@@ -125,13 +125,18 @@ function formatReceiptTime(timestamp: number): string {
   });
 }
 
-function targetTimingLabel(target: QueueReceiptTarget): string | undefined {
+function targetTimingLabel(target: QueueReceiptTarget, scope: QueueMessageReceipt['scope']): string | undefined {
   const awakened = target.awakenedAt === undefined ? undefined : `回合唤醒 ${formatReceiptTime(target.awakenedAt)}`;
   const seen = target.seenAt === undefined ? undefined : `正文读取 ${formatReceiptTime(target.seenAt)}`;
   const withdrawn =
     target.withdrawnAt === undefined ? undefined : `撤出待处理 ${formatReceiptTime(target.withdrawnAt)}`;
   const handledAt = target.state === 'handled' ? target.outcome?.handledAt : undefined;
-  const handled = handledAt === undefined ? undefined : `处理完成 ${formatReceiptTime(handledAt)}`;
+  const handled =
+    handledAt === undefined
+      ? undefined
+      : scope === 'cross_thread_delivery'
+        ? `本轮消费 ${formatReceiptTime(handledAt)}`
+        : `处理完成 ${formatReceiptTime(handledAt)}`;
   return [awakened, seen, withdrawn, handled].filter(Boolean).join(' · ') || undefined;
 }
 
@@ -225,7 +230,7 @@ export function MessageReceiptDock({
         {receipt.targets.map((target) => {
           const reminder = latestReminderForTarget(receipt, target.catId);
           const intentLabel = authorIntentLabel(target.authorIntent);
-          const timing = targetTimingLabel(target);
+          const timing = targetTimingLabel(target, receipt.scope);
           const evidence = target.state === 'handled' ? target.outcome?.evidenceRef : undefined;
           const executionKind = findExecutionKind(
             messages,

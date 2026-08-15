@@ -2,6 +2,7 @@ import type { VoiceChunkEvent, VoiceStreamEndEvent, VoiceStreamStartEvent } from
 
 export type PlaybackManagerState = 'idle' | 'playing' | 'paused';
 export type PlaybackSource = 'voice' | 'podcast' | 'listen';
+export type EnqueueUrlResult = 'enqueued' | 'failed' | 'cancelled';
 
 export interface PlaybackSnapshot {
   state: PlaybackManagerState;
@@ -118,34 +119,37 @@ export class PlaybackManager {
   /**
    * Enqueue a remote audio URL for playback (e.g. podcast segment).
    * Fetches the URL, creates a blob URL, and adds to the playback queue.
-   * The returned promise resolves when the URL is fetched and enqueued (not when playback finishes).
+   * The returned promise distinguishes a successful enqueue, a transfer failure, and batch cancellation.
    * @param fetchFn - Fetch function that returns a Response (allows passing auth-aware fetchers like apiFetch).
    */
-  async enqueueUrl(url: string, fetchFn: (url: string) => Promise<Response> = fetch): Promise<void> {
+  async enqueueUrl(url: string, fetchFn: (url: string) => Promise<Response> = fetch): Promise<EnqueueUrlResult> {
     const capturedBatchId = this.batchId;
     let res: Response;
     try {
       res = await fetchFn(url);
     } catch (err) {
+      if (this.batchId !== capturedBatchId) return 'cancelled';
       console.error('[PlaybackManager] enqueueUrl fetch rejected:', err);
-      return;
+      return 'failed';
     }
-    if (this.batchId !== capturedBatchId) return;
+    if (this.batchId !== capturedBatchId) return 'cancelled';
     if (!res.ok) {
       console.error(`[PlaybackManager] enqueueUrl fetch failed: ${res.status}`);
-      return;
+      return 'failed';
     }
     let blob: Blob;
     try {
       blob = await res.blob();
     } catch (err) {
+      if (this.batchId !== capturedBatchId) return 'cancelled';
       console.error('[PlaybackManager] enqueueUrl blob() rejected:', err);
-      return;
+      return 'failed';
     }
-    if (this.batchId !== capturedBatchId) return;
+    if (this.batchId !== capturedBatchId) return 'cancelled';
     const blobUrl = URL.createObjectURL(blob);
     this.blobUrls.push(blobUrl);
     this.enqueueEntry({ url: blobUrl, completesItem: true });
+    return 'enqueued';
   }
 
   /** Enqueue a native TTS stream chunk while preserving one logical sentence boundary. */

@@ -70,25 +70,95 @@ test('session affinity returns a resumed thread to its original host', async () 
   }
 });
 
-test('resume rotates away from an affinity host that is active for another session', async () => {
-  const { pool, hosts } = createHarness();
+test('live interleaving keeps each native session pinned to its original host', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { pool, hosts } = createHarness({ idleTtlMs: 300_000 });
   try {
-    const first = await pool.createSession(sessionOptions({ invocationId: 'invocation-a1' }));
-    first.rememberSession('thread-a');
-    await first.close();
+    const firstB = await pool.createSession(sessionOptions({ invocationId: 'invocation-b1' }));
+    firstB.rememberSession('thread-b');
+    await firstB.close();
 
-    const second = await pool.createSession(sessionOptions({ invocationId: 'invocation-b1' }));
-    second.rememberSession('thread-b');
+    t.mock.timers.tick(73_815);
+    const firstA = await pool.createSession(sessionOptions({ invocationId: 'invocation-a1' }));
+    firstA.rememberSession('thread-a');
+    assert.equal(hosts.length, 2, 'a new native session must not borrow a host owned by thread-b');
+    assert.equal(firstA.reusedSessionHost, false);
 
-    const resumed = await pool.createSession(sessionOptions({ invocationId: 'invocation-a2', sessionId: 'thread-a' }));
+    t.mock.timers.tick(207_795);
+    await firstA.close();
 
-    assert.equal(hosts.length, 2, 'thread-a must get a replacement instead of a false same-session conflict');
-    assert.equal(resumed.reusedSessionHost, false);
-    assert.equal(hosts[0].connections.length, 2, 'thread-b legitimately reused the original warm host');
-    assert.equal(hosts[1].connections.length, 1, 'thread-a resumed on an isolated replacement host');
+    t.mock.timers.tick(119_989);
+    const resumedB = await pool.createSession(sessionOptions({ invocationId: 'invocation-b2', sessionId: 'thread-b' }));
 
-    await resumed.close();
-    await second.close();
+    t.mock.timers.tick(104_517);
+    const resumedA = await pool.createSession(sessionOptions({ invocationId: 'invocation-a2', sessionId: 'thread-a' }));
+
+    assert.equal(hosts.length, 2, 'the interleaving must not cold-spawn a third host');
+    assert.equal(resumedB.reusedSessionHost, true);
+    assert.equal(resumedA.reusedSessionHost, true);
+    assert.equal(hosts[0].connections.length, 2, 'thread-b must resume on H1');
+    assert.equal(hosts[1].connections.length, 2, 'thread-a must resume on H2');
+
+    await resumedA.close();
+    await resumedB.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
+test('legacy multi-affinity waits for the active lease, retires the host, then resumes', async () => {
+  const { pool, hosts } = createHarness({ idleTtlMs: 300_000 });
+  try {
+    const legacy = await pool.createSession(sessionOptions({ invocationId: 'invocation-legacy' }));
+    legacy.rememberSession('thread-b');
+    await legacy.close();
+
+    const resumedB = await pool.createSession(sessionOptions({ invocationId: 'invocation-b2', sessionId: 'thread-b' }));
+    pool.sessionOwners.set('thread-a', pool.sessionOwners.get('thread-b'));
+    let aSettled = false;
+    const acquiringA = pool
+      .createSession(sessionOptions({ invocationId: 'invocation-a2', sessionId: 'thread-a' }))
+      .then((session) => {
+        aSettled = true;
+        return session;
+      });
+
+    await delay(0);
+    assert.equal(aSettled, false, 'thread-a must not migrate while H1 still carries thread-b');
+    assert.equal(hosts.length, 1, 'no replacement host may start before H1 is retired');
+    assert.equal(hosts[0].closeCalls, 0, 'the active lease must reach terminal before retirement starts');
+
+    await resumedB.close();
+    const resumedA = await acquiringA;
+    assert.equal(hosts[0].closeCalls, 1, 'legacy multi-affinity must retire the entire shared host');
+    assert.equal(hosts.length, 2);
+    assert.equal(resumedA.reusedSessionHost, false);
+    await resumedA.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
+test('legacy multi-affinity retirement wait is cancelled by the invocation signal', async () => {
+  const { pool, hosts } = createHarness({ idleTtlMs: 300_000 });
+  const controller = new AbortController();
+  try {
+    const legacy = await pool.createSession(sessionOptions({ invocationId: 'invocation-legacy' }));
+    legacy.rememberSession('thread-b');
+    await legacy.close();
+
+    const resumedB = await pool.createSession(sessionOptions({ invocationId: 'invocation-b2', sessionId: 'thread-b' }));
+    pool.sessionOwners.set('thread-a', pool.sessionOwners.get('thread-b'));
+    const acquiringA = pool.createSession(
+      sessionOptions({ invocationId: 'invocation-a2', sessionId: 'thread-a', signal: controller.signal }),
+    );
+    await delay(0);
+    controller.abort(new Error('invocation cancelled'));
+
+    await assert.rejects(acquiringA, /invocation cancelled/);
+    assert.equal(hosts.length, 1);
+    assert.equal(hosts[0].closeCalls, 0, 'cancelling the waiter must not terminate another session lease');
+    await resumedB.close();
   } finally {
     await pool.closeAll();
   }
@@ -159,6 +229,25 @@ test('a genuinely active lease for the same session remains fail-closed', async 
     );
     assert.equal(pool.getMetrics().activeLeaseCount, 1);
     await active.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
+test('concurrent cold resumes for the same native session serialize before host selection', async () => {
+  const { pool, hosts } = createHarness();
+  try {
+    const firstAcquisition = pool.createSession(
+      sessionOptions({ invocationId: 'invocation-first', sessionId: 'thread-a' }),
+    );
+    const duplicateAcquisition = pool.createSession(
+      sessionOptions({ invocationId: 'invocation-duplicate', sessionId: 'thread-a' }),
+    );
+
+    const first = await firstAcquisition;
+    await assert.rejects(duplicateAcquisition, /already has an active host lease/);
+    assert.equal(hosts.length, 1, 'duplicate cold resume must not spawn a competing writer host');
+    await first.close();
   } finally {
     await pool.closeAll();
   }
@@ -255,20 +344,42 @@ test('zero idle TTL closes the host before another same-turn lease can reuse it'
   }
 });
 
-test('resume rotates away from affinity when the host launch signature changed', async () => {
+test('signature mismatch closes the old host completely before resuming on a replacement', async () => {
   const { pool, hosts } = createHarness();
+  let releaseClose;
+  const closeGate = new Promise((resolve) => {
+    releaseClose = resolve;
+  });
   try {
     const first = await pool.createSession(sessionOptions());
     first.rememberSession('thread-a');
     await first.close();
 
-    const replacement = await pool.createSession(
-      sessionOptions({ sessionId: 'thread-a', cwd: '/workspace/different-project' }),
-    );
+    hosts[0].close = async () => {
+      hosts[0].closeCalls++;
+      await closeGate;
+      hosts[0].alive = false;
+    };
+    let replacementSettled = false;
+    const acquiring = pool
+      .createSession(sessionOptions({ sessionId: 'thread-a', cwd: '/workspace/different-project' }))
+      .then((session) => {
+        replacementSettled = true;
+        return session;
+      });
+
+    await delay(0);
+    assert.equal(hosts[0].closeCalls, 1, 'signature mismatch must retire the source host');
+    assert.equal(replacementSettled, false, 'resume must wait for source host close completion');
+    assert.equal(hosts.length, 1, 'no new host may start while the source host is still alive');
+
+    releaseClose();
+    const replacement = await acquiring;
     assert.equal(hosts.length, 2);
     assert.equal(replacement.reusedSessionHost, false);
     await replacement.close();
   } finally {
+    releaseClose?.();
     await pool.closeAll();
   }
 });

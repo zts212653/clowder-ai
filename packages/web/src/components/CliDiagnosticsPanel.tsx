@@ -90,6 +90,7 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_response_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
+  active_writer_recovery: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },

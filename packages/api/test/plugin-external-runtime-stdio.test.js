@@ -11,6 +11,7 @@ import {
   completeExternalHandshake,
   createExternalRuntimeHarness,
   EXTERNAL_INSTANCE_ID,
+  externalCandidate,
   externalManifest,
   externalPublishInput,
   FakePluginProcessAdapter,
@@ -132,7 +133,11 @@ test('non-canonical and oversized frames close authority with zero business disp
 
 test('unexpected child exit closes the Broker session and marks runtime crashed', async () => {
   const harness = await runningHarness();
-  harness.child.exit({ code: 17, signal: null });
+  harness.child.exit({
+    code: 17,
+    signal: null,
+    diagnostic: { code: 'EVENT_BUS_CONFLICT' },
+  });
   await harness.handle.closed;
 
   const broker = await harness.brokerStore.snapshot();
@@ -142,6 +147,61 @@ test('unexpected child exit closes the Broker session and marks runtime crashed'
   assert.equal(inventory.instances[0].activationState, 'error');
   assert.equal(inventory.instances[0].runtimeState, 'crashed');
   assert.equal(inventory.instances[0].lifecycleRevision, 2);
+  assert.deepEqual(inventory.instances[0].lastRuntimeError, {
+    code: 'EVENT_BUS_CONFLICT',
+    exitCode: 17,
+    signal: null,
+    occurredAt: inventory.instances[0].updatedAt,
+  });
+});
+
+test('Windows process exit codes remain durable when the runtime crashes', async () => {
+  const harness = await runningHarness();
+  harness.child.exit({ code: 0xc0000005, signal: null });
+  await harness.handle.closed;
+
+  const inventory = await harness.inventory.snapshot();
+  assert.equal(inventory.instances[0].activationState, 'error');
+  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+  assert.deepEqual(inventory.instances[0].lastRuntimeError, {
+    code: 'UNEXPECTED_RUNTIME_FAILURE',
+    exitCode: 0xc0000005,
+    signal: null,
+    occurredAt: inventory.instances[0].updatedAt,
+  });
+});
+
+test('typed exit before broker.ready fails startup immediately and retains the safe diagnostic', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-pre-ready-exit-'));
+  const harness = await createExternalRuntimeHarness({ rootDir });
+  const processes = new FakePluginProcessAdapter();
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => undefined,
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+    handshakeTimeoutMs: 5_000,
+  });
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  sendFrame(child, wireRequest('hello-pre-ready', 'broker.hello', externalCandidate()));
+  await readFrame(child);
+  child.exit({ code: 17, signal: null, diagnostic: { code: 'EVENT_BUS_CONFLICT' } });
+
+  await assert.rejects(starting, (error) => error?.code === 'PROCESS_EXITED');
+  const inventory = await harness.inventory.snapshot();
+  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+  assert.equal(inventory.instances[0].lastRuntimeError.code, 'EVENT_BUS_CONFLICT');
+  assert.equal(inventory.instances[0].lastRuntimeError.exitCode, 17);
 });
 
 test('authority revocation closes transport on the next call with zero new effect', async () => {

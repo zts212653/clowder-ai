@@ -61,7 +61,7 @@ export async function captureCodexActiveWriterDetection(input: {
   try {
     threadRead = {
       outcome: 'succeeded',
-      result: await withTimeout(input.readThread(), Math.max(1, input.timeoutMs ?? 250)),
+      result: await withTimeout(input.readThread(), Math.max(1, input.timeoutMs ?? 1_000)),
     };
   } catch {
     threadRead = { outcome: 'failed' };

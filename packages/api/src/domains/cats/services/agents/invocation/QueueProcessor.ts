@@ -106,7 +106,10 @@ import {
   type QueuedMessageCustodyCoordinator,
 } from './QueuedMessageCustodyCoordinator.js';
 import { type QueueEntryDurableTerminalOwner, resolveQueueEntrySettlement } from './queue-entry-settlement.js';
-import { resolveQueueSourceResponseEvidence } from './queue-source-response-evidence.js';
+import {
+  resolveQueueSourceResponseEvidence,
+  resolveQueueSourceResponseEvidenceFromMessages,
+} from './queue-source-response-evidence.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
 import {
   type CommitInvocationInput,
@@ -2083,6 +2086,29 @@ export class QueueProcessor {
       return;
     }
 
+    let sourceResponseByMessageId: Map<
+      string,
+      ReturnType<typeof resolveQueueSourceResponseEvidenceFromMessages>[number]
+    >;
+    try {
+      const readThread = this.deps.messageStore.getByThreadAfter?.bind(this.deps.messageStore);
+      const threadMessages = readThread ? await readThread(input.threadId) : [];
+      sourceResponseByMessageId = new Map(
+        resolveQueueSourceResponseEvidenceFromMessages({
+          messages: threadMessages,
+          catId: input.catId,
+          invocationId: input.invocationId,
+          sourceMessageIds: messages.map((message) => message.id),
+        }).map((evidence) => [evidence.sourceMessageId, evidence]),
+      );
+    } catch (err) {
+      this.deps.log.error(
+        { err, threadId: input.threadId, catId: input.catId, invocationId: input.invocationId },
+        '[F264] detached exact-source response hydration failed closed',
+      );
+      return;
+    }
+
     const targetCatId = input.catId as CatId;
     for (const message of messages) {
       const custody = message.queueCustody;
@@ -2099,16 +2125,7 @@ export class QueueProcessor {
       }
 
       try {
-        const sourceResponse = (
-          await resolveQueueSourceResponseEvidence({
-            messageStore: this.deps.messageStore,
-            threadId: input.threadId,
-            userId: message.userId,
-            catId: input.catId,
-            invocationId: input.invocationId,
-            sourceMessageIds: [message.id],
-          })
-        )[0];
+        const sourceResponse = sourceResponseByMessageId.get(message.id);
         if (input.status !== 'succeeded' && !sourceResponse) continue;
 
         const handledAt = Math.max(

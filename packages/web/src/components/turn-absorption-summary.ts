@@ -9,6 +9,8 @@ export interface TurnAbsorptionItem {
   content: string;
   contentBlocks?: ChatMessage['contentBlocks'];
   kind: TurnAbsorptionKind;
+  /** Receipt transport scope; cross-thread completion closes the carrier turn, not its carried work. */
+  receiptScope?: QueueMessageReceipt['scope'];
   /** The cat that consumed this source; never the source author identity. */
   handlerCatId: string;
   invocationId: string;
@@ -134,6 +136,7 @@ export function projectTurnAbsorptionSummary(
       content: message.content,
       contentBlocks: message.contentBlocks,
       kind: classifyTarget(target),
+      receiptScope: message.extra?.queueReceipt?.scope,
       handlerCatId: target.catId,
       invocationId: target.invocationId,
       seenAt: target.seenAt,

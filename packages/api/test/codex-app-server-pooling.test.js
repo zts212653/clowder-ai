@@ -277,9 +277,9 @@ test('CodexAgentService hides a recovered model-capacity failure from the Clowde
   assert.equal(retryTurn.params.additionalContext?.['cat-cafe.capacity-recovery']?.kind, 'application');
 });
 
-test('CodexAgentService attaches active-writer replacement provenance to the one fresh session_init', async () => {
+test('CodexAgentService exposes active-writer refusal without minting a replacement session', async () => {
   const first = new ActiveWriterWire('native-old');
-  const second = new PoolWire('native-fresh');
+  const second = new ActiveWriterWire('native-old');
   const wires = [first, second];
   let factoryCalls = 0;
   const service = new CodexAgentService({
@@ -297,19 +297,40 @@ test('CodexAgentService attaches active-writer replacement provenance to the one
     }),
   );
 
-  assert.equal(factoryCalls, 2, 'one failed resume must produce exactly one fresh start');
-  const freshSession = output.find(
-    (message) => message.type === 'session_init' && message.sessionId === 'native-fresh',
+  assert.equal(factoryCalls, 2, 'one failed resume may receive only one bounded same-session retry');
+  assert.equal(
+    output.some((message) => message.type === 'session_init'),
+    false,
   );
-  assert.ok(freshSession);
-  assert.equal(freshSession.sessionReplacement.cause, 'active_writer_reborn');
-  assert.equal(freshSession.sessionReplacement.previousNativeThreadId, 'native-old');
-  assert.equal(freshSession.sessionReplacement.attempt, 1);
-  assert.equal(freshSession.sessionReplacement.diagnostics.classification, 'native_active_turn_without_local_lease');
   assert.equal(
     output.filter((message) => message.type === 'session_init' && message.sessionReplacement).length,
+    0,
+    'active-writer refusal must not mint replacement provenance or a new native session',
+  );
+  assert.equal(
+    output.some(
+      (message) =>
+        message.type === 'error' &&
+        message.error.includes('拒绝自动替换或封存当前会话') &&
+        message.error.includes('请稍后重试'),
+    ),
+    true,
+  );
+  assert.equal(
+    output.filter((message) => message.metadata?.diagnostics?.appServerRecovery?.reason === 'active_writer_retry')
+      .length,
     1,
-    'replacement provenance belongs only to the fresh native session',
+    'the bounded retry must preserve diagnostics without claiming a replacement',
+  );
+  const terminalError = output.find((message) => message.type === 'error');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.reasonCode, 'active_writer_recovery');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.activeWriterRecovery?.state, 'owner_busy');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.publicSummary, '原生会话仍绑定原 writer host');
+  assert.match(terminalError.metadata?.cliDiagnostics?.publicHint, /原 Session 已保留/);
+  assert.doesNotMatch(
+    JSON.stringify(terminalError.metadata?.cliDiagnostics),
+    /thread native-old already has an active writer/,
+    'typed diagnostics must not expose raw upstream active-writer text',
   );
 });
 

@@ -1,12 +1,12 @@
 ---
 name: expert-panel
+disable-model-invocation: true
 description: >
   多猫专家辩论团：在现有协作习惯上加一层轻量编排 + WHY 链标准 + 交付链。
-  Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、operator说"帮我分析一下"。
-  Not for: 单猫能搞定的问题、代码实现、bug fix、日常聊天。
+  Use when: 用户明确要求 expert panel、专家辩论、多猫分析或三猫讨论。
+  Not for: 普通“帮我分析一下”、单猫能搞定的问题、代码实现、bug fix、日常聊天。
   Output: 洞察卡片(rich block) + 语音总结 + 正式报告(DOCX/PDF)。
 triggers:
-  - "帮我分析一下"
   - "专家辩论"
   - "expert panel"
   - "技术参谋"
@@ -19,6 +19,8 @@ triggers:
 ---
 
 # Expert Panel — 多猫专家辩论团
+
+> **仅显式调用**：这是高成本多猫编排能力。只有用户明确点名 `expert-panel` / “专家辩论” / “多猫分析”时才启用；普通“帮我分析一下”由单猫先判断和回答。
 
 **定位：编排层，不是独立流程。** 复用已有协作习惯，只添加三样东西：角色分配、WHY 链标准、交付链。
 
@@ -162,7 +164,7 @@ Convergence Lead 汇总所有猫的分析，产出收敛报告。
 
 | 场景 | 用什么 |
 |------|--------|
-| 日常"帮我分析一下" | expert-panel 单独用（Light 调研档） |
+| 日常“帮我分析一下” | 不调用本 skill；单猫直接分析，按需使用 `deep-research` |
 | 高 stakes 决策、operator说"调研" | expert-panel + `deep-research`（Full 调研档） |
 | 分析后需要立项 | expert-panel → `feat-lifecycle` |
 | 分析后需要沉淀 | expert-panel → `collaborative-thinking` Mode C |

@@ -53,6 +53,7 @@ async function launchUnrelatedJob(fixturePath, registryDirectory, shortId) {
 }
 
 const silentLog = { info() {}, warn() {} };
+const REAPER_TEST_STOP_TIMEOUT_MS = 2_000;
 
 test(
   'unparseable dispatcher acknowledgement retains the pending record and never guesses a process target',
@@ -163,7 +164,7 @@ test(
       const liveRecovery = await reapStaleClaudeBgJobOwners({
         dataDir,
         claudeCommand: fixturePath,
-        killGraceMs: 100,
+        killGraceMs: REAPER_TEST_STOP_TIMEOUT_MS,
         log: silentLog,
       });
       assert.equal(liveRecovery.skippedActiveOwners, 1);
@@ -177,7 +178,7 @@ test(
       const recovery = await reapStaleClaudeBgJobOwners({
         dataDir,
         claudeCommand: fixturePath,
-        killGraceMs: 100,
+        killGraceMs: REAPER_TEST_STOP_TIMEOUT_MS,
         log: silentLog,
       });
 
@@ -220,7 +221,7 @@ test(
       const recovery = await reapStaleClaudeBgJobOwners({
         dataDir,
         claudeCommand: fixturePath,
-        killGraceMs: 100,
+        killGraceMs: REAPER_TEST_STOP_TIMEOUT_MS,
         log: silentLog,
       });
 
@@ -275,7 +276,11 @@ test(
 
       helper.kill('SIGKILL');
       await new Promise((resolve) => helper.once('exit', resolve));
-      const recovery = await reapStaleClaudeBgJobOwners({ dataDir, killGraceMs: 100, log: silentLog });
+      const recovery = await reapStaleClaudeBgJobOwners({
+        dataDir,
+        killGraceMs: REAPER_TEST_STOP_TIMEOUT_MS,
+        log: silentLog,
+      });
 
       assert.equal(recovery.stopAttempts, 0, 'pending records have no semantic job id to stop');
       assert.equal(recovery.reapedOwners, 0);
@@ -499,7 +504,7 @@ test(
           const recovery = await reapStaleClaudeBgJobOwners({
             dataDir,
             claudeCommand: fixturePath,
-            killGraceMs: 100,
+            killGraceMs: REAPER_TEST_STOP_TIMEOUT_MS,
             log: silentLog,
           });
 

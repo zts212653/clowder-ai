@@ -9,7 +9,19 @@
 
 set -euo pipefail
 
-MAIN_REPO="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+MAIN_REPO=""
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      MAIN_REPO="${line#worktree }"
+      break
+      ;;
+  esac
+done < <(git worktree list --porcelain)
+if [ -z "$MAIN_REPO" ]; then
+  printf "ERROR: failed to resolve main worktree from git worktree list\n" >&2
+  exit 1
+fi
 WORKTREE_REPO="$(git rev-parse --show-toplevel)"
 SKILLS_SRC="$WORKTREE_REPO/cat-cafe-skills"
 [ -f "$SKILLS_SRC/manifest.yaml" ] || SKILLS_SRC="$MAIN_REPO/cat-cafe-skills"

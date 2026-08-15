@@ -11,7 +11,7 @@ import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } 
 
 interface OfficialPluginRouteOptions {
   readonly inventory: PluginInventoryStore;
-  readonly installer: Pick<OfficialPluginPackageInstaller, 'install'>;
+  readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'update'>;
   readonly lifecycle: Pick<ExternalPluginLifecycleService, 'prepare' | 'enable' | 'disable' | 'repair' | 'uninstall'>;
   readonly auth?: OfficialPluginAuthPort;
   readonly catalog?: readonly OfficialPluginCatalogEntry[];
@@ -22,10 +22,13 @@ interface LifecycleRequest {
   readonly Body: { expectedRevision?: unknown };
 }
 
-function projectInstance(instance: PluginInstanceRecord | undefined) {
+function projectInstance(instance: PluginInstanceRecord | undefined, snapshot: PluginInventorySnapshot) {
   if (!instance) return null;
+  const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
   return {
     pluginInstanceId: instance.pluginInstanceId,
+    installedVersion: installedPackage?.version ?? null,
+    packageDigest: instance.packageDigest,
     lifecycleState: instance.lifecycleState,
     configReadiness: instance.configReadiness,
     activationState: instance.activationState,
@@ -33,6 +36,7 @@ function projectInstance(instance: PluginInstanceRecord | undefined) {
     lifecycleRevision: instance.lifecycleRevision,
     installedAt: instance.installedAt,
     updatedAt: instance.updatedAt,
+    ...(instance.lastRuntimeError === undefined ? {} : { lastRuntimeError: instance.lastRuntimeError }),
   };
 }
 
@@ -50,11 +54,13 @@ function projectPlugin(
     catalogId: entry.catalogId,
     packageName: entry.packageName,
     version: entry.version,
+    availableVersion: entry.version,
     pluginId: entry.pluginId,
     packageDigest: entry.packageDigest,
     effectiveGrants: [...entry.effectiveGrants],
     ownerAuthAvailable: entry.ownerAuth !== undefined,
-    instance: projectInstance(instance),
+    updateAvailable: instance !== undefined && instance.packageDigest !== entry.packageDigest,
+    instance: projectInstance(instance, snapshot),
   };
 }
 
@@ -80,7 +86,12 @@ function sendMutationError(reply: FastifyReply, error: unknown) {
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   if (error instanceof OfficialPluginInstallError) {
-    const status = error.code === 'UNKNOWN_CATALOG_ID' ? 404 : 422;
+    const status =
+      error.code === 'UNKNOWN_CATALOG_ID' || error.code === 'INSTANCE_NOT_FOUND'
+        ? 404
+        : error.code === 'STALE_REVISION' || error.code === 'UPDATE_REQUIRES_STOPPED'
+          ? 409
+          : 422;
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   return reply.status(500).send({ error: 'Official plugin operation failed' });
@@ -113,6 +124,32 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
         snapshot = await options.inventory.snapshot();
       }
       return projectPlugin(entry, snapshot, instance);
+    } catch (error) {
+      return sendMutationError(reply, error);
+    }
+  });
+
+  app.post<LifecycleRequest>('/api/plugins/official/:instanceId/update', async (request, reply) => {
+    const access = requirePluginWriteAccess(request);
+    if ('error' in access) return pluginAccessError(reply, access);
+    const revision = expectedRevision(request.body?.expectedRevision);
+    if (!revision) return reply.status(400).send({ error: 'expectedRevision must be a positive integer' });
+    const resolved = resolveOfficialInstance(
+      await options.inventory.snapshot(),
+      request.params.instanceId,
+      catalogByPluginId,
+    );
+    if (!resolved) return reply.status(404).send({ error: 'Official plugin instance not found' });
+    try {
+      const updated = await options.installer.update(
+        resolved.entry.catalogId,
+        resolved.instance.pluginInstanceId,
+        revision,
+      );
+      const snapshot = await options.inventory.snapshot();
+      const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === updated.pluginInstanceId);
+      if (!instance) return reply.status(500).send({ error: 'Updated plugin projection is unavailable' });
+      return projectPlugin(resolved.entry, snapshot, instance);
     } catch (error) {
       return sendMutationError(reply, error);
     }

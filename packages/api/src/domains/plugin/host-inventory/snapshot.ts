@@ -9,6 +9,8 @@ import type {
   PluginInstanceRecord,
   PluginInventorySnapshot,
   PluginPackageRecord,
+  PluginRuntimeErrorCode,
+  PluginRuntimeErrorRecord,
   RuntimeState,
 } from './types.js';
 import { PluginInventoryError } from './types.js';
@@ -18,6 +20,16 @@ const LIFECYCLE_STATES = new Set<InstanceLifecycleState>(['installed', 'retired'
 const CONFIG_STATES = new Set<ConfigReadiness>(['incomplete', 'ready']);
 const ACTIVATION_STATES = new Set<ActivationState>(['disabled', 'enabling', 'enabled', 'disabling', 'error']);
 const RUNTIME_STATES = new Set<RuntimeState>(['stopped', 'starting', 'handshaking', 'healthy', 'degraded', 'crashed']);
+const RUNTIME_ERROR_CODES = new Set<PluginRuntimeErrorCode>([
+  'AUTH_EXPIRED',
+  'EVENT_BUS_CONFLICT',
+  'NOT_FOUND',
+  'PERMISSION_DENIED',
+  'RATE_LIMITED',
+  'UNAVAILABLE',
+  'UNEXPECTED_RUNTIME_FAILURE',
+]);
+const MAX_PROCESS_EXIT_CODE = 0xffff_ffff;
 
 function corrupt(message: string): never {
   throw new PluginInventoryError('CORRUPT_SNAPSHOT', message);
@@ -68,6 +80,31 @@ function signalSchemaCatalog(value: unknown, label: string): SignalSchemaCatalog
   return Object.fromEntries(
     Object.entries(raw).map(([key, schema]) => [key, structuredClone(object(schema, `${label}.${key}`))]),
   );
+}
+
+function runtimeError(value: unknown, label: string): PluginRuntimeErrorRecord {
+  const raw = object(value, label);
+  const keys = Object.keys(raw).sort();
+  const expectedKeys = ['code', 'exitCode', 'occurredAt', 'signal'];
+  if (!equalStrings(keys, expectedKeys)) corrupt(`${label} has unsupported fields`);
+  if (
+    raw.exitCode !== null &&
+    (typeof raw.exitCode !== 'number' ||
+      !Number.isSafeInteger(raw.exitCode) ||
+      raw.exitCode < 0 ||
+      raw.exitCode > MAX_PROCESS_EXIT_CODE)
+  ) {
+    corrupt(`${label}.exitCode must be null or an unsigned 32-bit integer`);
+  }
+  if (raw.signal !== null && (typeof raw.signal !== 'string' || !/^SIG[A-Z0-9]{1,12}$/u.test(raw.signal))) {
+    corrupt(`${label}.signal must be null or a bounded signal name`);
+  }
+  return {
+    code: enumValue(raw.code, RUNTIME_ERROR_CODES, `${label}.code`),
+    exitCode: raw.exitCode,
+    signal: raw.signal as NodeJS.Signals | null,
+    occurredAt: timestamp(raw.occurredAt, `${label}.occurredAt`),
+  };
 }
 
 export function isCanonicalPackageDigest(value: string): boolean {
@@ -126,6 +163,9 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
     installedAt: timestamp(raw.installedAt, `instances[${index}].installedAt`),
     updatedAt: timestamp(raw.updatedAt, `instances[${index}].updatedAt`),
     ...(raw.retiredAt === undefined ? {} : { retiredAt: timestamp(raw.retiredAt, `instances[${index}].retiredAt`) }),
+    ...(raw.lastRuntimeError === undefined
+      ? {}
+      : { lastRuntimeError: runtimeError(raw.lastRuntimeError, `instances[${index}].lastRuntimeError`) }),
   };
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`instances[${index}].packageDigest is not canonical`);
   if (record.lifecycleState === 'retired' && record.retiredAt === undefined) {

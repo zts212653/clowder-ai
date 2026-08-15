@@ -14,7 +14,7 @@ description_updated_at: 2026-08-11T14:10:00Z
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: implementation / Phase C, K-2D, and the Phase D official install/activation surface are on main; alpha activation verification, owner OAuth, and real-meeting dogfood remain open
+> **Status**: implementation / Phase C, K-2D, the alpha.3 official catalog, and explicit safe package update are on main; runtime restart, owner update/enable, alpha activation verification, and real-meeting dogfood remain open
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
@@ -101,9 +101,9 @@ Anker recorder
 
 | Evidence | Already true | Not yet true |
 |---|---|---|
-| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials; `@clowder-ai/feishu-meeting-intake@0.1.0-alpha.2` is public with a raw-unpack runnable dependency closure and `runtime.transport: "stdio"` | Real dogfood waits for one generated meeting artifact; owner auth is completed from the plugin card rather than a copied terminal command |
-| Plugin repository | PR #24 merged C-2 + official plugin source; PR #26/#29 completed the first release chain; PR #30 added the reviewed stdio entrypoint; PR #31 fixed the immutable runtime closure. Contract `0.1.0-beta.9`, SDK `0.1.0-beta.5`, and Feishu `0.1.0-alpha.2` are registry-visible with exact integrity and provenance | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement; explicit dist-tag cleanup must not be reintroduced as an F292 token gate |
-| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; PR #3555 merged a contract-native K-2B session/ledger plus typed `events.publish` adapter; PR #3558 merged the digest-derived package locator and supervised stdio runtime at `ae23934d5`; PR #3581 merged owner-only lifecycle controls and truthful Settings health at `57ac9d04d`. The official catalog now pins alpha.2 by exact URL/SRI and activates its package-owned owner-auth contract; boot and install remain dormant | Alpha activation has not yet been verified; an explicit owner enable and one real-meeting dogfood journey remain open |
+| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials; `@clowder-ai/feishu-meeting-intake@0.1.0-alpha.3` is public with a raw-unpack runnable dependency closure, bounded two-source readiness, typed event-bus conflict diagnostics, and `runtime.transport: "stdio"` | Real dogfood waits for the running Host to load the merged alpha.3 catalog, explicitly update/enable the installed instance, and receive one generated meeting artifact; owner auth is completed from the plugin card rather than a copied terminal command |
+| Plugin repository | PR #24 merged C-2 + official plugin source; PR #26/#29 completed the first release chain; PR #30 added the reviewed stdio entrypoint; PR #31 fixed the immutable runtime closure; PR #33 fenced readiness across both event sources and published alpha.3. Contract `0.1.0-beta.9`, SDK `0.1.0-beta.5`, and Feishu `0.1.0-alpha.3` are registry-visible with exact integrity and provenance | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement; explicit dist-tag cleanup must not be reintroduced as an F292 token gate |
+| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; PR #3555 merged a contract-native K-2B session/ledger plus typed `events.publish` adapter; PR #3558 merged the digest-derived package locator and supervised stdio runtime at `ae23934d5`; PR #3581 merged owner-only lifecycle controls and truthful Settings health at `57ac9d04d`; PR #3698 added bounded durable runtime diagnostics and explicit retry UI at `130220886d`; PR #3704 adopted alpha.3 and added truthful installed-versus-available projection plus revision-fenced explicit update at `fae109e987` | The running Host must be explicitly restarted, then the existing alpha.2 instance must be explicitly updated and enabled before alpha activation verification and one real-meeting dogfood journey |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
 | Needs Me / F290 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F290 is still at Experience Design Gate; F292 honestly rejects Channel destinations |
 
@@ -117,6 +117,10 @@ missed events and pre-plugin meetings, not the primary journey.
   the immutable official catalog artifact after SRI/manifest/schema verification, installs it without
   starting a process, and exposes revision-fenced owner controls in Settings. API boot, restart, and
   install stay dormant; only an explicit owner `enable` starts the supervised stdio process.
+- **Package adoption is explicit and state-honest.** Settings distinguishes the installed artifact
+  from the catalog's available version. An owner update verifies the exact internal-archive/SRI and both
+  lifecycle and grant revisions, preserves the same instance/config, and leaves it disabled/stopped;
+  it never smuggles activation into an upgrade.
 - **OAuth stays user-scoped and outside Host secrets.** The Host child environment remains the four
   non-secret K-2D claims. The package resolves its bundled `@larksuite/cli` entrypoint and uses the OS
   home directory for the existing user login; Clowder AI neither stores nor passes a Feishu token.
@@ -344,10 +348,11 @@ missed events and pre-plugin meetings, not the primary journey.
 ## Dependencies
 
 - **Evolved from**: F202 + F240（plugin lifecycle and IM connector boundary）.
-- **Remaining Phase D gate**: alpha-verify the merged official activation slice, then perform
-  user-scoped Lark reauthorization and one real-meeting dogfood journey. K-2D #3558 is merged and
-  F289's paused one-shot migration is explicitly not a dependency. Official package publication,
-  package-side stdio runtime, K-2A inventory, K-2B transport, and K-2D supervision are complete.
+- **Remaining Phase D gate**: restart the running Host onto #3704, explicitly update the existing
+  instance to alpha.3 and enable it, confirm user-scoped Lark authorization, then perform one
+  real-meeting dogfood journey. K-2D #3558 is merged and F289's paused one-shot migration is
+  explicitly not a dependency. Official package publication, package-side stdio runtime, K-2A
+  inventory/update, K-2B transport, and K-2D supervision are complete.
 - **Related**: F141 + F168（GitHub long-lived-source behavior and durable operations oracle; no
   migration requirement）.
 - **Related**: F195（live meeting copilot; F292 owns post-meeting Feishu artifact intake only）.

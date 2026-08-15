@@ -567,4 +567,76 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.deepEqual(stored.queueCustody.handledByCatIds, ['opus']);
     assert.deepEqual(stored.queueCustody.failedByCatIds, ['codex']);
   });
+
+  test('restart terminalizes a failed historical exposure with an exact durable source response', async () => {
+    const threadId = 'thread-managed-command-historical-response';
+    const invocationId = 'inv-managed-command-historical-response';
+    const message = await store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'managed command completed',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId,
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        meta: { taskId: 'task-managed-command', threadId, catId: 'opus', wakeWhen: true },
+      },
+      queueCustody: makeCustody({
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        revision: 3,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [{ targetCatId: 'opus', invocationId, seenAt: 1_075 }],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+    });
+    const response = await store.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'the command result was consumed before the stop gate failed',
+      mentions: [],
+      timestamp: 1_500,
+      threadId,
+      extra: {
+        stream: {
+          invocationId: 'parent-managed-command-historical-response',
+          turnInvocationId: invocationId,
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+      },
+    });
+    const freshQueue = new InvocationQueue();
+    const reconciler = new QueuedMessageCustodyStartupReconciler({
+      messageStore: store,
+      invocationRecordStore: invocationStore,
+      invocationQueue: freshQueue,
+      now: () => 2_000,
+      log: { info() {}, warn() {} },
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(result.handledTargets, 1);
+    assert.equal(freshQueue.getEntrySnapshot(threadId, 'scheduler', 'entry-1'), null);
+    const stored = await store.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'delivered');
+    assert.equal(await redis.ttl(`msg:${message.id}`), -1);
+    assert.deepEqual(stored.queueCustody.targetOutcomeByCatId.opus, {
+      invocationId,
+      disposition: 'responded',
+      evidenceRef: { kind: 'invocation_lineage', invocationId },
+      handledAt: 2_000,
+      consumption: {
+        kind: 'source_response',
+        outputMessageIds: [response.id],
+      },
+    });
+  });
 });

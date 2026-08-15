@@ -22,6 +22,8 @@ import { SettingsText } from './primitives/SettingsText';
 
 export interface OfficialPluginInstance {
   pluginInstanceId: string;
+  installedVersion: string | null;
+  packageDigest: string;
   lifecycleState: 'installed' | 'retired';
   configReadiness: 'incomplete' | 'ready';
   activationState: 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
@@ -29,24 +31,39 @@ export interface OfficialPluginInstance {
   lifecycleRevision: number;
   installedAt: number;
   updatedAt: number;
+  lastRuntimeError?: {
+    code: string;
+    exitCode: number | null;
+    signal: string | null;
+    occurredAt: number;
+  };
 }
 
 export interface OfficialPluginInfo {
   catalogId: string;
   packageName: string;
   version: string;
+  availableVersion: string;
   pluginId: string;
   packageDigest: string;
   effectiveGrants: string[];
   ownerAuthAvailable: boolean;
+  updateAvailable: boolean;
   instance: OfficialPluginInstance | null;
 }
 
-export type OfficialPluginAction = 'install' | 'enable' | 'disable' | 'repair' | 'uninstall';
+export type OfficialPluginAction = 'install' | 'update' | 'enable' | 'disable' | 'repair' | 'uninstall';
 
 function status(plugin: OfficialPluginInfo): { label: string; tone: 'emerald' | 'amber' | 'slate' | 'red' } {
   const instance = plugin.instance;
   if (!instance) return { label: '未安装', tone: 'slate' };
+  if (plugin.updateAvailable) return { label: '可更新', tone: 'amber' };
+  if (
+    instance.lastRuntimeError?.code === 'EVENT_BUS_CONFLICT' &&
+    (instance.activationState === 'error' || instance.runtimeState === 'crashed')
+  ) {
+    return { label: '连接被占用', tone: 'red' };
+  }
   if (instance.activationState === 'error' || instance.runtimeState === 'crashed') {
     return { label: '需修复', tone: 'red' };
   }
@@ -61,8 +78,21 @@ function status(plugin: OfficialPluginInfo): { label: string; tone: 'emerald' | 
 function guidance(plugin: OfficialPluginInfo, auth: OwnerAuthState | null): string {
   const instance = plugin.instance;
   if (!instance) return '安装后仍需手动启用；Clowder AI 不会在启动时擅自连接飞书。';
+  if (plugin.updateAvailable) {
+    const installedVersion = instance.installedVersion ?? '未知版本';
+    if (!['stopped', 'crashed'].includes(instance.runtimeState)) {
+      return `已安装 ${installedVersion}，${plugin.availableVersion} 可用。请先停用，再更新。`;
+    }
+    return `已安装 ${installedVersion}，${plugin.availableVersion} 可用。更新后会保持停用，由你决定何时再次启用。`;
+  }
   const authCopy = plugin.ownerAuthAvailable ? ownerAuthGuidance(auth) : undefined;
   if (authCopy) return authCopy;
+  if (
+    instance.lastRuntimeError?.code === 'EVENT_BUS_CONFLICT' &&
+    (instance.activationState === 'error' || instance.runtimeState === 'crashed')
+  ) {
+    return '另一台设备或服务正在使用同一个飞书应用的事件连接。关闭旧连接或等待飞书释放后，点“重试连接”。';
+  }
   if (instance.activationState === 'error' || instance.runtimeState === 'crashed') {
     return '接收服务已停止。确认飞书授权有效、同一应用没有被其他机器占用后，点“修复”重试。';
   }
@@ -91,12 +121,19 @@ export function OfficialPluginCard({
   const pluginStatus = status(plugin);
   const activation = plugin.instance?.activationState;
   const failed = activation === 'error' || plugin.instance?.runtimeState === 'crashed';
+  const eventBusConflict = failed && plugin.instance?.lastRuntimeError?.code === 'EVENT_BUS_CONFLICT';
   const transitioning =
     activation === 'enabling' ||
     activation === 'disabling' ||
     plugin.instance?.runtimeState === 'starting' ||
     plugin.instance?.runtimeState === 'handshaking';
   const enabled = activation === 'enabled' || activation === 'enabling';
+  const canUpdate =
+    plugin.updateAvailable &&
+    plugin.instance !== null &&
+    ['stopped', 'crashed'].includes(plugin.instance.runtimeState) &&
+    activation !== 'enabling' &&
+    activation !== 'disabling';
   return (
     <article className={settingsResourceCardClass}>
       <div className={`${settingsResourceRowClass} w-full`}>
@@ -132,7 +169,12 @@ export function OfficialPluginCard({
               {busy ? '安装中…' : '安装'}
             </SettingsPrimaryButton>
           )}
-          {plugin.instance && !ownerAuth.connected && (
+          {plugin.instance && canUpdate && (
+            <SettingsPrimaryButton disabled={busy} onClick={() => onAction('update')}>
+              {busy ? '更新中…' : `更新到 ${plugin.availableVersion}`}
+            </SettingsPrimaryButton>
+          )}
+          {plugin.instance && !canUpdate && !ownerAuth.connected && (
             <OfficialPluginOwnerAuthAction
               auth={ownerAuth.auth}
               busy={ownerAuth.busy}
@@ -140,12 +182,12 @@ export function OfficialPluginCard({
               onStart={() => void ownerAuth.start()}
             />
           )}
-          {plugin.instance && ownerAuth.connected && failed && (
-            <SettingsSecondaryButton disabled={busy} onClick={() => onAction('repair')}>
-              修复
+          {plugin.instance && !canUpdate && ownerAuth.connected && failed && (
+            <SettingsSecondaryButton disabled={busy} onClick={() => onAction(eventBusConflict ? 'enable' : 'repair')}>
+              {eventBusConflict ? '重试连接' : '修复'}
             </SettingsSecondaryButton>
           )}
-          {plugin.instance && ownerAuth.connected && !failed && (
+          {plugin.instance && !canUpdate && ownerAuth.connected && !failed && (
             <SettingsResourceToggleSwitch
               enabled={enabled}
               busy={busy || transitioning}
@@ -165,7 +207,7 @@ export function OfficialPluginCard({
             {guidance(plugin, ownerAuth.auth)}
           </SettingsText>
           {plugin.ownerAuthAvailable && <OfficialPluginOwnerAuthDetails auth={ownerAuth.auth} />}
-          {failed && !plugin.ownerAuthAvailable && (
+          {failed && !plugin.ownerAuthAvailable && !eventBusConflict && (
             <SettingsText as="p" tone="muted" className="mt-1">
               请确认飞书账号授权有效，再点“修复”。
             </SettingsText>
@@ -173,11 +215,18 @@ export function OfficialPluginCard({
           <div className="mt-2 flex items-end justify-between gap-3">
             <div className="min-w-0">
               <SettingsText as="p" tone="muted">
-                {plugin.packageName} · {plugin.version}
+                {plugin.instance
+                  ? `${plugin.packageName} · 已安装 ${plugin.instance.installedVersion ?? '未知版本'}`
+                  : `${plugin.packageName} · 可用 ${plugin.availableVersion}`}
               </SettingsText>
               <SettingsText as="p" tone="muted" className="mt-0.5 break-all font-mono">
-                {plugin.packageDigest.slice(0, 16)}…
+                {(plugin.instance?.packageDigest ?? plugin.packageDigest).slice(0, 16)}…
               </SettingsText>
+              {plugin.instance && plugin.updateAvailable && (
+                <SettingsText as="p" tone="muted" className="mt-1">
+                  可用 {plugin.availableVersion}
+                </SettingsText>
+              )}
             </div>
             {plugin.instance && (
               <SettingsDeleteButton

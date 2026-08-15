@@ -70,7 +70,12 @@ export class ExternalPluginLifecycleService {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'plugin configuration is not ready');
       }
       this.assertState(current, ['disabled', 'error'], ['stopped', 'crashed'], 'enable');
-      const enabling = await this.advance(instanceId, expectedRevision, { activationState: 'enabling' });
+      const enabling = await this.advance(
+        instanceId,
+        expectedRevision,
+        { activationState: 'enabling' },
+        { clearRuntimeError: true },
+      );
       const enabled = await this.advance(instanceId, enabling.lifecycleRevision, { activationState: 'enabled' });
       try {
         await this.options.supervisor.start(instanceId);
@@ -150,12 +155,14 @@ export class ExternalPluginLifecycleService {
     instanceId: string,
     expectedRevision: number,
     patch: Partial<PluginInstanceRecord>,
+    options: { readonly clearRuntimeError?: boolean } = {},
   ): Promise<PluginInstanceRecord> {
     return this.options.store.transaction((transaction) => {
       const current = currentInstance(transaction, instanceId);
       assertRevision(current, expectedRevision);
+      const { lastRuntimeError: _lastRuntimeError, ...withoutRuntimeError } = current;
       const next = {
-        ...current,
+        ...(options.clearRuntimeError ? withoutRuntimeError : current),
         ...patch,
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: this.now(),

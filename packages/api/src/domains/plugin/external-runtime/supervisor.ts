@@ -2,7 +2,12 @@ import process from 'node:process';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
 import type { PluginInventoryTransaction } from '../host-inventory/ports.js';
-import type { PluginInstanceRecord, PluginPackageRecord, RuntimeState } from '../host-inventory/types.js';
+import type {
+  PluginInstanceRecord,
+  PluginPackageRecord,
+  PluginRuntimeErrorRecord,
+  RuntimeState,
+} from '../host-inventory/types.js';
 import { NodeExternalPluginProcessAdapter } from './node-process-adapter.js';
 import { verifyExternalPackage } from './package-authority.js';
 import { createExternalStdioBrokerTransport, type ExternalStdioBrokerTransport } from './stdio-broker-transport.js';
@@ -33,6 +38,7 @@ interface RuntimeExecution {
   readonly ready: Deferred<void>;
   readonly closed: Deferred<void>;
   process?: ExternalPluginProcess;
+  exit?: Awaited<ExternalPluginProcess['exited']>;
   locatedPackage?: VerifiedPluginPackage;
   connection?: BrokerConnection;
   transport?: ExternalStdioBrokerTransport;
@@ -132,7 +138,10 @@ export class ExternalPluginRuntimeSupervisor {
         CLOWDER_WIRE_VERSION: WIRE_VERSION,
       },
     });
-    void execution.process.exited.then(() => this.finish(execution, 'process_exit', 'crashed', false));
+    void execution.process.exited.then((exit) => {
+      execution.exit = exit;
+      return this.finish(execution, 'process_exit', 'crashed', false);
+    });
     this.assertOpen(execution);
     await this.setRuntimeState(execution, 'handshaking');
     execution.connection = await this.options.broker.openExternalConnection(execution.pluginInstanceId);
@@ -165,7 +174,16 @@ export class ExternalPluginRuntimeSupervisor {
       timer.unref();
     });
     try {
-      await Promise.race([execution.ready.promise, timeout]);
+      await Promise.race([
+        execution.ready.promise,
+        execution.closed.promise.then(() => {
+          throw new ExternalPluginRuntimeError(
+            'PROCESS_EXITED',
+            `${execution.pluginInstanceId} process authority ended before broker.ready`,
+          );
+        }),
+        timeout,
+      ]);
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -213,8 +231,23 @@ export class ExternalPluginRuntimeSupervisor {
           `${execution.pluginInstanceId} authority changed before runtime projection`,
         );
       }
-      transaction.instances.put({ ...instance, runtimeState, updatedAt: this.now() });
+      if (runtimeState === 'starting') {
+        const { lastRuntimeError: _lastRuntimeError, ...withoutRuntimeError } = instance;
+        transaction.instances.put({ ...withoutRuntimeError, runtimeState, updatedAt: this.now() });
+      } else {
+        transaction.instances.put({ ...instance, runtimeState, updatedAt: this.now() });
+      }
     });
+  }
+
+  private runtimeError(exit: RuntimeExecution['exit'], occurredAt: number): PluginRuntimeErrorRecord | undefined {
+    if (exit === undefined) return undefined;
+    return {
+      code: exit.diagnostic?.code ?? 'UNEXPECTED_RUNTIME_FAILURE',
+      exitCode: exit.code,
+      signal: exit.signal,
+      occurredAt,
+    };
   }
 
   private async setCrashedState(execution: RuntimeExecution): Promise<void> {
@@ -228,12 +261,15 @@ export class ExternalPluginRuntimeSupervisor {
       ) {
         return;
       }
+      const occurredAt = this.now();
+      const runtimeError = this.runtimeError(execution.exit, occurredAt);
       transaction.instances.put({
         ...instance,
         activationState: 'error',
         runtimeState: 'crashed',
         lifecycleRevision: instance.lifecycleRevision + 1,
-        updatedAt: this.now(),
+        updatedAt: occurredAt,
+        ...(runtimeError === undefined ? {} : { lastRuntimeError: runtimeError }),
       });
     });
   }
@@ -254,13 +290,16 @@ export class ExternalPluginRuntimeSupervisor {
       if (terminateProcess && execution.process) {
         await execution.process.terminate().catch(() => undefined);
       }
+      if (execution.process && execution.exit === undefined) {
+        execution.exit = await execution.process.exited.catch(() => undefined);
+      }
       if (execution.locatedPackage) {
         await execution.locatedPackage.release().catch(() => undefined);
       }
       if (execution.projected && terminalState === 'crashed') {
         const projectCrash = execution.started
           ? this.setCrashedState(execution)
-          : this.setRuntimeState(execution, 'crashed');
+          : this.setRuntimeStateWithError(execution, 'crashed');
         await projectCrash.catch(() => undefined);
       } else if (execution.projected && !execution.connection) {
         await this.setRuntimeState(execution, 'stopped').catch(() => undefined);
@@ -269,6 +308,21 @@ export class ExternalPluginRuntimeSupervisor {
       execution.closed.resolve(undefined);
     })();
     return execution.terminal;
+  }
+
+  private async setRuntimeStateWithError(execution: RuntimeExecution, runtimeState: RuntimeState): Promise<void> {
+    await this.options.inventory.transaction((transaction: PluginInventoryTransaction) => {
+      const instance = transaction.instances.get(execution.pluginInstanceId);
+      if (!instance || instance.packageDigest !== execution.packageDigest) return;
+      const occurredAt = this.now();
+      const runtimeError = this.runtimeError(execution.exit, occurredAt);
+      transaction.instances.put({
+        ...instance,
+        runtimeState,
+        updatedAt: occurredAt,
+        ...(runtimeError === undefined ? {} : { lastRuntimeError: runtimeError }),
+      });
+    });
   }
 
   private assertOpen(execution: RuntimeExecution): void {

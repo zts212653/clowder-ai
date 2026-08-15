@@ -7,6 +7,21 @@ export type InstanceLifecycleState = 'installed' | 'retired';
 export type ConfigReadiness = 'incomplete' | 'ready';
 export type ActivationState = 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
 export type RuntimeState = 'stopped' | 'starting' | 'handshaking' | 'healthy' | 'degraded' | 'crashed';
+export type PluginRuntimeErrorCode =
+  | 'AUTH_EXPIRED'
+  | 'EVENT_BUS_CONFLICT'
+  | 'NOT_FOUND'
+  | 'PERMISSION_DENIED'
+  | 'RATE_LIMITED'
+  | 'UNAVAILABLE'
+  | 'UNEXPECTED_RUNTIME_FAILURE';
+
+export interface PluginRuntimeErrorRecord {
+  readonly code: PluginRuntimeErrorCode;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly occurredAt: number;
+}
 
 export interface PluginPackageRecord {
   readonly packageDigest: string;
@@ -34,6 +49,8 @@ export interface PluginInstanceRecord {
   readonly installedAt: number;
   readonly updatedAt: number;
   readonly retiredAt?: number;
+  /** Sanitized machine-readable failure only. Raw child stderr is never persisted. */
+  readonly lastRuntimeError?: PluginRuntimeErrorRecord;
 }
 
 export interface PluginGrantRecord {
@@ -64,6 +81,7 @@ export interface PackageAdmissionCandidate {
 
 export interface UpgradePackageInput extends PackageAdmissionCandidate {
   readonly pluginInstanceId: string;
+  readonly expectedLifecycleRevision: number;
   readonly expectedGrantRevision: number;
 }
 
@@ -93,6 +111,7 @@ export type PluginInventoryErrorCode =
   | 'PACKAGE_ALREADY_INSTALLED'
   | 'INSTANCE_NOT_FOUND'
   | 'STALE_INSTANCE'
+  | 'STALE_LIFECYCLE_REVISION'
   | 'STALE_GRANT_REVISION'
   | 'INSTANCE_ID_COLLISION'
   | 'CORRUPT_SNAPSHOT'

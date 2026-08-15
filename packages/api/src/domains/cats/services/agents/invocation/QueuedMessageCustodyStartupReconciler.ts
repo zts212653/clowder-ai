@@ -11,7 +11,10 @@ import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 import { createCrossThreadQueueEntryFromCustody, projectQueuedAttemptIds } from './QueuedMessageCustodyCoordinator.js';
-import { resolveQueueSourceResponseEvidence } from './queue-source-response-evidence.js';
+import {
+  type QueueSourceResponseEvidence,
+  resolveQueueSourceResponseEvidenceFromMessages,
+} from './queue-source-response-evidence.js';
 
 interface StartupCustodyLog {
   info(msg: string): void;
@@ -126,6 +129,32 @@ interface RestartTargetProjection {
   failedTargets: number;
 }
 
+interface RestartSourceResponse {
+  exposure: NonNullable<QueuedMessageCustody['bodyExposures']>[number];
+  witness: QueueSourceResponseEvidence['witness'];
+}
+
+function resolveRestartSourceResponse(
+  message: StoredMessage,
+  current: QueuedMessageCustody,
+  catId: string,
+  threadMessages: readonly StoredMessage[],
+): RestartSourceResponse | null {
+  const exposures = [...(current.bodyExposures ?? [])]
+    .filter((candidate) => candidate.targetCatId === catId)
+    .sort((left, right) => right.seenAt - left.seenAt);
+  for (const exposure of exposures) {
+    const sourceResponse = resolveQueueSourceResponseEvidenceFromMessages({
+      messages: threadMessages,
+      catId,
+      invocationId: exposure.invocationId,
+      sourceMessageIds: [message.id],
+    })[0];
+    if (sourceResponse) return { exposure, witness: sourceResponse.witness };
+  }
+  return null;
+}
+
 async function resolveRestartTargets(
   message: StoredMessage,
   current: QueuedMessageCustody,
@@ -147,24 +176,57 @@ async function resolveRestartTargets(
     failedTargets: 0,
   };
 
+  const retainedExposureTargets = new Set(
+    (current.bodyExposures ?? [])
+      .filter((exposure) => projection.pending.has(exposure.targetCatId))
+      .map((exposure) => exposure.targetCatId),
+  );
+  let threadMessages: readonly StoredMessage[] = [];
+  if (retainedExposureTargets.size > 0) {
+    const readThread = messageStore.getByThreadAfter?.bind(messageStore);
+    if (readThread) {
+      // Startup custody is server-internal reconciliation, not a viewer read.
+      // Managed-command sources are scheduler-authored while their response
+      // output belongs to the triggering user, so source userId must not scope
+      // this scan. Exact cat/invocation/causal fences below provide authority.
+      threadMessages = await readThread(message.threadId);
+    }
+  }
+
+  // Failed bookkeeping clears the active seen-invocation map but deliberately
+  // retains append-only body exposures. A crash between output persistence and
+  // exact source settlement must therefore recover from the historical
+  // exposure itself. Only a durable, user-visible response causally bound to
+  // this exact source qualifies; a bare read or historical child result does
+  // not reopen terminal truth.
+  for (const catId of [...projection.pending]) {
+    if (!retainedExposureTargets.has(catId)) continue;
+    const sourceResponse = resolveRestartSourceResponse(message, current, catId, threadMessages);
+    if (!sourceResponse) continue;
+    const { exposure, witness } = sourceResponse;
+    projection.pending.delete(catId);
+    projection.handled.add(catId);
+    projection.failed.delete(catId);
+    projection.notified.delete(catId);
+    delete projection.awakenedInvocationIdByCatId[catId];
+    delete projection.awakenedAtByCatId[catId];
+    delete projection.seenInvocationIdByCatId[catId];
+    projection.targetOutcomeByCatId[catId] = {
+      invocationId: exposure.invocationId,
+      disposition: 'responded',
+      evidenceRef: { kind: 'invocation_lineage', invocationId: exposure.invocationId },
+      handledAt: Math.max(now, exposure.seenAt + 1),
+      consumption: witness,
+    };
+    projection.handledTargets += 1;
+  }
+
   for (const [catId, invocationId] of Object.entries(current.seenInvocationIdByCatId)) {
     delete projection.seenInvocationIdByCatId[catId];
     if (!projection.pending.has(catId)) continue;
     const exposure = current.bodyExposures?.find(
       (candidate) => candidate.targetCatId === catId && candidate.invocationId === invocationId,
     );
-    const sourceResponse = exposure
-      ? (
-          await resolveQueueSourceResponseEvidence({
-            messageStore,
-            threadId: message.threadId,
-            userId: message.userId,
-            catId,
-            invocationId,
-            sourceMessageIds: [message.id],
-          })
-        )[0]
-      : undefined;
     const witness = await resolveSuccessfulRestartWitness(
       message,
       catId,
@@ -173,22 +235,14 @@ async function resolveRestartTargets(
       invocationRecordStore,
       turnExecutionStore,
     );
-    if (sourceResponse || witness) {
+    if (witness) {
       projection.pending.delete(catId);
       projection.handled.add(catId);
       projection.failed.delete(catId);
       projection.notified.delete(catId);
       delete projection.awakenedInvocationIdByCatId[catId];
       delete projection.awakenedAtByCatId[catId];
-      if (sourceResponse && exposure) {
-        projection.targetOutcomeByCatId[catId] = {
-          invocationId,
-          disposition: 'responded',
-          evidenceRef: { kind: 'invocation_lineage', invocationId },
-          handledAt: Math.max(now, exposure.seenAt + 1),
-          consumption: sourceResponse.witness,
-        };
-      } else if (witness === 'child_execution' && exposure) {
+      if (witness === 'child_execution' && exposure) {
         // Exact child success without a source-bound output still closes the
         // turn, but must not invent a response witness.
         projection.targetOutcomeByCatId[catId] = {

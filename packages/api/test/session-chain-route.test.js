@@ -23,7 +23,7 @@ describe('Session Chain Routes', () => {
   let SessionChainStore;
   let sessionChainRoutes;
 
-  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride) {
+  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride, isSessionSwitchBusy) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
     SessionChainStore = storeMod.SessionChainStore;
@@ -48,6 +48,7 @@ describe('Session Chain Routes', () => {
       threadStore,
       sessionSealer: mockSealer,
       ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
+      ...(isSessionSwitchBusy ? { isSessionSwitchBusy } : {}),
     });
     await app.ready();
     return store;
@@ -434,7 +435,7 @@ describe('Session Chain Routes', () => {
     assert.equal(body.error, 'Thread not found');
   });
 
-  it('POST /api/sessions/:sessionId/unseal reopens sealed session as a new active record', async () => {
+  it('POST /api/sessions/:sessionId/unseal restores the selected record in place when no active session exists', async () => {
     const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-reopen', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
@@ -447,57 +448,112 @@ describe('Session Chain Routes', () => {
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
-    assert.equal(body.mode, 'reopened');
-    assert.equal(body.fromSessionId, sealed.id);
+    assert.equal(body.mode, 'restored');
+    assert.equal(body.session.id, sealed.id);
     assert.equal(body.session.status, 'active');
     assert.equal(body.session.cliSessionId, 'cli-reopen');
-    assert.equal(body.session.seq, 1);
+    assert.equal(body.session.seq, 0);
+    assert.equal(store.getChain('opus', 'thread-1').length, 1);
   });
 
-  it('POST /api/sessions/:sessionId/unseal displaces empty active session', async () => {
+  it('POST /api/sessions/:sessionId/unseal restores over an explicitly confirmed empty active session', async () => {
     const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
-    // Empty active session (messageCount 0 or undefined) — safe to displace
-    store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    // Empty active session is preserved as a separate sealing record.
+    const active = store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
 
     const res = await app.inject({
       method: 'POST',
       url: `/api/sessions/${sealed.id}/unseal`,
       headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { expectedActiveSessionId: active.id },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
-    assert.equal(body.mode, 'reopened');
-    assert.equal(body.fromSessionId, sealed.id);
+    assert.equal(body.mode, 'restored');
+    assert.equal(body.session.id, sealed.id);
+    assert.equal(store.get(active.id).status, 'sealing');
   });
 
   it('POST /api/sessions/:sessionId/unseal returns 409 on CAS race during displacement', async () => {
-    const rejectingSealer = {
-      requestSeal: async () => ({ accepted: false }),
-      finalize: async () => {},
-    };
-    const store = await setup(undefined, rejectingSealer);
+    const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
-    // Empty active session but CAS will reject
-    store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    // The store-level CAS rejects after route-level confirmation succeeds.
+    const active = store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    store.restoreActiveSession = () => ({ status: 'active_changed', activeSessionId: active.id });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${sealed.id}/unseal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { expectedActiveSessionId: active.id },
+    });
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.code, 'active_session_changed');
+  });
+
+  it('POST /api/sessions/:sessionId/unseal requires explicit confirmation when another session is active', async () => {
+    const store = await setup();
+    const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
+    const active = store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
 
     const res = await app.inject({
       method: 'POST',
       url: `/api/sessions/${sealed.id}/unseal`,
       headers: { 'x-cat-cafe-user': 'user-1' },
     });
+
     assert.equal(res.statusCode, 409);
     const body = JSON.parse(res.payload);
-    assert.match(body.error, /CAS race/);
+    assert.equal(body.code, 'active_session_confirmation_required');
+    assert.equal(body.activeSessionId, active.id);
   });
 
-  it('POST /api/sessions/:sessionId/unseal returns 409 when active session has messages', async () => {
+  it('POST /api/sessions/:sessionId/unseal refuses to switch while the cat has queued or running work', async () => {
+    const store = await setup(undefined, undefined, undefined, () => true);
+    const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
+    const active = store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${sealed.id}/unseal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { expectedActiveSessionId: active.id },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'session_switch_busy');
+    assert.equal(store.getActive('opus', 'thread-1', 'user-1').id, active.id);
+    assert.equal(store.get(sealed.id).status, 'sealed');
+  });
+
+  it('POST /api/sessions/:sessionId/unseal refuses busy restoration even when no active record exists', async () => {
+    const store = await setup(undefined, undefined, undefined, () => true);
+    const sealed = store.create({ cliSessionId: 'cli-only', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${sealed.id}/unseal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { expectedActiveSessionId: null },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'session_switch_busy');
+    assert.equal(store.get(sealed.id).status, 'sealed');
+  });
+
+  it('POST /api/sessions/:sessionId/unseal explicitly switches to the selected record without deleting active work', async () => {
     const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
-    // Non-empty active session — must not be displaced
+    // Non-empty active work must be preserved while it is safely sealed.
     const active = store.create({ cliSessionId: 'cli-new', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(active.id, { messageCount: 5 });
 
@@ -505,10 +561,18 @@ describe('Session Chain Routes', () => {
       method: 'POST',
       url: `/api/sessions/${sealed.id}/unseal`,
       headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { expectedActiveSessionId: active.id },
     });
-    assert.equal(res.statusCode, 409);
+    assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
-    assert.equal(body.activeSessionId, active.id);
+    assert.equal(body.mode, 'restored');
+    assert.equal(body.session.id, sealed.id);
+    assert.equal(body.session.seq, 0);
+    assert.equal(store.getActive('opus', 'thread-1', 'user-1').id, sealed.id);
+    assert.equal(store.get(active.id).status, 'sealing');
+    assert.equal(store.get(active.id).sealReason, 'manual_session_switch');
+    assert.equal(store.get(active.id).messageCount, 5);
+    assert.equal(store.getChain('opus', 'thread-1').length, 2);
   });
 
   it('POST /api/sessions/:sessionId/unseal rejects system-owned non-default threads', async () => {

@@ -2,6 +2,7 @@ import type { Readable, Writable } from 'node:stream';
 import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import type { PluginRuntimeErrorCode } from '../host-inventory/types.js';
 
 export type ExternalPluginRuntimeErrorCode =
   | 'INSTANCE_NOT_RUNNABLE'
@@ -56,6 +57,7 @@ export interface ExternalPluginProcessSpec {
 export interface ExternalPluginProcessExit {
   readonly code: number | null;
   readonly signal: NodeJS.Signals | null;
+  readonly diagnostic?: { readonly code: PluginRuntimeErrorCode };
 }
 
 export interface ExternalPluginProcess {

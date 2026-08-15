@@ -6,7 +6,7 @@ import type { ListenDocumentDescriptor } from '@/stores/listenModeStore';
 import { useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { DocumentListenController } from '../DocumentListenController';
-import type { PlaybackSnapshot } from '../PlaybackManager';
+import type { EnqueueUrlResult, PlaybackSnapshot } from '../PlaybackManager';
 
 function descriptor(): ListenDocumentDescriptor {
   return {
@@ -29,6 +29,9 @@ function descriptor(): ListenDocumentDescriptor {
 
 function harness(saved: ListenDocumentState | null = null) {
   const telemetry = vi.fn();
+  const fetchAudio = vi
+    .fn<(url: string) => Promise<Response>>()
+    .mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) } as Response);
   let snapshot: PlaybackSnapshot = {
     state: 'idle',
     source: null,
@@ -59,10 +62,13 @@ function harness(saved: ListenDocumentState | null = null) {
         itemEndListener = null;
       };
     }),
-    enqueueUrl: vi.fn(async () => {
-      snapshot = { ...snapshot, state: 'playing' as const };
-      snapshotListener?.(snapshot);
-    }),
+    enqueueUrl: vi
+      .fn<(url: string, fetchFn: (url: string) => Promise<Response>) => Promise<EnqueueUrlResult>>()
+      .mockImplementation(async () => {
+        snapshot = { ...snapshot, state: 'playing' as const };
+        snapshotListener?.(snapshot);
+        return 'enqueued';
+      }),
     enqueueBase64: vi.fn(() => {
       snapshot = { ...snapshot, state: 'playing' as const };
       snapshotListener?.(snapshot);
@@ -96,7 +102,7 @@ function harness(saved: ListenDocumentState | null = null) {
   const controller = new DocumentListenController({
     api,
     getManager: () => manager as never,
-    fetchAudio: vi.fn() as never,
+    fetchAudio,
     now: () => 123,
     telemetry,
   });
@@ -107,6 +113,7 @@ function harness(saved: ListenDocumentState | null = null) {
       snapshot = { ...snapshot, ...patch };
       snapshotListener?.(snapshot);
     },
+    fetchAudio,
     itemEnd: (index: number) => itemEndListener?.(index),
     manager,
     telemetry,
@@ -116,35 +123,13 @@ function harness(saved: ListenDocumentState | null = null) {
 describe('DocumentListenController', () => {
   beforeEach(() => useListenModeStore.setState({ session: null }));
 
-  it('starts playback from the first cold-stream chunk before the complete asset is linked', async () => {
-    const { api, controller, manager } = harness();
-
-    await controller.startDocument(descriptor());
-    await vi.waitFor(() => expect(manager.enqueueBase64).toHaveBeenCalled());
-    await vi.waitFor(() => expect(api.linkAsset).toHaveBeenCalled());
-
-    expect(manager.enqueueBase64).toHaveBeenCalledWith('AAAA', 'wav', {
-      completesItem: true,
-      durationSec: 0.5,
-    });
-    expect(manager.enqueueBase64.mock.invocationCallOrder[0]).toBeLessThan(api.linkAsset.mock.invocationCallOrder[0]);
-  });
-
-  it('buffers 1.5 seconds of cold audio before starting playback', async () => {
-    let releaseSecond: (() => void) | undefined;
-    let releaseThird: (() => void) | undefined;
+  it('queues one complete sentence asset and never exposes streamed WAV chunks as audible seams', async () => {
     let releaseAsset: (() => void) | undefined;
     const { api, controller, manager } = harness();
     api.stream.mockImplementationOnce(() =>
       (async function* () {
         yield { type: 'chunk' as const, audioBase64: 'A', format: 'wav', durationSec: 0.5, isFinalChunk: false };
-        await new Promise<void>((resolve) => {
-          releaseSecond = resolve;
-        });
         yield { type: 'chunk' as const, audioBase64: 'B', format: 'wav', durationSec: 0.5, isFinalChunk: false };
-        await new Promise<void>((resolve) => {
-          releaseThird = resolve;
-        });
         yield { type: 'chunk' as const, audioBase64: 'C', format: 'wav', durationSec: 0.5, isFinalChunk: true };
         await new Promise<void>((resolve) => {
           releaseAsset = resolve;
@@ -160,27 +145,13 @@ describe('DocumentListenController', () => {
     );
 
     await controller.startDocument(descriptor());
-    await vi.waitFor(() => expect(releaseSecond).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(releaseAsset).toBeTypeOf('function'));
     expect(manager.enqueueBase64).not.toHaveBeenCalled();
-    releaseSecond?.();
-    await vi.waitFor(() => expect(releaseThird).toBeTypeOf('function'));
-    expect(manager.enqueueBase64).not.toHaveBeenCalled();
-    releaseThird?.();
-    await vi.waitFor(() => expect(manager.enqueueBase64).toHaveBeenCalledTimes(3));
-    expect(manager.enqueueBase64).toHaveBeenNthCalledWith(1, 'A', 'wav', {
-      completesItem: false,
-      durationSec: 0.5,
-    });
-    expect(manager.enqueueBase64).toHaveBeenNthCalledWith(2, 'B', 'wav', {
-      completesItem: false,
-      durationSec: 0.5,
-    });
-    expect(manager.enqueueBase64).toHaveBeenNthCalledWith(3, 'C', 'wav', {
-      completesItem: true,
-      durationSec: 0.5,
-    });
+    expect(manager.enqueueUrl).not.toHaveBeenCalled();
     releaseAsset?.();
     await vi.waitFor(() => expect(api.linkAsset).toHaveBeenCalled());
+    await vi.waitFor(() => expect(manager.enqueueUrl).toHaveBeenCalledWith('/audio/buffered.wav', expect.anything()));
+    expect(manager.enqueueBase64).not.toHaveBeenCalled();
   });
 
   it('restores the stable saved anchor and only fills a bounded look-ahead window', async () => {
@@ -298,7 +269,7 @@ describe('DocumentListenController', () => {
     const second = controller.startDocument(replacement, 1);
     releaseFirst?.();
     await Promise.all([first, second]);
-    await vi.waitFor(() => expect(manager.enqueueBase64).toHaveBeenCalled());
+    await vi.waitFor(() => expect(manager.enqueueUrl).toHaveBeenCalled());
 
     expect(useListenModeStore.getState().session?.identity.relativePath).toBe('docs/new.md');
     expect(manager.enqueueUrl).not.toHaveBeenCalledWith('/old.wav', expect.anything());
@@ -354,6 +325,72 @@ describe('DocumentListenController', () => {
     expect(interruptedWhenErrorBecameVisible).toBe(true);
     expect(useListenModeStore.getState().session?.error).toBe('sidecar stream failed');
     unsubscribe();
+  });
+
+  it.each([
+    ['rejected fetch', () => Promise.reject(new TypeError('network error'))],
+    ['404 response', () => Promise.resolve({ ok: false, status: 404 } as Response)],
+  ])('%s leaves the complete asset unprepared and exposes retryable error', async (_label, failFetch) => {
+    const { api, controller, fetchAudio, manager } = harness();
+    fetchAudio.mockImplementationOnce(failFetch);
+    manager.enqueueUrl.mockImplementationOnce(async (url, fetchFn) => {
+      try {
+        return (await fetchFn(url)).ok ? 'enqueued' : 'failed';
+      } catch {
+        return 'failed';
+      }
+    });
+
+    await controller.startDocument(descriptor());
+    await vi.waitFor(() => expect(useListenModeStore.getState().session?.phase).toBe('error'));
+
+    expect(api.stream).toHaveBeenCalledTimes(1);
+    expect(fetchAudio).toHaveBeenCalledOnce();
+    expect(manager.enqueueUrl).toHaveBeenCalledTimes(1);
+    expect(manager.markDone).not.toHaveBeenCalled();
+    expect(manager.interrupt).toHaveBeenCalledOnce();
+    expect(useListenModeStore.getState().session).toMatchObject({
+      currentIndex: 0,
+      cachedAnchors: [],
+      cacheBytes: 0,
+      phase: 'error',
+      error: '完整音频加载失败，请重试',
+    });
+  });
+
+  it('treats an interrupted in-flight prefetch as cancellation until the user resumes', async () => {
+    let resolvePrefetch: ((result: 'cancelled') => void) | undefined;
+    const { api, controller, emitSnapshot, manager } = harness();
+    manager.enqueueUrl.mockResolvedValueOnce('enqueued').mockImplementationOnce(
+      () =>
+        new Promise<'cancelled'>((resolve) => {
+          resolvePrefetch = resolve;
+        }),
+    );
+
+    await controller.startDocument(descriptor());
+    await vi.waitFor(() => expect(manager.enqueueUrl).toHaveBeenCalledTimes(2));
+    emitSnapshot({ source: 'listen', state: 'playing' });
+
+    manager.interrupt();
+    emitSnapshot({ source: null, state: 'idle' });
+    resolvePrefetch?.('cancelled');
+    for (let index = 0; index < 10; index++) await Promise.resolve();
+
+    expect(api.stream).toHaveBeenCalledTimes(2);
+    expect(manager.enqueueUrl).toHaveBeenCalledTimes(2);
+    expect(manager.markDone).not.toHaveBeenCalled();
+    expect(useListenModeStore.getState().session).toMatchObject({
+      currentIndex: 0,
+      cachedAnchors: ['sentence-0'],
+      cacheBytes: 100,
+      phase: 'idle',
+      error: null,
+    });
+
+    controller.togglePlayback();
+    await vi.waitFor(() => expect(manager.beginBatch).toHaveBeenCalledTimes(2));
+    expect(api.stream.mock.calls.length).toBeGreaterThan(2);
   });
 
   it('emits privacy-bounded first-play, buffer-depth, and underrun health metrics', async () => {

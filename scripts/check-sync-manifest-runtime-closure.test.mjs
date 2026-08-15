@@ -146,6 +146,27 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
+  it('does not make public magic-word tests depend on private L0 staging content', () => {
+    const stagingRef = 'cat-cafe-skills/refs/l0-staging-content.md';
+    const magicWordTest = readFileSync(
+      resolve(ROOT, 'packages/api/test/harness-eval/task-outcome-magic-word-detector.test.js'),
+      'utf8',
+    );
+    const eventsRouteTest = readFileSync(resolve(ROOT, 'packages/api/test/events-route.test.js'), 'utf8');
+
+    assert.ok(excluded.has(stagingRef), 'raw L0 staging content must remain private in public exports');
+    assert.match(
+      magicWordTest,
+      /skip:\s*!existsSync\(STAGING_CONTENT_URL\)/,
+      'the full home-governance parity assertion must skip when private L0 staging content is absent',
+    );
+    assert.match(
+      eventsRouteTest,
+      /if\s*\(hasSourceStagingContent\)[\s\S]*staging 四象限 meaning present[\s\S]*assert\.equal\(quadrants,\s*undefined/,
+      'the meanings endpoint test must require private meanings at home and require their absence publicly',
+    );
+  });
+
   it('stages tracked paths losslessly before applying the manifest', () => {
     const syncScript = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf8');
     assert.match(

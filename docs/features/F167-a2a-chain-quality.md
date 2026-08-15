@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-11
+updated: 2026-08-14
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -62,6 +62,13 @@ operator experience：
 Architecture cell: `ball-custody` + `dispatch` + `mcp-surface-governance`
 
 operator decision `[thread-id]#0001786347630932-000025-ab3cdda3` accepts narrow terminal producers for structured wakes already exposed to the current invocation. `cat_cafe_complete_managed_hold` closes an exact managed hold using callback-authenticated invocation identity plus server-derived source message/task/thread/holder coordinates. The live regression in `[thread-id]` extends the same accepted F167 boundary to ordinary A2A dispatch: `cat_cafe_complete_a2a_dispatch` derives source message, previous cat, thread, holder, and invocation from the current callback record and exact `ball.handed` event. The caller selects only `handled | completed`; stale, replaced, cross-thread, cross-holder, cross-source, or cross-task attempts fail closed. Read, command exit, tests, merge truth, ACK, unrelated task completion, and another coordination terminal remain non-terminal.
+
+2026-08-14 same-cat clarification: `catId` identifies a persona, not one invocation. A same-cat
+cross-thread carrier may disposition only when the stored trigger has canonical distinct-thread
+`crossPost.sourceThreadId` provenance and the existing exact `ball.handed` event binds that message,
+source cat, target holder, target thread, and current invocation. Same-thread self mentions and missing
+or same-thread provenance remain fail-closed. Here “cross-thread attempt” means an auth/source thread
+mismatch, not a valid server-authored cross-post carrier stored in its target thread.
 
 This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
 

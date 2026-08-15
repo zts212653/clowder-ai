@@ -10,6 +10,31 @@ import type {
 import { ExternalPluginRuntimeError } from './types.js';
 
 const DEFAULT_TERMINATION_GRACE_MS = 2_000;
+const MAX_DIAGNOSTIC_LINE_BYTES = 512;
+const RUNTIME_DIAGNOSTIC_CODES = new Set([
+  'AUTH_EXPIRED',
+  'EVENT_BUS_CONFLICT',
+  'NOT_FOUND',
+  'PERMISSION_DENIED',
+  'RATE_LIMITED',
+  'UNAVAILABLE',
+  'UNEXPECTED_RUNTIME_FAILURE',
+]);
+
+function parseRuntimeDiagnostic(line: Buffer): ExternalPluginProcessExit['diagnostic'] | undefined {
+  if (line.byteLength === 0 || line.byteLength > MAX_DIAGNOSTIC_LINE_BYTES) return undefined;
+  try {
+    const value: unknown = JSON.parse(line.toString('utf8'));
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const raw = value as Record<string, unknown>;
+    if (Object.keys(raw).sort().join(',') !== 'code,kind,v') return undefined;
+    if (raw.kind !== 'clowder.plugin.runtime-error' || raw.v !== 1) return undefined;
+    if (typeof raw.code !== 'string' || !RUNTIME_DIAGNOSTIC_CODES.has(raw.code)) return undefined;
+    return { code: raw.code as NonNullable<ExternalPluginProcessExit['diagnostic']>['code'] };
+  } catch {
+    return undefined;
+  }
+}
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
@@ -72,17 +97,46 @@ export class NodeExternalPluginProcessAdapter implements ExternalPluginProcessAd
     }
     const pid = child.pid;
     this.childPids.add(pid);
-    child.stderr.resume();
+    let diagnostic: ExternalPluginProcessExit['diagnostic'];
+    let pendingDiagnostic = Buffer.alloc(0);
+    let discardingOversizedDiagnostic = false;
+    const appendDiagnosticFragment = (fragment: Buffer): void => {
+      if (discardingOversizedDiagnostic) return;
+      if (pendingDiagnostic.byteLength + fragment.byteLength > MAX_DIAGNOSTIC_LINE_BYTES) {
+        pendingDiagnostic = Buffer.alloc(0);
+        discardingOversizedDiagnostic = true;
+        return;
+      }
+      pendingDiagnostic = Buffer.concat([pendingDiagnostic, fragment]);
+    };
+    const finishDiagnosticLine = (): ExternalPluginProcessExit['diagnostic'] | undefined => {
+      const parsed = discardingOversizedDiagnostic ? undefined : parseRuntimeDiagnostic(pendingDiagnostic);
+      pendingDiagnostic = Buffer.alloc(0);
+      discardingOversizedDiagnostic = false;
+      return parsed;
+    };
+    child.stderr.on('data', (chunk: Buffer) => {
+      let cursor = 0;
+      while (cursor < chunk.byteLength) {
+        const newline = chunk.indexOf(0x0a, cursor);
+        const fragmentEnd = newline < 0 ? chunk.byteLength : newline;
+        appendDiagnosticFragment(chunk.subarray(cursor, fragmentEnd));
+        if (newline < 0) break;
+        diagnostic = finishDiagnosticLine() ?? diagnostic;
+        cursor = newline + 1;
+      }
+    });
     const exited = new Promise<ExternalPluginProcessExit>((resolve) => {
       const settle = (result: ExternalPluginProcessExit) => {
-        child.off('exit', onExit);
+        child.off('close', onExit);
         child.off('error', onError);
         this.childPids.delete(pid);
         resolve(result);
       };
-      const onExit = (code: number | null, signal: NodeJS.Signals | null) => settle({ code, signal });
-      const onError = () => settle({ code: null, signal: null });
-      child.once('exit', onExit);
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+        settle({ code, signal, ...(diagnostic === undefined ? {} : { diagnostic }) });
+      const onError = () => settle({ code: null, signal: null, ...(diagnostic === undefined ? {} : { diagnostic }) });
+      child.once('close', onExit);
       child.once('error', onError);
     });
     let terminating: Promise<void> | undefined;

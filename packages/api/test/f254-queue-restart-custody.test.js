@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { PerCatTerminalDispositionCollector } from '../dist/domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import { QueuedMessageCustodyStartupReconciler } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js';
@@ -620,6 +621,196 @@ describe('F254 Queue restart custody', () => {
         outputMessageIds: [response.id],
       },
     });
+  });
+
+  test('terminalizes a failed historical exposure when its durable output names this source message', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 3,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-response-after-failure', seenAt: 1_075 }],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+      {
+        userId: 'scheduler',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-managed-command', threadId: 'thread-1', catId: 'opus', wakeWhen: true },
+        },
+      },
+    );
+    const response = messageStore.append({
+      userId: 'default-user',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'durable response persisted before failed bookkeeping cleared the active exposure',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-response-after-failure',
+          turnInvocationId: 'inv-response-after-failure',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const ballEvents = [];
+    const turnCustody = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: {
+        async get() {
+          return { state: 'active', holder: 'opus' };
+        },
+      },
+      ballCustodyEventLog: {
+        async read(_subjectKey, fromSequence = 0) {
+          return ballEvents.slice(fromSequence);
+        },
+      },
+    });
+    const ballProjection = await turnCustody.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'opus',
+      sourceMessageId: message.id,
+      taskId: 'task-managed-command',
+    });
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      turnExecutions: [
+        turnExecution({
+          invocationId: 'inv-response-after-failure',
+          parentInvocationId: 'parent-response-after-failure',
+          status: 'failed',
+          terminalReason: 'managed_hold_disposition_missing',
+        }),
+      ],
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(result.handledTargets, 1);
+    assert.equal(result.failedTargets, 0);
+    assert.deepEqual(await turnCustody.close(ballProjection), {
+      state: 'covered_active',
+      shouldBlock: true,
+      transitionObserved: false,
+      evidenceRefs: ['hold:ball:thread:thread-1'],
+    });
+    assert.deepEqual(ballEvents, []);
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'scheduler', 'entry-restart-1'), null);
+    const stored = messageStore.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'delivered');
+    assert.deepEqual(stored.queueCustody.targetOutcomeByCatId.opus, {
+      invocationId: 'inv-response-after-failure',
+      disposition: 'responded',
+      evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-response-after-failure' },
+      handledAt: 2_000,
+      consumption: {
+        kind: 'source_response',
+        outputMessageIds: [response.id],
+      },
+    });
+  });
+
+  test('hydrates the thread once while checking multiple retained exposure invocations', async () => {
+    const messageStore = createMessageStore();
+    const readThread = messageStore.getByThreadAfter.bind(messageStore);
+    let threadHydrations = 0;
+    messageStore.getByThreadAfter = (...args) => {
+      threadHydrations += 1;
+      return readThread(...args);
+    };
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 4,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [
+          { targetCatId: 'opus', invocationId: 'inv-response-older', seenAt: 1_075 },
+          { targetCatId: 'opus', invocationId: 'inv-response-newer', seenAt: 1_100 },
+        ],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+    );
+    messageStore.append({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'the older exposure has the exact durable response',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-response-older',
+          turnInvocationId: 'inv-response-older',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(threadHydrations, 1);
+  });
+
+  test('keeps a failed historical exposure queued when output is not bound to its source message', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 3,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-unbound-after-failure', seenAt: 1_075 }],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+    );
+    messageStore.append({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'same invocation, but this reply belongs to a different trigger',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-unbound-after-failure',
+          turnInvocationId: 'inv-unbound-after-failure',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: 'different-source-message' },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 0);
+    assert.equal(result.handledTargets, 0);
+    const restored = invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1');
+    assert.equal(restored.status, 'queued');
+    const stored = messageStore.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'queued');
+    assert.deepEqual(stored.queueCustody.failedByCatIds, ['opus']);
+    assert.deepEqual(stored.queueCustody.handledByCatIds, []);
   });
 
   test('requeues an awakened child that restarted before body exposure as exact unsettled work', async () => {

@@ -459,7 +459,7 @@ test('pre-turn transport failure retries once without changing a requested threa
   assert.equal(output.filter((event) => event.type === 'app_server.recovery').length, 1);
 });
 
-test('exact active-writer resume failure backs off and reborns on one fresh native session', async () => {
+test('exact active-writer resume failure backs off once and preserves the native session identity', async () => {
   const first = new ProtocolWire();
   const firstWrite = first.write.bind(first);
   first.write = async (message) => {
@@ -515,32 +515,27 @@ test('exact active-writer resume failure backs off and reborns on one fresh nati
   await waitFor(() => second.writes.some((message) => message.method === 'turn/start'));
   second.inbox.push({
     method: 'turn/completed',
-    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    params: { threadId: '019f-old', turn: { id: 'turn-1', status: 'completed' } },
   });
   const output = await run;
 
   assert.equal(factoryCalls, 2);
   assert.equal(first.writes.filter((message) => message.method === 'thread/resume').length, 1);
-  assert.equal(
-    second.writes.some((message) => message.method === 'thread/resume'),
-    false,
-  );
-  assert.equal(second.writes.filter((message) => message.method === 'thread/start').length, 1);
+  assert.equal(second.writes.filter((message) => message.method === 'thread/resume').length, 1);
+  assert.equal(second.writes.filter((message) => message.method === 'thread/start').length, 0);
   assert.equal(sessionOptions[0].sessionId, '019f-old');
-  assert.equal(sessionOptions[1].sessionId, undefined, 'reborn transport must not reuse the busy native session');
+  assert.equal(sessionOptions[1].sessionId, '019f-old', 'bounded retry must preserve the native session identity');
   const recovery = output.find((event) => event.type === 'app_server.recovery');
-  assert.equal(recovery.reason, 'active_writer_reborn');
+  assert.equal(recovery.reason, 'active_writer_retry');
   assert.equal(recovery.delayMs, 1);
   assert.equal(recovery.threadId, '019f-old');
-  assert.equal(Number.isFinite(recovery.replacement.detectedAt), true);
+  assert.equal(Number.isFinite(recovery.activeWriter.detectedAt), true);
   assert.equal(output.filter((event) => event.type === 'app_server.recovery').length, 1);
-  assert.deepEqual(recovery.replacement, {
-    cause: 'active_writer_reborn',
+  assert.deepEqual(recovery.activeWriter, {
     previousNativeThreadId: '019f-old',
-    detectedAt: recovery.replacement.detectedAt,
-    attempt: 1,
+    detectedAt: recovery.activeWriter.detectedAt,
     diagnostics: {
-      observedAt: recovery.replacement.diagnostics.observedAt,
+      observedAt: recovery.activeWriter.diagnostics.observedAt,
       classification: 'native_active_turn_without_local_lease',
       confidence: 'medium',
       localHostLease: { state: 'not_observed', source: 'carrier_affinity' },
@@ -601,10 +596,10 @@ test('active-writer diagnostics classify a reused healthy affinity host as a loc
   await waitFor(() => second.writes.some((message) => message.method === 'turn/start'));
   second.inbox.push({
     method: 'turn/completed',
-    params: { threadId: 'thread-1', turn: { id: 'turn-new', status: 'completed' } },
+    params: { threadId: 'local-old', turn: { id: 'turn-new', status: 'completed' } },
   });
   const output = await run;
-  const diagnostics = output.find((event) => event.type === 'app_server.recovery').replacement.diagnostics;
+  const diagnostics = output.find((event) => event.type === 'app_server.recovery').activeWriter.diagnostics;
   assert.equal(diagnostics.classification, 'local_live_lease');
   assert.equal(diagnostics.confidence, 'high');
   assert.deepEqual(diagnostics.localHostLease, { state: 'live', source: 'carrier_affinity' });
@@ -648,17 +643,17 @@ test('active-writer diagnostics remain external-or-unknown when thread/read has 
   await waitFor(() => second.writes.some((message) => message.method === 'turn/start'));
   second.inbox.push({
     method: 'turn/completed',
-    params: { threadId: 'thread-1', turn: { id: 'turn-new', status: 'completed' } },
+    params: { threadId: 'unknown-old', turn: { id: 'turn-new', status: 'completed' } },
   });
   const output = await run;
-  const diagnostics = output.find((event) => event.type === 'app_server.recovery').replacement.diagnostics;
+  const diagnostics = output.find((event) => event.type === 'app_server.recovery').activeWriter.diagnostics;
   assert.equal(diagnostics.classification, 'external_or_unknown');
   assert.equal(diagnostics.confidence, 'low');
   assert.equal(diagnostics.nativeThread.activeTurn, undefined);
   assert.equal(diagnostics.writerClientIdentity, 'unavailable');
 });
 
-test('active-writer diagnostics time out as external-or-unknown instead of blocking fresh recovery', async () => {
+test('active-writer diagnostics time out as external-or-unknown without authorizing replacement', async () => {
   const startedAt = Date.now();
   const detection = await captureCodexActiveWriterDetection({
     threadId: 'timed-out-old',
@@ -672,6 +667,23 @@ test('active-writer diagnostics time out as external-or-unknown instead of block
   assert.equal(detection.diagnostics.confidence, 'low');
   assert.equal(detection.diagnostics.nativeThread.readOutcome, 'failed');
   assert.ok(Date.now() - startedAt < 1_000, 'diagnostic collection must remain bounded');
+});
+
+test('active-writer diagnostics retain a thread/read result beyond the former 250ms cutoff', async () => {
+  const detection = await captureCodexActiveWriterDetection({
+    threadId: 'slow-read-old',
+    observedAt: Date.now(),
+    localLiveLease: false,
+    readThread: async () => {
+      await delay(350);
+      return { thread: { id: 'slow-read-old', status: { type: 'notLoaded' }, turns: [] } };
+    },
+  });
+
+  assert.equal(detection.diagnostics.nativeThread.readOutcome, 'succeeded');
+  assert.equal(detection.diagnostics.nativeThread.status, 'not_loaded');
+  assert.equal(detection.diagnostics.classification, 'external_or_unknown');
+  assert.equal(detection.diagnostics.confidence, 'low');
 });
 
 test('active-writer wording after provider output fails closed without replay', async () => {
@@ -711,8 +723,8 @@ test('active-writer wording after provider output fails closed without replay', 
   assert.equal(second.writes.length, 0);
 });
 
-test('a reborn start that also reports exact active-writer cannot fall through generic transport retry', async () => {
-  const activeWriterWire = (method, threadId) => {
+test('a repeated active-writer refusal fails closed without falling through or starting a fresh thread', async () => {
+  const activeWriterWire = (threadId) => {
     const wire = new ProtocolWire();
     const originalWrite = wire.write.bind(wire);
     wire.write = async (message) => {
@@ -724,7 +736,7 @@ test('a reborn start that also reports exact active-writer cannot fall through g
         });
         return;
       }
-      if (message.method !== method) return originalWrite(message);
+      if (message.method !== 'thread/resume') return originalWrite(message);
       wire.writes.push(message);
       wire.inbox.push({
         id: message.id,
@@ -733,8 +745,8 @@ test('a reborn start that also reports exact active-writer cannot fall through g
     };
     return wire;
   };
-  const first = activeWriterWire('thread/resume', '019f-old');
-  const second = activeWriterWire('thread/start', '019f-reborn');
+  const first = activeWriterWire('019f-old');
+  const second = activeWriterWire('019f-old');
   const wires = [first, second];
   let factoryCalls = 0;
   const run = collectFailure(
@@ -752,8 +764,10 @@ test('a reborn start that also reports exact active-writer cannot fall through g
   );
 
   const { error } = await run;
-  assert.match(error.message, /thread 019f-reborn already has an active writer/);
-  assert.equal(factoryCalls, 2, 'exact active-writer must never fall through to immediate generic retry');
+  assert.match(error.message, /thread 019f-old already has an active writer/);
+  assert.equal(factoryCalls, 2, 'exact active-writer must receive only one bounded same-session retry');
+  assert.equal(first.writes.filter((message) => message.method === 'thread/start').length, 0);
+  assert.equal(second.writes.filter((message) => message.method === 'thread/start').length, 0);
 });
 
 test('model-capacity failure retries the accepted turn on the same thread without leaking the failed attempt', async () => {

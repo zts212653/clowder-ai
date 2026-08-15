@@ -49,6 +49,12 @@ describe('K-2A persisted restart normalization', () => {
         configReadiness: 'ready',
         activationState: 'enabling',
         runtimeState: 'healthy',
+        lastRuntimeError: {
+          code: 'EVENT_BUS_CONFLICT',
+          exitCode: 17,
+          signal: null,
+          occurredAt: 3_500,
+        },
       });
     });
     const before = await firstStore.snapshot();
@@ -65,6 +71,7 @@ describe('K-2A persisted restart normalization', () => {
     assert.equal(after.instances[0].configReadiness, 'ready');
     assert.equal(after.instances[0].activationState, 'error');
     assert.equal(after.instances[0].runtimeState, 'stopped');
+    assert.deepEqual(after.instances[0].lastRuntimeError, before.instances[0].lastRuntimeError);
     assert.equal(after.instances[0].updatedAt, 4_000);
   });
 
@@ -122,6 +129,28 @@ describe('K-2A persisted restart normalization', () => {
     const snapshot = await store.snapshot();
     snapshot.grants[0].requestedCapabilities = ['onMessage'];
     snapshot.grants[0].effectiveGrants = ['onMessage'];
+    writeFileSync(path, JSON.stringify(snapshot));
+
+    await assert.rejects(
+      () => new FilePluginInventoryStore(path).snapshot(),
+      (error) => error?.code === 'CORRUPT_SNAPSHOT',
+    );
+  });
+
+  it('rejects runtime diagnostics with unrecognized fields instead of persisting raw detail', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-runtime-diagnostic-'));
+    const path = join(root, 'inventory.json');
+    const store = new FilePluginInventoryStore(path);
+    const controlPlane = new HostInventoryControlPlane(store, { createInstanceId: () => 'pi_restart' });
+    await controlPlane.installPackage(candidate());
+    const snapshot = await store.snapshot();
+    snapshot.instances[0].lastRuntimeError = {
+      code: 'EVENT_BUS_CONFLICT',
+      exitCode: 17,
+      signal: null,
+      occurredAt: 3_500,
+      rawMessage: 'must not persist',
+    };
     writeFileSync(path, JSON.stringify(snapshot));
 
     await assert.rejects(

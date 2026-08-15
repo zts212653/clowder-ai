@@ -1,4 +1,4 @@
-import type { BallCustodyEvent } from '@cat-cafe/shared';
+import { type BallCustodyEvent, isCrossThreadProvenance } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
@@ -127,7 +127,8 @@ export class A2ADispatchDispositionService {
       message &&
         message.threadId === auth.threadId &&
         message.catId &&
-        message.catId !== auth.catId &&
+        (message.catId !== auth.catId ||
+          isCrossThreadProvenance(message.extra?.crossPost?.sourceThreadId, message.threadId)) &&
         (message.mentions.includes(auth.catId) || message.extra?.targetCats?.includes(auth.catId)),
     );
   }

@@ -146,6 +146,92 @@ test('same exact catalog install is idempotent and does not mint a second instan
   assert.equal((await store.snapshot()).instances.length, 1);
 });
 
+test('explicit update replaces a stopped older package in place and remains disabled', async () => {
+  const oldArchive = await packageArchive();
+  const nextManifest = manifest({ version: '0.1.0-alpha.2' });
+  const nextArchive = await packageArchive({ packageManifest: nextManifest });
+  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f292-official-cache-'));
+  const store = new MemoryPluginInventoryStore();
+  const inventory = new HostInventoryControlPlane(store, {
+    createInstanceId: () => 'pi_official',
+    now: () => 10_000,
+  });
+  const oldInstaller = new OfficialPluginPackageInstaller({
+    inventory,
+    packagesRoot,
+    catalog: [catalogEntry(oldArchive.integrity)],
+    fetchArchive: async () => oldArchive.bytes,
+  });
+  await oldInstaller.install('feishu-meeting-intake');
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({
+      ...current,
+      configReadiness: 'ready',
+      activationState: 'error',
+      runtimeState: 'stopped',
+    });
+  });
+  const nextEntry = catalogEntry(nextArchive.integrity, {
+    version: nextManifest.version,
+    archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.2.tgz',
+  });
+  const installer = new OfficialPluginPackageInstaller({
+    inventory,
+    packagesRoot,
+    catalog: [nextEntry],
+    fetchArchive: async () => nextArchive.bytes,
+  });
+
+  const updated = await installer.update('feishu-meeting-intake', 'pi_official', 1);
+
+  assert.deepEqual(updated, {
+    pluginInstanceId: 'pi_official',
+    packageDigest: nextArchive.integrity,
+    grantRevision: 2,
+  });
+  const snapshot = await store.snapshot();
+  assert.equal(snapshot.instances.filter((instance) => instance.lifecycleState === 'installed').length, 1);
+  assert.equal(snapshot.instances[0].packageDigest, nextArchive.integrity);
+  assert.equal(snapshot.instances[0].configReadiness, 'ready');
+  assert.equal(snapshot.instances[0].activationState, 'disabled');
+  assert.equal(snapshot.instances[0].runtimeState, 'stopped');
+  assert.equal(snapshot.instances[0].lifecycleRevision, 2);
+  assert.equal(
+    snapshot.packages.find((item) => item.packageDigest === nextArchive.integrity)?.version,
+    '0.1.0-alpha.2',
+  );
+});
+
+test('explicit update rejects stale or running instances before downloading the archive', async () => {
+  const oldArchive = await packageArchive();
+  const nextManifest = manifest({ version: '0.1.0-alpha.2' });
+  const nextArchive = await packageArchive({ packageManifest: nextManifest });
+  const { packagesRoot, store, inventory, installer: oldInstaller } = await harness(oldArchive);
+  await oldInstaller.install('feishu-meeting-intake');
+  let fetches = 0;
+  const installer = new OfficialPluginPackageInstaller({
+    inventory,
+    packagesRoot,
+    catalog: [catalogEntry(nextArchive.integrity, { version: nextManifest.version })],
+    fetchArchive: async () => {
+      fetches += 1;
+      return nextArchive.bytes;
+    },
+  });
+
+  await assert.rejects(installer.update('feishu-meeting-intake', 'pi_official', 2), isInstallError('STALE_REVISION'));
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({ ...current, activationState: 'enabled', runtimeState: 'healthy' });
+  });
+  await assert.rejects(
+    installer.update('feishu-meeting-intake', 'pi_official', 1),
+    isInstallError('UPDATE_REQUIRES_STOPPED'),
+  );
+  assert.equal(fetches, 0);
+});
+
 test('digest mismatch fails before an archive or inventory mutation is published', async () => {
   const archive = await packageArchive();
   const wrongDigest = `sha512-${createHash('sha512').update('different').digest('base64')}`;

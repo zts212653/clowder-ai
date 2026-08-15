@@ -36,14 +36,23 @@ function formatClock(timestamp: number): string {
 }
 
 function handlerStatus(item: TurnAbsorptionItem, getCatLabel: (catId: string) => string): string {
-  const verb = item.kind === 'actionable' ? '读取' : item.kind === 'withdrawn_after_exposure' ? '记录' : '处理';
+  const verb =
+    item.kind === 'actionable' || (item.kind === 'completed_with_turn' && item.receiptScope === 'cross_thread_delivery')
+      ? '读取'
+      : item.kind === 'withdrawn_after_exposure'
+        ? '记录'
+        : '处理';
   return `由 ${getCatLabel(item.handlerCatId)}${verb}`;
 }
 
 function outcomeStatus(item: TurnAbsorptionItem): string {
   const terminalMark = item.kind === 'responded' || item.kind === 'completed_with_turn' ? '✓ ' : '';
   const timestamp = typeof item.outcomeAt === 'number' ? ` · ${formatClock(item.outcomeAt)}` : '';
-  return `${terminalMark}${KIND_LABEL[item.kind]}${timestamp}`;
+  const label =
+    item.kind === 'completed_with_turn' && item.receiptScope === 'cross_thread_delivery'
+      ? '正文已由本轮消费'
+      : KIND_LABEL[item.kind];
+  return `${terminalMark}${label}${timestamp}`;
 }
 
 interface TurnAbsorptionDockProps {
@@ -55,6 +64,10 @@ interface TurnAbsorptionDockProps {
 
 export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAuthorLabel }: TurnAbsorptionDockProps) {
   const { counts } = projection;
+  const crossThreadConsumed = projection.items.filter(
+    (item) => item.kind === 'completed_with_turn' && item.receiptScope === 'cross_thread_delivery',
+  ).length;
+  const sameThreadCompletedWithTurn = counts.completedWithTurn - crossThreadConsumed;
   return (
     <details
       open={projection.defaultExpanded}
@@ -68,7 +81,8 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
       <div className="mt-1.5 ml-1 border-l-2 border-cafe pl-3">
         <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-micro text-cafe-muted">
           <span>{`${counts.responded} 条明确回应`}</span>
-          <span>{`${counts.completedWithTurn} 条随本轮完成`}</span>
+          {sameThreadCompletedWithTurn > 0 && <span>{`${sameThreadCompletedWithTurn} 条随本轮完成`}</span>}
+          {crossThreadConsumed > 0 && <span>{`${crossThreadConsumed} 条跨线程正文已消费`}</span>}
           <span>{`${counts.actionable} 条仍待处理`}</span>
           <span>{`${counts.withdrawnAfterExposureUnhandled} 条已撤回（曾读取）`}</span>
         </div>
@@ -78,6 +92,7 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
               key={item.sourceMessageId}
               data-turn-absorption-source={item.sourceMessageId}
               data-turn-absorption-kind={item.kind}
+              data-turn-absorption-scope={item.receiptScope}
               className="rounded-md bg-cafe-surface/55 px-2 py-1.5"
             >
               <div className="flex flex-wrap items-center gap-x-1 text-cafe-secondary" data-source-author>

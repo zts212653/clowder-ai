@@ -1713,7 +1713,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / Phase C, K-2D, and the Phase D official install/activation surface are on main; alpha activation verification, owner OAuth, and real-meeting dogfood remain open",
+      "status": "implementation / Phase C, K-2D, the alpha.3 official catalog, and explicit safe package update are on main; runtime restart, owner update/enable, alpha activation verification, and real-meeting dogfood remain open",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
@@ -1737,7 +1737,7 @@
     {
       "id": "F296",
       "name": "Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量",
-      "status": "spec / Architecture Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "spec / Wave 1 contract frozen-v1 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F296-continuity-aware-context-injection.md"
     }
   ]

@@ -4,11 +4,11 @@
  *
  * GET   /api/threads/:threadId/sessions            - List sessions (optional catId filter)
  * GET   /api/sessions/:sessionId                   - Get single session record
- * POST  /api/sessions/:sessionId/unseal            - Manual unseal fallback (#F062)
+ * POST  /api/sessions/:sessionId/unseal            - Restore historical session as current (#F062)
  * PATCH /api/threads/:threadId/sessions/:catId/bind - Manual bind CLI session ID (#72)
  */
 
-import { type CatId, catRegistry } from '@cat-cafe/shared';
+import { type CatId, catRegistry, type SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
@@ -18,7 +18,10 @@ import { backfillBoundSessionHistory } from '../domains/cats/services/session/Bo
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
+import type {
+  ISessionChainStore,
+  RestoreActiveSessionResult,
+} from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -27,6 +30,19 @@ const bindSessionSchema = z.object({
   cliSessionId: z.string().min(1).max(500),
 });
 
+const restoreSessionSchema = z
+  .object({
+    expectedActiveSessionId: z.string().min(1).max(200).nullable().optional(),
+  })
+  .strict();
+
+type RestoreSessionBody = z.infer<typeof restoreSessionSchema>;
+
+interface RestoreRouteResponse {
+  statusCode: number;
+  body: Record<string, unknown>;
+}
+
 interface SessionChainRouteOptions extends FastifyPluginOptions {
   sessionChainStore: ISessionChainStore;
   threadStore: IThreadStore;
@@ -34,6 +50,7 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
   transcriptReader?: TranscriptReader;
   sessionSealer?: ISessionSealer;
   runtimeSessionStore?: IRuntimeSessionStore;
+  isSessionSwitchBusy?: (threadId: string, catId: string, userId: string) => boolean;
 }
 
 interface RuntimeSessionSummary {
@@ -98,8 +115,128 @@ async function attachRuntimeSessionSummaries<T extends { id: string }>(
   return Promise.all(sessions.map((session) => attachRuntimeSessionSummary(session, runtimeSessionStore)));
 }
 
+async function prepareRestore(
+  session: SessionRecord,
+  body: unknown,
+  store: ISessionChainStore,
+  isBusy: SessionChainRouteOptions['isSessionSwitchBusy'],
+  userId: string,
+): Promise<{ active: SessionRecord | null } | { response: RestoreRouteResponse }> {
+  const parsedBody = restoreSessionSchema.safeParse(body ?? {});
+  if (!parsedBody.success) {
+    return {
+      response: {
+        statusCode: 400,
+        body: { error: 'Invalid restore request', details: parsedBody.error.flatten() },
+      },
+    };
+  }
+
+  const active = await store.getActive(session.catId, session.threadId, session.userId);
+  const expectedActiveSessionId = parsedBody.data.expectedActiveSessionId;
+  if (active && active.id !== session.id && expectedActiveSessionId === undefined) {
+    return {
+      response: {
+        statusCode: 409,
+        body: {
+          code: 'active_session_confirmation_required',
+          error: 'Confirm the currently active session before restoring this historical session',
+          activeSessionId: active.id,
+          activeSessionSeq: active.seq,
+          activeMessageCount: active.messageCount ?? 0,
+        },
+      },
+    };
+  }
+  if ((active?.id ?? null) !== (expectedActiveSessionId ?? null)) {
+    return {
+      response: {
+        statusCode: 409,
+        body: {
+          code: 'active_session_changed',
+          error: 'The active session changed; refresh before restoring',
+          ...(active ? { activeSessionId: active.id } : {}),
+        },
+      },
+    };
+  }
+  if (isBusy?.(session.threadId, session.catId, userId)) {
+    return {
+      response: {
+        statusCode: 409,
+        body: {
+          code: 'session_switch_busy',
+          error: 'This cat has queued or running work in the thread; wait for it to finish before restoring',
+          ...(active ? { activeSessionId: active.id } : {}),
+        },
+      },
+    };
+  }
+  return { active };
+}
+
+function formatNonRestoredResult(
+  result: Exclude<RestoreActiveSessionResult, { status: 'restored' }>,
+): RestoreRouteResponse {
+  switch (result.status) {
+    case 'target_missing':
+      return { statusCode: 404, body: { error: 'Session not found' } };
+    case 'target_not_restorable':
+      return { statusCode: 409, body: { error: `Session status ${result.targetStatus} cannot be restored` } };
+    case 'active_changed':
+      return {
+        statusCode: 409,
+        body: {
+          code: 'active_session_changed',
+          error: 'The active session changed; refresh before restoring',
+          ...(result.activeSessionId ? { activeSessionId: result.activeSessionId } : {}),
+        },
+      };
+    case 'already_active':
+      return { statusCode: 200, body: { session: result.session, mode: 'already_active' } };
+  }
+}
+
+async function loadRestoreTarget(
+  sessionId: string,
+  userId: string,
+  sessionChainStore: ISessionChainStore,
+  threadStore: IThreadStore,
+): Promise<{ session: SessionRecord } | { response: RestoreRouteResponse }> {
+  const session = await sessionChainStore.get(sessionId);
+  if (!session) {
+    return { response: { statusCode: 404, body: { error: 'Session not found' } } };
+  }
+  const thread = await threadStore.get(session.threadId);
+  if (!thread) {
+    return { response: { statusCode: 404, body: { error: 'Thread not found' } } };
+  }
+  if (!canAccessSessionRecord(thread, session, userId)) {
+    return { response: { statusCode: 403, body: { error: 'Access denied' } } };
+  }
+  if (session.status === 'active') {
+    return {
+      response: { statusCode: 200, body: { session, mode: 'already_active' } },
+    };
+  }
+  if (session.status !== 'sealed') {
+    return {
+      response: { statusCode: 409, body: { error: `Session status ${session.status} cannot be restored` } },
+    };
+  }
+  return { session };
+}
+
 export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChainRouteOptions): Promise<void> {
-  const { sessionChainStore, threadStore, messageStore, transcriptReader, sessionSealer, runtimeSessionStore } = opts;
+  const {
+    sessionChainStore,
+    threadStore,
+    messageStore,
+    transcriptReader,
+    sessionSealer,
+    runtimeSessionStore,
+    isSessionSwitchBusy,
+  } = opts;
 
   app.get<{
     Params: { threadId: string };
@@ -178,11 +315,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
     return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));
   });
 
-  // POST /api/sessions/:sessionId/unseal — Manual fallback (#F062)
-  // Re-open a sealed/sealing session by creating a fresh active chain record
-  // bound to the same CLI session ID.
+  // POST /api/sessions/:sessionId/unseal — Manual recovery fallback (#F062)
+  // Restore the selected sealed record in place. When a newer record is
+  // active, the client must explicitly confirm its exact ID before the store
+  // atomically seals it and moves the active pointers to the selected record.
   app.post<{
     Params: { sessionId: string };
+    Body: RestoreSessionBody;
   }>('/api/sessions/:sessionId/unseal', async (request, reply) => {
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
@@ -190,89 +329,40 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
-    const { sessionId } = request.params;
-    const session = await sessionChainStore.get(sessionId);
-    if (!session) {
-      return reply.status(404).send({ error: 'Session not found' });
+    const target = await loadRestoreTarget(request.params.sessionId, userId, sessionChainStore, threadStore);
+    if ('response' in target) {
+      return reply.status(target.response.statusCode).send(target.response.body);
     }
 
-    const thread = await threadStore.get(session.threadId);
-    if (!thread) {
-      reply.status(404);
-      return { error: 'Thread not found' };
-    }
-    if (!canAccessSessionRecord(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const prepared = await prepareRestore(target.session, request.body, sessionChainStore, isSessionSwitchBusy, userId);
+    if ('response' in prepared) {
+      return reply.status(prepared.response.statusCode).send(prepared.response.body);
     }
 
-    if (session.status === 'active') {
-      return reply.send({ session, mode: 'already_active' as const });
-    }
-    if (session.status !== 'sealed' && session.status !== 'sealing') {
-      reply.status(409);
-      return { error: `Session status ${session.status} cannot be reopened` };
-    }
-
-    const active = await sessionChainStore.getActive(session.catId, session.threadId, session.userId);
-    if (active && active.id !== session.id) {
-      // Only displace the active session if it's empty (no messages).
-      // A non-empty active session is real work — refuse to destroy it.
-      if ((active.messageCount ?? 0) > 0) {
-        reply.status(409);
-        return {
-          error: 'Another active session with messages already exists for this cat/thread',
-          activeSessionId: active.id,
-        };
-      }
-      // Empty replacement (e.g., auto-seal created it) → safe to displace.
-      // Use sessionSealer when available for consistent seal semantics.
-      let displaced = false;
-      if (sessionSealer) {
-        try {
-          const result = await sessionSealer.requestSeal({ sessionId: active.id, reason: 'unseal_displacement' });
-          if (result.accepted) {
-            sessionSealer.finalize({ sessionId: active.id }).catch(() => {});
-            displaced = true;
-          }
-        } catch {
-          /* best-effort — empty session, no data to lose */
-        }
-      } else {
-        await sessionChainStore.update(active.id, {
-          status: 'sealed',
-          sealReason: 'unseal_displacement',
-          sealedAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-        displaced = true;
-      }
-      if (!displaced) {
-        reply.status(409);
-        return {
-          error: 'Failed to displace active session (CAS race) — retry unseal',
-          activeSessionId: active.id,
-        };
-      }
-    }
-
-    const reopened = await sessionChainStore.create({
-      cliSessionId: session.cliSessionId,
-      threadId: session.threadId,
-      catId: session.catId,
-      userId: session.userId,
+    const restored = await sessionChainStore.restoreActiveSession({
+      targetSessionId: target.session.id,
+      expectedActiveSessionId: prepared.active?.id ?? null,
+      displacedSealReason: 'manual_session_switch',
     });
+    if (restored.status !== 'restored') {
+      const response = formatNonRestoredResult(restored);
+      return reply.status(response.statusCode).send(response.body);
+    }
+
+    if (restored.displacedSessionId && sessionSealer) {
+      sessionSealer.finalize({ sessionId: restored.displacedSessionId }).catch(() => {});
+    }
 
     getEventAuditLog()
       .append({
         type: AuditEventTypes.SESSION_BIND,
-        threadId: session.threadId,
+        threadId: target.session.threadId,
         data: {
-          mode: 'unseal_reopen',
-          fromSessionId: session.id,
-          toSessionId: reopened.id,
-          catId: session.catId,
-          cliSessionId: session.cliSessionId,
+          mode: 'restore_as_current',
+          restoredSessionId: target.session.id,
+          displacedSessionId: restored.displacedSessionId,
+          catId: target.session.catId,
+          cliSessionId: target.session.cliSessionId,
           userId,
         },
       })
@@ -281,9 +371,9 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       });
 
     return reply.send({
-      mode: 'reopened' as const,
-      fromSessionId: session.id,
-      session: reopened,
+      mode: 'restored' as const,
+      session: restored.session,
+      ...(restored.displacedSessionId ? { displacedSessionId: restored.displacedSessionId } : {}),
     });
   });
 

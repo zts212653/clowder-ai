@@ -75,3 +75,72 @@ test('Node process adapter starts without a shell, inherits no ambient env, and 
   assert.equal(exit.code, null);
   assert.equal(exit.signal, 'SIGTERM');
 });
+
+test('Node process adapter retains only a recognized structured runtime diagnostic', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-diagnostic-'));
+  const script = join(rootDir, 'plugin.mjs');
+  await writeFile(
+    script,
+    [
+      "process.stderr.write('secret remote path must not persist\\n');",
+      `process.stderr.write('${JSON.stringify({
+        kind: 'clowder.plugin.runtime-error',
+        v: 1,
+        code: 'EVENT_BUS_CONFLICT',
+      })}\\n');`,
+      'process.exit(17);',
+    ].join(' '),
+    'utf8',
+  );
+  const adapter = new NodeExternalPluginProcessAdapter();
+  const child = await adapter.spawn({
+    command: process.execPath,
+    args: [script],
+    cwd: rootDir,
+    env: {
+      CLOWDER_PLUGIN_ID: 'official.external-source',
+      CLOWDER_PACKAGE_DIGEST: 'sha512-test',
+      CLOWDER_CONTRACT_VERSION: '0.1.0',
+      CLOWDER_WIRE_VERSION: '0.1.0',
+    },
+  });
+
+  assert.deepEqual(await child.exited, {
+    code: 17,
+    signal: null,
+    diagnostic: { code: 'EVENT_BUS_CONFLICT' },
+  });
+});
+
+test('Node process adapter preserves a diagnostic before oversized noise in the same stderr chunk', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-coalesced-diagnostic-'));
+  const script = join(rootDir, 'plugin.mjs');
+  const diagnostic = JSON.stringify({
+    kind: 'clowder.plugin.runtime-error',
+    v: 1,
+    code: 'EVENT_BUS_CONFLICT',
+  });
+  await writeFile(
+    script,
+    `process.stderr.write(${JSON.stringify(`${diagnostic}\n`)} + 'x'.repeat(600) + '\\n'); process.exit(17);\n`,
+    'utf8',
+  );
+  const adapter = new NodeExternalPluginProcessAdapter();
+  const child = await adapter.spawn({
+    command: process.execPath,
+    args: [script],
+    cwd: rootDir,
+    env: {
+      CLOWDER_PLUGIN_ID: 'official.external-source',
+      CLOWDER_PACKAGE_DIGEST: 'sha512-test',
+      CLOWDER_CONTRACT_VERSION: '0.1.0',
+      CLOWDER_WIRE_VERSION: '0.1.0',
+    },
+  });
+
+  assert.deepEqual(await child.exited, {
+    code: 17,
+    signal: null,
+    diagnostic: { code: 'EVENT_BUS_CONFLICT' },
+  });
+});

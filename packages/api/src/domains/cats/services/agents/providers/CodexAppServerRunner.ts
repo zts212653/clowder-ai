@@ -1,8 +1,8 @@
 import { codexAppServerRecovery } from '../../../../../infrastructure/telemetry/instruments.js';
 import {
   buildCodexActiveWriterDiagnostics,
+  type CodexActiveWriterDetection,
   CodexActiveWriterRecoveryError,
-  type CodexSessionReplacementProvenance,
 } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 import {
@@ -20,14 +20,14 @@ import {
 
 export interface CodexAppServerRecoveryEvent {
   type: 'app_server.recovery';
-  reason: 'pre_turn_transport' | 'active_writer_reborn' | 'model_capacity';
+  reason: 'pre_turn_transport' | 'active_writer_retry' | 'model_capacity';
   attempt: number;
   retryBudget: number;
   delayMs?: number;
   threadId?: string;
   phase?: 'pre_tool' | 'post_tool';
-  /** Present only for active_writer_reborn; causal evidence is not inferred from the seal reason later. */
-  replacement?: CodexSessionReplacementProvenance;
+  /** Present only for active_writer_retry; evidence never authorizes a replacement. */
+  activeWriter?: CodexActiveWriterDetection;
 }
 
 export interface CodexAppServerRecoveryBlockedEvent {
@@ -153,6 +153,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
     Math.max(1, options.activeWriterRetryDelayMs ?? DEFAULT_ACTIVE_WRITER_RETRY_DELAY_MS),
   );
   let transportAttempt = 0;
+  let activeWriterAttempt = 0;
   let capacityAttempt = 0;
   let recoveryAttempt = 0;
   let currentThread = options.runInput.thread;
@@ -224,9 +225,11 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         activeWriterThreadId &&
         isActiveWriterError(error) &&
         !capacityTerminalObserved &&
+        activeWriterAttempt < 1 &&
         transportAttempt < retryBudget &&
         canRetryBeforeTurn(failedAt, options.runInput.signal)
       ) {
+        activeWriterAttempt++;
         transportAttempt++;
         recoveryAttempt++;
         const detectedAt = Date.now();
@@ -243,26 +246,17 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
                   threadRead: { outcome: 'failed' },
                 }),
               };
-        const replacement: CodexSessionReplacementProvenance = {
-          cause: 'active_writer_reborn',
-          previousNativeThreadId: detection.previousNativeThreadId,
-          detectedAt: detection.detectedAt,
-          attempt: transportAttempt,
-          diagnostics: detection.diagnostics,
-        };
-        codexAppServerRecovery.add(1, { status: 'active_writer_reborn' });
+        codexAppServerRecovery.add(1, { status: 'active_writer_retry' });
         yield {
           type: 'app_server.recovery',
-          reason: 'active_writer_reborn',
+          reason: 'active_writer_retry',
           attempt: transportAttempt,
           retryBudget,
           delayMs: activeWriterRetryDelayMs,
           threadId: activeWriterThreadId,
-          replacement,
+          activeWriter: detection,
         } satisfies CodexAppServerRecoveryEvent;
         await waitForRecoveryDelay(activeWriterRetryDelayMs, options.runInput.signal);
-        currentThread = { kind: 'start' };
-        resumeThreadId = undefined;
         continue;
       }
 

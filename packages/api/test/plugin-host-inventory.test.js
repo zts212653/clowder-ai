@@ -110,6 +110,7 @@ describe('K-2A contract-native inventory', () => {
     });
     const upgraded = await controlPlane.upgradePackage({
       pluginInstanceId: installed.pluginInstanceId,
+      expectedLifecycleRevision: 1,
       expectedGrantRevision: 1,
       ...candidate({
         archive: 'echo-v2',

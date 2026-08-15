@@ -324,6 +324,8 @@ const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
   'Executable pairs are closed: review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
   'implement + implementer + task_done requires subject:task:<taskId>. Other family, slot, predicate, or subject combinations are rejected before publication.';
 
+const postMessageThreadIdSchema = z.string().min(1);
+
 export const postMessageInputSchema = {
   content: z.string().min(1).describe('The message content to post'),
   streamDisposition: z
@@ -334,9 +336,7 @@ export const postMessageInputSchema = {
       'How this callback relates to the provider final response. "independent" (DEFAULT) preserves a later final as a separate durable message. ' +
         'Use "replace_final" only when this callback is the canonical replacement for the same logical final response; route persistence then keeps one bubble and merges stream metadata into it.',
     ),
-  threadId: z
-    .string()
-    .min(1)
+  threadId: postMessageThreadIdSchema
     .optional()
     .describe(
       'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
@@ -404,6 +404,28 @@ export const postMessageInputSchema = {
         'Use only after you have reviewed the held envelope previews and decided your message is still appropriate.',
     ),
 };
+
+export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unconfigured';
+
+/**
+ * Project the cross-profile canonical shape into the contract exposed by one
+ * concrete MCP process. Invocation credentials always win during HTTP auth, so
+ * their public schema must not advertise threadId; an agent-key-only process
+ * has no current thread and must advertise it as required.
+ */
+export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
+  const { threadId: _threadId, ...common } = postMessageInputSchema;
+  if (principal === 'invocation') return common;
+  if (principal === 'agent-key') {
+    return {
+      ...common,
+      threadId: postMessageThreadIdSchema.describe(
+        'Target thread ID. Required for agent-key auth because a persistent agent has no current invocation thread.',
+      ),
+    };
+  }
+  return postMessageInputSchema;
+}
 
 export const getPendingMentionsInputSchema = {
   includeAcked: z
@@ -2932,10 +2954,11 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_post_message',
     description:
-      'Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. ' +
+      "Post a proactive async message to the caller's authorized target, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. " +
+      'Principal contract: invocation-token registration uses the current thread and omits threadId; agent-key-only registration requires threadId because it has no current invocation thread. ' +
       'Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode="single". ' +
-      'NOT for: another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
-      'Output: the message is persisted in the current thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
+      'NOT for: invocation-token delivery to another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode="parallel"). ' +
+      'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +

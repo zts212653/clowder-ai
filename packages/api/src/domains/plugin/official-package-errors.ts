@@ -8,6 +8,9 @@ export type OfficialPluginInstallErrorCode =
   | 'UNSUPPORTED_TRANSPORT'
   | 'INVALID_PACKAGE_SCHEMA'
   | 'INVALID_PACKAGE_ARCHIVE'
+  | 'INSTANCE_NOT_FOUND'
+  | 'STALE_REVISION'
+  | 'UPDATE_REQUIRES_STOPPED'
   | 'INVENTORY_REJECTED';
 
 export class OfficialPluginInstallError extends Error {

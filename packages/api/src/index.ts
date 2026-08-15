@@ -4795,6 +4795,9 @@ async function main(): Promise<void> {
     transcriptReader,
     sessionSealer,
     runtimeSessionStore,
+    isSessionSwitchBusy: (threadId, catId, userId) =>
+      (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
+      queueProcessor.hasPendingForCat(threadId, userId, catId),
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });

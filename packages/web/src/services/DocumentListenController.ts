@@ -10,7 +10,6 @@ import type { PlaybackManager, PlaybackSnapshot } from './PlaybackManager';
 import { getPlaybackManager } from './playbackRuntime';
 
 const PREFETCH_AHEAD = 4;
-const STREAM_START_BUFFER_SEC = 1.5;
 
 export interface ListenModeHealthMetric {
   feature: 'F279';
@@ -231,16 +230,19 @@ export class DocumentListenController {
     const descriptor = this.descriptor;
     const sentence = descriptor?.sentences[this.nextToPrepare];
     if (!sentence) return false;
-    const { asset, streamedPlaybackStarted } = await this.consumeSynthesisStream(generation, sentence.text);
+    const asset = await this.consumeSynthesisStream(generation, sentence.text);
     if (!asset || !this.isCurrent(generation)) return false;
     await this.dependencies.api.linkAsset(descriptor.identity, sentence.anchor, asset.assetId);
     if (!this.isCurrent(generation)) return false;
-    if (!streamedPlaybackStarted) {
-      await this.dependencies.getManager().enqueueUrl(asset.audioUrl, this.dependencies.fetchAudio);
-      if (!this.isCurrent(generation)) return false;
-      this.applyResumeOffset();
-      this.recordFirstSegmentReady();
+    const enqueueResult = await this.dependencies.getManager().enqueueUrl(asset.audioUrl, this.dependencies.fetchAudio);
+    if (!this.isCurrent(generation)) return false;
+    if (enqueueResult === 'cancelled') {
+      this.suspendAfterPlaybackCancellation(generation);
+      return false;
     }
+    if (enqueueResult === 'failed') throw new Error('完整音频加载失败，请重试');
+    this.applyResumeOffset();
+    this.recordFirstSegmentReady();
     this.recordPreparedSentence(sentence.anchor, asset.bytes);
     return true;
   }
@@ -250,43 +252,32 @@ export class DocumentListenController {
     const controller = new AbortController();
     this.synthesisAbort = controller;
     let asset: Extract<ListenSynthesisEvent, { type: 'asset' }> | null = null;
-    let streamedPlaybackStarted = false;
-    let bufferedDuration = 0;
-    let bufferedChunks: Array<Extract<ListenSynthesisEvent, { type: 'chunk' }>> = [];
     try {
       for await (const event of this.dependencies.api.stream(text, controller.signal)) {
-        if (!this.isCurrent(generation)) return { asset: null, streamedPlaybackStarted: false };
-        if (event.type === 'asset') {
-          asset = event;
-          continue;
-        }
-        bufferedChunks.push(event);
-        bufferedDuration += event.durationSec ?? 0;
-        if (!streamedPlaybackStarted && bufferedDuration < STREAM_START_BUFFER_SEC && !event.isFinalChunk) continue;
-        for (const chunk of bufferedChunks) this.enqueueStreamChunk(chunk);
-        bufferedChunks = [];
-        if (!streamedPlaybackStarted) {
-          streamedPlaybackStarted = true;
-          this.applyResumeOffset();
-          this.recordFirstSegmentReady();
-        }
+        if (!this.isCurrent(generation)) return null;
+        // Each stream chunk is a standalone WAV. Playing those chunks as successive
+        // HTMLAudio sources inserts a browser reload gap at every chunk boundary.
+        // The stream still provides early synthesis/cache progress, while playback
+        // consumes the complete sentence asset as one continuous audio item.
+        if (event.type === 'asset') asset = event;
       }
     } finally {
       if (this.synthesisAbort === controller) this.synthesisAbort = null;
     }
     if (!asset) throw new Error('语音流结束但没有生成可缓存音频');
-    return { asset, streamedPlaybackStarted };
-  }
-
-  private enqueueStreamChunk(event: Extract<ListenSynthesisEvent, { type: 'chunk' }>): void {
-    this.dependencies.getManager().enqueueBase64(event.audioBase64, event.format, {
-      completesItem: event.isFinalChunk,
-      ...(event.durationSec != null ? { durationSec: event.durationSec } : {}),
-    });
+    return asset;
   }
 
   private isCurrent(generation: number): boolean {
     return generation === this.generation && this.descriptor !== null;
+  }
+
+  private suspendAfterPlaybackCancellation(generation: number): void {
+    if (!this.isCurrent(generation)) return;
+    this.generation++;
+    this.abortSynthesis();
+    this.detachManagerListeners();
+    this.updateSession({ phase: 'idle', error: null });
   }
 
   private applyResumeOffset(): void {

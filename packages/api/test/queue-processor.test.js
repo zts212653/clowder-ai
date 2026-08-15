@@ -92,10 +92,10 @@ function enqueueEntry(queue, overrides = {}) {
 }
 
 function enqueueCustodiedEntry(queue, messageStore, overrides = {}) {
-  const { messageSource, ...entryOverrides } = overrides;
+  const { messageSource, messageUserId, ...entryOverrides } = overrides;
   const entry = enqueueEntry(queue, entryOverrides);
   const message = messageStore.append({
-    userId: entry.userId,
+    userId: messageUserId ?? entry.userId,
     catId: null,
     content: entry.content,
     mentions: entry.targetCats,
@@ -2468,6 +2468,60 @@ describe('QueueProcessor', () => {
         },
       );
       assert.deepEqual(durableDeps.queue.list('t1', 'u1'), []);
+    });
+
+    it('settles a detached scheduler source from a default-user response when the child fails', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore, {
+        userId: 'default-user',
+        messageUserId: 'scheduler',
+        messageSource: { connector: 'hold-ball' },
+      });
+      const childInvocationId = 'child-scheduler-response-then-fail';
+      const seenAt = entry.createdAt + 100;
+      const settledAt = entry.createdAt + 300;
+      const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: durableStore, now: () => settledAt });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      assert.equal(
+        durableDeps.queue.markQueuedSeen('t1', 'default-user', entry.id, 'opus', childInvocationId, seenAt),
+        true,
+      );
+      const exposedEntry = durableDeps.queue.getEntrySnapshot('t1', 'default-user', entry.id);
+      await coordinator.persistEntry(exposedEntry);
+      assert.equal(durableDeps.queue.removeEntrySnapshotIfUnchanged(exposedEntry), true);
+      const response = durableStore.append({
+        userId: 'default-user',
+        threadId: 't1',
+        catId: 'opus',
+        content: 'durable response from the triggering user turn',
+        mentions: [],
+        timestamp: entry.createdAt + 200,
+        replyTo: message.id,
+        extra: {
+          stream: { invocationId: 'parent-scheduler-response-then-fail', turnInvocationId: childInvocationId },
+        },
+      });
+
+      await new QueueProcessor(durableDeps).onInvocationComplete(
+        't1',
+        'opus',
+        'failed',
+        'parent-scheduler-response-then-fail',
+        ['opus'],
+        true,
+        { opus: childInvocationId },
+        [entry.id],
+      );
+
+      const settled = durableStore.getById(message.id);
+      assert.equal(settled.deliveryStatus, 'delivered');
+      assert.equal(settled.queueCustody.status, 'terminal');
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'responded');
+      assert.deepEqual(settled.queueCustody.targetOutcomeByCatId.opus.consumption, {
+        kind: 'source_response',
+        outputMessageIds: [response.id],
+      });
     });
 
     it('settles the exact child after exposed true recall removed its Queue carrier', async () => {

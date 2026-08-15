@@ -127,6 +127,36 @@ test('start failure projects error and stopped instead of false enabled', async 
   assert.equal(failed.lifecycleRevision, 5);
 });
 
+test('a new activation attempt clears a stale runtime diagnostic before startup can fail', async () => {
+  const { store, lifecycle } = await harness({
+    start: async () => {
+      throw new Error('package authority failed before runtime projection');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({
+      ...current,
+      activationState: 'error',
+      runtimeState: 'stopped',
+      lastRuntimeError: {
+        code: 'EVENT_BUS_CONFLICT',
+        exitCode: 17,
+        signal: null,
+        occurredAt: 1_500,
+      },
+    });
+  });
+
+  await assert.rejects(lifecycle.enable('pi_official', 2), lifecycleError('START_FAILED'));
+
+  const failed = (await store.snapshot()).instances[0];
+  assert.equal(failed.activationState, 'error');
+  assert.equal(failed.runtimeState, 'stopped');
+  assert.equal(failed.lastRuntimeError, undefined);
+});
+
 test('disable and uninstall stop process authority before their durable terminal state', async () => {
   const { store, lifecycle, calls } = await harness();
   await lifecycle.prepare('pi_official', 1);

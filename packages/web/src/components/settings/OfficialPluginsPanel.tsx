@@ -12,8 +12,11 @@ interface MutationRequest {
   readonly init: RequestInit;
 }
 
-function actionConfirmed(action: OfficialPluginAction): boolean {
+function actionConfirmed(plugin: OfficialPluginInfo, action: OfficialPluginAction): boolean {
   if (action === 'enable') return window.confirm('确认启用飞书会议纪要同步？启用后会连接本机 lark-cli。');
+  if (action === 'update') {
+    return window.confirm(`确认更新到 ${plugin.availableVersion}？更新后保持停用，需要你再次启用。`);
+  }
   if (action === 'uninstall') {
     return window.confirm('确认卸载？运行中的进程会先停止，已缓存的不可变包会保留。');
   }
@@ -61,7 +64,7 @@ export function OfficialPluginsPanel() {
 
   const mutate = useCallback(
     async (plugin: OfficialPluginInfo, action: OfficialPluginAction) => {
-      if (!actionConfirmed(action)) return;
+      if (!actionConfirmed(plugin, action)) return;
       const request = mutationRequest(plugin, action);
       if (!request) return;
       setBusyId(plugin.catalogId);

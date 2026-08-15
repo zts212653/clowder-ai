@@ -47,6 +47,15 @@ triggers:
 
 更完整判据见 `writing-skills/cat-cafe-skill-quality-principles.md`。
 
+### 载体与寿命自问
+
+创建或扩写 skill 前，再回答两组问题：
+
+1. **这条信息忘了以后，必须每轮付代价，还是任务出现时按需再读即可？** 跨压缩持续约束才进 L0；单轮反射进 staging；runtime 专属执行边界进对应 harness；任务方法进 skill；事实契约留 docs/code；可机械判定的交给 test/lint/guard。
+2. **价值缺口来自哪里，产物在做什么？** 区分私有/项目知识、公开但新近知识、持续变化的外部事实、模型行为缺口；再区分知识 payload、resolver/probe、治理边界、结果 verifier。只会自然过期的 payload / 行为代偿需要 keep/tune/sunset 信号；resolver、治理与 verifier 不因模型变强就自动退役。
+
+不要给全部 skill 建 expiry registry 或机械到期日。不确定效用且有明确 consumer 时，复用 F192 eval 的 keep/tune/sunset 闭环。
+
 ## 开工前：先看范本再动手
 
 **不要凭空写。** 先读一个同类型的好例子，理解家里的风格和标准。
@@ -88,6 +97,15 @@ Description 决定猫"要不要触发"。三层加载机制：
 **三件套格式（必须）**: `Use when ... / Not for ... / Output: ...`
 - 详见 `writing-skills/anthropic-best-practices.md`（Anthropic 原文）
 - 详见 *(internal reference removed)* §1.4（进场门票机制）
+
+#### Manual-only 是 provider adapter，不是共享字段
+
+只有“普通自然语言不该触发、用户必须明确点名该重型流程”的能力才设 manual-only。普通用户只说任务意图就应该获得能力的 skill（例如“做动画”）不要设；否则会把正常入口一起关掉。
+
+- Claude Code：`SKILL.md` frontmatter 写 `disable-model-invocation: true`。
+- Codex：同目录 `agents/openai.yaml` 写 `policy.allow_implicit_invocation: false`。
+- 两项必须成对；`pnpm check:skills` 会拒绝单边配置。
+- Gemini / Kimi 当前没有在本契约中验证等价硬开关；未补 provider adapter 前，不宣称“全 runtime manual-only”。
 
 ### T0-2：Gotchas 是最高价值内容（Anthropic）
 

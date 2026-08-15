@@ -97,6 +97,28 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
     expect(container.querySelector('[data-turn-absorption-kind="actionable"]')).not.toBeNull();
   });
 
+  it('labels cross-thread absorption as carrier consumption rather than work completion', () => {
+    const crossThread = projection(true);
+    Object.assign(crossThread.items[0]!, { receiptScope: 'cross_thread_delivery' });
+
+    act(() => {
+      root.render(
+        <TurnAbsorptionDock
+          projection={crossThread}
+          messages={[]}
+          getCatLabel={() => '小太阳·砚砚'}
+          sourceAuthorLabel="You"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('1 条跨线程正文已消费');
+    expect(container.textContent).toContain('正文已由本轮消费 · 08:16');
+    expect(container.textContent).toContain('由 小太阳·砚砚读取');
+    expect(container.textContent).not.toContain('随本轮完成');
+    expect(container.textContent).not.toContain('由 小太阳·砚砚处理');
+  });
+
   it('stays collapsed by default when N is above the lightweight threshold', () => {
     act(() => {
       root.render(

@@ -150,7 +150,7 @@ describe('PlaybackManager — enqueueUrl', () => {
       blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/wav' })),
     });
 
-    await pm.enqueueUrl('/api/audio/1.wav', mockFetch);
+    await expect(pm.enqueueUrl('/api/audio/1.wav', mockFetch)).resolves.toBe('enqueued');
     expect(mockFetch).toHaveBeenCalledWith('/api/audio/1.wav');
     expect(pm.getState()).toBe('playing');
     expect(mockAudio.play).toHaveBeenCalled();
@@ -178,8 +178,79 @@ describe('PlaybackManager — enqueueUrl', () => {
     const pm = new PlaybackManager(cb);
     const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
 
-    await pm.enqueueUrl('/api/audio/missing.wav', mockFetch);
+    await expect(pm.enqueueUrl('/api/audio/missing.wav', mockFetch)).resolves.toBe('failed');
     expect(pm.getState()).toBe('idle');
+  });
+
+  it('distinguishes an interrupted in-flight fetch from a transfer failure', async () => {
+    const cb = makeCallbacks();
+    const pm = new PlaybackManager(cb);
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const mockFetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    const pending = pm.enqueueUrl('/api/audio/prefetch.wav', mockFetch);
+    await vi.waitFor(() => expect(resolveFetch).toBeTypeOf('function'));
+    pm.interrupt();
+    resolveFetch?.({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/wav' })),
+    } as Response);
+
+    await expect(pending).resolves.toBe('cancelled');
+    expect(pm.getState()).toBe('idle');
+    expect(mockAudio.play).not.toHaveBeenCalled();
+  });
+
+  it('treats a fetch rejection from an interrupted batch as cancellation', async () => {
+    const cb = makeCallbacks();
+    const pm = new PlaybackManager(cb);
+    pm.beginBatch('listen');
+    let rejectFetch: ((reason?: unknown) => void) | undefined;
+    const mockFetch = vi.fn(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+    );
+
+    const pending = pm.enqueueUrl('/api/audio/prefetch.wav', mockFetch);
+    await vi.waitFor(() => expect(rejectFetch).toBeTypeOf('function'));
+    pm.beginBatch('podcast');
+    rejectFetch?.(new TypeError('aborted request'));
+
+    await expect(pending).resolves.toBe('cancelled');
+    expect(pm.getSnapshot()).toMatchObject({ source: 'podcast', state: 'idle' });
+    expect(pm.isBatchActive()).toBe(true);
+    expect(mockAudio.play).not.toHaveBeenCalled();
+  });
+
+  it('treats a blob rejection from an interrupted batch as cancellation', async () => {
+    const cb = makeCallbacks();
+    const pm = new PlaybackManager(cb);
+    pm.beginBatch('listen');
+    let rejectBlob: ((reason?: unknown) => void) | undefined;
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () =>
+        new Promise<Blob>((_resolve, reject) => {
+          rejectBlob = reject;
+        }),
+    });
+
+    const pending = pm.enqueueUrl('/api/audio/prefetch.wav', mockFetch);
+    await vi.waitFor(() => expect(rejectBlob).toBeTypeOf('function'));
+    pm.handleStreamStart(streamStart('replacement-voice'));
+    rejectBlob?.(new TypeError('aborted body'));
+
+    await expect(pending).resolves.toBe('cancelled');
+    expect(pm.getSnapshot()).toMatchObject({ source: 'voice', state: 'idle' });
+    expect(pm.getActiveInvocationId()).toBe('replacement-voice');
+    expect(mockAudio.play).not.toHaveBeenCalled();
   });
 });
 
@@ -447,7 +518,7 @@ describe('PlaybackManager — P1 regression: fetch rejection handling', () => {
     const pm = new PlaybackManager(cb);
     const rejectingFetch = vi.fn().mockRejectedValue(new TypeError('network error'));
 
-    await pm.enqueueUrl('/audio/fail.wav', rejectingFetch);
+    await expect(pm.enqueueUrl('/audio/fail.wav', rejectingFetch)).resolves.toBe('failed');
     expect(pm.getState()).toBe('idle');
   });
 

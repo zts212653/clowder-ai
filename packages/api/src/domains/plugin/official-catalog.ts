@@ -22,11 +22,11 @@ export const OFFICIAL_PLUGIN_CATALOG = [
   {
     catalogId: 'feishu-meeting-intake',
     packageName: '@clowder-ai/feishu-meeting-intake',
-    version: '0.1.0-alpha.2',
+    version: '0.1.0-alpha.3',
     pluginId: 'official.feishu-meeting-intake',
     archiveUrl:
-      'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.2.tgz',
-    packageDigest: 'sha512-pLYTYEdGdAXrWBlKrLcUtrTJ6mszT6dmHpBDFOFLuPh1qkJAqwQ+S/xT/ORvjislG6jAgrzmYWnzlZMa778iEA==',
+      'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.3.tgz',
+    packageDigest: 'sha512-cIrmZGup33W/L0XP9Q6b/OxgNR2oC5lCs1EAc3FcXhfQSJLDw3e/9di1vOGQZwN1Fm19Q0gMXKCxT1rg6WDNBg==',
     effectiveGrants: ['events.publish'],
     ownerAuth: {
       kind: 'lark-cli-device',

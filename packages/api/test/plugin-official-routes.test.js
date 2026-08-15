@@ -12,7 +12,7 @@ import { registerOfficialPluginRoutes } from '../dist/routes/plugin-official-rou
 
 const entry = OFFICIAL_PLUGIN_CATALOG[0];
 
-function manifest() {
+function manifest(overrides = {}) {
   return {
     pluginId: entry.pluginId,
     version: entry.version,
@@ -20,6 +20,7 @@ function manifest() {
     name: 'Feishu Meeting Intake',
     features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['events.publish'] }],
     runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
+    ...overrides,
   };
 }
 
@@ -30,10 +31,12 @@ async function harness(options = {}) {
     createInstanceId: () => 'pi_official',
     now: () => now++,
   });
+  const installedVersion = options.installedVersion ?? entry.version;
+  const installedDigest = options.installedDigest ?? entry.packageDigest;
   const installed = await inventory.installPackage({
-    manifest: manifest(),
-    computedPackageDigest: entry.packageDigest,
-    expectedPackageDigest: entry.packageDigest,
+    manifest: manifest({ version: installedVersion }),
+    computedPackageDigest: installedDigest,
+    expectedPackageDigest: installedDigest,
     packagePluginId: entry.pluginId,
     effectiveGrants: ['events.publish'],
   });
@@ -47,6 +50,7 @@ async function harness(options = {}) {
     },
   });
   const app = Fastify();
+  const updateCalls = [];
   app.addHook('preHandler', async (request) => {
     const raw = request.headers['x-test-session-user'];
     if (typeof raw === 'string' && raw.trim()) request.sessionUserId = raw.trim();
@@ -55,11 +59,26 @@ async function harness(options = {}) {
     catalog: options.catalog ?? OFFICIAL_PLUGIN_CATALOG,
     inventory: store,
     lifecycle,
-    installer: { install: async () => installed },
+    installer: {
+      install: async () => installed,
+      update: async (catalogId, instanceId, expectedRevision) => {
+        updateCalls.push({ catalogId, instanceId, expectedRevision });
+        return inventory.upgradePackage({
+          pluginInstanceId: instanceId,
+          expectedLifecycleRevision: expectedRevision,
+          expectedGrantRevision: 1,
+          manifest: manifest(),
+          computedPackageDigest: entry.packageDigest,
+          expectedPackageDigest: entry.packageDigest,
+          packagePluginId: entry.pluginId,
+          effectiveGrants: ['events.publish'],
+        });
+      },
+    },
     ...(options.auth === undefined ? {} : { auth: options.auth }),
   });
   await app.ready();
-  return { app, store, processCalls };
+  return { app, store, processCalls, updateCalls };
 }
 
 const ownerUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
@@ -70,15 +89,15 @@ const writeHeaders = {
   'x-test-session-user': ownerUserId,
 };
 
-test('pins the runnable alpha.2 artifact and activates its package-owned owner auth contract', () => {
-  assert.equal(entry.version, '0.1.0-alpha.2');
+test('pins the runnable alpha.3 artifact and activates its package-owned owner auth contract', () => {
+  assert.equal(entry.version, '0.1.0-alpha.3');
   assert.equal(
     entry.archiveUrl,
-    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.2.tgz',
+    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.3.tgz',
   );
   assert.equal(
     entry.packageDigest,
-    'sha512-pLYTYEdGdAXrWBlKrLcUtrTJ6mszT6dmHpBDFOFLuPh1qkJAqwQ+S/xT/ORvjislG6jAgrzmYWnzlZMa778iEA==',
+    'sha512-cIrmZGup33W/L0XP9Q6b/OxgNR2oC5lCs1EAc3FcXhfQSJLDw3e/9di1vOGQZwN1Fm19Q0gMXKCxT1rg6WDNBg==',
   );
   assert.deepEqual(entry.ownerAuth, {
     kind: 'lark-cli-device',
@@ -88,18 +107,76 @@ test('pins the runnable alpha.2 artifact and activates its package-owned owner a
 });
 
 test('projects exact official catalog and durable installed state only to authenticated sessions', async () => {
-  const { app } = await harness();
+  const { app, store } = await harness();
   try {
+    await store.transaction((transaction) => {
+      const instance = transaction.instances.get('pi_official');
+      transaction.instances.put({
+        ...instance,
+        lastRuntimeError: {
+          code: 'EVENT_BUS_CONFLICT',
+          exitCode: 17,
+          signal: null,
+          occurredAt: 1_234,
+        },
+      });
+    });
     assert.equal((await app.inject({ method: 'GET', url: '/api/plugins/official' })).statusCode, 401);
     const response = await app.inject({ method: 'GET', url: '/api/plugins/official', headers: readHeaders });
     assert.equal(response.statusCode, 200, response.payload);
     const body = response.json();
     assert.equal(body.plugins[0].catalogId, 'feishu-meeting-intake');
-    assert.equal(body.plugins[0].version, '0.1.0-alpha.2');
+    assert.equal(body.plugins[0].version, '0.1.0-alpha.3');
+    assert.equal(body.plugins[0].availableVersion, '0.1.0-alpha.3');
     assert.equal(body.plugins[0].packageDigest, entry.packageDigest);
+    assert.equal(body.plugins[0].updateAvailable, false);
     assert.equal(body.plugins[0].ownerAuthAvailable, true);
     assert.equal(body.plugins[0].instance.lifecycleRevision, 1);
+    assert.equal(body.plugins[0].instance.installedVersion, '0.1.0-alpha.3');
+    assert.equal(body.plugins[0].instance.packageDigest, entry.packageDigest);
     assert.equal(body.plugins[0].instance.runtimeState, 'stopped');
+    assert.deepEqual(body.plugins[0].instance.lastRuntimeError, {
+      code: 'EVENT_BUS_CONFLICT',
+      exitCode: 17,
+      signal: null,
+      occurredAt: 1_234,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('projects installed versus available truth and explicitly updates without starting', async () => {
+  const oldDigest = 'sha512-pLYTYEdGdAXrWBlKrLcUtrTJ6mszT6dmHpBDFOFLuPh1qkJAqwQ+S/xT/ORvjislG6jAgrzmYWnzlZMa778iEA==';
+  const { app, processCalls, updateCalls } = await harness({
+    installedVersion: '0.1.0-alpha.2',
+    installedDigest: oldDigest,
+  });
+  try {
+    const before = await app.inject({ method: 'GET', url: '/api/plugins/official', headers: readHeaders });
+    assert.equal(before.statusCode, 200, before.payload);
+    assert.equal(before.json().plugins[0].availableVersion, '0.1.0-alpha.3');
+    assert.equal(before.json().plugins[0].updateAvailable, true);
+    assert.equal(before.json().plugins[0].instance.installedVersion, '0.1.0-alpha.2');
+    assert.equal(before.json().plugins[0].instance.packageDigest, oldDigest);
+
+    const updated = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/official/pi_official/update',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedRevision: 1 },
+    });
+    assert.equal(updated.statusCode, 200, updated.payload);
+    assert.deepEqual(updateCalls, [
+      { catalogId: 'feishu-meeting-intake', instanceId: 'pi_official', expectedRevision: 1 },
+    ]);
+    assert.equal(updated.json().updateAvailable, false);
+    assert.equal(updated.json().instance.installedVersion, '0.1.0-alpha.3');
+    assert.equal(updated.json().instance.packageDigest, entry.packageDigest);
+    assert.equal(updated.json().instance.activationState, 'disabled');
+    assert.equal(updated.json().instance.runtimeState, 'stopped');
+    assert.deepEqual(processCalls, []);
   } finally {
     await app.close();
   }

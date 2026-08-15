@@ -119,6 +119,33 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
     expect(projection?.items[0]).toMatchObject({ kind: 'completed_with_turn', recalled: true });
   });
 
+  it('preserves cross-thread receipt scope so presentation cannot confuse carrier and work terminality', () => {
+    const projection = projectTurnAbsorptionSummary(
+      [
+        sourceMessage(
+          'm-cross-thread',
+          {
+            ...seen,
+            state: 'handled',
+            outcome: {
+              invocationId: 'child-1',
+              disposition: 'completed_with_turn',
+              evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-1' },
+              handledAt: 210,
+            },
+          },
+          { scope: 'cross_thread_delivery' },
+        ),
+      ],
+      'child-1',
+    );
+
+    expect(projection?.items[0]).toMatchObject({
+      kind: 'completed_with_turn',
+      receiptScope: 'cross_thread_delivery',
+    });
+  });
+
   it('excludes primary/successor triggers, content-free notice-only rows, other children and zero-exposure recall', () => {
     const messages: ChatMessage[] = [
       sourceMessage('m1', seen, { scope: 'primary_trigger' }),

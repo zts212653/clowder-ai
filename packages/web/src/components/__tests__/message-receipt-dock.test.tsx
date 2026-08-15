@@ -313,6 +313,38 @@ describe('MessageReceiptDock', () => {
     expect(container.textContent).toContain('砚砚 · 已唤醒 · 当前轮处理中');
   });
 
+  it('reports cross-thread body consumption without claiming the carried work completed', () => {
+    const completedCarrier: QueueMessageReceipt = {
+      version: 1,
+      entryId: 'cross-thread:message-work-still-open',
+      scope: 'cross_thread_delivery',
+      targets: [
+        {
+          catId: 'codex-sol',
+          state: 'handled',
+          invocationId: 'child-grounding-only',
+          seenAt: 700,
+          outcome: {
+            invocationId: 'child-grounding-only',
+            disposition: 'completed_with_turn',
+            evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-grounding-only' },
+            handledAt: 800,
+          },
+        },
+      ],
+      reminderAttempts: [],
+    };
+
+    act(() => {
+      root.render(<MessageReceiptDock receipt={completedCarrier} messages={[]} getCatLabel={() => '砚砚'} />);
+    });
+
+    expect(container.textContent).toContain('砚砚 · 正文已由本轮消费');
+    expect(container.textContent).toContain('本轮消费');
+    expect(container.textContent).not.toContain('已随本轮完成');
+    expect(container.textContent).not.toContain('处理完成');
+  });
+
   it('distinguishes failure before child creation from invoked-but-unsettled', () => {
     const base: QueueMessageReceipt = {
       version: 1,

@@ -2039,17 +2039,27 @@ describe(
       );
     });
 
-    it('real full sync exports from a detached origin/main source checkout', () => {
+    it('full sync exports from a detached origin/main source checkout or an explicit immutable pin', () => {
       const content = readSyncScript();
       assert.match(
         content,
-        /prepare_source_sync_tree\(\) \{[\s\S]*git -C "\$SOURCE_DIR" fetch --no-tags origin main[\s\S]*git -C "\$SOURCE_DIR" worktree add --detach "\$SOURCE_SYNC_DIR" refs\/remotes\/origin\/main/m,
-        'real full sync should materialize a detached source worktree from origin/main',
+        /prepare_source_sync_tree\(\) \{[\s\S]*git -C "\$SOURCE_DIR" fetch --no-tags origin main[\s\S]*local source_ref="refs\/remotes\/origin\/main"[\s\S]*git -C "\$SOURCE_DIR" worktree add --detach "\$SOURCE_SYNC_DIR" "\$source_ref"/m,
+        'full sync should default to a detached origin/main checkout and materialize the resolved source ref',
+      );
+      assert.match(
+        content,
+        /if \[ -n "\$REQUESTED_SOURCE_SHA" \]; then[\s\S]*rev-parse --verify "\$\{REQUESTED_SOURCE_SHA\}\^\{commit\}"[\s\S]*merge-base --is-ancestor "\$resolved_source_sha" refs\/remotes\/origin\/main[\s\S]*source_ref="\$resolved_source_sha"/m,
+        'an explicit source pin must resolve to a commit reachable from origin/main before export',
       );
       assert.match(
         content,
         /if \[ "\$DRY_RUN" = false \] && \[ "\$VALIDATE" = false \]; then[\s\S]*if \[ "\$SYNC_MODULE" = "all" \]; then[\s\S]*prepare_source_sync_tree/m,
-        'only real full sync should switch the source baseline to origin/main',
+        'real full sync should always switch the source baseline to a detached checkout',
+      );
+      assert.match(
+        content,
+        /if \{ \[ "\$DRY_RUN" = true \] \|\| \[ "\$VALIDATE" = true \]; \} && \[ -n "\$REQUESTED_SOURCE_SHA" \]; then[\s\S]*prepare_source_sync_tree/m,
+        'dry-run and validate should use the same detached checkout when an immutable source pin is supplied',
       );
       assert.match(
         content,

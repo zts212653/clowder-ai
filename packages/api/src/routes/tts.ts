@@ -22,6 +22,11 @@ import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyReques
 import { z } from 'zod';
 import { getCatVoice } from '../config/cat-voices.js';
 import type { DocumentListenRepository } from '../domains/cats/services/tts/DocumentListenRepository.js';
+import {
+  LISTEN_AUDIO_CACHE_VERSION,
+  pcm16WavDurationSec,
+  trimLeadingPcm16Wav,
+} from '../domains/cats/services/tts/listen-audio-postprocess.js';
 import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -42,7 +47,11 @@ const synthesizeSchema = z.object({
 const AUDIO_FILENAME_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
 const AUDIO_FORMATS = ['wav', 'mp3'] as const;
 
-function synthesisHash(provider: Pick<ITtsProvider, 'id' | 'model'>, request: TtsSynthesizeRequest): string {
+function synthesisHash(
+  provider: Pick<ITtsProvider, 'id' | 'model'>,
+  request: TtsSynthesizeRequest,
+  variant?: string,
+): string {
   const parts = [
     provider.id,
     provider.model,
@@ -56,7 +65,9 @@ function synthesisHash(provider: Pick<ITtsProvider, 'id' | 'model'>, request: Tt
   if (request.refText) parts.push(request.refText);
   if (request.instruct) parts.push(request.instruct);
   if (request.temperature != null) parts.push(String(request.temperature));
-  return createHash('sha256').update(parts.join('|')).digest('hex');
+  const baseHash = createHash('sha256').update(parts.join('|')).digest('hex');
+  if (!variant) return baseHash;
+  return createHash('sha256').update(`${baseHash}\0variant:${variant}`).digest('hex');
 }
 
 async function findCachedAudio(cacheDir: string, hash: string, requestedFormat: 'wav' | 'mp3') {
@@ -106,15 +117,18 @@ async function synthesizeAndCacheListenAsset(options: {
   const actualFormat = AUDIO_FORMATS.includes(finalResult.format as (typeof AUDIO_FORMATS)[number])
     ? finalResult.format
     : 'wav';
+  const audio = actualFormat === 'wav' ? trimLeadingPcm16Wav(finalResult.audio) : finalResult.audio;
+  const durationSec =
+    actualFormat === 'wav' ? (pcm16WavDurationSec(audio) ?? finalResult.durationSec) : finalResult.durationSec;
   const assetId = `${options.hash}.${actualFormat}`;
-  await writeFile(path.join(options.cacheDir, assetId), finalResult.audio);
+  await writeFile(path.join(options.cacheDir, assetId), audio);
   return {
     type: 'asset',
     audioUrl: `/api/tts/audio/${assetId}`,
     assetId,
     cached: false,
-    bytes: finalResult.audio.byteLength,
-    ...(finalResult.durationSec != null ? { durationSec: finalResult.durationSec } : {}),
+    bytes: audio.byteLength,
+    ...(durationSec != null ? { durationSec } : {}),
     synthesisMs: Date.now() - startedAt,
   };
 }
@@ -242,7 +256,7 @@ async function handleListenStream(
   }
 
   const synthRequest = buildListenSynthesisRequest(parsed.data);
-  const hash = synthesisHash(provider, synthRequest);
+  const hash = synthesisHash(provider, synthRequest, LISTEN_AUDIO_CACHE_VERSION);
   startTtsEventStream(reply);
   const cachedAudio = await findCachedAudio(options.cacheDir, hash, 'wav');
   if (cachedAudio) {
