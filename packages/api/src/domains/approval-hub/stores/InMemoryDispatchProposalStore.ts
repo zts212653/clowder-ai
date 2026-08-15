@@ -10,9 +10,14 @@ import {
   type CreateDispatchProposalInput,
   type CreateDispatchProposalResult,
   computeLineageKey,
+  type DispatchCanonicalAdmissionBlock,
+  type DispatchCanonicalAdmissionLookup,
   type DispatchLegacyNegativeAuthorizationLookup,
   type DispatchNegativeAuthorizationBlock,
   type DispatchNegativeAuthorizationLookup,
+  isCanonicalAdmissionProposalStatus,
+  tryCanonicalizeDispatchAdmissionSubjectRef,
+  tryComputeDispatchCanonicalActionKey,
 } from './ports/DispatchProposalStoreContracts.js';
 import type { IDispatchProposalStore } from './ports/DispatchProposalStorePort.js';
 
@@ -138,6 +143,30 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
     input: DispatchNegativeAuthorizationLookup,
   ): Promise<DispatchNegativeAuthorizationBlock[]> {
     return this.negativeAuthorization.findExact(this.proposals, input);
+  }
+
+  async findCanonicalAdmissionBlocks(
+    input: DispatchCanonicalAdmissionLookup,
+  ): Promise<DispatchCanonicalAdmissionBlock[]> {
+    if (!input.canonicalActionKey && !input.canonicalSubjectRef) return [];
+    return [...this.proposals.values()]
+      .flatMap((proposal) => {
+        if (
+          proposal.ownerUserId !== input.ownerUserId ||
+          !proposal.proposedAction ||
+          !isCanonicalAdmissionProposalStatus(proposal.status)
+        ) {
+          return [];
+        }
+        const canonicalActionKey = tryComputeDispatchCanonicalActionKey(proposal.ownerUserId, proposal.proposedAction);
+        if (!canonicalActionKey) return [];
+        const matches = input.canonicalActionKey
+          ? canonicalActionKey === input.canonicalActionKey
+          : tryCanonicalizeDispatchAdmissionSubjectRef(proposal.proposedAction.subjectRef) ===
+            input.canonicalSubjectRef;
+        return matches ? [{ proposalId: proposal.proposalId, status: proposal.status }] : [];
+      })
+      .sort((left, right) => left.proposalId.localeCompare(right.proposalId));
   }
 
   async findLegacyNegativeAuthorizationBlocks(

@@ -45,6 +45,29 @@ function createTextWithWarningService(catId) {
   };
 }
 
+function createCloudBridgeStatusService(catId, status) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({
+          type: 'cloud_bridge_status',
+          catId,
+          status,
+          ...(status === 'unavailable' ? { reason: 'no-adapter' } : {}),
+          message:
+            status === 'sent'
+              ? `已发送给 @${catId}，等待它从 ChatGPT 云端会话回写。`
+              : `未发送给 @${catId}：还没有可用的后台 Host Adapter。`,
+        }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
   let invocationSeq = 0;
   let messageSeq = 0;
@@ -224,6 +247,29 @@ describe('route-serial notice contract', () => {
       false,
     );
   });
+
+  for (const status of ['sent', 'unavailable']) {
+    it(`F247 persists one readable cloud bridge ${status} notice without a silent completion duplicate`, async () => {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const appendCalls = [];
+      const deps = createMockDeps({ opus: createCloudBridgeStatusService('opus', status) }, appendCalls, [], []);
+      const yieldedPayloads = [];
+      for await (const message of routeSerial(deps, ['opus'], 'deliver this', 'user1', `thread-cloud-${status}`)) {
+        if (message.type === 'system_info' && message.content) yieldedPayloads.push(JSON.parse(message.content));
+      }
+
+      assert.equal(yieldedPayloads.filter((payload) => payload.type === 'cloud_bridge_status').length, 1);
+      assert.equal(
+        yieldedPayloads.some((payload) => payload.type === 'silent_completion'),
+        false,
+      );
+      const persisted = appendCalls.filter((message) => message.source?.label === '云端猫投递');
+      assert.equal(persisted.length, 1);
+      assert.equal(persisted[0].source.connector, 'cloud-bridge-status');
+      assert.match(persisted[0].content, status === 'sent' ? /已发送/ : /未发送/);
+      assert.equal(persisted[0].source.meta.noticeTone, status === 'sent' ? 'info' : 'warning');
+    });
+  }
 
   it('issue #1208 P2: reports warning persistence failure via persistenceContext', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');

@@ -82,6 +82,7 @@ describe('K-2A contract-native inventory', () => {
       configReadiness: 'incomplete',
       activationState: 'disabled',
       runtimeState: 'stopped',
+      lifecycleRevision: 1,
       installedAt: 1_000,
       updatedAt: 1_000,
     });

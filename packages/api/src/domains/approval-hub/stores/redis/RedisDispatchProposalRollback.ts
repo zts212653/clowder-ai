@@ -26,10 +26,25 @@ const ABORT_STAGED_DISPATCH_LUA = `
   local keyBase = string.sub(failedKey, 1, #failedKey - #failedId)
   local holder = redis.call('GET', lineageKey)
 
+  local function removeCanonicalAdmissionIndexes(proposalKey, proposalId)
+    local actionIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionActionIndexKey')
+    local subjectIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionSubjectIndexKey')
+    if actionIndexKey then redis.call('ZREM', actionIndexKey, proposalId) end
+    if subjectIndexKey then redis.call('ZREM', subjectIndexKey, proposalId) end
+  end
+
+  local function restoreCanonicalAdmissionIndexes(proposalKey, proposalId, createdAt)
+    local actionIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionActionIndexKey')
+    local subjectIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionSubjectIndexKey')
+    if actionIndexKey then redis.call('ZADD', actionIndexKey, tonumber(createdAt), proposalId) end
+    if subjectIndexKey then redis.call('ZADD', subjectIndexKey, tonumber(createdAt), proposalId) end
+  end
+
   -- A staged holder cannot be superseded by create(). If lineage moved anyway,
   -- keep the record for diagnosis rather than running a second recovery model.
   if holder and holder ~= failedId then return 0 end
 
+  removeCanonicalAdmissionIndexes(failedKey, failedId)
   redis.call('DEL', failedKey)
   redis.call('ZREM', pendingKey, failedId)
   for i = negativeAuthorizationKeyStart, #KEYS do
@@ -53,6 +68,7 @@ const ABORT_STAGED_DISPATCH_LUA = `
       redis.call('HDEL', predecessorKey, 'supersededBy')
       redis.call('ZADD', pendingKey, tonumber(createdAt), predecessorId)
       redis.call('SET', lineageKey, predecessorId)
+      restoreCanonicalAdmissionIndexes(predecessorKey, predecessorId, createdAt)
       return 1
     end
   end

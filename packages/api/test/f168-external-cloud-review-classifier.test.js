@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { classifyExternalCloudReview } from '../dist/domains/community/external-review/external-cloud-review-classifier.js';
 
-const currentHeadSha = 'head-current';
+const currentHeadSha = '6908af814bbbfa52803f43db7c6968fa7c25cc00';
 const knownCloudReviewer = 'chatgpt-codex-connector[bot]';
 
 const awaitState = (overrides = {}) => ({
@@ -48,6 +48,16 @@ const comment = (overrides = {}) => ({
   createdAt: '2026-07-14T19:00:01.000Z',
   commitId: currentHeadSha,
   commentType: 'inline',
+  ...overrides,
+});
+
+const cleanConversation = (overrides = {}) => ({
+  id: 73,
+  author: knownCloudReviewer,
+  body: "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `6908af814b`",
+  createdAt: '2026-07-14T19:00:02.000Z',
+  commitId: undefined,
+  commentType: 'conversation',
   ...overrides,
 });
 
@@ -99,6 +109,50 @@ describe('F168 external cloud-review classifier', () => {
       reviewId: 71,
     });
     assert.deepEqual(result.correlatedReviewIds, [71]);
+    assert.deepEqual(result.waitResult, {
+      triggerCommentId: 70,
+      sourceRef: 'review:71',
+      decisionCursor: 71,
+      reviewer: knownCloudReviewer,
+      decision: 'COMMENTED',
+    });
+  });
+
+  it('recognizes the known connector canonical clean conversation for the exact current head', () => {
+    const result = classify({ comments: [cleanConversation()] });
+
+    assert.deepEqual(result.observation, {
+      headSha: currentHeadSha,
+      status: 'clean',
+      triggerCommentId: 70,
+    });
+    assert.deepEqual(result.correlatedCommentIds, [73]);
+    assert.deepEqual(result.waitResult, {
+      triggerCommentId: 70,
+      sourceRef: 'conversation:73',
+      conversationCommentCursor: 73,
+      reviewer: knownCloudReviewer,
+      decision: 'CLEAN',
+    });
+  });
+
+  it('fails closed for unknown, stale, missing-commit, and ambiguous conversation prose', () => {
+    const cases = [
+      cleanConversation({ author: 'unknown-review-bot[bot]' }),
+      cleanConversation({ body: "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `0123456789`" }),
+      cleanConversation({ body: "Codex Review: Didn't find any major issues." }),
+      cleanConversation({ body: 'Codex Review: Found 2 issues.\n\n**Reviewed commit:** `6908af814b`' }),
+      cleanConversation({
+        body: "Someone said Codex Review: Didn't find any major issues.\n**Reviewed commit:** `6908af814b`",
+      }),
+    ];
+
+    for (const candidate of cases) {
+      const result = classify({ comments: [candidate] });
+      assert.equal(result.waitResult, undefined);
+      assert.equal(result.observation.status, 'running');
+      assert.deepEqual(result.correlatedCommentIds, []);
+    }
   });
 
   it('does not correlate stale-head reviews or a wait registered for another head', () => {

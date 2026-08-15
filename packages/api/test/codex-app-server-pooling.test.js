@@ -83,6 +83,39 @@ class PoolWire {
   }
 }
 
+class ActiveWriterWire extends PoolWire {
+  constructor(threadId) {
+    super(threadId);
+    this.previousThreadId = threadId;
+  }
+
+  async write(message) {
+    if (message.method === 'thread/resume') {
+      this.writes.push(message);
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32600, message: `thread ${this.previousThreadId} already has an active writer` },
+      });
+      return;
+    }
+    if (message.method === 'thread/read') {
+      this.writes.push(message);
+      this.inbox.push({
+        id: message.id,
+        result: {
+          thread: {
+            id: this.previousThreadId,
+            status: { type: 'active', activeFlags: [] },
+            turns: [{ id: 'turn-old', status: 'inProgress', startedAt: 1_786_630_000, items: [] }],
+          },
+        },
+      });
+      return;
+    }
+    return super.write(message);
+  }
+}
+
 class FakeHostPool {
   constructor() {
     this.calls = [];
@@ -242,6 +275,42 @@ test('CodexAgentService hides a recovered model-capacity failure from the Clowde
   const retryTurn = pool.wires[1].writes.find((message) => message.method === 'turn/start');
   assert.deepEqual(retryTurn.params.input, []);
   assert.equal(retryTurn.params.additionalContext?.['cat-cafe.capacity-recovery']?.kind, 'application');
+});
+
+test('CodexAgentService attaches active-writer replacement provenance to the one fresh session_init', async () => {
+  const first = new ActiveWriterWire('native-old');
+  const second = new PoolWire('native-fresh');
+  const wires = [first, second];
+  let factoryCalls = 0;
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.6-sol',
+  });
+
+  const output = await drain(
+    service.invoke('continue', {
+      invocationId: 'invocation-active-writer-reborn',
+      sessionId: 'native-old',
+      agentCarrierSessionFactory: async () => wires[factoryCalls++],
+    }),
+  );
+
+  assert.equal(factoryCalls, 2, 'one failed resume must produce exactly one fresh start');
+  const freshSession = output.find(
+    (message) => message.type === 'session_init' && message.sessionId === 'native-fresh',
+  );
+  assert.ok(freshSession);
+  assert.equal(freshSession.sessionReplacement.cause, 'active_writer_reborn');
+  assert.equal(freshSession.sessionReplacement.previousNativeThreadId, 'native-old');
+  assert.equal(freshSession.sessionReplacement.attempt, 1);
+  assert.equal(freshSession.sessionReplacement.diagnostics.classification, 'native_active_turn_without_local_lease');
+  assert.equal(
+    output.filter((message) => message.type === 'session_init' && message.sessionReplacement).length,
+    1,
+    'replacement provenance belongs only to the fresh native session',
+  );
 });
 
 test('CodexAgentService surfaces one checkpoint card when an in-flight tool blocks capacity recovery', async () => {

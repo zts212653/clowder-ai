@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { DossierProfile } from '../dossier/parse-dossier-profiles.js';
 import { parseDossierProfiles } from '../dossier/parse-dossier-profiles.js';
 
 const SAMPLE_DOSSIER = `---
@@ -118,6 +117,25 @@ describe('parseDossierProfiles', () => {
     const profiles = parseDossierProfiles(SAMPLE_DOSSIER);
     expect(profiles.get('opus')?.l0SelfDescription).toBe('快速实现；动手前先核终态与验证边界');
     expect(profiles.get('codex')?.l0SelfDescription).toBeUndefined();
+  });
+
+  it('rejects an engagement policy whose required fields are nested below the policy object', () => {
+    const md = `
+\`\`\`yaml
+# structured-profile: cat:fable-5
+entityId: "cat:fable-5"
+engagementPolicy:
+  accidentalWrapper:
+    quota: "weekly_subscription_scarce"
+    defaultMode: "one_shot_calibration"
+    highValueUses:
+      - "final architecture synthesis"
+    routineRepairReturn: "author_then_routine_reviewer_if_needed"
+    reentry: "only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request"
+\`\`\`
+`;
+
+    expect(parseDossierProfiles(md).get('fable-5')?.engagementPolicy).toBeUndefined();
   });
 
   it('parses routingSignals when present', () => {

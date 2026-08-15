@@ -45,6 +45,12 @@ export type {
 } from './a2a.js';
 // F167 Phase S: action-scoped A2A successor single-flight contract
 export {
+  ACTION_SUBJECT_REF_DESCRIPTION,
+  ACTION_SUBJECT_REF_MAX_LENGTH,
+  ACTION_SUBJECT_REF_PATTERN,
+  actionSubjectRefSchema,
+} from './action-subject-ref.js';
+export {
   ACTION_SUCCESSOR_ACTION_FAMILIES,
   ACTION_SUCCESSOR_SLOTS,
   ACTION_TERMINAL_PREDICATE_KINDS,
@@ -66,6 +72,17 @@ export {
   type ReviewReentryReason,
   reviewReentrySchema,
 } from './action-successor.js';
+// F295 execution-scoped liveness and cancellation projection.
+export type {
+  ActiveExecutionCancelability,
+  ActiveExecutionCancelTarget,
+  ActiveExecutionKind,
+  ActiveExecutionListResponse,
+  ActiveExecutionNonCancelableReason,
+  ActiveExecutionProjection,
+  LiveInvocationCancelTarget,
+  ManagedCommandCancelTarget,
+} from './active-execution.js';
 // F178 Phase B: agent-key record + verify result
 export type { AgentKeyRecord, AgentKeyVerifyResult } from './agent-key.js';
 // F178 Phase B: agent-key reason taxonomy
@@ -404,6 +421,7 @@ export {
 } from './connector.js';
 export {
   type CliOutputQuoteSource,
+  CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
   CONTEXT_ATTACHMENT_MAX_COUNT,
   CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS,
   CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH,
@@ -587,13 +605,25 @@ export {
 } from './game.js';
 export {
   type AwaitStateV1,
+  createWaitContinuationCarrier,
   GITHUB_WAIT_PREDICATE_KINDS,
   type GitHubCiBaselineBucket,
+  type GitHubIssueAwaitStateV1,
+  type GitHubIssueWaitBaseline,
+  type GitHubIssueWaitPredicate,
+  type GitHubPrAwaitStateV1,
+  type GitHubPrWaitBaseline,
+  type GitHubPrWaitPredicate,
   type GitHubReviewThreadBaseline,
   type GitHubWaitBaseline,
   type GitHubWaitMatchedDelta,
   type GitHubWaitPredicate,
   type GitHubWaitPredicateKind,
+  type GitHubWaitSubjectRef,
+  parseWaitContinuationCarrier,
+  parseWaitOwnerFence,
+  type UnifiedAwaitStateV1,
+  type WaitContinuationCarrierV1,
   type WaitOutcomeDelivery,
   type WaitOutcomeV1,
   type WaitOwnerFence,
@@ -719,6 +749,14 @@ export type {
   LimbNodeRecord,
   LimbNodeStatus,
 } from './limb.js';
+// F279: Workspace Listen Mode durable document/cache state.
+export type {
+  ListenDocumentIdentity,
+  ListenDocumentState,
+  ListenPlaybackRate,
+  ListenRetention,
+  ListenSentenceState,
+} from './listen-mode.js';
 // F275 Phase B: internal managed-work identity kernel
 export type {
   ManagedWorkBinding,
@@ -1100,12 +1138,16 @@ export type {
   QueueLineageEvidenceRef,
   QueueManagedHoldContinuationWitness,
   QueueMessageReceipt,
+  QueueMessageReceiptProjection,
   QueueReceiptTarget,
   QueueReceiptTargetState,
   QueueReminderAttempt,
   QueueReminderAttemptState,
   QueueReminderMissedReason,
   QueueSourceResponseConsumptionWitness,
+  QueueTargetAttempt,
+  QueueTargetAttemptState,
+  QueueTargetAttemptTerminalReason,
   QueueTargetOutcome,
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
@@ -1153,6 +1195,14 @@ export type {
   ScheduleMutationTaskDefinition,
   ScheduleMutationTrigger,
 } from './schedule-mutation.js';
+export {
+  SCHEDULER_WAIT_PREDICATE_KINDS,
+  type SchedulerAwaitStateV1,
+  type SchedulerWaitBaseline,
+  type SchedulerWaitPredicate,
+  type SchedulerWaitPredicateKind,
+  type SchedulerWaitSubjectRef,
+} from './scheduler-wait.js';
 // Session chain types (F24 Session Chain + Context Health)
 export type {
   ContextHealth,
@@ -1218,6 +1268,8 @@ export type {
   SliceType,
   UpdateSliceInput,
 } from './slice.js';
+// Socket.IO room membership convergence contract shared by API and Web.
+export type { RoomJoinAck } from './socket-room.js';
 // SOP definition generated truth source (#748)
 export {
   DEVELOPMENT_SOP_DEFINITION,
@@ -1268,8 +1320,7 @@ export type {
   DispatchGateState,
   IssueAutomationState,
   IssuePendingWake,
-  IssueTrackingWakePolicy,
-  LegacyIssueAutomationState,
+  IssueWaitAutomationState,
   PrAutomationState,
   ReviewAutomationState,
   SuggestedCrossPostAction,
@@ -1319,6 +1370,8 @@ export type {
   TtsStreamRequest,
   TtsSynthesizeRequest,
   TtsSynthesizeResult,
+  TtsSynthesizeStreamEvent,
+  TtsSynthesizeStreamOptions,
   VoiceChunkEvent,
   VoiceConfig,
   VoiceStreamEndEvent,

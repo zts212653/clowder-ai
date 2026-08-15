@@ -40,6 +40,33 @@ skills:
     sop_step: null
     merged_from: ["feat-kickoff", "feat-discussion", "feat-completion"]
 
+  # ── operator友好插件开发 ──
+  owner-friendly-plugin-development:
+    category: "开发流程"
+    description: >
+      把真实用户旅程转成可安装、可授权、状态诚实、可恢复的 Clowder AI 插件产品边界。
+      Use when: 设计或开发需要 Settings 安装/授权、后台 runtime、事件或数据入站、Needs Me、Host 路由的插件。
+      Not for: 只搭 Codex 插件目录（用 plugin-creator）、纯 skill/MCP、无宿主生命周期的一次性 API 脚本、只修插件内部实现 bug。
+      Output: 用户旅程契约 + ownership/authority map + 生命周期/恢复/发布方案 + fresh-consumer 与真实 dogfood 证据。
+    triggers:
+      - "开发插件"
+      - "设计插件"
+      - "operator友好的 plugin"
+      - "owner-friendly plugin"
+      - "设计插件授权流"
+      - "插件生命周期设计"
+      - "插件发布闭包"
+      - "插件 dogfood"
+    not_for:
+      - "搭 Codex 插件目录"
+      - "纯 skill 或 MCP"
+      - "一次性 API 脚本"
+      - "插件内部 bug fix"
+    output: "Journey contract + ownership/authority map + lifecycle/recovery/release plan + fresh-consumer and real-dogfood evidence"
+    next: ["feat-lifecycle", "writing-plans", "console-dev", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
   # ── 引导流程设计 ──
   guide-authoring:
     category: "引导与协作"

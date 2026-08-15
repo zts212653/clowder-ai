@@ -1,4 +1,3 @@
-import type { RecoveryCensusEntry } from './census.js';
 import {
   type LegacyClosureInventoryItem,
   type LegacyWithheldAttachment,
@@ -6,18 +5,9 @@ import {
 } from './legacy-closure-migration.js';
 import { sha256Text, type ValidatedRecoveryManifest, validateRecoveryManifest } from './manifest.js';
 
-const WITHHELD_LOG_MESSAGE = '[F254-E] draft withheld from normal thread final';
 const PRODUCTION_CONFIRMATION = 'MIGRATE F254 LEGACY CLOSURES TO 6399';
 
-export interface LegacyWithheldLogEvent {
-  withheldAtUtc: string;
-  threadId: string;
-  catId: string;
-  invocationId: string;
-  closureId: string;
-  decisionKind: string;
-  evidenceRef: string;
-}
+export { collectLegacyWithheldAttachments, parseLegacyWithheldLogLine } from './legacy-closure-inventory.js';
 
 export interface LegacyClosureMigrationBundle {
   version: 1;
@@ -87,7 +77,7 @@ function parseClosure(value: unknown, legacyBefore: number): LegacyClosureInvent
 function parseAttachment(value: unknown): LegacyWithheldAttachment {
   if (!isRecord(value)) throw new Error('legacy migration bundle attachment must be an object');
   const source = value.source;
-  if (source !== 'legacy_census' && source !== 'runtime_log') {
+  if (source !== 'legacy_census' && source !== 'runtime_log' && source !== 'closure_state') {
     throw new Error('legacy migration bundle attachment source is invalid');
   }
   if (!Array.isArray(value.evidenceRefs) || value.evidenceRefs.some((item) => typeof item !== 'string')) {
@@ -148,81 +138,6 @@ function assertAttachmentEvidenceCoverage(
   }
   const missing = closures.filter((closure) => !attachedClosureIds.has(closure.id)).map((closure) => closure.id);
   if (missing.length > 0) throw new Error(`active closures lack withheld invocation inventory: ${missing.join(', ')}`);
-}
-
-export function parseLegacyWithheldLogLine(
-  line: string,
-  sourcePath: string,
-  lineNumber: number,
-): LegacyWithheldLogEvent | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!isRecord(value) || value.msg !== WITHHELD_LOG_MESSAGE) return null;
-  if (!isRecord(value.decision)) throw new Error(`${sourcePath}:${lineNumber} withheld decision is missing`);
-  const event: LegacyWithheldLogEvent = {
-    withheldAtUtc: requireTimestamp(value.time, 'log.time'),
-    threadId: requireString(value.threadId, 'log.threadId'),
-    catId: requireString(value.catId, 'log.catId'),
-    invocationId: requireString(value.invocationId, 'log.invocationId'),
-    closureId: requireString(value.decision.closureId, 'log.decision.closureId'),
-    decisionKind: requireString(value.decision.kind, 'log.decision.kind'),
-    evidenceRef: `api-log:${sourcePath}#L${lineNumber}@${String(value.time)}`,
-  };
-  return event;
-}
-
-export function collectLegacyWithheldAttachments(input: {
-  closures: readonly LegacyClosureInventoryItem[];
-  census: readonly RecoveryCensusEntry[];
-  logEvents: readonly LegacyWithheldLogEvent[];
-  legacyBeforeExclusive: string;
-}): LegacyWithheldAttachment[] {
-  const cutoff = Date.parse(input.legacyBeforeExclusive);
-  if (!Number.isFinite(cutoff)) throw new Error('legacyBeforeExclusive must be ISO');
-  const closures = new Map(input.closures.map((closure) => [closure.id, closure]));
-  const attachments: LegacyWithheldAttachment[] = [];
-  for (const entry of input.census) {
-    const closure = closures.get(entry.closureId);
-    if (!closure) continue;
-    if (entry.threadId !== closure.threadId || entry.catId !== closure.catId || entry.userId !== closure.userId) {
-      throw new Error(`census identity disagrees with active closure ${entry.closureId}`);
-    }
-    attachments.push({
-      closureId: entry.closureId,
-      invocationId: entry.invocationId,
-      source: 'legacy_census',
-      evidenceRefs: [`legacy-census:${entry.invocationId}@${entry.withheldAtUtc}`],
-      withheldDecision: {
-        withheldAtUtc: entry.withheldAtUtc,
-        closureId: entry.closureId,
-        decisionKind: entry.decisionKind,
-      },
-    });
-  }
-  for (const event of input.logEvents) {
-    if (Date.parse(event.withheldAtUtc) >= cutoff) continue;
-    const closure = closures.get(event.closureId);
-    if (!closure) continue;
-    if (event.threadId !== closure.threadId || event.catId !== closure.catId) {
-      throw new Error(`runtime log identity disagrees with active closure ${event.closureId}`);
-    }
-    attachments.push({
-      closureId: event.closureId,
-      invocationId: event.invocationId,
-      source: 'runtime_log',
-      evidenceRefs: [event.evidenceRef],
-      withheldDecision: {
-        withheldAtUtc: event.withheldAtUtc,
-        closureId: event.closureId,
-        decisionKind: event.decisionKind,
-      },
-    });
-  }
-  return normalizeLegacyAttachments(attachments);
 }
 
 function normalizeBundle(raw: unknown): Omit<LegacyClosureMigrationBundle, 'bundleSha256'> {

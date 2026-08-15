@@ -1,0 +1,161 @@
+import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+
+import { validateEventsPublishInput, validateEventsPublishResult } from '@clowder-ai/plugin-contract';
+import { MAX_NDJSON_FRAME_BYTES } from '@clowder-ai/plugin-contract/conformance';
+import { ExternalPluginRuntimeSupervisor } from '../dist/domains/plugin/external-runtime/index.js';
+import {
+  completeExternalHandshake,
+  createExternalRuntimeHarness,
+  EXTERNAL_INSTANCE_ID,
+  externalManifest,
+  externalPublishInput,
+  FakePluginProcessAdapter,
+  readFrame,
+  sendFrame,
+  wireRequest,
+} from './plugin-external-runtime-helpers.js';
+
+function eventsHandler(dispatches) {
+  return {
+    method: 'events.publish',
+    validateInput(value) {
+      const validation = validateEventsPublishInput(value);
+      return validation.valid ? { valid: true, value: validation.value } : { valid: false };
+    },
+    validateResult(value) {
+      return validateEventsPublishResult(value).valid;
+    },
+    settlementKey(_context, input) {
+      return `${input.signalType}:${input.idempotencyKey}`;
+    },
+    async dispatch(_context, input) {
+      dispatches.push(structuredClone(input));
+      return { publicationId: 'publication-1', disposition: 'accepted' };
+    },
+    async lookupSettlement() {
+      return null;
+    },
+    serializePreEffectError() {
+      return null;
+    },
+    restoreSettledError(error) {
+      return new Error(error.message);
+    },
+  };
+}
+
+async function runningHarness() {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-stdio-'));
+  const dispatches = [];
+  const harness = await createExternalRuntimeHarness({ rootDir, methods: [eventsHandler(dispatches)] });
+  const processes = new FakePluginProcessAdapter();
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => undefined,
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+  });
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  const handshake = await completeExternalHandshake(child);
+  const handle = await starting;
+  return { ...harness, child, dispatches, handle, processes, supervisor, handshake };
+}
+
+test('stdio hello/ready and events.publish use the existing Broker session and ledger', async () => {
+  const harness = await runningHarness();
+  assert.equal(harness.handshake.hello.result.pluginInstanceId, EXTERNAL_INSTANCE_ID);
+  assert.equal(harness.handshake.ready.result, null);
+
+  sendFrame(harness.child, wireRequest('publish-1', 'events.publish', externalPublishInput()));
+  assert.deepEqual(await readFrame(harness.child), {
+    jsonrpc: '2.0',
+    id: 'publish-1',
+    result: { publicationId: 'publication-1', disposition: 'accepted' },
+  });
+  assert.equal(harness.dispatches.length, 1);
+
+  const snapshot = await harness.brokerStore.snapshot();
+  assert.equal(snapshot.sessions.length, 1);
+  assert.equal(snapshot.sessions[0].transportKind, 'stdio');
+  assert.equal(snapshot.sessions[0].phase, 'active');
+  assert.equal(snapshot.calls[0].phase, 'settled_success');
+  await harness.supervisor.stop(EXTERNAL_INSTANCE_ID);
+});
+
+test('reserved rows receive the contract classifier response and never dispatch', async () => {
+  const harness = await runningHarness();
+  sendFrame(harness.child, wireRequest('reserved-1', 'messaging.send', {}));
+  const response = await readFrame(harness.child);
+  assert.equal(response.id, 'reserved-1');
+  assert.equal(response.error.code, -32602);
+  assert.equal(harness.dispatches.length, 0);
+  assert.equal(harness.child.terminateCalls, 0);
+  await harness.supervisor.stop(EXTERNAL_INSTANCE_ID);
+});
+
+test('non-canonical and oversized frames close authority with zero business dispatch', async (t) => {
+  await t.test('non-canonical', async () => {
+    const harness = await runningHarness();
+    harness.child.stdout.write(
+      '{ "jsonrpc":"2.0","id":"publish-1","method":"events.publish","params":{"meta":{"deadlineUnixMs":1},"input":{}}}\n',
+    );
+    await harness.child.exited;
+    assert.equal(harness.child.terminateCalls, 1);
+    assert.equal(harness.dispatches.length, 0);
+    const snapshot = await harness.brokerStore.snapshot();
+    assert.equal(snapshot.sessions[0].phase, 'closed');
+  });
+
+  await t.test('oversized', async () => {
+    const harness = await runningHarness();
+    harness.child.stdout.write(Buffer.alloc(MAX_NDJSON_FRAME_BYTES + 2, 0x61));
+    harness.child.stdout.write('\n');
+    await harness.child.exited;
+    assert.equal(harness.child.terminateCalls, 1);
+    assert.equal(harness.dispatches.length, 0);
+  });
+});
+
+test('unexpected child exit closes the Broker session and marks runtime crashed', async () => {
+  const harness = await runningHarness();
+  harness.child.exit({ code: 17, signal: null });
+  await harness.handle.closed;
+
+  const broker = await harness.brokerStore.snapshot();
+  assert.equal(broker.sessions[0].phase, 'closed');
+  assert.equal(broker.sessions[0].closeReason, 'process_exit');
+  const inventory = await harness.inventory.snapshot();
+  assert.equal(inventory.instances[0].activationState, 'error');
+  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+  assert.equal(inventory.instances[0].lifecycleRevision, 2);
+});
+
+test('authority revocation closes transport on the next call with zero new effect', async () => {
+  const harness = await runningHarness();
+  await harness.inventory.transaction((transaction) => {
+    const grants = transaction.grants.get(EXTERNAL_INSTANCE_ID);
+    transaction.grants.put({ ...grants, effectiveGrants: [], grantRevision: grants.grantRevision + 1 });
+  });
+  sendFrame(harness.child, wireRequest('publish-revoked', 'events.publish', externalPublishInput()));
+  const response = await readFrame(harness.child);
+  assert.equal(response.error.code, -32603);
+  await harness.child.exited;
+  assert.equal(harness.child.terminateCalls, 1);
+  assert.equal(harness.dispatches.length, 0);
+  const broker = await harness.brokerStore.snapshot();
+  assert.equal(broker.sessions[0].phase, 'closed');
+});

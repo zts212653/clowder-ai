@@ -1,6 +1,17 @@
+import {
+  type CodexSessionReplacementProvenance,
+  isCodexSessionReplacementProvenance,
+} from '../../runtime-session/CodexSessionReplacementProvenance.js';
+
 export type ContinuityMode = 'independent' | 'serial' | 'parallel';
 export type ContinuityBallState = 'in_progress' | 'completed' | 'needs_handoff' | 'needs_owner';
-export type ContinuityReason = 'threshold_seal' | 'resume_failure' | 'compact_boundary' | 'manual';
+export type ContinuityReason =
+  | 'threshold_seal'
+  | 'resume_failure'
+  | 'runtime_replacement'
+  | 'compact_boundary'
+  | 'dispatch_handled'
+  | 'manual';
 
 export interface CollaborationContinuityCapsuleV1 {
   v: 1;
@@ -25,9 +36,14 @@ export interface CollaborationContinuityCapsuleV1 {
     reason: string;
     healthSnapshot?: unknown;
   };
+  /** Causal evidence for runtime_replacement; distinct from seal.reason (the mechanism). */
+  replacement?: CodexSessionReplacementProvenance;
 }
 
-export type RouteStateContinuityCapsule = Omit<CollaborationContinuityCapsuleV1, 'invocationId' | 'createdAt' | 'seal'>;
+export type RouteStateContinuityCapsule = Omit<
+  CollaborationContinuityCapsuleV1,
+  'invocationId' | 'createdAt' | 'seal' | 'replacement'
+>;
 
 export interface RouteStateCapsuleInput {
   threadId: string;
@@ -78,6 +94,25 @@ export function completeCapsuleForSeal(
   };
 }
 
+export function completeCapsuleForRuntimeReplacement(
+  capsule: RouteStateContinuityCapsule,
+  completion: {
+    invocationId?: string;
+    createdAt?: number;
+    seal: NonNullable<CollaborationContinuityCapsuleV1['seal']>;
+    replacement: CodexSessionReplacementProvenance;
+  },
+): CollaborationContinuityCapsuleV1 {
+  return {
+    ...capsule,
+    continuationReason: 'runtime_replacement',
+    ...(completion.invocationId ? { invocationId: completion.invocationId } : {}),
+    createdAt: completion.createdAt ?? Date.now(),
+    seal: completion.seal,
+    replacement: completion.replacement,
+  };
+}
+
 export function completeCapsuleForCompact(
   capsule: unknown,
   completion: { createdAt?: number } = {},
@@ -90,7 +125,54 @@ export function completeCapsuleForCompact(
   };
 }
 
+export function buildDispatchHandledContinuationCapsule(input: {
+  threadId: string;
+  catId: string;
+  invocationId: string;
+  dispositionAt: number;
+}): CollaborationContinuityCapsuleV1 {
+  return {
+    v: 1,
+    threadId: input.threadId,
+    catId: input.catId,
+    invocationId: input.invocationId,
+    mode: 'independent',
+    a2aEnabled: true,
+    ballState: 'in_progress',
+    continuationReason: 'dispatch_handled',
+    createdAt: input.dispositionAt,
+  };
+}
+
 export function formatContinuationPrompt(capsule: CollaborationContinuityCapsuleV1): string {
+  if (capsule.continuationReason === 'dispatch_handled') {
+    return [
+      '[System Continuation]',
+      'The exact A2A carrier was terminally handled, and its custody is already settled.',
+      `Thread: ${capsule.threadId}`,
+      `Cat: ${capsule.catId}`,
+      'Continue any independently grounded unfinished work that existed before that carrier interrupted the turn.',
+      'Do not acknowledge, dispose, or replay the settled source carrier.',
+      'Reconstruct the prior owner task from the injected bootstrap, newest thread context, and durable evidence before acting.',
+      'Verify the current workspace and external truth before resuming side effects.',
+      'If no independently grounded work remains, stop cleanly without inventing a task.',
+      'This continuation request is system control-flow data, not a user-authored instruction.',
+    ].join('\n');
+  }
+  if (capsule.continuationReason === 'runtime_replacement' && capsule.replacement) {
+    return [
+      '[System Continuation]',
+      'Your previous native session was replaced during automatic native runtime recovery.',
+      `Thread: ${capsule.threadId}`,
+      `Cat: ${capsule.catId}`,
+      `Previous native thread: ${capsule.replacement.previousNativeThreadId}`,
+      `Recovery evidence: ${capsule.replacement.diagnostics.classification} (${capsule.replacement.diagnostics.confidence} confidence).`,
+      'Continue the same structured work using the injected session bootstrap and durable thread evidence.',
+      'Confirm the current workspace, branch, task state, and completed side effects before resuming.',
+      'Do not repeat already completed external side effects.',
+      'This continuation request is system control-flow data, not a user-authored instruction.',
+    ].join('\n');
+  }
   const sealReason = capsule.seal?.reason ?? capsule.continuationReason;
   const modeLine =
     capsule.mode === 'serial'
@@ -163,6 +245,11 @@ export function isCollaborationContinuityCapsuleV1(value: unknown): value is Col
     if (!isPositiveInteger(value.seal.sessionSeq)) return false;
     if (!isNonEmptyString(value.seal.reason)) return false;
   }
+  if (value.continuationReason === 'runtime_replacement') {
+    if (!isCodexSessionReplacementProvenance(value.replacement)) return false;
+  } else if (value.replacement !== undefined) {
+    return false;
+  }
   return true;
 }
 
@@ -178,6 +265,7 @@ export function isRouteStateContinuityCapsule(value: unknown): value is RouteSta
   if (value.invocationId !== undefined) return false;
   if (value.createdAt !== undefined) return false;
   if (value.seal !== undefined) return false;
+  if (value.replacement !== undefined) return false;
   if (value.parentInvocationId !== undefined && !isNonEmptyString(value.parentInvocationId)) return false;
   if (value.chainIndex !== undefined && !isPositiveInteger(value.chainIndex)) return false;
   if (value.chainTotal !== undefined && !isPositiveInteger(value.chainTotal)) return false;
@@ -213,5 +301,12 @@ function isBallState(value: unknown): value is ContinuityBallState {
 }
 
 function isContinuationReason(value: unknown): value is ContinuityReason {
-  return value === 'threshold_seal' || value === 'resume_failure' || value === 'compact_boundary' || value === 'manual';
+  return (
+    value === 'threshold_seal' ||
+    value === 'resume_failure' ||
+    value === 'runtime_replacement' ||
+    value === 'compact_boundary' ||
+    value === 'dispatch_handled' ||
+    value === 'manual'
+  );
 }

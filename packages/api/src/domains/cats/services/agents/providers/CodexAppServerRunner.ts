@@ -1,4 +1,9 @@
 import { codexAppServerRecovery } from '../../../../../infrastructure/telemetry/instruments.js';
+import {
+  buildCodexActiveWriterDiagnostics,
+  CodexActiveWriterRecoveryError,
+  type CodexSessionReplacementProvenance,
+} from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 import {
   CodexAppServerClient,
@@ -15,12 +20,14 @@ import {
 
 export interface CodexAppServerRecoveryEvent {
   type: 'app_server.recovery';
-  reason: 'pre_turn_transport' | 'model_capacity';
+  reason: 'pre_turn_transport' | 'active_writer_reborn' | 'model_capacity';
   attempt: number;
   retryBudget: number;
   delayMs?: number;
   threadId?: string;
   phase?: 'pre_tool' | 'post_tool';
+  /** Present only for active_writer_reborn; causal evidence is not inferred from the seal reason later. */
+  replacement?: CodexSessionReplacementProvenance;
 }
 
 export interface CodexAppServerRecoveryBlockedEvent {
@@ -39,12 +46,15 @@ export interface CodexAppServerRunnerOptions {
     onLifecycle?: CodexAppServerClientDeps['onLifecycle'];
   };
   retryBudget?: number;
+  activeWriterRetryDelayMs?: number;
   modelCapacityRetryDelaysMs?: readonly number[];
   recoveryAnchor?: CodexCapacityRecoveryAnchor;
 }
 
 const MODEL_CAPACITY_ERROR = 'Selected model is at capacity. Please try a different model.';
 const DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 15_000] as const;
+const DEFAULT_ACTIVE_WRITER_RETRY_DELAY_MS = 250;
+const MAX_ACTIVE_WRITER_RETRY_DELAY_MS = 5_000;
 const MAX_RECOVERY_STEP_CHARS = 160;
 
 function buildModelCapacityRecoveryInstruction(checkpoint: CodexCapacityRecoveryCheckpoint): string {
@@ -88,6 +98,10 @@ function isModelCapacityMessage(value: unknown): boolean {
 
 function isModelCapacityError(error: unknown): boolean {
   return error instanceof Error && isModelCapacityMessage(error.message);
+}
+
+function isActiveWriterError(error: unknown): boolean {
+  return error instanceof Error && /^thread \S+ already has an active writer$/.test(error.message.trim());
 }
 
 function isModelCapacityTurnFailure(value: unknown): boolean {
@@ -134,10 +148,15 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   const capacityRetryDelays = (options.modelCapacityRetryDelaysMs ?? DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS).map(
     (delayMs) => Math.max(0, delayMs),
   );
+  const activeWriterRetryDelayMs = Math.min(
+    MAX_ACTIVE_WRITER_RETRY_DELAY_MS,
+    Math.max(1, options.activeWriterRetryDelayMs ?? DEFAULT_ACTIVE_WRITER_RETRY_DELAY_MS),
+  );
   let transportAttempt = 0;
   let capacityAttempt = 0;
   let recoveryAttempt = 0;
-  let resumeThreadId = options.runInput.thread.kind === 'resume' ? options.runInput.thread.threadId : undefined;
+  let currentThread = options.runInput.thread;
+  let resumeThreadId = currentThread.kind === 'resume' ? currentThread.threadId : undefined;
   let recoveryInstruction: string | undefined;
   let imagePaths = options.runInput.imagePaths;
   const checkpoint = new CodexCapacityRecoveryCheckpoint(options.recoveryAnchor);
@@ -153,7 +172,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       const { signal: _transportSignal, ...transportOptions } = options.sessionOptions;
       const wire = await options.sessionFactory({
         ...transportOptions,
-        ...(resumeThreadId ? { sessionId: resumeThreadId } : {}),
+        ...(currentThread.kind === 'resume' ? { sessionId: currentThread.threadId } : {}),
       });
       const client = new CodexAppServerClient({
         ...options.clientDeps,
@@ -165,7 +184,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       });
       const runInput: CodexAppServerRunInput = {
         ...options.runInput,
-        thread: resumeThreadId ? { kind: 'resume', threadId: resumeThreadId } : options.runInput.thread,
+        thread: currentThread,
         recoveryAttempt,
         ...(recoveryInstruction ? { recoveryInstruction } : { recoveryInstruction: undefined }),
         ...(imagePaths ? { imagePaths } : { imagePaths: undefined }),
@@ -196,7 +215,55 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       const failedAt = lifecycle as CodexAppServerLifecycleSnapshot | null;
       if (failedAt?.threadId) {
         resumeThreadId = failedAt.threadId;
+        currentThread = { kind: 'resume', threadId: resumeThreadId };
         checkpoint.setNativeThreadId(resumeThreadId);
+      }
+
+      const activeWriterThreadId = currentThread.kind === 'resume' ? currentThread.threadId : undefined;
+      if (
+        activeWriterThreadId &&
+        isActiveWriterError(error) &&
+        !capacityTerminalObserved &&
+        transportAttempt < retryBudget &&
+        canRetryBeforeTurn(failedAt, options.runInput.signal)
+      ) {
+        transportAttempt++;
+        recoveryAttempt++;
+        const detectedAt = Date.now();
+        const detection =
+          error instanceof CodexActiveWriterRecoveryError
+            ? error.detection
+            : {
+                previousNativeThreadId: activeWriterThreadId,
+                detectedAt,
+                diagnostics: buildCodexActiveWriterDiagnostics({
+                  threadId: activeWriterThreadId,
+                  observedAt: detectedAt,
+                  localLiveLease: false,
+                  threadRead: { outcome: 'failed' },
+                }),
+              };
+        const replacement: CodexSessionReplacementProvenance = {
+          cause: 'active_writer_reborn',
+          previousNativeThreadId: detection.previousNativeThreadId,
+          detectedAt: detection.detectedAt,
+          attempt: transportAttempt,
+          diagnostics: detection.diagnostics,
+        };
+        codexAppServerRecovery.add(1, { status: 'active_writer_reborn' });
+        yield {
+          type: 'app_server.recovery',
+          reason: 'active_writer_reborn',
+          attempt: transportAttempt,
+          retryBudget,
+          delayMs: activeWriterRetryDelayMs,
+          threadId: activeWriterThreadId,
+          replacement,
+        } satisfies CodexAppServerRecoveryEvent;
+        await waitForRecoveryDelay(activeWriterRetryDelayMs, options.runInput.signal);
+        currentThread = { kind: 'start' };
+        resumeThreadId = undefined;
+        continue;
       }
 
       if (
@@ -227,6 +294,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
 
       if (
         !capacityTerminalObserved &&
+        !isActiveWriterError(error) &&
         transportAttempt < retryBudget &&
         canRetryBeforeTurn(failedAt, options.runInput.signal)
       ) {

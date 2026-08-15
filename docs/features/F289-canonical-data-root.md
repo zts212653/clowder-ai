@@ -8,18 +8,18 @@ community_issue: "clowder-ai#1303"
 description: "把用户持久数据从可重建代码投影中迁出，以一个与 cwd/worktree 无关的 canonical data root 服务源码与桌面用户。"
 description_source: human
 description_author: landy
-description_updated_at: 2026-08-08T03:58:18Z
+description_updated_at: 2026-08-11T13:29:00Z
 ---
 
 # F289: Canonical Data Root — 用户数据离开 runtime 投影
 
-> **Status**: in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P0
+> **Status**: in-progress — production cutover paused / current one-shot migration NO-GO | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P0
 
 ## Why
 
 用户数据的家不能由“代码从哪个目录启动”决定。当前 cwd/projectRoot fallback 让同一台机器出现多个彼此分叉的数据根：账号在一个抽屉写入、猫猫绑定从另一个抽屉读取，直接造成社区 issue #1303 的 `provider not found`；家里的 runtime 又因此承载约 16GB 不可重建数据，失去“随时可删并从 `origin/main` 重建”的投影性质。
 
-operator的完成定义是：**“一把修完，修完就完事了，之后不要两份东西了”**；社区源码用户和桌面用户升级后都应在第一次 API 启动时无感迁移，不要求手改 env，也不依赖尚未合入的桌面 updater。
+operator的完成定义是：**“一把修完，修完就完事了，之后不要两份东西了”**。真实数据演练已证明，这个终态仍正确，但不能再等同于“普通第一次 API 启动时自动搬完全部历史数据”；社区修复、寻址收口、历史 reconciliation 与生产 cutover 必须分别取得证据。
 
 ## Current State / 现状基线
 
@@ -36,6 +36,51 @@ operator的完成定义是：**“一把修完，修完就完事了，之后不�
 | local recovery snapshot | `~/.cat-cafe/backups/pre-data-root-unification-20260807T2050PDT/` 已复制上述四块数据；另用 SQLite online backup 生成 `evidence.sqlite.consistent`，`PRAGMA quick_check=ok` 且源/备份 `page_count=978920`。服务仍写入的 3 个 `events.live.jsonl` 证明最终 cutover 前必须停写再增量同步 |
 
 这不是单个账号路由 bug，而是持久化拓扑没有唯一答案。
+
+## 2026-08-11 Production Reality Check（当前权威执行边界）
+
+> **结论：#3467 当前不得合入或触发首次启动迁移。** 统一 data root 的目标保留，但“在第一次 API 启动中自动完成全部历史归位”的交付方式暂停，等待分阶段重构与离线迁移演练。
+
+冻结 main 后的候选曾完成 full gate、exact-HEAD CI 与 review continuity；这些证据证明代码候选满足合成 fixture 与仓库门禁，**不等于真实安装可安全 cutover**。在猫咖停止写入、未创建 target/manifest 的前提下，对真实 legacy roots 运行只读 dry-run 得到：
+
+| 现场证据 | 结果 |
+|----------|------|
+| candidate | PR #3467 exact HEAD `138299ac33653acf8705e7bf7bdc5333121e4bec`；未 merge |
+| planned assets / source roots | 95 项 / 9 个 roots |
+| active legacy footprint | 约 80GB；含约 58GB `packages/api/data`、14GB runtime `data`、4GB evidence SQLite 与约 201MB WAL、uploads/profile/config 等 |
+| planner verdict | `conflict=35`, `copied=30`, `merged=22`, `skipped=8`；exit 2，写入前 fail-closed |
+| unknown legacy entries | 61 项，尚未进入 typed asset census |
+| conflict domains | accounts/credentials/provider profiles、cat catalog、services、event-memory/evidence/task-outcome/world SQLite、CLI raw archive、audit NDJSON、Antigravity session state |
+| production mutation | 无；未 merge、未 restart、未创建 canonical target/manifest、未移动或删除 legacy source |
+| recovery state | 2026-08-07 的约 20GB 首轮快照仍在，但不覆盖本轮盘点出的约 80GB 数据面，不能充当最终 cutover 冷备 |
+
+35 个 blocker 主要不是“任选一个最新文件”就能解决：多个 root 持有真实但互相矛盾的身份、密钥、配置、SQLite 与 append-only 历史。错误选择 authority 会造成语义数据丢失。当前 fail-closed 设计避免静默覆盖，但若在此状态 merge，首次 runtime restart 会在启动前失败并造成停机。
+
+本轮还发现一个合成 fixture 未覆盖的实现缺口：audit policy 声明 `jsonl-union`，真实文件使用 `.ndjson`，现有 adapter 只识别 `.jsonl`，因此会把本可逐记录合并的审计历史判成 raw-history conflict。已保留精确 RED 测试证据；修复、扩展 fixture 与重新 review 属于后续重构，不得作为当前 cutover 的临时补丁绕过其余 35 个冲突。
+
+### Superseding delivery plan
+
+1. **暂停 #3467**：PR 保持 open 作为实现与证据载体；在新计划闭合前不 merge、不 restart、不 cutover。
+2. **Phase 0 — 冻结迁移面，不冻结开发**：先交付 canonical resolver、typed asset catalog、#1303 accounts/cats compatibility 修复与 anti-drift guard。guard 令 resolver/catalog 外新增持久路径直接 CI 红；已有安装不自动搬家、不 dual-write，每类资产仍只有一个显式 active writer root。
+3. **Phase 1 — 离线 reconciler**：默认只读，按 asset 展示全部来源、hash/SQLite 语义差异与建议 authority；每项冲突必须有显式 owner 决策，输出可审计 manifest，不按 mtime 猜真相。
+4. **Phase 2 — 完整克隆演练**：建立覆盖全部 active roots 的 stopped-writer 冷备并验证 SQLite/WAL，再对 disposable clone 迁移、启动与恢复；只有 dry-run `0 blocker`、restore drill 成功、关键用户旅程通过才进入预迁移。
+5. **Phase 3 — 按资产资格预迁移**：immutable/hash-stable 目录与可证明 append-only 的 closed segments 可在线预拷贝；SQLite、活跃日志及没有可靠 delta 协议的资产不得套用通用 rsync，必须使用 typed snapshot/delta adapter 或留到停写窗口。
+6. **Phase 4 — 受保护 cutover**：由不依赖 Clowder AI runtime 的独立执行器完成停写、最终冷备、增量同步、验证、activation 与冒烟。legacy source 保持只读；删除永远是后续单独授权。只有在新 writer 尚未放行前，activation 才允许纯“切指针”回退；放行新写入后，回退必须先 reconcile 新增数据，禁止声称秒级无损回滚。
+7. **消息状态机独立处置**：queue/hold/provider/message model 的运行态异常不是 F289 的迁移依赖，不与本 PR 捆绑；相关 owner 可在当前 main 上独立修复和合入。
+
+### Migration-surface freeze contract
+
+- “冻结迁移面”冻结的是**资产种类、路径构造入口与裁决协议**，不是宣称 legacy 字节从此静止。Phase 0 落地前，旧 roots 仍可能增长；落地后，增长必须发生在 catalog 已知的唯一 active path 上，因此 reconciliation 的规则集合封闭、数据量仍可观测。
+- 冲突条数增加不自动等于纯机器成本。同一稳定 ID 的身份/密钥冲突、不可合并 SQLite 或跨 store 引用仍需语义 authority；工具只负责枚举、证明和执行已批准的规则。
+- 任何继续开发的 feature 若新增 durable state，必须登记 lifecycle、canonical relative path、compatibility/migration disposition 与测试；否则 anti-drift guard 阻塞。开发不集体停，最终仅冻结生产 writers。
+
+### Downstream unblock contract
+
+- F279、K-2D、#3556/#3558 及其他 feature **不得继续等待 #3467 合入，也不得把其未落地 resolver 当成 main 契约**。
+- 下游应基于当前 main 完成自己的 domain/process/transport 改动；需要持久路径时保留窄注入边界或现有兼容 resolver，避免新造第二套 implicit root。
+- 下游新增持久状态必须进入 typed asset catalog/guard 契约；“已解阻”不等于可以继续裸拼 cwd/projectRoot 数据路径。
+- F289 后续若产出稳定的 canonical resolver，将以新的 exact-main 契约通知下游；适配属于届时的窄增量，不要求下游为本 PR 预留 merge/cutover 顺序。
+- 当前 main 不含 F289；恢复当前 main 的猫咖不会触发本迁移。
 
 ## Architecture Ownership
 
@@ -54,13 +99,13 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 - global accounts/credentials/catalog 与 profile/memory/log/transcript/upload 等消费者统一复用 resolver。
 - 新增静态/行为守护测试，阻止新增 cwd/projectRoot/repo-root 持久化 fallback。
 
-### Phase B: 版本化启动迁移与社区升级
+### Phase B: 离线 reconciliation、演练与显式 activation
 
-- API 在任何持久 store 打开或写入前执行 versioned migration；同一份代码同时覆盖源码启动与桌面启动。
-- migration 具备进程锁、幂等 manifest、逐资产 dry-run plan、校验、失败回滚与可诊断结果；marker 只在全量验证完成后提交。
+- 普通 API 首次启动不再承担历史数据搬迁；源码与桌面启动只消费 Phase A 已验证的 active-root/compatibility 契约。
+- 离线 reconciler 具备进程锁、幂等 manifest、逐资产 dry-run、显式 authority、校验与可诊断结果；marker 只在全量验证完成后提交。
 - 冲突时禁止按 mtime/“新文件赢”静默覆盖：JSON 配置按稳定 ID 语义合并；SQLite 使用一致备份/明确迁移器；目录资产仅合并无冲突路径，非同内容碰撞 fail-closed 并保留两侧证据。
-- startup migration 不依赖 F273。F273 只影响桌面代码如何到达用户；源码用户的 `pnpm start` 与桌面用户更新后的 API 第一次启动走同一迁移入口。
-- 本地 cutover 在停写窗口内完成最终增量同步、验证与 legacy active-root 退役；冷备保留为恢复资产，不参与运行时寻址。
+- 预迁移能力按资产证明，不建立“所有文件都能在线 rsync”的全局假设。正式 activation 只在 clone rehearsal、restore proof、最终 stopped-writer delta 与关键旅程全部通过后发生。
+- legacy source 在 cutover 后保持只读观察期；只有新 writer 尚未释放时允许 pointer-only rollback，物理清理与 post-write rollback 分别走独立授权/前向 reconciliation。
 
 ### Phase C: Desktop 与开发隔离
 
@@ -85,26 +130,26 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 
 ## User Journey
 
-### Primary Journey: 源码用户升级后无感归位
+### Primary Journey: 既有安装安全收敛且不阻塞正常启动
 
 - **Scope unit**: workspace
 - **Actor**: 源码用户
-- **Entry**: 用户在既有安装上运行 `pnpm start` 并获得含 F289 的版本
+- **Entry**: 用户在既有安装上获得 Phase A resolver/compatibility 版本
 - **Flow**:
-  1. API 启动先发现 legacy roots 并生成迁移 plan。
-  2. 无冲突数据自动迁到 canonical root；有冲突则启动 fail-closed，清楚展示资产、两侧路径与恢复动作，不伪装成功。
-  3. 验证通过后 API 正常启动，原有账号、密钥、猫名册、记忆、上传和日志仍可用。
-  4. 后续启动读取 versioned manifest，不重复迁移，也不再读取旧 root。
-- **Success evidence**: fresh temp-home 端到端 fixture + legacy source tree → 首启迁移 → 二次启动 no-op → API route 回归
+  1. API 通过统一 resolver 选择每类资产的唯一 active path；既有数据不因普通启动自动搬迁。
+  2. #1303 的 account create 与 cat binding 读写同一 store，legacy-only 安装仍可读。
+  3. 离线 reconciler 在独立命令中生成 plan；冲突 fail-closed，不影响正常 API 启动。
+  4. clone rehearsal 与受保护 cutover 通过后，activation 才把 active truth 切到 canonical root。
+- **Success evidence**: #1303 route E2E + boundary guard + offline dry-run manifest + clone migrate/restore drill + protected cutover report
 - **Non-goals**: 不把 F273 updater 改造成通用迁移框架；不迁移 Redis 6399；不把 Git 文档/skills 搬进 data root
 
 ### Supporting Journeys
 
 | ID | Scope unit | Actor | Flow | Evidence |
 |----|------------|-------|------|----------|
-| S1 | workspace | 桌面用户 | 更新/安装新代码 → API 首启迁移 → 账号与猫绑定读取同一 userData root | desktop service-manager fixture + #1303 回归 |
+| S1 | workspace | 桌面用户 | 更新/安装新代码 → compatibility resolver 保持旧数据可读 → 账号与猫绑定读取同一 active root | desktop service-manager fixture + #1303 回归 |
 | S2 | workspace | 开发猫 | 创建 feature worktree/alpha → 自动得到隔离 data root → 测试不触碰正式数据 | shell fixture + sentinel guard |
-| S3 | workspace | operator | 停写窗口 → 最终增量同步与验证 → runtime 只剩可重建投影 | migration report + legacy root absence/retirement check |
+| S3 | workspace | operator | clone 演练 → 独立执行器停写 → 最终增量/activation/冒烟 → 放行新 writer | migration report + restore proof + activation/rollback boundary evidence |
 
 ## 需求点 Checklist
 
@@ -112,8 +157,8 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 |----|---------------------------|---------|----------|------|
 | R1 | “runtime 这个仓应该只是投影” | AC-A1, AC-C3 | resolver tests + runtime tree audit | [ ] |
 | R2 | “一把修完，修完就完事了，之后不要两份东西了” | AC-A2, AC-B1, AC-B5 | guard + migration E2E + post-cutover audit | [ ] |
-| R3 | “社区小伙伴什么时候帮他们迁移” | AC-B1, AC-B4 | source/desktop first-start fixtures | [ ] |
-| R4 | “代码 + 启动迁移 + 桌面 env + 守护测试，一个原子 PR” | AC-C1, AC-C4 | PR diff + gate | [ ] |
+| R3 | “社区小伙伴什么时候帮他们迁移” | AC-B1, AC-B4 | offline reconciler + clone/restore fixture；普通启动不自动搬历史数据 | [ ] |
+| R4 | 原 one-shot 原子 PR 方向 | AC-C1, AC-C4 | 已由 KD-13 否决；按 resolver/guard、reconciler、cutover 分阶段 review | [x] superseded |
 | R5 | worktree 开发不能误碰正式数据 | AC-C2 | sentinel integration test | [ ] |
 | R6 | 本地冷备先做 | AC-B6 | backup path + SQLite quick_check + final stopped-writer delta check | [ ] |
 | R7 | “现在到底啥玩意在 cat-cafe、啥玩意在 runtime” | AC-A4 | typed asset census + lifecycle scope tests | [ ] |
@@ -133,27 +178,27 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 - [ ] AC-A4: owner-global / project-scoped / runtime-ephemeral / rebuildable-cache / Git-truth 五类资产有 typed census；project-scoped path 使用稳定 project key，同 repo 多 worktree 不产生多份正式 truth，显式开发 data root 则完整隔离。
 - [ ] AC-A3: `runtime-data-root` ownership cell 登记 canonical contract、migration owner 与主要代码锚点，ownership generator 检查通过。
 
-### Phase B（安全启动迁移）
+### Phase B（离线 reconciliation 与受保护 cutover）
 
-- [ ] AC-B1: temp-home E2E 证明 legacy-only 安装首启迁移成功、所有目标资产可读、二次启动严格 no-op，且迁移在 store open/write 前完成。
-- [ ] AC-B2: 并发启动只允许一个迁移 writer；中途失败不写完成 marker，下次可恢复；marker/manifest 带 schema version、source provenance、asset verdict 与校验信息。
-- [ ] AC-B3: JSON 互补/相同/冲突、目录相同/冲突、SQLite 目标缺失/相同/不同等 fixture 全覆盖；不同内容不按 mtime 静默覆盖。
-- [ ] AC-B4: 源码 `pnpm start` 与桌面 API 启动消费同一 migration entrypoint；F273 合入与否不改变迁移正确性。
-- [ ] AC-B5: migration 完成后任何 runtime read/write 都不再触达 legacy root；本地 cutover 后 runtime 活跃用户数据归零，备份目录不被 resolver 扫描。
-- [ ] AC-B6: 本地恢复快照可读；正式 cutover 前停写增量校验无差异，SQLite consistent backup `quick_check=ok`。
+- [ ] AC-B1: 离线命令默认 dry-run；真实/fixture legacy roots 均只生成 typed inventory、冲突与 authority manifest，不影响普通 API 启动。
+- [ ] AC-B2: reconciler 并发只允许一个 writer；中途失败不写 activation marker，下次可恢复；manifest 带 schema version、source provenance、authority 与 asset verdict。
+- [ ] AC-B3: JSON/NDJSON、目录、SQLite、append-only 与 unknown entry fixture 全覆盖；不同内容不按 mtime 静默覆盖，每类预迁移资格有独立证明。
+- [ ] AC-B4: disposable clone 完成 migrate → start → critical journeys → restore；源数据 hash/SQLite integrity 与恢复结果可审计。
+- [ ] AC-B5: 受保护 cutover 由 runtime 外独立执行器完成；writer freeze、最终 delta、activation、pre-write smoke 与 writer release 是显式 gate。writer release 前可回退 activation，之后回退必须 reconcile 新写入。
+- [ ] AC-B6: 覆盖全部 active roots 的 stopped-writer 冷备可恢复；SQLite consistent backup `quick_check/integrity_check=ok`；legacy source 保持只读，删除需独立授权。
 
 ### Phase C（桌面与开发隔离）
 
 - [ ] AC-C1: desktop `service-manager.js` 仅需设置 `CAT_CAFE_DATA_DIR=userDataDir` 即覆盖默认资产路径；#1303 新建账号后绑定猫猫的回归测试通过。
 - [ ] AC-C2: feature worktree、alpha 与 test 默认获得独立临时 data root；sentinel 证明不会读写 `~/.cat-cafe`，Redis 端口保持 6398。
 - [ ] AC-C3: runtime/workspace/data 三轴测试证明代码投影、Git 真相源、持久状态互不 fallback。
-- [ ] AC-C4: 以上代码、启动迁移、桌面 env、隔离与守护测试位于一个原子 PR；full gate 与非作者数据迁移 review 通过。
+- [ ] AC-C4: resolver/guard、offline reconciler、activation/cutover 分别以风险匹配的 PR 交付；每个切片有 exact-HEAD gate/review，任一切片不得借 continuity 越过新的数据风险面。
 
 ## Dependencies
 
 - **Evolved from**: F231（已验证 profile 真相不能依赖 cwd/worktree）
 - **Related**: F127（账号/猫实例配置语义）、F214（根目录卫生）、F249（project-scoped capabilities）、F260（per-user 持久真相）、F273（桌面代码分发；不是 blocker）
-- **Blocked by**: 无；F273 可独立先后合入
+- **Blocked by**: 生产 cutover 被真实数据 authority reconciliation、完整冷备/恢复演练与分阶段方案阻塞；F273、F279、K-2D、消息状态机及其他 feature 不被 F289 阻塞，可基于当前 main 独立推进
 
 ## Risk
 
@@ -161,8 +206,8 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 |------|------|
 | 活跃 SQLite/WAL 或 append-only 文件被非一致复制 | SQLite online backup + final stopped-writer delta + quick/integrity check |
 | home 与 runtime 都已有不同 truth，自动覆盖造成丢数据 | 逐资产 typed merge；不同内容 fail-closed；保留 source provenance 与恢复快照 |
-| migration 在 store 已写新 root 后才运行，形成第三份状态 | bootstrap preflight 必须先于任何持久 store open/write，integration test 锁顺序 |
-| 多进程同时首启 | filesystem lock + crash-safe manifest commit + idempotent retry |
+| compatibility 阶段出现 legacy + canonical dual-write，形成第三份状态 | 每类资产只有一个 active writer root；resolver/catalog 注入 + anti-drift guard；禁止隐式 dual-write |
+| 多进程同时执行 reconciler/cutover | filesystem lock + crash-safe manifest commit + idempotent retry；普通 API 启动不执行历史迁移 |
 | worktree/alpha 统一后误碰正式数据 | 启动脚本自动注入隔离 root + sentinel fail-fast guard |
 | 旧 per-asset env 用户升级后行为变化 | 显式细粒度 override 保持最高优先级并有 compatibility tests；仅删除隐式 cwd fallback |
 | startup migration 自动删除社区唯一副本 | 先复制/验证/切换 truth，再把 legacy root 标记为 inactive；删除只在显式本地 cutover/授权边界内执行 |
@@ -178,10 +223,13 @@ Why: 现有 `memory`/`identity-session` 等 cell 各自拥有数据语义，但�
 | KD-5 | 冲突 fail-closed，不按 mtime 猜 truth | 迁移涉及密钥、账号、SQLite 与用户记忆，猜错不可接受 | 2026-08-07 |
 | KD-6 | 服务不停的首轮复制是 recovery snapshot，不冒充严格 cold backup | live JSONL 与 SQLite WAL 的实测变化证明需要最终停写增量窗口 | 2026-08-07 |
 | KD-7 | 一个 physical data root 内保留 lifecycle scope，不把所有 `.cat-cafe` 文件拍平成全局一份 | capabilities/governance/plugin 等语义按 project 隔离；统一 root 解决选址，不抹掉 ownership | 2026-08-07 |
+| KD-13 | 暂停 KD-3 的 one-shot 原子 cutover 与普通首次启动自动迁移；改为 resolver/compatibility、离线 reconciliation、clone rehearsal、受保护 cutover 分阶段交付 | 真实 stopped-writer dry-run 在 95 项资产/9 个 roots/约 80GB 数据上发现 35 个语义冲突与 61 个未知条目；仓库全绿不能替代真实 authority 决策与 restore proof | 2026-08-11 |
+| KD-14 | 冻结 migration surface，不冻结全家开发：Phase 0 以 typed catalog + anti-drift guard 封闭新增资产种类和路径入口；已有安装不自动搬家、不 dual-write | 人肉 main freeze 无法持续；真正的人脑成本来自新增资产种类/路径协议，应该由 guard 阻止，而非让无关 feature 等待 | 2026-08-11 |
+| KD-15 | 在线预迁移与 pointer rollback 都按资产/写入阶段证明；不把“两阶段复制”或“秒级切回”当全局能力 | SQLite/WAL、活跃 append-only 与跨 store 引用没有统一 delta；writer release 后 canonical 新写入无法靠切回旧 root 无损保留 | 2026-08-11 |
 
 ## Tips Contribution（F244）
 
-`tips_exempt: migration is automatic and introduces no new user action; failures must surface as actionable startup diagnostics rather than tips.`
+`tips_exempt: F289 migration is an explicit operator/reconciler workflow, not a discoverability tip; diagnostics belong to the offline plan/manifest and protected cutover report.`
 
 ## Review Gate
 

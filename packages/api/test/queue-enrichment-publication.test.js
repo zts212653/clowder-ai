@@ -25,6 +25,28 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     ...overrides,
   });
 
+  const makeWithdrawnCustody = (overrides = {}) => ({
+    version: 1,
+    entryId: 'withdrawn-entry',
+    revision: 2,
+    ownerAuthProvenance: 'strict',
+    intent: 'execute',
+    status: 'terminal',
+    allTargetCats: ['opus'],
+    pendingTargetCats: [],
+    notifiedByCatIds: [],
+    seenByCatIds: [],
+    seenInvocationIdByCatId: {},
+    failedByCatIds: [],
+    handledByCatIds: [],
+    withdrawnByCatIds: ['opus'],
+    withdrawnAtByCatId: { opus: 20 },
+    priority: 'normal',
+    createdAt: 1,
+    updatedAt: 20,
+    ...overrides,
+  });
+
   it('serializes same-scope snapshots while a different user remains independent', async () => {
     const emitted = [];
     let releaseOlder;
@@ -40,11 +62,17 @@ describe('F220 intake: queue snapshot publication ordering', () => {
             releaseOlder = resolve;
           });
         }
-        return null;
+        return messageId === 'msg-terminal' ? { id: messageId, queueCustody: makeWithdrawnCustody() } : null;
       },
     };
     const socketManager = {
-      emitToUser: (userId, _event, data) => emitted.push({ userId, action: data.action, queue: data.queue }),
+      emitToUser: (userId, _event, data) =>
+        emitted.push({
+          userId,
+          action: data.action,
+          queue: data.queue,
+          messageReceipts: data.messageReceipts,
+        }),
     };
 
     const older = emitQueueUpdated(
@@ -56,7 +84,9 @@ describe('F220 intake: queue snapshot publication ordering', () => {
       'older',
     );
     await olderStartedPromise;
-    const newer = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'newer');
+    const newer = emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'newer', {
+      receiptMessageIds: ['msg-terminal'],
+    });
     const independent = emitQueueUpdated(socketManager, 'u2', 't1', [], messageStore, 'independent');
 
     try {
@@ -81,6 +111,17 @@ describe('F220 intake: queue snapshot publication ordering', () => {
       emitted.filter((event) => event.userId === 'u1').map((event) => event.action),
       ['older', 'newer'],
     );
+    assert.deepEqual(emitted.find((event) => event.action === 'newer')?.messageReceipts, [
+      {
+        messageId: 'msg-terminal',
+        queueReceipt: {
+          version: 1,
+          entryId: 'withdrawn-entry',
+          targets: [{ catId: 'opus', state: 'withdrawn', withdrawnAt: 20 }],
+          reminderAttempts: [],
+        },
+      },
+    ]);
   });
 
   it('freezes mutable queue entries at publication call time', async () => {
@@ -184,6 +225,41 @@ describe('F220 intake: queue snapshot publication ordering', () => {
       replyTo: 'msg-parent',
     });
     assert.deepEqual(emitted[0].queue[0].targetStates, {});
+  });
+
+  it('publishes message-bound terminal receipts after withdrawal empties the Queue', async () => {
+    const emitted = [];
+    const terminalCustody = makeWithdrawnCustody();
+    const messageStore = {
+      getById: async (messageId) =>
+        messageId === 'msg-withdrawn' ? { id: messageId, queueCustody: terminalCustody } : null,
+    };
+    const socketManager = {
+      emitToUser: (_userId, _event, data) => emitted.push(data),
+    };
+
+    await emitQueueUpdated(socketManager, 'u1', 't1', [], messageStore, 'removed', {
+      receiptMessageIds: ['msg-withdrawn', 'msg-withdrawn', 'msg-missing'],
+    });
+
+    assert.deepEqual(emitted, [
+      {
+        threadId: 't1',
+        queue: [],
+        action: 'removed',
+        messageReceipts: [
+          {
+            messageId: 'msg-withdrawn',
+            queueReceipt: {
+              version: 1,
+              entryId: 'withdrawn-entry',
+              targets: [{ catId: 'opus', state: 'withdrawn', withdrawnAt: 20 }],
+              reminderAttempts: [],
+            },
+          },
+        ],
+      },
+    ]);
   });
 
   it('does not poison a same-scope successor when the previous emitter throws', async () => {

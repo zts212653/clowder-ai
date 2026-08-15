@@ -263,4 +263,39 @@ describe('F168 external review aggregate', () => {
     assert.equal(state.lastDeliveredHeadSha, 'head-4');
     assert.equal(state.delivery.kind, 'delivered');
   });
+
+  it('repos with no checks: CI pass unblocks readiness so verdict is recordable', () => {
+    // Bug reproduction: clowder-ai has no GitHub checks. After CiCdRouter proves
+    // an empty rollup is stable for one poll interval, it promotes that observation
+    // to pass so readiness can advance without treating the first empty poll as green.
+    let state = createExternalReviewAggregate(assigned({ cloudPolicy: 'optional' }));
+    state = applyExternalReviewEvent(state, event('case.head_observed', { headSha: 'head-no-ci' })).value;
+
+    // Simulate the settled pass emitted by the poller's empty-rollup stability guard.
+    state = applyExternalReviewEvent(state, event('case.ci_observed', { headSha: 'head-no-ci', status: 'pass' })).value;
+
+    // Readiness decision must be 'ready', not 'wait/ci_pending'
+    assert.deepEqual(decideExternalReviewReadiness(state), { kind: 'ready', headSha: 'head-no-ci' });
+
+    // review_ready must succeed
+    const ready = applyExternalReviewEvent(state, event('case.review_ready', { headSha: 'head-no-ci' }));
+    assert.equal(ready.ok, true);
+    assert.equal(ready.value.lifecycle, 'rereview_required');
+
+    // Verdict must be recordable (not head_not_ready)
+    const verdict = applyExternalReviewEvent(
+      ready.value,
+      event('case.review_verdict_recorded', {
+        headSha: 'head-no-ci',
+        delivery: {
+          kind: 'delivered',
+          headSha: 'head-no-ci',
+          githubUrl: 'https://github.com/zts212653/clowder-ai/pull/1342#pullrequestreview-4920606010',
+          deliveredAt: 2_000,
+        },
+      }),
+    );
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.value.lifecycle, 'delivered');
+  });
 });

@@ -20,10 +20,13 @@ import type {
   SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
 import {
+  ACTION_SUBJECT_REF_DESCRIPTION,
   actionSuccessorMetadataSchema,
   CALLBACK_AUTH_FAILURE_REASONS,
   DEVELOPMENT_SOP_STAGE_IDS,
   dispatchProposedActionInputSchema,
+  EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION,
+  executableActionSuccessorMetadataSchema,
   extractFeatureIds,
   isCallbackAuthFailureReason,
   isValidRichBlock,
@@ -317,10 +320,6 @@ function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | 
   return { agentKeyCatId: input.agentKeyCatId };
 }
 
-const ACTION_SUBJECT_REF_DESCRIPTION =
-  'subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) ' +
-  'or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.';
-
 const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
   'Executable pairs are closed: review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
   'implement + implementer + task_done requires subject:task:<taskId>. Other family, slot, predicate, or subject combinations are rejected before publication.';
@@ -382,7 +381,7 @@ export const postMessageInputSchema = {
       'Invocation-token same-thread coordination lifecycle. Use active for a real handoff and terminal for the final result. ' +
         'A courtesy reply to terminal is persisted without waking the prior cat.',
     ),
-  action: actionSuccessorMetadataSchema
+  action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
       'Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. ' +
@@ -391,6 +390,8 @@ export const postMessageInputSchema = {
         'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. ' +
         'Use multi_mention for deliberate parallel review/ideation. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
+        ' ' +
         ACTION_SUBJECT_REF_DESCRIPTION,
     ),
   agentKeyCatId: agentKeyCatIdSchema,
@@ -674,7 +675,7 @@ export const crossPostMessageInputSchema = {
         'Not available to agent-key target-thread writes because they have no source relay provenance. ' +
         'GOTCHA: Do not combine coordination with effectClass="assign_work"; approval proposals intentionally do not carry relay provenance.',
     ),
-  action: actionSuccessorMetadataSchema
+  action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
       'Optional durable subject/action/slot successor identity for this cross-thread dispatch. ' +
@@ -684,6 +685,8 @@ export const crossPostMessageInputSchema = {
         'New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. ' +
         'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
+        ' ' +
         ACTION_SUBJECT_REF_DESCRIPTION,
     ),
   proposedAction: dispatchProposedActionInputSchema
@@ -924,10 +927,10 @@ export async function handlePostMessage(
     );
   }
   if (input.action) {
-    const parsedAction = actionSuccessorMetadataSchema.safeParse(input.action);
+    const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
     if (!parsedAction.success) {
       return errorResult(
-        `invalid post_message action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+        `invalid post_message action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
       );
     }
     if (!input.clientMessageId) {
@@ -1275,10 +1278,10 @@ export async function handleCrossPostMessage(input: {
     );
   }
   if (input.action) {
-    const parsedAction = actionSuccessorMetadataSchema.safeParse(input.action);
+    const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
     if (!parsedAction.success) {
       return errorResult(
-        `invalid cross_post_message action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
+        `invalid cross_post_message action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`,
       );
     }
     if (!input.clientMessageId) {
@@ -1663,27 +1666,30 @@ export async function handleRegisterPrTracking(input: {
 export const registerIssueTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   issueNumber: z.number().int().positive().describe('Issue number'),
-  instructions: z
+  when: z
+    .array(
+      z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('issue_comment_added') }).strict(),
+        z.object({ kind: z.literal('issue_author_commented') }).strict(),
+      ]),
+    )
+    .min(1)
+    .max(4)
+    .describe('One to four typed issue conditions, evaluated as flat any-of against a server-frozen baseline.'),
+  nextStep: z
     .string()
-    .max(2000)
-    .optional()
-    .describe('Tracking instructions — appended to trigger messages when issue comment events fire.'),
-  wakePolicy: z
-    .enum(['all_feedback', 'human_participant_activity'])
-    .optional()
-    .describe(
-      "Optional actor policy persisted on this issue tracker. Use 'human_participant_activity' when author and " +
-        "third-party human comments should wake the owner without bot process noise; 'all_feedback' is the default. " +
-        'Bot comments remain in durable event/cursor state but produce no connector delivery or invocation; ' +
-        'missing/unknown actor metadata fails safe to delivery.',
-    ),
+    .min(1)
+    .max(500)
+    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
+  expiresAt: z.number().int().positive().describe('Unix timestamp in milliseconds when responsibility expires.'),
 };
 
 export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
-  instructions?: string;
-  wakePolicy?: 'all_feedback' | 'human_participant_activity';
+  when: Array<{ kind: 'issue_comment_added' } | { kind: 'issue_author_commented' }>;
+  nextStep: string;
+  expiresAt: number;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return withDegradation({
@@ -1694,8 +1700,9 @@ export async function handleRegisterIssueTracking(input: {
         {
           repoFullName: input.repoFullName,
           issueNumber: input.issueNumber,
-          ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-          ...(input.wakePolicy ? { wakePolicy: input.wakePolicy } : {}),
+          when: input.when,
+          nextStep: input.nextStep,
+          expiresAt: input.expiresAt,
         },
         agentKeyOptions(input),
       ),
@@ -2011,7 +2018,7 @@ export const multiMentionInputSchema = {
     .enum(['high-impact', 'cross-domain', 'uncertain', 'info-gap', 'recon'])
     .optional()
     .describe('Which meta-thinking trigger motivated this call'),
-  action: actionSuccessorMetadataSchema
+  action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
       'Optional durable action identity for successor work. Use mode=single for the default one-successor path; ' +
@@ -2022,6 +2029,8 @@ export const multiMentionInputSchema = {
         'New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. ' +
         'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. ' +
+        EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
+        ' ' +
         ACTION_SUBJECT_REF_DESCRIPTION,
     ),
 };
@@ -2033,9 +2042,9 @@ function validateMultiMentionAction(
 ): string | undefined {
   if (!action) return undefined;
 
-  const parsedAction = actionSuccessorMetadataSchema.safeParse(action);
+  const parsedAction = executableActionSuccessorMetadataSchema.safeParse(action);
   if (!parsedAction.success) {
-    return `invalid multi_mention action metadata: ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`;
+    return `invalid multi_mention action metadata: ${EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION} ${parsedAction.error.issues.map((issue) => issue.message).join('; ')}`;
   }
   if (!idempotencyKey) {
     return 'multi_mention action metadata requires idempotencyKey for replay-safe single-flight admission.';
@@ -3286,13 +3295,14 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_register_issue_tracking',
     description:
-      'Register a GitHub issue for comment tracking. New comments on the issue are routed to your current thread. ' +
-      'Call after opening or referencing an issue you want to monitor. ' +
-      'The server resolves threadId and catId from your invocation identity. ' +
-      'GOTCHA: Must be called while callback credentials are still valid.',
+      'Register one explicit, bounded GitHub issue wait for the current task owner. ' +
+      'Use when: you can name the exact typed issue condition that changes your next action: any new comment, or a comment by the exact issue author. ' +
+      'NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. ' +
+      'Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
+      'GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.',
     inputSchema: registerIssueTrackingInputSchema,
     handler: handleRegisterIssueTracking,
     governance: {
@@ -3400,7 +3410,7 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_multi_mention',
     description:
       'Fan out to and collect responses from up to 3 cats, with explicit parallel action leases when the reviews are intentionally independent. ' +
@@ -3495,7 +3505,7 @@ export const callbackTools = [
       'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). ' +
       'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: "做完后源 thread 是否需要结果回来？" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. Server auto-injects a "## 主 Thread" header with routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. ' +
       'OPEN-SOURCE PR HARD GUARD: when title/reason/initialMessage references a zts212653/clowder-ai PR, the server automatically injects an `opensource-ops` maintainer five questions gate plus the real GitHub author/fix-custody boundary. Findings stay with the external author by default; do not route fixes to household cats unless explicit Strategy B authority is recorded. ' +
-      'FORMAL EXTERNAL PR OUTPUT: a proposal that names exactly one clowder-ai PR with formal review intent persists that canonical context. On approval, exactly one preferredCat becomes the child owner and receives `intent=review` + `human_participant_activity` PR tracking; the child also gets PR metadata. Advisory, triage, arbitrary-link, multi-PR, and zero/multi-owner proposals do not auto-track. ' +
+      'FORMAL EXTERNAL PR OUTPUT: a proposal that names exactly one clowder-ai PR with formal review intent persists that canonical context. On approval, exactly one preferredCat becomes the child owner and receives PR metadata. It does NOT auto-register a wait: the reviewer registers one explicit typed predicate only after work is actually blocked on an external condition. Advisory, triage, arbitrary-link, multi-PR, and zero/multi-owner proposals follow the same no-auto-wait rule. ' +
       'PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. ' +
       'INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.',
     inputSchema: proposeThreadInputSchema,

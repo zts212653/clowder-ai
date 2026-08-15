@@ -36,35 +36,41 @@ function createServiceWithPostMessage(catId, toolName = 'cat_cafe_post_message')
   };
 }
 
-function createServiceWithPostMessageThenDistinctFinal(catId) {
-  const service = {
-    callbackPersistedAt: 0,
+function createServiceWithTerminalAckReplacement(catId, messageId = 'callback-terminal-ack') {
+  return {
     async *invoke() {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
       yield {
         type: 'tool_use',
         catId,
         toolName: 'cat_cafe_post_message',
-        toolInput: { content: 'Short proactive callback update.' },
+        toolInput: {
+          content: 'Terminal coordination ACK.',
+          streamDisposition: 'replace_final',
+          coordination: { phase: 'terminal' },
+        },
+        toolUseId: 'post-terminal-ack',
         timestamp: Date.now(),
       };
-      service.callbackPersistedAt = Date.now();
       yield {
         type: 'tool_result',
         catId,
-        content: JSON.stringify({ status: 'ok', threadId: 'thread1', messageId: 'callback-msg-distinct' }),
+        toolUseId: 'post-terminal-ack',
+        content: JSON.stringify({
+          status: 'terminal_ack_recorded',
+          threadId: 'thread1',
+          ...(messageId ? { messageId } : {}),
+        }),
         timestamp: Date.now(),
       };
       yield {
         type: 'text',
         catId,
-        content: 'Detailed final answer that must remain durable after the callback.',
+        content: 'Provider final that should be replaced by the durable terminal ACK.',
         timestamp: Date.now(),
       };
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
-  return service;
 }
 
 function createToolOnlyReplacementService(catId) {
@@ -127,6 +133,37 @@ function createServiceWithMultiplePostResults(catId) {
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
+}
+
+function createServiceWithPostMessageThenDistinctFinal(catId) {
+  const service = {
+    callbackPersistedAt: 0,
+    async *invoke() {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+      yield {
+        type: 'tool_use',
+        catId,
+        toolName: 'cat_cafe_post_message',
+        toolInput: { content: 'Short proactive callback update.' },
+        timestamp: Date.now(),
+      };
+      service.callbackPersistedAt = Date.now();
+      yield {
+        type: 'tool_result',
+        catId,
+        content: JSON.stringify({ status: 'ok', threadId: 'thread1', messageId: 'callback-msg-distinct' }),
+        timestamp: Date.now(),
+      };
+      yield {
+        type: 'text',
+        catId,
+        content: 'Detailed final answer that must remain durable after the callback.',
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+  return service;
 }
 
 function createServiceWithPostMessageAndStreamMetadata(catId) {
@@ -418,6 +455,38 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     assert.equal(streamAppends.length, 0, 'replace_final should keep the callback as the sole durable response');
   });
 
+  it('treats a persisted terminal coordination ACK as a confirmed final replacement', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const persistenceContext = {};
+    const deps = createMockDeps({ opus: createServiceWithTerminalAckReplacement('opus') }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', { persistenceContext })) {
+      // drain
+    }
+
+    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    assert.equal(streamAppends.length, 0, 'the persisted terminal ACK must remain the sole durable response');
+    assert.deepEqual(
+      persistenceContext.persistedOutputMessageIds,
+      ['callback-terminal-ack'],
+      'delivery/session projections must retain the terminal ACK message id without a second final',
+    );
+  });
+
+  it('keeps the provider final when terminal_ack_recorded has no durable message id', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: createServiceWithTerminalAckReplacement('opus', '') }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const streamAppends = appendCalls.filter((message) => message.origin === 'stream' && message.catId === 'opus');
+    assert.equal(streamAppends.length, 1, 'an unproven terminal ACK must fail open and preserve the provider final');
+  });
+
   it('persists a distinct final answer after a successful proactive callback by default', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -578,7 +647,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     const service = createServiceWithPostMessageAndStreamMetadata('opus');
     const deps = createMockDeps({ opus: service }, appendCalls, augmentCalls);
 
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
       parentInvocationId: 'parent-inv-1',
       currentUserMessageId: 'trigger-msg-1',
     })) {
@@ -623,7 +692,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       augmentCalls,
     );
 
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1', {
       parentInvocationId: 'parent-inv-prefixed',
     })) {
       // drain
@@ -652,7 +721,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       appendCalls,
     );
 
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -713,7 +782,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: failedCallbackService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -752,7 +821,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: interleavedService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -798,7 +867,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: interleavedService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -844,7 +913,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: parallelToolService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -890,7 +959,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: outOfOrderService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -940,7 +1009,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: crossPostLikeService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -990,7 +1059,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: statusLikeService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -1040,7 +1109,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: ambiguousToolService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 
@@ -1081,7 +1150,7 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
     };
 
     const deps = createMockDeps({ opus: duplicatedResultService }, appendCalls);
-    for await (const msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
       // drain
     }
 

@@ -260,6 +260,20 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(args[mIdx + 1], 'claude-sonnet-4-6');
   });
 
+  test('terminates option parsing before a dash-prefixed prompt', async () => {
+    const prompt = '- [navigation]\nTreat this entire value as the user prompt.';
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const promise = collect(service.invoke(prompt, { cliConfigArgs: ['--title regression'] }));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.deepEqual(args.slice(-2), ['--', prompt], `expected option terminator immediately before prompt: ${args}`);
+    assert.ok(args.indexOf('--title') < args.indexOf('--'), 'user-defined CLI flags must remain before the terminator');
+  });
+
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

@@ -37,6 +37,24 @@ describe('chatStore workspaceMode', () => {
     expect(useChatStore.getState().rightPanelMode).toBe('workspace');
   });
 
+  it('restores mode and surface without reopening a manually folded Workspace', () => {
+    useChatStore.setState({
+      rightPanelMode: 'status',
+      workspaceMode: 'dev',
+      workspaceSurface: 'home',
+    });
+
+    const { restoreWorkspaceMode, restoreWorkspaceSurface } = useChatStore.getState();
+    restoreWorkspaceMode('tasks');
+    restoreWorkspaceSurface('files');
+
+    expect(useChatStore.getState()).toMatchObject({
+      rightPanelMode: 'status',
+      workspaceMode: 'tasks',
+      workspaceSurface: 'files',
+    });
+  });
+
   // 云端 round 5 P2：workspace/transcript 被 ChatContainer auto-open effect 强制开，
   // 显式关闭必须先退出这两个 mode → status，否则 effect 立即重开（关不掉）。
   it('closeRightPanel exits workspace/transcript to status, leaves status unchanged', () => {

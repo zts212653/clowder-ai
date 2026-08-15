@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-10
+updated: 2026-08-11
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -700,6 +700,16 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **局部正确替代全局一致**：双猫把审查拆成机制映射逐项验算，却没有在交付前让整幅画面作为一个世界运行；R3 还把“共享一个名词”误判成“共享一个坐标系”。 |
 | 纠正轮次 | 1（operator 问“这是我的问题吗”并指出星空会自动唤起宇宙级航行后，fable-5 完成深空化；codex-sol 再校准唤醒码与变轨并收敛）。 |
 | 元心智哪条没执行 | Q3 坐标变换——验证了每条映射，却没把所有元素放回听众会自动加载的同一个物理坐标系做整体预测。 |
+
+### Case E8: 把 runtime 激活授权扩张成内部 PR 合入授权（2026-08-12，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F279 剩余真实 UAT 依赖 runtime 重启，而重启需要 operator 明确授权，因此应把 PR #3604 的 merge 与 runtime activation 捆成一个 Decision Packet，先问operator再合入。 |
+| 实际要求 | 内部 PR 的 review、gate、CI 与 exact-HEAD provenance 闭合后，merge owner 应直接 squash merge；只有 merge 后的 runtime sync/build/restart 需要单独授权。正确状态是先 `main=landed`，未授权时诚实保持 `live=dormant`。 |
+| 偏差根因 | **授权范围混同 + 安全默认过度升级**：没有按 effect 拆开“可自决 merge”与“需授权 restart”，把后一步的权限边界倒灌到前一步；复刻了 Case E3 中“下一状态迁移交回operator”的同型错误。 |
+| 纠正轮次 | 本次 1 次（operator：`0001786543204352-000306-879d3a6a`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
+| 元心智哪条没执行 | Q1 角色确认：当时是证据闭合后的 merge owner，不是权限申请者；Q3 坐标变换：没有把一个“交付动作”拆成 merge 与 activation 两个独立 effect 分别判权。 |
 
 ## Review Gate
 

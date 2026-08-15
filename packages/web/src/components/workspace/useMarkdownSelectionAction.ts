@@ -7,6 +7,8 @@ import type { FloatingSelectionPosition } from './selection-action-position';
 export interface MarkdownSelectionAction {
   text: string;
   position: FloatingSelectionPosition;
+  selectionStart?: number;
+  selectionEnd?: number;
 }
 
 export function useMarkdownSelectionAction(

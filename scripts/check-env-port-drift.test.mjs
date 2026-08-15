@@ -502,6 +502,14 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     );
   });
 
+  it('setup.sh leaves TTS_CACHE_DIR unset so the API uses the stable user-data default', () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/setup.sh'), 'utf-8');
+    assert.ok(
+      !/^TTS_CACHE_DIR=/m.test(content),
+      'setup.sh must not pin the TTS cache to a checkout-relative directory',
+    );
+  });
+
   it(`runtime-worktree.sh API port fallback is ${expectedApiPort}`, () => {
     const fallback = readTsFallback('scripts/runtime-worktree.sh', /API_SERVER_PORT:-(\d+)/);
     assert.equal(

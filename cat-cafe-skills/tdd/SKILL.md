@@ -1,5 +1,6 @@
 ---
 name: tdd
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   Red-Green-Refactor for changes with behavior or regression risk.
   Use when: adding observable behavior, fixing a bug, or changing logic not already covered by a precise executable check.
@@ -54,7 +55,7 @@ REFACTOR 消除重复、改善命名，不新增行为；复跑同一保护集
 
 ## Bug Fix 模式
 
-未知根因、跨层或非确定性 bug 先加载 `debugging`，用[诊断胶囊](../refs/bug-diagnosis-capsule.md)定位；确定根因后再选择 RED：
+未知根因、跨层或非确定性 bug 先加载 `debugging`，用[诊断胶囊](../.cat-cafe-shared-refs/bug-diagnosis-capsule.md)定位；确定根因后再选择 RED：
 
 - 没有现成复现 → 新增失败回归测试；
 - 已有精确失败检查 → 直接把它当 RED；

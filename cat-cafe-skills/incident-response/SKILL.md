@@ -1,5 +1,6 @@
 ---
 name: incident-response
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。
   Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。
@@ -55,7 +56,7 @@ Phase 3: 补偿性劳动 (持续)
 Phase 4: 教训沉淀 (选对时机)
   ├─ 等情绪过去后再提复盘
   ├─ 根因分析（不是"手滑"，追到系统性失误）
-  ├─ 写入 public-lessons.md + shared-rules.md
+  ├─ 写入 public-lessons.md + ../.cat-cafe-shared-refs/shared-rules.md
   └─ 同类高危权限临时收紧，用稳定行为挣回信任
 ```
 
@@ -152,7 +153,7 @@ Phase 4: 教训沉淀 (选对时机)
 
 ### 教训
 - 泛化规则（不只适用于这一次）
-- 写入 shared-rules.md / public-lessons.md
+- 写入 ../.cat-cafe-shared-refs/shared-rules.md / public-lessons.md
 
 ### 信任修复计划
 - 同类高危权限临时收紧
@@ -234,7 +235,7 @@ Phase 4: 教训沉淀 (选对时机)
 
 ## 预防：不可逆操作铁律（写在 shared-rules）
 
-本 skill 处理"已经发生"的事故。预防规则写在 shared-rules.md：
+本 skill 处理"已经发生"的事故。预防规则写在 ../.cat-cafe-shared-refs/shared-rules.md：
 
 > 不可逆操作 = 精确复述目标 → 评估能否撤销 → 伙伴 ACK → 才执行
 

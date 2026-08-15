@@ -6,17 +6,17 @@
  * - 同一 catId 在同一 thread 仍保持单锁语义（新调用 abort 旧调用）
  * - 不同 catId 在同一 thread 可以并发执行
  *
- * F118 D3: TTL guard — slots exceeding maxSlotTtlMs are auto-cleaned on read.
+ * F118 post-close: age only marks a lease as a reaper candidate. Read APIs are
+ * observational and never abort or delete provider ownership.
  */
-
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('invocation-tracker');
 export const DEFAULT_INVOCATION_SLOT_TTL_MS = 75 * 60_000;
-const INVOCATION_SLOT_TTL_ABORT_REASON = 'invocation_slot_ttl_expired';
 
 interface ActiveInvocation {
   controller: AbortController;
+  threadId: string;
   /** Parent execution identity for exact terminal ownership / mutex recovery. */
   executionId?: string;
   userId: string;
@@ -47,6 +47,16 @@ export type SlotState = 'active' | 'canceled' | 'absent';
 export interface ActiveSlotInfo {
   catId: string;
   startedAt: number;
+}
+
+export interface StaleInvocationSlotInfo {
+  threadId: string;
+  catId: string;
+  userId: string;
+  executionId?: string;
+  startedAt: number;
+  ageMs: number;
+  state: 'active' | 'canceled';
 }
 
 export interface CancelResult {
@@ -80,7 +90,7 @@ export class InvocationTracker {
   /** Key: `${threadId}:${catId}` (slotKey) */
   private active = new Map<string, ActiveInvocation>();
   private deleting = new Set<string>();
-  /** F118 D3: max age before a slot is considered stale (default 75min); `0` disables cleanup. */
+  /** F118: max age before a slot becomes a reaper candidate; `0` disables candidacy. */
   private maxSlotTtlMs: number;
 
   constructor(opts?: { maxSlotTtlMs?: number }) {
@@ -89,38 +99,6 @@ export class InvocationTracker {
 
   private slotKey(threadId: string, catId: string): string {
     return `${threadId}:${catId}`;
-  }
-
-  /** F118 D3: Check if an invocation has exceeded the TTL. Aborts and removes it if expired. */
-  private isExpired(key: string, inv: ActiveInvocation): boolean {
-    // CLI_TIMEOUT_MS=0 means manual-cancel-only. Preserve that sentinel when deriving
-    // the tracker TTL: treating 0 as an immediate expiry makes every liveness read
-    // delete a newly-started slot and defeats queue/cancel ownership guards.
-    if (this.maxSlotTtlMs <= 0) return false;
-    const ageMs = Date.now() - inv.startedAt;
-    if (ageMs > this.maxSlotTtlMs) {
-      log.warn(
-        {
-          event: 'invocation_slot_ttl_expired',
-          slotKey: key,
-          catId: inv.catId,
-          userId: inv.userId,
-          executionId: inv.executionId ?? null,
-          ageMs,
-          maxSlotTtlMs: this.maxSlotTtlMs,
-        },
-        'Invocation slot exceeded its zombie TTL; aborting provider work before release',
-      );
-      // The slot is the only live path to the provider's AbortSignal. Deleting it without
-      // aborting leaves the underlying runner (and Codex app-server host lease) alive while
-      // upper layers incorrectly admit a replacement invocation.
-      inv.controller.abort(INVOCATION_SLOT_TTL_ABORT_REASON);
-      // Abort listeners run synchronously and may install a replacement for this slot. Only
-      // retire the exact invocation that crossed the TTL; never delete its replacement.
-      if (this.active.get(key) === inv) this.active.delete(key);
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -144,7 +122,16 @@ export class InvocationTracker {
     // Abort existing invocation for this SAME slot only
     this.active.get(key)?.controller.abort('preempted');
     const controller = new AbortController();
-    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now(), state: 'active', executionId });
+    this.active.set(key, {
+      controller,
+      threadId,
+      userId,
+      catId,
+      catIds,
+      startedAt: Date.now(),
+      state: 'active',
+      executionId,
+    });
     return controller;
   }
 
@@ -167,7 +154,16 @@ export class InvocationTracker {
     if (this.has(threadId)) return null;
     const controller = new AbortController();
     const key = this.slotKey(threadId, catId);
-    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now(), state: 'active', executionId });
+    this.active.set(key, {
+      controller,
+      threadId,
+      userId,
+      catId,
+      catIds,
+      startedAt: Date.now(),
+      state: 'active',
+      executionId,
+    });
     return controller;
   }
 
@@ -329,9 +325,8 @@ export class InvocationTracker {
 
   /** Exact execution fence for non-interrupting per-target reminder attempts. */
   getExecutionId(threadId: string, catId: string): string | undefined {
-    const key = this.slotKey(threadId, catId);
-    const inv = this.active.get(key);
-    if (!inv || this.isExpired(key, inv) || inv.state !== 'active') return undefined;
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    if (!inv || inv.state !== 'active') return undefined;
     return inv.executionId;
   }
 
@@ -344,7 +339,7 @@ export class InvocationTracker {
   /**
    * Get the AbortController for a specific slot, so the execution layer can subscribe
    * to a cat's OWN cancel signal (per-cat isolation). Returns undefined if there is no
-   * active (non-expired) slot.
+   * tracked slot.
    *
    * F-parallel-cancel: startAll/tryStartThreadAll give each cat an INDEPENDENT controller
    * but only RETURN primaryController (catIds[0]'s). Concurrent execution must resolve
@@ -355,7 +350,6 @@ export class InvocationTracker {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
     if (!inv) return undefined;
-    if (this.isExpired(key, inv)) return undefined;
     // NOTE: a 'canceled' tombstone intentionally still returns its (now aborted) controller —
     // that is the whole point of the tombstone (pre-invoke cancel must surface an aborted signal).
     return inv.controller;
@@ -371,7 +365,6 @@ export class InvocationTracker {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
     if (!inv) return 'absent';
-    if (this.isExpired(key, inv)) return 'absent';
     return inv.state;
   }
 
@@ -471,12 +464,12 @@ export class InvocationTracker {
       // F-parallel-cancel: a canceled tombstone is INACTIVE (slot retained only so getController
       // can still hand back the aborted controller for a pre-invoke cancel).
       if (inv.state === 'canceled') return false;
-      return !this.isExpired(key, inv);
+      return true;
     }
-    // Thread-level: check if ANY non-expired, non-canceled slot is active
+    // Thread-level: check if ANY non-canceled slot is active.
     const prefix = `${threadId}:`;
     for (const [key, inv] of this.active) {
-      if (key.startsWith(prefix) && inv.state !== 'canceled' && !this.isExpired(key, inv)) return true;
+      if (key.startsWith(prefix) && inv.state !== 'canceled') return true;
     }
     return false;
   }
@@ -507,6 +500,7 @@ export class InvocationTracker {
       const controller = new AbortController();
       this.active.set(key, {
         controller,
+        threadId,
         userId,
         catId,
         catIds,
@@ -541,7 +535,7 @@ export class InvocationTracker {
     // aborted signal via signalForCat and skips the target at the top of the worklist loop — the cat
     // silently never invokes. Tombstones are purged by start-/complete-family calls; trackExternalSlot
     // is the A2A re-occupation path and must do the same. (bug: 2026-06-11 a2a-handoff-no-spawn.)
-    if (existing && !this.isExpired(key, existing) && existing.state !== 'canceled') {
+    if (existing && existing.state !== 'canceled') {
       // Idempotent if this slot already tracks the same batch. The passed `controller` is the
       // batch gate (route-serial's options.invocationController), stored as batchController below.
       return existing.batchController === controller || existing.controller === controller;
@@ -554,6 +548,7 @@ export class InvocationTracker {
     // batch gate as batchController so cancelAll (whole-invocation stop) still cascades.
     this.active.set(key, {
       controller: new AbortController(),
+      threadId,
       userId,
       catId,
       catIds,
@@ -586,6 +581,7 @@ export class InvocationTracker {
       const controller = new AbortController();
       this.active.set(key, {
         controller,
+        threadId,
         userId,
         catId,
         catIds,
@@ -638,9 +634,32 @@ export class InvocationTracker {
     const result: ActiveSlotInfo[] = [];
     for (const [key, inv] of this.active) {
       // F-parallel-cancel: a canceled tombstone is not an active slot.
-      if (key.startsWith(prefix) && inv.state !== 'canceled' && !this.isExpired(key, inv)) {
+      if (key.startsWith(prefix) && inv.state !== 'canceled') {
         result.push({ catId: inv.catId, startedAt: inv.startedAt });
       }
+    }
+    return result;
+  }
+
+  /**
+   * Enumerate old ownership leases for the explicit liveness reaper. This method
+   * is deliberately non-mutating: age alone is never terminal evidence.
+   */
+  listStaleSlots(now = Date.now()): StaleInvocationSlotInfo[] {
+    if (this.maxSlotTtlMs <= 0) return [];
+    const result: StaleInvocationSlotInfo[] = [];
+    for (const inv of this.active.values()) {
+      const ageMs = now - inv.startedAt;
+      if (ageMs <= this.maxSlotTtlMs) continue;
+      result.push({
+        threadId: inv.threadId,
+        catId: inv.catId,
+        userId: inv.userId,
+        ...(inv.executionId ? { executionId: inv.executionId } : {}),
+        startedAt: inv.startedAt,
+        ageMs,
+        state: inv.state,
+      });
     }
     return result;
   }

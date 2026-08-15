@@ -8,26 +8,22 @@
  *    bridge.dispatch() is called with the RAW mention text + RAW mentioning
  *    catId (NOT the orchestrated prompt, NOT the thread owner userId).
  *
- *  - When the bridge is supplied but either field is missing, dispatch is
- *    SUPPRESSED (not called) — safer than sending wrong content. This pins
- *    the PR-B "library drop" contract: until PR-C plumbs mentionContent /
- *    mentioningCatId from `route-serial`/`route-parallel`, the bridge stays
- *    dormant rather than emitting incorrect deltas.
+ *  - When the bridge is supplied but either provenance field is missing,
+ *    dispatch is suppressed and the child publishes an unavailable status —
+ *    safer than sending wrongly attributed content.
  *
- *  - The KD-17 guard still yields `done` and returns regardless of bridge
- *    state — invokeSingleCat NEVER blocks on bridge completion.
+ *  - The KD-17 guard creates a durable child and waits for the bounded bridge
+ *    outcome before `done`; it never waits for the cloud cat's later response.
  *
- *  - No exception escapes the guard, even if bridge.dispatch rejects.
- *
- * NOTE: this is a unit test of the *guard contract*, not a full route-level
- * integration. Real `route-serial` / `route-parallel` integration tests land
- * with PR-C wiring.
+ *  - No exception escapes the invocation generator if an invalid bridge mock
+ *    rejects; the child reports error events and closes.
  */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { catRegistry } from '@cat-cafe/shared';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
 
 // Ensure gpt-pro is in the registry for these tests (its `openai-chatgpt-pro`
@@ -57,13 +53,19 @@ function makeRecordingBridge({ throwInDispatch = false } = {}) {
     dispatch: async (params) => {
       calls.push(params);
       if (throwInDispatch) throw new Error('bridge boom');
+      return {
+        kind: 'sent',
+        capturedUrl: 'https://chatgpt.com/c/demo',
+        transport: 'host',
+        hostMessageId: 'host-message-1',
+      };
     },
   };
 }
 
 function makeMinimalDeps(extraDeps = {}) {
   return {
-    registry: { put: () => {}, get: () => null, getAll: () => [] },
+    registry: new InvocationRegistry(),
     sessionManager: {},
     threadStore: makeMockThreadStore(),
     apiUrl: 'http://localhost:0',
@@ -77,8 +79,16 @@ const baseParams = {
   prompt: 'FULL ORCHESTRATED PROMPT — must not appear in delta intent',
   userId: 'alice',
   threadId: 'thread_t1',
+  ownerAuthProvenance: 'strict',
   isLastCat: true,
 };
+
+function bridgeStatus(messages) {
+  return messages
+    .filter((message) => message.type === 'system_info' && message.content)
+    .map((message) => JSON.parse(message.content))
+    .find((payload) => payload.type === 'cloud_bridge_status');
+}
 
 async function drainGenerator(gen) {
   const messages = [];
@@ -101,8 +111,8 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
       }),
     );
     assert.equal(bridge.calls.length, 0, 'bridge NOT called when mentionContent missing');
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(messages.at(-1).type, 'done');
   });
 
   it('SUPPRESSES bridge dispatch when bridge wired but mentioningCatId missing', async () => {
@@ -117,8 +127,8 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
       }),
     );
     assert.equal(bridge.calls.length, 0, 'bridge NOT called when mentioningCatId missing');
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(messages.at(-1).type, 'done');
   });
 
   it('DOES dispatch when bridge + both new fields supplied (RAW intent + RAW mentioningCatId)', async () => {
@@ -140,34 +150,37 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     // gpt52 R1 P1-2: calledBy MUST be the mentioning catId, NOT the userId.
     assert.equal(dispatchedParams.calledBy, 'opus-47');
     assert.notEqual(dispatchedParams.calledBy, baseParams.userId, 'calledBy must not be the thread owner userId');
-    assert.equal(messages[0].type, 'done', 'guard still yields done');
+    assert.equal(bridgeStatus(messages).status, 'sent');
+    assert.equal(messages.at(-1).type, 'done', 'guard still yields done');
   });
 
-  it('NEVER blocks the generator on bridge completion (fire-and-forget)', async () => {
+  it('waits for the bounded bridge receipt, but not for the cloud cat response', async () => {
     ensureGptProRegistered();
     let resolveDispatch;
     const slowDispatch = new Promise((res) => {
       resolveDispatch = res;
     });
-    const bridge = {
-      dispatch: () => slowDispatch,
-    };
+    const bridge = { dispatch: () => slowDispatch };
     const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
-    const start = Date.now();
-    const messages = await drainGenerator(
+    let settled = false;
+    const result = drainGenerator(
       invokeSingleCat(deps, {
         ...baseParams,
         mentionContent: 'asap',
         mentioningCatId: 'opus-47',
       }),
-    );
-    const elapsed = Date.now() - start;
-    assert.equal(messages[0].type, 'done');
-    assert.ok(elapsed < 500, `generator returned in ${elapsed}ms — must not await dispatch`);
-    resolveDispatch();
+    ).then((messages) => {
+      settled = true;
+      return messages;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    resolveDispatch({ kind: 'sent', capturedUrl: 'https://chatgpt.com/c/demo', transport: 'host' });
+    const messages = await result;
+    assert.equal(messages.at(-1).type, 'done');
   });
 
-  it('absorbs bridge.dispatch() rejection (no exception escape)', async () => {
+  it('turns an invalid bridge rejection into invocation error events (no generator exception escape)', async () => {
     ensureGptProRegistered();
     const bridge = makeRecordingBridge({ throwInDispatch: true });
     const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
@@ -179,10 +192,11 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
         mentioningCatId: 'opus-47',
       }),
     );
-    assert.equal(messages[0].type, 'done', 'guard yields done despite bridge rejection');
+    assert.ok(messages.some((message) => message.type === 'error'));
+    assert.equal(messages.at(-1).type, 'done');
   });
 
-  it('NO-OPS when bridge is null (back-compat with InvocationDeps without bridge wired)', async () => {
+  it('reports unavailable when bridge is null', async () => {
     ensureGptProRegistered();
     const deps = makeMinimalDeps({ cloudInvokeBridge: null });
     const messages = await drainGenerator(
@@ -192,11 +206,11 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
         mentioningCatId: 'opus-47',
       }),
     );
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(messages.at(-1).type, 'done');
   });
 
-  it('NO-OPS when bridge field absent (undefined) from deps', async () => {
+  it('reports unavailable when bridge field is absent', async () => {
     ensureGptProRegistered();
     const deps = makeMinimalDeps(); // no cloudInvokeBridge at all
     const messages = await drainGenerator(
@@ -206,7 +220,7 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
         mentioningCatId: 'opus-47',
       }),
     );
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].type, 'done');
+    assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(messages.at(-1).type, 'done');
   });
 });

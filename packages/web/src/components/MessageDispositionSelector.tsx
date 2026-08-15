@@ -189,7 +189,13 @@ export function MessageDispositionSelector({
                 aria-pressed={scopeOverride === disposition}
                 disabled={controller.loading || (disposition === 'continue_current' && carrierSupport !== 'exact')}
                 onClick={() => void choose(disposition)}
-                className="flex items-start gap-2 rounded-xl border border-cafe px-3 py-2 text-left transition-colors hover:bg-cafe-surface-elevated disabled:cursor-wait disabled:opacity-60"
+                className={`flex items-start gap-2 rounded-xl border border-cafe px-3 py-2 text-left transition-colors hover:bg-cafe-surface-elevated disabled:opacity-60 ${
+                  controller.loading
+                    ? 'disabled:cursor-wait'
+                    : disposition === 'continue_current' && carrierSupport !== 'exact'
+                      ? 'disabled:cursor-not-allowed'
+                      : ''
+                }`}
               >
                 <span
                   className={`mt-1 h-2 w-2 flex-none rounded-full ${

@@ -40,7 +40,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleAckMentions",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_amend_person_interaction",
@@ -253,7 +253,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleAmendPersonInteraction",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_audio_capture_start",
@@ -692,7 +692,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleBootcampEnvCheck",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_capture_paw_feel",
@@ -761,7 +761,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCheckPermissionStatus",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_community_await_external",
@@ -805,7 +805,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityAwaitExternal",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_community_guardian_signoff",
@@ -912,7 +912,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityGuardianSignoff",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_community_request_guardian",
@@ -969,7 +969,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCommunityRequestGuardian",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_complete_a2a_dispatch",
@@ -1011,7 +1011,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCompleteA2ADispatch",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_complete_managed_hold",
@@ -1053,7 +1053,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCompleteManagedHold",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_correct_person_claim",
@@ -1177,7 +1177,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCorrectPersonClaim",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_create_rich_block",
@@ -1221,7 +1221,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCreateRichBlock",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_create_task",
@@ -1311,7 +1311,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCreateTask",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_cross_post_message",
@@ -1335,16 +1335,12 @@
           },
           "action": {
             "additionalProperties": false,
-            "description": "Optional durable subject/action/slot successor identity for this cross-thread dispatch. Requires explicit clientMessageId and targetCats. mode=single allows exactly one target; mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
+            "description": "Optional durable subject/action/slot successor identity for this cross-thread dispatch. Requires explicit clientMessageId and targetCats. mode=single allows exactly one target; mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. Executable action pairs are closed: review + reviewer + review_delivered, or implement + implementer + task_done. Example: actionFamily=\"review\", successorSlot=\"reviewer\", terminalPredicate.kind=\"review_delivered\". merge/pr_merged and every other reserved vocabulary remain unavailable until their terminal completion producer is registered. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
             "properties": {
               "actionFamily": {
                 "enum": [
                   "review",
-                  "merge",
-                  "investigate",
-                  "implement",
-                  "verify",
-                  "vision_guard"
+                  "implement"
                 ],
                 "type": "string"
               },
@@ -1446,36 +1442,21 @@
                 "type": "object"
               },
               "subjectRef": {
+                "description": "subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
                 "maxLength": 240,
                 "minLength": 1,
+                "pattern": "^(?:pr:[^/\\s\\x1f]+\\/[^#\\s\\x1f]+#[1-9]\\d*|subject:[a-z][a-z0-9_-]{0,63}:[^\\s\\x1f]{1,200})$",
                 "type": "string"
               },
               "successorSlot": {
                 "enum": [
                   "reviewer",
-                  "merge_owner",
-                  "investigator",
-                  "implementer",
-                  "verifier",
-                  "vision_guardian"
+                  "implementer"
                 ],
                 "type": "string"
               },
               "terminalPredicate": {
                 "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "const": "pr_merged",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind"
-                    ],
-                    "type": "object"
-                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -1497,73 +1478,6 @@
                   {
                     "additionalProperties": false,
                     "properties": {
-                      "headSha": {
-                        "$ref": "#/properties/action/properties/terminalPredicate/anyOf/1/properties/headSha"
-                      },
-                      "kind": {
-                        "const": "ci_passed",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "headSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "commandDigest": {
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "test_passed",
-                        "type": "string"
-                      },
-                      "revisionSha": {
-                        "maxLength": 64,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "commandDigest",
-                      "revisionSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "freshnessKey": {
-                        "maxLength": 200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "durable_verdict",
-                        "type": "string"
-                      },
-                      "verdictRef": {
-                        "maxLength": 300,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "verdictRef",
-                      "freshnessKey"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
                       "kind": {
                         "const": "task_done",
                         "type": "string"
@@ -1574,8 +1488,7 @@
                     ],
                     "type": "object"
                   }
-                ],
-                "description": "Typed completion parameters; server catalog owns predicate semantics and subject binding."
+                ]
               }
             },
             "required": [
@@ -1792,7 +1705,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:9ac8cd42560932a63f7ac7f393447b68ab6088de9ff471256e9f4f593306dfac",
+      "inputSchemaDigest": "sha256:db51cfa65b8a0f76e5f0e16757a9c5239f72fcbd6bcc1bceb20d15fb31bc1d71",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -1805,7 +1718,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleCrossPostMessage",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_defer_person_memory_delta",
@@ -1936,7 +1849,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleDeferPersonMemoryDelta",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_drill_memory_cue",
@@ -1982,7 +1895,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleDrillMemoryCue",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_drill_person_memory",
@@ -2074,7 +1987,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleDrillPersonMemory",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_feat_index",
@@ -2122,7 +2035,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleFeatIndex",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_finance_query",
@@ -2253,7 +2166,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleForgetDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_forget_person",
@@ -2299,7 +2212,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPerson",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_forget_person_memory_proposal",
@@ -2345,7 +2258,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleForgetPersonMemoryProposal",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_generate_document",
@@ -2401,7 +2314,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGenerateDocument",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_available_guides",
@@ -2431,7 +2344,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetAvailableGuides",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_message",
@@ -2492,7 +2405,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetMessage",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_pending_mentions",
@@ -2535,7 +2448,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetPendingMentions",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_person_memory_proposal_status",
@@ -2582,7 +2495,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetPersonMemoryProposalStatus",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_rich_block_rules",
@@ -2643,7 +2556,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadCats",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_thread_context",
@@ -2729,7 +2642,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadContext",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_get_thread_metadata",
@@ -2759,7 +2672,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGetThreadMetadata",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_graph_resolve",
@@ -2863,7 +2776,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleGuideControl",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_hold_ball",
@@ -2985,7 +2898,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleHoldBall",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_library_archive",
@@ -3516,7 +3429,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleListLabels",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_list_paw_feel_inbox",
@@ -3819,7 +3732,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleListTasks",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_list_threads",
@@ -3876,7 +3789,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleListThreads",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_mark_generalizable",
@@ -3929,7 +3842,7 @@
       "actions": [
         "command"
       ],
-      "activeState": "migration-candidate",
+      "activeState": "canonical",
       "description": "Fan out to and collect responses from up to 3 cats, with explicit parallel action leases when the reviews are intentionally independent. Use when: deliberate independent multi-cat review/ideation needs aggregation. NOT for: a new same-thread single successor (use post_message with action.mode=\"single\") or simple cross-thread notification (use cross_post_message). Output: returns request/status immediately; admitted responses are aggregated and routed to callbackTo, while conflicts return safe_wait without creating request/timer/queue work. REQUIRES: searchEvidenceRefs (list what you searched first) OR overrideReason (why you're skipping search). GOTCHA: legacy action.mode=\"single\" callers remain accepted during migration and still require one target + idempotencyKey; new single-successor calls should move to post_message. GOTCHA: callbackTo is usually your own catId. For the same subjectRef+actionFamily+successorSlot, accept safe_wait. Fallback must use replace with the active leaseId/generation after server-recorded failed/canceled/unavailable evidence. Only deliberate independent review, #ideate, or explicit operator fan-out may use mode=parallel with parallelIntent.",
       "descriptionDigest": "sha256:6188f77a761b21d7e8fe7dc3fe7ecb6c9e63d1c1a57d7dc6e2e82e3d747bab3e",
       "descriptionCharacters": 1182,
@@ -3940,16 +3853,12 @@
         "properties": {
           "action": {
             "additionalProperties": false,
-            "description": "Optional durable action identity for successor work. Use mode=single for the default one-successor path; a second call for the same subjectRef+actionFamily+successorSlot returns safe_wait instead of spawning another cat. Use mode=parallel with parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
+            "description": "Optional durable action identity for successor work. Use mode=single for the default one-successor path; a second call for the same subjectRef+actionFamily+successorSlot returns safe_wait instead of spawning another cat. Use mode=parallel with parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. Executable action pairs are closed: review + reviewer + review_delivered, or implement + implementer + task_done. Example: actionFamily=\"review\", successorSlot=\"reviewer\", terminalPredicate.kind=\"review_delivered\". merge/pr_merged and every other reserved vocabulary remain unavailable until their terminal completion producer is registered. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
             "properties": {
               "actionFamily": {
                 "enum": [
                   "review",
-                  "merge",
-                  "investigate",
-                  "implement",
-                  "verify",
-                  "vision_guard"
+                  "implement"
                 ],
                 "type": "string"
               },
@@ -4051,36 +3960,21 @@
                 "type": "object"
               },
               "subjectRef": {
+                "description": "subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
                 "maxLength": 240,
                 "minLength": 1,
+                "pattern": "^(?:pr:[^/\\s\\x1f]+\\/[^#\\s\\x1f]+#[1-9]\\d*|subject:[a-z][a-z0-9_-]{0,63}:[^\\s\\x1f]{1,200})$",
                 "type": "string"
               },
               "successorSlot": {
                 "enum": [
                   "reviewer",
-                  "merge_owner",
-                  "investigator",
-                  "implementer",
-                  "verifier",
-                  "vision_guardian"
+                  "implementer"
                 ],
                 "type": "string"
               },
               "terminalPredicate": {
                 "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "const": "pr_merged",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind"
-                    ],
-                    "type": "object"
-                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -4102,73 +3996,6 @@
                   {
                     "additionalProperties": false,
                     "properties": {
-                      "headSha": {
-                        "$ref": "#/properties/action/properties/terminalPredicate/anyOf/1/properties/headSha"
-                      },
-                      "kind": {
-                        "const": "ci_passed",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "headSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "commandDigest": {
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "test_passed",
-                        "type": "string"
-                      },
-                      "revisionSha": {
-                        "maxLength": 64,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "commandDigest",
-                      "revisionSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "freshnessKey": {
-                        "maxLength": 200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "durable_verdict",
-                        "type": "string"
-                      },
-                      "verdictRef": {
-                        "maxLength": 300,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "verdictRef",
-                      "freshnessKey"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
                       "kind": {
                         "const": "task_done",
                         "type": "string"
@@ -4179,8 +4006,7 @@
                     ],
                     "type": "object"
                   }
-                ],
-                "description": "Typed completion parameters; server catalog owns predicate semantics and subject binding."
+                ]
               }
             },
             "required": [
@@ -4261,7 +4087,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:ae0a3aa9c34736fc38dd9b25871478d6d6e23a47d7505ec9d135eb2e262017d8",
+      "inputSchemaDigest": "sha256:f8a0bd832e343fa97f1abd3c87f494acd5a1010a02a0e2372a1d65d1371006d9",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -4271,7 +4097,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleMultiMention",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_nominate_for_global",
@@ -4333,10 +4159,10 @@
         "command"
       ],
       "activeState": "canonical",
-      "description": "Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode=\"single\". NOT for: another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode=\"parallel\"). Output: the message is persisted in the current thread; routed targets are queued, and action conflicts return safe_wait without creating work. GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. Existing standing uses claimOrigin=\"existing_standing\" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.",
-      "descriptionDigest": "sha256:25071503117df83ddd12bcc784b62c99f0d8a964b3f788b8ef7ac177252ccdf2",
-      "descriptionCharacters": 1697,
-      "descriptionTokensCl100kBase": 329,
+      "description": "Post a proactive async message to YOUR CURRENT thread, optionally waking one cat as an ordinary notification or a fenced same-thread structured single successor. Use when: sharing a mid-task update, routing one ordinary @ notification, or handing one named external action to one successor with action.mode=\"single\". NOT for: another thread (use cross_post_message) or deliberate independent multi-cat review/ideation (use multi_mention with mode=\"parallel\"). Output: the message is persisted in the current thread; routed targets are queued, and action conflicts return safe_wait without creating work. GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. Existing standing uses claimOrigin=\"existing_standing\" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. By default, a later provider final remains a separate durable message. Set streamDisposition=\"replace_final\" only when this callback is the canonical replacement for that same final response. To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. GOTCHA: Do NOT use this for routine replies — only for mid-task proactive messages when you need to share something before your response completes.",
+      "descriptionDigest": "sha256:dac522c80d1e706d12d852a9a14678759b94ef1ecd0b233e1ace98ad94736d57",
+      "descriptionCharacters": 1889,
+      "descriptionTokensCl100kBase": 363,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -4347,16 +4173,12 @@
           },
           "action": {
             "additionalProperties": false,
-            "description": "Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. Use multi_mention for deliberate parallel review/ideation. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
+            "description": "Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. Use multi_mention for deliberate parallel review/ideation. Executable action pairs are closed: review + reviewer + review_delivered, or implement + implementer + task_done. Example: actionFamily=\"review\", successorSlot=\"reviewer\", terminalPredicate.kind=\"review_delivered\". merge/pr_merged and every other reserved vocabulary remain unavailable until their terminal completion producer is registered. subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
             "properties": {
               "actionFamily": {
                 "enum": [
                   "review",
-                  "merge",
-                  "investigate",
-                  "implement",
-                  "verify",
-                  "vision_guard"
+                  "implement"
                 ],
                 "type": "string"
               },
@@ -4458,36 +4280,21 @@
                 "type": "object"
               },
               "subjectRef": {
+                "description": "subjectRef must use pr:<owner>/<repo>#<positive-number> (for example pr:zts212653/cat-cafe#2943) or subject:<namespace>:<opaque-id>. GitHub URL forms and SHA suffixes such as github:owner/repo#2943@abc123 are invalid.",
                 "maxLength": 240,
                 "minLength": 1,
+                "pattern": "^(?:pr:[^/\\s\\x1f]+\\/[^#\\s\\x1f]+#[1-9]\\d*|subject:[a-z][a-z0-9_-]{0,63}:[^\\s\\x1f]{1,200})$",
                 "type": "string"
               },
               "successorSlot": {
                 "enum": [
                   "reviewer",
-                  "merge_owner",
-                  "investigator",
-                  "implementer",
-                  "verifier",
-                  "vision_guardian"
+                  "implementer"
                 ],
                 "type": "string"
               },
               "terminalPredicate": {
                 "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "const": "pr_merged",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind"
-                    ],
-                    "type": "object"
-                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -4509,73 +4316,6 @@
                   {
                     "additionalProperties": false,
                     "properties": {
-                      "headSha": {
-                        "$ref": "#/properties/action/properties/terminalPredicate/anyOf/1/properties/headSha"
-                      },
-                      "kind": {
-                        "const": "ci_passed",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "headSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "commandDigest": {
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "test_passed",
-                        "type": "string"
-                      },
-                      "revisionSha": {
-                        "maxLength": 64,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "commandDigest",
-                      "revisionSha"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "freshnessKey": {
-                        "maxLength": 200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "durable_verdict",
-                        "type": "string"
-                      },
-                      "verdictRef": {
-                        "maxLength": 300,
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "verdictRef",
-                      "freshnessKey"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
                       "kind": {
                         "const": "task_done",
                         "type": "string"
@@ -4586,8 +4326,7 @@
                     ],
                     "type": "object"
                   }
-                ],
-                "description": "Typed completion parameters; server catalog owns predicate semantics and subject binding."
+                ]
               }
             },
             "required": [
@@ -4649,6 +4388,15 @@
             "description": "Optional message ID to reply to",
             "type": "string"
           },
+          "streamDisposition": {
+            "default": "independent",
+            "description": "How this callback relates to the provider final response. \"independent\" (DEFAULT) preserves a later final as a separate durable message. Use \"replace_final\" only when this callback is the canonical replacement for the same logical final response; route persistence then keeps one bubble and merges stream metadata into it.",
+            "enum": [
+              "independent",
+              "replace_final"
+            ],
+            "type": "string"
+          },
           "targetCats": {
             "description": "Optional explicit target cat IDs. Merged with @mentions parsed from content. Use get_thread_cats to discover valid catIds. F182: disabled cats are dropped (soft degradation) — check routing_warnings in response for cat_disabled entries and read alternatives[] to find replacements. Response always includes message field (human-readable routing summary).",
             "items": {
@@ -4668,7 +4416,7 @@
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:eeecde23a990a0441b195ff9b500effa806b3010be56effa18d83326135b40f3",
+      "inputSchemaDigest": "sha256:4d07b95488e8eca5dfb9d0e70596f7bb2d0e4d94b7380bf43fa8c5df17e9f739",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -4681,7 +4429,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handlePostMessage",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_preview_cat_life_settings",
@@ -5079,7 +4827,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposeEntity",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_propose_person_memory",
@@ -5960,7 +5708,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposePersonMemory",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_propose_profile_update",
@@ -6027,7 +5775,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposeProfileUpdate",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_propose_session_handoff",
@@ -6100,7 +5848,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposeSessionHandoff",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_propose_taste",
@@ -6193,7 +5941,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposeTaste",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_propose_thread",
@@ -6203,10 +5951,10 @@
         "create"
       ],
       "activeState": "migration-candidate",
-      "description": "Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: only when a clearly separable, long-running discussion genuinely deserves its own thread, or when the owner asks for \"新开一个 thread\". Do NOT use to escape the current conversation, to split routine tasks, or proactively without an obvious need. parentThreadId defaults to the current thread. After proposing, continue your current work — do not assume the thread exists until the user approves. WRITING @-mentions in `initialMessage`: use the SAME stable handle you use in the current thread (e.g. `@砚砚`, `@opus46`, `@gemini`) — NOT the raw catId form like `@cat-rcs85pvn`. Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: \"做完后源 thread 是否需要结果回来？\" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. Server auto-injects a \"## 主 Thread\" header with routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. OPEN-SOURCE PR HARD GUARD: when title/reason/initialMessage references a zts212653/clowder-ai PR, the server automatically injects an `opensource-ops` maintainer five questions gate plus the real GitHub author/fix-custody boundary. Findings stay with the external author by default; do not route fixes to household cats unless explicit Strategy B authority is recorded. FORMAL EXTERNAL PR OUTPUT: a proposal that names exactly one clowder-ai PR with formal review intent persists that canonical context. On approval, exactly one preferredCat becomes the child owner and receives `intent=review` + `human_participant_activity` PR tracking; the child also gets PR metadata. Advisory, triage, arbitrary-link, multi-PR, and zero/multi-owner proposals do not auto-track. PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.",
-      "descriptionDigest": "sha256:56c978c5260c17bc5754f3879a09fbdd28cb099d72e828476a950bb8494d630f",
-      "descriptionCharacters": 3083,
-      "descriptionTokensCl100kBase": 726,
+      "description": "Propose a new thread to the user. Returns proposalId, NOT a threadId — the thread is only created after the user approves the proposal card. Use sparingly: only when a clearly separable, long-running discussion genuinely deserves its own thread, or when the owner asks for \"新开一个 thread\". Do NOT use to escape the current conversation, to split routine tasks, or proactively without an obvious need. parentThreadId defaults to the current thread. After proposing, continue your current work — do not assume the thread exists until the user approves. WRITING @-mentions in `initialMessage`: use the SAME stable handle you use in the current thread (e.g. `@砚砚`, `@opus46`, `@gemini`) — NOT the raw catId form like `@cat-rcs85pvn`. Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: \"做完后源 thread 是否需要结果回来？\" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. Server auto-injects a \"## 主 Thread\" header with routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. OPEN-SOURCE PR HARD GUARD: when title/reason/initialMessage references a zts212653/clowder-ai PR, the server automatically injects an `opensource-ops` maintainer five questions gate plus the real GitHub author/fix-custody boundary. Findings stay with the external author by default; do not route fixes to household cats unless explicit Strategy B authority is recorded. FORMAL EXTERNAL PR OUTPUT: a proposal that names exactly one clowder-ai PR with formal review intent persists that canonical context. On approval, exactly one preferredCat becomes the child owner and receives PR metadata. It does NOT auto-register a wait: the reviewer registers one explicit typed predicate only after work is actually blocked on an external condition. Advisory, triage, arbitrary-link, multi-PR, and zero/multi-owner proposals follow the same no-auto-wait rule. PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.",
+      "descriptionDigest": "sha256:1f1977f96cc4505b13151871460fa43174cb536e9d46eca8376bd6bcf0a07fdf",
+      "descriptionCharacters": 3167,
+      "descriptionTokensCl100kBase": 737,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
@@ -6281,7 +6029,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleProposeThread",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_publish_verdict",
@@ -7083,7 +6831,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleReadProfile",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_read_session_digest",
@@ -7231,7 +6979,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRecallPersonRelationship",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_record_eval_lifecycle",
@@ -7715,7 +7463,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRecordMemoryCueOutcome",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_record_proactive_memory_abstention",
@@ -7760,7 +7508,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRecordProactiveMemoryAbstention",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_recover_local_review_verdict",
@@ -7907,7 +7655,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRedactPersonMemoryItem",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_register_external_runtime_session",
@@ -8034,46 +7782,83 @@
       "actions": [
         "create"
       ],
-      "activeState": "migration-candidate",
-      "description": "Register a GitHub issue for comment tracking. New comments on the issue are routed to your current thread. Call after opening or referencing an issue you want to monitor. The server resolves threadId and catId from your invocation identity. GOTCHA: Must be called while callback credentials are still valid.",
-      "descriptionDigest": "sha256:00f04dfe503422893bba59c4bdebfd034613e9a17ca333f9754d61634d5c9d1d",
-      "descriptionCharacters": 307,
-      "descriptionTokensCl100kBase": 58,
+      "activeState": "canonical",
+      "description": "Register one explicit, bounded GitHub issue wait for the current task owner. Use when: you can name the exact typed issue condition that changes your next action: any new comment, or a comment by the exact issue author. NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is required and does not delete task history.",
+      "descriptionDigest": "sha256:d38a2f3b149a5c20bfe72539e74927c10822c3ea65145a6e96b925e4cfc07bb4",
+      "descriptionCharacters": 656,
+      "descriptionTokensCl100kBase": 136,
       "inputSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
-          "instructions": {
-            "description": "Tracking instructions — appended to trigger messages when issue comment events fire.",
-            "maxLength": 2000,
-            "type": "string"
+          "expiresAt": {
+            "description": "Unix timestamp in milliseconds when responsibility expires.",
+            "exclusiveMinimum": 0,
+            "type": "integer"
           },
           "issueNumber": {
             "description": "Issue number",
             "exclusiveMinimum": 0,
             "type": "integer"
           },
+          "nextStep": {
+            "description": "What to do after a match. Display-only text; never parsed as wake policy.",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
           "repoFullName": {
             "description": "Repository full name in owner/repo format (e.g. \"zts212653/cat-cafe\")",
             "minLength": 1,
             "type": "string"
           },
-          "wakePolicy": {
-            "description": "Optional actor policy persisted on this issue tracker. Use 'human_participant_activity' when author and third-party human comments should wake the owner without bot process noise; 'all_feedback' is the default. Bot comments remain in durable event/cursor state but produce no connector delivery or invocation; missing/unknown actor metadata fails safe to delivery.",
-            "enum": [
-              "all_feedback",
-              "human_participant_activity"
-            ],
-            "type": "string"
+          "when": {
+            "description": "One to four typed issue conditions, evaluated as flat any-of against a server-frozen baseline.",
+            "items": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "issue_comment_added",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "issue_author_commented",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "type": "array"
           }
         },
         "required": [
           "repoFullName",
-          "issueNumber"
+          "issueNumber",
+          "when",
+          "nextStep",
+          "expiresAt"
         ],
         "type": "object"
       },
-      "inputSchemaDigest": "sha256:9412baa08758fa46f13bb11d7379f92b5dced544bbf8bb56f94f2136019b13ac",
+      "inputSchemaDigest": "sha256:ee62dcc201999722fab185a343e8dd05097f3377edce4b1ea7e08441d4b85fe3",
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
@@ -8083,7 +7868,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterIssueTracking",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_register_pr_tracking",
@@ -8244,7 +8029,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRegisterPrTracking",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_register_scheduled_task",
@@ -8414,7 +8199,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRequestPermission",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_retain_memory_callback",
@@ -8527,7 +8312,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleRetirePersonClaim",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_review_distillation",
@@ -8799,7 +8584,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleSetReadMode",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_set_thread_metadata",
@@ -8968,7 +8753,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleSetThreadMetadata",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_settle_present_loop",
@@ -9570,7 +9355,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleStartGuide",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_start_vote",
@@ -9644,7 +9429,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleStartVote",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_submit_game_action",
@@ -10071,7 +9856,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleUnregisterTracking",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_update_bootcamp_state",
@@ -10194,7 +9979,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateBootcampState",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_update_guide_state",
@@ -10255,7 +10040,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateGuideState",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_update_task",
@@ -10339,7 +10124,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateTask",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_update_workflow",
@@ -10485,7 +10270,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleUpdateWorkflow",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_validate_community_route",
@@ -10579,7 +10364,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawDeferredPersonMemory",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_withdraw_thread_proposal",
@@ -10619,7 +10404,7 @@
         "full"
       ],
       "implementationRef": "module:./tools/callback-tools.js#handleWithdrawThreadProposal",
-      "protectedImplementationDigest": "sha256:165b6a9cfe1b86adb30aa43feecc212625d46197b7c01afa8b3d9ab7db149f16"
+      "protectedImplementationDigest": "sha256:d64a68ffd6fb57af7d2636c0ecc04e886d396cc85ad61960222c5e201ea093e8"
     },
     {
       "name": "cat_cafe_workspace_navigate",

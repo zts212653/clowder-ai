@@ -40,6 +40,13 @@ function timestamp(value: unknown, label: string): number {
   return value;
 }
 
+function positiveInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    corrupt(`${label} must be a positive safe integer`);
+  }
+  return value;
+}
+
 function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, label: string): T {
   if (typeof value !== 'string' || !values.has(value as T)) corrupt(`${label} has an unsupported value`);
   return value as T;
@@ -114,6 +121,8 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
     configReadiness: enumValue(raw.configReadiness, CONFIG_STATES, `instances[${index}].configReadiness`),
     activationState: enumValue(raw.activationState, ACTIVATION_STATES, `instances[${index}].activationState`),
     runtimeState: enumValue(raw.runtimeState, RUNTIME_STATES, `instances[${index}].runtimeState`),
+    // Schema v1 snapshots written before owner activation existed are migrated in memory.
+    lifecycleRevision: positiveInteger(raw.lifecycleRevision ?? 1, `instances[${index}].lifecycleRevision`),
     installedAt: timestamp(raw.installedAt, `instances[${index}].installedAt`),
     updatedAt: timestamp(raw.updatedAt, `instances[${index}].updatedAt`),
     ...(raw.retiredAt === undefined ? {} : { retiredAt: timestamp(raw.retiredAt, `instances[${index}].retiredAt`) }),

@@ -1,7 +1,16 @@
 'use client';
 
-import type { QueueMessageReceipt, QueueReceiptTarget, QueueReminderAttempt } from '@cat-cafe/shared';
+import type {
+  QueueMessageReceipt,
+  QueueReceiptTarget,
+  QueueReminderAttempt,
+  QueueTargetAttempt,
+} from '@cat-cafe/shared';
+import { useState } from 'react';
 import type { ChatMessage } from '@/stores/chat-types';
+import { apiFetch } from '@/utils/api-client';
+import { resolveMessageElements } from '@/utils/scrollToMessage';
+import { CatAvatar } from './CatAvatar';
 import { authorIntentLabel, carrierCapabilityLabel, humanCarrierLabel } from './message-disposition-presentation';
 import { receiptTargetStateLabel } from './queue-receipt-projection';
 
@@ -75,10 +84,7 @@ export function focusInvocationLineage(messages: readonly ChatMessage[], invocat
   if (typeof document === 'undefined') return false;
   const messageIds = new Set(collectInvocationLineageMessageIds(messages, invocationId));
   if (messageIds.size === 0) return false;
-  const nodes = [...document.querySelectorAll<HTMLElement>('[data-message-id]')].filter((node) => {
-    const messageId = node.dataset.messageId;
-    return messageId ? messageIds.has(messageId) : false;
-  });
+  const nodes = resolveMessageElements(messageIds);
   if (nodes.length === 0) return false;
 
   for (const node of nodes) node.dataset.lineageFocus = 'true';
@@ -91,6 +97,7 @@ export function focusInvocationLineage(messages: readonly ChatMessage[], invocat
 
 export function focusTurnAbsorptionSummary(messages: readonly ChatMessage[], invocationId: string): boolean {
   if (typeof document === 'undefined') return false;
+  resolveMessageElements(collectInvocationLineageMessageIds(messages, invocationId));
   const dock = [...document.querySelectorAll<HTMLDetailsElement>('details[data-turn-absorption-invocation]')].find(
     (candidate) => candidate.dataset.turnAbsorptionInvocation === invocationId,
   );
@@ -135,7 +142,35 @@ function reminderTitle(attempt: QueueReminderAttempt): string | undefined {
   return '本轮结束前，提醒没有完成送达';
 }
 
+function attemptStatus(
+  target: QueueReceiptTarget,
+): 'pending' | 'spawning' | 'streaming' | 'done' | 'error' | undefined {
+  if (target.state === 'failed') return 'error';
+  if (target.state === 'handled' || target.state === 'withdrawn') return 'done';
+  if (target.state === 'seen') return 'streaming';
+  if (target.state === 'awakened' || target.state === 'steering') return 'spawning';
+  return 'pending';
+}
+
+function latestRetryableAttempt(target: QueueReceiptTarget): QueueTargetAttempt | undefined {
+  if (target.state !== 'failed' || target.retryable === false) return undefined;
+  const latest = target.attempts?.at(-1);
+  return latest?.state === 'failed' ||
+    (latest?.state === 'cancelled' && latest.terminalReason === 'invocation_cancelled')
+    ? latest
+    : undefined;
+}
+
+function failureReason(target: QueueReceiptTarget): string {
+  const latest = target.attempts?.at(-1);
+  if (latest?.terminalReason === 'invocation_cancelled') return '对应回复已停止，消息正文没有完成处理';
+  if (target.seenAt !== undefined) return '消息正文已进入回复，但该回复未完成';
+  if (target.invocationId) return '已创建对应回复，但消息正文未能进入该回复';
+  return '系统未能为该目标启动本次消息处理';
+}
+
 interface MessageReceiptDockProps {
+  messageId?: string;
   receipt: QueueMessageReceipt;
   messages: readonly ChatMessage[];
   activeInvocationIds?: ReadonlySet<string>;
@@ -143,13 +178,41 @@ interface MessageReceiptDockProps {
 }
 
 export function MessageReceiptDock({
+  messageId,
   receipt,
   messages,
   activeInvocationIds = EMPTY_ACTIVE_INVOCATION_IDS,
   getCatLabel,
 }: MessageReceiptDockProps) {
-  if (receipt.scope === 'primary_trigger') return null;
   const isCrossThreadDelivery = receipt.scope === 'cross_thread_delivery';
+  const [retryingAttemptId, setRetryingAttemptId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const retry = async (target: QueueReceiptTarget, attempt: QueueTargetAttempt) => {
+    if (!messageId) return;
+    setRetryingAttemptId(attempt.id);
+    setRetryError(null);
+    try {
+      const response = await apiFetch(
+        `/api/messages/${encodeURIComponent(messageId)}/queue-targets/${encodeURIComponent(target.catId)}/retry`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ attemptId: attempt.id }),
+        },
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? '重试未能排入队列');
+      }
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : '重试未能排入队列');
+    } finally {
+      setRetryingAttemptId(null);
+    }
+  };
+
+  if (receipt.scope === 'primary_trigger') return null;
 
   return (
     <section
@@ -171,6 +234,8 @@ export function MessageReceiptDock({
           const loadedLineage = evidence
             ? collectInvocationLineageMessageIds(messages, evidence.invocationId).length > 0
             : false;
+          const latestAttempt = target.attempts?.at(-1);
+          const retryableAttempt = latestRetryableAttempt(target);
           return (
             <div
               key={target.catId}
@@ -183,6 +248,7 @@ export function MessageReceiptDock({
                 className="absolute -left-[17px] top-2.5 h-2 w-2 rounded-full bg-[var(--color-cocreator-primary)]"
               />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <CatAvatar catId={target.catId} size={18} status={attemptStatus(target)} />
                 <span>{`${getCatLabel(target.catId)} · ${receiptTargetStateLabel(
                   target,
                   activeInvocationIds,
@@ -221,7 +287,30 @@ export function MessageReceiptDock({
                     {target.outcome?.disposition === 'responded' ? '查看回复 ↑' : '查看本轮 ↑'}
                   </button>
                 )}
+                {retryableAttempt && messageId && (
+                  <button
+                    type="button"
+                    data-retry-target={target.catId}
+                    disabled={retryingAttemptId !== null}
+                    onClick={() => void retry(target, retryableAttempt)}
+                    className="font-medium text-[var(--color-cocreator-primary)] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {retryingAttemptId === retryableAttempt.id ? '正在重试…' : '重试'}
+                  </button>
+                )}
               </div>
+              {target.state === 'failed' && (
+                <output
+                  className="mt-1 flex items-center gap-1.5 rounded-md border border-semantic-critical/30 bg-semantic-critical-surface/60 px-2 py-1 text-micro text-semantic-critical"
+                  data-receipt-failure={target.catId}
+                >
+                  <CatAvatar catId={target.catId} size={16} status="error" />
+                  <span>
+                    系统：{failureReason(target)}
+                    {latestAttempt ? ` · 本条消息第 ${latestAttempt.sequence} 次尝试` : ''}
+                  </span>
+                </output>
+              )}
               {timing && (
                 <div
                   className="mt-0.5 text-micro tabular-nums text-cafe-muted"
@@ -246,6 +335,11 @@ export function MessageReceiptDock({
           );
         })}
       </div>
+      {retryError && (
+        <output className="mt-2 rounded-md border border-semantic-critical/30 bg-semantic-critical-surface/60 px-2 py-1 text-micro text-semantic-critical">
+          重试未成功：{retryError}
+        </output>
+      )}
     </section>
   );
 }

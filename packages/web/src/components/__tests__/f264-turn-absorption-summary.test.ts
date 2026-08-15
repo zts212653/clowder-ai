@@ -83,6 +83,8 @@ describe('F264 AC-42/43 exact-child turn absorption projection', () => {
       'actionable',
       'withdrawn_after_exposure',
     ]);
+    expect(projection?.items[0]).toMatchObject({ handlerCatId: 'codex', outcomeAt: 200 });
+    expect(projection?.items[0]).not.toHaveProperty('catId');
     expect(projection?.defaultExpanded).toBe(false);
     expect(projection?.items[3]?.recalled).toBe(false);
   });

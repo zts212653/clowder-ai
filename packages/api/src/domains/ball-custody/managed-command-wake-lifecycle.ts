@@ -1,6 +1,7 @@
+import type { CatId } from '@cat-cafe/shared';
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 
 export type ManagedCommandWakeState =
   | 'command_running'
@@ -11,6 +12,8 @@ export type ManagedCommandWakeState =
   | 'enqueued'
   | 'cancelled'
   | 'consumed';
+
+export type ManagedCommandWakeCarrierTerminalReason = 'withdrawn' | 'canceled' | 'terminal' | 'force_reset';
 
 export interface ManagedCommandTerminalResult {
   readonly exitCode: number | null;
@@ -37,6 +40,7 @@ export interface ManagedCommandWakeProjection {
   readonly lastDispatchAt?: number;
   readonly lastDispatchOutcome?: 'dispatched' | 'enqueued' | 'full' | 'failed' | 'unavailable';
   readonly invocationId?: string;
+  readonly carrierTerminalReason?: ManagedCommandWakeCarrierTerminalReason;
   readonly consumedAt?: number;
   readonly slaBreachObservedAt?: number;
 }
@@ -48,6 +52,39 @@ export interface ManagedCommandWakeRecoveryStats {
 }
 
 export type ManagedCommandWakeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+
+export type ManagedCommandWakeEventCarrier =
+  | { state: 'missing' | 'pending' | 'orphaned' }
+  | { state: 'handled'; invocationId?: string }
+  | { state: 'terminal'; reason: ManagedCommandWakeCarrierTerminalReason };
+
+/** Project the existing F264 receipt; this is a read model, not another lifecycle owner. */
+export function resolveManagedCommandWakeEventCarrier(
+  message: StoredMessage | null | undefined,
+  expected: { threadId: string; catId: string; activeQueueEntryId?: string | null },
+): ManagedCommandWakeEventCarrier {
+  if (!message || message.threadId !== expected.threadId) {
+    return { state: 'missing' };
+  }
+  if (message.deliveryStatus === 'canceled') return { state: 'terminal', reason: 'canceled' };
+  const custody = message.queueCustody;
+  if (!custody) return { state: 'missing' };
+  const outcome = custody.targetOutcomeByCatId?.[expected.catId];
+  if (custody.handledByCatIds.includes(expected.catId as CatId) && outcome) {
+    return { state: 'handled', invocationId: outcome.invocationId };
+  }
+  if (custody.withdrawnByCatIds?.includes(expected.catId as CatId)) {
+    return { state: 'terminal', reason: 'withdrawn' };
+  }
+  if (custody.status === 'terminal') return { state: 'terminal', reason: 'terminal' };
+  if (custody.pendingTargetCats.includes(expected.catId as CatId)) {
+    if ('activeQueueEntryId' in expected && expected.activeQueueEntryId !== custody.entryId) {
+      return { state: 'orphaned' };
+    }
+    return { state: 'pending' };
+  }
+  return { state: 'missing' };
+}
 
 export interface ManagedCommandWakeTrigger {
   trigger(
@@ -70,7 +107,8 @@ export interface ManagedCommandWakeDynamicTaskStore {
 
 export interface ManagedCommandWakeRecoveryDeps {
   readonly dynamicTaskStore: ManagedCommandWakeDynamicTaskStore;
-  readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey'>;
+  readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey'> &
+    Partial<Pick<IMessageStore, 'getById'>>;
   readonly socketManager: { broadcastToRoom(room: string, event: string, payload: unknown): void };
   readonly taskRunner: { unregister(taskId: string): void };
   readonly invocationRecordStore: {
@@ -87,9 +125,7 @@ export interface ManagedCommandWakeRecoveryDeps {
     userId: string;
     catId: string;
     messageId: string;
-  }) =>
-    | { state: 'missing' | 'pending' | 'handled'; invocationId?: string }
-    | Promise<{ state: 'missing' | 'pending' | 'handled'; invocationId?: string }>;
+  }) => ManagedCommandWakeEventCarrier | Promise<ManagedCommandWakeEventCarrier>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;
@@ -152,6 +188,18 @@ export function parseManagedCommandWakeTask(task: DynamicTaskDef | null): Parsed
   return { task, lifecycle, command, threadId: task.deliveryThreadId, catId, userId };
 }
 
+/** Parse the disabled tombstone left when user activity retires only the wake carrier. */
+export function parseRetiredManagedCommandWakeTask(task: DynamicTaskDef | null): ParsedManagedCommandWakeTask | null {
+  if (!task || task.enabled || task.deliveryThreadId === null) return null;
+  const lifecycle = task.params.holdLifecycle;
+  const command = readManagedCommandWakeProjection(task);
+  if (!isPlainRecord(lifecycle) || lifecycle.status !== 'cancelled_by_user' || !command) return null;
+  const catId = task.createdBy.startsWith('hold-ball:') ? task.createdBy.slice('hold-ball:'.length) : '';
+  const userId = task.params.triggerUserId;
+  if (!catId || typeof userId !== 'string' || !userId) return null;
+  return { task, lifecycle, command, threadId: task.deliveryThreadId, catId, userId };
+}
+
 export function createInitialManagedCommandWakeProjection(
   command: string,
   startedAt: number,
@@ -195,7 +243,9 @@ export function buildCancelledManagedCommandCompletionParams(
   };
 }
 
-function normalizeTerminalResult(result: ManagedCommandTerminalResult): ManagedCommandTerminalResult {
+export function normalizeManagedCommandTerminalResult(
+  result: ManagedCommandTerminalResult,
+): ManagedCommandTerminalResult {
   return {
     exitCode: result.exitCode,
     timedOut: result.timedOut,
@@ -238,25 +288,25 @@ export function persistManagedCommandCompletionEvidence(
         conditionMetAt,
         wakeContent: input.wakeContent,
         wakeSource: 'command_completion',
-        result: normalizeTerminalResult(input.result),
+        result: normalizeManagedCommandTerminalResult(input.result),
       };
     } else if (command.state === 'condition_met' && !command.messageId && command.messageClaimedAt === undefined) {
       nextCommand = {
         ...command,
         wakeContent: input.wakeContent,
         wakeSource: 'command_completion',
-        result: normalizeTerminalResult(input.result),
+        result: normalizeManagedCommandTerminalResult(input.result),
       };
     } else if (command.state === 'condition_met' && !command.messageId) {
       nextCommand = {
         ...command,
-        result: normalizeTerminalResult(input.result),
+        result: normalizeManagedCommandTerminalResult(input.result),
         pendingCompletionContent: input.wakeContent,
       };
     } else {
       nextCommand = {
         ...command,
-        result: normalizeTerminalResult(input.result),
+        result: normalizeManagedCommandTerminalResult(input.result),
       };
     }
 

@@ -70,7 +70,7 @@ import {
   appendMessageIfThreadFrontier,
 } from './redis-message-frontier-append.js';
 import {
-  safeParseConnectorSource,
+  parseConnectorSourceField,
   safeParseContentBlocks,
   safeParseExtra,
   safeParseMentions,
@@ -790,7 +790,8 @@ export class RedisMessageStore {
     const toolEvents = safeParseToolEvents(data.toolEvents);
     const parsedMetadata = safeParseMetadata(data.metadata);
     const parsedExtra = hydrateExtra(data.extra, data.pluginMessage);
-    const parsedSource = safeParseConnectorSource(data.source);
+    const sourceField = parseConnectorSourceField(data.source);
+    const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
     const parsedRecall = safeParseMessageRecall(data.recall);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
@@ -821,6 +822,7 @@ export class RedisMessageStore {
       ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
       ...(parsedRecall ? { recall: parsedRecall } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
+      ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
       ...(data.mentionsUser === '1' ? { mentionsUser: true } : {}),
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
       ...(data.visibilitySeq ? { visibilitySeq: parseInt(data.visibilitySeq, 10) } : {}),
@@ -1223,6 +1225,13 @@ export class RedisMessageStore {
     userId?: string,
     options?: ThreadMessageReadOptions,
   ): Promise<StoredMessage[]> {
+    if (
+      options?.includeQueuedUserMessages === true ||
+      options?.includeExposedQueuedUserMessagesForCatId !== undefined
+    ) {
+      return this.getByThreadAfterRawTimeline(threadId, afterId, limit, userId, options);
+    }
+
     // 1. Ensure visibility index is migrated (lazy one-time backfill)
     await this.ensureVisibilityMigrated(threadId);
 
@@ -1310,6 +1319,78 @@ export class RedisMessageStore {
     // 4. Lazy null-ZREM: clean stale visibility members (fire-and-forget)
     if (staleIds.length > 0) {
       this.redis.zrem(visKey, ...staleIds).catch(() => {});
+    }
+
+    return result;
+  }
+
+  /**
+   * Forward pagination for an explicitly queued-inclusive reader. Queued user
+   * rows have no visibility member by design, so this path uses the raw thread
+   * ZSET and its authoritative timeline score instead of pretending the
+   * visibility index can represent them.
+   */
+  private async getByThreadAfterRawTimeline(
+    threadId: string,
+    afterId: string | undefined,
+    limit: number | undefined,
+    userId: string | undefined,
+    options: ThreadMessageReadOptions,
+  ): Promise<StoredMessage[]> {
+    let cursor: ReturnType<typeof parseCursor>;
+    try {
+      cursor = parseCursor(afterId);
+    } catch (error) {
+      if (options.unresolvedCursorPolicy === 'empty') return [];
+      throw error;
+    }
+
+    const key = MessageKeys.thread(threadId);
+    let afterScore: number | null = null;
+    if (cursor) {
+      const rawScore = await this.redis.zscore(key, cursor.id);
+      if (rawScore !== null) afterScore = parseRedisNumber(rawScore);
+      if (afterScore === null && options.unresolvedCursorPolicy === 'empty') return [];
+    }
+
+    const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
+    const chunkSize = Math.max(50, Math.min(maxResults, 200));
+    const isVisible = resolveThreadMessageVisibility(options);
+    const result: StoredMessage[] = [];
+    let offset = 0;
+
+    while (result.length < maxResults) {
+      const raw = await this.redis.zrangebyscore(
+        key,
+        afterScore === null ? '-inf' : String(afterScore),
+        '+inf',
+        'WITHSCORES',
+        'LIMIT',
+        offset,
+        chunkSize,
+      );
+      if (raw.length === 0) break;
+
+      const ids: string[] = [];
+      const scores = new Map<string, number>();
+      for (let index = 0; index < raw.length; index += 2) {
+        const id = raw[index]!;
+        ids.push(id);
+        scores.set(id, parseRedisNumber(raw[index + 1]!));
+      }
+      const hydrated = new Map((await this.hydrateMessages(ids)).map((message) => [message.id, message]));
+      for (const id of ids) {
+        const score = scores.get(id)!;
+        if (cursor && afterScore !== null && score === afterScore && id <= cursor.id) continue;
+        const message = hydrated.get(id);
+        if (!message || !isVisible(message)) continue;
+        if (userId && message.userId !== userId && !isSystemUserMessage(message)) continue;
+        result.push(message);
+        if (result.length >= maxResults) break;
+      }
+
+      if (ids.length < chunkSize) break;
+      offset += ids.length;
     }
 
     return result;
@@ -2058,6 +2139,9 @@ export class RedisMessageStore {
     if (current.deliveryStatus !== 'queued' && !isExposedRecallSettlement) {
       throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
     }
+    if (input.replacement && input.replacement.sourceMessageId !== id) {
+      throw new Error('queue custody replacement proof source message mismatch');
+    }
     assertQueueCustodyTransition(current.queueCustody, input);
     const timelineScore =
       input.deliveredAt === undefined ? undefined : resolveDeliveryTimelineScore(current, input.deliveredAt);
@@ -2185,7 +2269,8 @@ export class RedisMessageStore {
       const toolEvents = safeParseToolEvents(d.toolEvents);
       const parsedMetadata = safeParseMetadata(d.metadata);
       const parsedExtra = hydrateExtra(d.extra, d.pluginMessage);
-      const parsedSource = safeParseConnectorSource(d.source);
+      const sourceField = parseConnectorSourceField(d.source);
+      const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
       const parsedRecall = safeParseMessageRecall(d.recall);
       messages.push({
@@ -2215,6 +2300,7 @@ export class RedisMessageStore {
         ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
         ...(parsedRecall ? { recall: parsedRecall } : {}),
         ...(parsedSource ? { source: parsedSource } : {}),
+        ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
         ...(d.mentionsUser === '1' ? { mentionsUser: true } : {}),
         ...(d.replyTo ? { replyTo: d.replyTo } : {}),
         // #1200 Sol R6 P2-1: Inject visibilitySeq from hash (parity with hydrateHash).

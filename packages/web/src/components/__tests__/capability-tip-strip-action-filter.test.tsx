@@ -1,5 +1,5 @@
 import type { CapabilityTip } from '@cat-cafe/shared';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,6 +48,18 @@ const noActionTip: CapabilityTip = {
   kind: 'magic_word',
   body: 'No-action tips are valid inventory entries but cannot back the waiting-strip CTA.',
   action: undefined,
+};
+
+const pluginSettingsTip: CapabilityTip = {
+  ...sourceTip,
+  id: 'feature-f292-plugin-settings',
+  kind: 'feature',
+  body: 'Open the official Feishu meeting plugin setup from the existing Settings plugin surface.',
+  action: {
+    type: 'open_capability_surface',
+    label: 'Open plugin settings',
+    surfaceId: 'settings.plugins',
+  },
 };
 
 vi.mock('@/lib/capabilityTipEvents', async () => ({
@@ -152,5 +164,34 @@ describe('F244 CapabilityTipStrip action eligibility', () => {
 
     const strip = container.querySelector('[data-testid="capability-tip-strip"]');
     expect(strip?.getAttribute('data-tip-id')).toBe('capability-beta-draft');
+  });
+
+  it('renders a registered capability surface as a real navigation target', async () => {
+    vi.doMock('@/lib/capability-tips.seed.json', () => ({
+      default: [pluginSettingsTip],
+    }));
+
+    const { CapabilityTipStrip } = await import('../CapabilityTipStrip');
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <CapabilityTipStrip
+          surface="assistant_stream_bubble"
+          contexts={['thinking']}
+          firstDelayMs={0}
+          rotateMs={12000}
+        />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    const link = container.querySelector<HTMLAnchorElement>('[data-testid="capability-tip-open-surface"]');
+    expect(link?.textContent).toContain('Open plugin settings');
+    expect(link?.getAttribute('href')).toBe('/settings?s=plugins');
   });
 });

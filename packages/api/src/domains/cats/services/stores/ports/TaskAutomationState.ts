@@ -1,7 +1,8 @@
 import type {
   AutomationState,
   IssueAutomationState,
-  LegacyIssueAutomationState,
+  IssueWaitAutomationState,
+  PrAutomationState,
   ReviewAutomationState,
 } from '@cat-cafe/shared';
 
@@ -56,29 +57,35 @@ export function mergeTaskAutomationState(
   patch: Partial<AutomationState>,
 ): AutomationState | undefined {
   if (!existing && Object.keys(patch).length === 0) return undefined;
-  const issuePatch = patch as Partial<LegacyIssueAutomationState>;
-  const issueExisting = existing as LegacyIssueAutomationState | undefined;
+  const subjectRef =
+    patch.await?.subjectRef ??
+    patch.waitOutcome?.subjectRef ??
+    existing?.await?.subjectRef ??
+    existing?.waitOutcome?.subjectRef;
+  const issuePatch = patch as Partial<IssueWaitAutomationState>;
+  const issueExisting = existing as IssueWaitAutomationState | undefined;
   const isIssueState =
-    issuePatch.issue !== undefined ||
-    issueExisting?.issue !== undefined ||
-    issuePatch.wakePolicy !== undefined ||
-    issuePatch.trackingInstructions !== undefined;
+    issuePatch.issue !== undefined || issueExisting?.issue !== undefined || subjectRef?.startsWith('issue:') === true;
   if (isIssueState) {
-    return {
+    const merged: IssueWaitAutomationState = {
       issue: issuePatch.issue
         ? mergeIssueAutomationState(issueExisting?.issue, issuePatch.issue)
         : issueExisting?.issue,
       closedAt: patch.closedAt ?? existing?.closedAt,
-      wakePolicy: issuePatch.wakePolicy ?? issueExisting?.wakePolicy,
-      trackingInstructions: issuePatch.trackingInstructions ?? issueExisting?.trackingInstructions,
+      await: issuePatch.await ?? issueExisting?.await,
+      waitOutcome: patch.waitOutcome ?? existing?.waitOutcome,
     };
+    return merged;
   }
-  return {
-    ci: patch.ci ? { ...existing?.ci, ...patch.ci } : existing?.ci,
-    conflict: patch.conflict ? { ...existing?.conflict, ...patch.conflict } : existing?.conflict,
-    review: patch.review ? mergeReviewAutomationState(existing?.review, patch.review) : existing?.review,
-    closedAt: patch.closedAt ?? existing?.closedAt,
-    await: patch.await ?? existing?.await,
-    waitOutcome: patch.waitOutcome ?? existing?.waitOutcome,
+  const prPatch = patch as Partial<PrAutomationState>;
+  const prExisting = existing as PrAutomationState | undefined;
+  const merged: PrAutomationState = {
+    ci: prPatch.ci ? { ...prExisting?.ci, ...prPatch.ci } : prExisting?.ci,
+    conflict: prPatch.conflict ? { ...prExisting?.conflict, ...prPatch.conflict } : prExisting?.conflict,
+    review: prPatch.review ? mergeReviewAutomationState(prExisting?.review, prPatch.review) : prExisting?.review,
+    closedAt: prPatch.closedAt ?? prExisting?.closedAt,
+    await: prPatch.await ?? prExisting?.await,
+    waitOutcome: prPatch.waitOutcome ?? prExisting?.waitOutcome,
   };
+  return merged;
 }

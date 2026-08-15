@@ -602,7 +602,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       }
       deduped.push(args[i]);
     }
-    deduped.push(...userParts, prompt);
+    // Keep user-defined flags parseable, then terminate option parsing before
+    // the prompt positional. Without `--`, a dash-prefixed prompt is treated as
+    // an unknown OpenCode flag and the CLI exits after printing help.
+    deduped.push(...userParts, '--', prompt);
 
     return deduped;
   }

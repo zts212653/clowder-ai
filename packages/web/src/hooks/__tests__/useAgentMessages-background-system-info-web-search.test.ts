@@ -646,6 +646,57 @@ describe('consumeBackgroundSystemInfo rich_block placeholder', () => {
     expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'target-msg', block);
   });
 
+  it('keeps an identity-bound rich block on the current background stream after an independent callback', () => {
+    const parentInvocationId = 'parent-independent';
+    const turnInvocationId = 'turn-independent';
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [
+          {
+            id: 'stream-independent',
+            type: 'assistant',
+            catId: 'opus',
+            origin: 'stream',
+            isStreaming: true,
+            content: 'current provider response',
+            extra: { stream: { invocationId: parentInvocationId, turnInvocationId } },
+          },
+          {
+            id: 'callback-independent',
+            type: 'assistant',
+            catId: 'opus',
+            origin: 'callback',
+            content: 'independent proactive update',
+            extra: {
+              isExplicitPost: true,
+              stream: { invocationId: parentInvocationId, turnInvocationId },
+            },
+          },
+        ],
+        catStatuses: {},
+        catInvocations: {
+          opus: { invocationId: parentInvocationId, turnInvocationId },
+        },
+      })),
+    });
+    const block = { id: 'rb-independent', kind: 'card', v: 1, title: 'current final' };
+    const msg = {
+      type: 'system_info',
+      catId: 'opus',
+      threadId: 'thread-1',
+      content: JSON.stringify({ type: 'rich_block', block }),
+      invocationId: parentInvocationId,
+      turnInvocationId,
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'stream-independent', block);
+    expect(options.store.appendRichBlockToThread).not.toHaveBeenCalledWith('thread-1', 'callback-independent', block);
+  });
+
   it('AC-Z17: reuses finalized background stream bubble for late rich_block instead of creating bg-rich placeholder', () => {
     const options = createMockOptions({
       getThreadState: vi.fn(() => ({

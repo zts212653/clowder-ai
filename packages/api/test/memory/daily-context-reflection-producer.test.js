@@ -106,7 +106,7 @@ describe('F271 DailyContextReflectionProducer', () => {
   });
 
   test('treats a day with no eligible sessions as a healthy quiet day', async () => {
-    const { producer, calls } = setup(new Map());
+    const { producer, calls } = setup(new Map(), {}, { monotonicNow: () => 0 });
 
     const result = await producer.run();
 

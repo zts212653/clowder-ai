@@ -120,7 +120,7 @@ test('an aborted lease is force-reaped when cooperative cleanup is abandoned', a
   }
 });
 
-test('tracker zombie expiry reaps an abandoned lease and permits the same session to resume', async (t) => {
+test('tracker lease-age reads do not abort or reap an active provider host', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 100_000 });
   const { pool, hosts } = createHarness({ abortGraceMs: 5 });
   const tracker = new InvocationTracker({ maxSlotTtlMs: 1000 });
@@ -132,17 +132,14 @@ test('tracker zombie expiry reaps an abandoned lease and permits the same sessio
     abandoned.rememberSession('codex-session-a');
 
     t.mock.timers.tick(1001);
-    assert.equal(tracker.has('cafe-thread-a', 'codex'), false, 'tracker TTL should retire the stale slot');
+    assert.equal(tracker.has('cafe-thread-a', 'codex'), true, 'lease age alone must not retire the owner');
+    assert.equal(tracker.listStaleSlots().length, 1, 'age should only surface an explicit reaper candidate');
+    assert.equal(controller.signal.aborted, false, 'liveness reads must not become a provider cancel path');
     await delay(20);
 
-    assert.equal(hosts[0].closeCalls, 1, 'tracker expiry must reach the pool abort fallback');
-    assert.equal(pool.getMetrics().activeLeaseCount, 0);
-
-    const resumed = await pool.createSession(
-      sessionOptions({ invocationId: 'invocation-resumed', sessionId: 'codex-session-a' }),
-    );
-    assert.equal(hosts.length, 2, 'same-session resume should receive a fresh host after stale cleanup');
-    await resumed.close();
+    assert.equal(hosts[0].closeCalls, 0, 'candidate enumeration must not reach the pool abort fallback');
+    assert.equal(pool.getMetrics().activeLeaseCount, 1);
+    await abandoned.close();
   } finally {
     await pool.closeAll();
   }

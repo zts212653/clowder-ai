@@ -18,6 +18,7 @@ import {
   type CodexAppServerLifecycleStage,
 } from './CodexAppServerLifecycle.js';
 import { CodexAppServerNotificationQueue } from './CodexAppServerNotificationQueue.js';
+import { resolveCodexAppServerThread } from './CodexAppServerThreadResolver.js';
 import {
   classifyCodexAppServerToolSurface,
   classifyCodexProtocolItem,
@@ -128,12 +129,16 @@ export class CodexAppServerClient {
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
 
       const threadResult = asCodexAppServerRecord(
-        input.thread.kind === 'resume'
-          ? await this.request(
-              'thread/resume',
-              buildCodexAppServerThreadParams(input, { threadId: input.thread.threadId }),
-            )
-          : await this.request('thread/start', buildCodexAppServerThreadParams(input)),
+        await resolveCodexAppServerThread({
+          thread: input.thread,
+          params: buildCodexAppServerThreadParams(
+            input,
+            input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
+          ),
+          localLiveLease: this.deps.wire.reusedSessionHost === true,
+          request: (method, params) => this.request(method, params),
+          now: this.deps.now ?? Date.now,
+        }),
       );
       const thread = asCodexAppServerRecord(threadResult?.thread);
       const threadId = thread?.id;
@@ -328,6 +333,9 @@ export class CodexAppServerClient {
     if (this.pumpEnded) return Promise.reject(new Error('Codex app-server stream is already closed'));
     const id = this.nextRequestId++;
     const promise = new Promise<unknown>((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    // The stream can close while the transport write is still in flight. Mark the
+    // response promise handled now; the returned write chain still propagates it.
+    void promise.catch(() => {});
     return this.write({ id, method, params })
       .then(() => {
         if (this.pumpFailure) throw this.pumpFailure;

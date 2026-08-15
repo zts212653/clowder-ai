@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
+import { type ListenSentence, maskLeadingMarkdownFrontmatter } from '@/lib/listen-mode/markdown-sentences';
 import { HubIcon } from '../hub-icons';
+import { LiveSelectionAnnotationAction } from '../LiveSelectionAnnotationAction';
 import { MarkdownContent } from '../MarkdownContent';
 import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
@@ -23,7 +25,7 @@ export interface FileContentRendererProps {
   currentWorktree?: WorktreeEntry;
   mdContainerRef: React.RefObject<HTMLDivElement>;
   mdSelectionAction: MarkdownSelectionAction | null;
-  onMdAddToChat: () => void;
+  onMdAddToChat: (action: MarkdownSelectionAction, comment: string) => void;
   onSave: (c: string) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
   rawUrl: (p: string) => string;
@@ -31,6 +33,9 @@ export interface FileContentRendererProps {
   restoreScrollTop?: number | null;
   restoreKey?: string;
   onScrollTopChange?: (scrollTop: number) => void;
+  listenSentences?: ListenSentence[];
+  activeListenAnchor?: string;
+  onListenSentenceStart?: (index: number) => void;
 }
 
 /** Renders file content: binary (image/audio/video), markdown, HTML, JSX, or code. */
@@ -57,6 +62,9 @@ export function FileContentRenderer({
   restoreScrollTop,
   restoreKey,
   onScrollTopChange,
+  listenSentences,
+  activeListenAnchor,
+  onListenSentenceStart,
 }: FileContentRendererProps) {
   const onScrollTopChangeRef = useRef(onScrollTopChange);
   onScrollTopChangeRef.current = onScrollTopChange;
@@ -64,6 +72,35 @@ export function FileContentRenderer({
   restoreScrollTopRef.current = restoreScrollTop;
 
   const mdActive = isMarkdown && markdownRendered && !editMode;
+  const [followListenPosition, setFollowListenPosition] = useState(true);
+
+  const scrollToActiveSentence = useCallback(
+    (behavior: ScrollBehavior) => {
+      const container = mdContainerRef.current;
+      if (!container || !activeListenAnchor) return;
+      const sentence = [...container.querySelectorAll<HTMLElement>('[data-listen-sentence-anchor]')].find(
+        (element) => element.dataset.listenSentenceAnchor === activeListenAnchor,
+      );
+      sentence?.scrollIntoView({ block: 'center', behavior });
+    },
+    [activeListenAnchor, mdContainerRef],
+  );
+
+  useEffect(() => {
+    const container = mdContainerRef.current;
+    if (!container || !mdActive || !activeListenAnchor) return;
+    const pauseFollowing = () => setFollowListenPosition(false);
+    container.addEventListener('wheel', pauseFollowing, { passive: true });
+    container.addEventListener('touchstart', pauseFollowing, { passive: true });
+    return () => {
+      container.removeEventListener('wheel', pauseFollowing);
+      container.removeEventListener('touchstart', pauseFollowing);
+    };
+  }, [activeListenAnchor, mdActive, mdContainerRef]);
+
+  useEffect(() => {
+    if (followListenPosition) scrollToActiveSentence('smooth');
+  }, [followListenPosition, scrollToActiveSentence]);
 
   useEffect(() => {
     const el = mdContainerRef.current;
@@ -157,28 +194,36 @@ export function FileContentRenderer({
       <div className="relative flex-1 min-h-0">
         <div className="h-full overflow-auto bg-cafe-white p-4" ref={mdContainerRef}>
           <MarkdownContent
-            content={file.content}
+            content={maskLeadingMarkdownFrontmatter(file.content)}
             disableCommandPrefix
             basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
             worktreeId={worktreeId ?? undefined}
+            listenSentences={listenSentences}
+            activeListenAnchor={activeListenAnchor}
+            onListenSentenceStart={onListenSentenceStart}
           />
         </div>
-        {mdSelectionAction && (
+        {activeListenAnchor && !followListenPosition && (
           <button
             type="button"
-            onClick={onMdAddToChat}
-            onMouseDown={(event) => event.preventDefault()}
-            style={mdSelectionAction.position}
-            className="absolute flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
-            title="引用到聊天"
+            onClick={() => {
+              setFollowListenPosition(true);
+              scrollToActiveSentence('smooth');
+            }}
+            aria-label="回到当前句"
+            title="跳回正在播放的句子"
+            className="absolute bottom-3 right-8 z-20 rounded-full border border-cafe bg-cafe-surface/90 px-3 py-1.5 text-xs text-cafe-secondary shadow-sm transition-colors hover:border-cafe hover:bg-cafe-surface"
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
-              <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
-            </svg>
-            Add to chat
+            回到当前句
           </button>
         )}
+        <LiveSelectionAnnotationAction
+          action={mdSelectionAction}
+          resetKey={openFilePath}
+          positionMode="absolute"
+          actionTestId="workspace-markdown-selection-add-to-chat"
+          onSave={onMdAddToChat}
+        />
       </div>
     );
 

@@ -29,6 +29,8 @@ export interface PluginInstanceRecord {
   readonly configReadiness: ConfigReadiness;
   readonly activationState: ActivationState;
   readonly runtimeState: RuntimeState;
+  /** Fence for owner-driven config/activation/lifecycle mutations. Runtime health does not advance it. */
+  readonly lifecycleRevision: number;
   readonly installedAt: number;
   readonly updatedAt: number;
   readonly retiredAt?: number;

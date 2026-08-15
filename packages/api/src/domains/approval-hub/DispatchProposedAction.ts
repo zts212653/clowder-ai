@@ -25,9 +25,11 @@ export interface ValidatedDispatchProposedAction {
 }
 
 /**
- * F246 owns only a proposed initial structured transfer. Replacement,
- * return, re-entry, and existing-standing claims remain direct F167 flows;
- * admitting them here would require a second approval lifecycle.
+ * F246 owns only a proposed initial structured transfer. Replacement, return,
+ * and re-entry remain direct F167 flows; admitting them here would require a
+ * second approval lifecycle. A first existing-standing claim is also admitted
+ * by F167, but its canonical negative-authorization check shares the atomic
+ * first-claim boundary so it cannot bypass a pending or rejected decision.
  */
 export function validateDispatchProposedAction(
   input: unknown,

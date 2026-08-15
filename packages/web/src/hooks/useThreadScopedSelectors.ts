@@ -19,6 +19,7 @@
 import { useShallow } from 'zustand/react/shallow';
 import type { CatInvocationInfo, CatStatusType, ChatMessage } from '@/stores/chat-types';
 import { type ChatState, useChatStore } from '@/stores/chatStore';
+import { projectTerminalActiveInvocationSlots } from '@/stores/invocation-liveness';
 
 /** Inert defaults returned when threadId is null or has no entry. Frozen so
  *  callers can't accidentally mutate a shared singleton. */
@@ -50,6 +51,32 @@ const DEFAULT_LIVENESS: ThreadLiveness = {
   targetCats: EMPTY_TARGET_CATS as string[],
 };
 
+/**
+ * Resolve a short-lived contradiction between a terminal app-server lifecycle
+ * and a stale active snapshot. The lifecycle only wins when it is correlated
+ * to the same parent invocation; an old terminal turn must never suppress a
+ * newly admitted slot for the same cat.
+ */
+function projectTerminalLiveness(liveness: ThreadLiveness): ThreadLiveness {
+  const projection = projectTerminalActiveInvocationSlots(liveness.activeInvocations, liveness.catInvocations);
+  const terminalCats = new Map<string, CatStatusType>();
+
+  for (const { catId, status } of projection.terminalSlots) {
+    terminalCats.set(catId, status);
+  }
+
+  if (terminalCats.size === 0) return liveness;
+  const catStatuses = { ...liveness.catStatuses };
+  for (const [catId, status] of terminalCats) catStatuses[catId] = status;
+
+  return {
+    ...liveness,
+    hasActive: Object.keys(projection.activeInvocations).length > 0,
+    activeInvocations: projection.activeInvocations,
+    catStatuses,
+  };
+}
+
 /** Pure selector — returns the messages array for a thread, preferring the
  *  flat slice when threadId is current (to keep reference equality with the
  *  source-of-truth and avoid cross-thread dup). */
@@ -76,7 +103,7 @@ export function selectThreadLiveness(state: ChatState, threadId: string | null):
   // Current-thread path. Also taken when `currentThreadId` is absent
   // (incomplete test mocks) — flat is the only authoritative source then.
   if (threadId === state.currentThreadId || !state.currentThreadId) {
-    return {
+    return projectTerminalLiveness({
       hasActive: state.hasActiveInvocation ?? false,
       catStatuses: state.catStatuses ?? DEFAULT_LIVENESS.catStatuses,
       catStatusDetails: state.catStatusDetails ?? DEFAULT_LIVENESS.catStatusDetails,
@@ -84,11 +111,11 @@ export function selectThreadLiveness(state: ChatState, threadId: string | null):
       catInvocations: state.catInvocations ?? DEFAULT_LIVENESS.catInvocations,
       intentMode: state.intentMode ?? null,
       targetCats: state.targetCats ?? DEFAULT_LIVENESS.targetCats,
-    };
+    });
   }
   const ts = state.threadStates?.[threadId];
   if (!ts) return DEFAULT_LIVENESS;
-  return {
+  return projectTerminalLiveness({
     hasActive: ts.hasActiveInvocation ?? false,
     catStatuses: ts.catStatuses ?? DEFAULT_LIVENESS.catStatuses,
     catStatusDetails: ts.catStatusDetails ?? DEFAULT_LIVENESS.catStatusDetails,
@@ -96,7 +123,7 @@ export function selectThreadLiveness(state: ChatState, threadId: string | null):
     catInvocations: ts.catInvocations ?? DEFAULT_LIVENESS.catInvocations,
     intentMode: ts.intentMode ?? null,
     targetCats: ts.targetCats ?? DEFAULT_LIVENESS.targetCats,
-  };
+  });
 }
 
 /** React hook — thread-scoped messages. Drop-in for `useChatStore((s) => s.messages)`

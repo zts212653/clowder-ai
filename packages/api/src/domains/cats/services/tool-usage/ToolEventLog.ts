@@ -19,6 +19,137 @@ const NUDGE_FOLLOWUP_TOOLS = new Set(['graph_resolve', 'list_recent']);
 /** Substrings that indicate a Bash grep / rg / find fallback. */
 const GREP_FALLBACK_PATTERNS = ['grep', 'rg ', 'ripgrep', 'find ', 'find\t'];
 
+/**
+ * TD (2026-08-12): bounded growth guards.
+ *
+ * Production incident: one thread key reached 12,887 events / 221MB because
+ * route-serial wires raw `toolInput` into `summary` (observed single events up
+ * to 1.98MB) with no cap, while append refreshes the TTL — active threads
+ * never expire. Every round-end recall correlation (route-serial/parallel)
+ * plus every updateSummary then full-scans the zset and JSON.parses it on the
+ * API event loop → periodic seconds-long freezes.
+ *
+ * Telemetry only needs sequence + prefix features (FM-1 grep detection reads
+ * the command prefix; FM-2/3/5 read small typed fields), never full payloads.
+ */
+const SUMMARY_FIELD_CHAR_CAP = 1000;
+/**
+ * R1 (gpt52 review, PR #3613): structural arrays get a larger budget and
+ * element-wise truncation. F200 consumers (recall-correlation-hook,
+ * RecallEventCorrelator) read `_f200Candidates`/`_f200Edges` with
+ * `.map()`/`.filter()` — converting an array to a marker string throws
+ * TypeError inside the fire-and-forget correlation and silently kills the
+ * whole batch. Realistic max payload (COVERAGE_MAX_LIMIT=20 candidates)
+ * serializes to ~2.4KB and must pass whole.
+ */
+const SUMMARY_ARRAY_FIELD_CHAR_CAP = 4000;
+const SUMMARY_TOTAL_CHAR_CAP = 8000;
+/** Matching/merge sentinels — always preserved verbatim (FIFO merge depends on them). */
+const SUMMARY_SENTINEL_KEYS = new Set(['_toolUseId', '_resultMerged', '_truncated']);
+/** Default per-thread cap. 2000 events ≫ any FM metric window; typical sanitized event <1KB. */
+const DEFAULT_MAX_EVENTS_PER_THREAD = 2000;
+
+function safeStringifyLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 16;
+  } catch {
+    return 16;
+  }
+}
+
+/**
+ * Round-end recall correlation (F200 AC-A1, route-serial/route-parallel) only
+ * correlates invocations that just completed — their events sit at the zset
+ * tail. One round is far below 200 tool events; 200 gives slack for parallel
+ * multi-cat rounds without ever pulling megabytes.
+ */
+export const RECALL_CORRELATION_EVENT_WINDOW = 200;
+
+/**
+ * PR #3613 residual (2026-08-13 audit): updateSummary ran a full
+ * `zrange 0 -1 WITHSCORES` per tool RESULT. The per-thread cap bounds that at
+ * 2000 events, but a window full of pre-sanitize fat legacy members measured
+ * 21.8MB — still a 12ms Redis stall plus MB-scale parse on every result until
+ * legacy members rotate out. FIFO merge targets (the round's own tool_use
+ * appends) always sit near the tail, so the scan is tail-bounded. Stale
+ * unmerged events older than this window are no longer merge candidates —
+ * intentional: a result arriving >200 events late belongs to no live round.
+ */
+export const UPDATE_SUMMARY_TAIL_WINDOW = 200;
+
+/**
+ * Cap summary payloads at the storage boundary so no caller (route-serial
+ * tool_use wiring, external-runtime ingest, result merges) can grow events
+ * unboundedly. Lossy by design — marked with `_truncated: true`.
+ *
+ * TYPE-PRESERVING invariant (R1 gpt52 review): truncation must never change a
+ * field's JS type. Consumers pattern-match on shape (`Array.isArray`,
+ * `.map()`, truthy-`length` idioms); a marker string where an array lived is
+ * a behavior bug, not degraded telemetry. Rules:
+ *   string → prefix slice; array → element-wise prefix (stays an array);
+ *   plain object → `{}` (safe under truthy-length and Array.isArray checks);
+ *   scalars pass through.
+ */
+export function sanitizeToolEventSummary(
+  summary: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!summary) return summary;
+  const out: Record<string, unknown> = {};
+  let budget = SUMMARY_TOTAL_CHAR_CAP;
+  let truncated = false;
+  for (const [key, value] of Object.entries(summary)) {
+    if (SUMMARY_SENTINEL_KEYS.has(key)) {
+      out[key] = value;
+      continue;
+    }
+    let kept = value;
+    let cost: number;
+    if (typeof value === 'string') {
+      cost = value.length;
+      if (cost > SUMMARY_FIELD_CHAR_CAP) {
+        kept = value.slice(0, SUMMARY_FIELD_CHAR_CAP);
+        cost = SUMMARY_FIELD_CHAR_CAP;
+        truncated = true;
+      }
+    } else if (Array.isArray(value)) {
+      cost = safeStringifyLength(value);
+      if (cost > SUMMARY_ARRAY_FIELD_CHAR_CAP) {
+        // Element-wise prefix within the array budget — stays an array.
+        const prefix: unknown[] = [];
+        let used = 2; // '[]'
+        for (const element of value) {
+          const elementCost = safeStringifyLength(element) + 1;
+          if (used + elementCost > SUMMARY_ARRAY_FIELD_CHAR_CAP) break;
+          prefix.push(element);
+          used += elementCost;
+        }
+        kept = prefix;
+        cost = used;
+        truncated = true;
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      cost = safeStringifyLength(value);
+      if (cost > SUMMARY_FIELD_CHAR_CAP) {
+        kept = {};
+        cost = 2;
+        truncated = true;
+      }
+    } else {
+      // number/boolean/null/undefined — never oversized.
+      cost = safeStringifyLength(value);
+    }
+    if (cost > budget) {
+      // Skip (not break): later small fields may still fit.
+      truncated = true;
+      continue;
+    }
+    out[key] = kept;
+    budget -= cost;
+  }
+  if (truncated) out._truncated = true;
+  return out;
+}
+
 export class ToolEventLog {
   /**
    * 砚砚 cloud-7 P1: per-thread serialization queue for updateSummary.
@@ -29,7 +160,14 @@ export class ToolEventLog {
    */
   private readonly updateChain = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly redis: RedisClient) {}
+  private readonly maxEventsPerThread: number;
+
+  constructor(
+    private readonly redis: RedisClient,
+    options?: { maxEventsPerThread?: number },
+  ) {
+    this.maxEventsPerThread = options?.maxEventsPerThread ?? DEFAULT_MAX_EVENTS_PER_THREAD;
+  }
 
   /** Append a tool event. Errors logged, never thrown.
    *
@@ -51,7 +189,15 @@ export class ToolEventLog {
     // Same-timestamp tie? sequenceId increments — order preserved.
     // Fallback (no INCR): timestamp + turnIndex * 1e-6 (turnIndex tie-break).
     const score = seq != null ? seq : event.timestamp + (event.turnIndex ?? 0) * 1e-6;
-    const member = JSON.stringify(event);
+    // TD 2026-08-12: sanitize at the storage boundary — no caller may persist
+    // unbounded payloads. Typed FM summaries are unchanged (all small fields);
+    // only generic raw-toolInput summaries get cut. Cast is safe: the union's
+    // summary shapes are preserved key-for-key except oversized values.
+    const sanitized =
+      'summary' in event && event.summary
+        ? ({ ...event, summary: sanitizeToolEventSummary(event.summary as Record<string, unknown>) } as ToolEvent)
+        : event;
+    const member = JSON.stringify(sanitized);
 
     try {
       const added = await this.redis.zadd(key, score, member);
@@ -60,6 +206,15 @@ export class ToolEventLog {
         // Side TTL on seq counter so it doesn't leak forever
         const r = this.redis as { expire?: (k: string, ttl: number) => Promise<number> };
         await r.expire?.(seqKey, TOOL_EVENT_LOG_TTL_SECONDS).catch(noop);
+        // TD 2026-08-12: cap per-thread cardinality — keep the newest N.
+        // O(log N + M) on eviction, O(log N) steady-state. Also self-heals
+        // oversized legacy keys: first append after deploy trims them down.
+        const rt = this.redis as {
+          zremrangebyrank?: (k: string, start: number, stop: number) => Promise<number>;
+        };
+        if (rt.zremrangebyrank && this.maxEventsPerThread > 0) {
+          await rt.zremrangebyrank(key, 0, -(this.maxEventsPerThread + 1)).catch(noop);
+        }
       }
     } catch (err) {
       log.warn({ err, key, toolName: event.toolName }, 'Failed to append tool event');
@@ -70,6 +225,18 @@ export class ToolEventLog {
   async readByThread(threadId: string): Promise<ToolEvent[]> {
     const key = toolEventLogKey(threadId);
     const members = await this.redis.zrange(key, 0, -1);
+    return members.map((m) => JSON.parse(m) as ToolEvent);
+  }
+
+  /**
+   * TD 2026-08-12: bounded tail read for hot paths. Round-end recall
+   * correlation only needs the current round's events (always at the tail) —
+   * full-thread scans of large keys were freezing the API event loop.
+   */
+  async readRecentByThread(threadId: string, limit: number): Promise<ToolEvent[]> {
+    if (limit <= 0) return [];
+    const key = toolEventLogKey(threadId);
+    const members = await this.redis.zrange(key, -limit, -1);
     return members.map((m) => JSON.parse(m) as ToolEvent);
   }
 
@@ -143,8 +310,10 @@ export class ToolEventLog {
    * `_resultMerged=true` sentinel marks merged events so subsequent results
    * walk past them and find the next unmatched call (oldest-first).
    *
-   * O(N) read+rewrite per call; for v1 thread sizes (~tens of events) this is
-   * fine. Will need a secondary index for larger threads.
+   * Read cost is tail-bounded (UPDATE_SUMMARY_TAIL_WINDOW): the fuzzy FIFO
+   * path only sees the tail window; the exact `toolUseId` path falls back to
+   * one full scan on a window miss (R1 gpt52 #3629 — unique-key contract for
+   * delayed/out-of-order results must not be traded for the fast path).
    */
   async updateSummary(
     threadId: string,
@@ -176,6 +345,24 @@ export class ToolEventLog {
     matcher: { toolUseId?: string; toolName?: string; catId?: string },
     summaryPatch: Record<string, unknown>,
   ): Promise<boolean> {
+    // Fast path: tail window. Merge targets are normally the current round's
+    // own appends, which sit at the tail (PR #3613 residual fix).
+    const updated = await this._matchAndMerge(threadId, matcher, summaryPatch, -UPDATE_SUMMARY_TAIL_WINDOW);
+    if (updated || !matcher.toolUseId) return updated;
+    // R1 (gpt52, #3629): `toolUseId` is the explicit unique-key contract for
+    // delayed / out-of-order results — a slow tool on a busy multi-cat thread
+    // can see 200+ events land before its result arrives. Only this rare
+    // window-miss path pays the full scan; the fuzzy FIFO path stays bounded
+    // (a fuzzy match that far back belongs to no live round).
+    return this._matchAndMerge(threadId, matcher, summaryPatch, 0);
+  }
+
+  private async _matchAndMerge(
+    threadId: string,
+    matcher: { toolUseId?: string; toolName?: string; catId?: string },
+    summaryPatch: Record<string, unknown>,
+    start: number,
+  ): Promise<boolean> {
     const key = toolEventLogKey(threadId);
     // 砚砚 五审 P1-B: preserve original zset score (append uses INCR sequence,
     // not timestamp). zrange WITHSCORES gets us [member, score, member, score...]
@@ -184,7 +371,7 @@ export class ToolEventLog {
       zadd: (key: string, score: number, member: string) => Promise<number>;
       zrem?: (k: string, m: string) => Promise<number>;
     };
-    const withScores = await r.zrange(key, 0, -1, 'WITHSCORES').catch(() => [] as string[]);
+    const withScores = await r.zrange(key, start, -1, 'WITHSCORES').catch(() => [] as string[]);
     // withScores layout: [member0, score0, member1, score1, ...]
     // 砚砚 cloud-6 P2: parity-only detection misparsed shims that ignore
     // WITHSCORES and return only members in even count. Also verify that
@@ -205,7 +392,7 @@ export class ToolEventLog {
       }
     } else {
       // Fallback: no scores returned — use insertion order, no real score preservation
-      const members = await this.redis.zrange(key, 0, -1);
+      const members = await this.redis.zrange(key, start, -1);
       for (const m of members) pairs.push({ member: m, score: Number.NaN });
     }
     // Walk oldest → newest. With toolUseId, exact match wins anywhere; without,
@@ -226,7 +413,9 @@ export class ToolEventLog {
         // overwrite an earlier call's data — FIFO match to next unmatched call.
         if (summary['_resultMerged'] === true) continue;
       }
-      const mergedSummary = { ...summary, ...summaryPatch, _resultMerged: true };
+      // TD 2026-08-12: sanitize the merged result — result-side patches (e.g.
+      // raw tool output) must not regrow a capped event past the budget.
+      const mergedSummary = sanitizeToolEventSummary({ ...summary, ...summaryPatch, _resultMerged: true });
       const newEvent = { ...event, summary: mergedSummary };
       const newMember = JSON.stringify(newEvent);
       // 砚砚 cloud-4 P2: idempotent retry guard — when newMember bytes match

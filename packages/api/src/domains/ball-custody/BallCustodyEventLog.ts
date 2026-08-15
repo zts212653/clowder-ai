@@ -18,12 +18,24 @@ export interface IBallCustodyEventLog {
    */
   append(event: BallCustodyEvent): Promise<{ appended: boolean; sequence: number }>;
 
+  /**
+   * Append only when the subject log is still at `expectedSequence` (the next
+   * 0-based position). Duplicate detection wins over the sequence fence so an
+   * exact retry stays idempotent after later events land.
+   */
+  appendFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedAppendResult>;
+
   /** 按插入序读 subject 事件。fromSequence = 0-based 起点（默认 0 = 全部）。 */
   read(subjectKey: string, fromSequence?: number): Promise<BallCustodyEvent[]>;
 
   /** 列出所有至少有一条事件的 subjectKey。 */
   listSubjects(): Promise<string[]>;
 }
+
+export type BallCustodyFencedAppendResult =
+  | { outcome: 'appended'; sequence: number }
+  | { outcome: 'duplicate' }
+  | { outcome: 'conflict'; actualSequence: number };
 
 /**
  * KEYS[1] = ballcustody:events:log:{subjectKey}   (per-subject LIST)
@@ -41,6 +53,29 @@ redis.call('SADD', KEYS[2], ARGV[1])
 redis.call('SADD', KEYS[3], ARGV[3])
 return redis.call('RPUSH', KEYS[1], ARGV[2])
 `;
+
+const APPEND_FENCED_LUA = `
+local already = redis.call('SISMEMBER', KEYS[2], ARGV[1])
+if already == 1 then
+  return {0, -1}
+end
+
+local current = redis.call('LLEN', KEYS[1])
+if current ~= tonumber(ARGV[2]) then
+  return {-1, current}
+end
+
+redis.call('SADD', KEYS[2], ARGV[1])
+redis.call('SADD', KEYS[3], ARGV[4])
+redis.call('RPUSH', KEYS[1], ARGV[3])
+return {1, current}
+`;
+
+function requireSequence(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`);
+  }
+}
 
 export class RedisBallCustodyEventLog implements IBallCustodyEventLog {
   constructor(private readonly redis: RedisClient) {}
@@ -61,6 +96,25 @@ export class RedisBallCustodyEventLog implements IBallCustodyEventLog {
       return { appended: false, sequence: -1 };
     }
     return { appended: true, sequence: result - 1 };
+  }
+
+  async appendFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedAppendResult> {
+    requireSequence(expectedSequence, 'expectedSequence');
+    const result = (await this.redis.eval(
+      APPEND_FENCED_LUA,
+      3,
+      BallCustodyKeys.eventLog(event.subjectKey),
+      BallCustodyKeys.eventsSeen,
+      BallCustodyKeys.eventsSubjects,
+      event.sourceEventId,
+      expectedSequence.toString(),
+      JSON.stringify(event),
+      event.subjectKey,
+    )) as [number, number];
+
+    if (result[0] === 0) return { outcome: 'duplicate' };
+    if (result[0] === -1) return { outcome: 'conflict', actualSequence: result[1] };
+    return { outcome: 'appended', sequence: result[1] };
   }
 
   async read(subjectKey: string, fromSequence = 0): Promise<BallCustodyEvent[]> {

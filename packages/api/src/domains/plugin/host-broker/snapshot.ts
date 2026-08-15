@@ -165,7 +165,11 @@ function parseSession(value: unknown, index: number): BrokerSessionRecord {
     connectionId: string(raw.connectionId, `${label}.connectionId`),
     brokerSessionId: string(raw.brokerSessionId, `${label}.brokerSessionId`),
     runtimeLeaseId: string(raw.runtimeLeaseId, `${label}.runtimeLeaseId`),
-    transportKind: enumValue(raw.transportKind, new Set(['builtin-loopback'] as const), `${label}.transportKind`),
+    transportKind: enumValue(
+      raw.transportKind,
+      new Set(['builtin-loopback', 'stdio'] as const),
+      `${label}.transportKind`,
+    ),
     pluginInstanceId: string(raw.pluginInstanceId, `${label}.pluginInstanceId`),
     pluginId: identity.pluginId,
     packageDigest: identity.packageDigest,

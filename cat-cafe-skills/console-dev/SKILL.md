@@ -1,5 +1,6 @@
 ---
 name: console-dev
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   Console 前端交付范式：4 道门禁驱动的前端开发流程。Use when:
   新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。
@@ -68,5 +69,5 @@ Console 前端开发先定入口和状态，再写组件。这个 skill 不替�
 
 ## 参考
 
-- `refs/f190-frontend-lessons.md` — F190 Console intake 的具体案例。
+- `../.cat-cafe-shared-refs/f190-frontend-lessons.md` — F190 Console intake 的具体案例。
 - `docs/architecture/feature-placement.md` — Console 入口层级决策树。

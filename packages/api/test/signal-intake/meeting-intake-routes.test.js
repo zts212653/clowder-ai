@@ -88,6 +88,20 @@ describe('F292 meeting intake recovery routes', () => {
     });
     assert.equal(degraded.statusCode, 200);
     assert.equal(degraded.json().intake.repair.action, 'regrant');
+    const regrant = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/regrant',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { expectedRevision: 2 },
+    });
+    assert.equal(regrant.statusCode, 200);
+    assert.deepEqual(regrant.json().regrant, {
+      kind: 'official_plugin_auth',
+      catalogId: 'feishu-meeting-intake',
+      settingsHref: '/settings?s=plugins',
+      nextAction: 'retry',
+    });
+    assert.equal('argv' in regrant.json().regrant, false);
     const stale = await app.inject({
       method: 'POST',
       url: '/api/meeting-intakes/intake-1/repair/clear',

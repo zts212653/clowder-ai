@@ -3,7 +3,16 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
-import { collectInvocationLineageMessageIds, focusInvocationLineage, MessageReceiptDock } from '../MessageReceiptDock';
+import { MOUNT_DEFERRED_MESSAGE_EVENT } from '@/utils/scrollToMessage';
+import {
+  collectInvocationLineageMessageIds,
+  focusInvocationLineage,
+  focusTurnAbsorptionSummary,
+  MessageReceiptDock,
+} from '../MessageReceiptDock';
+
+const mockApiFetch = vi.hoisted(() => vi.fn());
+vi.mock('@/utils/api-client', () => ({ apiFetch: mockApiFetch }));
 
 const receipt: QueueMessageReceipt = {
   version: 1,
@@ -92,6 +101,7 @@ describe('MessageReceiptDock', () => {
   });
 
   beforeEach(() => {
+    mockApiFetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -360,6 +370,138 @@ describe('MessageReceiptDock', () => {
     expect(container.textContent).toContain('砚砚 · 已读取 · 未收口，已回队列');
   });
 
+  it('does not offer retry after target truth has advanced or when no cross-thread carrier exists', () => {
+    const failedAttempt = {
+      id: 'cross-thread:codex:1',
+      targetCatId: 'codex',
+      sequence: 1,
+      state: 'failed' as const,
+      createdAt: 100,
+      updatedAt: 200,
+      terminalReason: 'invocation_failed' as const,
+    };
+
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-1"
+          receipt={{
+            version: 1,
+            entryId: 'cross-thread:message-1',
+            scope: 'cross_thread_delivery',
+            targets: [{ catId: 'codex', state: 'failed', retryable: false, attempts: [failedAttempt] }],
+            reminderAttempts: [],
+          }}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-retry-target="codex"]')).toBeNull();
+
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-1"
+          receipt={{
+            version: 1,
+            entryId: 'entry-recovered',
+            targets: [{ catId: 'codex', state: 'seen', attempts: [failedAttempt] }],
+            reminderAttempts: [],
+          }}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-retry-target="codex"]')).toBeNull();
+  });
+
+  it('offers retry when a delivered invocation was stopped before it completed', () => {
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-stopped"
+          receipt={{
+            version: 1,
+            entryId: 'entry-stopped',
+            targets: [
+              {
+                catId: 'codex',
+                state: 'failed',
+                attempts: [
+                  {
+                    id: 'entry-stopped:codex:1',
+                    targetCatId: 'codex',
+                    sequence: 1,
+                    state: 'cancelled',
+                    createdAt: 100,
+                    updatedAt: 200,
+                    terminalReason: 'invocation_cancelled',
+                  },
+                ],
+              },
+            ],
+            reminderAttempts: [],
+          }}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+
+    expect(container.querySelector('[data-retry-target="codex"]')).not.toBeNull();
+  });
+
+  it('retries only the exact message target and current failed attempt', async () => {
+    mockApiFetch.mockResolvedValue(new Response(JSON.stringify({ status: 'retry_queued' }), { status: 202 }));
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-retry-exact"
+          receipt={{
+            version: 1,
+            entryId: 'entry-retry-exact',
+            targets: [
+              {
+                catId: 'codex',
+                state: 'failed',
+                attempts: [
+                  {
+                    id: 'entry-retry-exact:codex:3',
+                    targetCatId: 'codex',
+                    sequence: 3,
+                    state: 'failed',
+                    createdAt: 100,
+                    updatedAt: 200,
+                    terminalReason: 'invocation_failed',
+                  },
+                ],
+              },
+            ],
+            reminderAttempts: [],
+          }}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+
+    const retry = container.querySelector<HTMLButtonElement>('[data-retry-target="codex"]');
+    expect(retry).not.toBeNull();
+    await act(async () => retry?.click());
+
+    const retryCalls = mockApiFetch.mock.calls.filter(([path]) => String(path).includes('/queue-targets/codex/retry'));
+    expect(retryCalls).toHaveLength(1);
+    expect(retryCalls[0]).toEqual([
+      '/api/messages/message-retry-exact/queue-targets/codex/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ attemptId: 'entry-retry-exact:codex:3' }),
+      }),
+    ]);
+  });
+
   it('keeps author withdrawal visible as history instead of actionable Queue work', () => {
     const withdrawnReceipt: QueueMessageReceipt = {
       version: 1,
@@ -464,6 +606,58 @@ describe('invocation lineage navigation', () => {
       behavior: 'smooth',
       block: 'center',
     });
+
+    host.remove();
+  });
+
+  it('mounts every deferred lineage bubble before focusing the chain', () => {
+    const host = document.createElement('div');
+    const mountEvents: string[] = [];
+    for (const id of ['msg-original', 'msg-second-bubble', 'msg-supplement']) {
+      const placeholder = document.createElement('div');
+      placeholder.dataset.deferredMessageId = id;
+      placeholder.addEventListener(MOUNT_DEFERRED_MESSAGE_EVENT, () => {
+        mountEvents.push(id);
+        const node = document.createElement('div');
+        node.dataset.messageId = id;
+        node.scrollIntoView = vi.fn();
+        placeholder.replaceWith(node);
+      });
+      host.appendChild(placeholder);
+    }
+    document.body.appendChild(host);
+
+    expect(focusInvocationLineage(messages, 'inv-1')).toBe(true);
+    expect(mountEvents).toEqual(['msg-original', 'msg-second-bubble', 'msg-supplement']);
+    expect(host.querySelectorAll('[data-lineage-focus="true"]')).toHaveLength(3);
+    expect(host.querySelectorAll('[data-deferred-message-id]')).toHaveLength(0);
+
+    host.remove();
+  });
+
+  it('mounts a deferred absorption dock before opening and focusing it', () => {
+    const host = document.createElement('div');
+    const placeholder = document.createElement('div');
+    placeholder.dataset.deferredMessageId = 'msg-original';
+    const scrollIntoView = vi.fn();
+    placeholder.addEventListener(MOUNT_DEFERRED_MESSAGE_EVENT, () => {
+      const node = document.createElement('div');
+      node.dataset.messageId = 'msg-original';
+      node.scrollIntoView = vi.fn();
+      const dock = document.createElement('details');
+      dock.dataset.turnAbsorptionInvocation = 'inv-1';
+      dock.scrollIntoView = scrollIntoView;
+      node.appendChild(dock);
+      placeholder.replaceWith(node);
+    });
+    host.appendChild(placeholder);
+    document.body.appendChild(host);
+
+    expect(focusTurnAbsorptionSummary(messages, 'inv-1')).toBe(true);
+    const dock = host.querySelector<HTMLDetailsElement>('details[data-turn-absorption-invocation="inv-1"]');
+    expect(dock?.open).toBe(true);
+    expect(dock?.dataset.lineageFocus).toBe('true');
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
 
     host.remove();
   });

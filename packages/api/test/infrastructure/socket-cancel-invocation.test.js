@@ -35,6 +35,9 @@ function explicitCancel(overrides = {}) {
     origin: 'explicit_stop',
     actionId: `action-${Date.now()}-${Math.random()}`,
     clientInstanceId: 'client-test-1',
+    sourceControl: 'chat_input_action',
+    gesture: 'pointer',
+    trustedGesture: true,
     ...overrides,
   };
 }
@@ -310,6 +313,28 @@ describe('SocketManager cancel_invocation', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     socket.emit('cancel_invocation', { threadId: 'thread-1', catId: 'opus' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(invocationTracker.cancelAll.mock.calls.length, 0);
+    socket.disconnect();
+  });
+
+  it('rejects a self-attributed cancel without a trusted UI control gesture', async () => {
+    const socket = await connectClient(port);
+    socket.emit('join_room', 'thread:thread-1');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    socket.emit('cancel_invocation', {
+      threadId: 'thread-1',
+      catId: 'opus',
+      origin: 'explicit_stop',
+      actionId: 'action-self-attributed',
+      clientInstanceId: 'client-test-1',
+      sourceControl: 'chat_input_action',
+      gesture: 'pointer',
+      trustedGesture: false,
+    });
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     assert.equal(invocationTracker.cancel.mock.calls.length, 0);

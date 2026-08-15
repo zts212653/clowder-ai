@@ -116,11 +116,16 @@ async function buildApp(opts = {}) {
       emitToUser: () => {},
     },
     invocationRecordStore: rs,
+    ...(opts.messageStore ? { messageStore: opts.messageStore } : {}),
+    ...(opts.queueCustodyCoordinator ? { queueCustodyCoordinator: opts.queueCustodyCoordinator } : {}),
+    ...(opts.getManagedCommandWakeRecovery
+      ? { getManagedCommandWakeRecovery: opts.getManagedCommandWakeRecovery }
+      : {}),
     ...(opts.agentSessionMutex ? { agentSessionMutex: opts.agentSessionMutex } : {}),
   });
 
   await app.ready();
-  return { app, queueProcessor: qp, recordStore: rs, tracker, broadcasts };
+  return { app, invocationQueue, queueProcessor: qp, recordStore: rs, tracker, broadcasts };
 }
 
 // ── RED tests ──
@@ -241,6 +246,51 @@ describe('force-reset: releases all stuck state for a thread (escape hatch)', ()
     assert.ok(broadcasts.some(({ m }) => m.type === 'done' && m.catId === 'codex-sol'));
     assert.ok(queueProcessor.actions.some((action) => action.op === 'clearPause' && action.cid === 'codex-sol'));
     assert.ok(queueProcessor.actions.some((action) => action.op === 'releaseSlot' && action.cid === 'codex-sol'));
+  });
+
+  it('force-reset retires active managed producers and withdraws their exact Queue carriers', async () => {
+    const events = [];
+    const managedCommandWakeRecovery = {
+      async retireThread(threadId, userId, reason) {
+        events.push(`retire:${threadId}:${userId}:${reason}`);
+        return { retired: 1, messageIds: ['message-managed-force-reset'] };
+      },
+      async retireCarrier() {
+        throw new Error('force-reset must use the thread-wide producer fence');
+      },
+    };
+    const queueCustodyCoordinator = {
+      async withdrawEntry(entry) {
+        events.push(`withdraw:${entry.id}`);
+        return true;
+      },
+    };
+    const { app, invocationQueue } = await buildApp({
+      getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
+      queueCustodyCoordinator,
+    });
+    const { entry } = invocationQueue.enqueue({
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      ownerAuthProvenance: 'strict',
+      content: 'managed wake result',
+      messageId: 'message-managed-force-reset',
+      source: 'agent',
+      sourceCategory: 'scheduled',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      autoExecute: true,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/force-reset`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(events, [`retire:${THREAD_ID}:${USER_ID}:force_reset`, `withdraw:${entry.id}`]);
+    assert.equal(invocationQueue.list(THREAD_ID, USER_ID).length, 0);
   });
 
   it('does not release a foreign pre-start processing slot when the tracker is absent', async () => {

@@ -7,6 +7,7 @@ import { catColorVar } from '@/lib/cat-slug';
 import { CAT_COLORS } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
+import { foldedSourceInvocationIdInTimeline } from './turn-absorption-summary';
 
 /** Maximum dots rendered on the track — prevents clutter in long conversations */
 const MAX_DOTS = 18;
@@ -71,6 +72,13 @@ function formatTime(ts: number): string {
 
 function truncateContent(content: string, maxLen: number): string {
   return content.length <= maxLen ? content : `${content.slice(0, maxLen)}…`;
+}
+
+export function messageNavigatorPreviewText(
+  message: ChatMessageData,
+  messages: readonly ChatMessageData[],
+): string | null {
+  return foldedSourceInvocationIdInTimeline(message, messages) ? null : truncateContent(message.content, 40);
 }
 
 interface MessageNavigatorProps {
@@ -165,6 +173,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
         {hoveredIdx !== null && sampledItems[hoveredIdx] && (
           <NavTooltip
             message={sampledItems[hoveredIdx].msg}
+            messages={messages}
             topPercent={sampledItems.length <= 1 ? 50 : (hoveredIdx / (sampledItems.length - 1)) * 100}
             ownerName={coCreator.name}
           />
@@ -176,10 +185,12 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
 
 function NavTooltip({
   message,
+  messages,
   topPercent,
   ownerName,
 }: {
   message: ChatMessageData;
+  messages: readonly ChatMessageData[];
   topPercent: number;
   ownerName: string;
 }) {
@@ -189,6 +200,7 @@ function NavTooltip({
   const senderName = useMemo(() => {
     return getSenderLabel(message, resolveCat, ownerName);
   }, [message, ownerName, resolveCat]);
+  const previewText = messageNavigatorPreviewText(message, messages);
 
   return (
     <div
@@ -198,7 +210,7 @@ function NavTooltip({
       <div className="font-medium">
         {senderName} · {formatTime(message.timestamp)}
       </div>
-      <div className="text-cafe-muted truncate mt-0.5">{truncateContent(message.content, 40)}</div>
+      {previewText ? <div className="text-cafe-muted truncate mt-0.5">{previewText}</div> : null}
     </div>
   );
 }

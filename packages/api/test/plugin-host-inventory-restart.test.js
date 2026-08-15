@@ -85,6 +85,34 @@ describe('K-2A persisted restart normalization', () => {
     );
   });
 
+  it('requires a new explicit activation after restart even when the old runtime was already stopped', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-dormant-restart-'));
+    const path = join(root, 'inventory.json');
+    const store = new FilePluginInventoryStore(path);
+    const first = new HostInventoryControlPlane(store, {
+      createInstanceId: () => 'pi_restart',
+      now: () => 3_000,
+    });
+    await first.installPackage(candidate());
+    await store.transaction((tx) => {
+      const instance = tx.instances.get('pi_restart');
+      tx.instances.put({
+        ...instance,
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'stopped',
+      });
+    });
+
+    const restartedStore = new FilePluginInventoryStore(path);
+    const restarted = new HostInventoryControlPlane(restartedStore, { now: () => 4_000 });
+    assert.equal(await restarted.recoverAfterRestart(), 1);
+    const recovered = (await restartedStore.snapshot()).instances[0];
+    assert.equal(recovered.activationState, 'disabled');
+    assert.equal(recovered.runtimeState, 'stopped');
+    assert.equal(recovered.lifecycleRevision, 2);
+  });
+
   it('rejects persisted grants that were not requested by the referenced package manifest', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-forged-grant-'));
     const path = join(root, 'inventory.json');

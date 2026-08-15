@@ -83,6 +83,100 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.equal(stored.queueCustody.revision, 2);
   });
 
+  test('forward queued-inclusive reads preserve raw thread order across an exposed queued cursor', async () => {
+    const threadId = 'thread-queued-inclusive-forward-redis';
+    const before = await store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'before',
+      mentions: [],
+      timestamp: 1_000,
+      threadId,
+    });
+    const exposed = await store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'exposed queued body',
+      mentions: ['opus'],
+      timestamp: 2_000,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'sealed-child' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+      }),
+    });
+    const after = await store.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'after',
+      mentions: [],
+      timestamp: 2_000,
+      threadId,
+    });
+    const options = {
+      includeQueuedCatMessages: true,
+      includeExposedQueuedUserMessagesForCatId: 'opus',
+    };
+
+    assert.deepEqual(
+      (await store.getByThreadAfter(threadId, before.id, 20, 'user-1', options)).map((message) => message.id),
+      [exposed.id, after.id],
+    );
+    assert.deepEqual(
+      (await store.getByThreadAfter(threadId, exposed.id, 20, 'user-1', options)).map((message) => message.id),
+      [after.id],
+    );
+    assert.deepEqual(
+      (
+        await store.getByThreadAfter(threadId, before.id, 20, 'user-1', {
+          ...options,
+          includeExposedQueuedUserMessagesForCatId: 'codex-sol',
+        })
+      ).map((message) => message.id),
+      [after.id],
+    );
+  });
+
+  test('CAS-rebinds one exact source to its verified replacement without persisting the proof', async () => {
+    const initial = makeCustody({
+      entryId: 'entry-replaced',
+      allTargetCats: ['opus'],
+      pendingTargetCats: ['opus'],
+    });
+    const message = await store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'recover this exact queued source',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-replacement',
+      deliveryStatus: 'queued',
+      queueCustody: initial,
+    });
+    const next = { ...initial, entryId: 'entry-replacement', revision: 2, updatedAt: 1_100 };
+
+    const result = await store.transitionQueueCustody(message.id, {
+      expectedRevision: 1,
+      next,
+      replacement: {
+        kind: 'verified',
+        previousEntryId: initial.entryId,
+        replacementEntryId: next.entryId,
+        sourceMessageId: message.id,
+      },
+    });
+
+    assert.equal(result.kind, 'updated');
+    const stored = await store.getById(message.id);
+    assert.deepEqual(stored.queueCustody, next);
+    assert.equal('replacement' in stored.queueCustody, false);
+    assert.equal(await redis.ttl(`msg:${message.id}`), -1);
+  });
+
   test('round-trips a cross-thread exact-child awakening before body exposure', async () => {
     const custody = makeCustody({
       entryId: 'cross-thread:message-awakened',

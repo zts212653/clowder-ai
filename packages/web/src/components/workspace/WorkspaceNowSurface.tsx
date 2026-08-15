@@ -1,29 +1,46 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
-
-export type WorkspaceRunningObjects = Record<string, { catId: string; mode: string; startedAt?: number }>;
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { ExecutionCancelButton } from '../ExecutionCancelButton';
 
 interface WorkspaceNowSurfaceProps {
-  activeInvocations?: WorkspaceRunningObjects;
   repository?: { name: string; branch: string };
 }
 
-function runningLabel(mode: string): string {
-  if (mode.includes('headless')) return '正在后台处理这条 thread';
-  if (mode.includes('cron')) return '正在执行定时工作';
-  return '正在处理这条 thread';
+function runningLabel(kind: 'live_invocation' | 'managed_command'): string {
+  return kind === 'managed_command' ? '托管命令' : '实时回合';
 }
 
-export function WorkspaceNowSurface({ activeInvocations = {}, repository }: WorkspaceNowSurfaceProps) {
+export function WorkspaceNowSurface({ repository }: WorkspaceNowSurfaceProps) {
   const { getCatById } = useCatData();
-  const running = Object.entries(activeInvocations).sort(
-    ([leftId, left], [rightId, right]) =>
-      (left.startedAt ?? 0) - (right.startedAt ?? 0) || leftId.localeCompare(rightId),
+  const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
+  const hydration = useActiveExecutionStore((state) => state.hydration);
+  const running = useMemo(
+    () =>
+      Object.values(executionsByKey).sort(
+        (left, right) => left.startedAt - right.startedAt || left.executionId.localeCompare(right.executionId),
+      ),
+    [executionsByKey],
   );
 
   if (running.length === 0) {
+    if (hydration === 'loading') {
+      return (
+        <section className="border-b border-cafe-subtle/55 px-5 py-4 text-xs text-cafe-muted">
+          正在同步项目里的运行状态…
+        </section>
+      );
+    }
+    if (hydration === 'error') {
+      return (
+        <section className="border-b border-cafe-subtle/55 px-5 py-4 text-xs text-conn-amber-text">
+          当前无法验证项目里的运行状态，请稍后重试。
+        </section>
+      );
+    }
     return null;
   }
 
@@ -49,9 +66,9 @@ export function WorkspaceNowSurface({ activeInvocations = {}, repository }: Work
         </div>
 
         <div className="divide-y divide-cafe-subtle/60 border-y border-cafe-subtle/60">
-          {running.map(([invocationId, invocation]) => (
+          {running.map((execution) => (
             <article
-              key={invocationId}
+              key={`${execution.kind}:${execution.executionId}`}
               className="group flex items-center gap-3 py-3.5"
               data-testid="workspace-running-object"
             >
@@ -71,14 +88,19 @@ export function WorkspaceNowSurface({ activeInvocations = {}, repository }: Work
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-semibold text-cafe-black">
-                  {resolveCatDisplayName(invocation.catId, getCatById)}
+                  {resolveCatDisplayName(execution.catId, getCatById)}
                 </div>
-                <div className="mt-0.5 truncate text-micro text-cafe-secondary">{runningLabel(invocation.mode)}</div>
+                <div className="mt-0.5 truncate text-micro text-cafe-secondary">
+                  {execution.threadTitle ?? execution.threadId} · {runningLabel(execution.kind)}
+                </div>
               </div>
-              <span className="shrink-0 text-micro text-cafe-muted">进行中</span>
+              <ExecutionCancelButton execution={execution} label="停止" />
             </article>
           ))}
         </div>
+        {hydration === 'error' && (
+          <p className="mt-2 text-micro text-conn-amber-text">同步暂时失败，以上为最近一次已验证状态。</p>
+        )}
       </div>
     </section>
   );

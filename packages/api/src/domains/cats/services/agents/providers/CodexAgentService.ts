@@ -61,6 +61,7 @@ import {
   isLivenessWarning,
   KILL_GRACE_MS,
   spawnCli,
+  withVerdictGhGuardEnv,
 } from '../../../../../utils/cli-spawn.js';
 import { parseCliTimeoutMs, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
@@ -1397,7 +1398,7 @@ export class CodexAgentService implements AgentService {
         }
       }
       const homeIsolated = authMode === 'api_key' && !!customBaseUrl;
-      const codexEnv = applyAuthMode(rawEnv, authMode);
+      const codexEnv = withVerdictGhGuardEnv(applyAuthMode(rawEnv, authMode));
 
       // Diagnostic logging: critical env state for debugging CLI startup failures
       log.info(
@@ -1622,6 +1623,20 @@ export class CodexAgentService implements AgentService {
             }
           : {}),
       };
+      let pendingSessionReplacement: AgentMessage['sessionReplacement'];
+      const attachPendingSessionReplacement = (message: AgentMessage): AgentMessage => {
+        if (
+          message.type !== 'session_init' ||
+          !message.sessionId ||
+          !pendingSessionReplacement ||
+          message.sessionId === pendingSessionReplacement.previousNativeThreadId
+        ) {
+          return message;
+        }
+        const replacement = pendingSessionReplacement;
+        pendingSessionReplacement = undefined;
+        return { ...message, sessionReplacement: replacement };
+      };
 
       for await (const event of events) {
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
@@ -1646,6 +1661,9 @@ export class CodexAgentService implements AgentService {
           continue;
         }
         if (isCodexAppServerRecoveryEvent(event)) {
+          if (event.reason === 'active_writer_reborn' && event.replacement) {
+            pendingSessionReplacement = event.replacement;
+          }
           yield {
             type: 'status' as const,
             catId: this.catId,
@@ -1925,17 +1943,19 @@ export class CodexAgentService implements AgentService {
         });
         if (result !== null) {
           if (Array.isArray(result)) {
-            for (const msg of result) {
+            for (const rawMessage of result) {
+              const msg = attachPendingSessionReplacement(rawMessage);
               if (msg.type === 'session_init' && msg.sessionId) {
                 metadata.sessionId = msg.sessionId;
               }
               yield { ...msg, metadata };
             }
           } else {
-            if (result.type === 'session_init' && result.sessionId) {
-              metadata.sessionId = result.sessionId;
+            const message = attachPendingSessionReplacement(result);
+            if (message.type === 'session_init' && message.sessionId) {
+              metadata.sessionId = message.sessionId;
             }
-            yield { ...result, metadata };
+            yield { ...message, metadata };
           }
         }
       }

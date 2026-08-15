@@ -10,8 +10,12 @@ tips_exempt: post-close Codex stall termination hardening; no new user action or
 # F118: CLI Liveness Watchdog & Session Recovery — CLI 进程活性守卫 + 会话恢复
 
 > **Status**: done (Phase D closed) | **Owner**: Ragdoll + Maine Coon | **Priority**: P0 | **Completed**: 2026-03-14 | **Follow-up Hardening**: closed (PR #492, 2026-03-16) | **GAP-2**: Phase D closed — D1 merged (PR #1105), D2 merged (PR #1108), D3+D4 merged (PR #1109), all 2026-04-12
+>
+> **Architecture cell**: `dispatch` | **Map delta**: none | **Why**: owner-liveness reaping stays inside the existing InvocationTracker / QueueProcessor / durable TurnExecution boundary and adds no queue, store, router, or lifecycle ledger.
 
 > **2026-07-13 operator override:** 多个真实 Codex 回合在等待 provider continuation 时被 420s stall guard 误判终止。默认策略改为 warning-only + manual Cancel；诊断告警延后到 30 分钟，`CLI_TIMEOUT_MS` 默认 0，只有显式正数配置才 opt in 自动 timeout。此前 hard-cap/auto-kill AC 保留为历史实现记录，不再描述默认运行策略。
+>
+> **2026-08-13 post-close owner-liveness correction:** Phase D 的 75 分钟 backstop 仍在 `InvocationTracker` getter 与 QueueProcessor 读取/准入路径里按 `startedAt` 自动 abort/delete，与 KD-7 的 manual-cancel-only 冲突。当前契约改为：75 分钟只产生候选；读取零终止副作用；serialized reaper 仅在 lease stale 且独立 provider/TurnExecution owner 已缺席或终态后，按 exact `executionId` 收敛 record、queue、tracker projection。unknown 保留 owner 并发结构化告警。历史 D3/D4 记录保留，不再代表现行语义。
 
 ## Why
 
@@ -249,7 +253,7 @@ CLI 挂了 (liveness, Phase A+B ✅)
 
 **D2 已合入**（PR #1108, 2026-04-12）：`spawn_started` socket event + per-cat spawning UI + D1 P3 多轮替换回归测试。填补 intent_mode 盲区（0-2min），ThinkingIndicator 显示"启动中..."。
 
-**D3+D4 已合入**（PR #1109, 2026-04-12）：纵深防御层。D3: InvocationTracker TTL guard — `has()` 对超过独立 75min owner-liveness backstop 的 slot 自动清理返回 false；该 backstop 不再派生自 CLI process timeout。D4: QueueProcessor zombie defense — `processingSlots` 从 `Set` 改为 `Map<string, number>`（记录 startedAt），三入口加 `sweepZombieSlots()`，双重确认（TTL 超时 + tracker.has() 为 false）防误杀。Phase D 全部完成。
+**D3+D4 已合入**（PR #1109, 2026-04-12，历史实现，已被 2026-08-13 correction supersede）：当时 `has()` 按 75min 自动清理，QueueProcessor 三入口调用 `sweepZombieSlots()`；这个实现仍以 age 代替 owner truth，后来与 KD-7 冲突。现行实现保留 75min 作为候选阈值，但回收必须走独立 provider/child probe + exact-execution fenced reaper。
 
 ## Key Decisions
 
@@ -262,6 +266,7 @@ CLI 挂了 (liveness, Phase A+B ✅)
 | KD-5 | CPU 增长只影响状态判定，不无限重置 timer；需 bounded extension + hard cap | 防 busy-loop/livelock 永不超时（Maine Coon review P1） | 2026-03-14 |
 | KD-6 | 社区 #86/#98/#99 归入 F118，扩展 scope 为 liveness + recovery + audit closure，不开 F121 | 一条因果链不拆两个 feature，管理成本 > 边界清晰收益（三猫 + operator共识） | 2026-03-14 |
 | KD-7 | 默认静默永不自动终止；`CLI_TIMEOUT_MS=0` 且 stall warning-only，用户 Cancel 是默认唯一终止入口 | CPU/NDJSON 无法区分慢 provider continuation 与死锁；两次 Sol 现场证明自动保险丝会终止尚未交付的合法回合 | 2026-07-13 |
+| KD-8 | owner age 只产生 reaper candidate，不是终止证据；回收需 stale lease + 独立 provider/TurnExecution owner absent/terminal，unknown fail-safe retain；读取永不收尸 | `startedAt` 是年龄而非心跳。把查询与终止耦合会让健康长回合被任何 UI/queue read 杀死；exact `executionId` fence 防旧 sweep 误删 replacement | 2026-08-13 |
 
 ## Review Gate
 

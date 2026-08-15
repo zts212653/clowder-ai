@@ -9,9 +9,11 @@ export interface TurnAbsorptionItem {
   content: string;
   contentBlocks?: ChatMessage['contentBlocks'];
   kind: TurnAbsorptionKind;
-  catId: string;
+  /** The cat that consumed this source; never the source author identity. */
+  handlerCatId: string;
   invocationId: string;
   seenAt: number;
+  outcomeAt?: number;
   recalled: boolean;
   /** True only when the canonical source bubble can hide its body without masking actionable work. */
   bodyProjectedHere: boolean;
@@ -32,6 +34,23 @@ export interface TurnAbsorptionProjection {
 }
 
 type ReceiptTarget = QueueMessageReceipt['targets'][number];
+
+function projectedExecutionIds(message: ChatMessage): string[] {
+  const executionIds: string[] = [];
+  if (message.extra?.turnExecution) executionIds.push(message.extra.turnExecution.invocationId);
+  if (message.extra?.auxiliaryTurnExecutions) {
+    for (const execution of message.extra.auxiliaryTurnExecutions) executionIds.push(execution.invocationId);
+  }
+  return executionIds;
+}
+
+export function terminalSurfaceMessageId(messages: readonly ChatMessage[], invocationId: string): string | undefined {
+  for (const candidate of [...messages].reverse()) {
+    if (candidate.isStreaming) continue;
+    if (projectedExecutionIds(candidate).includes(invocationId)) return candidate.id;
+  }
+  return undefined;
+}
 
 function exactExposedTarget(message: ChatMessage, invocationId: string): ReceiptTarget | undefined {
   const receipt = message.extra?.queueReceipt;
@@ -77,6 +96,23 @@ export function foldedSourceInvocationId(message: ChatMessage): string | undefin
   return message.extra?.queueReceipt?.targets.find(hasExactHandledOutcome)?.invocationId;
 }
 
+export function foldedSourceInvocationIdInTimeline(
+  message: ChatMessage,
+  messages: readonly ChatMessage[],
+): string | undefined {
+  const invocationId = foldedSourceInvocationId(message);
+  return invocationId && terminalSurfaceMessageId(messages, invocationId) ? invocationId : undefined;
+}
+
+function targetOutcomeAt(target: ReceiptTarget): number | undefined {
+  const outcome = target.outcome;
+  if (target.state === 'handled' && outcome && outcome.invocationId === target.invocationId) {
+    return outcome.handledAt;
+  }
+  if (target.state === 'withdrawn' && typeof target.withdrawnAt === 'number') return target.withdrawnAt;
+  return target.seenAt;
+}
+
 /**
  * Pure F264 Gap F projection. It consumes the existing receipt lineage only;
  * wording, message text and token positions never become handling evidence.
@@ -98,9 +134,10 @@ export function projectTurnAbsorptionSummary(
       content: message.content,
       contentBlocks: message.contentBlocks,
       kind: classifyTarget(target),
-      catId: target.catId,
+      handlerCatId: target.catId,
       invocationId: target.invocationId,
       seenAt: target.seenAt,
+      outcomeAt: targetOutcomeAt(target),
       recalled,
       bodyProjectedHere,
     });

@@ -40,7 +40,7 @@ export interface ServiceManifest {
   deepHealthTimeoutMs?: number;
   /** Optional health-payload identity contract. A 2xx response is not enough
    *  when one service id can dispatch multiple model/backend implementations. */
-  healthIdentity?: 'asr-model-backend';
+  healthIdentity?: 'asr-model-backend' | 'tts-stream-route-v1';
   prerequisites?: {
     runtime?: string;
     venvPath?: string;
@@ -230,6 +230,7 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     defaultEndpoint: 'http://localhost:9879',
     healthPath: '/health',
     deepHealthPath: '/health/deep',
+    healthIdentity: 'tts-stream-route-v1',
     prerequisites: {
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/tts-venv',
@@ -594,6 +595,13 @@ export function serviceHealthIdentityMatches(
   health: ServiceHealthResult,
 ): { matches: boolean; reason?: string } {
   if (!service.healthIdentity) return { matches: true };
+  if (service.healthIdentity === 'tts-stream-route-v1') {
+    const capabilities = health.details?.capabilities;
+    if (!Array.isArray(capabilities) || !capabilities.includes('speech-stream-route-v1')) {
+      return { matches: false, reason: 'health response omitted speech-stream-route-v1 capability' };
+    }
+    return { matches: true };
+  }
   const desiredModel = config?.selectedModel?.trim();
   if (!desiredModel) return { matches: false, reason: 'desired model is not configured' };
   const liveModel = health.details?.model;

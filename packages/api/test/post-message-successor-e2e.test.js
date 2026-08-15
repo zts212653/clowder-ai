@@ -58,6 +58,7 @@ function activeLease(input) {
 async function createHarness({
   deliveryCursorStore,
   doneTrackingHead,
+  livePrSnapshot,
   incomingTerminal = false,
   incomingActiveSubject,
   reviewCarrier = false,
@@ -116,91 +117,103 @@ async function createHarness({
   const terminalPreflightCalls = [];
   const unavailableCalls = [];
   const state = { admit: null };
-  const actionSuccessorAdmissionService = doneTrackingHead
-    ? (() => {
-        const leaseStore = {
-          async getSubjectTerminal() {
-            return null;
-          },
-          async markSubjectTerminal() {
-            throw new Error('terminal marker write is not expected');
-          },
-          async clearSubjectTerminal() {
-            throw new Error('terminal marker clear is not expected');
-          },
-          async claim(input) {
-            admissionCalls.push(input);
-            return { outcome: 'claimed', lease: activeLease(input) };
-          },
-          async get() {
-            return null;
-          },
-          async replace() {
-            throw new Error('replace is not expected');
-          },
-          async commitOutcome() {
-            throw new Error('commitOutcome is not expected');
-          },
-          async returnToPredecessor() {
-            throw new Error('returnToPredecessor is not expected');
-          },
-          async markReturnDelivered() {
-            throw new Error('markReturnDelivered is not expected');
-          },
-          async continueFreshRevision() {
-            throw new Error('continueFreshRevision is not expected');
-          },
-        };
-        const resolver = new ActionSubjectTruthResolver(
-          leaseStore,
-          {
+  const actionSuccessorAdmissionService =
+    doneTrackingHead || livePrSnapshot
+      ? (() => {
+          const leaseStore = {
+            async getSubjectTerminal() {
+              return null;
+            },
+            async markSubjectTerminal() {
+              throw new Error('terminal marker write is not expected');
+            },
+            async clearSubjectTerminal() {
+              throw new Error('terminal marker clear is not expected');
+            },
+            async claim(input) {
+              admissionCalls.push(input);
+              return { outcome: 'claimed', lease: activeLease(input) };
+            },
             async get() {
               return null;
             },
-          },
-          {
-            async getBySubject() {
-              return {
-                kind: 'pr_tracking',
-                status: 'done',
-                headSha: doneTrackingHead,
-                ciPrState: null,
-                reviewPrState: null,
-                closedAt: null,
-              };
+            async replace() {
+              throw new Error('replace is not expected');
             },
-          },
-        );
-        return new ActionSuccessorAdmissionService(leaseStore, resolver);
-      })()
-    : {
-        async admit(input) {
-          admissionCalls.push(input);
-          if (state.admit) return state.admit(input);
-          const lease = activeLease(input);
-          return {
-            admit: true,
-            outcome: 'claimed',
-            lease,
-            fence: { leaseId: lease.leaseId, generation: lease.generation, dispatchId: input.dispatchId },
+            async commitOutcome() {
+              throw new Error('commitOutcome is not expected');
+            },
+            async returnToPredecessor() {
+              throw new Error('returnToPredecessor is not expected');
+            },
+            async markReturnDelivered() {
+              throw new Error('markReturnDelivered is not expected');
+            },
+            async continueFreshRevision() {
+              throw new Error('continueFreshRevision is not expected');
+            },
           };
-        },
-        async markUnavailable(input) {
-          unavailableCalls.push(input);
-        },
-        async preflightLocalReviewTerminalRoute(input) {
-          terminalPreflightCalls.push(input);
-          if (input.targetThreadId !== thread.id) {
+          const resolver = new ActionSubjectTruthResolver(
+            leaseStore,
+            {
+              async get() {
+                return null;
+              },
+            },
+            doneTrackingHead
+              ? {
+                  async getBySubject() {
+                    return {
+                      kind: 'pr_tracking',
+                      status: 'done',
+                      headSha: doneTrackingHead,
+                      ciPrState: null,
+                      reviewPrState: null,
+                      closedAt: null,
+                    };
+                  },
+                }
+              : undefined,
+            undefined,
+            undefined,
+            livePrSnapshot
+              ? {
+                  async observe(input) {
+                    return { subjectRef: input.subjectRef, ...livePrSnapshot };
+                  },
+                }
+              : undefined,
+          );
+          return new ActionSuccessorAdmissionService(leaseStore, resolver);
+        })()
+      : {
+          async admit(input) {
+            admissionCalls.push(input);
+            if (state.admit) return state.admit(input);
+            const lease = activeLease(input);
             return {
-              applicable: true,
-              allow: false,
-              reason: 'target_thread_mismatch',
-              expectedThreadId: thread.id,
+              admit: true,
+              outcome: 'claimed',
+              lease,
+              fence: { leaseId: lease.leaseId, generation: lease.generation, dispatchId: input.dispatchId },
             };
-          }
-          return { applicable: true, allow: true, expectedThreadId: thread.id };
-        },
-      };
+          },
+          async markUnavailable(input) {
+            unavailableCalls.push(input);
+          },
+          async preflightLocalReviewTerminalRoute(input) {
+            terminalPreflightCalls.push(input);
+            if (input.targetThreadId !== thread.id) {
+              return {
+                applicable: true,
+                allow: false,
+                reason: 'target_thread_mismatch',
+                expectedThreadId: thread.id,
+              };
+            }
+            return { applicable: true, allow: true, expectedThreadId: thread.id };
+          },
+        };
 
   app = Fastify();
   await app.register(callbacksRoutes, {
@@ -303,6 +316,26 @@ test('done-tracking HEAD truth traverses the direct review carrier and queues on
     leaseId: 'lease-e2e-1',
     generation: 1,
     dispatchId: 'post:e2e-done-tracking-review-2915',
+  });
+});
+
+test('server-observed live HEAD bootstraps the first direct review carrier and queues one fenced successor', async () => {
+  const headSha = 'ffffffffffffffffffffffffffffffffffffffff';
+  const harness = await createHarness({ livePrSnapshot: { headSha, prState: 'open' } });
+  const result = await harness.handlePostMessage({
+    content: 'Review the server-observed live HEAD before any projection exists',
+    targetCats: ['codex'],
+    clientMessageId: 'e2e-live-bootstrap-review-2915',
+    action: actionMetadata({ terminalPredicate: { kind: 'review_delivered', headSha } }),
+  });
+
+  assert.equal(toolJson(result).status, 'ok');
+  assert.equal(harness.admissionCalls.length, 1);
+  const [queued] = harness.invocationQueue.list(harness.thread.id, 'user-1');
+  assert.deepEqual(queued.actionSuccessorFence, {
+    leaseId: 'lease-e2e-1',
+    generation: 1,
+    dispatchId: 'post:e2e-live-bootstrap-review-2915',
   });
 });
 

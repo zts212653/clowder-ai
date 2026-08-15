@@ -396,6 +396,19 @@ export async function* spawnCliInTmux(
       if (!killed) throw streamErr;
     }
 
+    // FIFO EOF is a terminal output signal: tee has closed its write end and no
+    // further CLI activity can arrive. Retire both output timers before polling
+    // the separately-written exit sentinel, otherwise a successful command can
+    // be reported as timed out during that short finalization race.
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = null;
+    }
+    if (firstEventTimer) {
+      clearTimeout(firstEventTimer);
+      firstEventTimer = null;
+    }
+
     const exitCode = await readExitCode(exitFilePath);
     // F212 (云端 codex P2): always read stderr file once so abnormal-exit / timeout branches
     // can feed it into buildCliDiagnostics for reasonCode classification. Previously only

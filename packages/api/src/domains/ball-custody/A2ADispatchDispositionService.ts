@@ -2,7 +2,7 @@ import type { BallCustodyEvent } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
-import type { IBallCustodyIngest } from './BallCustodyIngest.js';
+import type { IBallCustodyFencedIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
 import {
   type A2ADispatchDisposition,
@@ -31,7 +31,7 @@ interface A2ADispatchDispositionDeps {
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly ballCustodyEventLog: Pick<IBallCustodyEventLog, 'read'>;
   readonly ballCustodyProjectionStore: Pick<IBallCustodyProjectionStore, 'get'>;
-  readonly ballCustody: IBallCustodyIngest;
+  readonly ballCustody: IBallCustodyFencedIngest;
   readonly repairProjection?: (subjectKey: string) => Promise<void>;
   readonly now?: () => number;
 }
@@ -82,7 +82,7 @@ export class A2ADispatchDispositionService {
 
     await this.assertCurrentHolder(subjectKey, auth.catId);
     this.assertExactHandoffIsLive(events, auth.catId, source);
-    await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId);
+    await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length);
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
     );
@@ -185,9 +185,10 @@ export class A2ADispatchDispositionService {
     disposition: A2ADispatchDisposition,
     subjectKey: string,
     eventSourceId: string,
+    expectedSequence: number,
   ): Promise<void> {
     try {
-      await this.deps.ballCustody.record(
+      const result = await this.deps.ballCustody.recordFenced(
         buildDispatchDispositionEvent({
           threadId: auth.threadId,
           catId: auth.catId,
@@ -197,7 +198,11 @@ export class A2ADispatchDispositionService {
           disposition,
           at: this.now(),
         }),
+        expectedSequence,
       );
+      if (result.outcome === 'conflict') {
+        throw new A2ADispatchDispositionError('a2a_dispatch_disposition_fence_conflict');
+      }
     } catch (error) {
       const appended = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
         (event) => event.sourceEventId === eventSourceId,

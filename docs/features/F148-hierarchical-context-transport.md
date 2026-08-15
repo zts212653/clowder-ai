@@ -1,6 +1,6 @@
 ---
 feature_ids: [F148]
-related_features: [F102, F042, F024]
+related_features: [F102, F042, F024, F296]
 topics: [context-engineering, multi-agent, memory]
 doc_kind: spec
 created: 2026-03-31

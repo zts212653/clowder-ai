@@ -72,9 +72,10 @@ describe('F254 Phase E — route-parallel output commit', () => {
     });
     const unseen = await messageStore.append({
       userId: 'user-1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
+      catId: 'codex-sol',
+      content: 'late visible cat analysis',
+      mentions: [],
+      origin: 'stream',
       timestamp: 150,
       threadId: 'thread-1',
     });
@@ -113,6 +114,7 @@ describe('F254 Phase E — route-parallel output commit', () => {
     for await (const _event of routeParallel(deps, ['opus'], 'question', 'user-1', 'thread-1', {
       parentInvocationId: 'outer-parallel',
       ownerAuthProvenance: 'strict',
+      thinkingMode: 'play',
       freshnessReinvokeEnqueue: (entry) => enqueued.push(entry),
     })) {
       // drain

@@ -14,7 +14,7 @@
 
 import { DEFAULT_CLI_TIMEOUT_LABEL } from '../utils/cli-timeout.js';
 
-/** Semantic group keys for the System Settings page (#770). */
+/** Semantic groups used by the curated System Settings projection. */
 export type SettingsGroupKey = 'network' | 'storage' | 'lifecycle' | 'runtime' | 'security';
 
 export const SETTINGS_GROUPS: Record<SettingsGroupKey, string> = {
@@ -25,13 +25,7 @@ export const SETTINGS_GROUPS: Record<SettingsGroupKey, string> = {
   security: '安全 & 访问控制',
 };
 
-/**
- * Unified boolean env-var parser. Accepts '1', 'true' (case-insensitive).
- * Everything else (including undefined/empty) returns `defaultOn`.
- *
- * Used by: System Settings UI toggle display, CORS_ALLOW_PRIVATE_NETWORK,
- * and frontend-origin.ts (pre-existing consumer).
- */
+/** Shared boolean convention for settings whose consumers accept `1` or `true`. */
 export function parseBoolEnv(raw: string | undefined, defaultOn = false): boolean {
   if (raw == null || raw === '') return defaultOn;
   return raw === '1' || raw.toLowerCase() === 'true';
@@ -78,35 +72,19 @@ export interface EnvDefinition {
   runtimeEditable?: boolean;
   /** If true, this var should appear in .env.example (enforced by check:env-example) */
   exampleRecommended?: boolean;
-  /**
-   * Dead-config marker (#770): set to a human-readable reason when the var has
-   * zero live consumers in this repo. The entry STAYS in the registry (registry
-   * is the canonical inventory — entries are never deleted); the frontend renders
-   * an "已废弃" badge from this field. Physical removal is a maintainer decision.
-   * Invariants (enforced by env-registry tests): deprecated vars are never
-   * runtimeEditable and never part of the SYSTEM_VARS curated projection.
-   */
+  /** Human-readable reason shown by Settings when a retained registry entry has no live consumer. */
   deprecated?: string;
   /** Explicit allowed values for cycle-style toggles (e.g. ['off','shadow','on']) */
   allowedValues?: string[];
-  /** Human-friendly label for System Settings page (#770) */
+  /** User-facing label in the curated System Settings projection. */
   label?: string;
-  /** Settings group for the System Settings page (#770) */
+  /** Display group in the curated System Settings projection. */
   settingsGroup?: SettingsGroupKey;
-  /** When true, changes to this var require a process restart to take effect */
+  /** Whether the effective runtime value changes only after a process restart. */
   restartRequired?: boolean;
-  /** For boolean env vars: parsing semantics for the System Settings toggle */
+  /** Runtime truthiness semantics for read-only boolean status rows. */
   booleanSemantics?: {
-    /** What value the var defaults to when unset */
     defaultOn: boolean;
-    /**
-     * How the runtime consumer determines truthiness.
-     * Must match the actual code that reads this var:
-     * - 'parseBoolEnv' (default): '1' or 'true' (case-insensitive)
-     * - 'exactTrue': only the exact string 'true' (e.g. === 'true')
-     * - 'exactOne': only the exact string '1' (e.g. === '1')
-     * - 'notZero': everything except '0' is truthy (e.g. !== '0')
-     */
     trueWhen?: 'parseBoolEnv' | 'exactTrue' | 'exactOne' | 'notZero';
   };
 }
@@ -219,9 +197,9 @@ export const ENV_VARS: EnvDefinition[] = [
       'Legacy allowlist 模式：设置后切换为 allowlist，仅允许列出的根目录（按系统路径分隔符分隔；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加默认 roots）。未设置时使用 denylist 模式（见 PROJECT_DENIED_ROOTS）。',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
     label: '目录白名单',
     settingsGroup: 'security',
-    runtimeEditable: false,
   },
   {
     name: 'PROJECT_ALLOWED_ROOTS_APPEND',
@@ -229,21 +207,21 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 true 则将 PROJECT_ALLOWED_ROOTS 追加到默认根目录（home, /tmp, /workspace 等）而非覆盖',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
     label: '追加白名单',
     settingsGroup: 'security',
-    runtimeEditable: false,
     booleanSemantics: { defaultOn: false, trueWhen: 'exactTrue' },
   },
   {
     name: 'PROJECT_DENIED_ROOTS',
     defaultValue: '(平台默认系统目录)',
     description:
-      'Denylist 模式下额外拦截的目录（按系统路径分隔符分隔，会合并到平台默认拦截列表）。仅在未设置 PROJECT_ALLOWED_ROOTS 时生效',
+      'Denylist 模式下额外拦截的目录（按系统路径分隔符分隔，会合并到平台默认拦截列表）。仅在未设置 PROJECT_ALLOWED_ROOTS 时生效。',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
     label: '目录黑名单',
     settingsGroup: 'security',
-    runtimeEditable: false,
   },
   {
     name: 'FRONTEND_URL',
@@ -346,6 +324,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_VERDICT_REPO_FULL_NAME',
+    defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/cat-cafe',
+    description:
+      'F248 verdict publisher canonical owner/repo; automatic, pre-push, and managed agent-shell publication fail closed on target mismatch',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_AGENT_KEY_SECRET',
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — 共享密钥（直接环境变量提供）',
@@ -385,6 +372,26 @@ export const ENV_VARS: EnvDefinition[] = [
       'F247 Cloud Cat — gpt-pro Remote MCP agent-key sidecar override；默认由 runtime owner 自动 provision/renew，无需手工 mint。',
     category: 'server',
     sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PERSONAL_CHROME_SOCKET',
+    defaultValue: '(空)',
+    description:
+      'F247 Personal Chrome Host Adapter — operator-provisioned Unix socket path；仅与 pairing secret 同时存在时启用。',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET',
+    defaultValue: '(空)',
+    description:
+      'F247 Personal Chrome Host Adapter — 本地 API ↔ Native Messaging helper 配对密钥；仅 operator/dev seam，禁止日志输出。',
+    category: 'server',
+    sensitive: true,
+    hubVisible: false,
     runtimeEditable: false,
   },
   {
@@ -654,7 +661,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_RUNTIME_ROOT',
     defaultValue: '(未设置 → process.cwd())',
     description:
-      'F061: Cat Cafe runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
+      'F061: Clowder AI runtime 二进制根目录（runtime startup 自动 export 为 $RUNTIME_DIR），优先级高于 capability orchestrator 的 auto-detection，用于 Antigravity MCP config args 路径',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -673,7 +680,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'REDIS_URL',
     defaultValue: '(未设置)',
-    description: '数据库连接地址。未设置时需要同时开启"内存模式"才能启动',
+    description: '数据库连接地址。未设置时需要同时开启“内存模式”才能启动',
     category: 'storage',
     sensitive: false,
     maskMode: 'url',
@@ -697,7 +704,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'MEMORY_STORE',
     defaultValue: '(未设置)',
-    description: '当 Redis 不可用时启用此选项作为后备。数据仅存内存，重启后丢失。已配置 Redis 时此选项不生效',
+    description: '当 Redis 不可用时允许以内存模式启动。已配置 Redis 时此选项不改变存储后端',
     category: 'storage',
     sensitive: false,
     runtimeEditable: false,
@@ -863,6 +870,24 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_SUPERVISOR_SOCKET_DIR',
+    defaultValue: '(内部注入)',
+    description: 'CLI supervisor owner manifest 绑定的 Codex Unix socket 目录',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PROCESS_OWNER_ID',
+    defaultValue: '(内部注入)',
+    description: 'CLI 子进程树继承的随机 ownership token，不需要手动设置',
+    category: 'cli',
+    sensitive: true,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_TEMPLATE_PATH',
     defaultValue: '(repo 根 cat-template.json)',
     description: '猫猫模板文件路径',
@@ -920,7 +945,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'cli',
     sensitive: false,
     deprecated:
-      '模式系统消费者已在 F101 Mode v2 重构（2dfece987）中移除，早于 TD117 registry backfill（b58106d0d）；当前无活消费者，去留待 maintainer 决定',
+      '模式系统消费者已在 F101 Mode v2 重构（2dfece987）中移除，早于 cat-cafe#832 的 TD117 registry backfill（b58106d0d）；当前无活消费者，去留待 maintainer 决定',
   },
   {
     name: 'CAT_CAFE_TMUX_AGENT',
@@ -1399,8 +1424,15 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TTS_CACHE_DIR',
-    defaultValue: './data/tts-cache',
-    description: 'TTS 音频缓存目录',
+    defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/assets/tts`,
+    description: 'TTS 音频缓存目录；设置后覆盖 CAT_CAFE_DATA_DIR 下的稳定默认位置',
+    category: 'tts',
+    sensitive: false,
+  },
+  {
+    name: 'LISTEN_MODE_DB',
+    defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/listen-mode.sqlite`,
+    description: '听读模式持久状态数据库；设置后覆盖 CAT_CAFE_DATA_DIR 下的默认位置',
     category: 'tts',
     sensitive: false,
   },
@@ -1535,7 +1567,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PASS',
@@ -1544,7 +1576,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: true,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_HOST',
@@ -1553,7 +1585,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PORT',
@@ -1562,7 +1594,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_POLL_INTERVAL_MS',
@@ -1571,7 +1603,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_MCP_PAT',
@@ -1588,7 +1620,7 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: false,
     deprecated:
-      'IMAP 邮件监控通道已在 v0.9.0 (#596) 移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
 
   // --- evidence (F102 记忆系统) ---
@@ -2037,37 +2069,9 @@ export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string 
   });
 }
 
-export function isEditableEnvVar(def: EnvDefinition): boolean {
-  // #770: fail-closed — only explicitly opted-in vars are editable.
-  // Every editable key must declare runtimeEditable: true.
-  return def.runtimeEditable === true;
-}
-
-/** True if this env var is both sensitive AND explicitly opted into runtime editing. */
-export function isSensitiveEditableEnvVar(def: EnvDefinition): boolean {
-  return def.sensitive && def.runtimeEditable === true;
-}
-
-export function isEditableEnvVarName(name: string): boolean {
-  return ENV_VARS.some((def) => def.name === name && isHubVisibleEnvVar(def) && isEditableEnvVar(def));
-}
-
-/** Check if any of the given env var names are sensitive-editable (requires owner gate). */
-export function hasSensitiveEditableVars(names: Iterable<string>): boolean {
-  const nameSet = new Set(names);
-  return ENV_VARS.some((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def));
-}
-
-/** Return only the sensitive-editable keys from the given names (for audit filtering). */
-export function filterSensitiveEditableKeys(names: Iterable<string>): string[] {
-  const nameSet = new Set(names);
-  return ENV_VARS.filter((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def)).map((def) => def.name);
-}
-
 /**
- * #770: curated platform settings surfaced on the System Settings page.
- * Only vars in this set appear in the grouped System Settings UI.
- * The full ENV_VARS registry remains the canonical truth source.
+ * Curated platform-level settings for the System page. The full registry stays
+ * canonical for Environment & Files and module-owned surfaces.
  */
 export const SYSTEM_VARS: ReadonlySet<string> = new Set([
   'API_SERVER_HOST',
@@ -2097,10 +2101,31 @@ export const SYSTEM_VARS: ReadonlySet<string> = new Set([
   'UPLOAD_DIR',
 ]);
 
-/**
- * Build a filtered env summary containing only System Settings vars.
- * Used by GET /api/config/env-summary?surface=system.
- */
 export function buildSystemEnvSummary(): Array<EnvDefinition & { currentValue: string | null }> {
-  return buildEnvSummary().filter((v) => SYSTEM_VARS.has(v.name));
+  return buildEnvSummary().filter((variable) => SYSTEM_VARS.has(variable.name));
+}
+
+export function isEditableEnvVar(def: EnvDefinition): boolean {
+  return def.runtimeEditable === true;
+}
+
+/** True if this env var is both sensitive AND explicitly opted into runtime editing. */
+export function isSensitiveEditableEnvVar(def: EnvDefinition): boolean {
+  return def.sensitive && def.runtimeEditable === true;
+}
+
+export function isEditableEnvVarName(name: string): boolean {
+  return ENV_VARS.some((def) => def.name === name && isHubVisibleEnvVar(def) && isEditableEnvVar(def));
+}
+
+/** Check if any of the given env var names are sensitive-editable (requires owner gate). */
+export function hasSensitiveEditableVars(names: Iterable<string>): boolean {
+  const nameSet = new Set(names);
+  return ENV_VARS.some((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def));
+}
+
+/** Return only the sensitive-editable keys from the given names (for audit filtering). */
+export function filterSensitiveEditableKeys(names: Iterable<string>): string[] {
+  const nameSet = new Set(names);
+  return ENV_VARS.filter((def) => nameSet.has(def.name) && isSensitiveEditableEnvVar(def)).map((def) => def.name);
 }

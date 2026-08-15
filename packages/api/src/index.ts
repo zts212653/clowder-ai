@@ -52,11 +52,17 @@ import { F276ApprovalAdapter } from './domains/approval-hub/adapters/F276Approva
 import { F292ApprovalAdapter } from './domains/approval-hub/adapters/F292ApprovalAdapter.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
+import type { ManagedCommandWakeRecoverySweep } from './domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import { resolveManagedCommandWakeEventCarrier } from './domains/ball-custody/managed-command-wake-lifecycle.js';
 import { RedisWaitTerminationStore } from './domains/ball-custody/RedisWaitTerminationStore.js';
+import { WaitContinuationRetryCommitter } from './domains/ball-custody/WaitContinuationRetryCommitter.js';
+import { WaitContinuationRetryPreflight } from './domains/ball-custody/WaitContinuationRetryPreflight.js';
 import { WaitTerminationService } from './domains/ball-custody/WaitTerminationService.js';
 import { agentSessionMutex } from './domains/cats/services/agents/invocation/AgentSessionMutex.js';
 import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
+import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
+import { startSerializedInvocationOwnerReaperInterval } from './domains/cats/services/agents/invocation/InvocationOwnerReaperInterval.js';
 import {
   actionSuccessorInvocationIdempotencyKey,
   InvocationQueue,
@@ -72,6 +78,7 @@ import type {
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import { reconcileZombies } from './domains/cats/services/agents/invocation/reconcileZombies.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
 import {
@@ -86,6 +93,7 @@ import {
 import { closeStaleAcpPools } from './domains/cats/services/agents/providers/acp/acp-pool-registry.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 import { RedisAntigravitySupervisorStore } from './domains/cats/services/agents/providers/antigravity/AntigravitySupervisorStore.js';
+import { getCodexAppServerLifecycle } from './domains/cats/services/agents/providers/CodexAppServerLifecycleRegistry.js';
 import {
   type CodexAppServerPoolRegistry,
   closeStaleCodexAppServerPools,
@@ -156,6 +164,11 @@ import { classifyInvocationRecoveryStatus } from './domains/cats/services/stores
 import type { MessageAppendListener } from './domains/cats/services/stores/ports/MessageStore.js';
 import { RedisInvocationRecordStore } from './domains/cats/services/stores/redis/RedisInvocationRecordStore.js';
 import { RedisMessageStore } from './domains/cats/services/stores/redis/RedisMessageStore.js';
+import { DocumentListenRepository } from './domains/cats/services/tts/DocumentListenRepository.js';
+import {
+  resolveDocumentListenStatePath,
+  resolveTtsCacheDir,
+} from './domains/cats/services/tts/document-listen-paths.js';
 import { MlxAudioTtsProvider } from './domains/cats/services/tts/MlxAudioTtsProvider.js';
 import { initStreamingTtsRegistry } from './domains/cats/services/tts/StreamingTtsChunker.js';
 import { TtsRegistry } from './domains/cats/services/tts/TtsRegistry.js';
@@ -302,6 +315,7 @@ import {
   memoryPublishRoutes,
   memoryRoutes,
   messageActionsRoutes,
+  messageBundleRoutes,
   messagesRoutes,
   mkdirRoute,
   packsRoutes,
@@ -370,6 +384,7 @@ import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
+import { emitQueueUpdated } from './utils/queue-enrichment.js';
 import { resolveUserId } from './utils/request-identity.js';
 import { getDefaultUploadDir } from './utils/upload-paths.js';
 
@@ -410,6 +425,7 @@ function hasRuntimeSessionDrain(service: AgentService): service is AgentService 
 }
 
 async function main(): Promise<void> {
+  let managedCommandWakeRecovery: ManagedCommandWakeRecoverySweep | undefined;
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
 
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
@@ -730,6 +746,13 @@ async function main(): Promise<void> {
   let actionSubjectTruthResolver:
     | import('./domains/ball-custody/ActionSubjectTruthResolver.js').ActionSubjectTruthResolver
     | undefined;
+  // The action services initialize before the GitHub runtime configuration. The
+  // provider stays fail-closed until this late-bound server observer is ready.
+  let observeLivePrFreshness:
+    | ((
+        input: import('./domains/ball-custody/LivePrFreshnessObservation.js').LivePrFreshnessObservationInput,
+      ) => Promise<import('./domains/ball-custody/LivePrFreshnessObservation.js').LivePrFreshnessSnapshot | null>)
+    | undefined;
   let actionSuccessorCompletionService:
     | import('./domains/ball-custody/ActionSuccessorCompletionService.js').ActionSuccessorCompletionService
     | undefined;
@@ -811,6 +834,11 @@ async function main(): Promise<void> {
         },
       },
       localReviewCompletion.evidenceProvider,
+      {
+        async observe(input) {
+          return (await observeLivePrFreshness?.(input)) ?? null;
+        },
+      },
     );
     actionSuccessorAdmissionService = new actionAdmissionMod.ActionSuccessorAdmissionService(
       actionSuccessorLeaseStore,
@@ -2015,48 +2043,26 @@ async function main(): Promise<void> {
   if (legacyPinchTabEnabled) {
     app.log.warn('[api] F247 legacy PinchTab bridge explicitly enabled; it may control foreground browser UI');
   }
-  const { CloudInvokeBridge, buildFallbackMessageContent } = await import(
-    './domains/cats/services/cloud-bridge/cloud-invoke-bridge.js'
-  );
+  const { CloudInvokeBridge } = await import('./domains/cats/services/cloud-bridge/cloud-invoke-bridge.js');
   const bridgeLogger = (await import('./infrastructure/logger.js')).createModuleLogger('cloud-bridge');
+  const { createRefreshablePersonalChromeHostAdapter } = await import(
+    './domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-host-adapter.js'
+  );
+  const personalChromeHostAdapter = createRefreshablePersonalChromeHostAdapter({
+    projectRoot: resolveActiveProjectRoot(),
+    env: process.env,
+    logger: bridgeLogger,
+  });
   const cloudInvokeBridge = new CloudInvokeBridge({
-    // The official host provider injects this narrow capability when the
-    // runtime exposes one. Null is honest: public OpenAI host docs currently
-    // provide no arbitrary-conversation append API for this server process.
-    hostAdapter: null,
+    hostAdapter: personalChromeHostAdapter,
     pinchTabAdapter,
-    emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason, detail }) => {
-      // Post a system_info message into the thread so the user sees the fallback
-      const content = buildFallbackMessageContent({ reason, detail, catId: fbCatId });
-      try {
-        // P1-2 fix: persisted system fallback must use catId: null to pass
-        // isSystemUserMessage() — otherwise userId-scoped queries in
-        // RedisMessageStore/MessageStore filter them out on reload.
-        // The `content` field (from buildFallbackMessageContent) already
-        // identifies which cat the failure is about.
-        await messageStore.append({
-          threadId: fbThreadId,
-          userId: 'system',
-          content,
-          catId: null,
-          mentions: [],
-          timestamp: Date.now(),
-        });
-        // Broadcast uses bridgeCatId for real-time UI attribution
-        // (AgentMessage.catId is CatId, not nullable)
-        const bridgeCatId = fbCatId as unknown as import('@cat-cafe/shared').CatId;
-        socketManager?.broadcastAgentMessage(
-          {
-            type: 'system_info',
-            content,
-            catId: bridgeCatId,
-            timestamp: Date.now(),
-          },
-          fbThreadId,
-        );
-      } catch (e) {
-        bridgeLogger.warn({ fbThreadId, fbCatId, reason, err: e }, 'F247 B1c: fallback emit failed');
-      }
+    emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason }) => {
+      // invokeSingleCat owns the one user-visible status so route persistence,
+      // F167 disposition, and Queue settlement share one child invocation.
+      bridgeLogger.info(
+        { threadId: fbThreadId, catId: fbCatId, reason },
+        'F247 bridge fallback captured; invocation will publish the terminal status',
+      );
     },
     threadStore,
     logger: bridgeLogger,
@@ -2147,6 +2153,22 @@ async function main(): Promise<void> {
     ...(ballCustodyProjectionStore ? { ballCustodyProjectionStore } : {}),
     ...(ballCustodyEventLog ? { ballCustodyEventLog } : {}),
   });
+  let a2aDispatchDispositionService:
+    | import('./domains/ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService
+    | undefined;
+  if (ballCustodyIngest && ballCustodyEventLog && ballCustodyProjectionStore) {
+    const { A2ADispatchDispositionService } = await import('./domains/ball-custody/A2ADispatchDispositionService.js');
+    a2aDispatchDispositionService = new A2ADispatchDispositionService({
+      registry,
+      messageStore,
+      ballCustodyEventLog,
+      ballCustodyProjectionStore,
+      ballCustody: ballCustodyIngest,
+      ...(ballCustodyProjector
+        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
+        : {}),
+    });
+  }
   const proactiveCandidateRegistryResolver = personMemoryStore
     ? new ProactiveCandidateRegistryResolver({
         entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
@@ -2233,6 +2255,7 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
+    ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
     turnExecutionStore,
     ...(freshnessStateStore ? { freshnessStateStore } : {}),
@@ -2458,6 +2481,45 @@ async function main(): Promise<void> {
     queueProcessor,
     log: app.log,
   });
+  const invocationOwnerSocketManager = socketManager;
+  if (!invocationOwnerSocketManager) throw new Error('SocketManager unavailable for invocation owner reaper');
+  const invocationOwnerReaper = new InvocationOwnerReaper({
+    invocationTracker,
+    invocationRecordStore,
+    turnExecutionStore,
+    getProviderLifecycle: getCodexAppServerLifecycle,
+    listStaleProcessingLeases: (now) => queueProcessor.listStaleProcessingLeases(now),
+    reapStalePrestartReservations: (now) => queueProcessor.reapStalePrestartReservations(now),
+    ...('scanAll' in invocationRecordStore
+      ? {
+          listRunningRecords: async () =>
+            (await invocationRecordStore.scanAll()).filter((record) => record.status === 'running'),
+        }
+      : {}),
+    reconcileZombie: (zombie) =>
+      reconcileZombies([zombie], {
+        invocationRecordStore,
+        taskProgressStore,
+        ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
+        log: app.log,
+        onReconciledZombie,
+        invocationQueue,
+        onQueueConverged: (info) => {
+          void emitQueueUpdated(
+            invocationOwnerSocketManager,
+            info.userId,
+            info.threadId,
+            invocationQueue.list(info.threadId, info.userId),
+            messageStore,
+            'zombie_converged',
+          ).catch((err) => app.log.warn({ err, feature: 'F118' }, 'zombie_converged broadcast failed'));
+        },
+      }),
+    releaseExactOwner: (threadId, targetCats, executionId) => {
+      queueProcessor.releaseExactExecutionOwner(threadId, targetCats, executionId);
+    },
+    log: app.log,
+  });
   socketManager.setQueueProcessor(queueProcessor);
   if (freshnessClosureStore) {
     try {
@@ -2566,6 +2628,16 @@ async function main(): Promise<void> {
   }
 
   // Register routes (socketManager injected, no circular import)
+  const retryAuthorityPreflight = new WaitContinuationRetryPreflight({
+    taskStore,
+    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
+  });
+  const retryAuthorityCommitter = new WaitContinuationRetryCommitter({
+    messageStore,
+    taskStore,
+    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
+    ...(redis ? { redis } : {}),
+  });
   const messagesOpts = {
     projectRoot: resolveActiveProjectRoot(),
     registry,
@@ -2583,10 +2655,9 @@ async function main(): Promise<void> {
     invocationQueue,
     ...(freshnessClosureStore ? { freshnessClosureStore } : {}),
     queueProcessor,
+    retryAuthorityPreflight,
+    retryAuthorityCommitter,
     sessionContinuationCoordinator,
-    taskProgressStore, // F194 AC-B7: cleared on zombie reconcile
-    onReconciledZombie,
-    ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
@@ -2650,6 +2721,7 @@ async function main(): Promise<void> {
     },
   };
   await app.register(messagesRoutes, messagesOpts);
+  await app.register(messageBundleRoutes, { messageStore, threadStore });
   await app.register(queueRoutes, {
     threadStore,
     invocationQueue,
@@ -2663,10 +2735,9 @@ async function main(): Promise<void> {
     invocationRecordStore, // F194 Phase B: canonical liveness read source
     draftStore, // F194 Phase B: canonical liveness read source
     turnExecutionStore, // F194/F254: durable running child closes tracker/draft handoff gaps
-    ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
-    taskProgressStore, // F194 AC-B7: cleared on zombie reconcile
-    onReconciledZombie,
     invocationRegistry: registry, // F194 Phase Z (KD-22): namespace bridge for parent↔child invocation
+    getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
+    dynamicTaskStore, // F295: canonical managed-command execution read projection
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -2848,6 +2919,8 @@ async function main(): Promise<void> {
   const { createGitWorktreePublisher } = await import(
     './infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js'
   );
+  const verdictRepoFullName =
+    process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
   const { createA2aGeneratorAdapter } = await import(
     './infrastructure/harness-eval/publish-verdict/a2a-generator-adapter.js'
   );
@@ -2978,7 +3051,10 @@ async function main(): Promise<void> {
     redis: redisClient ?? undefined,
     invokeTriggerProvider: invokeTriggerHolder,
     messageStore,
-    gitPublisher: createGitWorktreePublisher({ repoRoot }),
+    gitPublisher: createGitWorktreePublisher({
+      repoRoot,
+      expectedRepoFullName: verdictRepoFullName,
+    }),
     verdictGenerators,
     // 砚砚 R4 P1 + cloud R4 P1: register CallbackAuthRegistry for MCP route auth.
     callbackRegistry: registry,
@@ -3324,7 +3400,7 @@ async function main(): Promise<void> {
   const fetchPrWaitBaseline = async (
     repoFullName: string,
     prNumber: number,
-    when: readonly import('@cat-cafe/shared').GitHubWaitPredicate[],
+    when: readonly import('@cat-cafe/shared').GitHubPrWaitPredicate[],
   ) => {
     const [{ readGitHubWaitBaseline }, { fetchPaginated }] = await Promise.all([
       import('./domains/github-signals/GitHubWaitBaselineReader.js'),
@@ -3359,8 +3435,39 @@ async function main(): Promise<void> {
     if (!status?.headSha) throw new Error(`Current PR HEAD unavailable for ${repoFullName}#${prNumber}`);
     return status.headSha;
   };
+  observeLivePrFreshness = async ({ subjectRef, repoFullName, prNumber }) => {
+    const status = await fetchPrCiStatus(repoFullName, prNumber, app.log, {
+      ghToken: getGitHubToken(),
+    });
+    if (!status) return null;
+    return { subjectRef, headSha: status.headSha, prState: status.prState };
+  };
   const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> =>
     fetchLatestIssueCommentCursor(repoFullName, issueNumber, { ghToken: getGitHubToken() });
+  const fetchIssueWaitBaseline = async (repoFullName: string, issueNumber: number) => {
+    const { readGitHubIssueWaitBaseline } = await import('./domains/github-signals/GitHubIssueWaitBaselineReader.js');
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    return readGitHubIssueWaitBaseline(
+      { repoFullName, issueNumber },
+      {
+        fetchCommentCursor: fetchIssueCommentCursor,
+        fetchMetadata: async (repo, issue) => {
+          const { stdout } = await execFileAsync(
+            'gh',
+            ['api', `/repos/${repo}/issues/${issue}`, '--jq', '{state, authorLogin: .user.login}'],
+            getGitHubExecOptions(15_000),
+          );
+          const data = JSON.parse(stdout) as { state?: string; authorLogin?: string };
+          return {
+            state: data.state === 'closed' ? ('closed' as const) : ('open' as const),
+            ...(data.authorLogin ? { authorLogin: data.authorLogin } : {}),
+          };
+        },
+      },
+    );
+  };
   const verifyPrReviewEventWaitCoverage = async (input: {
     repoFullName: string;
     prNumber: number;
@@ -3674,16 +3781,11 @@ async function main(): Promise<void> {
   let managedHoldDispositionService:
     | import('./domains/ball-custody/ManagedHoldDispositionService.js').ManagedHoldDispositionService
     | undefined;
-  let a2aDispatchDispositionService:
-    | import('./domains/ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService
-    | undefined;
   if (ballCustodyIngest && ballCustodyEventLog && ballCustodyProjectionStore) {
-    const [{ ManagedHoldReceiptService }, { ManagedHoldDispositionService }, { A2ADispatchDispositionService }] =
-      await Promise.all([
-        import('./domains/ball-custody/ManagedHoldReceiptService.js'),
-        import('./domains/ball-custody/ManagedHoldDispositionService.js'),
-        import('./domains/ball-custody/A2ADispatchDispositionService.js'),
-      ]);
+    const [{ ManagedHoldReceiptService }, { ManagedHoldDispositionService }] = await Promise.all([
+      import('./domains/ball-custody/ManagedHoldReceiptService.js'),
+      import('./domains/ball-custody/ManagedHoldDispositionService.js'),
+    ]);
     const receiptService = new ManagedHoldReceiptService({
       queue: invocationQueue,
       messageStore,
@@ -3703,16 +3805,6 @@ async function main(): Promise<void> {
       ballCustodyProjectionStore,
       ballCustody: ballCustodyIngest,
       receiptService,
-      ...(ballCustodyProjector
-        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
-        : {}),
-    });
-    a2aDispatchDispositionService = new A2ADispatchDispositionService({
-      registry,
-      messageStore,
-      ballCustodyEventLog,
-      ballCustodyProjectionStore,
-      ballCustody: ballCustodyIngest,
       ...(ballCustodyProjector
         ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
         : {}),
@@ -3753,11 +3845,11 @@ async function main(): Promise<void> {
     validatePr,
     validateIssue,
     fetchPrWaitBaseline,
+    fetchIssueWaitBaseline,
     waitLifecycleHolder,
     verifyPrReviewEventWaitCoverage,
     ...(externalReviewVerdictService ? { externalReviewVerdictService } : {}),
     ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
-    fetchIssueCommentCursor,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
@@ -3916,7 +4008,7 @@ async function main(): Promise<void> {
     messageStore,
     socketManager,
   });
-  await app.register(threadExportRoutes, { threadStore });
+  await app.register(threadExportRoutes, { threadStore, messageStore });
   await app.register(threadMemberStrategyRoutes, { threadStore }); // #921
   await app.register(threadMemberEffortRoutes, { threadStore }); // F262
   await app.register(threadMemberSpeedRoutes, { threadStore }); // F291
@@ -3981,7 +4073,9 @@ async function main(): Promise<void> {
     MeetingIntakeActionService,
     MeetingIntakeService,
     MemoryMeetingIntakeStore,
+    MemorySignalRouteStore,
     RedisMeetingIntakeStore,
+    RedisSignalRouteStore,
     RedisSourceAccessLeaseStore,
     SourceAccessLeaseService,
     SourceResolverRegistry,
@@ -3989,6 +4083,35 @@ async function main(): Promise<void> {
     ThreadMeetingArtifactDispatcher,
   } = await import('./domains/signal-intake/index.js');
   const meetingIntakeStore = redis ? new RedisMeetingIntakeStore(redis) : new MemoryMeetingIntakeStore();
+  const signalRouteStore = redis ? new RedisSignalRouteStore(redis) : new MemorySignalRouteStore();
+  const { createDormantPluginRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
+  const externalPluginRuntime = createDormantPluginRuntimeComposition({
+    projectRoot: resolveActiveProjectRoot(),
+    routes: signalRouteStore,
+    intakes: meetingIntakeStore,
+  });
+  const externalPluginRecovery = await externalPluginRuntime.recoverAfterRestart();
+  app.log.info(
+    `[api] K-2 external plugin runtime recovered ` +
+      `(sessions=${externalPluginRecovery.brokerSessions}, instances=${externalPluginRecovery.inventoryInstances}; live=dormant)`,
+  );
+  const { OfficialPluginAuthService } = await import('./domains/plugin/official-plugin-auth.js');
+  const officialPluginAuth = new OfficialPluginAuthService({ packages: externalPluginRuntime.packages });
+  app.addHook('onClose', async () => {
+    await officialPluginAuth.shutdown();
+    await externalPluginRuntime.shutdown('api_shutdown');
+  });
+  const { OfficialPluginPackageInstaller } = await import('./domains/plugin/official-package-installer.js');
+  const { registerOfficialPluginRoutes } = await import('./routes/plugin-official-routes.js');
+  registerOfficialPluginRoutes(app, {
+    inventory: externalPluginRuntime.inventoryStore,
+    lifecycle: externalPluginRuntime.lifecycle,
+    auth: officialPluginAuth,
+    installer: new OfficialPluginPackageInstaller({
+      inventory: externalPluginRuntime.inventory,
+      packagesRoot: externalPluginRuntime.paths.packagesRoot,
+    }),
+  });
 
   // F246: Approval Hub — unified operator approval center, including F292 event-origin intake.
   const approvalProducerRegistry = new ApprovalProducerRegistry({
@@ -4911,11 +5034,15 @@ async function main(): Promise<void> {
   // because resolveServiceEndpoint reads endpointEnvVars first.
   const ttsRegistry = new TtsRegistry();
   ttsRegistry.register(new MlxAudioTtsProvider());
-  const ttsCacheDir = process.env.TTS_CACHE_DIR ?? './data/tts-cache';
-  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir });
+  const ttsCacheDir = resolveTtsCacheDir();
+  const listenModeDbPath = resolveDocumentListenStatePath();
+  const documentListenRepository = new DocumentListenRepository(listenModeDbPath);
+  await documentListenRepository.initialize();
+  await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, documentListenRepository });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
   initStreamingTtsRegistry(ttsRegistry);
-  startTtsCacheCleaner(ttsCacheDir);
+  startTtsCacheCleaner(ttsCacheDir, documentListenRepository);
+  app.addHook('onClose', async () => documentListenRepository.close());
 
   // C1+C2: Web Push Notifications (optional — requires VAPID keys)
   const pushSubscriptionStore = createPushSubscriptionStore(redis);
@@ -5046,6 +5173,14 @@ async function main(): Promise<void> {
     }
   });
 
+  let invocationOwnerReaperTimer: ReturnType<typeof setInterval> | null = null;
+  app.addHook('onClose', async () => {
+    if (invocationOwnerReaperTimer) {
+      clearInterval(invocationOwnerReaperTimer);
+      invocationOwnerReaperTimer = null;
+    }
+  });
+
   // F167 S.1-c: the sweep timer is created after listen (it needs invokeTrigger), but
   // Fastify rejects addHook once listening — so register the cleanup hook here and
   // late-bind the timer handle.
@@ -5061,6 +5196,31 @@ async function main(): Promise<void> {
   // Start listening
   let address: string;
   try {
+    const { reapStaleCliProcessOwners } = await import('./utils/cli-process-owner-reaper.js');
+    const { reapStaleClaudeBgJobOwners } = await import('./utils/claude-bg-job-owner-reaper.js');
+    const configuredOwnerGrace = Number.parseInt(process.env.CAT_CAFE_SUPERVISOR_KILL_GRACE_MS ?? '3000', 10);
+    const ownerKillGraceMs =
+      Number.isSafeInteger(configuredOwnerGrace) && configuredOwnerGrace > 0 ? configuredOwnerGrace : 3_000;
+    const ownerRecoveryLog = {
+      info: (message: string) => app.log.info(message),
+      warn: (message: string) => app.log.warn(message),
+    };
+    const ownerRecovery = await reapStaleCliProcessOwners({
+      dataDir: process.env.CAT_CAFE_DATA_DIR,
+      killGraceMs: ownerKillGraceMs,
+      log: ownerRecoveryLog,
+    });
+    if (ownerRecovery.foundOwners > 0 || ownerRecovery.invalidManifests > 0) {
+      app.log.info({ result: ownerRecovery }, '[api] CLI process owner startup recovery completed');
+    }
+    const claudeBgOwnerRecovery = await reapStaleClaudeBgJobOwners({
+      dataDir: process.env.CAT_CAFE_DATA_DIR,
+      killGraceMs: ownerKillGraceMs,
+      log: ownerRecoveryLog,
+    });
+    if (claudeBgOwnerRecovery.foundOwners > 0 || claudeBgOwnerRecovery.invalidManifests > 0) {
+      app.log.info({ result: claudeBgOwnerRecovery }, '[api] Claude bg job owner startup recovery completed');
+    }
     const { initGovernanceOverlay } = await import('./domains/cats/services/context/SystemPromptBuilder.js');
     await initGovernanceOverlay();
     address = await listenBeforeTurnExecutionRecovery({
@@ -5121,6 +5281,23 @@ async function main(): Promise<void> {
       app.log.warn(`[api] Startup sweep failed (best-effort): ${String(err)}`);
     }
   }
+
+  // F118 post-close: stale age only admits a candidate. A serialized explicit
+  // reaper must also prove the exact provider/child owner absent or terminal.
+  const INVOCATION_OWNER_REAPER_INTERVAL_MS = 5 * 60_000;
+  try {
+    await invocationOwnerReaper.runOnce();
+  } catch (err) {
+    app.log.warn({ err }, '[api] F118 invocation owner reaper startup sweep failed (best-effort)');
+  }
+  invocationOwnerReaperTimer = startSerializedInvocationOwnerReaperInterval({
+    reaper: invocationOwnerReaper,
+    intervalMs: INVOCATION_OWNER_REAPER_INTERVAL_MS,
+    onError: (err) => {
+      app.log.warn({ err }, '[api] F118 invocation owner reaper sweep failed (best-effort)');
+    },
+  });
+  invocationOwnerReaperTimer.unref();
 
   // F145 P0: Kill orphan agent-browser headless Chrome processes from previous sessions.
   try {
@@ -5240,6 +5417,7 @@ async function main(): Promise<void> {
     invocationTracker,
     invocationQueue,
     queueProcessor,
+    queueCustodyCoordinator,
     messageStore,
     threadMetaLookup: async (threadId) => {
       const thread = await threadStore.get(threadId);
@@ -5274,31 +5452,28 @@ async function main(): Promise<void> {
     const { ManagedCommandWakeRecoverySweep } = await import(
       './domains/ball-custody/ManagedCommandWakeRecoverySweep.js'
     );
-    const managedCommandWakeRecovery = new ManagedCommandWakeRecoverySweep({
+    const recovery = new ManagedCommandWakeRecoverySweep({
       dynamicTaskStore,
       messageStore,
       socketManager,
       taskRunner: taskRunnerV2,
       invocationRecordStore,
       getInvokeTrigger: () => invokeTrigger,
-      getEventCarrier: async ({ threadId, catId, messageId }) => {
+      getEventCarrier: async ({ threadId, userId, catId, messageId }) => {
         const message = await messageStore.getById(messageId);
-        const custody = message?.queueCustody;
-        if (!message || message.threadId !== threadId || !custody) return { state: 'missing' as const };
-        const outcome = custody.targetOutcomeByCatId?.[catId];
-        if (custody.handledByCatIds.includes(catId as CatId) && outcome) {
-          return { state: 'handled' as const, invocationId: outcome.invocationId };
-        }
-        if (custody.pendingTargetCats.includes(catId as CatId)) return { state: 'pending' as const };
-        return { state: 'missing' as const };
+        const custodyEntryId = message?.queueCustody?.entryId;
+        const activeQueueEntryId = custodyEntryId
+          ? (invocationQueue.getEntrySnapshot(threadId, userId, custodyEntryId)?.id ?? null)
+          : null;
+        return resolveManagedCommandWakeEventCarrier(message, { threadId, catId, activeQueueEntryId });
       },
     });
-    (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).managedCommandWakeRecovery =
-      managedCommandWakeRecovery;
-    taskRunnerV2.setManagedCommandWakeRecovery((taskId) => managedCommandWakeRecovery.recordFallbackDue(taskId));
+    managedCommandWakeRecovery = recovery;
+    (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).managedCommandWakeRecovery = recovery;
+    taskRunnerV2.setManagedCommandWakeRecovery((taskId) => recovery.recordFallbackDue(taskId));
 
     const runManagedCommandWakeRecovery = (): void => {
-      void managedCommandWakeRecovery
+      void recovery
         .runOnce()
         .then((stats) => {
           if (stats.scanned > 0) {
@@ -5425,16 +5600,23 @@ async function main(): Promise<void> {
       log: app.log,
     });
     waitLifecycleHolder.current = waitLifecycle;
-    const [{ PrWaitMigrationService }, { WaitLifecycleRecoverySweep }] = await Promise.all([
-      import('./domains/ball-custody/PrWaitMigrationService.js'),
-      import('./domains/ball-custody/WaitLifecycleRecoverySweep.js'),
-    ]);
+    const [{ PrWaitMigrationService }, { IssueWaitMigrationService }, { WaitLifecycleRecoverySweep }] =
+      await Promise.all([
+        import('./domains/ball-custody/PrWaitMigrationService.js'),
+        import('./domains/ball-custody/IssueWaitMigrationService.js'),
+        import('./domains/ball-custody/WaitLifecycleRecoverySweep.js'),
+      ]);
     await new PrWaitMigrationService({
       taskStore,
       readBaseline: fetchPrWaitBaseline,
       log: app.log,
     }).migrateAll();
-    await new WaitLifecycleRecoverySweep(taskStore, waitLifecycle).run();
+    await new IssueWaitMigrationService({
+      taskStore,
+      readBaseline: fetchIssueWaitBaseline,
+      log: app.log,
+    }).migrateAll();
+    await new WaitLifecycleRecoverySweep(taskStore, waitLifecycle, app.log).run();
 
     let externalReviewCoordinator:
       | import('./domains/community/external-review/ExternalReviewCoordinator.js').ExternalReviewCoordinator
@@ -5800,6 +5982,7 @@ async function main(): Promise<void> {
         isSelfMerge: (login: string) => feedbackFilter.isSelfAuthored(login),
         // F202 Phase 2D: issue comment tracking deps
         issueCommentRouter,
+        waitLifecycle,
         fetchIssueComments,
         fetchIssueState,
         fetchIssueMetadata,

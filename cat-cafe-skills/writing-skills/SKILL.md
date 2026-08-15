@@ -1,5 +1,6 @@
 ---
 name: writing-skills
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
   Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
@@ -55,7 +56,7 @@ triggers:
 | 流程型 skill | `cat-cafe-skills/tdd/SKILL.md` | 清晰的分步流程 + 红绿重构纪律 |
 | 调试型 skill | `cat-cafe-skills/debugging/SKILL.md` | 根因定位方法论 + 假设验证 |
 | 门禁型 skill | `cat-cafe-skills/quality-gate/SKILL.md` | 检查清单 + 硬门禁 + 下一步 |
-| MCP tool | `refs/mcp-tool-description-standard.md` 的好/差对比 | 四项路由契约 + 有证据才写 Gotcha |
+| MCP tool | `../.cat-cafe-shared-refs/mcp-tool-description-standard.md` 的好/差对比 | 四项路由契约 + 有证据才写 Gotcha |
 
 > 写 MCP tool 前还要 **grep 家里现有同类 tool 的 description**，保持风格一致。
 
@@ -118,7 +119,7 @@ Claude 会按需读取这些文件。**150 行是拆分 smell 不是硬限**—�
 4. 产物（调用后会发生什么，含副作用）
 5. GOTCHA（仅当存在真实陷阱 / 易混工具时）
 ```
-> 1-4 是完整路由契约；5 由真实混淆证据触发。缺路由契约不合格，缺一个并不存在的 GOTCHA 不算缺陷。详见 `refs/mcp-tool-description-standard.md`
+> 1-4 是完整路由契约；5 由真实混淆证据触发。缺路由契约不合格，缺一个并不存在的 GOTCHA 不算缺陷。详见 `../.cat-cafe-shared-refs/mcp-tool-description-standard.md`
 
 ## Skill 类型（Anthropic 9 分类 + 我们的 3 分类）
 
@@ -194,7 +195,7 @@ description: >
 | Clowder AI skill 质量哲学 | `writing-skills/cat-cafe-skill-quality-principles.md` | 废话 skill 判定、载体选择、激发/刹车边界 |
 | Anthropic 官方 skill 写法 | `writing-skills/anthropic-best-practices.md` | 9 类 skill、progressive disclosure、hooks |
 | 知识工程完整方法论 | *(internal reference removed)* | 触发设计、正反灰例、8 个可复用模式 |
-| MCP description 四要素 + 条件 Gotcha 审查清单 | `refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
+| MCP description 四要素 + 条件 Gotcha 审查清单 | `../.cat-cafe-shared-refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
 | Skill TDD 测试方法 | `writing-skills/testing-skills-with-subagents.md` | 红绿重构、压力测试、弹孔表 |
 
 ## 和其他 Skill 的区别

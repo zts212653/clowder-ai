@@ -13,6 +13,7 @@ import { describe, test } from 'node:test';
 import { buildDeps, mockMsg } from './helpers/incremental-context-helpers.js';
 
 const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { resolveUnboundHistoryContextTokenCeiling } = await import('../dist/config/context-capacity.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
 const { estimateTokens } = await import('../dist/utils/token-counter.js');
@@ -65,7 +66,7 @@ describe('assembleIncrementalContext — invocation history ceiling', () => {
     assert.ok(result.degradation, 'Zero budget should report degradation');
   });
 
-  test('without an invocation ceiling, fails closed instead of resolving a hidden default', async () => {
+  test('without an invocation ceiling, direct consumers use the conservative unbound guard', async () => {
     const count = 50;
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -74,8 +75,13 @@ describe('assembleIncrementalContext — invocation history ceiling', () => {
     const deps = buildDeps(messageStore, deliveryCursorStore);
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
 
-    assert.equal(result.contextText, '', 'Unresolved invocation capacity must not include history');
-    assert.ok(result.degradation, 'Fail-closed capacity should be visible as degradation');
+    const contextTokens = estimateTokens(result.contextText);
+    const unboundHistoryCeiling = resolveUnboundHistoryContextTokenCeiling();
+    assert.notEqual(result.contextText, '', 'An unbound direct consumer must retain bounded history');
+    assert.ok(
+      contextTokens <= unboundHistoryCeiling * 1.15, // 15% tolerance for estimation error
+      `Context should respect unbound guard ${unboundHistoryCeiling}, got ${contextTokens} tokens`,
+    );
   });
 
   test('Smart Window still owns message selection under a generous invocation ceiling', async () => {

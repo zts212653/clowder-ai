@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
+  ACTION_SUBJECT_REF_DESCRIPTION,
+  ACTION_SUBJECT_REF_MAX_LENGTH,
+  ACTION_SUBJECT_REF_PATTERN,
   type ActionSuccessorActionFamily,
   type ActionTerminalPredicateInput,
   type ActionTerminalPredicateKind,
@@ -85,6 +88,12 @@ export class ActionTerminalPredicateError extends Error {
 
 function canonicalizeSubjectRef(value: string): string {
   const trimmed = value.trim();
+  if (!trimmed || trimmed.length > ACTION_SUBJECT_REF_MAX_LENGTH || !ACTION_SUBJECT_REF_PATTERN.test(trimmed)) {
+    throw new ActionTerminalPredicateError(
+      'predicate_subject_unsupported',
+      `unsupported predicate subject: ${value}. ${ACTION_SUBJECT_REF_DESCRIPTION}`,
+    );
+  }
   const pr = /^pr:([^/\s]+)\/([^#\s]+)#([1-9]\d*)$/i.exec(trimmed);
   if (pr) {
     const [, owner, repo, number] = pr;
@@ -95,7 +104,10 @@ function canonicalizeSubjectRef(value: string): string {
     const [, namespace, id] = opaque;
     if (namespace && id && !id.includes('\u001f')) return `subject:${namespace.toLowerCase()}:${id}`;
   }
-  throw new ActionTerminalPredicateError('predicate_subject_unsupported', `unsupported predicate subject: ${value}`);
+  throw new ActionTerminalPredicateError(
+    'predicate_subject_unsupported',
+    `unsupported predicate subject: ${value}. ${ACTION_SUBJECT_REF_DESCRIPTION}`,
+  );
 }
 
 function requirePrSubject(kind: ActionTerminalPredicateKind, subjectRef: string): void {

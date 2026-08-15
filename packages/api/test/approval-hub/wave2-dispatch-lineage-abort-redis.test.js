@@ -53,6 +53,8 @@ describe('RedisDispatchProposalStore lineage abort recovery', { skip: redisIsola
       'dispatch-proposal-user-settled:*',
       'dispatch-proposal-clientmsg:*',
       'dispatch-proposal-lineage:*',
+      'dispatch-proposal-canonical-admission:*',
+      'dispatch-proposal-canonical-admission-rebuild-completed-at',
     ]);
   }
 

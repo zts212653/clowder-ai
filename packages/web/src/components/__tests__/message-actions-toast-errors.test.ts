@@ -104,6 +104,31 @@ async function triggerAction(container: HTMLDivElement, buttonTitle: string, dia
   });
 }
 
+async function openOverflowAction(container: HTMLDivElement, label: string) {
+  const more = container.querySelector('button[aria-label="更多消息操作"]') as HTMLButtonElement | null;
+  expect(more).not.toBeNull();
+  if (!more) throw new Error('more-actions button not found');
+  await act(async () => {
+    more.click();
+  });
+
+  const action = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === label);
+  expect(action, `overflow action "${label}" should exist`).toBeTruthy();
+  if (!action) throw new Error(`overflow action "${label}" not found`);
+  await act(async () => {
+    action.click();
+  });
+}
+
+async function triggerOverflowDialogAction(container: HTMLDivElement, label: string, dialogTitle: string) {
+  await openOverflowAction(container, label);
+  const dialog = findOpenDialog(dialogTitle);
+  expect(dialog, `dialog "${dialogTitle}" should be open`).toBeTruthy();
+  await act(async () => {
+    await dialog!.onConfirm?.();
+  });
+}
+
 // ---------- suite ----------
 
 describe('F109: MessageActions toast on errors (4 UI paths)', () => {
@@ -179,12 +204,8 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
         });
       renderActions(root);
 
-      // Hard delete has a two-step flow: click button → GET thread → show dialog
-      const btn = container.querySelector('button[title="永久删除"]') as HTMLButtonElement;
-      expect(btn).not.toBeNull();
-      await act(async () => {
-        btn.click();
-      });
+      // Hard delete has a two-step flow: open overflow action → GET thread → show dialog
+      await openOverflowAction(container, '永久删除');
 
       // Wait for the async handleHardDelete to resolve (GET thread)
       await act(async () => {
@@ -208,10 +229,7 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
         .mockRejectedValueOnce(new Error('Network error'));
       renderActions(root);
 
-      const btn = container.querySelector('button[title="永久删除"]') as HTMLButtonElement;
-      await act(async () => {
-        btn.click();
-      });
+      await openOverflowAction(container, '永久删除');
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0));
       });
@@ -302,7 +320,7 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
         json: async () => ({ error: '无权对此对话创建分支' }),
       });
       renderActions(root);
-      await triggerAction(container, '从这里分支', '从这里分支');
+      await triggerOverflowDialogAction(container, '从这里分支', '从这里分支');
 
       expect(addToastMock).toHaveBeenCalledOnce();
       expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
@@ -312,7 +330,7 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
     it('shows toast on network error (catch path)', async () => {
       apiFetchMock.mockRejectedValue(new Error('Network error'));
       renderActions(root);
-      await triggerAction(container, '从这里分支', '从这里分支');
+      await triggerOverflowDialogAction(container, '从这里分支', '从这里分支');
 
       expect(addToastMock).toHaveBeenCalledOnce();
       expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });

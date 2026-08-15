@@ -8,6 +8,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   _resetDossierCache,
@@ -49,6 +50,8 @@ l0RosterSummary: "Quick and versatile coding"
 \`\`\`
 `;
 
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+
 afterEach(() => {
   _resetDossierCache();
 });
@@ -87,6 +90,13 @@ describe('R2-P1: ENOENT vs non-ENOENT error classification', () => {
 });
 
 describe('R2-P2: hasDossierEntry warning scope', () => {
+  test('canonical Fable engagement policy survives the typed loader', () => {
+    const policy = loadDossierProfiles(REPO_ROOT).get('fable-5')?.engagementPolicy;
+
+    expect(policy?.defaultMode).toBe('one_shot_calibration');
+    expect(policy?.reentry).toBe('only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request');
+  });
+
   test('hydrates identity.pronouns from the structured dossier profile', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-pronouns-'));
     const dossierDir = join(tempRoot, 'docs', 'team');

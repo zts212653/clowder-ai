@@ -72,6 +72,7 @@ import {
   type TerminalDecision,
 } from './thread-runtime-ledger';
 import { getThreadRuntimeLedger } from './thread-runtime-singleton';
+import type { ExplicitStopIntent } from './useSocket-cancel-provenance';
 
 // F173 Phase E (KD-1 handler unification): handleAgentMessage is the single
 // socket dispatch entry. Background event business logic is now module-local in
@@ -1585,8 +1586,15 @@ export function consumeBackgroundSystemInfo(
         if (found) targetId = found.id;
       }
 
-      // Fallback: most recent callback message from this cat
-      if (!targetId) {
+      const richBlockHasExplicitInvocation = Boolean(
+        msg.invocationId ?? msg.turnInvocationId ?? parsed.invocationId ?? parsed.turnInvocationId,
+      );
+
+      // Legacy invocationless fallback: attach to the most recent callback message.
+      // Identity-bound blocks belong to the current provider stream. Since
+      // post_message callbacks became independent by default, routing those blocks to
+      // the preceding callback duplicates the card until history hydration repairs it.
+      if (!targetId && !richBlockHasExplicitInvocation) {
         const threadMessages = options.store.getThreadState(msg.threadId).messages;
         for (let i = threadMessages.length - 1; i >= 0; i--) {
           const m = threadMessages[i];
@@ -1603,9 +1611,6 @@ export function consumeBackgroundSystemInfo(
       if (!targetId) {
         targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
       }
-      const richBlockHasExplicitInvocation = Boolean(
-        msg.invocationId ?? msg.turnInvocationId ?? parsed.invocationId ?? parsed.turnInvocationId,
-      );
       if (!targetId && !richBlockHasExplicitInvocation) {
         // F194 Phase Z6: rich/audio blocks can arrive just after `done` finalized the stream
         // bubble and cleared bgStreamRefs. Reuse the exact finalized stream bubble so live
@@ -2430,7 +2435,7 @@ function markThreadInvocationActive(msg: BackgroundAgentMessage, options: Handle
   // F108: slot-aware — register specific invocation if ID available
   if (msg.invocationId) {
     options.store.addThreadActiveInvocation(msg.threadId, msg.invocationId, msg.catId, 'execute');
-  } else if (!threadState.hasActiveInvocation) {
+  } else {
     options.store.setThreadHasActiveInvocation(msg.threadId, true);
   }
 }
@@ -2506,6 +2511,9 @@ export function handleBackgroundAgentMessage(
 
   if (msg.type === 'text' && msg.content) {
     const isCallbackText = msg.origin === 'callback';
+    if (!isCallbackText && shouldSuppressLateBackgroundStreamChunk(msg, streamKey, options)) {
+      return;
+    }
     if (!isCallbackText) {
       markThreadInvocationActive(msg, options);
     }
@@ -2703,9 +2711,6 @@ export function handleBackgroundAgentMessage(
         finalMsgId = cbId;
       }
     } else {
-      if (shouldSuppressLateBackgroundStreamChunk(msg, streamKey, options)) {
-        return;
-      }
       // F183 Phase B1.8 — bg stream chunk wire-up via reducer (single-writer)。
       // canonical invocationId 走 reducer 的 reduceStreamChunk — existing bubble
       // append/replace content；no existing 时 makePlaceholder 创建新 bubble (origin=
@@ -6086,9 +6091,13 @@ export function useAgentMessages() {
               if (found) targetId = found.id;
             }
 
-            // Bugfix: standalone create_rich_block (no messageId) — prefer most recent
-            // callback message from this cat over the active streaming message.
-            if (!targetId) {
+            const richBlockHasExplicitInvocation = Boolean(msg.turnInvocationId ?? effectiveInv);
+
+            // Legacy invocationless fallback: attach to the most recent callback message.
+            // Identity-bound blocks belong to the current provider stream. Since
+            // post_message callbacks became independent by default, routing those blocks to
+            // the preceding callback duplicates the card until history hydration repairs it.
+            if (!targetId && !richBlockHasExplicitInvocation) {
               const currentMessages = useChatStore.getState().messages;
               for (let i = currentMessages.length - 1; i >= 0; i--) {
                 const m = currentMessages[i];
@@ -6106,7 +6115,6 @@ export function useAgentMessages() {
               msg.catId,
               msg.turnInvocationId ?? effectiveInv,
             );
-            const richBlockHasExplicitInvocation = Boolean(msg.turnInvocationId ?? effectiveInv);
             if (!targetId && !suppressedLateRichBlock && !richBlockHasExplicitInvocation) {
               // F194 Phase Z6: invocationless rich/audio events may arrive after done.
               // `findInvocationlessStreamPlaceholder` includes the just-finalized stream
@@ -6474,13 +6482,17 @@ export function useAgentMessages() {
   );
 
   const handleStop = useCallback(
-    (cancelFn: (threadId: string, catId?: string) => void, threadId: string) => {
+    (
+      cancelFn: (threadId: string, catId: string | undefined, intent: ExplicitStopIntent) => boolean,
+      threadId: string,
+      intent: ExplicitStopIntent,
+    ) => {
       const store = useChatStore.getState();
       // When exactly one cat is active, cancel only that cat to avoid
       // thread-level cancelAll accidentally killing other cats.
       const activeSlots = Object.values(store.getThreadState(threadId).activeInvocations ?? {});
       const singleCatId = activeSlots.length === 1 ? activeSlots[0]?.catId : undefined;
-      cancelFn(threadId, singleCatId);
+      if (!cancelFn(threadId, singleCatId, intent)) return;
       clearPendingCallbacksForThread(threadId);
       const isActiveThreadStop = threadId === store.currentThreadId;
 

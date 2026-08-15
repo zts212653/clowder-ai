@@ -7,6 +7,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 
 const mockOnStop = vi.fn();
 
@@ -61,8 +62,16 @@ vi.mock('@/stores/chatStore', () => {
 });
 
 vi.mock('@/components/ChatInput', () => ({
-  ChatInput: ({ onStop }: { onStop?: () => void }) =>
-    React.createElement('button', { 'data-testid': 'stop-btn', onClick: onStop }, 'Stop'),
+  ChatInput: ({ onStop }: { onStop?: (intent: ExplicitStopIntent) => void }) =>
+    React.createElement(
+      'button',
+      {
+        type: 'button',
+        'data-testid': 'stop-btn',
+        onClick: () => onStop?.({ sourceControl: 'chat_input_action', gesture: 'pointer', trustedGesture: true }),
+      },
+      'Stop',
+    ),
 }));
 
 vi.mock('@/components/SplitPaneCell', () => ({
@@ -124,6 +133,9 @@ describe('SplitPaneView stop routing (P1 regression)', () => {
 
     // P1 regression: onStop should be called with the target thread ID (thread-b),
     // NOT with no args (which would default to URL threadId in ChatContainer)
-    expect(mockOnStop).toHaveBeenCalledWith('thread-b');
+    expect(mockOnStop).toHaveBeenCalledWith(
+      { sourceControl: 'chat_input_action', gesture: 'pointer', trustedGesture: true },
+      'thread-b',
+    );
   });
 });

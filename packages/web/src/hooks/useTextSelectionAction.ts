@@ -11,6 +11,9 @@ export interface TextSelectionAction {
   text: string;
   position: FloatingSelectionPosition;
   sourceKind: string | null;
+  sourceSegmentId?: string;
+  selectionStart?: number;
+  selectionEnd?: number;
 }
 
 function rectLike(rect: DOMRect | DOMRectReadOnly): RectLike {
@@ -38,10 +41,31 @@ function sourceElement(node: Node | null): Element | null {
   return node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
 }
 
-function selectionSource(selection: Selection): { kind: string | null; mixed: boolean } {
+function selectionOffsets(selection: Selection, container: Node): { start: number; end: number } | null {
+  if (selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (typeof range.cloneRange !== 'function') return null;
+  try {
+    const prefix = range.cloneRange();
+    prefix.selectNodeContents(container);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const start = prefix.toString().length;
+    const end = start + range.toString().length;
+    return end > start ? { start, end } : null;
+  } catch {
+    return null;
+  }
+}
+
+function selectionSource(selection: Selection): {
+  kind: string | null;
+  mixed: boolean;
+  coordinateRoot: Element | null;
+  segmentId: string | null;
+} {
   const anchorSource = sourceElement(selection.anchorNode)?.closest('[data-context-quote-source]');
   const focusSource = sourceElement(selection.focusNode)?.closest('[data-context-quote-source]');
-  if (anchorSource !== focusSource) return { kind: null, mixed: true };
+  if (anchorSource !== focusSource) return { kind: null, mixed: true, coordinateRoot: null, segmentId: null };
 
   const range = selection.getRangeAt(0);
   const commonElement = sourceElement(range.commonAncestorContainer);
@@ -58,10 +82,68 @@ function selectionSource(selection: Selection): { kind: string | null; mixed: bo
         return false;
       }
     });
-    if (crossesNestedSource) return { kind: null, mixed: true };
+    if (crossesNestedSource) return { kind: null, mixed: true, coordinateRoot: null, segmentId: null };
   }
 
-  return { kind: anchorSource?.getAttribute('data-context-quote-source') ?? null, mixed: false };
+  const kind = anchorSource?.getAttribute('data-context-quote-source') ?? null;
+  if (kind === 'cli_output') {
+    const anchorSegment = sourceElement(selection.anchorNode)?.closest('[data-context-quote-segment-id]');
+    const focusSegment = sourceElement(selection.focusNode)?.closest('[data-context-quote-segment-id]');
+    const segment = anchorSegment && anchorSegment === focusSegment ? anchorSegment : null;
+    return {
+      kind,
+      mixed: false,
+      coordinateRoot: segment,
+      segmentId: segment?.getAttribute('data-context-quote-segment-id') ?? null,
+    };
+  }
+
+  return {
+    kind,
+    mixed: false,
+    coordinateRoot: anchorSource ?? null,
+    segmentId: null,
+  };
+}
+
+function projectSelectionAction(
+  selection: Selection | null,
+  container: HTMLElement,
+  coordinateSpace: 'container' | 'viewport',
+): TextSelectionAction | null {
+  if (
+    !selection ||
+    selection.isCollapsed ||
+    !selection.toString().trim() ||
+    !container.contains(selection.anchorNode) ||
+    !container.contains(selection.focusNode)
+  ) {
+    return null;
+  }
+
+  const viewport =
+    coordinateSpace === 'container'
+      ? rectLike(container.getBoundingClientRect())
+      : {
+          top: 0,
+          left: 0,
+          right: window.innerWidth,
+          bottom: window.innerHeight,
+          width: window.innerWidth,
+          height: window.innerHeight,
+        };
+  const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
+  const source = selectionSource(selection);
+  const offsetRoot = source.kind === 'cli_output' ? source.coordinateRoot : (source.coordinateRoot ?? container);
+  const offsets = offsetRoot ? selectionOffsets(selection, offsetRoot) : null;
+  if (!position || source.mixed) return null;
+  return {
+    text: selection.toString().trim(),
+    position,
+    sourceKind: source.kind,
+    ...(offsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
+    ...(offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
+  };
 }
 
 export function useTextSelectionAction(
@@ -82,45 +164,19 @@ export function useTextSelectionAction(
       return;
     }
 
-    const sync = () => {
-      const selection = window.getSelection();
-      if (
-        !selection ||
-        selection.isCollapsed ||
-        !selection.toString().trim() ||
-        !container.contains(selection.anchorNode) ||
-        !container.contains(selection.focusNode)
-      ) {
-        setAction(null);
-        return;
-      }
-
-      const viewport =
-        coordinateSpace === 'container'
-          ? rectLike(container.getBoundingClientRect())
-          : {
-              top: 0,
-              left: 0,
-              right: window.innerWidth,
-              bottom: window.innerHeight,
-              width: window.innerWidth,
-              height: window.innerHeight,
-            };
-      const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
-      const source = selectionSource(selection);
-      setAction(
-        position && !source.mixed ? { text: selection.toString().trim(), position, sourceKind: source.kind } : null,
-      );
-    };
+    const sync = () => setAction(projectSelectionAction(window.getSelection(), container, coordinateSpace));
 
     document.addEventListener('selectionchange', sync);
     document.addEventListener('scroll', sync, true);
     window.addEventListener('resize', sync);
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(sync);
+    resizeObserver?.observe(container);
     sync();
     return () => {
       document.removeEventListener('selectionchange', sync);
       document.removeEventListener('scroll', sync, true);
       window.removeEventListener('resize', sync);
+      resizeObserver?.disconnect();
     };
   }, [active, containerRef, coordinateSpace, resetKey]);
 

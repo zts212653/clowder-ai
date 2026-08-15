@@ -82,6 +82,68 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handlePostMessage rejects an invalid action subjectRef before sending or queueing a callback', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handlePostMessage({
+      content: 'Review the first PR head.',
+      targetCats: ['codex'],
+      clientMessageId: 'invalid-subject-ref',
+      action: {
+        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
+    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.equal(attempts, 0, 'invalid metadata must not reach the callback transport');
+    assert.deepEqual(
+      readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
+      [],
+    );
+  });
+
+  test('post_message exposes only action pairs with an executable terminal producer', async () => {
+    const { handlePostMessage, postMessageInputSchema } = await import('../dist/tools/callback-tools.js');
+    const impossibleMerge = {
+      subjectRef: 'pr:owner/repo#3684',
+      actionFamily: 'merge',
+      successorSlot: 'merge_owner',
+      mode: 'single',
+      terminalPredicate: { kind: 'pr_merged' },
+    };
+
+    const advertised = postMessageInputSchema.action.safeParse(impossibleMerge);
+    assert.equal(advertised.success, false, 'the public tool schema must not advertise an unregistered producer');
+
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    const result = await handlePostMessage({
+      content: 'Merge after the verified gate.',
+      targetCats: ['codex-sol'],
+      clientMessageId: 'impossible-merge-carrier',
+      action: impossibleMerge,
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /review.*review_delivered/i);
+    assert.match(result.content[0].text, /implement.*task_done/i);
+    assert.equal(attempts, 0, 'unsupported action metadata must not reach callback transport');
+  });
+
   test('handlePostMessage forwards replace_final disposition to the callback API', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
@@ -311,7 +373,7 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'agent-review-2915',
       agentKeyCatId: 'antigravity',
       action: {
-        subjectRef: 'github:pr:2915',
+        subjectRef: 'pr:owner/repo#2915',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -576,7 +638,7 @@ describe('MCP Callback Tools', () => {
     };
 
     const action = {
-      subjectRef: 'github:pr:2868',
+      subjectRef: 'pr:owner/repo#2868',
       actionFamily: 'review',
       successorSlot: 'reviewer',
       mode: 'single',
@@ -663,7 +725,7 @@ describe('MCP Callback Tools', () => {
   test('handleCrossPostMessage action requires explicit replay and cardinality identity', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     const action = {
-      subjectRef: 'github:pr:2868',
+      subjectRef: 'pr:owner/repo#2868',
       actionFamily: 'review',
       successorSlot: 'reviewer',
       mode: 'single',
@@ -1867,6 +1929,39 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.triggerType, undefined);
   });
 
+  test('handleMultiMention rejects a non-canonical action subject before callback transport', async () => {
+    const { handleMultiMention } = await import('../dist/tools/callback-tools.js');
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ requestId: 'should-not-send' }) };
+    };
+
+    const result = await handleMultiMention({
+      targets: ['codex'],
+      question: 'Review the first PR head.',
+      callbackTo: 'opus',
+      idempotencyKey: 'invalid-multi-subject-ref',
+      searchEvidenceRefs: ['message:incident-f167'],
+      action: {
+        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /pr:<owner>\/<repo>#<positive-number>/);
+    assert.match(result.content[0].text, /subject:<namespace>:<opaque-id>/);
+    assert.equal(attempts, 0);
+    assert.deepEqual(
+      readdirSync(outboxDir).filter((name) => name.endsWith('.json')),
+      [],
+    );
+  });
+
   test('handleMultiMention forwards structured successor identity and replace intent', async () => {
     const { handleMultiMention } = await import('../dist/tools/callback-tools.js');
     let capturedOptions;
@@ -1877,11 +1972,11 @@ describe('MCP Callback Tools', () => {
 
     const action = {
       subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'merge',
+      actionFamily: 'review',
       successorSlot: 'reviewer',
       mode: 'single',
       replace: { leaseId: 'lease-old', expectedGeneration: 1 },
-      terminalPredicate: { kind: 'pr_merged' },
+      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
     };
     const result = await handleMultiMention({
       targets: ['codex'],
@@ -1904,13 +1999,13 @@ describe('MCP Callback Tools', () => {
       return { ok: true, json: async () => ({ requestId: 'req-standing', status: 'running' }) };
     };
     const action = {
-      subjectRef: 'pr:owner/repo#2868',
-      actionFamily: 'merge',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:task:task-2868',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
       claimOrigin: 'existing_standing',
       groundingEvidenceRef: 'grounding:verified-owner',
-      terminalPredicate: { kind: 'pr_merged' },
+      terminalPredicate: { kind: 'task_done' },
     };
     const result = await handleMultiMention({
       targets: ['opus'],
@@ -1966,10 +2061,10 @@ describe('MCP Callback Tools', () => {
       searchEvidenceRefs: ['pr:owner/repo#2868'],
       action: {
         subjectRef: 'pr:owner/repo#2868',
-        actionFamily: 'merge',
+        actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
-        terminalPredicate: { kind: 'pr_merged' },
+        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
       },
     });
 

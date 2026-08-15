@@ -902,6 +902,10 @@ describe('TTS sidecar startup guards', () => {
 
     assert.match(installScript, /POST_INSTALL_HOOK_ARM64=["']tts_install_arm64_warmup["']/);
     assert.match(installScript, /generate_audio/);
+    assert.match(installScript, /mlx-audio>=0\.4\.7/);
+    assert.match(installScript, /QWEN3_CLONE_DEFAULT_MODEL=/);
+    assert.match(installScript, /TTS_MODEL:-[\s\S]*qwen3-clone[\s\S]*TTS_MODEL="\$QWEN3_CLONE_DEFAULT_MODEL"/);
+    assert.match(apiScript, /MIN_MLX_AUDIO_VERSION/);
     assert.match(installScript, /zm_yunjian/);
     assert.match(installScript, /_CATCAFE_HF_PROXY_FOR_DOWNLOAD/);
     assert.match(serverScript, /HF_HUB_OFFLINE/);

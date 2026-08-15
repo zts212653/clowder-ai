@@ -106,6 +106,11 @@ async function createFixture(t, options = {}) {
       throw new Error('simulated deny-index outage');
     };
   }
+  if (options.failCanonicalLookup) {
+    dispatchProposalStore.findCanonicalAdmissionBlocks = async () => {
+      throw new Error('simulated canonical-admission lookup outage');
+    };
+  }
   t.after(() => app.close());
 
   const auth = await registry.create('user-1', 'opus', source.id);
@@ -239,6 +244,26 @@ test('negative authorization lookup failure is fail-closed before normal-path si
   );
 });
 
+test('canonical admission lookup failure is fail-closed before a weak cross-invocation carrier can persist', async (t) => {
+  const fixture = await createFixture(t, { failCanonicalLookup: true });
+  const freshAuth = await fixture.registry.create('user-1', 'opus', fixture.sourceId);
+
+  const response = await post(fixture, freshAuth, {
+    effectClass: 'coordinate',
+    coordination: { phase: 'active', subjectRef: 'pr:owner/repo#42' },
+    clientMessageId: 'canonical-admission-unavailable',
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().code, 'DISPATCH_NEGATIVE_AUTHORIZATION_UNAVAILABLE');
+  assert.deepEqual(fixture.messageStore.getByThread(fixture.targetId, 20, 'user-1'), []);
+  assert.deepEqual(fixture.invocationRecordStore.getRecords(), []);
+  assert.equal(
+    (await fixture.registry.getRecord(freshAuth.invocationId)).clientMessageIds.has('canonical-admission-unavailable'),
+    false,
+  );
+});
+
 test('negative authorization remains blocked when its audit sink is unavailable', async (t) => {
   const fixture = await createFixture(t, { failAudit: true });
   const proposal = await createAssignWorkProposal(fixture);
@@ -297,7 +322,7 @@ test('target-set intersection blocks subset, superset, and reorder as one carrie
   assert.equal(freshInvocation.statusCode, 200, 'a fresh invocation is not tainted by the old proposal');
 });
 
-test('a new structured transfer is blocked before F167 admission, while a verifiable existing transition reaches F167', async (t) => {
+test('a new structured transfer is blocked before F167 admission, while a persisted-lease transition reaches F167', async (t) => {
   const fixture = await createFixture(t, { withActionAdmission: true });
   const proposal = await createAssignWorkProposal(fixture);
   assert.ok(await fixture.dispatchProposalStore.reject(proposal.proposalId, 'user-1'));

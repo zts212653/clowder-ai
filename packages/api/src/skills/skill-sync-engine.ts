@@ -19,7 +19,10 @@ import { pathsEqual } from '../utils/project-path.js';
 import {
   buildSkillMountTargets,
   createSkillSymlink,
+  ensureSharedSkillRefsMount,
   isManagedDirectoryLevelSkillsSymlink,
+  removeSharedSkillRefsMount,
+  SHARED_SKILL_REFS_ALIAS,
 } from '../utils/skill-mount.js';
 import { computeSourceManifestHash, listSourceSkillNames } from '../utils/skill-source.js';
 import { updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
@@ -380,6 +383,14 @@ async function syncProjectUnlocked(
         /* ENOENT — will be created below */
       }
       await mkdir(skillsDir, { recursive: true });
+      const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
+      if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
+        result.conflicts.push({
+          skillName: SHARED_SKILL_REFS_ALIAS,
+          mountPointId: target.id,
+          path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
+        });
+      }
 
       for (const skillName of targetEnabled) {
         validateSkillName(skillName);
@@ -425,9 +436,11 @@ async function syncProjectUnlocked(
       continue;
     }
     const isDisabledMount = !activeDirSet.has(skillsDir);
+    if (isDisabledMount) await removeSharedSkillRefsMount(skillsDir, skillsSource);
     const entries = await readdir(skillsDir).catch(() => [] as string[]);
     const dirCleanup = new Set(cleanupNames);
     for (const entry of entries) {
+      if (entry === SHARED_SKILL_REFS_ALIAS) continue;
       if (!isDisabledMount && !dirCleanup.has(entry) && allSkillSet.has(entry)) continue;
       dirCleanup.add(entry);
     }
@@ -454,6 +467,7 @@ async function syncProjectUnlocked(
       } catch {
         /* */
       }
+      await removeSharedSkillRefsMount(oldDir, skillsSource);
       // Guard: if oldDir is a symlink to a non-matching source, skip readdir
       // to avoid following the symlink and deleting content from the target.
       try {

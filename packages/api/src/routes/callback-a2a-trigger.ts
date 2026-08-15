@@ -18,6 +18,7 @@ import { getDefaultCatId } from '../config/cat-config-loader.js';
 import type { ActionSuccessorFence } from '../domains/ball-custody/ActionSuccessorAdmissionService.js';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { buildHandedEvent } from '../domains/ball-custody/ball-custody-events.js';
+import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
 import { buildA2ADispatchTurnCustodyWake } from '../domains/ball-custody/turn-custody-wake-provenance.js';
 import type { InvocationQueue, QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -69,7 +70,7 @@ export interface QueueProcessorLike {
     catId: string;
     invocationId: string;
     messageIds: readonly string[];
-  }): Promise<void>;
+  }): Promise<readonly TurnCustodyWakeProvenance[]>;
   /** F216 c3 supersede: reuse the force-send abort-resume coordinate system.
    *  clearPause prevents the aborted invocation's async cleanup from poisoning QueueProcessor state (F39).
    *  releaseSlot force-frees the per-slot processingSlots mutex so tryAutoExecute sees a free slot. */

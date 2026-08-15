@@ -1221,7 +1221,7 @@
     {
       "id": "F202",
       "name": "Plugin Framework — local discovery, config, resource activation, and schedule resources",
-      "status": "in-progress (local Phase 1 merged; K-2A merged; K-2B production-transport state machine implemented dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
+      "status": "in-progress (local Phase 1 merged; K-2A/K-2B merged; K-2D supervised stdio runtime composed dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
       "file": "F202-plugin-framework.md"
     },
     {
@@ -1647,7 +1647,7 @@
     {
       "id": "F279",
       "name": "Workspace Listen Mode — 正文听读与可复用音频缓存",
-      "status": "in-progress / Phase A passed; Phase B/C exact-HEAD review approved; F289 base dependency and real-TTS UAT pending",
+      "status": "in-progress / Phase A passed; Phase B complete; Phase C implementation landed with full Workspace UAT pending; Phase D background full-document cache Design Gate draft pending operator signoff",
       "file": "F279-workspace-listen-mode.md"
     },
     {
@@ -1695,7 +1695,7 @@
     {
       "id": "F289",
       "name": "Canonical Data Root — 用户数据离开 runtime 投影",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P0",
+      "status": "in-progress — production cutover paused / current one-shot migration NO-GO | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P0",
       "file": "F289-canonical-data-root.md"
     },
     {
@@ -1713,14 +1713,32 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / Phase C Host path complete with dormant K-2B transport; Phase D remains blocked by Feishu package publication and external runtime activation",
+      "status": "implementation / Phase C, K-2D, and the Phase D official install/activation surface are on main; alpha activation verification, owner OAuth, and real-meeting dogfood remain open",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
       "id": "F293",
       "name": "— Live Routing Context",
-      "status": "spec / Architecture Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "spec / Architecture + Experience Design Gate reopened | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F293-live-routing-context.md"
+    },
+    {
+      "id": "F294",
+      "name": "Selective Message Bundles — 消息多选、选择性导出与跨 Thread 富文本转发",
+      "status": "in-progress / Phase A merged (PR #3599); Phase B implementation merged (PR #3603), Redis hydration repaired (PR #3628), and Alpha UX follow-up verified (PR #3650); Phase B cold-load auth UAT and Phase C pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F294-selective-message-bundles.md"
+    },
+    {
+      "id": "F295",
+      "name": "Cancelable Execution Projection — 运行态与精确 Stop 单一投影",
+      "status": "done | **Completed**: 2026-08-13 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F295-cancelable-execution-projection.md"
+    },
+    {
+      "id": "F296",
+      "name": "Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量",
+      "status": "spec / Architecture Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F296-continuity-aware-context-injection.md"
     }
   ]
 }

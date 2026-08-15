@@ -11,6 +11,13 @@ let mockAudio: {
   onended: (() => void) | null;
   onerror: (() => void) | null;
   ended: boolean;
+  currentTime: number;
+  duration: number;
+  playbackRate: number;
+  ontimeupdate: (() => void) | null;
+  ondurationchange: (() => void) | null;
+  onloadedmetadata: (() => void) | null;
+  readyState: number;
   removeAttribute: ReturnType<typeof vi.fn>;
   preload: string;
   id: string;
@@ -32,6 +39,13 @@ function createMockAudio() {
     onended: null as (() => void) | null,
     onerror: null as (() => void) | null,
     ended: false,
+    currentTime: 0,
+    duration: 10,
+    playbackRate: 1,
+    ontimeupdate: null as (() => void) | null,
+    ondurationchange: null as (() => void) | null,
+    onloadedmetadata: null as (() => void) | null,
+    readyState: 1,
     removeAttribute: vi.fn((attr: string) => {
       if (attr === 'src') {
         _src = '';
@@ -405,10 +419,13 @@ describe('PlaybackManager — P1 regression: stale fetch cancellation', () => {
     // Segment 1 starts playing
     await vi.waitFor(() => expect(pm.getState()).toBe('playing'));
 
-    // Segment 1 finishes, but segment 2 fetch is still pending
-    // playNext() sees empty queue + streamDone=false → stays in playing state
+    // Segment 1 finishes, but segment 2 fetch is still pending. The manager
+    // must tell consumers that no audio is currently playing while retaining
+    // batch ownership so the next blob can resume automatically.
     mockAudio.ended = true;
     mockAudio.onended?.();
+    expect(pm.getSnapshot()).toMatchObject({ source: 'podcast', state: 'idle' });
+    expect(pm.isBatchActive()).toBe(true);
 
     // Now resolve the second fetch — should auto-resume (audio.ended detected)
     resolveSecondFetch({
@@ -464,5 +481,91 @@ describe('PlaybackManager — P1 regression: fetch rejection handling', () => {
     await pm.startBatch(['/a/1.wav', '/a/2.wav'], rejectingFetch);
 
     expect(pm.getState()).toBe('idle');
+  });
+});
+
+describe('PlaybackManager — F279 source, rate, and progress', () => {
+  it('plays streamed chunks as one logical sentence boundary with cumulative progress', () => {
+    const itemEnds: number[] = [];
+    const pm = new PlaybackManager({
+      ...makeCallbacks(),
+      onItemEnd: (index) => itemEnds.push(index),
+    });
+    pm.beginBatch('listen');
+
+    pm.enqueueBase64('AAAA', 'wav', { completesItem: false, durationSec: 0.5 });
+    pm.enqueueBase64('BBBB', 'wav', { completesItem: true, durationSec: 0.5 });
+    mockAudio.currentTime = 0.4;
+    expect(pm.getSnapshot()).toMatchObject({ itemIndex: 0, currentTime: 0.4, duration: 1 });
+
+    mockAudio.onended?.();
+    expect(itemEnds).toEqual([]);
+    mockAudio.currentTime = 0.25;
+    expect(pm.getSnapshot()).toMatchObject({ itemIndex: 0, currentTime: 0.75, duration: 1 });
+
+    mockAudio.onended?.();
+    expect(itemEnds).toEqual([0]);
+    expect(pm.getSnapshot().itemIndex).toBe(1);
+  });
+
+  it('owns a listen batch, applies playback rate, and publishes progress snapshots', async () => {
+    const pm = new PlaybackManager(makeCallbacks());
+    const snapshots: Array<ReturnType<typeof pm.getSnapshot>> = [];
+    const unsubscribe = pm.subscribe((snapshot) => snapshots.push(snapshot));
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/wav' })),
+    });
+
+    pm.beginBatch('listen');
+    pm.setPlaybackRate(1.5);
+    await pm.enqueueUrl('/audio/listen.wav', mockFetch);
+    mockAudio.currentTime = 3;
+    mockAudio.duration = 12;
+    mockAudio.ontimeupdate?.();
+
+    expect(pm.getSnapshot()).toMatchObject({
+      source: 'listen',
+      state: 'playing',
+      playbackRate: 1.5,
+      currentTime: 3,
+      duration: 12,
+      itemIndex: 0,
+    });
+    expect(mockAudio.playbackRate).toBe(1.5);
+    expect(snapshots.at(-1)?.currentTime).toBe(3);
+    unsubscribe();
+  });
+
+  it('seeks within the active sentence and publishes the resumed offset', async () => {
+    const pm = new PlaybackManager(makeCallbacks());
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/wav' })),
+    });
+    pm.beginBatch('listen');
+    await pm.enqueueUrl('/audio/listen.wav', mockFetch);
+
+    pm.seek(4);
+
+    expect(mockAudio.currentTime).toBe(4);
+    expect(pm.getSnapshot().currentTime).toBe(4);
+  });
+
+  it('replaces a listen owner when a voice stream starts', async () => {
+    const pm = new PlaybackManager(makeCallbacks());
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/wav' })),
+    });
+    pm.beginBatch('listen');
+    await pm.enqueueUrl('/audio/listen.wav', mockFetch);
+
+    pm.handleStreamStart(streamStart('voice-2'));
+    pm.handleChunk(chunk('voice-2'));
+
+    expect(pm.getSnapshot().source).toBe('voice');
+    expect(pm.getActiveInvocationId()).toBe('voice-2');
+    expect(mockAudio.play).toHaveBeenCalledTimes(2);
   });
 });

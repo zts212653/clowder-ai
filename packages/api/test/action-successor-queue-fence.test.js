@@ -211,6 +211,28 @@ describe('QueueProcessor action successor generation fence', () => {
     assert.equal(store.commitOutcome.mock.calls.length, 0, 'CAS loser must not synthesize a holder outcome');
   });
 
+  it('consumes a failed action-fenced Queue carrier instead of creating an unfenced retry', async () => {
+    const store = {
+      preflight: mock.fn(async () => ({ ok: true, reason: 'active' })),
+      preflightOutput: mock.fn(async () => ({ ok: true, reason: 'active' })),
+      commitOutcome: mock.fn(async () => ({ outcome: 'recorded', lease: { status: 'failed' } })),
+    };
+    const deps = depsWithStore(store, {
+      routeExecution: mock.fn(async function* () {
+        yield Promise.reject(new Error('provider failed'));
+      }),
+      ackCollectedCursors: mock.fn(async () => {}),
+    });
+    const processor = new QueueProcessor(deps);
+    const entry = enqueueActionEntry(deps);
+
+    const result = await processor.executeEntry(entry);
+
+    assert.equal(result.status, 'failed');
+    assert.equal(deps.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id), null);
+    assert.equal(store.commitOutcome.mock.calls.length, 1, 'the fenced lease owns any later successor decision');
+  });
+
   it('cancels before invocation creation when the lease is stale or subject terminal', async () => {
     const store = {
       preflight: mock.fn(async () => ({ ok: false, reason: 'subject_terminal' })),

@@ -11,6 +11,7 @@ import {
   classifyCodexSafeBoundary,
 } from '../dist/domains/cats/services/agents/providers/codex-app-server-boundary.js';
 import { KimiAgentService } from '../dist/domains/cats/services/agents/providers/KimiAgentService.js';
+import { createProviderNativeFreshnessFactory } from '../dist/domains/cats/services/freshness/createProviderNativeFreshnessFactory.js';
 import { FreshnessAttentionEventLog } from '../dist/domains/cats/services/freshness/FreshnessAttentionEventLog.js';
 import {
   createContentFreeFreshnessNotice,
@@ -163,6 +164,49 @@ describe('F254 D2 provider-native freshness truth', () => {
 
     assert.ok(notice, 'the current parent must receive a content-free queued freshness notice');
     assert.match(notice.text, /get_thread_context/);
+  });
+
+  it('treats a visible other-cat stream body as unread at a play-mode safe boundary', async () => {
+    const visibleCatMessage = {
+      id: '0000000000000002-000001-bbbbbbbb',
+      visibilitySeq: 2,
+      threadId: 'thread-visible-cat-message',
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'visible cat analysis',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+    };
+    const factory = createProviderNativeFreshnessFactory({
+      redis: new FakeRedis(),
+      cursorStore: { getSeenCursor: async () => 'v2:0000000000000001:0000000000000001-000001-aaaaaaaa' },
+      messageStore: {
+        getByThreadAfter: async () => [visibleCatMessage],
+        getById: async () => undefined,
+      },
+      threadStore: { get: async () => ({ thinkingMode: 'play' }) },
+    });
+
+    const controller = await factory({
+      invocationId: 'inv-visible-cat-message',
+      threadId: visibleCatMessage.threadId,
+      userId: 'user-1',
+      catId: 'opus',
+      provider: 'openai_codex',
+      capability: {
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        deliverySemantics: 'exact_active_turn',
+      },
+    });
+    const notice = await controller.prepare({
+      threadId: visibleCatMessage.threadId,
+      turnId: 'turn-visible-cat-message',
+      toolSurface: 'command_execution',
+    });
+
+    assert.ok(notice, 'visible unread cat speech must produce the same freshness notice as unread user speech');
   });
 
   it('classifies only completed supported tool surfaces as safe boundaries', () => {

@@ -11,6 +11,8 @@ tips_exempt: post-close R20/R21 live CLI ghost bugfix timeline; no new user-faci
 
 > **Status**: done | **Completed**: 2026-05-12 | **Owner**: Ragdoll/Opus-47 (Z8/Z9/Z10 author) + Maine Coon/Maine Coon (Z5/Z6/Z7 author + Z8/Z9/Z10 reviewer) | **Priority**: P1
 >
+> **2026-08-13 post-close cleanup-carrier correction:** `/messages` 与 `/queue` 仍使用本 feature 的 canonical helper 做 read classification，但 `zombies[]` 在 GET 路径只用于诊断/过滤，不再 fire-and-forget 写 `failed`。运行时 cleanup 已迁到 F118 serialized owner reaper：stale lease 只是候选，必须再有独立 provider/TurnExecution owner absent/terminal 证明，并以 exact `executionId` fence 收敛。下文 AC-B7/B8、KD-19 的 route-trigger cleanup 是历史交付记录，已被此 correction supersede。
+>
 >
 >
 > Reviewer: Maine Coon/Maine Coon (GPT-5.5)。立项基于 2026-05-07 thread `[thread-id]` post-close diagnosis（F183 close 之后operator报告"现在活跃的线程气泡都是裂的"，Maine Coon只读诊断捕到 `/api/messages` 与 `/api/threads/:threadId/queue` 对同一 thread 的 liveness 判定矛盾）。Architecture cell：`docs/architecture/ownership/cells/runtime-invocation-state` (待建/复用)。Map delta：none — 复用既有 `domains/cats/services/agents/invocation/` 边界，本 feat 在该 cell 内新增 read-model helper，不改 ownership map。

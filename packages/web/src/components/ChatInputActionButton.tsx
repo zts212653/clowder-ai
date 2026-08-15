@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { createExplicitStopIntent, type ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
@@ -15,7 +16,7 @@ interface ChatInputActionButtonProps {
   onQueueSend?: () => void;
   /** F39: Force-mode send (cancel running + execute immediately) */
   onForceSend?: () => void;
-  onStop?: () => void;
+  onStop?: (intent: ExplicitStopIntent) => void;
   disabled?: boolean;
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
@@ -108,7 +109,8 @@ export function ChatInputActionButton({
       {/* Stop button: visible alongside queue send (primary stop covers disabled state) */}
       {hasActiveInvocation && !disabled && onStop && (
         <button
-          onClick={() => onStop()}
+          type="button"
+          onClick={(event) => onStop(createExplicitStopIntent(event, 'chat_input_action'))}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
           title="停止生成"
           aria-label="Stop generation"
@@ -123,7 +125,8 @@ export function ChatInputActionButton({
       {disabled && onStop && hasActiveInvocation ? (
         /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
-          onClick={() => onStop()}
+          type="button"
+          onClick={(event) => onStop(createExplicitStopIntent(event, 'chat_input_action'))}
           className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors"
           title="停止生成"
           aria-label="Stop generation"

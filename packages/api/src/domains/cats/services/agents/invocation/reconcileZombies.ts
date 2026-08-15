@@ -11,10 +11,9 @@
  * (succeeded/canceled have empty allow-sets); so calling reconcileZombies twice on the same
  * id is safe — the second call sees `failed` and the state machine guard makes it a no-op.
  *
- * Read-path safety: this is invoked AFTER the read endpoint has already returned its
- * response. The read endpoint (messages.ts / queue.ts) calls helper, gets {active, zombies},
- * surfaces `active` to the user, and fires reconcileZombies(zombies, deps) without awaiting.
- * The helper is read-only; cleanup runs in the background.
+ * Read-path safety (F118 post-close): read endpoints only classify/filter zombie
+ * candidates. The serialized InvocationOwnerReaper invokes this mutation pathway
+ * after stale-lease + independent owner evidence proves absence or terminal state.
  */
 
 import type { CatId } from '@cat-cafe/shared';

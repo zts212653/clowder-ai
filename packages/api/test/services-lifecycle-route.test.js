@@ -512,6 +512,7 @@ describe('service lifecycle write routes', () => {
           assert.equal(didRun, false, 'uninstall script must not run before pre-stop completes');
           killed.push({ pid, signal });
         },
+        isProcessAlive: async () => false,
         runScript: async () => {
           didRun = true;
           return { code: 0, output: 'uninstalled' };
@@ -1725,6 +1726,7 @@ describe('service lifecycle write routes', () => {
         findPidsByPort: async () => (killed.length > 0 ? [] : [5151]),
         readProcessCommand: async () => `bash ${resolvedScript}`,
         killPid: (pid, signal) => killed.push({ pid, signal }),
+        isProcessAlive: async () => false,
         runScript: async () => {
           didRun = true;
           return { code: null, pid: 4405, output: '' };
@@ -1920,6 +1922,7 @@ describe('service lifecycle write routes', () => {
         killPid: (pid, signal) => {
           killed.push({ pid, signal });
         },
+        isProcessAlive: async () => false,
       },
     });
     try {
@@ -1973,6 +1976,7 @@ describe('service lifecycle write routes', () => {
         killPid: (pid, signal) => {
           killed.push({ pid, signal });
         },
+        isProcessAlive: async () => false,
         runScript: async (input) => {
           if (input.serviceId !== 'whisper-stt' || input.action !== 'start') return { code: 0, output: 'noop' };
           resolveStartRun();
@@ -2178,6 +2182,7 @@ describe('service lifecycle write routes', () => {
         killPid: (pid, signal) => {
           killed.push({ pid, signal });
         },
+        isProcessAlive: async () => false,
       },
     });
     try {
@@ -2302,6 +2307,7 @@ describe('service lifecycle write routes', () => {
         killPid: (pid, signal) => {
           killed.push({ pid, signal });
         },
+        isProcessAlive: async () => false,
       },
     });
     try {
@@ -2566,6 +2572,7 @@ describe('service lifecycle write routes', () => {
         findPidsByPort: async () => [12345],
         readProcessCommand: async () => `/bin/bash ${resolvedScript}`,
         killPid: () => {},
+        isProcessAlive: async () => false,
       },
     });
     try {
@@ -3053,7 +3060,12 @@ describe('deep health probe (zombie detection)', () => {
       ['mlx-tts', { installed: true, enabled: true, selectedModel: 'mlx-community/Kokoro-82M-bf16' }],
     ]);
     const app = await buildApp({
-      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: { capabilities: ['speech', 'speech-stream-route-v1'] },
+      }),
       lifecycle: {
         serviceConfig: {
           get: (id) => configs.get(id) ?? { enabled: false },
@@ -3121,6 +3133,7 @@ describe('deep health probe (zombie detection)', () => {
           killed.push({ pid, signal });
           killedPids.add(pid);
         },
+        isProcessAlive: async () => false,
         runScript: async () => {
           scriptRan = true;
           return { code: 0, output: 'started' };
