@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { createReviewFeedbackTaskSpec } from '../dist/infrastructure/email/ReviewFeedbackTaskSpec.js';
 
 const cloudLogin = 'chatgpt-codex-connector[bot]';
-const headSha = 'head-current';
+const headSha = '6908af814bbbfa52803f43db7c6968fa7c25cc00';
 
 function makeTask() {
   return {
@@ -93,6 +93,17 @@ function cloudFinding() {
     createdAt: '2026-07-14T19:00:01.000Z',
     commitId: headSha,
     commentType: 'inline',
+  };
+}
+
+function cloudCleanConversation(overrides = {}) {
+  return {
+    id: 73,
+    author: cloudLogin,
+    body: "Codex Review: Didn't find any major issues. :rocket:\n\n**Reviewed commit:** `6908af814b`",
+    createdAt: '2026-07-14T19:00:02.000Z',
+    commentType: 'conversation',
+    ...overrides,
   };
 }
 
@@ -188,6 +199,22 @@ describe('F168/F280 ReviewFeedbackTaskSpec cloud-review integration', () => {
     assert.equal(harness.routerCalls.length, 1);
     assert.equal(harness.triggerCalls.length, 1);
     assert.equal(harness.triggerCalls[0][6].reason, 'github_wait_satisfied');
+  });
+
+  it('projects a canonical conversation-only clean verdict into exact wait facts', async () => {
+    const harness = makeHarness(
+      { kind: 'state_only', reason: 'explicit_wait_required' },
+      { comments: [cloudCleanConversation()], reviews: [] },
+    );
+
+    const gate = await harness.spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(gate.workItems[0].signal.resultSourceRef, 'conversation:73');
+    assert.equal(gate.workItems[0].signal.resultConversationCommentCursor, 73);
+    assert.equal(gate.workItems[0].signal.resultTriggerCommentId, 70);
+    await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(harness.routerCalls.length, 1);
+    assert.equal(harness.triggerCalls.length, 1);
   });
 
   it('coalesces cloud and ordinary feedback into one matcher pass and one wake', async () => {

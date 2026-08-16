@@ -22,7 +22,11 @@ import type {
   ExternalReviewCoordinatorResult,
   ExternalReviewTrackingTarget,
 } from '../../domains/community/external-review/ExternalReviewCoordinator.js';
-import { classifyExternalCloudReview } from '../../domains/community/external-review/external-cloud-review-classifier.js';
+import {
+  classifyExternalCloudReview,
+  type ExternalCloudReviewClassification,
+  type ExternalCloudReviewWaitResult,
+} from '../../domains/community/external-review/external-cloud-review-classifier.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -32,6 +36,7 @@ import type {
   ReviewFeedbackRouter,
   ReviewFeedbackRoutingAudit,
 } from './ReviewFeedbackRouter.js';
+import { projectReviewFeedbackTerminalEffects } from './ReviewFeedbackTerminalEffects.js';
 
 export interface ReviewFeedbackSignal {
   repairedTask: TaskItem;
@@ -47,6 +52,10 @@ export interface ReviewFeedbackSignal {
   reviewThreads?: readonly GitHubReviewThreadBaseline[];
   resultTriggerCommentId?: number;
   resultSourceRef?: string;
+  resultConversationCommentCursor?: number;
+  resultDecision?: string;
+  resultReviewer?: string;
+  subjectState?: 'merged' | 'closed';
   validateRoutingRepairFresh?: () => Promise<boolean>;
   commitRoutingRepair?: () => Promise<boolean>;
   commitCursor: () => Promise<void>;
@@ -130,6 +139,42 @@ const DEFAULT_CLOUD_REVIEW_TIMEOUT_MS = 30 * 60_000;
 interface ExternalCloudResolution {
   readonly comments: PrFeedbackComment[];
   readonly decisions: PrReviewDecision[];
+  readonly waitResult?: ExternalCloudReviewWaitResult;
+}
+
+function passthroughCloudResolution(
+  input: Pick<ExternalCloudResolution, 'comments' | 'decisions'>,
+  waitResult?: ExternalCloudReviewWaitResult,
+): ExternalCloudResolution {
+  return { ...input, ...(waitResult ? { waitResult } : {}) };
+}
+
+async function recordExternalCloudObservation(
+  input: Parameters<typeof resolveExternalCloudReview>[0],
+  classification: ExternalCloudReviewClassification,
+): Promise<boolean> {
+  if (!input.opts.externalReviewCoordinator || !classification.observation) return false;
+  try {
+    const result = await input.opts.externalReviewCoordinator.recordCloud(
+      {
+        repoFullName: input.repoFullName,
+        prNumber: input.prNumber,
+        ...classification.observation,
+      },
+      {
+        threadId: input.task.threadId,
+        catId: input.task.ownerCatId ?? '',
+        userId: input.task.userId ?? '',
+      },
+    );
+    return result.kind !== 'not_tracked';
+  } catch (err) {
+    input.opts.log.warn(
+      { err, repoFullName: input.repoFullName, prNumber: input.prNumber },
+      '[F168] cloud-review bookkeeping failed; delivering ordinary feedback',
+    );
+    return false;
+  }
 }
 
 async function resolveExternalCloudReview(input: {
@@ -143,7 +188,7 @@ async function resolveExternalCloudReview(input: {
   readonly deliverableComments: PrFeedbackComment[];
   readonly deliverableDecisions: PrReviewDecision[];
 }): Promise<ExternalCloudResolution> {
-  if (!input.opts.externalReviewCoordinator || !input.headSha) {
+  if (!input.headSha) {
     return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
   }
 
@@ -156,37 +201,16 @@ async function resolveExternalCloudReview(input: {
     now: (input.opts.now ?? Date.now)(),
     timeoutMs: input.opts.cloudReviewTimeoutMs ?? DEFAULT_CLOUD_REVIEW_TIMEOUT_MS,
   });
-  if (!classification.observation) {
-    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
-  }
-
-  let result: ExternalReviewCoordinatorResult;
-  try {
-    result = await input.opts.externalReviewCoordinator.recordCloud(
-      {
-        repoFullName: input.repoFullName,
-        prNumber: input.prNumber,
-        ...classification.observation,
-      },
-      {
-        threadId: input.task.threadId,
-        catId: input.task.ownerCatId ?? '',
-        userId: input.task.userId ?? '',
-      },
-    );
-  } catch (err) {
-    input.opts.log.warn(
-      { err, repoFullName: input.repoFullName, prNumber: input.prNumber },
-      '[F168] cloud-review bookkeeping failed; delivering ordinary feedback',
-    );
-    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
-  }
-  if (result.kind === 'not_tracked') {
-    return { comments: input.deliverableComments, decisions: input.deliverableDecisions };
-  }
+  const waitResult = classification.waitResult;
+  const passthrough = passthroughCloudResolution(
+    { comments: input.deliverableComments, decisions: input.deliverableDecisions },
+    waitResult,
+  );
+  if (!(await recordExternalCloudObservation(input, classification))) return passthrough;
   const correlatedCommentIds = new Set(classification.correlatedCommentIds);
   const correlatedReviewIds = new Set(classification.correlatedReviewIds);
   return {
+    ...passthrough,
     comments: input.deliverableComments.filter((comment) => !correlatedCommentIds.has(comment.id)),
     decisions: input.deliverableDecisions.filter((review) => !correlatedReviewIds.has(review.id)),
   };
@@ -449,57 +473,42 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const prKey = `${repoFullName}#${prNumber}`;
             const repairResult = await repairLegacyRotatedTask(task);
             const trackingTask = repairResult.task;
+            const trackingSubjectKey = trackingTask.subjectKey ?? task.subjectKey;
+            if (!trackingSubjectKey) continue;
 
             const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
             if (prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed') {
-              await opts.taskStore.patchAutomationState(trackingTask.id, { review: { prState: prMetadata.prState } });
-              opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — lifecycle delegated to CI adapter`);
-
-              // F168 Phase A: emit pr.merged / pr.closed event (best-effort)
-              if (opts.eventLog && trackingTask.subjectKey) {
-                const subjectKey = trackingTask.subjectKey; // already in format pr:owner/repo#N
-                const eventKind: CommunityEvent['kind'] = prMetadata.prState === 'merged' ? 'pr.merged' : 'pr.closed';
-                try {
-                  const communityEvent: CommunityEvent = {
-                    sourceEventId: `lifecycle:${subjectKey}:${prMetadata.prState}`,
-                    subjectKey,
-                    kind: eventKind,
-                    classification: 'state-changing',
-                    payload: { prState: prMetadata.prState, repoFullName, prNumber },
-                    at: Date.now(),
-                  };
-                  const { appended } = await opts.eventLog.append(communityEvent);
-                  if (appended && opts.projector) {
-                    await opts.projector.apply(communityEvent);
-                  }
-                } catch {
-                  opts.log.warn(`[review-feedback] community event emit failed for ${prKey}`);
-                }
-              }
-
-              // F208 AC-E2: distillation checkpoint on feat-phase-close (best-effort)
-              if (opts.distillationCheckpoint && prMetadata.prState === 'merged') {
-                try {
-                  // Extract feature ID from the canonical PR title.
-                  const featureSource = prMetadata.prTitle ?? '';
-                  const featureMatch = featureSource.match(/\b[Ff](\d{2,4})\b/);
-                  const featureId = featureMatch ? `F${featureMatch[1]}` : undefined;
-                  if (featureId) {
-                    const phaseMatch = featureSource.match(/[Pp]hase\s+([A-Z])/i);
-                    await opts.distillationCheckpoint.onFeatPhaseClose({
-                      prNumber,
-                      repoFullName,
-                      authorCatId: (trackingTask.ownerCatId ?? 'unknown') as string,
-                      threadId: trackingTask.threadId,
-                      featureId,
-                      phaseLabel: phaseMatch?.[1] ?? 'unknown',
-                    });
-                  }
-                } catch {
-                  opts.log.warn(`[review-feedback] distillation checkpoint failed for ${prKey}`);
-                }
-              }
-
+              opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — routing typed terminal lifecycle`);
+              await projectReviewFeedbackTerminalEffects({
+                opts,
+                task: trackingTask,
+                subjectKey: trackingSubjectKey,
+                repoFullName,
+                prNumber,
+                terminalState: prMetadata.prState,
+                prTitle: prMetadata.prTitle,
+              });
+              const reviewState = trackingTask.automationState?.review;
+              const legacyCommentCursor = reviewState?.lastCommentCursor ?? 0;
+              workItems.push({
+                signal: {
+                  repairedTask: trackingTask,
+                  repoFullName,
+                  prNumber,
+                  routingAudit: repairResult.routingAudit,
+                  newComments: [],
+                  newDecisions: [],
+                  headSha: prMetadata.headSha,
+                  inlineCommentCursor: reviewState?.lastInlineCommentCursor ?? legacyCommentCursor,
+                  conversationCommentCursor: reviewState?.lastConversationCommentCursor ?? legacyCommentCursor,
+                  decisionCursor: reviewState?.lastDecisionCursor ?? 0,
+                  subjectState: prMetadata.prState,
+                  validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
+                  commitRoutingRepair: repairResult.commitRoutingRepair,
+                  commitCursor: async () => {},
+                },
+                subjectKey: trackingSubjectKey,
+              });
               continue;
             }
 
@@ -735,7 +744,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               (comment) => !opts.isEchoComment?.(comment) && !opts.isNoiseComment?.(comment),
             );
             const deliverableDecisions = safeDeliveryReviews.filter((review) => !opts.isEchoReview?.(review));
-            await resolveExternalCloudReview({
+            const cloudResolution = await resolveExternalCloudReview({
               opts,
               task: trackingTask,
               repoFullName,
@@ -779,6 +788,8 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
 
             const hadNewItems = allNewComments.length > 0 || allNewReviews.length > 0;
             const activeAwait = trackingTask.automationState?.await;
+            const activePrBaseline =
+              activeAwait && 'headSha' in activeAwait.baseline ? activeAwait.baseline : undefined;
             if (!activeAwait && !repairResult.routingAudit) {
               if (hadNewItems || commentCursorMigrationActive) {
                 await advanceCursor(
@@ -809,20 +820,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               requestedThreadIds.length > 0 && opts.fetchReviewThreads
                 ? await opts.fetchReviewThreads(repoFullName, prNumber, requestedThreadIds)
                 : undefined;
-            const knownCloudReviewers = new Set(
-              (opts.knownCloudReviewerLogins ?? DEFAULT_CLOUD_REVIEWER_LOGINS).map((login) =>
-                login.trim().toLowerCase(),
-              ),
-            );
-            const latestCloudDecision = [...safeDeliveryReviews]
-              .filter(
-                (review) =>
-                  review.commitId === prMetadata?.headSha &&
-                  knownCloudReviewers.has(review.author.trim().toLowerCase()),
-              )
-              .sort((left, right) => left.id - right.id)
-              .at(-1);
-            const resultTriggerCommentId = activeAwait?.baseline.review?.resultTriggerCommentId;
+            const waitResult = cloudResolution.waitResult;
 
             workItems.push({
               signal: {
@@ -832,15 +830,20 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 routingAudit: repairResult.routingAudit,
                 newComments,
                 newDecisions,
-                headSha: prMetadata?.headSha ?? activeAwait?.baseline.headSha ?? '',
+                headSha: prMetadata?.headSha ?? activePrBaseline?.headSha ?? '',
                 inlineCommentCursor: maxInlineCommentId,
                 conversationCommentCursor: maxConversationCommentId,
                 decisionCursor: maxReviewId,
                 ...(reviewThreads ? { reviewThreads } : {}),
-                ...(latestCloudDecision && resultTriggerCommentId
+                ...(waitResult
                   ? {
-                      resultTriggerCommentId,
-                      resultSourceRef: `review:${latestCloudDecision.id}`,
+                      resultTriggerCommentId: waitResult.triggerCommentId,
+                      resultSourceRef: waitResult.sourceRef,
+                      resultDecision: waitResult.decision,
+                      resultReviewer: waitResult.reviewer,
+                      ...(waitResult.conversationCommentCursor !== undefined
+                        ? { resultConversationCommentCursor: waitResult.conversationCommentCursor }
+                        : {}),
                     }
                   : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
@@ -864,7 +867,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                   ),
               },
               // #320 KD-15: unified subject_key format
-              subjectKey: trackingTask.subjectKey!,
+              subjectKey: trackingSubjectKey,
             });
           } catch (err) {
             opts.log.warn(
@@ -908,6 +911,12 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             ...(signal.reviewThreads ? { reviewThreads: signal.reviewThreads } : {}),
             ...(signal.resultTriggerCommentId ? { resultTriggerCommentId: signal.resultTriggerCommentId } : {}),
             ...(signal.resultSourceRef ? { resultSourceRef: signal.resultSourceRef } : {}),
+            ...(signal.resultConversationCommentCursor !== undefined
+              ? { resultConversationCommentCursor: signal.resultConversationCommentCursor }
+              : {}),
+            ...(signal.resultDecision ? { resultDecision: signal.resultDecision } : {}),
+            ...(signal.resultReviewer ? { resultReviewer: signal.resultReviewer } : {}),
+            ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
           },
           { taskId: repairedTask.id },
         );
@@ -917,7 +926,12 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
           const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
           const policy: ConnectorTriggerPolicy = {
             priority: hasChangesRequested ? 'urgent' : 'normal',
-            reason: 'github_wait_satisfied',
+            reason:
+              signal.subjectState === 'merged'
+                ? 'github_pr_merged'
+                : signal.subjectState === 'closed'
+                  ? 'github_pr_closed'
+                  : 'github_wait_satisfied',
             sourceCategory: 'review',
             coalesceKey: `${subjectKey}:wait:${routeResult.catId || 'unassigned'}`,
           };

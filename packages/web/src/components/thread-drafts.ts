@@ -3,6 +3,8 @@ import { type ContextAttachment, ContextAttachmentsSchema } from '@cat-cafe/shar
 const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
 const CONTEXT_STORAGE_KEY = 'cat-cafe:thread-context-attachment-drafts';
+const EMPTY_CONTEXT_ATTACHMENTS: readonly ContextAttachment[] = [];
+const contextAttachmentDraftListeners = new Set<() => void>();
 
 /**
  * Reply context persisted alongside the text draft so quoted messages survive
@@ -149,13 +151,24 @@ export function syncReplyDraftToStorage(threadId: string, reply: DraftReplyConte
 }
 
 export function syncContextAttachmentDraftToStorage(threadId: string, attachments: readonly ContextAttachment[]): void {
+  const previousSignature = JSON.stringify(threadContextAttachmentDrafts.get(threadId) ?? EMPTY_CONTEXT_ATTACHMENTS);
   const parsed = ContextAttachmentsSchema.safeParse(attachments);
-  if (parsed.success && parsed.data.length > 0) {
-    threadContextAttachmentDrafts.set(threadId, parsed.data);
-  } else {
-    threadContextAttachmentDrafts.delete(threadId);
-  }
+  const next = parsed.success && parsed.data.length > 0 ? parsed.data : EMPTY_CONTEXT_ATTACHMENTS;
+  const nextSignature = JSON.stringify(next);
+  if (previousSignature === nextSignature) return;
+  if (next.length > 0) threadContextAttachmentDrafts.set(threadId, [...next]);
+  else threadContextAttachmentDrafts.delete(threadId);
   persistContextAttachmentDrafts(threadContextAttachmentDrafts);
+  for (const listener of contextAttachmentDraftListeners) listener();
+}
+
+export function getContextAttachmentDraft(threadId: string): readonly ContextAttachment[] {
+  return threadContextAttachmentDrafts.get(threadId) ?? EMPTY_CONTEXT_ATTACHMENTS;
+}
+
+export function subscribeContextAttachmentDrafts(listener: () => void): () => void {
+  contextAttachmentDraftListeners.add(listener);
+  return () => contextAttachmentDraftListeners.delete(listener);
 }
 
 export function hasPendingThreadDraft(threadId: string): boolean {

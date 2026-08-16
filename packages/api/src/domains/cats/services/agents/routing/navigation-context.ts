@@ -41,7 +41,6 @@ export function extractBatonContext(
     let staleHoldWarning = false;
     for (let j = i - 1; j >= 0; j--) {
       const prev = messages[j];
-      if (prev.origin === 'stream') continue;
       const prevSpeaker = prev.catId ?? 'user';
       if (prevSpeaker !== fromSpeaker) continue;
       if (HOLD_PATTERNS.test(prev.content)) {
@@ -50,13 +49,10 @@ export function extractBatonContext(
       break;
     }
 
-    const excerpt =
-      m.origin === 'stream'
-        ? ''
-        : m.content
-            .split('\n')[0]
-            .replace(/@[\p{L}\p{N}_-]+/gu, '')
-            .trim();
+    const excerpt = m.content
+      .split('\n')[0]
+      .replace(/@[\p{L}\p{N}_-]+/gu, '')
+      .trim();
 
     return {
       fromMessageId: m.id,

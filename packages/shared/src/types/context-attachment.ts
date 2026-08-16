@@ -1,6 +1,7 @@
 export const CONTEXT_ATTACHMENT_VERSION = 1 as const;
 export const CONTEXT_ATTACHMENT_MAX_COUNT = 12;
 export const CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH = 20_000;
+export const CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH = 10_000;
 export const CONTEXT_ATTACHMENT_PROMPT_MAX_CHARS = 48_000;
 
 interface ContextAttachmentBase {
@@ -34,6 +35,8 @@ export interface CliOutputQuoteSource {
   readonly kind: 'cli_output';
   readonly threadId: string;
   readonly messageId: string;
+  /** Stable rendered leaf that owns selectionStart/selectionEnd (for example stdout or one tool detail). */
+  readonly segmentId?: string;
 }
 
 export interface WorkspaceFileQuoteSource {
@@ -51,6 +54,11 @@ export type QuoteContextSource = MessageQuoteSource | CliOutputQuoteSource | Wor
 export interface QuoteContextAttachment extends ContextAttachmentBase {
   readonly kind: 'quote';
   readonly text: string;
+  /** User-authored response that is semantically paired with this quote. */
+  readonly comment?: string;
+  /** Character offsets inside the immutable rendered source leaf used for annotation markers. */
+  readonly selectionStart?: number;
+  readonly selectionEnd?: number;
   readonly source: QuoteContextSource;
 }
 

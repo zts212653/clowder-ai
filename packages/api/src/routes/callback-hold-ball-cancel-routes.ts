@@ -6,8 +6,14 @@ import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskSt
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
-import { executeHoldCancel, findHoldBallTask, findPendingHoldBallTask, readHoldLifecycle } from './hold-ball-cancel.js';
+import { cancelManagedWakeIfTaskMatches } from './callback-hold-ball-routes.js';
+import {
+  executeHoldCancel,
+  findCancelableHoldBallTask,
+  findHoldBallTask,
+  isCancelableHoldBallTask,
+  readHoldLifecycle,
+} from './hold-ball-cancel.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 
 const log = createModuleLogger('routes/callback-hold-ball-cancel');
@@ -24,6 +30,8 @@ export interface HoldBallCancelRouteDeps {
   messageStore: IMessageStore;
   socketManager: SocketManager;
   threadStore: { get(threadId: string): { createdBy: string } | null | Promise<{ createdBy: string } | null> };
+  /** Injectable exact-task fence for route tests; defaults to the managed runner registry. */
+  cancelManagedWakeIfTaskMatches?: (taskId: string, threadId: string, catId: string) => boolean;
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
     threadId: string;
@@ -44,6 +52,11 @@ async function authorizeThreadAccess(
     return false;
   }
   return true;
+}
+
+function cancelExactManagedRunner(deps: HoldBallCancelRouteDeps, taskId: string, threadId: string, catId: string) {
+  const cancel = deps.cancelManagedWakeIfTaskMatches ?? cancelManagedWakeIfTaskMatches;
+  cancel(taskId, threadId, catId);
 }
 
 export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBallCancelRouteDeps): void {
@@ -74,7 +87,7 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
     return {
       taskId,
       status,
-      cancelable: task.enabled && status === 'active',
+      cancelable: isCancelableHoldBallTask(task),
       catId,
       lifecycle,
     };
@@ -91,7 +104,7 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       const { taskId } = request.params;
       const withFeedback = request.query.withFeedback === '1' || request.query.withFeedback === 'true';
-      const task = findPendingHoldBallTask(taskId, dynamicTaskStore);
+      const task = findCancelableHoldBallTask(taskId, dynamicTaskStore);
       if (!task) {
         reply.status(404);
         return { error: 'Hold task not found or not a hold-ball task' };
@@ -104,9 +117,10 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       executeHoldCancel(task, { dynamicTaskStore, taskRunner });
       const catId = task.createdBy?.replace('hold-ball:', '') ?? 'unknown';
-      // P1-1: also cancel any running wakeWhen command for this (thread, cat)
+      // F295: the deleted task may already have been replaced in the same thread+cat slot.
+      // Fence by taskId so a stale bubble cannot terminate the replacement command.
       if (threadId) {
-        cancelWakeWhenRunner(threadId, catId);
+        cancelExactManagedRunner(deps, taskId, threadId, catId);
       }
       log.info({ taskId, threadId, catId, userId }, 'F167 Phase J: hold_ball cancelled by user');
 

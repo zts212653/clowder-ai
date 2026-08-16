@@ -1,5 +1,6 @@
 ---
 name: memory-navigation
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
   Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
@@ -24,7 +25,7 @@ output: "Entry choice + noise control params + downstream tool call"
 
 > 记忆系统三入口路由决策 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
 >
-> 单一真相源：`cat-cafe-skills/refs/memory-routing-partial.md`
+> 单一真相源：`../.cat-cafe-shared-refs/memory-routing-partial.md`
 
 ## When to load
 
@@ -122,5 +123,5 @@ Not for:
 
 - **Spec**: `docs/features/F188-library-stewardship.md` Phase F
 - **Plan**: *(internal reference removed)*
-- **Partial**: `cat-cafe-skills/refs/memory-routing-partial.md`
+- **Partial**: `../.cat-cafe-shared-refs/memory-routing-partial.md`
 - **Related skills**: `feat-lifecycle` / `debugging` / `cross-cat-handoff`

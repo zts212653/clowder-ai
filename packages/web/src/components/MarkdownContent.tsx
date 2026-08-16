@@ -1,6 +1,6 @@
 'use client';
 
-import { Children, isValidElement, type ReactNode, useCallback, useRef, useState } from 'react';
+import { Children, isValidElement, memo, type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkBreaks from 'remark-breaks';
@@ -10,9 +10,11 @@ import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { createListenSentenceRemarkPlugin, type ListenSentence } from '@/lib/listen-mode/markdown-sentences';
 import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
+import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
@@ -316,13 +318,18 @@ function inlineCodeClassName(className = ''): string {
  * Using a factory avoids duplicating component definitions: styling is defined once,
  * and textProcessor composition is injected into the mention-processing pipeline.
  */
-function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components {
+interface ListenSentenceRendering {
+  activeAnchor?: string;
+  onStart: (index: number) => void;
+}
+
+function buildMdComponents(tp?: (children: ReactNode) => ReactNode, listen?: ListenSentenceRendering): Components {
   // Compose text processing: tp runs first (e.g. replace markers with buttons),
   // then withMentions/withMentionsAndLinks processes remaining strings.
   const m = tp ? (c: ReactNode) => withMentions(tp(c)) : withMentions;
   const ml = tp ? (c: ReactNode) => withMentionsAndLinks(tp(c)) : withMentionsAndLinks;
 
-  return {
+  const components: Components = {
     p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{ml(children)}</p>,
     strong: ({ children }) => <strong className="font-semibold">{m(children)}</strong>,
     em: ({ children }) => <em>{m(children)}</em>,
@@ -383,6 +390,29 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components 
     ),
     td: ({ children }) => <td className="border border-cafe px-2 py-1">{m(children)}</td>,
   };
+  if (listen) {
+    components.span = ({ children, node: _node, ...props }) => {
+      void _node;
+      const listenProps = props as Record<string, unknown>;
+      const anchor = listenProps['data-listen-sentence-anchor'];
+      const rawIndex = listenProps['data-listen-sentence-index'];
+      if (typeof anchor === 'string' && (typeof rawIndex === 'number' || typeof rawIndex === 'string')) {
+        const index = Number(rawIndex);
+        return (
+          <ListenSentenceSpan
+            anchor={anchor}
+            index={index}
+            active={listen.activeAnchor === anchor}
+            onStart={listen.onStart}
+          >
+            {children}
+          </ListenSentenceSpan>
+        );
+      }
+      return <span {...props}>{children}</span>;
+    };
+  }
+  return components;
 }
 
 /** Default components — no textProcessor, built once at module load */
@@ -403,6 +433,10 @@ interface Props {
    *  are excluded — textProcessor never touches code block content.
    *  Useful for replacing text patterns (e.g. markers) with interactive elements. */
   textProcessor?: (children: ReactNode) => ReactNode;
+  /** F279 sentence projection for rendered Workspace Markdown. */
+  listenSentences?: ListenSentence[];
+  activeListenAnchor?: string;
+  onListenSentenceStart?: (index: number) => void;
 }
 
 /** Check if href is a relative markdown link (not absolute, not external) */
@@ -432,33 +466,52 @@ export function resolveRelativePath(base: string, relative: string): string {
   return parts.join('/');
 }
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   content,
   className,
   disableCommandPrefix,
   basePath,
   worktreeId,
   textProcessor,
+  listenSentences,
+  activeListenAnchor,
+  onListenSentenceStart,
 }: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = normalizeMathDelimiters(cmdMatch ? content.slice(cmdMatch[1].length) : content);
 
-  let components: Components = textProcessor ? buildMdComponents(textProcessor) : mdComponents;
+  const listen = useMemo(
+    () =>
+      listenSentences?.length && onListenSentenceStart
+        ? { activeAnchor: activeListenAnchor, onStart: onListenSentenceStart }
+        : undefined,
+    [activeListenAnchor, listenSentences, onListenSentenceStart],
+  );
+  const components = useMemo(() => {
+    let nextComponents: Components = textProcessor || listen ? buildMdComponents(textProcessor, listen) : mdComponents;
 
-  if (basePath != null) {
-    // When textProcessor is active, the workspace link component must also compose it
-    const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
-    components = { ...components, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
-    if (worktreeId) {
-      components = { ...components, img: createWorkspaceImageComponent(basePath, worktreeId) };
+    if (basePath != null) {
+      // When textProcessor is active, the workspace link component must also compose it
+      const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
+      nextComponents = { ...nextComponents, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
+      if (worktreeId) {
+        nextComponents = { ...nextComponents, img: createWorkspaceImageComponent(basePath, worktreeId) };
+      }
     }
-  }
+
+    return nextComponents;
+  }, [basePath, listen, textProcessor, worktreeId]);
 
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
       {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks, [remarkMath, { singleDollarTextMath: false }]]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkBreaks,
+          [remarkMath, { singleDollarTextMath: false }],
+          ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
+        ]}
         rehypePlugins={[rehypeKatex]}
         components={components}
         urlTransform={transformChatMarkdownUrl}
@@ -467,4 +520,4 @@ export function MarkdownContent({
       </ReactMarkdown>
     </div>
   );
-}
+});

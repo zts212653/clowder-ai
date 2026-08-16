@@ -8,6 +8,10 @@ import {
   computeLineageKey,
   computeNegativeAuthorizationKey,
 } from '../ports/IDispatchProposalStore.js';
+import {
+  canonicalAdmissionIndexKeysForProposal,
+  canonicalAdmissionStoredFields,
+} from './RedisDispatchProposalCanonicalAdmission.js';
 import { hydrateDispatchProposal, serializeDispatchProposal } from './RedisDispatchProposalSerde.js';
 
 /**
@@ -22,6 +26,14 @@ const CAS_CREATE_LINEAGE_LUA = `
   local createdAt = ARGV[2]
   local oldCount = tonumber(ARGV[3])
   local keyBase = string.sub(newHashKey, 1, #newHashKey - #newId)
+
+  local function removeCanonicalAdmissionIndexes(proposalId)
+    local proposalKey = keyBase .. proposalId
+    local actionIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionActionIndexKey')
+    local subjectIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionSubjectIndexKey')
+    if actionIndexKey then redis.call('ZREM', actionIndexKey, proposalId) end
+    if subjectIndexKey then redis.call('ZREM', subjectIndexKey, proposalId) end
+  end
 
   local hasDedup = ARGV[4] == '1'
   if hasDedup then
@@ -48,7 +60,8 @@ const CAS_CREATE_LINEAGE_LUA = `
     end
   end
 
-  local fieldStart = 5 + oldCount
+  local canonicalIndexCount = tonumber(ARGV[5 + oldCount])
+  local fieldStart = 6 + oldCount
   local fieldArgs = {}
   for i = fieldStart, #ARGV do
     fieldArgs[#fieldArgs + 1] = ARGV[i]
@@ -67,6 +80,7 @@ const CAS_CREATE_LINEAGE_LUA = `
       if redis.call('HGET', staleKey, 'status') == 'pending' then
         redis.call('HSET', staleKey, 'status', 'superseded', 'supersededBy', keeperId)
         redis.call('ZREM', pendingKey, staleId)
+        removeCanonicalAdmissionIndexes(staleId)
         superseded[#superseded + 1] = staleId
       end
     end
@@ -78,6 +92,7 @@ const CAS_CREATE_LINEAGE_LUA = `
     if redis.call('HGET', oldKey, 'status') == 'pending' then
       redis.call('HSET', oldKey, 'status', 'superseded', 'supersededBy', newId)
       redis.call('ZREM', pendingKey, existingLineage)
+      removeCanonicalAdmissionIndexes(existingLineage)
       superseded[#superseded + 1] = existingLineage
     end
   end
@@ -86,7 +101,11 @@ const CAS_CREATE_LINEAGE_LUA = `
   redis.call('SET', lineageKey, newId)
   if hasDedup then redis.call('SET', KEYS[4], newId) end
   local negativeAuthorizationKeyStart = hasDedup and 5 or 4
-  for i = negativeAuthorizationKeyStart, #KEYS do
+  local canonicalIndexKeyStart = #KEYS - canonicalIndexCount + 1
+  for i = negativeAuthorizationKeyStart, canonicalIndexKeyStart - 1 do
+    redis.call('ZADD', KEYS[i], tonumber(createdAt), newId)
+  end
+  for i = canonicalIndexKeyStart, #KEYS do
     redis.call('ZADD', KEYS[i], tonumber(createdAt), newId)
   end
   if #superseded > 0 then
@@ -209,10 +228,25 @@ export async function createRedisDispatchProposal(
   const pendingRedisKey = DispatchProposalKeys.userPending(input.ownerUserId);
   const detailRedisKey = DispatchProposalKeys.detail(input.proposalId);
   const negativeAuthorizationRedisKeys = negativeAuthorizationRedisKeysForProposal(proposal);
+  const canonicalAdmissionRedisKeys = canonicalAdmissionIndexKeysForProposal(proposal);
+  const canonicalAdmissionFields = canonicalAdmissionStoredFields(redis, proposal);
   const oldCandidateIds = await findBackfillCandidateIds(redis, input, lineage, lineageRedisKey);
   const redisKeys = dedup.redisKey
-    ? [lineageRedisKey, pendingRedisKey, detailRedisKey, dedup.redisKey, ...negativeAuthorizationRedisKeys]
-    : [lineageRedisKey, pendingRedisKey, detailRedisKey, ...negativeAuthorizationRedisKeys];
+    ? [
+        lineageRedisKey,
+        pendingRedisKey,
+        detailRedisKey,
+        dedup.redisKey,
+        ...negativeAuthorizationRedisKeys,
+        ...canonicalAdmissionRedisKeys,
+      ]
+    : [
+        lineageRedisKey,
+        pendingRedisKey,
+        detailRedisKey,
+        ...negativeAuthorizationRedisKeys,
+        ...canonicalAdmissionRedisKeys,
+      ];
   const result = await redis.eval(
     CAS_CREATE_LINEAGE_LUA,
     redisKeys.length,
@@ -222,7 +256,9 @@ export async function createRedisDispatchProposal(
     String(oldCandidateIds.length),
     dedup.redisKey ? '1' : '0',
     ...oldCandidateIds,
+    String(canonicalAdmissionRedisKeys.length),
     ...serializeDispatchProposal(proposal),
+    ...canonicalAdmissionFields,
   );
   const collision = await resolveAtomicCollision(redis, result);
   if (collision) return { proposal: collision, supersededProposals: [] };

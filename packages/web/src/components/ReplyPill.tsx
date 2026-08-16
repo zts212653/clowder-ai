@@ -3,6 +3,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { resolveSender } from '@/lib/resolve-sender';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 
 interface ReplyPillProps {
   replyPreview: { senderCatId: string | null; content: string; deleted?: true };
@@ -23,11 +24,7 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
   const previewText = deleted ? '消息已删除' : content;
 
   const handleClick = () => {
-    const target = document.querySelector(`[data-message-id="${CSS.escape(replyToId)}"]`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('ring-2', 'ring-offset-1');
-    setTimeout(() => target.classList.remove('ring-2', 'ring-offset-1'), 1500);
+    scrollToMessage(replyToId);
   };
 
   return (

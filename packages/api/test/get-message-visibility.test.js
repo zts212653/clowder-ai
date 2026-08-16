@@ -313,6 +313,52 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.equal(res.statusCode, 404);
   });
 
+  test('returns durable queued user work only to a cat with an exact body-exposure witness', async () => {
+    const app = await createApp();
+    const exposedCaller = await registry.create('user-1', 'opus');
+    const unexposedCaller = await registry.create('user-1', 'codex');
+    const queued = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'survives the child session that first read it',
+      mentions: ['opus'],
+      timestamp: 1200,
+      threadId: 'thread-exposed-queued-user',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-exposed-queued-user',
+        allTargetCats: ['opus', 'codex'],
+        pendingTargetCats: ['opus', 'codex'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'sealed-child-opus' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child-opus', seenAt: 1150 }],
+      }),
+    });
+
+    const exposed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}&mode=full`,
+      headers: {
+        'x-invocation-id': exposedCaller.invocationId,
+        'x-callback-token': exposedCaller.callbackToken,
+      },
+    });
+    assert.equal(exposed.statusCode, 200, exposed.body);
+    assert.equal(JSON.parse(exposed.body).message.speaker, 'co-creator');
+    assert.equal(JSON.parse(exposed.body).message.catId, null);
+    assert.equal(JSON.parse(exposed.body).message.threadId, queued.threadId);
+
+    const unexposed = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${queued.id}&mode=full`,
+      headers: {
+        'x-invocation-id': unexposedCaller.invocationId,
+        'x-callback-token': unexposedCaller.callbackToken,
+      },
+    });
+    assert.equal(unexposed.statusCode, 404, "another target must not inherit the first cat's exposure");
+  });
+
   test('get-message defaults to preview (bounded); mode=full returns complete content (F236 AC-B1/B2)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
@@ -441,7 +487,7 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.ok(contextContents.includes('public after'), 'public messages should appear in context');
   });
 
-  test('returns 404 for other cat stream message in play-mode thread', async () => {
+  test('returns other-cat persisted stream-origin speech in play-mode thread', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -453,7 +499,7 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const streamMsg = messageStore.append({
       userId: 'user-1',
       catId: 'codex',
-      content: 'codex stream thinking',
+      content: 'codex persisted answer',
       mentions: [],
       timestamp: 1000,
       threadId: thread.id,
@@ -469,7 +515,8 @@ describe('GET /api/callbacks/get-message visibility', () => {
       },
     });
 
-    assert.equal(res.statusCode, 404, 'other cat stream message in play mode should be 404');
+    assert.equal(res.statusCode, 200, 'transport origin must not make persisted speech private');
+    assert.equal(JSON.parse(res.body).message.content, 'codex persisted answer');
   });
 
   test('returns own stream message in play-mode thread', async () => {
@@ -502,7 +549,7 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.equal(res.statusCode, 200, 'own stream message should be visible');
   });
 
-  test('context excludes other cat stream messages in play-mode thread', async () => {
+  test('context includes other-cat persisted stream-origin speech in play-mode thread', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -519,11 +566,11 @@ describe('GET /api/callbacks/get-message visibility', () => {
       threadId: thread.id,
     });
 
-    // codex stream in same thread — should be hidden from opus
+    // codex persisted answer in the same thread — visible to opus
     messageStore.append({
       userId: 'user-1',
       catId: 'codex',
-      content: 'codex secret stream',
+      content: 'codex persisted answer',
       mentions: [],
       timestamp: 1000,
       threadId: thread.id,
@@ -554,7 +601,7 @@ describe('GET /api/callbacks/get-message visibility', () => {
     const body = JSON.parse(res.body);
     assert.ok(body.context, 'context should be present');
     const contextContents = body.context.map((m) => m.content);
-    assert.ok(!contextContents.includes('codex secret stream'), 'other cat stream must be hidden in play mode');
+    assert.ok(contextContents.includes('codex persisted answer'), 'other-cat persisted speech must be visible');
     assert.ok(contextContents.includes('opus own stream'), 'own stream should be visible');
   });
 });

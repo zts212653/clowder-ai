@@ -112,7 +112,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看
-- 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `refs/evidence-output-contract.md`）
+- 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `../.cat-cafe-shared-refs/evidence-output-contract.md`）
 
 ## 不要做的事
 

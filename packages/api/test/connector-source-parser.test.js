@@ -2,7 +2,10 @@
 
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { safeParseConnectorSource } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
+import {
+  parseConnectorSourceField,
+  safeParseConnectorSource,
+} from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
 
 describe('safeParseConnectorSource (F97)', () => {
   it('parses valid ConnectorSource JSON', () => {
@@ -62,5 +65,21 @@ describe('safeParseConnectorSource (F97)', () => {
     const result = safeParseConnectorSource(raw);
     assert.ok(result);
     assert.strictEqual(result.url, undefined);
+  });
+});
+
+describe('parseConnectorSourceField', () => {
+  it('distinguishes an absent field from malformed persisted provenance', () => {
+    assert.deepEqual(parseConnectorSourceField(undefined), { kind: 'absent' });
+    assert.deepEqual(parseConnectorSourceField(''), { kind: 'invalid' });
+    assert.deepEqual(parseConnectorSourceField('{'), { kind: 'invalid' });
+    assert.deepEqual(parseConnectorSourceField(JSON.stringify({ connector: 'github-wait' })), {
+      kind: 'invalid',
+    });
+  });
+
+  it('returns validated connector provenance without normalization', () => {
+    const source = { connector: 'github-wait', label: 'GitHub wait', icon: 'github' };
+    assert.deepEqual(parseConnectorSourceField(JSON.stringify(source)), { kind: 'valid', source });
   });
 });

@@ -25,6 +25,7 @@ const DRIFT_TOLERANCE_PX = 2;
 
 /** Session-scoped scroll memory for thread switches/remounts. */
 const SCROLL_MEMORY_KEY = 'cat-cafe:sidebar:scrollTop';
+const SCROLL_OCCLUDER_SELECTOR = '[data-scroll-occluder="true"]';
 
 function getSessionStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
@@ -48,6 +49,28 @@ function writePersistedScrollTop(value: number) {
   const storage = getSessionStorage();
   if (!storage) return;
   storage.setItem(SCROLL_MEMORY_KEY, String(Math.max(0, Math.round(value))));
+}
+
+function getVisibleTop(container: HTMLElement): number {
+  const containerTop = container.getBoundingClientRect().top;
+  const occluder = container.querySelector<HTMLElement>(SCROLL_OCCLUDER_SELECTOR);
+  if (!occluder) return containerTop;
+  const rect = occluder.getBoundingClientRect();
+  return rect.top <= containerTop + DRIFT_TOLERANCE_PX && rect.bottom > containerTop ? rect.bottom : containerTop;
+}
+
+function revealOccludedFirstThread(container: HTMLElement): void {
+  const visibleTop = getVisibleTop(container);
+  const items = container.querySelectorAll<HTMLElement>('[data-thread-id]');
+  for (const item of items) {
+    const rect = item.getBoundingClientRect();
+    if (rect.bottom <= visibleTop) continue;
+    const overlap = visibleTop - rect.top;
+    if (overlap > DRIFT_TOLERANCE_PX) {
+      container.scrollTop = Math.max(0, container.scrollTop - overlap);
+    }
+    return;
+  }
 }
 
 /**
@@ -79,17 +102,17 @@ export function useScrollAnchor(
     if (!container) return;
 
     const items = container.querySelectorAll('[data-thread-id]');
-    const containerTop = container.getBoundingClientRect().top;
+    const visibleTop = getVisibleTop(container);
 
     for (const item of items) {
       const rect = item.getBoundingClientRect();
       // First element whose bottom is still visible
-      if (rect.bottom > containerTop) {
+      if (rect.bottom > visibleTop) {
         const threadId = item.getAttribute('data-thread-id');
         if (!threadId) continue;
         anchorRef.current = {
           threadId,
-          offsetFromTop: rect.top - containerTop,
+          offsetFromTop: rect.top - visibleTop,
         };
         return;
       }
@@ -130,6 +153,7 @@ export function useScrollAnchor(
     // If the container is too short (e.g., groups collapsed), keep pending for the
     // next effect run (triggered when threadGroups identity changes after API fetch).
     if (Math.abs(container.scrollTop - pendingTop) <= DRIFT_TOLERANCE_PX) {
+      revealOccludedFirstThread(container);
       captureAnchor();
       persistScrollTop();
       pendingRestoreRef.current = null;
@@ -152,20 +176,24 @@ export function useScrollAnchor(
     const el = container.querySelector(selector);
     if (!el) return;
 
-    const containerTop = container.getBoundingClientRect().top;
+    const visibleTop = getVisibleTop(container);
     const elTop = el.getBoundingClientRect().top;
-    const drift = elTop - containerTop - anchor.offsetFromTop;
+    const drift = elTop - visibleTop - anchor.offsetFromTop;
 
     if (Math.abs(drift) > DRIFT_TOLERANCE_PX) {
       container.scrollTop += drift;
-      // Update stored anchor to reflect corrected position
-      anchorRef.current = {
-        ...anchor,
-        offsetFromTop: el.getBoundingClientRect().top - container.getBoundingClientRect().top,
-      };
     }
+    // Preserve the anchor's exact offset during reorders. A partially visible row
+    // can be the user's deliberate scroll position, and live status updates also
+    // replace threadGroups without moving any rows. Normalizing that row here
+    // would reverse the user's scroll; restore already handles sticky occlusion.
+    persistScrollTop();
+    anchorRef.current = {
+      ...anchor,
+      offsetFromTop: el.getBoundingClientRect().top - getVisibleTop(container),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- containerRef is a live ref, not a dependency
-  }, [threadGroups]);
+  }, [persistScrollTop, threadGroups]);
 
   return { onScroll };
 }

@@ -432,6 +432,71 @@ describe('ChatInput draft persistence', () => {
     expect(threadContextAttachmentDrafts.has('thread-CONTEXT')).toBe(false);
   });
 
+  it('replaces an edited annotation in place without renumbering mixed draft attachments', async () => {
+    const onSend = vi.fn();
+    const threadAttachment = {
+      v: 1 as const,
+      id: 'ctx-thread-before-annotations',
+      kind: 'thread' as const,
+      threadId: 'thread-source',
+      title: 'Source Thread',
+    };
+    const first = {
+      v: 1 as const,
+      id: 'ctx-quote-first',
+      kind: 'quote' as const,
+      text: 'first selected source',
+      comment: 'first comment',
+      selectionStart: 0,
+      selectionEnd: 21,
+      source: { kind: 'message' as const, threadId: 'thread-ANNOTATION', messageId: 'msg-1' },
+    };
+    const second = {
+      v: 1 as const,
+      id: 'ctx-quote-second',
+      kind: 'quote' as const,
+      text: 'second selected source',
+      comment: 'before edit',
+      selectionStart: 22,
+      selectionEnd: 44,
+      source: { kind: 'message' as const, threadId: 'thread-ANNOTATION', messageId: 'msg-1' },
+    };
+    const updated = { ...second, comment: 'after edit' };
+    threadContextAttachmentDrafts.set('thread-ANNOTATION', [threadAttachment, first, second]);
+
+    act(() => root.render(React.createElement(ChatInput, { threadId: 'thread-ANNOTATION', onSend })));
+    await act(async () => {
+      useChatStore.getState().setPendingChatInsert({
+        threadId: 'thread-ANNOTATION',
+        text: '',
+        contextAttachments: [updated],
+        removeContextAttachmentIds: [second.id],
+      });
+      await Promise.resolve();
+    });
+
+    expect(threadContextAttachmentDrafts.get('thread-ANNOTATION')).toEqual([threadAttachment, first, updated]);
+    expect(threadContextAttachmentDrafts.get('thread-ANNOTATION')?.map(({ id }) => id)).toEqual([
+      threadAttachment.id,
+      first.id,
+      second.id,
+    ]);
+    expect(threadContextAttachmentDrafts.get('thread-ANNOTATION')?.filter(({ id }) => id === second.id)).toHaveLength(
+      1,
+    );
+    expect(container.querySelector('[data-testid="context-annotations-summary"]')?.textContent).toContain(
+      '2 annotations',
+    );
+    act(() => {
+      getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(onSend).toHaveBeenCalledWith('', undefined, undefined, undefined, undefined, undefined, [
+      threadAttachment,
+      first,
+      updated,
+    ]);
+  });
+
   it('keeps structured context drafts when the send is rejected before admission', async () => {
     const onSend = vi.fn(async () => false);
     const attachment = {

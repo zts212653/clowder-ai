@@ -112,6 +112,49 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     assert.equal(messageStore.getByThread('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 21);
   });
+
+  test('conversation-only clean result consumes the exact wait once without a review decision cursor', async () => {
+    const { router, task, messageStore } = await setup([{ kind: 'pr_review_result_available' }]);
+    const clean = signal({
+      newComments: [],
+      newDecisions: [],
+      conversationCommentCursor: 21,
+      decisionCursor: 30,
+      resultSourceRef: 'conversation:21',
+      resultConversationCommentCursor: 21,
+    });
+
+    const first = await router.route(clean, { taskId: task.id });
+    assert.equal(first.kind, 'notified');
+    assert.match(first.content, /RESULT_AVAILABLE/);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+
+    const replay = await router.route(clean, { taskId: task.id });
+    assert.equal(replay.kind, 'skipped');
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+  });
+
+  test('terminal PR truth observed by the review collector consumes an active wait', async () => {
+    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_review_result_available' }]);
+    const result = await router.route(
+      signal({
+        newComments: [],
+        newDecisions: [],
+        decisionCursor: 30,
+        subjectState: 'merged',
+      }),
+      { taskId: task.id },
+    );
+
+    assert.equal(result.kind, 'notified');
+    assert.match(result.content, /PR state: merged/);
+    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    const stored = await taskStore.get(task.id);
+    assert.equal(stored.status, 'done');
+    assert.equal(stored.automationState.await, undefined);
+    assert.equal(stored.automationState.waitOutcome.reason, 'subject_terminal');
+    assert.equal(stored.automationState.waitOutcome.terminalSubjectState, 'merged');
+  });
 });
 
 describe('review preview renderer', () => {

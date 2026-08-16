@@ -6,7 +6,13 @@
  * and serves an OpenAI-compatible /v1/audio/speech endpoint.
  */
 
-import type { ITtsProvider, TtsSynthesizeRequest, TtsSynthesizeResult } from '@cat-cafe/shared';
+import type {
+  ITtsProvider,
+  TtsSynthesizeRequest,
+  TtsSynthesizeResult,
+  TtsSynthesizeStreamEvent,
+  TtsSynthesizeStreamOptions,
+} from '@cat-cafe/shared';
 import { normalizeLoopbackUrl } from '../../../services/loopback-url.js';
 import { getServiceConfig } from '../../../services/service-config.js';
 import { getServiceManifest, resolveServiceEndpoint } from '../../../services/service-manifest.js';
@@ -64,6 +70,37 @@ function resolveTtsBaseUrl(): string {
   return resolveServiceEndpoint(service, process.env, getServiceConfig('mlx-tts')) ?? 'http://127.0.0.1:9879';
 }
 
+function chunkId(audio: Uint8Array, offset: number): string {
+  return String.fromCharCode(
+    audio[offset] ?? 0,
+    audio[offset + 1] ?? 0,
+    audio[offset + 2] ?? 0,
+    audio[offset + 3] ?? 0,
+  );
+}
+
+/** Read PCM/container duration without decoding the generated WAV. */
+function inferWavDurationSec(audio: Uint8Array): number | undefined {
+  if (audio.byteLength < 12 || chunkId(audio, 0) !== 'RIFF' || chunkId(audio, 8) !== 'WAVE') return undefined;
+  const view = new DataView(audio.buffer, audio.byteOffset, audio.byteLength);
+  let byteRate: number | undefined;
+  let dataSize: number | undefined;
+  let offset = 12;
+
+  while (offset + 8 <= audio.byteLength) {
+    const id = chunkId(audio, offset);
+    const size = view.getUint32(offset + 4, true);
+    const dataOffset = offset + 8;
+    if (dataOffset + size > audio.byteLength) return undefined;
+    if (id === 'fmt ' && size >= 12) byteRate = view.getUint32(dataOffset + 8, true);
+    if (id === 'data') dataSize = size;
+    if (byteRate && dataSize != null) return dataSize / byteRate;
+    offset = dataOffset + size + (size % 2);
+  }
+
+  return undefined;
+}
+
 export class MlxAudioTtsProvider implements ITtsProvider {
   readonly id = 'mlx-audio';
   readonly model: string;
@@ -86,11 +123,8 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     return this.baseUrlOverride ?? normalizeLoopbackUrl(resolveTtsBaseUrl());
   }
 
-  async synthesize(request: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> {
-    const url = `${this.resolveBaseUrl()}/v1/audio/speech`;
-
-    // F066: Build request body with optional clone params for Qwen3-TTS Base
-    const body = JSON.stringify({
+  private requestBody(request: TtsSynthesizeRequest): string {
+    return JSON.stringify({
       input: request.text,
       voice: request.voice,
       model: this.model,
@@ -102,6 +136,13 @@ export class MlxAudioTtsProvider implements ITtsProvider {
       ...(request.instruct ? { instruct: request.instruct } : {}),
       ...(request.temperature != null ? { temperature: request.temperature } : {}),
     });
+  }
+
+  async synthesize(request: TtsSynthesizeRequest): Promise<TtsSynthesizeResult> {
+    const url = `${this.resolveBaseUrl()}/v1/audio/speech`;
+
+    // F066: Build request body with optional clone params for Qwen3-TTS Base
+    const body = this.requestBody(request);
 
     // Dynamic timeout: prevents premature abort while server is still generating.
     // Long voice messages (~400 chars) routinely exceeded the old 120 s clone-mode
@@ -133,10 +174,12 @@ export class MlxAudioTtsProvider implements ITtsProvider {
       const serverFormat = response.headers.get('x-audio-format');
       const ALLOWED_FORMATS = new Set(['wav', 'mp3']);
       const actualFormat = serverFormat && ALLOWED_FORMATS.has(serverFormat) ? serverFormat : (request.format ?? 'wav');
+      const durationSec = actualFormat === 'wav' ? inferWavDurationSec(audio) : undefined;
 
       return {
         audio,
         format: actualFormat,
+        ...(durationSec != null ? { durationSec } : {}),
         metadata: {
           provider: this.id,
           model: this.model,
@@ -146,5 +189,104 @@ export class MlxAudioTtsProvider implements ITtsProvider {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async *stream(
+    request: TtsSynthesizeRequest,
+    options: TtsSynthesizeStreamOptions = {},
+  ): AsyncIterable<TtsSynthesizeStreamEvent> {
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) abortFromCaller();
+    else options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    const effectiveTimeout = calculateTimeout(request.text, true, this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    try {
+      const response = await fetch(`${this.resolveBaseUrl()}/v1/audio/speech/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: this.requestBody(request),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => 'unknown');
+        throw new Error(`TTS stream server returned ${response.status}: ${detail}`);
+      }
+      if (!response.body) throw new Error('TTS stream server returned no response body');
+
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      let pendingChunk: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }> | undefined;
+      while (true) {
+        const { done, value } = await reader.read();
+        buffered += decoder.decode(value, { stream: !done });
+        const lines = buffered.split('\n');
+        buffered = lines.pop() ?? '';
+        if (done && buffered.trim()) {
+          lines.push(buffered);
+          buffered = '';
+        }
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = this.parseStreamEvent(line, request);
+          if (event.type === 'chunk') {
+            if (pendingChunk) yield pendingChunk;
+            if (event.isFinalChunk) {
+              pendingChunk = undefined;
+              yield event;
+            } else {
+              pendingChunk = event;
+            }
+            continue;
+          }
+          if (pendingChunk) {
+            yield { ...pendingChunk, isFinalChunk: true };
+            pendingChunk = undefined;
+          }
+          yield event;
+        }
+        if (done) break;
+      }
+      if (pendingChunk) yield pendingChunk;
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abortFromCaller);
+      await reader?.cancel().catch(() => undefined);
+    }
+  }
+
+  private parseStreamEvent(line: string, request: TtsSynthesizeRequest): TtsSynthesizeStreamEvent {
+    const event = JSON.parse(line) as {
+      type?: string;
+      audio_base64?: string;
+      duration_sec?: number;
+      final?: boolean;
+      error?: string;
+    };
+    if (event.type === 'error') throw new Error(event.error || 'TTS stream failed');
+    if (!event.audio_base64 || (event.type !== 'chunk' && event.type !== 'final')) {
+      throw new Error('TTS stream returned a malformed event');
+    }
+    const audio = Buffer.from(event.audio_base64, 'base64');
+    if (event.type === 'chunk') {
+      return {
+        type: 'chunk',
+        audio,
+        format: 'wav',
+        ...(event.duration_sec != null ? { durationSec: event.duration_sec } : {}),
+        isFinalChunk: event.final === true,
+      };
+    }
+    return {
+      type: 'final',
+      result: {
+        audio,
+        format: 'wav',
+        ...(event.duration_sec != null ? { durationSec: event.duration_sec } : {}),
+        metadata: { provider: this.id, model: this.model, voice: request.voice },
+      },
+    };
   }
 }

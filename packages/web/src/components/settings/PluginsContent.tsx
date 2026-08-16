@@ -12,6 +12,7 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
+import { OfficialPluginsPanel } from './OfficialPluginsPanel';
 import { PluginConfigPanel } from './PluginConfigPanel';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
@@ -31,6 +32,12 @@ const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
   resources: [],
   hasHealthCheck: false,
 };
+
+function pluginToggleFailure(data: { status?: string; error?: string }, actionLabel: string): string | undefined {
+  if (data.status === 'partial') return data.error ?? `插件${actionLabel}部分成功`;
+  if (data.status === 'failed') return data.error ?? `插件${actionLabel}失败`;
+  return undefined;
+}
 
 export function PluginsContent() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -65,11 +72,8 @@ export function PluginsContent() {
           return;
         }
         const data = (await res.json().catch(() => ({}))) as { status?: string; error?: string };
-        const isFailed = data.status === 'failed';
-        const isPartial = data.status === 'partial';
-        if (isFailed || isPartial) {
-          setToggleError(data.error ?? `插件${actionLabel}${isPartial ? '部分成功' : '失败'}`);
-        }
+        const failure = pluginToggleFailure(data, actionLabel);
+        if (failure) setToggleError(failure);
         await fetchPlugins();
       } catch {
         setToggleError('网络错误');
@@ -86,42 +90,47 @@ export function PluginsContent() {
 
   if (loading) {
     return (
-      <SettingsText as="p" variant="sm" tone="muted">
-        加载中...
-      </SettingsText>
+      <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+        <OfficialPluginsPanel />
+        <SettingsText as="p" variant="sm" tone="muted">
+          加载本地插件中...
+        </SettingsText>
+      </div>
     );
   }
 
   if (plugins.length === 0) {
     return (
-      <div
-        className="flex flex-col items-center justify-center"
-        style={{
-          borderRadius: '1rem',
-          background: 'var(--console-card-bg)',
-          padding: '4rem 2rem',
-          textAlign: 'center',
-        }}
-      >
-        <span className="mb-3 opacity-40" style={{ color: 'var(--cafe-text-muted)' }}>
-          <HubIcon name="blocks" className="h-10 w-10" />
-        </span>
-        <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
-          暂无已安装的插件
-        </SettingsText>
-        <SettingsText as="p" tone="muted" className="mt-1">
-          插件在 plugins/ 目录下管理
-        </SettingsText>
+      <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+        <OfficialPluginsPanel />
+        <div
+          className="flex flex-col items-center justify-center"
+          style={{
+            borderRadius: '1rem',
+            background: 'var(--console-card-bg)',
+            padding: '4rem 2rem',
+            textAlign: 'center',
+          }}
+        >
+          <span className="mb-3 opacity-40" style={{ color: 'var(--cafe-text-muted)' }}>
+            <HubIcon name="blocks" className="h-10 w-10" />
+          </span>
+          <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
+            暂无本地插件
+          </SettingsText>
+          <SettingsText as="p" tone="muted" className="mt-1">
+            本地插件在 plugins/ 目录下管理
+          </SettingsText>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+      <OfficialPluginsPanel />
       {toggleError && (
-        <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">
-          {toggleError}
-        </div>
+        <div className="rounded-md bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{toggleError}</div>
       )}
       {plugins.map((plugin) => {
         const isExpanded = expandedId === plugin.id;

@@ -39,6 +39,14 @@ function memLog() {
       events.push(e);
       return { appended: true, sequence: events.length - 1 };
     },
+    appendFenced: async (e, expectedSequence) => {
+      if (seen.has(e.sourceEventId)) return { outcome: 'duplicate' };
+      const actualSequence = events.filter((event) => event.subjectKey === e.subjectKey).length;
+      if (actualSequence !== expectedSequence) return { outcome: 'conflict', actualSequence };
+      seen.add(e.sourceEventId);
+      events.push(e);
+      return { outcome: 'appended', sequence: expectedSequence };
+    },
     read: async (sk) => events.filter((e) => e.subjectKey === sk),
     listSubjects: async () => [...new Set(events.map((e) => e.subjectKey))],
   };
@@ -221,6 +229,17 @@ describe('BallCustodyIngest.record — append + appended:true guard → apply', 
     const p = await store.get('ball:thread:thr1');
     assert.strictEqual(p.state, 'active');
     assert.strictEqual(p.holder, 'codex');
+  });
+
+  it('recordFenced does not append or project after an intervening event', async () => {
+    const { ingest, store } = setup();
+    await ingest.record(buildHandedEvent({ toCatId: 'opus', threadId: 'thr1', messageId: 'm1', at: 1 }));
+    const result = await ingest.recordFenced(
+      buildHandedEvent({ fromCatId: 'opus', toCatId: 'codex', threadId: 'thr1', messageId: 'm2', at: 2 }),
+      0,
+    );
+    assert.deepStrictEqual(result, { outcome: 'conflict', actualSequence: 1 });
+    assert.strictEqual((await store.get('ball:thread:thr1')).holder, 'opus');
   });
 });
 

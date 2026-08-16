@@ -39,6 +39,21 @@ describe('chat context references', () => {
     expect(attachment.text).toHaveLength(CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH);
   });
 
+  it('creates one flat Quote attachment that keeps the selected text paired with its comment', () => {
+    const attachment = createQuoteContextAttachment(
+      'selected passage',
+      { kind: 'message', threadId: 'thread_abc123', messageId: 'message_abc123' },
+      { comment: '  my comment  ', selectionStart: 4, selectionEnd: 20 },
+    );
+    expect(attachment).toMatchObject({
+      kind: 'quote',
+      text: 'selected passage',
+      comment: 'my comment',
+      selectionStart: 4,
+      selectionEnd: 20,
+    });
+  });
+
   it('reserves @ for cats and uses explicit slash commands for context', () => {
     expect(detectContextShortcut('/thread')).toEqual({ mode: 'threads', start: 0, end: 7 });
     expect(detectContextShortcut('/file')).toEqual({ mode: 'files', start: 0, end: 5 });

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Expert Panel"
+  short_description: "显式召集多猫独立分析、保留分歧并收敛交付"
+  default_prompt: "Use $expert-panel to convene an independent multi-cat analysis and synthesize the evidence without erasing disagreement."
+
+policy:
+  allow_implicit_invocation: false

@@ -72,6 +72,7 @@ import { canViewMessage } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
 import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
+import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
@@ -91,7 +92,7 @@ import { accumulateTextAggregate } from '../text-aggregation.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
-import { persistUserFacingSystemInfoWarnings } from './persist-system-info-warnings.js';
+import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -176,6 +177,9 @@ export async function* routeParallel(
   const thinkingMode = options.thinkingMode ?? 'play';
   const isFreshnessSupplement = Boolean(options.freshnessSupplementId);
   const turnExecutionKind = isFreshnessSupplement ? 'freshness_supplement' : 'ordinary';
+  const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
+  const bridgeMentioningCatId = options.a2aTriggerMessageId ? exactA2ACallerCatId : userId;
+  const bridgeTriggerMessageId = options.a2aTriggerMessageId ?? currentUserMessageId;
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
@@ -208,7 +212,6 @@ export async function* routeParallel(
           )
         )
           return false;
-        if (thinkingMode === 'play' && raw.catId != null && raw.origin === 'stream') return false;
         return true;
       },
       queueChecker: getQueuedFreshnessMessagesForCat
@@ -617,7 +620,9 @@ export async function* routeParallel(
         catId: catId as string,
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         mode: 'parallel',
-        a2aEnabled: false,
+        ...(exactA2ACallerCatId ? { directMessageFrom: exactA2ACallerCatId } : {}),
+        ...(options.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
+        a2aEnabled: Boolean(options.a2aTriggerMessageId),
       });
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
@@ -751,7 +756,6 @@ export async function* routeParallel(
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
             cursorOverlay: options.cursorBoundaries?.get(catId as string),
-            exactA2ATriggerMessageId: options.a2aTriggerMessageId,
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
@@ -952,19 +956,22 @@ export async function* routeParallel(
         // helper namespace bridge 失效 → ideate/parallel 场景气泡又裂。
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
-        // F247 AC-B1c-3 PR-C: Plumb raw mention text for cloud bridge dispatch.
-        // Parallel routes are user-initiated (no A2A), so mentioningCatId = userId.
+        // F247: preserve server-owned A2A provenance through parallel fan-out.
+        // User-initiated parallel routes have no A2A caller and retain userId;
+        // an unpaired A2A trigger fails closed in invokeSingleCat instead of
+        // attributing the call to the thread owner.
         mentionContent: message,
-        mentioningCatId: userId as import('@cat-cafe/shared').CatId,
+        ...(bridgeMentioningCatId
+          ? { mentioningCatId: bridgeMentioningCatId as import('@cat-cafe/shared').CatId }
+          : {}),
+        ...(options.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: turnExecutionKind,
         executionCausal: {
-          ...((currentUserMessageId ?? options.a2aTriggerMessageId)
-            ? { triggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId }
-            : {}),
+          ...(bridgeTriggerMessageId ? { triggerMessageId: bridgeTriggerMessageId } : {}),
           ...(options.freshnessSupplementId ? { freshnessSupplementId: options.freshnessSupplementId } : {}),
         },
         promptMessageIds: exactPromptMessageIds,
@@ -2087,7 +2094,7 @@ export async function* routeParallel(
         }
       }
 
-      await persistUserFacingSystemInfoWarnings({
+      await persistUserFacingSystemInfoNotices({
         messageStore: deps.messageStore,
         threadId,
         catId: msg.catId,
@@ -2274,12 +2281,14 @@ export async function* routeParallel(
     options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
   }
 
-  // F200 AC-A1: fire-and-forget recall correlation after all cats complete
+  // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
+  // TD 2026-08-12: bounded tail read — full-thread reads of large keys
+  // (observed 221MB) froze the API event loop every round-end.
   if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
     const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
     if (evidenceDb) {
       deps.toolEventLog
-        .readByThread(threadId)
+        .readRecentByThread(threadId, RECALL_CORRELATION_EVENT_WINDOW)
         .then((events) => {
           const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
           for (const [catId, invId] of completedCatInvocationIds) {

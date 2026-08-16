@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   usePersistedState: vi.fn(),
   enablePresentationLock: vi.fn(),
   disablePresentationLock: vi.fn(),
+  setWorkspaceMode: vi.fn(),
+  restoreWorkspaceMode: vi.fn(),
+  setWorkspaceSurface: vi.fn(),
+  restoreWorkspaceSurface: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWorkspace', () => ({
@@ -65,10 +69,14 @@ function setupMocks({
   workspaceMode = 'eval',
   workspaceSurface = 'home',
   file = null,
+  currentThreadId = 'thread-1',
+  preferredWorkspaceMode = 'eval',
 }: {
   workspaceMode?: string;
   workspaceSurface?: string;
   file?: Record<string, unknown> | null;
+  currentThreadId?: string;
+  preferredWorkspaceMode?: string;
 } = {}) {
   mocks.useWorkspace.mockReturnValue({
     worktrees: [{ id: 'cat-cafe-runtime', branch: 'runtime/main-sync', root: '/tmp/repo' }],
@@ -99,10 +107,10 @@ function setupMocks({
   mocks.useChatStore.mockImplementation((sel: (s: Record<string, unknown>) => unknown) => {
     const store: Record<string, unknown> = {
       workspaceWorktreeId: 'cat-cafe-runtime',
-      workspaceOpenFilePath: file ? 'docs/guide.md' : null,
-      workspaceOpenTabs: file ? ['docs/guide.md'] : [],
+      workspaceOpenFilePath: typeof file?.path === 'string' ? file.path : null,
+      workspaceOpenTabs: typeof file?.path === 'string' ? [file.path] : [],
       currentProjectPath: '/tmp/repo',
-      currentThreadId: 'thread-1',
+      currentThreadId,
       setWorkspaceWorktreeId: vi.fn(),
       setWorkspaceOpenFilePath: vi.fn(),
       setWorkspaceOpenTabs: vi.fn(),
@@ -120,9 +128,11 @@ function setupMocks({
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
       workspaceMode,
-      setWorkspaceMode: vi.fn(),
+      setWorkspaceMode: mocks.setWorkspaceMode,
+      restoreWorkspaceMode: mocks.restoreWorkspaceMode,
       workspaceSurface,
-      setWorkspaceSurface: vi.fn(),
+      setWorkspaceSurface: mocks.setWorkspaceSurface,
+      restoreWorkspaceSurface: mocks.restoreWorkspaceSurface,
       workspacePreview: { port: undefined, path: '/' },
       setWorkspacePreview: vi.fn(),
       presentationLock: false,
@@ -132,7 +142,7 @@ function setupMocks({
     return sel(store);
   });
   mocks.usePersistedState.mockImplementation((_key: string, init: unknown) => [init, vi.fn()]);
-  mocks.apiFetch.mockResolvedValue({ json: async () => ({ preferredWorkspaceMode: 'eval' }) });
+  mocks.apiFetch.mockResolvedValue({ json: async () => ({ preferredWorkspaceMode }) });
 }
 
 describe('WorkspacePanel eval mode', () => {
@@ -147,6 +157,10 @@ describe('WorkspacePanel eval mode', () => {
   beforeEach(() => {
     mocks.enablePresentationLock.mockReset();
     mocks.disablePresentationLock.mockReset();
+    mocks.setWorkspaceMode.mockReset();
+    mocks.restoreWorkspaceMode.mockReset();
+    mocks.setWorkspaceSurface.mockReset();
+    mocks.restoreWorkspaceSurface.mockReset();
     setupMocks();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -171,6 +185,59 @@ describe('WorkspacePanel eval mode', () => {
     });
 
     expect(container.querySelector('[data-testid="eval-workspace-panel"]')).not.toBeNull();
+  });
+
+  it('restores a thread preferred mode without treating it as a request to open Workspace', async () => {
+    setupMocks({ workspaceMode: 'dev', preferredWorkspaceMode: 'tasks' });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(mocks.restoreWorkspaceMode).toHaveBeenCalledWith('tasks');
+    expect(mocks.setWorkspaceMode).not.toHaveBeenCalled();
+  });
+
+  it('restores the Files surface on a thread switch without treating it as a request to open Workspace', async () => {
+    const threadAFile = {
+      path: 'docs/a.md',
+      content: '# A',
+      sha256: 'aaa',
+      size: 3,
+      mime: 'text/markdown',
+      truncated: false,
+      binary: false,
+    };
+    const threadBFile = { ...threadAFile, path: 'docs/b.md', content: '# B', sha256: 'bbb' };
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: threadAFile,
+      currentThreadId: 'thread-a',
+      preferredWorkspaceMode: 'dev',
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+    mocks.setWorkspaceSurface.mockClear();
+    mocks.restoreWorkspaceSurface.mockClear();
+
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: threadBFile,
+      currentThreadId: 'thread-b',
+      preferredWorkspaceMode: 'dev',
+    });
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(mocks.restoreWorkspaceSurface).toHaveBeenCalledWith('files');
+    expect(mocks.setWorkspaceSurface).not.toHaveBeenCalled();
   });
 
   it('keeps the file tree visible while a file detail is open', async () => {

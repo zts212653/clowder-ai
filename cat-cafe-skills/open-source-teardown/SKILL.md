@@ -42,12 +42,16 @@ triggers:
 
 - source repo URL、local path、commit SHA、更新时间。
 - 宣传 claims ledger：claim / evidence files / Source verdict / Decision fit / unknowns。
+- 输入谱系与复现矩阵：paper / appendix / limitations / code / config / data / checkpoint / 本次环境，
+  写明版本、可得性和不一致处；没有实验 claim 时记 `not applicable`，不虚构 artifact。
+- 原始输出与失败尾部审计：raw transcript/output/log、成功与失败样本、per-run/per-seed 稳定性；
+  没有运行 claim 时记 `not applicable`，不可得的 artifact 显式记 `unknown`。
 - 架构图或模块地图：entrypoints、state stores、extension points、empty dirs；用 ASCII tree 或 Mermaid，参考 *(internal reference removed)*。
 - 明星特性深挖：每个特性都写到代码路径和运行链路。
 - 算法剥皮表：真算法 / LLM judge / 启发式 / 规则 / 外部服务。
 - Clowder AI 对比：能学、不能学、我们因为 tradeoff 不 follow 的理由。
 
-报告模板见 [refs/report-template.md](refs/report-template.md)；八审计镜头 + 命令见 [refs/teardown-method.md](refs/teardown-method.md)；用户视角第一性原理（第 9 镜头）见 [refs/user-mind-evaluation.md](refs/user-mind-evaluation.md)。
+报告模板见 [refs/report-template.md](refs/report-template.md)；十二个审计镜头 + 命令见 [refs/teardown-method.md](refs/teardown-method.md)；用户视角第一性原理见 [refs/user-mind-evaluation.md](refs/user-mind-evaluation.md)。
 
 ## 进度纪律
 
@@ -62,6 +66,8 @@ triggers:
 3. clone 或 update 到 `/home/user/projects/ref/{project}`。
 4. 记录 `git rev-parse HEAD`、最新 tag/release、`git status --short`。
 5. 把 README/PPT/官网中的明星特性拆成 claims ledger。
+6. 若项目伴随论文或实验 claim，先读论文正文、附录、limitations、data/model card 和发布
+   artifact，再读 thread / 搬运文 / 总结；二手材料用于找争议和反例，不替代一手证据。
 
 不要先评价。先把“它声称自己有什么”列成可验证对象。
 
@@ -104,6 +110,27 @@ claim，追完链路真实性后，还要重建**足以支持当前决定的边�
 Context 变短可能减少输入，也可能改变可复用前缀和缓存经济性；结果取决于供应商规则、
 breakpoint、请求序列和实际命中率。必须读取 usage/billing 或做配对实验，不能把“中间
 context 变化”直接写成“cache 全 miss”或固定倍率。**claim 真实 ≠ 足以支持产品决定。**
+
+### Step 2.5 — 输入谱系、复现实物与原始输出
+
+研究、benchmark、RL/eval 或“自进化”claim 不能只追源码控制流，还要追实验到底吃了什么、
+吐了什么：
+
+1. 建 `paper-config / code-config / reproduction-config` 三向 diff，锁定 repo commit/tag、依赖、
+   base model、dataset/split、prompt/template、超参、checkpoint 和随机种子。
+2. 把 unavailable、未公开、文档歧义、代码默认值覆盖论文值分别记录；缺失是证据边界，
+   不是自动 `reject`，也不能从“无代码/复现失败”直接推导“造假/cherry-pick”。
+3. 安全、成本和授权允许时，先做有边界的 smoke；记录 exact command、环境、状态和与报告结果的
+   delta。训练、RL 或大规模 eval 的完整复现默认 `not_attempted`，属于需 operator 明确授权的支出项，
+   不是 audit 默认动作。不能运行时写清原因，不用脑补运行结果。
+4. 不只看 aggregate score、best checkpoint 或 loss curve。抽查 raw transcript/output/log，至少覆盖
+   一个成功样本与一个失败/尾部样本；对训练结果查看 failed run、per-seed/per-task 分布和异常退出。
+5. cherry-pick 分型判证：run/seed 选择性汇报需要候选 run、选择规则与报告 run 的关系等
+   过程证据；comparator / tuning budget 不对等可由论文表格和公开 config 的明确差异成立。
+   两类都要与“本次未复现”“release artifact 不足”“论文 claim 不可信”拆开表述。
+
+这里的“经典材料 / 跨域材料”用于提出更强 baseline、替代解释和 failure mode，不因年代或名气
+自动获得权威；primary-first 也不等于 author-first，作者 artifact 与独立复现证据仍需分栏。
 
 ### Step 3 — 算法剥皮
 
@@ -161,6 +188,9 @@ reliability | operability | privacy/risk
 | 错误 | 后果 | 修正 |
 |------|------|------|
 | 只看 README/PPT 就下结论 | 被营销话术带跑 | 每个 claim 必须有代码路径 |
+| 先读 thread / 总结再读原文 | 二手 framing 变成默认问题定义 | primary-first：正文→附录/limitations→artifact→二手争议 |
+| 只看 best score / loss / 汇总表 | 崩溃 run、seed 方差和尾部失败被平均数埋掉 | 抽 raw output/log、失败样本和 per-run/per-seed 分布 |
+| 默认 paper config = released code config | 在不同输入上复现，却把偏差全归因给算法 | 建 paper/code/reproduction 三向 diff，锁 commit 与环境 |
 | 把“有命令/有 UI”当成“有闭环” | 误判能力成熟度 | 追到 state mutation 和 future behavior |
 | 把 LLM judge 当算法 | 高估系统可验证性 | 算法表强制分栏 |
 | 把 hash update 当 stale | 混淆上游版本和知识失效 | 分开写 package update / knowledge stale |

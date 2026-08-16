@@ -4,12 +4,8 @@
  * Spawns a shell command, captures combined stdout+stderr output to a temp log file,
  * and returns a structured result when the command exits, times out, or is cancelled.
  *
- * Design decisions (per f167-phase-p-wakewhen.md plan):
- * - Shell mode: `spawn(command, { shell: true })` — commands are shell expressions
- * - Output: combined stdout+stderr piped to temp file; last 50 lines returned
- * - Timeout: SIGTERM → 5s grace → SIGKILL
- * - Single-use: each ManagedRunner instance handles one command lifecycle
- * - Log cleanup: temp file deleted after result is captured
+ * Shell expressions run once per instance; output is captured to a temporary log.
+ * Termination follows SIGTERM → 5s grace → SIGKILL and returns the last 50 lines.
  *
  * State machine:
  *   IDLE → RUNNING → {COMPLETED | TIMED_OUT | CANCELLED} → (log cleaned up)
@@ -21,6 +17,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createModuleLogger } from './logger.js';
 import { buildManagedRunnerEnvironment } from './managed-runner-environment.js';
+import {
+  armProcessTreeKillEscalation,
+  type ProcessTreeKillEscalation,
+  terminateWindowsProcessTree,
+  type WindowsProcessTreeTerminationResult,
+} from './managed-runner-process-tree.js';
 
 const log = createModuleLogger('managed-runner');
 
@@ -60,7 +62,7 @@ export class ManagedRunner {
   private _logPath: string | null = null;
   private _child: ChildProcess | null = null;
   private _timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private _killTimer: ReturnType<typeof setTimeout> | null = null;
+  private _killEscalation: ProcessTreeKillEscalation | null = null;
   /** P2-3 fix: rolling tail buffer keeps last TAIL_LINES regardless of log file truncation */
   private _rollingTail: string[] = [];
 
@@ -101,8 +103,7 @@ export class ManagedRunner {
     return new Promise<WakeWhenResult>((resolve) => {
       const logStream = createWriteStream(this._logPath!, { flags: 'w' });
 
-      // P1-2 fix: detached=true creates a new process group so we can kill
-      // the entire tree (shell + children) via process.kill(-pid, signal).
+      // A detached child leads the process group used for tree termination.
       const child = spawn(command, {
         shell: true,
         cwd,
@@ -176,22 +177,11 @@ export class ManagedRunner {
         if (this._state !== 'running') return;
         log.info({ pid: this._pid, command, timeoutMs }, 'ManagedRunner: timeout reached, sending SIGTERM');
         this._state = 'timed_out';
-        // P1-2 fix: kill the process GROUP (shell + children), not just the shell PID.
-        this._killProcessGroup('SIGTERM');
-
-        // P1-4 fix (cloud R2): always attempt SIGKILL after grace period in timed_out state.
-        // With detached=true, the shell may exit first (firing the 'exit' event) while child
-        // processes in the group survive SIGTERM. _killProcessGroup(-pid, SIGKILL) is idempotent
-        // (ESRCH caught if group is already dead).
-        this._killTimer = setTimeout(() => {
-          log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after grace period');
-          this._killProcessGroup('SIGKILL');
-        }, KILL_GRACE_MS);
+        const gracefulTermination = this._killProcessGroup('SIGTERM');
+        this._armKillEscalation(gracefulTermination, 'ManagedRunner: SIGKILL after grace period');
       }, timeoutMs);
 
-      // P2-9 fix (cloud R4): use 'close' instead of 'exit'. Node can emit 'exit'
-      // before child stdout/stderr streams have fully drained — using 'close' ensures
-      // all piped data has been consumed before we read the rolling tail.
+      // `close` waits for stdout/stderr to drain before the tail is read.
       child.on('close', (code, signal) => {
         // P2-3 fix: flush any remaining partial line to rolling tail
         if (_rollingPartialLine) {
@@ -201,20 +191,13 @@ export class ManagedRunner {
           }
           _rollingPartialLine = '';
         }
-        // P1-4 fix (cloud R2): selective timer clearing.
-        // Always clear timeout timer (process already exited, no need).
-        // Keep _killTimer alive in timed_out/cancelled state — with detached=true,
-        // the shell may exit while child processes in the group survive SIGTERM.
-        // The SIGKILL escalation must still fire to clean up the group.
+        // Keep escalation alive when descendants may outlive the shell.
         if (this._timeoutTimer) {
           clearTimeout(this._timeoutTimer);
           this._timeoutTimer = null;
         }
         if (this._state !== 'timed_out' && this._state !== 'cancelled') {
-          if (this._killTimer) {
-            clearTimeout(this._killTimer);
-            this._killTimer = null;
-          }
+          this._clearKillEscalation();
         }
         const durationMs = Date.now() - startTime;
 
@@ -270,39 +253,60 @@ export class ManagedRunner {
     });
   }
 
-  /**
-   * Cancel the running process. SIGTERM → 5s grace → SIGKILL.
-   * No-op if not running.
-   */
+  /** Cancel the running process. SIGTERM → 5s grace → SIGKILL. */
   cancel(): void {
     if (this._state !== 'running' || !this._child) return;
 
     log.info({ pid: this._pid }, 'ManagedRunner: cancel requested, sending SIGTERM');
     this._state = 'cancelled';
     this._clearTimers();
-    // P1-2 fix: kill the process GROUP, not just the shell PID
-    this._killProcessGroup('SIGTERM');
-
-    // P1-4 fix (cloud R2): always attempt SIGKILL after cancel grace period.
-    // With detached=true, shell may exit while children in the group survive.
-    this._killTimer = setTimeout(() => {
-      log.warn({ pid: this._pid }, 'ManagedRunner: SIGKILL after cancel grace period');
-      this._killProcessGroup('SIGKILL');
-    }, KILL_GRACE_MS);
+    const gracefulTermination = this._killProcessGroup('SIGTERM');
+    this._armKillEscalation(gracefulTermination, 'ManagedRunner: SIGKILL after cancel grace period');
   }
 
-  /**
-   * P1-2 fix: kill the entire process group (shell + child processes).
-   * With detached=true, child.pid IS the process group leader.
-   * process.kill(-pid, signal) sends the signal to all processes in the group.
-   */
-  private _killProcessGroup(signal: NodeJS.Signals): void {
-    if (!this._pid) return;
+  /** Terminate the detached process group (Unix) or process tree (Windows). */
+  private _killProcessGroup(signal: NodeJS.Signals): Promise<WindowsProcessTreeTerminationResult> | null {
+    if (!this._pid) return null;
+
+    if (process.platform === 'win32') {
+      const pid = this._pid;
+      const termination = terminateWindowsProcessTree(pid, signal);
+      void termination.then((result) => {
+        if (result.status === 'completed') {
+          log.debug({ pid, signal }, 'ManagedRunner: taskkill completed');
+          return;
+        }
+        log.warn({ pid, signal, result }, `ManagedRunner: taskkill ${result.status}`);
+      });
+      return termination;
+    }
+
     try {
       process.kill(-this._pid, signal);
-    } catch {
+    } catch (err) {
       // Process group may already be gone — that's fine
+      log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be gone)');
     }
+    return null;
+  }
+
+  private _armKillEscalation(
+    gracefulTermination: Promise<WindowsProcessTreeTerminationResult> | null,
+    warningMessage: string,
+  ): void {
+    this._killEscalation = armProcessTreeKillEscalation(
+      gracefulTermination,
+      () => {
+        log.warn({ pid: this._pid }, warningMessage);
+        this._killProcessGroup('SIGKILL');
+      },
+      KILL_GRACE_MS,
+    );
+  }
+
+  private _clearKillEscalation(): void {
+    this._killEscalation?.cancel();
+    this._killEscalation = null;
   }
 
   private _clearTimers(): void {
@@ -310,10 +314,7 @@ export class ManagedRunner {
       clearTimeout(this._timeoutTimer);
       this._timeoutTimer = null;
     }
-    if (this._killTimer) {
-      clearTimeout(this._killTimer);
-      this._killTimer = null;
-    }
+    this._clearKillEscalation();
   }
 
   private _readTailOutput(): string {

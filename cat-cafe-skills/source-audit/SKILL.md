@@ -60,21 +60,34 @@ F218 的事故不是模型凭空幻觉，而是外部不可靠信息源污染：
 
 先列 claim，再逐条审：
 
-| Claim | Metric / comparator | Strongest cheap alternative / claim ceiling | Scope / denominator / exclusions | Lifecycle cost / unknowns | 原始来源 | Source verdict | Non-triviality verdict | Decision fit | Provenance |
-|-------|---------------------|---------------------------------------------|----------------------------------|---------------------------|----------|----------------|------------------------|--------------|------------|
-| ... | ... | ... | ... | ... | paper / official / vendor blog / media / forum | ... | ... | ... | ... |
+| Claim | Metric / comparator | Strongest cheap alternative / claim ceiling | Inputs / raw outputs / reproduction | Scope / denominator / exclusions | Lifecycle cost / unknowns | 原始来源 | Source verdict | Non-triviality verdict | Decision fit | Provenance |
+|-------|---------------------|---------------------------------------------|-------------------------------------|----------------------------------|---------------------------|----------|----------------|------------------------|--------------|------------|
+| ... | ... | ... | paper/config/data/checkpoint + transcript/failure/tail + run status | ... | ... | paper / official / vendor blog / media / forum | ... | ... | ... | ... |
 
-## 六问 Checklist
+## 八问 Checklist
+
+这八问是按 claim 取用的 menu，不是逐项补齐的流水线：1/2/6/7 通常适用；3/8 在 claim
+依赖方法或测量时使用；4/5 只在 claim 涉及实验、复现、稳定性或模型输出时触发。无对应
+artifact 的传闻不要先造一轮实验审计，直接沿来源链和决策边界收敛。
 
 1. **一手 or 二手？** 追到原始论文、官方文档、实验报告或数据集。多篇文章互相引用不等于多方验证。
 2. **利益冲突？** 卖产品/咨询/课程的一方说"这个问题很严重"要扣分，并标明动机。
 3. **方法可复核吗？** Peer review、博客、营销页都只是来源属性；继续查样本、指标定义、
    baseline、实验代码/数据、重复次数和不确定性。Peer-reviewed 不自动等于结论可复现。
-4. **时效性？** 标清发布时间、测试年份、模型/版本。AI 领域旧模型数据不能直接论证新模型。
-5. **对象和决策匹配吗？** 区分“这个结果在它测的任务上成立”与“它能支持我们的决定”。
+4. **输入谱系一致吗？** 在二手 thread / 总结之前，先读论文正文、附录、limitations、
+   data/model card，再核代码、默认 config、released data/checkpoint 与作者汇报配置是否一致。
+   记录 paper-config / code-config / reproduction-config 的差异；缺失记 `unknown`，不能从
+   “没有代码”直接跳到“造假”。经典材料和跨域材料用于生成反事实与比较器，不因资历自动加权。
+5. **盯过原始输出吗？** Best score、平均 loss 和一条漂亮曲线看不见崩溃率、seed 方差、
+   分布尾部与“表面成功、实质失败”。若 artifact 可得，抽查 raw transcript/output、失败 run、
+   per-task/per-seed 结果和异常日志；若不可得，明确 output-level evidence 缺失。指控 run/seed
+   选择性汇报需要候选 run、选择规则或等价过程证据；comparator / tuning budget 不对等则可由
+   论文表格与公开 config 的明确差异成立。一次复现失败本身不证明其中任何一种。
+6. **时效性？** 标清发布时间、测试年份、模型/版本。AI 领域旧模型数据不能直接论证新模型。
+7. **对象和决策匹配吗？** 区分“这个结果在它测的任务上成立”与“它能支持我们的决定”。
    写清目标 workload、用户群、系统版本和未覆盖能力；家里体感只负责触发冲突调查，不能
    反过来当作否定外部结果的证据。
-6. **测量与账本边界清楚吗？（防 true-but-incomplete）** 不要求证明一个不存在的“完整
+8. **测量与账本边界清楚吗？（防 true-but-incomplete）** 不要求证明一个不存在的“完整
    世界账本”，而要重建**足以支持当前决定的 scoped ledger**：指标定义与 comparator；
    分子、分母、排除项和自适应复用次数；系统边界、时间窗和生命周期成本（采集/预处理、
    在线调用、cache read/write/miss、维护、人审）；质量、覆盖、延迟、可靠性等联动结果；
@@ -93,6 +106,9 @@ F218 的事故不是模型凭空幻觉，而是外部不可靠信息源污染：
 measured_construct: 它实际测了什么
 comparator: 与谁比；版本和配置是否同条件
 population_and_denominator: 样本/请求/用户范围、分母、排除项
+input_lineage: paper/appendix/limitations + data/config/code/checkpoint；版本与不一致处
+output_audit: raw outputs/transcripts + failed/tail cases + per-run/seed stability；不可得项
+reproduction_status: not_attempted / exact / partial / failed；环境、命令和偏差
 decision_boundary: 我们要据此做什么决定；目标 workload 和时间窗
 lifecycle_ledger: ingest/extract + query/retrieval + generation + cache + maintenance/human
 coupled_outcomes: quality + coverage/abstention + latency + reliability + risk
@@ -112,9 +128,12 @@ claim_ceiling: 当前证据最多允许写到哪里
 ```
 
 - **Source verdict 的最低证据面**：`measured_construct`、`comparator`、
-  `population_and_denominator`，以及六问中足以复核方法的证据。若 claim 自称“总成本”或
+  `population_and_denominator`，以及八问中足以复核方法的证据。若 claim 自称“总成本”或
   “端到端”，`lifecycle_ledger` 也属于 measured construct 的定义。缺少这些 source-validity
   证据时，Source verdict 最高只能 `use-with-caveat`。
+- 若 claim 自称“可复现 / 稳定 / robust / 跨 seed SOTA”，`input_lineage`、`output_audit` 与
+  `reproduction_status` 也属于 Source verdict 的最低证据面。若论文限定范围内的结果仍可由
+  正文方法支持，artifact 缺失通常是 `use-with-caveat`，不是自动 `reject`；但不得升级成复现性结论。
 - **Decision fit 的最低证据面**：`decision_boundary`、与该决定相关的
   `lifecycle_ledger` / `coupled_outcomes`，以及明确的 `unknowns`。这些字段缺项**不降级已成立的 Source verdict**，
   但 Decision fit 最高只能 `partial`；若连决策边界或目标 workload 都未知，则为 `none`。
@@ -159,6 +178,9 @@ docs/research / ADR / PPT 用 claim ledger 表。若 claim 被拒绝，也记录
 |------|------|------|
 | 把搜索结果当证据 | 被 SEO / 营销文带跑 | 搜索结果只算候选线索，必须追一手 |
 | 多篇博客互引就说"多方验证" | 回声室污染 | 画引用链，找到共同源头 |
+| 先读 thread / summary 再读原文 | 二手 framing 先入为主，后续只在原文里找佐证 | primary-first：正文→附录/limitations→artifact→二手评论 |
+| 只看 best score / loss，不看原始输出 | 崩溃 run、尾部失败和表面合规被平均数埋掉 | 抽 raw output/transcript、失败样本、per-seed 分布；不可得则降 claim ceiling |
+| 把 paper config 当作 released code config | 复现实验在不同输入上跑，却误判方法真假 | 建 paper/code/reproduction 三向 config diff |
 | 用旧模型数据论证新模型 | 对象错配 | 标测试模型/年份，只谈适用范围 |
 | 只写 caveat 不改结论 | 弱证据仍污染判断 | verdict 决定表述强度；弱证据不能撑强结论 |
 | 把公开 benchmark 分数当产品总效用 | 测量构念被偷换 | 先写 measured construct，再单独判 decision fit |
@@ -182,6 +204,13 @@ True-but-incomplete 事件：供应商声称“recall 输入从 10k 降到 2k，
 但没有在 untouched holdout 上击败一句强静态规则。合格输出可以给限定后的 Source verdict
 `use`，但 Non-triviality verdict 必须是 `not-compared`，且不得把“搜索环能找到策略”升级成
 “只有自进化才能获得该能力”。
+
+复现投诉事件：二手帖子声称“约 30 篇 Agentic RL 工作中多数无代码；某 PPO 改进按公开
+配置复现比论文低 20 多点，且 baseline 反而更高”。合格输出不能把帖子直接写成赛道造假证据，
+也不能用“调学习率”敷衍。必须定位到具体 paper/repo/SHA，建立 paper/code/reproduction config
+diff，核数据与 checkpoint 可得性；训练/RL 复现默认 `not_attempted`，只有取得成本与授权边界后
+才跑多 seed、检查 raw curve、崩溃 run、逐任务输出和选择规则。无法取得授权或实物时，分别把
+“该次复现失败”和“作者结果不可信”的 claim ceiling 写清。
 
 ## Related Skills
 

@@ -11,7 +11,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { QueueAuthorIntent } from '@cat-cafe/shared';
+import type { QueueAuthorIntent, QueueTargetAttemptTerminalReason, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionService.js';
@@ -53,12 +53,25 @@ export interface QueueEntry {
   queuedBodyExposures?: QueueBodyExposure[];
   /** The reading invocation failed/canceled; responsibility remains queued. */
   queuedFailedByCatIds?: string[];
+  /** Exact terminal fact for the currently active target attempt. */
+  queuedFailureAtByCatId?: Record<string, number>;
+  queuedFailureReasonByCatId?: Record<string, QueueTargetAttemptTerminalReason>;
+  /** Gate 5: restart-stable identity of the latest durable retry attempt per target. */
+  queuedAttemptIdByCatId?: Record<string, string>;
   /** Historical target closure retained while sibling targets remain queued. */
   queuedHandledByCatIds?: string[];
   /** F264: accepted Steer awaiting replacement invocation identity. */
   steerRequestedByCatIds?: string[];
   /** F264: exact replacement invocation after provider-start read binding. */
   steeredInvocationIdByCatId?: Record<string, string>;
+  /**
+   * #1291 Gate 6: process-local exact Batch Steer reservation.
+   *
+   * This is deliberately not a second durable ledger. Durable per-message Queue
+   * custody remains authoritative; this marker only fences dequeue so F175 cannot
+   * absorb an unselected adjacent entry between reservation and replacement start.
+   */
+  exactSteerBatch?: ExactSteerBatchReservation;
   intent: string;
   status: 'queued' | 'processing';
   createdAt: number;
@@ -88,6 +101,8 @@ export interface QueueEntry {
   readOnlyToolPolicy?: ToolExecutionPolicy;
   /** F167 Phase S: persistent action lease generation fence across queue/start/commit. */
   actionSuccessorFence?: ActionSuccessorFence;
+  /** #1291 Gate 4: immutable projection of the canonical wait owner fence. */
+  waitContinuationCarrier?: WaitContinuationCarrierV1;
   /** F175: user drag-reorder position — explicit values override priority in dequeue */
   position?: number;
   /** F175: skill hint for connector triggers — flows through as promptTags on execution */
@@ -104,6 +119,20 @@ export interface EnqueueResult {
   /** True when enqueue returned an existing active entry by idempotency key. */
   deduped?: boolean;
 }
+
+export interface ExactSteerBatchReservation {
+  reservationId: string;
+  primaryEntryId: string;
+  entryIds: string[];
+  targetCatId: string;
+}
+
+export type ExactUserBatchReservationResult =
+  | ({ outcome: 'reserved' } & ExactSteerBatchReservation)
+  | {
+      outcome: 'rejected';
+      reason: 'invalid_entry_ids' | 'entry_not_found' | 'entry_ineligible' | 'entries_incompatible';
+    };
 
 export interface QueuedHandledResult {
   entryId: string;
@@ -142,6 +171,12 @@ export class InvocationQueue {
 
   /** Original content per entryId at enqueue time, for rollbackEnqueue */
   private originalContents = new Map<string, string>();
+
+  /** Rollback snapshots for the short reservation→preempt→dequeue window. */
+  private exactSteerReservations = new Map<
+    string,
+    { threadId: string; userId: string; entries: Map<string, QueueEntry> }
+  >();
 
   private scopeKey(threadId: string, userId: string): string {
     return `${threadId}:${userId}`;
@@ -196,6 +231,7 @@ export class InvocationQueue {
   setPosition(threadId: string, userId: string, entryId: string, position: number): boolean {
     const e = this.findEntry(threadId, userId, entryId);
     if (!e || e.status !== 'queued') return false;
+    if (e.exactSteerBatch) return false;
     if (isSystemPinnedQueueEntry(e)) return false;
     e.position = position;
     return true;
@@ -219,6 +255,7 @@ export class InvocationQueue {
       | 'position'
       | 'suggestedSkill'
       | 'ownerAuthProvenance'
+      | 'exactSteerBatch'
     > & {
       ownerAuthProvenance: OwnerAuthProvenance;
       autoExecute?: boolean;
@@ -313,6 +350,7 @@ export class InvocationQueue {
       freshnessSupplementSeq: input.freshnessSupplementSeq,
       readOnlyToolPolicy: input.readOnlyToolPolicy,
       actionSuccessorFence: input.actionSuccessorFence,
+      waitContinuationCarrier: input.waitContinuationCarrier,
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
       a2aTriggerMessageId: input.a2aTriggerMessageId,
@@ -325,11 +363,17 @@ export class InvocationQueue {
 
   /** Check if any entry in the thread already carries this messageId (connector retry dedup). */
   hasEntryWithMessageId(threadId: string, messageId: string): boolean {
+    return this.findEntryWithMessageId(threadId, messageId) !== null;
+  }
+
+  /** Return the exact Queue carrier for a persisted message across user scopes. */
+  findEntryWithMessageId(threadId: string, messageId: string): QueueEntry | null {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      if (q.some((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId))) return true;
+      const entry = q.find((e) => e.messageId === messageId || e.mergedMessageIds?.includes(messageId));
+      if (entry) return { ...entry };
     }
-    return false;
+    return null;
   }
 
   /** Backfill messageId on a new entry (null → value). */
@@ -366,10 +410,18 @@ export class InvocationQueue {
 
   /** Remove a specific entry by id. Returns null if not found. */
   remove(threadId: string, userId: string, entryId: string): QueueEntry | null {
-    const q = this.queues.get(this.scopeKey(threadId, userId));
+    let q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const idx = q.findIndex((e) => e.id === entryId);
+    let idx = q.findIndex((e) => e.id === entryId);
     if (idx === -1) return null;
+    const batch = q[idx]?.exactSteerBatch;
+    if (batch) {
+      this.releaseExactUserBatch(threadId, userId, batch.reservationId);
+      q = this.queues.get(this.scopeKey(threadId, userId));
+      if (!q) return null;
+      idx = q.findIndex((entry) => entry.id === entryId);
+      if (idx === -1) return null;
+    }
     this.originalContents.delete(entryId);
 
     return q.splice(idx, 1)[0] ?? null;
@@ -386,6 +438,15 @@ export class InvocationQueue {
   getEntrySnapshot(threadId: string, userId: string, entryId: string): QueueEntry | null {
     const entry = this.findEntry(threadId, userId, entryId);
     return entry ? InvocationQueue.cloneEntry(entry) : null;
+  }
+
+  /** Resolve a durable carrier by its globally unique entry id without trusting a source-thread projection. */
+  getEntrySnapshotForUserById(userId: string, entryId: string): QueueEntry | null {
+    for (const q of this.queues.values()) {
+      const entry = q.find((candidate) => candidate.id === entryId && candidate.userId === userId);
+      if (entry) return InvocationQueue.cloneEntry(entry);
+    }
+    return null;
   }
 
   /**
@@ -628,6 +689,7 @@ export class InvocationQueue {
     if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
     entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
     if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    this.clearQueuedFailure(entry, catId);
     return true;
   }
 
@@ -657,6 +719,7 @@ export class InvocationQueue {
     if (entry.queuedNotifiedByCatIds?.length === 0) entry.queuedNotifiedByCatIds = undefined;
     entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
     if (entry.queuedFailedByCatIds?.length === 0) entry.queuedFailedByCatIds = undefined;
+    this.clearQueuedFailure(entry, catId);
     if (invocationId) {
       entry.queuedSeenInvocationIdByCatId = { ...(entry.queuedSeenInvocationIdByCatId ?? {}), [catId]: invocationId };
       if (
@@ -697,6 +760,7 @@ export class InvocationQueue {
       seen.add(catId);
       notified.delete(catId);
       failed.delete(catId);
+      this.clearQueuedFailure(entry, catId);
       entry.queuedSeenInvocationIdByCatId = {
         ...(entry.queuedSeenInvocationIdByCatId ?? {}),
         [catId]: invocationId,
@@ -734,6 +798,8 @@ export class InvocationQueue {
     catId: string,
     invocationId: string,
     attemptedEntryIds: ReadonlySet<string> = new Set(),
+    terminalReason: QueueTargetAttemptTerminalReason = 'invocation_failed',
+    failedAt = Date.now(),
   ): Array<{ entryId: string; userId: string }> {
     const failed: Array<{ entryId: string; userId: string }> = [];
     for (const q of this.queues.values()) {
@@ -749,6 +815,11 @@ export class InvocationQueue {
         const failedCats = new Set(entry.queuedFailedByCatIds ?? []);
         failedCats.add(catId);
         entry.queuedFailedByCatIds = [...failedCats];
+        entry.queuedFailureAtByCatId = { ...(entry.queuedFailureAtByCatId ?? {}), [catId]: failedAt };
+        entry.queuedFailureReasonByCatId = {
+          ...(entry.queuedFailureReasonByCatId ?? {}),
+          [catId]: terminalReason,
+        };
         if (entry.queuedSeenInvocationIdByCatId?.[catId] === invocationId) {
           delete entry.queuedSeenInvocationIdByCatId[catId];
           if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0) {
@@ -760,6 +831,60 @@ export class InvocationQueue {
       }
     }
     return failed;
+  }
+
+  /**
+   * Re-open exactly one failed target of an existing Queue entry. The message,
+   * entry id, and other target state remain unchanged; custody records the new
+   * attempt before any execution is started.
+   */
+  retryFailedTarget(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+  ): { before: QueueEntry; after: QueueEntry } | null {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.status !== 'queued' ||
+      !entry.targetCats.includes(catId) ||
+      !entry.queuedFailedByCatIds?.includes(catId)
+    ) {
+      return null;
+    }
+    const before = InvocationQueue.cloneEntry(entry);
+    entry.queuedFailedByCatIds = entry.queuedFailedByCatIds.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailedByCatIds.length === 0) entry.queuedFailedByCatIds = undefined;
+    this.clearQueuedFailure(entry, catId);
+    if (entry.queuedSeenInvocationIdByCatId?.[catId]) {
+      delete entry.queuedSeenInvocationIdByCatId[catId];
+      if (Object.keys(entry.queuedSeenInvocationIdByCatId).length === 0)
+        entry.queuedSeenInvocationIdByCatId = undefined;
+    }
+    if (entry.queuedAwakenedInvocationIdByCatId?.[catId]) {
+      delete entry.queuedAwakenedInvocationIdByCatId[catId];
+      delete entry.queuedAwakenedAtByCatId?.[catId];
+      if (Object.keys(entry.queuedAwakenedInvocationIdByCatId).length === 0) {
+        entry.queuedAwakenedInvocationIdByCatId = undefined;
+        entry.queuedAwakenedAtByCatId = undefined;
+      }
+    }
+    return { before, after: InvocationQueue.cloneEntry(entry) };
+  }
+
+  /** Bind the custody-CAS winner before its exact retry target can start. */
+  bindRetryAttemptId(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+    attemptId: string,
+  ): QueueEntry | null {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (!entry || entry.status !== 'queued' || !entry.targetCats.includes(catId) || !attemptId) return null;
+    entry.queuedAttemptIdByCatId = { ...(entry.queuedAttemptIdByCatId ?? {}), [catId]: attemptId };
+    return InvocationQueue.cloneEntry(entry);
   }
 
   /**
@@ -897,6 +1022,14 @@ export class InvocationQueue {
     handledCats.add(catId);
     entry.queuedHandledByCatIds = [...handledCats];
     entry.queuedFailedByCatIds = entry.queuedFailedByCatIds?.filter((candidate) => candidate !== catId);
+    if (entry.queuedFailureAtByCatId) {
+      delete entry.queuedFailureAtByCatId[catId];
+      if (Object.keys(entry.queuedFailureAtByCatId).length === 0) entry.queuedFailureAtByCatId = undefined;
+    }
+    if (entry.queuedFailureReasonByCatId) {
+      delete entry.queuedFailureReasonByCatId[catId];
+      if (Object.keys(entry.queuedFailureReasonByCatId).length === 0) entry.queuedFailureReasonByCatId = undefined;
+    }
     entry.queuedNotifiedByCatIds = entry.queuedNotifiedByCatIds?.filter((candidate) => candidate !== catId);
     entry.steerRequestedByCatIds = entry.steerRequestedByCatIds?.filter((candidate) => candidate !== catId);
     if (entry.steerRequestedByCatIds?.length === 0) entry.steerRequestedByCatIds = undefined;
@@ -953,14 +1086,38 @@ export class InvocationQueue {
         ? { queuedBodyExposures: entry.queuedBodyExposures.map((exposure) => ({ ...exposure })) }
         : {}),
       ...(entry.queuedFailedByCatIds ? { queuedFailedByCatIds: [...entry.queuedFailedByCatIds] } : {}),
+      ...(entry.queuedFailureAtByCatId ? { queuedFailureAtByCatId: { ...entry.queuedFailureAtByCatId } } : {}),
+      ...(entry.queuedFailureReasonByCatId
+        ? { queuedFailureReasonByCatId: { ...entry.queuedFailureReasonByCatId } }
+        : {}),
+      ...(entry.queuedAttemptIdByCatId ? { queuedAttemptIdByCatId: { ...entry.queuedAttemptIdByCatId } } : {}),
       ...(entry.queuedHandledByCatIds ? { queuedHandledByCatIds: [...entry.queuedHandledByCatIds] } : {}),
       ...(entry.steerRequestedByCatIds ? { steerRequestedByCatIds: [...entry.steerRequestedByCatIds] } : {}),
       ...(entry.steeredInvocationIdByCatId
         ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
         : {}),
+      ...(entry.exactSteerBatch
+        ? {
+            exactSteerBatch: {
+              ...entry.exactSteerBatch,
+              entryIds: [...entry.exactSteerBatch.entryIds],
+            },
+          }
+        : {}),
       ...(entry.senderMeta ? { senderMeta: { ...entry.senderMeta } } : {}),
       ...(entry.callerTraceContext ? { callerTraceContext: { ...entry.callerTraceContext } } : {}),
     };
+  }
+
+  private clearQueuedFailure(entry: QueueEntry, catId: string): void {
+    if (entry.queuedFailureAtByCatId?.[catId] !== undefined) {
+      delete entry.queuedFailureAtByCatId[catId];
+      if (Object.keys(entry.queuedFailureAtByCatId).length === 0) entry.queuedFailureAtByCatId = undefined;
+    }
+    if (entry.queuedFailureReasonByCatId?.[catId] !== undefined) {
+      delete entry.queuedFailureReasonByCatId[catId];
+      if (Object.keys(entry.queuedFailureReasonByCatId).length === 0) entry.queuedFailureReasonByCatId = undefined;
+    }
   }
 
   /** Count of queued (not processing) entries. */
@@ -977,6 +1134,7 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
+      if (e.exactSteerBatch) this.exactSteerReservations.delete(e.exactSteerBatch.reservationId);
     }
     this.queues.delete(key);
     return q;
@@ -991,6 +1149,7 @@ export class InvocationQueue {
     if (!q) return false;
     const target = q.find((e) => e.id === entryId);
     if (!target || target.status === 'processing') return false;
+    if (target.exactSteerBatch) return false;
     if (isSystemPinnedQueueEntry(target)) return false;
 
     const queued = q.filter((e) => e.status === 'queued');
@@ -1020,6 +1179,7 @@ export class InvocationQueue {
     if (!q) return false;
     const entry = q.find((e) => e.id === entryId);
     if (!entry || entry.status === 'processing') return false;
+    if (entry.exactSteerBatch) return false;
     if (isSystemPinnedQueueEntry(entry)) return false;
 
     const minPos = q.reduce((min, e) => {
@@ -1030,6 +1190,214 @@ export class InvocationQueue {
     return true;
   }
 
+  /**
+   * Atomically reserve an explicit ordinary-user allowlist before Steer preempts
+   * the current invocation. Every validation happens before the first mutation.
+   */
+  reserveExactUserBatch(
+    threadId: string,
+    userId: string,
+    entryIds: readonly string[],
+  ): ExactUserBatchReservationResult {
+    const distinctIds = [...new Set(entryIds)];
+    if (distinctIds.length < 2 || distinctIds.length !== entryIds.length || distinctIds.length > MAX_QUEUE_DEPTH) {
+      return { outcome: 'rejected', reason: 'invalid_entry_ids' };
+    }
+
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) return { outcome: 'rejected', reason: 'entry_not_found' };
+    const byId = new Map(q.map((entry) => [entry.id, entry]));
+    const selected = distinctIds.map((entryId) => byId.get(entryId));
+    if (selected.some((entry) => !entry)) return { outcome: 'rejected', reason: 'entry_not_found' };
+    const entries = selected as QueueEntry[];
+
+    if (entries.some((entry) => !InvocationQueue.isExactUserBatchEligible(entry))) {
+      return { outcome: 'rejected', reason: 'entry_ineligible' };
+    }
+
+    const primary = entries[0];
+    const targetCatId = primary?.targetCats[0];
+    if (!primary || !targetCatId) return { outcome: 'rejected', reason: 'entry_ineligible' };
+    if (
+      entries.some(
+        (entry) =>
+          entry.intent !== primary.intent ||
+          entry.ownerAuthProvenance !== primary.ownerAuthProvenance ||
+          entry.targetCats[0] !== targetCatId,
+      )
+    ) {
+      return { outcome: 'rejected', reason: 'entries_incompatible' };
+    }
+
+    const reservation: ExactSteerBatchReservation = {
+      reservationId: randomUUID(),
+      primaryEntryId: primary.id,
+      entryIds: [...distinctIds],
+      targetCatId,
+    };
+    const snapshots = new Map(entries.map((entry) => [entry.id, InvocationQueue.cloneEntry(entry)]));
+
+    const minPos = q.reduce((min, entry) => {
+      if (entry.status === 'queued' && entry.position !== undefined && entry.position < min) return entry.position;
+      return min;
+    }, 0);
+    for (const entry of entries) {
+      entry.exactSteerBatch = { ...reservation, entryIds: [...reservation.entryIds] };
+      const requested = new Set(entry.steerRequestedByCatIds ?? []);
+      requested.add(targetCatId);
+      entry.steerRequestedByCatIds = [...requested];
+    }
+    primary.position = minPos - 1;
+    this.exactSteerReservations.set(reservation.reservationId, { threadId, userId, entries: snapshots });
+    return { outcome: 'reserved', ...reservation };
+  }
+
+  /** Release an unstarted reservation and restore every selected entry snapshot. */
+  releaseExactUserBatch(threadId: string, userId: string, reservationId: string): QueueEntry[] {
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (!reservation || reservation.threadId !== threadId || reservation.userId !== userId) return [];
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) {
+      this.exactSteerReservations.delete(reservationId);
+      return [];
+    }
+
+    const restored: QueueEntry[] = [];
+    for (const [entryId, snapshot] of reservation.entries) {
+      const index = q.findIndex(
+        (entry) =>
+          entry.id === entryId && entry.status === 'queued' && entry.exactSteerBatch?.reservationId === reservationId,
+      );
+      if (index === -1) continue;
+      const restoredEntry = InvocationQueue.cloneEntry(snapshot);
+      q[index] = restoredEntry;
+      restored.push(InvocationQueue.cloneEntry(restoredEntry));
+    }
+    this.exactSteerReservations.delete(reservationId);
+    return restored;
+  }
+
+  /** Cancel every still-queued Batch Steer reservation in one user scope. */
+  releaseAllExactUserBatches(threadId: string, userId: string): QueueEntry[] {
+    const reservationIds = new Set(
+      this.list(threadId, userId).flatMap((entry) =>
+        entry.exactSteerBatch ? [entry.exactSteerBatch.reservationId] : [],
+      ),
+    );
+    return [...reservationIds].flatMap((reservationId) => this.releaseExactUserBatch(threadId, userId, reservationId));
+  }
+
+  /** Drop rollback bookkeeping once no live Queue entry references the reservation. */
+  pruneExactUserBatchReservation(reservationId: string): boolean {
+    const stillReferenced = [...this.queues.values()].some((q) =>
+      q.some((entry) => entry.exactSteerBatch?.reservationId === reservationId),
+    );
+    if (stillReferenced) return false;
+    return this.exactSteerReservations.delete(reservationId);
+  }
+
+  /** Exact already-processing members, in the caller-frozen order, excluding the primary. */
+  collectExactSteerBatchMembers(entry: QueueEntry): QueueEntry[] | null {
+    const batch = entry.exactSteerBatch;
+    if (!batch || batch.primaryEntryId !== entry.id) return null;
+    const reservation = this.exactSteerReservations.get(batch.reservationId);
+    if (!reservation || reservation.threadId !== entry.threadId || reservation.userId !== entry.userId) return null;
+    const q = this.queues.get(this.scopeKey(entry.threadId, entry.userId));
+    if (!q) return null;
+    const byId = new Map(q.map((candidate) => [candidate.id, candidate]));
+    const members: QueueEntry[] = [];
+    for (const entryId of batch.entryIds) {
+      const current = byId.get(entryId);
+      if (
+        !current ||
+        current.status !== 'processing' ||
+        current.exactSteerBatch?.reservationId !== batch.reservationId
+      ) {
+        return null;
+      }
+      if (entryId !== batch.primaryEntryId) members.push(InvocationQueue.cloneEntry(current));
+    }
+    return members;
+  }
+
+  /** Restore every member after a start-reservation persistence failure. */
+  rollbackExactSteerBatchProcessing(threadId: string, reservationId: string): QueueEntry[] {
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (!reservation || reservation.threadId !== threadId) return [];
+    const q = this.queues.get(this.scopeKey(reservation.threadId, reservation.userId));
+    if (!q) return [];
+    const rolledBack: QueueEntry[] = [];
+    for (const entryId of reservation.entries.keys()) {
+      const entry = q.find(
+        (candidate) =>
+          candidate.id === entryId &&
+          candidate.status === 'processing' &&
+          candidate.exactSteerBatch?.reservationId === reservationId,
+      );
+      if (!entry) continue;
+      entry.status = 'queued';
+      delete entry.processingStartedAt;
+      rolledBack.push(InvocationQueue.cloneEntry(entry));
+    }
+    return rolledBack;
+  }
+
+  private static isExactUserBatchEligible(entry: QueueEntry): boolean {
+    const targetCatId = entry.targetCats[0];
+    return (
+      entry.status === 'queued' &&
+      entry.source === 'user' &&
+      entry.ownerAuthProvenance !== 'unknown' &&
+      entry.targetCats.length === 1 &&
+      !!targetCatId &&
+      !entry.autoExecute &&
+      !entry.sourceCategory &&
+      !entry.actionSuccessorFence &&
+      !entry.waitContinuationCarrier &&
+      !entry.freshnessClosureId &&
+      !entry.freshnessSupplementId &&
+      !entry.continuationKey &&
+      !entry.callerCatId &&
+      !entry.a2aParentInvocationId &&
+      !entry.a2aTriggerMessageId &&
+      !entry.exactSteerBatch &&
+      entry.authorIntentByCatId?.[targetCatId]?.requested !== 'continue_current'
+    );
+  }
+
+  /** Mark a primary plus its frozen exact allowlist in one synchronous mutation. */
+  private markEntryProcessing(entry: QueueEntry): QueueEntry | null {
+    const batch = entry.exactSteerBatch;
+    if (!batch) {
+      entry.status = 'processing';
+      entry.processingStartedAt = Date.now();
+      return InvocationQueue.cloneEntry(entry);
+    }
+    if (batch.primaryEntryId !== entry.id) return null;
+    const reservation = this.exactSteerReservations.get(batch.reservationId);
+    if (!reservation || reservation.threadId !== entry.threadId || reservation.userId !== entry.userId) return null;
+    const q = this.queues.get(this.scopeKey(entry.threadId, entry.userId));
+    if (!q) return null;
+    const byId = new Map(q.map((candidate) => [candidate.id, candidate]));
+    const selected = batch.entryIds.map((entryId) => byId.get(entryId));
+    if (
+      selected.some(
+        (candidate) =>
+          !candidate ||
+          candidate.status !== 'queued' ||
+          candidate.exactSteerBatch?.reservationId !== batch.reservationId,
+      )
+    ) {
+      return null;
+    }
+    const processingStartedAt = Date.now();
+    for (const candidate of selected as QueueEntry[]) {
+      candidate.status = 'processing';
+      candidate.processingStartedAt = processingStartedAt;
+    }
+    return InvocationQueue.cloneEntry(entry);
+  }
+
   /** F175: Mark the highest-priority queued entry as processing (stays in array). */
   markProcessing(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
@@ -1038,9 +1406,7 @@ export class InvocationQueue {
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
     const best = queued[0]!;
-    best.status = 'processing';
-    best.processingStartedAt = Date.now();
-    return { ...best };
+    return this.markEntryProcessing(best);
   }
 
   /** F175: Peek at the highest-priority queued entry without mutating state. */
@@ -1060,6 +1426,7 @@ export class InvocationQueue {
       const entry = q.find((e) => e.id === entryId && e.status === 'processing');
       if (entry) {
         entry.status = 'queued';
+        delete entry.processingStartedAt;
         return true;
       }
     }
@@ -1095,13 +1462,15 @@ export class InvocationQueue {
   }
 
   /** F175: Mark the highest-priority queued entry across users as processing.
-   *  skipCatIds: skip entries whose primary target cat is in this set (slot busy). */
-  markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>): QueueEntry | null {
+   *  skipCatIds: skip entries whose primary target cat is in this set (slot busy).
+   *  onlyCatId: restrict recovery to the exact slot whose pause elapsed. */
+  markProcessingAcrossUsers(threadId: string, skipCatIds?: Set<string>, onlyCatId?: string): QueueEntry | null {
     let best: QueueEntry | null = null;
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
         if (e.status !== 'queued') continue;
+        if (onlyCatId !== undefined && (e.targetCats[0] ?? '') !== onlyCatId) continue;
         if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
           best = e;
@@ -1109,9 +1478,7 @@ export class InvocationQueue {
       }
     }
     if (!best) return null;
-    best.status = 'processing';
-    best.processingStartedAt = Date.now();
-    return { ...best };
+    return this.markEntryProcessing(best);
   }
 
   /** Remove a processing entry across all users for a thread by entryId. */
@@ -1457,9 +1824,7 @@ export class InvocationQueue {
       if (!this.queueMatchesThread(q, threadId)) continue;
       const entry = q.find((e) => e.id === entryId && e.status === 'queued');
       if (entry) {
-        entry.status = 'processing';
-        entry.processingStartedAt = Date.now();
-        return true;
+        return this.markEntryProcessing(entry) !== null;
       }
     }
     return false;

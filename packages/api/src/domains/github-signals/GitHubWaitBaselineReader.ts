@@ -1,7 +1,7 @@
 import type {
+  GitHubPrWaitBaseline,
+  GitHubPrWaitPredicate,
   GitHubReviewThreadBaseline,
-  GitHubWaitBaseline,
-  GitHubWaitPredicate,
   PrAutomationState,
 } from '@cat-cafe/shared';
 
@@ -31,7 +31,7 @@ export interface GitHubWaitBaselineReaderDeps {
 }
 
 export interface InitialPrWaitSnapshot {
-  readonly baseline: GitHubWaitBaseline;
+  readonly baseline: GitHubPrWaitBaseline;
   readonly collectorState: PrAutomationState;
 }
 
@@ -43,7 +43,7 @@ function maxGithubId(items: readonly GithubIdItem[]): number {
   return max;
 }
 
-function hasPredicate(when: readonly GitHubWaitPredicate[], ...kinds: GitHubWaitPredicate['kind'][]): boolean {
+function hasPredicate(when: readonly GitHubPrWaitPredicate[], ...kinds: GitHubPrWaitPredicate['kind'][]): boolean {
   return when.some((predicate) => kinds.includes(predicate.kind));
 }
 
@@ -51,7 +51,7 @@ export async function readGitHubWaitBaseline(
   input: {
     readonly repoFullName: string;
     readonly prNumber: number;
-    readonly when: readonly GitHubWaitPredicate[];
+    readonly when: readonly GitHubPrWaitPredicate[];
   },
   deps: GitHubWaitBaselineReaderDeps,
 ): Promise<InitialPrWaitSnapshot> {
@@ -95,7 +95,7 @@ export async function readGitHubWaitBaseline(
       : 'external_infrastructure';
   const capturedAt = (deps.now ?? Date.now)();
   const resultTriggerCommentId = input.when.find(
-    (predicate): predicate is Extract<GitHubWaitPredicate, { kind: 'pr_review_result_available' }> =>
+    (predicate): predicate is Extract<GitHubPrWaitPredicate, { kind: 'pr_review_result_available' }> =>
       predicate.kind === 'pr_review_result_available' && predicate.triggerCommentId !== undefined,
   )?.triggerCommentId;
 

@@ -64,6 +64,12 @@ function makeFile(overrides: Record<string, unknown> = {}) {
 
 let setPendingChatInsert: ReturnType<typeof vi.fn>;
 
+function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function setupMocks(fileOverrides: Record<string, unknown> = {}) {
   const file = makeFile(fileOverrides);
   setPendingChatInsert = vi.fn();
@@ -116,8 +122,10 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       _workspaceFileSetAt: { ts: 0, threadId: null },
       workspaceMode: 'dev',
       setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
       workspaceSurface: 'files',
       setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
       workspacePreview: { port: 3000, path: '/' },
       setWorkspacePreview: vi.fn(),
     };
@@ -245,7 +253,7 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
     expect(btn).toBeNull();
   });
 
-  it('Add to Chat inserts correctly formatted reference', async () => {
+  it('Add to Chat pairs the rendered Markdown selection with a user comment', async () => {
     setupMocks();
     await renderPanel();
 
@@ -260,6 +268,17 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
     await act(async () => {
       btn.click();
     });
+    expect(setPendingChatInsert).not.toHaveBeenCalled();
+
+    const comment = container.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]');
+    expect(document.activeElement).toBe(comment);
+    await act(async () => {
+      if (!comment) throw new Error('annotation comment editor missing');
+      setTextareaValue(comment, 'why this Markdown matters');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')?.click();
+    });
 
     expect(setPendingChatInsert).toHaveBeenCalledWith({
       threadId: 'thread-1',
@@ -269,6 +288,7 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
           v: 1,
           kind: 'quote',
           text: 'selected text',
+          comment: 'why this Markdown matters',
           source: {
             kind: 'workspace_file',
             path: 'docs/test.md',
@@ -276,6 +296,45 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
             branch: 'main',
             language: 'markdown',
           },
+        }),
+      ],
+    });
+  });
+
+  it('keeps the rendered Markdown editor bound to the clicked selection after focus collapses it', async () => {
+    setupMocks();
+    await renderPanel();
+
+    const mdContent = container.querySelector('[data-testid="markdown-content"]');
+    await act(async () => {
+      simulateSelection(mdContent, mdContent, 'snapshot Markdown text');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[title="引用到聊天"]')?.click();
+    });
+    await act(async () => {
+      clearSelection();
+    });
+
+    const editor = container.querySelector<HTMLElement>('[data-testid="context-annotation-editor"]');
+    expect(editor?.textContent).toContain('snapshot Markdown text');
+    const comment = container.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]');
+    await act(async () => {
+      if (!comment) throw new Error('Markdown annotation editor missing after selection collapse');
+      setTextareaValue(comment, 'comment keeps the clicked Markdown target');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')?.click();
+    });
+
+    expect(setPendingChatInsert).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      text: '',
+      contextAttachments: [
+        expect.objectContaining({
+          kind: 'quote',
+          text: 'snapshot Markdown text',
+          comment: 'comment keeps the clicked Markdown target',
         }),
       ],
     });
@@ -321,8 +380,10 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
         _workspaceFileSetAt: { ts: 0, threadId: null },
         workspaceMode: 'dev',
         setWorkspaceMode: vi.fn(),
+        restoreWorkspaceMode: vi.fn(),
         workspaceSurface: 'files',
         setWorkspaceSurface: vi.fn(),
+        restoreWorkspaceSurface: vi.fn(),
         workspacePreview: { port: 3000, path: '/' },
         setWorkspacePreview: vi.fn(),
       };

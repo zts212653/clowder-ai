@@ -1,0 +1,174 @@
+#!/usr/bin/env node
+
+import { spawnSync } from 'node:child_process';
+import { dirname, delimiter, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const args = process.argv.slice(2);
+const ownDir = dirname(fileURLToPath(import.meta.url));
+
+const VALUE_OPTION_ALIASES = Object.freeze({
+  repository: Object.freeze(['--repo', '-R']),
+  title: Object.freeze(['--title', '-t']),
+  head: Object.freeze(['--head', '-H']),
+  base: Object.freeze(['--base', '-B']),
+});
+
+function valueOptionAt(index, names) {
+  const arg = args[index];
+  if (names.includes(arg)) {
+    return { value: args[index + 1], width: args[index + 1] === undefined ? 1 : 2 };
+  }
+  for (const name of names) {
+    const prefix = `${name}=`;
+    if (arg.startsWith(prefix)) return { value: arg.slice(prefix.length), width: 1 };
+    if (/^-[^-]$/.test(name) && arg.startsWith(name) && arg.length > name.length) {
+      return { value: arg.slice(name.length), width: 1 };
+    }
+  }
+  return undefined;
+}
+
+function optionValues(option) {
+  const names = VALUE_OPTION_ALIASES[option];
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const parsed = valueOptionAt(index, names);
+    if (!parsed) continue;
+    if (parsed.value !== undefined) values.push(parsed.value);
+    index += parsed.width - 1;
+  }
+  return values;
+}
+
+function optionValue(option) {
+  return optionValues(option).at(-1);
+}
+
+function commandArgs() {
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index];
+    const repository = valueOptionAt(index, VALUE_OPTION_ALIASES.repository);
+    if (repository) {
+      index += repository.width;
+      continue;
+    }
+    const hostname = valueOptionAt(index, ['--hostname']);
+    if (hostname) {
+      index += hostname.width;
+      continue;
+    }
+    if (arg === 'pr') {
+      index += 1;
+      while (index < args.length) {
+        const inheritedRepository = valueOptionAt(index, VALUE_OPTION_ALIASES.repository);
+        if (!inheritedRepository) break;
+        index += inheritedRepository.width;
+      }
+      return ['pr', ...args.slice(index)];
+    }
+    if (!arg.startsWith('-')) return args.slice(index);
+    index += 1;
+  }
+  return [];
+}
+
+function gitOutput(gitArgs) {
+  const result = spawnSync('git', gitArgs, { encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
+function candidateTouchesVerdictArtifacts() {
+  const baseBranch = optionValue('base') ?? 'main';
+  const remoteBase = `refs/remotes/origin/${baseBranch}`;
+  const baseRef = gitOutput(['rev-parse', '--verify', remoteBase]) ? remoteBase : baseBranch;
+  const paths = gitOutput(['diff', '--name-only', `${baseRef}...HEAD`]);
+  return paths.split('\n').some(
+    (path) =>
+      path.startsWith('docs/harness-feedback/bundles/') ||
+      path.startsWith('docs/harness-feedback/verdicts/') ||
+      path === 'docs/harness-feedback/registry/measurement-bundles.yaml',
+  );
+}
+
+function isVerdictPrCreate() {
+  const command = commandArgs();
+  if (command[0] !== 'pr' || !['create', 'new'].includes(command[1])) return false;
+  const title = optionValue('title') ?? '';
+  const head = optionValue('head') ?? '';
+  const branch = gitOutput(['branch', '--show-current']);
+  const commitSubject = gitOutput(['log', '-1', '--pretty=%s']);
+  return (
+    title.startsWith('verdict(') ||
+    head.includes('verdict/auto/') ||
+    branch.startsWith('verdict/auto/') ||
+    commitSubject.startsWith('verdict(') ||
+    candidateTouchesVerdictArtifacts()
+  );
+}
+
+function fail(code, detail) {
+  process.stderr.write(`${code}: ${detail}\n`);
+  process.exit(1);
+}
+
+if (isVerdictPrCreate()) {
+  const expectedRepo =
+    process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
+    process.env.CAT_CAFE_REPO_FULL_NAME ??
+    'zts212653/cat-cafe';
+  const explicitRepos = optionValues('repository');
+  if (explicitRepos.length === 0) {
+    fail('verdict_publish_missing_repo_scope', `verdict PR creation requires --repo ${expectedRepo}`);
+  }
+  const wrongRepo = explicitRepos.find((repo) => repo.toLowerCase() !== expectedRepo.toLowerCase());
+  if (wrongRepo) {
+    fail(
+      'verdict_publish_wrong_repository',
+      `gh --repo resolves to ${wrongRepo}; expected ${expectedRepo}`,
+    );
+  }
+
+  const guardRoot = process.env.CAT_CAFE_VERDICT_GH_GUARD_ROOT;
+  if (!guardRoot) {
+    fail('verdict_publish_guard_unavailable', 'CAT_CAFE_VERDICT_GH_GUARD_ROOT is not configured');
+  }
+  const repoRoot = gitOutput(['rev-parse', '--show-toplevel']);
+  if (!repoRoot) fail('verdict_publish_guard_unavailable', 'current directory is not a git repository');
+  const baseBranch = optionValue('base') ?? 'main';
+  const guard = spawnSync(
+    process.execPath,
+    [
+      resolve(guardRoot, 'scripts/check-verdict-publish-contract.mjs'),
+      '--repo-root',
+      repoRoot,
+      '--expected-repo',
+      expectedRepo,
+      '--remote',
+      'origin',
+      '--fresh-base-branch',
+      baseBranch,
+      '--source-ref',
+      'HEAD',
+    ],
+    { encoding: 'utf8' },
+  );
+  if (guard.status !== 0) {
+    process.stderr.write(guard.stderr || 'verdict_publish_guard_failed\n');
+    process.exit(guard.status ?? 1);
+  }
+}
+
+const delegatePath = (process.env.PATH ?? '')
+  .split(delimiter)
+  .filter((entry) => entry && resolve(entry) !== resolve(ownDir))
+  .join(delimiter);
+const delegate = process.env.CAT_CAFE_REAL_GH_PATH ?? 'gh';
+const result = spawnSync(delegate, args, {
+  env: { ...process.env, PATH: delegatePath },
+  stdio: 'inherit',
+});
+if (result.error) fail('gh_delegate_failed', result.error.message);
+if (result.signal) process.kill(process.pid, result.signal);
+process.exit(result.status ?? 1);

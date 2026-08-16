@@ -229,6 +229,7 @@ describe('post_message A2A mention invocation', () => {
       timestamp: Date.now(),
       threadId: 't1',
       extra: {
+        isExplicitPost: true,
         stream: {
           invocationId,
           turnInvocationId: invocationId,

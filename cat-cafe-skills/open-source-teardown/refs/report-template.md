@@ -38,6 +38,32 @@ covers: [architecture, star-features, algorithms, comparison]
 - Adaptive eval reuse: benchmark/holdout visibility + query count
 - Unknown or unreported items:
 
+## 1.5 Input Provenance & Output Audit
+
+### Input Provenance / Reproduction Matrix
+
+| Layer / artifact | Version / SHA | Model + data/split | Prompt/config/seed | Availability | Mismatch / claim impact |
+|------------------|---------------|--------------------|--------------------|--------------|-------------------------|
+| Paper + appendix + limitations | | | | | |
+| Released code/config/data/checkpoint | | | | | |
+| This reproduction | | | | | |
+
+- Exact command / environment:
+- Reproduction status: not attempted / exact / partial / failed
+- Delta from reported result:
+- Input unknowns or unavailable artifacts:
+
+### Raw Output / Failure-Tail Audit
+
+| Run / sample | Success / failure / tail | Raw artifact path | Observation | Agrees with aggregate? | Provenance / unknowns |
+|--------------|--------------------------|-------------------|-------------|------------------------|-----------------------|
+
+- Per-run / per-seed / per-task stability:
+- Aborted or missing runs:
+- Selection rule and reported checkpoint/run relationship:
+- Output evidence unavailable or uninspected:
+- Claim ceiling after input/output audit:
+
 ## 2. Architecture Map
 
 ```text

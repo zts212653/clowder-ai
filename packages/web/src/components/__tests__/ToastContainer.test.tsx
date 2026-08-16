@@ -21,6 +21,12 @@ let mockToasts: ToastItem[] = [];
 const removeToast = vi.fn();
 const markExiting = vi.fn();
 const disableAutoDismiss = vi.fn();
+const navigationMocks = vi.hoisted(() => ({
+  planTeleport: vi.fn(),
+  kickTeleportResolve: vi.fn(),
+  pushThreadRouteWithHistory: vi.fn(),
+  scrollToMessage: vi.fn(),
+}));
 
 vi.mock('@/stores/chatStore', () => {
   const getState = () => ({ currentThreadId: mockCurrentThreadId });
@@ -48,6 +54,15 @@ vi.mock('@/stores/toastStore', () => {
   useToastStore.getState = getState;
   return { useToastStore };
 });
+
+vi.mock('@/utils/teleport', () => ({
+  planTeleport: navigationMocks.planTeleport,
+  kickTeleportResolve: navigationMocks.kickTeleportResolve,
+}));
+vi.mock('@/utils/scrollToMessage', () => ({ scrollToMessage: navigationMocks.scrollToMessage }));
+vi.mock('../ThreadSidebar/thread-navigation', () => ({
+  pushThreadRouteWithHistory: navigationMocks.pushThreadRouteWithHistory,
+}));
 
 import { getHiddenToastExpiries, ToastCard, ToastContainer } from '../ToastContainer';
 
@@ -101,6 +116,10 @@ describe('ToastContainer thread-scoped filtering (#924)', () => {
     removeToast.mockReset();
     markExiting.mockReset();
     disableAutoDismiss.mockReset();
+    navigationMocks.planTeleport.mockReset();
+    navigationMocks.kickTeleportResolve.mockReset();
+    navigationMocks.pushThreadRouteWithHistory.mockReset();
+    navigationMocks.scrollToMessage.mockReset();
     vi.useRealTimers();
   });
 
@@ -175,6 +194,36 @@ describe('ToastContainer thread-scoped filtering (#924)', () => {
     expect(content?.querySelector('[data-overflow-measure="block"]')).not.toBeNull();
     expect(content?.querySelector('[data-critical-text-appearance]')).toBeNull();
     expect(content?.querySelector('button')).toBeNull();
+  });
+
+  it('navigates a success action to the exact target Bundle identity', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const toast = makeToast({
+      id: 'bundle-success',
+      type: 'success',
+      title: '已转发',
+      message: '目标对话已收到 Bundle',
+      action: { label: '查看', threadId: 'thread-B', messageId: 'bundle-message-1' },
+    });
+    mockCurrentThreadId = 'thread-A';
+    navigationMocks.planTeleport.mockReturnValue({ scrollNow: null, navigateTo: 'thread-B' });
+
+    await act(async () => root.render(<ToastCard toast={toast} />));
+    const action = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '查看');
+    await act(async () => action?.click());
+
+    expect(navigationMocks.planTeleport).toHaveBeenCalledWith({
+      threadId: 'thread-B',
+      messageId: 'bundle-message-1',
+      currentThreadId: 'thread-A',
+    });
+    expect(navigationMocks.pushThreadRouteWithHistory).toHaveBeenCalledWith('thread-B', window);
+    expect(markExiting).toHaveBeenCalledWith(toast.id);
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it('retains an overflowing toast, preserves reader focus, and distinguishes same-title controls', async () => {

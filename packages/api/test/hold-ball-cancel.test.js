@@ -235,6 +235,45 @@ describe('F167 Phase J AC-J4~J6: cancelPendingHoldsForThread', () => {
     assert.equal(running.params.holdLifecycle.managedCommand.state, 'command_running');
   });
 
+  for (const dispatchedState of ['enqueued', 'dispatched']) {
+    test(`does not retire an accepted ${dispatchedState} wake before its invocation-bound disposition`, () => {
+      const accepted = makeTask({
+        id: `hold-ball-accepted-${dispatchedState}`,
+        deliveryThreadId: 'thread-accepted-wake',
+        params: {
+          message: 'wake carrier',
+          targetCatId: 'codex-sol',
+          triggerUserId: 'user1',
+          holdLifecycle: {
+            mode: 'wake_when',
+            status: 'active',
+            wakeAt: Date.now() + 60_000,
+            createdBy: 'hold-ball:codex-sol',
+            managedCommand: {
+              state: dispatchedState,
+              command: 'pnpm gate',
+              startedAt: Date.now() - 10_000,
+              conditionMetAt: Date.now() - 1_000,
+              wakeContent: 'gate finished',
+              result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+              messageId: 'completion-message-accepted',
+            },
+          },
+        },
+      });
+      const deps = makeStubDeps([accepted]);
+
+      const cancelled = cancelPendingHoldsForThread('thread-accepted-wake', deps);
+
+      assert.deepEqual(cancelled, [], 'an accepted wake has a live child invocation and is no longer cancelable');
+      assert.deepEqual(deps._unregistered, []);
+      assert.deepEqual(deps._removed, []);
+      assert.equal(accepted.enabled, true);
+      assert.equal(accepted.params.holdLifecycle.status, 'active');
+      assert.equal(accepted.params.holdLifecycle.managedCommand.state, dispatchedState);
+    });
+  }
+
   test('does not cancel tasks from other threads', () => {
     const sameThread = makeTask({ id: 'hold-ball-1-here', deliveryThreadId: 'thread-A' });
     const otherThread = makeTask({ id: 'hold-ball-2-there', deliveryThreadId: 'thread-B' });

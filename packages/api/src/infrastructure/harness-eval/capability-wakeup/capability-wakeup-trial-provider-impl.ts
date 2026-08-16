@@ -137,6 +137,12 @@ export class CapabilityWakeupTrialProviderImpl implements CapabilityWakeupTrialP
       const sessionId = sessionRef.sessionId;
       const session = await this.resolveSessionRecord(sessionRef, scope);
       const transcriptEvents = await this.readAllTranscriptEvents(sessionId, session.threadId, session.catId);
+      // PR #3613 explicit decision (gpt52 R1 OQ): tool-event-log is now capped
+      // at the newest 2000 events per thread, so this thread-scoped read is
+      // "recent 2000 only" while transcript/skill events stay session-scoped.
+      // Acceptable: wakeup trials target recent sessions whose events sit at
+      // the tail; a >2000-event gap between session start and eval run would
+      // already indicate a stale trial not worth classifying.
       const toolEvents = await this.toolEventLog.readByThread(session.threadId);
       const skillLoadEvents = await this.skillLoadEventLog.readBySession(sessionId);
       const family = 'family' in session ? session.family : undefined;

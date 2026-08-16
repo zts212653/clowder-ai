@@ -10,123 +10,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { createCatId } from '@cat-cafe/shared';
-import { A2ADispatchDispositionService } from '../dist/domains/ball-custody/A2ADispatchDispositionService.js';
-import { BallCustodyIngest } from '../dist/domains/ball-custody/BallCustodyIngest.js';
-import { BallCustodyProjector } from '../dist/domains/ball-custody/BallCustodyProjector.js';
 import { buildHandedEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
 import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
-import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
-
-class MemoryEventLog {
-  events = [];
-  async append(event) {
-    if (this.events.some((candidate) => candidate.sourceEventId === event.sourceEventId)) {
-      return { appended: false, sequence: -1 };
-    }
-    this.events.push(structuredClone(event));
-    return { appended: true, sequence: this.events.length - 1 };
-  }
-  async read(subjectKey, fromSequence = 0) {
-    return this.events.filter((event) => event.subjectKey === subjectKey).slice(fromSequence);
-  }
-  async listSubjects() {
-    return [...new Set(this.events.map((event) => event.subjectKey))];
-  }
-}
-
-class MemoryProjectionStore {
-  projections = new Map();
-  async get(subjectKey) {
-    return structuredClone(this.projections.get(subjectKey) ?? null);
-  }
-  async save(projection) {
-    this.projections.set(projection.subjectKey, structuredClone(projection));
-  }
-  async listSubjectKeys() {
-    return [...this.projections.keys()];
-  }
-  async delete(subjectKey) {
-    this.projections.delete(subjectKey);
-  }
-}
-
-async function harness() {
-  const eventLog = new MemoryEventLog();
-  const projectionStore = new MemoryProjectionStore();
-  const projector = new BallCustodyProjector(eventLog, projectionStore);
-  const ingest = new BallCustodyIngest(eventLog, projector);
-  const messageStore = new MessageStore();
-  const source = messageStore.append({
-    userId: 'user-1',
-    catId: createCatId('fable5'),
-    content: '@codex-sol review complete',
-    mentions: [createCatId('codex-sol')],
-    timestamp: 1_000,
-    threadId: 'thread-1',
-    origin: 'stream',
-  });
-  await ingest.record(
-    buildHandedEvent({
-      threadId: 'thread-1',
-      fromCatId: 'fable5',
-      toCatId: 'codex-sol',
-      messageId: source.id,
-      at: 1_000,
-    }),
-  );
-  let latest = true;
-  const service = new A2ADispatchDispositionService({
-    registry: { isLatest: async (invocationId) => latest && invocationId === 'inv-1' },
-    messageStore,
-    ballCustodyEventLog: eventLog,
-    ballCustodyProjectionStore: projectionStore,
-    ballCustody: ingest,
-    repairProjection: (subjectKey) => projector.rebuild(subjectKey),
-    now: () => 2_000,
-  });
-  return {
-    eventLog,
-    projectionStore,
-    ingest,
-    messageStore,
-    source,
-    service,
-    setLatest(value) {
-      latest = value;
-    },
-  };
-}
-
-function auth(h, overrides = {}) {
-  return {
-    invocationId: 'inv-1',
-    callbackToken: 'token',
-    userId: 'user-1',
-    ownerAuthProvenance: 'unknown',
-    catId: createCatId('codex-sol'),
-    threadId: 'thread-1',
-    a2aTriggerMessageId: h.source.id,
-    originTriggerMessageId: h.source.id,
-    clientMessageIds: new Set(),
-    createdAt: 1,
-    expiresAt: 99_000,
-    ...overrides,
-  };
-}
-
-function dispatchWake(h) {
-  return {
-    kind: 'structured',
-    protocol: 'dispatch',
-    subjectKey: 'ball:thread:thread-1',
-    holderCatId: 'codex-sol',
-    handoff: {
-      sourceEventId: `route:${h.source.id}:codex-sol`,
-      messageId: h.source.id,
-      fromCatId: 'fable5',
-    },
-  };
-}
+import {
+  createA2ADispositionAuth as auth,
+  createA2ADispositionWake as dispatchWake,
+  createA2ADispositionHarness as harness,
+} from './helpers/a2a-dispatch-disposition-harness.js';
 
 describe('F167 ordinary A2A dispatch disposition', () => {
   test('only the exact invocation-bound producer terminalizes the dispatch ball once', async () => {
@@ -144,6 +34,9 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       shouldBlock: false,
       transitionObserved: true,
       structuredTransitionKind: 'dispatch_dispositioned',
+      dispatchDisposition: 'completed',
+      dispatchDispositionEventId: `dispatch-disposition:inv-1:${h.source.id}`,
+      dispatchDispositionAt: 2_000,
       evidenceRefs: [`dispatch:ball:thread:thread-1`, `route:${h.source.id}:codex-sol`],
     });
 
@@ -153,6 +46,28 @@ describe('F167 ordinary A2A dispatch disposition', () => {
         .length,
       1,
     );
+  });
+
+  test('handled remains distinguishable from completed at the stop-gate decision boundary', async () => {
+    const h = await harness();
+    const gate = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: h.projectionStore,
+      ballCustodyEventLog: h.eventLog,
+    });
+    const opened = await gate.open(dispatchWake(h));
+
+    await h.service.complete(auth(h), 'handled');
+
+    assert.deepEqual(await gate.close(opened), {
+      state: 'covered_active',
+      shouldBlock: false,
+      transitionObserved: true,
+      structuredTransitionKind: 'dispatch_dispositioned',
+      dispatchDisposition: 'handled',
+      dispatchDispositionEventId: `dispatch-disposition:inv-1:${h.source.id}`,
+      dispatchDispositionAt: 2_000,
+      evidenceRefs: [`dispatch:ball:thread:thread-1`, `route:${h.source.id}:codex-sol`],
+    });
   });
 
   test('concurrent conflicting dispositions linearize to one event and reject the loser', async () => {
@@ -168,6 +83,34 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       (await h.eventLog.read('ball:thread:thread-1')).filter((event) => event.kind === 'ball.dispatch_dispositioned')
         .length,
       1,
+    );
+  });
+
+  test('a stale disposition cannot resolve a successor holder after the holder check', async () => {
+    const h = await harness({
+      beforeDispositionRecord: async ({ ingest }) => {
+        await ingest.record(
+          buildHandedEvent({
+            threadId: 'thread-1',
+            fromCatId: 'codex-sol',
+            toCatId: 'opus',
+            messageId: 'successor-message',
+            at: 1_500,
+          }),
+        );
+      },
+    });
+
+    await assert.rejects(
+      () => h.service.complete(auth(h), 'completed'),
+      /^A2ADispatchDispositionError: a2a_dispatch_disposition_fence_conflict$/,
+    );
+    const projection = await h.projectionStore.get('ball:thread:thread-1');
+    assert.equal(projection.state, 'active');
+    assert.equal(projection.holder, 'opus');
+    assert.equal(
+      (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.dispatch_dispositioned'),
+      false,
     );
   });
 

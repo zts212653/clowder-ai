@@ -12,6 +12,10 @@ const { InvocationQueue } = await import('../dist/domains/cats/services/agents/i
 /** Build deps with stubs */
 function buildDeps(overrides = {}) {
   const invocationQueue = new InvocationQueue();
+  const managedCommandWakeRecovery = {
+    retireCarrier: mock.fn(async () => 0),
+    retireThread: mock.fn(async () => ({ retired: 0, messageIds: [] })),
+  };
   return {
     threadStore: {
       get: mock.fn(async (id) => ({
@@ -49,6 +53,7 @@ function buildDeps(overrides = {}) {
     },
     messageStore: {
       markCanceled: mock.fn(async () => ({ deliveryStatus: 'canceled', deliveryTransitioned: true })),
+      getById: mock.fn(async () => null),
     },
     queueCustodyCoordinator: {
       persistEntry: mock.fn(async () => {}),
@@ -59,6 +64,8 @@ function buildDeps(overrides = {}) {
     agentSessionMutex: {
       forceReleaseByScope: mock.fn(() => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] })),
     },
+    managedCommandWakeRecovery,
+    getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
     ...overrides,
   };
 }
@@ -450,7 +457,36 @@ describe('Queue Management API', () => {
   // ── Functional: DELETE entry ──
 
   it('DELETE /queue/:entryId withdraws actionable custody without deleting author history', async () => {
-    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict' });
+    const r = enqueueEntry(deps.invocationQueue, {
+      ownerAuthProvenance: 'strict',
+      messageId: 'msg-withdrawn',
+    });
+    deps.invocationQueue.backfillMessageId('t1', 'user-a', r.entry.id, 'msg-withdrawn-merged');
+    const terminalCustody = {
+      version: 1,
+      entryId: r.entry.id,
+      revision: 2,
+      ownerAuthProvenance: 'strict',
+      intent: 'execute',
+      status: 'terminal',
+      allTargetCats: ['opus'],
+      pendingTargetCats: [],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      withdrawnByCatIds: ['opus'],
+      withdrawnAtByCatId: { opus: 20 },
+      priority: 'normal',
+      createdAt: r.entry.createdAt,
+      updatedAt: 20,
+    };
+    deps.messageStore.getById.mock.mockImplementation(async (messageId) =>
+      messageId === 'msg-withdrawn' || messageId === 'msg-withdrawn-merged'
+        ? { id: messageId, queueCustody: terminalCustody }
+        : null,
+    );
 
     const res = await app.inject({
       method: 'DELETE',
@@ -466,6 +502,14 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'removed');
+    assert.deepEqual(updateCall.arguments[2].queue, []);
+    assert.deepEqual(
+      updateCall.arguments[2].messageReceipts.map((projection) => projection.messageId),
+      ['msg-withdrawn', 'msg-withdrawn-merged'],
+    );
+    assert.deepEqual(updateCall.arguments[2].messageReceipts[0].queueReceipt.targets, [
+      { catId: 'opus', state: 'withdrawn', withdrawnAt: 20 },
+    ]);
     assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls.length, 1);
     assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls[0].arguments[0].id, r.entry.id);
     assert.equal(deps.messageStore.markCanceled.mock.calls.length, 0);
@@ -487,6 +531,10 @@ describe('Queue Management API', () => {
 
     assert.equal(res.statusCode, 503);
     assert.equal(JSON.parse(res.body).code, 'QUEUE_WITHDRAWAL_FAILED');
+    const terminalReceiptPublication = deps.socketManager.emitToUser.mock.calls.find(
+      (call) => call.arguments[1] === 'queue_updated' && call.arguments[2].messageReceipts?.length > 0,
+    );
+    assert.equal(terminalReceiptPublication, undefined);
     assert.deepEqual(
       deps.invocationQueue.list('t1', 'user-a').map((entry) => entry.id),
       [r.entry.id],
@@ -542,8 +590,64 @@ describe('Queue Management API', () => {
   // ── Functional: DELETE clear ──
 
   it('DELETE /queue clears all entries for user', async () => {
-    enqueueEntry(deps.invocationQueue, { targetCats: ['a'], ownerAuthProvenance: 'strict' });
-    enqueueEntry(deps.invocationQueue, { targetCats: ['b'] });
+    const first = enqueueEntry(deps.invocationQueue, {
+      targetCats: ['a'],
+      ownerAuthProvenance: 'strict',
+      messageId: 'msg-clear-a',
+    });
+    const second = enqueueEntry(deps.invocationQueue, { targetCats: ['b'], messageId: 'msg-clear-b' });
+    const custodyByMessageId = new Map([
+      [
+        'msg-clear-a',
+        {
+          version: 1,
+          entryId: first.entry.id,
+          revision: 2,
+          ownerAuthProvenance: 'strict',
+          intent: 'execute',
+          status: 'terminal',
+          allTargetCats: ['a'],
+          pendingTargetCats: [],
+          notifiedByCatIds: [],
+          seenByCatIds: [],
+          seenInvocationIdByCatId: {},
+          failedByCatIds: [],
+          handledByCatIds: [],
+          withdrawnByCatIds: ['a'],
+          withdrawnAtByCatId: { a: 30 },
+          priority: 'normal',
+          createdAt: first.entry.createdAt,
+          updatedAt: 30,
+        },
+      ],
+      [
+        'msg-clear-b',
+        {
+          version: 1,
+          entryId: second.entry.id,
+          revision: 2,
+          ownerAuthProvenance: 'unknown',
+          intent: 'execute',
+          status: 'terminal',
+          allTargetCats: ['b'],
+          pendingTargetCats: [],
+          notifiedByCatIds: [],
+          seenByCatIds: [],
+          seenInvocationIdByCatId: {},
+          failedByCatIds: [],
+          handledByCatIds: [],
+          withdrawnByCatIds: ['b'],
+          withdrawnAtByCatId: { b: 31 },
+          priority: 'normal',
+          createdAt: second.entry.createdAt,
+          updatedAt: 31,
+        },
+      ],
+    ]);
+    deps.messageStore.getById.mock.mockImplementation(async (messageId) => {
+      const queueCustody = custodyByMessageId.get(messageId);
+      return queueCustody ? { id: messageId, queueCustody } : null;
+    });
 
     const res = await app.inject({
       method: 'DELETE',
@@ -563,10 +667,42 @@ describe('Queue Management API', () => {
     const updateCall = emitCalls.find((c) => c.arguments[1] === 'queue_updated');
     assert.ok(updateCall);
     assert.equal(updateCall.arguments[2].action, 'cleared');
+    assert.deepEqual(
+      updateCall.arguments[2].messageReceipts.map((projection) => projection.messageId),
+      ['msg-clear-a', 'msg-clear-b'],
+    );
     assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.calls.length, 2);
     assert.equal(deps.messageStore.markCanceled.mock.calls.length, 0);
     const deleted = deps.socketManager.emitToUser.mock.calls.find((call) => call.arguments[1] === 'message_deleted');
     assert.equal(deleted, undefined);
+  });
+
+  it('DELETE /queue retires each exact managed-wake producer after durable carrier withdrawal', async () => {
+    const events = [];
+    deps.queueCustodyCoordinator.withdrawEntry.mock.mockImplementation(async (entry) => {
+      events.push(`withdraw:${entry.id}`);
+      return true;
+    });
+    deps.managedCommandWakeRecovery.retireCarrier.mock.mockImplementation(async (messageIds, reason) => {
+      events.push(`retire:${messageIds.join(',')}:${reason}`);
+      return 1;
+    });
+    const { entry } = enqueueEntry(deps.invocationQueue, {
+      targetCats: ['codex-sol'],
+      messageId: 'message-managed-wake',
+      source: 'agent',
+      sourceCategory: 'scheduled',
+    });
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(events, [`withdraw:${entry.id}`, 'retire:message-managed-wake:withdrawn']);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 0);
   });
 
   it('DELETE /queue reports partial durable withdrawal and keeps every unsettled entry actionable', async () => {
@@ -680,6 +816,88 @@ describe('Queue Management API', () => {
   });
 
   // ── Functional: POST steer ──
+
+  it('POST /queue/steer-batch reserves exact A+B before one cancel and never marks unselected C', async () => {
+    const a = enqueueEntry(deps.invocationQueue, { content: 'a', ownerAuthProvenance: 'strict' }).entry;
+    const b = enqueueEntry(deps.invocationQueue, { content: 'b', ownerAuthProvenance: 'strict' }).entry;
+    const c = enqueueEntry(deps.invocationQueue, { content: 'c', ownerAuthProvenance: 'strict' }).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => {
+      const byId = new Map(deps.invocationQueue.list('t1', 'user-a').map((entry) => [entry.id, entry]));
+      assert.deepEqual(byId.get(a.id).steerRequestedByCatIds, ['opus'], 'A reserved before cancel');
+      assert.deepEqual(byId.get(b.id).steerRequestedByCatIds, ['opus'], 'B reserved before cancel');
+      assert.equal(byId.get(c.id).steerRequestedByCatIds, undefined, 'C remains outside reservation');
+      return { cancelled: true, catIds: ['opus'], executionIds: ['inv-active'] };
+    });
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: a }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/queue/steer-batch',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { entryIds: [a.id, b.id] },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json().entryIds, [a.id, b.id]);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 1);
+    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 1);
+    assert.equal(deps.queueCustodyCoordinator.persistEntry.mock.calls.length, 2);
+
+    const projected = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(projected.statusCode, 200);
+    assert.ok(projected.json().queue.every((entry) => !Object.hasOwn(entry, 'exactSteerBatch')));
+  });
+
+  it('POST /queue/steer-batch rejects an ineligible member atomically before cancel', async () => {
+    const a = enqueueEntry(deps.invocationQueue, { content: 'a', ownerAuthProvenance: 'strict' }).entry;
+    const freshness = enqueueEntry(deps.invocationQueue, {
+      content: 'freshness',
+      ownerAuthProvenance: 'strict',
+      sourceCategory: 'freshness',
+      freshnessClosureId: 'closure-1',
+    }).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/queue/steer-batch',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { entryIds: [a.id, freshness.id] },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'BATCH_ENTRY_INELIGIBLE');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.equal(deps.queueProcessor.processNext.mock.calls.length, 0);
+    assert.ok(deps.invocationQueue.list('t1', 'user-a').every((entry) => !entry.steerRequestedByCatIds));
+  });
+
+  it('POST /queue/steer-batch releases the whole reservation when durable reservation persistence fails', async () => {
+    const a = enqueueEntry(deps.invocationQueue, { content: 'a', ownerAuthProvenance: 'strict' }).entry;
+    const b = enqueueEntry(deps.invocationQueue, { content: 'b', ownerAuthProvenance: 'strict' }).entry;
+    deps.queueCustodyCoordinator.persistEntry = mock.fn(async () => {
+      throw new Error('custody unavailable');
+    });
+    deps.invocationTracker.has = mock.fn(() => true);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/queue/steer-batch',
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { entryIds: [a.id, b.id] },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().code, 'BATCH_RESERVATION_PERSIST_FAILED');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    assert.ok(deps.invocationQueue.list('t1', 'user-a').every((entry) => !entry.steerRequestedByCatIds));
+  });
 
   it('POST /queue/:entryId/steer rejects promote because Steer has one cancel-and-restart meaning', async () => {
     const queued = enqueueEntry(deps.invocationQueue, { content: 'queued correction' });

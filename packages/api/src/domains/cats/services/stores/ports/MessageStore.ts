@@ -10,6 +10,7 @@ import type {
   CatId,
   ConnectorSource,
   CrossThreadCoordination,
+  MessageBundleCarrierV1,
   MessageContent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
@@ -64,6 +65,8 @@ export interface ThreadMessageReadOptions {
   includeQueuedCatMessages?: boolean;
   /** Include durable queued user work in the owner's browser timeline only. */
   includeQueuedUserMessages?: boolean;
+  /** Include queued user work whose body was durably exposed to this exact cat. */
+  includeExposedQueuedUserMessagesForCatId?: CatId;
   /** Include only owner-visible, content-free tombstones whose body had a proven exposure before recall. */
   includeRecalledUserMessages?: boolean;
   /**
@@ -247,6 +250,8 @@ export interface StoredMessage {
       coordinationKey: 'minted-active-root' | 'minted-terminal-root' | 'action-active-root';
     };
     targetCats?: string[];
+    /** F294: refs-only durable carrier; target message id remains the Bundle identity. */
+    messageBundle?: MessageBundleCarrierV1;
     /** F292: Host-authored provenance for a data-only meeting artifact queued to a cat. */
     meetingArtifact?: {
       intakeId: string;
@@ -334,6 +339,12 @@ export interface StoredMessage {
   revealedAt?: number;
   /** F097: External connector source. Present = connector message (not user/cat) */
   source?: ConnectorSource;
+  /**
+   * Read-time fail-closed marker: Redis contained a source field that could not
+   * be validated as ConnectorSource. Authority consumers must not reinterpret
+   * this message as user-authored work.
+   */
+  sourceParseFailure?: true;
   /** F098-D: Timestamp when a queued message was actually dequeued and processed by a cat */
   deliveredAt?: number;
   /** Stable timeline score when publication time differs from execution delivery time. */
@@ -411,7 +422,7 @@ export type HostMessageExtra = Omit<NonNullable<StoredMessage['extra']>, 'plugin
  */
 export type AppendMessageInput = Omit<
   StoredMessage,
-  'id' | 'threadId' | 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'recall'
+  'id' | 'threadId' | 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'recall' | 'sourceParseFailure'
 > & {
   threadId?: string;
   /** Append may initialize only queued state; terminal delivery metadata belongs to transition methods. */
@@ -1315,6 +1326,41 @@ export class MessageStore {
     const max = Number.isFinite(limit as number) && (limit as number) > 0 ? (limit as number) : Number.MAX_SAFE_INTEGER;
     const isVisible = resolveThreadMessageVisibility(options);
 
+    // The canonical visibility index intentionally excludes queued user work.
+    // A caller that explicitly requests those rows therefore needs the raw
+    // thread timeline domain. Mixing visibilitySeq with queued authoring time
+    // would skip exposed queued rows and break Memory/Redis parity.
+    if (
+      options?.includeQueuedUserMessages === true ||
+      options?.includeExposedQueuedUserMessagesForCatId !== undefined
+    ) {
+      const ordered = this.messages
+        .filter((msg) => msg.threadId === threadId)
+        .filter((msg) => !userId || msg.userId === userId || isSystemUserMessage(msg))
+        .filter(isVisible)
+        .sort((left, right) => {
+          const timeDelta = getTimelineOrderTime(left) - getTimelineOrderTime(right);
+          return timeDelta || left.id.localeCompare(right.id);
+        });
+      let cursor: ReturnType<typeof parseCursor>;
+      try {
+        cursor = parseCursor(afterId);
+      } catch (error) {
+        if (options.unresolvedCursorPolicy === 'empty') return [];
+        throw error;
+      }
+      const projectVisibilitySeq = (message: StoredMessage): StoredMessage => {
+        const seq = this.visibilitySeq.get(message.id);
+        return seq === undefined ? message : { ...message, visibilitySeq: seq };
+      };
+      if (!cursor) return ordered.slice(0, max).map(projectVisibilitySeq);
+      const cursorIndex = ordered.findIndex((message) => message.id === cursor.id);
+      if (cursorIndex < 0) {
+        return options.unresolvedCursorPolicy === 'empty' ? [] : ordered.slice(0, max).map(projectVisibilitySeq);
+      }
+      return ordered.slice(cursorIndex + 1, cursorIndex + 1 + max).map(projectVisibilitySeq);
+    }
+
     // Collect all visible messages, inject visibilitySeq (§8.7: binding by ID)
     const visible: Array<{ msg: StoredMessage; seq: number }> = [];
     for (const msg of this.messages) {
@@ -1671,6 +1717,9 @@ export class MessageStore {
       input.deliveredAt === undefined;
     if (msg.deliveryStatus !== 'queued' && !isExposedRecallSettlement) {
       throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
+    }
+    if (input.replacement && input.replacement.sourceMessageId !== id) {
+      throw new Error('queue custody replacement proof source message mismatch');
     }
     assertQueueCustodyTransition(msg.queueCustody, input);
     msg.queueCustody = cloneQueuedMessageCustody(input.next);

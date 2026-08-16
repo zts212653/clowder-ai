@@ -156,4 +156,62 @@ describe('ChatMessage layout-change event timing', () => {
 
     window.removeEventListener('catcafe:chat-layout-changed', handler);
   });
+
+  it('dispatches chat-layout-changed after tools and tool-detail disclosure commits', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const message = {
+      id: 'm3',
+      type: 'assistant',
+      catId: 'codex',
+      timestamp: Date.now(),
+      visibility: 'public',
+      revealedAt: null,
+      whisperTo: null,
+      origin: 'assistant',
+      variant: null,
+      isStreaming: false,
+      content: '',
+      thinking: '',
+      contentBlocks: null,
+      toolEvents: [
+        { id: 'tool-1', type: 'tool_use', label: 'Read file', detail: '{"file_path":"README.md"}', timestamp: 1000 },
+        { id: 'result-1', type: 'tool_result', label: 'Read result', detail: 'target detail', timestamp: 1001 },
+      ],
+      metadata: null,
+      summary: null,
+      evidence: null,
+      extra: null,
+      source: null,
+    } as const;
+    const snapshots: Array<{ tools: boolean; detail: boolean }> = [];
+    const handler = () => {
+      snapshots.push({
+        tools: Boolean(container.querySelector('[data-testid="tool-row-tool-1"]')),
+        detail: container.textContent?.includes('target detail') ?? false,
+      });
+    };
+    window.addEventListener('catcafe:chat-layout-changed', handler);
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: message as unknown as ChatMessageType,
+          getCatById: () => undefined,
+        }),
+      );
+    });
+    const cliToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('CLI Output'),
+    );
+    act(() => (cliToggle as HTMLButtonElement).click());
+    const toolsToggle = container.querySelector<HTMLButtonElement>('[data-testid="tools-section-toggle"]');
+    act(() => toolsToggle?.click());
+    const toolRow = container.querySelector<HTMLButtonElement>('[data-testid="tool-row-tool-1"]');
+    act(() => toolRow?.click());
+
+    expect(snapshots).toContainEqual({ tools: true, detail: false });
+    expect(snapshots.at(-1)).toEqual({ tools: true, detail: true });
+
+    window.removeEventListener('catcafe:chat-layout-changed', handler);
+  });
 });

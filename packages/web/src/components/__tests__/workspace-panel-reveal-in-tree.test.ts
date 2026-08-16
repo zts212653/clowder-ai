@@ -163,8 +163,10 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
       currentWorktree: { id: 'main', branch: 'main', root: '/tmp/repo' },
       workspaceMode: 'dev',
       setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
       workspaceSurface: 'files',
       setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
       workspacePreview: { port: undefined, path: '/' },
       setWorkspacePreview: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
@@ -189,6 +191,9 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
     setWorkspaceSurface: vi.fn((surface: string) => {
       store.workspaceSurface = surface;
     }),
+    restoreWorkspaceSurface: vi.fn((surface: string) => {
+      store.workspaceSurface = surface;
+    }),
     workspacePreview: { port: undefined, path: '/' },
     setWorkspacePreview: vi.fn((preview: { port?: number; path: string }) => {
       store.workspacePreview = preview;
@@ -207,6 +212,9 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
       store.workspaceRevealPath = path;
     }),
     setWorkspaceMode: vi.fn((mode: string) => {
+      store.workspaceMode = mode;
+    }),
+    restoreWorkspaceMode: vi.fn((mode: string) => {
       store.workspaceMode = mode;
     }),
     setRightPanelMode: vi.fn(),

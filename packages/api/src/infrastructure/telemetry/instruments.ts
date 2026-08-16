@@ -912,6 +912,19 @@ export const codexAppServerHostEviction = lazy(() =>
   }),
 );
 
+export const codexAppServerHostMigration = lazy(() =>
+  meter().createCounter('cat_cafe.codex_app_server.host.migration', {
+    description: 'Native-session host migration lifecycle, partitioned by bounded reason and status',
+  }),
+);
+
+export const codexAppServerHostMigrationDuration = lazy(() =>
+  meter().createHistogram('cat_cafe.codex_app_server.host.migration_duration', {
+    description: 'Time spent waiting for and retiring a source host before native-session migration',
+    unit: 's',
+  }),
+);
+
 /** Durable visibility mutation could not resolve a raw cursor to canonical position. */
 export const visibilityCursorUnresolvedMutation = lazy(() =>
   meter().createCounter('cat_cafe.visibility_cursor.unresolved_mutation', {
@@ -1272,6 +1285,7 @@ export function warmupCounters(): void {
   codexAppServerHostLive.add(0);
   codexAppServerLeaseActive.add(0);
   codexAppServerHostEviction.add(0);
+  codexAppServerHostMigration.add(0);
   freshnessGateHeld.add(0);
   freshnessGateForward.add(0);
   freshnessRelevanceSuppressed.add(0);

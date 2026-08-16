@@ -2469,41 +2469,166 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.deepEqual(active.continuityCapsule, continuityCapsule);
   });
 
-  it('F24: updates cliSessionId when session_init arrives for existing active record', async () => {
+  it('active_writer_reborn seals by replacement mechanism but emits runtime-replacement continuity provenance', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState, formatContinuationPrompt } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'native-old',
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      userId: 'user1',
+    });
+    const sessionSealer = {
+      requestSeal: async ({ sessionId, reason }) => {
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason, updatedAt: Date.now() });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      finalize: async ({ sessionId }) => {
+        sessionChainStore.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+      },
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const replacement = {
+      cause: 'active_writer_reborn',
+      previousNativeThreadId: 'native-old',
+      detectedAt: 1_786_630_000,
+      attempt: 1,
+      diagnostics: {
+        observedAt: 1_786_630_000,
+        classification: 'native_active_turn_without_local_lease',
+        confidence: 'medium',
+        localHostLease: { state: 'not_observed', source: 'carrier_affinity' },
+        nativeThread: {
+          readOutcome: 'succeeded',
+          threadId: 'native-old',
+          status: 'active',
+          activeTurn: { turnId: 'turn-old', startedAt: 1_786_629_000 },
+        },
+        writerClientIdentity: 'unavailable',
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'codex',
+          sessionId: 'native-fresh',
+          sessionReplacement: replacement,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const continuityCapsule = buildCapsuleFromRouteState({
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      mode: 'independent',
+      a2aEnabled: true,
+    });
+
+    const msgs = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer },
+        {
+          catId: 'codex',
+          service,
+          prompt: 'continue',
+          userId: 'user1',
+          threadId: 'thread-active-writer-recovery',
+          isLastCat: true,
+          continuityCapsule,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('codex', 'thread-active-writer-recovery');
+    const sealed = chain.find((record) => record.id === oldRecord.id);
+    const active = chain.find((record) => record.status === 'active');
+    assert.equal(sealed.sealReason, 'cli_session_replaced', 'seal reason remains the mechanism');
+    assert.equal(sealed.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(sealed.continuityCapsule.replacement, replacement);
+    assert.equal(active.cliSessionId, 'native-fresh');
+
+    const sealEvent = msgs.find((message) => {
+      if (message.type !== 'system_info') return false;
+      try {
+        return JSON.parse(message.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'runtime replacement must emit a continuation carrier');
+    const payload = JSON.parse(sealEvent.content);
+    assert.equal(payload.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(payload.continuityCapsule.replacement, replacement);
+    assert.equal(payload.continuityCapsule.seal.reason, 'cli_session_replaced');
+    assert.equal(payload.continuityDiagnostics.source, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.boundary, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.sealMechanism, 'cli_session_replaced');
+    assert.deepEqual(payload.continuityDiagnostics.replacement, replacement);
+
+    const prompt = formatContinuationPrompt(payload.continuityCapsule);
+    assert.match(prompt, /automatic native runtime recovery/i);
+    assert.doesNotMatch(prompt, /threshold|manual|handoff/i);
+  });
+
+  it('F24: plain cli_session_replaced remains a mechanism and does not invent runtime recovery', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
     const sessionChainStore = new SessionChainStore();
 
     // Pre-create an active session with old cliSessionId
     sessionChainStore.create({
       cliSessionId: 'old-cli',
       threadId: 'thread-f24-update',
-      catId: 'opus',
+      catId: 'codex',
       userId: 'user1',
     });
 
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
-        yield { type: 'session_init', catId: 'opus', sessionId: 'new-cli', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'codex', sessionId: 'new-cli', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
 
     const deps = { ...makeDeps(), sessionChainStore };
-    await collect(
+    const msgs = await collect(
       invokeSingleCat(deps, {
-        catId: 'opus',
+        catId: 'codex',
         service,
         prompt: 'test',
         userId: 'user1',
         threadId: 'thread-f24-update',
         isLastCat: true,
+        continuityCapsule: buildCapsuleFromRouteState({
+          threadId: 'thread-f24-update',
+          catId: 'codex',
+          mode: 'independent',
+          a2aEnabled: true,
+        }),
       }),
     );
 
-    const active = sessionChainStore.getActive('opus', 'thread-f24-update');
+    const chain = sessionChainStore.getChain('codex', 'thread-f24-update');
+    const sealed = chain.find((record) => record.status === 'sealed');
+    const active = sessionChainStore.getActive('codex', 'thread-f24-update');
     assert.ok(active);
     assert.equal(active.cliSessionId, 'new-cli', 'should have updated cliSessionId');
+    assert.equal(sealed.sealReason, 'cli_session_replaced');
+    assert.equal(active.continuityCapsule.continuationReason, 'threshold_seal');
+    assert.equal(
+      msgs.some((message) => message.type === 'system_info' && /runtime_replacement/.test(message.content ?? '')),
+      false,
+    );
   });
 
   it('ACP session: ephemeralSession=true skips seal on sessionId change', async () => {
@@ -7440,7 +7565,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       assert.equal(optionsSeen[0]?.contextCapacity?.windowTokens, 1_000_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.inputCeilingTokens, 984_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.actionable, true);
-      assert.equal(seenPrompt, 'resume-only current delta');
+      assertStagingPromptContract(seenPrompt, '#1329 native OpenCode capacity binding');
+      assert.ok(seenPrompt.endsWith('resume-only current delta'));
+      assert.ok(!seenPrompt.includes('[Previous Session Summary]'));
+      assert.ok(!seenPrompt.includes('active-session history'));
       assert.deepEqual(callOrder, [['invoke']]);
     } finally {
       process.chdir(previousCwd);

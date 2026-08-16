@@ -135,7 +135,7 @@ git commit -m "feat: add specific feature"
 
 计划中的 Open Question 必须分类：
 - **技术 OQ**：实现过程中自行解决
-- **价值 OQ**：需要 operator 判断 → 附 Decision Packet（格式见 `refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
+- **价值 OQ**：需要 operator 判断 → 附 Decision Packet（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
 
 先判断可逆性：回滚成本低的不升级 operator，猫猫自决。
 

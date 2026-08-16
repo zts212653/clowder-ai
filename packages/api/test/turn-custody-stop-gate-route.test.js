@@ -10,6 +10,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
+const { TurnCustodyAdoptionRegistry, turnCustodyAdoptionRegistry } = await import(
+  '../dist/domains/ball-custody/TurnCustodyAdoptionRegistry.js'
+);
+
 let catRegistryLock = Promise.resolve();
 
 async function withCatRegistryLock(fn) {
@@ -213,6 +217,7 @@ async function runRoute(
     sessionSealer,
     transcriptReader,
     sessionManager,
+    throwAfterInvocationCreated = false,
   } = {},
 ) {
   return withCatRegistryLock(async () => {
@@ -246,6 +251,13 @@ async function runRoute(
         ...routeOptions,
       })) {
         yielded.push(message);
+        if (
+          throwAfterInvocationCreated &&
+          message.type === 'system_info' &&
+          message.extra?.turnExecution?.invocationId
+        ) {
+          throw new Error('simulated route failure after invocation creation');
+        }
       }
       return { appended, yielded, metadataAugments };
     } finally {
@@ -377,6 +389,242 @@ describe('F167 Phase T route custody stop gate', () => {
     assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'a2a_dispatch_disposition_missing');
   });
 
+  test('handled dispatch plus immediate provider termination emits one typed continuation witness', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        {
+          shouldBlock: false,
+          transitionObserved: true,
+          structuredTransitionKind: 'dispatch_dispositioned',
+          dispatchDisposition: 'handled',
+          dispatchDispositionEventId: 'dispatch-disposition:codex-inv-1:message-a2a',
+          dispatchDispositionAt: 2_000,
+        },
+      ],
+    });
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'tool_use',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolInput: { disposition: 'handled' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolResultStatus: 'ok',
+          content: '{"outcome":"applied","disposition":"handled"}',
+        },
+      ],
+    ]);
+
+    const { yielded } = await runRoute(service, 'thread-a2a-handled-provider-terminal', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-handled-provider-terminal',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, {
+      kind: 'dispatch_handled_continuation',
+      sourceMessageId: 'message-a2a',
+      dispositionEventId: 'dispatch-disposition:codex-inv-1:message-a2a',
+      dispositionAt: 2_000,
+    });
+  });
+
+  test('completed dispatch is terminal and never emits a continuation witness', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        {
+          shouldBlock: false,
+          transitionObserved: true,
+          structuredTransitionKind: 'dispatch_dispositioned',
+          dispatchDisposition: 'completed',
+          dispatchDispositionEventId: 'dispatch-disposition:codex-inv-1:message-a2a',
+          dispatchDispositionAt: 2_000,
+        },
+      ],
+    });
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'tool_use',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolInput: { disposition: 'completed' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolResultStatus: 'ok',
+          content: '{"outcome":"applied","disposition":"completed"}',
+        },
+      ],
+    ]);
+
+    const { yielded } = await runRoute(service, 'thread-a2a-completed-terminal', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-completed-terminal',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.equal(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, undefined);
+  });
+
+  test('handled dispatch with same-invocation post-tool progress does not enqueue an extra continuation', async () => {
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        {
+          shouldBlock: false,
+          transitionObserved: true,
+          structuredTransitionKind: 'dispatch_dispositioned',
+          dispatchDisposition: 'handled',
+          dispatchDispositionEventId: 'dispatch-disposition:codex-inv-1:message-a2a',
+          dispatchDispositionAt: 2_000,
+        },
+      ],
+    });
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'tool_use',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolInput: { disposition: 'handled' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'dispose-1',
+          toolResultStatus: 'ok',
+          content: '{"outcome":"applied","disposition":"handled"}',
+        },
+        {
+          type: 'tool_use',
+          toolName: 'command_execution',
+          toolUseId: 'merge-1',
+          toolInput: { command: 'gh pr merge' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'command_execution',
+          toolUseId: 'merge-1',
+          toolResultStatus: 'ok',
+          content: 'merged',
+        },
+      ],
+    ]);
+
+    const { yielded } = await runRoute(service, 'thread-a2a-handled-same-turn-progress', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-handled-same-turn-progress',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.equal(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, undefined);
+  });
+
+  test('a released structured carrier does not mount a stale disposition producer or hard-fail', async () => {
+    const projection = createProjectionService({
+      state: 'covered_empty',
+      closeDecisions: [{ shouldBlock: false, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['The successor now owns this protocol ball.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-a2a-dispatch-released', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-dispatch-released',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.doesNotMatch(service.calls[0], /cat_cafe_complete_a2a_dispatch/);
+    assert.equal(
+      appended.some((message) => message.source?.connector === 'routing-guard-failure'),
+      false,
+    );
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, undefined);
+  });
+
+  test('an unproven structured holder mismatch fails once without spawning a retry child', async () => {
+    const projection = createProjectionService({
+      state: 'unknown_legacy',
+      closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
+    });
+    const service = createSequenceService('codex', ['The third-party holder change is not proven as my release.']);
+
+    const { appended, yielded } = await runRoute(service, 'thread-a2a-dispatch-unproven-holder', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: 'ball:thread:thread-a2a-dispatch-unproven-holder',
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'route:message-a2a:codex',
+            messageId: 'message-a2a',
+            fromCatId: 'fable5',
+          },
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.match(service.calls[0], /cat_cafe_complete_a2a_dispatch/);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(yielded.find((message) => message.type === 'done')?.errorCode, 'a2a_dispatch_disposition_missing');
+  });
+
   test('managed re-hold emits exact continuation receipt proof without terminal completion', async () => {
     const projection = createProjectionService({
       state: 'covered_active',
@@ -404,6 +652,270 @@ describe('F167 Phase T route custody stop gate', () => {
       taskId: 'task-managed-hold',
       transition: 'reheld',
     });
+  });
+
+  test('a managed hold body adopted by an already-running turn emits its own continuation proof', async () => {
+    const opens = [];
+    const projection = {
+      opens,
+      async open(wake) {
+        opens.push(wake);
+        return wake.kind === 'structured' && wake.protocol === 'hold'
+          ? { state: 'covered_active', evidenceRefs: [`hold:${wake.sourceMessageId}`], baseline: { kind: 'test' } }
+          : { state: 'covered_empty', evidenceRefs: [`wake:${wake.kind}`] };
+      },
+      async close(opened) {
+        return opened.state === 'covered_active'
+          ? {
+              state: 'covered_active',
+              shouldBlock: false,
+              transitionObserved: true,
+              structuredTransitionKind: 'held',
+              evidenceRefs: [...opened.evidenceRefs],
+            }
+          : {
+              state: 'covered_empty',
+              shouldBlock: false,
+              transitionObserved: false,
+              evidenceRefs: [...opened.evidenceRefs],
+            };
+      },
+    };
+    const service = createSequenceService('codex', ['Consumed the queued callback and established a new hold.']);
+
+    const { yielded } = await runRoute(service, 'thread-managed-hold-adopted', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: { kind: 'unstructured', source: 'user_chat' },
+        persistedPromptMessageIds: ['message-managed-hold-adopted'],
+        onPromptMessagesExposed: async () => [
+          {
+            kind: 'structured',
+            protocol: 'hold',
+            subjectKey: 'ball:thread:thread-managed-hold-adopted',
+            holderCatId: 'codex',
+            sourceMessageId: 'message-managed-hold-adopted',
+            taskId: 'task-managed-hold-adopted',
+          },
+        ],
+      },
+    });
+
+    assert.equal(opens.length, 2, 'the primary turn and adopted Queue obligation must both open projections');
+    assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitnesses, [
+      {
+        kind: 'managed_hold_continued',
+        sourceMessageId: 'message-managed-hold-adopted',
+        taskId: 'task-managed-hold-adopted',
+        transition: 'reheld',
+      },
+    ]);
+  });
+
+  test('a full-context tool read can adopt a managed hold after provider execution started', async () => {
+    turnCustodyAdoptionRegistry.resetForTest();
+    const opens = [];
+    const projection = {
+      async open(wake) {
+        opens.push(wake);
+        return wake.kind === 'structured'
+          ? { state: 'covered_active', evidenceRefs: [`hold:${wake.sourceMessageId}`], baseline: { kind: 'test' } }
+          : { state: 'covered_empty', evidenceRefs: [`wake:${wake.kind}`] };
+      },
+      async close(opened) {
+        return opened.state === 'covered_active'
+          ? {
+              state: 'covered_active',
+              shouldBlock: false,
+              transitionObserved: true,
+              structuredTransitionKind: 'held',
+              evidenceRefs: [...opened.evidenceRefs],
+            }
+          : {
+              state: 'covered_empty',
+              shouldBlock: false,
+              transitionObserved: false,
+              evidenceRefs: [...opened.evidenceRefs],
+            };
+      },
+    };
+    const wake = {
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-managed-hold-tool-adopted',
+      holderCatId: 'codex',
+      sourceMessageId: 'message-managed-hold-tool-adopted',
+      taskId: 'task-managed-hold-tool-adopted',
+    };
+    const service = {
+      calls: [],
+      async *invoke(prompt) {
+        this.calls.push(prompt);
+        yield {
+          type: 'system_info',
+          catId: 'codex',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'codex-inv-tool-adoption' }),
+          timestamp: Date.now(),
+        };
+        assert.equal(await turnCustodyAdoptionRegistry.adopt('outer-inv-1', [wake]), true);
+        yield { type: 'text', catId: 'codex', content: 'Read the new callback and re-held.', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    try {
+      const { yielded } = await runRoute(service, 'thread-managed-hold-tool-adopted', {
+        projectionService: projection,
+        routeOptions: { turnCustodyWake: { kind: 'unstructured', source: 'user_chat' } },
+      });
+      assert.equal(opens.length, 2);
+      assert.deepEqual(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitnesses, [
+        {
+          kind: 'managed_hold_continued',
+          sourceMessageId: wake.sourceMessageId,
+          taskId: wake.taskId,
+          transition: 'reheld',
+        },
+      ]);
+    } finally {
+      turnCustodyAdoptionRegistry.resetForTest();
+    }
+  });
+
+  test('adoption owner release drains accepted work and rejects later work', async () => {
+    const registry = new TurnCustodyAdoptionRegistry();
+    let startAdoption;
+    const adoptionStarted = new Promise((resolve) => {
+      startAdoption = resolve;
+    });
+    let finishAdoption;
+    const adoptionFinished = new Promise((resolve) => {
+      finishAdoption = resolve;
+    });
+    const unregister = registry.register('invocation-draining-adoption', async () => {
+      startAdoption();
+      await adoptionFinished;
+    });
+    const wake = {
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-draining-adoption',
+      holderCatId: 'codex',
+      sourceMessageId: 'message-draining-adoption',
+      taskId: 'task-draining-adoption',
+    };
+
+    const accepted = registry.adopt('invocation-draining-adoption', [wake]);
+    await adoptionStarted;
+    let released = false;
+    const release = unregister().then(() => {
+      released = true;
+    });
+
+    assert.equal(await registry.adopt('invocation-draining-adoption', [wake]), false);
+    assert.equal(released, false, 'release must wait until already accepted adoption finishes');
+    finishAdoption();
+    assert.equal(await accepted, true);
+    await release;
+    assert.equal(released, true);
+  });
+
+  test('an abnormal route exit unregisters its adoption owner before a later full-context read', async () => {
+    turnCustodyAdoptionRegistry.resetForTest();
+    const projection = {
+      opens: [],
+      async open(wake) {
+        this.opens.push(wake);
+        return { state: 'covered_empty', evidenceRefs: [`wake:${wake.kind}`] };
+      },
+      async close(opened) {
+        return {
+          state: 'covered_empty',
+          shouldBlock: false,
+          transitionObserved: false,
+          evidenceRefs: [...opened.evidenceRefs],
+        };
+      },
+    };
+    const wake = {
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-managed-hold-abnormal-exit',
+      holderCatId: 'codex',
+      sourceMessageId: 'message-managed-hold-after-abnormal-exit',
+      taskId: 'task-managed-hold-after-abnormal-exit',
+    };
+    const service = createSequenceService('codex', ['Provider output must never be reached.']);
+
+    try {
+      await assert.rejects(
+        runRoute(service, 'thread-managed-hold-abnormal-exit', {
+          projectionService: projection,
+          throwAfterInvocationCreated: true,
+          routeOptions: { turnCustodyWake: { kind: 'unstructured', source: 'user_chat' } },
+        }),
+        /simulated route failure after invocation creation/,
+      );
+
+      assert.equal(
+        await turnCustodyAdoptionRegistry.adopt('outer-inv-1', [wake]),
+        false,
+        'a later full-context callback must observe no live route owner and return 409',
+      );
+      assert.equal(projection.opens.length, 1, 'the exited route must not accept a new projection');
+    } finally {
+      turnCustodyAdoptionRegistry.resetForTest();
+    }
+  });
+
+  test('an adopted managed hold without a successor fails the same child closed', async () => {
+    const projection = {
+      async open(wake) {
+        return {
+          state: wake.kind === 'structured' ? 'covered_active' : 'covered_empty',
+          evidenceRefs: [`wake:${wake.kind}`],
+        };
+      },
+      async close(opened) {
+        return opened.state === 'covered_active'
+          ? {
+              state: 'covered_active',
+              shouldBlock: true,
+              transitionObserved: false,
+              evidenceRefs: [...opened.evidenceRefs],
+            }
+          : {
+              state: 'covered_empty',
+              shouldBlock: false,
+              transitionObserved: false,
+              evidenceRefs: [...opened.evidenceRefs],
+            };
+      },
+    };
+    const service = createSequenceService('codex', ['Read the callback but did not establish a successor.']);
+    const { appended, yielded } = await runRoute(service, 'thread-managed-hold-adopted-blocked', {
+      projectionService: projection,
+      routeOptions: {
+        turnCustodyWake: { kind: 'unstructured', source: 'user_chat' },
+        persistedPromptMessageIds: ['message-managed-hold-adopted-blocked'],
+        onPromptMessagesExposed: async () => [
+          {
+            kind: 'structured',
+            protocol: 'hold',
+            subjectKey: 'ball:thread:thread-managed-hold-adopted-blocked',
+            holderCatId: 'codex',
+            sourceMessageId: 'message-managed-hold-adopted-blocked',
+            taskId: 'task-managed-hold-adopted-blocked',
+          },
+        ],
+      },
+    });
+
+    const done = yielded.find((message) => message.type === 'done');
+    assert.equal(done?.errorCode, 'managed_hold_disposition_missing');
+    assert.equal(done?.turnCustodyTerminalWitnesses, undefined);
+    assert.equal(appended.filter((message) => message.source?.connector === 'routing-guard-failure').length, 1);
+    assert.equal(service.calls.length, 1, 'the exact child must not be replaced by a remedial child');
   });
 
   test('managed transfer emits exact continuation receipt proof', async () => {

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Capability } from '@clowder-ai/plugin-contract';
 import { type VerifiedPackageAdmission, verifyPackageAdmission } from './manifest-verifier.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from './ports.js';
+import { normalizePluginInstanceAfterRestart } from './restart-recovery.js';
 import type {
   InventoryMutationResult,
   PackageAdmissionCandidate,
@@ -41,6 +42,15 @@ function assertGrantRevision(grants: PluginGrantRecord, expectedGrantRevision: n
   }
 }
 
+function assertLifecycleRevision(instance: PluginInstanceRecord, expectedLifecycleRevision: number): void {
+  if (instance.lifecycleRevision !== expectedLifecycleRevision) {
+    throw new PluginInventoryError(
+      'STALE_LIFECYCLE_REVISION',
+      `expected lifecycle revision ${expectedLifecycleRevision}, current ${instance.lifecycleRevision}`,
+    );
+  }
+}
+
 function putVerifiedPackage(transaction: PluginInventoryTransaction, verified: VerifiedPackageAdmission): void {
   const existing = transaction.packages.get(verified.package.packageDigest);
   if (!existing) {
@@ -74,6 +84,7 @@ function createInstance(
     configReadiness: 'incomplete',
     activationState: 'disabled',
     runtimeState: 'stopped',
+    lifecycleRevision: 1,
     installedAt: now,
     updatedAt: now,
   };
@@ -126,6 +137,7 @@ export class HostInventoryControlPlane {
     const verified = verifyPackageAdmission(input, now);
     return this.store.transaction((transaction) => {
       const current = assertCurrentInstance(transaction, input.pluginInstanceId);
+      assertLifecycleRevision(current, input.expectedLifecycleRevision);
       if (current.pluginId !== verified.package.pluginId) {
         throw new PluginInventoryError(
           'PACKAGE_ID_MISMATCH',
@@ -141,6 +153,7 @@ export class HostInventoryControlPlane {
         packageDigest: input.computedPackageDigest,
         activationState: 'disabled',
         runtimeState: 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: now,
       });
       // The package manifest is the authority basis, so every upgrade advances the grant fence.
@@ -181,6 +194,7 @@ export class HostInventoryControlPlane {
         lifecycleState: 'retired',
         activationState: 'disabled',
         runtimeState: 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
         retiredAt: now,
         updatedAt: now,
       });
@@ -213,15 +227,9 @@ export class HostInventoryControlPlane {
     return this.store.transaction((transaction) => {
       let changed = 0;
       for (const instance of transaction.instances.list()) {
-        const activationInterrupted =
-          instance.activationState === 'enabling' || instance.activationState === 'disabling';
-        if (instance.runtimeState === 'stopped' && !activationInterrupted) continue;
-        transaction.instances.put({
-          ...instance,
-          activationState: activationInterrupted ? 'error' : instance.activationState,
-          runtimeState: 'stopped',
-          updatedAt: now,
-        });
+        const recovered = normalizePluginInstanceAfterRestart(instance, now);
+        if (recovered === undefined) continue;
+        transaction.instances.put(recovered);
         changed += 1;
       }
       return changed;

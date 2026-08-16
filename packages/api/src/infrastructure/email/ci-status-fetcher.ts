@@ -99,7 +99,15 @@ export async function fetchPrCiStatus(
     checks = await fetchCheckDetails(repoFullName, prNumber, prView.headRefOid, log, options);
   }
 
-  return { repoFullName, prNumber, headSha: prView.headRefOid, prState, aggregateBucket, checks };
+  return {
+    repoFullName,
+    prNumber,
+    headSha: prView.headRefOid,
+    prState,
+    aggregateBucket,
+    checkRollup: rollup.length === 0 ? 'empty' : 'present',
+    checks,
+  };
 }
 
 async function fetchCheckDetails(
@@ -191,6 +199,9 @@ export function normalizeBucket(bucket: string): CiBucket {
 export function computeAggregateBucket(
   rollup: Array<{ status: string; conclusion: string; __typename: string }>,
 ): CiBucket {
+  // A single empty rollup is ambiguous: GitHub may not have created the check
+  // runs yet for a fresh HEAD. CiCdRouter owns the persisted same-HEAD stability
+  // guard that eventually promotes a genuinely empty rollup to pass.
   if (rollup.length === 0) return 'pending';
   let hasFailure = false;
   let hasPending = false;

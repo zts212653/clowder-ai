@@ -8,6 +8,7 @@ import { registerComposerDraftFlusher } from './composer-draft-flush-registry';
 import {
   composerDraftSignature,
   contextAttachmentsFromDraft,
+  type DurableDraftSnapshot,
   imageUrlsFromDraft,
   mergeHydratedDraft,
   preservedBlocksFromDraft,
@@ -30,6 +31,29 @@ interface AdmissionSnapshot {
   images: File[];
   contextAttachments: ContextAttachment[];
   replyTo: ReplyDraft | null;
+}
+
+type ComposerDraftSave = () => Promise<boolean>;
+
+const composerDraftSaveTails = new Map<string, Promise<boolean>>();
+
+function enqueueComposerDraftSave(threadId: string, save: ComposerDraftSave): Promise<boolean> {
+  const previous = composerDraftSaveTails.get(threadId) ?? Promise.resolve(true);
+  const next = previous.catch(() => false).then(save);
+  composerDraftSaveTails.set(threadId, next);
+  void next.then(
+    () => {
+      if (composerDraftSaveTails.get(threadId) === next) composerDraftSaveTails.delete(threadId);
+    },
+    () => {
+      if (composerDraftSaveTails.get(threadId) === next) composerDraftSaveTails.delete(threadId);
+    },
+  );
+  return next;
+}
+
+async function waitForComposerDraftSaves(threadId: string): Promise<void> {
+  await composerDraftSaveTails.get(threadId)?.catch(() => false);
 }
 
 interface UseDurableComposerDraftOptions {
@@ -62,11 +86,11 @@ export function useDurableComposerDraft({
   const revisionRef = useRef(0);
   const hydratedRef = useRef(false);
   const lastSavedSignatureRef = useRef('');
-  const saveTailRef = useRef<Promise<boolean>>(Promise.resolve(true));
   const hydrationGenerationRef = useRef(0);
   const imageUrlsRef = useRef<string[]>([]);
   const contextAttachmentsRef = useRef<ContextAttachment[]>(contextAttachments);
   const preservedBlocksRef = useRef<MessageContent[]>([]);
+  const replyToIdRef = useRef(replyToMessage?.id);
   const admissionsPendingRef = useRef(0);
   const clearFallbackRef = useRef<(AdmissionSnapshot & { imageUrls: string[] }) | null>(null);
   const pendingSelectionRef = useRef<{ text: string; start: number; end: number } | null>(null);
@@ -105,10 +129,15 @@ export function useDurableComposerDraft({
   }, [contextAttachments]);
 
   useEffect(() => {
+    replyToIdRef.current = replyToMessage?.id;
+  }, [replyToMessage?.id]);
+
+  useEffect(() => {
     if (!threadId) return;
     const generation = ++hydrationGenerationRef.current;
     hydratedRef.current = false;
-    void loadOwnerComposerDraft(threadId)
+    void waitForComposerDraftSaves(threadId)
+      .then(() => loadOwnerComposerDraft(threadId))
       .then(({ draft, revision }) => {
         if (hydrationGenerationRef.current !== generation) return;
         const serverText = draft?.text ?? '';
@@ -189,43 +218,64 @@ export function useDurableComposerDraft({
     [restoreDraftImages, setContextAttachments, setInput, setReplyTo, threadId],
   );
 
-  const persistCurrentDraft = useCallback(async () => {
-    if (!threadId || admissionsPendingRef.current > 0) return false;
-    const snapshot = {
+  const captureCurrentDraft = useCallback(
+    (): DurableDraftSnapshot => ({
       text: inputRef.current,
       imageUrls: [...imageUrlsRef.current],
       contextAttachments: [...contextAttachmentsRef.current],
       preservedBlocks: [...preservedBlocksRef.current],
-      replyTo: replyToMessage?.id,
+      replyTo: replyToIdRef.current,
+    }),
+    [],
+  );
+
+  const persistDraftSnapshot = useCallback(
+    async (snapshot: DurableDraftSnapshot) => {
+      if (!threadId || admissionsPendingRef.current > 0) return false;
+      const signature = composerDraftSignature(
+        snapshot.text,
+        snapshot.imageUrls,
+        snapshot.contextAttachments,
+        snapshot.preservedBlocks,
+        snapshot.replyTo,
+      );
+      if (signature === lastSavedSignatureRef.current) return true;
+      const shouldClear =
+        !snapshot.text.trim() &&
+        snapshot.imageUrls.length === 0 &&
+        snapshot.contextAttachments.length === 0 &&
+        snapshot.preservedBlocks.length === 0 &&
+        !snapshot.replyTo;
+      const result = await writeOwnerComposerDraft(threadId, revisionRef.current, snapshot);
+      if (result.kind === 'conflict') {
+        reconcileConflict(result, shouldClear);
+        return false;
+      }
+      if (result.kind === 'failed') {
+        if (shouldClear) restoreAdmissionFallback();
+        return false;
+      }
+      revisionRef.current = result.revision;
+      lastSavedSignatureRef.current = signature;
+      clearFallbackRef.current = null;
+      return true;
+    },
+    [reconcileConflict, restoreAdmissionFallback, threadId],
+  );
+
+  const persistCurrentDraft = useCallback(
+    () => persistDraftSnapshot(captureCurrentDraft()),
+    [captureCurrentDraft, persistDraftSnapshot],
+  );
+
+  useEffect(() => {
+    if (!threadId) return;
+    return () => {
+      if (!hydratedRef.current || admissionsPendingRef.current > 0) return;
+      const snapshot = captureCurrentDraft();
+      void enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot));
     };
-    const signature = composerDraftSignature(
-      snapshot.text,
-      snapshot.imageUrls,
-      snapshot.contextAttachments,
-      snapshot.preservedBlocks,
-      snapshot.replyTo,
-    );
-    if (signature === lastSavedSignatureRef.current) return true;
-    const shouldClear =
-      !snapshot.text.trim() &&
-      snapshot.imageUrls.length === 0 &&
-      snapshot.contextAttachments.length === 0 &&
-      snapshot.preservedBlocks.length === 0 &&
-      !snapshot.replyTo;
-    const result = await writeOwnerComposerDraft(threadId, revisionRef.current, snapshot);
-    if (result.kind === 'conflict') {
-      reconcileConflict(result, shouldClear);
-      return false;
-    }
-    if (result.kind === 'failed') {
-      if (shouldClear) restoreAdmissionFallback();
-      return false;
-    }
-    revisionRef.current = result.revision;
-    lastSavedSignatureRef.current = signature;
-    clearFallbackRef.current = null;
-    return true;
-  }, [reconcileConflict, replyToMessage?.id, restoreAdmissionFallback, threadId]);
+  }, [captureCurrentDraft, persistDraftSnapshot, threadId]);
 
   useEffect(() => {
     if (!threadId || !hydratedRef.current || admissionsPendingRef.current > 0) return;
@@ -234,7 +284,7 @@ export function useDurableComposerDraft({
     void contextAttachments;
     void input;
     const timer = window.setTimeout(() => {
-      saveTailRef.current = saveTailRef.current.catch(() => false).then(persistCurrentDraft);
+      void enqueueComposerDraftSave(threadId, persistCurrentDraft);
     }, 400);
     return () => window.clearTimeout(timer);
   }, [admissionEpoch, contextAttachments, images, input, persistCurrentDraft, threadId]);
@@ -242,18 +292,18 @@ export function useDurableComposerDraft({
   useEffect(() => {
     if (!threadId) return;
     return registerComposerDraftFlusher(threadId, async () => {
-      saveTailRef.current = saveTailRef.current.catch(() => false).then(persistCurrentDraft);
-      const persisted = await saveTailRef.current;
+      const snapshot = captureCurrentDraft();
+      const persisted = await enqueueComposerDraftSave(threadId, () => persistDraftSnapshot(snapshot));
       return {
         persisted,
         snapshot: {
-          text: inputRef.current,
-          contextAttachments: [...contextAttachmentsRef.current],
-          ...(replyToMessage?.id ? { replyToId: replyToMessage.id } : {}),
+          text: snapshot.text,
+          contextAttachments: snapshot.contextAttachments,
+          ...(snapshot.replyTo ? { replyToId: snapshot.replyTo } : {}),
         },
       };
     });
-  }, [persistCurrentDraft, replyToMessage?.id, threadId]);
+  }, [captureCurrentDraft, persistDraftSnapshot, threadId]);
 
   const beginAdmission = useCallback(
     (snapshot: AdmissionSnapshot) => {

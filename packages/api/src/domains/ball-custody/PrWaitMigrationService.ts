@@ -1,4 +1,4 @@
-import type { AwaitStateV1, GitHubWaitPredicate, PrAutomationState, TaskItem } from '@cat-cafe/shared';
+import type { GitHubPrAwaitStateV1, GitHubPrWaitPredicate, PrAutomationState, TaskItem } from '@cat-cafe/shared';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { InitialPrWaitSnapshot } from '../github-signals/GitHubWaitBaselineReader.js';
 
@@ -18,7 +18,7 @@ export interface PrWaitMigrationServiceOptions {
   readonly readBaseline: (
     repoFullName: string,
     prNumber: number,
-    when: readonly GitHubWaitPredicate[],
+    when: readonly GitHubPrWaitPredicate[],
   ) => Promise<InitialPrWaitSnapshot>;
   readonly now?: () => number;
   readonly log: {
@@ -54,7 +54,7 @@ function legacyEventWaitTrigger(state: LegacyState): number | undefined {
   return typeof coverage.triggerCommentId === 'number' ? coverage.triggerCommentId : undefined;
 }
 
-function migrationPredicates(state: LegacyState): readonly GitHubWaitPredicate[] {
+function migrationPredicates(state: LegacyState): readonly GitHubPrWaitPredicate[] {
   const triggerCommentId = legacyEventWaitTrigger(state);
   if (triggerCommentId) return [{ kind: 'pr_review_result_available', triggerCommentId }];
   if (state.intent === 'merge') {
@@ -66,7 +66,7 @@ function migrationPredicates(state: LegacyState): readonly GitHubWaitPredicate[]
   return [{ kind: 'pr_head_changed' }];
 }
 
-function migrationNextStep(when: readonly GitHubWaitPredicate[]): string {
+function migrationNextStep(when: readonly GitHubPrWaitPredicate[]): string {
   if (when.some((predicate) => predicate.kind === 'pr_review_result_available')) {
     return 'Inspect the verified exact-HEAD review result.';
   }
@@ -137,7 +137,7 @@ export class PrWaitMigrationService {
       const when = migrationPredicates(raw);
       const snapshot = await this.opts.readBaseline(subject.repoFullName, subject.prNumber, when);
       const now = this.now();
-      const awaitState: AwaitStateV1 = {
+      const awaitState: GitHubPrAwaitStateV1 = {
         v: 1,
         generation: 1,
         subjectRef: `pr:${subject.repoFullName.toLowerCase()}#${subject.prNumber}`,

@@ -152,3 +152,14 @@ export function resolvePromptInputCeilingTokens(capacity: ResolvedContextCapacit
 export function deriveHistoryContextTokenCeiling(inputCeilingTokens: number): number {
   return Math.floor(Math.max(0, inputCeilingTokens) * 0.85);
 }
+
+/**
+ * Direct consumers that are not inside an invocation still need bounded,
+ * non-empty history. Reuse the unresolved prompt guard without treating it as
+ * model capacity or consulting mutable member configuration. Future direct
+ * consumers should call this resolver instead of duplicating the 100k/85k
+ * derivation.
+ */
+export function resolveUnboundHistoryContextTokenCeiling(): number {
+  return deriveHistoryContextTokenCeiling(UNRESOLVED_PROMPT_INPUT_CEILING);
+}

@@ -56,6 +56,11 @@ describe('useSocket explicit cancel provenance', () => {
       catId: 'fable5',
       clientInstanceId: 'client-1',
       actionId: 'action-1',
+      intent: {
+        sourceControl: 'chat_input_action',
+        gesture: 'pointer',
+        trustedGesture: true,
+      },
     });
 
     expect(sent).toBe(true);
@@ -65,7 +70,29 @@ describe('useSocket explicit cancel provenance', () => {
       origin: 'explicit_stop',
       actionId: 'action-1',
       clientInstanceId: 'client-1',
+      sourceControl: 'chat_input_action',
+      gesture: 'pointer',
+      trustedGesture: true,
     });
+  });
+
+  it('drops a cancel that was not produced by a trusted browser gesture', () => {
+    const emit = vi.fn();
+    const socket = { connected: true, volatile: { emit } };
+
+    const sent = emitExplicitCancel(socket, {
+      threadId: 'thread-1',
+      clientInstanceId: 'client-1',
+      actionId: 'action-untrusted',
+      intent: {
+        sourceControl: 'chat_input_banner',
+        gesture: 'pointer',
+        trustedGesture: false,
+      },
+    });
+
+    expect(sent).toBe(false);
+    expect(emit).not.toHaveBeenCalled();
   });
 
   it('IR-9: drops stop while disconnected so Socket.IO cannot replay it on reconnect', () => {
@@ -76,6 +103,11 @@ describe('useSocket explicit cancel provenance', () => {
       threadId: 'thread-1',
       clientInstanceId: 'client-1',
       actionId: 'action-2',
+      intent: {
+        sourceControl: 'parallel_status_bar',
+        gesture: 'keyboard',
+        trustedGesture: true,
+      },
     });
 
     expect(sent).toBe(false);

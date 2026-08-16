@@ -27,10 +27,7 @@ export type OpenCodeAutoApproveProbeFn = (options: {
   cwd?: string;
   env?: Record<string, string | null>;
 }) => Promise<OpenCodeAutoApproveProbeResult>;
-type OpenCodeHelpProbeResult =
-  | { status: 'ok'; helpText: string }
-  | { status: 'unsupported' }
-  | { status: 'transient-failure' };
+type OpenCodeHelpProbeResult = { status: 'ok'; helpText: string } | { status: 'transient-failure' };
 
 export function getCliFlagName(part: string): string | null {
   if (!part.startsWith('-')) return null;
@@ -55,7 +52,6 @@ async function probeOpenCodeHelp(
   args: readonly string[],
   cwd?: string,
   env?: Record<string, string | null>,
-  options?: { cliErrorAsUnsupported?: boolean },
 ): Promise<OpenCodeHelpProbeResult> {
   let helpText = '';
   try {
@@ -77,7 +73,7 @@ async function probeOpenCodeHelp(
       }
       if (isCliError(event)) {
         log.warn({ command, exitCode: event.exitCode, signal: event.signal }, 'OpenCode help probe failed');
-        return options?.cliErrorAsUnsupported ? { status: 'unsupported' } : { status: 'transient-failure' };
+        return { status: 'transient-failure' };
       }
     }
   } catch (err) {
@@ -102,16 +98,9 @@ export async function probeOpenCodeAutoApproveSupport(
     if (visibleHelp.helpText.includes(flag)) return { approvalFlag: flag };
   }
 
-  for (const flag of OPENCODE_DEFAULT_AUTO_APPROVE_FLAGS.slice(1)) {
-    const hiddenHelp = await probeOpenCodeHelp(command, ['run', flag, '--help'], cwd, env, {
-      cliErrorAsUnsupported: true,
-    });
-    if (hiddenHelp.status === 'ok') return { approvalFlag: flag };
-    if (hiddenHelp.status === 'transient-failure') {
-      return { warning: OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE, cacheable: false };
-    }
-  }
-
+  // Do not probe unadvertised aliases with `run <flag> --help`. Some yargs
+  // versions process `--help` before validating unknown flags, so that command
+  // exits 0 even when the candidate would make a real invocation exit 1.
   return { warning: OPENCODE_AUTO_APPROVE_UNAVAILABLE_MESSAGE, cacheable: true };
 }
 

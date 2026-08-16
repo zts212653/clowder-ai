@@ -6,11 +6,14 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import sharp from 'sharp';
 
 await import('tsx/esm');
 const { threadExportRoutes, resolveFrontendBaseUrl } = await import('../src/routes/thread-export.ts');
 const { resolveFrontendCorsOrigins } = await import('../src/config/frontend-origin.ts');
-const { ImageExporter } = await import('../src/services/ImageExporter.ts');
+const { ImageExporter, buildImageExportUrl, resolveExportCaptureHeight, stitchImageExportChunks } = await import(
+  '../src/services/ImageExporter.ts'
+);
 
 const ORIGINAL_CAPTURE = ImageExporter.prototype.capture;
 const ORIGINAL_CLOSE = ImageExporter.prototype.close;
@@ -34,23 +37,46 @@ function createThreadStore() {
   };
 }
 
-async function buildApp() {
+function makeMessage(overrides = {}) {
+  return {
+    id: 'message-1',
+    threadId: 'thread-1',
+    userId: 'user-1',
+    catId: null,
+    content: 'hello',
+    mentions: [],
+    timestamp: 100,
+    deliveryStatus: 'delivered',
+    ...overrides,
+  };
+}
+
+function createMessageStore(messages = [makeMessage()]) {
+  return {
+    async getById(messageId) {
+      return messages.find((message) => message.id === messageId) ?? null;
+    },
+  };
+}
+
+async function buildApp(messageStore = createMessageStore()) {
   const app = Fastify();
   await app.register(threadExportRoutes, {
     threadStore: createThreadStore(),
+    messageStore,
   });
   await app.ready();
   return app;
 }
 
 describe('POST /api/threads/:threadId/export-image', () => {
-  /** @type {{ url: string; userId: string }[]} */
+  /** @type {{ url: string; userId: string; options?: { selectionMessageIds?: readonly string[] } }[]} */
   let captures = [];
 
   beforeEach(() => {
     captures = [];
-    ImageExporter.prototype.capture = async (url, userId) => {
-      captures.push({ url, userId });
+    ImageExporter.prototype.capture = async (url, userId, options) => {
+      captures.push({ url, userId, options });
       return Buffer.from('fake-png');
     };
     ImageExporter.prototype.close = async () => {};
@@ -166,6 +192,92 @@ describe('POST /api/threads/:threadId/export-image', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(captures.length, 1);
     assert.equal(captures[0].url, 'http://localhost:3003/thread/thread-1');
+  });
+
+  it('resolves selection before capture and passes only timeline-normalized IDs', async () => {
+    const messageStore = createMessageStore([
+      makeMessage({ id: 'message-later', timestamp: 200, content: 'later' }),
+      makeMessage({ id: 'message-earlier', timestamp: 100, content: 'earlier' }),
+    ]);
+    const app = await buildApp(messageStore);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: {
+        items: [
+          { kind: 'message', messageId: 'message-later' },
+          { kind: 'message', messageId: 'message-earlier' },
+        ],
+      },
+    });
+    await app.close();
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(captures.length, 1);
+    assert.deepEqual(captures[0].options, {
+      selectionMessageIds: ['message-earlier', 'message-later'],
+    });
+  });
+
+  it('does not launch capture when selection resolution fails', async () => {
+    const app = await buildApp(createMessageStore([makeMessage({ id: 'message-1', _tombstone: true, content: '' })]));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-1/export-selection-image',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { items: [{ kind: 'message', messageId: 'message-1' }] },
+    });
+    await app.close();
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(captures.length, 0);
+  });
+});
+
+describe('buildImageExportUrl', () => {
+  it('appends export identity and repeated validated selection parameters', () => {
+    const result = new URL(
+      buildImageExportUrl('http://localhost:3003/thread/thread-1', 'user-1', {
+        selectionMessageIds: ['message-1', 'message-2'],
+      }),
+    );
+
+    assert.equal(result.searchParams.get('export'), 'true');
+    assert.equal(result.searchParams.get('userId'), 'user-1');
+    assert.deepEqual(result.searchParams.getAll('messageId'), ['message-1', 'message-2']);
+  });
+
+  it('uses the export root height instead of the 4000px capture viewport floor', () => {
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 4000, exportRootHeight: 214.2 }), 215);
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 5100, exportRootHeight: 5100 }), 5100);
+    assert.equal(resolveExportCaptureHeight({ documentHeight: 900, exportRootHeight: null }), 900);
+  });
+
+  it('stitches exact chunk boundaries without repeating or dropping boundary content', async () => {
+    const first = await sharp({
+      create: { width: 2, height: 4, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+    const second = await sharp({
+      create: { width: 2, height: 2, channels: 4, background: { r: 0, g: 255, b: 0, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+
+    const stitched = await stitchImageExportChunks(2, 6, [
+      { buffer: first, top: 0 },
+      { buffer: second, top: 4 },
+    ]);
+    const { data, info } = await sharp(stitched).raw().toBuffer({ resolveWithObject: true });
+    const pixel = (y) => Array.from(data.subarray(y * info.width * info.channels, y * info.width * info.channels + 3));
+
+    assert.equal(info.height, 6);
+    assert.deepEqual(pixel(3), [255, 0, 0]);
+    assert.deepEqual(pixel(4), [0, 255, 0]);
   });
 });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import type { CatData } from '@/hooks/useCatData';
+import { TriangleAlertIcon } from './HubConfigIcons';
 import { HubSessionStrategyEditor } from './HubSessionStrategyEditor';
 import {
   CODEX_APPROVAL_OPTIONS,
@@ -217,7 +218,10 @@ function ResolvedContextInfo({ cat }: { cat?: CatData | null }) {
   if (!rc || !rc.source) {
     return (
       <div className="text-xs leading-5 text-cafe-muted">
-        <p>⚠ 未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。</p>
+        <p className="flex items-start gap-1">
+          <TriangleAlertIcon />
+          <span>未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。</span>
+        </p>
         {rc?.capabilityReason ? <p className="mt-0.5">原因: {rc.capabilityReason}</p> : null}
       </div>
     );

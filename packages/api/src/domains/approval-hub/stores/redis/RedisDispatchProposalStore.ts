@@ -9,100 +9,41 @@ import {
   type CreateDispatchProposalInput,
   type CreateDispatchProposalResult,
   computeLineageKey,
+  type DispatchCanonicalAdmissionBlock,
+  type DispatchCanonicalAdmissionLookup,
   type DispatchLegacyNegativeAuthorizationLookup,
   type DispatchNegativeAuthorizationBlock,
   type DispatchNegativeAuthorizationLookup,
   type IDispatchProposalStore,
 } from '../ports/IDispatchProposalStore.js';
+import {
+  canonicalAdmissionIndexKeysForProposal,
+  canonicalAdmissionStoredFields,
+  RedisDispatchProposalCanonicalAdmission,
+} from './RedisDispatchProposalCanonicalAdmission.js';
+import {
+  type CanonicalAdmissionClaimInput,
+  claimRedisActionSuccessorWithCanonicalAdmission,
+  RedisCanonicalAdmissionUnavailableError,
+} from './RedisDispatchProposalCanonicalClaim.js';
 import { createRedisDispatchProposal } from './RedisDispatchProposalCreate.js';
+import {
+  CAS_APPROVE_DISPATCH_PROPOSAL_LUA,
+  CAS_REJECT_DISPATCH_PROPOSAL_LUA,
+  CAS_REVERT_DISPATCH_PROPOSAL_PENDING_LUA,
+} from './RedisDispatchProposalLifecycle.js';
 import { RedisDispatchProposalNegativeAuthorization } from './RedisDispatchProposalNegativeAuthorization.js';
 import { abortRedisDispatchStaged } from './RedisDispatchProposalRollback.js';
 import { hydrateDispatchProposal } from './RedisDispatchProposalSerde.js';
 
-/** CAS transition: pending → approved. Atomic status check + field update + index ops.
- *  deliveredMessageId is recorded separately via recordDelivery() AFTER successful delivery,
- *  so the CAS transition never leaks a delivery on a lost race (R2 P1-2 fix).
- *  KEYS[3] = userSettled sorted set (F246 Phase F history index, score=decidedAt). */
-const CAS_APPROVE_LUA = `
-  local key = KEYS[1]
-  local pendingKey = KEYS[2]
-  local settledKey = KEYS[3]
-  local status = redis.call('HGET', key, 'status')
-  if status ~= 'pending' then return 0 end
-  redis.call('HSET', key, 'status', 'approved',
-    'decidedAt', ARGV[1],
-    'decidedBy', ARGV[2],
-    'approvalOwnerAuthProvenance', ARGV[4])
-  redis.call('ZREM', pendingKey, ARGV[3])
-  redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
-  for i = 4, #KEYS do
-    redis.call('ZREM', KEYS[i], ARGV[3])
-  end
-  return 1
-`;
-
-/**
- * CAS rollback: approved → pending, with Phase J lineage guard (INV-J5).
- * If a successor holds the lineage, marks as superseded instead of reverting
- * (prevents dual pending on delivery-failure rollback).
- *
- * KEYS[1] = proposal hash, KEYS[2] = pending set, KEYS[3] = settled set, KEYS[4] = lineage key.
- * ARGV[1] = createdAt, ARGV[2] = proposalId.
- *
- * Returns: 1 = reverted to pending, 2 = superseded (successor exists), 0 = not approved.
- */
-const CAS_REVERT_PENDING_LUA = `
-  local key = KEYS[1]
-  local pendingKey = KEYS[2]
-  local settledKey = KEYS[3]
-  local lineageKey = KEYS[4]
-  local status = redis.call('HGET', key, 'status')
-  if status ~= 'approved' then return 0 end
-
-  local currentHolder = redis.call('GET', lineageKey)
-  if currentHolder and currentHolder ~= ARGV[2] then
-    redis.call('HSET', key, 'status', 'superseded', 'supersededBy', currentHolder)
-    redis.call('HDEL', key, 'decidedAt', 'decidedBy', 'approvalOwnerAuthProvenance')
-    redis.call('ZREM', settledKey, ARGV[2])
-    for i = 5, #KEYS do
-      redis.call('ZADD', KEYS[i], tonumber(ARGV[1]), ARGV[2])
-    end
-    return 2
-  end
-
-  redis.call('HSET', key, 'status', 'pending')
-  redis.call('HDEL', key, 'decidedAt', 'decidedBy', 'approvalOwnerAuthProvenance')
-  redis.call('ZADD', pendingKey, ARGV[1], ARGV[2])
-  redis.call('ZREM', settledKey, ARGV[2])
-  redis.call('SET', lineageKey, ARGV[2])
-  for i = 5, #KEYS do
-    redis.call('ZADD', KEYS[i], tonumber(ARGV[1]), ARGV[2])
-  end
-  return 1
-`;
-
-/** CAS transition: pending → rejected. Atomic status check + field update + index ops.
- *  KEYS[3] = userSettled sorted set (F246 Phase F history index, score=decidedAt). */
-const CAS_REJECT_LUA = `
-  local key = KEYS[1]
-  local pendingKey = KEYS[2]
-  local settledKey = KEYS[3]
-  local status = redis.call('HGET', key, 'status')
-  if status ~= 'pending' then return 0 end
-  redis.call('HSET', key, 'status', 'rejected',
-    'decidedAt', ARGV[1],
-    'decidedBy', ARGV[2])
-  redis.call('ZREM', pendingKey, ARGV[3])
-  redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
-  return 1
-`;
-
 /** Canonical persistent proposal store; denial indexes remain derived projections. */
 export class RedisDispatchProposalStore implements IDispatchProposalStore, ApprovalPublicationStore {
   private readonly negativeAuthorization: RedisDispatchProposalNegativeAuthorization;
+  private readonly canonicalAdmission: RedisDispatchProposalCanonicalAdmission;
 
   constructor(private readonly redis: RedisClient) {
     this.negativeAuthorization = new RedisDispatchProposalNegativeAuthorization(redis);
+    this.canonicalAdmission = new RedisDispatchProposalCanonicalAdmission(redis);
   }
 
   async create(input: CreateDispatchProposalInput): Promise<CreateDispatchProposalResult> {
@@ -151,16 +92,19 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
     const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
-    const negativeAuthorizationKeys = this.negativeAuthorization.keysForProposal(proposal);
+    const blockingIndexKeys = [
+      ...this.negativeAuthorization.keysForProposal(proposal),
+      ...canonicalAdmissionIndexKeysForProposal(proposal),
+    ];
     const now = Date.now();
 
     const result = await this.redis.eval(
-      CAS_APPROVE_LUA,
-      3 + negativeAuthorizationKeys.length,
+      CAS_APPROVE_DISPATCH_PROPOSAL_LUA,
+      3 + blockingIndexKeys.length,
       key,
       pendingKey,
       settledKey,
-      ...negativeAuthorizationKeys,
+      ...blockingIndexKeys,
       String(now),
       userId,
       proposalId,
@@ -200,17 +144,22 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     const K = computeLineageKey(proposal.sourceThreadId, proposal.targetThreadId, proposal.senderCatId);
     const lineageKeyRedis = DispatchProposalKeys.lineage(K);
     const negativeAuthorizationKeys = this.negativeAuthorization.keysForProposal(proposal);
+    const canonicalAdmissionKeys = canonicalAdmissionIndexKeysForProposal(proposal);
+    const canonicalAdmissionFields = canonicalAdmissionStoredFields(this.redis, proposal);
+    const blockingIndexKeys = [...negativeAuthorizationKeys, ...canonicalAdmissionKeys];
 
     const result = await this.redis.eval(
-      CAS_REVERT_PENDING_LUA,
-      4 + negativeAuthorizationKeys.length,
+      CAS_REVERT_DISPATCH_PROPOSAL_PENDING_LUA,
+      4 + blockingIndexKeys.length,
       key,
       pendingKey,
       settledKey,
       lineageKeyRedis,
-      ...negativeAuthorizationKeys,
+      ...blockingIndexKeys,
       String(proposal.createdAt),
       proposalId,
+      String(canonicalAdmissionKeys.length),
+      ...canonicalAdmissionFields,
     );
 
     // 0 = not approved, 2 = superseded (successor holds lineage) — both return null
@@ -234,7 +183,7 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     const now = Date.now();
 
     const result = await this.redis.eval(
-      CAS_REJECT_LUA,
+      CAS_REJECT_DISPATCH_PROPOSAL_LUA,
       3,
       key,
       pendingKey,
@@ -287,6 +236,30 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore, Appro
     input: DispatchNegativeAuthorizationLookup,
   ): Promise<DispatchNegativeAuthorizationBlock[]> {
     return this.negativeAuthorization.findBlocks(input);
+  }
+
+  async findCanonicalAdmissionBlocks(
+    input: DispatchCanonicalAdmissionLookup,
+  ): Promise<DispatchCanonicalAdmissionBlock[]> {
+    return this.canonicalAdmission.findBlocks(input);
+  }
+
+  async claimActionSuccessorWithCanonicalAdmission(input: CanonicalAdmissionClaimInput) {
+    try {
+      return await claimRedisActionSuccessorWithCanonicalAdmission(this.redis, input);
+    } catch (error) {
+      if (!(error instanceof RedisCanonicalAdmissionUnavailableError) || error.reason !== 'projection_not_ready') {
+        throw error;
+      }
+    }
+    try {
+      await this.canonicalAdmission.ensureReady();
+    } catch (error) {
+      throw new RedisCanonicalAdmissionUnavailableError(
+        `canonical admission projection rebuild failed closed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return claimRedisActionSuccessorWithCanonicalAdmission(this.redis, input);
   }
 
   async findLegacyNegativeAuthorizationBlocks(
