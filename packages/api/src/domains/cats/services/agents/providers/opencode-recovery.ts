@@ -171,13 +171,12 @@ export function buildOpenCodePostToolFinalizerPrompt(trace: OpenCodeToolTrace | 
 
 export function buildOpenCodePostToolFallbackText(trace: OpenCodeToolTrace | null, reason: string): string {
   const toolName = trace ? trace.toolName : 'a tool';
-  const outputText = projectSafeOpenCodeToolOutput(trace ? trace.output : undefined);
   const lines = [
     `OpenCode stopped after running \`${toolName}\` but did not produce a final text response.`,
     `No-tool finalizer recovery did not produce text: ${reason}.`,
     trace?.status ? `Tool status: ${trace.status}.` : undefined,
-    outputText.length > 0 ? `Latest tool output (sanitized):\n${outputText}` : 'No safe tool output was captured.',
-    'This is a recovery message; review the sanitized tool output before treating the task as complete.',
+    'Tool output is intentionally not included in this user-visible fallback.',
+    'This is a recovery message; do not treat the task as complete without checking internal diagnostics.',
   ];
   return lines.filter((line): line is string => Boolean(line)).join('\n\n');
 }

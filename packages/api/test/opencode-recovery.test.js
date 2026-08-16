@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import Database from 'better-sqlite3';
 import {
+  buildOpenCodePostToolFallbackText,
   projectSafeOpenCodeToolOutput,
   recoverOpenCodeSilentCompletion,
   resolveOpenCodeDbCandidates,
@@ -198,5 +199,21 @@ describe('opencode recovery boundary', () => {
     assert.doesNotMatch(projected, /\/single-segment-secret/);
     assert.doesNotMatch(projected, /\\\\server\\share/);
     assert.match(projected, /\[redacted/);
+  });
+
+  test('user-visible fallback omits arbitrary tool output instead of extending a secret denylist', () => {
+    const fallback = buildOpenCodePostToolFallbackText(
+      {
+        toolName: 'read',
+        status: 'completed',
+        output: 'file:///secrets/acme/private.pem AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE',
+      },
+      'no_text',
+    );
+
+    assert.doesNotMatch(fallback, /file:\/\/\//);
+    assert.doesNotMatch(fallback, /AKIAIOSFODNN7EXAMPLE/);
+    assert.doesNotMatch(fallback, /Latest tool output/);
+    assert.match(fallback, /not included in this user-visible fallback/i);
   });
 });

@@ -369,7 +369,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       let lastToolEventIndex = 0;
       let lastToolTrace: OpenCodeToolTrace | null = null;
       let lastStepFinishReason: string | undefined;
-      let terminalStepFinishAfterLastTool = false;
+      let stepStartCount = 0;
+      let delegateTaskEmitted = false;
       let lastAssistantMessageId: string | undefined;
       // F212 Phase G (AC-G3, clowder-ai#875): track unique event types so the
       // silent_completion diagnostic can surface them when textEventCount===0.
@@ -401,6 +402,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             ? String((event as Record<string, unknown>).type)
             : '__unknown';
         uniqueEventTypes.add(evtType);
+        if (evtType === 'step_start') stepStartCount++;
         const messageRef = extractOpenCodeMessageRef(event);
         if (messageRef?.sessionId) metadata.sessionId = messageRef.sessionId;
         if (messageRef?.messageId) lastAssistantMessageId = messageRef.messageId;
@@ -478,10 +480,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           if (result.type === 'tool_use') {
             toolUseEmitted = true;
             lastToolEventIndex = eventCount;
-            terminalStepFinishAfterLastTool = false;
             const toolTrace = extractOpenCodeToolTrace(event);
             if (toolTrace !== null) {
               lastToolTrace = toolTrace;
+              if (toolTrace.toolName === 'delegate-task') delegateTaskEmitted = true;
             }
           }
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
@@ -556,9 +558,6 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         const stepFinishReason = getOpenCodeStepFinishReason(event);
         if (stepFinishReason) {
           lastStepFinishReason = stepFinishReason;
-          if (lastToolEventIndex > lastTextEventIndex && eventCount > lastToolEventIndex) {
-            terminalStepFinishAfterLastTool = stepFinishReason !== 'tool-calls';
-          }
         }
       }
 
@@ -596,7 +595,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       if (
         textEventCount > 0 &&
         lastToolEventIndex > lastTextEventIndex &&
-        !terminalStepFinishAfterLastTool &&
+        !(lastStepFinishReason === 'stop' && (stepStartCount > 1 || delegateTaskEmitted)) &&
         !errorAlreadyYielded
       ) {
         log.warn(
@@ -609,7 +608,8 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             lastToolEventIndex,
             latestTool: lastToolTrace?.toolName,
             lastStepFinishReason,
-            terminalStepFinishAfterLastTool,
+            stepStartCount,
+            delegateTaskEmitted,
             textMode: 'replace',
           },
           'OpenCode CLI stopped after tool_use without final text - running no-tool finalizer',

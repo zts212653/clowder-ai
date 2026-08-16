@@ -1224,6 +1224,45 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
+  test('post-tool step_finish stop still runs one finalizer and replaces the incomplete prelude', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Recovered final answer.' } },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Inspect the config and report the result'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Let me inspect that.' } },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'config loaded' } },
+      },
+      STEP_FINISH,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2, 'reason=stop after tool_use is not proof of user-visible completion');
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.equal(textMsgs.at(-1)?.content, 'Recovered final answer.');
+  });
+
   test('post-tool finalizer tool attempt poisons later text and falls back safely', async () => {
     const proc = createMockProcess();
     const finalizerProc = createMockProcess();
@@ -1330,7 +1369,7 @@ describe('OpenCodeAgentService', () => {
     assert.match(String(textMsgs.at(-1)?.content), /managed_config_present/);
   });
 
-  test('post-tool deterministic fallback redacts raw tool output secrets and absolute paths', async () => {
+  test('post-tool deterministic fallback omits raw tool output entirely', async () => {
     const proc = createMockProcess();
     const finalizerProc = createMockProcess();
     let spawnCalls = 0;
@@ -1377,7 +1416,8 @@ describe('OpenCodeAgentService', () => {
     assert.doesNotMatch(content, /sk-review-secret/);
     assert.doesNotMatch(content, /C:\\Users\\Alice/);
     assert.doesNotMatch(content, /\/Users\/alice/);
-    assert.match(content, /\[redacted/);
+    assert.doesNotMatch(content, /Latest tool output/);
+    assert.match(content, /not included in this user-visible fallback/i);
   });
 
   test('same OpenCode session invocations are serialized through finalization', async () => {
