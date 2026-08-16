@@ -2,6 +2,7 @@
 
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useElapsedTime } from '@/hooks/useElapsedTime';
+import { createExplicitStopIntent, type ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorMix, catColorVar } from '@/lib/cat-slug';
 import type { TokenUsage } from '@/stores/chat-types';
@@ -99,7 +100,13 @@ export function aggregateUsage(
   };
 }
 
-export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; threadId: string }) {
+export function ParallelStatusBar({
+  onStop,
+  threadId,
+}: {
+  onStop?: (intent: ExplicitStopIntent) => void;
+  threadId: string;
+}) {
   // F173 Phase C Task 3 — thread-scoped read. Caller (ChatContainer) passes
   // its threadId so we follow the per-thread liveness, not flat current.
   const {
@@ -137,7 +144,8 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
         ))}
         {onStop && (
           <button
-            onClick={() => onStop()}
+            type="button"
+            onClick={(event) => onStop(createExplicitStopIntent(event, 'parallel_status_bar'))}
             className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-full bg-conn-red-bg text-conn-red-text hover:opacity-90 transition-colors text-xs font-medium"
             title="停止所有猫猫"
             aria-label="Stop all cats"

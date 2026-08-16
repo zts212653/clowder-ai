@@ -1,5 +1,6 @@
 ---
 name: pencil-design
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
   Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -28,7 +29,7 @@ feat-lifecycle → Design Gate → **pencil-design** → writing-plans → workt
 
 pencil-design 在 **spec 确认后、写代码前**。先把 UX 做对，再动手写代码。
 
-**可观测性 / 状态 / 失败相关 UI 必读**：动手画之前先过 Design Gate 的 **现场可感知性自检**（`cat-cafe-skills/refs/in-context-observability-checklist.md`）。Clowder AI 的可观测性哲学是"明厨亮灶"——in-context 富块 + entity 自带状态点优先于 dashboard。否则容易画成上个世纪的 stats card 被打回（F174 D2b 教训）。
+**可观测性 / 状态 / 失败相关 UI 必读**：动手画之前先过 Design Gate 的 **现场可感知性自检**（`../.cat-cafe-shared-refs/in-context-observability-checklist.md`）。Clowder AI 的可观测性哲学是"明厨亮灶"——in-context 富块 + entity 自带状态点优先于 dashboard。否则容易画成上个世纪的 stats card 被打回（F174 D2b 教训）。
 
 ## 🔴 风格一致性门禁（Style Consistency Gate）
 

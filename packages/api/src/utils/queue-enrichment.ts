@@ -8,7 +8,7 @@
  * pointers; the enrichment layer joins persisted message data at emit time.
  */
 
-import type { MessageContent, QueueMessageReceipt } from '@cat-cafe/shared';
+import type { MessageContent, QueueMessageReceipt, QueueMessageReceiptProjection } from '@cat-cafe/shared';
 import type { QueueEntry } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
@@ -21,10 +21,14 @@ export interface QueueEntryMessagePreview {
 }
 
 /** QueueEntry enriched with message preview for frontend consumption. */
-export interface EnrichedQueueEntry extends Omit<QueueEntry, 'ownerAuthProvenance'> {
+export interface EnrichedQueueEntry extends Omit<QueueEntry, 'ownerAuthProvenance' | 'exactSteerBatch'> {
   targetStates: Record<string, 'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'handled'>;
   messagePreview?: QueueEntryMessagePreview;
   queueReceipt?: QueueMessageReceipt;
+}
+
+export interface QueueUpdatePublicationOptions {
+  receiptMessageIds?: readonly string[];
 }
 
 type EnrichedTargetState = EnrichedQueueEntry['targetStates'][string];
@@ -73,8 +77,104 @@ function resolveTargetState(
   return 'queued';
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function latestQueueEntryExposure(
+  entry: QueueEntry,
+  catId: string,
+  invocationId?: string,
+): NonNullable<QueueEntry['queuedBodyExposures']>[number] | undefined {
+  let latest: NonNullable<QueueEntry['queuedBodyExposures']>[number] | undefined;
+  for (const exposure of entry.queuedBodyExposures ?? []) {
+    if (exposure.targetCatId !== catId) continue;
+    if (invocationId !== undefined && exposure.invocationId !== invocationId) continue;
+    if (!latest || exposure.seenAt >= latest.seenAt) latest = exposure;
+  }
+  return latest;
+}
+
+function hasAgentLiveReceiptEvidence(entry: QueueEntry): boolean {
+  return (
+    entry.source === 'agent' &&
+    Boolean(entry.queuedSeenByCatIds?.length || Object.keys(entry.queuedAwakenedInvocationIdByCatId ?? {}).length)
+  );
+}
+
+/**
+ * Agent/A2A work has a QueueEntry lifecycle but may not have a stored-message
+ * queueCustody record. Project its existing per-target truth into the same DTO
+ * consumed by QueuePanel; do not let the browser read raw QueueEntry maps.
+ *
+ * A live seen row requires both the recorded child id and its matching body
+ * exposure. Legacy/mismatched evidence stays receipt-visible but without an id,
+ * so the UI retains its fail-closed recovery path.
+ */
+function projectAgentAwakenedTarget(entry: QueueEntry, catId: string): QueueMessageReceipt['targets'][number] {
+  const invocationId = entry.queuedAwakenedInvocationIdByCatId?.[catId];
+  const awakenedAt = entry.queuedAwakenedAtByCatId?.[catId];
+  return {
+    catId,
+    state: 'awakened',
+    ...(isNonEmptyString(invocationId) ? { invocationId } : {}),
+    ...(awakenedAt !== undefined ? { awakenedAt } : {}),
+  };
+}
+
+function projectAgentSeenTarget(entry: QueueEntry, catId: string): QueueMessageReceipt['targets'][number] {
+  const invocationId = entry.queuedSeenInvocationIdByCatId?.[catId];
+  if (!isNonEmptyString(invocationId)) return { catId, state: 'seen' };
+  const exposure = latestQueueEntryExposure(entry, catId, invocationId);
+  return exposure ? { catId, state: 'seen', invocationId, seenAt: exposure.seenAt } : { catId, state: 'seen' };
+}
+
+function projectAgentFailedTarget(entry: QueueEntry, catId: string): QueueMessageReceipt['targets'][number] {
+  const exposure = latestQueueEntryExposure(entry, catId);
+  if (exposure) return { catId, state: 'failed', invocationId: exposure.invocationId, seenAt: exposure.seenAt };
+
+  const invocationId = entry.queuedAwakenedInvocationIdByCatId?.[catId];
+  const awakenedAt = entry.queuedAwakenedAtByCatId?.[catId];
+  return {
+    catId,
+    state: 'failed',
+    ...(isNonEmptyString(invocationId) ? { invocationId } : {}),
+    ...(awakenedAt !== undefined ? { awakenedAt } : {}),
+  };
+}
+
+function projectAgentReceiptTarget(
+  entry: QueueEntry,
+  catId: string,
+  state: EnrichedTargetState,
+): QueueMessageReceipt['targets'][number] {
+  if (state === 'seen') return projectAgentSeenTarget(entry, catId);
+  if (state === 'awakened') return projectAgentAwakenedTarget(entry, catId);
+  if (state === 'failed') return projectAgentFailedTarget(entry, catId);
+  return { catId, state };
+}
+
+function projectAgentQueueReceipt(
+  entry: QueueEntry,
+  targetCats: readonly string[],
+  targetStates: EnrichedQueueEntry['targetStates'],
+): QueueMessageReceipt | undefined {
+  if (!hasAgentLiveReceiptEvidence(entry)) return undefined;
+
+  return {
+    version: 1,
+    entryId: entry.id,
+    targets: targetCats.map((catId) => projectAgentReceiptTarget(entry, catId, targetStates[catId])),
+    reminderAttempts: [],
+  };
+}
+
 export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
-  const { ownerAuthProvenance: _internalOwnerAuthProvenance, ...publicEntry } = entry;
+  const {
+    ownerAuthProvenance: _internalOwnerAuthProvenance,
+    exactSteerBatch: _internalExactSteerBatch,
+    ...publicEntry
+  } = entry;
   const notified = new Set(entry.queuedNotifiedByCatIds ?? []);
   const awakened = new Set(Object.keys(entry.queuedAwakenedInvocationIdByCatId ?? {}));
   const seen = new Set(entry.queuedSeenByCatIds ?? []);
@@ -87,14 +187,17 @@ export function projectPublicQueueEntry(entry: QueueEntry): EnrichedQueueEntry {
   const targetCats = Array.isArray(entry.allTargetCats)
     ? entry.allTargetCats
     : [...new Set([...(Array.isArray(entry.targetCats) ? entry.targetCats : []), ...handled])];
+  const targetStates = Object.fromEntries(
+    targetCats.map((catId) => [
+      catId,
+      resolveTargetState(catId, { handled, steering, failed, seen, awakened, notified }),
+    ]),
+  ) as EnrichedQueueEntry['targetStates'];
+  const queueReceipt = projectAgentQueueReceipt(entry, targetCats, targetStates);
   return {
     ...publicEntry,
-    targetStates: Object.fromEntries(
-      targetCats.map((catId) => [
-        catId,
-        resolveTargetState(catId, { handled, steering, failed, seen, awakened, notified }),
-      ]),
-    ),
+    targetStates,
+    ...(queueReceipt ? { queueReceipt } : {}),
   };
 }
 
@@ -181,12 +284,36 @@ async function enrichProjectedQueueEntries(
   }
 }
 
-async function enrichQueueEntriesWithinDeadline(
+async function projectMessageReceipts(
+  messageIds: readonly string[],
+  messageStore: IMessageStore,
+): Promise<QueueMessageReceiptProjection[]> {
+  const uniqueMessageIds = [...new Set(messageIds.filter((messageId) => messageId.length > 0))];
+  const projections = await Promise.all(
+    uniqueMessageIds.map(async (messageId): Promise<QueueMessageReceiptProjection | undefined> => {
+      try {
+        const message = await messageStore.getById(messageId);
+        return message?.queueCustody
+          ? { messageId, queueReceipt: projectQueueReceipt(message.queueCustody) }
+          : undefined;
+      } catch {
+        // Socket projection is recoverable from history hydration. One unavailable
+        // message must not suppress the ordered Queue snapshot or sibling receipts.
+        return undefined;
+      }
+    }),
+  );
+  return projections.filter((projection): projection is QueueMessageReceiptProjection => projection !== undefined);
+}
+
+async function buildQueueUpdateProjectionWithinDeadline(
   entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
-): Promise<EnrichedQueueEntry[]> {
+  receiptMessageIds: readonly string[],
+): Promise<{ queue: EnrichedQueueEntry[]; messageReceipts?: QueueMessageReceiptProjection[] }> {
   const projected = entries.map(projectPublicQueueEntry);
-  if (!messageStore || projected.length === 0) return projected;
+  if (!messageStore) return { queue: projected };
+  if (projected.length === 0 && receiptMessageIds.length === 0) return { queue: projected };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<undefined>((resolve) => {
@@ -194,8 +321,14 @@ async function enrichQueueEntriesWithinDeadline(
     timer.unref?.();
   });
   try {
-    const enriched = await Promise.race([enrichProjectedQueueEntries(projected, messageStore), deadline]);
-    return enriched ?? projected;
+    const update = Promise.all([
+      enrichProjectedQueueEntries(projected, messageStore),
+      projectMessageReceipts(receiptMessageIds, messageStore),
+    ]).then(([queue, messageReceipts]) => ({
+      queue,
+      ...(messageReceipts.length > 0 ? { messageReceipts } : {}),
+    }));
+    return (await Promise.race([update, deadline])) ?? { queue: projected };
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -214,16 +347,18 @@ export function emitQueueUpdated(
   entries: QueueEntry[],
   messageStore: IMessageStore | null | undefined,
   action: string,
+  options: QueueUpdatePublicationOptions = {},
 ): Promise<void> {
   const snapshot = freezeQueueSnapshot(entries);
+  const receiptMessageIds = [...new Set(options.receiptMessageIds ?? [])];
   const scopeKey = JSON.stringify([threadId, userId]);
   const tails = publicationTailsFor(socketManager);
   const previous = tails.get(scopeKey) ?? Promise.resolve();
   const publication = previous.then(async () => {
-    const payload = await enrichQueueEntriesWithinDeadline(snapshot, messageStore);
+    const payload = await buildQueueUpdateProjectionWithinDeadline(snapshot, messageStore, receiptMessageIds);
     socketManager.emitToUser(userId, 'queue_updated', {
       threadId,
-      queue: payload,
+      ...payload,
       action,
     });
   });

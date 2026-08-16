@@ -19,6 +19,7 @@ import {
   type CatRoutingError,
   catRegistry,
   isCrossThreadProvenance,
+  type MessageBundleCarrierV1,
   type MessageContent,
   type MessageWorkDisposition,
   type OutputCommitDecision,
@@ -29,7 +30,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
-import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
+import type { WaitContinuationRetryCommitter } from '../domains/ball-custody/WaitContinuationRetryCommitter.js';
+import type { WaitContinuationRetryPreflight } from '../domains/ball-custody/WaitContinuationRetryPreflight.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -48,13 +50,8 @@ import type {
   QueueProcessor,
   SessionContinuationCoordinatorLike,
 } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import {
-  type ReconcileZombieDeps,
-  reconcileZombies,
-} from '../domains/cats/services/agents/invocation/reconcileZombies.js';
 import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import type { ConsumedContinuationToken } from '../domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
-import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import {
   createA2ASlotTrackingBridge,
@@ -67,6 +64,15 @@ import {
   flattenTextParts,
   flattenTurnTextParts,
 } from '../domains/cats/services/agents/text-aggregation.js';
+import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
+import {
+  MessageBundlePromptUnavailableError,
+  resolveMessageBundlePrompt,
+} from '../domains/cats/services/context/MessageBundlePromptResolver.js';
+import {
+  type MessageSelectionAdmissionResult,
+  MessageSelectionResolver,
+} from '../domains/cats/services/context/MessageSelectionResolver.js';
 import type { FreshnessClosureStore } from '../domains/cats/services/freshness/FreshnessClosureStore.js';
 import {
   isLeakedSupplementDecline,
@@ -157,7 +163,6 @@ interface StreamingHookLike {
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
-import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
@@ -166,12 +171,31 @@ import {
   resolveMessageDispositionForAdmission,
   resolveQueueAuthorIntentByCatId,
 } from './message-disposition-admission.js';
-import { buildMessageContentBlocks, sendMessageSchema } from './messages.schema.js';
+import { buildMessageContentBlocks, type SendMessageInput, sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
 const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
 const QUEUE_COMPLETION_WATCHDOG_MS = 5_000;
+
+type ResolvedBundleAdmission = Extract<MessageSelectionAdmissionResult, { status: 'resolved' }>;
+
+function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
+  const sourceTitle = admission.sourceThread.title?.trim() || admission.sourceThread.id;
+  if (admission.items.length === 1 && admission.items[0]?.kind === 'quote') {
+    return `转发了 1 段引用 · 来自「${sourceTitle}」`;
+  }
+  const unit = admission.items.length === 1 ? '条消息' : '条聊天记录';
+  return `转发了 ${admission.items.length} ${unit} · 来自「${sourceTitle}」`;
+}
+
+function bundleAdmissionErrorStatus(
+  reason: Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'],
+): number {
+  if (reason === 'not_authorized') return 403;
+  if (reason === 'source_unavailable') return 409;
+  return 400;
+}
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -197,12 +221,6 @@ export interface MessagesRoutesOptions {
   invocationRecordStore?: IInvocationRecordStore;
   /** Durable per-child lifecycle truth used to bridge tracker/draft handoff gaps. */
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'listByParent'>;
-  /** F194 AC-B7: when helper detects zombies, reconcileZombies clears their TaskProgress
-   *  snapshot so the frontend doesn't show phantom progress. Optional — cleanup still marks
-   *  records `failed` even without this. */
-  taskProgressStore?: TaskProgressStore;
-  /** Exact-owner terminal recovery wired by the composition root. */
-  onReconciledZombie?: ReconcileZombieDeps['onReconciledZombie'];
 
   summaryStore?: ISummaryStore;
   /** #80: Streaming draft store for F5 recovery */
@@ -211,6 +229,10 @@ export interface MessagesRoutesOptions {
   invocationQueue?: InvocationQueue;
   /** F39: Queue processor for auto-dequeue on invocation complete */
   queueProcessor?: QueueProcessor;
+  /** Gate 5: read-only canonical authority check before any retry mutation. */
+  retryAuthorityPreflight?: Pick<WaitContinuationRetryPreflight, 'preflight'>;
+  /** Gate 5: atomically bind current canonical authority to the custody attempt commit. */
+  retryAuthorityCommitter?: Pick<WaitContinuationRetryCommitter, 'commit'>;
   /** ADR-042: canonical supplement truth used to hydrate original-bubble status on F5/history reads. */
   freshnessClosureStore?: Pick<FreshnessClosureStore, 'listSupplementsByThread'>;
   /** F224: Shared continuation lifecycle coordinator for direct immediate invocations. */
@@ -224,7 +246,6 @@ export interface MessagesRoutesOptions {
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
   autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
   /** F233 PR3: ball-custody event sink for zombie reconciliation side effects. */
-  ballCustody?: IBallCustodyIngest;
   /** F088 ISSUE-15: Outbound delivery hook for connector platforms (late-bound after gateway bootstrap) */
   outboundHook?: OutboundDeliveryHookLike;
   /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
@@ -360,23 +381,14 @@ function formatRoutingWarnings(warnings: CatRoutingError[]): string {
   return parts.join(' ');
 }
 
-function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | undefined): void {
+export function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | undefined): void {
   if (!deps) return;
   try {
     const cancelled = cancelPendingHoldsForThread(threadId, deps);
     if (cancelled.length > 0) {
-      // P1-3 fix (cloud R2): also cancel running wakeWhen commands for each cancelled hold.
-      // Without this, the runner continues executing after the fallback task is removed,
-      // and posts a stale wake when it completes.
-      for (const task of cancelled) {
-        const catId = task.createdBy?.replace('hold-ball:', '') ?? '';
-        if (catId) {
-          cancelWakeWhenRunner(threadId, catId);
-        }
-      }
       log.info(
         { threadId, cancelledCount: cancelled.length, taskIds: cancelled.map((t) => t.id) },
-        'F167 Phase J: auto-cancelled pending hold-ball tasks on user message',
+        'F295: retired pending hold-ball wakes on user message without cancelling independent commands',
       );
     }
   } catch (err) {
@@ -476,6 +488,99 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     });
   }
 
+  /**
+   * F1308: retry one visible failed target without cloning or re-sending the
+   * authored message. `attemptId` is the optimistic-concurrency fence: once a
+   * retry is accepted, a second click still naming the old failed attempt gets
+   * a conflict instead of a second execution.
+   */
+  app.post<{ Params: { messageId: string; targetCatId: string }; Body: { attemptId?: unknown } }>(
+    '/api/messages/:messageId/queue-targets/:targetCatId/retry',
+    async (request, reply) => {
+      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      }
+      const attemptId = request.body?.attemptId;
+      if (typeof attemptId !== 'string' || attemptId.length === 0) {
+        reply.status(400);
+        return { error: 'attemptId is required' };
+      }
+      const retryAuthorityPreflight = opts.retryAuthorityPreflight;
+      const retryAuthorityCommitter = opts.retryAuthorityCommitter;
+      if (!opts.invocationQueue || !opts.queueProcessor || !retryAuthorityPreflight || !retryAuthorityCommitter) {
+        reply.status(503);
+        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
+      }
+      const message = await opts.messageStore.getById(request.params.messageId);
+      if (!message || message.userId !== userId || !message.queueCustody) {
+        reply.status(404);
+        return { error: 'Queued message was not found', code: 'QUEUE_MESSAGE_NOT_FOUND' };
+      }
+      const authority = await retryAuthorityPreflight.preflight({
+        message,
+        requestingUserId: userId,
+        targetCatId: request.params.targetCatId,
+      });
+      if (!authority.ok) {
+        reply.status(409);
+        return {
+          error: 'This target no longer has current retry authority',
+          code: 'QUEUE_RETRY_AUTHORITY_STALE',
+          reason: authority.reason,
+        };
+      }
+      const targetCarrier = message.queueCustody.carrierByTargetCatId?.[request.params.targetCatId];
+      const carrierEntryId = targetCarrier?.entryId ?? message.queueCustody.entryId;
+      const carrier = targetCarrier
+        ? opts.invocationQueue.getEntrySnapshotForUserById(userId, carrierEntryId)
+        : undefined;
+      if (targetCarrier && !carrier) {
+        reply.status(409);
+        return { error: 'This target no longer has a retryable delivery carrier', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
+      }
+      const carrierThreadId = carrier?.threadId ?? message.threadId;
+      const result = await opts.queueProcessor.retryFailedTarget(
+        carrierThreadId,
+        userId,
+        carrierEntryId,
+        request.params.targetCatId,
+        attemptId,
+        (transitions) =>
+          retryAuthorityCommitter.commit({
+            authorityMessageId: request.params.messageId,
+            requestingUserId: userId,
+            targetCatId: request.params.targetCatId,
+            transitions,
+          }),
+      );
+      if (result.outcome === 'unavailable') {
+        reply.status(503);
+        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
+      }
+      if (result.outcome === 'authority_stale') {
+        reply.status(409);
+        return {
+          error: 'This target no longer has current retry authority',
+          code: 'QUEUE_RETRY_AUTHORITY_STALE',
+          reason: result.reason,
+        };
+      }
+      if (result.outcome !== 'retried') {
+        reply.status(409);
+        return { error: 'This target is no longer retryable', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
+      }
+      reply.status(202);
+      return {
+        status: 'retry_queued',
+        entryId: carrierEntryId,
+        targetCatId: request.params.targetCatId,
+        attemptId: result.attemptId,
+      };
+    },
+  );
+
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
     let content: string;
@@ -493,6 +598,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
+    let messageBundleRequest: SendMessageInput['messageBundle'];
 
     if (request.isMultipart()) {
       // Parse multipart: text fields + image files
@@ -539,6 +645,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
       // #699: Extract replyTo from JSON body
       replyTo = parseResult.data.replyTo;
+      messageBundleRequest = parseResult.data.messageBundle;
     }
 
     const userId = resolveUserId(request, {
@@ -553,6 +660,58 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Default to 'default' thread for lobby (prevents global broadcast)
     const resolvedThreadId = threadId ?? 'default';
+
+    let admittedMessageBundle: ResolvedBundleAdmission | undefined;
+    let explicitBundleTargetCats: CatId[] | undefined;
+    if (messageBundleRequest) {
+      if (!opts.threadStore) {
+        reply.status(503);
+        return { error: 'Message Bundle routing is unavailable', code: 'MESSAGE_BUNDLE_UNAVAILABLE' };
+      }
+
+      const targetThread = await opts.threadStore.get(resolvedThreadId);
+      if (!targetThread || targetThread.deletedAt) {
+        reply.status(400);
+        return { error: '目标对话不存在', code: 'MESSAGE_BUNDLE_TARGET_NOT_FOUND' };
+      }
+      if (targetThread.createdBy !== userId && targetThread.createdBy !== 'system') {
+        reply.status(403);
+        return { error: '无权向目标对话转发', code: 'MESSAGE_BUNDLE_TARGET_UNAUTHORIZED' };
+      }
+
+      const selectionResolver = new MessageSelectionResolver({
+        messageStore: opts.messageStore,
+        threadStore: opts.threadStore,
+      });
+      const admission = await selectionResolver.resolveForAdmission(
+        {
+          sourceThreadId: messageBundleRequest.sourceThreadId,
+          items: messageBundleRequest.items,
+        },
+        { userId },
+      );
+      if (admission.status !== 'resolved') {
+        reply.status(bundleAdmissionErrorStatus(admission.reason));
+        return {
+          error: 'Message Bundle source validation failed',
+          code: `MESSAGE_BUNDLE_${admission.reason.toUpperCase()}`,
+          ...(admission.messageId ? { messageId: admission.messageId } : {}),
+        };
+      }
+
+      const resolvedTargets = await router.resolveExplicitTargets(messageBundleRequest.targetCats, resolvedThreadId, {
+        persist: false,
+      });
+      if (resolvedTargets.length !== messageBundleRequest.targetCats.length) {
+        reply.status(400);
+        return { error: 'Message Bundle contains an unavailable target cat', code: 'MESSAGE_BUNDLE_INVALID_TARGETS' };
+      }
+
+      admittedMessageBundle = admission;
+      explicitBundleTargetCats = resolvedTargets;
+      content = buildMessageBundleSummary(admission);
+      contentBlocks = undefined;
+    }
 
     // F167 L1 AC-A3: user message is a fresh turn — clear any in-flight ping-pong
     // streak on this thread's active worklist (no-op if none).
@@ -722,14 +881,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
     log.debug({ threadId: resolvedThreadId, contentLen: content.length }, 'Resolving targets and intent');
-    const {
-      targetCats: resolvedTargetCats,
-      intent,
-      hasMentions,
-      routing_warnings,
-    } = await router.resolveTargetsAndIntent(content, resolvedThreadId, {
-      persist: true,
-    });
+    const bundleRoutingTargetCats = explicitBundleTargetCats ?? [];
+    const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = admittedMessageBundle
+      ? {
+          targetCats: bundleRoutingTargetCats,
+          intent: parseIntent('', bundleRoutingTargetCats.length),
+          hasMentions: true,
+          routing_warnings: [],
+        }
+      : await router.resolveTargetsAndIntent(content, resolvedThreadId, {
+          persist: true,
+        });
+    const { targetCats: resolvedTargetCats, intent, hasMentions, routing_warnings } = routingResult;
     // F35: When sending a whisper, override routing targets to only whisperTo recipients.
     // This prevents non-recipient cats from being invoked and seeing whisper content.
     const targetCats =
@@ -741,6 +904,39 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
     }
     const primaryCat = targetCats[0] ?? 'unknown';
+
+    // Sidebar participant presence is canonical ThreadStore truth, not a
+    // side-effect of the first CLI event. Persist every resolved target (the
+    // router already does this for explicit mentions, so the write is
+    // intentionally idempotent) and publish the existing `thread_updated`
+    // event through the user's always-joined room. This makes an unopened
+    // thread update immediately without inventing another event or room.
+    const publishSidebarParticipants = async () => {
+      let sidebarParticipants = [...targetCats];
+      if (opts.threadStore?.addParticipants) {
+        await opts.threadStore.addParticipants(resolvedThreadId, targetCats);
+        const storedParticipants = (await opts.threadStore.get(resolvedThreadId))?.participants ?? [];
+        sidebarParticipants = [...new Set([...storedParticipants, ...targetCats])];
+      }
+      opts.socketManager.emitToUser(userId, 'thread_updated', {
+        threadId: resolvedThreadId,
+        participants: sidebarParticipants,
+      });
+    };
+    const publishAdmittedBundleParticipants = async () => {
+      try {
+        await publishSidebarParticipants();
+      } catch (err) {
+        log.warn({ err, threadId: resolvedThreadId }, 'Bundle persisted but participant projection failed');
+        opts.socketManager.emitToUser(userId, 'thread_updated', {
+          threadId: resolvedThreadId,
+          participants: [...targetCats],
+        });
+      }
+    };
+    // Bundle admission defers this mutation until the canonical carrier write
+    // succeeds, so validation/queue-capacity failures leave no false sidebar state.
+    if (!admittedMessageBundle) await publishSidebarParticipants();
 
     // F-invocation-stale-recovery P1-2: Surface routing_warnings when user's explicit @mention
     // silently fell back (e.g., @kimi → cat_not_found → default cat, user sees no feedback).
@@ -764,6 +960,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
+    const messageBundleWrite: { extra: { messageBundle: MessageBundleCarrierV1 } } | Record<string, never> =
+      admittedMessageBundle ? { extra: { messageBundle: admittedMessageBundle.carrier } } : {};
 
     // F39+F108B: Slot-aware delivery mode routing
     // Whisper → check target cat's slot (side-dispatch to idle cat)
@@ -798,6 +996,11 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     })();
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
+
+    if (admittedMessageBundle && mode !== 'queue' && !opts.invocationRecordStore) {
+      reply.status(503);
+      return { error: 'Message Bundle immediate routing is unavailable', code: 'MESSAGE_BUNDLE_UNAVAILABLE' };
+    }
 
     if (mode === 'queue' && hasActive && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
@@ -867,6 +1070,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
               : {}),
             ...(replyTo ? { replyTo } : {}),
+            ...messageBundleWrite,
           });
           storedUserMessageId = userMessage.id;
 
@@ -893,6 +1097,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         }
       }
 
+      if (admittedMessageBundle) await publishAdmittedBundleParticipants();
+
       // Emit queue update to this user only (privacy: scopeKey isolation)
       await emitQueueUpdated(
         opts.socketManager,
@@ -912,6 +1118,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         entryId: enqueueResult.entry?.id,
         merged: false,
         ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
+        ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
       };
     }
 
@@ -1009,6 +1216,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                     ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
                     : {}),
                   ...(replyTo ? { replyTo } : {}),
+                  ...messageBundleWrite,
                 });
                 toctouUserMessageId = toctouUserMessage.id;
                 const queueEntryId = enqueueResult.entry?.id;
@@ -1023,6 +1231,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 throw err;
               }
             }
+            if (admittedMessageBundle) await publishAdmittedBundleParticipants();
             await emitQueueUpdated(
               opts.socketManager,
               userId,
@@ -1039,6 +1248,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               entryId: enqueueResult.entry?.id,
               merged: false,
               ...(toctouUserMessageId ? { userMessageId: toctouUserMessageId } : {}),
+              ...(admittedMessageBundle && toctouUserMessageId ? { messageBundleId: toctouUserMessageId } : {}),
             };
           }
           // No queue available — thread is busy but we can't queue. Reject.
@@ -1074,8 +1284,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         if (controller) {
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
         }
+        const existingRecord = await opts.invocationRecordStore.get(createResult.invocationId);
         reply.status(200);
-        return { status: 'duplicate', invocationId: createResult.invocationId };
+        return {
+          status: 'duplicate',
+          invocationId: createResult.invocationId,
+          ...(existingRecord?.userMessageId ? { userMessageId: existingRecord.userMessageId } : {}),
+          ...(admittedMessageBundle && existingRecord?.userMessageId
+            ? { messageBundleId: existingRecord.userMessageId }
+            : {}),
+        };
       }
 
       // Force path: the joint acquisition owns validation, scoped cancellation, and replacement install.
@@ -1145,12 +1363,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
             : {}),
           ...(replyTo ? { replyTo } : {}),
+          ...messageBundleWrite,
         });
 
         // ③ Backfill InvocationRecord.userMessageId
         await opts.invocationRecordStore.update(createResult.invocationId, {
           userMessageId: storedUserMessage.id,
         });
+        if (admittedMessageBundle) await publishAdmittedBundleParticipants();
 
         // F192 Phase G AC-G12 / F227: detect magic words → Event Memory (immediate path)
         void tryDetectMagicWords(
@@ -1178,6 +1398,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         status: 'processing',
         invocationId: createResult.invocationId,
         userMessageId: storedUserMessage.id,
+        ...(admittedMessageBundle ? { messageBundleId: storedUserMessage.id } : {}),
         timestamp: Date.now(),
       });
 
@@ -1302,6 +1523,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           let currentTurnCatId: string | undefined;
           const collectedTextParts: string[] = [];
 
+          if (admittedMessageBundle) {
+            if (!opts.threadStore) throw new MessageBundlePromptUnavailableError('thread_store_unavailable');
+            const bundlePrompt = await resolveMessageBundlePrompt({
+              bundleMessageId: storedUserMessage.id,
+              forwarderUserId: userId,
+              carrier: admittedMessageBundle.carrier,
+              messageStore: opts.messageStore,
+              threadStore: opts.threadStore,
+            });
+            if (bundlePrompt.status !== 'ready') {
+              throw new MessageBundlePromptUnavailableError(bundlePrompt.reason);
+            }
+            content = bundlePrompt.content;
+          }
+
           // F088 ISSUE-15: Start streaming placeholder on external platforms
           if (opts.streamingHook) {
             streamStartPromise = opts.streamingHook
@@ -1421,6 +1657,18 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               cursorBoundaries,
               persistenceContext,
               parentInvocationId: createResult.invocationId,
+              ...(admittedMessageBundle
+                ? {
+                    persistedPromptMessageIds: [storedUserMessage.id],
+                    persistedPromptMessages: [
+                      {
+                        messageId: storedUserMessage.id,
+                        content,
+                        forceExplicitProjection: true,
+                      },
+                    ],
+                  }
+                : {}),
               onPromptMessagesExposed: (input) =>
                 opts.queueProcessor?.markPromptMessagesSeen(input) ?? Promise.resolve(),
               // F222 P1: user direct entry → eligible for frustration auto-issue
@@ -1443,16 +1691,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 invocationId: createResult.invocationId,
               });
               intentModeBroadcast = true;
-              // Push participants to sidebar. resolveTargets only calls addParticipants
-              // for @mention flows; non-mention routing (preferredCats/default) skips it.
-              // Merge stored participants with targetCats so sidebar always gets the
-              // responding cats, regardless of how they were resolved.
-              const existingParticipants = (await opts.threadStore?.get(resolvedThreadId))?.participants ?? [];
-              const mergedParticipants = [...new Set([...existingParticipants, ...targetCats])];
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'thread_updated', {
-                threadId: resolvedThreadId,
-                participants: mergedParticipants,
-              });
             }
             // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
             if (controller?.signal.aborted) break;
@@ -2151,6 +2389,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.isExplicitPost ||
       m.extra?.stream ||
       m.extra?.targetCats ||
+      m.extra?.messageBundle ||
       m.extra?.scheduler ||
       m.extra?.systemKind ||
       m.extra?.a2aRouting ||
@@ -2173,6 +2412,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
               ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
               ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+              ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
               ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
               ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
               ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
@@ -2311,37 +2551,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           const liveInvocationIds = new Set(liveness.active.map((s) => s.invocationId));
           const orphanDrafts = activeDrafts.filter((d) => !liveInvocationIds.has(d.invocationId));
           activeDrafts = activeDrafts.filter((d) => liveInvocationIds.has(d.invocationId));
-          // F194 AC-B7~B10: fire-and-forget zombie cleanup so /messages read isn't blocked.
-          // Lifecycle converges to failed + TaskProgress cleared. Idempotent (state machine
-          // guard rejects double-write). reconcileZombies failure logs warn — never throws.
-          if (liveness.zombies.length > 0) {
-            const zombieQueue = opts.invocationQueue;
-            void reconcileZombies(liveness.zombies, {
-              invocationRecordStore: recordStore,
-              taskProgressStore: opts.taskProgressStore,
-              ballCustody: opts.ballCustody,
-              log: request.log,
-              onReconciledZombie: opts.onReconciledZombie,
-              // F220 Phase 2a (#972): also converge the dead invocation's stale `processing`
-              // queue entry. Without this the record flips to failed but the entry keeps
-              // pinning the queue head, so a later user @codex never runs.
-              ...(zombieQueue ? { invocationQueue: zombieQueue } : {}),
-              ...(zombieQueue
-                ? {
-                    onQueueConverged: (info: { threadId: string; userId: string; removedEntryIds: string[] }) => {
-                      void emitQueueUpdated(
-                        opts.socketManager,
-                        info.userId,
-                        info.threadId,
-                        zombieQueue.list(info.threadId, info.userId),
-                        opts.messageStore,
-                        'zombie_converged',
-                      ).catch((err) => request.log.warn({ err, feature: 'F220' }, 'zombie_converged broadcast failed'));
-                    },
-                  }
-                : {}),
-            }).catch((err) => request.log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
-          }
+          // Zombie candidates remain diagnostic-only here. Explicit owner reconciliation
+          // is serialized outside the GET path so reads cannot terminate provider work.
           if (orphanDrafts.length > 0) {
             request.log.info(
               {

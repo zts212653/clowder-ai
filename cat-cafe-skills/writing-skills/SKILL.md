@@ -1,5 +1,6 @@
 ---
 name: writing-skills
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
   Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
@@ -46,6 +47,15 @@ triggers:
 
 更完整判据见 `writing-skills/cat-cafe-skill-quality-principles.md`。
 
+### 载体与寿命自问
+
+创建或扩写 skill 前，再回答两组问题：
+
+1. **这条信息忘了以后，必须每轮付代价，还是任务出现时按需再读即可？** 跨压缩持续约束才进 L0；单轮反射进 staging；runtime 专属执行边界进对应 harness；任务方法进 skill；事实契约留 docs/code；可机械判定的交给 test/lint/guard。
+2. **价值缺口来自哪里，产物在做什么？** 区分私有/项目知识、公开但新近知识、持续变化的外部事实、模型行为缺口；再区分知识 payload、resolver/probe、治理边界、结果 verifier。只会自然过期的 payload / 行为代偿需要 keep/tune/sunset 信号；resolver、治理与 verifier 不因模型变强就自动退役。
+
+不要给全部 skill 建 expiry registry 或机械到期日。不确定效用且有明确 consumer 时，复用 F192 eval 的 keep/tune/sunset 闭环。
+
 ## 开工前：先看范本再动手
 
 **不要凭空写。** 先读一个同类型的好例子，理解家里的风格和标准。
@@ -55,7 +65,7 @@ triggers:
 | 流程型 skill | `cat-cafe-skills/tdd/SKILL.md` | 清晰的分步流程 + 红绿重构纪律 |
 | 调试型 skill | `cat-cafe-skills/debugging/SKILL.md` | 根因定位方法论 + 假设验证 |
 | 门禁型 skill | `cat-cafe-skills/quality-gate/SKILL.md` | 检查清单 + 硬门禁 + 下一步 |
-| MCP tool | `refs/mcp-tool-description-standard.md` 的好/差对比 | 四项路由契约 + 有证据才写 Gotcha |
+| MCP tool | `../.cat-cafe-shared-refs/mcp-tool-description-standard.md` 的好/差对比 | 四项路由契约 + 有证据才写 Gotcha |
 
 > 写 MCP tool 前还要 **grep 家里现有同类 tool 的 description**，保持风格一致。
 
@@ -88,6 +98,15 @@ Description 决定猫"要不要触发"。三层加载机制：
 - 详见 `writing-skills/anthropic-best-practices.md`（Anthropic 原文）
 - 详见 *(internal reference removed)* §1.4（进场门票机制）
 
+#### Manual-only 是 provider adapter，不是共享字段
+
+只有“普通自然语言不该触发、用户必须明确点名该重型流程”的能力才设 manual-only。普通用户只说任务意图就应该获得能力的 skill（例如“做动画”）不要设；否则会把正常入口一起关掉。
+
+- Claude Code：`SKILL.md` frontmatter 写 `disable-model-invocation: true`。
+- Codex：同目录 `agents/openai.yaml` 写 `policy.allow_implicit_invocation: false`。
+- 两项必须成对；`pnpm check:skills` 会拒绝单边配置。
+- Gemini / Kimi 当前没有在本契约中验证等价硬开关；未补 provider adapter 前，不宣称“全 runtime manual-only”。
+
 ### T0-2：Gotchas 是最高价值内容（Anthropic）
 
 Skill/MCP 里最值钱的常常不是流程描述，而是**真实失败史**沉淀出的 Common Mistakes / GOTCHA。
@@ -118,7 +137,7 @@ Claude 会按需读取这些文件。**150 行是拆分 smell 不是硬限**—�
 4. 产物（调用后会发生什么，含副作用）
 5. GOTCHA（仅当存在真实陷阱 / 易混工具时）
 ```
-> 1-4 是完整路由契约；5 由真实混淆证据触发。缺路由契约不合格，缺一个并不存在的 GOTCHA 不算缺陷。详见 `refs/mcp-tool-description-standard.md`
+> 1-4 是完整路由契约；5 由真实混淆证据触发。缺路由契约不合格，缺一个并不存在的 GOTCHA 不算缺陷。详见 `../.cat-cafe-shared-refs/mcp-tool-description-standard.md`
 
 ## Skill 类型（Anthropic 9 分类 + 我们的 3 分类）
 
@@ -194,7 +213,7 @@ description: >
 | Clowder AI skill 质量哲学 | `writing-skills/cat-cafe-skill-quality-principles.md` | 废话 skill 判定、载体选择、激发/刹车边界 |
 | Anthropic 官方 skill 写法 | `writing-skills/anthropic-best-practices.md` | 9 类 skill、progressive disclosure、hooks |
 | 知识工程完整方法论 | *(internal reference removed)* | 触发设计、正反灰例、8 个可复用模式 |
-| MCP description 四要素 + 条件 Gotcha 审查清单 | `refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
+| MCP description 四要素 + 条件 Gotcha 审查清单 | `../.cat-cafe-shared-refs/mcp-tool-description-standard.md` | 好/差对比、inputSchema 规范、错误返回 |
 | Skill TDD 测试方法 | `writing-skills/testing-skills-with-subagents.md` | 红绿重构、压力测试、弹孔表 |
 
 ## 和其他 Skill 的区别

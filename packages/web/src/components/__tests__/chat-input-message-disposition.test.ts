@@ -134,17 +134,24 @@ describe('F264 author message disposition selector', () => {
     });
   }
 
-  it('appears only for live work and consumes a one-shot override after successful admission', async () => {
-    const onSend = vi.fn(async () => true);
+  async function renderThreadInput(props: React.ComponentProps<typeof ChatInput>) {
     await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-1', onSend, hasActiveInvocation: false }));
-    });
-    expect(container.querySelector('[data-testid="message-disposition-trigger"]')).toBeNull();
-
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-1', onSend, hasActiveInvocation: true }));
+      useChatStore.setState({
+        currentThreadId: props.threadId,
+        hasActiveInvocation: props.hasActiveInvocation ?? false,
+      });
+      root.render(React.createElement(ChatInput, props));
+      await Promise.resolve();
       await Promise.resolve();
     });
+  }
+
+  it('appears only for live work and consumes a one-shot override after successful admission', async () => {
+    const onSend = vi.fn(async () => true);
+    await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: false });
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')).toBeNull();
+
+    await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     expect(trigger.textContent).toContain('接着当前工作');
     await typeAndSend('顺手看一下问题 B');
@@ -162,10 +169,7 @@ describe('F264 author message disposition selector', () => {
 
   it('retains a one-shot override when admission fails', async () => {
     const onSend = vi.fn(async () => false);
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-2', onSend, hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-2', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     await typeAndSend('网络失败也别吃掉我的选择');
 
@@ -182,10 +186,7 @@ describe('F264 author message disposition selector', () => {
 
   it('keeps Steer as a distinct primary-trigger action without author disposition', async () => {
     const onSend = vi.fn(async () => true);
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-3', onSend, hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-3', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     act(() => setTextarea(textarea, '现在就换轨'));
@@ -200,10 +201,7 @@ describe('F264 author message disposition selector', () => {
   });
 
   it('can persist the choice for this thread instead of changing every send', async () => {
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: true });
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     await act(async () => {
       trigger.click();
@@ -241,10 +239,7 @@ describe('F264 author message disposition selector', () => {
   });
 
   it('shows contextual onboarding only on the first meaningful open', async () => {
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-5', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-5', onSend: vi.fn(), hasActiveInvocation: true });
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
 
     await act(async () => {
@@ -259,7 +254,7 @@ describe('F264 author message disposition selector', () => {
     expect(container.querySelector('[data-testid="message-disposition-onboarding"]')).toBeNull();
   });
 
-  it('fails closed and explains unsupported or undeclared provider carriers', async () => {
+  it('fails closed without presenting an unsupported carrier as busy', async () => {
     useChatStore.setState({
       catInvocations: {
         opus: {
@@ -272,10 +267,7 @@ describe('F264 author message disposition selector', () => {
         },
       },
     });
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true });
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     expect(trigger.textContent).toContain('下一件工作');
     await act(async () => {
@@ -283,7 +275,11 @@ describe('F264 author message disposition selector', () => {
       await Promise.resolve();
     });
     const continueOption = container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement;
+    const nextWorkOption = container.querySelector('[data-disposition-option="next_work"]') as HTMLButtonElement;
     expect(continueOption.disabled).toBe(true);
+    expect(continueOption.className).toContain('disabled:cursor-not-allowed');
+    expect(continueOption.className).not.toContain('disabled:cursor-wait');
+    expect(nextWorkOption.disabled).toBe(false);
     expect(container.textContent).toContain('当前接入不支持本轮读取');
 
     act(() => {
@@ -291,10 +287,7 @@ describe('F264 author message disposition selector', () => {
         catInvocations: { opus: { invocationId: 'inv-active' } },
       });
     });
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true });
     expect(container.textContent).toContain('能力未声明');
   });
 
@@ -310,13 +303,7 @@ describe('F264 author message disposition selector', () => {
       ),
     );
 
-    await act(async () => {
-      root.render(
-        React.createElement(ChatInput, { threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: true }),
-      );
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: true });
 
     const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     await act(async () => {
@@ -359,11 +346,7 @@ describe('F264 author message disposition selector', () => {
       return Promise.resolve(jsonResponse(productSnapshot));
     });
 
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: true });
 
     const triggerA = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     await act(async () => {
@@ -373,10 +356,7 @@ describe('F264 author message disposition selector', () => {
     act(() => (container.querySelector('[data-disposition-option="next_work"]') as HTMLButtonElement).click());
     expect(triggerA.textContent).toContain('仅这一次');
 
-    await act(async () => {
-      root.render(React.createElement(ChatInput, { threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: true }));
-      await Promise.resolve();
-    });
+    await renderThreadInput({ threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: true });
 
     const triggerB = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
     expect(triggerB.textContent).toContain('下一件工作');

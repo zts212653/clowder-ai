@@ -256,6 +256,82 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     }
   });
 
+  test('an exact structured wake released by a later handoff is covered_empty for the stale carrier', async () => {
+    const dispatch = harness({
+      projection: { state: 'active', holder: 'codex-terra' },
+      events: [
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:message-1:codex-sol',
+          payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:successor-message:codex-terra',
+          payload: { fromCatId: 'codex-sol', toCatId: 'codex-terra' },
+        },
+      ],
+    });
+    const dispatchOpened = await dispatch.service.open({
+      kind: 'structured',
+      protocol: 'dispatch',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      handoff: {
+        sourceEventId: 'route:message-1:codex-sol',
+        messageId: 'message-1',
+        fromCatId: 'opus',
+      },
+    });
+    assert.deepEqual(dispatchOpened, {
+      state: 'covered_empty',
+      evidenceRefs: [
+        'dispatch:ball:thread:thread-1',
+        'route:message-1:codex-sol',
+        'released:route:successor-message:codex-terra',
+      ],
+    });
+    assert.equal((await dispatch.service.close(dispatchOpened)).shouldBlock, false);
+
+    const hold = harness({
+      projection: { state: 'active', holder: 'codex-terra' },
+      events: [
+        {
+          kind: 'ball.wake_condition_met',
+          sourceEventId: 'wakecond:task-1',
+          payload: { catId: 'codex-sol', taskId: 'task-1' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:message-1:codex-sol',
+          payload: { toCatId: 'codex-sol' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:successor-message:codex-terra',
+          payload: { fromCatId: 'codex-sol', toCatId: 'codex-terra' },
+        },
+      ],
+    });
+    const holdOpened = await hold.service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-1',
+      taskId: 'task-1',
+    });
+    assert.deepEqual(holdOpened, {
+      state: 'covered_empty',
+      evidenceRefs: [
+        'hold:ball:thread:thread-1',
+        'route:message-1:codex-sol',
+        'released:route:successor-message:codex-terra',
+      ],
+    });
+    assert.equal((await hold.service.close(holdOpened)).shouldBlock, false);
+  });
+
   test('unknown projections preserve bounded machine-readable failure reasons', async () => {
     const actionMissing = new TurnCustodyProjectionService({
       actionSuccessorLeaseStore: { get: async () => null },

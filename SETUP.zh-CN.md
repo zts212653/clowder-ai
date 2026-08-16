@@ -299,7 +299,8 @@ NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 
 # 文字转语音（TTS）
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
+# 可选覆盖；默认使用 ~/.cat-cafe/assets/tts
+# TTS_CACHE_DIR=/绝对路径/tts-cache
 
 # 语音纠正（LLM 后处理）
 NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878

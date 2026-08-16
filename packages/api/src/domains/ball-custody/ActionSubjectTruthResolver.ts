@@ -11,6 +11,7 @@ import {
 } from './action-successor-completion-state-machine.js';
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
 import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
+import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
 import type { LocalReviewEvidenceProvider } from './LocalReviewEvidenceProvider.js';
 
 type TerminalResolution = {
@@ -112,6 +113,7 @@ export class ActionSubjectTruthResolver {
     private readonly trackingFreshnessProvider?: TrackingFreshnessProvider,
     private readonly taskActionTruthProvider?: TaskActionTruthProvider,
     private readonly localReviewEvidenceProvider?: LocalReviewEvidenceProvider,
+    private readonly livePrFreshnessProvider?: LivePrFreshnessProvider,
   ) {}
 
   async resolve(subjectRefInput: string, _now: number): Promise<ActionSubjectTruthResolution> {
@@ -310,6 +312,22 @@ export class ActionSubjectTruthResolver {
           freshnessKey: predicate.freshnessKey,
         };
       }
+    }
+
+    // Bootstrap only: a fresh server-owned observation is consulted only after
+    // CommunityStore and existing PR tracking have no usable HEAD.
+    const livePr = await resolveLivePrFreshnessObservation(
+      predicate.subjectRef,
+      predicate.headSha,
+      this.livePrFreshnessProvider,
+    );
+    if (livePr) {
+      if (livePr.status !== 'verified') return livePr;
+      return {
+        status: 'verified',
+        evidenceRef: livePr.evidenceRef,
+        freshnessKey: predicate.freshnessKey,
+      };
     }
 
     return { status: 'insufficient', reason: 'current HEAD projection unavailable' };

@@ -12,7 +12,9 @@ describe('F128 community PR cognitive guard', () => {
     assert.match(tool.description, /opensource-ops/);
     assert.match(tool.description, /maintainer (?:five questions|五问)/i);
     assert.match(tool.description, /GitHub author/i);
-    assert.match(tool.description, /human_participant_activity/);
+    assert.doesNotMatch(tool.description, /human_participant_activity/);
+    assert.match(tool.description, /does NOT auto-register a wait/i);
+    assert.match(tool.description, /explicit typed predicate/i);
     assert.match(tool.description, /advisory, triage, arbitrary-link/i);
     assert.match(tool.description, /exactly one preferredCat/i);
   });

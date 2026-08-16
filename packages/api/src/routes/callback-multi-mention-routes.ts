@@ -740,8 +740,9 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
     // in their thread. Fail-open: no cursor → forward; error → forward (log + continue).
     if (deps.deliveryCursorStore) {
       try {
-        // P1 fix (gpt52 R1+R2): full visibility filter aligned with post_message gate —
-        // baseline (deleted/non-delivered/briefing) + play-mode (canViewMessage/stream origin).
+        // Full visibility filter aligned with post_message gate — baseline
+        // publication rules plus play-mode whisper privacy. Stream is transport
+        // provenance, so persisted cat speech remains freshness-relevant.
         const needsFreshnessPlayFilter = deps.threadStore
           ? await (async () => {
               const thread = await deps.threadStore!.get(record.threadId);
@@ -764,7 +765,6 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           // Play-mode visibility:
           if (needsFreshnessPlayFilter) {
             if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
-            if (msg.origin === 'stream' && msg.catId && msg.catId !== callerCatId) return false;
           }
           return true;
         };

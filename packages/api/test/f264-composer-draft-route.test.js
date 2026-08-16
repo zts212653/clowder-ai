@@ -10,6 +10,21 @@ const THREAD_ID = 'thread-f264-gap-f-draft-route';
 const OWNER_ID = 'owner-f264-gap-f';
 const AUTH_HEADERS = { 'x-cat-cafe-user': OWNER_ID };
 const apps = [];
+const QUOTE_ATTACHMENT_BLOCK = {
+  type: 'context_attachment',
+  attachment: {
+    v: 1,
+    id: 'ctx-f264-durable-quote',
+    kind: 'quote',
+    text: 'selected durable passage',
+    comment: 'paired durable comment',
+    source: {
+      kind: 'message',
+      threadId: THREAD_ID,
+      messageId: 'message-f264-durable-source',
+    },
+  },
+};
 
 function createApp() {
   const app = Fastify();
@@ -98,11 +113,16 @@ describe('F264 Gap F owner composer draft API', () => {
     assert.deepEqual(staleAfterClear.json(), { code: 'DRAFT_REVISION_MISMATCH', actualRevision: 2 });
   });
 
-  it('accepts only canonical uploaded image blocks', async () => {
+  it('rejects non-composer blocks and enforces image and attachment limits', async () => {
     const app = createApp();
     for (const contentBlocks of [
       [{ type: 'tool_call', toolName: 'oops', toolId: 'unsafe', input: {} }],
       [{ type: 'image', url: '/uploads/../secret.png' }],
+      Array.from({ length: 6 }, (_, index) => ({ type: 'image', url: `/uploads/too-many-${index}.png` })),
+      Array.from({ length: 13 }, (_, index) => ({
+        ...QUOTE_ATTACHMENT_BLOCK,
+        attachment: { ...QUOTE_ATTACHMENT_BLOCK.attachment, id: `ctx-too-many-${index}` },
+      })),
     ]) {
       const invalid = await app.inject({
         method: 'PUT',
@@ -125,5 +145,32 @@ describe('F264 Gap F owner composer draft API', () => {
     });
     assert.equal(valid.statusCode, 200);
     assert.equal(valid.json().draft.revision, 1);
+  });
+
+  it('round-trips canonical ContextAttachment blocks with text and images', async () => {
+    const app = createApp();
+    const contentBlocks = [{ type: 'image', url: '/uploads/f264-durable.png' }, QUOTE_ATTACHMENT_BLOCK];
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/api/threads/${THREAD_ID}/composer-draft`,
+      headers: AUTH_HEADERS,
+      payload: {
+        expectedRevision: 0,
+        text: 'durable text beside attachment',
+        contentBlocks,
+      },
+    });
+
+    assert.equal(put.statusCode, 200, put.body);
+    assert.deepEqual(put.json().draft.contentBlocks, contentBlocks);
+
+    const get = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${THREAD_ID}/composer-draft`,
+      headers: AUTH_HEADERS,
+    });
+    assert.equal(get.statusCode, 200, get.body);
+    assert.equal(get.json().draft.text, 'durable text beside attachment');
+    assert.deepEqual(get.json().draft.contentBlocks, contentBlocks);
   });
 });

@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 
@@ -19,9 +20,17 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
   private readonly abortHandler: () => void;
 
   constructor(private readonly options: AgentCarrierSessionOptions) {
-    this.child = spawn(options.command, [...options.args], {
+    const env = normalizeEnv(options.env);
+    const launch =
+      process.platform === 'win32'
+        ? { command: options.command, args: [...options.args], env }
+        : buildUnixSupervisedSpawnPlan(options.command, options.args, {
+            env,
+            killGraceMs: 500,
+          });
+    this.child = spawn(launch.command, launch.args, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
-      env: normalizeEnv(options.env),
+      env: launch.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child.stderr.setEncoding('utf8');

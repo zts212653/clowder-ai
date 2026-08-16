@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage as ChatMessageType } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useTts', () => ({
@@ -10,6 +11,9 @@ vi.mock('@/hooks/useTts', () => ({
 }));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ cats: [], isLoading: false, getCatById: () => undefined, getCatsByBreed: () => new Map() }),
+}));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({ name: 'You', aliases: [], mentionPatterns: [] }),
 }));
 
 const { ChatMessage } = await import('../ChatMessage');
@@ -86,11 +90,13 @@ describe('ChatMessage true recall tombstone', () => {
   });
 
   it('folds an exactly handled source body only when its terminal invocation surface exists', () => {
+    const authoredAt = new Date(2026, 7, 11, 8, 4).getTime();
+    const handledAt = new Date(2026, 7, 11, 8, 16).getTime();
     const source: ChatMessageType = {
       id: 'message-folded-source',
       type: 'user',
       content: '这段补充只应出现在本轮摘要',
-      timestamp: 1,
+      timestamp: authoredAt,
       extra: {
         queueReceipt: {
           version: 1,
@@ -100,12 +106,12 @@ describe('ChatMessage true recall tombstone', () => {
               catId: 'codex',
               state: 'handled',
               invocationId: 'child-folded',
-              seenAt: 10,
+              seenAt: authoredAt + 1,
               outcome: {
                 invocationId: 'child-folded',
-                disposition: 'responded',
+                disposition: 'completed_with_turn',
                 evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-folded' },
-                handledAt: 20,
+                handledAt,
               },
             },
           ],
@@ -118,7 +124,7 @@ describe('ChatMessage true recall tombstone', () => {
       type: 'assistant',
       catId: 'codex',
       content: '本轮最终答复',
-      timestamp: 2,
+      timestamp: handledAt,
       extra: {
         turnExecution: {
           invocationId: 'child-folded',
@@ -130,22 +136,64 @@ describe('ChatMessage true recall tombstone', () => {
     useChatStore.setState({ messages: [source, terminal] });
 
     act(() => {
-      root.render(<ChatMessage message={source} threadId="thread-1" getCatById={() => undefined} />);
+      root.render(
+        <>
+          <ChatMessage message={source} threadId="thread-1" getCatById={() => undefined} />
+          <ChatMessage message={terminal} threadId="thread-1" getCatById={() => undefined} />
+        </>,
+      );
     });
 
-    expect(container.querySelector('[data-folded-source="child-folded"]')).not.toBeNull();
-    expect(container.textContent).toContain('补充已随本轮收口');
-    expect(container.textContent).not.toContain('这段补充只应出现在本轮摘要');
+    const foldedAnchor = container.querySelector<HTMLElement>('[data-folded-source-anchor="child-folded"]');
+    expect(foldedAnchor).not.toBeNull();
+    expect(foldedAnchor?.getAttribute('aria-hidden')).toBe('true');
+    expect(container.querySelector('[data-testid="message-receipt-dock"]')).toBeNull();
+    expect(container.querySelector('[data-folded-source="child-folded"]')).toBeNull();
+    expect(container.textContent?.match(/这段补充只应出现在本轮摘要/g)).toHaveLength(1);
+    expect(container.textContent).toContain('You');
+    expect(container.textContent).toContain('08:04');
+    expect(container.textContent).toContain('随本轮完成 · 08:16');
 
-    const absorptionDock = document.createElement('details');
-    absorptionDock.dataset.turnAbsorptionInvocation = 'child-folded';
+    const absorptionDock = container.querySelector<HTMLDetailsElement>(
+      'details[data-turn-absorption-invocation="child-folded"]',
+    );
+    expect(absorptionDock).not.toBeNull();
+    if (!absorptionDock) throw new Error('fixture must render the canonical absorption dock');
     absorptionDock.scrollIntoView = vi.fn();
-    document.body.appendChild(absorptionDock);
+    if (foldedAnchor) foldedAnchor.scrollIntoView = vi.fn();
+    expect(scrollToMessage('message-folded-source')).toBe(true);
+    expect(foldedAnchor?.getAttribute('aria-hidden')).toBe('false');
+    expect(container.textContent).toContain('该补充已归入上方回复');
     act(() => {
-      (container.querySelector('[data-folded-source="child-folded"]') as HTMLButtonElement).click();
+      (container.querySelector('[data-folded-source-return="child-folded"]') as HTMLButtonElement).click();
     });
     expect(absorptionDock.open).toBe(true);
     expect(absorptionDock.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
-    absorptionDock.remove();
+  });
+
+  it('keeps an actionable supplement in the primary timeline with its real receipt', () => {
+    const actionable: ChatMessageType = {
+      id: 'message-actionable-source',
+      type: 'user',
+      content: '这条仍待处理，不能为了消重隐藏',
+      timestamp: 1,
+      extra: {
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-actionable-source',
+          targets: [{ catId: 'codex', state: 'seen', invocationId: 'child-actionable', seenAt: 10 }],
+          reminderAttempts: [],
+        },
+      },
+    };
+    useChatStore.setState({ messages: [actionable] });
+
+    act(() => {
+      root.render(<ChatMessage message={actionable} threadId="thread-1" getCatById={() => undefined} />);
+    });
+
+    expect(container.querySelector('[data-message-id="message-actionable-source"]')).not.toBeNull();
+    expect(container.textContent).toContain('这条仍待处理，不能为了消重隐藏');
+    expect(container.textContent).toContain('已读');
   });
 });

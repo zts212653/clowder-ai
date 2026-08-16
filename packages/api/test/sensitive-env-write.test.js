@@ -254,8 +254,6 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
-    // #770: use PREVIEW_GATEWAY_PORT (runtimeEditable: true) instead of FRONTEND_URL
-    // which is now non-editable under fail-closed default.
     writeFileSync(envFilePath, 'PREVIEW_GATEWAY_PORT=4100\nF102_API_KEY=sk-old\n', 'utf8');
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
     const auditEvents = [];
@@ -404,8 +402,6 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
-    // #770: use PREVIEW_GATEWAY_PORT (runtimeEditable: true) instead of FRONTEND_URL
-    // which is now non-editable under fail-closed default.
     writeFileSync(envFilePath, 'PREVIEW_GATEWAY_PORT=4100\n', 'utf8');
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
 

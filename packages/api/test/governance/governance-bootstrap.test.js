@@ -80,7 +80,15 @@ describe('GovernanceBootstrapService', () => {
         const resolved = resolve(dirname(linkPath), target);
         assert.equal(resolved, resolve(skillsRoot, skill), `${dir}/${skill} should point to cat-cafe-skills/${skill}`);
       }
-      // refs/ dir (no SKILL.md) should not be symlinked
+      const sharedRefsAlias = join(targetProject, dir, '.cat-cafe-shared-refs');
+      const aliasStat = await lstat(sharedRefsAlias);
+      assert.ok(aliasStat.isSymbolicLink(), `${dir}/.cat-cafe-shared-refs should be a symlink`);
+      assert.equal(
+        resolve(dirname(sharedRefsAlias), await readlink(sharedRefsAlias)),
+        resolve(skillsRoot, 'refs'),
+        `${dir}/.cat-cafe-shared-refs should point to canonical shared refs`,
+      );
+      // The public refs name remains unclaimed so external skills can coexist.
       await assert.rejects(lstat(join(targetProject, dir, 'refs')), { code: 'ENOENT' });
     }
   });

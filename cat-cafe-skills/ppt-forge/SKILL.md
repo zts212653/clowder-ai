@@ -1,5 +1,6 @@
 ---
 name: ppt-forge
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。
   架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。
@@ -35,8 +36,8 @@ description: >
 
 | 触发 | 场景 | 主导 | 详细文档 |
 |------|------|------|---------|
-| operator说"做个 PPT" | **1: 内容分析 + 分页规划** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
-| 分页确认 | **2: 低保真 MD 写作** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
+| operator说"做个 PPT" | **1: 内容分析 + 分页规划** | 架构猫 | [ppt-lofi-authoring.md](../.cat-cafe-shared-refs/ppt-lofi-authoring.md) |
+| 分页确认 | **2: 低保真 MD 写作** | 架构猫 | [ppt-lofi-authoring.md](../.cat-cafe-shared-refs/ppt-lofi-authoring.md) |
 | 低保真 MD 完成 | **3: operator审稿** | operator | — |
 | 审稿通过 | **4: imagegen 出图** | imagegen 猫/云端 Codex | 逐页生成精美图 |
 | 出图完成 | **5: 交付** | 主执行猫 | 图片打包 + 预览 |
@@ -44,7 +45,7 @@ description: >
 
 ## 场景 1-2: 低保真 MD 写作
 
-> 详细规范：[ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md)
+> 详细规范：[ppt-lofi-authoring.md](../.cat-cafe-shared-refs/ppt-lofi-authoring.md)
 
 ### 写作流程
 
@@ -123,11 +124,11 @@ status: lofi-draft
 
 | 风格 | Ref 文件 | 核心特征 |
 |------|---------|---------|
-| **华为** | [ppt-style-huawei.md](../refs/ppt-style-huawei.md) | 白底+红黑、直角、极致密排、图表化、数据说话 |
+| **华为** | [ppt-style-huawei.md](../.cat-cafe-shared-refs/ppt-style-huawei.md) | 白底+红黑、直角、极致密排、图表化、数据说话 |
 | Apple | 待补 | 黑白+渐变、大圆角、极简、每页一件事 |
 | 阿里 | 待补 | 橙+科技蓝、中圆角、Dashboard 风 |
 
-需要新风格时，参照 [ppt-style-huawei.md](../refs/ppt-style-huawei.md) 格式新建 ref。
+需要新风格时，参照 [ppt-style-huawei.md](../.cat-cafe-shared-refs/ppt-style-huawei.md) 格式新建 ref。
 
 ## 成功案例
 

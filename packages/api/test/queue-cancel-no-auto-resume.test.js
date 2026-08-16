@@ -458,11 +458,11 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // ADR-042 / operator Queue correction: a canceled primary is restored to Queue.
-  // Cleanup must not immediately dispatch either the same entry or a sibling;
-  // a later explicit/natural dispatch owns the next attempt.
+  // Gate 2 / operator Queue correction: explicit user cancellation consumes every
+  // entry that was included in the attempted batch. Cleanup must not recreate
+  // or immediately dispatch any of those bodies.
   // ─────────────────────────────────────────────────────────────────────────
-  it('single-cat user_cancel restores the primary and does not blind-spawn from cleanup', async () => {
+  it('single-cat user_cancel consumes the attempted batch and does not blind-spawn from cleanup', async () => {
     // Override start() to return a pre-aborted controller with 'user_cancel'
     const abortedController = new AbortController();
     abortedController.abort('user_cancel');
@@ -479,16 +479,10 @@ describe('cancelAll must NOT auto-resume queued entries', () => {
     // Let fire-and-forget settle
     await new Promise((r) => setTimeout(r, 100));
 
-    // Both entries remain queued. The canceled primary is still the single
-    // durable carrier, and cleanup cannot bounce between retryable entries.
+    // Both entries belonged to the same attempted user batch, so explicit stop
+    // terminalizes them instead of silently requeueing either one.
     const remaining = deps.queue.list('t1', 'u1');
-    assert.deepEqual(
-      remaining.map((entry) => [entry.id, entry.status]),
-      [
-        [entry1.id, 'queued'],
-        [entry2.id, 'queued'],
-      ],
-    );
+    assert.deepEqual(remaining, []);
     assert.equal(deps.router.routeExecution.mock.callCount(), 1, 'cleanup must not spawn a second attempt');
   });
 

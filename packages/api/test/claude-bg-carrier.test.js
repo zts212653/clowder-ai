@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -148,6 +148,130 @@ test('砚砚 P1.1: callbackEnv CANNOT re-poison CLAUDE_CODE_ENTRYPOINT', async (
   );
   assert.equal(childEnv.CLAUDECODE, undefined, 'CLAUDECODE must be unset too');
   assert.equal(childEnv.OTHER_VAR, 'kept', 'other callbackEnv vars must still propagate');
+});
+
+test('Claude bg ownership strips process tokens and persists only its native stop namespace', async () => {
+  const ownerDataDir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-owner-env-'));
+  const profileDirectory = join(ownerDataDir, 'claude-profile');
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+    ownerDataDir,
+    enableJobOwnership: true,
+  });
+  try {
+    await service.startJob('hi', {
+      callbackEnv: { CAT_CAFE_PROCESS_OWNER_ID: 'callback-poison' },
+      accountEnv: {
+        CAT_CAFE_PROCESS_OWNER_ID: 'account-poison',
+        CLAUDE_CONFIG_DIR: profileDirectory,
+        ANTHROPIC_API_KEY: 'must-not-persist',
+      },
+    });
+    assert.equal(fakeSpawn.lastEnv.CAT_CAFE_PROCESS_OWNER_ID, undefined);
+    const ownerDirectory = join(ownerDataDir, 'claude-bg-job-owners');
+    const [manifestName] = readdirSync(ownerDirectory);
+    const manifest = JSON.parse(readFileSync(join(ownerDirectory, manifestName), 'utf8'));
+    assert.equal(manifest.state, 'active');
+    assert.equal(manifest.shortId, 'abcd1234');
+    assert.deepEqual(manifest.stopContext, { claudeConfigDir: profileDirectory });
+    assert.equal(JSON.stringify(manifest).includes('must-not-persist'), false);
+  } finally {
+    rmSync(ownerDataDir, { recursive: true, force: true });
+  }
+});
+
+test('provider-native job-terminal states retire their active owner manifests', async () => {
+  const cases = [
+    { state: 'done', shortId: 'd0ae0001' },
+    { state: 'error', shortId: 'e2200001' },
+    { state: 'failed', shortId: 'fa110001' },
+    { state: 'stopped', shortId: '570e0001' },
+  ];
+
+  for (const scenario of cases) {
+    const ownerDataDir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-native-terminal-'));
+    const jobsDir = join(ownerDataDir, 'jobs');
+    seedJobState(jobsDir, scenario.shortId, {
+      state: scenario.state,
+      output: scenario.state === 'done' ? { result: 'done' } : undefined,
+      timelineLines: [],
+    });
+    const service = new ClaudeBgCarrierService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn: buildFakeSpawn({ stdout: `backgrounded · ${scenario.shortId}\n` }),
+      model: 'claude-test-model',
+      jobsDir,
+      ownerDataDir,
+      enableJobOwnership: true,
+    });
+
+    try {
+      for await (const _message of service.invoke('native terminal')) {
+        // Drain the complete delivery so the provider-native state is consumed.
+      }
+      assert.deepEqual(
+        readdirSync(join(ownerDataDir, 'claude-bg-job-owners')),
+        [],
+        `${scenario.state} is provider-native evidence that the job ended`,
+      );
+    } finally {
+      rmSync(ownerDataDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Claude bg timeout retains its active manifest when native stop exits nonzero', async () => {
+  const ownerDataDir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-owner-timeout-'));
+  const jobsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-bg-owner-timeout-jobs-'));
+  const shortId = 'dead0001';
+  seedJobState(jobsDir, shortId, { state: 'working' });
+  const spawnCalls = [];
+  const fakeSpawn = (_command, args, options) => {
+    spawnCalls.push({ args, options });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.unref = () => {};
+    child.kill = () => true;
+    setImmediate(() => {
+      if (args[0] === '--bg') {
+        child.stdout.emit('data', Buffer.from(`backgrounded · ${shortId}\n`));
+        child.emit('close', 0);
+      } else {
+        child.emit('close', 1);
+      }
+    });
+    return child;
+  };
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    enableJobOwnership: true,
+    model: 'claude-test-model',
+    jobsDir,
+    ownerDataDir,
+    pollMs: 5,
+    timeoutMs: 20,
+    ownerKillGraceMs: 100,
+  });
+  try {
+    await assert.rejects(async () => {
+      for await (const _message of service.invoke('time out')) {
+        // The fixture remains working until the carrier timeout fires.
+      }
+    }, /timeout/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const stopCall = spawnCalls.find(({ args }) => args[0] === 'stop');
+    assert.ok(stopCall);
+    assert.equal(stopCall.options.env.CAT_CAFE_PROCESS_OWNER_ID, undefined);
+    assert.equal(readdirSync(join(ownerDataDir, 'claude-bg-job-owners')).length, 1);
+  } finally {
+    rmSync(ownerDataDir, { recursive: true, force: true });
+    rmSync(jobsDir, { recursive: true, force: true });
+  }
 });
 
 test('F254 read-only policy locks bg carrier tools, MCP, and env after account overrides', async () => {

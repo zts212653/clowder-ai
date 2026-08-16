@@ -56,7 +56,7 @@ export type BallTransitionReject = 'invalid_transition' | 'bad_payload';
 export type BallTransitionResult = { ok: true; next: BallState } | { ok: false; reason: BallTransitionReject };
 
 /** transition 守卫只需 projection 的这几字段（窄输入，好测）。 */
-export type BallTransitionSnapshot = Pick<BallCustodyProjection, 'heldUntil' | 'lastStateChangeAt'>;
+export type BallTransitionSnapshot = Pick<BallCustodyProjection, 'holder' | 'heldUntil' | 'lastStateChangeAt'>;
 
 const ok = (next: BallState): BallTransitionResult => ({ ok: true, next });
 const reject = (reason: BallTransitionReject): BallTransitionResult => ({ ok: false, reason });
@@ -101,6 +101,18 @@ function resolveHeartbeat(
   return reject('invalid_transition');
 }
 
+function resolveDisposition(
+  event: BallCustodyEvent,
+  snapshot: BallTransitionSnapshot,
+  current: BallState,
+): BallTransitionResult {
+  if (!set('active', 'blocked').has(current)) return reject('invalid_transition');
+  const catId = event.payload.catId;
+  if (typeof catId !== 'string') return reject('bad_payload');
+  if (snapshot.holder !== catId) return reject('invalid_transition');
+  return ok('resolved');
+}
+
 // ─── 转移表（静态 from→to）+ resolver 出口（动态）────────────────────────
 
 type StaticRule = { from: Set<BallState> | '*'; to: BallState };
@@ -123,10 +135,6 @@ const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.wake_sent': { from: set('blocked'), to: 'blocked' }, // informational；非 blocked → reject（ignore）
   // F167 Phase P: wakeWhen command completed — ball stays active (cat is being woken with result)
   'ball.wake_condition_met': { from: set('active'), to: 'active' },
-  // F167×F254: only the exact invocation-bound producer may close a live managed hold.
-  'ball.hold_dispositioned': { from: set('active', 'blocked'), to: 'resolved' },
-  // F167: only the exact invocation-bound producer may close a live ordinary A2A dispatch.
-  'ball.dispatch_dispositioned': { from: set('active', 'blocked'), to: 'resolved' },
   // ─── Phase C 安乐死（KD-C1/C2 + 砚砚 R0：7 非-resolved → resolved；resolved → 自然 reject 无规则）───
   // KD-C2 三独立 kind 共享转移行为（语义独立 / payload.kind 区分 / simple table 一致性）
   'ball.frozen': { from: set('new', 'active', 'blocked', 'parked', 'dead', 'void', 'zombie'), to: 'resolved' },
@@ -141,6 +149,10 @@ const DYNAMIC_TABLE: Partial<Record<BallCustodyEvent['kind'], DynamicRule>> = {
   'ball.handed_cvo': { resolve: (e, _s, c) => resolveHandedCvo(e, c) },
   'ball.hold_expired': { resolve: resolveHoldExpired },
   'invocation.heartbeat': { resolve: resolveHeartbeat },
+  // The event-log sequence fence protects the check-to-append window. This
+  // holder guard is the projector/rebuild backstop for every event producer.
+  'ball.hold_dispositioned': { resolve: resolveDisposition },
+  'ball.dispatch_dispositioned': { resolve: resolveDisposition },
 };
 
 /**

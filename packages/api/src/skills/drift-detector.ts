@@ -20,7 +20,11 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from '../utils/project-path.js';
-import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../utils/skill-mount.js';
+import {
+  buildSkillMountTargets,
+  isManagedDirectoryLevelSkillsSymlink,
+  SHARED_SKILL_REFS_ALIAS,
+} from '../utils/skill-mount.js';
 import {
   canonicalSkillMountPathPolicy,
   normalizeSkillMountPathPolicy,
@@ -407,6 +411,9 @@ async function checkMountDrift(
       continue;
     }
     for (const name of entries) {
+      // The reserved shared-refs alias is deliberately created and preserved by
+      // the sync engine (ensureSharedSkillRefsMount) — never report it as stale.
+      if (name === SHARED_SKILL_REFS_ALIAS) continue;
       if (expectedSet.has(name) && skillAllowsMountPoint(policy, name, target.mountPointId)) continue;
       const effSource = effectiveSourceMap?.get(name) ?? skillsSource;
       const result = await classifyEntry(join(target.dir, name), join(effSource, name), platformName);

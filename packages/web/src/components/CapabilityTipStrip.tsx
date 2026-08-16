@@ -32,9 +32,17 @@ const DEFAULT_FIRST_DELAY_MS = 6000;
 const DEFAULT_ROTATE_MS = 30000;
 
 const INVENTORY_TIP_IDS: readonly string[] = CAPABILITY_TIPS.map((t) => t.id);
+const CAPABILITY_SURFACE_ROUTES: Readonly<Record<string, string>> = {
+  'settings.plugins': '/settings?s=plugins',
+};
+
+function capabilitySurfaceHref(tip: CapabilityTip): string | undefined {
+  if (tip.action?.type !== 'open_capability_surface') return undefined;
+  return CAPABILITY_SURFACE_ROUTES[tip.action.surfaceId];
+}
 
 function canRenderInTipStrip(tip: CapabilityTip): boolean {
-  return tip.action?.type === 'open_concierge_draft';
+  return tip.action?.type === 'open_concierge_draft' || capabilitySurfaceHref(tip) !== undefined;
 }
 
 const CAPABILITY_TIP_STRIP_TIPS: readonly CapabilityTip[] = CAPABILITY_TIPS.filter(canRenderInTipStrip);
@@ -51,32 +59,47 @@ function TipContent({
   surface: CapabilityTipSurface;
   setSurfaceState: (state: 'collapsed' | 'toolbar' | 'bubble', prompt?: string) => void;
 }) {
-  const openDraft = () => {
-    setSurfaceState('bubble', buildConciergeDraftPrompt(tip));
+  const surfaceHref = capabilitySurfaceHref(tip);
+  const recordAction = (actionType: 'open_concierge_draft' | 'open_capability_surface') => {
     recordCapabilityTipEvent({
       event: 'capability_tip_action',
       tipId: tip.id,
       context: matchedContext,
       surface,
-      actionType: 'open_concierge_draft',
+      actionType,
       outcome: 'opened',
       timestamp: Date.now(),
     });
+  };
+  const openDraft = () => {
+    setSurfaceState('bubble', buildConciergeDraftPrompt(tip));
+    recordAction('open_concierge_draft');
   };
 
   return (
     <>
       <span className="shrink-0 font-medium text-cafe-secondary">Tip</span>
       <span className="min-w-0 flex-1 break-words">{tip.body}</span>
-      <button
-        type="button"
-        data-testid="capability-tip-learn-more"
-        onClick={openDraft}
-        title="了解更多：打开猫猫球并预填输入框，不会自动发送"
-        className="shrink-0 rounded-md border border-cafe px-2 py-1 text-xs font-medium text-cafe-secondary transition-colors hover:border-cafe-accent hover:text-cafe-accent"
-      >
-        了解更多
-      </button>
+      {surfaceHref ? (
+        <a
+          data-testid="capability-tip-open-surface"
+          href={surfaceHref}
+          onClick={() => recordAction('open_capability_surface')}
+          className="shrink-0 rounded-md border border-cafe px-2 py-1 text-xs font-medium text-cafe-secondary transition-colors hover:border-cafe-accent hover:text-cafe-accent"
+        >
+          {tip.action?.label}
+        </a>
+      ) : (
+        <button
+          type="button"
+          data-testid="capability-tip-learn-more"
+          onClick={openDraft}
+          title="了解更多：打开猫猫球并预填输入框，不会自动发送"
+          className="shrink-0 rounded-md border border-cafe px-2 py-1 text-xs font-medium text-cafe-secondary transition-colors hover:border-cafe-accent hover:text-cafe-accent"
+        >
+          {tip.action?.label ?? '了解更多'}
+        </button>
+      )}
     </>
   );
 }
@@ -201,7 +224,7 @@ export function CapabilityTipStrip({
     if (exposedKeyRef.current === exposureKey) return;
     exposedKeyRef.current = exposureKey;
     handleExposure(tip, matchedContext);
-  }, [matchedContext, rotationKey, surface, tip, contentReady, handleExposure]);
+  }, [matchedContext, rotationKey, surface, tip, contentReady, handleExposure, enabled]);
 
   if (!enabled) return null;
 

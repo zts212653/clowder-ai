@@ -73,6 +73,7 @@ skipped=0
 errors=0
 dir_mounted=0  # providers where .{provider}/skills is a valid directory-level
                # symlink (legacy mount, already valid) — skipped wholesale
+SHARED_REFS_ALIAS=".cat-cafe-shared-refs"
 
 # Canonicalize a path to its physical (symlink-resolved) location. macOS
 # readlink lacks -f; using `cd && pwd -P` is a builtin and avoids spawning
@@ -177,6 +178,36 @@ sync_link() {
   else
     ln -s "$link_target" "$link_path"
     printf "  ${GREEN}✓${NC} %s → %s\n" "$skill_name" "$target_dir/"
+  fi
+  created=$((created + 1))
+}
+
+sync_shared_refs() {
+  local target_dir="$1"
+  local link_target="$2"
+  local link_path="$target_dir/$SHARED_REFS_ALIAS"
+
+  if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "$link_target" ]; then
+    skipped=$((skipped + 1))
+    return 0
+  fi
+  if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+    printf "  ${RED}SKIP${NC} %s (reserved shared refs coordinate is occupied)\n" "$link_path"
+    errors=$((errors + 1))
+    return 0
+  fi
+  if [ ! -d "$target_dir" ]; then
+    if $DRY_RUN; then
+      printf "  ${YELLOW}[dry-run]${NC} would mkdir %s\n" "$target_dir"
+    else
+      mkdir -p "$target_dir"
+    fi
+  fi
+  if $DRY_RUN; then
+    printf "  ${YELLOW}[dry-run]${NC} would create %s → %s\n" "$link_path" "$link_target"
+  else
+    ln -s "$link_target" "$link_path"
+    printf "  ${GREEN}✓${NC} %s → %s/\n" "$SHARED_REFS_ALIAS" "$target_dir"
   fi
   created=$((created + 1))
 }
@@ -291,6 +322,9 @@ for wt in "${worktree_paths[@]}"; do
     fi
 
     synced=0
+    before=$created
+    sync_shared_refs "$wt_skills" "../../cat-cafe-skills/refs"
+    [ "$created" -gt "$before" ] && synced=$((synced + 1))
     for skill_name in "${skill_names[@]}"; do
       before=$created
       sync_link "$skill_name" "$wt_skills" "../../cat-cafe-skills/$skill_name"
@@ -306,6 +340,10 @@ done
 
 if $USER_MODE; then
   printf "\n${BOLD}[HOME]${NC} ~/.{claude,codex,gemini,kimi}/skills/ (--user opt-in)\n"
+  sync_shared_refs "$HOME_CLAUDE" "$SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_CODEX" "$SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_GEMINI" "$SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_KIMI" "$SKILLS_SRC/refs"
   for skill_name in "${skill_names[@]}"; do
     sync_link "$skill_name" "$HOME_CLAUDE" "$SKILLS_SRC/$skill_name"
     sync_link "$skill_name" "$HOME_CODEX"  "$SKILLS_SRC/$skill_name"

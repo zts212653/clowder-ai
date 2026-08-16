@@ -132,6 +132,71 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     });
   });
 
+  it('persists an exact wait continuation carrier without promoting its owner fence', async () => {
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const { invocationId } = await store.create({
+      threadId: 'thread-wait',
+      userId: 'user-wait',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'redis-wait-carrier',
+      actionLeaseCarrier: { kind: 'none' },
+      waitContinuationCarrier,
+    });
+
+    const record = await store.get(invocationId);
+    assert.deepEqual(record.waitContinuationCarrier, waitContinuationCarrier);
+    assert.deepEqual(record.actionLeaseCarrier, { kind: 'none' });
+  });
+
+  it('rejects malformed wait continuation carriers before writing Redis state', async () => {
+    await assert.rejects(
+      () =>
+        store.create({
+          threadId: 'thread-wait-invalid',
+          userId: 'user-wait',
+          targetCats: ['codex-sol'],
+          intent: 'execute',
+          idempotencyKey: 'redis-wait-carrier-invalid',
+          actionLeaseCarrier: { kind: 'none' },
+          waitContinuationCarrier: {
+            v: 1,
+            waitId: 'task-pr-7',
+            outcomeId: 'wait:pr:owner/repo#7:g0:matched',
+            ownerFence: { kind: 'containing_task', generation: 0 },
+          },
+        }),
+      /invalid wait continuation carrier/,
+    );
+    assert.equal(await redis.exists('idemp:thread-wait-invalid:user-wait:redis-wait-carrier-invalid'), 0);
+  });
+
+  it('fails closed when a persisted wait continuation carrier is malformed', async () => {
+    const now = String(Date.now());
+    await redis.hset('invoc:malformed-wait-carrier', {
+      id: 'malformed-wait-carrier',
+      threadId: 'thread-wait',
+      userId: 'user-wait',
+      targetCats: JSON.stringify(['codex-sol']),
+      intent: 'execute',
+      idempotencyKey: 'malformed-wait-carrier',
+      status: 'running',
+      userMessageId: '',
+      error: '',
+      actionLeaseCarrier: JSON.stringify({ kind: 'none' }),
+      waitContinuationCarrier: JSON.stringify({ v: 1, waitId: 'task-pr-7' }),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await assert.rejects(() => store.get('malformed-wait-carrier'), /invalid wait continuation carrier/);
+  });
+
   it('hydrates the pre-classifier actionLeaseRef field as an action-successor carrier', async () => {
     const now = String(Date.now());
     await redis.hset('invoc:legacy-action-carrier', {

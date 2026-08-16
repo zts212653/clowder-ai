@@ -43,7 +43,7 @@ test('routeSerial keeps newest cursor boundary when same cat re-enters in one ch
   const cursorOld = 'v2:0000000000000001:0000000000000001-000001-aaaaaaaa';
   const newUserMsgId = '0000000000000002-000001-bbbbbbbb';
   const newUserCursor = `v2:0000000000000002:${newUserMsgId}`;
-  const streamOnlyMsgId = '0000000000000003-000001-cccccccc';
+  const ownStreamMsgId = '0000000000000003-000001-cccccccc';
 
   let opusCalls = 0;
   const opusService = {
@@ -104,11 +104,11 @@ test('routeSerial keeps newest cursor boundary when same cat re-enters in one ch
     }
     return [
       {
-        id: streamOnlyMsgId,
+        id: ownStreamMsgId,
         threadId: 'thread-1',
         userId: 'user-1',
-        catId: 'codex',
-        content: 'codex stream internal',
+        catId: 'opus',
+        content: 'opus own stream output',
         mentions: [],
         origin: 'stream',
         timestamp: Date.now(),

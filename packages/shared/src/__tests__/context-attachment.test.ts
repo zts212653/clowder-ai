@@ -36,9 +36,47 @@ describe('ContextAttachmentSchema', () => {
         id: 'ctx-quote-1',
         kind: 'quote',
         text: 'selected CLI output',
-        source: { kind: 'cli_output', threadId: 'thread_abc123', messageId: 'msg_1' },
+        comment: 'This output explains the failure.',
+        selectionStart: 8,
+        selectionEnd: 23,
+        source: { kind: 'cli_output', threadId: 'thread_abc123', messageId: 'msg_1', segmentId: 'stdout' },
       }),
-    ).toMatchObject({ kind: 'quote', source: { kind: 'cli_output' } });
+    ).toMatchObject({
+      kind: 'quote',
+      comment: 'This output explains the failure.',
+      selectionStart: 8,
+      selectionEnd: 23,
+      source: { kind: 'cli_output', segmentId: 'stdout' },
+    });
+  });
+
+  it('keeps quote comments bounded and requires complete ordered selection coordinates', () => {
+    const quote = {
+      v: 1,
+      id: 'ctx-quote-commented',
+      kind: 'quote',
+      text: 'selected message text',
+      source: { kind: 'message', threadId: 'thread_abc123', messageId: 'msg_1' },
+    } as const;
+
+    expect(ContextAttachmentSchema.safeParse({ ...quote, comment: '   ' }).success).toBe(false);
+    expect(
+      ContextAttachmentSchema.safeParse({
+        ...quote,
+        comment: 'x'.repeat(10_001),
+      }).success,
+    ).toBe(false);
+    expect(ContextAttachmentSchema.safeParse({ ...quote, selectionStart: 2 }).success).toBe(false);
+    expect(ContextAttachmentSchema.safeParse({ ...quote, selectionStart: 8, selectionEnd: 8 }).success).toBe(false);
+    expect(ContextAttachmentSchema.safeParse({ ...quote, selectionStart: 8, selectionEnd: 4 }).success).toBe(false);
+    expect(
+      ContextAttachmentSchema.safeParse({
+        ...quote,
+        selectionStart: 0,
+        selectionEnd: 8,
+        source: { kind: 'cli_output', threadId: 'thread_abc123', messageId: 'msg_1' },
+      }).success,
+    ).toBe(false);
   });
 
   it('fails closed for future versions, unknown fields, invalid ranges, and overlong quotes', () => {

@@ -180,7 +180,7 @@ describe('AC-D2: IssueCommentRouter', () => {
     assert.ok(content.includes('[UNTRUSTED EXTERNAL CONTENT]'), 'should wrap external content');
   });
 
-  test('buildIssueCommentContent appends trackingInstructions', () => {
+  test('buildIssueCommentContent excludes deleted trackingInstructions', () => {
     assert.ok(buildIssueCommentContent, 'buildIssueCommentContent should be importable');
     const content = buildIssueCommentContent(
       {
@@ -190,8 +190,8 @@ describe('AC-D2: IssueCommentRouter', () => {
       },
       'Please respond in Chinese',
     );
-    assert.ok(content.includes('📌 **Tracking Instructions**'), 'should have instructions header');
-    assert.ok(content.includes('Please respond in Chinese'), 'should include instructions text');
+    assert.equal(content.includes('Tracking Instructions'), false);
+    assert.equal(content.includes('Please respond in Chinese'), false);
   });
 });
 

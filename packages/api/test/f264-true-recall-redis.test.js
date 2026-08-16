@@ -289,6 +289,40 @@ describe('F264 Gap F true recall contract (Redis store)', { skip: redisIsolation
     assert.deepEqual(await store.getOwnerComposerDraft('owner-redis', 'thread-f264-gap-f-redis'), beforeDraft);
   });
 
+  it('round-trips ContextAttachment blocks in the owner composer draft', async () => {
+    const contentBlocks = [
+      { type: 'image', url: '/uploads/durable-draft.png' },
+      {
+        type: 'context_attachment',
+        attachment: {
+          v: 1,
+          id: 'ctx-redis-durable-draft',
+          kind: 'quote',
+          text: 'durable selected passage',
+          comment: 'durable paired comment',
+          source: {
+            kind: 'message',
+            threadId: 'thread-f264-gap-f-redis',
+            messageId: 'message-redis-durable-source',
+          },
+        },
+      },
+    ];
+    const result = await store.putOwnerComposerDraft('owner-redis', 'thread-f264-gap-f-redis', {
+      expectedRevision: 0,
+      text: 'durable text',
+      contentBlocks,
+      updatedAt: 1_500,
+    });
+
+    assert.equal(result.kind, 'updated');
+    assert.deepEqual(result.draft.contentBlocks, contentBlocks);
+    assert.deepEqual(
+      (await store.getOwnerComposerDraft('owner-redis', 'thread-f264-gap-f-redis')).contentBlocks,
+      contentBlocks,
+    );
+  });
+
   it('matches MemoryStore by recalling an already delivered handled source', async () => {
     const message = await appendQueued(
       custody({

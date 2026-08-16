@@ -6,6 +6,7 @@
  * - POST /api/messages auto-cancel (user message invalidates pending holds)
  */
 
+import type { SchedulerAwaitStateV1 } from '@cat-cafe/shared';
 import { readManagedCommandWakeProjection } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import {
@@ -29,6 +30,8 @@ export type HoldLifecycleStatus = 'active' | 'retired_by_event' | 'cancelled_by_
 export interface HoldLifecycleProjection {
   readonly mode: 'timer' | 'wake_when';
   readonly status: HoldLifecycleStatus;
+  /** F280 Phase D: typed logical wait projection; absent only on legacy records. */
+  readonly await?: SchedulerAwaitStateV1;
   readonly waitSourceRef?: Record<string, unknown>;
   readonly subjectKey?: string;
   readonly expectedSignalKey?: HoldExpectedSignalKey;
@@ -87,6 +90,24 @@ export function isPendingHoldBallTask(task: DynamicTaskDef): boolean {
   if (!Object.hasOwn(task.params, 'holdLifecycle')) return true;
   const lifecycle = readHoldLifecycle(task);
   return lifecycle?.status === 'active';
+}
+
+/**
+ * An ordinary user message retires the obsolete wake carrier, not the
+ * independently running managed command. Keep that execution discoverable and
+ * explicitly cancelable until its exact runner reaches terminal.
+ */
+export function isRetiredWakeWithRunningManagedCommand(task: DynamicTaskDef): boolean {
+  if (!isHoldBallTask(task) || task.enabled) return false;
+  const lifecycle = readHoldLifecycle(task);
+  const command = readManagedCommandWakeProjection(task);
+  return (
+    lifecycle?.mode === 'wake_when' && lifecycle.status === 'cancelled_by_user' && command?.state === 'command_running'
+  );
+}
+
+export function isCancelableHoldBallTask(task: DynamicTaskDef): boolean {
+  return isPendingHoldBallTask(task) || isRetiredWakeWithRunningManagedCommand(task);
 }
 
 export function isRetiredHoldBallTombstone(task: DynamicTaskDef): boolean {
@@ -182,6 +203,15 @@ export function findPendingHoldBallTask(
   return task;
 }
 
+export function findCancelableHoldBallTask(
+  taskId: string,
+  store: Pick<HoldBallCancelDeps['dynamicTaskStore'], 'getById'>,
+): DynamicTaskDef | null {
+  const task = store.getById(taskId);
+  if (!task || !isCancelableHoldBallTask(task)) return null;
+  return task;
+}
+
 export function executeHoldCancel(task: DynamicTaskDef, deps: HoldBallCancelDeps): void {
   deps.taskRunner.unregister(task.id);
   deps.dynamicTaskStore.remove(task.id);
@@ -198,10 +228,17 @@ export function cancelPendingHoldsForThread(threadId: string, deps: HoldBallCanc
   const pending = deps.dynamicTaskStore
     .getAll()
     .filter((t) => isPendingHoldBallTask(t) && t.deliveryThreadId === threadId);
+  const cancelled: DynamicTaskDef[] = [];
 
   for (const task of pending) {
-    deps.taskRunner.unregister(task.id);
     const command = readManagedCommandWakeProjection(task);
+    // Once Queue or direct dispatch has accepted this wake, its child invocation
+    // owns the exact source/task pair. Retiring the task here would make the
+    // invocation-bound disposition impossible and requeue already-read work.
+    if (command?.state === 'enqueued' || command?.state === 'dispatched') continue;
+
+    deps.taskRunner.unregister(task.id);
+    cancelled.push(task);
     if (command && deps.dynamicTaskStore.updateParams && deps.dynamicTaskStore.setEnabled) {
       const lifecycle = readHoldLifecycle(task);
       if (lifecycle) {
@@ -219,8 +256,8 @@ export function cancelPendingHoldsForThread(threadId: string, deps: HoldBallCanc
     }
     deps.dynamicTaskStore.remove(task.id);
   }
-  if (pending.length > 0) c1HoldCancelCount.add(pending.length);
-  return pending;
+  if (cancelled.length > 0) c1HoldCancelCount.add(cancelled.length);
+  return cancelled;
 }
 
 export function retirePendingHoldsForSatisfiedWait(

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { PerCatTerminalDispositionCollector } from '../dist/domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import { QueuedMessageCustodyStartupReconciler } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js';
@@ -147,6 +148,95 @@ describe('F254 Queue restart custody', () => {
     assert.equal(restored.ownerAuthProvenance, 'strict');
   });
 
+  test('rehydrates a wait continuation carrier from its canonical connector message', async () => {
+    const messageStore = createMessageStore();
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g3:matched',
+      ownerFence: { kind: 'containing_task', generation: 3 },
+    };
+    appendQueued(messageStore, custody({ ownerAuthProvenance: 'strict' }), {
+      source: {
+        connector: 'github-wait',
+        label: 'GitHub Wait',
+        icon: 'github',
+        meta: { waitContinuationCarrier },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    await reconciler.reconcile();
+
+    const restored = invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1');
+    assert.equal(restored.source, 'connector');
+    assert.deepEqual(restored.waitContinuationCarrier, waitContinuationCarrier);
+    assert.equal(restored.actionSuccessorFence, undefined);
+  });
+
+  test('reconstructs the same durable retry attempt identity after restart', async () => {
+    const messageStore = createMessageStore();
+    appendQueued(
+      messageStore,
+      custody({
+        targetAttempts: [
+          {
+            id: 'entry-restart-1:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            terminalReason: 'invocation_failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+          },
+          {
+            id: 'entry-restart-1:opus:2',
+            targetCatId: 'opus',
+            sequence: 2,
+            state: 'queued',
+            createdAt: 1_200,
+            updatedAt: 1_200,
+          },
+        ],
+        updatedAt: 1_200,
+      }),
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    await reconciler.reconcile();
+
+    const restored = invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1');
+    assert.deepEqual(restored.queuedAttemptIdByCatId, { opus: 'entry-restart-1:opus:2' });
+  });
+
+  test('does not replace the original Queue idempotency identity with the initial attempt after restart', async () => {
+    const messageStore = createMessageStore();
+    appendQueued(
+      messageStore,
+      custody({
+        targetAttempts: [
+          {
+            id: 'entry-restart-1:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'queued',
+            createdAt: 1_000,
+            updatedAt: 1_000,
+          },
+        ],
+      }),
+    );
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    await reconciler.reconcile();
+
+    const restored = invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1');
+    assert.equal(restored.queuedAttemptIdByCatId, undefined);
+  });
+
   test('restores one durable cross-thread carrier per target without cloning the message body', async () => {
     const messageStore = createMessageStore();
     const message = appendQueued(
@@ -229,6 +319,16 @@ describe('F254 Queue restart custody', () => {
         receiptScope: 'cross_thread_delivery',
         carrierByTargetCatId: carrier,
         carrierStateByTargetCatId: { opus: { status: 'queued' } },
+        targetAttempts: [
+          {
+            id: 'cross-thread:message-first:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'queued',
+            createdAt: 1_000,
+            updatedAt: 1_000,
+          },
+        ],
       }),
       { catId: 'sonnet', content: 'first handoff', timestamp: 1_000 },
     );
@@ -239,6 +339,16 @@ describe('F254 Queue restart custody', () => {
         receiptScope: 'cross_thread_delivery',
         carrierByTargetCatId: carrier,
         carrierStateByTargetCatId: { opus: { status: 'queued' } },
+        targetAttempts: [
+          {
+            id: 'cross-thread:message-second:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'queued',
+            createdAt: 1_001,
+            updatedAt: 1_001,
+          },
+        ],
       }),
       { catId: 'sonnet', content: 'second handoff', timestamp: 1_001 },
     );
@@ -254,6 +364,7 @@ describe('F254 Queue restart custody', () => {
     assert.equal(restored.content, 'first handoff\nsecond handoff');
     assert.deepEqual(restored.targetCats, ['opus']);
     assert.equal(restored.autoExecute, true);
+    assert.equal(restored.queuedAttemptIdByCatId, undefined);
   });
 
   test('restores a coalesced target carrier when sibling messages have different global target sets', async () => {
@@ -344,6 +455,51 @@ describe('F254 Queue restart custody', () => {
     assert.equal(result.entriesRestored, 1);
     assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-healthy').messageId, healthy.id);
     assert.ok(warnings.some((message) => message.includes(corrupt.id)));
+  });
+
+  test('terminalizes a legacy unfenced github-wait group without blocking a later healthy custody group', async () => {
+    const messageStore = createMessageStore();
+    const legacy = appendQueued(messageStore, custody({ entryId: 'entry-legacy-wait' }), {
+      content: 'pre-Gate-4 github wait',
+      source: {
+        connector: 'github-wait',
+        label: 'GitHub Wait',
+        icon: 'github',
+      },
+    });
+    const healthy = appendQueued(messageStore, custody({ entryId: 'entry-healthy-after-legacy' }), {
+      content: 'healthy queued work',
+    });
+    const warnings = [];
+    const invocationQueue = new InvocationQueue();
+    const reconciler = new QueuedMessageCustodyStartupReconciler({
+      messageStore,
+      invocationQueue,
+      invocationRecordStore: createRecordStore(),
+      now: () => 2_000,
+      log: {
+        info() {},
+        warn(message) {
+          warnings.push(message);
+        },
+      },
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 1);
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(
+      invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-healthy-after-legacy').messageId,
+      healthy.id,
+    );
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-legacy-wait'), null);
+    const storedLegacy = messageStore.getById(legacy.id);
+    assert.equal(storedLegacy.deliveryStatus, 'delivered');
+    assert.equal(storedLegacy.queueCustody.status, 'terminal');
+    assert.deepEqual(storedLegacy.queueCustody.pendingTargetCats, []);
+    assert.deepEqual(storedLegacy.queueCustody.failedByCatIds, ['opus']);
+    assert.ok(warnings.some((message) => message.includes(legacy.id)));
   });
 
   test('distinguishes malformed custody from an absent legacy custody field', () => {
@@ -465,6 +621,196 @@ describe('F254 Queue restart custody', () => {
         outputMessageIds: [response.id],
       },
     });
+  });
+
+  test('terminalizes a failed historical exposure when its durable output names this source message', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 3,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-response-after-failure', seenAt: 1_075 }],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+      {
+        userId: 'scheduler',
+        source: {
+          connector: 'hold-ball',
+          label: '持球通知',
+          meta: { taskId: 'task-managed-command', threadId: 'thread-1', catId: 'opus', wakeWhen: true },
+        },
+      },
+    );
+    const response = messageStore.append({
+      userId: 'default-user',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'durable response persisted before failed bookkeeping cleared the active exposure',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-response-after-failure',
+          turnInvocationId: 'inv-response-after-failure',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const ballEvents = [];
+    const turnCustody = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: {
+        async get() {
+          return { state: 'active', holder: 'opus' };
+        },
+      },
+      ballCustodyEventLog: {
+        async read(_subjectKey, fromSequence = 0) {
+          return ballEvents.slice(fromSequence);
+        },
+      },
+    });
+    const ballProjection = await turnCustody.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'opus',
+      sourceMessageId: message.id,
+      taskId: 'task-managed-command',
+    });
+    const reconciler = createReconciler({
+      messageStore,
+      invocationQueue,
+      turnExecutions: [
+        turnExecution({
+          invocationId: 'inv-response-after-failure',
+          parentInvocationId: 'parent-response-after-failure',
+          status: 'failed',
+          terminalReason: 'managed_hold_disposition_missing',
+        }),
+      ],
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(result.handledTargets, 1);
+    assert.equal(result.failedTargets, 0);
+    assert.deepEqual(await turnCustody.close(ballProjection), {
+      state: 'covered_active',
+      shouldBlock: true,
+      transitionObserved: false,
+      evidenceRefs: ['hold:ball:thread:thread-1'],
+    });
+    assert.deepEqual(ballEvents, []);
+    assert.equal(invocationQueue.getEntrySnapshot('thread-1', 'scheduler', 'entry-restart-1'), null);
+    const stored = messageStore.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'delivered');
+    assert.deepEqual(stored.queueCustody.targetOutcomeByCatId.opus, {
+      invocationId: 'inv-response-after-failure',
+      disposition: 'responded',
+      evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-response-after-failure' },
+      handledAt: 2_000,
+      consumption: {
+        kind: 'source_response',
+        outputMessageIds: [response.id],
+      },
+    });
+  });
+
+  test('hydrates the thread once while checking multiple retained exposure invocations', async () => {
+    const messageStore = createMessageStore();
+    const readThread = messageStore.getByThreadAfter.bind(messageStore);
+    let threadHydrations = 0;
+    messageStore.getByThreadAfter = (...args) => {
+      threadHydrations += 1;
+      return readThread(...args);
+    };
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 4,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [
+          { targetCatId: 'opus', invocationId: 'inv-response-older', seenAt: 1_075 },
+          { targetCatId: 'opus', invocationId: 'inv-response-newer', seenAt: 1_100 },
+        ],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+    );
+    messageStore.append({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'the older exposure has the exact durable response',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-response-older',
+          turnInvocationId: 'inv-response-older',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: message.id },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 1);
+    assert.equal(threadHydrations, 1);
+  });
+
+  test('keeps a failed historical exposure queued when output is not bound to its source message', async () => {
+    const messageStore = createMessageStore();
+    const message = appendQueued(
+      messageStore,
+      custody({
+        revision: 3,
+        status: 'queued',
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: {},
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-unbound-after-failure', seenAt: 1_075 }],
+        failedByCatIds: ['opus'],
+        updatedAt: 1_600,
+      }),
+    );
+    messageStore.append({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      catId: 'opus',
+      content: 'same invocation, but this reply belongs to a different trigger',
+      mentions: [],
+      timestamp: 1_500,
+      extra: {
+        stream: {
+          invocationId: 'parent-unbound-after-failure',
+          turnInvocationId: 'inv-unbound-after-failure',
+        },
+        causal: { kind: 'invocation_reply', triggerMessageId: 'different-source-message' },
+      },
+    });
+    const invocationQueue = new InvocationQueue();
+    const reconciler = createReconciler({ messageStore, invocationQueue });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.messagesTerminalized, 0);
+    assert.equal(result.handledTargets, 0);
+    const restored = invocationQueue.getEntrySnapshot('thread-1', 'user-1', 'entry-restart-1');
+    assert.equal(restored.status, 'queued');
+    const stored = messageStore.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'queued');
+    assert.deepEqual(stored.queueCustody.failedByCatIds, ['opus']);
+    assert.deepEqual(stored.queueCustody.handledByCatIds, []);
   });
 
   test('requeues an awakened child that restarted before body exposure as exact unsettled work', async () => {
@@ -829,9 +1175,14 @@ describe('F254 Queue restart custody', () => {
     assert.equal(invocationQueue.list('thread-1', 'user-1').length, 0);
   });
 
-  test('StartupReconciler keeps legacy agent-handoff visibility recovery outside user custody', async () => {
+  test('StartupReconciler recovers legacy agent handoffs without claiming active requests were interrupted', async () => {
     const messageStore = createMessageStore();
-    const message = appendQueued(messageStore, null, { catId: 'opus', mentions: ['codex'] });
+    const reviewRequest = appendQueued(messageStore, null, { catId: 'codex-sol', mentions: ['opus'] });
+    const reviewVerdict = appendQueued(messageStore, null, {
+      catId: 'opus',
+      mentions: ['codex-sol'],
+      timestamp: 1_001,
+    });
     const invocationQueue = new InvocationQueue();
     const invocationRecordStore = {
       async scanByStatus() {
@@ -851,8 +1202,16 @@ describe('F254 Queue restart custody', () => {
 
     const result = await reconciler.reconcileOrphans();
 
-    assert.equal(result.messagesRecovered, 1);
-    assert.equal(messageStore.getById(message.id).deliveryStatus, 'delivered');
+    assert.equal(result.messagesRecovered, 2);
+    assert.equal(result.running, 0);
+    assert.equal(result.queued, 0);
+    assert.equal(result.notifiedThreads, 0);
+    assert.equal(messageStore.getById(reviewRequest.id).deliveryStatus, 'delivered');
+    assert.equal(messageStore.getById(reviewVerdict.id).deliveryStatus, 'delivered');
+    assert.equal(
+      messageStore.getRecent(20).some((message) => message.source?.connector === 'startup-reconciler'),
+      false,
+    );
   });
 
   test('StartupReconciler restores then naturally resumes each new durable scope once', async () => {

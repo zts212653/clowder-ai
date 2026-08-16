@@ -18,6 +18,7 @@ const REDIS_URL = process.env.REDIS_URL;
 
 describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisDispatchProposalStore;
+  let computeDispatchCanonicalActionKey;
   let createRedisClient;
   let redis;
   let store;
@@ -28,6 +29,8 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
 
     const storeModule = await import('../../dist/domains/approval-hub/stores/redis/RedisDispatchProposalStore.js');
     RedisDispatchProposalStore = storeModule.RedisDispatchProposalStore;
+    const contractsModule = await import('../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js');
+    computeDispatchCanonicalActionKey = contractsModule.computeDispatchCanonicalActionKey;
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -51,6 +54,8 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
         'dispatch-proposal-user-settled:*',
         'dispatch-proposal-clientmsg:*',
         'dispatch-proposal-lineage:*',
+        'dispatch-proposal-canonical-admission:*',
+        'dispatch-proposal-canonical-admission-rebuild-completed-at',
         'dispatch-proposal-negative-authorization:*',
         'dispatch-proposal-legacy-negative-authorization:*',
         'dispatch-proposal-negative-authorization-legacy-cutover',
@@ -67,6 +72,8 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
         'dispatch-proposal-user-settled:*',
         'dispatch-proposal-clientmsg:*',
         'dispatch-proposal-lineage:*',
+        'dispatch-proposal-canonical-admission:*',
+        'dispatch-proposal-canonical-admission-rebuild-completed-at',
         'dispatch-proposal-negative-authorization:*',
         'dispatch-proposal-legacy-negative-authorization:*',
         'dispatch-proposal-negative-authorization-legacy-cutover',
@@ -802,6 +809,229 @@ describe('RedisDispatchProposalStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
       { proposalId: 'dp-redis-001', status: 'rejected', targetCats: ['sonnet'] },
     ]);
+  });
+
+  it('#1291 Gate 1: Redis canonical admission carries pending and rejected decisions across invocations', async () => {
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#42',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    };
+    await store.create({ ...baseInput, proposedAction });
+    const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
+
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+      [{ proposalId: baseInput.proposalId, status: 'pending' }],
+    );
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: baseInput.ownerUserId,
+        canonicalActionKey: computeDispatchCanonicalActionKey(baseInput.ownerUserId, {
+          ...proposedAction,
+          actionFamily: 'investigate',
+          successorSlot: 'investigator',
+        }),
+      }),
+      [],
+    );
+
+    await store.approve(baseInput.proposalId, 'user-1');
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+      [],
+      'approved proposals leave the derived canonical denial projection',
+    );
+    await store.revertToPending(baseInput.proposalId);
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+      [{ proposalId: baseInput.proposalId, status: 'pending' }],
+      'a reverted proposal atomically re-enters the projection',
+    );
+
+    await store.reject(baseInput.proposalId, 'user-1');
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: baseInput.ownerUserId,
+        canonicalSubjectRef: 'pr:owner/repo#42',
+      }),
+      [{ proposalId: baseInput.proposalId, status: 'rejected' }],
+    );
+  });
+
+  it('#1291 Gate 1 RED: canonical admission uses a bounded candidate index instead of scanning user history', async () => {
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#43',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+    };
+    await store.create({ ...baseInput, proposalId: 'dp-canonical-bounded', proposedAction });
+    const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
+    const originalZrevrange = redis.zrevrange;
+    redis.zrevrange = async function guardedUserHistoryScan(key, ...args) {
+      if (
+        key === `dispatch-proposal-user-pending:${baseInput.ownerUserId}` ||
+        key === `dispatch-proposal-user-settled:${baseInput.ownerUserId}`
+      ) {
+        throw new Error('canonical admission must not scan persistent user history');
+      }
+      return originalZrevrange.call(this, key, ...args);
+    };
+    try {
+      assert.deepEqual(
+        await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+        [{ proposalId: 'dp-canonical-bounded', status: 'pending' }],
+      );
+    } finally {
+      redis.zrevrange = originalZrevrange;
+    }
+  });
+
+  it('#1291 Gate 1: a first canonical lookup backfills historic pending/rejected proposal hashes before allowing', async () => {
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#46',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'e'.repeat(40) },
+    };
+    await redis.hset(
+      'dispatch-proposal:dp-canonical-historic',
+      'proposalId',
+      'dp-canonical-historic',
+      'sourceInvocationId',
+      baseInput.sourceInvocationId,
+      'sourceThreadId',
+      baseInput.sourceThreadId,
+      'targetThreadId',
+      baseInput.targetThreadId,
+      'senderCatId',
+      baseInput.senderCatId,
+      'ownerUserId',
+      baseInput.ownerUserId,
+      'effectClass',
+      'assign_work',
+      'content',
+      'historic canonical blocker',
+      'targetCats',
+      JSON.stringify(baseInput.targetCats),
+      'status',
+      'rejected',
+      'createdAt',
+      '100',
+      'proposedAction',
+      JSON.stringify(proposedAction),
+    );
+    const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
+
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+      [{ proposalId: 'dp-canonical-historic', status: 'rejected' }],
+    );
+    assert.equal(
+      await redis.hget('dispatch-proposal:dp-canonical-historic', 'canonicalAdmissionActionKey'),
+      canonicalActionKey,
+    );
+    assert.ok(await redis.get('dispatch-proposal-canonical-admission-rebuild-completed-at'));
+  });
+
+  it('#1291 Gate 1 RED: a null canonical-index Redis result fails closed', async () => {
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#44',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'c'.repeat(40) },
+    };
+    await store.create({ ...baseInput, proposalId: 'dp-canonical-null', proposedAction });
+    const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
+    const originalEval = redis.eval;
+    redis.eval = async function nullCanonicalLookup(script, ...args) {
+      if (typeof script === 'string' && script.includes('canonical-admission-lookup')) return null;
+      return originalEval.call(this, script, ...args);
+    };
+    try {
+      await assert.rejects(
+        () => store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+        /canonical admission lookup returned an invalid Redis result/,
+      );
+    } finally {
+      redis.eval = originalEval;
+    }
+  });
+
+  it('#1291 Gate 1 RED: a decision created after preflight cannot slip past the F167 claim boundary', async () => {
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#45',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'd'.repeat(40) },
+    };
+    const canonicalActionKey = computeDispatchCanonicalActionKey(baseInput.ownerUserId, proposedAction);
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({ ownerUserId: baseInput.ownerUserId, canonicalActionKey }),
+      [],
+      'the simulated carrier preflight runs before the concurrent decision is written',
+    );
+    assert.ok(
+      await redis.get('dispatch-proposal-canonical-admission-rebuild-completed-at'),
+      'the preflight activates the canonical projection before the decision interleaves',
+    );
+
+    await store.create({ ...baseInput, proposalId: 'dp-canonical-interleaving', proposedAction });
+    const { claimRedisActionSuccessorWithCanonicalAdmission, RedisCanonicalAdmissionBlockedError } = await import(
+      '../../dist/domains/approval-hub/stores/redis/RedisDispatchProposalCanonicalClaim.js'
+    );
+    const { canonicalizeActionTerminalPredicate } = await import(
+      '../../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js'
+    );
+    const claimInput = {
+      leaseId: 'lease-canonical-interleaving',
+      tenantScope: baseInput.ownerUserId,
+      subjectRef: proposedAction.subjectRef,
+      actionFamily: proposedAction.actionFamily,
+      successorSlot: proposedAction.successorSlot,
+      mode: 'single',
+      holderCatIds: ['sonnet'],
+      dispatchId: 'cross-post:canonical-interleaving',
+      claimOrigin: 'structured_transfer',
+      holderThreadId: baseInput.targetThreadId,
+      predecessorCatId: baseInput.senderCatId,
+      predecessorThreadId: baseInput.sourceThreadId,
+      issuerStandingEvidenceRef: 'callback:interleaving',
+      evidenceRefs: ['callback:interleaving'],
+      terminalPredicate: canonicalizeActionTerminalPredicate({
+        actionFamily: proposedAction.actionFamily,
+        subjectRef: proposedAction.subjectRef,
+        predicate: proposedAction.terminalPredicate,
+      }),
+      now: baseInput.createdAt + 1,
+    };
+
+    await assert.rejects(
+      () =>
+        claimRedisActionSuccessorWithCanonicalAdmission(redis, {
+          ownerUserId: baseInput.ownerUserId,
+          canonicalActionKey,
+          negativeAuthorization: {
+            sourceInvocationId: baseInput.sourceInvocationId,
+            sourceThreadId: baseInput.sourceThreadId,
+            senderCatId: baseInput.senderCatId,
+            targetThreadId: baseInput.targetThreadId,
+            targetCats: baseInput.targetCats,
+            sourceInvocationCreatedAt: baseInput.createdAt,
+          },
+          claimInput,
+        }),
+      (error) =>
+        error instanceof RedisCanonicalAdmissionBlockedError && error.proposalIds.includes('dp-canonical-interleaving'),
+    );
+    assert.equal(await redis.scard('action:successor:all'), 0, 'the denied interleaving creates no F167 lease');
   });
 
   it('#1291: Redis abort removes only the staged successor blocker', async () => {

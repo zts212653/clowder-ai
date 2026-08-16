@@ -420,9 +420,17 @@ export class StartupReconciler {
           if (result != null) {
             recovered++;
             recoveredMessageIds.add(id);
-            // Track thread for notification (user should know their queued message wasn't executed)
-            const msg = result as { threadId?: string; userId?: string; mentions?: CatId[] };
-            if (msg.threadId) {
+            // Only owner-authored queued work represents an interrupted request.
+            // Legacy agent handoffs are already-authored speech whose visibility
+            // metadata is being repaired; treating their mentions as interrupted
+            // cats produces false restart notices after an otherwise clean Stop.
+            const msg = result as {
+              threadId?: string;
+              userId?: string;
+              catId?: CatId | null;
+              mentions?: CatId[];
+            };
+            if (msg.threadId && msg.catId == null) {
               const existing = affectedThreads.get(msg.threadId) ?? {
                 catIds: [],
                 userId: (msg.userId as string) ?? 'unknown',

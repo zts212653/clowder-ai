@@ -48,9 +48,17 @@ export async function dispatchBoundConversationThroughHost(args: {
       },
     };
   } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'HOST_UNAVAILABLE'
+    ) {
+      return null;
+    }
     const detail = `Host append_message failed: ${shortMessage(error)}`;
     return {
-      outcome: { kind: 'error', message: shortMessage(error) },
+      outcome: { kind: 'error', reason: 'host-append-failed', message: shortMessage(error), detail },
       fallback: { reason: 'host-append-failed', detail },
     };
   }

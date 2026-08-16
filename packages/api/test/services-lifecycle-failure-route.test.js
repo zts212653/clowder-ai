@@ -519,6 +519,59 @@ describe('service lifecycle failure handling', () => {
     }
   });
 
+  it('restarts an owned TTS listener that predates the streaming route contract', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const configs = new Map([
+      ['mlx-tts', { installed: true, enabled: true, selectedModel: 'mlx-community/Kokoro-82M-bf16' }],
+    ]);
+    const killed = new Set();
+    let didRun = false;
+    const resolvedRuntime = resolveServiceScriptPath('scripts/services/tts-api.py');
+    const app = await buildApp({
+      lifecycle: {
+        startupGraceMs: 10,
+        serviceConfig: {
+          get: (id) => configs.get(id),
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async () => (killed.has(5151) ? [] : [5151]),
+        readProcessCommand: async () => `python3 ${resolvedRuntime} --port 9879`,
+        killPid: (pid) => killed.add(pid),
+        runScript: async () => {
+          didRun = true;
+          return { code: null, pid: 7001 };
+        },
+      },
+      fetchHealth: async () => ({
+        ok: true,
+        status: 200,
+        error: null,
+        details: didRun ? { status: 'ok', capabilities: ['speech', 'speech-stream-route-v1'] } : { status: 'ok' },
+      }),
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/mlx-tts/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(didRun, true, 'must restart a sidecar that cannot advertise the F279 stream route');
+      assert.deepEqual([...killed], [5151]);
+      assert.match(JSON.parse(res.payload).message, /start initiated/i);
+    } finally {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
   it('waits for an unhealthy owned listener to exit before restarting', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';

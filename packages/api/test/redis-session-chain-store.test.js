@@ -625,6 +625,88 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal((await store.getActive('opus', 'thread-1'))?.id, record.id);
   });
 
+  it('restoreActiveSession() atomically restores the selected record in place and preserves the displaced record', async () => {
+    const target = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-restore-target',
+      threadId: 'thread-restore-current',
+    });
+    await store.update(target.id, {
+      status: 'sealed',
+      sealReason: 'cli_session_replaced',
+      sealedAt: Date.now(),
+      messageCount: 3,
+    });
+    const current = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-restore-current',
+      threadId: 'thread-restore-current',
+    });
+    await store.update(current.id, { messageCount: 7 });
+
+    const result = await store.restoreActiveSession({
+      targetSessionId: target.id,
+      expectedActiveSessionId: current.id,
+      displacedSealReason: 'manual_session_switch',
+    });
+
+    assert.equal(result.status, 'restored');
+    assert.equal(result.session.id, target.id);
+    assert.equal(result.session.seq, 0);
+    assert.equal(result.displacedSessionId, current.id);
+    assert.equal((await store.getActive('opus', 'thread-restore-current', 'user-1')).id, target.id);
+
+    const restoredTarget = await store.get(target.id);
+    assert.equal(restoredTarget.status, 'active');
+    assert.equal(restoredTarget.sealReason, undefined);
+    assert.equal(restoredTarget.sealedAt, undefined);
+    assert.equal(restoredTarget.messageCount, 3);
+
+    const displaced = await store.get(current.id);
+    assert.equal(displaced.status, 'sealing');
+    assert.equal(displaced.sealReason, 'manual_session_switch');
+    assert.equal(displaced.messageCount, 7);
+
+    const chain = await store.getChain('opus', 'thread-restore-current', 'user-1');
+    assert.deepEqual(
+      chain.map(({ id, seq }) => ({ id, seq })),
+      [
+        { id: target.id, seq: 0 },
+        { id: current.id, seq: 1 },
+      ],
+      'restoring must not create a replacement sequence record',
+    );
+  });
+
+  it('restoreActiveSession() rejects a stale expected active ID without mutating either record', async () => {
+    const target = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-restore-cas-target',
+      threadId: 'thread-restore-cas',
+    });
+    await store.update(target.id, {
+      status: 'sealed',
+      sealReason: 'cli_session_replaced',
+      sealedAt: Date.now(),
+    });
+    const current = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'cli-restore-cas-current',
+      threadId: 'thread-restore-cas',
+    });
+
+    const result = await store.restoreActiveSession({
+      targetSessionId: target.id,
+      expectedActiveSessionId: 'stale-active-session-id',
+      displacedSealReason: 'manual_session_switch',
+    });
+
+    assert.deepEqual(result, { status: 'active_changed', activeSessionId: current.id });
+    assert.equal((await store.get(target.id)).status, 'sealed');
+    assert.equal((await store.get(current.id)).status, 'active');
+    assert.equal((await store.getActive('opus', 'thread-restore-cas', 'user-1')).id, current.id);
+  });
+
   // ── F198 Bug #3: chainKey stable conversation anchor (Redis-backed) ──
 
   it('create() persists chainKey and getByChainKey() reads it back', async () => {

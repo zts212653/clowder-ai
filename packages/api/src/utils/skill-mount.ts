@@ -1,10 +1,12 @@
-import { lstat, readlink, realpath, symlink } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { lstat, readlink, realpath, rm, symlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from './project-path.js';
 import { resolveStartupProjectRoot } from './startup-root.js';
 
 export type SkillMountPointKey = 'claude' | 'codex' | 'gemini' | 'kimi';
+
+export const SHARED_SKILL_REFS_ALIAS = '.cat-cafe-shared-refs';
 
 export function buildMountPointDirCandidates(
   projectRoot: string,
@@ -156,6 +158,63 @@ export async function createSkillSymlink(target: string, path: string): Promise<
     } else {
       throw err;
     }
+  }
+}
+
+/**
+ * Keep shared skill refs addressable from a provider mount without depending on
+ * whether the runtime resolves the per-skill symlink before normalizing `..`.
+ */
+export async function ensureSharedSkillRefsMount(
+  skillsDir: string,
+  skillsSource: string,
+): Promise<'created' | 'existing' | 'conflict' | 'source-missing'> {
+  const sharedRefsSource = join(skillsSource, 'refs');
+  try {
+    if (!(await lstat(sharedRefsSource)).isDirectory()) return 'source-missing';
+  } catch {
+    return 'source-missing';
+  }
+
+  const aliasPath = join(skillsDir, SHARED_SKILL_REFS_ALIAS);
+  try {
+    const status = await lstat(aliasPath);
+    if (!status.isSymbolicLink()) return 'conflict';
+    const current = await readlink(aliasPath);
+    const currentTarget = isAbsolute(current) ? current : resolve(dirname(aliasPath), current);
+    const [realCurrent, realExpected] = await Promise.all([
+      realpath(currentTarget).catch(() => currentTarget),
+      realpath(sharedRefsSource).catch(() => sharedRefsSource),
+    ]);
+    return pathsEqual(realCurrent, realExpected) ? 'existing' : 'conflict';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'conflict';
+  }
+
+  const target = process.platform === 'win32' ? sharedRefsSource : relative(dirname(aliasPath), sharedRefsSource);
+  await createSkillSymlink(target, aliasPath);
+  return 'created';
+}
+
+/** Remove the reserved coordinate only when it is one of our managed links. */
+export async function removeSharedSkillRefsMount(skillsDir: string, skillsSource: string): Promise<boolean> {
+  const aliasPath = join(skillsDir, SHARED_SKILL_REFS_ALIAS);
+  try {
+    const skillsDirStatus = await lstat(skillsDir);
+    if (skillsDirStatus.isSymbolicLink() || !skillsDirStatus.isDirectory()) return false;
+    if (!(await lstat(aliasPath)).isSymbolicLink()) return false;
+    const current = await readlink(aliasPath);
+    const currentTarget = isAbsolute(current) ? current : resolve(dirname(aliasPath), current);
+    const expectedTarget = join(skillsSource, 'refs');
+    const [realCurrent, realExpected] = await Promise.all([
+      realpath(currentTarget).catch(() => currentTarget),
+      realpath(expectedTarget).catch(() => expectedTarget),
+    ]);
+    if (!pathsEqual(realCurrent, realExpected)) return false;
+    await rm(aliasPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -43,12 +43,20 @@ export function createFileContextAttachment(
   });
 }
 
-export function createQuoteContextAttachment(text: string, source: QuoteContextSource): ContextAttachment {
+export function createQuoteContextAttachment(
+  text: string,
+  source: QuoteContextSource,
+  annotation: { comment?: string; selectionStart?: number; selectionEnd?: number } = {},
+): ContextAttachment {
   return parseCreatedAttachment({
     v: 1,
     id: createAttachmentId('quote'),
     kind: 'quote',
     text: text.trim().slice(0, CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH),
+    ...(annotation.comment?.trim() ? { comment: annotation.comment.trim() } : {}),
+    ...(annotation.selectionStart !== undefined && annotation.selectionEnd !== undefined
+      ? { selectionStart: annotation.selectionStart, selectionEnd: annotation.selectionEnd }
+      : {}),
     source,
   });
 }

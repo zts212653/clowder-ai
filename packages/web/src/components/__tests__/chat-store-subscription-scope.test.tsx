@@ -256,4 +256,90 @@ describe('SplitPaneView thread-state subscription', () => {
     });
     expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
   });
+
+  it('uses terminal-projected liveness for the split-pane banner and Stop control', () => {
+    const threadId = 'split-terminal-projection-thread';
+    const backgroundState = useChatStore.getState().getThreadState(threadId);
+
+    act(() => {
+      useChatStore.setState({
+        currentThreadId: 'default',
+        threads: [
+          {
+            id: threadId,
+            title: 'Split terminal projection',
+            projectPath: '/test',
+            createdBy: 'test-user',
+            participants: [],
+            lastActiveAt: 1,
+            createdAt: 1,
+          },
+        ],
+        splitPaneThreadIds: [threadId],
+        splitPaneTargetId: threadId,
+        threadStates: {
+          ...originalState.threadStates,
+          [threadId]: {
+            ...backgroundState,
+            hasActiveInvocation: true,
+            activeInvocations: { 'inv-closed': { catId: 'codex-sol', mode: 'execute' } },
+            targetCats: ['codex-sol'],
+            catStatuses: { 'codex-sol': 'streaming' },
+            catInvocations: {
+              'codex-sol': {
+                invocationId: 'inv-closed',
+                appServerLifecycle: {
+                  stage: 'closed',
+                  lastActivityAt: 123,
+                  recoveryAttempt: 0,
+                  turnStartSent: true,
+                  turnAccepted: true,
+                  itemObserved: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        React.createElement(SplitPaneView, {
+          onSend: vi.fn(),
+          onStop: vi.fn(),
+          onZoomToThread: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Stop generation"]')).toBeNull();
+
+    act(() => {
+      useChatStore.getState().setThreadHasActiveInvocation(threadId, true);
+    });
+
+    expect(useChatStore.getState().threadStates[threadId]?.activeInvocations).toEqual({});
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Stop generation"]')).not.toBeNull();
+
+    act(() => {
+      useChatStore.setState((state) => ({
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...state.threadStates[threadId],
+            activeInvocations: { 'inv-new': { catId: 'codex-sol', mode: 'execute' } },
+          },
+        },
+      }));
+    });
+
+    expect(container.querySelector('[data-testid="active-invocation-banner"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Stop generation"]')).not.toBeNull();
+  });
 });

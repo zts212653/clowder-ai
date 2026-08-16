@@ -9,7 +9,7 @@
 
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
-import type { AwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
+import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
 import type { CatId } from './ids.js';
 
 // Re-export affordance types so existing consumers don't break
@@ -43,6 +43,17 @@ export interface CiAutomationState {
   readonly lastNotifiedAt?: number;
   readonly enabled?: boolean;
   readonly skipNotified?: boolean;
+  /**
+   * Empty statusCheckRollup is ambiguous for a fresh HEAD: it can mean either
+   * "this PR has no checks" or "GitHub has not created the check runs yet".
+   * Persist the same-HEAD observation streak so the poller can require one
+   * full stability interval before treating a genuinely empty rollup as pass.
+   */
+  readonly rollupObservation?: {
+    readonly headSha: string;
+    readonly state: 'empty' | 'present';
+    readonly streakStartedAt: number;
+  };
   /** Terminal PR state — persisted by CiCdRouter on lifecycle close (F200 AC-D2.3). */
   readonly prState?: 'merged' | 'closed';
   /**
@@ -119,30 +130,26 @@ export interface PrAutomationState {
   readonly conflict?: ConflictAutomationState;
   readonly review?: ReviewAutomationState;
   readonly closedAt?: number;
-  readonly await?: AwaitStateV1;
+  readonly await?: GitHubPrAwaitStateV1;
   readonly waitOutcome?: WaitOutcomeV1;
   /** Type-level quarantine: issue compatibility cannot be installed on a PR state. */
   readonly issue?: never;
 }
 
-/** F280 Phase B: issue-only compatibility surface until Phase C. */
-export type IssueTrackingWakePolicy = 'all_feedback' | 'human_participant_activity';
-
-export interface LegacyIssueAutomationState {
+/** F280 Phase C: issue collector and typed one-shot wait state. */
+export interface IssueWaitAutomationState {
   readonly issue?: IssueAutomationState;
   readonly closedAt?: number;
-  readonly wakePolicy?: IssueTrackingWakePolicy;
-  readonly trackingInstructions?: string;
-  /** Type-level quarantine: PR facts and waits cannot be installed on an issue state. */
+  readonly await?: GitHubIssueAwaitStateV1;
+  readonly waitOutcome?: WaitOutcomeV1;
+  /** Type-level quarantine: PR facts cannot be installed on an issue state. */
   readonly ci?: never;
   readonly conflict?: never;
   readonly review?: never;
-  readonly await?: never;
-  readonly waitOutcome?: never;
 }
 
 /** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D). */
-export type AutomationState = PrAutomationState | LegacyIssueAutomationState;
+export type AutomationState = PrAutomationState | IssueWaitAutomationState;
 
 export type TaskProbeSpec =
   | {

@@ -29,6 +29,12 @@ const completedTrackingSnapshot = (headSha) => ({
   status: 'done',
 });
 
+const livePrSnapshot = (headSha, prState = 'open', subjectRef = 'pr:owner/repo#2868') => ({
+  subjectRef,
+  headSha,
+  prState,
+});
+
 function projection(state, overrides = {}) {
   return {
     repo: 'owner/repo',
@@ -60,6 +66,7 @@ function harness({
   trackingSnapshot,
   task = null,
   localReviewEvidenceProvider,
+  livePrSnapshot: observedLivePr,
 } = {}) {
   const marks = [];
   const leaseStore = {
@@ -95,6 +102,16 @@ function harness({
           },
         }
       : undefined;
+  const livePrReads = [];
+  const livePrFreshnessProvider =
+    observedLivePr !== undefined
+      ? {
+          async observe(input) {
+            livePrReads.push(input);
+            return observedLivePr;
+          },
+        }
+      : undefined;
   return {
     resolver: new ActionSubjectTruthResolver(
       leaseStore,
@@ -106,9 +123,11 @@ function harness({
         },
       },
       localReviewEvidenceProvider,
+      livePrFreshnessProvider,
     ),
     marks,
     communityStore,
+    livePrReads,
   };
 }
 
@@ -602,6 +621,64 @@ describe('ActionSubjectTruthResolver', () => {
     });
   });
 
+  it('bootstraps the first review from a server-observed live PR HEAD after durable sources are absent', async () => {
+    const { resolver, livePrReads } = harness({
+      object: null,
+      livePrSnapshot: livePrSnapshot(HEAD_NEW),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'verified',
+      evidenceRef: `github:pr:owner/repo#2868:head:${HEAD_NEW}`,
+      freshnessKey: predicate.freshnessKey,
+    });
+    assert.deepEqual(livePrReads, [{ subjectRef: 'pr:owner/repo#2868', repoFullName: 'owner/repo', prNumber: 2868 }]);
+  });
+
+  it('rejects stale or terminal live GitHub observations instead of trusting the caller predicate', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    const stale = harness({ object: null, livePrSnapshot: livePrSnapshot(HEAD_OLD) }).resolver;
+    assert.deepEqual(await stale.resolveFreshness(predicate), {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the bootstrap-observed current HEAD',
+    });
+
+    for (const prState of ['merged', 'closed']) {
+      const terminal = harness({ object: null, livePrSnapshot: livePrSnapshot(HEAD_NEW, prState) }).resolver;
+      assert.deepEqual(await terminal.resolveFreshness(predicate), {
+        status: 'mismatch',
+        reason: 'bootstrap observation reports a terminal PR',
+      });
+    }
+  });
+
+  it('rejects a bootstrap observation bound to another PR subject', async () => {
+    const { resolver } = harness({
+      object: null,
+      livePrSnapshot: livePrSnapshot(HEAD_NEW, 'open', 'pr:other/repo#2868'),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'insufficient',
+      reason: 'bootstrap PR observation subject mismatch',
+    });
+  });
+
   it('rejects non-PR and PR-terminal tracking snapshots even when they retain the matching HEAD', async () => {
     const predicate = canonicalizeActionTerminalPredicate({
       actionFamily: 'review',
@@ -646,5 +723,33 @@ describe('ActionSubjectTruthResolver', () => {
       evidenceRef: `community:pr:owner/repo#2868:head:${HEAD_NEW}`,
       freshnessKey: predicate.freshnessKey,
     });
+  });
+
+  it('does not query the bootstrap observer when durable CommunityStore or tracking truth is available', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+    const externalReview = {
+      currentHeadSha: HEAD_NEW,
+      lastReviewedHeadSha: null,
+      delivery: null,
+      ci: null,
+    };
+    const community = harness({
+      object: projection('in_progress', { externalReview }),
+      livePrSnapshot: livePrSnapshot(HEAD_OLD),
+    });
+    const tracking = harness({
+      object: null,
+      trackingHead: HEAD_NEW,
+      livePrSnapshot: livePrSnapshot(HEAD_OLD),
+    });
+
+    assert.equal((await community.resolver.resolveFreshness(predicate)).status, 'verified');
+    assert.equal((await tracking.resolver.resolveFreshness(predicate)).status, 'verified');
+    assert.deepEqual(community.livePrReads, []);
+    assert.deepEqual(tracking.livePrReads, []);
   });
 });

@@ -15,6 +15,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { _resetDBForTest } from '@/utils/offline-store';
 import { useChatHistory } from '../useChatHistory';
+import { selectThreadLiveness } from '../useThreadScopedSelectors';
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(),
@@ -184,6 +185,67 @@ describe('/queue idle + /messages draft → hasActiveInvocation restored (cancel
 
     const after = useChatStore.getState();
     expect(Object.keys(after.activeInvocations).length).toBe(0);
+  });
+
+  it('a later invocationless draft stays active after an identity-matched terminal slot', async () => {
+    const store = useChatStore.getState();
+    store.setCatInvocation('opus-47', {
+      invocationId: 'inv-old',
+      appServerLifecycle: {
+        stage: 'closed',
+        lastActivityAt: 123,
+        recoveryAttempt: 0,
+        turnStartSent: true,
+        turnAccepted: true,
+        itemObserved: true,
+      },
+    });
+    store.addActiveInvocation('inv-old', 'opus-47', 'execute');
+
+    let resolveQueue!: (response: Response) => void;
+    const queueResponse = new Promise<Response>((resolve) => {
+      resolveQueue = resolve;
+    });
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/queue')) return queueResponse;
+      if (typeof url === 'string' && url.includes('/messages')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              messages: [
+                {
+                  id: 'draft-msg-after-terminal',
+                  threadId: 'thread-draft',
+                  role: 'assistant',
+                  content: 'new invocationless draft',
+                  catId: 'opus-47',
+                  isDraft: true,
+                  timestamp: Date.now(),
+                },
+              ],
+              hasMore: false,
+              tasks: [],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-draft' }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const state = useChatStore.getState();
+    expect(state.activeInvocations).toEqual({});
+    expect(selectThreadLiveness(state, 'thread-draft').hasActive).toBe(true);
+
+    await act(async () => {
+      resolveQueue(new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: [] }), { status: 200 }));
+      await queueResponse;
+    });
   });
 
   it('control: /queue idle + /messages returns NO drafts → hasActiveInvocation stays false', async () => {

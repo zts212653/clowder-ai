@@ -63,6 +63,19 @@ export interface CompressionEventResult {
   revisionMatched: boolean;
 }
 
+export interface RestoreActiveSessionInput {
+  targetSessionId: string;
+  expectedActiveSessionId: string | null;
+  displacedSealReason: string;
+}
+
+export type RestoreActiveSessionResult =
+  | { status: 'restored'; session: SessionRecord; displacedSessionId?: string }
+  | { status: 'already_active'; session: SessionRecord }
+  | { status: 'target_missing' }
+  | { status: 'target_not_restorable'; targetStatus: SessionRecord['status'] }
+  | { status: 'active_changed'; activeSessionId?: string };
+
 export interface ISessionChainStore {
   /** Create SessionRecord (seq auto-increments, status=active) */
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
@@ -86,6 +99,10 @@ export interface ISessionChainStore {
     reason: string,
     expectedPolicyRevision?: string,
   ): SessionRecord | null | Promise<SessionRecord | null>;
+  /** Atomically preserve the current record as sealing and reactivate one selected sealed record in place. */
+  restoreActiveSession(
+    input: RestoreActiveSessionInput,
+  ): RestoreActiveSessionResult | Promise<RestoreActiveSessionResult>;
   /** Get by internal ID */
   get(id: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Get active session for a cat in a thread */
@@ -287,6 +304,55 @@ export class SessionChainStore implements ISessionChainStore {
     const ownerKey = this.ownerCatThreadKey(record.userId, record.catId, record.threadId);
     if (this.ownerActiveIndex.get(ownerKey) === id) this.ownerActiveIndex.delete(ownerKey);
     return record;
+  }
+
+  restoreActiveSession(input: RestoreActiveSessionInput): RestoreActiveSessionResult {
+    const target = this.records.get(input.targetSessionId);
+    if (!target) return { status: 'target_missing' };
+
+    const key = this.catThreadKey(target.catId, target.threadId);
+    const ownerKey = this.ownerCatThreadKey(target.userId, target.catId, target.threadId);
+    const activeSessionId = this.ownerActiveIndex.get(ownerKey);
+    if (target.status === 'active' && activeSessionId === target.id) {
+      return { status: 'already_active', session: target };
+    }
+    if (target.status !== 'sealed') {
+      return { status: 'target_not_restorable', targetStatus: target.status };
+    }
+    if ((activeSessionId ?? null) !== input.expectedActiveSessionId) {
+      return { status: 'active_changed', ...(activeSessionId ? { activeSessionId } : {}) };
+    }
+
+    let displacedSessionId: string | undefined;
+    if (activeSessionId) {
+      const displaced = this.records.get(activeSessionId);
+      if (
+        !displaced ||
+        displaced.status !== 'active' ||
+        displaced.userId !== target.userId ||
+        displaced.catId !== target.catId ||
+        displaced.threadId !== target.threadId
+      ) {
+        return { status: 'active_changed', activeSessionId };
+      }
+      displaced.status = 'sealing';
+      displaced.sealReason = input.displacedSealReason;
+      displaced.updatedAt = Date.now();
+      displacedSessionId = displaced.id;
+    }
+
+    target.status = 'active';
+    delete target.sealReason;
+    delete target.sealedAt;
+    target.updatedAt = Date.now();
+    this.activeIndex.set(key, target.id);
+    this.ownerActiveIndex.set(ownerKey, target.id);
+
+    return {
+      status: 'restored',
+      session: target,
+      ...(displacedSessionId ? { displacedSessionId } : {}),
+    };
   }
 
   get(id: string): SessionRecord | null {

@@ -99,7 +99,9 @@ export interface LiveInvocation {
 export type ZombieReason =
   | 'no_tracker_no_fresh_draft_age_exceeded'
   // F194 Phase Z (KD-22): cat slot reused by another parent invocation, this parent has no own child draft
-  | 'cat_slot_reused_no_self_draft';
+  | 'cat_slot_reused_no_self_draft'
+  // F118 post-close: explicit reaper proved the old lease has no independent live owner.
+  | 'owner_lease_stale_provider_absent';
 
 export interface ZombieRecord {
   invocationId: string;

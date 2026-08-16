@@ -151,9 +151,10 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
     });
     const unseen = await messageStore.append({
       userId: 'user1',
-      catId: null,
-      content: 'late correction',
-      mentions: ['opus'],
+      catId: 'codex-sol',
+      content: 'late visible cat analysis',
+      mentions: [],
+      origin: 'stream',
       timestamp: 150,
       threadId: 'thread-1',
     });
@@ -165,6 +166,7 @@ describe('F254 ADR-042 — route-serial publish then supplement', () => {
       routeSerial(harness.deps, ['opus'], 'question', 'user1', 'thread-1', {
         parentInvocationId: 'turn-serial',
         ownerAuthProvenance: 'strict',
+        thinkingMode: 'play',
         freshnessReinvokeEnqueue: (entry) => enqueued.push(entry),
       }),
     );

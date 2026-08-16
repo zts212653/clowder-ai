@@ -1,3 +1,4 @@
+import type { QueueMessageReceiptProjection } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
@@ -33,6 +34,7 @@ import type {
   WorkspaceSurface,
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
+import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
 import { getMessageTimelineOrderTime } from './message-timeline';
 import { crossesUserTurnBoundary } from './turn-boundary';
 
@@ -92,13 +94,20 @@ function mergeCatInvocationInfo(
   };
 }
 
-function projectQueueReceiptsOntoMessages(messages: ChatMessage[], queue: QueueEntry[]): ChatMessage[] {
+function projectQueueReceiptsOntoMessages(
+  messages: ChatMessage[],
+  queue: QueueEntry[],
+  messageReceipts: readonly QueueMessageReceiptProjection[],
+): ChatMessage[] {
   const receiptByMessageId = new Map<string, NonNullable<QueueEntry['queueReceipt']>>();
   for (const entry of queue) {
     if (!entry.queueReceipt) continue;
     for (const messageId of [entry.messageId, ...entry.mergedMessageIds]) {
       if (messageId) receiptByMessageId.set(messageId, entry.queueReceipt);
     }
+  }
+  for (const projection of messageReceipts) {
+    receiptByMessageId.set(projection.messageId, projection.queueReceipt);
   }
   if (receiptByMessageId.size === 0) return messages;
 
@@ -273,12 +282,21 @@ function mirrorActiveFlat(
   return mirrorActiveToThreadStates(state, state.currentThreadId, patch);
 }
 
-function buildQueueStoreUpdate(state: ChatState, threadId: string, queue: QueueEntry[]): Partial<ChatState> {
+function buildQueueStoreUpdate(
+  state: ChatState,
+  threadId: string,
+  queue: QueueEntry[],
+  messageReceipts: readonly QueueMessageReceiptProjection[],
+): Partial<ChatState> {
   const activeThread = threadId === state.currentThreadId;
   const existing = activeThread ? undefined : (state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE });
   const wasFull = activeThread ? state.queueFull : existing?.queueFull;
   const isShrinking = wasFull && queue.length < 5;
-  const messages = projectQueueReceiptsOntoMessages(activeThread ? state.messages : (existing?.messages ?? []), queue);
+  const messages = projectQueueReceiptsOntoMessages(
+    activeThread ? state.messages : (existing?.messages ?? []),
+    queue,
+    messageReceipts,
+  );
 
   if (activeThread) {
     const patch: Partial<ThreadState> = {
@@ -1086,7 +1104,7 @@ export interface ChatState {
   resetThreadInvocationState: (threadId: string) => void;
 
   // ── F39: Queue actions ──
-  setQueue: (threadId: string, queue: QueueEntry[]) => void;
+  setQueue: (threadId: string, queue: QueueEntry[], messageReceipts?: readonly QueueMessageReceiptProjection[]) => void;
   setQueuePaused: (threadId: string, paused: boolean, reason?: 'canceled' | 'failed') => void;
   setQueueFull: (threadId: string, source: 'user' | 'connector') => void;
   /** Mark queued messages delivered, terminalize existing bubbles, and recover any missed live insert. */
@@ -1119,7 +1137,10 @@ export interface ChatState {
   workspaceOpenFileLine: number | null;
   /** F284: current Workspace object; survives panel folds and route unmounts. */
   workspaceSurface: WorkspaceSurface;
+  /** Explicit user navigation: select the surface and reveal Workspace. */
   setWorkspaceSurface: (surface: WorkspaceSurface) => void;
+  /** Passive thread restoration: select the surface without changing panel visibility. */
+  restoreWorkspaceSurface: (surface: WorkspaceSurface) => void;
   workspacePreview: WorkspacePreviewState;
   setWorkspacePreview: (preview: WorkspacePreviewState) => void;
   workspaceEditToken: string | null;
@@ -1167,7 +1188,10 @@ export interface ChatState {
   // Phase H + F139 + F160 + F168 + F246: Workspace mode
   // F233 Phase C C3: 'trajectory' — feat 球权轨迹时间轴
   workspaceMode: WorkspaceMode;
+  /** Explicit user navigation: select the mode and reveal Workspace. */
   setWorkspaceMode: (mode: WorkspaceMode) => void;
+  /** Passive thread restoration: select the mode without changing panel visibility. */
+  restoreWorkspaceMode: (mode: WorkspaceMode) => void;
 
   // ── F195 Phase C: Floating transcript window ──
   floatingTranscriptVisible: boolean;
@@ -1269,7 +1293,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── F39: Queue actions ──
 
-  setQueue: (threadId, queue) => set((state) => buildQueueStoreUpdate(state, threadId, queue)),
+  setQueue: (threadId, queue, messageReceipts = []) =>
+    set((state) => buildQueueStoreUpdate(state, threadId, queue, messageReceipts)),
 
   setQueuePaused: (threadId, paused, reason) =>
     set((state) => {
@@ -1445,6 +1470,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceOpenFileLine: null,
   workspaceSurface: 'home' as const,
   setWorkspaceSurface: (surface) => set({ workspaceSurface: surface, rightPanelMode: 'workspace' }),
+  restoreWorkspaceSurface: (surface) => set({ workspaceSurface: surface }),
   workspacePreview: { port: undefined, path: '/' },
   setWorkspacePreview: (preview) => set({ workspacePreview: preview }),
   workspaceEditToken: null,
@@ -1784,6 +1810,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Phase H: Workspace mode
   workspaceMode: 'dev' as const,
   setWorkspaceMode: (mode) => set({ workspaceMode: mode, rightPanelMode: 'workspace' }),
+  restoreWorkspaceMode: (mode) => set({ workspaceMode: mode }),
 
   // F195 Phase C: Floating transcript window
   floatingTranscriptVisible: false,
@@ -2066,7 +2093,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }),
         };
       }
-      return { hasActiveInvocation: v, ...mirrorActiveFlat(state, { hasActiveInvocation: v }) };
+      const activeInvocations = v
+        ? projectTerminalActiveInvocationSlots(state.activeInvocations, state.catInvocations).activeInvocations
+        : state.activeInvocations;
+      const patch = { hasActiveInvocation: v, activeInvocations };
+      return { ...patch, ...mirrorActiveFlat(state, patch) };
     }),
   /** F108: Register a new active invocation slot */
   addActiveInvocation: (invocationId, catId, mode, startedAt?) =>
@@ -2494,8 +2525,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // F164: Write-through outgoing thread's messages to IndexedDB (fire-and-forget)
       // Always write — even empty arrays — so server-cleared threads don't leave stale snapshots
       void saveMessagesSnapshot(state.currentThreadId, saved.messages, saved.hasMore).catch(() => {});
-      // Load target thread state (or defaults for first visit)
-      const loaded = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      // A first visit has no in-memory projection yet. Surface that as history
+      // hydration immediately so the UI cannot mistake "not loaded" for an
+      // authoritative empty conversation while IDB/API restore is pending.
+      const loaded = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE, isLoadingHistory: true };
       const flattened = flattenThread(loaded);
 
       // F063 Presentation Lock: overlay locked workspace fields so the visible
@@ -2838,18 +2871,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setThreadHasActiveInvocation: (threadId, active) =>
     set((state) => {
       if (threadId === state.currentThreadId) {
+        const activeInvocations = active
+          ? projectTerminalActiveInvocationSlots(state.activeInvocations, state.catInvocations).activeInvocations
+          : state.activeInvocations;
+        const patch = { hasActiveInvocation: active, activeInvocations };
         return {
-          hasActiveInvocation: active,
-          ...mirrorActiveToThreadStates(state, threadId, { hasActiveInvocation: active }),
+          ...patch,
+          ...mirrorActiveToThreadStates(state, threadId, patch),
         };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const activeInvocations = active
+        ? projectTerminalActiveInvocationSlots(existing.activeInvocations, existing.catInvocations).activeInvocations
+        : existing.activeInvocations;
       return {
         threadStates: {
           ...state.threadStates,
           [threadId]: {
             ...existing,
             hasActiveInvocation: active,
+            activeInvocations,
             lastActivity: Date.now(),
           },
         },

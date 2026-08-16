@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { actionSubjectRefSchema } from './action-subject-ref.js';
 
 export const ACTION_SUCCESSOR_ACTION_FAMILIES = [
   'review',
@@ -192,8 +193,8 @@ export function isAllowedActionSuccessorSlot(
   return ACTION_SLOTS[actionFamily].has(successorSlot as ActionSuccessorSlot);
 }
 
-const actionSuccessorMetadataObjectSchema = z.object({
-  subjectRef: z.string().min(1).max(240),
+export const actionSuccessorMetadataObjectSchema = z.object({
+  subjectRef: actionSubjectRefSchema,
   actionFamily: z.enum(ACTION_SUCCESSOR_ACTION_FAMILIES),
   successorSlot: z.enum(ACTION_SUCCESSOR_SLOTS),
   mode: z.enum(['single', 'parallel']),
@@ -238,7 +239,7 @@ const actionSuccessorMetadataObjectSchema = z.object({
     .optional(),
 });
 
-type ActionSuccessorMetadataValue = z.infer<typeof actionSuccessorMetadataObjectSchema>;
+export type ActionSuccessorMetadataValue = z.infer<typeof actionSuccessorMetadataObjectSchema>;
 
 function refineSlotAndMode(value: ActionSuccessorMetadataValue, ctx: z.RefinementCtx): void {
   if (!isAllowedActionSuccessorSlot(value.actionFamily, value.successorSlot)) {
@@ -326,12 +327,15 @@ function refineReviewReentry(value: ActionSuccessorMetadataValue, ctx: z.Refinem
   }
 }
 
-export const actionSuccessorMetadataSchema = actionSuccessorMetadataObjectSchema.superRefine((value, ctx) => {
+export function refineActionSuccessorMetadata(value: ActionSuccessorMetadataValue, ctx: z.RefinementCtx): void {
   refineSlotAndMode(value, ctx);
   refineClaimOrigin(value, ctx);
   refineReturn(value, ctx);
   refineTerminalPredicate(value, ctx);
   refineReviewReentry(value, ctx);
-});
+}
+
+export const actionSuccessorMetadataSchema =
+  actionSuccessorMetadataObjectSchema.superRefine(refineActionSuccessorMetadata);
 
 export type ActionSuccessorRequestMetadata = z.infer<typeof actionSuccessorMetadataSchema>;

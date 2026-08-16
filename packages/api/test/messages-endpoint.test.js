@@ -1017,6 +1017,349 @@ describe('GET /api/messages', () => {
   });
 });
 
+describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () => {
+  let app;
+  let messageStore;
+  let retryCalls;
+  let authorityDecision;
+  let authorityDecisions;
+  let authorityCalls;
+  let commitDecision;
+  let commitDecisions;
+  let commitCalls;
+  let invocationQueue;
+  let authorityImplementation;
+  let WaitContinuationRetryPreflight;
+
+  beforeEach(async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    ({ WaitContinuationRetryPreflight } = await import(
+      '../dist/domains/ball-custody/WaitContinuationRetryPreflight.js'
+    ));
+    messageStore = new MessageStore();
+    retryCalls = [];
+    authorityDecision = { ok: true, kind: 'user' };
+    authorityDecisions = [];
+    authorityCalls = [];
+    commitDecision = { outcome: 'committed' };
+    commitDecisions = [];
+    commitCalls = [];
+    invocationQueue = { getEntrySnapshotForUserById: () => null };
+    authorityImplementation = undefined;
+    app = Fastify();
+    await app.register(messagesRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore,
+      socketManager: { broadcastAgentMessage: () => {}, emitToUser: () => {} },
+      invocationQueue,
+      queueProcessor: {
+        retryFailedTarget: async (...args) => {
+          retryCalls.push(args);
+          const commitAuthority = args[5];
+          if (typeof commitAuthority === 'function') {
+            const committed = await commitAuthority([]);
+            if (committed.outcome !== 'committed') return committed;
+          }
+          return { outcome: 'retried', attemptId: 'entry-retry:opus:2' };
+        },
+      },
+      retryAuthorityPreflight: {
+        preflight: async (input) => {
+          authorityCalls.push(input);
+          if (authorityImplementation) return authorityImplementation.preflight(input);
+          return authorityDecisions.shift() ?? authorityDecision;
+        },
+      },
+      retryAuthorityCommitter: {
+        commit: async (input) => {
+          commitCalls.push(input);
+          return commitDecisions.shift() ?? commitDecision;
+        },
+      },
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('retries the immutable source message target through its failed attempt fence', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'keep this exact authored text',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-f1308',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-retry',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        failedByCatIds: ['opus'],
+        targetAttempts: [
+          {
+            id: 'entry-retry:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${queued.id}/queue-targets/opus/retry`,
+      headers: { 'content-type': 'application/json' },
+      payload: { attemptId: 'entry-retry:opus:1' },
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.deepEqual(JSON.parse(response.body), {
+      status: 'retry_queued',
+      entryId: 'entry-retry',
+      targetCatId: 'opus',
+      attemptId: 'entry-retry:opus:2',
+    });
+    assert.deepEqual(retryCalls[0].slice(0, 5), [
+      'thread-f1308',
+      'default-user',
+      'entry-retry',
+      'opus',
+      'entry-retry:opus:1',
+    ]);
+    assert.equal(typeof retryCalls[0][5], 'function');
+    assert.equal(authorityCalls.length, 1);
+    assert.equal(commitCalls.length, 1);
+    assert.equal(authorityCalls[0].message.id, queued.id);
+    assert.equal(authorityCalls[0].requestingUserId, 'default-user');
+    assert.equal(authorityCalls[0].targetCatId, 'opus');
+    assert.equal(messageStore.getById(queued.id).content, 'keep this exact authored text');
+  });
+
+  it('rejects stale authority before Queue or custody retry mutation', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: 'system',
+      content: 'historical wait outcome',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-stale-wait',
+      deliveryStatus: 'queued',
+      source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-stale-wait',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        failedByCatIds: ['opus'],
+        targetAttempts: [
+          {
+            id: 'entry-stale-wait:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+    authorityDecision = { ok: false, reason: 'stale_generation' };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${queued.id}/queue-targets/opus/retry`,
+      headers: { 'content-type': 'application/json' },
+      payload: { attemptId: 'entry-stale-wait:opus:1' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), {
+      error: 'This target no longer has current retry authority',
+      code: 'QUEUE_RETRY_AUTHORITY_STALE',
+      reason: 'stale_generation',
+    });
+    assert.equal(authorityCalls.length, 1);
+    assert.deepEqual(retryCalls, []);
+  });
+
+  it('rejects a persisted source parse failure before Queue reopen or custody append', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'legacy connector source must not be reclassified as user-authored work',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-invalid-source',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-invalid-source',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        failedByCatIds: ['opus'],
+        targetAttempts: [
+          {
+            id: 'entry-invalid-source:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+    messageStore.getById(queued.id).sourceParseFailure = true;
+    authorityImplementation = new WaitContinuationRetryPreflight({
+      taskStore: {
+        get: async () => {
+          throw new Error('invalid connector source must fail before Task lookup');
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${queued.id}/queue-targets/opus/retry`,
+      headers: { 'content-type': 'application/json' },
+      payload: { attemptId: 'entry-invalid-source:opus:1' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), {
+      error: 'This target no longer has current retry authority',
+      code: 'QUEUE_RETRY_AUTHORITY_STALE',
+      reason: 'legacy_unattributed',
+    });
+    assert.equal(authorityCalls.length, 1);
+    assert.deepEqual(retryCalls, []);
+    const stored = messageStore.getById(queued.id);
+    assert.equal(stored.queueCustody.revision, 1);
+    assert.equal(stored.queueCustody.targetAttempts.length, 1);
+  });
+
+  it('rejects authority that changes after route preflight at the retry mutation boundary', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: 'system',
+      content: 'authority changes before retry mutation',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-racing-wait',
+      deliveryStatus: 'queued',
+      source: { connector: 'github-wait', meta: { waitContinuationCarrier: { v: 1 } } },
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-racing-wait',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        failedByCatIds: ['opus'],
+        targetAttempts: [
+          {
+            id: 'entry-racing-wait:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+    authorityDecision = { ok: true, kind: 'wait_containing_task' };
+    commitDecision = { outcome: 'authority_stale', reason: 'outcome_mismatch' };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${queued.id}/queue-targets/opus/retry`,
+      headers: { 'content-type': 'application/json' },
+      payload: { attemptId: 'entry-racing-wait:opus:1' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), {
+      error: 'This target no longer has current retry authority',
+      code: 'QUEUE_RETRY_AUTHORITY_STALE',
+      reason: 'outcome_mismatch',
+    });
+    assert.equal(authorityCalls.length, 1);
+    assert.equal(commitCalls.length, 1);
+    assert.equal(retryCalls.length, 1);
+  });
+
+  it('resolves a cross-thread failed target to its target-thread carrier before retrying', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'retry the target-thread carrier',
+      mentions: ['codex'],
+      timestamp: 1_000,
+      threadId: 'thread-source',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'cross-thread:source-message',
+        receiptScope: 'cross_thread_delivery',
+        allTargetCats: ['codex'],
+        pendingTargetCats: ['codex'],
+        failedByCatIds: ['codex'],
+        carrierByTargetCatId: {
+          codex: {
+            entryId: 'target-carrier-codex',
+            source: 'agent',
+            sourceCategory: 'a2a',
+            a2aTriggerMessageId: 'source-message',
+            autoExecute: true,
+            createdAt: 1_000,
+          },
+        },
+        targetAttempts: [
+          {
+            id: 'cross-thread:source-message:codex:1',
+            targetCatId: 'codex',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+    invocationQueue.getEntrySnapshotForUserById = (userId, entryId) =>
+      userId === 'default-user' && entryId === 'target-carrier-codex'
+        ? { id: entryId, threadId: 'thread-target', userId }
+        : null;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/messages/${queued.id}/queue-targets/codex/retry`,
+      headers: { 'content-type': 'application/json' },
+      payload: { attemptId: 'cross-thread:source-message:codex:1' },
+    });
+
+    assert.equal(response.statusCode, 202);
+    assert.deepEqual(retryCalls[0].slice(0, 5), [
+      'thread-target',
+      'default-user',
+      'target-carrier-codex',
+      'codex',
+      'cross-thread:source-message:codex:1',
+    ]);
+    assert.equal(typeof retryCalls[0][5], 'function');
+  });
+});
+
 // Auto-summary disabled (clowder-ai#343): summaries no longer merged into GET timeline.
 // SummaryStore still persisted for memory infrastructure / future Thread Recap.
 describe('GET /api/messages — summary NOT in timeline (clowder-ai#343)', () => {

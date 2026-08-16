@@ -17,6 +17,7 @@ import { CommunityPanel } from './CommunityPanel';
 import { createFileContextAttachment } from './chat-context-reference';
 import { EvalWorkspacePanel } from './eval-workspace/EvalWorkspacePanel';
 import { EventTimeline } from './event-memory/EventTimeline';
+import { ListenModePlayer } from './listen-mode/ListenModePlayer';
 import { RecallFeed } from './memory/RecallFeed';
 import { RecallLedger } from './memory/RecallLedger';
 import { TaskBoardPanel } from './TaskBoardPanel';
@@ -148,12 +149,10 @@ function PresentationLockButton({ locked, onToggle }: { locked: boolean; onToggl
 }
 
 export function WorkspacePanel({
-  activeInvocations = {},
   threadId,
   defaultCatId = 'opus',
   onOpenStatus,
 }: {
-  activeInvocations?: Record<string, { catId: string; mode: string; startedAt?: number }>;
   threadId?: string;
   defaultCatId?: string;
   onOpenStatus?: () => void;
@@ -223,11 +222,13 @@ export function WorkspacePanel({
 
   const viewMode = useChatStore((s) => s.workspaceSurface);
   const setViewMode = useChatStore((s) => s.setWorkspaceSurface);
+  const restoreViewMode = useChatStore((s) => s.restoreWorkspaceSurface);
   // F227: recall mode sub-tab — 记忆流 (RecallFeed) vs 拉闸记录 (EventTimeline) vs 账本 (RecallLedger, F263)
   const [recallTab, setRecallTab] = useState<'feed' | 'events' | 'ledger'>('feed');
   // Phase H: Workspace mode switcher (dev tools vs knowledge feed)
   const workspaceMode = useChatStore((s) => s.workspaceMode);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
+  const restoreWorkspaceMode = useChatStore((s) => s.restoreWorkspaceMode);
   const workspacePreview = useChatStore((s) => s.workspacePreview);
   const setWorkspacePreview = useChatStore((s) => s.setWorkspacePreview);
   const previewPort = workspacePreview.port;
@@ -275,8 +276,13 @@ export function WorkspacePanel({
     const freshOpenForCurrentThread =
       workspaceFileSetAt.ts !== previousWorkspaceFileSetTs &&
       (!workspaceFileSetAt.threadId || workspaceFileSetAt.threadId === currentThreadId);
-    if (openFilePath && (openFilePath !== previousOpenFilePath || freshOpenForCurrentThread)) setViewMode('files');
-  }, [currentThreadId, openFilePath, setViewMode, workspaceFileSetAt.threadId, workspaceFileSetAt.ts]);
+    if (!openFilePath || (openFilePath === previousOpenFilePath && !freshOpenForCurrentThread)) return;
+    if (freshOpenForCurrentThread) {
+      setViewMode('files');
+    } else {
+      restoreViewMode('files');
+    }
+  }, [currentThreadId, openFilePath, restoreViewMode, setViewMode, workspaceFileSetAt.threadId, workspaceFileSetAt.ts]);
   const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');
@@ -322,16 +328,16 @@ export function WorkspacePanel({
       .then((thread: { preferredWorkspaceMode?: string }) => {
         if (cancelled) return;
         if (isWorkspaceMode(thread.preferredWorkspaceMode)) {
-          setWorkspaceMode(thread.preferredWorkspaceMode);
+          restoreWorkspaceMode(thread.preferredWorkspaceMode);
         } else if (['community', 'artifacts'].includes(useChatStore.getState().workspaceMode)) {
-          setWorkspaceMode('dev');
+          restoreWorkspaceMode('dev');
         }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [currentThreadId, presentationLock]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentThreadId, presentationLock, restoreWorkspaceMode]);
   // F120: Listen for port discovery via Socket.IO
   useEffect(() => {
     let cancelled = false;
@@ -580,6 +586,7 @@ export function WorkspacePanel({
       ref={panelRef}
       className="flex flex-1 min-w-0 bg-[var(--console-panel-bg)] flex-col overflow-hidden animate-slide-in-right"
     >
+      <ListenModePlayer />
       {/* ── Focus mode overlay ── */}
       {focusedPane === 'browser' && workspaceMode === 'dev' && viewMode === 'browser' ? (
         <WorkspacePreviewOnly
@@ -856,7 +863,6 @@ export function WorkspacePanel({
               {viewMode === 'home' ? (
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   <WorkspaceNowSurface
-                    activeInvocations={activeInvocations}
                     repository={
                       currentWorktree
                         ? { name: worktreeBasename(currentWorktree.root), branch: currentWorktree.branch }

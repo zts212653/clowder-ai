@@ -3,6 +3,10 @@ import type { CatInvocationInfo, QueueEntry } from '@/stores/chat-types';
 
 export const UNSETTLED_SEEN_LABEL = '已读，但关联回合已结束；尚未确认处理完成';
 
+function completedWithTurnReceiptLabel(scope?: QueueMessageReceipt['scope']): string {
+  return scope === 'cross_thread_delivery' ? '正文已由本轮消费' : '已随本轮完成';
+}
+
 type QueueTargetState = NonNullable<QueueEntry['targetStates']>[string];
 type ActiveInvocationSlots = Record<string, { catId: string }>;
 
@@ -130,6 +134,8 @@ export function receiptTargetStateLabel(
   if (target.state === 'steering') return 'Steer 中';
   if (target.state === 'withdrawn') return '已撤出待处理 · 历史保留';
   if (target.outcome?.disposition === 'responded') return '已由回复明确处理';
-  if (target.outcome?.disposition === 'completed_with_turn') return '已随本轮完成';
+  if (target.outcome?.disposition === 'completed_with_turn') {
+    return completedWithTurnReceiptLabel(scope);
+  }
   return '已处理 · 无可回溯证据';
 }

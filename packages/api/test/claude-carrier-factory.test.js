@@ -200,14 +200,32 @@ describe('FallbackCarrierWrapper — in-invocation fallback (D3/D4)', () => {
         })();
       },
     };
+    const fallbackAttempts = [];
+    const fallbackFactory = (tier, catId) => {
+      fallbackAttempts.push(tier);
+      return {
+        catId,
+        invoke() {
+          return (async function* () {
+            throw new Error('mock fallback unavailable');
+          })();
+        },
+      };
+    };
 
-    const wrapper = new FallbackCarrierWrapper(throwingCarrier, 'opus', 'bg_daemon', 'bg_daemon', store);
+    const wrapper = new FallbackCarrierWrapper(
+      throwingCarrier,
+      'opus',
+      'bg_daemon',
+      'bg_daemon',
+      store,
+      fallbackFactory,
+    );
     const events = [];
 
     // The wrapper catches the quota error, degrades bg_daemon, then tries to create
-    // a real fallback carrier (print_sdk = ClaudeAgentService). That real carrier will
-    // also fail in test (no meaningful prompt/session), but we verify the system_info
-    // event was yielded first and health state was updated.
+    // the selected fallback carrier. The injected carrier keeps this contract test
+    // independent from whichever Claude CLI/account happens to exist on the host.
     try {
       for await (const msg of wrapper.invoke('test')) events.push(msg);
     } catch {
@@ -226,6 +244,7 @@ describe('FallbackCarrierWrapper — in-invocation fallback (D3/D4)', () => {
     assert.equal(payload.to, 'print_sdk'); // skipped degraded interactive_pty
     assert.equal(payload.reason, 'quota');
     assert.ok(payload.error.includes('usage limit'), 'error snippet included');
+    assert.deepEqual(fallbackAttempts, ['print_sdk']);
   });
 
   test('thrown transient error rethrows without degradation', async () => {

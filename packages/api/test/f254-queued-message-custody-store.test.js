@@ -94,4 +94,63 @@ describe('F254 queued message custody store', () => {
     assert.equal(store.getById(message.id).deliveryStatus, 'queued');
     assert.equal(store.getById(message.id).queueCustody.status, 'queued');
   });
+
+  test('forward queued-inclusive reads preserve raw thread order across an exposed queued cursor', () => {
+    const store = new MessageStore();
+    const threadId = 'thread-queued-inclusive-forward-memory';
+    const before = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'before',
+      mentions: [],
+      timestamp: 1_000,
+      threadId,
+    });
+    const exposed = store.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'exposed queued body',
+      mentions: ['opus'],
+      timestamp: 2_000,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        seenByCatIds: ['opus'],
+        seenInvocationIdByCatId: { opus: 'sealed-child' },
+        bodyExposures: [{ targetCatId: 'opus', invocationId: 'sealed-child', seenAt: 2_100 }],
+      }),
+    });
+    const after = store.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'after',
+      mentions: [],
+      timestamp: 2_000,
+      threadId,
+    });
+    const options = {
+      includeQueuedCatMessages: true,
+      includeExposedQueuedUserMessagesForCatId: 'opus',
+    };
+
+    assert.deepEqual(
+      store.getByThreadAfter(threadId, before.id, 20, 'user-1', options).map((message) => message.id),
+      [exposed.id, after.id],
+    );
+    assert.deepEqual(
+      store.getByThreadAfter(threadId, exposed.id, 20, 'user-1', options).map((message) => message.id),
+      [after.id],
+    );
+    assert.deepEqual(
+      store
+        .getByThreadAfter(threadId, before.id, 20, 'user-1', {
+          ...options,
+          includeExposedQueuedUserMessagesForCatId: 'codex-sol',
+        })
+        .map((message) => message.id),
+      [after.id],
+    );
+  });
 });

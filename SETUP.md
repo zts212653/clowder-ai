@@ -299,7 +299,8 @@ NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 
 # Text-to-Speech (TTS)
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
+# Optional override; by default Clowder AI uses ~/.cat-cafe/assets/tts
+# TTS_CACHE_DIR=/absolute/path/to/tts-cache
 
 # Speech correction (LLM post-processing)
 NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878

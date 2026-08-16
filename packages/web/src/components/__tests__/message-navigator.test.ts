@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { MessageNavigator } from '@/components/MessageNavigator';
+import { MessageNavigator, messageNavigatorPreviewText } from '@/components/MessageNavigator';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
@@ -151,5 +151,46 @@ describe('MessageNavigator', () => {
     expect(html).not.toContain('bg-gray-200');
     expect(html).not.toContain('bg-gray-300/50');
     expect(html).toContain('rounded-full');
+  });
+
+  it('does not leak a folded source body through the navigator tooltip projection', () => {
+    const source: ChatMessageData = {
+      ...makeMsg('m-folded', 'user'),
+      content: '这段正文只允许在 canonical child 显示',
+      extra: {
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-folded',
+          targets: [
+            {
+              catId: 'codex-sol',
+              state: 'handled',
+              invocationId: 'child-folded',
+              seenAt: 10,
+              outcome: {
+                invocationId: 'child-folded',
+                disposition: 'completed_with_turn',
+                evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-folded' },
+                handledAt: 20,
+              },
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    };
+    const terminal: ChatMessageData = {
+      ...makeMsg('m-terminal', 'assistant', 'codex-sol'),
+      extra: {
+        turnExecution: {
+          invocationId: 'child-folded',
+          parentInvocationId: 'parent-folded',
+          executionKind: 'ordinary',
+        },
+      },
+    };
+
+    expect(messageNavigatorPreviewText(source, [source, terminal])).toBeNull();
+    expect(messageNavigatorPreviewText(source, [source])).toContain('这段正文只允许');
   });
 });

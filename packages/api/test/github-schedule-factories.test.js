@@ -80,6 +80,7 @@ function makeGitHubDeps(overrides = {}) {
     fetchOpenIssues: async () => [],
     // F202 Phase 2D: issue-tracking deps
     issueCommentRouter: stubRouter,
+    waitLifecycle: { observe: async () => ({ kind: 'state_only', reason: 'test' }) },
     fetchIssueComments: async () => [],
     fetchIssueState: async () => 'open',
     isEchoIssueComment: () => false,

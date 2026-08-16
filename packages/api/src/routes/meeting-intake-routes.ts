@@ -185,8 +185,9 @@ export function registerMeetingIntakeRoutes(app: FastifyInstance, options: Meeti
       return {
         intake: current,
         regrant: {
-          kind: 'host_command',
-          argv: ['lark-cli', 'auth', 'login', '--as', 'user'],
+          kind: 'official_plugin_auth',
+          catalogId: 'feishu-meeting-intake',
+          settingsHref: '/settings?s=plugins',
           nextAction: 'retry',
         },
       };

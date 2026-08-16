@@ -20,6 +20,7 @@ export default defineConfig({
       'src/__tests__/dispatch-proposal-types.test.ts',
       'src/__tests__/approval-hub-types.test.ts',
       'src/__tests__/approval-producer-catalog.test.ts',
+      'src/__tests__/explicit-stop-intent.test.ts',
       'src/__tests__/person-memory-contract.test.ts',
       'src/__tests__/person-memory-rich-card.test.ts',
       'src/__tests__/eval-metric-ref.test.ts',
@@ -33,6 +34,7 @@ export default defineConfig({
       'src/__tests__/paw-feel-disposition-contract.test.ts',
       'src/__tests__/memory-cue.test.ts',
       'src/__tests__/context-attachment.test.ts',
+      'test/message-bundle-schema.test.ts',
     ],
   },
 });

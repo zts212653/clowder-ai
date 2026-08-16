@@ -17,6 +17,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | Skill | 触发场景 | SOP Step |
 |-------|----------|----------|
 | `feat-lifecycle` | 新功能立项/讨论/完成 | — |
+| `owner-friendly-plugin-development` | 设计有安装/授权/runtime/Host 路由的operator友好插件 | — |
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
 | `collaborative-thinking` | brainstorm/多猫讨论/收敛 | — |

@@ -34,7 +34,7 @@ function awaitState(when) {
   };
 }
 
-async function setup(when) {
+async function setup(when, routerOverrides = {}) {
   const taskStore = new TaskStore();
   const messageStore = new MessageStore();
   const lifecycle = new GitHubWaitLifecycleService({
@@ -67,6 +67,7 @@ async function setup(when) {
       events.push(event);
       return { idempotencyKey: event.idempotencyKey };
     },
+    ...routerOverrides,
   });
   return { taskStore, messageStore, task, router, events, lifecycle };
 }
@@ -78,12 +79,76 @@ function poll(overrides = {}) {
     headSha: 'aaa1111',
     prState: 'open',
     aggregateBucket: 'pass',
+    checkRollup: 'present',
     checks: [{ name: 'tests', bucket: 'pass' }],
     ...overrides,
   };
 }
 
 describe('CiCdRouter F280 typed waits', () => {
+  test('requires a same-HEAD empty rollup to stay empty for one poll interval before passing', async () => {
+    let now = 1_000;
+    const projected = [];
+    const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {
+      now: () => now,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+    });
+    const empty = poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] });
+
+    const first = await router.route(empty);
+    assert.equal(first.kind, 'skipped');
+    assert.equal(projected.at(-1).aggregateBucket, 'pending');
+    assert.deepEqual((await taskStore.get(task.id)).automationState.ci.rollupObservation, {
+      headSha: 'aaa1111',
+      state: 'empty',
+      streakStartedAt: 1_000,
+    });
+
+    now = 61_000;
+    const settled = await router.route(empty);
+    assert.equal(settled.kind, 'notified');
+    assert.equal(projected.at(-1).aggregateBucket, 'pass');
+  });
+
+  test('a non-empty observation resets the empty-rollup stability window', async () => {
+    let now = 1_000;
+    const projected = [];
+    const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {
+      now: () => now,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+    });
+
+    await router.route(poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] }));
+    now = 30_000;
+    await router.route(
+      poll({
+        aggregateBucket: 'pending',
+        checkRollup: 'present',
+        checks: [{ name: 'tests', bucket: 'pending' }],
+      }),
+    );
+    now = 61_000;
+    const afterReset = await router.route(poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] }));
+
+    assert.equal(afterReset.kind, 'skipped');
+    assert.equal(projected.at(-1).aggregateBucket, 'pending');
+    assert.deepEqual((await taskStore.get(task.id)).automationState.ci.rollupObservation, {
+      headSha: 'aaa1111',
+      state: 'empty',
+      streakStartedAt: 61_000,
+    });
+  });
+
   test('unregistered PR is state-only', async () => {
     const { router } = await setup(null);
     assert.equal((await router.route(poll())).kind, 'skipped');
