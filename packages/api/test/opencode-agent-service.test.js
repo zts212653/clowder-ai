@@ -323,6 +323,40 @@ describe('OpenCodeAgentService', () => {
     assert.ok(args.indexOf('--title') < args.indexOf('--'), 'user-defined CLI flags must remain before the terminator');
   });
 
+  test('no-tool finalizer overwrites inherited permissions and scopes its agent config', () => {
+    const service = new OpenCodeAgentService({ catId: 'opencode', model: 'claude-sonnet-4-6' });
+    const finalizerAgent = 'cat-cafe-no-tool-finalizer-test-nonce';
+    const env = service.buildNoToolFinalizerEnv(
+      {
+        OPENCODE_PERMISSION: JSON.stringify({ '*': 'allow', bash: 'allow' }),
+      },
+      finalizerAgent,
+    );
+
+    const envPermission = JSON.parse(env.OPENCODE_PERMISSION);
+    assert.equal(envPermission['*'], 'deny', 'finalizer must override post-config global permission precedence');
+    assert.equal(envPermission.bash, 'deny', 'finalizer must explicitly deny executable tools');
+
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(config.default_agent, finalizerAgent);
+    assert.equal(config.agent[finalizerAgent].permission['*'], 'deny');
+    assert.equal(
+      config.agent['cat-cafe-no-tool-finalizer'],
+      undefined,
+      'an organization config must not be able to target a stable finalizer agent name',
+    );
+  });
+
+  test('no-tool finalizer terminates option parsing before a dash-prefixed prompt', () => {
+    const prompt = '- [navigation]\nTreat this entire value as the finalizer prompt.';
+    const finalizerAgent = 'cat-cafe-no-tool-finalizer-test-nonce';
+    const service = new OpenCodeAgentService({ catId: 'opencode', model: 'claude-sonnet-4-6' });
+    const args = service.buildNoToolFinalizerArgs(prompt, 'ses_test123', 'claude-sonnet-4-6', finalizerAgent);
+
+    assert.equal(args[args.indexOf('--agent') + 1], finalizerAgent);
+    assert.deepEqual(args.slice(-2), ['--', prompt], `expected option terminator immediately before prompt: ${args}`);
+  });
+
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
@@ -1161,13 +1195,24 @@ describe('OpenCodeAgentService', () => {
     assert.ok(finalizerArgs.includes('--session'), `finalizer must resume the same OpenCode session: ${finalizerArgs}`);
     assert.equal(finalizerArgs[finalizerArgs.indexOf('--session') + 1], 'ses_test123');
     assert.ok(finalizerArgs.includes('--agent'), `finalizer must use a dedicated no-tool agent: ${finalizerArgs}`);
-    assert.equal(finalizerArgs[finalizerArgs.indexOf('--agent') + 1], 'cat-cafe-no-tool-finalizer');
-    const finalizerConfig = JSON.parse(spawnFn.mock.calls[1].arguments[2].env.OPENCODE_CONFIG_CONTENT);
+    const finalizerAgent = finalizerArgs[finalizerArgs.indexOf('--agent') + 1];
+    assert.match(
+      finalizerAgent,
+      /^cat-cafe-no-tool-finalizer-[0-9a-f-]{36}$/,
+      'finalizer agent name must be invocation-scoped so post-inline organization config cannot target it',
+    );
+    const finalizerEnv = spawnFn.mock.calls[1].arguments[2].env;
+    const finalizerConfig = JSON.parse(finalizerEnv.OPENCODE_CONFIG_CONTENT);
     assert.equal(finalizerConfig.permission['*'], 'deny', 'finalizer env must deny tool execution');
     assert.equal(
-      finalizerConfig.agent['cat-cafe-no-tool-finalizer'].permission['*'],
+      finalizerConfig.agent[finalizerAgent].permission['*'],
       'deny',
       'dedicated finalizer agent must deny tool execution',
+    );
+    assert.equal(
+      JSON.parse(finalizerEnv.OPENCODE_PERMISSION)['*'],
+      'deny',
+      'finalizer must override permission env loaded after organization and managed config',
     );
     assert.equal(textMsgs.length, 2, 'finalizer should add one replacement text after the incomplete prelude');
     assert.equal(textMsgs[0].content, 'Let me verify from the actual config rather than guessing.');

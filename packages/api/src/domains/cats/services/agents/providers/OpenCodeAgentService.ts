@@ -14,6 +14,7 @@
  *   error       → error
  */
 
+import { randomUUID } from 'node:crypto';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -54,6 +55,8 @@ import {
   identifierPrefix,
   OPENCODE_CONFIG_CONTENT_ENV,
   OPENCODE_NO_TOOL_FINALIZER_AGENT,
+  OPENCODE_NO_TOOL_PERMISSION,
+  OPENCODE_PERMISSION_ENV,
   type OpenCodeToolTrace,
   recoverOpenCodeSilentCompletion,
   SessionSingleFlight,
@@ -719,8 +722,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     }
 
     const finalizerPrompt = buildOpenCodePostToolFinalizerPrompt(params.trace);
-    const finalizerArgs = this.buildNoToolFinalizerArgs(finalizerPrompt, params.sessionId, params.effectiveModel);
-    const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv);
+    const finalizerAgent = `${OPENCODE_NO_TOOL_FINALIZER_AGENT}-${randomUUID()}`;
+    const finalizerArgs = this.buildNoToolFinalizerArgs(
+      finalizerPrompt,
+      params.sessionId,
+      params.effectiveModel,
+      finalizerAgent,
+    );
+    const finalizerEnv = this.buildNoToolFinalizerEnv(params.childEnv, finalizerAgent);
     const cliOpts = {
       command: params.command,
       args: finalizerArgs,
@@ -878,18 +887,27 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return recovered.text;
   }
 
-  private buildNoToolFinalizerArgs(prompt: string, sessionId: string | undefined, model: string): string[] {
-    const args = ['run', '--pure', '--agent', OPENCODE_NO_TOOL_FINALIZER_AGENT];
+  private buildNoToolFinalizerArgs(
+    prompt: string,
+    sessionId: string | undefined,
+    model: string,
+    finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
+  ): string[] {
+    const args = ['run', '--pure', '--agent', finalizerAgent];
     if (sessionId) args.push('--session', sessionId);
     if (model) args.push('-m', model);
-    args.push('--format', 'json', prompt);
+    args.push('--format', 'json', '--', prompt);
     return args;
   }
 
-  private buildNoToolFinalizerEnv(childEnv: Record<string, string | null>): Record<string, string | null> {
+  private buildNoToolFinalizerEnv(
+    childEnv: Record<string, string | null>,
+    finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
+  ): Record<string, string | null> {
     return {
       ...childEnv,
-      [OPENCODE_CONFIG_CONTENT_ENV]: JSON.stringify(buildOpenCodeNoToolFinalizerConfig()),
+      [OPENCODE_CONFIG_CONTENT_ENV]: JSON.stringify(buildOpenCodeNoToolFinalizerConfig(finalizerAgent)),
+      [OPENCODE_PERMISSION_ENV]: JSON.stringify(OPENCODE_NO_TOOL_PERMISSION),
     };
   }
 

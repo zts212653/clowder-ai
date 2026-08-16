@@ -6,6 +6,7 @@ import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 
 export const OPENCODE_DB_ENV = 'OPENCODE_DB';
 export const OPENCODE_CONFIG_CONTENT_ENV = 'OPENCODE_CONFIG_CONTENT';
+export const OPENCODE_PERMISSION_ENV = 'OPENCODE_PERMISSION';
 export const OPENCODE_NO_TOOL_FINALIZER_AGENT = 'cat-cafe-no-tool-finalizer';
 export const OPENCODE_NO_TOOL_PERMISSION = {
   '*': 'deny',
@@ -338,14 +339,16 @@ export function hasOpenCodeManagedConfig(options: OpenCodeManagedConfigDetection
   return defaultManagedConfigPaths(options).some((path) => existsSync(path));
 }
 
-export function buildOpenCodeNoToolFinalizerConfig(): Record<string, unknown> {
+export function buildOpenCodeNoToolFinalizerConfig(
+  finalizerAgent = OPENCODE_NO_TOOL_FINALIZER_AGENT,
+): Record<string, unknown> {
   return {
     $schema: 'https://opencode.ai/config.json',
-    default_agent: OPENCODE_NO_TOOL_FINALIZER_AGENT,
+    default_agent: finalizerAgent,
     permission: OPENCODE_NO_TOOL_PERMISSION,
     tools: OPENCODE_NO_TOOL_FLAGS,
     agent: {
-      [OPENCODE_NO_TOOL_FINALIZER_AGENT]: {
+      [finalizerAgent]: {
         mode: 'primary',
         permission: OPENCODE_NO_TOOL_PERMISSION,
         tools: OPENCODE_NO_TOOL_FLAGS,
