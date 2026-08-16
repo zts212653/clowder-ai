@@ -100,14 +100,7 @@ function hasTrustedLocalOrigin(value: string | undefined): boolean {
   }
 }
 
-function isApiBoundToLocalhost(): boolean {
-  const host = process.env.API_SERVER_HOST?.trim();
-  if (!host) return true;
-  return isLoopbackHost(normalizeHostForLoopbackCheck(host));
-}
-
 export function isLocalCapabilityWriteRequest(request: FastifyRequest): boolean {
-  if (!isApiBoundToLocalhost()) return false;
   if (!isLoopbackAddress(request.ip)) return false;
   if (hasProxyForwardingHeaders(request)) return false;
 

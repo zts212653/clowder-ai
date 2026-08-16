@@ -16,6 +16,16 @@ const OWNER_HEADERS = { 'x-test-session-user': 'you' };
 const NON_OWNER_HEADERS = { 'x-test-session-user': 'codex' };
 const LOCAL_OWNER_HEADERS = { ...OWNER_HEADERS, host: 'localhost:3004', origin: 'http://localhost:3003' };
 const LOCAL_NON_OWNER_HEADERS = { ...NON_OWNER_HEADERS, host: 'localhost:3004', origin: 'http://localhost:3003' };
+const PROXY_FORWARDING_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-client-ip',
+  'cf-connecting-ip',
+  'true-client-ip',
+];
 const REDACTED_SECRET = '••••••';
 
 const savedEnv = new Map();
@@ -127,7 +137,7 @@ describe('capabilities MCP write routes', () => {
     assert.deepEqual(config?.capabilities, []);
   });
 
-  it('rejects local-looking MCP writes when the API is bound for LAN access', async () => {
+  it('allows direct loopback MCP writes when the API is bound to all interfaces', async () => {
     setEnv('API_SERVER_HOST', '0.0.0.0');
 
     const res = await app.inject({
@@ -140,8 +150,83 @@ describe('capabilities MCP write routes', () => {
       },
     });
 
-    assert.equal(res.statusCode, 403);
+    assert.equal(res.statusCode, 200, res.payload);
+    const config = await readCapabilitiesConfig(projectRoot);
+    assert.ok(config?.capabilities.some((entry) => entry.id === 'external-mcp'));
+  });
+
+  it('rejects remote peers even when Host and Origin look local', async () => {
+    setEnv('API_SERVER_HOST', '0.0.0.0');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: LOCAL_OWNER_HEADERS,
+      remoteAddress: '192.0.2.10',
+      payload: { id: 'remote-mcp', command: 'node', args: ['server.js'] },
+    });
+
+    assert.equal(res.statusCode, 403, res.payload);
     assert.match(JSON.parse(res.payload).error, /direct localhost/i);
+    const config = await readCapabilitiesConfig(projectRoot);
+    assert.deepEqual(config?.capabilities, []);
+  });
+
+  it('rejects loopback peers with a non-local Host or Origin', async () => {
+    const cases = [
+      {
+        label: 'Host',
+        headers: { ...OWNER_HEADERS, host: 'api.example.test', origin: 'http://localhost:3003' },
+      },
+      {
+        label: 'Origin',
+        headers: { ...OWNER_HEADERS, host: 'localhost:3004', origin: 'https://app.example.test' },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/capabilities/mcp/install',
+        headers: testCase.headers,
+        payload: { id: `non-local-${testCase.label.toLowerCase()}`, command: 'node', args: ['server.js'] },
+      });
+
+      assert.equal(res.statusCode, 403, `${testCase.label}: ${res.payload}`);
+      assert.match(JSON.parse(res.payload).error, /direct localhost/i);
+    }
+
+    const config = await readCapabilitiesConfig(projectRoot);
+    assert.deepEqual(config?.capabilities, []);
+  });
+
+  it('rejects loopback peers with any proxy-forwarding header', async () => {
+    for (const header of PROXY_FORWARDING_HEADERS) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/capabilities/mcp/install',
+        headers: { ...LOCAL_OWNER_HEADERS, [header]: '203.0.113.10' },
+        payload: { id: `forwarded-${header}`, command: 'node', args: ['server.js'] },
+      });
+
+      assert.equal(res.statusCode, 403, `${header}: ${res.payload}`);
+      assert.match(JSON.parse(res.payload).error, /direct localhost/i);
+    }
+
+    const config = await readCapabilitiesConfig(projectRoot);
+    assert.deepEqual(config?.capabilities, []);
+  });
+
+  it('rejects MCP writes without a session-backed identity', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/capabilities/mcp/install',
+      headers: { host: 'localhost:3004', origin: 'http://localhost:3003' },
+      payload: { id: 'anonymous-mcp', command: 'node', args: ['server.js'] },
+    });
+
+    assert.equal(res.statusCode, 401, res.payload);
+    assert.match(JSON.parse(res.payload).error, /session/i);
     const config = await readCapabilitiesConfig(projectRoot);
     assert.deepEqual(config?.capabilities, []);
   });
