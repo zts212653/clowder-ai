@@ -420,6 +420,15 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 
+  it('warns that the default Google CLI carrier cannot resolve an Auto Context Window', async () => {
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro');
+
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro', { acpEnabled: true });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
   it('does not reuse a saved Manual source after the editor switches Context Window to Auto', async () => {
     await renderAdvancedRuntimeSection(
       'antigravity',

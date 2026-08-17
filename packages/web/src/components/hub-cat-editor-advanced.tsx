@@ -203,7 +203,7 @@ function selectionMatchesSavedContext(cat: CatData | null | undefined, form: Hub
 
 function draftCannotResolveOrApplyContextWindow(form: HubCatEditorFormState): boolean | null {
   if (form.acpEnabled) return false;
-  if (form.clientId === 'antigravity' || form.clientId === 'catagent') return true;
+  if (form.clientId === 'antigravity' || form.clientId === 'catagent' || form.clientId === 'google') return true;
   if (form.clientId !== 'openai') return false;
   if (form.codexCarrier === 'app_server') return true;
   if (form.codexCarrier === 'exec_json') return false;
