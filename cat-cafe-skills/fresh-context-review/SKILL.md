@@ -1,5 +1,6 @@
 ---
 name: fresh-context-review
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   Author-triggered fresh-context scan of PR diff before formal review.
   Finding generator, NOT approval authority.
@@ -179,4 +180,4 @@ Author 收到 finding list 后：
 ## 下一步
 
 Fresh-context findings 处理完 → 直接进 **`request-review`**（SOP Step ③a）。
-在 review request 中附上 fresh-context findings 摘要（见 `refs/review-request-template.md` 的 "Fresh-Context Findings" section）。正式 reviewer 会用 `FC:covered` / `FC:new` 标注自己的 findings（见 `receive-review` skill "Reviewer Delta Annotation"）。
+在 review request 中附上 fresh-context findings 摘要（见 `../.cat-cafe-shared-refs/review-request-template.md` 的 "Fresh-Context Findings" section）。正式 reviewer 会用 `FC:covered` / `FC:new` 标注自己的 findings（见 `receive-review` skill "Reviewer Delta Annotation"）。

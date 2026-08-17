@@ -237,15 +237,25 @@ export class KimiAgentService implements AgentService {
             timestamp: Date.now(),
           };
         }
-        l0AgentFilePath = writeKimiL0AgentFile(
-          buildKimiL0AgentFileContent({
-            catId: this.catId as string,
-            l0,
-            packSystemPrompt: freshStartReason
-              ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
-              : options?.systemPrompt,
-          }),
-        );
+        // kimi-code >=0.30 hard-rejects `--agent-file` alongside `--session`
+        // ("the agent is bound at session creation and the bound agent is
+        // restored automatically on resume") — exit 1 before any turn runs.
+        // The flag only ever selected the agent for a *new* session, so on a
+        // resume it was already a silent no-op; the fingerprint gate above has
+        // just proven the bound agent IS this exact L0, so dropping the file
+        // is the honest expression of the CLI's own semantics, not a downgrade.
+        // The L0 stays compiled either way — the gate depends on it.
+        if (!effectiveResumeSessionId) {
+          l0AgentFilePath = writeKimiL0AgentFile(
+            buildKimiL0AgentFileContent({
+              catId: this.catId as string,
+              l0,
+              packSystemPrompt: freshStartReason
+                ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
+                : options?.systemPrompt,
+            }),
+          );
+        }
       } catch (err) {
         if (tempMcpConfig) {
           try {

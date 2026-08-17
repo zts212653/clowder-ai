@@ -4,10 +4,10 @@ import { describe, it } from 'node:test';
 import { parseMagicWordMeanings } from '../../dist/domains/memory/magic-word-meanings.js';
 
 /**
- * F227 PR-2 Task 8 (AC-A5) — meanings parsed from compiled L0, not redefined.
+ * F227 PR-2 Task 8 (AC-A5) — meanings parsed from injected governance, not redefined.
  */
 describe('F227 PR-2: parseMagicWordMeanings', () => {
-  it('parses -「word」= meaning → action lines from compiled L0', () => {
+  it('parses -「word」= meaning → action lines from injected governance', () => {
     const content = [
       '## 3. 家规',
       '-「脚手架」= 你在偷懒写临时方案 → 停，审视产物是否终态，不是→重写',

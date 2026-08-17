@@ -102,11 +102,23 @@ function sealReasonLabel(reason?: string): string {
   if (reason === 'unexpected_runtime_session_switch') return 'runtime switch';
   if (reason === 'overflow_circuit_breaker') return 'overflow';
   if (reason === 'unseal_displacement') return 'unseal displaced';
+  if (reason === 'manual_session_switch') return 'manual switch';
   if (reason === 'reconcile_stuck') return 'stuck reaper';
   if (reason === 'global_reaper') return 'global reaper';
   if (reason === 'turn_budget_exceeded') return 'budget exceeded';
   if (reason === 'lease_timeout') return 'lease timeout'; // legacy
   return reason;
+}
+
+async function restoreFailureMessage(response: Response): Promise<string | null> {
+  if (response.ok) return null;
+  const fallback = `Restore failed (${response.status})`;
+  try {
+    const data = (await response.json()) as { error?: string };
+    return data.error || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function cachePercent(cacheRead?: number, input?: number): number {
@@ -146,7 +158,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   const [loading, setLoading] = useState(false);
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [unsealingSessionId, setUnsealingSessionId] = useState<string | null>(null);
+  const [restoringSessionId, setRestoringSessionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [chainCollapsed, setChainCollapsed] = useState(false);
   const [sealedCollapsed, setSealedCollapsed] = useState(true);
@@ -214,7 +226,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   // heuristic-only old data.
   // 砚砚 review P2: require status==='sealed'. requestSeal() writes sealReason while the record is
   // still 'sealing' (async-finalizes to 'sealed' later), so an in-flight sealing 0-msg tool_conflict
-  // record must NOT be folded — it still needs its live status + 查看/解封 actions visible.
+  // record must NOT be folded — it still needs its live status + 查看 action visible.
   const isRuntimeTaggedRetryFragment = (s: SessionSummary) => s.runtimeSession?.retryFragment?.kind === 'retry';
   const isLegacyToolConflictRetryCorpse = (s: SessionSummary) => s.sealReason === 'tool_conflict';
   const isRetryCorpse = (s: SessionSummary) => {
@@ -244,28 +256,35 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   // Check if any cat recently had a compact (from hooks)
   const hasRecentCompact = Object.values(catInvocations).some((inv) => inv.sessionSealed);
 
-  const handleUnseal = async (sessionId: string) => {
-    if (unsealingSessionId) return;
+  const handleRestoreAsCurrent = async (session: SessionSummary) => {
+    if (restoringSessionId) return;
+    const current = activeSessions.find((candidate) => candidate.catId === session.catId);
+    if (
+      current &&
+      !window.confirm(
+        `恢复 Session #${session.seq + 1} 为当前会话？当前 Session #${current.seq + 1} 会被安全封存，消息不会删除。`,
+      )
+    ) {
+      return;
+    }
     setActionError(null);
-    setUnsealingSessionId(sessionId);
+    setRestoringSessionId(session.id);
     try {
-      const res = await apiFetch(`/api/sessions/${sessionId}/unseal`, { method: 'POST' });
-      if (!res.ok) {
-        let message = `Unseal failed (${res.status})`;
-        try {
-          const data = (await res.json()) as { error?: string };
-          if (data?.error) message = data.error;
-        } catch {
-          /* best-effort */
-        }
+      const res = await apiFetch(`/api/sessions/${session.id}/unseal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedActiveSessionId: current?.id ?? null }),
+      });
+      const message = await restoreFailureMessage(res);
+      if (message) {
         setActionError(message);
         return;
       }
       setRefreshKey((k) => k + 1);
     } catch {
-      setActionError('Unseal request failed');
+      setActionError('Restore request failed');
     } finally {
-      setUnsealingSessionId(null);
+      setRestoringSessionId(null);
     }
   };
 
@@ -521,22 +540,26 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         )}
                         {/* Session replay entry removed — Phase E AC-E1 sunset.
                             Canonical replay is now Theater Overlay via ThreadItem "回放剧场" (PR E-1). */}
-                        <button
-                          type="button"
-                          className="text-micro px-2 py-0.5 rounded border border-[var(--_accent-20)] text-[var(--color-cafe-accent)] hover:bg-[var(--_accent-5)] disabled:opacity-50"
-                          style={
-                            {
-                              '--_accent-20': 'color-mix(in oklch, var(--color-cafe-accent) 20%, transparent)',
-                              '--_accent-5': 'color-mix(in oklch, var(--color-cafe-accent) 5%, transparent)',
-                            } as React.CSSProperties
-                          }
-                          onClick={() => {
-                            void handleUnseal(session.id);
-                          }}
-                          disabled={unsealingSessionId != null || isStale}
-                        >
-                          {unsealingSessionId === session.id ? '解封中…' : '解封'}
-                        </button>
+                        {session.status === 'sealed' ? (
+                          <button
+                            type="button"
+                            className="text-micro px-2 py-0.5 rounded border border-[var(--_accent-20)] text-[var(--color-cafe-accent)] hover:bg-[var(--_accent-5)] disabled:opacity-50"
+                            style={
+                              {
+                                '--_accent-20': 'color-mix(in oklch, var(--color-cafe-accent) 20%, transparent)',
+                                '--_accent-5': 'color-mix(in oklch, var(--color-cafe-accent) 5%, transparent)',
+                              } as React.CSSProperties
+                            }
+                            onClick={() => {
+                              void handleRestoreAsCurrent(session);
+                            }}
+                            disabled={restoringSessionId != null || isStale}
+                          >
+                            {restoringSessionId === session.id ? '恢复中…' : '恢复为当前'}
+                          </button>
+                        ) : (
+                          <span className="text-micro text-cafe-muted">封存中…</span>
+                        )}
                       </div>
                     )}
                   </div>

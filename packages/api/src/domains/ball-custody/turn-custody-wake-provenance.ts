@@ -1,7 +1,12 @@
+import type { WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import type { QueueEntry } from '../cats/services/agents/invocation/InvocationQueue.js';
 import { hydrateCrossThreadReplyHint, type IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { handedEventSourceId } from './ball-custody-events.js';
 import type { TurnCustodyWakeProvenance } from './TurnCustodyProjectionService.js';
+import {
+  waitContinuationCarrierFromStoredMessage,
+  waitContinuationCarriersMatch,
+} from './wait-continuation-carrier.js';
 
 type WakeQueueEntry = Pick<
   QueueEntry,
@@ -13,6 +18,7 @@ type WakeQueueEntry = Pick<
   | 'sourceCategory'
   | 'targetCats'
   | 'threadId'
+  | 'waitContinuationCarrier'
 >;
 
 export function buildCrossThreadNoObligationWake(input: unknown): TurnCustodyWakeProvenance | undefined {
@@ -142,11 +148,48 @@ async function resolveA2AWake(entry: WakeQueueEntry, messageStore: IMessageStore
   });
 }
 
+function missingQueueCarrier(entry: WakeQueueEntry): TurnCustodyWakeProvenance {
+  return {
+    kind: 'legacy',
+    reason: 'carrier_missing',
+    ...(entry.sourceCategory ? { sourceCategory: entry.sourceCategory } : {}),
+  };
+}
+
+async function resolveWaitContinuationWake(
+  entry: WakeQueueEntry,
+  messageStore: IMessageStore,
+): Promise<TurnCustodyWakeProvenance | null> {
+  const queueCarrier = entry.waitContinuationCarrier;
+  if (!queueCarrier) return null;
+  if (entry.source !== 'connector' || !entry.messageId || entry.actionSuccessorFence) {
+    return missingQueueCarrier(entry);
+  }
+
+  let storedCarrier: WaitContinuationCarrierV1 | undefined;
+  try {
+    storedCarrier = waitContinuationCarrierFromStoredMessage(await messageStore.getById(entry.messageId));
+  } catch {
+    return missingQueueCarrier(entry);
+  }
+  if (!waitContinuationCarriersMatch(queueCarrier, storedCarrier)) return missingQueueCarrier(entry);
+
+  return {
+    kind: 'structured',
+    protocol: 'event_wait',
+    subjectKey: `ball:thread:${entry.threadId}`,
+    holderCatId: entry.targetCats[0] ?? 'unknown',
+    waitContinuationCarrier: queueCarrier,
+  };
+}
+
 /** Selects one turn-scoped truth source; absence stays legacy fail-closed. */
 export async function resolveQueueTurnCustodyWake(
   entry: WakeQueueEntry,
   messageStore: IMessageStore,
 ): Promise<TurnCustodyWakeProvenance> {
+  const waitWake = await resolveWaitContinuationWake(entry, messageStore);
+  if (waitWake) return waitWake;
   if (entry.actionSuccessorFence) {
     return {
       kind: 'action_successor',

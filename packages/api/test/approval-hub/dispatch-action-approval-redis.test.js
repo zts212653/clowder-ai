@@ -80,6 +80,8 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       'dispatch-proposal-user-settled:*',
       'dispatch-proposal-clientmsg:*',
       'dispatch-proposal-lineage:*',
+      'dispatch-proposal-canonical-admission:*',
+      'dispatch-proposal-canonical-admission-rebuild-completed-at',
       'action:successor:*',
     ]);
   });
@@ -137,6 +139,17 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     assert.equal(await proposalStore.getApprovalOwnerAuthProvenance(proposal.proposalId), 'strict');
     assert.equal(first.value.actionLease.dispatchDeliveryState, 'pending');
     assert.equal(await redis.scard('action:successor:all'), 1);
+    const { computeDispatchCanonicalActionKey } = await import(
+      '../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'
+    );
+    assert.deepEqual(
+      await proposalStore.findCanonicalAdmissionBlocks({
+        ownerUserId: proposal.ownerUserId,
+        canonicalActionKey: computeDispatchCanonicalActionKey(proposal.ownerUserId, proposal.proposedAction),
+      }),
+      [],
+      'the atomic approval removes its proposal from canonical admission before subsequent carriers inspect it',
+    );
   });
 
   test('matching task standing approves exactly one executable implement lease', async () => {

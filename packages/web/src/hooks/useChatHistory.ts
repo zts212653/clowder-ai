@@ -24,7 +24,14 @@ import {
   saveThreadMessages as saveMessagesSnapshot,
   saveThreadActiveState,
 } from '@/utils/offline-store';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import {
+  captureMessageScrollAnchor,
+  captureMessageScrollAnchorForMessage,
+  MESSAGE_VIEWPORT_MOUNTED_EVENT,
+  type MessageScrollAnchor,
+  restoreMessageScrollAnchor,
+  scrollToMessage,
+} from '@/utils/scrollToMessage';
 import {
   peekPendingTeleport,
   resolvePendingTeleport,
@@ -34,10 +41,20 @@ import {
 import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 
-type SavedScrollState = {
-  top: number;
-  anchor: 'bottom' | 'offset';
+type SavedScrollState =
+  | { top: number; anchor: 'bottom' }
+  | { top: number; anchor: 'offset'; messageAnchor?: MessageScrollAnchor };
+type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
+type NavigationSettleSample = { top: number; messageAnchor: MessageScrollAnchor };
+type NavigationSettleState = {
+  framesRemaining: number;
+  stableFrames: number;
+  previousSample?: NavigationSettleSample;
 };
+type NavigationSettleResult =
+  | { kind: 'retry' }
+  | { kind: 'settled'; sample: NavigationSettleSample }
+  | { kind: 'expired' };
 
 // clowder-ai#27: route navigation remounts the page, so scroll memory must live
 // outside React refs to survive /thread/A → /thread/B → /thread/A.
@@ -45,6 +62,7 @@ const scrollPositionsByThread = new Map<string, SavedScrollState>();
 const taskCacheByThread = new Map<string, TaskItem[]>();
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 const MAX_RESTORE_FRAMES = 90;
+const NAVIGATION_STABLE_FRAMES = 2;
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
 export function __resetTaskCacheForTest() {
@@ -87,11 +105,66 @@ export function resolveScrollAnchor(
   return userScrolledUp && el.scrollTop < prev.top ? 'offset' : 'bottom';
 }
 
-function rememberScrollState(threadId: string, el: HTMLElement, userScrolledUp = false) {
+function rememberScrollState(threadId: string, el: HTMLElement, userScrolledUp = false, preserveOffsetAnchor = false) {
+  const previous = scrollPositionsByThread.get(threadId) ?? null;
+  const anchor = resolveScrollAnchor(el, previous, userScrolledUp);
+  if (anchor === 'bottom') {
+    scrollPositionsByThread.set(threadId, { top: el.scrollTop, anchor });
+    return;
+  }
+
   scrollPositionsByThread.set(threadId, {
     top: el.scrollTop,
-    anchor: resolveScrollAnchor(el, scrollPositionsByThread.get(threadId) ?? null, userScrolledUp),
+    anchor,
+    messageAnchor:
+      preserveOffsetAnchor && previous?.anchor === 'offset'
+        ? (previous.messageAnchor ?? captureMessageScrollAnchor(el))
+        : captureMessageScrollAnchor(el),
   });
+}
+
+function tryRestoreSavedScrollState(el: HTMLElement, saved: SavedScrollState): boolean {
+  const messageAnchorRestored =
+    saved.anchor === 'offset' && saved.messageAnchor ? restoreMessageScrollAnchor(el, saved.messageAnchor) : false;
+  if (messageAnchorRestored) return true;
+
+  const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
+  el.scrollTop = targetTop;
+  const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
+  return canSettle && Math.abs(el.scrollTop - targetTop) <= 1;
+}
+
+function captureNavigationSettleSample(el: HTMLElement, messageId: string): NavigationSettleSample | undefined {
+  const messageAnchor = captureMessageScrollAnchorForMessage(el, messageId);
+  return messageAnchor ? { top: el.scrollTop, messageAnchor } : undefined;
+}
+
+function isStableNavigationSample(previous: NavigationSettleSample, current: NavigationSettleSample): boolean {
+  return (
+    Math.abs(current.top - previous.top) <= 1 &&
+    Math.abs(current.messageAnchor.viewportOffsetPx - previous.messageAnchor.viewportOffsetPx) <= 1
+  );
+}
+
+function advanceNavigationSettle(
+  state: NavigationSettleState,
+  el: HTMLElement | null,
+  messageId: string,
+  stale: boolean,
+): NavigationSettleResult {
+  if (stale) return { kind: 'expired' };
+
+  state.framesRemaining -= 1;
+  const sample = el ? captureNavigationSettleSample(el, messageId) : undefined;
+  if (!sample) return state.framesRemaining > 0 ? { kind: 'retry' } : { kind: 'expired' };
+
+  state.stableFrames =
+    state.previousSample && isStableNavigationSample(state.previousSample, sample) ? state.stableFrames + 1 : 0;
+  state.previousSample = sample;
+  return state.stableFrames >= NAVIGATION_STABLE_FRAMES || state.framesRemaining <= 0
+    ? { kind: 'settled', sample }
+    : { kind: 'retry' };
 }
 
 const HISTORY_PAGE_SIZE = 50;
@@ -191,61 +264,64 @@ function mergeRichPayload(
   return { v: 1 as const, blocks };
 }
 
+type RequiredMessageExtraFields = {
+  [Key in Exclude<keyof MessageExtra, 'rich'>]-?: MessageExtra[Key] | undefined;
+};
+
+function pickMessageExtraField<Key extends keyof MessageExtra>(
+  preferred: ChatMessageData['extra'],
+  fallback: ChatMessageData['extra'],
+  key: Key,
+): MessageExtra[Key] | undefined {
+  return preferred?.[key] ?? fallback?.[key];
+}
+
 function mergeMessageExtra(
   preferred: ChatMessageData['extra'],
   fallback: ChatMessageData['extra'],
 ): ChatMessageData['extra'] | undefined {
   const rich = mergeRichPayload(preferred?.rich, fallback?.rich);
-  const crossPost = preferred?.crossPost ?? fallback?.crossPost;
-  const stream = preferred?.stream ?? fallback?.stream;
-  const targetCats = preferred?.targetCats ?? fallback?.targetCats;
-  const scheduler = preferred?.scheduler ?? fallback?.scheduler;
-  const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
-  // F212 Phase B: preserve cliDiagnostics when merging history (mirrors timeoutDiagnostics —
-  // diagnostics outlive a single live event and must survive hydration after F5 / re-fetch).
-  const cliDiagnostics = preferred?.cliDiagnostics ?? fallback?.cliDiagnostics;
-  const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
-  const systemKind = preferred?.systemKind ?? fallback?.systemKind;
-  const recovery = preferred?.recovery ?? fallback?.recovery;
-  const freshness = preferred?.freshness ?? fallback?.freshness;
-  const supplement = preferred?.supplement ?? fallback?.supplement;
-  const freshnessSupplement = preferred?.freshnessSupplement ?? fallback?.freshnessSupplement;
-  // #814 P2: preserve isExplicitPost so F5/thread-switch doesn't lose the
-  // "don't merge by invocation" semantic for explicit post_message callbacks.
-  const isExplicitPost = preferred?.isExplicitPost ?? fallback?.isExplicitPost;
-  if (
-    !rich &&
-    !crossPost &&
-    !stream &&
-    !targetCats &&
-    !scheduler &&
-    !timeoutDiagnostics &&
-    !cliDiagnostics &&
-    !governanceBlocked &&
-    !systemKind &&
-    !recovery &&
-    !freshness &&
-    !supplement &&
-    !freshnessSupplement &&
-    !isExplicitPost
-  ) {
-    return undefined;
-  }
+  const pick = <Key extends keyof MessageExtra>(key: Key) => pickMessageExtraField(preferred, fallback, key);
+  // This object is intentionally exhaustive and fail-closed: adding a typed
+  // ChatMessage.extra carrier makes TypeScript require an explicit merge rule,
+  // while unknown runtime properties are still discarded. Most carriers are
+  // immutable/additive projections, so the selected message wins and the other
+  // side only fills a missing field. `rich` remains the sole structural merge.
+  const fields: RequiredMessageExtraFields = {
+    crossPost: pick('crossPost'),
+    stream: pick('stream'),
+    turnExecution: pick('turnExecution'),
+    auxiliaryTurnExecutions: pick('auxiliaryTurnExecutions'),
+    targetCats: pick('targetCats'),
+    messageBundle: pick('messageBundle'),
+    isExplicitPost: pick('isExplicitPost'),
+    scheduler: pick('scheduler'),
+    timeoutDiagnostics: pick('timeoutDiagnostics'),
+    // F212 Phase B: diagnostics outlive one live event and must survive hydration.
+    cliDiagnostics: pick('cliDiagnostics'),
+    governanceBlocked: pick('governanceBlocked'),
+    freshnessClosure: pick('freshnessClosure'),
+    freshness: pick('freshness'),
+    supplement: pick('supplement'),
+    freshnessSupplement: pick('freshnessSupplement'),
+    queueReceipt: pick('queueReceipt'),
+    recall: pick('recall'),
+    systemKind: pick('systemKind'),
+    a2aRouting: pick('a2aRouting'),
+    recovery: pick('recovery'),
+    systemInfo: pick('systemInfo'),
+    invocationReconciliation: pick('invocationReconciliation'),
+    providerRecovery: pick('providerRecovery'),
+  };
+  const definedFields = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Omit<
+    MessageExtra,
+    'rich'
+  >;
+  if (!rich && Object.keys(definedFields).length === 0) return undefined;
+
   return {
     ...(rich ? { rich } : {}),
-    ...(crossPost ? { crossPost } : {}),
-    ...(stream ? { stream } : {}),
-    ...(targetCats ? { targetCats } : {}),
-    ...(scheduler ? { scheduler } : {}),
-    ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
-    ...(cliDiagnostics ? { cliDiagnostics } : {}),
-    ...(governanceBlocked ? { governanceBlocked } : {}),
-    ...(systemKind ? { systemKind } : {}),
-    ...(recovery ? { recovery } : {}),
-    ...(freshness ? { freshness } : {}),
-    ...(supplement ? { supplement } : {}),
-    ...(freshnessSupplement ? { freshnessSupplement } : {}),
-    ...(isExplicitPost ? { isExplicitPost: true as const } : {}),
+    ...definedFields,
   };
 }
 
@@ -496,7 +572,7 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     (thinking && thinking === fallback.thinking ? fallbackThinkingChunks : undefined);
   const extra = mergeMessageExtra(preferred.extra, fallback.extra);
 
-  return {
+  const merged: ChatMessageData = {
     ...fallback,
     ...preferred,
     content: preferred.content || fallback.content,
@@ -530,6 +606,14 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...(preferred.mentionsUser || fallback.mentionsUser ? { mentionsUser: true } : {}),
     ...(preferred.isStreaming !== undefined ? { isStreaming: preferred.isStreaming } : {}),
   };
+  if (extra) return merged;
+
+  // The top-level spreads above may contain a runtime-only `extra`. When the
+  // typed fail-closed merge accepted no carrier, remove that raw object instead
+  // of accidentally preserving it through the preferred message.
+  const withoutExtra = { ...merged };
+  delete withoutExtra.extra;
+  return withoutExtra;
 }
 
 // F183 Phase B1 AC-B2: 简化到 ≤ 2 种匹配策略。
@@ -762,7 +846,9 @@ export function useChatHistory(threadId: string) {
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
+  const restoreFrameKindRef = useRef<RestoreFrameKind | null>(null);
   const userScrollUpRef = useRef(false);
+  const userScrollIntentRef = useRef(false);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -778,6 +864,7 @@ export function useChatHistory(threadId: string) {
   }, []);
 
   const cancelPendingRestore = useCallback(() => {
+    restoreFrameKindRef.current = null;
     if (restoreFrameRef.current !== null) {
       cancelAnimationFrame(restoreFrameRef.current);
       restoreFrameRef.current = null;
@@ -802,6 +889,7 @@ export function useChatHistory(threadId: string) {
   const scheduleRestore = useCallback(
     (saved: SavedScrollState) => {
       cancelPendingRestore();
+      restoreFrameKindRef.current = 'restore';
       let framesRemaining = MAX_RESTORE_FRAMES;
       // Capture threadId at schedule time so a stale callback can't mutate
       // the next thread's scroll state if it fires before effect cleanup.
@@ -811,25 +899,21 @@ export function useChatHistory(threadId: string) {
         // Stale guard: if thread switched before cleanup cancelled us, no-op.
         if (threadIdRef.current !== scheduledForThread) {
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           return;
         }
 
         const el = scrollContainerRef.current;
         if (!el) {
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           return;
         }
 
-        const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-        const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
-        el.scrollTop = targetTop;
-
-        const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
-        const reachedTarget = Math.abs(el.scrollTop - targetTop) <= 1;
-
-        if ((canSettle && reachedTarget) || framesRemaining <= 0) {
-          rememberScrollState(scheduledForThread, el);
+        if (tryRestoreSavedScrollState(el, saved) || framesRemaining <= 0) {
+          scrollPositionsByThread.set(scheduledForThread, { ...saved, top: el.scrollTop });
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
           return;
         }
@@ -843,6 +927,31 @@ export function useChatHistory(threadId: string) {
     [cancelPendingRestore],
   );
 
+  const scheduleCurrentAnchorCorrection = useCallback(() => {
+    if (restoreFrameKindRef.current === 'restore' || restoreFrameKindRef.current === 'navigation') return;
+    cancelPendingRestore();
+    const scheduledForThread = threadIdRef.current;
+    const saved = scrollPositionsByThread.get(scheduledForThread);
+    if (!saved) return;
+
+    restoreFrameKindRef.current = 'correction';
+    restoreFrameRef.current = requestAnimationFrame(() => {
+      restoreFrameRef.current = null;
+      restoreFrameKindRef.current = null;
+      if (threadIdRef.current !== scheduledForThread) return;
+
+      const el = scrollContainerRef.current;
+      if (!el || useChatStore.getState().currentThreadId !== scheduledForThread) return;
+      if (saved.anchor === 'bottom') {
+        followBottomAnchor('auto');
+        return;
+      }
+      if (saved.messageAnchor && restoreMessageScrollAnchor(el, saved.messageAnchor)) {
+        scrollPositionsByThread.set(scheduledForThread, { ...saved, top: el.scrollTop });
+      }
+    });
+  }, [cancelPendingRestore, followBottomAnchor]);
+
   // F052: after a cross-post jump, retry scrolling to the source bubble until the message
   // DOM has rendered (thread switch remounts + paginates async). Gives up after
   // MAX_RESTORE_FRAMES so a paged-out source can't spin forever — the caller already fell
@@ -852,27 +961,55 @@ export function useChatHistory(threadId: string) {
       // A cross-post jump preempts the default scroll-restore so the two raf loops don't fight
       // over scrollTop (restore pulls to cached offset, this pulls to the target bubble).
       cancelPendingRestore();
+      restoreFrameKindRef.current = 'navigation';
       const scheduledForThread = threadIdRef.current;
       let framesRemaining = MAX_RESTORE_FRAMES;
+      const finishNavigation = () => {
+        restoreFrameKindRef.current = null;
+        restoreFrameRef.current = null;
+      };
       const tick = () => {
         if (threadIdRef.current !== scheduledForThread) {
-          restoreFrameRef.current = null;
+          finishNavigation();
           return;
         }
         if (scrollToMessage(messageId)) {
           const el = scrollContainerRef.current;
-          if (el) {
-            scrollPositionsByThread.set(scheduledForThread, {
-              top: el.scrollTop,
-              anchor: 'offset',
-            });
+          if (!el) {
+            finishNavigation();
+            return;
           }
-          restoreFrameRef.current = null;
+
+          const settleState: NavigationSettleState = {
+            framesRemaining,
+            stableFrames: 0,
+          };
+          const settle = () => {
+            const result = advanceNavigationSettle(
+              settleState,
+              scrollContainerRef.current,
+              messageId,
+              threadIdRef.current !== scheduledForThread,
+            );
+            if (result.kind === 'retry') {
+              restoreFrameRef.current = requestAnimationFrame(settle);
+              return;
+            }
+            if (result.kind === 'settled') {
+              scrollPositionsByThread.set(scheduledForThread, {
+                top: result.sample.top,
+                anchor: 'offset',
+                messageAnchor: result.sample.messageAnchor,
+              });
+            }
+            finishNavigation();
+          };
+          restoreFrameRef.current = requestAnimationFrame(settle);
           return;
         }
         framesRemaining -= 1;
         if (framesRemaining <= 0) {
-          restoreFrameRef.current = null;
+          finishNavigation();
           return;
         }
         restoreFrameRef.current = requestAnimationFrame(tick);
@@ -895,9 +1032,12 @@ export function useChatHistory(threadId: string) {
       const isCurrentThread = store.currentThreadId === forThread;
       const threadState = store.threadStates[forThread];
       const alreadyActive = isCurrentThread ? store.hasActiveInvocation : threadState?.hasActiveInvocation === true;
+      // A draft is a causally newer active edge even when the coarse bit is
+      // already true. Re-enter the proof-aware writer so a terminal-correlated
+      // cached slot cannot suppress this invocationless evidence.
+      store.setThreadHasActiveInvocation(forThread, true);
       if (alreadyActive) return;
 
-      store.setThreadHasActiveInvocation(forThread, true);
       for (const catId of draftCatIds) {
         const syntheticId = `hydrated-${forThread}-${catId}`;
         if (isCurrentThread) {
@@ -975,6 +1115,7 @@ export function useChatHistory(threadId: string) {
               supplement?: NonNullable<ChatMessageData['extra']>['supplement'];
               freshnessSupplement?: NonNullable<ChatMessageData['extra']>['freshnessSupplement'];
               queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
+              messageBundle?: NonNullable<ChatMessageData['extra']>['messageBundle'];
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -1031,6 +1172,7 @@ export function useChatHistory(threadId: string) {
                   m.extra?.supplement ||
                   m.extra?.freshnessSupplement ||
                   m.extra?.queueReceipt ||
+                  m.extra?.messageBundle ||
                   cliDiag;
                 if (!hasExtraField) return {};
                 return {
@@ -1051,6 +1193,7 @@ export function useChatHistory(threadId: string) {
                     ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
                     ...(m.extra?.freshnessSupplement ? { freshnessSupplement: m.extra.freshnessSupplement } : {}),
                     ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
+                    ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                     ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
                   },
                 };
@@ -1651,7 +1794,7 @@ export function useChatHistory(threadId: string) {
       const heightDelta = el.scrollHeight - scrollSnapshotRef.current;
       el.scrollTop += heightDelta;
       scrollSnapshotRef.current = null;
-      rememberScrollState(threadId, el);
+      rememberScrollState(threadId, el, false, true);
       return;
     }
 
@@ -1732,21 +1875,14 @@ export function useChatHistory(threadId: string) {
   }, [resolveTeleport]);
 
   useEffect(() => {
-    let rafId: number | null = null;
-    const handler = () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        followBottomAnchor('auto');
-      });
-    };
-
+    const handler = () => scheduleCurrentAnchorCorrection();
     window.addEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+    window.addEventListener(MESSAGE_VIEWPORT_MOUNTED_EVENT, handler);
     return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+      window.removeEventListener(MESSAGE_VIEWPORT_MOUNTED_EVENT, handler);
     };
-  }, [followBottomAnchor]);
+  }, [scheduleCurrentAnchorCorrection]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -1754,25 +1890,28 @@ export function useChatHistory(threadId: string) {
 
     let touchY: number | null = null;
     let pointerY: number | null = null;
-    const markUpwardIntent = () => {
-      userScrollUpRef.current = true;
+    const markScrollIntent = (upward: boolean) => {
+      userScrollIntentRef.current = true;
+      if (upward) userScrollUpRef.current = true;
+      cancelPendingRestore();
     };
     const handleWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) markUpwardIntent();
+      markScrollIntent(event.deltaY < 0);
     };
     const handleTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY ?? null;
     };
     const handleTouchMove = (event: TouchEvent) => {
       const nextY = event.touches[0]?.clientY ?? null;
-      if (touchY !== null && nextY !== null && nextY > touchY) markUpwardIntent();
+      if (touchY !== null && nextY !== null && nextY !== touchY) markScrollIntent(nextY > touchY);
       touchY = nextY;
     };
     const handlePointerDown = (event: PointerEvent) => {
+      markScrollIntent(false);
       pointerY = event.clientY;
     };
     const handlePointerMove = (event: PointerEvent) => {
-      if (pointerY !== null && event.clientY < pointerY) markUpwardIntent();
+      if (pointerY !== null && event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY);
       pointerY = event.clientY;
     };
     const clearPointer = () => {
@@ -1787,13 +1926,18 @@ export function useChatHistory(threadId: string) {
       ) {
         return;
       }
-      if (
+      const upward =
         event.key === 'ArrowUp' ||
         event.key === 'PageUp' ||
         event.key === 'Home' ||
-        (event.key === ' ' && event.shiftKey)
-      ) {
-        markUpwardIntent();
+        (event.key === ' ' && event.shiftKey);
+      const downward =
+        event.key === 'ArrowDown' ||
+        event.key === 'PageDown' ||
+        event.key === 'End' ||
+        (event.key === ' ' && !event.shiftKey);
+      if (upward || downward) {
+        markScrollIntent(upward);
       }
     };
 
@@ -1817,7 +1961,7 @@ export function useChatHistory(threadId: string) {
       el.removeEventListener('pointercancel', clearPointer);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [cancelPendingRestore]);
 
   // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {
@@ -1828,8 +1972,9 @@ export function useChatHistory(threadId: string) {
     // Guard: don't save during store swap (DOM content may not match threadId,
     // and browser may fire scroll events with scrollTop=0 during content swap).
     if (useChatStore.getState().currentThreadId === threadIdRef.current) {
-      rememberScrollState(threadIdRef.current, el, userScrollUpRef.current);
+      rememberScrollState(threadIdRef.current, el, userScrollUpRef.current, !userScrollIntentRef.current);
       userScrollUpRef.current = false;
+      userScrollIntentRef.current = false;
     }
 
     if (!hasMore || isLoadingHistory) return;

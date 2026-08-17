@@ -1,7 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { peekPlaybackManager } from '@/services/playbackRuntime';
 import type { RichAudioBlock } from '@/stores/chat-types';
+import { useListenModeStore } from '@/stores/listenModeStore';
+import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
 
 /** CSS variable-based cat colors for voice message bars */
@@ -20,6 +23,8 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
   const [progress, setProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(block.durationSec ?? 0);
   const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  const playbackControlId = useId();
+  const listenModeActive = useListenModeStore((state) => state.session !== null);
 
   const isVoiceMessage = !!block.text;
 
@@ -82,13 +87,40 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
     };
   }, []);
 
+  useEffect(() => {
+    if (!blobSrc) return;
+    const id = `audio-block:${playbackControlId}`;
+    const pause = () => audioRef.current?.pause();
+    const stop = () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      audio.pause();
+      audio.currentTime = 0;
+    };
+    const voiceStore = useVoiceSessionStore.getState();
+    const unregisterControl = voiceStore.registerPlaybackControl(id, {
+      pause,
+      resume: () => {},
+      skip: stop,
+    });
+    const unregisterStop = voiceStore.registerStopCallback(id, stop);
+    return () => {
+      unregisterControl();
+      unregisterStop();
+    };
+  }, [blobSrc, playbackControlId]);
+
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) {
       audio.pause();
     } else {
-      audio.play();
+      const manager = peekPlaybackManager();
+      const snapshot = manager?.getSnapshot();
+      if (snapshot?.source === 'listen') manager?.pause();
+      else if (snapshot?.source) manager?.interrupt();
+      void audio.play().catch(() => setPlaying(false));
     }
   };
 
@@ -174,6 +206,10 @@ export function AudioBlock({ block, catId }: { block: RichAudioBlock; catId?: st
         <div className="text-xs text-cafe-muted pl-1 max-w-[420px] whitespace-pre-wrap break-words leading-relaxed">
           {block.text}
         </div>
+
+        {listenModeActive && (
+          <div className="pl-1 text-micro text-cafe-secondary">听读中未自动播放 · 点此会先暂停正文</div>
+        )}
 
         {blobSrc && <audio ref={audioRef} src={blobSrc} preload="metadata" />}
       </div>

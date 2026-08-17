@@ -1,8 +1,8 @@
 /**
  * F202 Phase 2C compatibility after the F280 PR wait cutover.
  *
- * Legacy instructions remain issue-only until F280 Phase C. PR wake renderers
- * intentionally omit all source and caller prose.
+ * F280 Phase C deletes issue tracking prose together with the old actor policy.
+ * GitHub wake renderers intentionally omit all source and caller prose.
  * AC-C3: unregister_tracking MCP tool
  * AC-C4: external GitHub content marked as untrusted
  * Followup: PR/Issue number validation, optional resource support
@@ -22,47 +22,7 @@ const nodeFs = await import('node:fs');
 const nodeOs = await import('node:os');
 const nodePath = await import('node:path');
 
-// ── AC-C1: issue-only trackingInstructions compatibility ─────────
-
-describe('AC-C1: issue-only trackingInstructions storage', () => {
-  test('issue upsert stores trackingInstructions', () => {
-    const store = new TaskStore();
-    const task = store.upsertBySubject({
-      kind: 'issue_tracking',
-      threadId: 't1',
-      subjectKey: 'issue:o/r#1',
-      title: 'test',
-      why: 'test',
-      createdBy: 'cat1',
-      automationState: { trackingInstructions: 'Fix CI then merge' },
-    });
-    assert.strictEqual(task.automationState?.trackingInstructions, 'Fix CI then merge');
-  });
-
-  test('issue re-upsert without automationState preserves instructions', () => {
-    const store = new TaskStore();
-    store.upsertBySubject({
-      kind: 'issue_tracking',
-      threadId: 't1',
-      subjectKey: 'issue:o/r#2',
-      title: 'test',
-      why: 'test',
-      createdBy: 'cat1',
-      automationState: { trackingInstructions: 'Original' },
-    });
-    const updated = store.upsertBySubject({
-      kind: 'issue_tracking',
-      threadId: 't1',
-      subjectKey: 'issue:o/r#2',
-      title: 'updated',
-      why: 'test',
-      createdBy: 'cat1',
-    });
-    assert.strictEqual(updated.automationState?.trackingInstructions, 'Original');
-  });
-});
-
-// ── P2-fix: re-register with instructions preserves automation cursors ──
+// ── P2-fix: typed re-registration preserves collector cursors ────────────
 
 describe('P2-fix: automation cursor preservation on re-registration', () => {
   test('re-upsert with a typed wait preserves existing PR collector cursors', () => {
@@ -117,7 +77,7 @@ describe('P2-fix: automation cursor preservation on re-registration', () => {
     assert.strictEqual(reregistered.automationState?.conflict?.mergeState, 'CLEAN');
   });
 
-  test('re-upsert with instructions preserves existing issue cursors (issue_tracking)', () => {
+  test('re-upsert with a typed issue wait preserves existing issue cursors', () => {
     const store = new TaskStore();
     const created = store.upsertBySubject({
       kind: 'issue_tracking',
@@ -131,7 +91,7 @@ describe('P2-fix: automation cursor preservation on re-registration', () => {
     store.patchAutomationState(created.id, {
       issue: { lastCommentCursor: 99, lastNotifiedAt: 3000, issueState: 'open' },
     });
-    // Re-register with instructions
+    // Re-register with an explicit typed wait.
     const reregistered = store.upsertBySubject({
       kind: 'issue_tracking',
       threadId: 't1',
@@ -139,17 +99,36 @@ describe('P2-fix: automation cursor preservation on re-registration', () => {
       title: 'Issue tracking',
       why: 'test',
       createdBy: 'cat1',
-      automationState: { trackingInstructions: 'Watch for maintainer response' },
+      automationState: {
+        await: {
+          v: 1,
+          generation: 1,
+          subjectRef: 'issue:o/r#50',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          baseline: {
+            capturedAt: 1,
+            issue: { lastCommentCursor: 99, state: 'open', authorLogin: 'issue-author' },
+          },
+          continuation: {
+            when: [{ kind: 'issue_author_commented' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: 'Inspect the issue author reply.',
+          },
+          expiresAt: Date.now() + 60_000,
+          createdAt: Date.now(),
+          provenance: 'explicit_registration',
+        },
+      },
     });
-    assert.strictEqual(reregistered.automationState?.trackingInstructions, 'Watch for maintainer response');
+    assert.strictEqual(reregistered.automationState?.await?.generation, 1);
     assert.strictEqual(reregistered.automationState?.issue?.lastCommentCursor, 99);
     assert.strictEqual(reregistered.automationState?.issue?.issueState, 'open');
   });
 });
 
-// ── AC-C2: issue prose retained; PR renderers stay compact ──────
+// ── AC-C2: GitHub renderers exclude legacy prose ─────────────────
 
-describe('AC-C2: issue-only instructions and compact PR messages', () => {
+describe('AC-C2: compact GitHub messages', () => {
   const baseSignal = {
     repoFullName: 'owner/repo',
     prNumber: 42,
@@ -189,13 +168,13 @@ describe('AC-C2: issue-only instructions and compact PR messages', () => {
     assert.ok(!content.includes('Tracking Instructions'), 'should not contain instructions header');
   });
 
-  test('buildIssueCommentContent still includes Phase-C issue instructions', () => {
+  test('buildIssueCommentContent excludes deleted issue instructions', () => {
     const content = buildIssueCommentContent(
       { repoFullName: 'owner/repo', issueNumber: 42, newComments: [] },
       'Watch for maintainer response',
     );
-    assert.match(content, /Tracking Instructions/);
-    assert.match(content, /Watch for maintainer response/);
+    assert.equal(content.includes('Tracking Instructions'), false);
+    assert.equal(content.includes('Watch for maintainer response'), false);
   });
 });
 

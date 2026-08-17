@@ -368,6 +368,7 @@ describe('multipart image target routing', () => {
           broadcastedAgentMessages.push(msg);
         },
         broadcastToRoom: () => {},
+        emitToUser: () => {},
       },
       router: mockRouter,
       invocationRecordStore: new InvocationRecordStore(),

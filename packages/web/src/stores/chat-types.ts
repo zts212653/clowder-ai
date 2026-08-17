@@ -2,6 +2,7 @@ import type {
   CliDiagnostics,
   ContextAttachment,
   FreshnessSupplementProjection,
+  MessageBundleCarrierV1,
   MessageContent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
@@ -310,6 +311,8 @@ export interface ChatMessage {
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
+    /** F294: refs-only durable Bundle carrier hydrated from the target message. */
+    messageBundle?: MessageBundleCarrierV1;
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;
     /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
@@ -712,6 +715,8 @@ export interface ComposerDraftInsert {
   text: string;
   imageUrls?: string[];
   contextAttachments?: ContextAttachment[];
+  /** Draft-only edit operation; never enters the durable message contract. */
+  removeContextAttachmentIds?: string[];
   /** Server ACK owns the complete editor text; do not append it to a stale local snapshot. */
   authoritative?: boolean;
   /** Newly transferred source range in authoritative text; ChatInput focuses and selects it after hydration. */

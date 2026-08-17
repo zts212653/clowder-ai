@@ -768,7 +768,12 @@ describe('useAgentMessages loading lifecycle', () => {
   });
 
   it('stopping a background thread does not clear active thread invocation state', () => {
-    const cancelInvocation = vi.fn();
+    const cancelInvocation = vi.fn(() => true);
+    const stopIntent = {
+      sourceControl: 'chat_input_action' as const,
+      gesture: 'pointer' as const,
+      trustedGesture: true,
+    };
     mockGetThreadState.mockImplementation((tid?: string) => {
       if (tid === 'thread-2') {
         return {
@@ -801,10 +806,10 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     act(() => {
-      captured?.handleStop(cancelInvocation, 'thread-2');
+      captured?.handleStop(cancelInvocation, 'thread-2', stopIntent);
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined);
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined, stopIntent);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
     expect(mockSetThreadMessageStreaming).toHaveBeenCalledWith('thread-2', 'bg-stream-1', false);
 
@@ -816,8 +821,44 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(mockSetStreaming).not.toHaveBeenCalled();
   });
 
+  it('keeps local invocation state when the cancel packet is not sent', () => {
+    const cancelInvocation = vi.fn(() => false);
+    mockGetThreadState.mockImplementation(() => ({
+      messages: [
+        {
+          id: 'still-streaming',
+          type: 'assistant',
+          catId: 'opus',
+          content: 'still running',
+          isStreaming: true,
+          timestamp: Date.now(),
+        },
+      ],
+    }));
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleStop(cancelInvocation, 'thread-2', {
+        sourceControl: 'chat_input_action',
+        gesture: 'pointer',
+        trustedGesture: false,
+      });
+    });
+
+    expect(cancelInvocation).toHaveBeenCalledOnce();
+    expect(mockResetThreadInvocationState).not.toHaveBeenCalled();
+    expect(mockSetThreadMessageStreaming).not.toHaveBeenCalled();
+  });
+
   it('stopping a background thread derives catId from the TARGET thread slots', () => {
-    const cancelInvocation = vi.fn();
+    const cancelInvocation = vi.fn(() => true);
+    const stopIntent = {
+      sourceControl: 'chat_input_action' as const,
+      gesture: 'pointer' as const,
+      trustedGesture: true,
+    };
     storeState.activeInvocations = {
       'inv-active': { catId: 'codex', mode: 'execute' },
     };
@@ -858,17 +899,17 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     act(() => {
-      captured?.handleStop(cancelInvocation, 'thread-2');
+      captured?.handleStop(cancelInvocation, 'thread-2', stopIntent);
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus');
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus', stopIntent);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
   });
 
   it('stopping a background thread clears its pending timeout guard', () => {
     vi.useFakeTimers();
     try {
-      const cancelInvocation = vi.fn();
+      const cancelInvocation = vi.fn(() => true);
 
       act(() => {
         root.render(React.createElement(Harness));
@@ -886,7 +927,11 @@ describe('useAgentMessages loading lifecycle', () => {
       // Switch active thread, then stop the old thread from split-pane context.
       storeState.currentThreadId = 'thread-2';
       act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
+        captured?.handleStop(cancelInvocation, 'thread-1', {
+          sourceControl: 'chat_input_action',
+          gesture: 'pointer',
+          trustedGesture: true,
+        });
       });
 
       act(() => {
@@ -907,7 +952,7 @@ describe('useAgentMessages loading lifecycle', () => {
   it('stopping another thread does not clear the current thread timeout guard', () => {
     vi.useFakeTimers();
     try {
-      const cancelInvocation = vi.fn();
+      const cancelInvocation = vi.fn(() => true);
 
       act(() => {
         root.render(React.createElement(Harness));
@@ -934,7 +979,11 @@ describe('useAgentMessages loading lifecycle', () => {
 
       // Stop old thread-1 from split-pane context.
       act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
+        captured?.handleStop(cancelInvocation, 'thread-1', {
+          sourceControl: 'chat_input_action',
+          gesture: 'pointer',
+          trustedGesture: true,
+        });
       });
 
       act(() => {

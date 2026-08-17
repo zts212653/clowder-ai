@@ -2,7 +2,8 @@
  * F247 AC-B1c-3 PR-C: Route plumbing verification.
  *
  * Verifies that:
- *  1. AgentRouter.getStrategyDeps() passes cloudInvokeBridge into invocationDeps
+ *  1. AgentRouter.getStrategyDeps() passes cloudInvokeBridge and the exact A2A
+ *     disposition producer into invocationDeps
  *  2. mentionContent and mentioningCatId are present in the InvocationParams type
  *     (compile-time contract — this test guards against accidental removal)
  *
@@ -82,6 +83,14 @@ describe('F247 AC-B1c-3 PR-C: AgentRouter.getStrategyDeps() plumbing', () => {
     const router = makeMinimalAgentRouter();
     const deps = router.getStrategyDeps();
     assert.equal(deps.invocationDeps.cloudInvokeBridge, undefined);
+  });
+
+  it('passes the exact A2A disposition producer only when provided', () => {
+    const dispositionService = { complete: async () => ({ outcome: 'applied' }) };
+    const wired = makeMinimalAgentRouter({ a2aDispatchDispositionService: dispositionService }).getStrategyDeps();
+    const absent = makeMinimalAgentRouter().getStrategyDeps();
+    assert.strictEqual(wired.invocationDeps.a2aDispatchDispositionService, dispositionService);
+    assert.equal(absent.invocationDeps.a2aDispatchDispositionService, undefined);
   });
 });
 

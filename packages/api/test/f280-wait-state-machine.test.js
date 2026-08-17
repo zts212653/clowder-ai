@@ -53,6 +53,10 @@ describe('F280 wait state machine', () => {
     assert.equal(matched.state.await, undefined);
     assert.equal(matched.state.waitOutcome?.reason, 'matched');
     assert.equal(matched.state.waitOutcome?.generation, 4);
+    assert.deepEqual(matched.state.waitOutcome?.ownerFence, {
+      kind: 'containing_task',
+      generation: 4,
+    });
 
     const replay = transitionWaitState(matched.state, {
       type: 'predicates_matched',
@@ -86,5 +90,23 @@ describe('F280 wait state machine', () => {
     assert.equal(result.applied, true);
     assert.equal(result.state.waitOutcome?.reason, 'owner_changed');
     assert.equal(result.state.waitOutcome?.delivery, 'not_applicable');
+  });
+
+  it('retains an action-successor owner fence without promoting it to action authority', async () => {
+    const { transitionWaitState } = await import(MODULE_URL.href);
+    const ownerFence = { kind: 'action_successor', leaseId: 'lease-review-7', generation: 9 };
+    const result = transitionWaitState(
+      { await: activeAwait({ generation: 9, ownerFence }) },
+      {
+        type: 'predicates_matched',
+        generation: 9,
+        at: 600,
+        matched: [{ kind: 'pr_head_changed', delta: 'HEAD aaaa111 → bbbb222' }],
+      },
+    );
+
+    assert.equal(result.applied, true);
+    assert.deepEqual(result.state.waitOutcome?.ownerFence, ownerFence);
+    assert.equal(Object.hasOwn(result.state.waitOutcome ?? {}, 'actionSuccessorFence'), false);
   });
 });

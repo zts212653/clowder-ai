@@ -98,7 +98,6 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
   const [manualTranscript, setManualTranscript] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [regrantCommand, setRegrantCommand] = useState<string | null>(null);
 
   const parsedSpeakers = parseSpeakers(speakers);
   const canConfirm = Boolean(parsedSpeakers && context.trim() && destination && outputs.length > 0 && !busy);
@@ -139,14 +138,6 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
         outputs,
       },
     });
-  }
-
-  async function regrant(): Promise<void> {
-    const result = await action('regrant', { expectedRevision: revision });
-    const value = record(result?.regrant);
-    if (Array.isArray(value.argv) && value.argv.every((part) => typeof part === 'string')) {
-      setRegrantCommand(value.argv.join(' '));
-    }
   }
 
   return (
@@ -262,18 +253,13 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
         </button>
       )}
       {repair?.action === 'regrant' && (
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => void regrant()}
-            disabled={busy}
-            className="rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 text-micro font-medium text-[var(--cafe-surface)] disabled:opacity-50"
-            data-testid="meeting-regrant"
-          >
-            查看重新授权方式
-          </button>
-          {regrantCommand && <code className="block select-all text-micro">{regrantCommand}</code>}
-        </div>
+        <a
+          href="/settings?s=plugins"
+          className="inline-block rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 text-micro font-medium text-[var(--cafe-surface)]"
+          data-testid="meeting-regrant"
+        >
+          去插件设置连接飞书
+        </a>
       )}
       {repair?.action === 'manual_import' && (
         <div className="space-y-2">

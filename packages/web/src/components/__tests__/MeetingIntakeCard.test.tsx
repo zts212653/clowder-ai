@@ -135,7 +135,7 @@ describe('F292 MeetingIntakeCard', () => {
     expect(container.querySelector('[data-testid="reject-btn"]')).toBeNull();
   });
 
-  it('exposes typed retry and regrant repairs and refreshes the exact item after each action', async () => {
+  it('exposes typed retry and routes regrant to the in-product plugin auth action', async () => {
     const retryItem = {
       ...item,
       detail: {
@@ -164,13 +164,11 @@ describe('F292 MeetingIntakeCard', () => {
         repair: { code: 'auth_required', action: 'regrant', observedAt: 3 },
       },
     };
-    mockApiFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ regrant: { argv: ['lark-cli', 'auth', 'login', '--as', 'user'] } }),
-    });
     await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: regrantItem })));
-    await act(async () => (container.querySelector('[data-testid="meeting-regrant"]') as HTMLButtonElement).click());
-    expect(container.textContent).toContain('lark-cli auth login --as user');
-    expect(mockFetchPending).toHaveBeenCalledTimes(2);
+    const regrant = container.querySelector<HTMLAnchorElement>('[data-testid="meeting-regrant"]');
+    expect(regrant?.href).toContain('/settings?s=plugins');
+    expect(regrant?.textContent).toContain('去插件设置连接飞书');
+    expect(container.textContent).not.toContain('lark-cli auth login');
+    expect(mockFetchPending).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,6 +4,7 @@ related_features: [F042, F088, F102, F124, F152, F167, F175, F183, F185]
 topics: [architecture, governance, ownership-map, skills, ci, quality-gate]
 doc_kind: spec
 created: 2026-05-07
+tips_exempt: existing architecture-checker contract correction; no new user-invokable capability or workflow surface
 ---
 
 # F191: Architecture Ownership Governance — 架构归属地图与 Map Delta 门禁
@@ -93,15 +94,17 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 
 4. `quality-gate` 先只要求报告 map delta，不做静态 hard block。
 
-### Phase C: Mechanical Checks（warning-only）
+### Phase C: Mechanical Checks（分级执行）
 
-增加 warning-only 脚本，先暴露盲点，不阻塞开发：
+以下启发式检查保持 warning-only，先暴露盲点，不阻塞开发：
 
 - ownership cell 引用的 `code_anchors` 是否存在
 - Feature spec / plan 中声明的 `Architecture cell` 是否存在
 - PR diff 新增 `Store|Queue|Router|Adapter|Dispatcher|Binding` 等架构名词但没有声明 `Architecture cell` 时给 warning
 
-该阶段不让 CI 判断架构是否正确，只检查机械不变量。误报样本稳定后，才能讨论是否接入 `pnpm check` / `pnpm gate` 的 hard fail。
+`doc_anchors` 采用确定性的 hard fail 棘轮：字段必须是非空字符串数组；每项必须使用仓库相对路径，目标必须存在、解析后仍位于仓库根目录内，且是普通文件。缺失、绝对路径、目录、越界路径或指向仓库外的符号链接都会阻断标准 `pnpm check` / `pnpm gate`，避免 ownership cell 把机器本地路径或目录伪装成可版本化的文档真相源。
+
+hard fail 仍只覆盖上述可机械判定的不变量，不让 CI 判断架构语义是否正确。`code_anchors` 与架构名词等启发式检查只有在误报样本稳定后，才能另行讨论是否升级。
 
 ### Phase D: Trial & Close
 
@@ -139,6 +142,7 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 - [x] AC-C2: warning-only 脚本能检测不存在的 `Architecture cell`
 - [x] AC-C3: warning-only 脚本能提示新增架构名词但缺少 cell 声明的 diff
 - [x] AC-C4: Phase C 不做 semantic architecture judgment，只检查机械不变量
+- [x] AC-C5: `doc_anchors` 必须用仓库相对路径解析为仓库内普通文件；缺失、绝对路径、目录、越界路径和仓库外符号链接 hard fail
 
 ### Phase D（Trial & Close）
 - [x] AC-D1: 至少 1 个真实 Feature 使用 `Architecture cell` + `Map delta` 试跑
@@ -153,7 +157,7 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 | R1 | “老项目 + 新需求”不能继续瞎累积架构 | AC-A1~A7, AC-B1~B4 | spec + skill review | [x] |
 | R2 | 不是每个 Feature 重新填表 / 重新画图 | AC-A1, AC-A7, AC-B1, AC-B2 | 普通增量写 `Map delta: none` | [x] |
 | R3 | 只在真正需要时触发重审 | AC-B1, AC-D1~D4 | 真实 Feature 试跑 | [x] |
-| R4 | 防止 map 腐烂 | AC-A4, AC-A7, AC-C1 | stale anchor check + generated README | [x] |
+| R4 | 防止 map 腐烂 | AC-A4, AC-A7, AC-C1, AC-C5 | stale anchor check + generated README | [x] |
 | R5 | 防止大家抢同一个大文件冲突 | AC-A1 | per-cell 文件结构 | [x] |
 | R6 | 涉及 harness：skills / quality gate / CI / prompts | AC-B1~B5, AC-C1~C4 | diff + review | [x] |
 | R7 | 47 的 `cited_by` 想法可以试，但不能首轮过度自动化 | AC-A4, AC-D3 | PoC 字段 + 后续决策 | [x] |
@@ -178,7 +182,7 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 |------|------|
 | 退化成每个 Feature 填表 | 只要求三字段；普通增量写 `Map delta: none`，不改 map |
 | 单文件热点冲突 | per-cell 文件结构；README 由 frontmatter 生成 |
-| CI 误报淹没开发 | Phase C warning-only，先收集误报再决定 hard fail |
+| CI 误报淹没开发 | 启发式检查保持 warning-only；只对确定性的 `doc_anchors` 仓库文件契约 hard fail |
 | map 变成死文档 | code anchors + Feature 引用 + review checklist 三层激活 |
 | 过度归一 | 每个 cell 必须写 `Do NOT Unify With` |
 | `identity-session` 变成万能筐 | 拆出 `identity-agent` / `identity-connector` / `identity-bubble` subcells，并写死不可互相吞并 |

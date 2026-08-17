@@ -4,7 +4,7 @@ related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-09
+updated: 2026-08-11
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model
 description_author: codex-sol
@@ -38,9 +38,10 @@ mcp_admission_claims:
 > replacement/withdrawal + cross-thread owner evidence + the operator-approved
 > known-person delta dual path are landed on main. The dual path keeps immediate
 > proposal and adds a content-free `capture/defer` receipt followed by a bounded
-> daily clerk. Phase C dogfood remains open until a real informative card is approved
-> and recall-verified. Live runtime remains separately gated and was not activated by
-> this merge. |
+> daily clerk. On 2026-08-11 the first real `InteractionEvent`
+> approve→materialize→relationship-card recall vertical slice passed against live
+> owner-private truth. Phase C remains open for the rest of AC-C1 and AC-C2/C3; this
+> single slice is not an overall utility or standing-reflex verdict. |
 > **Owner**: 小太阳·Maine Coon
 > (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
@@ -114,7 +115,8 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
   resolver、pending-card atomic replacement/withdrawal 与跨 thread owner evidence 均已合入。
   PR #3277 保证状态回答从 owner-private store 实时投影；PR #3286 允许 pending/not-now 卡
   原子替换或撤回；PR #3296/#3326 让当前对话中的完整卡可绑定任意 owner-visible thread
-  的精确 owner 来源。live runtime 是否已加载必须另查，不得从本文件推断。
+  的精确 owner 来源。部署状态不得从 merge 或旧 snapshot 推断；2026-08-11 的 authenticated
+  live status/recall 调用已证明该真实 case 的 materialized read path 可用。
 - 跨 thread source bundle 将 approval card 固定在当前 invocation thread，同时保留每条
   原消息的真实 thread/ref；server 在 stage 与 publish 前逐条重验
   owner、owner authorship、connector absence、delivery、deletion/tombstone、visibility、
@@ -124,10 +126,14 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
   #3503 已将其合入 main：明确且时机合适时继续即时 proposal；值得记但当前不宜打断时只写
   exact-source-bound、TTL=0、content-free deferred receipt，由 daily clerk 有界转换成仍需
   owner 审批的 F276 proposal。daily 不扫描对话、不接触私密正文，也绝不静默 materialize；
-  live runtime 尚未加载该合入，不得把 main landed 当作 dogfood 已生效。
-- Phase C 仍未闭环：郭良错误纠错卡已被拒绝，没有获准成为记忆；Alden 也尚无获准的
-  有信息量人物卡。只有真实卡逐项批准且 `recall_person_relationship` 返回原始人物事实、
-  互动和评价后，才可记录 UAT 成功。
+  本次 status/recall 证据未区分该 candidate 来自即时 propose 还是 deferred daily clerk，
+  因而不能据此宣称双路径均已完成生产 dogfood。
+- Phase C 的 `InteractionEvent` approve→materialize→recall vertical slice 已于 2026-08-11
+  首次通过：exact proposal 当前为 `materialized`、`publicationState=anchored`、无 remaining
+  drafts；同一人物 alias 的只读 recall 返回 bounded person/relationship/latest-interaction
+  card 与原消息 provenance。该证据关闭“尚无获准真实卡”的旧状态，但未覆盖 source excerpt
+  drill、correct/forget、reject/not-now absence，也未形成 AC-C2 runtime-health 或 AC-C3 utility
+  verdict；完整 Phase C 仍未闭环。
 - 首个真实 `InteractionEvent` proposal 已进入 owner-private Approval Hub，但 operator 拒绝并
   判为失败 dogfood：决策卡没有直接说明“发生了什么”，单一 invocation-origin source
   也无法表达由同一 thread 多条 owner 消息逐步讲清的事件、重要性与不确定性；同时 MCP
@@ -330,8 +336,8 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 | R7 | harness 按 claim 选机制，不盘点未选项 | AC-C2, AC-C3 | Design Gate review | [x] |
 | R8 | 不静默建档；审批卡逐 claim 清晰展示来源/类型与适量原话 | AC-A8..A10 | auth/card contract tests + UAT | [x] |
 | R9 | F260 是 workspace person identity root；F276 只做 owner-private extension | AC-A6, AC-A11, AC-A12, AC-B7 | resolver/uniqueness/convergence/forget tests | [x] |
-| R10 | 事件卡必须让 owner 看懂发生了什么，并能用任意 owner-visible thread 的多条原话逐字段举证；不能要求 owner 搬 thread | AC-A13..A15, AC-A18, AC-C1 | card/source auth/schema parity + Alden cross-thread E2E + owner UAT | [ ] 工程 contract 本次闭合；AC-C1 owner UAT 待跑 |
-| R11 | 已登记人物的后续重要互动不能因 registry suppression 或主任务繁忙持续漏记 | AC-A19..A25 | tri-state evaluator + deferred receipt/store/daily/proposal/purge tests | [x] 工程 contract；live dogfood 待跑 |
+| R10 | 事件卡必须让 owner 看懂发生了什么，并能用任意 owner-visible thread 的多条原话逐字段举证；不能要求 owner 搬 thread | AC-A13..A15, AC-A18, AC-C1 | card/source auth/schema parity + Alden cross-thread E2E + owner UAT | [ ] 2026-08-11 approve→materialize→recall slice 通过；source drill/correct/forget 等完整 AC-C1 仍待验 |
+| R11 | 已登记人物的后续重要互动不能因 registry suppression 或主任务繁忙持续漏记 | AC-A19..A25 | tri-state evaluator + deferred receipt/store/daily/proposal/purge tests | [x] 工程 contract；本次 live slice 未区分 immediate/deferred lane，双路径 dogfood 仍待分路验证 |
 
 ### 覆盖检查
 
@@ -484,8 +490,11 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 - [ ] AC-C1: detect→propose→approve→materialize→card→drill→correct→forget 全 journey
   owner-private UAT 通过；reject/not-now 路径证明 future recall absence。2026-07-27
   首个 `InteractionEvent` proposal 因 informed-approval/source-set contract 不足被
-  owner 拒绝，只记失败证据、不计成功样本。PR #3265 已关闭工程路径；剩余人类验收是
-  授权激活后以新 proposal 验证事件卡可读、可批准并能正确召回。
+  owner 拒绝，只记失败证据、不计成功样本。PR #3265 已关闭工程路径。2026-08-11
+  exact live status + recall 证明一个新的真实 `InteractionEvent` candidate 已完成
+  approve→materialize→bounded card recall，故该 vertical-slice pass condition 已关闭；
+  source excerpt/drill、correct/forget 全 journey 与 reject/not-now absence 尚未闭合，AC-C1
+  仍保持 open。
 - [ ] AC-C2: runtime traces 能定位各 stage 健康，但 detect/proposal telemetry 只含 aggregate
   count、latency、decision category；不得带 person/candidate/claim/source refs、
   alias/name/excerpt 或其 hash/fingerprint，且原始工程计数不冒充 utility eval。
@@ -495,9 +504,10 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 ## Dependencies
 
 - **Evolved from**: F260（entity locator/nudge 的真实后继，不重开 F260）
-- **Blocked by**: Phase C 只受 operator-controlled runtime activation 与 fresh
-  owner-private event UAT 阻塞；identity-root / informed-event 确定契约已由 PR #3265
-  合入，不能把首个被拒的 candidate 计作成功样本
+- **Blocked by**: Phase C 不再受 blanket runtime activation 阻塞；首个真实
+  approve→materialize→recall slice 已通过。剩余 blocker 是 AC-C1 未覆盖的 drill /
+  correct / forget / absence journey，以及 AC-C2 runtime-health 与 AC-C3 utility verdict；
+  identity-root / informed-event 确定契约已由 PR #3265 合入
 - **Related**: F186（private collection）、F200（aggregate navigation utility）、F227（typed
   source teleport only）、F231（user/persona boundary）、F263（failure taxonomy/aggregate harm）
 
@@ -548,10 +558,11 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
 - Implementation: identity-root + informed-event remediation 已由 PR #3265 合入 main
   `146e43280`；server-derived resolver、reverse uniqueness、recall convergence、
   forget cleanup、event card/sourceRefs/temporal parity 均已落地，F260 write scope
-  未重开。live runtime 尚未加载该实现。
-- Dogfood: blocked until operator-authorized activation and a fresh owner-private
-  `InteractionEvent` proposal proves the card is readable、approvable and recallable；
-  tracked evidence 只写 aggregate verdict。
+  未重开。2026-08-11 authenticated live status/recall 已覆盖一个 materialized
+  `InteractionEvent` read slice；未覆盖的 lifecycle 与分路证据按 AC-C1..C3 继续开放。
+- Dogfood: first real owner-private `InteractionEvent` approve→materialize→recall slice
+  passed on 2026-08-11. Full AC-C1 remains blocked on drill/correct/forget/absence evidence；
+  AC-C2/C3 与 immediate/deferred 分路验证仍开放，tracked docs 不复制真实 payload。
 
 ## Tips Contribution（F244）
 

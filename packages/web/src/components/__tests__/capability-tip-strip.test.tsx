@@ -56,6 +56,21 @@ describe('F244 CapabilityTipStrip', () => {
     vi.clearAllMocks();
   });
 
+  it('teaches the shipped F294 message-selection entry and export actions', () => {
+    const tip = (rawTips as readonly (SeedTip & { body?: string })[]).find(
+      (candidate) => candidate.id === 'feature-f294-selective-message-bundles',
+    );
+
+    expect(tip).toBeDefined();
+    expect(tip?.body).toContain('多选消息');
+    expect(tip?.body).toContain('导出');
+    expect(tip?.body).toContain('目标 Thread');
+    expect(tip?.body).toContain('接收猫');
+    expect(tip?.body).toContain('合并卡');
+    expect(tip?.body).not.toContain('从消息的“更多”');
+    expect(tip?.body).not.toContain('移动端长按进入多选');
+  });
+
   it('shimmer placeholder has accessible status label (not hidden by aria-hidden)', async () => {
     await render(
       <CapabilityTipStrip
@@ -156,9 +171,12 @@ describe('F244 CapabilityTipStrip', () => {
       }),
     );
 
-    const button = container.querySelector('[data-testid="capability-tip-learn-more"]') as HTMLButtonElement | null;
+    const actionControl = container.querySelector<HTMLElement>(
+      '[data-testid="capability-tip-learn-more"], [data-testid="capability-tip-open-surface"]',
+    );
+    expect(actionControl).not.toBeNull();
     act(() => {
-      button?.click();
+      actionControl?.click();
     });
 
     expect(recordCapabilityTipEventMock).toHaveBeenCalledWith(

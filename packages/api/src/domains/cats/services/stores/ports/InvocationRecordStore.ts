@@ -9,7 +9,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, FreshnessClosureStatus } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type FreshnessClosureStatus,
+  parseWaitContinuationCarrier,
+  type WaitContinuationCarrierV1,
+} from '@cat-cafe/shared';
 import { isValidTransition } from './invocation-state-machine.js';
 
 /** InvocationRecord lifecycle statuses */
@@ -57,6 +62,13 @@ export function requireInvocationActionLeaseCarrier(value: unknown): InvocationA
   });
 }
 
+export function requireInvocationWaitContinuationCarrier(value: unknown): WaitContinuationCarrierV1 | undefined {
+  if (value === undefined) return undefined;
+  const carrier = parseWaitContinuationCarrier(value);
+  if (!carrier) throw new Error('InvocationRecord create received an invalid wait continuation carrier');
+  return carrier;
+}
+
 /**
  * A single invocation record tracking the lifecycle of a cat invocation.
  */
@@ -96,6 +108,8 @@ export interface InvocationRecord {
   freshnessClosureStatus?: FreshnessClosureStatus;
   /** F167 S.1-b: server-written carrier classification recovered by holder callbacks. */
   actionLeaseCarrier: InvocationActionLeaseCarrier;
+  /** #1291 Gate 4: exact wait generation/outcome that authorized this continuation. */
+  waitContinuationCarrier?: WaitContinuationCarrierV1;
   createdAt: number;
   updatedAt: number;
 }
@@ -109,6 +123,8 @@ export interface CreateInvocationInput {
   idempotencyKey: string;
   /** F167 S.1-b: exact carrier classification; every producer must choose one union arm. */
   actionLeaseCarrier: InvocationActionLeaseCarrier;
+  /** #1291 Gate 4: absent for non-wait invocations. */
+  waitContinuationCarrier?: WaitContinuationCarrierV1;
 }
 
 /** Result of atomic create-or-deduplicate */
@@ -212,6 +228,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     }
 
     const id = randomUUID();
+    const waitContinuationCarrier = requireInvocationWaitContinuationCarrier(input.waitContinuationCarrier);
     const record: InvocationRecord = {
       id,
       threadId: input.threadId,
@@ -222,6 +239,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       status: 'queued',
       idempotencyKey: input.idempotencyKey,
       actionLeaseCarrier: requireInvocationActionLeaseCarrier(input.actionLeaseCarrier),
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
       createdAt: now,
       updatedAt: now,
     };

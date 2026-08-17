@@ -1,6 +1,7 @@
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import { DEFAULT_THREAD_STATE, type Thread, type ThreadState } from '@/stores/chat-types';
@@ -72,6 +73,7 @@ function ThreadItemComponent({
     useCallback((state) => state.threadStates[id] ?? DEFAULT_THREAD_STATE, [id]),
   );
   const itemThreadState = threadState ?? subscribedThreadState;
+  const itemLiveness = useThreadLiveness(id);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -381,7 +383,7 @@ function ThreadItemComponent({
           )}
           <LabelDots labels={threadLabels} />
           <ThreadCatStatus
-            threadState={itemThreadState}
+            liveness={itemLiveness}
             unreadCount={itemThreadState.unreadCount}
             hasUserMention={itemThreadState.hasUserMention}
           />

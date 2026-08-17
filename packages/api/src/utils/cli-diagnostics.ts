@@ -12,7 +12,7 @@
  *  - AC-A9 red line: no raw stderr ever in publicSummary / publicHint (humanized only)
  */
 
-import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
+import type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
@@ -118,6 +118,10 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // invocationId. Previous hint sent users to debugRef — wrong place, killed UX value.
     hint: 'CLI 进程正常退出，但没有可显示的文字输出（事件流没有 text event，或 plain-text stdout 为空）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream / auth / profile 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
   },
+  active_writer_recovery: {
+    summary: '原生会话仍绑定原 writer host',
+    hint: '原 Session 已保留，本轮没有新建或封存会话。正在等待原 host 释放；若持续不恢复，重启对应 runtime 后重试。',
+  },
   // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream provider
   // policy engine (Codex 0.98+) rejected content ("flagged for possible cybersecurity risk").
   // NOT a Clowder AI bug — the upstream policy layer made the call. User needs actionable
@@ -127,6 +131,20 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     hint: 'CLI 上游 provider 的 policy 引擎拒绝了这次请求（例如判断为敏感内容）。这不是 Clowder AI bug — 是 provider 侧决策。建议：换个表达方式重试 prompt（provider 通常给了 "try rephrasing" 提示）；换一只不同 provider 的猫；反复触发去查你用的 provider policy 文档（Anthropic / OpenAI / DeepSeek 各有 acceptable use policy）。展开下方"详细诊断"看具体 policy 消息。',
   },
 };
+
+export function buildActiveWriterRecoveryDiagnostic(input: {
+  state: CliActiveWriterRecoveryState;
+  debugRef: CliDiagnostics['debugRef'];
+}): CliDiagnostics {
+  const text = REASON_TEXT.active_writer_recovery;
+  return {
+    reasonCode: 'active_writer_recovery',
+    publicSummary: text.summary,
+    publicHint: text.hint,
+    activeWriterRecovery: { state: input.state },
+    debugRef: input.debugRef,
+  };
+}
 
 const UNKNOWN_TEXT = {
   summary: '未识别的 CLI 错误',

@@ -192,6 +192,21 @@ describe('BallCustodyProjector — reject 处理（INV-5）', () => {
     assert.strictEqual(p.state, 'active');
     assert.strictEqual(p.lastRejectedEvent, null);
   });
+
+  it('rejects a disposition whose payload holder no longer owns the live ball', async () => {
+    const { proj, store } = setup();
+    await proj.apply(ev('ball.handed', { payload: { toCatId: 'opus' }, at: 100 }));
+    await proj.apply(
+      ev('ball.dispatch_dispositioned', {
+        payload: { catId: 'codex-sol', sourceMessageId: 'message-1', disposition: 'completed' },
+        at: 200,
+      }),
+    );
+    const p = await store.get('ball:task:t1');
+    assert.strictEqual(p.state, 'active');
+    assert.strictEqual(p.holder, 'opus');
+    assert.strictEqual(p.lastRejectedEvent.kind, 'ball.dispatch_dispositioned');
+  });
 });
 
 describe('BallCustodyProjector — rebuild 幂等（INV-2 无漂移）', () => {

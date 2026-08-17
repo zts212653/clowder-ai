@@ -151,4 +151,42 @@ describe('F254 ADR-042 supplement startup reconciliation', () => {
     assert.equal(failed.status, 'failed');
     assert.equal(failed.failureReason, 'queue_full');
   });
+
+  it('does not re-enqueue a read-only-policy failure that already owns durable terminal truth', async () => {
+    const closureStore = new InMemoryFreshnessClosureStore();
+    const pending = await createPending(closureStore);
+    const running = await closureStore.claimSupplement(pending.id, {
+      invocationId: 'inv-policy-failed',
+      now: 200,
+    });
+    await closureStore.failSupplement(running.id, {
+      invocationId: 'inv-policy-failed',
+      reason: 'read_only_policy_unavailable',
+      now: 250,
+    });
+
+    const result = await reconcileFreshnessSupplementsAtStartup({
+      closureStore,
+      messageStore: new MessageStore(),
+      enqueue: () => {
+        throw new Error('terminal policy failure must never be re-enqueued');
+      },
+      executeThread: () => {
+        throw new Error('terminal policy failure must never execute');
+      },
+      log: logger(),
+      now: () => 500,
+    });
+
+    assert.deepEqual(result, {
+      scanned: 0,
+      recoveredCommitted: 0,
+      failed: 0,
+      enqueued: 0,
+      executedThreads: 0,
+    });
+    const failed = await closureStore.getSupplement(pending.id);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.failureReason, 'read_only_policy_unavailable');
+  });
 });

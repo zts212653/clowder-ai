@@ -1,4 +1,4 @@
-export type { BuiltinBrokerConnection } from './builtin-loopback.js';
+export type { BrokerConnection, BuiltinBrokerConnection } from './builtin-loopback.js';
 export { digestBrokerValue } from './canonical-json.js';
 export type { HostBrokerControlPlaneOptions } from './control-plane.js';
 export { HostBrokerControlPlane } from './control-plane.js';

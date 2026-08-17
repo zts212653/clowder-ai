@@ -64,6 +64,13 @@ export async function parseMultipart(
     fields.whisperTo = [fields.whisperTo];
   }
 
+  // F294 v1 deliberately admits Bundle carriers only through JSON. Detect the
+  // reserved field explicitly so multipart cannot degrade into an ordinary
+  // message or surface an ambiguous generic validation error.
+  if (fields.messageBundle !== undefined) {
+    return { error: 'Message Bundle does not support multipart uploads' };
+  }
+
   const parseResult = sendMessageSchema.safeParse(fields);
   if (!parseResult.success) {
     return { error: 'Invalid form fields' };

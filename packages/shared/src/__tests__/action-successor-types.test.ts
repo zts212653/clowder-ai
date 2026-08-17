@@ -4,6 +4,7 @@ import {
   dispatchProposedActionInputSchema,
   isAllowedActionSuccessorSlot,
 } from '../types/action-successor.js';
+import { executableActionSuccessorMetadataSchema } from '../types/executable-action-successor.js';
 
 const FULL_HEAD_SHA = 'a'.repeat(40);
 
@@ -18,6 +19,65 @@ describe('action successor shared contract', () => {
     });
     expect(parsed.actionFamily).toBe('merge');
     expect(isAllowedActionSuccessorSlot('merge', 'reviewer')).toBe(true);
+  });
+
+  it('keeps reserved vocabulary out of executable direct carriers', () => {
+    expect(
+      executableActionSuccessorMetadataSchema.safeParse({
+        subjectRef: 'pr:owner/repo#2868',
+        actionFamily: 'merge',
+        successorSlot: 'merge_owner',
+        mode: 'single',
+        terminalPredicate: { kind: 'pr_merged' },
+      }).success,
+    ).toBe(false);
+    expect(
+      executableActionSuccessorMetadataSchema.safeParse({
+        subjectRef: 'pr:owner/repo#2868',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+      }).success,
+    ).toBe(true);
+    expect(
+      executableActionSuccessorMetadataSchema.safeParse({
+        subjectRef: 'subject:task:task-1',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
+        mode: 'single',
+        terminalPredicate: { kind: 'task_done' },
+      }).success,
+    ).toBe(true);
+    expect(
+      executableActionSuccessorMetadataSchema.safeParse({
+        subjectRef: 'pr:owner/repo#2868',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'task_done' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('uses canonical subject grammar for every successor carrier', () => {
+    const invalid = actionSuccessorMetadataSchema.safeParse({
+      subjectRef: 'github:owner/repo#2868@abc1234',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+    });
+    expect(invalid.success).toBe(false);
+    expect(
+      actionSuccessorMetadataSchema.safeParse({
+        subjectRef: 'pr:owner/repo#2868',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
+      }).success,
+    ).toBe(true);
   });
 
   it('rejects arbitrary slots that could evade the canonical key', () => {

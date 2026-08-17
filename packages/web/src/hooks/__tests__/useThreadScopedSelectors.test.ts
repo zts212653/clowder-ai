@@ -231,4 +231,92 @@ describe('F173 Phase C — selectThreadLiveness', () => {
       codex: { invocationId: 'inv-b-codex', startedAt: 2 },
     });
   });
+
+  it('projects an identity-matched terminal lifecycle as idle on first thread paint', () => {
+    const state = makeState({
+      currentThreadId: 'thread-a',
+      hasActiveInvocation: true,
+      activeInvocations: { 'inv-closed': { catId: 'codex-sol', mode: 'execute' } },
+      targetCats: ['codex-sol'],
+      catStatuses: { 'codex-sol': 'streaming' },
+      catInvocations: {
+        'codex-sol': {
+          invocationId: 'inv-closed',
+          appServerLifecycle: {
+            stage: 'closed',
+            lastActivityAt: 123,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: true,
+          },
+        },
+      },
+    });
+
+    const result = selectThreadLiveness(state, 'thread-a');
+
+    expect(result.hasActive).toBe(false);
+    expect(result.activeInvocations).toEqual({});
+    expect(result.catStatuses).toEqual({ 'codex-sol': 'done' });
+    expect(result.targetCats).toEqual(['codex-sol']);
+  });
+
+  it('does not let an old terminal lifecycle suppress a newer invocation slot', () => {
+    const state = makeState({
+      currentThreadId: 'thread-a',
+      hasActiveInvocation: true,
+      activeInvocations: { 'inv-new': { catId: 'codex-sol', mode: 'execute' } },
+      targetCats: ['codex-sol'],
+      catStatuses: { 'codex-sol': 'streaming' },
+      catInvocations: {
+        'codex-sol': {
+          invocationId: 'inv-old',
+          appServerLifecycle: {
+            stage: 'closed',
+            lastActivityAt: 123,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: true,
+          },
+        },
+      },
+    });
+
+    const result = selectThreadLiveness(state, 'thread-a');
+
+    expect(result.hasActive).toBe(true);
+    expect(result.activeInvocations).toEqual({ 'inv-new': { catId: 'codex-sol', mode: 'execute' } });
+    expect(result.catStatuses).toEqual({ 'codex-sol': 'streaming' });
+  });
+
+  it('does not guess across an uncorrelated coarse active flag and terminal lifecycle', () => {
+    const state = makeState({
+      currentThreadId: 'thread-a',
+      hasActiveInvocation: true,
+      activeInvocations: {},
+      targetCats: ['codex-sol'],
+      catStatuses: { 'codex-sol': 'streaming' },
+      catInvocations: {
+        'codex-sol': {
+          invocationId: 'inv-coarse',
+          appServerLifecycle: {
+            stage: 'failed',
+            lastActivityAt: 456,
+            recoveryAttempt: 0,
+            turnStartSent: true,
+            turnAccepted: true,
+            itemObserved: false,
+          },
+        },
+      },
+    });
+
+    const result = selectThreadLiveness(state, 'thread-a');
+
+    expect(result.hasActive).toBe(true);
+    expect(result.activeInvocations).toEqual({});
+    expect(result.catStatuses).toEqual({ 'codex-sol': 'streaming' });
+  });
 });

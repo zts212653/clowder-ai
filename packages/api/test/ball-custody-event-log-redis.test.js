@@ -81,6 +81,20 @@ describe('BallCustodyEventLog (Redis)', { skip: redisIsolationSkipReason(REDIS_U
       await log.append(makeEvent({ sourceEventId: 'a2', at: 2000, kind: 'task.done' }));
       assert.strictEqual((await log.read('ball:task:t1')).length, 2);
     });
+
+    it('fenced append atomically rejects a stale sequence and preserves exact retry idempotency', async () => {
+      const first = makeEvent({ sourceEventId: 'fenced-1' });
+      assert.deepStrictEqual(await log.appendFenced(first, 0), { outcome: 'appended', sequence: 0 });
+      assert.deepStrictEqual(await log.appendFenced(first, 99), { outcome: 'duplicate' });
+      assert.deepStrictEqual(await log.appendFenced(makeEvent({ sourceEventId: 'fenced-2', kind: 'task.done' }), 0), {
+        outcome: 'conflict',
+        actualSequence: 1,
+      });
+      assert.deepStrictEqual(
+        (await log.read('ball:task:t1')).map((event) => event.sourceEventId),
+        ['fenced-1'],
+      );
+    });
   });
 
   describe('append — ordering（INV-1 replay 序）', () => {

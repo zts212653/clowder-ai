@@ -7,7 +7,9 @@ import { API_URL } from '@/utils/api-client';
 import { createQuoteContextAttachment } from '../chat-context-reference';
 import { FileContentRenderer } from './FileContentRenderer';
 import { FileIcon } from './FileIcons';
-import { useMarkdownSelectionAction } from './useMarkdownSelectionAction';
+import { type MarkdownSelectionAction, useMarkdownSelectionAction } from './useMarkdownSelectionAction';
+import { useWorkspaceListenMode } from './useWorkspaceListenMode';
+import { WorkspaceToolbarButton as ToolbarBtn } from './WorkspaceToolbarButton';
 
 interface WorkspaceFileViewerProps {
   file: FileData;
@@ -59,6 +61,12 @@ const CloseIcon = () => (
   </svg>
 );
 
+const PlayIcon = () => (
+  <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 12 14" fill="currentColor">
+    <path d="M1 1l10 6-10 6V1z" />
+  </svg>
+);
+
 export function WorkspaceFileViewer({
   file,
   openFilePath,
@@ -103,26 +111,46 @@ export function WorkspaceFileViewer({
     openFilePath,
   );
 
-  const handleMdAddToChat = useCallback(() => {
-    const text = mdSelectionAction?.text;
-    if (!text || !openFilePath) return;
-    setPendingChatInsert({
-      threadId: currentThreadId,
-      text: '',
-      contextAttachments: [
-        createQuoteContextAttachment(text, {
-          kind: 'workspace_file',
-          path: openFilePath,
-          ...(worktreeId ? { worktreeId } : {}),
-          ...(currentWorktree?.branch ? { branch: currentWorktree.branch } : {}),
-          language: 'markdown',
-        }),
-      ],
-    });
-  }, [currentThreadId, currentWorktree, mdSelectionAction, openFilePath, setPendingChatInsert, worktreeId]);
+  const handleMdAddToChat = useCallback(
+    (action: MarkdownSelectionAction, comment: string) => {
+      if (!openFilePath) return;
+      setPendingChatInsert({
+        threadId: currentThreadId,
+        text: '',
+        contextAttachments: [
+          createQuoteContextAttachment(
+            action.text,
+            {
+              kind: 'workspace_file',
+              path: openFilePath,
+              ...(worktreeId ? { worktreeId } : {}),
+              ...(currentWorktree?.branch ? { branch: currentWorktree.branch } : {}),
+              language: 'markdown',
+            },
+            {
+              comment,
+              ...(action.selectionStart !== undefined && action.selectionEnd !== undefined
+                ? {
+                    selectionStart: action.selectionStart,
+                    selectionEnd: action.selectionEnd,
+                  }
+                : {}),
+            },
+          ),
+        ],
+      });
+    },
+    [currentThreadId, currentWorktree, openFilePath, setPendingChatInsert, worktreeId],
+  );
 
   const rawUrl = (path: string) =>
     `${API_URL}/api/workspace/file/raw?worktreeId=${encodeURIComponent(worktreeId ?? '')}&path=${encodeURIComponent(path)}`;
+  const listenMode = useWorkspaceListenMode({
+    file,
+    openFilePath,
+    worktreeId,
+    enabled: isMarkdown && markdownRendered && !editMode && !file.truncated,
+  });
 
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col animate-fade-in" data-testid="workspace-file-viewer">
@@ -193,6 +221,20 @@ export function WorkspaceFileViewer({
                 title={markdownRendered ? '\u5207\u6362\u5230\u6E90\u7801' : '\u5207\u6362\u5230\u6E32\u67D3'}
               >
                 {markdownRendered ? 'Rendered' : 'Raw'}
+              </ToolbarBtn>
+            )}
+            {isMarkdown && markdownRendered && !editMode && (
+              <ToolbarBtn
+                active={listenMode.active}
+                activeClass="bg-cafe-accent text-[var(--cafe-accent-foreground)] hover:bg-cafe-interactive"
+                onClick={() => listenMode.start()}
+                title={listenMode.sentences.length > 0 ? '从上次位置开始听读' : '这份 Markdown 没有可听正文'}
+                disabled={listenMode.sentences.length === 0}
+              >
+                <span className="inline-flex items-center gap-1">
+                  <PlayIcon />
+                  听读
+                </span>
               </ToolbarBtn>
             )}
             {isHtml && !editMode && (
@@ -314,6 +356,9 @@ export function WorkspaceFileViewer({
         restoreScrollTop={restoreScrollTop}
         restoreKey={restoreKey}
         onScrollTopChange={onScrollTopChange}
+        listenSentences={listenMode.active ? listenMode.sentences : undefined}
+        activeListenAnchor={listenMode.activeAnchor}
+        onListenSentenceStart={listenMode.active ? listenMode.start : undefined}
       />
 
       {file.truncated && (
@@ -322,35 +367,5 @@ export function WorkspaceFileViewer({
         </div>
       )}
     </div>
-  );
-}
-
-/* ── Toolbar button helper ── */
-function ToolbarBtn({
-  children,
-  active,
-  activeClass,
-  disabled,
-  onClick,
-  title,
-}: {
-  children: React.ReactNode;
-  active?: boolean;
-  activeClass?: string;
-  disabled?: boolean;
-  onClick: () => void;
-  title: string;
-}) {
-  const ac = activeClass ?? 'bg-cafe-accent/80 text-[var(--cafe-surface)] hover:bg-cafe-accent';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${active ? ac : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'} ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
-      title={title}
-    >
-      {children}
-    </button>
   );
 }

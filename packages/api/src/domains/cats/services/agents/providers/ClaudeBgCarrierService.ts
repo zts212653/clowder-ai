@@ -32,6 +32,15 @@ import { type CatId, createCatId } from '@cat-cafe/shared';
 import { resolveCatCafeNodeCommand } from '../../../../../config/capabilities/mcp-constants.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import {
+  activateClaudeBgJobOwner,
+  buildClaudeBgJobStopEnv,
+  type ClaudeBgJobOwnerHandle,
+  captureClaudeBgJobStopContext,
+  completeClaudeBgJobOwner,
+  createClaudeBgJobOwnerManifest,
+} from '../../../../../utils/claude-bg-job-ownership.js';
+import { CLI_PROCESS_OWNER_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
@@ -49,7 +58,7 @@ import {
   resolveDefaultClaudeMcpServerPath,
   SUBSCRIPTION_MODE_DENY_KEYS,
 } from './ClaudeAgentService.js';
-import { JobEventConsumer } from './JobEventConsumer.js';
+import { JobEventConsumer, type JobState } from './JobEventConsumer.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import { TranscriptTailer } from './TranscriptTailer.js';
 
@@ -61,6 +70,23 @@ const SHORT_ID_PATTERN = /backgrounded\s*·\s*([a-f0-9]{8})/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const log = createModuleLogger('claude-bg-carrier');
+
+const UI_TURN_COMPLETE_STATES: ReadonlySet<JobState> = new Set(['done', 'error', 'failed', 'blocked', 'stopped']);
+const NATIVE_JOB_TERMINAL_STATES: ReadonlySet<JobState> = new Set(['done', 'error', 'failed', 'stopped']);
+
+/** States that close the current Clowder AI delivery turn without waiting. */
+function isUiTurnCompleteState(state: JobState | undefined): boolean {
+  return state !== undefined && UI_TURN_COMPLETE_STATES.has(state);
+}
+
+/**
+ * Provider-native evidence that the background job itself ended. `blocked`
+ * means the daemon is waiting, while transcript `turn_duration` only ends one
+ * response turn; neither is permission to discard the durable stop handle.
+ */
+function isNativeJobTerminalState(state: JobState | undefined): boolean {
+  return state !== undefined && NATIVE_JOB_TERMINAL_STATES.has(state);
+}
 
 export class CarrierError extends Error {
   override readonly cause?: unknown;
@@ -95,6 +121,17 @@ export interface ClaudeBgCarrierServiceOptions {
   mcpServerPath?: string;
   /** Test seam — replaces the real L0 compiler subprocess (Task 3a). */
   l0CompilerFn?: typeof compileL0ViaSubprocess;
+  /** Test seam — command used for both `--bg` dispatch and `stop <shortId>`. */
+  claudeCommand?: string;
+  /** Test seam — override the durable owner data root. */
+  ownerDataDir?: string;
+  /** Test seam — bounded wait for the native stop dispatcher to exit. */
+  ownerKillGraceMs?: number;
+  /**
+   * Test seam. Production defaults on; injected fake spawn implementations
+   * default off unless a test explicitly exercises durable ownership.
+   */
+  enableJobOwnership?: boolean;
 }
 
 interface StartJobResult {
@@ -107,6 +144,7 @@ interface StartJobResult {
    * Caller (invoke) propagates this into metadata for accurate observability.
    */
   effectiveModel: string;
+  owner?: ClaudeBgJobOwnerHandle;
 }
 
 /**
@@ -123,6 +161,10 @@ export class ClaudeBgCarrierService implements AgentService {
   private readonly pollMs: number;
   private readonly timeoutMs: number;
   private readonly mcpServerPath: string | undefined;
+  private readonly claudeCommand: string;
+  private readonly ownerDataDir: string | undefined;
+  private readonly ownerKillGraceMs: number;
+  private readonly jobOwnershipEnabled: boolean;
   /** Windows: cached MCP config file path (created once per instance,
    *  reused across invocations to avoid temp file spam). */
   private mcpConfigFilePath: string | undefined;
@@ -137,6 +179,11 @@ export class ClaudeBgCarrierService implements AgentService {
     this.jobsDir = options?.jobsDir;
     this.pollMs = options?.pollMs ?? 500;
     this.timeoutMs = options?.timeoutMs ?? 30 * 60_000;
+    this.claudeCommand = options?.claudeCommand ?? resolveCliCommandOrBare('claude');
+    this.ownerDataDir = options?.ownerDataDir;
+    this.ownerKillGraceMs = options?.ownerKillGraceMs ?? 3_000;
+    this.jobOwnershipEnabled =
+      process.platform !== 'win32' && (options?.enableJobOwnership ?? options?.spawnFn === undefined);
     // 砚砚 Step-3 P1: resolve MCP server path same way as ClaudeAgentService
     // (single source of truth via `resolveDefaultClaudeMcpServerPath`).
     const configuredPath = options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -147,26 +194,54 @@ export class ClaudeBgCarrierService implements AgentService {
     }
   }
 
-  /**
-   * Best-effort `claude stop <shortId>` — fire-and-forget cleanup after
-   * abort / timeout / unexpected wait failure. Errors are intentionally
-   * swallowed: the caller is already throwing, and we don't want stop()
-   * failures to mask the original cause.
-   *
-   * codex review (PR #1666 round 5) P1.2.
-   */
-  private bestEffortStop(shortId: string): void {
+  private retireOwnerAfterNativeTerminal(owner: ClaudeBgJobOwnerHandle | undefined): void {
+    if (!owner) return;
     try {
-      const child = this.spawnFn(resolveCliCommandOrBare('claude'), ['stop', shortId], {
+      completeClaudeBgJobOwner(owner);
+    } catch (error) {
+      log.warn({ error, ownerId: owner.manifest.ownerId }, 'Failed to retire Claude bg owner manifest');
+    }
+  }
+
+  /**
+   * Fire-and-forget `claude stop <shortId>` using the exact namespace stored
+   * with the job. The active manifest is retired only after exit code 0;
+   * spawn errors, timeouts, and nonzero exits preserve it for startup retry.
+   */
+  private bestEffortStop(shortId: string, owner?: ClaudeBgJobOwnerHandle): void {
+    try {
+      const child = this.spawnFn(this.claudeCommand, ['stop', shortId], {
+        ...(owner ? { env: buildClaudeBgJobStopEnv(process.env, owner.manifest.stopContext) } : {}),
         stdio: 'ignore',
       });
-      // Detach so stop() doesn't keep the event loop alive
       child.unref?.();
-      child.on('error', () => {
-        /* swallow — best effort */
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Stop dispatcher already exited; close/error will own the outcome.
+        }
+        log.warn({ shortId }, 'Claude bg native stop timed out; retained owner manifest');
+      }, this.ownerKillGraceMs);
+      timer.unref?.();
+      child.once('error', (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        log.warn({ error, shortId }, 'Claude bg native stop failed; retained owner manifest');
       });
-    } catch {
-      /* swallow — best effort */
+      child.once('close', (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (code === 0) this.retireOwnerAfterNativeTerminal(owner);
+        else log.warn({ code, shortId }, 'Claude bg native stop was nonzero; retained owner manifest');
+      });
+    } catch (error) {
+      log.warn({ error, shortId }, 'Claude bg native stop spawn failed; retained owner manifest');
     }
   }
 
@@ -272,7 +347,6 @@ export class ClaudeBgCarrierService implements AgentService {
       envOverrides.CLAUDE_CODE_ENTRYPOINT = null;
       envOverrides.CLAUDECODE = null;
       if (readOnly) envOverrides.CAT_CAFE_READONLY = 'true';
-      const env = buildChildEnv(envOverrides);
 
       // F198 codex round-7 B-prime refactor: model selection delegates to
       // ClaudeAgentService.resolveClaudeModelSelection so we don't drift
@@ -379,7 +453,23 @@ export class ClaudeBgCarrierService implements AgentService {
       // with claude installed-but-not-on-PATH (production runtime envs
       // launched via systemd/pm2/launchd) don't fail with ENOENT. Matches
       // existing ClaudeAgentService pattern (utils/cli-resolve.ts).
-      const claudeCommand = resolveCliCommandOrBare('claude');
+      // Claude Agent View persists jobs behind a shared daemon and strips
+      // arbitrary dispatcher env. Never project a process token onto that
+      // daemon; persist only the provider-native stop namespace instead.
+      envOverrides[CLI_PROCESS_OWNER_ENV] = null;
+      const childCwd = options?.workingDirectory ?? process.cwd();
+      const env = buildChildEnv(envOverrides);
+      let owner: ClaudeBgJobOwnerHandle | undefined;
+      try {
+        if (this.jobOwnershipEnabled) {
+          const stopContext = captureClaudeBgJobStopContext(env, childCwd);
+          if (stopContext.claudeConfigDir) env.CLAUDE_CONFIG_DIR = stopContext.claudeConfigDir;
+          else delete env.CLAUDE_CONFIG_DIR;
+          owner = createClaudeBgJobOwnerManifest(this.ownerDataDir, stopContext);
+        }
+      } catch (error) {
+        return reject(new CarrierError(`claude --bg owner manifest failed: ${(error as Error).message}`, error));
+      }
 
       // codex round 6 P1.3: propagate AbortSignal into spawn so cancellation
       // during the 5-15s startup window kills the child via SIGTERM. Without
@@ -389,12 +479,20 @@ export class ClaudeBgCarrierService implements AgentService {
       // Supervisor (`claude --bg`) reads stdin synchronously before forking
       // the detached worker, so it's safe to write+close before the daemon
       // backgrounds itself (spike-verified).
-      const child = this.spawnFn(claudeCommand, args, {
-        cwd: options?.workingDirectory ?? process.cwd(),
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        signal: options?.signal,
-      });
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = this.spawnFn(this.claudeCommand, args, {
+          cwd: childCwd,
+          env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          signal: options?.signal,
+        });
+      } catch (error) {
+        // Synchronous spawn failure proves no dispatcher (and therefore no
+        // native job) was created, so the pending record can be retired.
+        this.retireOwnerAfterNativeTerminal(owner);
+        return reject(new CarrierError(`claude --bg spawn failed: ${(error as Error).message}`, error));
+      }
 
       // Write the prompt to the supervisor's stdin, then close. Mirror the
       // EPIPE guard used in cli-spawn.ts (child may exit before consuming).
@@ -420,6 +518,8 @@ export class ClaudeBgCarrierService implements AgentService {
       };
 
       child.on('error', (err) => {
+        // The spawn error is provider-native proof that dispatch never began.
+        this.retireOwnerAfterNativeTerminal(owner);
         finish(new CarrierError(`claude --bg spawn failed: ${(err as Error).message}`, err));
       });
       child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
@@ -427,17 +527,30 @@ export class ClaudeBgCarrierService implements AgentService {
 
       child.on('close', (code) => {
         if (code !== 0) {
+          // A dispatcher may have persisted a job before exiting nonzero. No
+          // short id means no safe stop target, so retain the pending record.
           return finish(new CarrierError(`claude --bg exited code=${code}: ${stderr.slice(0, 300)}`));
         }
         const match = SHORT_ID_PATTERN.exec(stdout);
         if (!match) {
+          // Unknown job identity is intentionally durable and non-actionable;
+          // never guess via process environment or signal a shared daemon.
           return finish(new CarrierError(`Could not parse short id from claude --bg stdout: ${stdout.slice(0, 300)}`));
         }
         const shortId = match[1];
+        if (owner) {
+          try {
+            activateClaudeBgJobOwner(owner, shortId);
+          } catch (error) {
+            this.bestEffortStop(shortId, owner);
+            return finish(new CarrierError(`claude --bg owner activation failed: ${(error as Error).message}`, error));
+          }
+        }
         finish(null, {
           shortId,
           consumer: new JobEventConsumer(shortId, { jobsDir: this.jobsDir }),
           effectiveModel,
+          ...(owner ? { owner } : {}),
         });
       });
     });
@@ -467,7 +580,7 @@ export class ClaudeBgCarrierService implements AgentService {
     // codex round-8 P2: receive effective model from startJob so metadata
     // reflects what was actually spawned (not this.model fallback when
     // callbackEnv MODEL_OVERRIDE_KEY or api_key env routing changes the run).
-    const { shortId, consumer, effectiveModel } = await this.startJob(prompt, options);
+    const { shortId, consumer, effectiveModel, owner } = await this.startJob(prompt, options);
 
     yield {
       type: 'session_init',
@@ -496,7 +609,7 @@ export class ClaudeBgCarrierService implements AgentService {
     // terminal (long jobs would build unbounded memory pressure).
     const usageAcc = createUsageAccumulator();
     let transcriptEntryCount = 0;
-    let transcriptTerminal = false;
+    let transcriptTurnComplete = false;
     // codex slice-2 P1 round-4 (2026-05-14): track the LAST assistant
     // entry's joined text content. Predicate at terminal:
     //   trim(lastAssistantText) === trim(state.output.result) → suppress
@@ -541,7 +654,7 @@ export class ClaudeBgCarrierService implements AgentService {
 
     while (Date.now() < deadline) {
       if (options?.signal?.aborted) {
-        this.bestEffortStop(shortId);
+        this.bestEffortStop(shortId, owner);
         throw new Error(`ClaudeBgCarrierService.invoke: aborted for ${shortId}`);
       }
 
@@ -562,8 +675,8 @@ export class ClaudeBgCarrierService implements AgentService {
       }
 
       // Lazy-init tailer once daemon writes state.linkScanPath. Some short
-      // jobs may complete before linkScanPath appears — handled by legacy
-      // fallback in the terminal branch below.
+      // jobs may complete a delivery turn before linkScanPath appears —
+      // handled by the legacy fallback in the completion branch below.
       if (!tailer && state?.linkScanPath) {
         tailer = new TranscriptTailer(state.linkScanPath);
       }
@@ -571,13 +684,13 @@ export class ClaudeBgCarrierService implements AgentService {
       // Stream any new transcript entries.
       // cloud codex round-12 P1 (2026-05-14): wrap tail reads in try/catch
       // — readNew can fail at runtime (linkScanPath unreadable / removed /
-      // replaced with directory between polls). On non-terminal failure:
+      // replaced with directory between polls). On an incomplete-turn failure:
       // bestEffortStop + rethrow (consumer dies, leak guard fires).
       //
-      // cloud codex round-15 P1 (2026-05-14): if state is ALREADY terminal
+      // cloud codex round-15 P1 (2026-05-14): if the UI turn is ALREADY complete
       // when tail read fails, gracefully degrade — output.result fallback
       // is available, throwing would block backward-compat success path.
-      // Disable tailer so terminal branch treats this as legacy fallback case.
+      // Disable tailer so the completion branch treats this as a legacy fallback case.
       if (tailer) {
         let newEntries: unknown[] = [];
         try {
@@ -590,12 +703,13 @@ export class ClaudeBgCarrierService implements AgentService {
             state?.state === 'blocked' ||
             state?.state === 'stopped'
           ) {
-            // Terminal state — degrade gracefully, fallback path will emit
-            // output.result if present. No leak (job already finished).
+            // Delivery-complete state — degrade gracefully and let the
+            // fallback path emit output.result. A merely blocked native job
+            // keeps its durable owner manifest for later exact stop.
             tailer = undefined;
           } else {
-            // Non-terminal — consumer can't recover, prevent quota leak.
-            this.bestEffortStop(shortId);
+            // Incomplete turn — consumer can't recover, prevent quota leak.
+            this.bestEffortStop(shortId, owner);
             throw new Error(
               `ClaudeBgCarrierService.invoke: transcript read failed for ${shortId}: ${(err as Error).message}`,
             );
@@ -605,12 +719,12 @@ export class ClaudeBgCarrierService implements AgentService {
           accumulateUsageFromEntries(usageAcc, newEntries);
           transcriptEntryCount += newEntries.length;
           yield* yieldFromTranscript(newEntries);
-          if (!transcriptTerminal) {
+          if (!transcriptTurnComplete) {
             for (const raw of newEntries) {
               if (typeof raw === 'object' && raw !== null) {
                 const e = raw as Record<string, unknown>;
                 if (e.type === 'system' && e.subtype === 'turn_duration') {
-                  transcriptTerminal = true;
+                  transcriptTurnComplete = true;
                   break;
                 }
               }
@@ -619,20 +733,15 @@ export class ClaudeBgCarrierService implements AgentService {
         }
       }
 
-      const stateTerminal =
-        state?.state === 'done' ||
-        state?.state === 'error' ||
-        state?.state === 'failed' ||
-        state?.state === 'blocked' ||
-        state?.state === 'stopped';
-      if (stateTerminal || transcriptTerminal) {
-        // Final drain: transcript may have grown between last poll and terminal.
+      const uiTurnComplete = isUiTurnCompleteState(state?.state) || transcriptTurnComplete;
+      if (uiTurnComplete) {
+        // Final drain: transcript may have grown between the last poll and UI completion.
         // codex slice-2 P1 (regression B): use includeTrailingPartial to also
         // emit the final line when daemon committed state=done before
         // flushing the trailing \n on the last entry.
-        // cloud codex round-15 P1: we're already in terminal branch here,
-        // so a drain failure should degrade to output.result fallback,
-        // never throw (job already finished, no leak risk).
+        // cloud codex round-15 P1: we're already in the UI completion branch,
+        // so a drain failure should degrade to output.result fallback. Native
+        // jobs that are still live keep their durable owner manifest.
         if (tailer) {
           let finalEntries: unknown[] = [];
           try {
@@ -699,6 +808,11 @@ export class ClaudeBgCarrierService implements AgentService {
         // discarding it would corrupt cost/usage telemetry on this success.
         const usage = usageAcc.assistantTurnCount > 0 ? finalizeTranscriptUsage(usageAcc, { durationMs }) : undefined;
 
+        // UI delivery completion is a different lifecycle from the native
+        // background job. Only a provider job-terminal state can retire the
+        // manifest here; blocked and turn_duration keep the exact stop handle
+        // durable for API-death recovery.
+        if (isNativeJobTerminalState(state?.state)) this.retireOwnerAfterNativeTerminal(owner);
         yield {
           type: 'done',
           catId: this.catId,
@@ -716,7 +830,7 @@ export class ClaudeBgCarrierService implements AgentService {
             ...(usage ? { usage } : {}),
             diagnostics: {
               ...(state?.state && state.state !== 'done' ? { terminalState: state.state } : {}),
-              ...(transcriptTerminal && state?.state === 'working' ? { terminalState: 'transcript-complete' } : {}),
+              ...(transcriptTurnComplete && state?.state === 'working' ? { terminalState: 'transcript-complete' } : {}),
               durationMs,
               // Report transcript entry count when we actually counted any
               // (not gated on tailer being currently defined — see round-16).
@@ -731,7 +845,7 @@ export class ClaudeBgCarrierService implements AgentService {
     }
 
     // Timeout
-    this.bestEffortStop(shortId);
+    this.bestEffortStop(shortId, owner);
     throw new Error(`ClaudeBgCarrierService.invoke: timeout ${timeoutMs}ms for ${shortId}`);
   }
 }

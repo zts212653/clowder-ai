@@ -4,6 +4,9 @@ import { describe, it, mock } from 'node:test';
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { QueuedMessageCustodyCoordinator } = await import(
+  '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
   '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
@@ -633,7 +636,7 @@ describe('QueueProcessor pause epoch', () => {
     );
   });
 
-  it('does not cancel a delivered message when replacement tombstones its active carrier', async () => {
+  it('cancels honest queued custody when replacement tombstones its active carrier', async () => {
     const tracker = new InvocationTracker();
     const queue = new InvocationQueue();
     const messageStore = new MessageStore();
@@ -642,6 +645,7 @@ describe('QueueProcessor pause epoch', () => {
     const deps = depsWithQueuedThread(tracker);
     deps.queue = queue;
     deps.messageStore = messageStore;
+    deps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
     deps.router.routeExecution = mock.fn(async function* () {
       routeEntered.resolve();
       await routeRelease.promise;
@@ -671,7 +675,7 @@ describe('QueueProcessor pause epoch', () => {
 
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
     await routeEntered.promise;
-    assert.equal(messageStore.getById(message.id)?.deliveryStatus, 'delivered');
+    assert.equal(messageStore.getById(message.id)?.deliveryStatus, 'queued');
 
     const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
@@ -684,18 +688,23 @@ describe('QueueProcessor pause epoch', () => {
 
     assert.equal(
       messageStore.getById(message.id)?.deliveryStatus,
-      'delivered',
-      'replacement must not reverse an already-visible message to canceled',
+      'canceled',
+      'explicit replacement cancellation must withdraw rather than publish the queued source',
     );
     assert.equal(
       deps.socketManager.emitToUser.mock.calls.some(
         (call) => call.arguments[1] === 'message_deleted' && call.arguments[2]?.messageId === message.id,
       ),
-      false,
+      true,
     );
 
     routeRelease.resolve();
-    await new Promise((resolve) => setImmediate(resolve));
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const terminal = messageStore.getById(message.id);
+    assert.equal(terminal?.deliveryStatus, 'canceled');
+    assert.equal(terminal?.queueCustody, undefined);
   });
 
   it('fences a secondary replacement before a multi-cat queued start resumes after record creation', async () => {

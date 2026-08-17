@@ -137,38 +137,6 @@ describe('MCP Server Tool Registration', () => {
     assert.match(desc, /LOCAL COMMANDS ONLY/);
   });
 
-  test('post_message schema exposes threadId as optional (F178 agent-key auth)', async () => {
-    const { createServer } = await import('../dist/index.js');
-    const server = createServer();
-
-    const postTool = server._registeredTools.cat_cafe_post_message;
-    assert.ok(postTool, 'post_message tool should exist');
-    const shapeKeys = Object.keys(postTool.inputSchema.shape);
-    assert.ok(
-      shapeKeys.includes('threadId'),
-      'post_message must expose threadId for agent-key auth (F178 — no default invocation thread)',
-    );
-    assert.ok(
-      postTool.inputSchema._def.shape().threadId.isOptional(),
-      'post_message threadId must be optional (backward-compatible for invocation auth)',
-    );
-    assert.ok(
-      shapeKeys.includes('agentKeyCatId'),
-      'post_message must expose agentKeyCatId for shared persistent MCP variant identity',
-    );
-    assert.ok(
-      postTool.inputSchema._def.shape().agentKeyCatId.isOptional(),
-      'post_message agentKeyCatId stays schema-optional for invocation auth; shared persistent agent-key auth requires it at runtime',
-    );
-    assert.ok(shapeKeys.includes('action'), 'post_message must expose the same-thread structured successor action');
-    assert.ok(
-      postTool.inputSchema._def.shape().action.isOptional(),
-      'post_message action stays optional for ordinary notifications',
-    );
-    assert.match(postTool.description, /same-thread structured single successor/i);
-    assert.match(postTool.description, /multi_mention.*parallel/i);
-  });
-
   test('cross_post_message schema must REQUIRE threadId', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();

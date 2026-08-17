@@ -116,8 +116,10 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}, surface: 'files
       _workspaceFileSetAt: { ts: 0, threadId: null },
       workspaceMode: 'dev',
       setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
       workspaceSurface: surface,
       setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
       workspacePreview: { port: 3000, path: '/' },
       setWorkspacePreview: vi.fn(),
     };

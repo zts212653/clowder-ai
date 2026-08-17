@@ -2,7 +2,7 @@
  * F247 AC-B1c-2 + AC-B1c-4 + AC-B1c-11 (defense-in-depth): cloud-invoke-bridge tests.
  *
  * Pins:
- *  - dispatch is fire-and-forget — never throws to caller, even if adapter throws
+ *  - dispatch returns a bounded outcome and never throws, even if adapter throws
  *  - no adapter → fallback emitted with reason 'no-adapter'
  *  - adapter.isReady=false → fallback 'adapter-not-ready'
  *  - adapter.injectAndCaptureUrl rejects → fallback 'inject-failed'
@@ -72,7 +72,7 @@ const baseParams = {
   idempotencyKey: 'source-message-123',
 };
 
-describe('F247 AC-B1c-2: dispatch fire-and-forget contract', () => {
+describe('F247 AC-B1c-2: dispatch non-throwing outcome contract', () => {
   let threadStore;
   let fallback;
   beforeEach(() => {
@@ -344,6 +344,27 @@ describe('F247 Host Adapter: background append without foreground UI takeover', 
     assert.equal(legacyCalls, 0);
   });
 
+  it('treats a refreshable Host with no installation as unavailable rather than a broken delivery', async () => {
+    const existing = 'https://chatgpt.com/c/existing-uuid';
+    const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
+    const fallback = makeRecordingFallback();
+    const unavailable = new Error('personal Chrome Host Adapter is not installed');
+    unavailable.code = 'HOST_UNAVAILABLE';
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: { append_message: async () => Promise.reject(unavailable) },
+      pinchTabAdapter: null,
+      emitFallback: fallback.fn,
+      threadStore,
+    });
+
+    const outcome = await bridge.dispatchInternal(baseParams);
+
+    assert.equal(outcome.kind, 'fallback');
+    assert.equal(outcome.reason, 'no-adapter');
+    assert.equal(fallback.calls.length, 1);
+    assert.equal(fallback.calls[0].reason, 'no-adapter');
+  });
+
   it('requires the persisted source message ID and does not use legacy automation when it is absent', async () => {
     const existing = 'https://chatgpt.com/c/existing-uuid';
     const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });
@@ -390,10 +411,11 @@ describe('F247 AC-B1c-4: fallback message content', () => {
     ]) {
       const out = buildFallbackMessageContent({ reason, catId: 'gpt-pro', detail: 'why' });
       const parsed = JSON.parse(out);
-      assert.equal(parsed.type, 'b1c_bridge_fallback');
+      assert.equal(parsed.type, 'cloud_bridge_status');
       assert.equal(parsed.catId, 'gpt-pro');
+      assert.equal(parsed.status, 'unavailable');
       assert.equal(parsed.reason, reason);
-      assert.ok(parsed.headline.length > 0, 'has user-readable headline');
+      assert.ok(parsed.message.length > 0, 'has user-readable message');
       assert.equal(parsed.detail, 'why');
     }
   });

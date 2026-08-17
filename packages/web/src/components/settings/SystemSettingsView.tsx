@@ -4,36 +4,19 @@ import { useMemo } from 'react';
 import type { EnvVar } from './EnvSubComponents';
 import { SettingsSection } from './primitives';
 
-/* ------------------------------------------------------------------ */
-/*  Settings group definitions (display order)                        */
-/* ------------------------------------------------------------------ */
-
 const GROUP_ORDER: readonly string[] = ['network', 'storage', 'lifecycle', 'runtime', 'security'];
-
-const GROUP_LABELS: Record<string, string> = {
-  network: '网络 & 端口',
-  storage: '存储',
-  lifecycle: '数据生命周期',
-  runtime: '运行与调用',
-  security: '安全 & 访问控制',
-};
 
 const GROUP_DESCRIPTIONS: Record<string, string> = {
   lifecycle: '各类数据的自动清理时间。设为 0 表示永久保留（推荐）',
 };
 
-/**
- * Determine effective boolean state using per-variable runtime semantics.
- * The `trueWhen` field on booleanSemantics specifies how the actual runtime
- * consumer parses the value — the display must match that behavior.
- */
-function isEffectivelyOn(v: EnvVar): boolean {
-  const sem = v.booleanSemantics;
-  if (!sem) return false;
-  if (v.currentValue == null) return sem.defaultOn;
-  const raw = v.currentValue;
-  const mode = sem.trueWhen ?? 'parseBoolEnv';
-  switch (mode) {
+function isEffectivelyOn(variable: EnvVar): boolean {
+  const semantics = variable.booleanSemantics;
+  if (!semantics) return false;
+  if (variable.currentValue == null) return semantics.defaultOn;
+
+  const raw = variable.currentValue;
+  switch (semantics.trueWhen ?? 'parseBoolEnv') {
     case 'exactTrue':
       return raw === 'true';
     case 'exactOne':
@@ -82,23 +65,23 @@ function HelpTip({ text }: { text: string }) {
   );
 }
 
-function SettingItem({ v }: { v: EnvVar }) {
-  const label = v.label ?? v.name;
-  const displayValue = v.currentValue ?? v.defaultValue;
+function SettingItem({ variable }: { variable: EnvVar }) {
+  const label = variable.label ?? variable.name;
+  const displayValue = variable.currentValue ?? variable.defaultValue;
 
   return (
-    <div className="flex items-start gap-4 py-3 justify-between">
+    <div className="flex items-start justify-between gap-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-cafe">{label}</span>
-          {v.description && <HelpTip text={v.description} />}
+          {variable.description && <HelpTip text={variable.description} />}
         </div>
       </div>
-      <div className={`text-right ${v.booleanSemantics ? 'shrink-0' : 'min-w-0 max-w-[50%] overflow-hidden'}`}>
-        {v.booleanSemantics ? (
-          <ReadOnlyToggle on={isEffectivelyOn(v)} label={label} />
+      <div className={`text-right ${variable.booleanSemantics ? 'shrink-0' : 'min-w-0 max-w-[50%] overflow-hidden'}`}>
+        {variable.booleanSemantics ? (
+          <ReadOnlyToggle on={isEffectivelyOn(variable)} label={label} />
         ) : (
-          <span className="block truncate text-sm font-mono text-cafe-secondary" title={displayValue}>
+          <span className="block truncate font-mono text-sm text-cafe-secondary" title={displayValue}>
             {displayValue}
           </span>
         )}
@@ -109,38 +92,37 @@ function SettingItem({ v }: { v: EnvVar }) {
 
 interface SystemSettingsViewProps {
   variables: EnvVar[];
+  groupLabels: Record<string, string>;
 }
 
-export function SystemSettingsView({ variables }: SystemSettingsViewProps) {
+export function SystemSettingsView({ variables, groupLabels }: SystemSettingsViewProps) {
   const groups = useMemo(() => {
-    const map = new Map<string, EnvVar[]>();
-    for (const v of variables) {
-      const key = v.settingsGroup ?? 'other';
-      const arr = map.get(key) ?? [];
-      arr.push(v);
-      map.set(key, arr);
+    const grouped = new Map<string, EnvVar[]>();
+    for (const variable of variables) {
+      const key = variable.settingsGroup ?? 'other';
+      grouped.set(key, [...(grouped.get(key) ?? []), variable]);
     }
-    const ordered: Array<{ key: string; label: string; description?: string; vars: EnvVar[] }> = [];
+
+    const ordered: Array<{ key: string; label: string; description?: string; variables: EnvVar[] }> = [];
     for (const key of GROUP_ORDER) {
-      const vars = map.get(key);
-      if (vars?.length) {
-        ordered.push({ key, label: GROUP_LABELS[key] ?? key, description: GROUP_DESCRIPTIONS[key], vars });
-        map.delete(key);
-      }
+      const entries = grouped.get(key);
+      if (!entries?.length) continue;
+      ordered.push({ key, label: groupLabels[key] ?? key, description: GROUP_DESCRIPTIONS[key], variables: entries });
+      grouped.delete(key);
     }
-    for (const [key, vars] of map) {
-      ordered.push({ key, label: GROUP_LABELS[key] ?? key, vars });
+    for (const [key, entries] of grouped) {
+      ordered.push({ key, label: groupLabels[key] ?? key, variables: entries });
     }
     return ordered;
-  }, [variables]);
+  }, [groupLabels, variables]);
 
   return (
     <div className="space-y-4">
       {groups.map((group) => (
         <SettingsSection key={group.key} title={group.label} description={group.description}>
           <div className="divide-y divide-[var(--console-border-soft)]">
-            {group.vars.map((v) => (
-              <SettingItem key={v.name} v={v} />
+            {group.variables.map((variable) => (
+              <SettingItem key={variable.name} variable={variable} />
             ))}
           </div>
         </SettingsSection>

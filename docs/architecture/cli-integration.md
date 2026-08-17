@@ -3,6 +3,7 @@ feature_ids: [F118, F212]
 topics: [architecture, cli, integration]
 doc_kind: note
 created: 2026-02-26
+tips_exempt: Automatic CLI process-ownership repair with no new user action or discoverable capability.
 ---
 
 # CLI 集成架构：Claude Code / Codex / Google CLI
@@ -124,6 +125,40 @@ export async function* spawnCli(options: CliSpawnOptions): AsyncGenerator<unknow
 | 僵尸进程 | `process.on('exit')` 钩子强制清理 |
 | 用户取消 | `AbortSignal` 是默认唯一终止入口；取消后才进入既有有界清理链 |
 | 错误上报 | timeout 固定为 `cli_response_timeout` / `cli_stall_timeout`；kill 后 exit 只放 `terminalContext.postKill*`，不覆盖 timeout cause |
+
+**长驻 carrier 也必须走同一 ownership seam（2026-08-13）**：
+
+| Carrier | 生命周期归属 |
+|---------|------------|
+| Claude / Codex `exec` / Gemini / AGY headless / Kimi / OpenCode | `spawnCli` → `cli-supervisor` |
+| Codex app-server（stdio 与 pooled Unix socket） | `cli-supervisor` 持有 host 整棵进程树 |
+| ACP stdio / HTTP stream | `cli-supervisor` 持有 pool process 整棵进程树 |
+| Claude `--bg` daemon | job manifest 持有 daemon short id + allowlisted native stop context；dispatcher 正常退出不代表 job 结束 |
+| Codex tmux carrier | tmux pane 是 owner；关闭时 kill pane |
+| Antigravity Desktop callback adapter | 外部 GUI 会话，不把整个用户 App 当作 invocation 子树回收 |
+
+Unix 清理不能只依赖一个 PGID：Codex 的 `code-mode-host` 等子孙可以自行创建新进程组。每个 supervisor
+在 provider root 执行前先原子写入 `${CAT_CAFE_DATA_DIR}/cli-process-owners/<ownerId>.json`，再把随机
+`CAT_CAFE_PROCESS_OWNER_ID` 注入 root 环境；正常 fork / exec / 重父化 / 新 PGID 会继承这个 owner token。
+因此默认 1 秒循环只检查原 API parent 是否存活，不做全量 `ps`；SIGINT、TERM、leader exit 等生命周期边缘
+才扫描 token 投影，先 TERM，超时后重新扫描并只 KILL 当前仍匹配的 owner 进程。安全的完整 PGID 才走组信号，
+混合 PGID 退回逐 PID；整树归零即撤销 escalation 并删除 manifest。
+
+supervisor 自身遭 `SIGKILL` 时无法执行清理，所以 owner manifest 是 crash recovery 真相源。API 在开始监听前
+读取 manifests，以 supervisor PID + `lstart` 栅栏跳过活 owner，只回收死亡 owner 的 token 子树；扫描失败或
+无法证明归零时保留 manifest 下次重试。Codex socket 目录也记录在同一 manifest 中，且仅在 matching processes
+归零后删除。这个 reaper 不按 `codex` / `claude` 等命令名匹配，禁止退化为 `pkill -f`。
+
+Claude `--bg` 是 dispatcher-first 生命周期，不能把短命的 `claude --bg` dispatcher 套进 leader-exit
+supervisor：dispatcher 成功退出时 worker 才刚开始工作。carrier 在 dispatch 前写
+`${CAT_CAFE_DATA_DIR}/claude-bg-job-owners/<ownerId>.json` 的 `pending` 记录；记录只持严格 allowlist 的
+native stop context（当前为归一化绝对路径 `CLAUDE_CONFIG_DIR`），不持 credential，也不向 shared daemon
+注入 process-owner token。拿到严格校验的 8 位 short id 后原子激活。正常 abort/timeout 与 API startup
+recovery 都在该 context 下执行 exact `claude stop <shortId>`；只有 stop exit 0 或 daemon 的 native
+job-terminal state 才退休 active manifest。这里 UI turn completion 与 job lifecycle 严格分离：daemon
+`done` / `error` / `failed` / `stopped` 可证明 job 已终止；`blocked` 表示 daemon 仍在等待，transcript
+`turn_duration` 也只表示当前一轮完成，二者都继续保留 manifest。stop 失败、namespace 不可证或只有 pending
+记录时同样保留 manifest、零 process signal；无 manifest 的其他 Claude job 和 shared daemon 始终不受影响。
 
 **重要教训：stderr 是诊断证据，不是续命信号**
 

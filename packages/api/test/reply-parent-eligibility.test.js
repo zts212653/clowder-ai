@@ -94,14 +94,9 @@ describe('#699: isEligibleReplyParent', () => {
     assert.ok(isEligibleReplyParent(parent, defaultOpts));
   });
 
-  test('rejects other-cat stream message when hideOtherCatStreams=true', () => {
+  test('accepts other-cat persisted stream-origin message', () => {
     const parent = mockMsg({ catId: 'codex', origin: 'stream' });
-    assert.ok(!isEligibleReplyParent(parent, { ...defaultOpts, hideOtherCatStreams: true }));
-  });
-
-  test('accepts other-cat stream message when hideOtherCatStreams=false', () => {
-    const parent = mockMsg({ catId: 'codex', origin: 'stream' });
-    assert.ok(isEligibleReplyParent(parent, { ...defaultOpts, hideOtherCatStreams: false }));
+    assert.ok(isEligibleReplyParent(parent, defaultOpts));
   });
 
   test('user viewer sees all whispers', () => {

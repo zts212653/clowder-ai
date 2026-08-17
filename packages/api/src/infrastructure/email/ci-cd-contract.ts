@@ -19,6 +19,8 @@ export interface CiPollResult {
   readonly headSha: string;
   readonly prState: 'open' | 'merged' | 'closed';
   readonly aggregateBucket: CiBucket;
+  /** Raw GitHub rollup presence before the poller's empty-rollup stability guard. */
+  readonly checkRollup?: 'empty' | 'present';
   readonly checks: readonly CiCheckDetail[];
   /** GitHub login of the user who merged the PR (only present when prState=merged). */
   readonly mergedByLogin?: string;

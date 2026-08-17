@@ -11,7 +11,12 @@ import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
 import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
-import { buildSkillMountTargets, createSkillSymlink } from '../utils/skill-mount.js';
+import {
+  buildSkillMountTargets,
+  createSkillSymlink,
+  ensureSharedSkillRefsMount,
+  SHARED_SKILL_REFS_ALIAS,
+} from '../utils/skill-mount.js';
 import { classifyMountPath, type MountConflict } from './skill-sync-engine.js';
 
 // ────────── Types ──────────
@@ -64,6 +69,7 @@ export async function mountSkillSymlinks(
   skillsSource: string,
   mountRules: MountRules,
   mountPaths?: readonly string[],
+  sharedSkillsSource = skillsSource,
 ): Promise<SkillMountResult> {
   const result: SkillMountResult = { mounted: [], unmounted: [], conflicts: [] };
   const targets = activeMountTargets(projectRoot, mountRules);
@@ -102,6 +108,13 @@ export async function mountSkillSymlinks(
         }
       }
       await mkdir(dir, { recursive: true });
+      if ((await ensureSharedSkillRefsMount(dir, sharedSkillsSource)) === 'conflict') {
+        result.conflicts.push({
+          skillName: SHARED_SKILL_REFS_ALIAS,
+          mountPointId: target.id,
+          path: join(dir, SHARED_SKILL_REFS_ALIAS),
+        });
+      }
       const linkPath = join(dir, skillName);
       const status = await classifyMountPath(linkPath, skillsSource, skillName);
       if (status === 'missing') {

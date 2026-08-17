@@ -8,6 +8,8 @@ export interface ToastItem {
   title: string;
   message: string;
   threadId?: string;
+  /** Optional exact navigation affordance rendered below the toast body. */
+  action?: { label: string; threadId: string; messageId?: string };
   /** Auto-dismiss after ms (0 = no auto-dismiss) */
   duration: number;
   createdAt: number;

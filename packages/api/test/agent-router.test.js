@@ -737,7 +737,7 @@ describe('AgentRouter', () => {
       messages.push(msg);
     }
 
-    // In play mode, stream thinking is isolated between cats.
+    // Inside one serial route, play mode preserves independent first-pass reasoning.
     assert.ok(
       !codexReceivedPrompt.includes('Opus response'),
       'Codex prompt should NOT include Opus stream response in play mode',

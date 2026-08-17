@@ -4,16 +4,19 @@
  */
 
 import assert from 'node:assert/strict';
-import { spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { waitForSupervisorExit } from './helpers/cli-supervisor-exit.js';
+
+const REPO_ROOT = dirname(fileURLToPath(new URL('../../../package.json', import.meta.url)));
 
 const {
   spawnCli,
@@ -294,6 +297,7 @@ test(
       supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
         env: {
           ...process.env,
+          CAT_CAFE_DATA_DIR: tempDir,
           CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
           CAT_CAFE_SUPERVISOR_POLL_MS: '500',
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '300',
@@ -305,18 +309,9 @@ test(
         stderr += chunk.toString();
       });
 
-      const exit = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          supervisor.kill('SIGKILL');
-          resolve({ timedOut: true, stderr });
-        }, 3_000);
-        supervisor.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          resolve({ code, signal, stderr });
-        });
-      });
+      const exit = await waitForSupervisorExit(supervisor);
 
-      assert.notEqual(exit.timedOut, true, `supervisor did not exit: ${exit.stderr}`);
+      assert.notEqual(exit.timedOut, true, `supervisor did not exit: ${stderr}`);
       assert.equal(existsSync(markerPath), true, `child did not receive SIGTERM; stderr=${exit.stderr}`);
       assert.equal(await readFile(markerPath, 'utf8'), 'SIGTERM');
     } finally {
@@ -349,6 +344,7 @@ test(
       supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
         env: {
           ...process.env,
+          CAT_CAFE_DATA_DIR: tempDir,
           CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
           CAT_CAFE_SUPERVISOR_POLL_MS: '2000',
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '150',
@@ -366,18 +362,9 @@ test(
       }
       assert.equal(existsSync(readyPath), true, `stubborn child was not ready; stderr=${stderr}`);
 
-      const exit = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          supervisor?.kill('SIGKILL');
-          resolve({ timedOut: true, stderr });
-        }, 5_000);
-        supervisor.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          resolve({ code, signal, stderr });
-        });
-      });
+      const exit = await waitForSupervisorExit(supervisor);
 
-      assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${exit.stderr}`);
+      assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${stderr}`);
       assert.equal(await readFile(termPath, 'utf8'), 'SIGTERM');
       assert.equal(exit.code, 137, `SIGKILL child should surface as 137; stderr=${exit.stderr}`);
     } finally {
@@ -817,6 +804,87 @@ test('buildChildEnv never forwards runtime-only lifecycle capabilities to agent 
     else process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = previousGlobalSidecarOwner;
   }
 });
+
+test(
+  'buildChildEnv keeps the verdict gh guard first after a zsh login profile rewrites PATH',
+  { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
+  () => {
+    const childEnv = buildChildEnv({
+      PATH: '/usr/local/bin:/usr/bin',
+      CAT_CAFE_VERDICT_REPO_FULL_NAME: 'example/cat-cafe',
+    });
+
+    assert.equal(childEnv.PATH?.split(':')[0], join(REPO_ROOT, 'scripts', 'guarded-bin'));
+    assert.equal(childEnv.CAT_CAFE_VERDICT_GH_GUARD_ROOT, REPO_ROOT);
+    assert.equal(childEnv.CAT_CAFE_VERDICT_REPO_FULL_NAME, 'example/cat-cafe');
+    assert.equal(childEnv.ZDOTDIR, join(REPO_ROOT, 'scripts', 'guarded-zsh'));
+
+    const loginShell = spawnSync('/bin/zsh', ['-lc', 'command -v gh'], {
+      encoding: 'utf8',
+      env: childEnv,
+    });
+    assert.equal(loginShell.status, 0, loginShell.stderr);
+    assert.equal(loginShell.stdout.trim(), join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh'));
+  },
+);
+
+test(
+  'buildChildEnv delegates original zsh startup files before restoring the verdict gh guard',
+  { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
+  async () => {
+    const originalZdotdir = await mkdtemp(join(tmpdir(), 'cat-cafe-original-zdotdir-'));
+    const previousHistfile = process.env.HISTFILE;
+    const previousOriginalZdotdir = process.env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+    process.env.HISTFILE = join(tmpdir(), 'cat-cafe-inherited-history');
+    process.env.CAT_CAFE_ORIGINAL_ZDOTDIR = join(tmpdir(), 'cat-cafe-inherited-zdotdir');
+    try {
+      await Promise.all([
+        writeFile(join(originalZdotdir, '.zshenv'), 'export ORIGINAL_ZSHENV=1\n'),
+        writeFile(join(originalZdotdir, '.zprofile'), 'export ORIGINAL_ZPROFILE=1\nexport PATH=/usr/bin\n'),
+        writeFile(
+          join(originalZdotdir, '.zshrc'),
+          'export ORIGINAL_ZSHRC=1\nexport HISTFILE="$ZDOTDIR/.zsh_history"\n',
+        ),
+        writeFile(join(originalZdotdir, '.zlogin'), 'export ORIGINAL_ZLOGIN=1\n'),
+      ]);
+      const childEnv = buildChildEnv({
+        PATH: '/usr/bin',
+        ZDOTDIR: originalZdotdir,
+      });
+      assert.equal(childEnv.HISTFILE, join(originalZdotdir, '.zsh_history'));
+      assert.equal(childEnv.CAT_CAFE_ORIGINAL_ZDOTDIR, originalZdotdir);
+
+      const explicitHistfile = join(originalZdotdir, 'custom-history');
+      const childEnvWithExplicitHistfile = buildChildEnv({
+        PATH: '/usr/bin',
+        ZDOTDIR: originalZdotdir,
+        HISTFILE: explicitHistfile,
+      });
+      assert.equal(childEnvWithExplicitHistfile.HISTFILE, explicitHistfile);
+
+      const loginShell = spawnSync(
+        '/bin/zsh',
+        [
+          '-lic',
+          'printf "%s|%s|%s|%s|%s|%s\\n" "$ORIGINAL_ZSHENV" "$ORIGINAL_ZPROFILE" "$ORIGINAL_ZSHRC" "$ORIGINAL_ZLOGIN" "$HISTFILE" "$(command -v gh)"',
+        ],
+        { encoding: 'utf8', env: childEnv },
+      );
+
+      assert.equal(loginShell.status, 0, loginShell.stderr);
+      assert.equal(
+        loginShell.stdout.trim(),
+        `1|1|1|1|${join(originalZdotdir, '.zsh_history')}|${join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh')}`,
+      );
+    } finally {
+      await rm(originalZdotdir, { recursive: true, force: true });
+      if (previousHistfile === undefined) delete process.env.HISTFILE;
+      else process.env.HISTFILE = previousHistfile;
+      if (previousOriginalZdotdir === undefined) delete process.env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+      else process.env.CAT_CAFE_ORIGINAL_ZDOTDIR = previousOriginalZdotdir;
+    }
+  },
+);
 
 test('spawnCli handles already-aborted signal', async () => {
   const proc = createMockProcess();

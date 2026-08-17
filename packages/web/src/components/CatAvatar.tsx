@@ -47,11 +47,13 @@ export function CatAvatar({
   callbackAuthPopover,
   onCallbackAuthClick,
 }: CatAvatarProps) {
-  const [imgError, setImgError] = useState(false);
+  const [failedAvatarSrc, setFailedAvatarSrc] = useState<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
   const catName = resolveCatDisplayName(catId, getCatById);
+  const avatarSrc = cat?.avatar || `/avatars/${catId}.png`;
+  const imgError = failedAvatarSrc === avatarSrc;
 
   const isStreaming = status === 'streaming';
   const isError = status === 'error';
@@ -84,12 +86,12 @@ export function CatAvatar({
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={cat?.avatar ?? `/avatars/${catId}.png`}
+            src={avatarSrc}
             alt={catName}
             width={size}
             height={size}
             className="object-cover"
-            onError={() => setImgError(true)}
+            onError={() => setFailedAvatarSrc(avatarSrc)}
           />
         )}
       </Wrapper>

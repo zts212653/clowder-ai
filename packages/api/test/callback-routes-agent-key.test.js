@@ -536,6 +536,7 @@ describe('Callback routes: agent-key auth path', () => {
       timestamp: Date.now(),
       threadId: ownedThreadId,
       deliveryStatus: 'queued',
+      extra: { isExplicitPost: true },
     });
 
     const res = await app.inject({

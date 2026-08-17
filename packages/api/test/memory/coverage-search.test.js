@@ -929,14 +929,39 @@ describe('Coverage search hard latency budget and observability', () => {
         });
       },
     };
-    const service = new CoverageSearchService(store, null, { latencyBudgetMs: 30 });
+    // Leave enough room for the service's initial macrotask boundary even when the
+    // full gate is sharing the machine with other CPU-heavy test processes. A
+    // separate regression below covers the valid pre-start deadline path.
+    const service = new CoverageSearchService(store, null, { latencyBudgetMs: 500 });
 
     const result = await service.search('async stall', { scope: 'threads', limit: 5 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
 
     assert.equal(result.contract.latency.timedOut, true);
     assert.equal(abortObserved, true, 'deadline must propagate an AbortSignal into the evidence store');
     assert.equal(active, 0, 'timed-out work must not remain active after the partial response');
+  });
+
+  it('does not start source work when the deadline expires before the first safe slice', async () => {
+    const { CoverageSearchService } = await import('../../dist/domains/memory/CoverageSearchService.js');
+    let calls = 0;
+    const store = {
+      async searchWithMeta() {
+        calls++;
+        return { items: [], meta: { degraded: false } };
+      },
+    };
+    const service = new CoverageSearchService(store, null, { latencyBudgetMs: 30 });
+
+    const pending = service.search('pre-start deadline', { scope: 'threads', limit: 5 });
+    const blockedUntil = Date.now() + 50;
+    while (Date.now() < blockedUntil) {
+      // Model a saturated event loop before the service reaches its first safe slice.
+    }
+    const result = await pending;
+
+    assert.equal(result.contract.latency.timedOut, true);
+    assert.equal(result.contract.latency.abortPropagated, true);
+    assert.equal(calls, 0, 'expired work must be skipped instead of started without time to finish');
   });
 
   it(

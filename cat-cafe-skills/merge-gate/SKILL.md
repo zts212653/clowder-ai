@@ -223,9 +223,9 @@ fi
 # 1. Push feature branch
 git push origin {branch}
 
-# 2. 开 PR（读 refs/pr-template.md 获取 body 模板，用 HEREDOC 填写）
+# 2. 开 PR（读 ../.cat-cafe-shared-refs/pr-template.md 获取 body 模板，用 HEREDOC 填写）
 gh pr create --title "feat(xxx): ..." --body "$(cat <<'EOF'
-... 按 refs/pr-template.md 模板填写 ...
+... 按 ../.cat-cafe-shared-refs/pr-template.md 模板填写 ...
 EOF
 )"
 
@@ -240,11 +240,11 @@ EOF
 #    when=[{kind:'pr_ci_terminal'}, {kind:'pr_became_conflicting'}]
 # 若注册时 CI 已经终态，live baseline 会吸收历史，不补发；立即 `gh pr checks {PR}` 并继续。
 # 等待目标变化时显式 re-register；新 generation 原子替换旧 generation，不叠加 tracker/hold。
-# predicate catalog、compact wake 与 terminal 语义见 refs/pr-signals.md。
+# predicate catalog、compact wake 与 terminal 语义见 ../.cat-cafe-shared-refs/pr-signals.md。
 #
 # 收到冲突通知时（F140 Phase B）：
 # - 暂停当前工作，处理冲突优先（冲突是 merge blocker）
-# - 在对应 worktree 执行 rebase（参见 refs/pr-signals.md Phase B）
+# - 在对应 worktree 执行 rebase（参见 ../.cat-cafe-shared-refs/pr-signals.md Phase B）
 # - rebase 成功后继续原工作流
 # - 复杂冲突 → 通知operator，等指示后再继续
 
@@ -260,7 +260,7 @@ printf '%s\n' "$PR_BODY" | rg -q '@(codex|chatgpt-codex-connector|gpt52|opus|son
 #    （极简格式，在 PR comment 中，不是 body！）
 # ⚠️ 只发 “@codex review” 一行，不带 SHA、不带规则描述、不带审查标准！
 # 详细格式会让 Codex connector 误解为代码修改请求（2026-04-20 PR #1300 确认）
-# 详见 refs/pr-template.md「云端 Review 触发 Comment 模板」
+# 详见 ../.cat-cafe-shared-refs/pr-template.md「云端 Review 触发 Comment 模板」
 
 # 5.1 去重防呆
 LAST_TRIGGER=”$(gh pr view {PR_NUMBER} --json comments | jq -r '
@@ -644,7 +644,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 
 **硬规则（加粗执行）**：
 - **PR body（含 HTML 注释）禁止出现任何 `@句柄`**
-- **只允许在专用触发 comment 里使用标准触发模板（见 refs/pr-template.md）**
+- **只允许在专用触发 comment 里使用标准触发模板（见 ../.cat-cafe-shared-refs/pr-template.md）**
 
 ## 常见 QA（云端 Review 触发）
 

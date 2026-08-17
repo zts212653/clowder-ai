@@ -98,31 +98,25 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
     });
   });
 
-  test('register_issue_tracking forwards empty instructions so stored guidance can be cleared', async () => {
-    await withCapturedCallbackPosts(async ({ handleRegisterIssueTracking }, requests) => {
-      const result = await handleRegisterIssueTracking({ repoFullName: 'a/b', issueNumber: 2, instructions: '' });
-
-      assert.equal(result.isError, undefined);
-      assert.equal(requests.length, 1);
-      assert.equal(requests[0].url, 'http://localhost:3003/api/callbacks/register-issue-tracking');
-      assert.deepEqual(requests[0].body, { repoFullName: 'a/b', issueNumber: 2, instructions: '' });
-    });
-  });
-
-  test('register_issue_tracking forwards actor-aware wake policy', async () => {
+  test('register_issue_tracking forwards the typed one-shot wait contract', async () => {
     await withCapturedCallbackPosts(async ({ handleRegisterIssueTracking }, requests) => {
       const result = await handleRegisterIssueTracking({
-        repoFullName: 'zts212653/cat-cafe',
-        issueNumber: 42,
-        wakePolicy: 'human_participant_activity',
+        repoFullName: 'a/b',
+        issueNumber: 2,
+        when: [{ kind: 'issue_comment_added' }],
+        nextStep: 'Inspect the comment.',
+        expiresAt: 1_785_500_000_000,
       });
 
       assert.equal(result.isError, undefined);
       assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, 'http://localhost:3003/api/callbacks/register-issue-tracking');
       assert.deepEqual(requests[0].body, {
-        repoFullName: 'zts212653/cat-cafe',
-        issueNumber: 42,
-        wakePolicy: 'human_participant_activity',
+        repoFullName: 'a/b',
+        issueNumber: 2,
+        when: [{ kind: 'issue_comment_added' }],
+        nextStep: 'Inspect the comment.',
+        expiresAt: 1_785_500_000_000,
       });
     });
   });

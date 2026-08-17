@@ -4,17 +4,48 @@ import type { PersistenceContext } from './route-helpers.js';
 
 const log = createModuleLogger('route-system-info-persistence');
 
-function parseWarningMessage(content: string, catId: string): string | undefined {
+function parseVisibleNotice(
+  content: string,
+  catId: string,
+):
+  | {
+      content: string;
+      connector: string;
+      label: string;
+      icon: string;
+      tone: 'info' | 'warning';
+    }
+  | undefined {
   try {
-    const parsed = JSON.parse(content) as { type?: unknown; message?: unknown };
-    return parsed.type === 'warning' && typeof parsed.message === 'string' ? parsed.message : undefined;
+    const parsed = JSON.parse(content) as { type?: unknown; status?: unknown; message?: unknown };
+    if (typeof parsed.message !== 'string') return undefined;
+    if (parsed.type === 'warning') {
+      return {
+        content: parsed.message ? `⚠️ ${parsed.message}` : '⚠️ Warning',
+        connector: 'system-warning',
+        label: '系统警告',
+        icon: '⚠️',
+        tone: 'warning',
+      };
+    }
+    if (parsed.type === 'cloud_bridge_status') {
+      const unavailable = parsed.status === 'unavailable';
+      return {
+        content: parsed.message,
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: unavailable ? '⚠️' : '☁️',
+        tone: unavailable ? 'warning' : 'info',
+      };
+    }
+    return undefined;
   } catch (parseErr) {
     log.warn({ catId, err: parseErr }, 'Ignoring non-JSON user-facing system_info content');
     return undefined;
   }
 }
 
-export async function persistUserFacingSystemInfoWarnings(options: {
+export async function persistUserFacingSystemInfoNotices(options: {
   messageStore: IMessageStore;
   threadId: string;
   catId: string;
@@ -24,26 +55,26 @@ export async function persistUserFacingSystemInfoWarnings(options: {
   const { messageStore, threadId, catId, contents, persistenceContext } = options;
 
   for (const content of contents) {
-    const message = parseWarningMessage(content, catId);
-    if (message == null) continue;
+    const notice = parseVisibleNotice(content, catId);
+    if (notice == null) continue;
 
     try {
       await messageStore.append({
         userId: 'system',
         catId: null,
         threadId,
-        content: message ? `⚠️ ${message}` : '⚠️ Warning',
+        content: notice.content,
         mentions: [],
         timestamp: Date.now(),
         source: {
-          connector: 'system-warning',
-          label: '系统警告',
-          icon: '⚠️',
-          meta: { presentation: 'system_notice', noticeTone: 'warning' },
+          connector: notice.connector,
+          label: notice.label,
+          icon: notice.icon,
+          meta: { presentation: 'system_notice', noticeTone: notice.tone },
         },
       });
     } catch (persistErr) {
-      log.error({ catId, err: persistErr }, 'Failed to persist user-facing system_info warning');
+      log.error({ catId, err: persistErr }, 'Failed to persist user-facing system_info notice');
       if (persistenceContext) {
         persistenceContext.failed = true;
         persistenceContext.errors.push({

@@ -22,7 +22,7 @@ interface OpenCodeConfigOptions {
 
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { id?: string; name: string; limit?: { context: number } }>;
+  models?: Record<string, { id?: string; name: string }>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -87,6 +87,24 @@ export const OC_API_KEY_ENV = 'CAT_CAFE_OC_API_KEY';
 export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
 
 /**
+ * We deliberately emit no `limit` block at all.
+ *
+ * OpenCode requires `limit.output` whenever `limit` is present and merges
+ * `config ?? catalog ?? 0`, so pinning our context window here would also
+ * overwrite the catalog's authoritative output for any model OpenCode already
+ * knows — mistral/codestral-latest (4_096), openrouter/openai/gpt-4o (16_384),
+ * and 18 more under `openai`. #1208 emitted context without output and killed
+ * every affected cat at config-parse time; guessing an output instead would
+ * silently enlarge those caps. No authoritative per-carrier output source
+ * exists at this layer, so we supply neither field.
+ *
+ * Safe by upstream construction: `isOverflow` returns false when
+ * `limit.context` is 0, so auto-compaction simply does not engage — exactly the
+ * pre-#1208 behaviour. Re-introducing an invocation-owned window requires
+ * authoritative output provenance (carrier-aware capacity slice).
+ */
+
+/**
  * OpenCode API type determines which AI SDK npm adapter to use.
  * - 'openai'           → @ai-sdk/openai-compatible  (chat/completions, default for custom providers)
  * - 'openai-responses'  → @ai-sdk/openai             (responses API, for official OpenAI endpoints)
@@ -122,8 +140,6 @@ export interface OpenCodeRuntimeConfigOptions {
   models: readonly string[];
   modelAliases?: Readonly<Record<string, string>>;
   defaultModel?: string;
-  /** #1208: invocation-owned window applied to every registered model. */
-  contextWindowTokens?: number;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
   /**
@@ -211,7 +227,6 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     models,
     modelAliases,
     defaultModel,
-    contextWindowTokens,
     apiType = 'openai',
     hasBaseUrl = false,
     omitProviderAuth = false,
@@ -227,7 +242,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { id?: string; name: string; limit?: { context: number } }> = {};
+  const modelsMap: Record<string, { id?: string; name: string }> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
@@ -237,7 +252,6 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     modelsMap[modelName] = {
       ...(upstreamId ? { id: upstreamId } : {}),
       name: modelName,
-      ...(contextWindowTokens && contextWindowTokens > 0 ? { limit: { context: contextWindowTokens } } : {}),
     };
   }
 

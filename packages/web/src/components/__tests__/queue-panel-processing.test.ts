@@ -177,6 +177,39 @@ describe('QueuePanel hides processing entries', () => {
     expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
   });
 
+  it('moves an agent/A2A exact receipt out of QueuePanel while its child live turn owns the parent slot', () => {
+    useChatStore.setState({
+      queue: [
+        {
+          ...withTargetStates({ opus: 'seen' }),
+          id: 'q-agent-live',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          autoExecute: true,
+          callerCatId: 'codex',
+        },
+      ],
+      queuePaused: false,
+      activeInvocations: {
+        'parent-opus': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
+      },
+      catInvocations: {
+        opus: {
+          invocationId: 'parent-opus',
+          turnInvocationId: 'inv-opus',
+          startedAt: Date.now(),
+        },
+      },
+    });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.textContent).not.toContain('待处理');
+    expect(container.textContent).not.toContain('当前轮处理中');
+    expect(container.querySelector('[data-testid="steer-q-agent-live"]')).toBeNull();
+  });
+
   it('moves an awakened exact child out of QueuePanel while its parent control slot is live', () => {
     useChatStore.setState({
       queue: [withTargetStates({ opus: 'awakened' })],
@@ -300,7 +333,23 @@ describe('QueuePanel hides processing entries', () => {
 
   it('fails closed when a seen target has no exact receipt invocation id', () => {
     useChatStore.setState({
-      queue: [{ ...QUEUED_ENTRY, targetStates: { opus: 'seen' } }],
+      queue: [
+        {
+          ...QUEUED_ENTRY,
+          id: 'q-agent-missing-exact-id',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          autoExecute: true,
+          callerCatId: 'codex',
+          targetStates: { opus: 'seen' },
+          queueReceipt: {
+            version: 1,
+            entryId: 'q-agent-missing-exact-id',
+            targets: [{ catId: 'opus', state: 'seen' }],
+            reminderAttempts: [],
+          },
+        },
+      ],
       queuePaused: false,
       activeInvocations: {
         'inv-opus': { catId: 'opus', mode: 'execute', startedAt: Date.now() },

@@ -116,6 +116,7 @@ export class BallCustodyProjector {
     const proj = existing ?? createInitialProjection(event.subjectKey, now);
 
     const result = transition(proj.state, event, {
+      holder: proj.holder,
       heldUntil: proj.heldUntil,
       lastStateChangeAt: proj.lastStateChangeAt,
     });

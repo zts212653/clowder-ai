@@ -2469,41 +2469,166 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.deepEqual(active.continuityCapsule, continuityCapsule);
   });
 
-  it('F24: updates cliSessionId when session_init arrives for existing active record', async () => {
+  it('active_writer_reborn seals by replacement mechanism but emits runtime-replacement continuity provenance', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState, formatContinuationPrompt } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'native-old',
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      userId: 'user1',
+    });
+    const sessionSealer = {
+      requestSeal: async ({ sessionId, reason }) => {
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason, updatedAt: Date.now() });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      finalize: async ({ sessionId }) => {
+        sessionChainStore.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+      },
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const replacement = {
+      cause: 'active_writer_reborn',
+      previousNativeThreadId: 'native-old',
+      detectedAt: 1_786_630_000,
+      attempt: 1,
+      diagnostics: {
+        observedAt: 1_786_630_000,
+        classification: 'native_active_turn_without_local_lease',
+        confidence: 'medium',
+        localHostLease: { state: 'not_observed', source: 'carrier_affinity' },
+        nativeThread: {
+          readOutcome: 'succeeded',
+          threadId: 'native-old',
+          status: 'active',
+          activeTurn: { turnId: 'turn-old', startedAt: 1_786_629_000 },
+        },
+        writerClientIdentity: 'unavailable',
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'codex',
+          sessionId: 'native-fresh',
+          sessionReplacement: replacement,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const continuityCapsule = buildCapsuleFromRouteState({
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      mode: 'independent',
+      a2aEnabled: true,
+    });
+
+    const msgs = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer },
+        {
+          catId: 'codex',
+          service,
+          prompt: 'continue',
+          userId: 'user1',
+          threadId: 'thread-active-writer-recovery',
+          isLastCat: true,
+          continuityCapsule,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('codex', 'thread-active-writer-recovery');
+    const sealed = chain.find((record) => record.id === oldRecord.id);
+    const active = chain.find((record) => record.status === 'active');
+    assert.equal(sealed.sealReason, 'cli_session_replaced', 'seal reason remains the mechanism');
+    assert.equal(sealed.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(sealed.continuityCapsule.replacement, replacement);
+    assert.equal(active.cliSessionId, 'native-fresh');
+
+    const sealEvent = msgs.find((message) => {
+      if (message.type !== 'system_info') return false;
+      try {
+        return JSON.parse(message.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'runtime replacement must emit a continuation carrier');
+    const payload = JSON.parse(sealEvent.content);
+    assert.equal(payload.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(payload.continuityCapsule.replacement, replacement);
+    assert.equal(payload.continuityCapsule.seal.reason, 'cli_session_replaced');
+    assert.equal(payload.continuityDiagnostics.source, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.boundary, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.sealMechanism, 'cli_session_replaced');
+    assert.deepEqual(payload.continuityDiagnostics.replacement, replacement);
+
+    const prompt = formatContinuationPrompt(payload.continuityCapsule);
+    assert.match(prompt, /automatic native runtime recovery/i);
+    assert.doesNotMatch(prompt, /threshold|manual|handoff/i);
+  });
+
+  it('F24: plain cli_session_replaced remains a mechanism and does not invent runtime recovery', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
     const sessionChainStore = new SessionChainStore();
 
     // Pre-create an active session with old cliSessionId
     sessionChainStore.create({
       cliSessionId: 'old-cli',
       threadId: 'thread-f24-update',
-      catId: 'opus',
+      catId: 'codex',
       userId: 'user1',
     });
 
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
-        yield { type: 'session_init', catId: 'opus', sessionId: 'new-cli', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'codex', sessionId: 'new-cli', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
 
     const deps = { ...makeDeps(), sessionChainStore };
-    await collect(
+    const msgs = await collect(
       invokeSingleCat(deps, {
-        catId: 'opus',
+        catId: 'codex',
         service,
         prompt: 'test',
         userId: 'user1',
         threadId: 'thread-f24-update',
         isLastCat: true,
+        continuityCapsule: buildCapsuleFromRouteState({
+          threadId: 'thread-f24-update',
+          catId: 'codex',
+          mode: 'independent',
+          a2aEnabled: true,
+        }),
       }),
     );
 
-    const active = sessionChainStore.getActive('opus', 'thread-f24-update');
+    const chain = sessionChainStore.getChain('codex', 'thread-f24-update');
+    const sealed = chain.find((record) => record.status === 'sealed');
+    const active = sessionChainStore.getActive('codex', 'thread-f24-update');
     assert.ok(active);
     assert.equal(active.cliSessionId, 'new-cli', 'should have updated cliSessionId');
+    assert.equal(sealed.sealReason, 'cli_session_replaced');
+    assert.equal(active.continuityCapsule.continuationReason, 'threshold_seal');
+    assert.equal(
+      msgs.some((message) => message.type === 'system_info' && /runtime_replacement/.test(message.content ?? '')),
+      false,
+    );
   });
 
   it('ACP session: ephemeralSession=true skips seal on sessionId change', async () => {
@@ -7326,7 +7451,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('#1329: bare OpenCode native subscription binds the catalog window without acting on prior usage', async () => {
+  it('#1329/#1359: bare OpenCode native subscription binds the window at the Cat Cafe layer and supplies no limit block', async () => {
     const root = await mkdtemp(join(tmpdir(), 'context-binding-native-oc-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -7436,11 +7561,27 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
       assert.ok(seenRuntimeConfig, 'provider must observe a per-invocation runtime config');
       assert.equal(seenRuntimeConfig.model, 'anthropic/claude-opus-4-6');
-      assert.equal(seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6']?.limit?.context, 1_000_000);
+      // Boundary change (#1359): Cat Cafe no longer pushes its window into the
+      // OpenCode config. OpenCode requires `limit.output` whenever `limit`
+      // exists and merges `config ?? catalog ?? 0`, so any value we invent here
+      // would override the catalog's own authoritative — and sometimes smaller —
+      // output limit. With no per-carrier output source at this layer we supply
+      // neither field and leave OpenCode's catalog authoritative for both.
+      const nativeEntry = seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6'];
+      assert.ok(nativeEntry, 'the native model must still be registered in the runtime config');
+      assert.equal(nativeEntry.name, 'claude-opus-4-6');
+      assert.equal(nativeEntry.limit, undefined, 'no limit block may be supplied at this layer');
+      assert.equal(seenRuntimeConfig.$schema, 'https://opencode.ai/config.json');
+      // The invocation window is still bound — at the Cat Cafe layer, where it
+      // drives context health and session handoff. Only the propagation into
+      // OpenCode's own config is gone.
       assert.equal(optionsSeen[0]?.contextCapacity?.windowTokens, 1_000_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.inputCeilingTokens, 984_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.actionable, true);
-      assert.equal(seenPrompt, 'resume-only current delta');
+      assertStagingPromptContract(seenPrompt, '#1329 native OpenCode capacity binding');
+      assert.ok(seenPrompt.endsWith('resume-only current delta'));
+      assert.ok(!seenPrompt.includes('[Previous Session Summary]'));
+      assert.ok(!seenPrompt.includes('active-session history'));
       assert.deepEqual(callOrder, [['invoke']]);
     } finally {
       process.chdir(previousCwd);
@@ -7534,7 +7675,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('issue #1208: known native OpenCode model still receives the invocation context limit', async () => {
+  it('issue #1208/#1359: known native OpenCode model receives a schema-valid, limit-free runtime config', async () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
@@ -7613,11 +7754,18 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
     assert.ok(callbackEnv.OPENCODE_CONFIG);
     assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, undefined);
-    assert.equal(
-      seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6']?.limit?.context,
-      256_000,
-      'the provider-native compaction limit must match the invocation snapshot',
-    );
+    // Boundary change (#1359): the provider-native compaction limit is no longer
+    // supplied from here. #1208 wrote `limit: { context }` without the
+    // `limit.output` OpenCode's schema requires, which killed every affected cat
+    // at config-parse time; completing it instead would clobber the catalog's
+    // authoritative output for catalog-backed models. This layer has no
+    // authoritative per-carrier output, so it supplies neither field.
+    const knownEntry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
+    assert.ok(knownEntry, 'the known native model must still be registered');
+    assert.equal(knownEntry.limit, undefined, 'no limit block may be supplied at this layer');
+    // Still a schema-valid config — that is the whole point of the fix.
+    assert.equal(seenRuntimeConfig?.$schema, 'https://opencode.ai/config.json');
+    assert.ok(seenRuntimeConfig?.provider?.anthropic?.options, 'provider options must survive');
   });
 
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {

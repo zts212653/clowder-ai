@@ -47,6 +47,10 @@ export interface ReviewFeedbackSignal {
   readonly reviewThreads?: readonly GitHubReviewThreadBaseline[];
   readonly resultTriggerCommentId?: number;
   readonly resultSourceRef?: string;
+  readonly resultConversationCommentCursor?: number;
+  readonly resultDecision?: string;
+  readonly resultReviewer?: string;
+  readonly subjectState?: 'merged' | 'closed';
 }
 
 export type ReviewFeedbackRouteResult =
@@ -70,17 +74,22 @@ export class ReviewFeedbackRouter {
 
   async route(signal: ReviewFeedbackSignal, tracking: { taskId: string }): Promise<ReviewFeedbackRouteResult> {
     const latestDecision = [...signal.newDecisions].sort((left, right) => left.id - right.id).at(-1);
+    const resultDecision = signal.resultDecision ?? latestDecision?.state;
+    const resultReviewer = signal.resultReviewer ?? latestDecision?.author;
     const result = await this.opts.waitLifecycle.observe({
       taskId: tracking.taskId,
       facts: {
         headSha: signal.headSha,
         review: {
           decisionCursor: signal.decisionCursor,
-          ...(latestDecision?.state ? { decision: latestDecision.state } : {}),
-          ...(latestDecision?.author ? { reviewer: latestDecision.author } : {}),
+          ...(resultDecision ? { decision: resultDecision } : {}),
+          ...(resultReviewer ? { reviewer: resultReviewer } : {}),
           ...(signal.reviewThreads ? { threads: signal.reviewThreads } : {}),
           ...(signal.resultTriggerCommentId ? { resultTriggerCommentId: signal.resultTriggerCommentId } : {}),
           ...(signal.resultSourceRef ? { resultSourceRef: signal.resultSourceRef } : {}),
+          ...(signal.resultConversationCommentCursor
+            ? { resultConversationCommentCursor: signal.resultConversationCommentCursor }
+            : {}),
         },
       },
       collectorPatch: {
@@ -89,8 +98,10 @@ export class ReviewFeedbackRouter {
           lastInlineCommentCursor: signal.inlineCommentCursor,
           lastConversationCommentCursor: signal.conversationCommentCursor,
           lastDecisionCursor: signal.decisionCursor,
+          ...(signal.subjectState ? { prState: signal.subjectState } : {}),
         },
       },
+      ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
     });
     if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
     return {

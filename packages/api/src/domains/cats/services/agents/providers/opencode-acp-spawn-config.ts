@@ -24,7 +24,6 @@ export interface OpenCodeAcpSpawnConfigOptions {
   providerName?: string | null;
   defaultModel?: string | null;
   /** Invocation resolver output applied to the long-lived ACP process config. */
-  contextWindowTokens?: number;
   account?: OpenCodeAcpSpawnAccount | null;
 }
 
@@ -68,7 +67,6 @@ export async function prepareOpenCodeAcpSpawnConfig(
     models: account?.models?.length ? account.models : [effective.model],
     ...(account?.modelAliases ? { modelAliases: account.modelAliases } : {}),
     defaultModel: effective.model,
-    ...(options.contextWindowTokens ? { contextWindowTokens: options.contextWindowTokens } : {}),
     apiType: deriveOpenCodeApiType(effective.providerName),
     hasBaseUrl: Boolean(account?.baseUrl),
     omitProviderAuth: account?.authType !== 'api_key',

@@ -55,6 +55,7 @@ export { libraryRoutes } from './library.js';
 export { memoryRoutes } from './memory.js';
 export { memoryPublishRoutes } from './memory-publish.js';
 export { messageActionsRoutes } from './message-actions.js';
+export { messageBundleRoutes } from './message-bundles.js';
 export { messagesRoutes } from './messages.js';
 export { packsRoutes } from './packs.js';
 export { pawFeelDispositionRoutes } from './paw-feel-disposition.js';

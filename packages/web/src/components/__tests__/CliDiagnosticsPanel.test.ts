@@ -245,6 +245,7 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       'server_overloaded',
       'cli_response_timeout',
       'cli_stall_timeout',
+      'active_writer_recovery',
       // F212 Phase G (clowder-ai#875): silent_completion — CLI clean exit, no text event.
       'silent_completion',
       // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream

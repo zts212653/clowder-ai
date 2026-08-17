@@ -68,6 +68,13 @@ function formatWarning(parsed: Record<string, unknown>): VisibleSystemInfoResult
   };
 }
 
+function formatCloudBridgeStatus(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
+  if (parsed?.type !== 'cloud_bridge_status') return null;
+  const message = typeof parsed.message === 'string' ? parsed.message : '';
+  if (!message) return null;
+  return { content: message, variant: 'info' };
+}
+
 export function formatSessionSealRequested(
   parsed: Record<string, unknown>,
   resolveCatName: ResolveCatName = identityCatName,
@@ -76,6 +83,16 @@ export function formatSessionSealRequested(
 
   const catId = typeof parsed.catId === 'string' ? parsed.catId : 'unknown';
   const sessionSeq = typeof parsed.sessionSeq === 'number' ? parsed.sessionSeq : '?';
+  const continuityDiagnostics =
+    typeof parsed.continuityDiagnostics === 'object' && parsed.continuityDiagnostics !== null
+      ? (parsed.continuityDiagnostics as Record<string, unknown>)
+      : undefined;
+  if (continuityDiagnostics?.source === 'runtime_replacement') {
+    return {
+      content: `${resolveCatName(catId)} 的会话 #${sessionSeq} 已自动接力；新会话已在本轮继续运行`,
+      variant: 'info',
+    };
+  }
   const healthSnapshot =
     typeof parsed.healthSnapshot === 'object' && parsed.healthSnapshot !== null
       ? (parsed.healthSnapshot as Record<string, unknown>)
@@ -145,6 +162,7 @@ export function formatVisibleSystemInfo(
 ): VisibleSystemInfoResult | null {
   return (
     formatA2AFollowupAvailable(parsed, resolveCatName) ??
+    formatCloudBridgeStatus(parsed) ??
     formatWarning(parsed) ??
     (parsed?.type === 'a2a_pingpong_terminated' ? formatPingpongTerminated(parsed, resolveCatName) : null) ??
     (parsed?.type === 'a2a_role_rejected' ? formatRoleRejected(parsed, resolveCatName) : null) ??

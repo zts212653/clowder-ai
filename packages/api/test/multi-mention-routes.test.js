@@ -334,6 +334,65 @@ describe('Multi-Mention Routes', () => {
     await freshnessApp.close();
   });
 
+  test('holds multi-mention on unread visible other-cat stream-origin speech in play mode', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const causalMessageStore = createMockMessageStore();
+    const baseline = causalMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'baseline already seen',
+      mentions: ['opus'],
+      threadId: 'thread-1',
+      timestamp: 1,
+    });
+    causalMessageStore.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'unread persisted cat answer',
+      mentions: [],
+      origin: 'stream',
+      threadId: 'thread-1',
+      timestamp: 2,
+    });
+    causalMessageStore.getByThreadAfter = async (_threadId, afterId, limit = 20) =>
+      causalMessageStore
+        .getMessages()
+        .filter((message) => message.id > afterId)
+        .slice(0, limit);
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: causalMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      deliveryCursorStore: {
+        async getSeenCursor() {
+          return baseline.id;
+        },
+      },
+      threadStore: {
+        async get() {
+          return { id: 'thread-1', thinkingMode: 'play' };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: { targets: ['codex'], question: 'must read first', callbackTo: 'opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'held');
+    assert.equal(JSON.parse(res.body).reason, 'newer_messages_available');
+    await freshnessApp.close();
+  });
+
   test('checks queued continue-current work against the callback outer parent', async () => {
     const freshnessApp = Fastify({ logger: false });
     registerCallbackAuthHook(freshnessApp, mockRegistry);

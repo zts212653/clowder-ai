@@ -1435,8 +1435,166 @@ test('native L0 resume: matching fingerprint honors --session', async () => {
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(args.includes('--session'), 'matching fingerprint must resume');
     assert.equal(args[args.indexOf('--session') + 1], 'sess-match');
+    assert.ok(
+      !args.includes('--agent-file'),
+      'kimi-code rejects --agent-file combined with --session (agent is bound at session creation)',
+    );
     const freshInfo = msgs.find((m) => m.type === 'system_info' && /l0_resume_fresh_start/.test(m.content ?? ''));
     assert.equal(freshInfo, undefined, 'no fresh-start notice on clean resume');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// kimi-code >=0.30 turned the previously-silent no-op into a hard arg error:
+//   "error: Cannot combine --agent/--agent-file with --session/--continue:
+//    the agent is bound at session creation and the bound agent is restored
+//    automatically on resume."
+// Observed as exit 1 on every resumed kimi turn from 2026-08-09 (CLI 0.34.0).
+// The L0 must still be compiled on resume — the fingerprint gate above depends
+// on it — but the agent file only ever applied to a *new* session.
+test('native L0 resume: compiles L0 for the fingerprint gate but passes no agent flag', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-noagent-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-bound': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-bound',
+        systemPrompt: 'PACK_CONTENT',
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    await promise;
+
+    assert.equal(l0CompilerFn.mock.callCount(), 1, 'resume still compiles L0 to verify the fingerprint');
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--session'), 'verified fingerprint resumes the bound session');
+    assert.ok(!args.includes('--agent-file'), '--agent-file must not travel with --session');
+    assert.ok(!args.includes('--agent'), '--agent must not travel with --session');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// @codex-terra REQUEST_CHANGES on PR #1323 (exact HEAD 0f7c453be): session-selection flags
+// must be server-owned. Before this PR a user-configured --session still crashed on the CLI's
+// --agent-file mutual-exclusion check; dropping --agent-file on verified resume removes that
+// accidental shield, so the fingerprint gate could verify session A while the CLI resumes an
+// unverified session B — silently, with no l0_resume_fresh_start notice.
+test('native L0 resume: cliConfigArgs cannot swap the fingerprint-verified session', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-argv-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-verified': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-verified',
+        cliConfigArgs: ['--session sess-unverified'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    const msgs = await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('sess-unverified'), 'user cliConfigArgs must not select an unverified session');
+    assert.equal(args.filter((a) => a === '--session' || a === '-S').length, 1, 'exactly one session flag survives');
+    assert.equal(
+      args[args.indexOf('--session') + 1],
+      'sess-verified',
+      'the gate-verified session must be the one used',
+    );
+    // The gate said "resume verified" — metadata and argv must agree, not diverge silently.
+    const init = msgs.find((m) => m.type === 'session_init');
+    assert.equal(init?.sessionId, 'sess-verified');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// Attached-value spellings verified against kimi-code 0.34.0: both `-S<id>` and
+// `--session=<id>` are accepted and select the session (`Session "bogus-sess-zzz" not
+// found`), so a space-separated-only strip would leave the bypass wide open.
+test('native L0 resume: attached-value session spellings (-S<id> / --session=<id>) are stripped too', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-attached-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-verified': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-verified',
+        cliConfigArgs: ['-Ssneaky-one', '--session=sneaky-two'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.some((a) => a.includes('sneaky-one')), '-S<id> concatenated form must be stripped');
+    assert.ok(!args.some((a) => a.includes('sneaky-two')), '--session=<id> form must be stripped');
+    assert.equal(args[args.indexOf('--session') + 1], 'sess-verified', 'gate-verified session survives intact');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('native L0 fresh start: cliConfigArgs cannot sneak --continue past the fingerprint gate', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-cont-'));
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V2');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Hello', {
+        // no sessionId → fresh bind, --agent-file is carried
+        cliConfigArgs: ['--continue', '--verbose'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--continue'), '--continue would resume an unverified session behind the gate');
+    assert.ok(!args.includes('-c'), '-c is the same flag under its short alias');
+    assert.ok(args.includes('--agent-file'), 'fresh bind still carries the L0 agent file');
+    // Arity guard: --continue takes NO value, so stripping it must not swallow the next user arg.
+    assert.ok(args.includes('--verbose'), 'a valueless reserved flag must not eat the following user arg');
   } finally {
     restore();
     rmSync(shareDir, { recursive: true, force: true });

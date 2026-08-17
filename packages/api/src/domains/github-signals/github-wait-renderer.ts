@@ -1,11 +1,12 @@
 import type { WaitOutcomeV1 } from '@cat-cafe/shared';
 
 export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
-  const subject = outcome.subjectRef.slice('pr:'.length);
-  const lines = [`🔔 **PR wait satisfied** — ${subject}`, ''];
+  const isIssue = outcome.subjectRef.startsWith('issue:');
+  const subject = outcome.subjectRef.slice(isIssue ? 'issue:'.length : 'pr:'.length);
+  const lines = [`🔔 **${isIssue ? 'Issue' : 'PR'} wait satisfied** — ${subject}`, ''];
 
   if (outcome.reason === 'subject_terminal') {
-    lines.push(`- PR state: ${outcome.terminalSubjectState ?? 'closed'}`);
+    lines.push(`- ${isIssue ? 'Issue' : 'PR'} state: ${outcome.terminalSubjectState ?? 'closed'}`);
   } else {
     for (const match of outcome.matched ?? []) {
       lines.push(`- ${match.delta}`);

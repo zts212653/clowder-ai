@@ -607,6 +607,30 @@ describe('incremental current-message fallback helper', () => {
 
     assert.deepEqual(result, { projectedMessageIds: [], exposedMessageIds: [] });
   });
+
+  it('force-projects a server-owned Bundle view even when history already contains its durable summary', async () => {
+    const { explicitPromptForIncrementalContext } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    const messageId = '0000000000000002-000001-bbbbbbbb';
+
+    const result = explicitPromptForIncrementalContext(
+      {
+        projectedMessageIds: [messageId],
+        includesCurrentUserMessage: true,
+        currentMessageFilteredOut: false,
+      },
+      'durable summary',
+      messageId,
+      [{ messageId, content: '[Message Bundle]\nsource body\n[/Message Bundle]', forceExplicitProjection: true }],
+    );
+
+    assert.deepEqual(result, {
+      text: '[Message Bundle]\nsource body\n[/Message Bundle]',
+      projectedMessageIds: [messageId],
+      exposedMessageIds: [messageId],
+    });
+  });
 });
 
 describe('incremental current-message fallback integration', () => {

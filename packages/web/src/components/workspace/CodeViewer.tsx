@@ -8,6 +8,7 @@ import { basicSetup, EditorView } from 'codemirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { createQuoteContextAttachment } from '../chat-context-reference';
+import { SelectionAnnotationAction } from '../SelectionAnnotationAction';
 import {
   type FloatingSelectionPosition,
   positionSelectionActionForAnchors,
@@ -54,15 +55,17 @@ function getSelectionInfo(view: EditorView) {
   if (!text.trim()) return null;
   const startLine = view.state.doc.lineAt(from).number;
   const endLine = view.state.doc.lineAt(to).number;
-  return { text, startLine, endLine };
+  return { text, startLine, endLine, selectionStart: from, selectionEnd: to };
 }
 
-const AddToChatIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-    <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
-    <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
-  </svg>
-);
+interface CodeSelectionAction {
+  position: FloatingSelectionPosition;
+  text: string;
+  startLine: number;
+  endLine: number;
+  selectionStart: number;
+  selectionEnd: number;
+}
 
 export function CodeViewer({
   content,
@@ -94,7 +97,7 @@ export function CodeViewer({
   const shellRef = useRef<HTMLDivElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const [selectionAction, setSelectionAction] = useState<FloatingSelectionPosition | null>(null);
+  const [selectionAction, setSelectionAction] = useState<CodeSelectionAction | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
@@ -156,7 +159,8 @@ export function CodeViewer({
         });
         if (visibleOffset !== null) addAnchor(visibleOffset);
       }
-      setSelectionAction(positionSelectionActionForAnchors(anchors, shellRect));
+      const position = positionSelectionActionForAnchors(anchors, shellRect);
+      setSelectionAction(position ? { position, ...selection } : null);
     };
 
     const state = EditorState.create({
@@ -250,27 +254,35 @@ export function CodeViewer({
     return () => document.removeEventListener('keydown', handler);
   }, [editable, onSave, handleSave]);
 
-  const handleAddToChat = useCallback(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const sel = getSelectionInfo(view);
-    if (!sel) return;
-    setPendingChatInsert({
-      threadId: currentThreadId,
-      text: '',
-      contextAttachments: [
-        createQuoteContextAttachment(sel.text, {
-          kind: 'workspace_file',
-          path,
-          ...(worktreeId ? { worktreeId } : {}),
-          ...(branch ? { branch } : {}),
-          ...(mime ? { language: mime } : {}),
-          lineStart: sel.startLine,
-          lineEnd: sel.endLine,
-        }),
-      ],
-    });
-  }, [path, branch, worktreeId, mime, setPendingChatInsert, currentThreadId]);
+  const handleAddToChat = useCallback(
+    (comment: string) => {
+      if (!selectionAction) return;
+      setPendingChatInsert({
+        threadId: currentThreadId,
+        text: '',
+        contextAttachments: [
+          createQuoteContextAttachment(
+            selectionAction.text,
+            {
+              kind: 'workspace_file',
+              path,
+              ...(worktreeId ? { worktreeId } : {}),
+              ...(branch ? { branch } : {}),
+              ...(mime ? { language: mime } : {}),
+              lineStart: selectionAction.startLine,
+              lineEnd: selectionAction.endLine,
+            },
+            {
+              comment,
+              selectionStart: selectionAction.selectionStart,
+              selectionEnd: selectionAction.selectionEnd,
+            },
+          ),
+        ],
+      });
+    },
+    [path, branch, worktreeId, mime, setPendingChatInsert, currentThreadId, selectionAction],
+  );
 
   return (
     <div ref={shellRef} className="relative flex-1 min-h-0 text-sm">
@@ -289,17 +301,13 @@ export function CodeViewer({
       )}
       {/* Add to chat button (selection) */}
       {selectionAction && !editable && (
-        <button
-          type="button"
-          onClick={handleAddToChat}
-          onMouseDown={(event) => event.preventDefault()}
-          style={selectionAction}
-          className="absolute flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
-          title="引用到聊天"
-        >
-          <AddToChatIcon />
-          Add to chat
-        </button>
+        <SelectionAnnotationAction
+          selectedText={selectionAction.text}
+          position={selectionAction.position}
+          positionMode="absolute"
+          actionTestId="workspace-code-selection-add-to-chat"
+          onSave={handleAddToChat}
+        />
       )}
     </div>
   );

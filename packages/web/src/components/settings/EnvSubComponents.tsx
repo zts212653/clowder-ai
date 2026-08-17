@@ -29,7 +29,6 @@ export interface EnvVar {
   deprecated?: string;
   allowedValues?: string[];
   currentValue: string | null;
-  /** #770 System Settings metadata */
   label?: string;
   settingsGroup?: string;
   restartRequired?: boolean;
@@ -100,7 +99,6 @@ function needsRestart(variable: EnvVar): boolean {
   return variable.runtimeEditable === false || RESTART_REQUIRED_ENV_VARS.has(variable.name);
 }
 
-/** #770: fail-closed — only vars with explicit runtimeEditable: true are editable. */
 export function isEditableVariable(variable: EnvVar): boolean {
   return variable.runtimeEditable === true;
 }

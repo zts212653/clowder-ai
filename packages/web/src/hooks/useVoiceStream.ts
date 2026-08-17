@@ -2,42 +2,15 @@
 
 import type { VoiceChunkEvent, VoiceStreamEndEvent, VoiceStreamStartEvent } from '@cat-cafe/shared';
 import { useCallback, useEffect } from 'react';
-import { PlaybackManager } from '@/services/PlaybackManager';
+import { getPlaybackManager, peekPlaybackManager } from '@/services/playbackRuntime';
+import { useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 
-let managerInstance: PlaybackManager | null = null;
-
-function getOrCreateManager(): PlaybackManager {
-  if (managerInstance) return managerInstance;
-  managerInstance = new PlaybackManager({
-    onStateChange: (state) => {
-      const voiceStore = useVoiceSessionStore.getState();
-      if (state === 'idle') {
-        voiceStore.setPlaybackState('idle');
-      } else if (state === 'playing') {
-        voiceStore.setPlaybackState('playing');
-      } else if (state === 'paused') {
-        voiceStore.setPlaybackState('paused');
-      }
-    },
-  });
-  useVoiceSessionStore.getState().registerStopCallback('playback-manager', () => {
-    managerInstance?.interrupt();
-  });
-  useVoiceSessionStore.getState().registerPlaybackControl('playback-manager', {
-    pause: () => managerInstance?.pause(),
-    resume: () => managerInstance?.resume(),
-    skip: () => managerInstance?.skip(),
-  });
-  return managerInstance;
-}
-
-/** Get the shared PlaybackManager instance (creates if needed). Usable outside React. */
-export function getPlaybackManager(): PlaybackManager {
-  return getOrCreateManager();
-}
+export { getPlaybackManager } from '@/services/playbackRuntime';
 
 function matchesActiveSession(event: { threadId: string; catId: string }): boolean {
+  if (useListenModeStore.getState().session) return false;
+  if (peekPlaybackManager()?.getSnapshot().source === 'listen') return false;
   const { session } = useVoiceSessionStore.getState();
   if (!session?.voiceMode) return false;
   if (session.boundThreadId !== event.threadId) return false;
@@ -48,19 +21,19 @@ function matchesActiveSession(event: { threadId: string; catId: string }): boole
 export function handleVoiceStreamStart(event: VoiceStreamStartEvent): void {
   if (!matchesActiveSession(event)) return;
   useVoiceSessionStore.getState().setLiveStreamActive(true, event.invocationId);
-  getOrCreateManager().handleStreamStart(event);
+  getPlaybackManager().handleStreamStart(event);
 }
 
 export function handleVoiceChunk(event: VoiceChunkEvent): void {
   if (!matchesActiveSession(event)) return;
-  const manager = getOrCreateManager();
+  const manager = getPlaybackManager();
   manager.handleChunk(event);
   useVoiceSessionStore.getState().confirmAutoplayUnlocked();
 }
 
 export function handleVoiceStreamEnd(event: VoiceStreamEndEvent): void {
   if (!matchesActiveSession(event)) return;
-  getOrCreateManager().handleStreamEnd(event);
+  getPlaybackManager().handleStreamEnd(event);
   useVoiceSessionStore.getState().setLiveStreamActive(false);
 }
 
@@ -73,17 +46,14 @@ export function useVoiceStream(): {
 
   useEffect(() => {
     if (!session?.voiceMode) {
-      managerInstance?.interrupt();
+      const manager = peekPlaybackManager();
+      if (manager?.getActiveInvocationId()) manager.interrupt();
     }
-    return () => {
-      managerInstance?.destroy();
-      managerInstance = null;
-    };
   }, [session?.voiceMode]);
 
-  const pause = useCallback(() => managerInstance?.pause(), []);
-  const resume = useCallback(() => managerInstance?.resume(), []);
-  const skip = useCallback(() => managerInstance?.skip(), []);
+  const pause = useCallback(() => peekPlaybackManager()?.pause(), []);
+  const resume = useCallback(() => peekPlaybackManager()?.resume(), []);
+  const skip = useCallback(() => peekPlaybackManager()?.skip(), []);
 
   return { pause, resume, skip };
 }

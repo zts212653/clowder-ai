@@ -6,11 +6,13 @@
 import { createHash } from 'node:crypto';
 import type {
   ApprovalOriginRef,
-  AwaitStateV1,
   CatId,
   CatRoutingError,
   CrossThreadCoordination,
-  LegacyIssueAutomationState,
+  GitHubIssueAwaitStateV1,
+  GitHubPrAwaitStateV1,
+  GitHubPrWaitPredicate,
+  IssueWaitAutomationState,
   PrAutomationState,
   RichBlock,
   SuggestedCrossPostAction,
@@ -33,6 +35,12 @@ import {
   DispatchProposedActionError,
   validateDispatchProposedAction,
 } from '../domains/approval-hub/DispatchProposedAction.js';
+import { tryComputeDispatchCanonicalActionKey } from '../domains/approval-hub/stores/ports/IDispatchProposalStore.js';
+import {
+  RedisCanonicalAdmissionBlockedError,
+  RedisCanonicalAdmissionUnavailableError,
+} from '../domains/approval-hub/stores/redis/RedisDispatchProposalCanonicalClaim.js';
+import { RedisDispatchProposalStore } from '../domains/approval-hub/stores/redis/RedisDispatchProposalStore.js';
 import {
   type ActionSuccessorFence,
   ActionSuccessorStandingError,
@@ -49,6 +57,8 @@ import {
   actionSuccessorFencesMatch,
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
+import { turnCustodyAdoptionRegistry } from '../domains/ball-custody/TurnCustodyAdoptionRegistry.js';
+import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
 import { transitionWaitState } from '../domains/ball-custody/wait-state-machine.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -103,6 +113,7 @@ import {
 import {
   canViewMessage,
   getTimelineOrderTime,
+  isDurablyReadableByCat,
   isInternalNonQuotableParent,
   isSystemUserMessage,
   resolveVisibleReplyParent,
@@ -113,9 +124,13 @@ import {
   ExternalReviewVerdictError,
   type ExternalReviewVerdictService,
 } from '../domains/community/external-review/ExternalReviewVerdictService.js';
+import type { InitialIssueWaitSnapshot } from '../domains/github-signals/GitHubIssueWaitBaselineReader.js';
 import type { InitialPrWaitSnapshot } from '../domains/github-signals/GitHubWaitBaselineReader.js';
 import type { GitHubWaitLifecycleService } from '../domains/github-signals/GitHubWaitLifecycleService.js';
-import { githubWaitPredicatesSchema } from '../domains/github-signals/GitHubWaitPredicateCatalog.js';
+import {
+  githubIssueWaitPredicatesSchema,
+  githubWaitPredicatesSchema,
+} from '../domains/github-signals/GitHubWaitPredicateCatalog.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastructure/grounding/claim-extractors.js';
@@ -159,7 +174,11 @@ import { registerCallbackLocalReviewVerdictRoute } from './callback-local-review
 import { type CallbackMemoryCueDeps, registerCallbackMemoryCueRoutes } from './callback-memory-cue-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
-import { preflightNegativeAuthorizationFence } from './callback-negative-authorization-fence.js';
+import {
+  appendDispatchNegativeAuthorizationBlockedAudit,
+  isPersistedActionSuccessorTransition,
+  preflightNegativeAuthorizationFence,
+} from './callback-negative-authorization-fence.js';
 import { registerCallbackPersonMemoryRoutes } from './callback-person-memory-routes.js';
 import { registerCallbackProposePersonMemoryRoutes } from './callback-propose-person-memory-routes.js';
 import { registerCallbackProposeProfileUpdateRoutes } from './callback-propose-profile-update-routes.js';
@@ -423,6 +442,7 @@ function isExactCallbackDuplicate(
     mentions: readonly CatId[];
     mentionsUser?: boolean | undefined;
     replyTo?: string | undefined;
+    isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
   },
@@ -431,6 +451,7 @@ function isExactCallbackDuplicate(
   if (msg.catId !== input.catId || msg.content !== input.content) return false;
   if (!sameRichBlocks(msg.extra?.rich?.blocks, input.richBlocks)) return false;
   if ((msg.replyTo ?? undefined) !== (input.replyTo ?? undefined)) return false;
+  if (Boolean(msg.extra?.isExplicitPost) !== Boolean(input.isExplicitPost)) return false;
   if (Boolean(msg.mentionsUser) !== Boolean(input.mentionsUser)) return false;
   if (!sameStringArray(msg.mentions, input.mentions)) return false;
   return sameCoordinationForCallbackDedup(msg, input.coordination, input.coordinationDedupKey);
@@ -447,6 +468,7 @@ async function findRecentExactCallbackDuplicate(
     mentions: readonly CatId[];
     mentionsUser?: boolean | undefined;
     replyTo?: string | undefined;
+    isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
     now: number;
@@ -465,7 +487,7 @@ async function findRecentExactCallbackDuplicate(
 
 /**
  * Stable fingerprint over the exact dimensions findRecentExactCallbackDuplicate compares
- * (thread/user/cat/content/richBlocks/replyTo/mentionsUser/mentions). Used as the key for the atomic
+ * (thread/user/cat/content/richBlocks/replyTo/isExplicitPost/mentionsUser/mentions). Used as the key for the atomic
  * content-dedup claim that closes the check-then-act race in the duplicate scan. Hashed so
  * the key stays bounded regardless of message length.
  */
@@ -478,6 +500,7 @@ function buildCallbackContentDedupFingerprint(input: {
   mentions: readonly CatId[];
   mentionsUser?: boolean | undefined;
   replyTo?: string | undefined;
+  isExplicitPost?: boolean | undefined;
   coordination?: CrossThreadCoordination | undefined;
   coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
 }): string {
@@ -486,6 +509,7 @@ function buildCallbackContentDedupFingerprint(input: {
     input.userId,
     input.catId,
     input.replyTo ?? '',
+    input.isExplicitPost ? '1' : '0',
     input.mentionsUser ? '1' : '0',
     [...input.mentions].join(','),
     input.content,
@@ -526,6 +550,7 @@ async function claimCallbackContentOrDuplicate(
     mentions: readonly CatId[];
     mentionsUser?: boolean | undefined;
     replyTo?: string | undefined;
+    isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
     clientMessageId?: string | undefined;
@@ -543,6 +568,7 @@ async function claimCallbackContentOrDuplicate(
     mentions: input.mentions,
     ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
   });
@@ -557,6 +583,7 @@ async function claimCallbackContentOrDuplicate(
     mentions: input.mentions,
     ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
     now: input.now,
@@ -698,7 +725,7 @@ export interface CallbackRoutesOptions {
   fetchPrWaitBaseline?: (
     repoFullName: string,
     prNumber: number,
-    when: readonly import('@cat-cafe/shared').GitHubWaitPredicate[],
+    when: readonly GitHubPrWaitPredicate[],
   ) => Promise<InitialPrWaitSnapshot>;
   /** F177 Phase J: server-side proof that the cloud review callback owns the current wait. */
   verifyPrReviewEventWaitCoverage?: (input: {
@@ -722,6 +749,8 @@ export interface CallbackRoutesOptions {
   localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record' | 'recover'>;
   /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
+  /** F280 Phase C: server-owned issue baseline; author/cursor never come from the caller. */
+  fetchIssueWaitBaseline?: (repoFullName: string, issueNumber: number) => Promise<InitialIssueWaitSnapshot>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -756,6 +785,11 @@ export interface CallbackRoutesOptions {
       ) => void,
     ): void;
     unregisterEntryCompleteHook(entryId: string): void;
+    resolvePromptMessageCustodyWakes?(input: {
+      threadId: string;
+      catId: string;
+      messageIds: readonly string[];
+    }): Promise<readonly TurnCustodyWakeProvenance[]>;
   };
   /** F122B: InvocationQueue for agent-sourced A2A entries */
   invocationQueue?: import('../domains/cats/services/agents/invocation/InvocationQueue.js').InvocationQueue;
@@ -789,6 +823,7 @@ export interface CallbackRoutesOptions {
 
 const postMessageSchema = z.object({
   content: z.string().min(1).max(50000),
+  streamDisposition: z.enum(['independent', 'replace_final']).optional().default('independent'),
   threadId: z.string().min(1).optional(),
   replyTo: z.string().optional(),
   clientMessageId: z.string().min(1).max(200).optional(),
@@ -1069,7 +1104,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validatePr,
     validateIssue,
     fetchPrWaitBaseline,
-    fetchIssueCommentCursor,
+    fetchIssueWaitBaseline,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -1113,6 +1148,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       if (!parsed.success) {
         reply.status(400);
         return { error: 'Invalid request body', details: parsed.error.issues };
+      }
+      if (parsed.data.streamDisposition === 'replace_final') {
+        reply.status(400);
+        return {
+          kind: 'replace_final_agent_key_unsupported',
+          message: 'streamDisposition="replace_final" requires invocation-token provenance.',
+        };
       }
       if (parsed.data.coordination) {
         reply.status(400);
@@ -1240,6 +1282,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               mentions,
               ...(mentionsUser ? { mentionsUser } : {}),
               ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+              isExplicitPost: true,
               now,
             })
           : undefined;
@@ -1324,6 +1367,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         mentions,
         ...(mentionsUser ? { mentionsUser } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+        isExplicitPost: true,
         ...(clientMessageId ? { clientMessageId } : {}),
         now,
         hasRoutingWarnings: routing_warnings.length > 0,
@@ -1496,7 +1540,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       acknowledgeHeld,
       action,
       proposedAction,
+      streamDisposition,
     } = parsed.data;
+    const isStandaloneExplicitPost = streamDisposition === 'independent';
+    const standaloneExplicitPostExtra = isStandaloneExplicitPost ? { isExplicitPost: true as const } : {};
     const { invocationId } = actor;
     // #573: identity for cross-handler dedup. stream + callback for same logical
     // response must broadcast/persist with the same id; QueueProcessor + route-serial
@@ -2065,6 +2112,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : { suppressRouting: false, coordination: undefined };
     const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
       action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
+    // The combined Redis script preserves the F167 identity ordering: an
+    // existing dispatch replays or safely waits before broad lineage or
+    // full-key canonical authority can deny a genuinely new claim.
+    const atomicCanonicalAdmissionStore =
+      action &&
+      isCrossThread &&
+      opts.dispatchProposalStore instanceof RedisDispatchProposalStore &&
+      !isPersistedActionSuccessorTransition(action)
+        ? opts.dispatchProposalStore
+        : undefined;
+    const useAtomicCanonicalActionAdmission = Boolean(atomicCanonicalAdmissionStore);
     const negativeAuthorizationFence = await preflightNegativeAuthorizationFence({
       content,
       isCrossThread,
@@ -2076,10 +2134,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ownerUserId: actor.userId,
       explicitTargetCats,
       action,
+      coordinationSubjectRef: coordinationResult.coordination?.subjectRef,
       suppressRouting: coordinationResult.suppressRouting,
       effectClass,
       clientMessageId,
       dispatchProposalStore: opts.dispatchProposalStore,
+      deferStructuredActionAdmissionToAtomicClaim: useAtomicCanonicalActionAdmission,
       eventAuditLog: opts.eventAuditLog,
       log: app.log,
     });
@@ -2119,10 +2179,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // are display-only — route-helpers.ts:744-745 excludes them from freshness.
           if (msg.userId === 'system') return false;
           if (msg.origin === 'briefing') return false;
-          // Play-mode visibility:
+          // Play-mode privacy visibility. `origin` is transport provenance;
+          // persisted cat speech remains freshness-relevant.
           if (needsFreshnessPlayFilter) {
             if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
-            if (msg.origin === 'stream' && msg.catId && msg.catId !== actor.catId) return false;
           }
           if (isCrossThread && crossThreadFreshnessPolicy.reason === 'cross_thread_causal_overlap') {
             const coordinationId = explicitCoordination?.id ?? incomingCrossThreadHint?.coordination?.id;
@@ -2239,22 +2299,45 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
 
       const dispatchId = `${isCrossThread ? 'cross-post' : 'post'}:${clientMessageId}`;
+      const canonicalActionKey = useAtomicCanonicalActionAdmission
+        ? tryComputeDispatchCanonicalActionKey(actor.userId, action)
+        : undefined;
       try {
         const incomingActionLeaseRef = action.replace
           ? await resolveCallbackActionLeaseRef(record, invocationRecordStore)
           : undefined;
-        const admission = await opts.actionSuccessorAdmissionService.admit({
-          tenantScope: actor.userId,
-          actorCatId: actor.catId,
-          sourceThreadId: actor.threadId,
-          targetThreadId: effectiveThreadId,
-          holderCatIds: actionHolderCatIds,
-          dispatchId,
-          evidenceRef: `callback:${invocationId}:${clientMessageId}`,
-          now: Date.now(),
-          ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
-          action,
-        });
+        const admission = await opts.actionSuccessorAdmissionService.admit(
+          {
+            tenantScope: actor.userId,
+            actorCatId: actor.catId,
+            sourceThreadId: actor.threadId,
+            targetThreadId: effectiveThreadId,
+            holderCatIds: actionHolderCatIds,
+            dispatchId,
+            evidenceRef: `callback:${invocationId}:${clientMessageId}`,
+            now: Date.now(),
+            ...(incomingActionLeaseRef ? { incomingActionLeaseRef } : {}),
+            action,
+          },
+          canonicalActionKey && atomicCanonicalAdmissionStore
+            ? {
+                claim: (claimInput) =>
+                  atomicCanonicalAdmissionStore.claimActionSuccessorWithCanonicalAdmission({
+                    ownerUserId: actor.userId,
+                    canonicalActionKey,
+                    negativeAuthorization: {
+                      sourceInvocationId: invocationId,
+                      sourceThreadId: actor.threadId,
+                      senderCatId,
+                      targetThreadId: effectiveThreadId,
+                      targetCats: actionHolderCatIds,
+                      sourceInvocationCreatedAt: record.createdAt,
+                    },
+                    claimInput,
+                  }),
+              }
+            : undefined,
+        );
         if (!admission.admit) {
           if (admission.outcome === 'subject_terminal') {
             return { status: admission.outcome, terminal: admission.terminal, clientMessageId };
@@ -2269,6 +2352,41 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           actionFence = admission.fence;
         }
       } catch (err) {
+        if (err instanceof RedisCanonicalAdmissionBlockedError) {
+          await appendDispatchNegativeAuthorizationBlockedAudit({
+            proposalStatuses: err.proposalStatuses,
+            sourceInvocationId: invocationId,
+            sourceThreadId: actor.threadId,
+            targetThreadId: effectiveThreadId,
+            senderCatId,
+            blockedTargetCats: actionHolderCatIds,
+            effectClass,
+            clientMessageId,
+            ...(err.legacyCutoverAt !== undefined ? { legacyCutoverAt: err.legacyCutoverAt } : {}),
+            legacyUnresolved: err.legacyBlockPresent,
+            eventAuditLog: opts.eventAuditLog,
+            log: app.log,
+          });
+          reply.status(409);
+          return {
+            kind: err.legacyUnresolved
+              ? 'legacy_dispatch_lineage_unresolved'
+              : 'dispatch_negative_authorization_blocked',
+            proposalIds: err.proposalIds,
+            blockedTargetCats: [...actionHolderCatIds].sort(),
+          };
+        }
+        if (err instanceof RedisCanonicalAdmissionUnavailableError) {
+          app.log.error(
+            { err, action, sourceInvocationId: invocationId, targetThreadId: effectiveThreadId },
+            '[F246/#1291] canonical action admission unavailable',
+          );
+          reply.status(503);
+          return {
+            error: 'Dispatch authorization guard unavailable; retry shortly',
+            code: 'DISPATCH_NEGATIVE_AUTHORIZATION_UNAVAILABLE',
+          };
+        }
         app.log.warn({ err, action }, '[F167-S] invalid cross-post action successor admission');
         reply.status(400);
         return { status: 'invalid_action', error: err instanceof Error ? err.message : String(err) };
@@ -2438,10 +2556,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra =
       !coordinationResult.suppressRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
-    // #814: Mark as explicit post_message so frontend TD112 dedup does not
-    // merge this into the cat's CLI stream bubble.
+    // #814: independent post_message callbacks remain standalone. #1332:
+    // replace_final deliberately omits this marker so the existing frontend
+    // callback replacement path converges the live stream with durable history.
     const extraParts = {
-      isExplicitPost: true as const,
+      ...standaloneExplicitPostExtra,
       ...richExtra,
       ...crossPostExtra,
       ...coordinationExtra,
@@ -2531,6 +2650,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           mentions,
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+          isExplicitPost: isStandaloneExplicitPost,
           ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
           ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
           now,
@@ -2590,9 +2710,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                 origin: 'callback',
                 messageId: duplicateMsg.id,
                 ...stampVisibleTurn(effectiveInvId, invocationId),
-                // #814: Always include isExplicitPost so frontend TD112 dedup skips merge
                 extra: {
-                  isExplicitPost: true,
+                  ...standaloneExplicitPostExtra,
                   ...(isCrossThread
                     ? {
                         crossPost: {
@@ -2651,6 +2770,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       mentions,
       ...(mentionsUser ? { mentionsUser } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
+      isExplicitPost: isStandaloneExplicitPost,
       ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
       ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
@@ -2752,10 +2872,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           messageId: storedMsg.id,
           // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
           ...stampVisibleTurn(effectiveInvId, invocationId),
-          // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
-          // #814: Always include isExplicitPost so frontend TD112 dedup skips merge
+          // F52+F098-C1: Include crossPost + targetCats in real-time broadcast.
+          // #1332: replace_final omits the standalone marker so live UI replaces
+          // the provider stream bubble and suppresses later stream chunks.
           extra: {
-            isExplicitPost: true,
+            ...standaloneExplicitPostExtra,
             ...(isCrossThread
               ? {
                   crossPost: {
@@ -3128,6 +3249,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const principalCatId = principal.kind === 'invocation' ? principal.catId : principal.catId;
     const principalUserId = principal.userId;
+    const exposureAwareThreadRead = {
+      includeQueuedCatMessages: true,
+      includeExposedQueuedUserMessagesForCatId: principalCatId,
+    } as const;
     // F148 Phase B (AC-B2): tokenize keyword for relevance scoring
     const keywordTerms = keyword ? tokenizeKeyword(keyword) : [];
 
@@ -3177,13 +3302,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       item: Awaited<ReturnType<typeof messageStore.getByThread>>[number],
     ): boolean => {
       if (item.deletedAt) return false;
-      if (!isTimelinePublished(item)) return false;
+      if (!isDurablyReadableByCat(item, principalCatId)) return false;
       if (item.userId !== principalUserId && !isSystemUserMessage(item)) return false;
       if (!canViewMessage(item, viewer)) return false;
-      if (needsPlayFilter) {
-        const isOtherCat = item.catId && item.catId !== principalCatId;
-        if (isOtherCat && item.origin === 'stream') return false;
-      }
       return matchesExtraFilters(item);
     };
     const canIncludeContextItem = (item: Awaited<ReturnType<typeof messageStore.getByThread>>[number]): boolean => {
@@ -3211,7 +3332,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               beforeCount,
               target.id,
               principalUserId,
-              PUBLISHED_TIMELINE_READ,
+              exposureAwareThreadRead,
             )
           : [];
       const afterMessages =
@@ -3221,7 +3342,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               target.id,
               afterCount,
               principalUserId,
-              PUBLISHED_TIMELINE_READ,
+              exposureAwareThreadRead,
             )
           : [];
       filtered = [...beforeMessages, target, ...afterMessages]
@@ -3240,7 +3361,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             cursorId,
             principalUserId,
             scanLimit,
-            PUBLISHED_TIMELINE_READ,
+            exposureAwareThreadRead,
           );
           if (page.nextCursor) {
             cursorTimestamp = page.nextCursor.timestamp;
@@ -3259,10 +3380,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       });
       filtered = scan.matches.map(({ item }) => item);
       keywordScanTiming = scan.timing;
-    } else if (!needsPlayFilter) {
-      // Normal mode: paginate backwards collecting visible messages until we
-      // have enough or data is exhausted. This ensures whisper filtering
-      // doesn't silently shrink the result set.
+    } else {
+      // Paginate backwards until the requested number of visible, persisted
+      // messages is collected. Play/debug differ only in the whisper viewer;
+      // transport origin never changes message visibility.
       const visible: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
       const pageSize = Math.max(requestedLimit * 2, 50);
       let cursorTimestamp = Number.MAX_SAFE_INTEGER;
@@ -3276,15 +3397,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               pageSize,
               cursorId,
               principalUserId,
-              PUBLISHED_TIMELINE_READ,
+              exposureAwareThreadRead,
             )
           : await messageStore.getBefore(cursorTimestamp, pageSize, principalUserId, cursorId);
 
         if (batch.length === 0) break;
 
         for (const item of batch) {
-          if (!canViewMessage(item, viewer)) continue;
-          if (!matchesExtraFilters(item)) continue;
+          if (!canIncludeContextItemWithoutKeyword(item)) continue;
           visible.push(item);
         }
 
@@ -3295,51 +3415,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       visible.sort(compareChronological);
       filtered = visible.slice(-requestedLimit); // take TAIL (most recent)
-    } else {
-      // Play mode: paginate backwards collecting visible messages until we have enough
-      // or data is exhausted. No fixed page cap — correctness over latency.
-      const visible: Awaited<ReturnType<typeof messageStore.getByThread>> = [];
-      const pageSize = Math.max(requestedLimit * 2, 50); // fetch in chunks, min 50
-      let cursorTimestamp = Number.MAX_SAFE_INTEGER;
-      let cursorId: string | undefined;
-
-      while (visible.length < requestedLimit) {
-        const batch = effectiveThreadId
-          ? await messageStore.getByThreadBefore(
-              effectiveThreadId,
-              cursorTimestamp,
-              pageSize,
-              cursorId,
-              principalUserId,
-              PUBLISHED_TIMELINE_READ,
-            )
-          : await messageStore.getBefore(cursorTimestamp, pageSize, principalUserId, cursorId);
-
-        if (batch.length === 0) break; // no more messages
-
-        for (const item of batch) {
-          // F35: Skip whispers not intended for this cat
-          if (!canViewMessage(item, viewer)) continue;
-          // Visible in play mode: user messages, own cat's messages,
-          // or other cats' messages that are NOT explicitly stream.
-          // Legacy messages (no origin) are treated as visible for backward
-          // compatibility — all new writes are tagged, so untagged = legacy callback.
-          const isOtherCat = item.catId && item.catId !== principalCatId;
-          if (!isOtherCat || item.origin !== 'stream') {
-            if (!matchesExtraFilters(item)) continue;
-            visible.push(item);
-          }
-        }
-
-        // Move cursor to oldest message in batch (batch is ascending, first is oldest)
-        const oldest = batch[0]!;
-        cursorTimestamp = getTimelineOrderTime(oldest);
-        cursorId = oldest.id;
-      }
-
-      // visible is accumulated in reverse-chronological page order but each page is ascending.
-      visible.sort(compareChronological);
-      filtered = visible.slice(-requestedLimit);
     }
 
     if (keywordScanTiming) {
@@ -3476,6 +3551,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...filtered.map((item) => {
           const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
           const imageUrls = extractImageUrls(item.contentBlocks);
+          const queuedProjection =
+            item.deliveryStatus === 'queued' && item.queueCustody
+              ? { deliveryStatus: 'queued' as const, queueEntryId: item.queueCustody.entryId }
+              : {};
 
           if (isFullMode) {
             // F236 Track-1 full mode: return complete content, no truncation, no drillDown.
@@ -3488,6 +3567,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               content: item.content,
               contentLength: item.content.length,
               truncated: false,
+              ...queuedProjection,
               ...(imagePaths.length > 0 ? { imagePaths } : {}),
               ...(imageUrls.length > 0 ? { imageUrls } : {}),
             };
@@ -3509,7 +3589,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             imageUrls,
           });
           // F148 Phase B (AC-B2): include relevance score (computed on full content) when keyword search is active
-          return keywordTerms.length > 0 ? { ...anchored, relevanceScore: getKeywordScore(item) } : anchored;
+          return keywordTerms.length > 0
+            ? { ...anchored, ...queuedProjection, relevanceScore: getKeywordScore(item) }
+            : { ...anchored, ...queuedProjection };
         }),
         ...queuedFullMessages,
       ],
@@ -3612,8 +3694,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (!msg.extra?.crossPost && msg.catId !== null && msg.catId === principalCatId) return false;
           if (needsPlayFilter) {
             if (!canViewMessage(msg, viewer)) return false;
-            const isOtherCat = msg.catId && msg.catId !== principalCatId;
-            if (isOtherCat && msg.origin === 'stream') return false;
           }
           return true;
         };
@@ -3776,6 +3856,38 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           );
         }
       }
+      const exactQueuedMessageIds = queuedFullEntries.flatMap((entry) => [
+        ...(entry.messageId ? [entry.messageId] : []),
+        ...(entry.mergedMessageIds ?? []),
+      ]);
+      if (queueProcessor?.resolvePromptMessageCustodyWakes) {
+        let adoptedWakes: readonly TurnCustodyWakeProvenance[];
+        try {
+          adoptedWakes = await queueProcessor.resolvePromptMessageCustodyWakes({
+            threadId: effectiveThreadId,
+            catId: principalCatId,
+            messageIds: exactQueuedMessageIds,
+          });
+        } catch (err) {
+          app.log.error(
+            { err, invocationId: principal.invocationId, threadId: effectiveThreadId, catId: principalCatId },
+            '[F167] queued custody obligation resolution failed before full-body return',
+          );
+          reply.status(503);
+          return { error: 'Turn custody adoption unavailable', code: 'TURN_CUSTODY_ADOPTION_UNAVAILABLE' };
+        }
+        if (
+          adoptedWakes.length > 0 &&
+          !(await turnCustodyAdoptionRegistry.adopt(principal.invocationId, adoptedWakes))
+        ) {
+          app.log.error(
+            { invocationId: principal.invocationId, threadId: effectiveThreadId, catId: principalCatId },
+            '[F167] active invocation has no turn custody adoption handler',
+          );
+          reply.status(409);
+          return { error: 'Turn custody adoption unavailable', code: 'TURN_CUSTODY_ADOPTION_UNAVAILABLE' };
+        }
+      }
     }
 
     return payload;
@@ -3814,7 +3926,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     // #699 P1-1: Enforce visibility — userId scope, publication status, whisper filtering
-    if (!isTimelinePublished(message)) {
+    if (!isDurablyReadableByCat(message, principal.catId)) {
       reply.status(404);
       return { error: 'Message not found' };
     }
@@ -3833,12 +3945,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       reply.status(404);
       return { error: 'Message not found' };
     }
-    // Play mode: hide other cats' stream messages (cross-cat thinking isolation)
-    if (needsPlayFilter && message.origin === 'stream' && message.catId && message.catId !== principal.catId) {
-      reply.status(404);
-      return { error: 'Message not found' };
-    }
-
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
     // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
     // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
@@ -3874,6 +3980,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         ...(imagePaths.length > 0 ? { imagePaths } : {}),
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
         ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+        speaker: getSenderName(m.catId),
         timestamp: m.timestamp,
         threadId: m.threadId,
       };
@@ -3886,20 +3993,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const effectiveContextCount = contextCount ?? 0;
     if (effectiveContextCount > 0 && message.threadId) {
       const principalUserId = principal.userId;
+      const exposureAwareThreadRead = {
+        includeQueuedCatMessages: true,
+        includeExposedQueuedUserMessagesForCatId: principal.catId,
+      } as const;
       const before = await messageStore.getByThreadBefore(
         message.threadId,
         getTimelineOrderTime(message),
         effectiveContextCount,
         message.id,
         principalUserId,
-        PUBLISHED_TIMELINE_READ,
+        exposureAwareThreadRead,
       );
       const after = await messageStore.getByThreadAfter(
         message.threadId,
         message.id,
         effectiveContextCount,
         principalUserId,
-        PUBLISHED_TIMELINE_READ,
+        exposureAwareThreadRead,
       );
       // #699 P1-1b: Apply same visibility predicate to context items as target
       const contextMsgs = [...before, ...after]
@@ -3908,10 +4019,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           if (m.deletedAt) return false;
           // #699 P1 (gpt52 intake review): exclude internal/non-routable (system/briefing) from context too
           if (isInternalNonQuotableParent(m)) return false;
-          if (!isTimelinePublished(m)) return false;
+          if (!isDurablyReadableByCat(m, principal.catId)) return false;
           if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
           if (!canViewMessage(m, viewer)) return false;
-          if (needsPlayFilter && m.origin === 'stream' && m.catId && m.catId !== principal.catId) return false;
           return true;
         })
         .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
@@ -4491,7 +4601,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const previousState = task.automationState as PrAutomationState | undefined;
       const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
       const generation = previousGeneration + 1;
-      const awaitState: AwaitStateV1 = {
+      const awaitState: GitHubPrAwaitStateV1 = {
         v: 1,
         generation,
         subjectRef: subjectKey,
@@ -4555,21 +4665,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
   });
 
-  // F202 Phase 2D (AC-D3): Register issue tracking
-  const registerIssueTrackingSchema = z.object({
-    repoFullName: z
-      .string()
-      .min(1)
-      .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
-    issueNumber: z.number().int().positive(),
-    instructions: z.string().max(2000).optional(),
-    wakePolicy: z.enum(['all_feedback', 'human_participant_activity']).optional(),
-    // PR-O3 R2: issueOwnership removed from route schema.
-    // Grounding checker does NOT verify ownership (only checks issue existence),
-    // so caller-declared ownership is an unverified trust hole.
-    // PR-O4 will wire cross-store verification + re-add this field.
-    // Policy engine skeleton preserved for PR-O4 (tested in unit tests).
-  });
+  // F280 Phase C: typed, one-shot issue wait registration.
+  const registerIssueTrackingSchema = z
+    .object({
+      repoFullName: z
+        .string()
+        .min(1)
+        .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
+      issueNumber: z.number().int().positive(),
+      when: githubIssueWaitPredicatesSchema,
+      nextStep: z.string().min(1).max(500),
+      expiresAt: z.number().int().positive(),
+    })
+    .strict();
 
   app.post('/api/callbacks/register-issue-tracking', async (request, reply) => {
     if (!taskStore) {
@@ -4592,7 +4700,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, issueNumber, instructions } = parsed.data;
+    const { repoFullName, issueNumber, when, nextStep, expiresAt } = parsed.data;
+    if (expiresAt <= Date.now()) {
+      reply.status(400);
+      return { error: 'expiresAt must be in the future' };
+    }
     const catId = record.catId;
 
     // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
@@ -4671,57 +4783,87 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
-    const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}`;
-    const existingTask = await taskStore.getBySubject(subjectKey);
-    const existingIssueState = existingTask?.automationState as LegacyIssueAutomationState | undefined;
-    const wakePolicy = parsed.data.wakePolicy ?? existingIssueState?.wakePolicy ?? 'all_feedback';
-    const existingIssueCursor = existingIssueState?.issue?.lastCommentCursor;
-    const shouldSeedIssueCursor = existingIssueCursor === undefined || existingTask?.status === 'done';
-    let seededIssueCursor: number | undefined;
-    if (shouldSeedIssueCursor) {
-      if (!fetchIssueCommentCursor) {
+    const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}` as const;
+    try {
+      if (!fetchIssueWaitBaseline) {
         reply.status(503);
-        return { error: 'Issue comment cursor fetcher not configured' };
+        return { error: 'Issue wait baseline reader not configured' };
       }
+      let snapshot: InitialIssueWaitSnapshot;
       try {
-        seededIssueCursor = await fetchIssueCommentCursor(repoFullName, issueNumber);
+        snapshot = await fetchIssueWaitBaseline(repoFullName, issueNumber);
       } catch {
         reply.status(503);
-        return { error: 'Issue comment cursor unavailable — try again later' };
+        return { error: 'Issue wait baseline unavailable — try again later' };
       }
-    }
 
-    const automationState: LegacyIssueAutomationState = {
-      wakePolicy,
-      ...(instructions !== undefined ? { trackingInstructions: instructions } : {}),
-      // Cloud R17 P1: seed both cursors together. Without lastDeliveredCursor, the gate's
-      // fallback (lastDeliveredCursor ?? collectionCursor) uses the post-advance collection
-      // cursor if a crash occurs between collection advance and delivery cursor persist,
-      // silently losing the undelivered comment on the next poll. Seeding both to the same
-      // value mirrors the R14 fix in registerRoutingTracking (community-auto-tracking.ts).
-      ...(seededIssueCursor !== undefined
-        ? { issue: { lastCommentCursor: seededIssueCursor, lastDeliveredCursor: seededIssueCursor } }
-        : {}),
-    };
-    try {
-      const task = await taskStore.upsertBySubject({
+      const taskInput = {
         kind: 'issue_tracking',
         subjectKey,
         threadId: record.threadId,
         title: `Issue tracking: ${repoFullName}#${issueNumber}`,
         ownerCatId: catId,
-        why: `Tracking issue ${repoFullName}#${issueNumber} for comment notifications`,
+        why: `Waiting on typed GitHub issue predicates for ${repoFullName}#${issueNumber}.`,
         createdBy: catId,
         userId: record.userId,
-        automationState: Object.keys(automationState).length > 0 ? automationState : undefined,
+      } as const;
+      const task = record.managedWorkBinding
+        ? await taskStore.upsertBySubjectWithManagedWorkBinding(taskInput, record.managedWorkBinding)
+        : await taskStore.upsertBySubject(taskInput);
+      const previousState = task.automationState as IssueWaitAutomationState | undefined;
+      const previousGeneration = previousState?.await?.generation ?? previousState?.waitOutcome?.generation ?? 0;
+      const generation = previousGeneration + 1;
+      const awaitState: GitHubIssueAwaitStateV1 = {
+        v: 1,
+        generation,
+        subjectRef: subjectKey,
+        ownerFence: { kind: 'containing_task', generation },
+        baseline: snapshot.baseline,
+        continuation: {
+          when,
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract names this field `then`.
+          then: nextStep,
+        },
+        expiresAt,
+        createdAt: Date.now(),
+        provenance: 'explicit_registration',
+      };
+      const superseded = previousState?.await
+        ? transitionWaitState(previousState, {
+            type: 'superseded',
+            generation: previousState.await.generation,
+            at: Date.now(),
+          })
+        : undefined;
+      const supersededOutcome =
+        superseded?.applied === true ? (superseded.state as IssueWaitAutomationState).waitOutcome : undefined;
+      const replacement: IssueWaitAutomationState = {
+        ...snapshot.collectorState,
+        await: awaitState,
+        ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
+      };
+      const installed = await taskStore.replaceAutomationStateIfGeneration(task.id, {
+        expectedGeneration: previousGeneration === 0 ? null : previousGeneration,
+        expectedUpdatedAt: task.updatedAt,
+        automationState: replacement,
       });
+      if (!installed) {
+        reply.status(409);
+        return { error: 'Issue wait changed concurrently — retry registration' };
+      }
+      if (supersededOutcome) {
+        await opts.waitLifecycleHolder?.current?.recordOutcomeEvent(installed, supersededOutcome);
+      }
 
-      return { status: 'ok', threadId: record.threadId, task };
+      return { status: 'ok', threadId: record.threadId, task: installed, await: awaitState };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
         reply.status(409);
         return { error: `Issue ${repoFullName}#${issueNumber} already registered by another user` };
+      }
+      if (isManagedWorkBindingConflictError(error)) {
+        reply.status(409);
+        return { error: 'Issue tracking task is already bound to different managed work' };
       }
       throw error;
     }
@@ -5316,7 +5458,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (msg.origin === 'briefing') return false;
         if (needsPlayFilter) {
           if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
-          if (msg.origin === 'stream' && msg.catId && msg.catId !== principal.catId) return false;
         }
         return true;
       };
