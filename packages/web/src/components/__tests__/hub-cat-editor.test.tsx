@@ -420,12 +420,23 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 
-  it('warns that the default Google CLI carrier cannot resolve an Auto Context Window', async () => {
+  it('suppresses the Context Window warning for Google drafts when the model has a catalog entry', async () => {
+    // gemini-2.5-pro is in the shared catalog → Auto mode resolves via catalog
     await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro');
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
 
+    // Catalog resolution is Auto-only; Manual still needs the carrier warning.
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro', { contextWindow: '128000' });
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+
+    // Unknown model with no catalog entry → warning fires
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom');
     expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
 
-    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro', { acpEnabled: true });
+    // ACP bypasses the carrier entirely — no warning regardless of model
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom', { acpEnabled: true });
     expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
   });
 

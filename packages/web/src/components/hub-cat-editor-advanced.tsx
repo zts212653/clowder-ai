@@ -1,5 +1,6 @@
 'use client';
 
+import { getContextWindowFallback } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
 import { HubSessionStrategyEditor } from './HubSessionStrategyEditor';
 import {
@@ -230,7 +231,8 @@ function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null;
     cat?.contextWindow == null &&
     cat?.defaultModel === form.defaultModel &&
     (capability?.source === 'reported' || capability?.source === 'catalog');
-  if (hasCurrentAutoResolution) return null;
+  const hasCatalogAutoResolution = !isManual && getContextWindowFallback(form.defaultModel) != null;
+  if (hasCurrentAutoResolution || hasCatalogAutoResolution) return null;
 
   return (
     <p className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--cafe-accent)]">
