@@ -2279,9 +2279,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         models: rawModels,
         ...(resolvedAccount.modelAliases ? { modelAliases: resolvedAccount.modelAliases } : {}),
         defaultModel: effectiveModel,
-        ...(invocationCapacitySnapshot?.capacity.windowTokens
-          ? { contextWindowTokens: invocationCapacitySnapshot.capacity.windowTokens }
-          : {}),
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         omitProviderAuth: !isApiKey,

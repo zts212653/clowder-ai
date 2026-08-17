@@ -7451,7 +7451,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('#1329: bare OpenCode native subscription binds the catalog window without acting on prior usage', async () => {
+  it('#1329/#1359: bare OpenCode native subscription binds the window at the Cat Cafe layer and supplies no limit block', async () => {
     const root = await mkdtemp(join(tmpdir(), 'context-binding-native-oc-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -7561,7 +7561,20 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
       assert.ok(seenRuntimeConfig, 'provider must observe a per-invocation runtime config');
       assert.equal(seenRuntimeConfig.model, 'anthropic/claude-opus-4-6');
-      assert.equal(seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6']?.limit?.context, 1_000_000);
+      // Boundary change (#1359): Cat Cafe no longer pushes its window into the
+      // OpenCode config. OpenCode requires `limit.output` whenever `limit`
+      // exists and merges `config ?? catalog ?? 0`, so any value we invent here
+      // would override the catalog's own authoritative — and sometimes smaller —
+      // output limit. With no per-carrier output source at this layer we supply
+      // neither field and leave OpenCode's catalog authoritative for both.
+      const nativeEntry = seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6'];
+      assert.ok(nativeEntry, 'the native model must still be registered in the runtime config');
+      assert.equal(nativeEntry.name, 'claude-opus-4-6');
+      assert.equal(nativeEntry.limit, undefined, 'no limit block may be supplied at this layer');
+      assert.equal(seenRuntimeConfig.$schema, 'https://opencode.ai/config.json');
+      // The invocation window is still bound — at the Cat Cafe layer, where it
+      // drives context health and session handoff. Only the propagation into
+      // OpenCode's own config is gone.
       assert.equal(optionsSeen[0]?.contextCapacity?.windowTokens, 1_000_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.inputCeilingTokens, 984_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.actionable, true);
@@ -7662,7 +7675,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('issue #1208: known native OpenCode model still receives the invocation context limit', async () => {
+  it('issue #1208/#1359: known native OpenCode model receives a schema-valid, limit-free runtime config', async () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
@@ -7741,11 +7754,18 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
     assert.ok(callbackEnv.OPENCODE_CONFIG);
     assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, undefined);
-    assert.equal(
-      seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6']?.limit?.context,
-      256_000,
-      'the provider-native compaction limit must match the invocation snapshot',
-    );
+    // Boundary change (#1359): the provider-native compaction limit is no longer
+    // supplied from here. #1208 wrote `limit: { context }` without the
+    // `limit.output` OpenCode's schema requires, which killed every affected cat
+    // at config-parse time; completing it instead would clobber the catalog's
+    // authoritative output for catalog-backed models. This layer has no
+    // authoritative per-carrier output, so it supplies neither field.
+    const knownEntry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
+    assert.ok(knownEntry, 'the known native model must still be registered');
+    assert.equal(knownEntry.limit, undefined, 'no limit block may be supplied at this layer');
+    // Still a schema-valid config — that is the whole point of the fix.
+    assert.equal(seenRuntimeConfig?.$schema, 'https://opencode.ai/config.json');
+    assert.ok(seenRuntimeConfig?.provider?.anthropic?.options, 'provider options must survive');
   });
 
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {
