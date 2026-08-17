@@ -65,9 +65,9 @@ function createMockAgentKeyRegistry() {
 function activeLease(holderCatIds, overrides = {}) {
   return {
     leaseId: 'lease-review-1',
-    key: 'user-1|github:pr:2868|review|reviewer',
+    key: 'user-1|pr:owner/repo#2868|review|reviewer',
     tenantScope: 'user-1',
-    subjectRef: 'github:pr:2868',
+    subjectRef: 'pr:owner/repo#2868',
     actionFamily: 'review',
     successorSlot: 'reviewer',
     mode: holderCatIds.length > 1 ? 'parallel' : 'single',
@@ -182,12 +182,32 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     });
   }
 
+  test('rejects an invalid action subjectRef before admission or invocation queueing', async () => {
+    const response = await postSameThread({
+      targetCats: ['codex'],
+      clientMessageId: 'invalid-subject-ref',
+      action: {
+        subjectRef: 'github:zts212653/cat-cafe#3677@181099d2',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        mode: 'single',
+        terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.match(response.body, /pr:<owner>\/<repo>#<positive-number>/);
+    assert.match(response.body, /subject:<namespace>:<opaque-id>/);
+    assert.equal(actionService.calls.length, 0);
+    assert.equal(invocationQueue.list(source.id, 'user-1').length, 0);
+  });
+
   test('same-thread post_message admits one successor and carries a post fence into InvocationQueue', async () => {
     const response = await postSameThread({
       targetCats: ['codex'],
       clientMessageId: 'review-2915',
       action: {
-        subjectRef: 'github:pr:2915',
+        subjectRef: 'pr:owner/repo#2915',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -212,7 +232,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex', 'gpt52'],
       clientMessageId: 'parallel-review-2915',
       action: {
-        subjectRef: 'github:pr:2915',
+        subjectRef: 'pr:owner/repo#2915',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'parallel',
@@ -244,7 +264,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['opus'],
       clientMessageId: 'parallel-reject-2915',
       action: {
-        subjectRef: 'github:pr:2915',
+        subjectRef: 'pr:owner/repo#2915',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'parallel',
@@ -269,7 +289,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -312,7 +332,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -361,7 +381,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-replay-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -412,7 +432,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-replay-blocked-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -445,7 +465,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'return-same-client-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -493,7 +513,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -525,7 +545,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -552,7 +572,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'action-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -574,7 +594,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'recover-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -601,7 +621,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex'],
       clientMessageId: 'recover-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -636,7 +656,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     const missingKey = await post({
       targetCats: ['codex'],
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'single',
@@ -650,7 +670,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       targetCats: ['codex', 'gpt52'],
       clientMessageId: 'parallel-review-2868',
       action: {
-        subjectRef: 'github:pr:2868',
+        subjectRef: 'pr:owner/repo#2868',
         actionFamily: 'review',
         successorSlot: 'reviewer',
         mode: 'parallel',
@@ -710,7 +730,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
           targetCats: ['codex'],
           clientMessageId: 'agent-review-2915',
           action: {
-            subjectRef: 'github:pr:2915',
+            subjectRef: 'pr:owner/repo#2915',
             actionFamily: 'review',
             successorSlot: 'reviewer',
             mode: 'single',

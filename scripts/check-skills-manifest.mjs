@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import {
   collectSkillRequirements,
   loadCapabilitiesConfig,
@@ -44,6 +45,12 @@ function loadManifest() {
 
 function hasYamlFrontmatter(content) {
   return content.startsWith('---\n') || content.startsWith('---\r\n');
+}
+
+function parseSkillFrontmatter(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) return null;
+  return parseYaml(match[1]) ?? {};
 }
 
 function loadRosterHandles() {
@@ -148,6 +155,52 @@ function lintManifestStructure(skillsMap) {
     if (!existsSync(skillDocPath)) continue;
     if (Object.hasOwn(skillsMap, skillName)) continue;
     errors.push(`[manifest] filesystem skill "${skillName}" has SKILL.md but is missing in manifest.yaml`);
+  }
+
+  return errors;
+}
+
+function lintManualOnlyPolicy(skillsMap) {
+  const errors = [];
+
+  for (const skillName of Object.keys(skillsMap)) {
+    const skillDir = join(skillsRoot, skillName);
+    const skillDocPath = join(skillDir, 'SKILL.md');
+    if (!existsSync(skillDocPath)) continue;
+
+    const skillDoc = readFileSync(skillDocPath, 'utf-8');
+    let frontmatter;
+    try {
+      frontmatter = parseSkillFrontmatter(skillDoc);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`[manual-only] ${relative(repoRoot, skillDocPath)} has invalid YAML frontmatter: ${message}`);
+      continue;
+    }
+
+    const claudeManualOnly = frontmatter?.['disable-model-invocation'] === true;
+    const openaiConfigPath = join(skillDir, 'agents', 'openai.yaml');
+    let codexManualOnly = false;
+    if (existsSync(openaiConfigPath)) {
+      try {
+        const openaiConfig = parseYaml(readFileSync(openaiConfigPath, 'utf-8')) ?? {};
+        codexManualOnly = openaiConfig?.policy?.allow_implicit_invocation === false;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`[manual-only] ${relative(repoRoot, openaiConfigPath)} has invalid YAML: ${message}`);
+        continue;
+      }
+    }
+
+    if (claudeManualOnly && !codexManualOnly) {
+      errors.push(
+        `[manual-only] ${skillName} disables Claude model invocation but lacks agents/openai.yaml policy.allow_implicit_invocation: false`,
+      );
+    } else if (codexManualOnly && !claudeManualOnly) {
+      errors.push(
+        `[manual-only] ${skillName} disables Codex implicit invocation but lacks SKILL.md disable-model-invocation: true`,
+      );
+    }
   }
 
   return errors;
@@ -282,7 +335,11 @@ async function lintManifest() {
   const skillsMap = parsed.skills;
   const { handles, nicknames } = loadRosterHandles();
 
-  const errors = [...lintManifestStructure(skillsMap), ...lintHardcodedHandles(skillsMap, handles, nicknames)];
+  const errors = [
+    ...lintManifestStructure(skillsMap),
+    ...lintManualOnlyPolicy(skillsMap),
+    ...lintHardcodedHandles(skillsMap, handles, nicknames),
+  ];
   const warnings = await collectMcpWarnings(skillsMap);
 
   return {

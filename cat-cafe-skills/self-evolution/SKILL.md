@@ -68,11 +68,28 @@ description: >
 
 ### 提案流程
 
-1. **写提案**：用 `docs/evolution-proposals/TEMPLATE.md` 创建 `EP-XXX.md`
-2. **5 槽模板**：Trigger / Evidence(≥2 源) / Root Cause / Lever(最小杠杆) / Verify
-3. **审批**：影响单猫→直接提operator；影响三猫→先 1 猫 sanity check→operator拍板
-4. **落地闭环**：accepted → 必须关联 commit/PR，不能停在"提了"
-5. **30 天验证**：落地 30 天后自动触发 replay check——同类错误还出现吗？
+1. **先闭环当前任务**：按新裁决修正当前产物，并在当前 scope 扫同类位置；不能只修被点名的一处
+2. **写提案**：用 `docs/evolution-proposals/TEMPLATE.md` 创建 `EP-XXX.md`
+3. **5 槽模板**：Trigger / Evidence(≥2 源) / Root Cause / Lever(最小杠杆) / Verify
+4. **审批**：影响单猫→直接提operator；影响三猫→先 1 猫 sanity check→operator拍板
+5. **落地闭环**：accepted → 必须关联 commit/PR，不能停在"提了"
+6. **30 天验证**：落地 30 天后自动触发 replay check——同类错误还出现吗？
+
+### 裁决蒸馏默认动作
+
+operator给出可泛化的裁决或纠正后，**归档 / 提案前先完成一次有界同类扫描**：
+
+1. 以本次偏差的判据为搜索词，扫描当前任务正在修改的文件、claim 或检查清单。
+2. 当前 scope 内的同型问题一并修；跨 feature 的命中只投 source ref 给 owner，不顺手扩大实现球权。
+3. 若裁决消除了真实歧义，把它蒸馏成一组“错误例 → 正确例 → 分界判据”，写回现有 skill / test / docs 真相源。
+
+这不是“每次纠正都建档”，也不是全仓扫墓。未确认历史重复时仍按正常任务处理；只有本节触发条件成立，才进入 Evolution Proposal。
+
+**例子对**：
+
+- 错误例：只改 reviewer 点名的一个分页调用点，却没查同一 helper 的其他消费者。
+- 正确例：先修点名位置，再在当前改动边界内搜索同一 helper；同型调用一并修，跨 feature 命中只路由证据。
+- 分界判据：同一失败机制 + 当前任务已持有 scope 才直接修；仅文字相似或别的 owner scope 不算。
 
 ### 最小杠杆排序
 

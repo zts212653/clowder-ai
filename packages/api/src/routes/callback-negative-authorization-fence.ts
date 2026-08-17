@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import type { ActionSuccessorRequestMetadata, CatId } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type {
   DispatchNegativeAuthorizationBlock,
   IDispatchProposalStore,
+} from '../domains/approval-hub/stores/ports/IDispatchProposalStore.js';
+import {
+  tryCanonicalizeDispatchAdmissionSubjectRef,
+  tryComputeDispatchCanonicalActionKey,
 } from '../domains/approval-hub/stores/ports/IDispatchProposalStore.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
@@ -38,20 +42,59 @@ function resolveCanonicalCarrierTargets(input: {
   return input.suppressRouting ? [] : [...mergedTargets];
 }
 
-function isExistingActionSuccessorTransition(action: unknown): boolean {
+/**
+ * Only a transition carrying a persisted F167 lease reference can bypass a
+ * first-claim admission check. `existing_standing` names the issuer's proof,
+ * not an already-claimed lease, so it still needs canonical admission.
+ */
+export function isPersistedActionSuccessorTransition(action: unknown): boolean {
   if (!action || typeof action !== 'object') return false;
   const candidate = action as {
     replace?: unknown;
     returnToPredecessor?: unknown;
-    reviewReentry?: unknown;
-    claimOrigin?: unknown;
   };
-  return Boolean(
-    candidate.replace ||
-      candidate.returnToPredecessor ||
-      candidate.reviewReentry ||
-      candidate.claimOrigin === 'existing_standing',
-  );
+  return Boolean(candidate.replace || candidate.returnToPredecessor);
+}
+
+/**
+ * A structured carrier proves the complete F167 identity. An actionless
+ * coordination carrier proves no action identity at all, so its subject can
+ * only nominate a held action for denial; it cannot grant or synthesize
+ * custody from a partial key.
+ */
+function resolveCanonicalAdmissionCandidate(input: {
+  ownerUserId: string;
+  action?: ActionSuccessorRequestMetadata;
+  coordinationSubjectRef?: string;
+}): { canonicalActionKey?: string; canonicalSubjectRef?: string } | undefined {
+  if (input.action) {
+    const canonicalActionKey = tryComputeDispatchCanonicalActionKey(input.ownerUserId, input.action);
+    // Let F167 return its ordinary invalid-action response. Never degrade a
+    // malformed structured action into a weaker subject-only lookup.
+    return canonicalActionKey ? { canonicalActionKey } : undefined;
+  }
+  if (!input.coordinationSubjectRef) return undefined;
+  const canonicalSubjectRef = tryCanonicalizeDispatchAdmissionSubjectRef(input.coordinationSubjectRef);
+  // An opaque coordination subject does not identify an executable action.
+  return canonicalSubjectRef ? { canonicalSubjectRef } : undefined;
+}
+
+function mergeNegativeAuthorizationBlocks(
+  blocks: readonly DispatchNegativeAuthorizationBlock[],
+): DispatchNegativeAuthorizationBlock[] {
+  const byProposalId = new Map<string, DispatchNegativeAuthorizationBlock>();
+  for (const block of blocks) {
+    const existing = byProposalId.get(block.proposalId);
+    if (!existing) {
+      byProposalId.set(block.proposalId, { ...block, targetCats: [...block.targetCats] });
+      continue;
+    }
+    for (const targetCat of block.targetCats) {
+      if (!existing.targetCats.includes(targetCat)) existing.targetCats.push(targetCat);
+    }
+    existing.targetCats.sort();
+  }
+  return [...byProposalId.values()].sort((left, right) => left.proposalId.localeCompare(right.proposalId));
 }
 
 export type NegativeAuthorizationFenceResult =
@@ -79,12 +122,67 @@ export interface NegativeAuthorizationFenceInput {
   targetThreadId: string;
   ownerUserId: string;
   explicitTargetCats?: readonly string[];
-  action?: unknown;
+  action?: ActionSuccessorRequestMetadata;
+  coordinationSubjectRef?: string;
   suppressRouting: boolean;
   clientMessageId?: string;
   dispatchProposalStore?: IDispatchProposalStore;
+  /** Redis F167 owns full-key structured admission; broad preflight remains for actionless/non-atomic carriers. */
+  deferStructuredActionAdmissionToAtomicClaim?: boolean;
   eventAuditLog?: Pick<EventAuditLog, 'append'>;
   log: Pick<FastifyBaseLogger, 'error'>;
+}
+
+export interface DispatchNegativeAuthorizationAuditInput {
+  proposalStatuses: ReadonlyArray<{
+    proposalId: string;
+    status: DispatchNegativeAuthorizationBlock['status'];
+  }>;
+  sourceInvocationId: string;
+  sourceThreadId: string;
+  targetThreadId: string;
+  senderCatId: CatId;
+  blockedTargetCats: readonly string[];
+  effectClass?: string;
+  clientMessageId?: string;
+  legacyCutoverAt?: number;
+  legacyUnresolved?: boolean;
+  eventAuditLog?: Pick<EventAuditLog, 'append'>;
+  log: Pick<FastifyBaseLogger, 'error'>;
+}
+
+export async function appendDispatchNegativeAuthorizationBlockedAudit(
+  input: DispatchNegativeAuthorizationAuditInput,
+): Promise<void> {
+  const proposalIds = input.proposalStatuses.map(({ proposalId }) => proposalId);
+  const auditData = {
+    proposalIds,
+    proposalStatuses: input.proposalStatuses,
+    sourceInvocationId: input.sourceInvocationId,
+    sourceThreadId: input.sourceThreadId,
+    targetThreadId: input.targetThreadId,
+    senderCatId: input.senderCatId,
+    blockedTargetCats: [...input.blockedTargetCats].sort(),
+    effectClass: input.effectClass ?? 'omitted',
+    clientMessageIdPresent: Boolean(input.clientMessageId),
+    ...(input.legacyCutoverAt !== undefined ? { legacyCutoverAt: input.legacyCutoverAt } : {}),
+    legacyUnresolved: input.legacyUnresolved ?? false,
+    ...(input.clientMessageId
+      ? { clientMessageIdHash: createHash('sha256').update(input.clientMessageId).digest('hex') }
+      : {}),
+  };
+  try {
+    await (input.eventAuditLog ?? getEventAuditLog()).append({
+      type: 'dispatch_negative_authorization_blocked',
+      threadId: input.targetThreadId,
+      data: auditData,
+    });
+  } catch (err) {
+    input.log.error(
+      { err, proposalIds, sourceInvocationId: input.sourceInvocationId },
+      '[F246/#1291] negative authorization audit append failed',
+    );
+  }
 }
 
 /**
@@ -108,14 +206,27 @@ export async function preflightNegativeAuthorizationFence(
     input.effectClass === 'assign_work' ||
     canonicalCarrierTargets.length === 0 ||
     !input.dispatchProposalStore ||
-    isExistingActionSuccessorTransition(input.action)
+    isPersistedActionSuccessorTransition(input.action)
   ) {
     return undefined;
   }
 
+  // Exact and legacy proposal indexes are intentionally broader than a full
+  // action identity. For an atomic structured carrier, F167 resolves an
+  // existing lease before its broad lineage and full-key canonical deny
+  // checks; applying the lineage-wide preflight here would let an unrelated
+  // proposal preempt a valid replay or re-entry.
+  if (input.action && input.deferStructuredActionAdmissionToAtomicClaim) return undefined;
+
+  const canonicalAdmissionCandidate = resolveCanonicalAdmissionCandidate({
+    ownerUserId: input.ownerUserId,
+    ...(input.action ? { action: input.action } : {}),
+    ...(input.coordinationSubjectRef ? { coordinationSubjectRef: input.coordinationSubjectRef } : {}),
+  });
   let negativeAuthorizationBlocks: DispatchNegativeAuthorizationBlock[];
   let legacyCutoverAt: number | undefined;
-  let legacyNegativeAuthorizationBlockCount = 0;
+  let legacyProposalIds = new Set<string>();
+  let nonLegacyProposalIds = new Set<string>();
   try {
     const exactBlocks = await input.dispatchProposalStore.findNegativeAuthorizationBlocks({
       ownerUserId: input.ownerUserId,
@@ -138,10 +249,27 @@ export async function preflightNegativeAuthorizationFence(
             cutoverAt: legacyCutoverAt,
           })
         : [];
-    legacyNegativeAuthorizationBlockCount = legacyBlocks.length;
-    negativeAuthorizationBlocks = [...exactBlocks, ...legacyBlocks].sort((left, right) =>
-      left.proposalId.localeCompare(right.proposalId),
-    );
+    const canonicalBlocks = canonicalAdmissionCandidate
+      ? await input.dispatchProposalStore.findCanonicalAdmissionBlocks({
+          ownerUserId: input.ownerUserId,
+          ...canonicalAdmissionCandidate,
+        })
+      : [];
+    legacyProposalIds = new Set(legacyBlocks.map((block) => block.proposalId));
+    nonLegacyProposalIds = new Set([
+      ...exactBlocks.map((block) => block.proposalId),
+      ...canonicalBlocks.map((block) => block.proposalId),
+    ]);
+    negativeAuthorizationBlocks = mergeNegativeAuthorizationBlocks([
+      ...exactBlocks,
+      ...legacyBlocks,
+      ...canonicalBlocks.map((block) => ({
+        ...block,
+        // Canonical identity is tenant-scoped rather than target-scoped. Once
+        // it matches, the entire incoming carrier is denied before routing.
+        targetCats: [...canonicalCarrierTargets],
+      })),
+    ]);
   } catch (err) {
     input.log.error(
       {
@@ -165,8 +293,7 @@ export async function preflightNegativeAuthorizationFence(
 
   const proposalIds = negativeAuthorizationBlocks.map((block) => block.proposalId);
   const blockedTargetCats = [...new Set(negativeAuthorizationBlocks.flatMap((block) => block.targetCats))].sort();
-  const auditData = {
-    proposalIds,
+  await appendDispatchNegativeAuthorizationBlockedAudit({
     proposalStatuses: negativeAuthorizationBlocks.map((block) => ({
       proposalId: block.proposalId,
       status: block.status,
@@ -176,33 +303,21 @@ export async function preflightNegativeAuthorizationFence(
     targetThreadId: input.targetThreadId,
     senderCatId: input.senderCatId,
     blockedTargetCats,
-    effectClass: input.effectClass ?? 'omitted',
-    clientMessageIdPresent: Boolean(input.clientMessageId),
+    effectClass: input.effectClass,
+    clientMessageId: input.clientMessageId,
     ...(legacyCutoverAt !== undefined ? { legacyCutoverAt } : {}),
-    legacyUnresolved: legacyNegativeAuthorizationBlockCount > 0,
-    ...(input.clientMessageId
-      ? { clientMessageIdHash: createHash('sha256').update(input.clientMessageId).digest('hex') }
-      : {}),
-  };
-  try {
-    await (input.eventAuditLog ?? getEventAuditLog()).append({
-      type: 'dispatch_negative_authorization_blocked',
-      threadId: input.targetThreadId,
-      data: auditData,
-    });
-  } catch (err) {
-    input.log.error(
-      { err, proposalIds, sourceInvocationId: input.sourceInvocationId },
-      '[F246/#1291] negative authorization audit append failed',
-    );
-  }
+    legacyUnresolved: legacyProposalIds.size > 0,
+    eventAuditLog: input.eventAuditLog,
+    log: input.log,
+  });
   return {
     statusCode: 409,
     body: {
-      kind:
-        negativeAuthorizationBlocks.length === legacyNegativeAuthorizationBlockCount
-          ? 'legacy_dispatch_lineage_unresolved'
-          : 'dispatch_negative_authorization_blocked',
+      kind: negativeAuthorizationBlocks.every(
+        (block) => legacyProposalIds.has(block.proposalId) && !nonLegacyProposalIds.has(block.proposalId),
+      )
+        ? 'legacy_dispatch_lineage_unresolved'
+        : 'dispatch_negative_authorization_blocked',
       proposalIds,
       blockedTargetCats,
     },

@@ -108,9 +108,41 @@ describe('classifyGitHubExecutionFailure', () => {
     const fixture = rawGitHubFixture(['Account spending limit reached before the job started.']);
     const result = await fetchPrCiStatus('zts212653/cat-cafe', 3276, { warn() {} }, fixture);
     assert.equal(result.checks[0].executionFailure, 'billing_spending_limit_zero_step');
+    assert.equal(result.checkRollup, 'present');
     assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/check-runs?')));
     assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/jobs?')));
     assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/annotations?')));
+  });
+
+  it('marks an empty GitHub rollup without prematurely classifying it as pass', async () => {
+    const commands = [];
+    const result = await fetchPrCiStatus(
+      'zts212653/clowder-ai',
+      1342,
+      { warn() {} },
+      {
+        async execFileAsync(file, args) {
+          assert.equal(file, 'gh');
+          commands.push([...args]);
+          assert.equal(args[0], 'pr');
+          assert.equal(args[1], 'view');
+          return {
+            stdout: JSON.stringify({
+              headRefOid: 'b'.repeat(40),
+              state: 'OPEN',
+              mergedAt: null,
+              mergedBy: null,
+              statusCheckRollup: [],
+            }),
+          };
+        },
+      },
+    );
+
+    assert.equal(result.aggregateBucket, 'pending');
+    assert.equal(result.checkRollup, 'empty');
+    assert.deepEqual(result.checks, []);
+    assert.equal(commands.length, 1, 'an ambiguous empty rollup must not be rendered as terminal CI details');
   });
 
   it('keeps a raw billing-shaped check unclassified when annotations are absent', async () => {
@@ -170,7 +202,9 @@ describe('normalizeBucket', () => {
 });
 
 describe('computeAggregateBucket', () => {
-  it('returns pending for empty rollup', () => {
+  it('keeps an empty rollup pending until the poller proves it is stable', () => {
+    // A single empty statusCheckRollup is ambiguous: the repository may have no
+    // checks, or GitHub may not have created the check runs yet for a fresh HEAD.
     assert.strictEqual(computeAggregateBucket([]), 'pending');
   });
 

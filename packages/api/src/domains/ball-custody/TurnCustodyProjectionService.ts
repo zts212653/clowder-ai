@@ -1,8 +1,9 @@
-import type { BallCustodyEvent } from '@cat-cafe/shared';
+import type { BallCustodyEvent, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
+import { handedEventSourceId } from './ball-custody-events.js';
 
 export type TurnCustodyWakeProvenance =
   | {
@@ -21,7 +22,14 @@ export type TurnCustodyWakeProvenance =
     }
   | {
       readonly kind: 'structured';
-      readonly protocol: 'event_wait' | 'assign_work' | 'coordination' | 'callback';
+      readonly protocol: 'event_wait';
+      readonly subjectKey: string;
+      readonly holderCatId: string;
+      readonly waitContinuationCarrier: WaitContinuationCarrierV1;
+    }
+  | {
+      readonly kind: 'structured';
+      readonly protocol: 'assign_work' | 'coordination' | 'callback';
       readonly subjectKey: string;
       readonly holderCatId: string;
     }
@@ -83,8 +91,16 @@ export interface TurnCustodyStopDecision {
   readonly shouldBlock: boolean;
   readonly transitionObserved: boolean;
   readonly structuredTransitionKind?: 'hold_dispositioned' | 'dispatch_dispositioned' | 'held' | 'handed';
+  readonly dispatchDisposition?: 'handled' | 'completed';
+  readonly dispatchDispositionEventId?: string;
+  readonly dispatchDispositionAt?: number;
   readonly evidenceRefs: string[];
 }
+
+type StructuredTransitionObservation = Pick<
+  TurnCustodyStopDecision,
+  'structuredTransitionKind' | 'dispatchDisposition' | 'dispatchDispositionEventId' | 'dispatchDispositionAt'
+>;
 
 export type TurnCustodyShadowComparison = 'agree_allow' | 'agree_block' | 'old_only_block' | 'new_only_block';
 
@@ -112,6 +128,31 @@ function actionTransitionFingerprint(lease: ActionSuccessorLease, holderCatId: s
   });
 }
 
+function dispatchTransitionObservation(
+  event: BallCustodyEvent,
+  baseline: StructuredTransitionBaseline,
+): StructuredTransitionObservation | undefined {
+  if (
+    baseline.protocol !== 'dispatch' ||
+    event.payload.catId !== baseline.holderCatId ||
+    event.payload.sourceMessageId !== baseline.dispatchSourceMessageId ||
+    event.payload.fromCatId !== baseline.dispatchFromCatId
+  ) {
+    return undefined;
+  }
+  const disposition = event.payload.disposition;
+  return {
+    structuredTransitionKind: 'dispatch_dispositioned',
+    ...(disposition === 'handled' || disposition === 'completed'
+      ? {
+          dispatchDisposition: disposition,
+          dispatchDispositionEventId: event.sourceEventId,
+          dispatchDispositionAt: event.at,
+        }
+      : {}),
+  };
+}
+
 function unknown(reason: string): TurnCustodyProjection {
   return { state: 'unknown_legacy', evidenceRefs: [`unknown:${reason}`] };
 }
@@ -120,13 +161,13 @@ function decision(
   projection: TurnCustodyProjection,
   transitionObserved: boolean,
   state = projection.state,
-  structuredTransitionKind?: TurnCustodyStopDecision['structuredTransitionKind'],
+  structuredTransition?: StructuredTransitionObservation,
 ): TurnCustodyStopDecision {
   return {
     state,
     shouldBlock: state === 'unknown_legacy' || (state === 'covered_active' && !transitionObserved),
     transitionObserved,
-    ...(structuredTransitionKind ? { structuredTransitionKind } : {}),
+    ...structuredTransition,
     evidenceRefs: [...projection.evidenceRefs],
   };
 }
@@ -158,8 +199,8 @@ export class TurnCustodyProjectionService {
       if (projection.baseline.kind === 'action_successor') {
         return decision(projection, await this.actionTransitionObserved(projection.baseline));
       }
-      const structuredTransitionKind = await this.structuredTransitionObserved(projection.baseline);
-      return decision(projection, structuredTransitionKind !== undefined, projection.state, structuredTransitionKind);
+      const structuredTransition = await this.structuredTransitionObserved(projection.baseline);
+      return decision(projection, structuredTransition !== undefined, projection.state, structuredTransition);
     } catch {
       return decision(
         { state: 'unknown_legacy', evidenceRefs: [...projection.evidenceRefs, 'unknown:query_failed'] },
@@ -204,23 +245,22 @@ export class TurnCustodyProjectionService {
     if (projection?.state !== 'active' && projection?.state !== 'blocked') {
       return unknown('structured_projection_missing');
     }
-    if (projection.holder !== wake.holderCatId) return unknown('structured_holder_mismatch');
-    if (
-      wake.protocol === 'dispatch' &&
-      !events.some(
-        (event) =>
-          event.kind === 'ball.handed' &&
-          event.sourceEventId === wake.handoff.sourceEventId &&
-          event.payload.fromCatId === wake.handoff.fromCatId &&
-          event.payload.toCatId === wake.holderCatId,
-      )
-    ) {
+    const exactWakeIndex = this.exactStructuredWakeIndex(wake, events);
+    if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
       return unknown('dispatch_handoff_missing');
+    }
+    if (projection.holder !== wake.holderCatId) {
+      return this.releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
     }
     return {
       state: 'covered_active',
       evidenceRefs: [
         `${wake.protocol}:${wake.subjectKey}`,
+        ...(wake.protocol === 'event_wait'
+          ? [
+              `wait:${wake.waitContinuationCarrier.waitId}:${wake.waitContinuationCarrier.outcomeId}:g${wake.waitContinuationCarrier.ownerFence.generation}`,
+            ]
+          : []),
         ...(wake.protocol === 'dispatch' ? [wake.handoff.sourceEventId] : []),
       ],
       baseline: {
@@ -240,6 +280,75 @@ export class TurnCustodyProjectionService {
     };
   }
 
+  private releasedStructuredWake(
+    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
+    events: readonly BallCustodyEvent[],
+    exactWakeIndex: number,
+  ): TurnCustodyProjection | undefined {
+    if (exactWakeIndex === -1) return undefined;
+    const release = this.findRelease(events, exactWakeIndex, wake.holderCatId);
+    if (!release) return undefined;
+    const exactWakeEvidence =
+      wake.protocol === 'dispatch'
+        ? wake.handoff.sourceEventId
+        : wake.protocol === 'hold'
+          ? handedEventSourceId(wake.sourceMessageId, wake.holderCatId)
+          : undefined;
+    return {
+      state: 'covered_empty',
+      evidenceRefs: [
+        `${wake.protocol}:${wake.subjectKey}`,
+        ...(exactWakeEvidence ? [exactWakeEvidence] : []),
+        `released:${release.sourceEventId}`,
+      ],
+    };
+  }
+
+  private exactStructuredWakeIndex(
+    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
+    events: readonly BallCustodyEvent[],
+  ): number {
+    if (wake.protocol === 'dispatch') {
+      return events.findIndex(
+        (event) =>
+          event.kind === 'ball.handed' &&
+          event.sourceEventId === wake.handoff.sourceEventId &&
+          event.payload.fromCatId === wake.handoff.fromCatId &&
+          event.payload.toCatId === wake.holderCatId,
+      );
+    }
+    if (wake.protocol !== 'hold') return -1;
+    const wakeConditionIndex = events.findIndex(
+      (event) =>
+        event.kind === 'ball.wake_condition_met' &&
+        event.payload.taskId === wake.taskId &&
+        event.payload.catId === wake.holderCatId,
+    );
+    if (wakeConditionIndex === -1) return -1;
+    return events.findIndex(
+      (event, index) =>
+        index > wakeConditionIndex &&
+        event.kind === 'ball.handed' &&
+        event.sourceEventId === handedEventSourceId(wake.sourceMessageId, wake.holderCatId) &&
+        event.payload.toCatId === wake.holderCatId,
+    );
+  }
+
+  private findRelease(
+    events: readonly BallCustodyEvent[],
+    exactWakeIndex: number,
+    holderCatId: string,
+  ): BallCustodyEvent | undefined {
+    return events.slice(exactWakeIndex + 1).find((event) => {
+      if (event.kind === 'ball.handed') return event.payload.fromCatId === holderCatId;
+      return (
+        event.kind === 'ball.handed_cvo' &&
+        event.payload.fromCatId === holderCatId &&
+        (event.payload.intent === 'handoff' || event.payload.intent === 'done_notify')
+      );
+    });
+  }
+
   private async actionTransitionObserved(baseline: ActionTransitionBaseline): Promise<boolean> {
     const lease = await this.deps.actionSuccessorLeaseStore?.get(baseline.leaseId);
     if (!lease) return false;
@@ -248,7 +357,7 @@ export class TurnCustodyProjectionService {
 
   private async structuredTransitionObserved(
     baseline: StructuredTransitionBaseline,
-  ): Promise<TurnCustodyStopDecision['structuredTransitionKind']> {
+  ): Promise<StructuredTransitionObservation | undefined> {
     const events = await this.deps.ballCustodyEventLog?.read(baseline.subjectKey, baseline.fromSequence);
     for (const event of events ?? []) {
       const kind = this.structuredTransitionKind(event, baseline);
@@ -260,28 +369,25 @@ export class TurnCustodyProjectionService {
   private structuredTransitionKind(
     event: BallCustodyEvent,
     baseline: StructuredTransitionBaseline,
-  ): TurnCustodyStopDecision['structuredTransitionKind'] {
+  ): StructuredTransitionObservation | undefined {
     const holderCatId = baseline.holderCatId;
     if (event.kind === 'ball.hold_dispositioned') {
       return baseline.protocol === 'hold' &&
         event.payload.catId === holderCatId &&
         event.payload.sourceMessageId === baseline.sourceMessageId &&
         event.payload.taskId === baseline.taskId
-        ? 'hold_dispositioned'
+        ? { structuredTransitionKind: 'hold_dispositioned' }
         : undefined;
     }
     if (event.kind === 'ball.dispatch_dispositioned') {
-      return baseline.protocol === 'dispatch' &&
-        event.payload.catId === holderCatId &&
-        event.payload.sourceMessageId === baseline.dispatchSourceMessageId &&
-        event.payload.fromCatId === baseline.dispatchFromCatId
-        ? 'dispatch_dispositioned'
-        : undefined;
+      return dispatchTransitionObservation(event, baseline);
     }
     if (event.kind === 'ball.handed' || event.kind === 'ball.handed_cvo') {
-      return event.payload.fromCatId === holderCatId ? 'handed' : undefined;
+      return event.payload.fromCatId === holderCatId ? { structuredTransitionKind: 'handed' } : undefined;
     }
-    if (event.kind === 'ball.held') return event.payload.catId === holderCatId ? 'held' : undefined;
+    if (event.kind === 'ball.held') {
+      return event.payload.catId === holderCatId ? { structuredTransitionKind: 'held' } : undefined;
+    }
     return undefined;
   }
 }

@@ -158,6 +158,118 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
+  // ── #1291 Gate 6: exact ordinary-user Batch Steer reservation ──
+
+  describe('exact user Batch Steer reservation (#1291)', () => {
+    it('atomically reserves only the explicit allowlist and marks every selected entry as steering', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const c = queue.enqueue(entry({ content: 'c', ownerAuthProvenance: 'strict' })).entry;
+
+      const result = queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      assert.equal(result.outcome, 'reserved');
+      assert.deepEqual(result.entryIds, [a.id, b.id]);
+      assert.equal(queue.list('t1', 'u1')[0].id, a.id, 'primary entry is promoted');
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.deepEqual(byId.get(a.id).steerRequestedByCatIds, ['opus']);
+      assert.deepEqual(byId.get(b.id).steerRequestedByCatIds, ['opus']);
+      assert.equal(byId.get(c.id).steerRequestedByCatIds, undefined, 'unselected C is untouched');
+      assert.equal(byId.get(c.id).exactSteerBatch, undefined, 'unselected C is not reserved');
+    });
+
+    it('marks the complete reservation processing in one dequeue transition', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const c = queue.enqueue(entry({ content: 'c', ownerAuthProvenance: 'strict' })).entry;
+      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      const primary = queue.markProcessing('t1', 'u1');
+
+      assert.equal(primary.id, a.id);
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.equal(byId.get(a.id).status, 'processing');
+      assert.equal(byId.get(b.id).status, 'processing');
+      assert.equal(byId.get(a.id).processingStartedAt, byId.get(b.id).processingStartedAt);
+      assert.equal(byId.get(c.id).status, 'queued');
+    });
+
+    it('withdrawing one deferred member releases the reservation and leaves siblings ordinary', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      const removed = queue.remove('t1', 'u1', b.id);
+
+      assert.equal(removed.id, b.id);
+      const remaining = queue.list('t1', 'u1');
+      assert.equal(remaining.length, 1);
+      assert.equal(remaining[0].id, a.id);
+      assert.equal(remaining[0].exactSteerBatch, undefined);
+      assert.equal(remaining[0].steerRequestedByCatIds, undefined);
+    });
+
+    it('rejects the complete reserved set without mutating any entry when one carrier is ineligible', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const fenced = queue.enqueue(
+        entry({
+          content: 'fenced',
+          ownerAuthProvenance: 'strict',
+          actionSuccessorFence: { leaseId: 'lease-1' },
+        }),
+      ).entry;
+
+      const before = queue.list('t1', 'u1');
+      const result = queue.reserveExactUserBatch('t1', 'u1', [a.id, fenced.id]);
+
+      assert.deepEqual(result, { outcome: 'rejected', reason: 'entry_ineligible' });
+      assert.deepEqual(queue.list('t1', 'u1'), before);
+    });
+
+    it('rejects incompatible target cats and intents without partial reservation', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const otherCat = queue.enqueue(
+        entry({ content: 'b', ownerAuthProvenance: 'strict', targetCats: ['codex'] }),
+      ).entry;
+      const before = queue.list('t1', 'u1');
+
+      assert.deepEqual(queue.reserveExactUserBatch('t1', 'u1', [a.id, otherCat.id]), {
+        outcome: 'rejected',
+        reason: 'entries_incompatible',
+      });
+      assert.deepEqual(queue.list('t1', 'u1'), before);
+    });
+
+    it('rejects connector/system, freshness, continuation/A2A, pinned, and legacy-unattributed carriers', () => {
+      const cases = [
+        { source: 'connector' },
+        { source: 'agent', sourceCategory: 'scheduled' },
+        { sourceCategory: 'freshness', freshnessClosureId: 'closure-1' },
+        { sourceCategory: 'continuation' },
+        { sourceCategory: 'a2a', a2aTriggerMessageId: 'trigger-1' },
+        { source: 'agent', sourceCategory: 'continuation', continuationKey: 'pinned-1' },
+        { ownerAuthProvenance: 'unknown' },
+        {
+          authorIntentByCatId: {
+            opus: { requested: 'continue_current', boundParentInvocationId: 'parent-1' },
+          },
+        },
+      ];
+
+      for (const [index, carrier] of cases.entries()) {
+        const isolated = new InvocationQueue();
+        const a = isolated.enqueue(entry({ content: `a-${index}`, ownerAuthProvenance: 'strict' })).entry;
+        const blocked = isolated.enqueue(
+          entry({ content: `blocked-${index}`, ownerAuthProvenance: 'strict', ...carrier }),
+        ).entry;
+        assert.deepEqual(isolated.reserveExactUserBatch('t1', 'u1', [a.id, blocked.id]), {
+          outcome: 'rejected',
+          reason: 'entry_ineligible',
+        });
+      }
+    });
+  });
+
   it('preserves senderMeta on enqueued connector entry', () => {
     const r = queue.enqueue(
       entry({

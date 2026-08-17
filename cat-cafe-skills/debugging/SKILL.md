@@ -186,7 +186,7 @@ Phase 4: 先写失败测试 → 修复 → 验证
 
 Phase 1 开始时，用 **8 栏诊断胶囊** 结构化调查过程：
 
-> 模板 → [refs/bug-diagnosis-capsule.md](../refs/bug-diagnosis-capsule.md)
+> 模板 → [../.cat-cafe-shared-refs/bug-diagnosis-capsule.md](../.cat-cafe-shared-refs/bug-diagnosis-capsule.md)
 
 胶囊 8 栏：现象 / 证据 / 问题假设或根因 / 诊断策略 / 超时策略 / 预警策略 / 用户可见交互修正（可选） / 验收
 

@@ -265,3 +265,8 @@ export function buildStagingPrepend(catId: CatId): string {
 export function loadStagingManifest(): StagingManifest {
   return loadStagingContent().manifest;
 }
+
+/** Shared source text for consumers that need staging semantics without a cat-specific header. */
+export function loadStagingBody(): string {
+  return loadStagingContent().body;
+}

@@ -111,7 +111,7 @@ triggers:
 ```
 
 4 种 interactiveType：`select`（单选）、`multi-select`（多选）、`card-grid`（卡片网格）、`confirm`（确认/取消）。
-用户选择后 block 自动 disabled + 结果持久化。详见 `refs/rich-blocks.md`。
+用户选择后 block 自动 disabled + 结果持久化。详见 `../.cat-cafe-shared-refs/rich-blocks.md`。
 
 ### 内联 HTML Widget（html_widget）
 
@@ -184,9 +184,9 @@ DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不�
 ## 和其他 skill 的区别
 
 - `request-review` / `quality-gate`：这些 skill 的**产出**可能包含 card/checklist block，但**何时用 block、怎么调**看这个 skill
-- `refs/rich-blocks.md`：更详细的字段规格参考，本 skill 是精简决策版
+- `../.cat-cafe-shared-refs/rich-blocks.md`：更详细的字段规格参考，本 skill 是精简决策版
 
 ## 参考
 
-- 完整字段规格：`refs/rich-blocks.md`
+- 完整字段规格：`../.cat-cafe-shared-refs/rich-blocks.md`
 - MCP 工具实时规则：`get_rich_block_rules`

@@ -1,4 +1,7 @@
 import {
+  ACTION_SUBJECT_REF_DESCRIPTION,
+  ACTION_SUBJECT_REF_MAX_LENGTH,
+  ACTION_SUBJECT_REF_PATTERN,
   ACTION_SUCCESSOR_ACTION_FAMILIES,
   type ActionSuccessorActionFamily,
   type ActionSuccessorSlot,
@@ -40,6 +43,12 @@ export interface ActionSuccessorIdentity {
 
 export function canonicalizeActionSubjectRef(value: string): string {
   const trimmed = value.trim();
+  if (!trimmed || trimmed.length > ACTION_SUBJECT_REF_MAX_LENGTH || !ACTION_SUBJECT_REF_PATTERN.test(trimmed)) {
+    throw new ActionSuccessorIdentityError(
+      'invalid_subject_ref',
+      `invalid action subjectRef: ${value}. ${ACTION_SUBJECT_REF_DESCRIPTION}`,
+    );
+  }
   const pr = /^pr:([^/\s]+)\/([^#\s]+)#([1-9]\d*)$/i.exec(trimmed);
   if (pr) {
     const [, owner, repo, number] = pr;
@@ -50,7 +59,10 @@ export function canonicalizeActionSubjectRef(value: string): string {
     const [, namespace, id] = opaque;
     if (namespace && id && !id.includes('\u001f')) return `subject:${namespace.toLowerCase()}:${id}`;
   }
-  throw new ActionSuccessorIdentityError('invalid_subject_ref', `invalid action subjectRef: ${value}`);
+  throw new ActionSuccessorIdentityError(
+    'invalid_subject_ref',
+    `invalid action subjectRef: ${value}. ${ACTION_SUBJECT_REF_DESCRIPTION}`,
+  );
 }
 
 export function canonicalizeActionIdentity(input: ActionSuccessorIdentityInput): ActionSuccessorIdentity {

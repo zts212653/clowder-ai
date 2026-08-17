@@ -182,7 +182,6 @@ async function prepareAcpSpawnContext(
       clientId: config.clientId,
       providerName: config.provider,
       defaultModel: input.effectiveModel,
-      ...(contextPolicy?.windowTokens ? { contextWindowTokens: contextPolicy.windowTokens } : {}),
       account: accountContext.account,
     });
   } catch (err) {

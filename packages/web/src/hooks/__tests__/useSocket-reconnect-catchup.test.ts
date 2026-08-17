@@ -37,6 +37,7 @@ const mockClearCatStatuses = vi.fn();
 const mockSetStreaming = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
+const mockRefreshSidebarThreadSnapshot = vi.fn(() => Promise.resolve(true));
 const mockGetThreadState = vi.fn(() => ({
   messages: [],
   isLoading: false,
@@ -119,6 +120,10 @@ const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3100',
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}));
+
+vi.mock('@/utils/sidebar-thread-snapshot', () => ({
+  refreshSidebarThreadSnapshot: () => mockRefreshSidebarThreadSnapshot(),
 }));
 
 // Mock game reconnect
@@ -272,6 +277,30 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
     //  too — but only on RECONNECT, not the initial connect this test simulates.
     //  See "F183 follow-up: catch-up triggered on every reconnect" test below.)
     expect(mockRequestStreamCatchUp).not.toHaveBeenCalled();
+  });
+
+  describe('canonical Sidebar snapshot reconnect recovery', () => {
+    it('rehydrates the canonical sidebar snapshot on reconnect but not initial connect', () => {
+      mockStoreState.hasActiveInvocation = false;
+      const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+      });
+
+      act(() => {
+        for (const listener of mockSocket.listeners('connect')) {
+          (listener as () => void)();
+        }
+      });
+      expect(mockRefreshSidebarThreadSnapshot).not.toHaveBeenCalled();
+
+      act(() => {
+        for (const listener of mockSocket.listeners('connect')) {
+          (listener as () => void)();
+        }
+      });
+      expect(mockRefreshSidebarThreadSnapshot).toHaveBeenCalledTimes(1);
+    });
   });
 
   // F183 follow-up (R2/R4/R5 reconnect-window gap, 2026-05-02):

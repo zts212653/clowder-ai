@@ -62,7 +62,7 @@ Step 2: CREATE — 建检查清单
   - 列出 Discussion 里的 UX 描述和场景
 
 Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
-  - 检查 CloseGateReport 是否已生成（schema: `cat-cafe-skills/refs/close-gate.md`）
+  - 检查 CloseGateReport 是否已生成（schema: `../.cat-cafe-shared-refs/close-gate.md`）
   - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
   - **Follow-up tail scan**：扫以下文本来源，命中关键词 = **线索（进入语义判定），不是自动 BLOCKED**——判定标准只有一条：该词是否在把 **unmet AC 包装成已完成 / 偷偷延期**（close 借口）。正常阶段描述（"X 属 next phase 的 scope"）、风险讨论、路线图引用不触发（2026-07-15 修订：raw keyword 自动 BLOCK 误杀正常文本）：
     - 来源：close report、PR body、commit messages、spec 中 AC 注释、review 反馈回复
@@ -176,12 +176,12 @@ Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
     `git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|mp4|mov|wav|pdf|pen)$'`
   - 任一命中 → BLOCK：说明仓库根目录出现了媒体/设计工件（含已跟踪和未跟踪）
   - 处理方式：移到 `${TMPDIR}/cat-cafe-evidence/...` 或显式归档到正式目录后再继续
-  - 规则真相源：`cat-cafe-skills/refs/evidence-output-contract.md`
+  - 规则真相源：`../.cat-cafe-shared-refs/evidence-output-contract.md`
 
 Step 8: REPORT — 输出合规报告 + 证据
 ```
 
-**前端功能额外要求**：author 必须在正确 worktree / preview 上走关键交互，并记录 URL、操作与结果。截图、录屏、DOM assertion、Playwright 输出都是证据载体；只有视觉判断确实需要画面时才采截图 / 录屏，缺截图本身不阻塞，也不得让 operator 代采。执行细则：`cat-cafe-skills/refs/vision-evidence-workflow.md`。
+**前端功能额外要求**：author 必须在正确 worktree / preview 上走关键交互，并记录 URL、操作与结果。截图、录屏、DOM assertion、Playwright 输出都是证据载体；只有视觉判断确实需要画面时才采截图 / 录屏，缺截图本身不阻塞，也不得让 operator 代采。执行细则：`../.cat-cafe-shared-refs/vision-evidence-workflow.md`。
 
 **有 .pen 设计稿的功能额外要求** 🔴（Step 5 匹配到 .pen 时强制执行）：
 1. 打开 .pen 文件 → `get_screenshot` 截取设计稿

@@ -4,6 +4,11 @@ import type {
   DispatchProposal,
   DispatchProposalStatus,
 } from '@cat-cafe/shared';
+import {
+  ActionSuccessorIdentityError,
+  canonicalizeActionIdentity,
+  canonicalizeActionSubjectRef,
+} from '../../../ball-custody/action-successor-identity.js';
 
 /** Fields provided at creation time (status/decided* set by store). */
 export interface CreateDispatchProposalInput {
@@ -93,6 +98,71 @@ export interface DispatchNegativeAuthorizationBlock {
   status: NegativeAuthorizationProposalStatus;
   /** Canonical carrier targets intersecting this proposal's held target set. */
   targetCats: string[];
+}
+
+/** Pending/rejected approval decisions that can deny a new canonical action. */
+export type CanonicalAdmissionProposalStatus = Extract<DispatchProposalStatus, 'pending' | 'rejected'>;
+
+/**
+ * A cross-invocation admission lookup. `canonicalActionKey` is authoritative
+ * for structured carriers. `canonicalSubjectRef` is only a deny candidate for
+ * an actionless coordination carrier that cannot prove its full action key.
+ */
+export interface DispatchCanonicalAdmissionLookup {
+  ownerUserId: string;
+  canonicalActionKey?: string;
+  canonicalSubjectRef?: string;
+}
+
+export interface DispatchCanonicalAdmissionBlock {
+  proposalId: string;
+  status: CanonicalAdmissionProposalStatus;
+}
+
+/** The F167 identity key used to compare a held proposal with a structured carrier. */
+export function computeDispatchCanonicalActionKey(
+  ownerUserId: string,
+  action: Pick<ActionSuccessorRequestMetadata, 'subjectRef' | 'actionFamily' | 'successorSlot'>,
+): string {
+  return canonicalizeActionIdentity({
+    tenantScope: ownerUserId,
+    subjectRef: action.subjectRef,
+    actionFamily: action.actionFamily,
+    successorSlot: action.successorSlot,
+  }).key;
+}
+
+function safelyCanonicalize<T>(operation: () => T): T | undefined {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof ActionSuccessorIdentityError) return undefined;
+    throw error;
+  }
+}
+
+/** Invalid/legacy action metadata has no canonical identity to compare. */
+export function tryComputeDispatchCanonicalActionKey(
+  ownerUserId: string,
+  action: Pick<ActionSuccessorRequestMetadata, 'subjectRef' | 'actionFamily' | 'successorSlot'>,
+): string | undefined {
+  return safelyCanonicalize(() => computeDispatchCanonicalActionKey(ownerUserId, action));
+}
+
+/** A weak carrier may name a subject, but it never receives a partial action key. */
+export function canonicalizeDispatchAdmissionSubjectRef(subjectRef: string): string {
+  return canonicalizeActionSubjectRef(subjectRef);
+}
+
+/** An opaque weak-carrier subject is communication-only, not an action identity. */
+export function tryCanonicalizeDispatchAdmissionSubjectRef(subjectRef: string): string | undefined {
+  return safelyCanonicalize(() => canonicalizeDispatchAdmissionSubjectRef(subjectRef));
+}
+
+export function isCanonicalAdmissionProposalStatus(
+  status: DispatchProposalStatus,
+): status is CanonicalAdmissionProposalStatus {
+  return status === 'pending' || status === 'rejected';
 }
 
 export function isNegativeAuthorizationProposalStatus(

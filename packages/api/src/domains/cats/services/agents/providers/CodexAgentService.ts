@@ -52,7 +52,7 @@ import {
 } from '../../../../../config/codex-cli.js';
 import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
+import { buildActiveWriterRecoveryDiagnostic, buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
@@ -61,12 +61,14 @@ import {
   isLivenessWarning,
   KILL_GRACE_MS,
   spawnCli,
+  withVerdictGhGuardEnv,
 } from '../../../../../utils/cli-spawn.js';
 import { parseCliTimeoutMs, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import { CodexActiveWriterRecoveryError } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentCarrierSession,
@@ -1397,7 +1399,7 @@ export class CodexAgentService implements AgentService {
         }
       }
       const homeIsolated = authMode === 'api_key' && !!customBaseUrl;
-      const codexEnv = applyAuthMode(rawEnv, authMode);
+      const codexEnv = withVerdictGhGuardEnv(applyAuthMode(rawEnv, authMode));
 
       // Diagnostic logging: critical env state for debugging CLI startup failures
       log.info(
@@ -1622,7 +1624,6 @@ export class CodexAgentService implements AgentService {
             }
           : {}),
       };
-
       for await (const event of events) {
         if (pooledSessionInUse && pooledCredentialEnv && isCodexThreadStartedEvent(event)) {
           bindSessionCredentialFile(credentialNamespace, event.thread_id, pooledCredentialEnv.path);
@@ -2064,7 +2065,9 @@ export class CodexAgentService implements AgentService {
       }
       const visibleError = capacityRecoveryBlocked
         ? `自动续跑已安全停止（${capacityRecoveryBlocked.reason}）；系统已保留并显示本轮断点，没有猜测或切换任务。`
-        : rawError;
+        : err instanceof CodexActiveWriterRecoveryError
+          ? '原生会话恢复仍被 active writer 拒绝；系统已拒绝自动替换或封存当前会话。请稍后重试。'
+          : rawError;
       const errorMetadata =
         this.carrierMode === 'app_server'
           ? {
@@ -2078,17 +2081,31 @@ export class CodexAgentService implements AgentService {
                     },
                   }
                 : {}),
-              cliDiagnostics: buildCliDiagnostics({
-                rawText: rawError,
-                // `structuredErrorText` is reserved for Claude result events. Raw Codex
-                // transport failures must stay on provider-neutral classifier/unknown paths.
-                debugRef: {
-                  command: 'codex app-server',
-                  exitCode: null,
-                  signal: null,
-                  ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
-                },
-              }),
+              cliDiagnostics:
+                err instanceof CodexActiveWriterRecoveryError
+                  ? buildActiveWriterRecoveryDiagnostic({
+                      state:
+                        err.detection.diagnostics.classification === 'external_or_unknown'
+                          ? 'external_or_unknown'
+                          : 'owner_busy',
+                      debugRef: {
+                        command: 'codex app-server',
+                        exitCode: null,
+                        signal: null,
+                        ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                      },
+                    })
+                  : buildCliDiagnostics({
+                      rawText: rawError,
+                      // `structuredErrorText` is reserved for Claude result events. Raw Codex
+                      // transport failures must stay on provider-neutral classifier/unknown paths.
+                      debugRef: {
+                        command: 'codex app-server',
+                        exitCode: null,
+                        signal: null,
+                        ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                      },
+                    }),
             }
           : metadata;
       yield {

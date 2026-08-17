@@ -663,6 +663,31 @@
     "owner": "opus"
   },
   {
+    "id": "feature-f294-selective-message-bundles",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F294-selective-message-bundles.md",
+      "anchor": "Primary Journey: 把整条消息或消息片段转发给另一个 Thread 的人和猫"
+    },
+    "structureSource": {
+      "path": "docs/features/F294-selective-message-bundles.md",
+      "anchor": "Primary Journey: 把整条消息或消息片段转发给另一个 Thread 的人和猫"
+    },
+    "bodySource": {
+      "path": "docs/features/F294-selective-message-bundles.md",
+      "anchor": "从稳定消息的动作区进入多选模式"
+    },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "只想留下或转发几条消息？点消息动作条里的“多选消息”图标，可导出 Markdown、TXT、PNG，也可搜索并选择目标 Thread 和接收猫，发送一张保留作者与来源的合并卡；框选消息文字也能单独转发。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "怎么选择和转发",
+      "draftPrompt": "请告诉我怎么在当前 Thread 多选整条消息或框选一段文字，再导出所选内容或把它作为合并卡转发到另一个 Thread 的指定猫猫。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-thread-labels",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
@@ -1086,6 +1111,31 @@
     "owner": "codex-sol"
   },
   {
+    "id": "feature-f279-workspace-listen-mode",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F279-workspace-listen-mode.md",
+      "anchor": "## User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F279-workspace-listen-mode.md",
+      "anchor": "### Phase C — Workspace Player Integration + UAT"
+    },
+    "bodySource": {
+      "path": "docs/features/F279-workspace-listen-mode.md",
+      "anchor": "从任意句开始、按自己舒服的速度听下去"
+    },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "长 Markdown 看不进去时，在 Workspace 打开渲染正文，点顶部“听读”；也可点任意一句从这里开始，随后暂停、跳句或切换倍速。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "帮我打开长文",
+      "draftPrompt": "请帮我在 Workspace 打开一篇 Markdown 长文，我想用听读模式从指定句子开始。"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f281-exact-proposal-forget",
     "kind": "feature",
     "sourceRef": {
@@ -1158,6 +1208,31 @@
     "owner": "opus"
   },
   {
+    "id": "feature-f292-feishu-meeting-intake",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
+      "anchor": "Current activation and repair truth"
+    },
+    "structureSource": {
+      "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
+      "anchor": "User Journey"
+    },
+    "bodySource": {
+      "path": "docs/features/F292-feishu-meeting-intake-plugin.md",
+      "anchor": "Current activation and repair truth"
+    },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "想让飞书会议生成后自动交给猫猫？到设置 → 插件安装并启用“飞书会议”，登录失效时按卡片提示重新授权。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "打开飞书会议设置",
+      "surfaceId": "settings.plugins"
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "capability-concept-demo-design",
     "kind": "capability",
     "sourceRef": {
@@ -1209,5 +1284,33 @@
       "draftPrompt": "打开成员的会话策略设置，说明三种策略和当前能力状态。"
     },
     "owner": "codex"
+  },
+  {
+    "id": "feature-f295-exact-execution-stop",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F295-cancelable-execution-projection.md",
+      "anchor": "Primary Journey: 从“猫在运行”到精确停止"
+    },
+    "structureSource": {
+      "path": "docs/features/F295-cancelable-execution-projection.md",
+      "anchor": "Phase B: Existing surfaces consume one projection"
+    },
+    "bodySource": {
+      "path": "docs/features/F295-cancelable-execution-projection.md",
+      "anchor": "Why"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo"],
+    "body": "“正在发生”会同时标明工作所在的 thread 和类型；停止按钮只结束这一条实时回合或托管命令，不会误伤同一只猫的其他工作。",
+    "action": {
+      "type": "open_source",
+      "label": "查看精确停止说明",
+      "sourceRef": {
+        "path": "docs/features/F295-cancelable-execution-projection.md",
+        "anchor": "Primary Journey: 从“猫在运行”到精确停止"
+      }
+    },
+    "owner": "codex-sol"
   }
 ]

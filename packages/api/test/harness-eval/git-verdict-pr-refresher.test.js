@@ -99,11 +99,53 @@ function dropLocalVerdictBranch(repo) {
   git(repo, 'branch', '-D', branchName);
 }
 
+function createTestRefresher(deps) {
+  return createGitVerdictPrRefresher({
+    expectedRepoFullName: 'zts212653/cat-cafe',
+    identityRunner: async () => {},
+    ...deps,
+  });
+}
+
 describe('git verdict PR refresher', () => {
+  it('validates the effective owner remote before resolving or fetching the PR', async () => {
+    const { repo } = createDivergedVerdictRepo();
+    let resolved = false;
+    try {
+      const refresh = createGitVerdictPrRefresher({
+        repoRoot: repo,
+        expectedRepoFullName: 'zts212653/cat-cafe',
+        identityRunner: async () => {
+          throw new Error('effective push target mismatch');
+        },
+        resolveOpenPr: async () => {
+          resolved = true;
+          return [];
+        },
+      });
+
+      await assert.rejects(
+        refresh({
+          branchName,
+          verdictId,
+          expectedHeadSha: '0'.repeat(40),
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          refreshDerivedCensus() {
+            throw new Error('must not reach refresh');
+          },
+        }),
+        /effective push target mismatch/,
+      );
+      assert.equal(resolved, false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it('merges latest main, resolves only the derived census, and fast-forwards the same PR branch under pre-push guards', async () => {
     const { repo, remote, branchHead } = createDivergedVerdictRepo();
     try {
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(branchHead),
       });
@@ -148,7 +190,7 @@ describe('git verdict PR refresher', () => {
       git(repo, 'commit', '-m', 'foreign path');
       git(repo, 'push', 'origin', branchName);
       const foreignHead = git(repo, 'rev-parse', 'HEAD');
-      const refresh = createGitVerdictPrRefresher({ repoRoot: repo, resolveOpenPr: async () => prFor(foreignHead) });
+      const refresh = createTestRefresher({ repoRoot: repo, resolveOpenPr: async () => prFor(foreignHead) });
       await assert.rejects(
         refresh({
           branchName,
@@ -180,7 +222,7 @@ describe('git verdict PR refresher', () => {
       const remoteHead = git(repo, 'rev-parse', `refs/remotes/origin/${branchName}`);
       git(repo, 'switch', 'main');
 
-      const refresh = createGitVerdictPrRefresher({ repoRoot: repo, resolveOpenPr: async () => prFor(remoteHead) });
+      const refresh = createTestRefresher({ repoRoot: repo, resolveOpenPr: async () => prFor(remoteHead) });
       await assert.rejects(
         refresh({
           branchName,
@@ -217,7 +259,7 @@ describe('git verdict PR refresher', () => {
       let concurrentHead = '';
       let injected = false;
 
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(remoteHead),
         async beforeAcquireLocalBranch({ repoRoot, branchName: localBranchName }) {
@@ -268,7 +310,7 @@ describe('git verdict PR refresher', () => {
       let movedHead = '';
       let injected = false;
 
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(remoteHead),
         async beforeAttachLocalBranch({ repoRoot, branchName: localBranchName, branchHead }) {
@@ -320,7 +362,7 @@ describe('git verdict PR refresher', () => {
       let validatedCommit = '';
       let injected = false;
 
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(branchHead),
         async beforePreparePinnedPush({ repoRoot, worktreePath, branchName: localBranchName, commitSha }) {
@@ -383,7 +425,7 @@ exit 1
     );
 
     try {
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: repo,
         resolveOpenPr: async () => prFor(branchHead),
       });
@@ -408,6 +450,51 @@ exit 1
         git(remote, 'rev-parse', `refs/heads/${branchName}`),
         branchHead,
         'refresh must not update the remote verdict branch when the propagated hook rejects push',
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(remote, { recursive: true, force: true });
+    }
+  });
+
+  it('stores the source checkout root as catcafe.verdictSourceRoot in the pinned push repo', async () => {
+    const { repo, remote, branchHead } = createDivergedVerdictRepo();
+    const markerPath = join(repo, 'source-root.txt');
+    installPrePushHook(
+      repo,
+      `#!/bin/sh
+git config --get catcafe.verdictSourceRoot > "${markerPath}"
+echo "source root hook fired" >&2
+exit 1
+`,
+      '.githooks-blocking',
+    );
+
+    try {
+      const refresh = createTestRefresher({
+        repoRoot: repo,
+        resolveOpenPr: async () => prFor(branchHead),
+      });
+
+      await assert.rejects(
+        refresh({
+          branchName,
+          verdictId,
+          expectedHeadSha: branchHead,
+          generatedAt: '2026-08-02T00:00:00.000Z',
+          refreshDerivedCensus(worktreeRoot, _generatedAt, cleanSource) {
+            assert.equal(cleanSource, 'count: 1\nsource: main\n');
+            writeFileSync(join(worktreeRoot, censusPath), 'count: 2\nsource: main\n');
+            return join(worktreeRoot, censusPath);
+          },
+        }),
+        /source root hook fired/,
+      );
+
+      assert.equal(
+        readFileSync(markerPath, 'utf8').trim(),
+        git(repo, 'rev-parse', '--show-toplevel'),
+        'pinned push repo must carry the source checkout root for the pre-push contract script lookup',
       );
     } finally {
       rmSync(repo, { recursive: true, force: true });
@@ -451,7 +538,7 @@ exit 1
       );
       assert.notEqual(sourceGitDir, linkedGitDir);
 
-      const refresh = createGitVerdictPrRefresher({
+      const refresh = createTestRefresher({
         repoRoot: linkedWorktree,
         resolveOpenPr: async () => prFor(branchHead),
       });

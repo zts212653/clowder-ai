@@ -66,6 +66,15 @@ describe('chatStore multi-thread state', () => {
     expect(msgs[1].id).toBe('a2');
   });
 
+  it('marks a first-visit thread as hydrating instead of presenting an empty conversation', () => {
+    useChatStore.getState().setCurrentThread('thread-cold');
+
+    const state = useChatStore.getState();
+    expect(state.currentThreadId).toBe('thread-cold');
+    expect(state.messages).toEqual([]);
+    expect(state.isLoadingHistory).toBe(true);
+  });
+
   it('preserves catStatuses when switching threads', () => {
     // Set cat status on thread A
     useChatStore.getState().setTargetCats(['opus', 'codex']);

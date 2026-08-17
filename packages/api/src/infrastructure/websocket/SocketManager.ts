@@ -4,7 +4,7 @@
  */
 
 import { Server as HttpServer } from 'node:http';
-import { createCatId } from '@cat-cafe/shared';
+import { createCatId, isExplicitStopGesture, isExplicitStopSourceControl, type RoomJoinAck } from '@cat-cafe/shared';
 import { Server, Socket } from 'socket.io';
 import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
 import {
@@ -27,6 +27,22 @@ interface QueueProcessorLike {
   clearPause(threadId: string, catId?: string): void;
   releaseSlot(threadId: string, catId: string): void;
   suppressAutoResume(threadId: string, catId: string, executionIds?: readonly string[]): void;
+}
+
+type RoomJoinAcknowledge = (result: RoomJoinAck) => void;
+
+function validateRoomJoin(roomInput: unknown, userId: string): RoomJoinAck {
+  const room = typeof roomInput === 'string' ? roomInput : '';
+  if (!room || !/^(thread:|worktree:|preview:global$|workspace:global$|workspace:navigate:ack$|user:)/.test(room)) {
+    return { ok: false, room, error: 'invalid_room' };
+  }
+  if (room.startsWith('user:') && room !== `user:${userId}`) {
+    return { ok: false, room, error: 'forbidden_room' };
+  }
+  if ((room === 'workspace:global' || room === 'workspace:navigate:ack' || room === 'preview:global') && !userId) {
+    return { ok: false, room, error: 'authentication_required' };
+  }
+  return { ok: true, room };
 }
 
 /**
@@ -178,29 +194,24 @@ export class SocketManager {
         log.info({ socketId: socket.id }, 'Client disconnected');
       });
 
-      socket.on('join_room', (room: string) => {
-        // Validate room name format — only allow known prefixes
-        if (!/^(thread:|worktree:|preview:global$|workspace:global$|workspace:navigate:ack$|user:)/.test(room)) {
-          log.warn({ socketId: socket.id, room }, 'Attempted to join invalid room');
+      socket.on('join_room', async (roomInput: unknown, acknowledgeInput?: unknown) => {
+        const acknowledge =
+          typeof acknowledgeInput === 'function' ? (acknowledgeInput as RoomJoinAcknowledge) : undefined;
+        const validation = validateRoomJoin(roomInput, userId);
+        if (!validation.ok) {
+          log.warn({ socketId: socket.id, room: roomInput, userId, error: validation.error }, 'Room join rejected');
+          acknowledge?.(validation);
           return;
         }
-        // F156: Room ACL — user: rooms are identity-scoped
-        if (room.startsWith('user:') && room !== `user:${userId}`) {
-          log.warn({ socketId: socket.id, room, userId }, 'Room ACL denied: cannot join another user room');
-          return;
+        const { room } = validation;
+        try {
+          await socket.join(room);
+          acknowledge?.({ ok: true, room });
+          log.info({ socketId: socket.id, room }, 'Joined room');
+        } catch (error) {
+          log.error({ socketId: socket.id, room, error }, 'Failed to join room');
+          acknowledge?.({ ok: false, room, error: 'join_failed' });
         }
-        // F156 B-3: Global rooms carry metadata (file paths, worktreeIds, preview ports).
-        // Require authenticated userId. In single-user mode userId is always set;
-        // F077 will add workspace membership check for multi-user.
-        if (
-          (room === 'workspace:global' || room === 'workspace:navigate:ack' || room === 'preview:global') &&
-          !userId
-        ) {
-          log.warn({ socketId: socket.id, room }, 'Global room requires authentication');
-          return;
-        }
-        socket.join(room);
-        log.info({ socketId: socket.id, room }, 'Joined room');
       });
 
       socket.on('leave_room', (room: string) => {
@@ -217,6 +228,9 @@ export class SocketManager {
           origin?: string;
           actionId?: string;
           clientInstanceId?: string;
+          sourceControl?: string;
+          gesture?: string;
+          trustedGesture?: boolean;
         }) => {
           if (!this.invocationTracker || !data?.threadId) return;
           const hasExplicitProvenance =
@@ -226,7 +240,10 @@ export class SocketManager {
             data.actionId.length <= 200 &&
             typeof data.clientInstanceId === 'string' &&
             data.clientInstanceId.length > 0 &&
-            data.clientInstanceId.length <= 200;
+            data.clientInstanceId.length <= 200 &&
+            isExplicitStopSourceControl(data.sourceControl) &&
+            isExplicitStopGesture(data.gesture) &&
+            data.trustedGesture === true;
           if (!hasExplicitProvenance) {
             log.warn(
               {
@@ -234,6 +251,9 @@ export class SocketManager {
                 socketId: socket.id,
                 threadId: data.threadId,
                 catId: data.catId ?? null,
+                sourceControl: data.sourceControl ?? null,
+                gesture: data.gesture ?? null,
+                trustedGesture: data.trustedGesture ?? null,
               },
               'Rejected cancel_invocation without explicit Stop provenance',
             );
@@ -270,6 +290,9 @@ export class SocketManager {
               origin: data.origin,
               actionId: data.actionId,
               clientInstanceId: data.clientInstanceId,
+              sourceControl: data.sourceControl,
+              gesture: data.gesture,
+              trustedGesture: data.trustedGesture,
             },
             'F211-REG6: cancel_invocation received — capturing real trigger provenance (genuine Stop vs reconnect-spurious)',
           );

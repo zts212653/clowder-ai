@@ -1,7 +1,15 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
-import { useTextSelectionAction } from '@/hooks/useTextSelectionAction';
+import {
+  ContextAttachmentSchema,
+  type MessageBundleSelectionItem,
+  type QuoteContextAttachment,
+  type QuoteContextSource,
+} from '@cat-cafe/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { type TextSelectionAction, useTextSelectionAction } from '@/hooks/useTextSelectionAction';
 import type { ChatMessage } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -9,8 +17,12 @@ import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { createQuoteContextAttachment } from './chat-context-reference';
+import { LiveSelectionAnnotationAction } from './LiveSelectionAnnotationAction';
+import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { TransferTargetPicker } from './TransferTargetPicker';
 import { TrueRecallActionButton } from './TrueRecallActionButton';
+import { useMessageAnnotationMarkers } from './useMessageAnnotationMarkers';
 
 function showErrorToast(title: string, body?: Record<string, unknown>) {
   useToastStore.getState().addToast({
@@ -33,13 +45,81 @@ interface MessageActionsProps {
   message: ChatMessage;
   threadId: string;
   children: React.ReactNode;
+  selectionMode?: boolean;
+  selected?: boolean;
+  selectionEligible?: boolean;
+  onEnterSelection?: (messageId: string) => void;
+  onToggleSelection?: (messageId: string) => void;
 }
 
-export function MessageActions({ message, threadId, children }: MessageActionsProps) {
+function selectionCoordinates(action: TextSelectionAction): { selectionStart?: number; selectionEnd?: number } {
+  if (action.selectionStart === undefined || action.selectionEnd === undefined) return {};
+  return { selectionStart: action.selectionStart, selectionEnd: action.selectionEnd };
+}
+
+function quoteSourceForSelection(
+  action: TextSelectionAction,
+  threadId: string,
+  messageId: string,
+  senderCatId?: string,
+): QuoteContextSource {
+  if (action.sourceKind === 'cli_output') {
+    return {
+      kind: 'cli_output',
+      threadId,
+      messageId,
+      ...(action.sourceSegmentId ? { segmentId: action.sourceSegmentId } : {}),
+    };
+  }
+  return {
+    kind: 'message',
+    threadId,
+    messageId,
+    ...(senderCatId ? { senderCatId } : {}),
+  };
+}
+
+function addSelectionAnnotationToComposer(
+  action: TextSelectionAction | null,
+  threadId: string,
+  messageId: string,
+  senderCatId: string | undefined,
+  comment: string,
+) {
+  if (!action) return;
+  useChatStore.getState().setPendingChatInsert({
+    threadId,
+    text: '',
+    contextAttachments: [
+      createQuoteContextAttachment(action.text, quoteSourceForSelection(action, threadId, messageId, senderCatId), {
+        comment,
+        ...selectionCoordinates(action),
+      }),
+    ],
+  });
+  window.getSelection()?.removeAllRanges();
+}
+
+export function MessageActions({
+  message,
+  threadId,
+  children,
+  selectionMode = false,
+  selected = false,
+  selectionEligible = false,
+  onEnterSelection,
+  onToggleSelection,
+}: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [forwardSelection, setForwardSelection] = useState<{
+    items: MessageBundleSelectionItem[];
+  } | null>(null);
   const messageRef = useRef<HTMLDivElement>(null);
   const selectionAction = useTextSelectionAction(messageRef, !message.isStreaming, message.id, 'viewport');
+  const annotationMarkers = useMessageAnnotationMarkers(messageRef, threadId, message.id);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
+  const isDesktop = useIsDesktop();
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -47,10 +127,39 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
   const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming && !isRecalled;
-  /* Toolbar position: float ABOVE the bubble, horizontally aligned to the
-   * bubble start (past the avatar). -translate-y-full pushes it above the
-   * wrapper; left-10/right-10 clears the avatar (w-8 + gap-2 ≈ 40px). */
-  const toolbarPositionClass = isUser ? '-top-1 -translate-y-full right-10' : '-top-1 -translate-y-full left-10';
+  const hasPrimarySelectionEntry = canAct && selectionEligible && Boolean(onEnterSelection);
+  /* The primary selection entry reserves its own row so it stays clickable;
+   * legacy hover-only toolbars keep floating above the bubble. left-10/right-10
+   * clears the avatar (w-8 + gap-2 ≈ 40px). */
+  const toolbarPositionClass = hasPrimarySelectionEntry
+    ? isUser
+      ? 'top-0 right-10'
+      : 'top-0 left-10'
+    : isUser
+      ? '-top-1 -translate-y-full right-10'
+      : '-top-1 -translate-y-full left-10';
+  const secondaryActionsClass = hasPrimarySelectionEntry
+    ? overflowOpen
+      ? 'flex max-w-48 gap-0.5 overflow-visible opacity-100'
+      : 'pointer-events-none flex max-w-0 gap-0.5 overflow-hidden opacity-0 transition-[max-width,opacity] group-hover:max-w-48 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:max-w-48 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
+    : 'flex gap-0.5';
+
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOverflowOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [overflowOpen]);
+  useEffect(() => {
+    if (!overflowOpen || !isDesktop) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!messageRef.current?.contains(event.target as Node)) setOverflowOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [isDesktop, overflowOpen]);
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
@@ -168,139 +277,291 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
 
   const close = useCallback(() => setDialog({ type: 'none' }), []);
 
-  const handleSelectionAddToChat = useCallback(() => {
-    if (!selectionAction) return;
-    const source =
-      selectionAction.sourceKind === 'cli_output'
-        ? ({ kind: 'cli_output', threadId, messageId: message.id } as const)
-        : ({
-            kind: 'message',
-            threadId,
+  const handleSelectionAddToChat = useCallback(
+    (action: TextSelectionAction, comment: string) =>
+      addSelectionAnnotationToComposer(action, threadId, message.id, message.catId, comment),
+    [message.catId, message.id, threadId],
+  );
+
+  const handleSelectionForward = useCallback(
+    (action: TextSelectionAction, comment: string) => {
+      if (action.sourceKind !== 'message') return;
+      setForwardSelection({
+        items: [
+          {
+            kind: 'quote',
             messageId: message.id,
-            ...(message.catId ? { senderCatId: message.catId } : {}),
-          } as const);
-    useChatStore.getState().setPendingChatInsert({
-      threadId,
-      text: '',
-      contextAttachments: [createQuoteContextAttachment(selectionAction.text, source)],
-    });
-    window.getSelection()?.removeAllRanges();
-  }, [message.catId, message.id, selectionAction, threadId]);
+            text: action.text,
+            ...selectionCoordinates(action),
+            ...(comment ? { comment } : {}),
+          },
+        ],
+      });
+    },
+    [message.id],
+  );
+
+  const updateAnnotation = useCallback(
+    (attachment: QuoteContextAttachment, comment: string) => {
+      const updated = ContextAttachmentSchema.parse({ ...attachment, comment });
+      useChatStore.getState().setPendingChatInsert({
+        threadId,
+        text: '',
+        contextAttachments: [updated],
+        removeContextAttachmentIds: [attachment.id],
+      });
+    },
+    [threadId],
+  );
+
+  const deleteAnnotation = useCallback(
+    (attachment: QuoteContextAttachment) => {
+      useChatStore.getState().setPendingChatInsert({
+        threadId,
+        text: '',
+        removeContextAttachmentIds: [attachment.id],
+      });
+    },
+    [threadId],
+  );
+
+  const overflowMenuItems = (
+    <>
+      <button
+        type="button"
+        role="menuitem"
+        className="w-full px-3 py-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+        onClick={() => {
+          setOverflowOpen(false);
+          handleBranchDirect();
+        }}
+      >
+        从这里分支
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="w-full px-3 py-2 text-left text-sm text-conn-red-text transition-colors hover:bg-cafe-surface-elevated"
+        onClick={() => {
+          setOverflowOpen(false);
+          handleHardDelete();
+        }}
+      >
+        永久删除
+      </button>
+    </>
+  );
 
   return (
-    <div ref={messageRef} data-context-quote-source="message" className="group relative">
+    <div
+      ref={messageRef}
+      data-context-quote-source="message"
+      data-message-selection={selectionMode ? (selected ? 'selected' : 'available') : undefined}
+      data-selection-layout={selectionMode ? 'leading-gutter' : undefined}
+      className={`group relative ${selectionMode ? 'pl-12' : ''} ${hasPrimarySelectionEntry && !selectionMode ? 'pt-8' : ''}`}
+    >
       {children}
 
-      {selectionAction && (
+      {selectionMode && selectionEligible && (
         <button
           type="button"
-          data-testid="message-selection-add-to-chat"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={handleSelectionAddToChat}
-          style={selectionAction.position}
-          className="fixed z-[70] flex items-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive"
-          title="引用到聊天"
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={selected ? '取消选择这条消息' : '选择这条消息'}
+          onClick={() => onToggleSelection?.(message.id)}
+          className={`absolute left-2 top-2 z-20 grid h-7 w-7 place-items-center rounded-full border-2 transition-[background-color,border-color,transform] active:scale-95 ${
+            selected
+              ? 'border-[var(--semantic-success)] bg-[var(--semantic-success)] text-[var(--cafe-surface)]'
+              : 'border-cafe bg-cafe-surface text-cafe-muted hover:border-cafe-accent hover:text-cafe-accent'
+          }`}
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path d="M1.5 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5.5a1 1 0 0 1-1 1H5L2.5 11.5V9h-1a1 1 0 0 1-1-1V2.5Z" />
-            <path d="M13.5 5v4a1 1 0 0 1-1 1H12v2.5L9.5 10H7a1 1 0 0 1-1-1" opacity="0.5" />
-          </svg>
-          Add to chat
+          {selected && (
+            <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="m5 12 4 4L19 6" />
+            </svg>
+          )}
         </button>
       )}
 
-      {canReply && (
+      {!selectionMode && (
+        <LiveSelectionAnnotationAction
+          action={selectionAction}
+          resetKey={message.id}
+          positionMode="fixed"
+          actionTestId="message-selection-add-to-chat"
+          onSave={handleSelectionAddToChat}
+          onForward={handleSelectionForward}
+          canForward={(action) => action.sourceKind === 'message'}
+        />
+      )}
+
+      {!selectionMode &&
+        annotationMarkers.map((marker) => (
+          <SelectionAnnotationAction
+            key={marker.attachment.id}
+            selectedText={marker.attachment.text}
+            initialComment={marker.attachment.comment}
+            position={marker.position}
+            positionMode="fixed"
+            actionTestId={`context-annotation-marker-${marker.attachment.id}`}
+            triggerContent={marker.number}
+            triggerClassName="fixed z-[65] grid h-7 w-7 place-items-center rounded-full border-2 border-[var(--cafe-surface)] bg-cafe-accent text-xs font-bold text-[var(--cafe-surface)] shadow-lg transition-transform hover:scale-110"
+            onSave={(comment) => updateAnnotation(marker.attachment, comment)}
+            onDelete={() => deleteAnnotation(marker.attachment)}
+          />
+        ))}
+
+      {canReply && !selectionMode && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} z-10 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
+          className={`${overflowOpen || hasPrimarySelectionEntry ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} absolute ${toolbarPositionClass} z-30 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
         >
-          {/* #699: Reply (quote) button — available for all message types */}
-          <button
-            onClick={() => {
-              useChatStore.getState().setReplyTo({
-                id: message.id,
-                content: message.content,
-                senderCatId: message.catId ?? null,
-                threadId,
-              });
-            }}
-            className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-primary transition-colors"
-            title="引用回复"
+          {hasPrimarySelectionEntry && (
+            <button
+              type="button"
+              onClick={() => onEnterSelection?.(message.id)}
+              className={`rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary ${
+                isUser ? 'order-2' : ''
+              }`}
+              title="多选消息"
+              aria-label="多选消息"
+            >
+              <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m4.5 7 1.25 1.25L8 6" />
+                <rect x="3" y="14" width="6" height="6" rx="1" strokeWidth={2} />
+                <path strokeLinecap="round" strokeWidth={2} d="M13 7h8M13 17h8" />
+              </svg>
+            </button>
+          )}
+          <div
+            data-testid="message-secondary-actions"
+            className={`${isUser ? 'order-1' : ''} ${secondaryActionsClass}`.trim()}
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 10h10a5 5 0 015 5v6M3 10l6-6M3 10l6 6"
-              />
-            </svg>
-          </button>
-          {canAct && (
-            <>
-              <button
-                onClick={handleSoftDelete}
-                className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
-                title="删除"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-              </button>
-              <button
-                onClick={handleBranchDirect}
-                className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-green-text transition-colors"
-                title="从这里分支"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                  />
-                </svg>
-              </button>
-              {isUser && (
-                <>
-                  <TrueRecallActionButton message={message} threadId={threadId} />
+            {/* #699: Reply (quote) button — available for all message types */}
+            <button
+              onClick={() => {
+                useChatStore.getState().setReplyTo({
+                  id: message.id,
+                  content: message.content,
+                  senderCatId: message.catId ?? null,
+                  threadId,
+                });
+              }}
+              className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-primary transition-colors"
+              title="引用回复"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 10h10a5 5 0 015 5v6M3 10l6-6M3 10l6 6"
+                />
+              </svg>
+            </button>
+            {canAct && (
+              <>
+                <button
+                  onClick={handleSoftDelete}
+                  className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
+                  title="删除"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
+                {isUser && (
+                  <>
+                    <TrueRecallActionButton message={message} threadId={threadId} />
+                    <button
+                      onClick={handleEdit}
+                      className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
+                      title="编辑 (创建分支)"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                        />
+                      </svg>
+                    </button>
+                  </>
+                )}
+                <div className="relative">
                   <button
-                    onClick={handleEdit}
-                    className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
-                    title="编辑 (创建分支)"
+                    type="button"
+                    onClick={() => setOverflowOpen((open) => !open)}
+                    className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+                    title="更多消息操作"
+                    aria-label="更多消息操作"
+                    aria-haspopup="menu"
+                    aria-expanded={overflowOpen}
                   >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                      />
+                    <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="5" cy="12" r="1.8" />
+                      <circle cx="12" cy="12" r="1.8" />
+                      <circle cx="19" cy="12" r="1.8" />
                     </svg>
                   </button>
-                </>
-              )}
-              <button
-                onClick={handleHardDelete}
-                className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
-                title="永久删除"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </button>
-            </>
-          )}
+                  {overflowOpen && isDesktop && (
+                    <div
+                      role="menu"
+                      aria-label="更多消息操作"
+                      className={`absolute top-full z-40 mt-1 w-40 rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg ${
+                        isUser ? 'right-0' : 'left-0'
+                      }`}
+                    >
+                      {overflowMenuItems}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
+      )}
+
+      {overflowOpen &&
+        !isDesktop &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] flex items-end" role="presentation">
+            <button
+              type="button"
+              className="absolute inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
+              aria-label="关闭更多消息操作"
+              onClick={() => setOverflowOpen(false)}
+            />
+            <div
+              role="menu"
+              aria-label="更多消息操作"
+              className="relative m-2 w-[calc(100%-1rem)] rounded-2xl border border-cafe bg-cafe-surface p-2 shadow-2xl"
+            >
+              <p className="px-3 pb-2 pt-1 text-xs font-semibold text-cafe-muted">消息操作</p>
+              {overflowMenuItems}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {forwardSelection !== null && (
+        <TransferTargetPicker
+          open
+          sourceThreadId={threadId}
+          items={forwardSelection.items}
+          onClose={() => setForwardSelection(null)}
+          onSuccess={() => {
+            window.getSelection()?.removeAllRanges();
+            setForwardSelection(null);
+          }}
+        />
       )}
 
       {/* Soft delete confirmation */}

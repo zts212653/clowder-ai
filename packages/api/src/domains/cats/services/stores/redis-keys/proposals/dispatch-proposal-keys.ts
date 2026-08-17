@@ -31,6 +31,22 @@ export const DispatchProposalKeys = {
   lineage: (lineageKey: string) => `dispatch-proposal-lineage:${lineageKey}`,
 
   /**
+   * #1291 canonical-admission projection. Members are only pending/rejected
+   * proposal IDs; the proposal hash is revalidated before any denial.
+   */
+  canonicalAdmissionAction: (canonicalActionKey: string) =>
+    `dispatch-proposal-canonical-admission:action:${encodeURIComponent(canonicalActionKey)}`,
+
+  /** Weak actionless carriers can nominate a subject but cannot synthesize an action identity. */
+  canonicalAdmissionSubject: (ownerUserId: string, canonicalSubjectRef: string) =>
+    `dispatch-proposal-canonical-admission:subject:${encodeURIComponent(ownerUserId)}:${encodeURIComponent(
+      canonicalSubjectRef,
+    )}`,
+
+  /** A completed derived-index rebuild gates atomic admission for historic proposal hashes. */
+  canonicalAdmissionRebuildCompletedAt: 'dispatch-proposal-canonical-admission-rebuild-completed-at' as const,
+
+  /**
    * #1291 deny-only candidate index. The encoded suffix is
    * owner×sourceInvocation×targetThread×canonicalTargetCat; members are proposal IDs.
    * Canonical proposal fields are always revalidated before a callback is blocked.

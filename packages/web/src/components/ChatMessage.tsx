@@ -1,7 +1,7 @@
 'use client';
 
 import { isCrossThreadProvenance } from '@cat-cafe/shared';
-import { type CSSProperties, type ReactNode, useState } from 'react';
+import { type CSSProperties, memo, type ReactNode, useState } from 'react';
 import { formatSessionSealRequested, formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -28,6 +28,7 @@ import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { MessageBubble } from './MessageBubble';
+import { MessageBundleCard } from './MessageBundleCard';
 import { focusTurnAbsorptionSummary, MessageReceiptDock } from './MessageReceiptDock';
 import { MetadataBadge } from './MetadataBadge';
 import { buildMessageDisclosureKey } from './message-disclosure-state';
@@ -42,7 +43,11 @@ import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TimeoutDiagnosticsPanel } from './TimeoutDiagnosticsPanel';
 import { TtsPlayButton } from './TtsPlayButton';
 import { TurnAbsorptionDock } from './TurnAbsorptionDock';
-import { foldedSourceInvocationId, projectTurnAbsorptionSummary } from './turn-absorption-summary';
+import {
+  foldedSourceInvocationIdInTimeline,
+  projectTurnAbsorptionSummary,
+  terminalSurfaceMessageId,
+} from './turn-absorption-summary';
 
 const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   ragdoll: { radius: 'rounded-2xl rounded-bl-sm' },
@@ -50,6 +55,7 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   siamese: { radius: 'rounded-2xl rounded-tr-sm' },
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
+const EMPTY_TIMELINE_MESSAGES: readonly ChatMessageType[] = [];
 
 /* catSlug helper moved to '@/lib/cat-slug' so other components can share it. */
 const SCHEDULER_ACCENT_BADGE_CLASS =
@@ -82,15 +88,6 @@ function projectedExecutionIds(message: ChatMessageType): string[] {
     ...(message.extra?.turnExecution ? [message.extra.turnExecution.invocationId] : []),
     ...(message.extra?.auxiliaryTurnExecutions?.map((execution) => execution.invocationId) ?? []),
   ];
-}
-
-function terminalSurfaceMessageId(messages: readonly ChatMessageType[], invocationId: string): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const candidate = messages[index];
-    if (!candidate || candidate.isStreaming) continue;
-    if (projectedExecutionIds(candidate).includes(invocationId)) return candidate.id;
-  }
-  return undefined;
 }
 
 function getFreshnessNotice(message: ChatMessageType): { text: string; title?: string } | null {
@@ -139,6 +136,7 @@ function getFreshnessNotice(message: ChatMessageType): { text: string; title?: s
 interface ChatMessageProps {
   message: ChatMessageType;
   threadId?: string;
+  timelineMessages?: readonly ChatMessageType[];
   activeInvocationIds?: ReadonlySet<string>;
   getCatById: (id: string) => CatData | undefined;
   onEditCat?: (catId: string) => void;
@@ -157,9 +155,19 @@ interface ChatMessageProps {
   dedupCount?: number;
 }
 
-export function ChatMessage({
+function needsTimelineProjection(message: ChatMessageType): boolean {
+  return Boolean(
+    message.extra?.queueReceipt ||
+      message.extra?.turnExecution ||
+      message.extra?.auxiliaryTurnExecutions?.length ||
+      isSchedulerReplyPreview(message.replyPreview),
+  );
+}
+
+export const ChatMessage = memo(function ChatMessage({
   message,
   threadId,
+  timelineMessages,
   activeInvocationIds,
   getCatById,
   onEditCat,
@@ -176,8 +184,14 @@ export function ChatMessage({
   const thinkingDisclosureKey = buildMessageDisclosureKey(disclosureThreadId, message, 'thinking');
   const cliDisclosureKey = buildMessageDisclosureKey(disclosureThreadId, message, 'cli');
   const isLoadingThreads = useChatStore((s) => s.isLoadingThreads);
-  const threads = useChatStore((s) => s.threads);
-  const threadMessages = useChatStore((s) => s.messages);
+  const crossThreadSourceName = useChatStore((s) => {
+    const sourceId = message.extra?.crossPost?.sourceThreadId;
+    if (!sourceId) return undefined;
+    return s.threads.find((thread) => thread.id === sourceId)?.title;
+  });
+  const threadMessages = useChatStore(
+    (s) => timelineMessages ?? (needsTimelineProjection(message) ? s.messages : EMPTY_TIMELINE_MESSAGES),
+  );
   const globalBubbleDefaults = useChatStore((s) => s.globalBubbleDefaults);
   const candidateSourceThreadId = message.extra?.crossPost?.sourceThreadId;
   const crossThreadSourceThreadId = isCrossThreadProvenance(candidateSourceThreadId, renderThreadId)
@@ -252,8 +266,17 @@ export function ChatMessage({
         };
       })()
     : null;
-  const currentThread = useChatStore((s) => s.threads.find((t) => t.id === s.currentThreadId));
-  const bubbleRestorePending = isLoadingThreads && !!currentThreadId && !currentThread;
+  const currentThreadExists = useChatStore((s) => s.threads.some((thread) => thread.id === s.currentThreadId));
+  const currentThreadBubbleThinking = useChatStore(
+    (s) => s.threads.find((thread) => thread.id === s.currentThreadId)?.bubbleThinking,
+  );
+  const currentThreadBubbleCli = useChatStore(
+    (s) => s.threads.find((thread) => thread.id === s.currentThreadId)?.bubbleCli,
+  );
+  const currentThreadThinkingMode = useChatStore(
+    (s) => s.threads.find((thread) => thread.id === s.currentThreadId)?.thinkingMode,
+  );
+  const bubbleRestorePending = isLoadingThreads && !!currentThreadId && !currentThreadExists;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const hasTextContent = message.content.trim().length > 0;
   const isWhisper = message.visibility === 'whisper';
@@ -288,6 +311,7 @@ export function ChatMessage({
         key={projection.invocationId}
         projection={projection}
         messages={threadMessages}
+        sourceAuthorLabel={coCreator.name}
         getCatLabel={(catId) => {
           const cat = getCatById(catId);
           return cat ? formatCatName(cat) : catId;
@@ -503,6 +527,7 @@ export function ChatMessage({
 
   const messageReceiptDock = message.extra?.queueReceipt ? (
     <MessageReceiptDock
+      messageId={message.id}
       receipt={message.extra.queueReceipt}
       messages={threadMessages}
       activeInvocationIds={activeInvocationIds}
@@ -588,10 +613,31 @@ export function ChatMessage({
     );
 
     const whisperActive = isWhisper && !isRevealed;
-    const foldedInvocationId = foldedSourceInvocationId(message);
-    const bodyIsFolded =
-      foldedInvocationId !== undefined && terminalSurfaceMessageId(threadMessages, foldedInvocationId) !== undefined;
+    const foldedInvocationId = foldedSourceInvocationIdInTimeline(message, threadMessages);
+    const bodyIsFolded = foldedInvocationId !== undefined;
     const recalledAfterExposure = message.extra?.recall?.exposure === 'seen';
+
+    if (bodyIsFolded && foldedInvocationId) {
+      return (
+        <div
+          data-message-id={message.id}
+          data-folded-source-anchor={foldedInvocationId}
+          aria-hidden="true"
+          className="h-0 overflow-hidden"
+        >
+          <button
+            hidden
+            type="button"
+            data-folded-source-affordance
+            data-folded-source-return={foldedInvocationId}
+            className="ml-auto block rounded-md border border-cafe bg-cafe-surface px-2 py-1 text-xs font-medium text-cafe-muted hover:text-cafe-secondary"
+            onClick={() => focusTurnAbsorptionSummary(threadMessages, foldedInvocationId)}
+          >
+            该补充已归入上方回复 · 返回本轮摘要 ↑
+          </button>
+        </div>
+      );
+    }
 
     return (
       <MessageBubble
@@ -623,15 +669,15 @@ export function ChatMessage({
               </div>
             ) : null}
           </div>
-        ) : bodyIsFolded && foldedInvocationId ? (
-          <button
-            type="button"
-            data-folded-source={foldedInvocationId}
-            className="text-left text-xs font-medium text-cafe-muted hover:text-cafe-secondary"
-            onClick={() => focusTurnAbsorptionSummary(threadMessages, foldedInvocationId)}
-          >
-            补充已随本轮收口 · 在本轮摘要中展开 ↑
-          </button>
+        ) : message.extra?.messageBundle ? (
+          <MessageBundleCard
+            messageId={message.id}
+            forwarderName={coCreator.name}
+            getCatLabel={(catId) => {
+              const cat = getCatById(catId);
+              return cat ? formatCatName(cat) : catId;
+            }}
+          />
         ) : hasBlocks ? (
           <ContentBlocks blocks={message.contentBlocks!} />
         ) : (
@@ -778,7 +824,7 @@ export function ChatMessage({
         {crossThreadSourceThreadId &&
           (() => {
             const sourceId = crossThreadSourceThreadId;
-            const sourceName = threads.find((t) => t.id === sourceId)?.title ?? '未命名对话';
+            const sourceName = crossThreadSourceName ?? '未命名对话';
             const shortId = sourceId.replace(/^thread_/, '').slice(0, 8);
             const senderLabel = catStyle?.label;
             return (
@@ -863,7 +909,7 @@ export function ChatMessage({
           defaultExpanded={
             bubbleRestorePending
               ? false
-              : resolveBubbleExpanded(currentThread?.bubbleThinking, globalBubbleDefaults.thinking)
+              : resolveBubbleExpanded(currentThreadBubbleThinking, globalBubbleDefaults.thinking)
           }
           expandInExport={false}
           breedColor={catData?.color.primary}
@@ -874,11 +920,9 @@ export function ChatMessage({
         <CliOutputBlock
           events={cliEvents}
           status={cliStatus}
-          thinkingMode={currentThread?.thinkingMode}
+          thinkingMode={currentThreadThinkingMode}
           defaultExpanded={
-            bubbleRestorePending
-              ? false
-              : resolveBubbleExpanded(currentThread?.bubbleCli, globalBubbleDefaults.cliOutput)
+            bubbleRestorePending ? false : resolveBubbleExpanded(currentThreadBubbleCli, globalBubbleDefaults.cliOutput)
           }
           breedColor={catData?.color.primary}
           disclosureKey={cliDisclosureKey}
@@ -910,4 +954,4 @@ export function ChatMessage({
       )}
     </MessageBubble>
   );
-}
+});

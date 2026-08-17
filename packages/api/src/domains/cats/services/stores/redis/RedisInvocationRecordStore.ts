@@ -20,6 +20,7 @@ import {
   type InvocationStatus,
   normalizeSuccessfulCatIds,
   requireInvocationActionLeaseCarrier,
+  requireInvocationWaitContinuationCarrier,
   type UpdateInvocationInput,
 } from '../ports/InvocationRecordStore.js';
 import { InvocationKeys } from '../redis-keys/invocation-keys.js';
@@ -31,8 +32,8 @@ const IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
  * Lua script for atomic idempotency check + record creation.
  * KEYS[1] = idempotency key (ioredis auto-prefixes)
  * KEYS[2] = invocation record key (ioredis auto-prefixes)
- * ARGV[1..8] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now,
- *              actionLeaseCarrier(JSON)
+ * ARGV[1..9] = id, threadId, userId, targetCats(JSON), intent, idempotencyKey, now,
+ *              actionLeaseCarrier(JSON), waitContinuationCarrier(JSON or empty)
  */
 const CREATE_ATOMIC_LUA = `
 local existing = redis.call('GET', KEYS[1])
@@ -47,6 +48,9 @@ redis.call('HSET', KEYS[2],
   'userMessageId', '', 'error', '',
   'actionLeaseCarrier', ARGV[8],
   'createdAt', ARGV[7], 'updatedAt', ARGV[7])
+if ARGV[9] ~= '' then
+  redis.call('HSET', KEYS[2], 'waitContinuationCarrier', ARGV[9])
+end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 return {'created', ARGV[1]}
 `;
@@ -225,6 +229,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     // Bare keys — ioredis keyPrefix auto-applies to eval() KEYS[] too
     const idempKey = InvocationKeys.idempotency(input.threadId, input.userId, input.idempotencyKey);
     const recordKey = InvocationKeys.detail(id);
+    const waitContinuationCarrier = requireInvocationWaitContinuationCarrier(input.waitContinuationCarrier);
 
     const result = (await this.redis.eval(
       CREATE_ATOMIC_LUA,
@@ -239,6 +244,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       input.idempotencyKey,
       now,
       JSON.stringify(requireInvocationActionLeaseCarrier(input.actionLeaseCarrier)),
+      waitContinuationCarrier ? JSON.stringify(waitContinuationCarrier) : '',
     )) as [string, string];
 
     return {
@@ -542,6 +548,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       ? Object.freeze(safeParseArray(data.successfulCatIds) as CatId[])
       : undefined;
     const actionLeaseCarrier = parseActionLeaseCarrier(data.actionLeaseCarrier, data.actionLeaseRef);
+    const waitContinuationCarrier = parseStoredWaitContinuationCarrier(data.waitContinuationCarrier);
     return {
       id: data.id!,
       threadId: data.threadId!,
@@ -564,10 +571,22 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
         ? { freshnessClosureStatus: data.freshnessClosureStatus as InvocationRecord['freshnessClosureStatus'] }
         : {}),
       actionLeaseCarrier,
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };
   }
+}
+
+function parseStoredWaitContinuationCarrier(value: string | undefined): InvocationRecord['waitContinuationCarrier'] {
+  if (!value) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('Stored InvocationRecord has malformed wait continuation carrier JSON');
+  }
+  return requireInvocationWaitContinuationCarrier(parsed);
 }
 
 function parseActionLeaseCarrier(

@@ -135,7 +135,7 @@ test('pool shutdown releases active leases once even when a session closes late'
   assert.equal(pool.getMetrics().warmHostCount, 0);
 });
 
-test('forced replacement is marked non-affine before the superseded host finishes closing', async () => {
+test('forced replacement waits until the superseded host finishes closing', async () => {
   let releaseClose;
   let markCloseStarted;
   const closeStarted = new Promise((resolve) => {
@@ -172,16 +172,45 @@ test('forced replacement is marked non-affine before the superseded host finishe
   const terminating = first.terminate();
   await closeStarted;
 
-  const replacement = await pool.createSession(sessionOptions({ sessionId: 'thread-a' }));
-  assert.equal(hosts.length, 2);
-  assert.equal(
-    replacement.reusedSessionHost,
-    false,
-    'a replacement lease must not claim healthy affinity while the old host is still closing',
-  );
+  let replacementSettled = false;
+  const acquiring = pool.createSession(sessionOptions({ sessionId: 'thread-a' })).then((session) => {
+    replacementSettled = true;
+    return session;
+  });
+  await delay(0);
+  assert.equal(replacementSettled, false, 'the native session must not migrate while its source host is alive');
+  assert.equal(hosts.length, 1);
 
   releaseClose();
   await terminating;
+  const replacement = await acquiring;
+  assert.equal(hosts.length, 2);
+  assert.equal(replacement.reusedSessionHost, false);
+  await replacement.close();
+  await pool.closeAll();
+});
+
+test('failed source-host close keeps migration fenced and never spawns a replacement', async () => {
+  const { pool, hosts } = createHarness();
+  const first = await pool.createSession(sessionOptions());
+  first.rememberSession('thread-a');
+  await first.close();
+  hosts[0].close = async () => {
+    hosts[0].closeCalls++;
+    throw new Error('source host refused to close');
+  };
+
+  await assert.rejects(
+    pool.createSession(sessionOptions({ sessionId: 'thread-a', cwd: '/workspace/different-project' })),
+    /source host refused to close/,
+  );
+  assert.equal(hosts.length, 1, 'migration must fail closed while the source process may still be alive');
+  assert.equal(hosts[0].closeCalls, 1);
+  hosts[0].alive = false;
+  const replacement = await pool.createSession(
+    sessionOptions({ sessionId: 'thread-a', cwd: '/workspace/different-project' }),
+  );
+  assert.equal(hosts.length, 2, 'migration may proceed after independent evidence shows the source process exited');
   await replacement.close();
   await pool.closeAll();
 });

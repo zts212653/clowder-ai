@@ -107,6 +107,10 @@ if not detailKey then
 end
 
 local lease = cjson.decode(leaseRaw)
+local canonicalActionIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionActionIndexKey')
+local canonicalSubjectIndexKey = redis.call('HGET', proposalKey, 'canonicalAdmissionSubjectIndexKey')
+if canonicalActionIndexKey then redis.call('ZREM', canonicalActionIndexKey, ARGV[3]) end
+if canonicalSubjectIndexKey then redis.call('ZREM', canonicalSubjectIndexKey, ARGV[3]) end
 redis.call('HSET', proposalKey,
   'status', 'approved',
   'decidedAt', ARGV[1],

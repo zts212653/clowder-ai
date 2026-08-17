@@ -7,6 +7,7 @@ import { useLabelStore } from '@/stores/label-store';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
+import { refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
 import { TheaterOverlay } from '../story-player/TheaterOverlay';
@@ -185,21 +186,10 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       // IDB read failure — continue to API
     }
 
-    // Then fetch fresh data from API (replace snapshot if successful)
+    // Then replace it with the server's canonical projection. Mount, online,
+    // and Socket.IO reconnect callers share one in-flight full-list request.
     try {
-      const res = await apiFetch('/api/threads?view=sidebar');
-      if (!res.ok) return;
-      const data = await res.json();
-      const threads = data.threads ?? [];
-      setThreads(threads); // Also triggers IDB write-through via chatStore
-      const { initThreadUnread } = useChatStore.getState();
-      for (const thread of threads) {
-        if (thread.unreadCount > 0 || thread.hasUserMention) {
-          initThreadUnread(thread.id, thread.unreadCount ?? 0, !!thread.hasUserMention);
-        }
-      }
-    } catch {
-      // API failed — IDB snapshot already displayed (if available)
+      await refreshSidebarThreadSnapshot();
     } finally {
       setLoadingThreads(false);
     }
@@ -292,6 +282,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         }
 
         if (opts.projectPath) setCurrentProject(opts.projectPath);
+        // Publish the POST response before changing the URL. The header resolves
+        // its title from the thread store, while the sidebar refresh below is
+        // intentionally asynchronous; navigating first creates a visible
+        // "未命名对话" gap for every newly-created thread.
+        const currentThreads = useChatStore.getState().threads;
+        setThreads([thread, ...currentThreads.filter((current) => current.id !== thread.id)]);
         navigateToThread(thread.id);
         // Auto-close sidebar on mobile after creating a new conversation
         if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -305,7 +301,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         setIsCreating(false);
       }
     },
-    [setCurrentProject, navigateToThread, loadThreads, onClose],
+    [setCurrentProject, setThreads, navigateToThread, loadThreads, onClose],
   );
 
   // F095 Phase D: Load trashed threads
@@ -1182,6 +1178,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
             <div
               className="sticky top-0 z-10 flex items-stretch border-b border-cafe-subtle bg-[var(--console-panel-bg)] pt-2 px-2"
               data-testid="sidebar-tabs-row"
+              data-scroll-occluder="true"
             >
               {canScrollLeft && (
                 <button

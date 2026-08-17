@@ -2613,7 +2613,24 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.deepEqual(stored.queueCustody.pendingTargetCats, []);
     assert.deepEqual(stored.queueCustody.failedByCatIds, ['codex']);
     const receipt = userEvents.find((event) => event.event === 'messages_queued').data.messages[0].extra.queueReceipt;
-    assert.deepEqual(receipt.targets, [{ catId: 'codex', state: 'failed' }]);
+    assert.deepEqual(receipt.targets, [
+      {
+        catId: 'codex',
+        state: 'failed',
+        retryable: false,
+        attempts: [
+          {
+            id: `cross-thread:${triggerMessage.id}:codex:1`,
+            targetCatId: 'codex',
+            sequence: 1,
+            state: 'failed',
+            terminalReason: 'invocation_failed',
+            createdAt: triggerMessage.timestamp,
+            updatedAt: triggerMessage.timestamp,
+          },
+        ],
+      },
+    ]);
   });
 
   test('F264 rejects an idempotent-looking empty carrier receipt for a different requested target', async () => {

@@ -393,6 +393,31 @@ describe('ConnectorInvokeTrigger', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
+  function waitConnectorMessage(messageId, outcomeId, generation = 3) {
+    return {
+      id: messageId,
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: null,
+      content: `Wait outcome ${outcomeId}`,
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      source: {
+        connector: 'github-wait',
+        label: 'GitHub Wait',
+        icon: 'github',
+        meta: {
+          waitContinuationCarrier: {
+            v: 1,
+            waitId: 'task-pr-7',
+            outcomeId,
+            ownerFence: { kind: 'containing_task', generation },
+          },
+        },
+      },
+    };
+  }
+
   it('creates InvocationRecord and calls routeExecution', async () => {
     const trigger = createTrigger();
     trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-1');
@@ -411,6 +436,92 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(routerMock.calls[0].threadId, 'thread-1');
     assert.strictEqual(routerMock.calls[0].userMessageId, 'msg-1');
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['opus']);
+  });
+
+  it('copies the exact stored wait carrier into a direct Invocation and event-wait turn provenance', async () => {
+    const storedMessage = waitConnectorMessage('msg-wait-direct', 'wait:pr:owner/repo#7:g3:matched');
+    const trigger = createTrigger({
+      messageStore: { getById: async (id) => (id === storedMessage.id ? storedMessage : null) },
+    });
+
+    await trigger.trigger(
+      storedMessage.threadId,
+      /** @type {any} */ ('opus'),
+      storedMessage.userId,
+      storedMessage.content,
+      storedMessage.id,
+      undefined,
+      { sourceCategory: 'review' },
+    );
+    await waitForTrigger();
+
+    const expectedCarrier = storedMessage.source.meta.waitContinuationCarrier;
+    assert.deepStrictEqual(recordMock.creates[0].waitContinuationCarrier, expectedCarrier);
+    assert.deepStrictEqual(routerMock.calls[0].options.turnCustodyWake, {
+      kind: 'structured',
+      protocol: 'event_wait',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'opus',
+      waitContinuationCarrier: expectedCarrier,
+    });
+  });
+
+  it('keeps an action-successor wait owner fence inside event-wait custody', async () => {
+    const storedMessage = waitConnectorMessage('msg-wait-action-owner', 'wait:pr:owner/repo#7:g4:matched', 4);
+    storedMessage.source.meta.waitContinuationCarrier.ownerFence = {
+      kind: 'action_successor',
+      leaseId: 'lease-wait-4',
+      generation: 4,
+    };
+    const trigger = createTrigger({
+      messageStore: { getById: async (id) => (id === storedMessage.id ? storedMessage : null) },
+    });
+
+    await trigger.trigger(
+      storedMessage.threadId,
+      /** @type {any} */ ('opus'),
+      storedMessage.userId,
+      storedMessage.content,
+      storedMessage.id,
+      undefined,
+      { sourceCategory: 'review' },
+    );
+    await waitForTrigger();
+
+    assert.deepStrictEqual(recordMock.creates[0].actionLeaseCarrier, { kind: 'none' });
+    assert.deepStrictEqual(
+      recordMock.creates[0].waitContinuationCarrier.ownerFence,
+      storedMessage.source.meta.waitContinuationCarrier.ownerFence,
+    );
+    assert.strictEqual(routerMock.calls[0].options.turnCustodyWake.protocol, 'event_wait');
+    assert.deepStrictEqual(
+      routerMock.calls[0].options.turnCustodyWake.waitContinuationCarrier,
+      storedMessage.source.meta.waitContinuationCarrier,
+    );
+  });
+
+  it('rejects malformed stored github-wait carriers before direct execution', async () => {
+    const storedMessage = waitConnectorMessage('msg-wait-malformed-direct', 'wait:pr:owner/repo#7:g4:matched', 4);
+    storedMessage.source.meta.waitContinuationCarrier.ownerFence.generation = 0;
+    const trigger = createTrigger({
+      messageStore: { getById: async (id) => (id === storedMessage.id ? storedMessage : null) },
+    });
+
+    await assert.rejects(
+      () =>
+        trigger.trigger(
+          storedMessage.threadId,
+          /** @type {any} */ ('opus'),
+          storedMessage.userId,
+          storedMessage.content,
+          storedMessage.id,
+          undefined,
+          { sourceCategory: 'review' },
+        ),
+      /missing a valid continuation carrier/,
+    );
+    assert.strictEqual(recordMock.creates.length, 0);
+    assert.strictEqual(routerMock.calls.length, 0);
   });
 
   it('passes a trusted GitHub delivery-decision carrier through the direct execution path', async () => {
@@ -2110,6 +2221,57 @@ describe('ConnectorInvokeTrigger', () => {
       assert.deepStrictEqual(entries[0].targetCats, ['opus']);
     });
 
+    it('projects the exact stored wait carrier into Queue while the thread is busy', async () => {
+      trackerMock.setActive('thread-1');
+      const storedMessage = waitConnectorMessage('msg-wait-queued', 'wait:pr:owner/repo#7:g3:matched');
+      const trigger = createTrigger({
+        messageStore: { getById: async (id) => (id === storedMessage.id ? storedMessage : null) },
+      });
+
+      await trigger.trigger(
+        storedMessage.threadId,
+        /** @type {any} */ ('opus'),
+        storedMessage.userId,
+        storedMessage.content,
+        storedMessage.id,
+        undefined,
+        { sourceCategory: 'review' },
+      );
+      await waitForTrigger();
+
+      assert.deepStrictEqual(
+        queue.list('thread-1', 'user-1')[0].waitContinuationCarrier,
+        storedMessage.source.meta.waitContinuationCarrier,
+      );
+      assert.strictEqual(recordMock.creates.length, 0);
+    });
+
+    it('rejects malformed stored github-wait carriers before Queue admission', async () => {
+      trackerMock.setActive('thread-1');
+      const storedMessage = waitConnectorMessage('msg-wait-malformed-queued', 'wait:pr:owner/repo#7:g4:matched', 4);
+      delete storedMessage.source.meta.waitContinuationCarrier.ownerFence;
+      const trigger = createTrigger({
+        messageStore: { getById: async (id) => (id === storedMessage.id ? storedMessage : null) },
+      });
+
+      await assert.rejects(
+        () =>
+          trigger.trigger(
+            storedMessage.threadId,
+            /** @type {any} */ ('opus'),
+            storedMessage.userId,
+            storedMessage.content,
+            storedMessage.id,
+            undefined,
+            { sourceCategory: 'review' },
+          ),
+        /missing a valid continuation carrier/,
+      );
+      assert.strictEqual(queue.list('thread-1', 'user-1').length, 0);
+      assert.strictEqual(recordMock.creates.length, 0);
+      assert.strictEqual(routerMock.calls.length, 0);
+    });
+
     it('urgent connector enqueues with priority instead of preempting (F175)', async () => {
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
@@ -2245,6 +2407,50 @@ describe('ConnectorInvokeTrigger', () => {
       assert.strictEqual(entries[0].content, 'First review', 'coalescing keeps first queued content as canonical');
       assert.strictEqual(entries[0].messageId, 'msg-1');
       assert.deepStrictEqual(entries[0].mergedMessageIds, ['msg-2']);
+    });
+
+    it('does not coalesce different wait generations under the same adapter key', async () => {
+      trackerMock.setActive('thread-1');
+      const first = waitConnectorMessage('msg-wait-g3', 'wait:pr:owner/repo#7:g3:matched', 3);
+      const second = waitConnectorMessage('msg-wait-g4', 'wait:pr:owner/repo#7:g4:matched', 4);
+      const messages = new Map([
+        [first.id, first],
+        [second.id, second],
+      ]);
+      const trigger = createTrigger({ messageStore: { getById: async (id) => messages.get(id) ?? null } });
+      const policy = {
+        priority: 'normal',
+        sourceCategory: 'review',
+        coalesceKey: 'pr:owner/repo#7:wait:opus',
+      };
+
+      await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        first.content,
+        first.id,
+        undefined,
+        policy,
+      );
+      await waitForTrigger();
+      await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        second.content,
+        second.id,
+        undefined,
+        policy,
+      );
+      await waitForTrigger();
+
+      const entries = queue.list('thread-1', 'user-1');
+      assert.strictEqual(entries.length, 2);
+      assert.deepStrictEqual(
+        entries.map((entry) => entry.waitContinuationCarrier?.ownerFence.generation),
+        [3, 4],
+      );
     });
 
     it('upgrades coalesced review feedback when a later event is urgent', async () => {

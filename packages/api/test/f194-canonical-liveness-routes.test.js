@@ -224,10 +224,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     }
   });
 
-  it('AC-B7~B10 (P1-2 fix): zombie detected by /queue → reconcileZombies fires, record converges to failed + TaskProgress cleared', async () => {
-    // Verifies the production callsite for reconcileZombies. After hitting /queue with a zombie
-    // fixture, the record must transition running → failed and TaskProgress must be cleared,
-    // even though the helper itself is read-only — proves AC-B7~B10 is wired into prod path.
+  it('GET /queue reports a zombie diagnostically without terminal side effects', async () => {
     const now = 10_000_000;
     const zombieRecord = makeRecord({
       id: 'inv-zombie-cleanup',
@@ -290,37 +287,18 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       assert.equal(queueRes.statusCode, 200);
       assert.equal(queueRes.body.activeInvocations.length, 0, 'zombie not surfaced as active');
 
-      // Allow fire-and-forget reconcileZombies microtask to complete
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setImmediate(resolve));
 
-      assert.equal(zombieRecord.status, 'failed', 'reconcileZombies must mark record failed');
-      assert.equal(zombieRecord.error, 'zombie_record_detected');
-      assert.deepEqual(cleared, [{ threadId: THREAD_ID, catId: 'opus' }], 'TaskProgress cleared');
-      assert.deepEqual(terminalEvents, [
-        {
-          invocationId: zombieRecord.id,
-          threadId: THREAD_ID,
-          catId: 'opus',
-          targetCats: ['opus'],
-          status: 'failed',
-        },
-      ]);
+      assert.equal(zombieRecord.status, 'running', 'read endpoints must not write lifecycle truth');
+      assert.deepEqual(cleared, [], 'read endpoints must not clear owner projections');
+      assert.deepEqual(terminalEvents, [], 'explicit owner reaper is the only terminal carrier');
     } finally {
       Date.now = origNow;
       if (app) await app.close();
     }
   });
 
-  it('cloud R17 P1: /messages reconciles zombies even when draft list is empty', async () => {
-    // Reproduces cloud Codex P1 (comment 3211853817): the activeDrafts.length>0 gate
-    // meant /api/messages skipped getThreadLiveInvocations entirely when a thread
-    // had no drafts. But zombies are PRECISELY the no-draft case (record running +
-    // no fresh draft + age past grace). Without this fix, /messages never reconciles
-    // them; only /queue would, and a thread that's read but not queue-checked stays
-    // phantom forever.
-    //
-    // Verify: zombie record + EMPTY draft store + GET /messages → reconcileZombies
-    // fires (record transitions running → failed, TaskProgress cleared).
+  it('GET /messages stays side-effect free when a zombie has no draft', async () => {
     const now = 20_000_000;
     const zombieRecord = makeRecord({
       id: 'inv-zombie-no-drafts',
@@ -379,21 +357,11 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       });
       assert.equal(res.statusCode, 200);
 
-      // Allow fire-and-forget reconcileZombies microtask to complete
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setImmediate(resolve));
 
-      assert.equal(zombieRecord.status, 'failed', 'reconcileZombies must fire from /messages even without drafts');
-      assert.equal(zombieRecord.error, 'zombie_record_detected');
-      assert.deepEqual(cleared, [{ threadId: THREAD_ID, catId: 'opus' }], 'TaskProgress cleared via /messages path');
-      assert.deepEqual(terminalEvents, [
-        {
-          invocationId: zombieRecord.id,
-          threadId: THREAD_ID,
-          catId: 'opus',
-          targetCats: ['opus'],
-          status: 'failed',
-        },
-      ]);
+      assert.equal(zombieRecord.status, 'running', 'GET /messages must not write lifecycle truth');
+      assert.deepEqual(cleared, []);
+      assert.deepEqual(terminalEvents, []);
     } finally {
       Date.now = origNow;
       if (app) await app.close();

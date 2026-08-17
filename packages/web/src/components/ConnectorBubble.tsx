@@ -4,8 +4,10 @@ import { type ConnectorIconSpec, getConnectorDefinition } from '@cat-cafe/shared
 import { useCallback, useEffect, useState } from 'react';
 import { tintedLight } from '@/lib/color-utils';
 import { connectorThemeToken } from '@/lib/connector-theme-token';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { ExecutionCancelButton } from './ExecutionCancelButton';
 import {
   AuthKeyIcon,
   ConnectorImage,
@@ -89,8 +91,10 @@ function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpe
 function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; threadId?: string; catId?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
   const [terminalStatus, setTerminalStatus] = useState<'retired_by_event' | 'fired' | null>(null);
+  const managedExecution = useActiveExecutionStore((store) => store.executionsByKey[`managed_command:${taskId}`]);
 
   useEffect(() => {
+    if (managedExecution) return;
     let cancelled = false;
     void apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/status`)
       .then(async (res) => {
@@ -114,7 +118,7 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [managedExecution, taskId]);
 
   const handleCancel = useCallback(
     async (withFeedback = false) => {
@@ -154,6 +158,14 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
   }
   if (terminalStatus === 'fired') return <span className="text-xs text-cafe-muted">已完成</span>;
   if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
+  if (managedExecution) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-cafe-secondary">托管命令运行中</span>
+        <ExecutionCancelButton execution={managedExecution} label="取消命令" />
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2">
       <button

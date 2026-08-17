@@ -271,8 +271,6 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
   app.get('/api/config/env-summary', async (request) => {
     const { surface } = request.query as { surface?: string };
-
-    // #770: ?surface=system returns only curated System Settings vars
     if (surface === 'system') {
       return { groups: SETTINGS_GROUPS, variables: buildSystemEnvSummary() };
     }

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import Database from 'better-sqlite3';
 import {
   OpenCodeAgentService,
   summarizeOpenCodeEnvForDebug,
@@ -70,6 +74,46 @@ async function collect(iterable) {
   return messages;
 }
 
+async function delay(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(predicate, description) {
+  for (let i = 0; i < 50; i++) {
+    if (predicate()) return;
+    await delay(5);
+  }
+  assert.fail(`timed out waiting for ${description}`);
+}
+
+function createOpenCodeRecoveryDb({ sessionId, messageId, text }) {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-db-'));
+  const dbPath = join(dir, 'opencode.db');
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE part (
+      id text PRIMARY KEY,
+      message_id text NOT NULL,
+      session_id text NOT NULL,
+      time_created integer NOT NULL,
+      time_updated integer NOT NULL,
+      data text NOT NULL
+    );
+  `);
+  db.prepare(
+    'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    'prt_recovered_text',
+    messageId,
+    sessionId,
+    1780915410601,
+    1780915410687,
+    JSON.stringify({ type: 'text', text }),
+  );
+  db.close();
+  return dbPath;
+}
+
 // ── opencode JSON event fixtures ──
 
 const STEP_START = {
@@ -114,6 +158,11 @@ const STEP_FINISH = {
     cost: 0.036,
     tokens: { total: 36937, input: 36928, output: 9 },
   },
+};
+
+const STEP_FINISH_TOOL_CALLS = {
+  ...STEP_FINISH,
+  part: { ...STEP_FINISH.part, reason: 'tool-calls' },
 };
 
 // CodeAgent 3.0 → OpenCode facade: translate script may drop usage, yielding
@@ -258,6 +307,54 @@ describe('OpenCodeAgentService', () => {
     const mIdx = args.indexOf('-m');
     assert.ok(mIdx >= 0, `expected -m in args: ${args}`);
     assert.strictEqual(args[mIdx + 1], 'claude-sonnet-4-6');
+  });
+
+  test('terminates option parsing before a dash-prefixed prompt', async () => {
+    const prompt = '- [navigation]\nTreat this entire value as the user prompt.';
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-sonnet-4-6' });
+    const promise = collect(service.invoke(prompt, { cliConfigArgs: ['--title regression'] }));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.deepEqual(args.slice(-2), ['--', prompt], `expected option terminator immediately before prompt: ${args}`);
+    assert.ok(args.indexOf('--title') < args.indexOf('--'), 'user-defined CLI flags must remain before the terminator');
+  });
+
+  test('no-tool finalizer overwrites inherited permissions and scopes its agent config', () => {
+    const service = new OpenCodeAgentService({ catId: 'opencode', model: 'claude-sonnet-4-6' });
+    const finalizerAgent = 'cat-cafe-no-tool-finalizer-test-nonce';
+    const env = service.buildNoToolFinalizerEnv(
+      {
+        OPENCODE_PERMISSION: JSON.stringify({ '*': 'allow', bash: 'allow' }),
+      },
+      finalizerAgent,
+    );
+
+    const envPermission = JSON.parse(env.OPENCODE_PERMISSION);
+    assert.equal(envPermission['*'], 'deny', 'finalizer must override post-config global permission precedence');
+    assert.equal(envPermission.bash, 'deny', 'finalizer must explicitly deny executable tools');
+
+    const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT);
+    assert.equal(config.default_agent, finalizerAgent);
+    assert.equal(config.agent[finalizerAgent].permission['*'], 'deny');
+    assert.equal(
+      config.agent['cat-cafe-no-tool-finalizer'],
+      undefined,
+      'an organization config must not be able to target a stable finalizer agent name',
+    );
+  });
+
+  test('no-tool finalizer terminates option parsing before a dash-prefixed prompt', () => {
+    const prompt = '- [navigation]\nTreat this entire value as the finalizer prompt.';
+    const finalizerAgent = 'cat-cafe-no-tool-finalizer-test-nonce';
+    const service = new OpenCodeAgentService({ catId: 'opencode', model: 'claude-sonnet-4-6' });
+    const args = service.buildNoToolFinalizerArgs(prompt, 'ses_test123', 'claude-sonnet-4-6', finalizerAgent);
+
+    assert.equal(args[args.indexOf('--agent') + 1], finalizerAgent);
+    assert.deepEqual(args.slice(-2), ['--', prompt], `expected option terminator immediately before prompt: ${args}`);
   });
 
   test('API key is passed via ANTHROPIC_API_KEY env, not CLI args', async () => {
@@ -944,6 +1041,33 @@ describe('OpenCodeAgentService', () => {
     );
   });
 
+  test('step_start-only NDJSON recovers assistant text from OpenCode SQLite by session/message id', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const dbPath = createOpenCodeRecoveryDb({
+      sessionId: STEP_START.sessionID,
+      messageId: STEP_START.part.messageID,
+      text: 'Recovered from OpenCode SQLite.',
+    });
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'deepseek-chat',
+      opencodeDbPath: dbPath,
+    });
+    const promise = collect(service.invoke('Test silent', { invocationId: 'inv-silent-sqlite-recovery' }));
+
+    emitOpenCodeEvents(proc, [STEP_START]);
+    const messages = await promise;
+
+    const recovered = messages.find((m) => m.type === 'text');
+    assert.equal(recovered?.content, 'Recovered from OpenCode SQLite.');
+    assert.ok(
+      !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      'SQLite recovery supplies text, so silent_completion must not fire',
+    );
+  });
+
   test('AC-G3: text event present → does NOT yield silent_completion (no false positive)', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
@@ -963,17 +1087,33 @@ describe('OpenCodeAgentService', () => {
   });
 
   // F212 Phase G R1 P1 (cloud codex catch on 1d519e7f2): tool-only turns are legitimate
-  // task completions per F215 AC-B3. Tool events that complete the user's request without
-  // a text response MUST NOT be flagged as silent_completion.
-  test('AC-G3 R1 P1: tool_use event without text → does NOT yield silent_completion', async () => {
+  // task completions per F215 AC-B3. Tool events must not be mislabeled as
+  // silent_completion and must not be routed through the post-tool finalizer.
+  test('AC-G3 R1 P1: pure tool_use completion is preserved without silent_completion or finalizer', async () => {
     const proc = createMockProcess();
-    const spawnFn = mock.fn(() => proc);
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'unexpected finalizer text' } },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
     const promise = collect(service.invoke('Use tools'));
-    // step_start + tool_use only — no TEXT_RESPONSE. Per F215 AC-B3 this is a valid
-    // tool-only completion path. silent_completion would mislabel it as a provider error.
+    // step_start + tool_use only — no TEXT_RESPONSE from the main CLI invocation.
+    // This is not a provider error, but users still need final assistant text.
     emitOpenCodeEvents(proc, [STEP_START, TOOL_USE, STEP_FINISH]);
     const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
 
     const silentError = messages.find(
       (m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
@@ -994,12 +1134,330 @@ describe('OpenCodeAgentService', () => {
       messages.some((m) => m.type === 'tool_use'),
       'tool_use yield confirms event reached transformer',
     );
+    assert.equal(spawnCalls, 1, 'pure tool-only completion must not start a no-tool finalizer invocation');
+    assert.equal(textMsgs.length, 0, 'pure tool-only completion remains non-user-visible text');
   });
 
   // Issue #1208: CodeAgent 3.0 → OpenCode translate may drop token usage.
   // When the CLI produces events but no step_finish carries tokens, auto-handoff
   // based on context fill cannot fire. The service must surface a persistent
   // visible alert so users know automatic handoff is unavailable.
+  test('post-tool completion gap runs a no-tool finalizer and replaces the incomplete prelude', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            {
+              ...TEXT_RESPONSE,
+              part: { ...TEXT_RESPONSE.part, text: 'The active model is deepseek-v4-pro.' },
+            },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me verify from the actual config rather than guessing.' },
+      },
+      {
+        ...TOOL_USE,
+        part: {
+          ...TOOL_USE.part,
+          tool: 'read',
+          state: {
+            status: 'completed',
+            input: { filePath: '.cat-cafe/cat-catalog.json', offset: 210, limit: 50 },
+            output: '"defaultModel": "deepseek-v4-pro"',
+          },
+        },
+      },
+      STEP_FINISH_TOOL_CALLS,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2, 'post-tool gap should start exactly one no-tool finalizer invocation');
+    const finalizerArgs = spawnFn.mock.calls[1].arguments[1];
+    assert.ok(finalizerArgs.includes('--session'), `finalizer must resume the same OpenCode session: ${finalizerArgs}`);
+    assert.equal(finalizerArgs[finalizerArgs.indexOf('--session') + 1], 'ses_test123');
+    assert.ok(finalizerArgs.includes('--agent'), `finalizer must use a dedicated no-tool agent: ${finalizerArgs}`);
+    const finalizerAgent = finalizerArgs[finalizerArgs.indexOf('--agent') + 1];
+    assert.match(
+      finalizerAgent,
+      /^cat-cafe-no-tool-finalizer-[0-9a-f-]{36}$/,
+      'finalizer agent name must be invocation-scoped so post-inline organization config cannot target it',
+    );
+    const finalizerEnv = spawnFn.mock.calls[1].arguments[2].env;
+    const finalizerConfig = JSON.parse(finalizerEnv.OPENCODE_CONFIG_CONTENT);
+    assert.equal(finalizerConfig.permission['*'], 'deny', 'finalizer env must deny tool execution');
+    assert.equal(
+      finalizerConfig.agent[finalizerAgent].permission['*'],
+      'deny',
+      'dedicated finalizer agent must deny tool execution',
+    );
+    assert.equal(
+      JSON.parse(finalizerEnv.OPENCODE_PERMISSION)['*'],
+      'deny',
+      'finalizer must override permission env loaded after organization and managed config',
+    );
+    assert.equal(textMsgs.length, 2, 'finalizer should add one replacement text after the incomplete prelude');
+    assert.equal(textMsgs[0].content, 'Let me verify from the actual config rather than guessing.');
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.equal(textMsgs.at(-1)?.content, 'The active model is deepseek-v4-pro.');
+    assert.ok(
+      !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      'post-tool finalizer is a recovery, not silent_completion',
+    );
+  });
+
+  test('post-tool step_finish stop still runs one finalizer and replaces the incomplete prelude', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Recovered final answer.' } },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Inspect the config and report the result'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'Let me inspect that.' } },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'config loaded' } },
+      },
+      STEP_FINISH,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2, 'reason=stop after tool_use is not proof of user-visible completion');
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.equal(textMsgs.at(-1)?.content, 'Recovered final answer.');
+  });
+
+  test('post-tool finalizer tool attempt poisons later text and falls back safely', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            {
+              ...TOOL_USE,
+              part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', input: {}, output: 'forbidden' } },
+            },
+            {
+              ...TEXT_RESPONSE,
+              part: { ...TEXT_RESPONSE.part, text: 'accepted-after-tool' },
+            },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me check that.' },
+      },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'model=deepseek-v4-pro' } },
+      },
+      STEP_FINISH_TOOL_CALLS,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(spawnCalls, 2);
+    assert.ok(
+      !textMsgs.some((m) => m.content === 'accepted-after-tool'),
+      'any finalizer tool_use must poison the whole finalizer result before later text is accepted',
+    );
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.match(String(textMsgs.at(-1)?.content), /tool_use_blocked/);
+  });
+
+  test('post-tool finalizer fails closed before spawn when managed OpenCode config can override permissions', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    const managedConfigPath = join(mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-managed-')), 'opencode.json');
+    writeFileSync(managedConfigPath, JSON.stringify({ permission: { '*': 'allow' } }), 'utf8');
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [
+            STEP_START,
+            { ...TEXT_RESPONSE, part: { ...TEXT_RESPONSE.part, text: 'managed override would have run' } },
+            STEP_FINISH,
+          ]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'deepseek-v4-pro',
+      opencodeManagedConfigPaths: [managedConfigPath],
+    });
+    const promise = collect(service.invoke('Check the active model and report it'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Let me check that.' },
+      },
+      {
+        ...TOOL_USE,
+        part: { ...TOOL_USE.part, tool: 'read', state: { status: 'completed', output: 'model=deepseek-v4-pro' } },
+      },
+      STEP_FINISH_TOOL_CALLS,
+    ]);
+
+    const messages = await promise;
+    const textMsgs = messages.filter((m) => m.type === 'text');
+
+    assert.equal(
+      spawnCalls,
+      1,
+      'managed config precedence must block finalizer before a second OpenCode process starts',
+    );
+    assert.equal(textMsgs.at(-1)?.textMode, 'replace');
+    assert.match(String(textMsgs.at(-1)?.content), /managed_config_present/);
+  });
+
+  test('post-tool deterministic fallback omits raw tool output entirely', async () => {
+    const proc = createMockProcess();
+    const finalizerProc = createMockProcess();
+    let spawnCalls = 0;
+    const spawnFn = mock.fn(() => {
+      spawnCalls++;
+      if (spawnCalls === 2) {
+        process.nextTick(() => {
+          emitOpenCodeEvents(finalizerProc, [STEP_START, STEP_FINISH]);
+        });
+        return finalizerProc;
+      }
+      return proc;
+    });
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'deepseek-v4-pro' });
+    const promise = collect(service.invoke('Read config'));
+
+    emitOpenCodeEvents(proc, [
+      STEP_START,
+      {
+        ...TEXT_RESPONSE,
+        part: { ...TEXT_RESPONSE.part, text: 'Reading config.' },
+      },
+      {
+        ...TOOL_USE,
+        part: {
+          ...TOOL_USE.part,
+          tool: 'read',
+          state: {
+            status: 'completed',
+            output:
+              'token=sk-review-secret-123 path=C:\\Users\\Alice\\secrets\\config.json also /Users/alice/.ssh/id_rsa',
+          },
+        },
+      },
+      STEP_FINISH_TOOL_CALLS,
+    ]);
+
+    const messages = await promise;
+    const fallback = messages.filter((m) => m.type === 'text').at(-1);
+    const content = String(fallback?.content);
+
+    assert.equal(spawnCalls, 2);
+    assert.equal(fallback?.textMode, 'replace');
+    assert.doesNotMatch(content, /sk-review-secret/);
+    assert.doesNotMatch(content, /C:\\Users\\Alice/);
+    assert.doesNotMatch(content, /\/Users\/alice/);
+    assert.doesNotMatch(content, /Latest tool output/);
+    assert.match(content, /not included in this user-visible fallback/i);
+  });
+
+  test('same OpenCode session invocations are serialized through finalization', async () => {
+    let active = 0;
+    let maxActive = 0;
+    let started = 0;
+    const releases = [];
+    const spawnCliOverride = async function* () {
+      active++;
+      started++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => releases.push(resolve));
+      yield STEP_START;
+      yield TEXT_RESPONSE;
+      yield STEP_FINISH;
+      active--;
+    };
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      model: 'deepseek-v4-pro',
+      spawnFn: mock.fn(() => {
+        throw new Error('spawnCliOverride must own this test');
+      }),
+    });
+    const first = collect(service.invoke('first', { sessionId: 'ses_shared', spawnCliOverride }));
+    const second = collect(service.invoke('second', { sessionId: 'ses_shared', spawnCliOverride }));
+
+    await waitFor(() => started >= 1, 'first session process to start');
+    await delay(20);
+    assert.equal(maxActive, 1, 'second same-session invoke must not spawn before first completes');
+    releases[0]();
+    await first;
+
+    await waitFor(() => started === 2, 'second session process to start after first completes');
+    releases[1]();
+    await second;
+
+    assert.equal(maxActive, 1, 'same-session invokes must remain single-flight');
+  });
+
   test('issue #1208: opencode events without usage telemetry yield warning alert', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

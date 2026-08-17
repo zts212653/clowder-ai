@@ -1,5 +1,6 @@
 ---
 name: deep-research
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   多源深度调研管道（Web Deep Research + Coder 合成 + 云端模型咨询）。
   Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"、需要咨询云端模型。
@@ -86,7 +87,7 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 
 ## Prompt 模板（Step 1）
 
-**使用 8 槽位骨架模板**：`cat-cafe-skills/refs/research-prompt-template.md`
+**使用 8 槽位骨架模板**：`../.cat-cafe-shared-refs/research-prompt-template.md`
 
 8 个槽位：
 1. `Problem Frame` — 任务边界 + 非目标
@@ -119,9 +120,9 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 执行猫可用 `mcp__claude-in-chrome__*` 工具自动发送 prompt + 附件 + 提取回复。
 
 **详细 DOM 选择器和代码片段见各平台 ref**：
-- **ChatGPT** → `refs/chatgpt-browser-automation.md`（2026-03-10 实测验证 ✅）
-- **Claude.ai** → `refs/claude-ai-browser-automation.md`（2026-03-10 实测验证 ✅）
-- **Gemini** → `refs/gemini-browser-automation.md`（2026-03-10 实测验证 ✅）
+- **ChatGPT** → `../.cat-cafe-shared-refs/chatgpt-browser-automation.md`（2026-03-10 实测验证 ✅）
+- **Claude.ai** → `../.cat-cafe-shared-refs/claude-ai-browser-automation.md`（2026-03-10 实测验证 ✅）
+- **Gemini** → `../.cat-cafe-shared-refs/gemini-browser-automation.md`（2026-03-10 实测验证 ✅）
 
 ### ChatGPT 自动化摘要（已验证）
 
@@ -164,13 +165,13 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 - **GPT Pro 回复**：`copy-turn-action-button` + `clipboard.readText()` ✅ 全自动
 - **✅ GPT 深度研究报告**：API 提取法（`backend-api/conversation/{id}` + Bearer token）
   - 报告在 widget state JSON → `report_message.content.parts[0]` = 完整 Markdown
-  - Blob 下载 → `cp` 归档（详见 `refs/chatgpt-browser-automation.md`）
+  - Blob 下载 → `cp` 归档（详见 `../.cat-cafe-shared-refs/chatgpt-browser-automation.md`）
 - **✅ Claude.ai 报告**：Artifact 面板原生 "Download as Markdown" 按钮（blob URL，同源 DOM）
   - 点击 Copy options → Download as Markdown → 自动下载 .md 文件
-  - 比 ChatGPT 简单得多——无需 API 提取（详见 `refs/claude-ai-browser-automation.md`）
+  - 比 ChatGPT 简单得多——无需 API 提取（详见 `../.cat-cafe-shared-refs/claude-ai-browser-automation.md`）
 - **✅ Gemini 报告**：导出到 Google Docs → 文件 → 下载 → Markdown (.md)
   - 两跳路径（Gemini → Google Docs → 本地），比 ChatGPT/Claude 多一步
-  - 下载文件名 = Google Docs 文档标题 + `.md`（详见 `refs/gemini-browser-automation.md`）
+  - 下载文件名 = Google Docs 文档标题 + `.md`（详见 `../.cat-cafe-shared-refs/gemini-browser-automation.md`）
 
 ## 常见错误
 

@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
   detectMagicWords,
   MAGIC_WORD_PATTERNS,
 } from '../../dist/infrastructure/harness-eval/task-outcome/magic-word-detector.js';
+
+const SHARED_RULES_URL = new URL('../../../../cat-cafe-skills/refs/shared-rules.md', import.meta.url);
+const STAGING_CONTENT_URL = new URL('../../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url);
+
+function readSharedRuleMagicWords() {
+  const rulesText = readFileSync(SHARED_RULES_URL, 'utf8');
+  const magicWordsSection =
+    rulesText.split('## Magic Words（co-creator专用拉闸词）')[1]?.split('### 47 自检协议')[0] ?? '';
+  return [...magicWordsSection.matchAll(/\|\s*「([^」]+)」\s*\|/g)].map((match) => match[1]);
+}
 
 describe('Magic Word Runtime Detector (F192 Phase G AC-G12)', () => {
   it('detects 脚手架 in user message', () => {
@@ -67,6 +78,12 @@ describe('Magic Word Runtime Detector (F192 Phase G AC-G12)', () => {
     assert.equal(hits[0].word, '补锅匠');
   });
 
+  it('detects 四象限 as the unknowns-first brake', () => {
+    const hits = detectMagicWords('四象限：我们是不是只在已知范围里收敛？');
+    assert.ok(hits.length > 0);
+    assert.equal(hits[0].word, '四象限');
+  });
+
   it('detects multiple magic words in one message', () => {
     const hits = detectMagicWords('脚手架！绕路了！回来');
     assert.equal(hits.length, 2);
@@ -87,4 +104,24 @@ describe('Magic Word Runtime Detector (F192 Phase G AC-G12)', () => {
   it('MAGIC_WORD_PATTERNS has at least 9 entries', () => {
     assert.ok(MAGIC_WORD_PATTERNS.length >= 9, `Expected ≥9 patterns, got ${MAGIC_WORD_PATTERNS.length}`);
   });
+
+  it('keeps runtime patterns in sync with public injected-governance truth', () => {
+    const sourceWords = readSharedRuleMagicWords();
+
+    assert.deepEqual(MAGIC_WORD_PATTERNS.slice(0, sourceWords.length), sourceWords);
+  });
+
+  it(
+    'keeps runtime patterns in sync with private home-governance truth',
+    { skip: !existsSync(STAGING_CONTENT_URL) && 'private L0 staging content is intentionally absent publicly' },
+    () => {
+      const stagingText = readFileSync(STAGING_CONTENT_URL, 'utf8');
+      const sourceWords = [
+        ...readSharedRuleMagicWords(),
+        ...[...stagingText.matchAll(/^-「([^」]+)」=/gm)].map((match) => match[1]),
+      ];
+
+      assert.deepEqual(MAGIC_WORD_PATTERNS, sourceWords);
+    },
+  );
 });

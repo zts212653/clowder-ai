@@ -14,7 +14,7 @@ export type LegacyClosureInvocationOutcome =
 export interface LegacyWithheldAttachment {
   closureId: string;
   invocationId: string;
-  source: 'legacy_census' | 'runtime_log';
+  source: 'legacy_census' | 'runtime_log' | 'closure_state';
   evidenceRefs: string[];
   withheldDecision?: {
     withheldAtUtc: string;
@@ -27,6 +27,9 @@ export type LegacyClosureInventoryItem = Pick<
   FreshnessClosureAggregate,
   'id' | 'userId' | 'threadId' | 'catId' | 'status' | 'revision' | 'createdAt' | 'updatedAt'
 >;
+
+export type LegacyClosureAttachmentInventoryItem = LegacyClosureInventoryItem &
+  Pick<FreshnessClosureAggregate, 'turnInvocationId' | 'attempts'>;
 
 export interface LegacyClosureInvocationAccounting {
   invocationId: string;
@@ -81,11 +84,20 @@ function requireText(value: string, field: string): string {
 }
 
 export function normalizeLegacyAttachments(raw: readonly LegacyWithheldAttachment[]): LegacyWithheldAttachment[] {
+  const sourceRank: Record<LegacyWithheldAttachment['source'], number> = {
+    legacy_census: 0,
+    runtime_log: 1,
+    closure_state: 2,
+  };
   const byInvocation = new Map<string, LegacyWithheldAttachment>();
   for (const attachment of raw) {
     const closureId = requireText(attachment.closureId, 'closureId');
     const invocationId = requireText(attachment.invocationId, 'invocationId');
-    if (attachment.source !== 'legacy_census' && attachment.source !== 'runtime_log') {
+    if (
+      attachment.source !== 'legacy_census' &&
+      attachment.source !== 'runtime_log' &&
+      attachment.source !== 'closure_state'
+    ) {
       throw new Error(`legacy closure migration ${invocationId} has invalid source`);
     }
     const evidenceRefs = [...new Set(attachment.evidenceRefs.map((ref) => requireText(ref, 'evidenceRef')))].sort();
@@ -97,7 +109,8 @@ export function normalizeLegacyAttachments(raw: readonly LegacyWithheldAttachmen
     byInvocation.set(invocationId, {
       closureId,
       invocationId,
-      source: existing?.source === 'legacy_census' ? existing.source : attachment.source,
+      source:
+        existing && sourceRank[existing.source] <= sourceRank[attachment.source] ? existing.source : attachment.source,
       evidenceRefs: [...new Set([...(existing?.evidenceRefs ?? []), ...evidenceRefs])].sort(),
       ...(() => {
         const decisions = [existing?.withheldDecision, attachment.withheldDecision].filter(

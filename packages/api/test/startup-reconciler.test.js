@@ -879,7 +879,6 @@ describe('StartupReconciler', () => {
 
   test('#697: recovers orphaned queued messages when no InvocationRecord exists', async () => {
     // No InvocationRecords — message is purely orphaned
-    const scannedIds = [];
     const deliveredIds = [];
     const messageStore = {
       append(msg) {
@@ -915,6 +914,7 @@ describe('StartupReconciler', () => {
     assert.ok(deliveredIds.includes('orphan-msg-1'));
     assert.ok(deliveredIds.includes('orphan-msg-2'));
     assert.equal(result.messagesRecovered, 2);
+    assert.equal(result.notifiedThreads, 1, 'owner-authored queued work still produces one thread notice');
   });
 
   test('#805 P2-1: InvocationRecord cleanup — queued record with matching userMessageId is marked failed', async () => {

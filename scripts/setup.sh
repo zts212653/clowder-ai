@@ -378,7 +378,6 @@ if [ "$ENABLE_TTS" = true ]; then
 # ── Voice Output (TTS) 语音输出 ──────────────────────────────
 TTS_ENABLED=1
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
 ENVEOF
 else
     cat >> "$ENV_FILE" <<ENVEOF
@@ -450,7 +449,7 @@ install_sidecar_venvs() {
         echo "  Updating TTS venv: $tts_venv ..."
     fi
     "$tts_venv/bin/pip" install --quiet -U pip
-    "$tts_venv/bin/pip" install --quiet mlx-audio 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
+    "$tts_venv/bin/pip" install --quiet 'mlx-audio>=0.4.7' 'misaki[zh]' fastapi uvicorn 'httpx[socks]' num2words spacy phonemizer
 
     # LLM post-processing venv
     local llm_venv="$venv_base/llm-venv"

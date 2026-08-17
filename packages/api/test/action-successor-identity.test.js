@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 const { canonicalizeActionIdentity, ActionSuccessorIdentityError } = await import(
   '../dist/domains/ball-custody/action-successor-state-machine.js'
 );
+const { ACTION_SUBJECT_REF_DESCRIPTION, actionSuccessorMetadataSchema } = await import('@cat-cafe/shared');
 
 describe('F167 Phase S action successor identity', () => {
   it('canonicalizes PR identity without putting thread or cat into the key', () => {
@@ -43,6 +44,33 @@ describe('F167 Phase S action successor identity', () => {
           successorSlot: 'reviewer',
         }),
       (error) => error instanceof ActionSuccessorIdentityError && error.code === 'invalid_action_family',
+    );
+  });
+
+  it('keeps schema and runtime diagnostics aligned for an invalid subjectRef', () => {
+    const subjectRef = 'github:zts212653/cat-cafe#3677@181099d2';
+    const parsed = actionSuccessorMetadataSchema.safeParse({
+      subjectRef,
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    });
+
+    assert.equal(parsed.success, false);
+    assert.ok(parsed.error.issues.some((issue) => issue.message.includes(ACTION_SUBJECT_REF_DESCRIPTION)));
+    assert.throws(
+      () =>
+        canonicalizeActionIdentity({
+          tenantScope: 'user-1',
+          subjectRef,
+          actionFamily: 'review',
+          successorSlot: 'reviewer',
+        }),
+      (error) =>
+        error instanceof ActionSuccessorIdentityError &&
+        error.code === 'invalid_subject_ref' &&
+        error.message.includes(ACTION_SUBJECT_REF_DESCRIPTION),
     );
   });
 });

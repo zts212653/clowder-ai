@@ -37,6 +37,26 @@ export {
   ToolCallContentSchema,
   ToolResultContentSchema,
 } from './message.schema.js';
+export {
+  MESSAGE_BUNDLE_MAX_ITEMS,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_VERSION,
+  type MessageBundleCarrierV1,
+  MessageBundleCarrierV1Schema,
+  type MessageBundleItemV1,
+  MessageBundleItemV1Schema,
+  type MessageBundleMessageItemV1,
+  MessageBundleMessageItemV1Schema,
+  type MessageBundleQuoteItemV1,
+  MessageBundleQuoteItemV1Schema,
+  type MessageBundleSelection,
+  type MessageBundleSelectionItem,
+  MessageBundleSelectionItemSchema,
+  type MessageBundleSelectionQuoteItem,
+  MessageBundleSelectionQuoteItemSchema,
+  MessageBundleSelectionSchema,
+} from './message-bundle.schema.js';
 // F129 Pack System schemas (fail-closed .strict())
 export type {
   PackDefaultsInput,

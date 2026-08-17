@@ -1,12 +1,20 @@
 import type { CatId } from '@cat-cafe/shared';
+import {
+  WaitContinuationCarrierError,
+  waitContinuationCarrierFromStoredMessage,
+  waitContinuationCarriersMatch,
+} from '../../../../ball-custody/wait-continuation-carrier.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, QueuedMessageCustody, StoredMessage } from '../../stores/ports/MessageStore.js';
 import { markReminderAttemptMissed, markReminderAttemptSeen } from '../../stores/ports/queued-message-receipt.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
-import { createCrossThreadQueueEntryFromCustody } from './QueuedMessageCustodyCoordinator.js';
-import { resolveQueueSourceResponseEvidence } from './queue-source-response-evidence.js';
+import { createCrossThreadQueueEntryFromCustody, projectQueuedAttemptIds } from './QueuedMessageCustodyCoordinator.js';
+import {
+  type QueueSourceResponseEvidence,
+  resolveQueueSourceResponseEvidenceFromMessages,
+} from './queue-source-response-evidence.js';
 
 interface StartupCustodyLog {
   info(msg: string): void;
@@ -121,6 +129,32 @@ interface RestartTargetProjection {
   failedTargets: number;
 }
 
+interface RestartSourceResponse {
+  exposure: NonNullable<QueuedMessageCustody['bodyExposures']>[number];
+  witness: QueueSourceResponseEvidence['witness'];
+}
+
+function resolveRestartSourceResponse(
+  message: StoredMessage,
+  current: QueuedMessageCustody,
+  catId: string,
+  threadMessages: readonly StoredMessage[],
+): RestartSourceResponse | null {
+  const exposures = [...(current.bodyExposures ?? [])]
+    .filter((candidate) => candidate.targetCatId === catId)
+    .sort((left, right) => right.seenAt - left.seenAt);
+  for (const exposure of exposures) {
+    const sourceResponse = resolveQueueSourceResponseEvidenceFromMessages({
+      messages: threadMessages,
+      catId,
+      invocationId: exposure.invocationId,
+      sourceMessageIds: [message.id],
+    })[0];
+    if (sourceResponse) return { exposure, witness: sourceResponse.witness };
+  }
+  return null;
+}
+
 async function resolveRestartTargets(
   message: StoredMessage,
   current: QueuedMessageCustody,
@@ -142,24 +176,57 @@ async function resolveRestartTargets(
     failedTargets: 0,
   };
 
+  const retainedExposureTargets = new Set(
+    (current.bodyExposures ?? [])
+      .filter((exposure) => projection.pending.has(exposure.targetCatId))
+      .map((exposure) => exposure.targetCatId),
+  );
+  let threadMessages: readonly StoredMessage[] = [];
+  if (retainedExposureTargets.size > 0) {
+    const readThread = messageStore.getByThreadAfter?.bind(messageStore);
+    if (readThread) {
+      // Startup custody is server-internal reconciliation, not a viewer read.
+      // Managed-command sources are scheduler-authored while their response
+      // output belongs to the triggering user, so source userId must not scope
+      // this scan. Exact cat/invocation/causal fences below provide authority.
+      threadMessages = await readThread(message.threadId);
+    }
+  }
+
+  // Failed bookkeeping clears the active seen-invocation map but deliberately
+  // retains append-only body exposures. A crash between output persistence and
+  // exact source settlement must therefore recover from the historical
+  // exposure itself. Only a durable, user-visible response causally bound to
+  // this exact source qualifies; a bare read or historical child result does
+  // not reopen terminal truth.
+  for (const catId of [...projection.pending]) {
+    if (!retainedExposureTargets.has(catId)) continue;
+    const sourceResponse = resolveRestartSourceResponse(message, current, catId, threadMessages);
+    if (!sourceResponse) continue;
+    const { exposure, witness } = sourceResponse;
+    projection.pending.delete(catId);
+    projection.handled.add(catId);
+    projection.failed.delete(catId);
+    projection.notified.delete(catId);
+    delete projection.awakenedInvocationIdByCatId[catId];
+    delete projection.awakenedAtByCatId[catId];
+    delete projection.seenInvocationIdByCatId[catId];
+    projection.targetOutcomeByCatId[catId] = {
+      invocationId: exposure.invocationId,
+      disposition: 'responded',
+      evidenceRef: { kind: 'invocation_lineage', invocationId: exposure.invocationId },
+      handledAt: Math.max(now, exposure.seenAt + 1),
+      consumption: witness,
+    };
+    projection.handledTargets += 1;
+  }
+
   for (const [catId, invocationId] of Object.entries(current.seenInvocationIdByCatId)) {
     delete projection.seenInvocationIdByCatId[catId];
     if (!projection.pending.has(catId)) continue;
     const exposure = current.bodyExposures?.find(
       (candidate) => candidate.targetCatId === catId && candidate.invocationId === invocationId,
     );
-    const sourceResponse = exposure
-      ? (
-          await resolveQueueSourceResponseEvidence({
-            messageStore,
-            threadId: message.threadId,
-            userId: message.userId,
-            catId,
-            invocationId,
-            sourceMessageIds: [message.id],
-          })
-        )[0]
-      : undefined;
     const witness = await resolveSuccessfulRestartWitness(
       message,
       catId,
@@ -168,22 +235,14 @@ async function resolveRestartTargets(
       invocationRecordStore,
       turnExecutionStore,
     );
-    if (sourceResponse || witness) {
+    if (witness) {
       projection.pending.delete(catId);
       projection.handled.add(catId);
       projection.failed.delete(catId);
       projection.notified.delete(catId);
       delete projection.awakenedInvocationIdByCatId[catId];
       delete projection.awakenedAtByCatId[catId];
-      if (sourceResponse && exposure) {
-        projection.targetOutcomeByCatId[catId] = {
-          invocationId,
-          disposition: 'responded',
-          evidenceRef: { kind: 'invocation_lineage', invocationId },
-          handledAt: Math.max(now, exposure.seenAt + 1),
-          consumption: sourceResponse.witness,
-        };
-      } else if (witness === 'child_execution' && exposure) {
+      if (witness === 'child_execution' && exposure) {
         // Exact child success without a source-bound output still closes the
         // turn, but must not invent a response witness.
         projection.targetOutcomeByCatId[catId] = {
@@ -263,11 +322,36 @@ export class QueuedMessageCustodyStartupReconciler {
     const resumeScopes: QueueCustodyResumeScope[] = [];
     let entriesRestored = 0;
     for (const [entryId, messages] of groups) {
-      const entry = this.buildQueueEntry(messages, entryId);
-      const outcome = this.deps.invocationQueue.restoreDurableEntry(entry);
-      if (outcome !== 'restored') continue;
-      entriesRestored += 1;
-      resumeScopes.push({ threadId: entry.threadId, userId: entry.userId });
+      try {
+        const entry = this.buildQueueEntry(messages, entryId);
+        const outcome = this.deps.invocationQueue.restoreDurableEntry(entry);
+        if (outcome !== 'restored') continue;
+        entriesRestored += 1;
+        resumeScopes.push({ threadId: entry.threadId, userId: entry.userId });
+      } catch (error) {
+        if (error instanceof WaitContinuationCarrierError) {
+          for (const message of messages) {
+            try {
+              const disposition = await this.terminalizeLegacyUnfencedWait(message.id);
+              if (disposition.terminalized) messagesTerminalized += 1;
+              failedTargets += disposition.failedTargets;
+            } catch (dispositionError) {
+              messagesFailed += 1;
+              this.deps.log.warn(
+                `[queue-custody-startup] failed to terminalize legacy unfenced wait ${message.id}: ` +
+                  `${dispositionError instanceof Error ? dispositionError.message : String(dispositionError)}`,
+              );
+            }
+          }
+        } else {
+          messagesFailed += messages.length;
+        }
+        this.deps.log.warn(
+          `[queue-custody-startup] isolated non-restorable Queue group ${entryId} ` +
+            `(${messages.map((message) => message.id).join(',')}): ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     if (queuedMessageIds.length > 0) {
@@ -476,6 +560,54 @@ export class QueuedMessageCustodyStartupReconciler {
     return groups;
   }
 
+  private async terminalizeLegacyUnfencedWait(
+    messageId: string,
+  ): Promise<{ terminalized: boolean; failedTargets: number }> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const message = await this.deps.messageStore.getById(messageId);
+      const current = message?.queueCustody;
+      if (!message || message.deliveryStatus !== 'queued' || !current || current.status === 'terminal') {
+        return { terminalized: false, failedTargets: 0 };
+      }
+      try {
+        waitContinuationCarrierFromStoredMessage(message);
+        return { terminalized: false, failedTargets: 0 };
+      } catch (error) {
+        if (!(error instanceof WaitContinuationCarrierError)) throw error;
+      }
+      const now = this.now();
+      const failedTargetCats = uniqueCatIds([...current.failedByCatIds, ...current.pendingTargetCats]);
+      const reminderProjection = resolveRestartReminderAttempts(current, now);
+      const {
+        processingStartedAt: _processingStartedAt,
+        awakenedInvocationIdByCatId: _awakenedInvocationIdByCatId,
+        awakenedAtByCatId: _awakenedAtByCatId,
+        steerRequestedByCatIds: _steerRequestedByCatIds,
+        steeredInvocationIdByCatId: _steeredInvocationIdByCatId,
+        carrierStateByTargetCatId: _carrierStateByTargetCatId,
+        reminderAttempts: _reminderAttempts,
+        ...stableCurrent
+      } = current;
+      const result = await this.deps.messageStore.transitionQueueCustody(messageId, {
+        expectedRevision: current.revision,
+        next: {
+          ...stableCurrent,
+          revision: current.revision + 1,
+          status: 'terminal',
+          pendingTargetCats: [],
+          failedByCatIds: failedTargetCats,
+          ...(reminderProjection.reminderAttempts ? { reminderAttempts: reminderProjection.reminderAttempts } : {}),
+          updatedAt: now,
+        },
+        deliveredAt: now,
+      });
+      if (result.kind === 'revision_mismatch') continue;
+      if (result.kind === 'not_found') return { terminalized: false, failedTargets: 0 };
+      return { terminalized: true, failedTargets: current.pendingTargetCats.length };
+    }
+    throw new Error(`legacy wait terminalization CAS retries exhausted for message ${messageId}`);
+  }
+
   private buildQueueEntry(messages: StoredMessage[], entryId: string): QueueEntry {
     messages.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id));
     const primary = messages[0];
@@ -502,12 +634,19 @@ export class QueuedMessageCustodyStartupReconciler {
       throw new Error(`active queue custody group has no target for carrier ${entryId}`);
     }
     const allTargets = [...custody.allTargetCats];
+    const waitContinuationCarrier = waitContinuationCarrierFromStoredMessage(primary);
+    for (const sibling of messages.slice(1)) {
+      if (!waitContinuationCarriersMatch(waitContinuationCarrierFromStoredMessage(sibling), waitContinuationCarrier)) {
+        throw new Error(`divergent wait continuation carriers for Queue entry ${entryId}`);
+      }
+    }
     const targetSet = new Set<string>(allTargets);
     const filterTargets = (values: readonly CatId[]): CatId[] => values.filter((catId) => targetSet.has(catId));
     const filterInvocationMap = (values: Readonly<Record<string, string>>): Record<string, string> =>
       Object.fromEntries(Object.entries(values).filter(([catId]) => targetSet.has(catId)));
     const filterTimestampMap = (values: Readonly<Record<string, number>>): Record<string, number> =>
       Object.fromEntries(Object.entries(values).filter(([catId]) => targetSet.has(catId)));
+    const queuedAttemptIdByCatId = projectQueuedAttemptIds(custody, pendingTargets);
     return {
       id: entryId,
       threadId: primary.threadId,
@@ -516,7 +655,8 @@ export class QueuedMessageCustodyStartupReconciler {
       content: messages.map((message) => message.content).join('\n'),
       messageId: primary.id,
       mergedMessageIds: messages.slice(1).map((message) => message.id),
-      source: 'user',
+      source: waitContinuationCarrier ? 'connector' : 'user',
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
       targetCats: pendingTargets,
       allTargetCats: allTargets,
       ...(custody.authorIntentByCatId ? { authorIntentByCatId: structuredClone(custody.authorIntentByCatId) } : {}),
@@ -529,6 +669,7 @@ export class QueuedMessageCustodyStartupReconciler {
         .filter((exposure) => targetSet.has(exposure.targetCatId))
         .map((exposure) => ({ ...exposure })),
       queuedFailedByCatIds: filterTargets(custody.failedByCatIds),
+      ...(Object.keys(queuedAttemptIdByCatId).length > 0 ? { queuedAttemptIdByCatId } : {}),
       queuedHandledByCatIds: filterTargets(custody.handledByCatIds),
       steerRequestedByCatIds: filterTargets(custody.steerRequestedByCatIds ?? []),
       steeredInvocationIdByCatId: filterInvocationMap(custody.steeredInvocationIdByCatId ?? {}),

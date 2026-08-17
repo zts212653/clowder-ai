@@ -75,12 +75,12 @@ describe('extractBatonContext', () => {
     assert.equal(baton, null);
   });
 
-  it('blanks excerpt for stream-origin messages (P1-R2: visibility boundary)', () => {
+  it('preserves excerpt for persisted stream-origin messages', () => {
     const msgs = [
       {
         id: 'm40',
         catId: 'codex',
-        content: '@opus 我内部在想这个方案不太行',
+        content: '@opus 这个方案需要再看一下',
         timestamp: 1000,
         userId: 'u1',
         origin: 'stream',
@@ -89,7 +89,7 @@ describe('extractBatonContext', () => {
     const baton = extractBatonContext(msgs, 'opus');
     assert.ok(baton !== null);
     assert.equal(baton.fromSpeaker, 'codex');
-    assert.equal(baton.mentionExcerpt, '', 'stream excerpt must be blank — thinking content is not visible');
+    assert.ok(baton.mentionExcerpt.includes('这个方案需要再看一下'));
   });
 
   it('preserves excerpt for non-stream messages', () => {
@@ -118,13 +118,13 @@ describe('extractBatonContext', () => {
     assert.equal(baton.staleHoldWarning, false, '"正在review" is work status, not hold');
   });
 
-  it('ignores stream-origin hold for stale-hold detection (cloud P2)', () => {
+  it('uses persisted stream-origin speech for stale-hold detection', () => {
     const msgs = [
       { id: 'm60', catId: 'codex', content: '别动，等我看完这段代码', timestamp: 1000, userId: 'u1', origin: 'stream' },
       { id: 'm61', catId: 'codex', content: '@opus 帮我看看', timestamp: 2000, userId: 'u1', origin: 'callback' },
     ];
     const baton = extractBatonContext(msgs, 'opus');
-    assert.equal(baton.staleHoldWarning, false, 'stream thinking hold should not trigger stale warning');
+    assert.equal(baton.staleHoldWarning, true, 'persisted hold speech must remain semantically visible');
   });
 
   it('finds baton via canonical mentions field (alias @宪宪 → catId opus)', () => {

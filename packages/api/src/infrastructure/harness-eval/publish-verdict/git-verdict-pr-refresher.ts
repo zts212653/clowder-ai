@@ -32,6 +32,8 @@ interface LocalBranchAcquisition {
 
 export interface GitVerdictPrRefresherDeps {
   repoRoot: string;
+  expectedRepoFullName: string;
+  identityRunner?: (repoRoot: string, expectedRepoFullName: string) => Promise<void>;
   resolveOpenPr?: (branchName: string) => Promise<OpenVerdictPr[]>;
   beforeAcquireLocalBranch?: (args: { repoRoot: string; branchName: string; branchHead: string }) => Promise<void>;
   beforeAttachLocalBranch?: (args: { repoRoot: string; branchName: string; branchHead: string }) => Promise<void>;
@@ -44,7 +46,39 @@ export interface GitVerdictPrRefresherDeps {
   }) => Promise<void>;
 }
 
-async function defaultResolveOpenPr(repoRoot: string, branchName: string): Promise<OpenVerdictPr[]> {
+async function defaultIdentityRunner(repoRoot: string, expectedRepoFullName: string): Promise<void> {
+  await exec(
+    process.execPath,
+    [
+      resolve(repoRoot, 'scripts/check-verdict-publish-contract.mjs'),
+      '--repo-root',
+      repoRoot,
+      '--expected-repo',
+      expectedRepoFullName,
+      '--remote',
+      'origin',
+      '--identity-only',
+      'true',
+    ],
+    { cwd: repoRoot, timeout: 30_000 },
+  );
+}
+
+async function verifyPublisherIdentity(deps: GitVerdictPrRefresherDeps): Promise<void> {
+  const identityRunner = deps.identityRunner ?? defaultIdentityRunner;
+  await identityRunner(deps.repoRoot, deps.expectedRepoFullName);
+}
+
+function resolveConfiguredOpenPr(deps: GitVerdictPrRefresherDeps): (branchName: string) => Promise<OpenVerdictPr[]> {
+  if (deps.resolveOpenPr) return deps.resolveOpenPr;
+  return (branchName) => defaultResolveOpenPr(deps.repoRoot, deps.expectedRepoFullName, branchName);
+}
+
+async function defaultResolveOpenPr(
+  repoRoot: string,
+  expectedRepoFullName: string,
+  branchName: string,
+): Promise<OpenVerdictPr[]> {
   const result = await exec(
     'gh',
     [
@@ -60,6 +94,8 @@ async function defaultResolveOpenPr(repoRoot: string, branchName: string): Promi
       '2',
       '--json',
       'url,headRefOid,headRefName,baseRefName,body',
+      '--repo',
+      expectedRepoFullName,
     ],
     withHiddenGhCliWindow({ cwd: repoRoot, timeout: 30_000 }),
   );
@@ -194,9 +230,15 @@ async function pushValidatedCommitFromPinnedBranch(
 ): Promise<void> {
   const originUrl = (await git(repoRoot, ['remote', 'get-url', 'origin'])).stdout.trim();
   const hooksPath = await resolveEffectiveHooksPath(sourceRepoRoot);
+  const sourceCheckoutRoot = (await git(sourceRepoRoot, ['rev-parse', '--show-toplevel'])).stdout.trim();
   await exec('git', ['clone', '--no-checkout', '--shared', sourceRepoRoot, pushRepoPath], { timeout: 60_000 });
   await git(pushRepoPath, ['remote', 'set-url', 'origin', originUrl]);
   await git(pushRepoPath, ['config', 'core.hooksPath', hooksPath]);
+  // The pinned clone has no worktree, so the pre-push guard cannot find
+  // scripts/ at its toplevel; hand the source checkout root to the hook
+  // explicitly (effective hooks may point at <root>/.git/hooks, whose
+  // parent is not the checkout root).
+  await git(pushRepoPath, ['config', 'catcafe.verdictSourceRoot', sourceCheckoutRoot]);
   await git(pushRepoPath, ['update-ref', `refs/heads/${branchName}`, commitSha]);
   const pinnedHead = (await git(pushRepoPath, ['rev-parse', `refs/heads/${branchName}`])).stdout.trim();
   if (pinnedHead !== commitSha) {
@@ -313,7 +355,8 @@ export function createGitVerdictPrRefresher(deps: GitVerdictPrRefresherDeps) {
   return async function refreshPublishedVerdictPr(
     opts: RefreshPublishedVerdictPrOpts,
   ): Promise<RefreshPublishedVerdictPrResult> {
-    const resolveOpenPr = deps.resolveOpenPr ?? ((branchName) => defaultResolveOpenPr(deps.repoRoot, branchName));
+    await verifyPublisherIdentity(deps);
+    const resolveOpenPr = resolveConfiguredOpenPr(deps);
     const tempRoot = mkdtempSync(`${tmpdir()}/cat-cafe-refresh-verdict-${process.pid}-`);
     // Git keys worktree administration by the target basename. Keep that basename
     // unique as well as the parent so concurrent refreshes cannot collide.

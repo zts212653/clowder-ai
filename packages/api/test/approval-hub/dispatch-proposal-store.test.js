@@ -3,11 +3,12 @@ import { beforeEach, describe, it } from 'node:test';
 
 describe('DispatchProposalStore (in-memory)', () => {
   let InMemoryDispatchProposalStore;
+  let computeDispatchCanonicalActionKey;
+  let tryComputeDispatchCanonicalActionKey;
 
   beforeEach(async () => {
-    ({ InMemoryDispatchProposalStore } = await import(
-      '../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'
-    ));
+    ({ InMemoryDispatchProposalStore, computeDispatchCanonicalActionKey, tryComputeDispatchCanonicalActionKey } =
+      await import('../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'));
   });
 
   const createInput = (overrides = {}) => ({
@@ -410,6 +411,68 @@ describe('DispatchProposalStore (in-memory)', () => {
     assert.deepEqual(await store.findNegativeAuthorizationBlocks(negativeLookup), [
       { proposalId: 'dp-001', status: 'rejected', targetCats: ['sonnet'] },
     ]);
+  });
+
+  it('#1291 Gate 1: canonical admission matches full action identity across invocation boundaries', async () => {
+    const store = new InMemoryDispatchProposalStore();
+    const proposedAction = {
+      subjectRef: 'pr:owner/repo#42',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+      mode: 'single',
+      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+    };
+    await store.create(createInput({ proposedAction }));
+    const canonicalActionKey = computeDispatchCanonicalActionKey('user-1', proposedAction);
+
+    assert.deepEqual(await store.findCanonicalAdmissionBlocks({ ownerUserId: 'user-1', canonicalActionKey }), [
+      { proposalId: 'dp-001', status: 'pending' },
+    ]);
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: 'user-1',
+        canonicalActionKey: computeDispatchCanonicalActionKey('user-1', {
+          ...proposedAction,
+          actionFamily: 'investigate',
+          successorSlot: 'investigator',
+        }),
+      }),
+      [],
+      'a different actionFamily/successorSlot has an independent canonical identity',
+    );
+
+    await store.reject('dp-001', 'user-1');
+    assert.deepEqual(
+      await store.findCanonicalAdmissionBlocks({
+        ownerUserId: 'user-1',
+        canonicalSubjectRef: 'pr:owner/repo#42',
+      }),
+      [{ proposalId: 'dp-001', status: 'rejected' }],
+      'a weak carrier can only nominate the rejected canonical action for denial',
+    );
+  });
+
+  it('#1291 Gate 1: canonicalization only softens expected invalid identity input, never an internal fault', () => {
+    const actionWithUnexpectedFault = {
+      get subjectRef() {
+        throw new Error('canonical subject resolver fault');
+      },
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
+    };
+    assert.throws(
+      () => tryComputeDispatchCanonicalActionKey('user-1', actionWithUnexpectedFault),
+      /canonical subject resolver fault/,
+    );
+    assert.equal(
+      tryComputeDispatchCanonicalActionKey('user-1', {
+        subjectRef: 'not a canonical subject',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+      }),
+      undefined,
+      'malformed carrier identity stays non-matchable without widening it to a partial key',
+    );
   });
 
   it('#1291: legacy cutover cannot activate until canonical index rebuild has completed', async () => {

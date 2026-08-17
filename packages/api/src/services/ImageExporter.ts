@@ -8,7 +8,54 @@ const log = createModuleLogger('image-exporter');
 
 /** Chunk height for scroll-and-stitch. 4000px is well under Chrome's ~16384 GPU limit. */
 const CHUNK_HEIGHT = 4000;
+const INITIAL_VIEWPORT_HEIGHT = 900;
 const VIEWPORT_WIDTH = 1280;
+
+export interface ImageExportCaptureOptions {
+  selectionMessageIds?: readonly string[];
+}
+
+export function buildImageExportUrl(url: string, userId: string, options?: ImageExportCaptureOptions): string {
+  const exportUrl = new URL(url);
+  exportUrl.searchParams.set('export', 'true');
+  exportUrl.searchParams.set('userId', userId);
+  for (const messageId of options?.selectionMessageIds ?? []) {
+    exportUrl.searchParams.append('messageId', messageId);
+  }
+  return exportUrl.toString();
+}
+
+export function resolveExportCaptureHeight(metrics: {
+  documentHeight: number;
+  exportRootHeight: number | null;
+}): number {
+  const candidate =
+    metrics.exportRootHeight && metrics.exportRootHeight > 0 ? metrics.exportRootHeight : metrics.documentHeight;
+  return Math.max(1, Math.ceil(candidate));
+}
+
+export interface ImageExportChunk {
+  buffer: Buffer;
+  top: number;
+}
+
+export async function stitchImageExportChunks(
+  width: number,
+  height: number,
+  chunks: readonly ImageExportChunk[],
+): Promise<Buffer> {
+  return sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    },
+  })
+    .composite(chunks.map((chunk) => ({ input: chunk.buffer, top: chunk.top, left: 0 })))
+    .png()
+    .toBuffer();
+}
 
 function resolveConfiguredChromePath(): string | null {
   const envPath = process.env.CHROME_EXECUTABLE_PATH;
@@ -93,7 +140,7 @@ export class ImageExporter {
    * For pages taller than CHUNK_HEIGHT, scrolls through the page in chunks
    * and stitches them together using Sharp.
    */
-  async capture(url: string, userId: string): Promise<Buffer> {
+  async capture(url: string, userId: string, options?: ImageExportCaptureOptions): Promise<Buffer> {
     try {
       if (!this.browser) {
         this.browser = await puppeteer.launch({
@@ -106,13 +153,9 @@ export class ImageExporter {
       const page = await this.browser.newPage();
 
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
-      await page.setViewport({ width: VIEWPORT_WIDTH, height: CHUNK_HEIGHT });
+      await page.setViewport({ width: VIEWPORT_WIDTH, height: INITIAL_VIEWPORT_HEIGHT });
 
-      const exportUrl = new URL(url);
-      exportUrl.searchParams.set('export', 'true');
-      exportUrl.searchParams.set('userId', userId);
-
-      await page.goto(exportUrl.toString(), {
+      await page.goto(buildImageExportUrl(url, userId, options), {
         waitUntil: 'networkidle2',
         timeout: 30000,
       });
@@ -121,17 +164,36 @@ export class ImageExporter {
       // data-export-ready is set by ChatContainer when !isLoadingHistory && messages.length > 0 && !isLoadingCatData.
       await page.waitForSelector('[data-export-ready="true"]', { timeout: 20000 });
 
+      // Next's development error indicator is outside the application export root.
+      // It must never become part of a user document, even when dogfooding a dev build.
+      await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
+
       // Wait for React to finish rendering all messages (height stabilizes)
       await this.waitForStableHeight(page);
 
-      const pageHeight = await page.evaluate(
+      const captureMetrics = await page.evaluate(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (globalThis as any).document.documentElement.scrollHeight as number,
+        () => {
+          const document = (globalThis as any).document;
+          const exportRoot = document.querySelector('[data-export-root]');
+          return {
+            documentHeight: document.documentElement.scrollHeight as number,
+            exportRootHeight: exportRoot
+              ? Math.max(exportRoot.scrollHeight, exportRoot.getBoundingClientRect().height)
+              : null,
+          };
+        },
       );
+      const pageHeight = resolveExportCaptureHeight(captureMetrics);
       const messageCount = await page.evaluate(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => ((globalThis as any).document.querySelectorAll('[data-message-id]') ?? []).length,
       );
+      if (options?.selectionMessageIds && messageCount !== options.selectionMessageIds.length) {
+        throw new Error(
+          `Selection DOM count mismatch: expected ${options.selectionMessageIds.length}, rendered ${messageCount}`,
+        );
+      }
       log.info(
         { pageHeight, messageCount, chunks: Math.ceil(pageHeight / CHUNK_HEIGHT) },
         'Page height and message count captured',
@@ -149,6 +211,9 @@ export class ImageExporter {
 
       // Tall page: scroll-and-stitch to avoid Chrome's tiling duplication bug
       const chunks: { buffer: Buffer; top: number; height: number }[] = [];
+
+      await page.setViewport({ width: VIEWPORT_WIDTH, height: CHUNK_HEIGHT });
+      await this.waitForPaint(page);
 
       // Scroll to top first
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -186,23 +251,7 @@ export class ImageExporter {
       log.info({ chunks: chunks.length }, 'Chunks captured, stitching...');
 
       // Stitch chunks vertically using Sharp
-      const stitched = await sharp({
-        create: {
-          width: VIEWPORT_WIDTH,
-          height: pageHeight,
-          channels: 4,
-          background: { r: 255, g: 255, b: 255, alpha: 1 },
-        },
-      })
-        .composite(
-          chunks.map((c) => ({
-            input: c.buffer,
-            top: c.top,
-            left: 0,
-          })),
-        )
-        .png()
-        .toBuffer();
+      const stitched = await stitchImageExportChunks(VIEWPORT_WIDTH, pageHeight, chunks);
 
       log.info({ bytes: stitched.length }, 'Stitched image ready');
       await page.close();

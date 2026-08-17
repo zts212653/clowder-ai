@@ -18,6 +18,7 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     const removed = [];
     const storedMessages = [];
     const broadcasts = [];
+    const managedCancelCalls = [];
     return {
       registry,
       taskRunner: {
@@ -68,10 +69,15 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
           return owner ? { createdBy: owner } : null;
         },
       },
+      cancelManagedWakeIfTaskMatches(taskId, threadId, catId) {
+        managedCancelCalls.push({ taskId, threadId, catId });
+        return true;
+      },
       _unregistered: unregistered,
       _removed: removed,
       _storedMessages: storedMessages,
       _broadcasts: broadcasts,
+      _managedCancelCalls: managedCancelCalls,
     };
   }
 
@@ -147,6 +153,9 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
 
     assert.deepEqual(deps._unregistered, ['hold-ball-123-abc']);
     assert.deepEqual(deps._removed, ['hold-ball-123-abc']);
+    assert.deepEqual(deps._managedCancelCalls, [
+      { taskId: 'hold-ball-123-abc', threadId: 'thread-del1', catId: 'codex' },
+    ]);
 
     assert.equal(deps._storedMessages.length, 1, 'AC-J3: should emit cancel confirmation');
     assert.match(deps._storedMessages[0].content, /持球已取消/);
@@ -180,6 +189,43 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       userId: 'test-user',
       catId: 'opus',
     });
+  });
+
+  test('F295: exact DELETE still stops a running command after an ordinary message retired its wake', async () => {
+    const task = makeHoldTask('hold-ball-retired-wake-running-command', 'thread-running', 'codex');
+    task.enabled = false;
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'cancelled_by_user',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex',
+        managedCommand: {
+          state: 'command_running',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 1_000,
+        },
+      },
+    };
+    const deps = makeStubDeps([task], { 'thread-running': 'test-user' });
+    const app = await createApp(deps);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/callbacks/hold-ball/hold-ball-retired-wake-running-command',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps._managedCancelCalls, [
+      {
+        taskId: 'hold-ball-retired-wake-running-command',
+        threadId: 'thread-running',
+        catId: 'codex',
+      },
+    ]);
+    assert.deepEqual(deps._removed, ['hold-ball-retired-wake-running-command']);
   });
 
   test('GET status returns retired-by-event tombstone as non-cancelable', async () => {

@@ -14,8 +14,10 @@ import {
 import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type { PluginGrantRecord, PluginInstanceRecord, PluginPackageRecord } from '../host-inventory/types.js';
 import {
+  type BrokerConnection,
+  type BrokerConnectionController,
   type BuiltinBrokerConnection,
-  type BuiltinBrokerConnectionController,
+  createBrokerConnection,
   createBuiltinBrokerConnection,
 } from './builtin-loopback.js';
 import { digestBrokerValue } from './canonical-json.js';
@@ -26,6 +28,7 @@ import type {
   BrokerCallRecord,
   BrokerMethodHandler,
   BrokerSessionRecord,
+  BrokerTransportKind,
 } from './types.js';
 import { HostBrokerError } from './types.js';
 
@@ -68,7 +71,7 @@ function sessionForConnection(transaction: HostBrokerTransaction, connectionId: 
   return session;
 }
 
-export class HostBrokerControlPlane implements BuiltinBrokerConnectionController {
+export class HostBrokerControlPlane implements BrokerConnectionController {
   private readonly now: () => number;
   private readonly preActiveTimeoutMs: number;
   private readonly activeLeaseTtlMs: number;
@@ -87,6 +90,16 @@ export class HostBrokerControlPlane implements BuiltinBrokerConnectionController
   }
 
   async openBuiltinConnection(pluginInstanceId: string): Promise<BuiltinBrokerConnection> {
+    const connectionId = await this.openConnection(pluginInstanceId, 'builtin-loopback');
+    return createBuiltinBrokerConnection(this, connectionId);
+  }
+
+  async openExternalConnection(pluginInstanceId: string): Promise<BrokerConnection> {
+    const connectionId = await this.openConnection(pluginInstanceId, 'stdio');
+    return createBrokerConnection(this, connectionId);
+  }
+
+  private async openConnection(pluginInstanceId: string, transportKind: BrokerTransportKind): Promise<string> {
     const authority = await this.currentAuthority(pluginInstanceId, true);
     const now = this.now();
     const connectionId = this.options.createConnectionId?.() ?? `conn_${randomUUID()}`;
@@ -106,7 +119,7 @@ export class HostBrokerControlPlane implements BuiltinBrokerConnectionController
         connectionId,
         brokerSessionId,
         runtimeLeaseId,
-        transportKind: 'builtin-loopback',
+        transportKind,
         pluginInstanceId,
         pluginId: authority.instance.pluginId,
         packageDigest: authority.instance.packageDigest,
@@ -118,7 +131,7 @@ export class HostBrokerControlPlane implements BuiltinBrokerConnectionController
         updatedAt: now,
       });
     });
-    return createBuiltinBrokerConnection(this, connectionId);
+    return connectionId;
   }
 
   async hello(connectionId: string, candidate: unknown): Promise<SessionBinding> {

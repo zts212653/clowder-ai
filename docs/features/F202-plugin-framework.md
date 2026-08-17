@@ -5,17 +5,17 @@ topics: [plugin-framework, capability-registry, settings, resource-activation, s
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "K-2A/K-2B add dormant internal inventory, Broker-session, and settlement boundaries; they introduce no new user-invokable action or discovery surface, while the existing Settings plugin journey remains unchanged."
+tips_exempt: "K-2A through K-2D add dormant Host inventory, Broker-session, settlement, and supervised stdio boundaries; they introduce no new user-invokable activation or discovery surface, while the existing Settings plugin journey remains unchanged."
 ---
 
 # F202: Plugin Framework — local discovery, config, resource activation, and schedule resources
 
-> **Status**: in-progress (local Phase 1 merged; K-2A merged; K-2B production-transport state machine implemented dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
+> **Status**: in-progress (local Phase 1 merged; K-2A/K-2B merged; K-2D supervised stdio runtime composed dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
 Architecture cell: plugin
-Map delta: completed; updated 2026-08-10 for K-2A/K-2B.
+Map delta: completed; updated 2026-08-11 for K-2D.
 Why: F202 owns both the repository-local lifecycle boundary and the Host-governed external package,
 session, grant, and durable Broker-settlement boundary. Product-domain effects remain in their
 canonical cells.
@@ -82,8 +82,9 @@ The external-package K-2 path currently covers:
   loopback adapter that exercises the same control plane without bypassing it.
 - A ready-only `events.publish` handler that reuses F292 signal admission and canonical settlement;
   core imports the published contract validators and wire registry instead of mirroring them.
-- Fail-closed restart and ambiguous-dispatch recovery. Production composition, external process
-  supervision/stdio, environment injection, and live plugin activation remain later K-2 slices.
+- K-2D: immutable package-to-process authority, closed-environment child supervision, bounded
+  contract-owned stdio transport, and fail-closed restart recovery. Production composition is
+  constructed but dormant; installation UI, activation authority, and real co-run remain later slices.
 
 ## Non-Goals
 
@@ -156,7 +157,7 @@ The external-package K-2 path currently covers:
 - [ ] AC-H4: GitHub PR/issue bodies and comments are explicitly marked or delimited as untrusted external content before they are routed to cats.
 - [ ] AC-H5: Existing PR tracking tasks remain backward compatible after the migration.
 
-### AC-I: K-2A/K-2B External Package and Broker Boundary
+### AC-I: K-2A through K-2D External Package and Runtime Boundary
 
 - [x] AC-I1: Host inventory binds admitted package digest, installation instance, activation, and
   effective grants to exact published contract truth without a core-local manifest mirror.
@@ -168,9 +169,16 @@ The external-package K-2 path currently covers:
   concurrent retries have one winner and ambiguous recovery consults canonical domain settlement.
 - [x] AC-I5: Only contract registry methods with `ready: true` can dispatch. `events.publish` flows
   through F292 Host authorization/idempotency without copying C-2 schema into core.
-- [x] AC-I6: The builtin loopback exercises the production state machine, while composition-root
-  wiring, external process/stdio transport, environment injection, and runtime activation remain
-  absent and cannot be reported as live.
+- [x] AC-I6: Builtin loopback and external stdio traverse the same Host Broker state machine;
+  production composition constructs and restart-recovers the supervisor but never calls `start`
+  or exposes an activation route.
+- [x] AC-I7: External start copies the exact Host-owned archive into a private stage, verifies its
+  admitted SRI, atomically publishes and re-hashes the launchable tree, contains the entrypoint,
+  launches without a shell or inherited credentials, and accepts only bounded
+  contract/SDK-classified frames.
+- [x] AC-I8: Process, protocol, deadline, stop, crash, and Host-restart terminal paths close Broker
+  authority and normalize runtime state without trusting a persisted PID or blindly redispatching
+  an ambiguous effect.
 
 ## Intake Timeline
 
@@ -181,6 +189,7 @@ The external-package K-2 path currently covers:
 | 2026-06-08 | Maintainer decision: clowder-ai#844/#846 is re-anchored from its conflicting standalone feature number to F202 Phase 2. The source-truth plan lives here; the open PR must retitle/rewrite body/docs/roadmap before merge review continues. |
 | 2026-08-05 | K-2A Host inventory merged via cat-cafe#3422 (`a6b38ac53`); package/install/grant truth landed with runtime dormant. |
 | 2026-08-10 | K-2B production-transport state machine merged via cat-cafe#3555 (`f7fe82303`): contract-native handshake, durable call ledger, restart normalization, builtin loopback, and typed F292 `events.publish`; external runtime activation remains dormant. |
+| 2026-08-11 | K-2D implemented on cat-cafe#3558: immutable package verification, supervised stdio transport, closed bootstrap environment, and current-main project persistence composition; startup remains dormant with no activation route. |
 
 ## Current Maintainer Position
 
@@ -190,10 +199,10 @@ Phase 2 is accepted as the correct home for schedule resources and the existing 
 
 Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
 
-K-2A/K-2B are accepted as the Host-owned external-package foundation. “Production transport” here
-means the persistent Host control plane and typed domain dispatch path, not a live external process:
-process supervision, stdio/IPC, environment delivery, composition-root activation, and real plugin
-co-run remain separately gated. Core must continue importing the exact public contract rather than
-growing a private wire registry.
+K-2A through K-2D are accepted as the Host-owned external-package foundation. The Host now has a
+supervised stdio process boundary and a production composition object, but startup only performs
+fail-closed persistence recovery. No package is installed or started by that wiring, no activation
+route exists, and real plugin co-run remains separately gated. Core must continue importing the
+exact public contract rather than growing a private wire registry.
 
-[Maine Coon/GPT-5.5🐾]
+[小太阳·Maine Coon/GPT-5.6 Sol🐾]

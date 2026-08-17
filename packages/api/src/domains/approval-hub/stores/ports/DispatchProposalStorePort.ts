@@ -4,6 +4,8 @@ import type { ApprovalPublicationStore } from '../../ports/ApprovalPublicationSt
 import type {
   CreateDispatchProposalInput,
   CreateDispatchProposalResult,
+  DispatchCanonicalAdmissionBlock,
+  DispatchCanonicalAdmissionLookup,
   DispatchLegacyNegativeAuthorizationLookup,
   DispatchNegativeAuthorizationBlock,
   DispatchNegativeAuthorizationLookup,
@@ -27,6 +29,7 @@ export interface IDispatchProposalStore extends ApprovalPublicationStore {
   findNegativeAuthorizationBlocks(
     input: DispatchNegativeAuthorizationLookup,
   ): Promise<DispatchNegativeAuthorizationBlock[]>;
+  findCanonicalAdmissionBlocks(input: DispatchCanonicalAdmissionLookup): Promise<DispatchCanonicalAdmissionBlock[]>;
   findLegacyNegativeAuthorizationBlocks(
     input: DispatchLegacyNegativeAuthorizationLookup,
   ): Promise<DispatchNegativeAuthorizationBlock[]>;

@@ -17,6 +17,7 @@ import {
   clearBackgroundStreamRefForActiveEvent,
   handleBackgroundAgentMessage,
 } from '../useAgentMessages';
+import { selectThreadLiveness } from '../useThreadScopedSelectors';
 
 /** Monotonic counter matching useSocket.ts bgSeq */
 let testBgSeq = 0;
@@ -311,6 +312,34 @@ describe('background thread socket handling', () => {
       expect(ts.hasActiveInvocation).toBe(true);
     });
 
+    it('a later invocationless stream stays active after an identity-matched terminal slot', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation('thread-bg', 'opus', {
+        invocationId: 'inv-old',
+        appServerLifecycle: {
+          stage: 'closed',
+          lastActivityAt: 123,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      store.addThreadActiveInvocation('thread-bg', 'inv-old', 'opus', 'execute');
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'new invocationless stream',
+        timestamp: Date.now(),
+      });
+
+      const state = useChatStore.getState();
+      expect(state.getThreadState('thread-bg').activeInvocations).toEqual({});
+      expect(selectThreadLiveness(state, 'thread-bg').hasActive).toBe(true);
+    });
+
     it('background text with isFinal clears hasActiveInvocation for that thread', () => {
       // Set up: switch to thread-bg, mark active invocation, switch away
       useChatStore.getState().setCurrentThread('thread-bg');
@@ -502,6 +531,64 @@ describe('background thread socket handling', () => {
           }),
         ]),
       );
+    });
+
+    it('does not mutate terminal liveness when an invocationless late stream is dropped', () => {
+      const now = Date.now();
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation('thread-bg', 'opus', {
+        invocationId: 'inv-bg-terminal',
+        appServerLifecycle: {
+          stage: 'closed',
+          lastActivityAt: now,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      store.addThreadActiveInvocation('thread-bg', 'inv-bg-terminal', 'opus', 'execute');
+      store.addMessageToThread('thread-bg', {
+        id: 'bg-stream-terminal',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'terminal stream',
+        origin: 'stream',
+        isStreaming: true,
+        extra: { stream: { invocationId: 'inv-bg-terminal' } },
+        timestamp: now,
+      });
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'authoritative callback',
+        origin: 'callback',
+        messageId: 'bg-callback-terminal',
+        timestamp: now + 1,
+      });
+
+      const before = useChatStore.getState();
+      expect(selectThreadLiveness(before, 'thread-bg').hasActive).toBe(false);
+      expect(before.getThreadState('thread-bg').isLoading).toBe(false);
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'late invocationless chunk',
+        origin: 'stream',
+        timestamp: now + 2,
+      });
+
+      const after = useChatStore.getState();
+      expect(selectThreadLiveness(after, 'thread-bg').hasActive).toBe(false);
+      expect(after.getThreadState('thread-bg').isLoading).toBe(false);
+      expect(after.getThreadState('thread-bg').activeInvocations).toEqual(
+        before.getThreadState('thread-bg').activeInvocations,
+      );
+      expect(after.getThreadState('thread-bg').messages).toEqual(before.getThreadState('thread-bg').messages);
     });
 
     it('defers explicit background callback until done so later stream chunks are not suppressed', () => {

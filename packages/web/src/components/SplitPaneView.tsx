@@ -4,6 +4,7 @@ import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
+import type { ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
@@ -22,7 +23,7 @@ interface SplitPaneViewProps {
     messageDisposition?: MessageWorkDisposition,
     contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onStop: (overrideThreadId?: string) => void;
+  onStop: (intent: ExplicitStopIntent, overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -87,9 +88,6 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
     },
     [splitPaneThreadIds, splitPaneTargetId, paneSlots, setSplitPaneThreadIds, setSplitPaneTarget],
   );
-
-  const targetThreadState = splitPaneTargetId ? getThreadState(splitPaneTargetId) : null;
-  const isTargetActiveInvocation = targetThreadState?.hasActiveInvocation ?? false;
 
   const handleBackToSingle = useCallback(() => {
     const target = splitPaneTargetId ?? splitPaneThreadIds[0];
@@ -181,9 +179,8 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
                       messageDisposition,
                     )
               }
-              onStop={() => onStop(splitPaneTargetId ?? undefined)}
+              onStop={(intent) => onStop(intent, splitPaneTargetId ?? undefined)}
               disabled={!splitPaneTargetId}
-              hasActiveInvocation={isTargetActiveInvocation}
               uploadStatus={uploadStatus}
               uploadError={uploadError}
             />

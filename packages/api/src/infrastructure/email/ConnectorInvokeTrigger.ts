@@ -9,7 +9,12 @@
  * BACKLOG #97 Phase 3b
  */
 
-import { type CatId, type MessageContent, type OutputCommitDecision } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type MessageContent,
+  type OutputCommitDecision,
+  type WaitContinuationCarrierV1,
+} from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { getDefaultCatId } from '../../config/cat-config-loader.js';
 import type { TurnCustodyWakeProvenance } from '../../domains/ball-custody/TurnCustodyProjectionService.js';
@@ -17,10 +22,18 @@ import {
   resolveQueueTurnCustodyWake,
   retargetTurnCustodyWake,
 } from '../../domains/ball-custody/turn-custody-wake-provenance.js';
-import type { InvocationQueue } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
+import {
+  loadWaitContinuationCarrier,
+  waitContinuationCarrierFromStoredMessage,
+  waitContinuationCarriersMatch,
+} from '../../domains/ball-custody/wait-continuation-carrier.js';
+import type { InvocationQueue, QueueEntry } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { PerCatTerminalDispositionCollector } from '../../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
-import { createInitialQueuedMessageCustody } from '../../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import {
+  createInitialQueuedMessageCustody,
+  type QueuedMessageCustodyCoordinator,
+} from '../../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/visible-turn.js';
@@ -35,7 +48,7 @@ import type {
   InvocationStatus,
 } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../../domains/cats/services/stores/ports/invocation-state-machine.js';
-import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
+import type { IMessageStore, StoredMessage } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { MemoryCueOpportunitySeed } from '../../domains/memory/cue/MemoryCueInvocationPromptService.js';
 import { readTrustedConnectorMemoryCueSeeds } from '../../domains/memory/cue/MemoryCueTrustedConnector.js';
@@ -132,6 +145,8 @@ export interface ConnectorInvokeTriggerOptions {
   readonly invocationTracker: InvocationTracker;
   readonly invocationQueue: InvocationQueue;
   readonly queueProcessor?: QueueProcessor;
+  /** Gate 2: exact queued-source CAS used when recovery must replace an absent carrier. */
+  readonly queueCustodyCoordinator?: QueuedMessageCustodyCoordinator;
   readonly outboundHook?: OutboundDeliveryHook;
   readonly streamingHook?: StreamingOutboundHook;
   readonly threadMetaLookup?: (threadId: string) => ThreadMeta | undefined | Promise<ThreadMeta | undefined>;
@@ -237,8 +252,17 @@ export class ConnectorInvokeTrigger {
         policy.sourceCategory,
         policy.suggestedSkill,
         policy.coalesceKey,
+        true,
       );
-      if (outcome === 'enqueued') await this.opts.queueProcessor?.tryAutoExecute(threadId);
+      if (outcome === 'enqueued') {
+        const exactEntry = this.opts.invocationQueue.findEntryWithMessageId(threadId, messageId);
+        if (exactEntry && (await this.isQueueEntryCustodyReady(exactEntry, messageId))) {
+          await this.opts.queueProcessor?.tryAutoExecute(threadId, {
+            bypassNonAgentGate: true,
+            onlyEntryId: exactEntry.id,
+          });
+        }
+      }
       return outcome;
     }
 
@@ -347,7 +371,13 @@ export class ConnectorInvokeTrigger {
 
   private isExactConnectorRecord(
     record: InvocationRecord | null,
-    expected: { threadId: string; userId: string; catId: CatId; messageId: string },
+    expected: {
+      threadId: string;
+      userId: string;
+      catId: CatId;
+      messageId: string;
+      waitContinuationCarrier?: WaitContinuationCarrierV1;
+    },
   ): record is InvocationRecord {
     return (
       record !== null &&
@@ -357,7 +387,8 @@ export class ConnectorInvokeTrigger {
       record.idempotencyKey === `connector-${expected.messageId}` &&
       record.targetCats.length === 1 &&
       record.targetCats[0] === expected.catId &&
-      record.actionLeaseCarrier.kind === 'none'
+      record.actionLeaseCarrier.kind === 'none' &&
+      waitContinuationCarriersMatch(record.waitContinuationCarrier, expected.waitContinuationCarrier)
     );
   }
 
@@ -367,6 +398,7 @@ export class ConnectorInvokeTrigger {
     userId: string,
     messageId: string,
   ): Promise<DirectInvocationAdmission> {
+    const waitContinuationCarrier = await loadWaitContinuationCarrier(this.opts.messageStore, messageId);
     // Admission is not accepted until the idempotent record exists and exactly
     // one worker has claimed queued -> running in the shared store.
     const createResult = await this.opts.invocationRecordStore.create({
@@ -376,13 +408,22 @@ export class ConnectorInvokeTrigger {
       intent: 'execute',
       idempotencyKey: `connector-${messageId}`,
       actionLeaseCarrier: { kind: 'none' },
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
     });
     const invocationId = createResult.invocationId;
     let expectedInitialStatus: Extract<InvocationStatus, 'queued' | 'failed'> = 'queued';
 
     if (createResult.outcome === 'duplicate') {
       const existingRecord = await this.opts.invocationRecordStore.get(invocationId);
-      if (!this.isExactConnectorRecord(existingRecord, { threadId, userId, catId, messageId })) {
+      if (
+        !this.isExactConnectorRecord(existingRecord, {
+          threadId,
+          userId,
+          catId,
+          messageId,
+          ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
+        })
+      ) {
         this.opts.log.warn(
           { threadId, catId, messageId, invocationId, status: 'missing' },
           '[ConnectorInvokeTrigger] Duplicate invocation identity was not accepted',
@@ -491,8 +532,12 @@ export class ConnectorInvokeTrigger {
     sourceCategory?: string,
     suggestedSkill?: string,
     coalesceKey?: string,
+    autoExecute = false,
   ): Promise<'full' | 'enqueued'> {
     const { invocationQueue, socketManager, log } = this.opts;
+
+    const sourceMessage = await this.opts.messageStore?.getById(messageId);
+    const waitContinuationCarrier = waitContinuationCarrierFromStoredMessage(sourceMessage);
 
     if (invocationQueue.hasEntryWithMessageId(threadId, messageId)) {
       log.info(
@@ -502,14 +547,23 @@ export class ConnectorInvokeTrigger {
       return 'enqueued';
     }
 
+    const custodyOwner = sourceMessage?.queueCustody?.ownerAuthProvenance;
     const result = invocationQueue.enqueue({
       threadId,
       userId,
-      ownerAuthProvenance: 'unknown',
+      ownerAuthProvenance:
+        custodyOwner === 'strict' || custodyOwner === 'compatibility_fallback' || custodyOwner === 'unknown'
+          ? custodyOwner
+          : 'unknown',
       content: message,
+      messageId,
       ...(coalesceKey
         ? {
-            idempotencyKey: `connector:${sourceCategory ?? 'generic'}:${coalesceKey}`,
+            idempotencyKey: `connector:${sourceCategory ?? 'generic'}:${coalesceKey}${
+              waitContinuationCarrier
+                ? `:wait:${waitContinuationCarrier.waitId}:${waitContinuationCarrier.outcomeId}`
+                : ''
+            }`,
             dedupeProcessing: false,
           }
         : {}),
@@ -517,11 +571,13 @@ export class ConnectorInvokeTrigger {
       targetCats: [catId],
       intent: 'execute',
       priority,
+      autoExecute,
       ...(sourceCategory
         ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue' }
         : {}),
       ...(sender ? { senderMeta: sender } : {}),
       ...(suggestedSkill ? { suggestedSkill } : {}),
+      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
     });
 
     if (result.outcome === 'full') {
@@ -549,9 +605,10 @@ export class ConnectorInvokeTrigger {
     }
 
     if (result.entry) {
+      // Initial admission stores the exact source atomically; coalesced replays
+      // still append their distinct message IDs to the canonical carrier.
       invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
       const persistedEntry = invocationQueue.getEntrySnapshot(threadId, userId, result.entry.id);
-      const sourceMessage = await this.opts.messageStore?.getById(messageId);
       if (persistedEntry && sourceMessage?.deliveryStatus === 'queued' && !sourceMessage.queueCustody) {
         const initialized = await this.opts.messageStore?.initializeQueueCustody(
           messageId,
@@ -559,6 +616,26 @@ export class ConnectorInvokeTrigger {
         );
         if (initialized?.kind !== 'initialized' && initialized?.kind !== 'existing') {
           throw new Error(`connector Queue custody initialization failed for ${messageId}: ${initialized?.kind}`);
+        }
+      } else if (
+        persistedEntry &&
+        sourceMessage?.deliveryStatus === 'queued' &&
+        sourceMessage.queueCustody &&
+        sourceMessage.queueCustody.entryId !== persistedEntry.id
+      ) {
+        try {
+          if (!this.opts.queueCustodyCoordinator) {
+            throw new Error('Queue custody coordinator unavailable for verified replacement');
+          }
+          await this.opts.queueCustodyCoordinator.transferEntryCustody(persistedEntry, {
+            kind: 'verified',
+            previousEntryId: sourceMessage.queueCustody.entryId,
+            replacementEntryId: persistedEntry.id,
+            sourceMessageId: messageId,
+          });
+        } catch (error) {
+          if (!result.deduped) invocationQueue.rollbackEnqueue(threadId, userId, persistedEntry.id);
+          throw error;
         }
       }
     }
@@ -576,6 +653,33 @@ export class ConnectorInvokeTrigger {
       '[ConnectorInvokeTrigger] Queued (active invocation running)',
     );
     return result.outcome;
+  }
+
+  /**
+   * A recovery caller can observe a speculative replacement row while the first
+   * caller is still committing its durable rebind. Only the caller that sees the
+   * exact custody owner may publish that row to QueueProcessor.
+   */
+  private async isQueueEntryCustodyReady(entry: QueueEntry, sourceMessageId: string): Promise<boolean> {
+    if (!this.opts.messageStore) return true;
+
+    let sourceMessage: StoredMessage | null;
+    try {
+      sourceMessage = await this.opts.messageStore.getById(sourceMessageId);
+    } catch (error) {
+      this.opts.log.warn(
+        { err: error, threadId: entry.threadId, queueEntryId: entry.id, sourceMessageId },
+        '[ConnectorInvokeTrigger] Queue custody readiness lookup failed; deferring auto-execution',
+      );
+      return false;
+    }
+    if (!sourceMessage?.queueCustody) return true;
+    if (sourceMessage.queueCustody.status === 'terminal') return false;
+
+    const targetCarriers = sourceMessage.queueCustody.carrierByTargetCatId;
+    return targetCarriers
+      ? entry.targetCats.every((catId) => targetCarriers[catId]?.entryId === entry.id)
+      : sourceMessage.queueCustody.entryId === entry.id;
   }
 
   private async executeInBackground(
@@ -700,6 +804,10 @@ export class ConnectorInvokeTrigger {
         ...(sourceCategory ? { sourceCategory } : {}),
       };
       if (this.opts.messageStore) {
+        const durableInvocation = await invocationRecordStore.get(invocationId);
+        if (!durableInvocation) {
+          throw new Error(`Connector invocation ${invocationId} disappeared before wake provenance resolution`);
+        }
         turnCustodyWake = await resolveQueueTurnCustodyWake(
           {
             threadId,
@@ -707,6 +815,9 @@ export class ConnectorInvokeTrigger {
             source: 'connector',
             sourceCategory,
             targetCats,
+            ...(durableInvocation.waitContinuationCarrier
+              ? { waitContinuationCarrier: durableInvocation.waitContinuationCarrier }
+              : {}),
           },
           this.opts.messageStore,
         );

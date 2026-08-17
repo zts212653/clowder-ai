@@ -28,7 +28,7 @@ describe('F284 ContextualWorkspaceChrome', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('keeps one quiet shell header and lets the canonical object own the first viewport', async () => {
+  it('keeps one quiet shell header without duplicating the global Workspace fold control', async () => {
     await act(async () => {
       root.render(
         <ContextualWorkspaceChrome mode="workspace" onFold={() => {}}>
@@ -42,6 +42,7 @@ describe('F284 ContextualWorkspaceChrome', () => {
       expect(container.querySelector(`[data-testid="workspace-host-${mode}"]`)).toBeNull();
     }
     expect(container.querySelectorAll('[data-workspace-chrome-layer]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="workspace-shell-fold"]')).toBeNull();
     expect(container.textContent).not.toContain('工作动态伴随');
   });
 

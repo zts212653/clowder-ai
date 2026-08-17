@@ -198,6 +198,14 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.doesNotMatch(freshnessClause, /list_recent/);
     });
 
+    sourceOnlyTest('四象限 renders as an unknowns-first Magic Word', () => {
+      const out = buildStagingPrepend('codex');
+      assert.match(out, /「四象限」/);
+      assert.match(out, /KK\/KU\/UK\/UU/);
+      assert.match(out, /最大盲区/);
+      assert.match(out, /禁止只填表/);
+    });
+
     sourceOnlyTest('wipers content rendered for siamese cat (gemini25)', () => {
       const out = buildStagingPrepend('gemini25');
       assert.ok(out.includes('摩擦上报'));
@@ -366,7 +374,7 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       const out = buildStagingPrepend('opus-47');
       const measured = tok(out);
       const headerOverhead = measured - declared;
-      // The item estimates describe the five body clauses. The rendered prepend
+      // The item estimates describe the manifest body clauses. The rendered prepend
       // additionally carries one compact header, which is intentionally bounded.
       assert.ok(
         headerOverhead >= 0 && headerOverhead <= 40,

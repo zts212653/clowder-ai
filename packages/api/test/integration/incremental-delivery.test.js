@@ -99,9 +99,9 @@ describe('Incremental Delivery', () => {
     const codexPrompt1 = codex.capturedPrompts[0] ?? '';
     const codexPrompt2 = codex.capturedPrompts[1] ?? '';
 
-    // First codex invocation should include previous user messages + current
-    // Note: opus-reply-1 is origin:'stream', hidden in play mode (cats don't see each other's thinking)
+    // First codex invocation should include all persisted unread visible speech + current.
     assert.ok(codexPrompt1.includes('alpha'), 'codex first prompt should include prior user message alpha');
+    assert.ok(codexPrompt1.includes('opus-reply-1'), 'codex first prompt should include unread persisted opus speech');
     assert.ok(codexPrompt1.includes('beta'), 'codex first prompt should include current user message beta');
 
     // Second codex invocation should not replay alpha/beta again

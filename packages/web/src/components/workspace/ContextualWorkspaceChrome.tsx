@@ -57,28 +57,30 @@ export function ContextualWorkspaceChrome({ mode, onFold, onNavigateHome, childr
           <span className="truncate text-xs font-semibold text-cafe-black">{host.label}</span>
         </div>
 
-        <button
-          type="button"
-          onClick={onFold}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-cafe-secondary transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-black"
-          title="收起侧栏"
-          aria-label="收起侧栏"
-          data-testid="workspace-shell-fold"
-        >
-          <svg
-            aria-hidden="true"
-            className="h-4 w-4"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        {mode !== 'workspace' && (
+          <button
+            type="button"
+            onClick={onFold}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-cafe-secondary transition-colors hover:bg-cafe-surface-sunken hover:text-cafe-black"
+            title="收起侧栏"
+            aria-label="收起侧栏"
+            data-testid="workspace-shell-fold"
           >
-            <path d="M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5Z" />
-            <path d="M10.5 2.5v11M7.5 6 5.5 8l2 2" />
-          </svg>
-        </button>
+            <svg
+              aria-hidden="true"
+              className="h-4 w-4"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5Z" />
+              <path d="M10.5 2.5v11M7.5 6 5.5 8l2 2" />
+            </svg>
+          </button>
+        )}
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
     </section>

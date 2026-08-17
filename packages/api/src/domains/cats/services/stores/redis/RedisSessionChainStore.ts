@@ -30,6 +30,8 @@ import type {
   CompressionEventResult,
   CreateSessionInput,
   ISessionChainStore,
+  RestoreActiveSessionInput,
+  RestoreActiveSessionResult,
   SessionRecordPatch,
 } from '../ports/SessionChainStore.js';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
@@ -121,6 +123,52 @@ redis.call('HSET', KEYS[1],
 if redis.call('GET', KEYS[2]) == ARGV[1] then redis.call('DEL', KEYS[2]) end
 if redis.call('GET', KEYS[3]) == ARGV[1] then redis.call('DEL', KEYS[3]) end
 return 1
+`;
+
+/**
+ * Atomic manual session restore.
+ * KEYS[1] target detail, KEYS[2] legacy active pointer,
+ * KEYS[3] owner active pointer, KEYS[4] expected active detail (dummy when none).
+ * ARGV[1] target id, ARGV[2] expected active id ('' when none),
+ * ARGV[3] displaced seal reason, ARGV[4] now,
+ * ARGV[5] user id, ARGV[6] cat id, ARGV[7] thread id.
+ */
+const RESTORE_ACTIVE_SESSION_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'target_missing'} end
+if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[5]
+  or redis.call('HGET', KEYS[1], 'catId') ~= ARGV[6]
+  or redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[7] then
+  return {'target_missing'}
+end
+local actualActive = redis.call('GET', KEYS[3]) or ''
+local targetStatus = redis.call('HGET', KEYS[1], 'status') or ''
+if targetStatus == 'active' and actualActive == ARGV[1] then
+  return {'already_active'}
+end
+if targetStatus ~= 'sealed' then
+  return {'target_not_restorable', targetStatus}
+end
+if actualActive ~= ARGV[2] then
+  return {'active_changed', actualActive}
+end
+if actualActive ~= '' then
+  if redis.call('EXISTS', KEYS[4]) == 0
+    or redis.call('HGET', KEYS[4], 'status') ~= 'active'
+    or redis.call('HGET', KEYS[4], 'userId') ~= ARGV[5]
+    or redis.call('HGET', KEYS[4], 'catId') ~= ARGV[6]
+    or redis.call('HGET', KEYS[4], 'threadId') ~= ARGV[7] then
+    return {'active_changed', actualActive}
+  end
+  redis.call('HSET', KEYS[4],
+    'status', 'sealing',
+    'sealReason', ARGV[3],
+    'updatedAt', ARGV[4])
+end
+redis.call('HSET', KEYS[1], 'status', 'active', 'updatedAt', ARGV[4])
+redis.call('HDEL', KEYS[1], 'sealReason', 'sealedAt')
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[2], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[2], ARGV[1])`}
+${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[3], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[3], ARGV[1])`}
+return {'restored', actualActive}
 `;
 
 const APPLY_POLICY_LUA = `
@@ -381,6 +429,49 @@ export class RedisSessionChainStore implements ISessionChainStore {
       expectedPolicyRevision ?? '',
     );
     return Number(result) === 1 ? this.get(id) : null;
+  }
+
+  async restoreActiveSession(input: RestoreActiveSessionInput): Promise<RestoreActiveSessionResult> {
+    const target = await this.get(input.targetSessionId);
+    if (!target) return { status: 'target_missing' };
+
+    const expectedActiveSessionId = input.expectedActiveSessionId ?? '';
+    const result = (await this.redis.eval(
+      RESTORE_ACTIVE_SESSION_LUA,
+      4,
+      SessionChainKeys.detail(target.id),
+      SessionChainKeys.active(target.catId, target.threadId),
+      SessionChainKeys.activeOwner(target.userId, target.catId, target.threadId),
+      SessionChainKeys.detail(expectedActiveSessionId || '__none__'),
+      target.id,
+      expectedActiveSessionId,
+      input.displacedSealReason,
+      String(Date.now()),
+      target.userId,
+      target.catId,
+      target.threadId,
+    )) as [string, string?];
+
+    const [status, detail] = result;
+    if (status === 'target_missing') return { status: 'target_missing' };
+    if (status === 'target_not_restorable') {
+      return {
+        status: 'target_not_restorable',
+        targetStatus: (detail || target.status) as SessionRecord['status'],
+      };
+    }
+    if (status === 'active_changed') {
+      return { status: 'active_changed', ...(detail ? { activeSessionId: detail } : {}) };
+    }
+
+    const restored = await this.get(target.id);
+    if (!restored) return { status: 'target_missing' };
+    if (status === 'already_active') return { status: 'already_active', session: restored };
+    return {
+      status: 'restored',
+      session: restored,
+      ...(detail ? { displacedSessionId: detail } : {}),
+    };
   }
 
   async get(id: string): Promise<SessionRecord | null> {

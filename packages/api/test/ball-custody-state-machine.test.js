@@ -22,7 +22,7 @@ function ev(kind, { payload = {}, at = 10_000, classification } = {}) {
   };
 }
 function snap(over = {}) {
-  return { heldUntil: null, lastStateChangeAt: 0, ...over };
+  return { holder: 'codex-sol', heldUntil: null, lastStateChangeAt: 0, ...over };
 }
 
 describe('ball-custody transition — 球流转', () => {
@@ -242,6 +242,14 @@ describe('ball-custody transition — 虚空 + 唤醒', () => {
       ok: false,
       reason: 'invalid_transition',
     });
+    assert.deepStrictEqual(
+      transition(
+        'active',
+        ev('ball.hold_dispositioned', { payload: { catId: 'codex-sol' } }),
+        snap({ holder: 'opus' }),
+      ),
+      { ok: false, reason: 'invalid_transition' },
+    );
   });
   it('ball.dispatch_dispositioned 只从 live A2A dispatch 终结原球，resolved replay 不复活', () => {
     for (const from of ['active', 'blocked']) {
@@ -266,6 +274,14 @@ describe('ball-custody transition — 虚空 + 唤醒', () => {
       ok: false,
       reason: 'invalid_transition',
     });
+    assert.deepStrictEqual(
+      transition(
+        'active',
+        ev('ball.dispatch_dispositioned', { payload: { catId: 'codex-sol' } }),
+        snap({ holder: 'opus' }),
+      ),
+      { ok: false, reason: 'invalid_transition' },
+    );
   });
 });
 

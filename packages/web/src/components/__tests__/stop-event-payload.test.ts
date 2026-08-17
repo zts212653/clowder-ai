@@ -52,7 +52,7 @@ describe('Stop event payload regression', () => {
     container.remove();
   });
 
-  it('ChatInputActionButton stop click does not pass MouseEvent to onStop', () => {
+  it('ChatInputActionButton stop click passes typed control and gesture provenance', () => {
     const onStop = vi.fn();
 
     act(() => {
@@ -72,14 +72,20 @@ describe('Stop event payload regression', () => {
     expect(stopBtn).toBeTruthy();
 
     act(() => {
-      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     });
 
     expect(onStop).toHaveBeenCalledTimes(1);
-    expect(onStop.mock.calls[0]).toEqual([]);
+    expect(onStop.mock.calls[0]).toEqual([
+      {
+        sourceControl: 'chat_input_action',
+        gesture: 'pointer',
+        trustedGesture: false,
+      },
+    ]);
   });
 
-  it('ParallelStatusBar stop click does not pass MouseEvent to onStop', () => {
+  it('ParallelStatusBar stop click passes typed control and gesture provenance', () => {
     const onStop = vi.fn();
 
     act(() => {
@@ -90,10 +96,16 @@ describe('Stop event payload regression', () => {
     expect(stopBtn).toBeTruthy();
 
     act(() => {
-      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      stopBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     });
 
     expect(onStop).toHaveBeenCalledTimes(1);
-    expect(onStop.mock.calls[0]).toEqual([]);
+    expect(onStop.mock.calls[0]).toEqual([
+      {
+        sourceControl: 'parallel_status_bar',
+        gesture: 'pointer',
+        trustedGesture: false,
+      },
+    ]);
   });
 });

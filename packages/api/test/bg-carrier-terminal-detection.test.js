@@ -10,7 +10,8 @@
  *   30-minute timeout → UI showed "正在回复" forever.
  *
  * Plus: JobState enum omitted `failed`/`blocked`/`stopped` — daemons that
- * end in those states also hung the carrier to timeout.
+ * report those states also left the current UI delivery hanging. `blocked`
+ * closes the UI turn but does not prove the native job stopped.
  *
  * Fix: detect terminal from the transcript turn-completion markers, and
  * recognise the full daemon state enum.
@@ -125,7 +126,7 @@ test('Bug #2: invoke() treats state=failed as terminal error', async () => {
   assert.match(err.error, /bad MCP config/, 'error message should surface the daemon detail');
 });
 
-test('Bug #2: invoke() treats state=blocked as terminal (surfaces needs)', async () => {
+test('Bug #2: invoke() completes the UI turn for state=blocked (surfaces needs)', async () => {
   const tmpJobsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-term-test-'));
   const shortId = 'cccc3333';
   seedJob(tmpJobsDir, shortId, {

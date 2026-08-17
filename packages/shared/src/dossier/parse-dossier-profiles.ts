@@ -13,6 +13,14 @@
  * No external YAML dependency — uses purpose-built parser for the known format.
  */
 
+export interface DossierEngagementPolicy {
+  quota: 'weekly_subscription_scarce';
+  defaultMode: 'one_shot_calibration' | 'final_seal';
+  highValueUses: string[];
+  routineRepairReturn: 'author_then_routine_reviewer_if_needed';
+  reentry: 'only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request';
+}
+
 export interface DossierProfile {
   entityId: string;
   identity?: {
@@ -23,6 +31,7 @@ export interface DossierProfile {
   l0RosterSummary?: string;
   l0RoutingNote?: string;
   l0SelfDescription?: string;
+  engagementPolicy?: DossierEngagementPolicy;
   routingSignals?: {
     peakCapabilities?: string[];
     antiSignals?: string[];
@@ -72,13 +81,8 @@ function parseYamlBlock(content: string): DossierProfile | null {
 
   const profile: DossierProfile = { entityId };
 
-  const pronouns = extractStringField(content, 'pronouns');
-  const l0PronounReminder = extractBooleanField(content, 'l0PronounReminder');
-  if (pronouns || l0PronounReminder !== undefined) {
-    profile.identity = {};
-    if (pronouns) profile.identity.pronouns = pronouns;
-    if (l0PronounReminder !== undefined) profile.identity.l0PronounReminder = l0PronounReminder;
-  }
+  const identity = parseIdentity(content);
+  if (identity) profile.identity = identity;
 
   const oneLiner = extractStringField(content, 'oneLiner');
   if (oneLiner) profile.oneLiner = oneLiner;
@@ -92,28 +96,70 @@ function parseYamlBlock(content: string): DossierProfile | null {
   const l0SelfDescription = extractStringField(content, 'l0SelfDescription');
   if (l0SelfDescription) profile.l0SelfDescription = l0SelfDescription;
 
-  // Parse routingSignals (nested object with list fields)
-  const peakCapabilities = extractListField(content, 'peakCapabilities');
-  const antiSignals = extractListField(content, 'antiSignals');
-  if (peakCapabilities || antiSignals) {
-    profile.routingSignals = {};
-    if (peakCapabilities) profile.routingSignals.peakCapabilities = peakCapabilities;
-    if (antiSignals) profile.routingSignals.antiSignals = antiSignals;
-  }
+  const engagementPolicy = parseEngagementPolicy(content);
+  if (engagementPolicy) profile.engagementPolicy = engagementPolicy;
 
-  // Parse provenance (Phase C AC-C2: display provenance on frontend)
-  const version = extractStringField(content, 'version');
-  const date = extractStringField(content, 'date');
-  if (version || date) {
-    profile.provenance = {
-      version: version ?? '0.0',
-      date: date ?? 'unknown',
-    };
-    const primarySources = extractListField(content, 'primarySources');
-    if (primarySources) profile.provenance.primarySources = primarySources;
-  }
+  const routingSignals = parseRoutingSignals(content);
+  if (routingSignals) profile.routingSignals = routingSignals;
+
+  const provenance = parseProvenance(content);
+  if (provenance) profile.provenance = provenance;
 
   return profile;
+}
+
+function parseIdentity(content: string): DossierProfile['identity'] {
+  const pronouns = extractStringField(content, 'pronouns');
+  const l0PronounReminder = extractBooleanField(content, 'l0PronounReminder');
+  if (!pronouns && l0PronounReminder === undefined) return undefined;
+
+  return {
+    ...(pronouns ? { pronouns } : {}),
+    ...(l0PronounReminder !== undefined ? { l0PronounReminder } : {}),
+  };
+}
+
+function parseEngagementPolicy(content: string): DossierEngagementPolicy | undefined {
+  const block = extractObjectBlock(content, 'engagementPolicy');
+  if (!block) return undefined;
+
+  const quota = extractDirectStringField(block, 'quota');
+  const defaultMode = extractDirectStringField(block, 'defaultMode');
+  const highValueUses = extractDirectListField(block, 'highValueUses');
+  const routineRepairReturn = extractDirectStringField(block, 'routineRepairReturn');
+  const reentry = extractDirectStringField(block, 'reentry');
+
+  if (quota !== 'weekly_subscription_scarce') return undefined;
+  if (defaultMode !== 'one_shot_calibration' && defaultMode !== 'final_seal') return undefined;
+  if (!highValueUses) return undefined;
+  if (routineRepairReturn !== 'author_then_routine_reviewer_if_needed') return undefined;
+  if (reentry !== 'only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request') return undefined;
+
+  return { quota, defaultMode, highValueUses, routineRepairReturn, reentry };
+}
+
+function parseRoutingSignals(content: string): DossierProfile['routingSignals'] {
+  const peakCapabilities = extractListField(content, 'peakCapabilities');
+  const antiSignals = extractListField(content, 'antiSignals');
+  if (!peakCapabilities && !antiSignals) return undefined;
+
+  return {
+    ...(peakCapabilities ? { peakCapabilities } : {}),
+    ...(antiSignals ? { antiSignals } : {}),
+  };
+}
+
+function parseProvenance(content: string): DossierProfile['provenance'] {
+  const version = extractStringField(content, 'version');
+  const date = extractStringField(content, 'date');
+  if (!version && !date) return undefined;
+
+  const primarySources = extractListField(content, 'primarySources');
+  return {
+    version: version ?? '0.0',
+    date: date ?? 'unknown',
+    ...(primarySources ? { primarySources } : {}),
+  };
 }
 
 /**
@@ -135,6 +181,90 @@ function extractBooleanField(content: string, field: string): boolean | undefine
   return match[1] === 'true';
 }
 
+/** Extract an indented object body without leaking identically named fields from sibling sections. */
+function extractObjectBlock(content: string, field: string): string | undefined {
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const fieldMatch = lines[i].match(new RegExp(`^(\\s*)${field}:\\s*(?:#.*)?$`));
+    if (!fieldMatch) continue;
+
+    const fieldIndent = fieldMatch[1].length;
+    const blockLines: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const trimmed = lines[j].trimStart();
+      const indent = lines[j].length - trimmed.length;
+      if (trimmed && indent <= fieldIndent) break;
+      blockLines.push(lines[j]);
+    }
+    return blockLines.join('\n');
+  }
+
+  return undefined;
+}
+
+function directChildIndent(content: string): number | undefined {
+  const indents = content
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => line.length - line.trimStart().length);
+  return indents.length > 0 ? Math.min(...indents) : undefined;
+}
+
+function extractDirectStringField(content: string, field: string): string | undefined {
+  const childIndent = directChildIndent(content);
+  if (childIndent === undefined) return undefined;
+
+  const pattern = new RegExp(`^\\s{${childIndent}}${field}:\\s*"([^"]*)"\\s*(?:#.*)?$`);
+  for (const line of content.split('\n')) {
+    const match = line.match(pattern);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+function extractDirectListField(content: string, field: string): string[] | undefined {
+  const childIndent = directChildIndent(content);
+  if (childIndent === undefined) return undefined;
+
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    const indent = lines[i].length - trimmed.length;
+    if (indent !== childIndent || !trimmed.startsWith(`${field}:`)) continue;
+    return parseListFieldAt(lines, i, childIndent, field);
+  }
+
+  return undefined;
+}
+
+function parseListFieldAt(
+  lines: string[],
+  fieldIndex: number,
+  fieldIndent: number,
+  field: string,
+): string[] | undefined {
+  const trimmed = lines[fieldIndex].trimStart();
+  const inlineMatch = trimmed.match(new RegExp(`^${field}:\\s*\\[(.+)\\]`));
+  if (inlineMatch) {
+    return inlineMatch[1]
+      .split(',')
+      .map((item) => item.trim().replace(/^"(.*)"$/, '$1'))
+      .filter(Boolean);
+  }
+
+  const items: string[] = [];
+  for (let i = fieldIndex + 1; i < lines.length; i++) {
+    const itemTrimmed = lines[i].trimStart();
+    const itemIndent = lines[i].length - itemTrimmed.length;
+    if (itemTrimmed && itemIndent <= fieldIndent) break;
+
+    const itemMatch = lines[i].match(/^\s+-\s+"(.+)"$/);
+    if (itemMatch) items.push(itemMatch[1]);
+  }
+  return items.length > 0 ? items : undefined;
+}
+
 /** Extract a list field: supports both inline `["a", "b"]` and multi-line `- "value"` */
 function extractListField(content: string, field: string): string[] | undefined {
   const lines = content.split('\n');
@@ -142,30 +272,8 @@ function extractListField(content: string, field: string): string[] | undefined 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trimStart();
     if (!trimmed.startsWith(`${field}:`)) continue;
-
-    // Check for inline array: `field: ["a", "b", "c"]`
-    const inlineMatch = trimmed.match(new RegExp(`^${field}:\\s*\\[(.+)\\]`));
-    if (inlineMatch) {
-      return inlineMatch[1]
-        .split(',')
-        .map((s) => s.trim().replace(/^"(.*)"$/, '$1'))
-        .filter(Boolean);
-    }
-
-    // Multi-line format: collect indented `- "value"` lines
     const fieldIndent = lines[i].length - trimmed.length;
-    const items: string[] = [];
-    for (let j = i + 1; j < lines.length; j++) {
-      const itemTrimmed = lines[j].trimStart();
-      const itemIndent = lines[j].length - itemTrimmed.length;
-      const itemMatch = lines[j].match(/^\s+-\s+"(.+)"$/);
-      if (itemMatch) {
-        items.push(itemMatch[1]);
-      } else if (itemTrimmed && itemIndent <= fieldIndent) {
-        break; // Hit a sibling or parent field
-      }
-    }
-    return items.length > 0 ? items : undefined;
+    return parseListFieldAt(lines, i, fieldIndent, field);
   }
 
   return undefined;

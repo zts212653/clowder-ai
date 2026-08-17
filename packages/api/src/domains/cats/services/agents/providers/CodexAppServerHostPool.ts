@@ -11,15 +11,21 @@ import {
   CodexAppServerHostLease,
   type HostCloseReason,
   type HostEntry,
+  notifyHostLeaseReleased,
   resolveHostEntry,
 } from './CodexAppServerHostLease.js';
+import { retireCodexSessionHost } from './CodexAppServerHostRetirement.js';
+import { withCodexSessionHostAcquisition } from './CodexSessionHostAcquisition.js';
 import {
   type CodexAppServerHostLaunch,
   type PreparedCodexHostLaunch,
   prepareCodexHostLaunch,
   withUnixListener,
 } from './CodexUnixWebSocketSession.js';
-import type { CodexAppServerHostPoolMetrics } from './codex-app-server-host-metrics.js';
+import {
+  type CodexAppServerHostPoolMetrics,
+  emptyCodexAppServerHostPoolMetrics,
+} from './codex-app-server-host-metrics.js';
 import {
   type CodexAppServerHostPoolConfig,
   type CodexAppServerHostPoolDeps,
@@ -34,28 +40,35 @@ export class CodexAppServerHostPool {
   private readonly pendingSpawns = new Set<Promise<HostEntry>>();
   private readonly pendingConnections = new Set<Promise<AgentCarrierSession>>();
   private readonly pendingCloses = new Set<Promise<void>>();
+  private readonly pendingSessionAcquisitions = new Map<string, Promise<void>>();
   private closed = false;
   private closeAllPromise: Promise<void> | null = null;
-  private readonly metrics: CodexAppServerHostPoolMetrics = {
-    liveHostCount: 0,
-    activeLeaseCount: 0,
-    warmHostCount: 0,
-    coldStartCount: 0,
-    warmHitCount: 0,
-    evictionCount: 0,
-  };
-
+  private readonly metrics: CodexAppServerHostPoolMetrics = emptyCodexAppServerHostPoolMetrics();
   constructor(
     private readonly config: CodexAppServerHostPoolConfig,
     private readonly deps: CodexAppServerHostPoolDeps = DEFAULT_CODEX_APP_SERVER_HOST_POOL_DEPS,
   ) {}
-
   async createSession(options: AgentCarrierSessionOptions): Promise<AgentCarrierSession> {
+    return withCodexSessionHostAcquisition(this.pendingSessionAcquisitions, options.sessionId, () =>
+      this.createReservedSession(options),
+    );
+  }
+  private async createReservedSession(options: AgentCarrierSessionOptions): Promise<AgentCarrierSession> {
     this.ensureOpen();
     const prepared = prepareCodexHostLaunch(options);
     await this.reapDeadEntries();
     this.ensureOpen();
-    const resolved = resolveHostEntry(this.entries, this.sessionOwners, prepared.signature, options.sessionId);
+    let resolved = resolveHostEntry(this.entries, this.sessionOwners, prepared.signature, options.sessionId);
+    if (resolved.retirement && options.sessionId) {
+      await retireCodexSessionHost({
+        ...resolved.retirement,
+        sessionId: options.sessionId,
+        ...(options.signal ? { signal: options.signal } : {}),
+        close: (entry) => this.closeEntry(entry, 'session_migration'),
+      });
+      this.ensureOpen();
+      resolved = resolveHostEntry(this.entries, this.sessionOwners, prepared.signature, options.sessionId);
+    }
     let entry = resolved.entry;
     let reusedSessionHost = resolved.reusedSessionHost;
     let reused = !!entry;
@@ -80,6 +93,7 @@ export class CodexAppServerHostPool {
       },
     });
     entry.lease = lease;
+    if (lease.sessionId) this.sessionOwners.set(lease.sessionId, entry);
     entry.warm = false;
     entry.lastUsedAt = Date.now();
     this.clearIdleTimer(entry);
@@ -99,18 +113,15 @@ export class CodexAppServerHostPool {
       throw error;
     }
   }
-
   getMetrics(): Readonly<CodexAppServerHostPoolMetrics> {
     return { ...this.metrics };
   }
-
   closeAll(): Promise<void> {
     if (this.closeAllPromise) return this.closeAllPromise;
     this.closed = true;
     this.closeAllPromise = this.finishCloseAll();
     return this.closeAllPromise;
   }
-
   private async finishCloseAll(): Promise<void> {
     await Promise.allSettled([...this.pendingSpawns]);
     const closePromises = new Set<Promise<void>>([
@@ -127,7 +138,7 @@ export class CodexAppServerHostPool {
   }
 
   private async reapDeadEntries(): Promise<void> {
-    const dead = [...this.entries].filter((entry) => entry.state === 'ready' && !entry.host.isAlive);
+    const dead = [...this.entries].filter((entry) => !entry.host.isAlive);
     await Promise.all(dead.map((entry) => this.closeEntry(entry, 'dead')));
   }
 
@@ -162,6 +173,7 @@ export class CodexAppServerHostPool {
         lastUsedAt: Date.now(),
         idleTimer: null,
         closePromise: null,
+        leaseReleaseWaiters: new Set(),
       };
       this.entries.add(entry);
       this.metrics.liveHostCount++;
@@ -286,30 +298,36 @@ export class CodexAppServerHostPool {
     this.pendingCloses.add(pending);
     void pending.then(
       () => this.pendingCloses.delete(pending),
-      () => this.pendingCloses.delete(pending),
+      () => {
+        this.pendingCloses.delete(pending);
+        entry.closePromise = null;
+      },
     );
     return pending;
   }
 
   private async finishCloseEntry(entry: HostEntry, reason: HostCloseReason): Promise<void> {
     this.clearIdleTimer(entry);
-    this.entries.delete(entry);
-    for (const [sessionId, owner] of this.sessionOwners) {
-      if (owner === entry) this.sessionOwners.delete(sessionId);
-    }
     this.releaseActiveLease(entry);
+    let closeError: unknown;
+    try {
+      await entry.host.close();
+    } catch (error) {
+      closeError = error;
+    }
+    if (entry.host.isAlive) throw closeError ?? new Error('Codex app-server source host remained alive after close');
+    this.entries.delete(entry);
     if (entry.warm && this.metrics.warmHostCount > 0) this.metrics.warmHostCount--;
     entry.warm = false;
     if (this.metrics.liveHostCount > 0) this.metrics.liveHostCount--;
     codexAppServerHostLive.add(-1);
-    if (reason === 'forced' || reason === 'idle_ttl' || reason === 'warm_cap') {
+    if (reason === 'forced' || reason === 'idle_ttl' || reason === 'session_migration' || reason === 'warm_cap') {
       this.metrics.evictionCount++;
       codexAppServerHostEviction.add(1, { status: reason });
     }
-    try {
-      await entry.host.close();
-    } finally {
-      await this.deps.removeSocketDirectory(entry.socketDirectory).catch(() => {});
+    await this.deps.removeSocketDirectory(entry.socketDirectory).catch(() => {});
+    for (const [sessionId, owner] of this.sessionOwners) {
+      if (owner === entry) this.sessionOwners.delete(sessionId);
     }
   }
 
@@ -318,6 +336,7 @@ export class CodexAppServerHostPool {
     if (!lease || (expected && lease !== expected)) return false;
     entry.lease = null;
     lease.dispose();
+    notifyHostLeaseReleased(entry);
     if (this.metrics.activeLeaseCount > 0) {
       this.metrics.activeLeaseCount--;
       codexAppServerLeaseActive.add(-1);

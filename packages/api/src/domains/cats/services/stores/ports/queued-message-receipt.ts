@@ -40,6 +40,14 @@ function latestExposure(
   return latest;
 }
 
+function targetAttempts(custody: QueuedMessageCustody, catId: string) {
+  const attempts = (custody.targetAttempts ?? [])
+    .filter((attempt) => attempt.targetCatId === catId)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((attempt) => ({ ...attempt }));
+  return attempts.length > 0 ? { attempts } : {};
+}
+
 function projectQueueReceiptTarget(
   custody: QueuedMessageCustody,
   catId: string,
@@ -55,12 +63,14 @@ function projectQueueReceiptTarget(
         },
       }
     : {};
+  const attemptsProjection = targetAttempts(custody, catId);
   if (state.handled.has(catId)) {
     const exposure = outcome ? latestExposure(custody, catId, outcome.invocationId) : undefined;
     return {
       catId,
       state: 'handled',
       ...authorIntentProjection,
+      ...attemptsProjection,
       ...(exposure ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt } : {}),
       ...(outcome ? { outcome } : {}),
     };
@@ -71,6 +81,7 @@ function projectQueueReceiptTarget(
       catId,
       state: 'withdrawn',
       ...authorIntentProjection,
+      ...attemptsProjection,
       withdrawnAt: custody.withdrawnAtByCatId?.[catId],
       ...(exposure ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt } : {}),
     };
@@ -81,19 +92,24 @@ function projectQueueReceiptTarget(
       catId,
       state: 'steering',
       ...authorIntentProjection,
+      ...attemptsProjection,
       invocationId: state.steering[catId],
       ...(exposure ? { seenAt: exposure.seenAt } : {}),
     };
   }
-  if (state.steeringRequested.has(catId)) return { catId, state: 'steering', ...authorIntentProjection };
+  if (state.steeringRequested.has(catId))
+    return { catId, state: 'steering', ...authorIntentProjection, ...attemptsProjection };
   if (state.failed.has(catId)) {
     const exposure = latestExposure(custody, catId);
     const awakenedInvocationId = custody.awakenedInvocationIdByCatId?.[catId];
     const awakenedAt = custody.awakenedAtByCatId?.[catId];
+    const retryable = !custody.carrierByTargetCatId || custody.carrierByTargetCatId[catId] !== undefined;
     return {
       catId,
       state: 'failed',
       ...authorIntentProjection,
+      ...attemptsProjection,
+      ...(retryable ? {} : { retryable: false }),
       ...(exposure
         ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt }
         : awakenedInvocationId
@@ -108,6 +124,7 @@ function projectQueueReceiptTarget(
       catId,
       state: 'seen',
       ...authorIntentProjection,
+      ...attemptsProjection,
       ...(invocationId ? { invocationId } : exposure ? { invocationId: exposure.invocationId } : {}),
       ...(exposure ? { seenAt: exposure.seenAt } : {}),
     };
@@ -118,12 +135,13 @@ function projectQueueReceiptTarget(
       catId,
       state: 'awakened',
       ...authorIntentProjection,
+      ...attemptsProjection,
       invocationId: state.awakened[catId],
       ...(awakenedAt !== undefined ? { awakenedAt } : {}),
     };
   }
-  if (state.notified.has(catId)) return { catId, state: 'notified', ...authorIntentProjection };
-  return { catId, state: 'queued', ...authorIntentProjection };
+  if (state.notified.has(catId)) return { catId, state: 'notified', ...authorIntentProjection, ...attemptsProjection };
+  return { catId, state: 'queued', ...authorIntentProjection, ...attemptsProjection };
 }
 
 export function projectQueueReceipt(custody: QueuedMessageCustody): QueueMessageReceipt {

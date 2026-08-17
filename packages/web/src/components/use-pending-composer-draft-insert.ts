@@ -5,7 +5,11 @@ import { type Dispatch, type MutableRefObject, type SetStateAction, useEffect } 
 import type { ComposerDraftInsert } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { composerDraftSignature } from './durable-composer-draft-helpers';
-import { mergeContextAttachments, rebaseAuthoritativeText } from './durable-composer-draft-merge';
+import {
+  applyContextAttachmentDelta,
+  mergeContextAttachments,
+  rebaseAuthoritativeText,
+} from './durable-composer-draft-merge';
 import type { PendingComposerSelection } from './use-pending-composer-selection';
 
 interface PendingComposerDraftRefs {
@@ -53,9 +57,12 @@ function applyPendingContext(
   setContextAttachments: Dispatch<SetStateAction<ContextAttachment[]>>,
   contextAttachmentsRef: MutableRefObject<ContextAttachment[]>,
 ): void {
-  if (!insert.contextAttachments && !insert.authoritative) return;
+  if (!insert.contextAttachments && !insert.removeContextAttachmentIds && !insert.authoritative) return;
   setContextAttachments((current) => {
-    const next = mergeContextAttachments(insert.contextAttachments ?? [], current);
+    const removedIds = new Set(insert.removeContextAttachmentIds ?? []);
+    const next = insert.authoritative
+      ? mergeContextAttachments(insert.contextAttachments ?? [], current)
+      : applyContextAttachmentDelta(current, insert.contextAttachments ?? [], removedIds);
     contextAttachmentsRef.current = next;
     return next;
   });

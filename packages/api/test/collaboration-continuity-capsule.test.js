@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 const {
   buildCapsuleFromRouteState,
+  buildDispatchHandledContinuationCapsule,
   completeCapsuleForCompact,
   completeCapsuleForSeal,
   formatContinuationPrompt,
@@ -167,5 +168,66 @@ describe('CollaborationContinuityCapsule', () => {
     assert.match(prompt, /continue the previous unfinished work/i);
     assert.match(prompt, /git status --short --branch/i);
     assert.match(prompt, /do not create a new worktree/i);
+  });
+
+  it('validates and explains an automatic native runtime replacement without threshold or handoff language', () => {
+    const capsule = {
+      v: 1,
+      threadId: 'thread-runtime-recovery',
+      catId: 'codex-sol',
+      invocationId: 'inv-runtime-recovery',
+      mode: 'independent',
+      a2aEnabled: true,
+      ballState: 'in_progress',
+      continuationReason: 'runtime_replacement',
+      createdAt: 2_000,
+      seal: { sessionId: 'session-old', sessionSeq: 2, reason: 'cli_session_replaced' },
+      replacement: {
+        cause: 'active_writer_reborn',
+        previousNativeThreadId: 'native-old',
+        detectedAt: 1_900,
+        attempt: 1,
+        diagnostics: {
+          observedAt: 1_900,
+          classification: 'native_active_turn_without_local_lease',
+          confidence: 'medium',
+          localHostLease: { state: 'not_observed', source: 'carrier_affinity' },
+          nativeThread: {
+            readOutcome: 'succeeded',
+            threadId: 'native-old',
+            status: 'active',
+            activeTurn: { turnId: 'turn-old', startedAt: 1_800 },
+          },
+          writerClientIdentity: 'unavailable',
+        },
+      },
+    };
+
+    assert.equal(isCollaborationContinuityCapsuleV1(capsule), true);
+    const prompt = formatContinuationPrompt(capsule);
+    assert.match(prompt, /automatic native runtime recovery/i);
+    assert.match(prompt, /native-old/);
+    assert.match(prompt, /session was replaced/i);
+    assert.doesNotMatch(prompt, /threshold|manual|handoff/i);
+  });
+
+  it('builds a dispatch-handled continuation without replaying the settled A2A carrier', () => {
+    const capsule = buildDispatchHandledContinuationCapsule({
+      threadId: 'thread-1',
+      catId: 'codex',
+      invocationId: 'inv-dispatch-handled',
+      dispositionAt: 2_000,
+    });
+
+    assert.equal(isCollaborationContinuityCapsuleV1(capsule), true);
+    assert.equal(capsule.continuationReason, 'dispatch_handled');
+    assert.equal(capsule.a2aTriggerMessageId, undefined);
+    assert.equal(capsule.directMessageFrom, undefined);
+    assert.equal(capsule.createdAt, 2_000);
+
+    const prompt = formatContinuationPrompt(capsule);
+    assert.match(prompt, /A2A carrier was terminally handled/i);
+    assert.match(prompt, /independently grounded.*unfinished work/i);
+    assert.match(prompt, /do not.*dispose.*settled source carrier/i);
   });
 });
