@@ -83,7 +83,7 @@ Why: 现有 `dispatch` cell 负责交付/排队，`identity-session` cell 负责
 
 ### 与事实基础设施的关系
 
-F298 / F300 / F299 是跨域的纵向事实运输链：保证事实与承诺活着、把事实送到猫的判断点、再让人能下钻看见；F293 是横向的 routing 业务域，拥有 route truth 与 `allowed / warned / rejected` 判定，并把其他 owner 的事实组合成选猫、发送、接责、回弹与确认旅程。
+[F298](F298-runtime-promise-durability.md) / [F300](F300-self-sensing-home-state-awareness.md) / [F299](F299-workspace-invocation-trajectory.md) 是跨域的纵向事实运输链：保证事实与承诺活着、把事实送到猫的判断点、再让人能下钻看见；F293 是横向的 routing 业务域，拥有 route truth 与 `allowed / warned / rejected` 判定，并把其他 owner 的事实组合成选猫、发送、接责、回弹与确认旅程。
 
 - **F300 只供给感知，不替 F293 判定**：F300 M1 在动作点投影目标的一手状态，并让 route 项指回 F293 canonical snapshot；F293 dispatch preflight 才拥有逐目标 gate、alternatives 与 degradation 语义。
 - **F299 记录视野，不改写路由**：F293 决策时看见的 snapshot/preflight refs 进入 F299 P3 durable request envelope，供异常确诊“供给 gap vs 猫的判断 bug”；inspector 不重放或覆盖 route decision。

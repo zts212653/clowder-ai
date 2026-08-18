@@ -8,6 +8,12 @@ export const MESSAGE_BUNDLE_VERSION = 1 as const;
 export const MESSAGE_BUNDLE_MAX_ITEMS = 50;
 export const MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION = 1 as const;
 export const MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN = 'cat-cafe:message-bundle-quote:v1\0';
+/**
+ * v2 validates a quote in the readable-text plane the human actually selected in,
+ * instead of the raw Markdown plane. v1 carriers stay resolvable forever.
+ */
+export const MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2 = 2 as const;
+export const MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2 = 'cat-cafe:message-bundle-quote:v2\0';
 export const MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION = 1 as const;
 export const MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN = 'cat-cafe:message-bundle-cli-quote:v1\0';
 export const MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION = 1 as const;
@@ -60,7 +66,10 @@ export const MessageBundleQuoteItemV1Schema = z
     messageId: boundedId,
     selectionStart: characterOffset,
     selectionEnd: characterOffset,
-    sourceProjectionVersion: z.literal(MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION),
+    sourceProjectionVersion: z.union([
+      z.literal(MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION),
+      z.literal(MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2),
+    ]),
     sourceProjectionSha256,
     comment: z.string().trim().min(1).max(CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH).optional(),
   })
@@ -125,6 +134,15 @@ export const MessageBundleSelectionQuoteItemSchema = z
     text: z.string().min(1).max(CONTEXT_ATTACHMENT_QUOTE_MAX_LENGTH),
     selectionStart: characterOffset.optional(),
     selectionEnd: characterOffset.optional(),
+    /**
+     * How many times the selected characters appear in the *rendered* message, counted by the
+     * browser that made the selection. Only the browser can see that plane: the renderer
+     * generates text with no source counterpart (footnote labels, KaTeX glyphs, component
+     * loading states), so a server-side projection can never prove on-screen uniqueness.
+     * Admission requires this to be exactly 1, which is the restrictive direction — a wrong
+     * value can only cause a refusal, never a wider anchor.
+     */
+    renderedOccurrences: z.number().int().min(1).max(10_000).optional(),
     comment: z.string().trim().min(1).max(CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH).optional(),
   })
   .strict()

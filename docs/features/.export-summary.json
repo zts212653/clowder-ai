@@ -1,8 +1,8 @@
 {
-  "exportedAt": "2026-08-18T02:14:55.812Z",
+  "exportedAt": "2026-08-18T05:32:18.938Z",
   "minTier": "yellow",
-  "exported": 291,
-  "skipped": 19,
+  "exported": 294,
+  "skipped": 16,
   "errors": 0,
   "skippedFiles": [
     "F061-verification-2026-04-21.md",
@@ -19,9 +19,6 @@
     "F257-temporal-context-hardening.md",
     "F264-per-target-message-receipt.md",
     "F280-unified-wait-contract.md",
-    "F284-contextual-workspace-shell.md",
-    "F298-runtime-promise-durability.md",
-    "F299-workspace-invocation-trajectory.md",
-    "F300-self-sensing-home-state-awareness.md"
+    "F284-contextual-workspace-shell.md"
   ]
 }

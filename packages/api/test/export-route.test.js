@@ -446,6 +446,7 @@ describe('Export Route (endpoint)', () => {
             kind: 'quote',
             messageId: 'message-quote',
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 6,
             selectionEnd: 10,
             comment: '重点看这里',

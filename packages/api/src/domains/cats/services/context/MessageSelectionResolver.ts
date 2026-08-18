@@ -1,8 +1,10 @@
 import {
+  findGeneratedTextConstructs,
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
-  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
+  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2,
   MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION,
   MESSAGE_BUNDLE_VERSION,
@@ -23,16 +25,18 @@ import {
   canAccessSourceThread,
   digestMessageBundleCliQuoteProjection,
   digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
   digestMessageBundleRichBlockProjection,
   isSelectableMessage,
   projectCliSegment,
   projectMessageBundleQuoteSourceV1,
+  projectMessageBundleQuoteSourceV2,
   projectMessageBundleReadableContent,
-  quoteOffsets,
   readRichBlockFallback,
   richBlockFromRecords,
   sanitizeRichBlock,
 } from './MessageBundleSourceProjection.js';
+import { resolveExactQuoteAnchor, resolveReadableQuoteAnchor } from './message-bundle-quote-matching.js';
 import { projectedItem } from './message-selection-results.js';
 import type {
   AdmissionCandidate,
@@ -45,11 +49,14 @@ import type {
 export {
   digestMessageBundleCliQuoteProjection,
   digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
   digestMessageBundleRichBlockProjection,
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
   projectMessageBundleQuoteSourceV1,
+  projectMessageBundleQuoteSourceV2,
   projectMessageBundleReadableContent,
 };
 export type {
@@ -106,16 +113,27 @@ export class MessageSelectionResolver {
     if (!isSelectableMessage(message, sourceThreadId, auth)) {
       return invalid('source_unavailable', item.messageId);
     }
-    const projection = projectMessageBundleQuoteSourceV1(message);
-    const offsets = quoteOffsets(item, projection);
+    // Only the browser can see the rendered plane. The renderer puts characters on screen with
+    // no source counterpart — footnote labels, KaTeX glyphs, component loading states — so a
+    // server-side projection can never prove that the human's selection was unique on screen.
+    // The selecting browser therefore asserts that count, and admission requires it to be 1.
+    if (item.renderedOccurrences !== 1) {
+      return invalid('ambiguous_quote', item.messageId);
+    }
+    // Defence in depth for the constructs we can name from the source alone.
+    if (findGeneratedTextConstructs(projectMessageBundleReadableContent(message)).length > 0) {
+      return invalid('unsupported_source', item.messageId);
+    }
+    const projection = projectMessageBundleQuoteSourceV2(message);
+    const offsets = resolveReadableQuoteAnchor(item, projection);
     if (typeof offsets === 'string') return invalid(offsets, item.messageId);
 
     const carrierItem: MessageBundleItemV1 = {
       kind: 'quote',
       messageId: item.messageId,
       ...offsets,
-      sourceProjectionVersion: MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
-      sourceProjectionSha256: digestMessageBundleQuoteProjection(projection),
+      sourceProjectionVersion: MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2,
+      sourceProjectionSha256: digestMessageBundleQuoteProjectionV2(projection),
       ...(item.comment ? { comment: item.comment } : {}),
     };
     return {
@@ -135,7 +153,7 @@ export class MessageSelectionResolver {
     if (source.status !== 'resolved') return invalid('source_unavailable', item.messageId);
     const projection = projectCliSegment(source.records, item.segmentId);
     if (projection === null) return invalid('source_unavailable', item.messageId);
-    const offsets = quoteOffsets(item, projection);
+    const offsets = resolveExactQuoteAnchor(item, projection);
     if (typeof offsets === 'string') return invalid(offsets, item.messageId);
 
     const carrierItem: MessageBundleItemV1 = {

@@ -39,6 +39,8 @@ export { CORE_COMMANDS } from './core-commands.js';
 export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).
 export * from './explicit-stop-intent.js';
+// Export shared text helpers
+export * from './markdown-readable-text.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
 // Export recall-result sidecar contract (producer → parser → persistence → UI)
@@ -51,7 +53,6 @@ export * from './registry/index.js';
 export * from './schemas/index.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
-// Export shared text helpers
 export * from './text-utils.js';
 // F255 runtime schemas are exported directly while their source remains grouped
 // with shared types; API and MCP must validate the same owner-free settlement shape.

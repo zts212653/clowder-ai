@@ -3,9 +3,11 @@ import {
   cleanCliToolLabel,
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
   type MessageContent,
   projectCliToolUseLabel,
+  projectMarkdownReadableText,
   type RichBlock,
 } from '@cat-cafe/shared';
 import type { StoredMessage, StoredToolEvent } from '../stores/ports/MessageStore.js';
@@ -16,6 +18,13 @@ import type { MessageSelectionAuth } from './message-selection-types.js';
 export function digestMessageBundleQuoteProjection(projection: string): string {
   return createHash('sha256')
     .update(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN, 'utf8')
+    .update(projection, 'utf8')
+    .digest('hex');
+}
+
+export function digestMessageBundleQuoteProjectionV2(projection: string): string {
+  return createHash('sha256')
+    .update(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2, 'utf8')
     .update(projection, 'utf8')
     .digest('hex');
 }
@@ -240,6 +249,16 @@ export function projectMessageBundleQuoteSourceV1(
   return projectMessageBundleReadableContent(message);
 }
 
+/**
+ * v2 quote plane: the visible characters a reader sees, not the raw Markdown.
+ * A selection made in the browser can only be validated in the plane it was made in.
+ */
+export function projectMessageBundleQuoteSourceV2(
+  message: Pick<StoredMessage, 'content' | 'contentBlocks' | 'extra'>,
+): string {
+  return projectMarkdownReadableText(projectMessageBundleReadableContent(message));
+}
+
 export function canAccessSourceThread(thread: Thread | null, auth: MessageSelectionAuth): thread is Thread {
   return Boolean(thread && !thread.deletedAt && (thread.createdBy === auth.userId || thread.createdBy === 'system'));
 }
@@ -302,35 +321,4 @@ export function richBlockFromRecords(records: readonly StoredMessage[], blockId:
     if (block) return block;
   }
   return null;
-}
-
-function findExactMatches(text: string, evidence: string): number[] {
-  const matches: number[] = [];
-  let cursor = 0;
-  while (cursor <= text.length - evidence.length) {
-    const index = text.indexOf(evidence, cursor);
-    if (index === -1) break;
-    matches.push(index);
-    cursor = index + 1;
-  }
-  return matches;
-}
-
-export function quoteOffsets(
-  item: { text: string; selectionStart?: number; selectionEnd?: number },
-  projection: string,
-): { selectionStart: number; selectionEnd: number } | 'quote_mismatch' | 'ambiguous_quote' {
-  if (
-    item.selectionStart !== undefined &&
-    item.selectionEnd !== undefined &&
-    projection.slice(item.selectionStart, item.selectionEnd) === item.text
-  ) {
-    return { selectionStart: item.selectionStart, selectionEnd: item.selectionEnd };
-  }
-  const matches = findExactMatches(projection, item.text);
-  if (matches.length === 0) return 'quote_mismatch';
-  if (matches.length > 1) return 'ambiguous_quote';
-  const selectionStart = matches[0];
-  if (selectionStart === undefined) return 'quote_mismatch';
-  return { selectionStart, selectionEnd: selectionStart + item.text.length };
 }

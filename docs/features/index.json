@@ -1745,6 +1745,24 @@
       "name": "Sidebar Projection Convergence — 服务端权威快照，前端单一写入",
       "status": "spec / Phase A complete (Design Gate PASS + AC-A3 source-map, 2026-08-17) — next: Phase B 服务端投影 | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Reviewer**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F297-sidebar-projection-convergence.md"
+    },
+    {
+      "id": "F298",
+      "name": "Runtime Promise Durability（运行态承诺持久性收敛）",
+      "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F298-runtime-promise-durability.md"
+    },
+    {
+      "id": "F299",
+      "name": "Workspace Invocation Trajectory — 猫这轮干了什么，亲眼可见",
+      "status": "in-progress | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F299-workspace-invocation-trajectory.md"
+    },
+    {
+      "id": "F300",
+      "name": "Self-Sensing 首切片 — 家况可感知（Home-State Awareness）",
+      "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F300-self-sensing-home-state-awareness.md"
     }
   ]
 }

@@ -149,6 +149,8 @@ describe('Message quote forwarding', () => {
         kind: 'quote',
         messageId: 'source-message-1',
         text: 'selected source text',
+        // The selecting browser asserts on-screen uniqueness; admission requires exactly 1.
+        renderedOccurrences: 1,
         selectionStart: 0,
         selectionEnd: 20,
         comment: 'why this matters',

@@ -189,12 +189,33 @@ function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
   return `转发了 ${admission.items.length} ${unit} · 来自「${sourceTitle}」`;
 }
 
-function bundleAdmissionErrorStatus(
-  reason: Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'],
-): number {
+type MessageBundleAdmissionFailureReason = Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'];
+
+function bundleAdmissionErrorStatus(reason: MessageBundleAdmissionFailureReason): number {
   if (reason === 'not_authorized') return 403;
   if (reason === 'source_unavailable') return 409;
   return 400;
+}
+
+/**
+ * A rejected forward must tell the human which of their own actions to redo. A single
+ * generic string turns every distinct cause into "it just failed".
+ */
+function bundleAdmissionErrorMessage(reason: MessageBundleAdmissionFailureReason): string {
+  switch (reason) {
+    case 'quote_mismatch':
+      return '选中的内容和原消息对不上，可能原消息已被编辑。请重新划选后再转发。';
+    case 'ambiguous_quote':
+      return '选中的文字在这条消息里出现了多次，无法确定是哪一处。请多选一些上下文再转发。';
+    case 'source_unavailable':
+      return '来源消息已不可用（被删除、撤回或权限变更）。请重新选择要转发的内容。';
+    case 'not_authorized':
+      return '无权读取来源对话的内容。';
+    case 'unsupported_source':
+      return '这条消息包含脚注或公式，划线引用暂不支持；可以改为转发整条消息。';
+    case 'invalid_selection':
+      return '这次选择无法解析，请取消选择后重新选一次。';
+  }
 }
 
 /**
@@ -694,7 +715,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (admission.status !== 'resolved') {
         reply.status(bundleAdmissionErrorStatus(admission.reason));
         return {
-          error: 'Message Bundle source validation failed',
+          error: bundleAdmissionErrorMessage(admission.reason),
           code: `MESSAGE_BUNDLE_${admission.reason.toUpperCase()}`,
           ...(admission.messageId ? { messageId: admission.messageId } : {}),
         };

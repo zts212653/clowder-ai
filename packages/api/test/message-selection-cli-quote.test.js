@@ -120,6 +120,50 @@ describe('MessageSelectionResolver CLI Quote admission', () => {
     assert.equal(MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN.endsWith('\0'), true);
   });
 
+  it('keeps CLI ranges strictly canonical: repeated text is only admitted by exact coordinates', async () => {
+    // A CLI segment renders in <pre>, so its stored characters are its rendered characters.
+    // Coordinates are therefore authoritative, and repeated text must never be re-anchored
+    // by a whitespace-normalized guess.
+    const bubble = makeMessage({
+      id: 'message-repeat',
+      catId: 'codex-sol',
+      content: 'retry failed\nretry failed',
+      origin: 'stream',
+      isStreaming: false,
+      extra: { stream: { invocationId: 'inv-2', turnInvocationId: 'turn-2' } },
+    });
+
+    async function admit(overrides) {
+      const { resolver } = createResolver({ messages: [makeMessage({ ...bubble })] });
+      return resolver.resolveForAdmission(
+        {
+          sourceThreadId: 'thread-source',
+          items: [
+            {
+              kind: 'cli_quote',
+              messageId: bubble.id,
+              sourceMessageIds: [bubble.id],
+              segmentId: 'stdout',
+              text: 'retry failed',
+              ...overrides,
+            },
+          ],
+        },
+        auth,
+      );
+    }
+
+    const exact = await admit({ selectionStart: 13, selectionEnd: 25 });
+    assert.equal(exact.status, 'resolved');
+    assert.equal(exact.carrier.items[0].selectionStart, 13);
+
+    const stale = await admit({ selectionStart: 14, selectionEnd: 26 });
+    assert.deepEqual(stale, { status: 'invalid', reason: 'ambiguous_quote', messageId: bubble.id });
+
+    const driftedWhitespace = await admit({ text: 'retry  failed', selectionStart: 13, selectionEnd: 26 });
+    assert.deepEqual(driftedWhitespace, { status: 'invalid', reason: 'quote_mismatch', messageId: bubble.id });
+  });
+
   it('rejects refs that mix a stream CLI bubble with separate callback speech', async () => {
     const stream = makeMessage({
       id: 'message-stream',

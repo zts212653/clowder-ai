@@ -7,6 +7,7 @@ doc_kind: audit
 created: 2026-03-10
 status: done
 completed: 2026-03-10
+tips_exempt: completed write-path audit appendix superseded by F297; diagnostic record with no cat-facing capability or workflow to teach
 ---
 
 # F081 Appendix — Bubble/Thread State Write-Path Audit

@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 await import('tsx/esm');
-const { MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN, MessageSelectionResolver, digestMessageBundleQuoteProjection } =
-  await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
+const {
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
+  MessageSelectionResolver,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
+} = await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
 
 function makeThread(overrides = {}) {
   return {
@@ -97,6 +101,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: message.id,
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 6,
             selectionEnd: 10,
             comment: 'focus here',
@@ -112,11 +117,11 @@ describe('MessageSelectionResolver admission', () => {
       messageId: message.id,
       selectionStart: 6,
       selectionEnd: 10,
-      sourceProjectionVersion: 1,
-      sourceProjectionSha256: digestMessageBundleQuoteProjection(message.content),
+      sourceProjectionVersion: 2,
+      sourceProjectionSha256: digestMessageBundleQuoteProjectionV2(message.content),
       comment: 'focus here',
     });
-    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN.endsWith('\0'), true);
+    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2.endsWith('\0'), true);
     assert.equal('text' in result.carrier.items[0], false);
     assert.equal(result.items[0].readableContent, 'beta');
   });
@@ -131,7 +136,7 @@ describe('MessageSelectionResolver admission', () => {
     const result = await resolver.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology' }],
+        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology', renderedOccurrences: 1 }],
       },
       auth,
     );
@@ -140,7 +145,7 @@ describe('MessageSelectionResolver admission', () => {
     assert.equal(result.items[0].readableContent, 'queue topology');
     assert.equal(
       result.carrier.items[0].sourceProjectionSha256,
-      digestMessageBundleQuoteProjection('[图片: queue topology]'),
+      digestMessageBundleQuoteProjectionV2('[图片: queue topology]'),
     );
   });
 
@@ -154,6 +159,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: 'message-1',
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 0,
             selectionEnd: 4,
           },
@@ -169,7 +175,7 @@ describe('MessageSelectionResolver admission', () => {
     const rejected = await ambiguous.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta' }],
+        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta', renderedOccurrences: 1 }],
       },
       auth,
     );

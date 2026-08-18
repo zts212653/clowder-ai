@@ -11,7 +11,8 @@ export type MessageSelectionInvalidReason =
   | 'not_authorized'
   | 'source_unavailable'
   | 'quote_mismatch'
-  | 'ambiguous_quote';
+  | 'ambiguous_quote'
+  | 'unsupported_source';
 
 export type MessageSelectionTombstoneReason = 'source_unavailable' | 'source_changed';
 

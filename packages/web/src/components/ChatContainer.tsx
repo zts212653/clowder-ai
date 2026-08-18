@@ -181,6 +181,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     [messages],
   );
 
+  /** Thread-level entry: selection mode opens with nothing selected yet. */
+  const openMessageSelection = useCallback(() => {
+    setSelectedMessageIds(new Set());
+    setSelectionMode(true);
+  }, []);
+
   const toggleMessageSelection = useCallback((messageId: string) => {
     setSelectedMessageIds((current) => {
       const next = new Set(current);
@@ -1079,6 +1085,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
           statusPanelOpen={statusPanelOpen && rightPanelMode === 'workspace'}
           hasWorkspaceActivity={hasProjectedExecution || workspaceSurface !== 'home' || presentationLock !== null}
+          {...(selectionMode ? {} : { onEnterSelection: openMessageSelection })}
           onToggleStatusPanel={() => {
             if (statusPanelOpen && rightPanelMode === 'workspace') {
               closeStatusPanel();

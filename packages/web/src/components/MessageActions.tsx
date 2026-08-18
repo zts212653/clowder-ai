@@ -130,22 +130,29 @@ export function MessageActions({
   const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming && !isRecalled;
-  const hasPrimarySelectionEntry = canAct && selectionEligible && Boolean(onEnterSelection);
-  /* The primary selection entry reserves its own row so it stays clickable;
-   * legacy hover-only toolbars keep floating above the bubble. left-10/right-10
-   * clears the avatar (w-8 + gap-2 ≈ 40px). */
-  const toolbarPositionClass = hasPrimarySelectionEntry
-    ? isUser
-      ? 'top-0 right-10'
-      : 'top-0 left-10'
-    : isUser
-      ? '-top-1 -translate-y-full right-10'
-      : '-top-1 -translate-y-full left-10';
-  const secondaryActionsClass = hasPrimarySelectionEntry
-    ? overflowOpen
-      ? 'flex max-w-48 gap-0.5 overflow-visible opacity-100'
-      : 'pointer-events-none flex max-w-0 gap-0.5 overflow-hidden opacity-0 transition-[max-width,opacity] group-hover:max-w-48 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:max-w-48 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
-    : 'flex gap-0.5';
+  const hasSelectionShortcut = canAct && selectionEligible && Boolean(onEnterSelection);
+  /* Message actions are a low-frequency capability, so on a pointer device they take no layout
+   * at all at rest: no reserved row above the bubble and no permanently painted toolbar. They
+   * surface on hover or keyboard focus.
+   *
+   * A touch-only device has neither, so hiding the toolbar there would make reply, delete,
+   * edit/branch and the overflow actions unreachable — the thread-level “选择消息” entry only
+   * covers selection. On touch the toolbar therefore stays visible and keeps its own reserved
+   * row, which is exactly the layout touch users had before this change.
+   *
+   * The query needs both halves: `(hover: none)` alone also matches an environment with no
+   * pointing device at all (a headless browser), which would switch every automated pointer
+   * check into the touch layout. `(pointer: coarse)` is what actually says “a finger”.
+   * left-10/right-10 clears the avatar (w-8 + gap-2 ≈ 40px). */
+  const touchReachable =
+    '[@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
+  const touchPosition =
+    '[@media(hover:none)_and_(pointer:coarse)]:top-0 [@media(hover:none)_and_(pointer:coarse)]:translate-y-0';
+  const toolbarPositionClass = `${isUser ? '-top-1 -translate-y-full right-10' : '-top-1 -translate-y-full left-10'} ${touchPosition}`;
+  const toolbarVisibilityClass = overflowOpen
+    ? 'opacity-100'
+    : `pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${touchReachable}`;
+  const touchReservedRowClass = canReply && !selectionMode ? '[@media(hover:none)_and_(pointer:coarse)]:pt-8' : '';
 
   useEffect(() => {
     if (!overflowOpen) return;
@@ -315,6 +322,8 @@ export function MessageActions({
             kind: 'quote',
             messageId: message.id,
             text: action.text,
+            // Only this browser can see the rendered plane; admission requires the count to be 1.
+            ...(action.renderedOccurrences !== undefined ? { renderedOccurrences: action.renderedOccurrences } : {}),
             ...selectionCoordinates(action),
             ...(comment ? { comment } : {}),
           },
@@ -381,7 +390,7 @@ export function MessageActions({
       data-context-quote-source="message"
       data-message-selection={selectionMode ? (selected ? 'selected' : 'available') : undefined}
       data-selection-layout={selectionMode ? 'leading-gutter' : undefined}
-      className={`group relative ${selectionMode ? 'pl-12' : ''} ${hasPrimarySelectionEntry && !selectionMode ? 'pt-8' : ''}`}
+      className={`group relative ${selectionMode ? 'pl-12' : ''} ${touchReservedRowClass}`.trimEnd()}
     >
       {children}
 
@@ -417,7 +426,7 @@ export function MessageActions({
           onSave={handleSelectionAddToChat}
           onForward={forwardingDisabled ? undefined : handleSelectionForward}
           canForward={(action) =>
-            action.sourceKind === 'message' ||
+            (action.sourceKind === 'message' && action.renderedOccurrences === 1) ||
             (action.sourceKind === 'cli_output' &&
               Boolean(action.sourceSegmentId) &&
               action.selectionStart !== undefined &&
@@ -444,9 +453,10 @@ export function MessageActions({
 
       {canReply && !selectionMode && (
         <div
-          className={`${overflowOpen || hasPrimarySelectionEntry ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} absolute ${toolbarPositionClass} z-30 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
+          data-quote-exclude
+          className={`${toolbarVisibilityClass} absolute ${toolbarPositionClass} z-30 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
         >
-          {hasPrimarySelectionEntry && (
+          {hasSelectionShortcut && (
             <button
               type="button"
               onClick={() => onEnterSelection?.(message.id)}
@@ -464,10 +474,7 @@ export function MessageActions({
               </svg>
             </button>
           )}
-          <div
-            data-testid="message-secondary-actions"
-            className={`${isUser ? 'order-1' : ''} ${secondaryActionsClass}`.trim()}
-          >
+          <div data-testid="message-secondary-actions" className={`${isUser ? 'order-1' : ''} flex gap-0.5`.trim()}>
             {/* #699: Reply (quote) button — available for all message types */}
             <button
               onClick={() => {

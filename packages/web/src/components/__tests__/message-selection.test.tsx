@@ -59,6 +59,10 @@ describe('whole-message selection rules', () => {
   });
 });
 
+function classTokens(element: Element | null | undefined): string[] {
+  return (element?.className ?? '').split(/\s+/).filter(Boolean);
+}
+
 describe('MessageActions selection entry', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -74,7 +78,7 @@ describe('MessageActions selection entry', () => {
     container.remove();
   });
 
-  it('exposes multi-select directly without hijacking the native context menu', () => {
+  it('keeps message actions out of the resting layout and off the native context menu', () => {
     const onEnterSelection = vi.fn();
     React.act(() => {
       root.render(
@@ -87,17 +91,22 @@ describe('MessageActions selection entry', () => {
     const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
     expect(select).toBeTruthy();
     const toolbar = select?.closest('div.absolute');
-    expect(toolbar?.className).toContain('opacity-100');
-    expect(toolbar?.className).not.toContain('opacity-0');
-    expect(toolbar?.className).toContain('top-0');
-    expect(toolbar?.className).not.toContain('-translate-y-full');
-    expect(container.querySelector('[data-context-quote-source="message"]')?.className).toContain('pt-8');
+    // At rest the toolbar is neither painted nor clickable, and reserves no row of its own.
+    expect(toolbar?.className).toContain('opacity-0');
+    expect(toolbar?.className).toContain('pointer-events-none');
+    expect(toolbar?.className).toContain('group-hover:opacity-100');
+    expect(toolbar?.className).toContain('group-focus-within:opacity-100');
+    expect(toolbar?.className).toContain('-translate-y-full');
+    // The reserved row is media-gated, not unconditional: pointer devices get no row at all,
+    // while touch-only devices keep one because they have no hover to reveal the toolbar.
+    const hostTokens = classTokens(container.querySelector('[data-context-quote-source="message"]'));
+    expect(hostTokens).not.toContain('pt-8');
+    expect(hostTokens).toContain('[@media(hover:none)_and_(pointer:coarse)]:pt-8');
+    expect(toolbar?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:opacity-100');
+    expect(toolbar?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto');
     const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
-    expect(secondaryActions?.className).toContain('max-w-0');
-    expect(secondaryActions?.className).toContain('opacity-0');
-    expect(secondaryActions?.className).toContain('group-hover:max-w-48');
-    expect(select?.className).toContain('order-2');
-    expect(secondaryActions?.className).toContain('order-1');
+    // Revealed together with the toolbar: no second collapse animation inside it.
+    expect(secondaryActions?.className).not.toContain('max-w-0');
     React.act(() => select?.click());
     expect(onEnterSelection).toHaveBeenCalledWith('message-1');
 
@@ -111,7 +120,7 @@ describe('MessageActions selection entry', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it('reserves the assistant-side primary entry without applying the user-side order inversion', () => {
+  it('keeps the assistant-side toolbar clear of the avatar without reserving layout', () => {
     React.act(() => {
       root.render(
         <MessageActions
@@ -127,19 +136,15 @@ describe('MessageActions selection entry', () => {
 
     const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
     const toolbar = select?.closest('div.absolute');
-    const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
 
-    expect(toolbar?.className).toContain('opacity-100');
-    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).toContain('opacity-0');
     expect(toolbar?.className).toContain('left-10');
     expect(toolbar?.className).not.toContain('right-10');
-    expect(toolbar?.className).not.toContain('-translate-y-full');
-    expect(container.querySelector('[data-context-quote-source="message"]')?.className).toContain('pt-8');
-    expect(select?.className).not.toContain('order-2');
-    expect(secondaryActions?.className).not.toContain('order-1');
+    expect(toolbar?.className).toContain('-translate-y-full');
+    expect(classTokens(container.querySelector('[data-context-quote-source="message"]'))).not.toContain('pt-8');
   });
 
-  it('expands secondary actions when keyboard focus enters the visible primary control', () => {
+  it('reveals the toolbar for keyboard users when focus enters the message', () => {
     React.act(() => {
       root.render(
         <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={vi.fn()}>
@@ -150,15 +155,13 @@ describe('MessageActions selection entry', () => {
 
     const select = container.querySelector('button[aria-label="多选消息"]') as HTMLButtonElement | null;
     const toolbar = select?.closest('div.absolute');
-    const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
 
     React.act(() => select?.focus());
 
     expect(document.activeElement).toBe(select);
     expect(toolbar?.matches(':focus-within')).toBe(true);
-    expect(secondaryActions?.className).toContain('group-focus-within:max-w-48');
-    expect(secondaryActions?.className).toContain('group-focus-within:pointer-events-auto');
-    expect(secondaryActions?.className).toContain('group-focus-within:opacity-100');
+    expect(toolbar?.className).toContain('group-focus-within:pointer-events-auto');
+    expect(toolbar?.className).toContain('group-focus-within:opacity-100');
   });
 
   it('places every selection checkbox in a sender-independent leading gutter', () => {

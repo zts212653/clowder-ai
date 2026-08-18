@@ -102,7 +102,7 @@ describe('F294 MessageBundleCarrierV1Schema', () => {
     ).toBe(false);
   });
 
-  it('requires valid Quote offsets, v1 projection, and a lowercase 64-char digest', () => {
+  it('requires valid Quote offsets, a known projection version, and a lowercase 64-char digest', () => {
     const baseQuote = {
       kind: 'quote',
       messageId: 'message-2',
@@ -113,8 +113,12 @@ describe('F294 MessageBundleCarrierV1Schema', () => {
     };
 
     expect(MessageBundleCarrierV1Schema.safeParse(carrier([{ ...baseQuote, selectionEnd: 3 }])).success).toBe(false);
+    // v1 (raw Markdown plane) and v2 (readable-text plane) are both resolvable; nothing else is.
     expect(
       MessageBundleCarrierV1Schema.safeParse(carrier([{ ...baseQuote, sourceProjectionVersion: 2 }])).success,
+    ).toBe(true);
+    expect(
+      MessageBundleCarrierV1Schema.safeParse(carrier([{ ...baseQuote, sourceProjectionVersion: 3 }])).success,
     ).toBe(false);
     expect(
       MessageBundleCarrierV1Schema.safeParse(carrier([{ ...baseQuote, sourceProjectionSha256: 'A'.repeat(64) }]))

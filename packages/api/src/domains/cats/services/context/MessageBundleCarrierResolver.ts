@@ -1,6 +1,7 @@
 import {
   MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
   MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2,
   MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION,
   MessageBundleCarrierV1Schema,
   type MessageBundleItemV1,
@@ -12,10 +13,12 @@ import {
   canAccessSourceThread,
   digestMessageBundleCliQuoteProjection,
   digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
   digestMessageBundleRichBlockProjection,
   isSelectableMessage,
   projectCliSegment,
   projectMessageBundleQuoteSourceV1,
+  projectMessageBundleQuoteSourceV2,
   projectMessageBundleReadableContent,
   readRichBlockFallback,
   richBlockFromRecords,
@@ -57,10 +60,16 @@ async function resolveQuoteCarrierItem(
   if (!isSelectableMessage(message, context.sourceThreadId, context.auth)) {
     return tombstone(item.messageId, 'source_unavailable');
   }
-  const projection = projectMessageBundleQuoteSourceV1(message);
+  // Each carrier is re-resolved in the exact plane it was admitted in, so a v1 quote
+  // stored before the readable-text plane existed keeps rendering instead of tombstoning.
+  const isV2 = item.sourceProjectionVersion === MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V2;
+  const projection = isV2 ? projectMessageBundleQuoteSourceV2(message) : projectMessageBundleQuoteSourceV1(message);
+  const expectedDigest = isV2
+    ? digestMessageBundleQuoteProjectionV2(projection)
+    : digestMessageBundleQuoteProjection(projection);
   const digestMatches =
-    item.sourceProjectionVersion === MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION &&
-    digestMessageBundleQuoteProjection(projection) === item.sourceProjectionSha256;
+    (isV2 || item.sourceProjectionVersion === MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION) &&
+    expectedDigest === item.sourceProjectionSha256;
   if (!digestMatches || item.selectionEnd > projection.length) {
     return tombstone(item.messageId, 'source_changed');
   }

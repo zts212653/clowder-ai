@@ -15,6 +15,8 @@ interface ChatContainerHeaderProps {
   statusPanelOpen: boolean;
   onToggleStatusPanel: () => void;
   hasWorkspaceActivity?: boolean;
+  /** F294: thread-level entry into message selection. Omitted while selection mode is active. */
+  onEnterSelection?: () => void;
 }
 
 export function ChatContainerHeader({
@@ -30,6 +32,7 @@ export function ChatContainerHeader({
   statusPanelOpen,
   onToggleStatusPanel,
   hasWorkspaceActivity = false,
+  onEnterSelection,
 }: ChatContainerHeaderProps) {
   return (
     <header className="safe-area-top">
@@ -70,6 +73,7 @@ export function ChatContainerHeader({
             🔐 {authPendingCount}
           </span>
         )}
+        {onEnterSelection && <SelectMessagesToggle onEnterSelection={onEnterSelection} />}
         {/* F284: one stable recall entry; activity stays a badge, not a second header capability. */}
         <PanelToggle
           onToggleStatusPanel={onToggleStatusPanel}
@@ -78,6 +82,40 @@ export function ChatContainerHeader({
         />
       </div>
     </header>
+  );
+}
+
+/**
+ * F294 thread-level selection entry. Message selection is discoverable here on every
+ * input modality — the per-message shortcut is a pointer/keyboard convenience only, so
+ * touch users never depend on a hover state that cannot happen.
+ */
+export function SelectMessagesToggle({ onEnterSelection }: { onEnterSelection: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onEnterSelection}
+      className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-full bg-transparent text-cafe-secondary transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+      aria-label="选择消息"
+      title="选择消息 · 导出或转发"
+      data-testid="thread-select-messages"
+    >
+      <svg
+        aria-hidden="true"
+        className="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="4" width="6" height="6" rx="1" />
+        <path d="m4.5 7 1.25 1.25L8 6" />
+        <rect x="3" y="14" width="6" height="6" rx="1" />
+        <path d="M13 7h8M13 17h8" />
+      </svg>
+    </button>
   );
 }
 

@@ -14,6 +14,13 @@ export interface TextSelectionAction {
   sourceSegmentId?: string;
   selectionStart?: number;
   selectionEnd?: number;
+  /**
+   * How many times these characters appear in the rendered source root. The server cannot
+   * compute this: the renderer generates text with no Markdown counterpart (footnote labels,
+   * KaTeX glyphs, component loading states). Admission requires 1, so reporting it honestly
+   * is what keeps a repeated on-screen fragment from being anchored to the wrong occurrence.
+   */
+  renderedOccurrences?: number;
 }
 
 function rectLike(rect: DOMRect | DOMRectReadOnly): RectLike {
@@ -55,6 +62,31 @@ function selectionOffsets(selection: Selection, container: Node): { start: numbe
   } catch {
     return null;
   }
+}
+
+/**
+ * Interface chrome (action toolbars, annotation markers, component loading/error states) is
+ * painted inside the source root but is not message content. It must never become quotable
+ * evidence, so any selection touching it is refused outright.
+ */
+function crossesExcludedChrome(range: Range, root: Element): boolean {
+  const excluded = [
+    ...(root.matches('[data-quote-exclude]') ? [root] : []),
+    ...Array.from(root.querySelectorAll('[data-quote-exclude]')),
+  ];
+  return excluded.some((candidate) => {
+    try {
+      return typeof range.intersectsNode === 'function' && range.intersectsNode(candidate);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function countRenderedOccurrences(root: Element, text: string): number {
+  const rendered = root.textContent ?? '';
+  if (!text) return 0;
+  return rendered.split(text).length - 1;
 }
 
 function selectionSource(selection: Selection): {
@@ -136,6 +168,7 @@ function projectSelectionAction(
         };
   const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
   const source = selectionSource(selection);
+  if (source.coordinateRoot && crossesExcludedChrome(selection.getRangeAt(0), source.coordinateRoot)) return null;
   const offsetRoot = source.kind === 'cli_output' ? source.coordinateRoot : (source.coordinateRoot ?? container);
   const offsets = offsetRoot ? selectionOffsets(selection, offsetRoot) : null;
   const leadingWhitespaceLength = rawText.length - rawText.trimStart().length;
@@ -144,10 +177,12 @@ function projectSelectionAction(
     ? { start: offsets.start + leadingWhitespaceLength, end: offsets.end - trailingWhitespaceLength }
     : null;
   if (!position || source.mixed) return null;
+  const renderedRoot = source.coordinateRoot ?? container;
   return {
     text,
     position,
     sourceKind: source.kind,
+    renderedOccurrences: countRenderedOccurrences(renderedRoot, text),
     ...(trimmedOffsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
     ...(trimmedOffsets ? { selectionStart: trimmedOffsets.start, selectionEnd: trimmedOffsets.end } : {}),
   };
