@@ -52,15 +52,15 @@ Queue、receipt、callback、hold、chat history 和 UI 都是这三件事的实
 
 ### 场景 2：B 正在运行时，用户又发给 B
 
-用户的第二条消息仍先成为独立的 Message 和 WorkItem。用户可选择：
+用户的第二条消息先成为独立的 Message；是否新建 WorkItem 取决于用户选择：
 
 | 选择 | 含义 |
 |---|---|
-| 正常排队（默认） | 等 B 当前 Run 结束后，调度第二个 WorkItem |
-| append | 明确要求 B 当前工作结束后优先处理它；若 Run 尚未开始且系统能原子确认输入集，才可进入同一次 Run |
-| steer | 取消当前 Run；被取消的 WorkItem 与原因保留，随后由调度器重新选择可执行 WorkItem |
+| 正常排队（默认） | 新建第二个 WorkItem，等 B 当前 Run 结束后调度它 |
+| append | 把这条 Message 记为原 WorkItem 的 `pendingInputs[]`；绝不改写当前 Run，当前 Run 终局后才可创建原 WorkItem 的下一次 Run |
+| steer | 终止当前 Run 并留下原因；把新 Message 记为原 WorkItem 的 `pendingInputs[]`，待终局确认后才为该 WorkItem 创建新的 Run |
 
-append 不是“已经塞进模型上下文”；steer 也不是“只运行新消息”。用户的选择只决定这条新 WorkItem 怎样等待或打断，不能抹掉既有工作或让它无证据消失。
+append 不是“已经塞进模型上下文”；它也不创建一个会与原 Run 争夺结算权的第二 WorkItem。steer 不是“只运行新消息”。用户的选择只决定新输入怎样等待或打断，不能抹掉既有工作或让它无证据消失。
 
 ### 场景 3：A 同时委托 B 和 C
 
@@ -72,9 +72,9 @@ A 的原始请求是父 WorkItem，A 仍对最终答复负责。A 分别创建�
 
 ### 场景 4：A 需要人的批准
 
-A 如果需要 co-creator 批准，不是把 `@co-creator` 文本当成推断。它创建一个显式的 human-approval WorkItem，写明：批准什么、谁可以批准、关联哪个父 WorkItem、过期后谁处理。
+A 如果需要 co-creator 批准，不是把 `@co-creator` 文本当成推断。它创建一个显式的 human-approval WorkItem，写明：批准什么、谁可以批准、关联哪个父 WorkItem、过期后谁处理。任何必须等待该批准的 WorkItem（例如交 B 的子项）都写 `blockedBy=approvalWorkItemId`。
 
-这个 WorkItem 等人，不创建 agent Run。人的 approve / reject 是带 WorkItem 引用的 Event；它只结算对应的批准项并唤醒 A 的父工作。多个待批准项时，回复必须选择引用，不能猜“这句可以”是在答哪一项。
+approval WorkItem 等人，不创建 agent Run；调度器也不得为受 `blockedBy` 约束的 B 创建 Run。人的 approve / reject 是带 WorkItem 引用的 Event：approve 才解除 B 的阻塞，reject / expire 则让 B 从未启动并唤醒 A 处置。多个待批准项时，回复必须选择引用，不能猜“这句可以”是在答哪一项。
 
 ### 场景 5：评审、CI 或外部回调到达
 
@@ -119,7 +119,10 @@ WorkItem 是唯一承载责任的对象。它不是 thread 的常驻状态，也
 | `goal` | 可验证的请求、子问题、批准或等待条件 |
 | `requester` / `assignee` / `responsible` | 谁提出、下一步交谁执行、谁负责决定完成或失败后的处置。根项通常由执行者负责；A 委托 B/C 时，B/C 是 assignee，A 是两个子项的 responsible，父项责任不会自动转移 |
 | `sourceInputs[]` | 它从哪些 Message / Event 得来 |
-| `status` | `open`、`running`、`waiting`、`needs_decision`、`completed` 或 `canceled`；都只描述这一个 WorkItem |
+| `pendingInputs[]` | append / steer 后，属于本 WorkItem、尚未进入任何 Run 的 Message / Event；只可被下一次 Run 选择 |
+| `activeRunId` | 可选的当前 Run 引用；live execution 只由这个 Run 的状态证明，不把 `running` 复制进 WorkItem |
+| `status` | `open`、`waiting`、`needs_decision`、`completed` 或 `canceled`；都只描述这一个 WorkItem |
+| `blockedBy` | 可选的精确前置 WorkItem；未完成前调度器不得创建本项 Run。human approval 用这一项表达，不从同时 @ 推断 |
 | `waitingFor` | 人、外部事件或精确 callback；human approval 必须在这里显式表达 |
 | `recovery` | 失败 Run、可重试条件、下一次检查与负责处置的人 |
 
@@ -157,7 +160,7 @@ Queue entry、receipt 和 callback 不在图中充当第四个产品对象：它
 |---|---|
 | 用户/成员明确请求某成员做事 | 创建或更新该成员的 WorkItem |
 | A 委托 B、C | 为 B、C 建独立子 WorkItem；父项仍由 A 负责 |
-| human approval / external wait | 创建或更新显式 waiting WorkItem，不创建 agent Run |
+| human approval / external wait | 创建或更新显式 waiting WorkItem，不创建 agent Run；若它是其他工作的前置条件，后者写 `blockedBy` |
 | `fyi`、无引用 `done-notify` | 只记录输入；默认不创建 WorkItem |
 | 有精确引用的结果 / 回调 | 推进被引用 WorkItem；必要时把 Event 交给其负责人 |
 | PR review、CI、外部 gate | 路由给已有 tracking/wait WorkItem 或终局记录，不制造 agent 工作 |
@@ -168,13 +171,13 @@ Queue entry、receipt 和 callback 不在图中充当第四个产品对象：它
 
 调度器只从可执行 WorkItem 中选择，而不是扫描“这个 thread 是否还有任何队列消息”。在开始一次执行时，它原子地：
 
-1. 确认 WorkItem 尚未被另一 live Run 占用；
+1. 确认 WorkItem 没有未完成的 `blockedBy`，且未被另一 live Run 占用；
 2. 选择本次要处理的 Message / Event；
 3. 创建 Run，并把这组精确引用写进 `inputs[]`；
 4. 以 Run id 作为幂等键启动执行者；
-5. 启动确认后，把 WorkItem 标为 `running`，并把实际输入暴露证据关联到这个 Run。
+5. 启动确认后，写 `activeRunId` 并把实际输入暴露证据关联到这个 Run；WorkItem 不另存 `running` 状态。
 
-第 3 步之后到达的输入不属于当前 Run。它必须走自己的 WorkItem，或经过用户显式 append / steer 选择。这样并发边界是 `Run.inputs[]`，不需要另造批次或投递尝试对象。
+第 3 步之后到达的输入不属于当前 Run。正常排队创建自己的 WorkItem；append / steer 只能进入原 WorkItem 的 `pendingInputs[]`，待该 Run 终局后再建立下一次 Run。这样并发边界是 `Run.inputs[]`，不需要另造批次或投递尝试对象。
 
 ```mermaid
 sequenceDiagram
@@ -275,9 +278,9 @@ human approval 是 `waitingFor.human`，含 approver、父 WorkItem 和允许的
 | ID | 场景 | 必须证明 |
 |---|---|---|
 | A1 | 用户或 A 明确交 B 一件事 | 创建一个带 source Message、assignee=B、responsible 的 WorkItem；Run 只引用自己的 `inputs[]` |
-| A2 | Run 创建后又来一条消息 | 新输入不进入既有 Run；它有独立 WorkItem 或用户显式 append / steer 记录 |
+| A2 | Run 创建后又来一条消息 | 新输入不进入既有 Run；正常排队建独立 WorkItem，append / steer 只写原 WorkItem 的 `pendingInputs[]` |
 | A3 | queued 消息被取消 | 该 WorkItem 取消，Message 不进入猫 prompt；其他项不受影响 |
-| A4 | B 正运行时用户选择 append / steer | append 不伪称已读；steer 留下取消原因并不抹掉原项 |
+| A4 | B 正运行时用户选择 append / steer | append 不伪称已读且只在当前 Run 终局后进入原项的下一次 Run；steer 留下取消原因并不抹掉原项 |
 | A5 | A 同时委托 B、C | 两个独立子 WorkItem / Run；父项仍由 A 负责 |
 | A6 | B 成功、C 失败 | B 结果保留；C 的精确 failure Event 回 A；A 显式改派、升级、继续或取消 |
 | A7 | Run 启动或执行失败 | 失败绑定精确 `workItemId + runId`；不会因无关输入自动重放 |
@@ -286,7 +289,7 @@ human approval 是 `waitingFor.human`，含 approver、父 WorkItem 和允许的
 | A10 | 用户看到失败 | UI 显示失败 Run、WorkItem、负责人和该项可用 recovery；没有 thread-wide Continue |
 | A11 | PR approval / CI / external wait 到达 | 更新 tracking/wait WorkItem 或终局记录；不创建无负责人的 agent Run |
 | A12 | `fyi`、无引用 done-notify、有引用 done-notify | 前两者不新建工作；有引用者只结算精确已有 WorkItem |
-| A13 | A 请求 human approval | 建显式 approval WorkItem；多个待办时必须引用；human 不产生 agent Run |
+| A13 | A 请求 human approval 后才可交 B | B 写 `blockedBy=approvalWorkItemId`；approve 前 B 不启动，reject / expire 后 B 从未启动且 A 被唤醒；多个待办时必须引用 |
 | A14 | 重启发生在 Run 启动前、启动后或结果前 | 以 WorkItem / Run 证据恢复；不猜负责人、不盲目重放 |
 | A15 | 一次性切换 | 所有非终局旧记录都有 WorkItem、Run 或受负责人约束的 reconciliation 归属；不保留旧/新运行时 fallback |
 | A16 | 用户正文仅含 `@` | 无结构化 intent 不路由、不生成“成员不存在”的系统气泡 |
@@ -298,6 +301,9 @@ human approval 是 `waitingFor.human`，含 approver、父 WorkItem 和允许的
 以下情况在正确实现中不可能发生：
 
 - 一个 live Run 没有精确 `inputs[]`，或新输入静默混进已创建 Run；
+- append 输入既改写已创建 Run，又生成与原项竞争结算权的第二个 WorkItem；
+- 带未完成 `blockedBy` 的 WorkItem 创建了 Run；
+- WorkItem 另存与 `activeRunId` 所指 Run 相矛盾的 `running` 状态；
 - 一个失败 Run 没有对应 WorkItem、负责人和可见处置路径；
 - 一个 WorkItem 的失败暂停同 thread 无关 WorkItem；
 - 无精确 WorkItem 的 Continue / retry 动作；
