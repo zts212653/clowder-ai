@@ -183,27 +183,43 @@ GitHub、CI、timer 和 webhook 不是本地猫，不能被投射成一个隐式
 
 ### 每目标 receipt
 
-每条需要 agent 处理的 Message，为每个 target 建立独立 QueueReceiptTarget。attempt 只追加，不覆盖历史：
+每条需要 agent 处理的 Message，为每个 target 建立独立 QueueReceiptTarget。attempt 只追加，不覆盖历史；appended 是 continue_current / 已覆盖输入的分支，不是每次 next_work 的必经状态：
 
-    queued → starting → appended → handled
-                      ↘ failed
-              queued → cancelled
+    queued
+      ├─→ starting ─┬─→ handled
+      │             └─→ failed
+      ├─→ appended ─┬─→ handled
+      │             └─→ failed
+      └─→ cancelled
 
 - retry 新增 attemptId，不复活旧 attempt；
 - entryId 与 messageId + targetCatId + attemptId 绑定；
 - 一个 target 的 failed / retry 不改写 sibling target；
 - receipt 的 handled 只能由绑定的 terminal execution 或授权 terminal action 结算。
 
+QueueReceiptTarget.state 不是第二个可独立写入的状态机。receipt owner 只写 QueuedMessageCustody 中的 target custody facts 与 append-only attempts；projectQueueReceiptTarget 再从这些事实派生 target 级 queued / notified / awakened / seen / steering / failed / withdrawn / handled。attempt 保存每次尝试的线性审计史，target state 保存用户此刻应看到的聚合投影，两者不得由不同 writer 分别推进。
+
 ### Queue custody 语义
 
 队列操作按 target 和 entry 精确解释：
 
-- next_work：目标没有 live execution 时，取得下一个 admitted entry；
+- next_work：目标没有 live execution 时，以一个 admitted entry 作为 trigger carrier，并冻结本次 execution 的 coverage snapshot；
 - continue_current：仅在 execution adapter 支持增量暴露时，把输入附着到该 live invocation；
 - steer：先对 exact invocation 提交可验证 interrupt，再为新工作创建新 attempt；
 - cancel：只取消尚未 admitted 的 exact target attempt。
 
 continue_current 表示“允许向该 invocation 暴露”，不等于 agent 已看见，更不等于 handled。若 adapter 不支持 supplement，必须回退到 next_work，不得悄悄把 receipt 标成完成。
+
+### 合并唤醒的 coverage snapshot
+
+一次 next_work admission 仍然只有一个 trigger carrier 和一个 TurnExecution，但可以覆盖该 target 在快照时全部 eligible、已成熟的 queued attempts：
+
+1. admission 先以 trigger entry 取得执行权，再在 provider dispatch 前冻结 coveredMessageIds 与 covered attempts；
+2. 每个 covered attempt 用自身 attemptId + 绑定 invocationId 做 CAS，从而不会被第二个 carrier 重复 claim；
+3. terminal 只用同一个 execution 的终局逐项 CAS 这些 covered attempts 为 handled；若跨记录提交中断，reconciler 依据该 terminal execution 幂等补齐剩余项；
+4. coverage snapshot 之后到达或当时尚未成熟的输入不属于本次 execution，保持 queued，等待下一次 carrier。
+
+因此“一次唤醒读多条消息”不等于“一条 attempt 代表多条消息”：Run 的 coverage 可以是一组，投递、失败、重试和结算仍按每条 Message 的 target attempt 隔离。
 
 ### “看过、运行过、处理过”的证据
 
@@ -405,7 +421,9 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 | A1 | 用户无 @ 发消息 | F078 服务端解析 target，并建立 per-target receipt |
 | A2 | 用户显式指定 target | 只为指定目标建立 receipt |
 | A3 | queued 前取消 | exact target attempt cancelled，无 Run |
-| A4 | next_work | 一个 carrier 绑定一个 entry / attempt / Run |
+| A4 | next_work | 一个 trigger carrier 只创建一个 Run；所有 covered entries 保留各自 attempt |
+| A4a | 同 target 多条消息已成熟 | 一次唤醒冻结 coverage，所有 covered attempts 绑定同一 invocation 并由其逐项结算 |
+| A4b | coverage snapshot 后又到消息 | 后到 attempt 保持 queued，不进入本次 coveredMessageIds |
 | A5 | adapter 支持 continue_current | QueueTargetAttempt 记录 exact invocationId 与 seenAt |
 | A6 | adapter 不支持 supplement | 回退 next_work，不提前 handled |
 | A7 | steer | exact live invocation 先被中断，新 attempt 后创建 |
@@ -468,5 +486,5 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 - TurnExecution causal refs：packages/api/src/domains/cats/services/stores/ports/TurnExecutionStore.ts
 - ActionSuccessor lease：packages/api/src/domains/ball-custody/ActionSuccessorLeaseStore.ts
 - AwaitState owner fence：packages/shared/src/types/github-wait.ts
-- 入口与 queue callbacks：packages/api/src/routes/cats/callbacks.ts
+- 入口与 queue callbacks：packages/api/src/routes/callbacks.ts
 - Issue：<https://github.com/zts212653/clowder-ai/issues/1354>
