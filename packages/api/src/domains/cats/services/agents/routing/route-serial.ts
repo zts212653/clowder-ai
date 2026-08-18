@@ -1369,24 +1369,30 @@ export async function* routeSerial(
         }
       }
 
-      // F257: fire-and-forget injection trace persist (pipeline-aware).
-      // Uses the full pipeline traces (session + turn) captured above — no v0
-      // collectTrace re-invocation, no scope filtering. All hooks that fired in
-      // the pipeline are recorded as per-hook ObservedSegments.
+      // #839: fire-and-forget injection trace persist (pipeline-aware).
+      // Per-hook execution telemetry from pipeline traces; aggregate
+      // delivery sizes from the actual route-assembled content.
       try {
         const traceStore = getTraceStore();
         if (traceStore) {
           const traceTurnId = crypto.randomUUID();
-          const trace = collectTraceFromPipeline(pipelineSessionTrace.session, pipelineTurnTrace.turn, hasNativeL0);
+          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
+          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapContext, mcpInstructions]
+            .filter(Boolean)
+            .join('\n\n');
+          const trace = collectTraceFromPipeline(pipelineSessionTrace.session, pipelineTurnTrace.turn, hasNativeL0, {
+            session: staticIdentity,
+            turn: traceTurnContent,
+          });
           const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
           const summary = buildTraceSummary(trace, traceMeta);
           const detail = buildTraceDetail(trace, traceMeta);
           traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F257] injection trace persist failed (fire-and-forget)');
+            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
           });
         }
       } catch {
-        /* F257: trace collection must never break invocation */
+        /* trace collection must never break invocation */
       }
 
       let deliveryBoundaryId: string | undefined;

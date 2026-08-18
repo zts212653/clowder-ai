@@ -226,7 +226,29 @@ export function buildTraceDetail(
 }
 
 // ---------------------------------------------------------------------------
-// F257: Pipeline-aware trace collection
+// Pipeline-aware trace collection (#839: full hook observability)
+// ---------------------------------------------------------------------------
+//
+// Two distinct truths:
+//   1. EXECUTION — which hooks fired in the pipeline, what they produced.
+//      Recorded as per-hook ObservedSegments (segmentId = hookId).
+//      A hook with status='observed' means the pipeline executed it AND it
+//      produced content. It does NOT mean that content reached the model —
+//      prompt output is scoped per legacy builder (S-only for session,
+//      D-only for turn). Hooks outside the delivery scope (L/B/C for
+//      session, R/N for turn) execute for trace but their content is
+//      filtered from the prompt.
+//
+//   2. DELIVERY — what was actually assembled and passed to the model.
+//      Recorded in StageDeliveryDecision (channel, contentAssembled) and
+//      the aggregate content hashes/sizes (sessionContentHash, etc.).
+//      When deliveredContent is provided by the route layer, these
+//      reflect the real delivered bytes, not pipeline patch sums.
+//
+// The old v0 collectTrace() conflated both: it re-ran buildStaticIdentity
+// (annotateSegments=true) to get S-prefix segment detail, then used the
+// route-assembled content for aggregate sizing. This new function keeps
+// both truths separate.
 // ---------------------------------------------------------------------------
 
 /**
@@ -252,33 +274,63 @@ function pipelineEventsToSegments(result: PipelineResult, stage: InjectionStage)
 /**
  * Collect trace from HookPipeline results.
  *
- * F257: reads directly from the pipeline's trace events, giving per-hook
+ * Reads directly from the pipeline's trace events, giving per-hook
  * granularity for ALL hooks (L+S+B+C+D+R+N). Unlike v0 `collectTrace()`
  * which re-runs buildStaticIdentity(annotateSegments=true) and only sees
  * S-prefix hooks, this captures whatever the pipeline actually executed.
+ *
+ * @param deliveredContent - Actual content assembled by the route layer and
+ *   passed to the model. When provided, aggregate sizes/hashes reflect what
+ *   was delivered (delivery truth), not what the pipeline produced. When
+ *   omitted, falls back to pipeline patch sums (execution truth).
  */
 export function collectTraceFromPipeline(
   sessionResult: PipelineResult | null,
   turnResult: PipelineResult | null,
   hasNativeL0: boolean,
+  deliveredContent?: { session?: string; turn?: string },
 ): CollectedTrace {
   const startMs = performance.now();
 
   const sessionSegments = sessionResult ? pipelineEventsToSegments(sessionResult, 'session-init') : [];
   const turnSegments = turnResult ? pipelineEventsToSegments(turnResult, 'per-turn') : [];
 
-  const sessionCharCount = sessionResult ? sessionResult.patches.reduce((sum, p) => sum + p.content.length, 0) : 0;
-  const turnCharCount = turnResult ? turnResult.patches.reduce((sum, p) => sum + p.content.length, 0) : 0;
+  // Aggregate sizes: prefer delivered content (delivery truth) over pipeline
+  // patch sums (execution truth). The route layer may add/filter content
+  // beyond what the pipeline produced (mode prompt, bootstrap, MCP, etc.).
+  const sessionText = deliveredContent?.session;
+  const turnText = deliveredContent?.turn;
 
-  const sessionTokenEstimate = sessionResult
-    ? sessionResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0)
-    : 0;
-  const turnTokenEstimate = turnResult ? turnResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0) : 0;
+  const sessionCharCount =
+    sessionText != null
+      ? sessionText.length
+      : sessionResult
+        ? sessionResult.patches.reduce((sum, p) => sum + p.content.length, 0)
+        : 0;
+  const turnCharCount =
+    turnText != null
+      ? turnText.length
+      : turnResult
+        ? turnResult.patches.reduce((sum, p) => sum + p.content.length, 0)
+        : 0;
+
+  const sessionTokenEstimate =
+    sessionText != null
+      ? estimateTokens(sessionText)
+      : sessionResult
+        ? sessionResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0)
+        : 0;
+  const turnTokenEstimate =
+    turnText != null
+      ? estimateTokens(turnText)
+      : turnResult
+        ? turnResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0)
+        : 0;
 
   const delivery: StageDeliveryDecision[] = [
     {
       stage: 'session-init',
-      contentAssembled: sessionSegments.some((s) => s.status === 'observed'),
+      contentAssembled: sessionCharCount > 0,
       channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
       reason: hasNativeL0
         ? 'Pipeline ran all hooks; delivery via native L0 compiler (file/instructions)'
@@ -286,18 +338,22 @@ export function collectTraceFromPipeline(
     },
     {
       stage: 'per-turn',
-      contentAssembled: turnSegments.some((s) => s.status === 'observed'),
+      contentAssembled: turnCharCount > 0,
       channel: 'message-prepend',
       reason: 'Per-turn context assembled for message-prepend',
     },
   ];
 
-  const sessionContentHash =
-    sessionResult && sessionCharCount > 0
-      ? hashContent(sessionResult.patches.map((p) => p.content).join('\n\n'))
-      : null;
-  const turnContentHash =
-    turnResult && turnCharCount > 0 ? hashContent(turnResult.patches.map((p) => p.content).join('\n\n')) : null;
+  let sessionContentHash: string | null = null;
+  if (sessionCharCount > 0) {
+    const raw = sessionText ?? sessionResult?.patches.map((p) => p.content).join('\n\n');
+    if (raw) sessionContentHash = hashContent(raw);
+  }
+  let turnContentHash: string | null = null;
+  if (turnCharCount > 0) {
+    const raw = turnText ?? turnResult?.patches.map((p) => p.content).join('\n\n');
+    if (raw) turnContentHash = hashContent(raw);
+  }
 
   return {
     segments: [...sessionSegments, ...turnSegments],
