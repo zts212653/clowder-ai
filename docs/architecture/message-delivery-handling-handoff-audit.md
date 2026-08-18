@@ -203,7 +203,7 @@ Agent 消息没有有效目标时只公开给用户，不猜测下一只 Agent�
 1. 解析仍然有效的结构化 target ids；
 2. 裸 `@`、代码片段、已删除成员等只产生解析 warning，不阻止消息排队；
 3. 若有效 target 非空，按该 target set 调度；
-4. 若为空，只有当该 thread 没有任何 Active Run 时才选择最近一条正常完成的成员回复者；
+4. 若为空，只有当该 thread 没有任何 Active Run 时才选择最近一条 `ResponseBubble.status='completed'` 的成员回复者；`processing / failed / canceled / interrupted` 都不是 fallback 候选；
 5. 没有历史回复者时使用服务端默认成员。
 
 因此 targetless entry 不会在其他成员仍运行时猜目标，也不会被后面的显式 target entry 越过。
@@ -401,7 +401,7 @@ launch failure 走同一终局路径：把已经存在的 response bubble 更新
 失败输入的直接来源可以从 `run.inputs[].messageId` 回读：
 
 - source 是用户或 Connector：公开 failure bubble 已经通知用户；
-- source 是 Agent：系统写一条指向该 authorId 的独立失败通知 message，并在 Queue 尾部创建普通 entry；
+- source 是 Agent：系统写一条 `visibilityPolicy='target_only'`、`targetRefs=[authorId]` 的独立失败通知 message，并在 Queue 尾部创建普通 entry；
 - 多条 input 来自同一 Agent 时，本轮只通知一次；
 - 系统生成的失败通知再次失败时，因为作者不是 Agent，不会递归通知。
 
@@ -454,6 +454,69 @@ Agent 可以在 UI/上下文摘要中知道“成员正在处理”，但持久 
 | Cancel running | Queue 不参与 | exact run 气泡终局为 canceled，释放 run，触发 drain |
 
 所有显式操作先赢得 Queue entry 的 exact take，再产生 client 副作用；不能先 cancel/steer，随后才发现 entry 已被正常 drain 取走。
+
+Append 与 Steer 的持久 cutover 分别是：
+
+```ts
+async function appendSelected(entryId, expectedInvocationId) {
+  return coordinator.runExclusive(threadId, async () => {
+    const taken = await stores.takeSelectedAndExposeInput({
+      entryId,
+      expectedInvocationId,
+    })
+    if (!taken) return 'stale'
+
+    activeRuns.addInput(expectedInvocationId, taken.entry)
+    const accepted = await client
+      .append(expectedInvocationId, taken.message)
+      .catch(() => false)
+    if (accepted) {
+      await history.addResponseInput(expectedInvocationId, taken.message.id)
+      return 'accepted'
+    }
+
+    activeRuns.removeInput(expectedInvocationId, taken.entry.id)
+    await history.appendDispatchFailure(taken.message, 'append_rejected')
+    return 'failed'
+  })
+}
+
+async function steerSelected(entryId, oldRun) {
+  return coordinator.runExclusive(oldRun.threadId, async () => {
+    const next = prepareAdmission(oldRun.targetId, entryId)
+    await principals.persistPending(next)
+
+    const cutover = await stores.takeSelectedAndCutoverResponse({
+      entryId,
+      expectedOldInvocationId: oldRun.invocationId,
+      cancelOldResponseId: oldRun.responseMessageId,
+      createProcessingResponse: next.responseBubble,
+      activatePrincipalId: next.principalId,
+    })
+    if (!cutover) {
+      await principals.discardPending(next.principalId)
+      return 'stale'
+    }
+
+    const newRun = buildRun(next, cutover.entry)
+    activeRuns.replaceExact(oldRun, newRun)
+    try {
+      await client.dispatch(newRun, {
+        force: true,
+        expectedOldInvocationId: oldRun.invocationId,
+      })
+      return 'accepted'
+    } catch (error) {
+      await onRunTerminal(newRun, classifyDispatchFailure(error))
+      return 'failed'
+    }
+  })
+}
+```
+
+`takeSelectedAndExposeInput` 的原子范围是“验证 exact selected entry 与仍为 processing 的 expected invocation + 移除 entry + 打开该 input 的 Agent 可见性”。Append 不创建新 response bubble；现有 bubble 已是 outstanding witness。adapter 接受后才把 input message id 持久追加到该 bubble，拒绝则保持旧 run 并写独立 failure result。
+
+`takeSelectedAndCutoverResponse` 的原子范围是“验证 exact selected entry 与旧 processing invocation + 移除 entry + 打开 input + 旧 bubble 原位 canceled + 新 processing bubble 创建 + 新 principal 激活”。只有该事务 winner 才能 `replaceExact` 并调用 `dispatch(force=true)`；进程在事务后退出时，新 bubble 仍由 startup 收敛为 interrupted，旧 provider 的迟到 callback 只会命中已终局的旧 invocation。
 
 Append 不会自动发生，也不会把两条 History message 合成一条。它只是把新 entry 加入现有 `ActiveRun.inputs`，并把 exact message 交给同一 invocation；已有 response bubble 继续保持原位置。adapter 若拒绝 Append，现有 run 不受影响，系统为该 input 写独立失败结果。
 
@@ -571,7 +634,7 @@ terminal response bubble   → 已完成、失败、取消或被重启中断
 | A9 | 用户显式 Append 第二条 | 只把选中 entry 加入 exact run；两条 History message 仍独立 |
 | A10 | A→B 与 C→B 连续排队 | 两条 wake 独立；B 第一轮结束触发第二条，不做隐式 coverage merge |
 | A11 | 用户消息无 target，thread 有 Active Run | targetless head 等待，后续显式 target entry 不越过 |
-| A12 | 最后一个 Active Run 终局 | targetless head 选择最近正常完成成员；没有则 default |
+| A12 | 最后一个 Active Run 终局 | targetless head 只选择最近 `status=completed` 的成员回复；processing/failed/canceled/interrupted 均排除；没有则 default |
 | A13 | mention 无效或成员已删除 | 保留解析 warning；按有效 target set 或 targetless fallback 继续，不永久卡 head |
 | A14 | 普通正文包含 `@` | 不产生结构化 target |
 | A15 | 两个调度事件同时到达 | 一个 drain owner；第二个只置 dirty；不会重复 dispatch |
@@ -586,13 +649,13 @@ terminal response bubble   → 已完成、失败、取消或被重启中断
 | A24 | provider 成功但没有额外文本 | bubble 原位 completed，并显示可理解的完成说明 |
 | A25 | 用户 Cancel run | exact bubble 原位 canceled；删除 exact run；requestDrain |
 | A26 | 用户 Cancel queued entry | exact entry 删除；输入留在 History 并标明未投递/取消 |
-| A27 | 用户 Steer 与正常 drain 竞争同一 entry | 只有 exact take winner 调 client；不先 cancel 后发现 entry 已丢 |
+| A27 | 用户 Steer 与正常 drain 竞争同一 entry | exact persistent cutover 同时 take entry、cancel 旧 bubble、创建新 bubble；只有 winner 调 client |
 | A28 | 用户 Steer B | 只取消 B 的 exact run；不按 producer author 猜测取消其他 run |
 | A29 | Append adapter 拒绝 | 原 run 保持；选中 input 有独立 failure result；消息不丢 |
 | A30 | A 先开始、B 后开始、B 先完成 | UI、最终 History、Agent context 都保持 A bubble → B bubble |
 | A31 | cursor 遇到 processing bubble | 不越过；terminal 后在原位置读正文再推进 |
 | A32 | 当前 Queue input 位于 barrier 之后 | 作为 exact input 注入；不错误推进普通 cursor |
-| A33 | Agent-authored input 的 run 失败 | 公开 failed；向原 author 追加一条普通定向通知 entry |
+| A33 | Agent-authored input 的 run 失败 | 公开 failed；向原 author 追加一条 `target_only` system message + 普通 entry |
 | A34 | 上述系统失败通知再次失败 | 不递归创建通知树 |
 | A35 | Queue reorder/remove | commit 后 requestDrain；新的物理队首立即成为调度真相 |
 
