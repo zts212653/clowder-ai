@@ -1,9 +1,9 @@
 ---
 title: "Thread 消息生命周期 RFC"
-description: "定义一条消息从路由、排队、批次投递、正文暴露、处理与闭环结算到失败恢复的完整链路；以 #1354 为入口，先定流程再定实现。"
+description: "以 Message/Event、WorkItem 与 Run 三个对象重建消息路由、执行、协作委托和精确恢复；以 #1354 的可见失败与可恢复项为验收入口。"
 doc_kind: architecture
 feature_ids: [F039, F117, F122, F167, F175, F177, F185, F194, F233, F254, F264, F275, F277, F280]
-topics: [message, delivery, routing, queue, dispatch, invocation, handoff, responsibility, receipt, lifecycle, observability]
+topics: [message, event, work-item, run, routing, queue, handoff, recovery, lifecycle, observability]
 created: 2026-08-13
 updated: 2026-08-18
 status: proposed
@@ -28,363 +28,245 @@ related_docs:
 
 # Thread 消息生命周期 RFC
 
-## 读法与结论
+## 先说结论
 
-#1354 暴露的不是一条 Queue 文案或一个 `isPaused` 分支，而是消息可见性、目标投递、正文暴露、执行结果与协作责任被混成 thread-wide "正在处理"。因此本 RFC 先固定一条读者可顺着走完的主链：**一条输入怎样到达目标、单目标/多目标如何处理、失败如何精确回流**；再说明 append、steer、重启和 human gate 如何只改变同一条链上的 durable facts。
+#1354 不是 QueuePanel 的数字或文案问题。它暴露的是：系统不知道**哪一件工作**失败了、谁该决定下一步，以及哪个动作确实可以恢复它。于是一个失败 Run 能被投影成整个 thread 的暂停，空面板还能给出会挑到无关工作的 Continue。
 
-本文的核心结论：
+本文不用“消息是否已投递”“某人是否正在处理”“任务是否已闭环”拼成一条状态链。它只建立三个领域对象：
 
-1. Queue entry 只负责请求一次唤起；它不是 prompt 内容，也不与 message receipt 一一对应。
-2. 一次 dispatch 必须先以 CAS 固定一个不可变 `DispatchBatch` frontier，再启动 client。frontier 是这次真正交付的 message receipt 与 packet event 的精确集合。
-3. **投递资格、正文暴露、obligation 结算、会话上下文是四件事**。不能用 `awakened` 代替 `seen`，也不能用 receipt 或 Queue 状态裁决闭环。
-4. 已失败的 delivery attempt 不会因为下一条消息触发 dispatch 而自动重投；重试或改派必须创建 policy 授权的下一 generation。
-5. 系统通知与普通消息共用 batch claim、启动、消费和恢复算法；区别只在普通消息进入 chat history，系统通知进入 situation packet。
+1. **Message / Event**：一条人或系统发生过的输入事实；
+2. **WorkItem**：一件有明确负责人、目标和下一步的工作；
+3. **Run**：一次实际执行，永久记录它精确看了哪些输入。
 
-本文定义产品与 durable 事实，不预设表结构。实现可复用现有对象，且不得另造与既有 receipt 平行的 `dispatched` / `dispatch_failed` 状态机。
+Queue、receipt、callback、hold、chat history 和 UI 都是这三件事的实现或视图；它们不再各自发明“当前 thread 正在处理”的结论。设计先由下面的场景验证，现有字段只在文末映射，不反向决定产品模型。
 
 ---
 
-## 四层事实：先把不该混在一起的东西拆开
+## 先看场景：系统究竟要保证什么
 
-| 层 | 回答的问题 | 权威事实 | 不能由它推出的事 |
-|---|---|---|---|
-| 会话上下文与可见性 | 用户/成员此后能在 history 看到什么 | `MessageStore` 的 message、时间线、visibility | 这条消息已被哪位成员处理 |
-| 投递资格与尝试 | 哪些输入可组成下一次对 target 的投递 | per-target receipt、Queue wake trigger、`DispatchBatch`、attempt generation | 正文已被模型读到或工作已经完成 |
-| 正文暴露 | 某 target 的哪次 invocation 真正收到了哪条正文 | append-only `bodyExposure(messageId,target,invocationId,seenAt)` | invocation 成功、回复成功、闭环成功 |
-| 协作闭环 | 谁仍须保证结果、每项委托是否已结算 | closure cursor、obligation outcome、join policy | target 被唤起或 Queue 暂时为空 |
+### 场景 1：一条消息交给 B
 
-`QueueReceiptTargetState` 已有八个可投影状态：`queued`、`notified`、`awakened`、`seen`、`failed`、`steering`、`withdrawn`、`handled`。本 RFC 对齐而不扩展为第二套词汇：
+用户或 A 把一条请求交给 B。系统保存 Message，创建一个交 B 执行、由明确负责人处置的 WorkItem。调度器挑中该 WorkItem 后创建 Run；这个 Run 写下它会给 B 的 `inputs[]`，再启动 B。
 
-- `queued` / `notified`：当前 generation 仍可成为投递 frontier 的候选；
-- `awakened`：有精确 child invocation 已被创建，**不证明正文暴露**；
-- `seen`：有精确 `bodyExposure`，才证明正文被该 invocation 看到；
-- `handled`：已有可验证的 queue consumption witness；
-- `failed`、`withdrawn`、`steering`：当前 generation 已离开默认 delivery frontier，后续动作由 policy 或用户 intent 决定。
+之后才到达的消息绝不能悄悄插进这个 Run。它要么成为另一个 WorkItem，要么由用户明确选择 append / steer；无论哪种，都留下自己的输入和去处。B 的 Run 成功或失败都回写到**这个** WorkItem，而不是改变整个 thread 的状态。
 
-这也保留现有契约：`continue_current` 只是 exposure permission，绝不是已读或 handled proof。面对用户的 UI "已读"，只能用第三层 `bodyExposure`；面对协作 "已结算"，只能用第四层 outcome。
+### 场景 2：B 正在运行时，用户又发给 B
 
-### 两条游标
+用户的第二条消息仍先成为独立的 Message 和 WorkItem。用户可选择：
 
-**执行游标**（每条实际执行线一条）是 `pre → current`：`pre` 是精确来源/回写点，`current` 是此刻唯一可取得该执行权的 holder。
+| 选择 | 含义 |
+|---|---|
+| 正常排队（默认） | 等 B 当前 Run 结束后，调度第二个 WorkItem |
+| append | 明确要求 B 当前工作结束后优先处理它；若 Run 尚未开始且系统能原子确认输入集，才可进入同一次 Run |
+| steer | 取消当前 Run；被取消的 WorkItem 与原因保留，随后由调度器重新选择可执行 WorkItem |
 
-**闭环游标**（每条用户请求链一条）是：
+append 不是“已经塞进模型上下文”；steer 也不是“只运行新消息”。用户的选择只决定这条新 WorkItem 怎样等待或打断，不能抹掉既有工作或让它无证据消失。
 
-```text
-rootMessageId / sourceRef
-current = 必须保证最终结果的 actor
-next = 尚待结算的 obligation 集合（可为空、一个或多个）
-completionPolicy = direct | all_of | any_of | gate_then_dispatch | quorum(n)
-```
+### 场景 3：A 同时委托 B 和 C
 
-A 请求 B、C 时，执行线为 `A→B`、`A→C`，A 的闭环仍是 `current=A, next={B,C}`。`next` 不是闭环责任已转给下一人；除非有可恢复的显式 handoff，A 仍负责处置分支的成功、失败、取消或替换。
+A 的原始请求是父 WorkItem，A 仍对最终答复负责。A 分别创建两个独立子 WorkItem：一个交 B，一个交 C。它们可并行，各自产生自己的 Run 和结果。
 
-### 对象关系与基数
+若 B 成功而 C 失败，系统把 B 的结果保留，把 C 的失败事件精确交还 A。**A 决定**改派 C 的工作、上升给 co-creator、缩小范围或取消；系统不以 `all_of`、`any_of`、`quorum` 之类的通用策略替 A 作产品判断。父 WorkItem 在 A 作出结论前不会自动完成。
 
-```text
-Message (0..1 次进入 chat history)
-  └─ DeliveryReceipt × N (messageId × targetId；含 attempt generations)
+这既覆盖多委托，也避免把“同时 @ 两人”误读成一套需要泛化分支完成规则的工作流引擎。
 
-QueueEntry × N ──触发──> target 的一次 dispatch 机会
-DispatchBatch (一个 target、一个不可变 frontier)
-  ├─ DeliveryAttempt × N ──引用──> DeliveryReceipt / Message
-  └─ PacketEvent × N       （没有 message / 不进入 chat history）
+### 场景 4：A 需要人的批准
 
-DispatchBatch ──成功启动──> Invocation / Run
-Run ──正文实际交付──> bodyExposure × N
-Obligation × N ──结算──> closure cursor.next
-```
+A 如果需要 co-creator 批准，不是把 `@co-creator` 文本当成推断。它创建一个显式的 human-approval WorkItem，写明：批准什么、谁可以批准、关联哪个父 WorkItem、过期后谁处理。
 
-Receipt 是每 target 的投递真相；Queue entry 是 wake trigger。它们**没有**必然的 1:1 嵌套：一个 entry 可唤起一批 receipt；append receipt 可暂时没有 entry；系统通知 entry 没有 chat-history message；一条 message 也可有多个 target receipt。Batch 是最小新增 durable 关系，不是万能 WorkUnit。
+这个 WorkItem 等人，不创建 agent Run。人的 approve / reject 是带 WorkItem 引用的 Event；它只结算对应的批准项并唤醒 A 的父工作。多个待批准项时，回复必须选择引用，不能猜“这句可以”是在答哪一项。
+
+### 场景 5：评审、CI 或外部回调到达
+
+“PR 已批准”“等待 CI”“外部回调成功”首先是 Event。路由器根据其显式来源和引用，更新已有的 PR-tracking / event-wait WorkItem，或记为终局通知。
+
+它**不会**仅因出现在 thread 中就创建猫的 Run。只有 Event 被某个明确的 WorkItem 需要处理，且该 WorkItem 有下一位执行者，才会唤起 agent。
+
+### 场景 6：managed hold 回来时结算失败
+
+一个 WorkItem 在等待 callback / hold 时，保存精确来源、等待条件和恢复负责人。callback 到达后，系统只能用同一份来源绑定恢复该 WorkItem。
+
+若来源、generation 或所需 disposition 不匹配，系统在创建后继 Run 前失败关闭：保留失败证据，并把**这一项**标为需要负责人处置。它不会把普通 queue body 重新塞回去，也不会暂停同 thread 的其他 WorkItem。UI 只能展示这项的负责人、失败 Run、可用处置和下一次检查，不能给 thread 级 Continue。
+
+### 场景 7：进程崩溃后恢复
+
+重启只从 durable WorkItem 和 Run 恢复：某 Run 是否已经启动、它的 `inputs[]` 是什么、是否已经有终局结果。若执行结果无法确认，系统把该 WorkItem 交给其负责人处置或按其显式重试规则创建新的 Run；它不把旧输入默默重放，也不从最近发言者推断谁该接手。
 
 ---
 
-## 主流程：一条消息如何走完
+## 三个对象
 
-### 入口与 timeline publication
+### 1. Message / Event：输入事实，不自动等于工作
 
-先持久化的是 message payload、路由 intent、target receipt 与（必要时）Queue entry；是否立即进入 chat history 由发送方和 batch 决定：
+Message 是用户或成员写下的内容；Event 是系统、外部服务或已有 Run 产生的结构化事实，例如“CI 完成”“B 的 Run 失败”“human approval 已拒绝”。两者都可以进入 chat history，也都可以只作为系统可见的来源记录。
 
-| 发送方/输入 | admission | 何时进入 chat history |
-|---|---|---|
-| 用户或外部通知 | 先进入 Queue，创建 receipt 与 wake trigger | 被某个 `DispatchBatch` claim 时；此前 UI 可显示为本地/排队态，不把它误报为已投递 |
-| Agent 的 CLI 输出或 `post_message` | Run 输出时直接持久化到 history | 产出时；若带结构化 target，再创建 receipt 与 wake trigger，后续 dispatch 不重复写入 |
-| 系统通知 | 创建 `PacketEvent` + 高优先级 Queue entry | 永不进入 history；只进入被唤起成员的 situation packet |
+每个输入至少有稳定 id、来源、时间、内容或结构化 payload，以及可选的 target / WorkItem 引用。输入本身不代表“谁必须处理”：
 
-Agent 无结构化 target 的输出是面向用户的报告/上升，不走用户 fallback，也不创建 agent Queue entry。用户无结构化 target 才走 §路由决策。
+- `fyi` 只是 Message / Event。默认不创建 WorkItem，也不会单独唤起谁；
+- 无引用的 `done-notify` 是完成通知，不猜测它结算哪项工作；
+- 带精确 `workItemId` 的 `done-notify` 可结算那个已有 WorkItem；
+- Message 或 Event 只有带明确 `work`、`handoff`、`approval`、`wait` 等意图时，才建立或推进 WorkItem。
 
-### 单目标 happy path：A → B
+这让系统通知不需要一套特殊“事件投递对象”：它和普通消息都是 Run 可引用的输入；区别仅在有无聊天正文、是否需要出现在 history。
+
+### 2. WorkItem：谁还要把哪件事处理到底
+
+WorkItem 是唯一承载责任的对象。它不是 thread 的常驻状态，也不是所有消息的账本；只有确实需要行动、等待或裁决的事项才有它。
+
+| 字段 | 含义 |
+|---|---|
+| `id`、`parentId` | 精确标识，以及可选的父 WorkItem |
+| `goal` | 可验证的请求、子问题、批准或等待条件 |
+| `requester` / `assignee` / `responsible` | 谁提出、下一步交谁执行、谁负责决定完成或失败后的处置。根项通常由执行者负责；A 委托 B/C 时，B/C 是 assignee，A 是两个子项的 responsible，父项责任不会自动转移 |
+| `sourceInputs[]` | 它从哪些 Message / Event 得来 |
+| `status` | `open`、`running`、`waiting`、`needs_decision`、`completed` 或 `canceled`；都只描述这一个 WorkItem |
+| `waitingFor` | 人、外部事件或精确 callback；human approval 必须在这里显式表达 |
+| `recovery` | 失败 Run、可重试条件、下一次检查与负责处置的人 |
+
+一个子 WorkItem 完成或失败时，产生带 `parentId` 的 Event 给父项 responsible。父项由 responsible 依据结果完成、继续、改派、升级或取消；不存在默认的“所有子项成功就完成”规则。
+
+### 3. Run：一次不可变的实际执行
+
+Run 只在 agent 真正要执行 WorkItem 时创建。它关联一个 WorkItem、一个执行者和一个不可变 `inputs[]`：Message / Event 的精确 id、顺序及必要版本。Run id 也是调用 provider、回调和重启恢复的幂等键。
+
+Run 可以尚未启动、正在运行或已有终局结果；这些是**执行记录**，不是 WorkItem 的整体状态，更不能直接说某条 Message 已被阅读或工作已完成。实现层仍须保存真正的 prompt/body exposure 证据；产品层只要求它能回答“这一次 Run 精确拿到了什么”。
+
+同一 WorkItem 可以有多个 Run，例如受控重试或改派后的新执行；每个 Run 都保留自己输入集和结果。旧 Run 失败，不会因为无关 Message 到达而自动重放。
+
+### 关系与基数
 
 ```text
-A 的输入（用户、外部或 agent output）
-  → 解析结构化 target=B，创建 B 的 receipt generation=1 与 wake trigger
-  → Dispatcher 为 B 原子创建 DispatchBatch frontier
-  → frontier 中尚未 publication 的用户/外部输入进入 chat history
-  → 使用 batchId 幂等拉起 B 的 client
-  → 成功创建 child invocation：receipt = awakened
-  → B 的 prompt 实际取得正文：写 bodyExposure，receipt = seen
-  → B 运行、回复入 chat history，并产生 B-obligation outcome
-  → A 的 closure 根据 join policy 结算或继续
+Message / Event × N ──sourceInputs──> WorkItem
+WorkItem ──parentId──> WorkItem（可选）
+WorkItem 1 ──has──> Run × N
+Run 1 ──records──> inputs[]（Message / Event refs）
+Run outcome ──creates──> Event（可推进本项或父项）
 ```
 
-`awakened` 只表示 B 的 client/invocation 已被成功创建；模型可能尚未读取正文，或在读取前失败。只有 `bodyExposure` 才能向用户或别的成员显示“B 看过这条”。B 的可引用 response/outcome 才能结算 A 对 B 的 obligation。
+Queue entry、receipt 和 callback 不在图中充当第四个产品对象：它们是调度、投递或来源绑定所需的实现记录，必须能落回某个 WorkItem 或 Run。
 
-### 多目标 happy path：A → B 与 C
+---
 
-同一 message 为 B、C 分别创建 receipt、attempt 与（若需要）wake trigger。两个 target 各有 slot，故可并行创建自己的 Batch 和 Run：
+## 主流程
 
-```text
-A closure: current=A, next={B-obligation, C-obligation}, policy=all_of
-B execution: pre=A, current=B
-C execution: pre=A, current=C
-```
+### 1. 分类输入，再决定是否有工作
 
-默认 `all_of`：B 与 C 的可接受结果都存在才机械满足 A 的闭环。B 的成功不抹掉 C 的失败；C 的 failure event 必须精确唤起 A 处置。`any_of` 的首个合格结果也必须对其他 obligation 留下显式 cancel/continue disposition。
+收到 Message / Event 时，路由器先读结构化 intent 和精确引用：
 
-### 多跳：A → B → D
+| 输入 | 结果 |
+|---|---|
+| 用户/成员明确请求某成员做事 | 创建或更新该成员的 WorkItem |
+| A 委托 B、C | 为 B、C 建独立子 WorkItem；父项仍由 A 负责 |
+| human approval / external wait | 创建或更新显式 waiting WorkItem，不创建 agent Run |
+| `fyi`、无引用 `done-notify` | 只记录输入；默认不创建 WorkItem |
+| 有精确引用的结果 / 回调 | 推进被引用 WorkItem；必要时把 Event 交给其负责人 |
+| PR review、CI、外部 gate | 路由给已有 tracking/wait WorkItem 或终局记录，不制造 agent 工作 |
 
-B 在自己的 Run 中委托 D，会有 B 的局部 closure `current=B, next={D}`。D 的结果或 failure packet 先交给 B；B 处置完并给出自己的 outcome 后，才结算 A 对 B 的 obligation。A 可以在 history 看见事实，但不会被跨过 B 直接当成 D 的 closure current。
+正文内的 `@` 仍只是正文。没有结构化 target / intent，系统不得猜测路由或声称“已跳过成员”。
 
-### 主流程时序图
+### 2. 调度一个 WorkItem，建立 Run 的输入快照
+
+调度器只从可执行 WorkItem 中选择，而不是扫描“这个 thread 是否还有任何队列消息”。在开始一次执行时，它原子地：
+
+1. 确认 WorkItem 尚未被另一 live Run 占用；
+2. 选择本次要处理的 Message / Event；
+3. 创建 Run，并把这组精确引用写进 `inputs[]`；
+4. 以 Run id 作为幂等键启动执行者；
+5. 启动确认后，把 WorkItem 标为 `running`，并把实际输入暴露证据关联到这个 Run。
+
+第 3 步之后到达的输入不属于当前 Run。它必须走自己的 WorkItem，或经过用户显式 append / steer 选择。这样并发边界是 `Run.inputs[]`，不需要另造批次或投递尝试对象。
 
 ```mermaid
 sequenceDiagram
-    actor A as 发送方 A
-    participant Q as Queue / dispatcher
-    participant BATCH as DispatchBatch
-    participant CH as Chat history
-    participant B as target B
-    participant C as closure current
+    actor U as 用户或成员
+    participant R as Router
+    participant W as WorkItem
+    participant S as Scheduler
+    participant B as B 的 Run
+    participant A as 父项负责人（可选）
 
-    A->>Q: durable input + target receipt + wake trigger
-    Q->>BATCH: CAS claim(target=B, frontier)
-    Note over BATCH: frontier 固定 message receipt / packet event 的精确集合
-    BATCH->>CH: publication 尚未可见的用户/外部消息
-    BATCH->>B: idempotent launch(batchId, history, frontier, packet)
-    B-->>BATCH: child invocationId
-    BATCH->>BATCH: receipt = awakened（不是已读）
-    B->>BATCH: bodyExposure(messageId, invocationId)
-    BATCH->>BATCH: receipt = seen
-    alt B 给出可引用结果
-        B->>CH: response / outcome
-        BATCH->>C: 结算对应 obligation；按 join policy 决定是否继续
-    else B 启动或处理失败
-        BATCH->>CH: 可见的 failure outcome
-        BATCH->>Q: PacketEvent + 高优先级 wake trigger 给 C
-        Q->>C: 下一个 batch 的 packet 带精确 failure evidence
+    U->>R: Message / Event + structured intent
+    R->>W: 创建或更新精确 WorkItem
+    S->>W: claim 一个可执行 WorkItem
+    S->>B: 创建 Run(inputs[] 固定) 并幂等启动
+    B-->>W: result / failure，关联 Run id
+    alt 子项成功或失败
+        W-->>A: Event(workItemId, runId, outcome)
+        A->>W: 完成父项、改派、升级或取消
+    else 直接项完成
+        W->>W: completed
     end
 ```
 
+### 3. 结果、失败与恢复
+
+Run 的结果只改变它所属 WorkItem，并产生可追踪的 Event。失败时，系统必须把失败绑定到 `workItemId + runId + assignee + 具体原因`：
+
+- 若是子 WorkItem，事件回父项 responsible；默认由该负责人处置；
+- 若是根 WorkItem，按其 `recovery` 指向的负责人处置；
+- 若可安全重试，负责人显式创建下一次 Run；
+- 若要换人，负责人创建新的子 WorkItem 或更新该项 assignee，并保留旧 Run；
+- 若需要人或外部条件，WorkItem 进入 `waiting`，写明 `waitingFor` 和下一次检查；
+- 若状态不一致，进入 `needs_decision`，而非整个 thread paused。
+
+重试不是调度器的默认行为。任何重试都必须能解释“为什么这次副作用安全、由谁批准、对应哪一次失败”。
+
+### 4. 可见性与恢复控制
+
+用户可以看到：Message 的发言者可见时间线、WorkItem 的目标与负责人、Run 的结果以及该项是否有可用恢复动作。这些视图必须分开回答问题：
+
+- “B 收到正文了吗？”只由精确的 body-exposure / provider 证据回答；
+- “B 现在在做什么？”由 B 的 live Run 回答；
+- “谁还要负责把这件事收口？”由 WorkItem 的 `responsible` 回答；
+- “我能恢复什么？”只能显示当前 WorkItem 的精确 recovery action。
+
+因此不存在 thread-wide `failed` 或无目标的 Continue。某 WorkItem 没有可恢复动作时，UI 应说明它正等待哪位负责人 / human / external event，而不是找同 thread 的其他待办顶替。
+
 ---
 
-## 唯一 dispatch 算法：原子 batch frontier
+## 关键规则
 
-Queue 入队、slot 释放、append 到期、用户 steer、系统通知都是**触发条件**，不是各自的投递机制。每个触发只请求 "reconsider target B"；真正投递一律经过下列 batch 算法。
+### 人工批准必须成为显式依赖
 
-### Delivery candidate，而非“未读消息”
+human approval 是 `waitingFor.human`，含 approver、父 WorkItem 和允许的 approve / reject 结果。人在线、被 @，或说了自然语言“可以”均不足以结算；回复要有精确引用。这样不会因为多个并行审批而误结算，也不会把人当 provider Run。
 
-本文不再把 `dispatched` 当“已读”，也不把 chat history 过滤成 agent 的全部上下文。Dispatcher 有两个不同查询：
+### managed hold 与 callback 只恢复原来的工作
 
-1. **history context**：现有 conversation/history 读取，提供正常可见上下文；不能因一条 receipt 已被投递而把它从成员可见历史删除。
-2. **delivery candidate**：某 target 当前 generation 可被新 Batch claim 的输入。它包括：
-   - state 为 `queued` / `notified`、尚未由另一 Batch claim 的 target receipt；
-   - 已到 `deferUntil` 的 append receipt；
-   - 未消费的 `PacketEvent`（没有 message body）。
+`waitingFor.callback` 保存 source、generation、关联 Run 和允许的后继动作。回调不匹配时，不创建后继 WorkItem / Run，也不回放原 queue body；只留下可见的 `needs_decision`。这让 custody、queue 与 Run 对同一次结算说同一种事实。
 
-`awakened`、`seen`、`handled`、`failed`、`withdrawn`、`steering` 不是默认 candidate。这样“投递资格”既不等于用户未读，也不等于 bodyExposure，更不会影响 L15 的历史可见性。
+### 取消和 steer 留下事实
 
-### Batch 的原子步骤
+取消 queue 中尚未执行的 WorkItem，或 steer 中断 live Run，都保留发起者、原因和关联 Run。取消只影响目标 WorkItem；已写出的 Message、已有结果和其他 WorkItem 不会被伪装成从未发生。
 
-对每一个 target，Dispatcher 在一个 durable CAS 事务中执行：
+### 重启不靠猜测
 
-```text
-1. 获取 target 的 dispatch lease；已有 live Batch / Run 则退出，等待下一触发。
-2. 在同一个 serialization point 读取 candidate，写入：
-     DispatchBatch { batchId, target, frontier, generation, claimAt }
-   frontier 是稳定的 message receipt generation refs + packet event refs。
-3. 同事务：
-   - 将尚未 publication 的用户/外部 message 标记归属该 batch，并写入 chat history；
-   - 将 frontier refs 标为该 batch 已 claim；
-   - 将触发它的 Queue entries / packet events 标为 `claimedBy=batchId`，阻止平行 Batch 重复取得。
-   此处不写 seen，也不假装 client 已启动。
-4. 以 batchId 作为幂等 key 启动 target client，context = history context + batch frontier + situation packet。
-5. 得到精确 invocationId 后，持久化 awakened，并把被该 Batch claim 的 Queue entries / PacketEvents 结算为已消费；首次正文实际暴露才附加 bodyExposure/seen。
-6. Run 终局、显式取消或 delivery failure 都以 batchId/attempt generation 结算，释放 lease，再触发下一轮。
-```
+恢复器核对每个非终局 WorkItem 与 Run：已确认启动的 Run 继续等其终局；未确认且无副作用证明的 Run 交 recovery；已满足的 callback / human / external Event 只推进精确引用项。没有证据就不重放，也不从参与者、最近消息或 thread 级队列推断负责人。
 
-本文的 `sealed` 指第 2–3 步的同一 CAS 已提交 `frontier`，使它成为本次 launch 的不可变 prompt snapshot。seal 前，receipt 只能通过同一笔尚未提交的 CAS 加入 frontier；seal 后不存在单独追加或重写 frontier 的路径，新的 append 必须走自己的 `deferUntil` / 下一 Batch。
+---
 
-消息若在第 2 步 frontier 固定后才到达，属于下一 Batch，绝不会在本 Batch 中被标记为已投递。进程在第 3、4、5 步之间崩溃时，恢复器依据 batchId 查询同一次幂等启动/精确 invocation，再完成或终结该 Batch；不会把已 claim 的内容丢回模糊队列，也不会把未曾进入 prompt 的内容标成 `seen`。
+## 对现有实现的映射（只在概念稳定后处理）
 
-这就是原子 batch frontier 的边界：Queue 的 FIFO/优先级决定**何时 reconsider target**，不会决定或拼接 prompt 内容；frontier 才是一次投递的精确内容来源。
+下表是实施起点，不是“必须保留现有八态”的承诺。现有对象能承载哪项事实、不能承载什么，须以三个核心对象为准重构。
 
-### Client 启动失败与重试 generation
-
-若 batchId 没有得到可验证的 child invocation，那个 Batch frontier 内的**每个** delivery attempt（含 PacketEvent）都以同一 batchId 终局为 `failed`：
-
-1. 该 delivery attempt 终局为 `failed`，留下 failure reason 与 batchId；
-2. 写用户可见的 failure outcome 到 history；
-3. 对 closure current 创建带精确来源的 PacketEvent 和高优先级 wake trigger；
-4. 同一 attempt **永不**重新成为 candidate。
-
-这里的 `closure current` 由失败项不可变的 `rootMessageId` 解析：即使 `fyi` 或无引用 `done-notify` 没有加入 `closure.next`，只要所属链存在 cursor，仍向其 `current` 发送 failure PacketEvent；若该通知没有 closure root，则只记录给其 sender 的可见投递失败，不凭失败合成新的 obligation。
-
-只有 `RecoveryPolicy` 的明确决定——例如有界且副作用安全的 retry，或 closure current 选择重试 B / 改派 D——才能创建新的 attempt generation。新 generation 重新从 `queued` / `notified` 参与 query；它不是把旧 `failed` state 默默塞回候选集。这样 A 可以真正决定“改范围、换人、请求用户、暂停”，而不是 B 被下一条无关输入意外拉起重投。
-
-### 系统通知也由同一算法消费
-
-PacketEvent 没有 chat-history message，故不会被 message candidate 查询“顺带匹配”。它却与 receipt 一起进入 frontier：
-
-```text
-failure / continuation need
-  → PacketEvent + Queue entry（最高优先级）
-  → Batch CAS claim(packetEventRef)
-  → launch 成功后 event.deliveredToInvocation = invocationId
-  → event 被该 Batch 结算为已消费，并序列化进 situation packet
-```
-
-启动失败同样结算该 event 的 attempt；其 recovery policy 要么建立精确的下一 generation，要么提升为可见的 workflow failure，不能让一个 queued event 无限重触发。普通 message 与 PacketEvent 的差异只有 materialization（history body vs packet body），不是另一条 dispatch 暗门。
-
-### 三个队列场景的验证
-
-| 场景 | frontier | 结果 |
+| 现有区域 | 未来承载 | 不得再承担 |
 |---|---|---|
-| A@B 已 claim 后，用户@B 才 admission | batch₁ 只有 A→B；用户 receipt 尚未在 snapshot 中 | B 先处理 A；slot 释放后 batch₂ 处理用户输入 |
-| C@B、用户@B、A@B 都在 claim 前 | batch₁ 同时引用三条 candidate receipt | 三条独立 message 一次交给 B；三个 receipt 各有自己的 outcome/obligation |
-| C@B、A@B 在 claim 前；用户@B 尚未 admission | batch₁ 只有 C、A；用户 receipt 不在 frontier | B 先处理 C、A；用户输入留给 batch₂ |
+| `MessageStore` / `RedisMessageStore` | Message 的正文、作者、发言者可见时间线与来源关系 | 判断谁仍负责、某次执行是否已完成 |
+| queue receipt / `queued-message-receipt` | 某 Message 对目标的调度与可见性投影；body exposure 的实现证据 | 充当 WorkItem 或 Run 的通用状态机 |
+| `InvocationQueue` / `QueueProcessor` | 选择可执行 WorkItem、创建 Run、保持 slot 与 Run id 幂等 | 用 thread 有无队列项决定所有 slot 是否 paused |
+| F194 / `TurnExecution` | Run 的 live invocation、终局和执行证据 | 代替 WorkItem 的责任或 human/external wait |
+| `ActionSuccessor` / `AwaitState` / F233 custody | `waitingFor.callback` 的精确来源、generation 与回归路径 | 失败后回放无绑定的 queue body |
+| 结构化 message intent、PR tracker、event wait | Message / Event 分类，以及对应 WorkItem 的推进 | 把 review/CI/wait 自动转为 agent Run |
+| QueuePanel / 状态卡 | 对一个 WorkItem / Run 的可见恢复与归因 | thread-wide 暂停和无目标 Continue |
 
-这三例不是额外的 coalescing if/else。它们只是“CAS snapshot 前到达的 candidate 入本批、之后到达的进下批”的直接推论。
+实现可以替换或收敛现有 receipt 状态；禁止为了兼容旧投影再新建一条平行生命周期。迁移时须将每个非终局旧记录归入一个 WorkItem、一个 Run 或一个显式待处置项；无法归属的记录只能进入受负责人约束的 reconciliation，不能被泛化重试。
 
----
+### 实施顺序
 
-## 路由、用户输入与干预
-
-### 路由决策
-
-Target 从结构化 metadata 读取，绝不从正文的 `@` 文本猜测：
-
-1. 用户有显式结构化 target：路由到这些 target；
-2. Concierge thread：没有显式 target 时路由给 duty cat；
-3. 用户无 target：继承最近五条、一小时内用户消息的最近有效 target；
-4. 仍无候选：最近健康回复者；
-5. 最后才是 `preferredCats` / 默认成员。
-
-Agent output 必须携带显式 target 才会创建 agent delivery receipt；没有 target 的 output 只写 history 并上升给用户。正文里的 `@` 是正文，不能产生“成员不存在，已跳过”的系统气泡。
-
-### 用户在 target 正在处理时的三种选择
-
-用户消息仍先 admission；当目标 A 有 live Run 时，client 让用户选择，不由后端猜测：
-
-| 选择 | durable intent | 对同一 dispatch 算法的影响 |
-|---|---|---|
-| 正常排队（默认） | 普通 receipt + wake trigger | A 的 slot 释放后，receipt 成为 candidate |
-| append | `routing=append`，receipt 带 `deferUntil=currentInvocationTerminal` | 不打断 A；`deferUntil` 满足时本身就是 reconsider trigger，即使没有其他 Queue entry 也会创建 Batch |
-| 立即发送（steer） | 新 receipt + `routing=steer`；用户取消当前 A Run | 当前 Run 在安全点停止并留下 `steering` disposition；lease 释放后，同一 batch 算法处理全部 eligible candidate |
-
-append 不是“成功把正文塞进现有 prompt”的同义词。若 Batch 尚未 sealed，带 exact carrier capability 的 append 可以在 CAS 中加入其 frontier；否则它只能等待当前 invocation terminal。`continue_current` 的授权与真正 `bodyExposure` 必须分别记录。无论哪一种，append 不能因“没有 Queue entry”永久停住。
-
-steer 的意图是“释放 A 的 slot 并重新决定下一批”，不是“只投递我点选的那一条”。被中止的 work 留下 `steering` / cancel evidence；它不伪装成 provider failure，也不让原 closure 无事实地终局。
-
-### Cancel
-
-取消总是目标明确的 state transition：
-
-- 用户可取消尚未 claim 的 receipt，标记 `withdrawn`/canceled；
-- 用户 steer 可中止 live Run，写明 invocation、发起者与原因；
-- closure current 或 join policy 可取消自己仍负责的 obligation；
-- 已有 response/outcome 不能被取消为“从未发生”。
-
-取消后检查 closure join policy；若需要处置，创建 PacketEvent 唤起 closure current。取消不会删除 history 或 receipt history，也不会静默地让一条义务消失。
-
----
-
-## 闭环、human gate 与通知 intent
-
-### Obligation 生命周期与失败回流
-
-work / handoff / gate intent 才创建 obligation 并加入 closure `next`。典型状态是：
-
-```text
-planned → waiting_delivery → running → responded | failed | rejected | expired | canceled | steered
-```
-
-delivery attempt 的 `queued/awakened/seen/failed` 是第二、三层事实，不应直接与 obligation 终局混写。一次 delivery failure 可以令对应 obligation 进入可处置的 `failed`，但永远不会把 A 的闭环责任偷交给 B 或自动关掉 A。
-
-```text
-B 的 outcome / failure
-  → 结算 B-obligation 的确切结果
-  → 更新 A closure.next
-  → join policy 满足：闭环终局或建立 A continuation
-  → 未满足且需要判断：PacketEvent 唤起 A，携带 B 的 evidence
-```
-
-### `fyi` 与 `done-notify`
-
-| intent | 是否可被 Batch 投递 | 是否新建 obligation | 对既有 custody/closure 的效果 |
-|---|---|---|---|
-| `fyi` | 是 | 否 | 只消费本次通知；不改变原 ball/closure（INV-7） |
-| `done-notify`，无精确引用 | 是 | 否 | 普通完成通知，不凭自然语言猜测要结算谁 |
-| `done-notify`，带有效 `obligationRef` / source ref | 是 | 否 | 可结算**既有**精确责任；不创建新的 `next` |
-
-这与现有 custody state machine 对齐：`done_notify` 可进入 resolved，`fyi` 保持原 state。二者都能出现在 delivery frontier，区别是第四层如何处理其精确引用，而不是让通知绕过投递/消费算法。
-
-### Human handoff / gate
-
-`handoff` / `request` / `gate` 给 co-creator 建立 human obligation。human 不经历 provider Run；其 UI 投递可记录为成功，但“用户在线”不等于 human 已批准或已处理。回复须带 `obligationRef`：只有一个未决项可安全自动绑定，多个未决项必须让用户显式选择。`fyi` 与无引用的 `done-notify` 不产生 pending-human inbox。
-
----
-
-## Situation packet、状态视图与重启
-
-### 每次唤起的上下文
-
-```text
-history context: 正常 chat history（不是“只剩未投递消息”）
-batch frontier: 本次精确 receipt/message refs 与 packet event refs
-closure cursor: root source、current、next obligations、join policy
-execution evidence: pre/current、同级 branch 的 terminal evidence
-delivery evidence: batchId、attempt generation、awakened/bodyExposure/failure
-allowed action: reply, delegate, reroute, ask human, suspend, cancel
-```
-
-成员不靠自然语言猜“B 是否在工作”。用户和成员共享同一份派生状态：B 的 receipt 是 `queued`、`awakened`、`seen` 或 `failed`，其 invocation、bodyExposure 与 outcome 都能链接到精确 source。没有 live invocation 不必然是异常：若 receipt 指向 wait/custody 的 precise holder，或 Batch 尚未到 delivery eligibility，状态仍是可解释的。
-
-### 重启恢复
-
-恢复器只看 durable facts：
-
-1. 对每个 `DispatchBatch`，以 batchId 查询/重放同一次幂等 client launch；未 resolve 的 claim 不能被另一 Batch 重新 claim；
-2. 对 `awakened` 的 receipt，核验精确 invocation 是否 live 或是否已有 terminal evidence；没有则写 failure/recovery event，绝不当 `seen`；
-3. 对已到期的 append receipt 与未 claim candidate，重新发出 target reconsider；
-4. 对未消费 PacketEvent，按其 attempt/recovery policy 继续或提升；
-5. 对 closure open obligation，依据关联 attempt/outcome/wait 做精确 failure 或 continuation，不从最近发言者猜 owner。
-
-重启后的异常也走相同的 failure outcome + PacketEvent 流程；它不是一条“重启专用”的投递分支。
-
-### 运行时切换
-
-发布 preflight 列出所有非终局 receipt generation、Batch、Run、obligation、wait 与 custody record，并设置 admission barrier：拒绝新的 root work；已有 record 的 exact-source completion、human approve/reject、callback 和 batch recovery 继续按旧语义 drain。清单为空才原子切换新入口。不得拿终局历史猜测补链。
-
----
-
-## 现有对象承载与实施顺序
-
-| 对象 | 保留职责 | 本 RFC 要求的最小连接 |
-|---|---|---|
-| `MessageStore` / `RedisMessageStore` | 正文、author、chat history、message relation | 区分 queue admission 与 timeline publication；保留 history 作为会话上下文 |
-| queue receipt / custody | target 的 queued/awakened/seen/handled/failed 等事实 | 不加 `dispatched` 平行态；追加 attempt generation、batch ref 与 exact bodyExposure 关联 |
-| `InvocationQueue` | target wake trigger、slot/lease、优先级 | entry 不承载 prompt；可 0..N 对 receipt；支持 packet event 与 append 到期触发 |
-| Dispatch layer | target batch claim 与 client launch | 持久 `DispatchBatch` frontier、CAS、batchId 幂等恢复、统一 message/event 消费 |
-| F194 / `TurnExecution` | live invocation 与 terminal outcome | 用 invocationId 证明 awakened/liveness，不把 Run existence 当 seen 或 closure success |
-| `ActionSuccessor` / `AwaitState` / F233 custody | exact callback 与等待 | callback 已覆盖时拒绝冗余 hold；fyi/done-notify 依精确引用处置 |
-| closure cursor | `current`、`next`、join policy、disposition | obligation outcome 与 delivery failure 的原子结算关联 |
-
-建议实现顺序：
-
-1. 先为 receipt projection、attempt generation、Batch frontier 写纯状态转换与 crash-recovery 测试；
-2. 以 batchId 贯通 Queue lease、client idempotent launch、`awakened` 与 bodyExposure；
-3. 把所有普通输入、append 到期与 PacketEvent 统一接到 candidate query，删除 active 时 skip/coalesce content 拼接；
-4. 接入 closure outcome、fyi/done-notify 精确引用和 human gate；
-5. 最后替换 QueuePanel、气泡与状态卡；删除没有精确对象的 Continue。
+1. 先定义 WorkItem、Run 与其 source / parent / recovery 关系，写状态转换和并发恢复测试；
+2. 让入站 Message / Event 先分类，再决定创建、推进或仅记录 WorkItem；
+3. 把 QueueProcessor 改为 item-scoped 调度和 Run 输入快照，移除 thread-wide pause / Continue 语义；
+4. 接入 human approval、external wait、managed hold 与 callback 的精确引用；
+5. 最后把 receipt、QueuePanel、气泡和现有历史读法迁成这三个对象的视图，并做一次性数据切换。
 
 ---
 
@@ -392,58 +274,47 @@ allowed action: reply, delegate, reroute, ask human, suspend, cancel
 
 | ID | 场景 | 必须证明 |
 |---|---|---|
-| L1 | 用户无结构化 target | 仅用户走 fallback：最近有效用户 target → 健康回复者 → 默认；agent 无 target 不走此链 |
-| L1a | 用户无 target 且有 agent 正在处理 | 用户能选排队、append、steer；选择写 durable intent，不由后端猜 |
-| L2 | B 正在处理，用户又 @B | receipt 仍 pending；slot 释放/append 到期触发下一 Batch，不被 active skip |
-| L3 | A @B | B awakened/seen 不能让 A 结束；可引用 B outcome 才结算 A 的 obligation |
-| L4 | A 同时 @B、@C | B/C 独立 Batch 与 slot；默认 `all_of` |
-| L5 | B 成功、C 失败 | B outcome 保留；C failure 可见；PacketEvent 精确唤起 A |
-| L5a | A @B，client 启动失败 | attempt `failed`、failure outcome 可见、旧 attempt 不自动重投、A 收到 recovery event |
-| L5b | A→B→D，D 失败 | D 的 PacketEvent 先唤起 B；B 的 outcome 后才影响 A |
-| L6 | A handoff/gate 给 human | 有 exact human obligation 与 approve/reject/timeout，不把 online 当处理 |
-| L6a | FYI / 无引用 done-notify | 可投递且消费，但不创建 `next`；FYI 不变更 custody |
-| L6b | done-notify 有 exact ref / 多个 human 待办 | 有 ref 才结算既有责任；多个待办必须明确选择 |
-| L7 | B 结果需要 A 判断 | B outcome 后 Batch packet 唤起 A，不由 B 偷关 A 的 closure |
-| L8 | any_of 首个成功 | 其余 obligation 有 explicit cancel/continue disposition |
-| L9 | append 在 Batch sealed 前 | 只有 CAS 能把它加入同一 frontier；成功投递仍以 awakened/seen 分开证明 |
-| L10 | append 在 Run 已读输入后 | `deferUntil` 于 invocation terminal 后使其成为 candidate，即使没有 Queue entry 也不滞留 |
-| L10a | steer | Run 安全中止并留下 steering evidence；释放 slot 后同一 batch 算法处理全部 candidate |
-| L11 | Batch claim/launch 崩溃竞态 | frontier 不变；以 batchId 幂等恢复；不会标 seen、不会丢或重复启动 |
-| L11a | 当前 holder 有 precise callback | admission 拒绝冗余 hold_ball |
-| L12 | 进程重启 | Batch、receipt generation、invocation、PacketEvent、closure/wait 全由 durable facts 重建 |
-| L13 | Run 在正文暴露前/后失败 | bodyExposure 有精确 invocation；UI 不从 awakened/Run 状态猜已读 |
-| L14 | 切换遇旧 in-flight | admission barrier 拒绝新 root work，但允许 exact-source completion 与 batch recovery drain |
-| L15 | 其他 agent 看见消息 | history 始终是上下文；receipt/Batch/invocation 另显投递和处理事实，不从 history 推断 |
-| L16 | 正文含 `@` | 未经结构化 target 选择不路由、不生成错误提示 |
-| L17 | A@B、C@B 同时 queued | 同一 CAS frontier 含两 receipt；一次唤起、两条独立 outcome |
-| L17a | B active 时 D@B | receipt 等下批；slot release 触发 candidate query |
-| L17b | A@B 已在 history，C@B 触发 B | 只要 A receipt 是 candidate，就可被该 Batch claim；是否有 A 的独立 Queue entry 不影响内容资格 |
-| L18 | 纯系统通知唤起 A | PacketEvent 被 Batch claim、写入 packet 并消费；不会因没有 CH message 无限重触发 |
-| L19 | failed attempt 后有无关 B 输入 | 失败 attempt 不进入新 frontier；只有 policy 创建的新 generation 可重试 |
+| A1 | 用户或 A 明确交 B 一件事 | 创建一个带 source Message、assignee=B、responsible 的 WorkItem；Run 只引用自己的 `inputs[]` |
+| A2 | Run 创建后又来一条消息 | 新输入不进入既有 Run；它有独立 WorkItem 或用户显式 append / steer 记录 |
+| A3 | queued 消息被取消 | 该 WorkItem 取消，Message 不进入猫 prompt；其他项不受影响 |
+| A4 | B 正运行时用户选择 append / steer | append 不伪称已读；steer 留下取消原因并不抹掉原项 |
+| A5 | A 同时委托 B、C | 两个独立子 WorkItem / Run；父项仍由 A 负责 |
+| A6 | B 成功、C 失败 | B 结果保留；C 的精确 failure Event 回 A；A 显式改派、升级、继续或取消 |
+| A7 | Run 启动或执行失败 | 失败绑定精确 `workItemId + runId`；不会因无关输入自动重放 |
+| A8 | managed-hold callback 完整匹配 | 原 WorkItem 恢复并以同一来源结算，无重复后继 Run |
+| A9 | managed-hold callback 缺失或不匹配，且同 thread 有其他待办 | 只有该项进入 `needs_decision`；其他 WorkItem 仍可调度 |
+| A10 | 用户看到失败 | UI 显示失败 Run、WorkItem、负责人和该项可用 recovery；没有 thread-wide Continue |
+| A11 | PR approval / CI / external wait 到达 | 更新 tracking/wait WorkItem 或终局记录；不创建无负责人的 agent Run |
+| A12 | `fyi`、无引用 done-notify、有引用 done-notify | 前两者不新建工作；有引用者只结算精确已有 WorkItem |
+| A13 | A 请求 human approval | 建显式 approval WorkItem；多个待办时必须引用；human 不产生 agent Run |
+| A14 | 重启发生在 Run 启动前、启动后或结果前 | 以 WorkItem / Run 证据恢复；不猜负责人、不盲目重放 |
+| A15 | 一次性切换 | 所有非终局旧记录都有 WorkItem、Run 或受负责人约束的 reconciliation 归属；不保留旧/新运行时 fallback |
+| A16 | 用户正文仅含 `@` | 无结构化 intent 不路由、不生成“成员不存在”的系统气泡 |
 
 ---
 
-## 不变量、非目标与来源
+## 不变量与非目标
 
-以下状态在正确实现中不可能出现：
+以下情况在正确实现中不可能发生：
 
-- Batch 声称一条 message 已被交付，但其 receipt generation 不在该 Batch frontier；
-- `awakened` 被 UI 当作正文已读，或 `seen` 缺 exact invocation/body exposure；
-- client 启动失败后旧 attempt 因无关 Queue trigger 被自动重投；
-- append 在 target terminal 后仍无 entry、无 candidate、无 reconsider trigger 而永久等待；
-- 纯 PacketEvent 因没有 CH message 而不能消费，或被无限 re-trigger；
-- closure 终局但仍有必须 `next` obligation open；
-- Queue 为空却只能显示没有 source 的 thread-wide blocked/Continue。
+- 一个 live Run 没有精确 `inputs[]`，或新输入静默混进已创建 Run；
+- 一个失败 Run 没有对应 WorkItem、负责人和可见处置路径；
+- 一个 WorkItem 的失败暂停同 thread 无关 WorkItem；
+- 无精确 WorkItem 的 Continue / retry 动作；
+- review、CI、approval 或等待事件因只是 thread message 而制造 agent Run；
+- human approval 从同时 @、在线状态或自然语言猜测；
+- callback 失配后回放无来源绑定的 queue body；
+- 子项结果自动替父项负责人作最终判断。
 
-非目标：不增加万能工作总账本；不让成员常驻监听 thread；不重解释终局历史；不把未经 carrier/receipt 审计的正文注入正在运行的模型；不定义用户 UX 的通用未读计数。
+非目标：不建设通用 workflow engine；不引入 `all_of` / `any_of` / `quorum` 完成策略；不将所有消息强行变成 WorkItem；不让成员常驻监听 thread；不把投递、正文已读、执行结果和责任混成一个状态机；不为保留旧实现而加入永久兼容分支。
 
 实现锚点：
 
-- `packages/shared/src/types/queue-receipt.ts`：八态 receipt、`awakenedAt`、`seenAt` 与 `continue_current` 非已读契约；
-- `packages/api/src/domains/cats/services/stores/ports/queued-message-receipt.ts`：receipt projection；
-- `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts` / `QueueProcessor.ts`：slot、wake 与 body exposure；
-- `packages/api/src/domains/ball-custody/ball-custody-state-machine.ts`：`done_notify → resolved`、`fyi → 不变`；
-- `AgentRouter.ts`、`messages.ts`、`callback-a2a-trigger.ts`：结构化 target、用户 fallback 与 active-target skip 的现有入口；
-- [#1354](https://github.com/zts212653/clowder-ai/issues/1354)：用户可见断裂的入口证据。
+- `packages/shared/src/types/queue-receipt.ts`：现有消息目标投影与 `continue_current` 的 exposure-only 契约；
+- `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts` / `QueueProcessor.ts`：当前 slot、queue 与 thread-wide pause 入口；
+- `packages/api/src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.ts`：managed-hold 精确 disposition 合同；
+- F194 / `TurnExecution`：Run live / terminal 的执行证据；
+- `ActionSuccessor`、`AwaitState`、PR tracking / event wait：显式 callback、human 与外部事件来源；
+- [#1354](https://github.com/zts212653/clowder-ai/issues/1354)：本 RFC 的可见失败、精确恢复与独立调度入口证据。
 
-确认本 RFC 后，才基于上述不变量拆出实现映射、状态转换测试与 PR；任何实现若绕过 Batch frontier 或把四层事实重新合并，都不符合本 RFC。
+确认这份对象和场景模型后，才拆实现 PR。任何实现若重新形成 thread-wide pause、无目标 Continue，或让输入/责任/执行混为一体，都不符合本 RFC。
