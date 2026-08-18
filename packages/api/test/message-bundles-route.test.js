@@ -20,6 +20,7 @@ function targetMessage(overrides = {}) {
       messageBundle: {
         v: 1,
         sourceThreadId: 'source-thread',
+        note: 'bundle-level reason',
         items: [{ kind: 'message', messageId: 'source-1' }],
       },
     },
@@ -91,6 +92,7 @@ describe('GET /api/message-bundles/:messageId', () => {
       createdBy: 'user-1',
       createdAt: 200,
       sourceThread: { id: 'source-thread', title: 'Source Thread' },
+      note: 'bundle-level reason',
       items: [
         {
           status: 'available',

@@ -1,6 +1,8 @@
 'use client';
 
 import { type ConnectorSource, isPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
+import { useState } from 'react';
+import { TransferTargetPicker } from '@/components/TransferTargetPicker';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
 import { AudioBlock } from './AudioBlock';
 import { CallbackAuthFailureBlock } from './CallbackAuthFailureBlock';
@@ -18,6 +20,7 @@ import { InteractiveBlockGroup } from './InteractiveBlockGroup';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
 import { PersonMemoryProposalCard } from './PersonMemoryProposalCard';
 import { isProposalCardBlock, ProposalCard } from './ProposalCard';
+import { RichBlockForwardButton } from './RichBlockForwardButton';
 import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
 
 function RichCardRenderer({
@@ -103,6 +106,41 @@ function RichBlockRenderer({
   }
 }
 
+/** A forwarded Rich Block is evidence, not a new execution surface. */
+function ReadOnlyRichBlockRenderer({ block }: { block: RichBlock }) {
+  if (block.kind === 'card') {
+    return <CardBlock block={{ ...block, actions: undefined, meta: undefined }} />;
+  }
+  if (block.kind === 'interactive') {
+    return (
+      <CardBlock
+        block={{
+          id: block.id,
+          kind: 'card',
+          v: 1,
+          title: block.title ?? '交互选项',
+          bodyMarkdown: block.description,
+          fields: block.options.map((option) => ({ label: option.label, value: option.description ?? '' })),
+        }}
+      />
+    );
+  }
+  if (block.kind === 'html_widget') {
+    return (
+      <CardBlock
+        block={{
+          id: block.id,
+          kind: 'card',
+          v: 1,
+          title: block.title ?? 'HTML 小组件',
+          bodyMarkdown: '这是转发的只读副本，不会运行原小组件。',
+        }}
+      />
+    );
+  }
+  return <RichBlockRenderer block={block} />;
+}
+
 type GroupedItem = { grouped: true; groupId: string; blocks: RichInteractiveBlock[] };
 type ResultItem = RichBlock | GroupedItem;
 
@@ -186,13 +224,19 @@ export function RichBlocks({
   blocks,
   catId,
   messageId,
+  sourceThreadId,
+  sourceMessageIds,
   messageSource,
   confirmations,
   sendContext,
+  readOnly = false,
+  forwardingEnabled = true,
 }: {
   blocks: RichBlock[];
   catId?: string;
   messageId?: string;
+  sourceThreadId?: string;
+  sourceMessageIds?: readonly string[];
   /**
    * F174 D2b-1 cloud P2 #1397: trusted-provenance gate for sub-renderers.
    * The callback-auth-failure renderer requires `messageSource.connector ===
@@ -204,31 +248,73 @@ export function RichBlocks({
   /** F229 Bug 2 fix: context tag for interactive-send events (e.g. 'concierge').
    *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
   sendContext?: string;
+  /** Forwarded blocks are inert evidence: no callbacks, specialised actions, or HTML execution. */
+  readOnly?: boolean;
+  /** The source must be terminal and the browser document admitted before forwarding can begin. */
+  forwardingEnabled?: boolean;
 }) {
+  const [forwardBlockId, setForwardBlockId] = useState<string | null>(null);
   if (blocks.length === 0) return null;
-  const items = groupBlocks(blocks);
+  const items = readOnly ? blocks : groupBlocks(blocks);
+  const forwardBlock = forwardBlockId ? blocks.find((block) => block.id === forwardBlockId) : undefined;
   return (
-    <div className="mt-2 space-y-2">
-      {items.map((item) =>
-        'grouped' in item ? (
-          <InteractiveBlockGroup
-            key={item.groupId}
-            blocks={item.blocks}
-            messageId={messageId}
-            sendContext={sendContext}
-          />
-        ) : (
-          <RichBlockRenderer
-            key={item.id}
-            block={item}
-            catId={catId}
-            messageId={messageId}
-            messageSource={messageSource}
-            confirmations={confirmations}
-            sendContext={sendContext}
-          />
-        ),
-      )}
-    </div>
+    <>
+      <div className="mt-2 space-y-2">
+        {items.map((item) =>
+          'grouped' in item ? (
+            <div key={item.groupId}>
+              <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
+              {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
+                <div className="mt-1 flex flex-wrap justify-end gap-1">
+                  {item.blocks.map((block, index) => (
+                    <RichBlockForwardButton
+                      key={block.id}
+                      block={block}
+                      groupedIndex={index}
+                      onForward={setForwardBlockId}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div key={item.id} className="group/rich-block relative">
+              {readOnly ? (
+                <ReadOnlyRichBlockRenderer block={item} />
+              ) : (
+                <RichBlockRenderer
+                  block={item}
+                  catId={catId}
+                  messageId={messageId}
+                  messageSource={messageSource}
+                  confirmations={confirmations}
+                  sendContext={sendContext}
+                />
+              )}
+              {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
+                <RichBlockForwardButton block={item} onForward={setForwardBlockId} />
+              ) : null}
+            </div>
+          ),
+        )}
+      </div>
+      {forwardingEnabled && forwardBlock && messageId && sourceThreadId ? (
+        <TransferTargetPicker
+          open
+          admissionBlocked={!forwardingEnabled}
+          sourceThreadId={sourceThreadId}
+          items={[
+            {
+              kind: 'rich_block',
+              messageId,
+              sourceMessageIds: sourceMessageIds ? [...sourceMessageIds] : [messageId],
+              blockId: forwardBlock.id,
+            },
+          ]}
+          onClose={() => setForwardBlockId(null)}
+          onSuccess={() => setForwardBlockId(null)}
+        />
+      ) : null}
+    </>
   );
 }

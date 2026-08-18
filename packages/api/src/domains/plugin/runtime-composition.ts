@@ -44,6 +44,12 @@ export interface DormantPluginRuntimeComposition {
   shutdown(reason?: string): Promise<void>;
 }
 
+// External runtimes must finish their own bounded source-readiness checks before
+// broker.ready. The published Feishu intake can spend up to 30 seconds on each
+// event source and lark-cli read command, so the Host policy must cover that
+// honest startup path while remaining bounded.
+export const EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS = 4 * 60_000;
+
 export function resolvePluginRuntimePersistencePaths(projectRoot: string): PluginRuntimePersistencePaths {
   const root = resolve(projectRoot, '.cat-cafe', 'plugin-host');
   return {
@@ -84,6 +90,7 @@ export function createDormantPluginRuntimeComposition(
         ...(options.now === undefined ? {} : { now: options.now }),
       }),
     ],
+    preActiveTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const packages = new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
@@ -91,6 +98,7 @@ export function createDormantPluginRuntimeComposition(
     inventory: inventoryStore,
     broker,
     packages,
+    handshakeTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.processes === undefined ? {} : { processes: options.processes }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });

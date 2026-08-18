@@ -6,6 +6,11 @@ import type { HostInventoryControlPlane } from './host-inventory/control-plane.j
 import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
 import { OFFICIAL_PLUGIN_CATALOG, type OfficialPluginCatalogEntry } from './official-catalog.js';
 import {
+  compareOfficialPluginVersions,
+  type OfficialPluginCatalogProvider,
+  StaticOfficialPluginCatalog,
+} from './official-catalog-provider.js';
+import {
   downloadCatalogArchive,
   MAX_OFFICIAL_PACKAGE_BYTES,
   publishOfficialPackageArchive,
@@ -16,7 +21,28 @@ export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
   readonly packagesRoot: string;
   readonly catalog?: readonly OfficialPluginCatalogEntry[];
+  readonly catalogProvider?: OfficialPluginCatalogProvider;
   readonly fetchArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
+}
+
+export interface OfficialPluginReleaseFence {
+  readonly version: string;
+  readonly packageDigest: string;
+}
+
+function assertExpectedRelease(entry: OfficialPluginCatalogEntry, expectedRelease: OfficialPluginReleaseFence): void {
+  if (entry.version !== expectedRelease.version || entry.packageDigest !== expectedRelease.packageDigest) {
+    throw new OfficialPluginInstallError('STALE_CATALOG', 'official catalog changed after owner confirmation');
+  }
+}
+
+function assertInstalledPackageVersion(entry: OfficialPluginCatalogEntry, installedVersion: string | undefined): void {
+  if (installedVersion !== entry.version) {
+    throw new OfficialPluginInstallError(
+      'PACKAGE_VERSION_MISMATCH',
+      'installed package identity does not match the official catalog release',
+    );
+  }
 }
 
 function pathInside(root: string, candidate: string): boolean {
@@ -56,19 +82,20 @@ async function readDeclaredSignalSchemas(
 }
 
 export class OfficialPluginPackageInstaller {
-  private readonly catalog: ReadonlyMap<string, OfficialPluginCatalogEntry>;
+  private readonly catalogProvider: OfficialPluginCatalogProvider;
   private readonly fetchArchive: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
   private readonly packagesRoot: string;
 
   constructor(private readonly options: OfficialPluginPackageInstallerOptions) {
-    const entries = options.catalog ?? OFFICIAL_PLUGIN_CATALOG;
-    this.catalog = new Map(entries.map((entry) => [entry.catalogId, entry]));
+    this.catalogProvider =
+      options.catalogProvider ?? new StaticOfficialPluginCatalog(options.catalog ?? OFFICIAL_PLUGIN_CATALOG);
     this.fetchArchive = options.fetchArchive ?? downloadCatalogArchive;
     this.packagesRoot = resolve(options.packagesRoot);
   }
 
-  async install(catalogId: string) {
-    const entry = this.catalogEntry(catalogId);
+  async install(catalogId: string, expectedRelease: OfficialPluginReleaseFence) {
+    const entry = await this.catalogEntry(catalogId);
+    assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
     if (existing) return existing;
 
@@ -87,8 +114,14 @@ export class OfficialPluginPackageInstaller {
     });
   }
 
-  async update(catalogId: string, pluginInstanceId: string, expectedLifecycleRevision: number) {
-    const entry = this.catalogEntry(catalogId);
+  async update(
+    catalogId: string,
+    pluginInstanceId: string,
+    expectedLifecycleRevision: number,
+    expectedRelease: OfficialPluginReleaseFence,
+  ) {
+    const entry = await this.catalogEntry(catalogId);
+    assertExpectedRelease(entry, expectedRelease);
     const snapshot = await this.options.inventory.store.snapshot();
     const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
     const current = snapshot.instances.find(
@@ -107,12 +140,23 @@ export class OfficialPluginPackageInstaller {
     if (!grants) {
       throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official plugin grant record is unavailable');
     }
+    const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
     if (instance.packageDigest === entry.packageDigest) {
+      assertInstalledPackageVersion(entry, installedPackage?.version);
       return {
         pluginInstanceId,
         packageDigest: instance.packageDigest,
         grantRevision: grants.grantRevision,
       };
+    }
+    const versionComparison = installedPackage
+      ? compareOfficialPluginVersions(entry.version, installedPackage.version)
+      : undefined;
+    if (versionComparison === undefined || versionComparison <= 0) {
+      throw new OfficialPluginInstallError(
+        'UPDATE_NOT_NEWER',
+        'official catalog release is not newer than the installed package',
+      );
     }
     if (
       !['stopped', 'crashed'].includes(instance.runtimeState) ||
@@ -149,8 +193,10 @@ export class OfficialPluginPackageInstaller {
     });
   }
 
-  private catalogEntry(catalogId: string): OfficialPluginCatalogEntry {
-    const entry = this.catalog.get(catalogId);
+  private async catalogEntry(catalogId: string): Promise<OfficialPluginCatalogEntry> {
+    const entry = (await this.catalogProvider.snapshot()).entries.find(
+      (candidate) => candidate.catalogId === catalogId,
+    );
     if (!entry) {
       throw new OfficialPluginInstallError('UNKNOWN_CATALOG_ID', `unknown official plugin ${catalogId}`);
     }
@@ -203,6 +249,8 @@ export class OfficialPluginPackageInstaller {
       (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
     );
     if (!instance || instance.packageDigest !== entry.packageDigest) return undefined;
+    const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+    assertInstalledPackageVersion(entry, installedPackage?.version);
     const grants = snapshot.grants.find((candidate) => candidate.pluginInstanceId === instance.pluginInstanceId);
     if (!grants) return undefined;
     return {

@@ -1,3 +1,4 @@
+import { CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH } from '@cat-cafe/shared';
 import type { RefObject } from 'react';
 import {
   type TransferCatChoice,
@@ -14,14 +15,16 @@ interface TransferTargetPickerViewProps {
   availableThreads: readonly TransferThreadChoice[];
   cats: readonly TransferCatChoice[];
   targetCats: ReadonlySet<string>;
+  note: string;
   error: string | null;
   submitting: boolean;
   itemCount: number;
-  quoteOnly: boolean;
+  singleItemLabel?: string;
   onClose: () => void;
   onBack: () => void;
   onSelectThread: (threadId: string) => void;
   onToggleCat: (catId: string) => void;
+  onNoteChange: (note: string) => void;
   onSubmit: () => void;
 }
 
@@ -32,7 +35,7 @@ function TransferPickerHeader({
   onClose,
 }: Pick<TransferTargetPickerViewProps, 'targetThreadId' | 'targetThreadTitle' | 'onBack' | 'onClose'>) {
   return (
-    <header className="flex items-center gap-3 border-b border-cafe px-4 py-3">
+    <header className="flex shrink-0 items-center gap-3 border-b border-cafe px-4 py-3">
       {targetThreadId ? (
         <button
           type="button"
@@ -64,47 +67,79 @@ function TransferPickerBody({
   availableThreads,
   cats,
   targetCats,
-  error,
+  note,
   onSelectThread,
   onToggleCat,
+  onNoteChange,
 }: Pick<
   TransferTargetPickerViewProps,
-  'targetThreadId' | 'availableThreads' | 'cats' | 'targetCats' | 'error' | 'onSelectThread' | 'onToggleCat'
+  | 'targetThreadId'
+  | 'availableThreads'
+  | 'cats'
+  | 'targetCats'
+  | 'note'
+  | 'onSelectThread'
+  | 'onToggleCat'
+  | 'onNoteChange'
 >) {
-  return (
-    <div className="min-h-0 overflow-y-auto p-3">
-      {targetThreadId ? (
-        <TransferCatStep cats={cats} selectedCatIds={targetCats} onToggle={onToggleCat} />
-      ) : (
+  if (!targetThreadId) {
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-3" data-testid="transfer-picker-thread-scroll">
         <TransferThreadStep threads={availableThreads} onSelect={onSelectThread} />
-      )}
-      {error ? (
-        <p role="alert" className="mt-3 text-sm text-conn-red-text">
-          {error}
-        </p>
-      ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-3">
+      <label className="block shrink-0">
+        <span className="mb-1.5 block text-xs font-medium text-cafe-muted">转发留言（可选）</span>
+        <textarea
+          aria-label="转发留言（可选）"
+          value={note}
+          maxLength={CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH}
+          rows={3}
+          placeholder="告诉接收方为什么转发这组内容…"
+          onChange={(event) => onNoteChange(event.target.value)}
+          className="w-full resize-y rounded-xl border border-cafe bg-cafe-surface px-3 py-2.5 text-sm text-cafe-primary outline-none transition-colors placeholder:text-cafe-muted focus:border-cafe-accent focus:ring-2 focus:ring-[var(--cafe-accent-soft)]"
+        />
+      </label>
+      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="transfer-picker-cat-scroll">
+        <TransferCatStep cats={cats} selectedCatIds={targetCats} onToggle={onToggleCat} />
+      </div>
     </div>
   );
 }
 
 function TransferPickerFooter({
   targetCats,
+  error,
   submitting,
   itemCount,
-  quoteOnly,
+  singleItemLabel,
   onSubmit,
-}: Pick<TransferTargetPickerViewProps, 'targetCats' | 'submitting' | 'itemCount' | 'quoteOnly' | 'onSubmit'>) {
+}: Pick<
+  TransferTargetPickerViewProps,
+  'targetCats' | 'error' | 'submitting' | 'itemCount' | 'singleItemLabel' | 'onSubmit'
+>) {
   return (
-    <footer className="flex items-center justify-between gap-3 border-t border-cafe bg-cafe-surface px-4 py-3">
-      <span className="text-xs text-cafe-muted">已选 {targetCats.size} 只猫猫</span>
-      <button
-        type="button"
-        disabled={targetCats.size === 0 || submitting}
-        className="rounded-lg bg-cafe-accent px-4 py-2 text-sm font-semibold text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:cursor-not-allowed disabled:opacity-40"
-        onClick={onSubmit}
-      >
-        {submitting ? '转发中…' : quoteOnly ? '转发 1 段引用' : `转发 ${itemCount} 条消息`}
-      </button>
+    <footer className="shrink-0 border-t border-cafe bg-cafe-surface px-4 py-3" data-testid="transfer-picker-footer">
+      {error ? (
+        <p role="alert" className="mb-2 text-sm text-conn-red-text">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-cafe-muted">已选 {targetCats.size} 只猫猫</span>
+        <button
+          type="button"
+          disabled={targetCats.size === 0 || submitting}
+          className="rounded-lg bg-cafe-accent px-4 py-2 text-sm font-semibold text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:cursor-not-allowed disabled:opacity-40"
+          onClick={onSubmit}
+        >
+          {submitting ? '转发中…' : singleItemLabel ? `转发 ${singleItemLabel}` : `转发 ${itemCount} 条消息`}
+        </button>
+      </div>
     </footer>
   );
 }

@@ -4,9 +4,10 @@ import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { AppServerLifecycleSnapshot, AppServerLifecycleStage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -45,6 +46,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const effectiveThreadId = threadId ?? currentThreadId;
   const { catInvocations, catStatuses } = useThreadLiveness(effectiveThreadId);
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
+  const cancelPendingByKey = useActiveExecutionStore((state) => state.cancelPendingByKey);
   const executionHydration = useActiveExecutionStore((state) => state.hydration);
   const executionAnchorThreadId = useActiveExecutionStore((state) => state.anchorThreadId);
   const { getCatById } = useCatData();
@@ -59,6 +61,8 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
         .sort((left, right) => left.startedAt - right.startedAt || left.executionId.localeCompare(right.executionId)),
     [effectiveThreadId, executionsByKey],
   );
+
+  const { hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(threadId);
 
   // Build display info from cat-config (dynamic, not hardcoded)
   const catDisplayMap = useMemo(() => {
@@ -85,7 +89,10 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   }, [activeExecutions.length]);
 
   const handleStopAll = useCallback(async () => {
-    const results = await Promise.allSettled(activeExecutions.map((execution) => cancelProjectedExecution(execution)));
+    const cancelableExecutions = activeExecutions.filter((execution) => execution.cancelability.state === 'cancelable');
+    const results = await Promise.allSettled(
+      cancelableExecutions.map((execution) => cancelProjectedExecution(execution)),
+    );
     if (results.some((result) => result.status === 'rejected')) {
       useToastStore.getState().addToast({
         type: 'error',
@@ -95,6 +102,10 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
       });
     }
   }, [activeExecutions]);
+  const stopAllPending = activeExecutions.some(
+    (execution) => cancelPendingByKey[activeExecutionKey(execution)] === true,
+  );
+  const hasCancelableExecution = activeExecutions.some((execution) => execution.cancelability.state === 'cancelable');
 
   // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
   const stalled = activeExecutions.some((execution) => {
@@ -119,6 +130,28 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     }
   }, [effectiveThreadId]);
 
+  // Canonical truth is empty but unsettled while the legacy socket still reports a
+  // live turn. Returning null here used to remove the force-reset entry — the only
+  // escape — at exactly the moment the user needs it, because ChatInput
+  // simultaneously hard-locks Cancel to `unavailable`. Keep a reachable exit.
+  if (activeExecutions.length === 0 && hasUnverifiedLegacyExecution) {
+    return (
+      <div className="console-divider-b" data-testid="execution-unverified-recovery">
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
+          <span className="text-cafe-muted shrink-0" title="本轮没有留下可核对的终态，可能已经结束。">
+            运行状态待确认
+          </span>
+        </div>
+        <ForceResetEntry escalated onClick={() => setResetDialogOpen(true)} />
+        <ForceResetDialog
+          open={resetDialogOpen}
+          busy={resetting}
+          onCancel={() => setResetDialogOpen(false)}
+          onConfirm={handleForceReset}
+        />
+      </div>
+    );
+  }
   if (activeExecutions.length === 0) return null;
 
   return (
@@ -155,9 +188,10 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
           <button
             type="button"
             onClick={handleStopAll}
-            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
+            disabled={stopAllPending || !hasCancelableExecution}
+            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0 disabled:cursor-wait disabled:opacity-50"
           >
-            全部停止
+            {stopAllPending ? '停止中…' : '全部停止'}
           </button>
         )}
       </div>

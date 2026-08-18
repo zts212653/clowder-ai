@@ -4,7 +4,28 @@ import { describe, it } from 'node:test';
 const MESSAGE_BUNDLE = {
   v: 1,
   sourceThreadId: 'thread-source',
-  items: [{ kind: 'message', messageId: 'message-source-1' }],
+  note: 'bundle-level reason',
+  items: [
+    { kind: 'message', messageId: 'message-source-1' },
+    {
+      kind: 'cli_quote',
+      messageId: 'message-cli',
+      sourceMessageIds: ['message-cli'],
+      segmentId: 'stdout',
+      selectionStart: 0,
+      selectionEnd: 4,
+      sourceProjectionVersion: 1,
+      sourceProjectionSha256: 'a'.repeat(64),
+    },
+    {
+      kind: 'rich_block',
+      messageId: 'message-rich',
+      sourceMessageIds: ['message-rich'],
+      blockId: 'card-1',
+      sourceProjectionVersion: 1,
+      sourceProjectionSha256: 'b'.repeat(64),
+    },
+  ],
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {

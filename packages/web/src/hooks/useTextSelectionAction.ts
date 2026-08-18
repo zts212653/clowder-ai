@@ -114,12 +114,14 @@ function projectSelectionAction(
   if (
     !selection ||
     selection.isCollapsed ||
-    !selection.toString().trim() ||
     !container.contains(selection.anchorNode) ||
     !container.contains(selection.focusNode)
   ) {
     return null;
   }
+  const rawText = selection.toString();
+  const text = rawText.trim();
+  if (!text) return null;
 
   const viewport =
     coordinateSpace === 'container'
@@ -136,13 +138,18 @@ function projectSelectionAction(
   const source = selectionSource(selection);
   const offsetRoot = source.kind === 'cli_output' ? source.coordinateRoot : (source.coordinateRoot ?? container);
   const offsets = offsetRoot ? selectionOffsets(selection, offsetRoot) : null;
+  const leadingWhitespaceLength = rawText.length - rawText.trimStart().length;
+  const trailingWhitespaceLength = rawText.length - rawText.trimEnd().length;
+  const trimmedOffsets = offsets
+    ? { start: offsets.start + leadingWhitespaceLength, end: offsets.end - trailingWhitespaceLength }
+    : null;
   if (!position || source.mixed) return null;
   return {
-    text: selection.toString().trim(),
+    text,
     position,
     sourceKind: source.kind,
-    ...(offsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
-    ...(offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
+    ...(trimmedOffsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
+    ...(trimmedOffsets ? { selectionStart: trimmedOffsets.start, selectionEnd: trimmedOffsets.end } : {}),
   };
 }
 

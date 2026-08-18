@@ -236,6 +236,10 @@ function snapshotActive(s: ChatState): ThreadState {
     workspaceOpenTabs: s.workspaceOpenTabs,
     workspaceOpenFilePath: s.workspaceOpenFilePath,
     workspaceOpenFileLine: s.workspaceOpenFileLine,
+    workspaceSurface: s.workspaceSurface,
+    workspacePreview: s.workspacePreview,
+    rightPanelMode: s.rightPanelMode,
+    rightPanelOpen: s.rightPanelOpen,
   };
 }
 
@@ -366,6 +370,10 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     workspaceOpenTabs: ts.workspaceOpenTabs,
     workspaceOpenFilePath: ts.workspaceOpenFilePath,
     workspaceOpenFileLine: ts.workspaceOpenFileLine,
+    // F284 × F120: restore the surface/preview/panel exactly as the thread was
+    // left — always (fail-closed), so a browser preview neither leaks into
+    // another thread nor vanishes on return.
+    ...restoreWorkspaceView(ts),
   };
   // Only restore worktreeId if the thread had one set — avoids wiping
   // the global selection for threads that never opened workspace.
@@ -373,6 +381,27 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     result.workspaceWorktreeId = ts.workspaceWorktreeId;
   }
   return result;
+}
+
+/**
+ * F284 × F120 (review P1-2, 缅因猫 fallback 坐标系收口): THE single projection
+ * for per-thread workspace view fields (surface / preview / panel mode / panel
+ * visibility). The four fields are optional on ThreadState only so older
+ * fixtures and legacy in-memory shapes stay valid; every `??` default lives
+ * here, and nowhere else. Callers: flattenThread (thread switch restore),
+ * setCurrentThread presentation-lock non-owner save, disablePresentationLock
+ * non-owner restore. None can be removed — each is a distinct semantic default
+ * for a field that was introduced after existing fixtures were written.
+ */
+function restoreWorkspaceView(
+  ts: Pick<ThreadState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'>,
+): Pick<ChatState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'> {
+  return {
+    workspaceSurface: ts.workspaceSurface ?? 'home',
+    workspacePreview: ts.workspacePreview ?? { port: undefined, path: '/' },
+    rightPanelMode: ts.rightPanelMode ?? 'status',
+    rightPanelOpen: ts.rightPanelOpen ?? false,
+  };
 }
 
 const MAX_BLOB_MESSAGES = 200;
@@ -1149,6 +1178,10 @@ export interface ChatState {
    * Used by WorkspacePanel to distinguish fresh navigate from stale leftovers on mount. */
   _workspaceFileSetAt: { ts: number; threadId: string | null };
   setRightPanelMode: (mode: 'status' | 'workspace' | 'transcript') => void;
+  /** F284 × F120 review P1: canonical right panel visibility (orthogonal to
+   * rightPanelMode). Snapshotted per thread — see ThreadState.rightPanelOpen. */
+  rightPanelOpen: boolean;
+  setRightPanelOpen: (open: boolean) => void;
   /** 显式关闭右侧 panel 时退出 workspace/transcript mode（否则 ChatContainer auto-open effect 立即重开，关不掉）。 */
   closeRightPanel: () => void;
   setWorkspaceWorktreeId: (id: string | null) => void;
@@ -1201,6 +1234,10 @@ export interface ChatState {
   pendingPreviewAutoOpen: { port: number; path: string } | null;
   setPendingPreviewAutoOpen: (data: { port: number; path: string }) => void;
   consumePreviewAutoOpen: () => { port: number; path: string } | null;
+  /** F120 × F284: write a preview into an INACTIVE thread's ThreadState so
+   * returning to that thread reveals it (browser surface + open panel).
+   * Used by the auto-open delivery contract for thread_inactive events. */
+  queueThreadPreview: (threadId: string, preview: { port: number; path: string }) => void;
 
   // ── F63-AC15: Code-to-chat reference ── #706: typed ComposerDraftInsert for recall-edit
   pendingChatInsert: ComposerDraftInsert | null;
@@ -1477,12 +1514,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceEditTokenExpiry: null,
   _workspaceFileSetAt: { ts: 0, threadId: null },
   setRightPanelMode: (mode) => set({ rightPanelMode: mode }),
+  rightPanelOpen: false,
+  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   // F232 P2（云端 round 5）：workspace/transcript mode 被 ChatContainer auto-open effect 强制开，
   // 显式关闭 panel 时必须先退出这两个 mode 回 status，否则 effect 立即重开（关不掉）。status 无此问题，保留。
   closeRightPanel: () =>
     set((s) => ({
       rightPanelMode:
         s.rightPanelMode === 'workspace' || s.rightPanelMode === 'transcript' ? 'status' : s.rightPanelMode,
+      rightPanelOpen: false,
     })),
   setWorkspaceWorktreeId: (id) => {
     // Guard: skip destructive reset when worktreeId is unchanged.
@@ -1691,6 +1731,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         workspaceOpenTabs: restored.workspaceOpenTabs ?? [],
         workspaceOpenFilePath: restored.workspaceOpenFilePath ?? null,
         workspaceOpenFileLine: restored.workspaceOpenFileLine ?? null,
+        // F284 × F120: restore is suppressed under lock, so the flat surface /
+        // preview / panel still show the lock view. On unlock, return them to
+        // the current thread's own saved values.
+        ...restoreWorkspaceView(threadState ?? { ...DEFAULT_THREAD_STATE }),
       };
     }),
   replacePresentationLockTarget: (snapshot) =>
@@ -1830,6 +1874,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             workspacePreview: data,
             workspaceSurface: 'browser' as const,
             rightPanelMode: 'workspace' as const,
+            rightPanelOpen: true,
           },
     ),
   consumePreviewAutoOpen: () => {
@@ -1837,6 +1882,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (pending) set({ pendingPreviewAutoOpen: null });
     return pending;
   },
+  queueThreadPreview: (threadId, preview) =>
+    set((state) => {
+      const patch = {
+        workspaceSurface: 'browser' as const,
+        workspacePreview: preview,
+        rightPanelMode: 'workspace' as const,
+        rightPanelOpen: true,
+      };
+      if (threadId === state.currentThreadId) {
+        if (state.presentationLock) return {};
+        return { ...patch, ...mirrorActiveFlat(state, patch) };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...existing, ...patch },
+        },
+      };
+    }),
 
   // ── F63-AC15: Code-to-chat reference ──
   pendingChatInsert: null,
@@ -2518,6 +2583,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             workspaceOpenTabs: prevThreadState?.workspaceOpenTabs ?? [],
             workspaceOpenFilePath: prevThreadState?.workspaceOpenFilePath ?? null,
             workspaceOpenFileLine: prevThreadState?.workspaceOpenFileLine ?? null,
+            // F284 × F120: the flat surface/preview/panel hold the lock view
+            // (restore is suppressed under lock), so a non-owner thread must
+            // save its own pre-visit values, not the locked overlay.
+            ...restoreWorkspaceView(prevThreadState ?? { ...DEFAULT_THREAD_STATE }),
           };
         }
       }
@@ -2540,6 +2609,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         flattened.workspaceOpenFilePath = lock.filePath;
         flattened.workspaceOpenFileLine = lock.line;
         flattened.workspaceScrollTop = lock.scrollTop;
+        // F284 × F120: surface/preview/panel are part of the frozen demo view —
+        // keep the current (locked) values instead of restoring the target's.
+        flattened.workspaceSurface = state.workspaceSurface;
+        flattened.workspacePreview = state.workspacePreview;
+        flattened.rightPanelMode = state.rightPanelMode;
+        flattened.rightPanelOpen = state.rightPanelOpen;
       }
 
       return {

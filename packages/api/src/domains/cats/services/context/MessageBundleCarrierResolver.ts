@@ -1,0 +1,162 @@
+import {
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION,
+  MessageBundleCarrierV1Schema,
+  type MessageBundleItemV1,
+} from '@cat-cafe/shared';
+import type { IMessageStore } from '../stores/ports/MessageStore.js';
+import type { IThreadStore } from '../stores/ports/ThreadStore.js';
+import type { SourceRecordResolver } from './MessageBundleSourceGroup.js';
+import {
+  canAccessSourceThread,
+  digestMessageBundleCliQuoteProjection,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleRichBlockProjection,
+  isSelectableMessage,
+  projectCliSegment,
+  projectMessageBundleQuoteSourceV1,
+  projectMessageBundleReadableContent,
+  readRichBlockFallback,
+  richBlockFromRecords,
+  sanitizeRichBlock,
+} from './MessageBundleSourceProjection.js';
+import { projectedItem, tombstone } from './message-selection-results.js';
+import type {
+  MessageSelectionAuth,
+  MessageSelectionProjectedItem,
+  MessageSelectionReadResult,
+} from './message-selection-types.js';
+
+interface ResolveMessageBundleCarrierInput {
+  input: unknown;
+  auth: MessageSelectionAuth;
+  messageStore: Pick<IMessageStore, 'getById'>;
+  threadStore: Pick<IThreadStore, 'get'>;
+  resolveSourceRecords: SourceRecordResolver;
+}
+
+type CarrierResolutionContext = Omit<ResolveMessageBundleCarrierInput, 'input'> & { sourceThreadId: string };
+
+async function resolveMessageCarrierItem(
+  item: Extract<MessageBundleItemV1, { kind: 'message' }>,
+  context: CarrierResolutionContext,
+): Promise<MessageSelectionProjectedItem> {
+  const message = await context.messageStore.getById(item.messageId);
+  if (!isSelectableMessage(message, context.sourceThreadId, context.auth)) {
+    return tombstone(item.messageId, 'source_unavailable');
+  }
+  return projectedItem(message, item, projectMessageBundleReadableContent(message));
+}
+
+async function resolveQuoteCarrierItem(
+  item: Extract<MessageBundleItemV1, { kind: 'quote' }>,
+  context: CarrierResolutionContext,
+): Promise<MessageSelectionProjectedItem> {
+  const message = await context.messageStore.getById(item.messageId);
+  if (!isSelectableMessage(message, context.sourceThreadId, context.auth)) {
+    return tombstone(item.messageId, 'source_unavailable');
+  }
+  const projection = projectMessageBundleQuoteSourceV1(message);
+  const digestMatches =
+    item.sourceProjectionVersion === MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION &&
+    digestMessageBundleQuoteProjection(projection) === item.sourceProjectionSha256;
+  if (!digestMatches || item.selectionEnd > projection.length) {
+    return tombstone(item.messageId, 'source_changed');
+  }
+  return projectedItem(message, item, projection.slice(item.selectionStart, item.selectionEnd));
+}
+
+async function resolveGroupedCarrierItem(
+  item: Extract<MessageBundleItemV1, { kind: 'cli_quote' | 'rich_block' }>,
+  context: CarrierResolutionContext,
+): Promise<MessageSelectionProjectedItem> {
+  const source = await context.resolveSourceRecords(
+    item.sourceMessageIds,
+    item.messageId,
+    context.sourceThreadId,
+    context.auth,
+  );
+  if (source.status !== 'resolved') {
+    return tombstone(item.messageId, source.status === 'changed' ? 'source_changed' : 'source_unavailable');
+  }
+
+  if (item.kind === 'cli_quote') {
+    const projection = projectCliSegment(source.records, item.segmentId);
+    const digestMatches =
+      projection !== null &&
+      item.sourceProjectionVersion === MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION &&
+      digestMessageBundleCliQuoteProjection(projection) === item.sourceProjectionSha256;
+    if (!projection || !digestMatches || item.selectionEnd > projection.length) {
+      return tombstone(item.messageId, 'source_changed');
+    }
+    return projectedItem(source.anchor, item, projection.slice(item.selectionStart, item.selectionEnd));
+  }
+
+  const sourceBlock = richBlockFromRecords(source.records, item.blockId);
+  const digestMatches =
+    sourceBlock !== null &&
+    item.sourceProjectionVersion === MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION &&
+    digestMessageBundleRichBlockProjection(sourceBlock) === item.sourceProjectionSha256;
+  const readableContent = sourceBlock ? readRichBlockFallback(sourceBlock) : null;
+  if (!digestMatches || !sourceBlock || !readableContent?.trim()) {
+    return tombstone(item.messageId, 'source_changed');
+  }
+  return projectedItem(source.anchor, item, readableContent, sanitizeRichBlock(sourceBlock));
+}
+
+function resolveCarrierItem(
+  item: MessageBundleItemV1,
+  context: CarrierResolutionContext,
+): Promise<MessageSelectionProjectedItem> {
+  switch (item.kind) {
+    case 'message':
+      return resolveMessageCarrierItem(item, context);
+    case 'quote':
+      return resolveQuoteCarrierItem(item, context);
+    case 'cli_quote':
+    case 'rich_block':
+      return resolveGroupedCarrierItem(item, context);
+  }
+}
+
+export async function resolveMessageBundleCarrier({
+  input,
+  auth,
+  messageStore,
+  threadStore,
+  resolveSourceRecords,
+}: ResolveMessageBundleCarrierInput): Promise<MessageSelectionReadResult> {
+  const parsed = MessageBundleCarrierV1Schema.safeParse(input);
+  if (!parsed.success) return { status: 'invalid', reason: 'invalid_carrier' };
+
+  const sourceThread = await threadStore.get(parsed.data.sourceThreadId);
+  if (!canAccessSourceThread(sourceThread, auth)) {
+    return {
+      status: 'resolved',
+      sourceThread: null,
+      ...(parsed.data.note ? { note: parsed.data.note } : {}),
+      items: parsed.data.items.map((item) => tombstone(item.messageId, 'source_unavailable')),
+    };
+  }
+
+  const items: MessageSelectionProjectedItem[] = [];
+  for (const item of parsed.data.items) {
+    items.push(
+      await resolveCarrierItem(item, {
+        auth,
+        messageStore,
+        threadStore,
+        resolveSourceRecords,
+        sourceThreadId: parsed.data.sourceThreadId,
+      }),
+    );
+  }
+
+  return {
+    status: 'resolved',
+    sourceThread: { id: sourceThread.id, title: sourceThread.title },
+    ...(parsed.data.note ? { note: parsed.data.note } : {}),
+    items,
+  };
+}

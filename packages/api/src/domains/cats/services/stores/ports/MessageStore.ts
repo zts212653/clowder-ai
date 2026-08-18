@@ -259,6 +259,8 @@ export interface StoredMessage {
       trust: 'untrusted_external';
       instructionPolicy: 'data_only';
     };
+    /** Wave 2 contract trial: source-only scene metadata; F296 decides presentation. */
+    dynamicSceneEntries?: readonly import('@cat-cafe/shared').AsrPersonMemoryDynamicSceneEntryV1[];
     freshness?:
       | PublishedFreshnessAnnotation
       | {

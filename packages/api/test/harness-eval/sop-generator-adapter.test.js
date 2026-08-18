@@ -216,6 +216,7 @@ describe('generateSopLiveVerdict', () => {
     mkdirSync(harnessFeedbackRoot, { recursive: true });
 
     const verdictId = 'vhp-eval-sop-development-test-001';
+    const packet = stubPacket();
     const result = generateSopLiveVerdict({
       verdictId,
       harnessFeedbackRoot,
@@ -224,7 +225,7 @@ describe('generateSopLiveVerdict', () => {
         { ruleId: 'R-WT-1', status: 'pass' },
         { ruleId: 'R-WT-2', status: 'skipped', reason: 'manual_only' },
       ],
-      submittedPacket: stubPacket(),
+      submittedPacket: packet,
     });
 
     // verdict.md exists with YAML frontmatter (P1-2 fix)
@@ -245,6 +246,12 @@ describe('generateSopLiveVerdict', () => {
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
     assert.ok(snapshot.evalSnapshotId, 'snapshot must have evalSnapshotId');
     assert.ok(snapshot.window, 'snapshot must have window');
+    assert.equal(snapshot.window.endMs, Date.parse(packet.createdAt), 'snapshot.window.endMs must use packet time');
+    assert.equal(
+      snapshot.window.startMs,
+      Date.parse(packet.createdAt) - 336 * 60 * 60 * 1000,
+      'snapshot.window.startMs must cover the weekly SOP eval window',
+    );
     assert.ok(snapshot.window.durationHours > 0, 'snapshot.window must have durationHours');
     assert.ok(Array.isArray(snapshot.components), 'snapshot must have components array');
     assert.ok(snapshot.components.length >= 1, 'snapshot must have at least 1 component');

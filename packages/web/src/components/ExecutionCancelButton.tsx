@@ -1,14 +1,15 @@
 'use client';
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
-import { useState } from 'react';
 import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useToastStore } from '@/stores/toastStore';
 
 const NON_CANCELABLE_COPY = {
   control_plane_unavailable: '控制面暂不可用，无法安全停止',
   cancellation_pending: '正在停止',
   terminalizing: '正在收尾，已不可停止',
+  foreign_principal: '由排程发起，占用中；你不是发起方',
 } as const;
 
 export function ExecutionCancelButton({
@@ -22,7 +23,19 @@ export function ExecutionCancelButton({
   pendingLabel?: string;
   className?: string;
 }) {
-  const [pending, setPending] = useState(false);
+  const pending = useActiveExecutionStore((state) => state.cancelPendingByKey[activeExecutionKey(execution)] === true);
+  if (pending) {
+    return (
+      <button
+        type="button"
+        disabled
+        className={`${className} cursor-wait opacity-50`}
+        aria-label={`Stop ${execution.catId} ${execution.kind} ${execution.executionId}`}
+      >
+        {pendingLabel}
+      </button>
+    );
+  }
   if (execution.cancelability.state === 'not_cancelable') {
     const reason = NON_CANCELABLE_COPY[execution.cancelability.reason];
     return (
@@ -33,7 +46,6 @@ export function ExecutionCancelButton({
   }
 
   const cancel = async () => {
-    setPending(true);
     try {
       await cancelProjectedExecution(execution);
     } catch (error) {
@@ -43,7 +55,6 @@ export function ExecutionCancelButton({
         message: error instanceof Error ? error.message : '请刷新后重试',
         duration: 5000,
       });
-      setPending(false);
     }
   };
 
@@ -51,11 +62,10 @@ export function ExecutionCancelButton({
     <button
       type="button"
       onClick={() => void cancel()}
-      disabled={pending}
-      className={`${className} disabled:cursor-wait disabled:opacity-50`}
+      className={className}
       aria-label={`Stop ${execution.catId} ${execution.kind} ${execution.executionId}`}
     >
-      {pending ? pendingLabel : label}
+      {label}
     </button>
   );
 }

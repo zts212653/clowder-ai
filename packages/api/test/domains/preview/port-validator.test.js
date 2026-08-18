@@ -117,6 +117,16 @@ describe('validatePort', () => {
     assert.equal(result.allowed, false);
   });
 
+  it('rejects a numeric prefix followed by junk', () => {
+    const result = validatePort('3847oops');
+    assert.equal(result.allowed, false);
+  });
+
+  it('rejects fractional ports', () => {
+    const result = validatePort(3847.5);
+    assert.equal(result.allowed, false);
+  });
+
   it('coerces valid string port to number and allows', () => {
     const result = validatePort('3847');
     assert.equal(result.allowed, true);

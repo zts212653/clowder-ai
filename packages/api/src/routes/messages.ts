@@ -686,6 +686,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const admission = await selectionResolver.resolveForAdmission(
         {
           sourceThreadId: messageBundleRequest.sourceThreadId,
+          ...(messageBundleRequest.note ? { note: messageBundleRequest.note } : {}),
           items: messageBundleRequest.items,
         },
         { userId },

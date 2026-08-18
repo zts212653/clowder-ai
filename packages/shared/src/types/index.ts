@@ -844,6 +844,22 @@ export {
   type SubjectSeenOpportunityV1,
   subjectSeenOpportunityV1Schema,
 } from './memory-cue.js';
+export {
+  ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
+  type AsrPersonMemoryDynamicSceneEntryV1,
+  type AsrPersonMemoryWriteOpportunityV1,
+  type AsrTranscriptSourceCoordinateV1,
+  asrPersonMemoryDynamicSceneEntryV1Schema,
+  asrPersonMemoryWriteOpportunityV1Schema,
+  asrTranscriptSourceCoordinateV1Schema,
+  type DeferredWriteOpportunityReceiptV1,
+  deferredWriteOpportunityReceiptV1Schema,
+  WRITE_OPPORTUNITY_DISPOSITIONS,
+  WRITE_OPPORTUNITY_INVALIDATORS,
+  type WriteOpportunityDispositionV1,
+  writeOpportunityDispositionV1Schema,
+  writeOpportunityGenerationId,
+} from './memory-write-opportunity.js';
 // Message types
 export type {
   AgentStreamMessage,

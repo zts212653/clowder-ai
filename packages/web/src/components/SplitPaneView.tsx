@@ -4,7 +4,6 @@ import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
-import type { ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
@@ -13,6 +12,7 @@ import { MiniThreadSidebar } from './MiniThreadSidebar';
 import { SplitPaneCell, SplitPanePlaceholder } from './SplitPaneCell';
 
 interface SplitPaneViewProps {
+  isReadonly?: boolean;
   onSend: (
     content: string,
     images?: File[],
@@ -23,7 +23,6 @@ interface SplitPaneViewProps {
     messageDisposition?: MessageWorkDisposition,
     contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onStop: (intent: ExplicitStopIntent, overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -36,7 +35,13 @@ const PANE_COUNT = 4;
  * Split-pane mode: 2x2 grid of mini chat views + mini sidebar + shared input.
  * The shared input bar sends to the currently selected pane (splitPaneTargetId).
  */
-export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoomToThread }: SplitPaneViewProps) {
+export function SplitPaneView({
+  isReadonly = false,
+  onSend,
+  uploadStatus,
+  uploadError,
+  onZoomToThread,
+}: SplitPaneViewProps) {
   const { threads, splitPaneThreadIds, splitPaneTargetId, setSplitPaneTarget, setSplitPaneThreadIds, getThreadState } =
     useChatStore(
       useShallow((s) => ({
@@ -179,8 +184,7 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
                       messageDisposition,
                     )
               }
-              onStop={(intent) => onStop(intent, splitPaneTargetId ?? undefined)}
-              disabled={!splitPaneTargetId}
+              disabled={!splitPaneTargetId || isReadonly}
               uploadStatus={uploadStatus}
               uploadError={uploadError}
             />

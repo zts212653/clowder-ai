@@ -40,6 +40,17 @@ function makeManagedCommandTask() {
   };
 }
 
+function makeSchedulerTriggeredCommandTask() {
+  // A scheduler round occupies the same cat slot, but its trigger principal is
+  // not the viewing user.
+  const task = makeManagedCommandTask();
+  return {
+    ...task,
+    id: 'hold-ball-command-scheduler',
+    params: { ...task.params, triggerUserId: 'scheduler' },
+  };
+}
+
 function makeUserMessageRetiredRunningCommandTask() {
   const task = makeManagedCommandTask();
   return {
@@ -282,5 +293,80 @@ describe('F295 active execution projection', () => {
     ]);
     assert.equal(deps._executions.has('thread-a:kimi'), false);
     assert.equal(deps._executions.get('thread-b:kimi').executionId, 'inv-b');
+  });
+
+  it('surfaces a scheduler-owned command as occupancy instead of hiding the busy cat slot', async () => {
+    // Reported downstream: the console filters executions by the viewing user, so a
+    // scheduler round holding the cat slot vanished and Queue looked idle while new
+    // work silently queued behind an invisible occupant.
+    deps._managedTasks.push(makeSchedulerTriggeredCommandTask());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const schedulerExecution = response
+      .json()
+      .executions.find(
+        (execution) =>
+          execution.kind === 'managed_command' &&
+          execution.catId === 'kimi' &&
+          execution.cancelability.state === 'not_cancelable',
+      );
+
+    assert.ok(schedulerExecution, 'an occupied cat slot must be visible to whoever shares the thread');
+    assert.equal(schedulerExecution.kind, 'managed_command');
+    assert.equal(schedulerExecution.catId, 'kimi');
+    // Occupancy only: this viewer does not own the run and must not be offered a stop.
+    assert.equal(schedulerExecution.cancelability.state, 'not_cancelable');
+    assert.equal(schedulerExecution.cancelability.reason, 'foreign_principal');
+    // The durable task id is a capability handle for the hold-ball status/cancel
+    // routes. A foreign row must not hand it out.
+    assert.notEqual(schedulerExecution.executionId, 'hold-ball-command-scheduler');
+    assert.match(schedulerExecution.executionId, /^occupied:/);
+  });
+
+  it('still hides executions on threads this user cannot access', async () => {
+    const foreign = makeSchedulerTriggeredCommandTask();
+    foreign.id = 'hold-ball-command-foreign-thread';
+    foreign.deliveryThreadId = 'thread-not-in-project';
+    deps._managedTasks.push(foreign);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(
+      response.json().executions.some((execution) => execution.executionId === 'hold-ball-command-foreign-thread'),
+      false,
+    );
+  });
+
+  it('the occupancy id resolves to no hold task, so it cannot read or cancel the foreign run', async () => {
+    // The hold-ball status/cancel routes both start by resolving the path param
+    // through the dynamic task store; an id that resolves to nothing 404s before
+    // any thread-scoped authorization is even consulted.
+    deps._managedTasks.push(makeSchedulerTriggeredCommandTask());
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-a/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const foreign = response
+      .json()
+      .executions.find((execution) => execution.cancelability.reason === 'foreign_principal');
+    assert.ok(foreign);
+
+    assert.equal(deps.dynamicTaskStore.getById(foreign.executionId), null);
+    // ...while the owner's own row still carries a usable handle.
+    const owned = response.json().executions.find((execution) => execution.executionId === 'hold-ball-command-b');
+    assert.ok(owned);
+    assert.ok(deps.dynamicTaskStore.getById(owned.executionId));
   });
 });

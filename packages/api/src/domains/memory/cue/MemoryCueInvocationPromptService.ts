@@ -6,7 +6,11 @@ import type {
   RecallScopeV1,
   SubjectSeenOpportunityV1,
 } from '@cat-cafe/shared';
-import type { MemoryCuePlaneService } from './MemoryCuePlaneService.js';
+import type {
+  MemoryCueDeliveryConfirmation,
+  MemoryCueDeliveryReceipt,
+  MemoryCuePlaneService,
+} from './MemoryCuePlaneService.js';
 import type { CreateMemoryCueDrillHandleInput } from './MemoryCueResolverRegistry.js';
 
 export type MemoryCueOpportunitySeed =
@@ -38,10 +42,16 @@ export interface ResolveMemoryCueInvocationPromptInput {
 export interface MemoryCueInvocationPromptResolution {
   promptSegment: string;
   admittedOpportunityIds: readonly string[];
+  omittedOpportunityIds: readonly string[];
+  deliveryReceipts: readonly MemoryCueDeliveryReceipt[];
 }
 
 export interface MemoryCueInvocationPromptResolver {
   resolve(input: ResolveMemoryCueInvocationPromptInput): Promise<MemoryCueInvocationPromptResolution>;
+  recordPresented?(
+    receipts: readonly MemoryCueDeliveryReceipt[],
+    confirmation: MemoryCueDeliveryConfirmation,
+  ): Promise<void>;
 }
 
 export function memoryCueOpportunityId(seed: MemoryCueOpportunitySeed, scope: RecallScopeV1): string {
@@ -87,6 +97,8 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
     const invocationState = { seenDedupeKeys: new Set<string>() };
     const segments: string[] = [];
     const admittedOpportunityIds: string[] = [];
+    const omittedOpportunityIds: string[] = [];
+    const deliveryReceipts: MemoryCueDeliveryReceipt[] = [];
     for (const seed of input.seeds) {
       const candidate = bindSeed(seed, input.serverScope);
       const resolved = await this.deps.plane.resolve({
@@ -99,8 +111,23 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
       if (resolved.promptSegment) {
         segments.push(resolved.promptSegment);
         admittedOpportunityIds.push(candidate.opportunityId);
+        deliveryReceipts.push(...resolved.deliveryReceipts);
+      } else {
+        omittedOpportunityIds.push(candidate.opportunityId);
       }
     }
-    return { promptSegment: segments.join('\n\n'), admittedOpportunityIds };
+    return {
+      promptSegment: segments.join('\n\n'),
+      admittedOpportunityIds,
+      omittedOpportunityIds,
+      deliveryReceipts,
+    };
+  }
+
+  async recordPresented(
+    receipts: readonly MemoryCueDeliveryReceipt[],
+    confirmation: MemoryCueDeliveryConfirmation,
+  ): Promise<void> {
+    await this.deps.plane.recordPresented(receipts, confirmation);
   }
 }

@@ -23,6 +23,7 @@ import {
   unresolvedSubjectWithoutActiveCustodyTotal,
 } from '../../../../../infrastructure/telemetry/instruments.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
+import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
 import type { ActionSuccessorLeaseStore } from '../../../../ball-custody/ActionSuccessorLeaseStore.js';
 import type { TurnCustodyWakeProvenance } from '../../../../ball-custody/TurnCustodyProjectionService.js';
 import {
@@ -34,6 +35,7 @@ import type { RetryAuthorityFailureReason } from '../../../../ball-custody/WaitC
 import { waitContinuationCarriersMatch } from '../../../../ball-custody/wait-continuation-carrier.js';
 import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
 import { readTrustedConnectorMemoryCueSeeds } from '../../../../memory/cue/MemoryCueTrustedConnector.js';
+import { bindAsrPersonMemoryScenesFromQueueMessage } from '../../../../signal-intake/AsrPersonMemoryQueueCarrier.js';
 import {
   MessageBundlePromptUnavailableError,
   resolveMessageBundlePrompt,
@@ -510,6 +512,8 @@ export interface QueueProcessorDeps {
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
   /** F167 Phase S.1: carrier preflight plus failed/canceled runtime outcomes; success requires Evidence→Verdict. */
   actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'preflight' | 'preflightOutput' | 'commitOutcome'>;
+  /** F167: retire structurally replaced ordinary A2A carriers before provider publication. */
+  a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
   /**
    * F254 Phase E (ADR-041 §5): seed the freshness seenCursor when closure adoption
    * injects required bodies — injection must count as seen, or the output gate
@@ -3347,6 +3351,7 @@ export class QueueProcessor {
     const { threadId, userId, intent, messageId } = entry;
     const targetCats = [...(executionTargetCats ?? entry.targetCats)];
     const primaryCat = targetCats[0] ?? 'unknown';
+    const exactA2ATargetCat = targetCats.length === 1 ? targetCats[0] : undefined;
 
     const batchedEntryIds: string[] = exactBatchEntries.map((candidate) => candidate.id);
     const batchedMessageIds: string[] = exactBatchEntries.flatMap((candidate) => [
@@ -3545,6 +3550,62 @@ export class QueueProcessor {
     };
 
     try {
+      // F167: Queue FIFO can outlive its exact A2A handoff. Reuse the same
+      // source/event fence as callback completion so a structurally replaced
+      // carrier never starts a provider invocation merely to fail at stop-gate.
+      const a2aDispositionService = this.deps.a2aDispatchDispositionService;
+      if (entry.sourceCategory === 'a2a' && entry.a2aTriggerMessageId && exactA2ATargetCat && a2aDispositionService) {
+        const sourceMessageIds = [...new Set([entry.a2aTriggerMessageId, ...entry.mergedMessageIds])];
+        let inspections: Array<Awaited<ReturnType<A2ADispatchDispositionService['inspectHandoff']>>> | undefined;
+        try {
+          inspections = await Promise.all(
+            sourceMessageIds.map((sourceMessageId) =>
+              a2aDispositionService.inspectHandoff({
+                threadId,
+                catId: exactA2ATargetCat,
+                sourceMessageId,
+              }),
+            ),
+          );
+        } catch (err) {
+          log.warn(
+            { err, threadId, entryId: entry.id, sourceMessageIds },
+            '[F167] A2A replacement preflight unavailable; preserving existing callback fence',
+          );
+        }
+        if (inspections?.every((inspection) => inspection.outcome === 'replaced')) {
+          try {
+            const custody = await this.ensureAttemptMessageCustody(entry);
+            if (custody === 'durable') {
+              if (!this.deps.queueCustodyCoordinator) {
+                throw new Error('queue custody coordinator unavailable for replaced A2A carrier');
+              }
+              if (!(await this.deps.queueCustodyCoordinator.withdrawEntry(entry))) {
+                throw new Error('replaced A2A carrier custody did not transition');
+              }
+            }
+            log.info(
+              {
+                threadId,
+                entryId: entry.id,
+                sourceMessageIds,
+                replacements: inspections.map((inspection) =>
+                  inspection.outcome === 'replaced' ? inspection.replacement : undefined,
+                ),
+              },
+              '[F167] retired replaced A2A carrier at queue preflight',
+            );
+            return executionResult('succeeded');
+          } catch (err) {
+            log.error(
+              { err, threadId, entryId: entry.id, sourceMessageIds },
+              '[F167] failed to retire replaced A2A carrier; retaining Queue custody',
+            );
+            return executionResult('failed');
+          }
+        }
+      }
+
       // F167 Phase S: a queue row is only a carrier. The durable action lease owns
       // successor cardinality; fail closed before creating an invocation when its
       // generation was replaced or the external subject reached terminal truth.
@@ -4400,6 +4461,9 @@ export class QueueProcessor {
       ];
       const contentBlocks: MessageContent[] = [];
       const persistedPromptMessages: PersistedPromptMessage[] = [];
+      const asrPersonMemoryScenes: Array<
+        import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene
+      > = [];
       for (const id of messageIds) {
         try {
           const stored = await messageStore.getById(id);
@@ -4430,6 +4494,9 @@ export class QueueProcessor {
               content: stored.content,
               ...(stored.contentBlocks?.length ? { contentBlocks: stored.contentBlocks } : {}),
             });
+            asrPersonMemoryScenes.push(
+              ...bindAsrPersonMemoryScenesFromQueueMessage(stored, { ownerUserId: userId, threadId }),
+            );
           }
           if (stored?.contentBlocks && stored.contentBlocks.length > 0) {
             contentBlocks.push(...stored.contentBlocks);
@@ -4509,6 +4576,7 @@ export class QueueProcessor {
           ownerAuthProvenance: entry.ownerAuthProvenance,
           humanDispositionInvocationOrigin: 'queue_replay',
           ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+          ...(asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
           turnCustodyWakeForCat: (catId: string) => retargetTurnCustodyWake(turnCustodyWake, catId),
           ...(contentBlocks.length > 0 ? { contentBlocks } : {}),
           ...(controller.signal ? { signal: controller.signal } : {}),

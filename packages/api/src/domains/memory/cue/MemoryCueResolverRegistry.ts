@@ -14,6 +14,7 @@ export interface MemoryCueSourceProjection {
   summary: string;
   anchor: string;
   revision: string;
+  asOf?: number;
   visibility: 'owner_public' | 'owner_private';
   drillFamily: CueEnvelopeV1['drill']['family'];
 }
@@ -86,6 +87,7 @@ export function buildCueEnvelope(input: {
     source: {
       anchor: input.source.anchor,
       revision: input.source.revision,
+      ...(input.source.asOf === undefined ? {} : { asOf: input.source.asOf }),
       visibility: input.source.visibility,
     },
     drill: {

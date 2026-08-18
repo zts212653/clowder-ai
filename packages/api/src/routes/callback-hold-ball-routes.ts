@@ -980,7 +980,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     } catch (error) {
       if (error instanceof A2ADispatchDispositionError) {
         reply.status(409);
-        return { error: 'A2A dispatch disposition rejected', code: error.code };
+        return {
+          error: 'A2A dispatch disposition rejected',
+          code: error.code,
+          ...(error.replacement ? { replacement: error.replacement } : {}),
+        };
       }
       throw error;
     }

@@ -50,6 +50,8 @@ interface MessageActionsProps {
   selectionEligible?: boolean;
   onEnterSelection?: (messageId: string) => void;
   onToggleSelection?: (messageId: string) => void;
+  /** Blocks network forwarding while this browser document is not admitted to write. */
+  forwardingDisabled?: boolean;
 }
 
 function selectionCoordinates(action: TextSelectionAction): { selectionStart?: number; selectionEnd?: number } {
@@ -109,6 +111,7 @@ export function MessageActions({
   selectionEligible = false,
   onEnterSelection,
   onToggleSelection,
+  forwardingDisabled = false,
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -285,6 +288,26 @@ export function MessageActions({
 
   const handleSelectionForward = useCallback(
     (action: TextSelectionAction, comment: string) => {
+      if (action.sourceKind === 'cli_output') {
+        if (!action.sourceSegmentId || action.selectionStart === undefined || action.selectionEnd === undefined) {
+          return;
+        }
+        setForwardSelection({
+          items: [
+            {
+              kind: 'cli_quote',
+              messageId: message.id,
+              sourceMessageIds: message.projectionSourceMessageIds ?? [message.id],
+              segmentId: action.sourceSegmentId,
+              text: action.text,
+              selectionStart: action.selectionStart,
+              selectionEnd: action.selectionEnd,
+              ...(comment ? { comment } : {}),
+            },
+          ],
+        });
+        return;
+      }
       if (action.sourceKind !== 'message') return;
       setForwardSelection({
         items: [
@@ -298,7 +321,7 @@ export function MessageActions({
         ],
       });
     },
-    [message.id],
+    [message.id, message.projectionSourceMessageIds],
   );
 
   const updateAnnotation = useCallback(
@@ -389,9 +412,17 @@ export function MessageActions({
           resetKey={message.id}
           positionMode="fixed"
           actionTestId="message-selection-add-to-chat"
+          triggerContent="引用…"
+          triggerClassName="fixed z-[70] flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
           onSave={handleSelectionAddToChat}
-          onForward={handleSelectionForward}
-          canForward={(action) => action.sourceKind === 'message'}
+          onForward={forwardingDisabled ? undefined : handleSelectionForward}
+          canForward={(action) =>
+            action.sourceKind === 'message' ||
+            (action.sourceKind === 'cli_output' &&
+              Boolean(action.sourceSegmentId) &&
+              action.selectionStart !== undefined &&
+              action.selectionEnd !== undefined)
+          }
         />
       )}
 
@@ -551,9 +582,10 @@ export function MessageActions({
           document.body,
         )}
 
-      {forwardSelection !== null && (
+      {forwardSelection !== null && !forwardingDisabled && (
         <TransferTargetPicker
           open
+          admissionBlocked={forwardingDisabled}
           sourceThreadId={threadId}
           items={forwardSelection.items}
           onClose={() => setForwardSelection(null)}

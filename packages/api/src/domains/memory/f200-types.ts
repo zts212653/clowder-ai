@@ -7,8 +7,16 @@ export type RecallToolName = 'search_evidence' | 'graph_resolve' | 'list_recent'
 export type RecallSource = 'pull' | 'push';
 export type PushRecallSurface = 'session_bootstrap' | 'cold_context';
 
+/**
+ * F296 AC-A1: how a push-recall surface actually presented its candidates.
+ * `pointer` = only a content-free retrieval entry reached the model;
+ * `body` = candidate titles/snippets were injected as prompt content.
+ */
+export type PushRecallPresentationKind = 'pointer' | 'body';
+
 export interface PushRecallPresentation {
   surface: PushRecallSurface;
+  presentationKind: PushRecallPresentationKind;
   query: string;
   scope: string;
   timestamp: number;
@@ -66,6 +74,9 @@ export interface RecallEvent {
   toolName: RecallToolName;
   source: RecallSource;
   pushSurface?: PushRecallSurface;
+  /** F296 AC-A1: only a candidate body counts as presented; a content-free
+   * pointer is traced with presented=false plus presentationKind='pointer'. */
+  presentationKind?: PushRecallPresentationKind;
   presented: boolean;
   inspected: boolean;
   outcome: 'used' | 'ignored';

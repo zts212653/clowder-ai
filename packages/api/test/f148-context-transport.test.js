@@ -9,7 +9,6 @@ import {
   detectRecentBurst,
   formatAnchors,
   formatTombstone,
-  recallEvidence,
   recallEvidenceWithProvenance,
   scoreImportance,
   scrubToolPayloads,
@@ -439,9 +438,9 @@ describe('F263: stripStructuralEnvelope', () => {
   });
 });
 
-// --- recallEvidence Tests ---
+// --- recallEvidenceWithProvenance Tests ---
 
-describe('F148: recallEvidence', () => {
+describe('F148: recallEvidenceWithProvenance', () => {
   const config = { ...DEFAULT_HIERARCHICAL_CONTEXT };
 
   /** Mock evidence store */
@@ -472,9 +471,13 @@ describe('F148: recallEvidence', () => {
 
     resetSeq();
     const recentMsgs = makeMsgSequence(2);
-    const results = await recallEvidence(store, 'Redis Thread', 'How do we handle Redis?', recentMsgs, config);
+    const results = (
+      await recallEvidenceWithProvenance(store, 'Redis Thread', 'How do we handle Redis?', recentMsgs, config)
+    ).candidates;
     assert.ok(results.length > 0);
     assert.ok(results.length <= config.maxEvidenceHits);
+    // F296 AC-A1: producer returns coordinates only.
+    assert.ok(!JSON.stringify(results).includes('Redis Config Decision'));
   });
 
   it('does not opt automatic cold-mention recall into pull-only candidates', async () => {
@@ -486,11 +489,11 @@ describe('F148: recallEvidence', () => {
       },
     };
 
-    await recallEvidence(store, 'Memory', 'reflection candidate', [], config);
+    await recallEvidenceWithProvenance(store, 'Memory', 'reflection candidate', [], config);
     assert.notEqual(receivedOptions.includePullOnly, true);
   });
 
-  it('F263 returns a drill pointer and structured push candidate for every evidence line', async () => {
+  it('F263/F296 returns a content-free push candidate for every hit', async () => {
     const store = {
       search: async () => [
         {
@@ -504,9 +507,9 @@ describe('F148: recallEvidence', () => {
     };
 
     const result = await recallEvidenceWithProvenance(store, 'Memory', 'telemetry', [], config);
-    assert.equal(result.evidence.length, 1);
-    assert.match(result.evidence[0].line, /provenance: anchor=F263; sourcePath=docs\/features\/F263/);
-    assert.deepEqual(result.evidence[0].candidate, {
+    assert.equal(result.candidates.length, 1);
+    assert.ok(!JSON.stringify(result).includes('Memory lifecycle repair'), 'title must not survive the producer');
+    assert.deepEqual(result.candidates[0], {
       anchor: 'F263',
       rank: 0,
       sourcePath: 'docs/features/F263-memory-lifecycle-repair-and-metrics.md',
@@ -516,8 +519,8 @@ describe('F148: recallEvidence', () => {
 
   it('returns empty array when no evidenceStore', async () => {
     resetSeq();
-    const results = await recallEvidence(undefined, 'Thread', 'test', makeMsgSequence(1), config);
-    assert.deepEqual(results, []);
+    const result = await recallEvidenceWithProvenance(undefined, 'Thread', 'test', makeMsgSequence(1), config);
+    assert.deepEqual(result.candidates, []);
   });
 
   it('returns empty array on timeout (fail-open)', async () => {
@@ -535,8 +538,8 @@ describe('F148: recallEvidence', () => {
 
     resetSeq();
     const shortConfig = { ...config, evidenceRecallTimeoutMs: 50 }; // 50ms timeout
-    const results = await recallEvidence(slowStore, 'Thread', 'test', makeMsgSequence(1), shortConfig);
-    assert.deepEqual(results, []);
+    const result = await recallEvidenceWithProvenance(slowStore, 'Thread', 'test', makeMsgSequence(1), shortConfig);
+    assert.deepEqual(result.candidates, []);
   });
 
   it('returns empty array on store error (fail-open)', async () => {
@@ -552,8 +555,8 @@ describe('F148: recallEvidence', () => {
     };
 
     resetSeq();
-    const results = await recallEvidence(errorStore, 'Thread', 'test', makeMsgSequence(1), config);
-    assert.deepEqual(results, []);
+    const result = await recallEvidenceWithProvenance(errorStore, 'Thread', 'test', makeMsgSequence(1), config);
+    assert.deepEqual(result.candidates, []);
   });
   it('F263 RED: query captures semantic content past structural envelope prefix', async () => {
     // Simulate a trigger message where the semantic term "billing-only" appears
@@ -936,7 +939,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
       burst: { count: 8, from: 2000, to: 3000 },
       anchorIds: ['msg-5', 'msg-10'],
       threadMemory: { available: true, sessionsIncorporated: 3 },
-      retrievalHints: ['Ask about Redis config decisions'],
+      recallPointer: { candidateCount: 1 },
       semanticSearchTerms: ['redis config'],
     });
     assert.equal(map.omitted.count, 22);
@@ -948,7 +951,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
     assert.equal(map.burst.timeRange.to, 3000);
     assert.deepStrictEqual(map.anchorIds, ['msg-5', 'msg-10']);
     assert.deepStrictEqual(map.threadMemory, { available: true, sessionsIncorporated: 3 });
-    assert.deepStrictEqual(map.retrievalHints, ['Ask about Redis config decisions']);
+    assert.deepStrictEqual(map.recallPointer, { candidateCount: 1 });
     assert.deepStrictEqual(map.semanticSearchTerms, ['redis config']);
   });
 
@@ -958,7 +961,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
       burst: { count: 5, from: 1000, to: 2000 },
       anchorIds: [],
       threadMemory: null,
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     });
     assert.equal(map.omitted.count, 0);
     assert.equal(map.anchorIds.length, 0);
@@ -971,7 +974,7 @@ describe('Phase D: buildCoverageMap (AC-D2)', () => {
       burst: { count: 3, from: 2000, to: 3000 },
       anchorIds: ['msg-1'],
       threadMemory: { available: true, sessionsIncorporated: 1 },
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     });
     const json = JSON.stringify(map);
     const parsed = JSON.parse(json);

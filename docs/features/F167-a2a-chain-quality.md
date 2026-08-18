@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-14
+updated: 2026-08-15
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -69,6 +69,19 @@ cross-thread carrier may disposition only when the stored trigger has canonical 
 source cat, target holder, target thread, and current invocation. Same-thread self mentions and missing
 or same-thread provenance remain fail-closed. Here “cross-thread attempt” means an auth/source thread
 mismatch, not a valid server-authored cross-post carrier stored in its target thread.
+
+2026-08-15 replacement-provenance clarification: an ordinary A2A Queue row is only a carrier for its
+exact persisted `ball.handed`. Queue admission reuses the disposition service's source/event fence and
+retires a carrier before provider start when a later state-changing event involving the target cat has
+already replaced that handoff. If replacement races after provider start, the disposition rejection
+includes the latest verified successor event plus same-thread `sourceMessageId` and coordination when
+available. Message metadata is exposed only after the event-derived message resolves back to the same
+thread, sender, and target; forged or foreign-thread metadata remains hidden. Durable Queue custody must
+terminalize before the stale row is consumed; failure retains the row and does not start an invocation.
+A coalesced Queue row carries multiple source messages and may retire only when every carried handoff is
+replaced; one live successor keeps the combined body executable. Successor message lookup is optional
+enrichment: store failure removes only the pointer/coordination fields and cannot erase the event-derived
+replacement verdict or reopen a stale provider invocation.
 
 This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
 

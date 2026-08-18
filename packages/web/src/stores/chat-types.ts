@@ -255,6 +255,8 @@ export interface SystemInfoProjection {
 
 export interface ChatMessage {
   id: string;
+  /** Client-only exact persisted records folded into this canonical bubble. */
+  projectionSourceMessageIds?: string[];
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
   /** Visual variant for system messages */
   variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
@@ -815,6 +817,17 @@ export interface ThreadState {
   workspaceOpenFilePath: string | null;
   /** F063: Scroll-to line per thread */
   workspaceOpenFileLine: number | null;
+  /** F284 × F120: active Workspace surface per thread (browser preview survives
+   * thread switches instead of leaking or vanishing). Optional for fixture
+   * compatibility; restore falls back to 'home'. */
+  workspaceSurface?: WorkspaceSurface;
+  /** F284 × F120: browser preview target (port/path) per thread */
+  workspacePreview?: WorkspacePreviewState;
+  /** F284 × F120: right panel visibility mode per thread */
+  rightPanelMode?: 'status' | 'workspace' | 'transcript';
+  /** F284 × F120 review P1: right panel open/closed per thread — orthogonal to
+   * mode (a visible Status panel ≠ folded). Restore falls back to closed. */
+  rightPanelOpen?: boolean;
 }
 
 /** F284: the object currently occupying the Workspace viewport.
@@ -903,4 +916,8 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceSurface: 'home',
+  workspacePreview: { port: undefined, path: '/' },
+  rightPanelMode: 'status',
+  rightPanelOpen: false,
 };

@@ -172,6 +172,14 @@ export interface HoldDispositionEventInput {
   sourceMessageId: string;
   taskId: string;
   disposition: ManagedHoldDisposition;
+  /**
+   * clowder-ai#1366: the exact wake reached a terminal, but it is no longer the
+   * subject's live wake (superseded, or its command carrier already terminal).
+   * The per-wake terminal is still durable so the F167 stop gate can recognize
+   * it; the subject-level projection must NOT advance to `resolved`, otherwise
+   * settling an old wake would silently kill a newer active hold.
+   */
+  retired?: boolean;
   at: number;
 }
 
@@ -196,6 +204,7 @@ export function buildHoldDispositionEvent(input: HoldDispositionEventInput): Bal
       sourceMessageId: input.sourceMessageId,
       taskId: input.taskId,
       disposition: input.disposition,
+      ...(input.retired ? { retired: true } : {}),
     },
     at: input.at,
   };

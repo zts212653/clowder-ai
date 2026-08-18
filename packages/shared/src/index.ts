@@ -17,6 +17,7 @@ export * from './capability-tip-telemetry.js';
 export * from './capability-tips.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
+export * from './cli-tool-label.js';
 // F291: OAuth Codex Standard/Fast semantic contract
 export * from './codex-speed.js';
 // Export command parser + core commands (F142 Phase B)
@@ -38,6 +39,8 @@ export { CORE_COMMANDS } from './core-commands.js';
 export * from './eval-metric-ref.js';
 // First-party WebSocket Stop intent contract (API + Web single source).
 export * from './explicit-stop-intent.js';
+// Browser Preview Gateway request identity shared by API and Web.
+export * from './preview-gateway.js';
 // Export recall-result sidecar contract (producer → parser → persistence → UI)
 export * from './recall-outcome.js';
 // Dossier profile parser: import from '@cat-cafe/shared/dossier' (F208 KD-10)

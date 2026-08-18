@@ -252,6 +252,7 @@ describe('POST /api/messages deliveryMode', () => {
         idempotencyKey: '22222222-2222-4222-8222-222222222222',
         messageBundle: {
           sourceThreadId: 'source-thread',
+          note: 'please focus on the source decision',
           items: [{ kind: 'message', messageId: 'source-message-1' }],
           targetCats: ['opus'],
         },
@@ -267,6 +268,7 @@ describe('POST /api/messages deliveryMode', () => {
     assert.deepEqual(initialAppend.extra.messageBundle, {
       v: 1,
       sourceThreadId: 'source-thread',
+      note: 'please focus on the source decision',
       items: [{ kind: 'message', messageId: 'source-message-1' }],
     });
     assert.equal(initialAppend.content.includes(sourceBody), false, 'durable summary must not copy source bodies');
@@ -278,6 +280,7 @@ describe('POST /api/messages deliveryMode', () => {
     assert.match(prompt, /Source thread: "Source Thread" \(source-thread\)/);
     assert.match(prompt, /Source author: cat:@opus/);
     assert.match(prompt, /Source message ref: source-message-1/);
+    assert.match(prompt, /Bundle note by user:user-1:\nplease focus on the source decision/);
     assert.match(prompt, /private source body must never enter the durable target summary/);
     const routeOptions = deps.router.routeExecution.mock.calls[0].arguments[6];
     assert.deepEqual(routeOptions.persistedPromptMessageIds, [initialAppend.id ?? JSON.parse(res.body).userMessageId]);

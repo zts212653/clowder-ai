@@ -23,7 +23,7 @@ type RecallStore = Pick<
 >;
 
 export type PersonMemoryRecallResult =
-  | { status: 'resolved'; card: RelationshipCard }
+  | { status: 'resolved'; card: RelationshipCard; asOf: number }
   | { status: 'ambiguous'; candidates: Array<{ personId: string; displayName: string }> }
   | { status: 'not_available' };
 
@@ -88,6 +88,23 @@ function latestActiveEvent(events: InteractionEvent[]): InteractionEvent | undef
   return events
     .filter((event) => event.status === 'active')
     .sort((left, right) => right.recordedAt - left.recordedAt)[0];
+}
+
+function relationshipCardAsOf(
+  person: PersonIdentity,
+  claims: readonly PersonClaimVersion[],
+  relationships: readonly PersonRelationship[],
+  events: readonly InteractionEvent[],
+): number {
+  return Math.max(
+    person.createdAt,
+    ...claims.map((claim) => claim.recordedAt),
+    ...relationships.flatMap((relationship) => [
+      relationship.createdAt,
+      ...relationship.transitions.map((transition) => transition.recordedAt),
+    ]),
+    ...events.map((event) => event.recordedAt),
+  );
 }
 
 function uniqueSourceRefs(
@@ -225,6 +242,7 @@ export class PersonMemoryRecallService {
     if (!relationship) return { status: 'not_available' };
     return {
       status: 'resolved',
+      asOf: relationshipCardAsOf(person, claims, relationships, events),
       card: boundedRelationshipCard({
         personId: person.personId,
         displayName: person.displayName,

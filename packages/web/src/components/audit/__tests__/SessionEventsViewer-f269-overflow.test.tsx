@@ -211,6 +211,7 @@ describe('SessionEventsViewer F269 recovery contracts', () => {
 
     expect(container.textContent).toContain('hello');
     expect(container.textContent).toContain('Refreshing...');
+    expect(container.textContent).toContain('条事件');
     expect(container.textContent).not.toContain('NaN');
 
     await act(async () => {
@@ -220,6 +221,7 @@ describe('SessionEventsViewer F269 recovery contracts', () => {
     });
 
     expect(container.textContent).toContain('inv-1');
+    expect(container.textContent).toContain('条事件');
     expect(container.textContent).not.toContain('hello');
   });
 

@@ -371,14 +371,21 @@ describe('F167 × F254 managed hold disposition', () => {
       }),
     );
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => error instanceof ManagedHoldDispositionError && error.code === 'managed_hold_disposition_replaced',
+    // clowder-ai#1366 contract change: a replaced wake used to be a bare 409 with
+    // NO custody event, which left the F167 stop gate with nothing to recognize
+    // and made it reinject the same wake forever. It now reaches a durable
+    // *retired* terminal that is inert on the subject plane.
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.retired, true);
+    const dispositioned = (await h.eventLog.read('ball:thread:thread-1')).filter(
+      (event) => event.kind === 'ball.hold_dispositioned',
     );
-    assert.equal(
-      (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
-      false,
-    );
+    assert.equal(dispositioned.length, 1);
+    assert.equal(dispositioned[0].payload.retired, true);
+    // The replacement holder keeps the ball; retiring the old wake must not resolve it.
+    const projection = await h.projectionStore.get('ball:thread:thread-1');
+    assert.equal(projection.holder, 'codex-sol');
+    assert.notEqual(projection.state, 'resolved');
   });
 
   test('only the fenced producer writes one receipt + terminal event and releases the real stop gate', async () => {
@@ -579,10 +586,11 @@ describe('F167 × F254 managed hold disposition', () => {
       (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
       false,
     );
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => error instanceof ManagedHoldDispositionError && error.code === 'managed_hold_disposition_replaced',
-    );
-    assert.deepEqual(h.messageStore.getById(h.stored.id).queueCustody.handledByCatIds, []);
+    // clowder-ai#1366: the re-held ball is a *newer* obligation. Retiring the old
+    // wake gives it a terminal without advancing the new hold to resolved.
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.retired, true);
+    assert.equal((await h.projectionStore.get('ball:thread:thread-1')).heldUntil, 199_000);
+    assert.notEqual((await h.projectionStore.get('ball:thread:thread-1')).state, 'resolved');
   });
 });

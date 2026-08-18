@@ -113,4 +113,26 @@ describe('K-2B Host Broker handshake', () => {
     assert.equal(snapshot.runtimeLeases[0].state, 'closed');
     assert.equal((await inventory.snapshot()).instances[0].runtimeState, 'stopped');
   });
+
+  it('renews only a live exact-authority runtime lease and never revives an expired lease', async () => {
+    const { connection, setNow, store } = await harness();
+    const binding = await connection.hello(candidateHello());
+    await connection.ready({ bindingNonce: binding.bindingNonce });
+    assert.equal((await store.snapshot()).runtimeLeases[0].expiresAt, 15_000);
+
+    setNow(9_000);
+    assert.equal(await connection.renewRuntimeLease(), 19_000);
+    let snapshot = await store.snapshot();
+    assert.equal(snapshot.sessions[0].activeLeaseExpiresAt, 19_000);
+    assert.equal(snapshot.runtimeLeases[0].expiresAt, 19_000);
+
+    setNow(19_000);
+    await assert.rejects(
+      connection.renewRuntimeLease(),
+      (error) => error instanceof HostBrokerError && error.code === 'SESSION_NOT_ACTIVE',
+    );
+    snapshot = await store.snapshot();
+    assert.equal(snapshot.sessions[0].phase, 'closed');
+    assert.equal(snapshot.runtimeLeases[0].state, 'closed');
+  });
 });

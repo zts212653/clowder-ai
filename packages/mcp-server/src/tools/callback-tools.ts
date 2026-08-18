@@ -3898,7 +3898,8 @@ export const callbackTools = [
       'NOT for: user turns, managed holds, unfinished work, re-hold, event wait, transfer, or unrelated task completion. ' +
       'Output: terminalizes the exact F167 dispatch ball; the server derives and fences threadId, holderCatId, fromCatId, invocationId, and sourceMessageId. ' +
       'GOTCHA: command exit, tests, merge truth, another coordination terminal, or ACK never substitute for this producer, ' +
-      'and the caller cannot select or close another subject.',
+      'and the caller cannot select or close another subject. If replaced, the error names the latest verified same-thread successor ' +
+      'event and any source message or coordination.',
     inputSchema: {
       disposition: z
         .enum(['handled', 'completed'])

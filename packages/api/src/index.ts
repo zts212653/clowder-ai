@@ -37,6 +37,7 @@ import { getCatModel } from './config/cat-models.js';
 import { resolveCodexCarrierTruth } from './config/codex-cli.js';
 import { configEventBus } from './config/config-event-bus.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
+import { resolveRuntimeDeploymentRevision } from './config/runtime-deployment-revision.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { ApprovalIngress } from './domains/approval-hub/ApprovalIngress.js';
@@ -435,6 +436,7 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   if (!privateUserId) throw new Error('[api] CAT_CAFE_USER_ID must not be blank');
+  const runtimeDeploymentRevision = resolveRuntimeDeploymentRevision(process.env.CAT_CAFE_RUNTIME_ROOT);
 
   if (isDebugMode) {
     app.log.info({ logDir: LOG_DIR_PATH }, '[api] Debug mode enabled (--debug flag)');
@@ -470,7 +472,11 @@ async function main(): Promise<void> {
 
   // Health check. Keep root paths for direct API access and expose /api/*
   // aliases for same-origin reverse-proxy deployments.
-  const healthHandler = async () => ({ status: 'ok' as const, timestamp: Date.now() });
+  const healthHandler = async () => ({
+    status: 'ok' as const,
+    timestamp: Date.now(),
+    deploymentRevision: runtimeDeploymentRevision,
+  });
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
@@ -2164,6 +2170,7 @@ async function main(): Promise<void> {
       ballCustodyEventLog,
       ballCustodyProjectionStore,
       ballCustody: ballCustodyIngest,
+      log: app.log,
       ...(ballCustodyProjector
         ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
         : {}),
@@ -2313,6 +2320,7 @@ async function main(): Promise<void> {
     sessionContinuationCoordinator,
     freshnessEventLog,
     freshnessClosureStore,
+    ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
     deliveryCursorStore,
   });
@@ -4084,6 +4092,15 @@ async function main(): Promise<void> {
   } = await import('./domains/signal-intake/index.js');
   const meetingIntakeStore = redis ? new RedisMeetingIntakeStore(redis) : new MemoryMeetingIntakeStore();
   const signalRouteStore = redis ? new RedisSignalRouteStore(redis) : new MemorySignalRouteStore();
+  const { ensureOfficialPluginSignalRoutes } = await import('./domains/plugin/official-signal-routes.js');
+  const officialSignalRouteBootstrap = await ensureOfficialPluginSignalRoutes({
+    routes: signalRouteStore,
+    ownerId: privateUserId,
+  });
+  app.log.info(
+    `[api] official plugin Host routes ready ` +
+      `(created=${officialSignalRouteBootstrap.created}, preserved=${officialSignalRouteBootstrap.preserved})`,
+  );
   const { createDormantPluginRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
   const externalPluginRuntime = createDormantPluginRuntimeComposition({
     projectRoot: resolveActiveProjectRoot(),
@@ -4101,16 +4118,42 @@ async function main(): Promise<void> {
     await officialPluginAuth.shutdown();
     await externalPluginRuntime.shutdown('api_shutdown');
   });
+  const { OFFICIAL_PLUGIN_POLICIES } = await import('./domains/plugin/official-catalog.js');
+  const { RefreshingOfficialPluginCatalog } = await import('./domains/plugin/official-catalog-provider.js');
   const { OfficialPluginPackageInstaller } = await import('./domains/plugin/official-package-installer.js');
+  const { OfficialPluginHistoryImportService } = await import('./domains/plugin/official-plugin-history-import.js');
+  const { createLarkCliFeishuArtifactInspector, normalizeGeneratedArtifact, parseFeishuMinutesReference } =
+    await import('@clowder-ai/feishu-meeting-intake');
   const { registerOfficialPluginRoutes } = await import('./routes/plugin-official-routes.js');
+  const officialPluginCatalog = new RefreshingOfficialPluginCatalog({ policies: OFFICIAL_PLUGIN_POLICIES });
+  const officialPluginHistoryImport = new OfficialPluginHistoryImportService({
+    inventory: externalPluginRuntime.inventoryStore,
+    broker: externalPluginRuntime.broker,
+    parseReference: (reference) => {
+      const locator = parseFeishuMinutesReference(reference);
+      if (locator.kind !== 'minute') {
+        throw new TypeError('Historical import only accepts Feishu Minutes references');
+      }
+      return {
+        artifactId: locator.artifactId,
+        kind: 'minute' as const,
+        ...(locator.revision === undefined ? {} : { revision: locator.revision }),
+      };
+    },
+    inspectArtifact: createLarkCliFeishuArtifactInspector({ homeDirectory: homedir() }),
+    normalizeArtifact: normalizeGeneratedArtifact,
+  });
   registerOfficialPluginRoutes(app, {
     inventory: externalPluginRuntime.inventoryStore,
     lifecycle: externalPluginRuntime.lifecycle,
     auth: officialPluginAuth,
+    catalogProvider: officialPluginCatalog,
     installer: new OfficialPluginPackageInstaller({
       inventory: externalPluginRuntime.inventory,
       packagesRoot: externalPluginRuntime.paths.packagesRoot,
+      catalogProvider: officialPluginCatalog,
     }),
+    historyImport: officialPluginHistoryImport,
   });
 
   // F246: Approval Hub — unified operator approval center, including F292 event-origin intake.
@@ -4777,6 +4820,11 @@ async function main(): Promise<void> {
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);
     },
+    socketEmitWithAck: async (event, data, room) =>
+      socketManager ? socketManager.broadcastToRoomWithAck(room, event, data) : [],
+    callbackRegistry: registry,
+    agentKeyRegistry,
+    threadStore,
   });
   await app.register(avatarsRoutes);
   await app.register(skillsRoutes);

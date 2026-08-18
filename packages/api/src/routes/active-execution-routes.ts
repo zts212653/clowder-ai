@@ -49,6 +49,19 @@ function unresolvedExecutionId(threadId: string, candidate: LiveExecutionCandida
   return `unresolved:${threadId}:${candidate.catId}:${candidate.startedAt}`;
 }
 
+/**
+ * Occupancy identity for a run this viewer does not own.
+ *
+ * The real `task.id` is a capability handle, not just a label: it resolves at
+ * `GET/DELETE /api/callbacks/hold-ball/:taskId`, whose authorization is
+ * thread-scoped rather than principal-scoped. Publishing it would have turned a
+ * foreign scheduler round into a discoverable read-and-cancel handle, so foreign
+ * rows carry a stable but deliberately unresolvable id instead.
+ */
+function foreignOccupancyExecutionId(threadId: string, catId: string, startedAt: number): string {
+  return `occupied:${threadId}:${catId}:${startedAt}`;
+}
+
 function projectLiveExecution(
   thread: Thread,
   userId: string,
@@ -106,25 +119,29 @@ function projectManagedCommandExecution(
     command.state !== 'command_running' ||
     !threadId ||
     typeof triggerUserId !== 'string' ||
-    triggerUserId !== userId ||
     !catId ||
     (!active && !isRetiredWakeWithRunningManagedCommand(task))
   ) {
     return null;
   }
+  // Thread access is the visibility boundary (threadById only holds threads this
+  // user may read). Trigger ownership decides whether the run can be STOPPED, not
+  // whether it can be SEEN: filtering a scheduler-owned round out of the list made
+  // an occupied cat slot look idle, so work queued behind an invisible occupant.
+  // The projection carries no command text, so occupancy leaks nothing further.
   const thread = threadById.get(threadId);
   if (!thread) return null;
+  const ownedByViewer = triggerUserId === userId;
   return {
-    executionId: task.id,
+    executionId: ownedByViewer ? task.id : foreignOccupancyExecutionId(thread.id, catId, command.startedAt),
     threadId: thread.id,
     threadTitle: thread.title,
     catId,
     kind: 'managed_command',
     startedAt: command.startedAt,
-    cancelability: {
-      state: 'cancelable',
-      target: { kind: 'managed_command', taskId: task.id },
-    },
+    cancelability: ownedByViewer
+      ? { state: 'cancelable', target: { kind: 'managed_command', taskId: task.id } }
+      : { state: 'not_cancelable', reason: 'foreign_principal' },
   };
 }
 

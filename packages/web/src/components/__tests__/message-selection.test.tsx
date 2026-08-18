@@ -260,6 +260,7 @@ describe('MessageSelectionToolbar', () => {
       selectedMessageIds: ['message-1', 'message-2'],
       onCancel: vi.fn(),
       onExportSuccess: vi.fn(),
+      forwardingDisabled: false,
       ...overrides,
     };
     React.act(() => root.render(<MessageSelectionToolbar {...props} />));
@@ -343,6 +344,26 @@ describe('MessageSelectionToolbar', () => {
       }),
     });
     expect(button('转发').disabled).toBe(true);
+  });
+
+  it('keeps exports usable but disables forwarding until the browser document is admitted', () => {
+    const onForward = vi.fn();
+    renderToolbar({ onForward, forwardingDisabled: true });
+
+    expect(button('文档').disabled).toBe(false);
+    expect(button('文本').disabled).toBe(false);
+    expect(button('长图').disabled).toBe(false);
+    expect(button('转发').disabled).toBe(true);
+    expect(button('取消').disabled).toBe(false);
+    expect(button('转发').title).toBe('正在验证页面版本，暂不可转发');
+
+    React.act(() => button('转发').click());
+    expect(onForward).not.toHaveBeenCalled();
+
+    renderToolbar({ onForward, forwardingDisabled: false });
+    expect(button('转发').disabled).toBe(false);
+    React.act(() => button('转发').click());
+    expect(onForward).toHaveBeenCalledOnce();
   });
 
   it('cancels without issuing an export request', () => {

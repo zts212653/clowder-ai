@@ -4,10 +4,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { classifyStatusChecks, observeMergePrTruth } from './lib/clowder-merge-check-evidence.mjs';
+
 export const CLOWDER_REPOSITORY = 'zts212653/clowder-ai';
 const CAFE_MESSAGE_ID = /^\d{16,}-\d{6}-[0-9a-f]{8}$/i;
-const PASSING_CHECK_RESULTS = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
-const PENDING_CHECK_RESULTS = new Set(['PENDING', 'EXPECTED', 'QUEUED', 'IN_PROGRESS', 'WAITING']);
 
 function blocked(reasonCode, nextAction, requiresNewAuthorization, detail) {
   return {
@@ -23,23 +23,6 @@ function blocked(reasonCode, nextAction, requiresNewAuthorization, detail) {
 
 function canonicalSubjectRef(repository, prNumber) {
   return `pr:${repository.toLowerCase()}#${prNumber}`;
-}
-
-function classifyStatusChecks(statusCheckRollup) {
-  if (!Array.isArray(statusCheckRollup) || statusCheckRollup.length === 0) return 'unavailable';
-
-  let sawPending = false;
-  for (const check of statusCheckRollup) {
-    const result = String(check?.conclusion ?? check?.state ?? check?.status ?? '').toUpperCase();
-    const status = String(check?.status ?? '').toUpperCase();
-    if (PASSING_CHECK_RESULTS.has(result)) continue;
-    if (PENDING_CHECK_RESULTS.has(result) || (status && status !== 'COMPLETED')) {
-      sawPending = true;
-      continue;
-    }
-    return 'failed';
-  }
-  return sawPending ? 'pending' : 'passed';
 }
 
 function validateInvocation(repository, prNumber, expectedHead) {
@@ -113,7 +96,7 @@ function validateAuthorization(authorization, expectedSubject, expectedHead) {
   );
 }
 
-function validatePrTruth(prTruth, expectedHead) {
+function validatePrTruth(prTruth, expectedHead, statusCheckObservation) {
   if (prTruth?.state !== 'OPEN') {
     return blocked(
       'pr_not_open',
@@ -147,7 +130,7 @@ function validatePrTruth(prTruth, expectedHead) {
     );
   }
 
-  const checks = classifyStatusChecks(prTruth.statusCheckRollup);
+  const checks = classifyStatusChecks(prTruth.statusCheckRollup, statusCheckObservation, expectedHead);
   if (checks === 'unavailable') {
     return blocked(
       'checks_unavailable',
@@ -183,7 +166,14 @@ function validatePrTruth(prTruth, expectedHead) {
  * a pull-request-scoped grant survives HEAD changes, an exact-HEAD grant does
  * not, and clowder-ai always uses the repository-required admin transport.
  */
-export function planClowderMergeExecution({ repository, prNumber, expectedHead, prTruth, authorization }) {
+export function planClowderMergeExecution({
+  repository,
+  prNumber,
+  expectedHead,
+  prTruth,
+  statusCheckObservation,
+  authorization,
+}) {
   const invocation = validateInvocation(repository, prNumber, expectedHead);
   if (invocation.outcome === 'blocked') return invocation;
 
@@ -193,7 +183,7 @@ export function planClowderMergeExecution({ repository, prNumber, expectedHead, 
   const authorizationKey = `merge:${expectedSubject}:${authorization.sourceMessageId}`;
   const subjectFreshnessKey = `head:${expectedHead}`;
 
-  const prTruthBlock = validatePrTruth(prTruth, expectedHead);
+  const prTruthBlock = validatePrTruth(prTruth, expectedHead, statusCheckObservation);
   if (prTruthBlock) {
     return {
       ...prTruthBlock,
@@ -281,7 +271,7 @@ function usage() {
   );
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const prNumber = Number(args.pr);
   if (
@@ -296,8 +286,13 @@ function main() {
   }
 
   let prTruth;
+  let statusCheckObservation = null;
   try {
-    prTruth = readPrTruth(prNumber);
+    if (process.env.CAT_CAFE_CLOWDER_MERGE_PR_FIXTURE) {
+      prTruth = readPrTruth(prNumber);
+    } else {
+      ({ prTruth, statusCheckObservation } = await observeMergePrTruth(prNumber, { readPrTruth }));
+    }
   } catch (error) {
     const result = blocked(
       'pr_truth_unavailable',
@@ -314,6 +309,7 @@ function main() {
     prNumber,
     expectedHead: args.head,
     prTruth,
+    statusCheckObservation,
     authorization: {
       sourceMessageId: args['authorization-ref'],
       subjectRef: args['authorization-subject'],
@@ -331,5 +327,8 @@ function main() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main();
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

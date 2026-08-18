@@ -27,24 +27,32 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
   if (execution.cancelability.state !== 'cancelable') {
     throw new Error('This execution is not cancelable');
   }
+  const executionStore = useActiveExecutionStore.getState();
+  if (!executionStore.beginCancellation(execution)) return;
   const target = execution.cancelability.target;
-  const response =
-    target.kind === 'live_invocation'
-      ? await apiFetch(
-          `/api/threads/${encodeURIComponent(target.threadId)}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ catId: target.catId }),
-          },
-        )
-      : await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(target.taskId)}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(detail?.error ?? `Cancel failed (${response.status})`);
+  try {
+    const response =
+      target.kind === 'live_invocation'
+        ? await apiFetch(
+            `/api/threads/${encodeURIComponent(target.threadId)}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ catId: target.catId }),
+            },
+          )
+        : await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(target.taskId)}`, { method: 'DELETE' });
+    if (!response.ok && response.status !== 409) {
+      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(detail?.error ?? `Cancel failed (${response.status})`);
+    }
+    useActiveExecutionStore.getState().settleCancellation(execution);
+    const anchorThreadId = useActiveExecutionStore.getState().anchorThreadId;
+    if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId);
+  } catch (error) {
+    useActiveExecutionStore.getState().releaseCancellation(execution);
+    throw error;
   }
-  const anchorThreadId = useActiveExecutionStore.getState().anchorThreadId;
-  if (anchorThreadId) await refreshActiveExecutionProjection(anchorThreadId);
 }
 
 /**

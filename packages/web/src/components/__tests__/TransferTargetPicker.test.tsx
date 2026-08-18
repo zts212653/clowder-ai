@@ -65,6 +65,7 @@ describe('TransferTargetPicker', () => {
       root.render(
         <TransferTargetPicker
           open
+          admissionBlocked={false}
           sourceThreadId="source-thread"
           items={[{ kind: 'message', messageId: 'source-message-1' }]}
           onClose={onClose}
@@ -87,6 +88,11 @@ describe('TransferTargetPicker', () => {
     React.act(() => bodyButton('Target').click());
     React.act(() => bodyButton(catLabel).click());
     await Promise.resolve();
+  }
+
+  function setTextAreaValue(textarea: HTMLTextAreaElement, value: string) {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, value);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   it('uses a mobile bottom sheet, exact thread/cat choices, and a success toast with target Bundle action', async () => {
@@ -114,6 +120,24 @@ describe('TransferTargetPicker', () => {
       threadId: 'target-thread',
       messageId: 'bundle-target-1',
     });
+  });
+
+  it('renders no writable surface when browser-document admission is blocked', () => {
+    React.act(() => {
+      root.render(
+        <TransferTargetPicker
+          open
+          admissionBlocked
+          sourceThreadId="source-thread"
+          items={[{ kind: 'message', messageId: 'source-message-1' }]}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      );
+    });
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(mocks.apiFetch).not.toHaveBeenCalled();
   });
 
   it('searches target threads by title before choosing a destination', () => {
@@ -169,6 +193,56 @@ describe('TransferTargetPicker', () => {
     const second = JSON.parse(mocks.apiFetch.mock.calls[1][1].body);
     expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
     expect(second.messageBundle.targetCats).toEqual(['codex', 'opus']);
+  });
+
+  it('keeps a bundle-level note after failure and rotates the retry key when that note changes', async () => {
+    mocks.apiFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'temporary' }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messageBundleId: 'bundle-note' }), { status: 200 }));
+    renderPicker();
+    await chooseTargetAndCat();
+    const note = document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="转发留言（可选）"]');
+    expect(note).not.toBeNull();
+    if (!note) throw new Error('note textarea did not render');
+    React.act(() => setTextAreaValue(note, 'first reason'));
+
+    await React.act(async () => bodyButton('转发 1 条消息').click());
+    expect(note.value).toBe('first reason');
+    React.act(() => setTextAreaValue(note, 'changed reason'));
+    await React.act(async () => bodyButton('转发 1 条消息').click());
+
+    const first = JSON.parse(mocks.apiFetch.mock.calls[0][1].body);
+    const second = JSON.parse(mocks.apiFetch.mock.calls[1][1].body);
+    expect(first.messageBundle.note).toBe('first reason');
+    expect(second.messageBundle.note).toBe('changed reason');
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it('keeps the optional note outside the independently scrollable cat roster', async () => {
+    renderPicker();
+    await chooseTargetAndCat();
+
+    const note = document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="转发留言（可选）"]');
+    const firstCat = bodyButton('布偶猫 Opus');
+    const catScroller = document.body.querySelector('[data-testid="transfer-picker-cat-scroll"]');
+    expect(note).not.toBeNull();
+    expect(catScroller).not.toBeNull();
+    if (!note) throw new Error('note textarea did not render');
+    expect(note.compareDocumentPosition(firstCat) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(note.closest('[data-testid="transfer-picker-cat-scroll"]')).toBeNull();
+    expect(firstCat.closest('[data-testid="transfer-picker-cat-scroll"]')).toBe(catScroller);
+  });
+
+  it('keeps a submit failure in the fixed footer instead of below the scrollable cat roster', async () => {
+    mocks.apiFetch.mockResolvedValue(new Response(JSON.stringify({ error: 'source range changed' }), { status: 400 }));
+    renderPicker();
+    await chooseTargetAndCat();
+
+    await React.act(async () => bodyButton('转发 1 条消息').click());
+
+    const alert = document.body.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('source range changed');
+    expect(alert?.closest('footer')).not.toBeNull();
   });
 
   it('uses Escape as back on the cat step, then closes and returns focus from the thread step', async () => {

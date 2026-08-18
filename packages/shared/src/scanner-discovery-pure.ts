@@ -23,6 +23,8 @@ export const KIND_DIRS: Record<string, ScannerEvidenceKind> = {
   lessons: 'lesson',
   discussions: 'discussion',
   research: 'research',
+  study: 'research',
+  'competitor-research': 'research',
   phases: 'plan',
   reflections: 'lesson',
   methods: 'lesson',

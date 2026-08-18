@@ -205,4 +205,24 @@ describe('K-2B durable Broker call ledger', () => {
     );
     assert.equal(expiredHandler.dispatchCount(), 0);
   });
+
+  it('admits an owner-requested historical signal only through the exact active runtime ledger', async () => {
+    const handler = fakeEventsHandler();
+    const { broker, connection, store } = await activeHarness(handler);
+    const input = eventsPublishInput({ idempotencyKey: 'owner-history' });
+
+    const accepted = await broker.publishOwnerImportedSignal(INSTANCE_ID, input);
+    const replay = await broker.publishOwnerImportedSignal(INSTANCE_ID, input);
+    assert.deepEqual(accepted, { publicationId: 'pub-owner-history', disposition: 'accepted' });
+    assert.deepEqual(replay, accepted);
+    assert.equal(handler.dispatchCount(), 1);
+    assert.equal((await store.snapshot()).calls[0].phase, 'settled_success');
+
+    await connection.close('owner-history-test');
+    await assert.rejects(
+      broker.publishOwnerImportedSignal(INSTANCE_ID, eventsPublishInput({ idempotencyKey: 'after-close' })),
+      isBrokerError('INSTANCE_NOT_READY'),
+    );
+    assert.equal(handler.dispatchCount(), 1);
+  });
 });
