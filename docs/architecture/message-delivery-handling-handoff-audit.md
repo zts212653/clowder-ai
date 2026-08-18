@@ -1,9 +1,9 @@
 ---
 title: "消息投递、执行与协作 Custody 因果模型"
-description: "以 #1354 为入口，复用 Message receipt、Queue custody、TurnExecution 与 ActionSuccessor/AwaitState 四个既有真相源，通过精确引用和 generation CAS 闭合投递、执行、交接、等待、恢复与重启。"
+description: "以 #1354 立模、以 #1371 反向验算，复用 Message receipt、Queue custody、TurnExecution 与 ActionSuccessor/AwaitState 四个既有真相源，通过精确引用、reserve-first 操作与 owner fence 同时闭合 safety 和 liveness。"
 doc_kind: architecture
 feature_ids: [F039, F055, F078, F117, F122, F167, F175, F177, F185, F194, F233, F254, F264, F275, F277, F280]
-topics: [message, delivery, execution, custody, a2a, wait, recovery, reconciliation, observability]
+topics: [message, delivery, execution, custody, a2a, wait, recovery, reconciliation, observability, liveness, atomicity]
 created: 2026-08-13
 updated: 2026-08-18
 status: proposed
@@ -49,6 +49,19 @@ Issue #1354 暴露的不是“缺一个统一 WorkItem”，而是四个既有�
 
 > 任一可执行 continuation，在一个 custody version 内只能有一个 owner、一个 admitted carrier、至多一个 live TurnExecution；普通 Queue 以 attemptId 作为 fence，lease / wait 以 generation 作为 fence。终局必须消费同一 source 与 owner fence。失败只属于该 target / attempt，不得扩大到其他 target 或整个 thread。
 
+### Safety 与 liveness 必须分别证明
+
+#1354 主要暴露 custody safety：不能由错 owner、错 source 或错 generation 推进。#1371 进一步证明，只有 safety 不够：系统可以每次都 fail closed，却在已产生副作用后返回冲突、让一个终态 entry 永久占住队头，或让调度器在没有 live execution 时无状态返回。
+
+因此本文同时要求：
+
+- **Safety**：不可逆副作用前必须先在事实 owner 内提交唯一 reservation；CAS loser 不得执行副作用；terminal 不得跨 source、target、attempt、invocation 或 generation。
+- **Liveness**：没有 live execution 且存在 eligible work 时，一次调度判定必须 admission、明确 park，或持久化 owner + next check；不得 bare-return 后等待无关新消息碰巧解锁。
+- **Monotonicity**：exact child 已提交的 terminal truth 不得被 parent aggregate、later retry 或投影写回降级。
+- **Non-interference**：一个 custody domain 的 hold、wait、failure 或 recovery 不得改写另一个 dispatch / target attempt 的 owner fence。
+
+这四项都是协议契约，不是 UI 或实现优化。
+
 ## #1354 暴露的三条断裂
 
 ### R1：失败有事实，却没有精确可见、可授权的恢复入口
@@ -77,6 +90,20 @@ Issue #1354 暴露的不是“缺一个统一 WorkItem”，而是四个既有�
 ### R3：外部事件被误当成新 agent 工作
 
 PR、CI、人类批准、定时器或 webhook 的到达，只能推进已有 AwaitState / ActionSuccessor predicate。它们本身不是“给某只猫新增一条普通消息”，更不能在没有授权 successor 的情况下创建 Run。
+
+## #1371 反向验算：不是一个根因
+
+#1371 汇总了同一用户表象下的多条独立故障，不能用一个 Queue hotfix 宣称闭环。本文逐条落到既有 owner 与验收：
+
+| #1371 分支 | 协议归属 | 本文闭环 |
+|---|---|---|
+| A. unrelated hold 改写 thread-global holder，A2A child 无法 terminal | dispatch / successor / wait 各自的 exact owner fence | Custody domain 非干扰；A25 |
+| B. failed primary 或 fairness gate 阻塞后续工作 | Queue custody 的 eligible selector 与 runnable head | progress obligation；A26–A27 |
+| C. Steer 在状态 CAS 前已 preempt | Queue custody reservation + provider 副作用 | reserve-first fenced saga；A28–A29 |
+| D. parent aggregate 把 succeeded child 写成 failed | per-target receipt terminal writer | child terminal 单调性；A30 |
+| E. busy-target 静默丢失、foreign occupancy 隐形、timeline/Queue 似重复 | receipt 持久化 + TurnExecution / UI 联结投影 | A31–A33 |
+
+这张表验证的是目标模型能否解释和防止 incident，而不是声称本文已经实现这些修复。
 
 ## 四个真相源，不是一个总账本
 
@@ -128,6 +155,8 @@ QueuePanel、消息气泡、thread 摘要和运维查询都是这些真相源的
 | leaseId / waitId | 行动交接或外部等待身份 |
 | generation | owner fence 的版本 |
 | outcomeId / evidenceRef | 可幂等消费的终局证据 |
+| operationId | steer 等跨副作用操作的幂等 reservation 身份 |
+| outputMessageId / replyTo | child 成功结果与 source 的 durable 输出因果 |
 
 threadId 只是容器，单独不能授权 terminal、retry、Continue、handoff 或 Run admission。
 
@@ -199,16 +228,53 @@ GitHub、CI、timer 和 webhook 不是本地猫，不能被投射成一个隐式
 
 QueueReceiptTarget.state 不是第二个可独立写入的状态机。receipt owner 只写 QueuedMessageCustody 中的 target custody facts 与 append-only attempts；projectQueueReceiptTarget 再从这些事实派生 target 级 queued / notified / awakened / seen / steering / failed / withdrawn / handled。attempt 保存每次尝试的线性审计史，target state 保存用户此刻应看到的聚合投影，两者不得由不同 writer 分别推进。
 
+### 每个 child 的终局真相单调推进
+
+per-target receipt 的 terminal writer 只能读取 exact resolved child，而不是 parent aggregate 的汇总状态：
+
+- child `succeeded` 且存在 durable `outputMessageId / replyTo / evidenceRef` 时，绑定 attempt 必须单调提交为 handled / consumed；
+- child `failed` 或 `cancelled` 时，只有该 child 的 attempt 保持 actionable，并生成精确 RecoveryCandidate；
+- parent aggregate 可以读取多个 child outcome 计算自己的结果，但不是 child receipt 的 writer；
+- handled / consumed 一旦由 exact child terminal 提交，不得被 later aggregate failure、retry、restart 或 projection 降级为 failed / queued；
+- terminal execution 已提交而 receipt 尚未结算时，只能由 receipt reconciler 按同一 attemptId + invocationId 补齐，不能重跑 child。
+
+因此“一个 sibling 使 aggregate 失败”与“另一个 child 是否已成功处理”是两个独立事实。
+
 ### Queue custody 语义
 
 队列操作按 target 和 entry 精确解释：
 
 - next_work：目标没有 live execution 时，以一个 admitted entry 作为 trigger carrier，并冻结本次 execution 的 coverage snapshot；
 - continue_current：仅在 execution adapter 支持增量暴露时，把输入附着到该 live invocation；
-- steer：先对 exact invocation 提交可验证 interrupt，再为新工作创建新 attempt；
+- steer：先在 Queue custody owner 内提交绑定 exact attempt + invocation 的唯一 reservation；只有 reservation winner 才可 interrupt，并用同一 operationId 完成 replacement；
 - cancel：只取消尚未 admitted 的 exact target attempt。
 
 continue_current 表示“允许向该 invocation 暴露”，不等于 agent 已看见，更不等于 handled。若 adapter 不支持 supplement，必须回退到 next_work，不得悄悄把 receipt 标成完成。
+
+### Queue admission 的 progress obligation
+
+删除 thread-wide pause 只消除错误状态，不自动保证队列继续前进。所有 new-arrival、execution-terminal、retry 和 restart 扫描必须调用同一 eligible selector；当目标没有 live execution 时，每次判定必须产生以下一种 durable 结果：
+
+1. admission 一个 eligible entry，并冻结 coverage snapshot；
+2. 因更高优先级 entry 延后当前 entry，同时在同一轮 admission 被保护的 entry；
+3. 把当前 entry 明确 park 到 runnable head 之外，并记录 reason、recovery owner、allowed action 与 next check；
+4. 证明没有 eligible entry。
+
+禁止在“存在 eligible work 且没有 live execution”时 bare-return。failed、cancelled、withdrawn 或 paused-awaiting-advance 的不可执行 attempt 保留在审计史和用户投影中，但不得继续占用 runnable FIFO head；同一 target 后到的独立 eligible attempt 必须仍可 admission。
+
+fairness gate 也受同一约束：如果 agent entry 因待处理 user entry 被延后，调度器必须启动该 user entry，或持久化它为何尚不可启动以及谁、何时再检查；不能同时阻塞两类工作，等待无关新消息触发下一次扫描。
+
+### Steer 的 reserve-first fenced saga
+
+Steer 跨越 Queue 状态写入和 provider preempt 副作用，不能用“先 preempt、后 CAS”实现。协议固定为：
+
+1. 读取 exact target attempt、live invocation 与各自 revision；
+2. 在既有 Queue custody fact 上 CAS 提交 steering reservation，写入 operationId、attemptId、invocationId 与 captured revisions；该 reservation 同时 fence void-ack、requeue、restart 和其他 steer；
+3. 只有 reservation winner 才以 operationId 作为幂等键调用 preempt；CAS loser 在任何副作用前返回 stale；
+4. preempt 结果先写回同一 Queue reservation；随后 receipt owner 以 operationId 幂等追加 replacement attempt，Queue owner 再物化 carrier；跨 owner 的中间缺边由该 operationId 精确 reconciliation，不能由第二套汇总状态推进；
+5. reservation 后、preempt 前失败时可安全释放或重试同一 operationId；preempt 后、replacement commit 前失败时进入 exact reconciliation，由 operationId 续完，不允许用户盲重试或再次 preempt。
+
+对调用方而言，冲突只允许发生在 preempt 之前；若 preempt 已发生，系统必须返回 committed 或 reconciliation_required 的可追踪结果，不能把它包装成无副作用的 409。
 
 ### 合并唤醒的 coverage snapshot
 
@@ -245,6 +311,18 @@ continue_current 表示“允许向该 invocation 暴露”，不等于 agent �
 - returnToPredecessor 或 transfer。
 
 命令退出码、普通文本 ACK、消息已发布或“看起来回答了”都不是行动终局。
+
+### Custody domain 非干扰
+
+threadId 只能分组，不能作为跨 domain 的 holder 或 terminal authority。普通 A2A dispatch、ActionSuccessor lease 与 AwaitState 各自以 exact subject 和 owner fence 推进：
+
+- 普通 A2A terminal 校验 source dispatch、target attempt、执行 child 与可选 successor lease；不得读取“当前 thread holder”作为替代证据；
+- hold_ball 只能写入其 source invocation 创建的 AwaitState / wait generation，不能覆盖另一个普通 dispatch 或 successor lease 的 holder；
+- successor terminal 只能消费自己的 leaseId + generation；另一个 wait、hold 或 sibling action 的 generation 变化与它无关；
+- 只有显式跨 domain transition 才能关联两者，例如 successor holder 消费当前 lease generation 后创建绑定该 lease 的 AwaitState；关联必须同时持久化双方 identity；
+- unrelated hold 与 A2A child 并发时，child 仍可凭自己的 attempt / invocation / lease fence 结算，不得产生 ambient `holder_mismatch`。
+
+这不是新增映射账本，而是禁止各 owner 用 thread-global 可变状态替代精确外键。
 
 ### ActionSuccessor lease
 
@@ -381,13 +459,26 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 - queued；
 - starting；
 - running；
+- paused-awaiting-advance，并显示 recovery owner / next check；
 - waiting / handed_off；
 - handled；
 - failed，可恢复时带 exact retry；
+- superseded / withdrawn，并显示 supersededBy；
 - cancelled；
 - reconciliation_required。
 
-气泡状态来自 per-target receipt 与其绑定 execution / custody 的联结。
+气泡状态来自 per-target receipt 与其绑定 execution / custody 的联结。timeline 与 Queue 必须复用同一个 source message identity：Queue 展示的是该 source 的 target lifecycle，不是第二条消息。诊断视图必须能从 source 展开到 targetCatId → attemptId → child invocationId → output / terminal evidence，避免“目标是谁、哪只 child 真正运行”只能靠日志猜测。
+
+busy target 的新输入也必须先建立 durable per-target receipt / attempt。它可以进入 live supplement，也可以保持 queued 等下一 carrier，但不能以 dedup_active 或“已有 Run”为由静默丢失责任。
+
+### 执行占用与控制权限分离
+
+canonical TurnExecution 仍 live 时，Queue / thread 投影必须显示 occupancy，即使执行由 scheduler 或其他 foreign principal 启动。可见不等于可取消：
+
+- owner 可控制的 execution 显示真实、可授权的 control handle；
+- foreign-principal execution 显示 `not_cancelable / foreign_principal` 与合成 occupancy identity；
+- 不得把可用于读取或取消的 raw task id 暴露为 foreign row identity；
+- 权限判断只能决定谁能 Steer / Cancel，不能把 live occupancy 从 owner 视图中删除。
 
 ### 内部等待
 
@@ -426,7 +517,7 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 | A4b | coverage snapshot 后又到消息 | 后到 attempt 保持 queued，不进入本次 coveredMessageIds |
 | A5 | adapter 支持 continue_current | QueueTargetAttempt 记录 exact invocationId 与 seenAt |
 | A6 | adapter 不支持 supplement | 回退 next_work，不提前 handled |
-| A7 | steer | exact live invocation 先被中断，新 attempt 后创建 |
+| A7 | steer | 先 CAS steering reservation；只有 winner preempt，并以同一 operationId 创建 replacement |
 | A8 | 普通 A2A 完成 | 结构化 complete 结算 exact receipt |
 | A9 | A 创建 successor 给 B | B 仅凭 exact lease generation admission |
 | A10 | B returnToPredecessor | 当前 generation 被消费，A 获得下一代 carrier |
@@ -444,16 +535,27 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 | A22 | 输入已暴露但 Run 失败 | receipt 不伪装 handled，保留 execution 证据 |
 | A23 | 消息无 source / authority | 只 publish 或拒绝推进，不隐式派工 |
 | A24 | 一次性切换 | 无双 runtime，无持久数据删除，投影可重建 |
+| A25 | unrelated cat 在 A2A child 运行时 hold_ball | hold 只推进自己的 AwaitState；child 仍可按 exact fence terminal，无 ambient holder_mismatch |
+| A26 | failed primary 后同 target 又有 eligible entry | failed attempt 离开 runnable head；后到 entry 在无 live execution 时继续 admission |
+| A27 | fairness gate 因 user entry 延后 agent entry | 同轮启动被保护的 user entry，或持久化 owner + next check；不得 bare-return 双向死锁 |
+| A28 | void-ack / requeue / restart 与 Steer 竞争 | reservation CAS loser 从未调用 preempt；winner 至多创建一个 replacement |
+| A29 | preempt 后 replacement commit 中断 | 返回 reconciliation_required，并由同一 operationId 幂等续完；不得盲重试或再次 preempt |
+| A30 | parent aggregate 失败，但一个 child 已 succeeded 且有 durable output | 该 child 单调 handled / consumed，不可重醒；只有 failed / cancelled child actionable |
+| A31 | busy target 在 coverage snapshot 后收到新消息 | 新 source 有 durable receipt / attempt，保持 queued 或走显式 supplement，不得 silent dedup |
+| A32 | scheduler / foreign principal 占用 execution slot | owner 可见 not_cancelable occupancy，但拿不到 raw capability handle |
+| A33 | 同一 source 同时出现在 timeline 与 Queue | UI 显示一个 source 的 per-target lifecycle 与 child lineage，不呈现为原因不明的重复消息 |
 
 ## 实施顺序
 
-1. 先把 #1354 的三个失败做成红测试，并覆盖 A14–A21；
-2. 为 receipt / queue / TurnExecution 补齐精确因果引用；
-3. 让 ActionSuccessor / AwaitState admission 与 terminal 共用 owner fence CAS；
-4. 从底层事实派生 RecoveryCandidate，删除 no-target Continue；
-5. 统一入口 effect 分类并保持 F078 server-side 路由；
-6. 用联结投影替换 QueuePanel 的 thread-wide pause；
-7. 完成一次性 backfill、切换和旧路径删除。
+1. 先把 #1354 与 #1371 的真实失败做成红测试，覆盖 A14–A22 与 A25–A33；
+2. 为 receipt / queue / TurnExecution 补齐精确因果引用，并让 exact child terminal 成为唯一单调 writer；
+3. 统一 new-arrival、terminal、retry、restart 的 eligible selector，落实 progress obligation 与 fairness self-consistency；
+4. 把 Steer 改为 reserve-first fenced saga，在任何 preempt 前赢得 operationId；
+5. 让普通 dispatch、ActionSuccessor 与 AwaitState 使用 exact domain fence，删除 ambient thread-holder 校验；
+6. 从底层事实派生 RecoveryCandidate，删除 no-target Continue；
+7. 统一入口 effect 分类并保持 F078 server-side 路由；
+8. 用联结投影替换 QueuePanel 的 thread-wide pause，并补 foreign-principal occupancy；
+9. 完成一次性 backfill、切换和旧路径删除。
 
 每一步必须先证明单 owner、单 carrier、单 live execution；不得以新增统一状态字段来掩盖跨源原子性尚未闭合。
 
@@ -464,10 +566,17 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 - 一个 target attempt 同时被两个 carrier admission；
 - 同一 custody generation 同时存在两个 live TurnExecution；
 - terminal 消费与 admission 不同的 source 或 generation；
+- 未提交 steering reservation 就执行 preempt，或一个 operationId 执行两次 preempt；
+- CAS loser 在返回冲突前已经产生 interrupt / cancel 副作用；
+- 没有 live execution 且存在 eligible work 时，selector 无状态 bare-return；
+- failed / parked attempt 永久占住 runnable head，阻止同 target 后续独立工作；
+- parent aggregate 把 exact child 已提交的 handled / consumed 降级为 failed / queued；
+- unrelated hold / wait 改写普通 A2A dispatch 或 successor lease 的 holder fence；
 - agent 正文、命令退出码或普通 ACK 结算行动责任；
 - 一个 target 的失败暂停 sibling 或整个 thread；
 - 外部 callback 在没有已注册 owner 时创建 Run；
 - UI 投影反向写入业务真相；
+- foreign-principal live execution 因不可控制而从 occupancy 投影消失；
 - retry 覆盖或删除旧 attempt；
 - 重启时凭最近消息猜测 owner。
 
@@ -488,3 +597,4 @@ reconciliation 只修复原 owner 管辖的边，不能用一个统一 reducer �
 - AwaitState owner fence：packages/shared/src/types/github-wait.ts
 - 入口与 queue callbacks：packages/api/src/routes/callbacks.ts
 - Issue：<https://github.com/zts212653/clowder-ai/issues/1354>
+- Reverse test：<https://github.com/zts212653/clowder-ai/issues/1371>
