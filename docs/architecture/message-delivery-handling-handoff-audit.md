@@ -211,18 +211,22 @@ Queue 入队、slot 释放、append 到期、用户 steer、系统通知都是**
 6. Run 终局、显式取消或 delivery failure 都以 batchId/attempt generation 结算，释放 lease，再触发下一轮。
 ```
 
+本文的 `sealed` 指第 2–3 步的同一 CAS 已提交 `frontier`，使它成为本次 launch 的不可变 prompt snapshot。seal 前，receipt 只能通过同一笔尚未提交的 CAS 加入 frontier；seal 后不存在单独追加或重写 frontier 的路径，新的 append 必须走自己的 `deferUntil` / 下一 Batch。
+
 消息若在第 2 步 frontier 固定后才到达，属于下一 Batch，绝不会在本 Batch 中被标记为已投递。进程在第 3、4、5 步之间崩溃时，恢复器依据 batchId 查询同一次幂等启动/精确 invocation，再完成或终结该 Batch；不会把已 claim 的内容丢回模糊队列，也不会把未曾进入 prompt 的内容标成 `seen`。
 
 这就是原子 batch frontier 的边界：Queue 的 FIFO/优先级决定**何时 reconsider target**，不会决定或拼接 prompt 内容；frontier 才是一次投递的精确内容来源。
 
 ### Client 启动失败与重试 generation
 
-若 batchId 没有得到可验证的 child invocation：
+若 batchId 没有得到可验证的 child invocation，那个 Batch frontier 内的**每个** delivery attempt（含 PacketEvent）都以同一 batchId 终局为 `failed`：
 
 1. 该 delivery attempt 终局为 `failed`，留下 failure reason 与 batchId；
 2. 写用户可见的 failure outcome 到 history；
 3. 对 closure current 创建带精确来源的 PacketEvent 和高优先级 wake trigger；
 4. 同一 attempt **永不**重新成为 candidate。
+
+这里的 `closure current` 由失败项不可变的 `rootMessageId` 解析：即使 `fyi` 或无引用 `done-notify` 没有加入 `closure.next`，只要所属链存在 cursor，仍向其 `current` 发送 failure PacketEvent；若该通知没有 closure root，则只记录给其 sender 的可见投递失败，不凭失败合成新的 obligation。
 
 只有 `RecoveryPolicy` 的明确决定——例如有界且副作用安全的 retry，或 closure current 选择重试 B / 改派 D——才能创建新的 attempt generation。新 generation 重新从 `queued` / `notified` 参与 query；它不是把旧 `failed` state 默默塞回候选集。这样 A 可以真正决定“改范围、换人、请求用户、暂停”，而不是 B 被下一条无关输入意外拉起重投。
 
