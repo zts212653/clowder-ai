@@ -33,4 +33,9 @@ export class RedisSignalRouteStore implements SignalRouteStore {
   async put(record: SignalRouteRecord): Promise<void> {
     await this.redis.set(key(record.pluginId, record.signalType), JSON.stringify(record));
   }
+
+  async putIfAbsent(record: SignalRouteRecord): Promise<boolean> {
+    const result = await this.redis.set(key(record.pluginId, record.signalType), JSON.stringify(record), 'NX');
+    return result === 'OK';
+  }
 }

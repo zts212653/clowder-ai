@@ -43,6 +43,7 @@ import {
   buildTombstone,
   detectRecentBurst,
   formatAnchors,
+  formatRecallPointer,
   formatTombstone,
   recallEvidenceWithProvenance,
   scrubToolPayloads,
@@ -51,7 +52,8 @@ import {
 } from './context-transport.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
-import { rankArtifactSources } from './source-ranking.js';
+import { rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
+import { resolveReachableArtifactRefs } from './source-reachability.js';
 
 /**
  * P1 R7 fix: Shared pure helper for context budget calculation.
@@ -243,6 +245,8 @@ export interface RouteOptions {
   promptTags?: readonly string[] | undefined;
   /** Trusted server-owned Cue seeds supplied by connector/workflow ingress. */
   memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[] | undefined;
+  /** F276 trial: source-only ASR scenes from exact persisted Queue messages. */
+  asrPersonMemoryScenes?: readonly import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene[];
   /** Pre-assembled context (deprecated: use history for per-cat budget) */
   contextHistory?: string | undefined;
   /** Raw thread history for per-cat context assembly */
@@ -1156,6 +1160,8 @@ export interface IncrementalContextOptions {
   recentFilesTouched?: Array<{ path: string; ops: string[] }>;
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Canonical workspace used to verify local artifact reachability. */
+  projectPath?: string;
   /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
   nowMs?: number;
   /** Route-scoped deferred boundary from an earlier invocation of this same cat. */
@@ -1359,13 +1365,18 @@ export async function assembleIncrementalContext(
     }
   }
   const mergedLedger = mergeLedger(storedLedgerArtifacts, recentArtifacts);
+  const reachableArtifactRefs = await resolveReachableArtifactRefs(options?.projectPath, mergedLedger);
 
   const rankedSources = rankArtifactSources(
     mergedLedger,
     allThreadTasks.map((t) => ({ kind: t.kind, subjectKey: t.subjectKey ?? null, title: t.title, status: t.status })),
-    { canonicalFeatureId: options?.canonicalFeatureId, threadTitle: options?.threadTitle },
+    {
+      canonicalFeatureId: options?.canonicalFeatureId,
+      threadTitle: options?.threadTitle,
+      reachableArtifactRefs,
+    },
   );
-  const topSource = rankedSources[0] ?? null;
+  const topSource = selectDirectiveSources(rankedSources)[0] ?? null;
   const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
@@ -1715,8 +1726,6 @@ async function assembleSmartWindowContext(
     sessionsIncorporated: number;
     decisions?: string[];
     decisionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
-    openQuestions?: string[];
-    openQuestionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
   } | null = null;
   if (threadStore) {
     try {
@@ -1747,10 +1756,8 @@ async function assembleSmartWindowContext(
           sessionsIncorporated: mem.sessionsIncorporated,
           ...(Array.isArray(mem.decisions) && mem.decisions.length ? { decisions: mem.decisions } : {}),
           ...(Array.isArray(mem.decisionRefs) && mem.decisionRefs.length ? { decisionRefs: mem.decisionRefs } : {}),
-          ...(Array.isArray(mem.openQuestions) && mem.openQuestions.length ? { openQuestions: mem.openQuestions } : {}),
-          ...(Array.isArray(mem.openQuestionRefs) && mem.openQuestionRefs.length
-            ? { openQuestionRefs: mem.openQuestionRefs }
-            : {}),
+          // F296 AC-A2: mem.openQuestions stays in the store but never enters the
+          // model-facing projection — it has no lifecycle state and no invalidator.
         };
       }
     } catch {
@@ -1768,14 +1775,16 @@ async function assembleSmartWindowContext(
     nonSystemRecent,
     hcConfig,
   );
-  const evidenceLines = recalledEvidence.evidence.map((item) => item.line);
+  // F296 AC-A1: recall is presented as a content-free pointer, never as
+  // candidate titles/snippets. The candidates themselves stay in the F263 trace.
+  const recallCandidates = recalledEvidence.candidates;
+  const recallPointerText =
+    recallCandidates.length > 0
+      ? formatRecallPointer({ label: 'Related evidence', candidateCount: recallCandidates.length })
+      : '';
 
-  // 3.9 Phase D: Build coverage map (AC-D2) — VG-1: only evidence recall titles (not tombstone search hints)
+  // 3.9 Phase D: Build coverage map (AC-D2)
   const participants = [...new Set(omitted.map((m) => m.catId ?? m.userId).filter(Boolean))] as string[];
-  const retrievalHints = evidenceLines.map((line) => {
-    const match = line.match(/^\[Evidence:\s*(.+?)\]/);
-    return match ? match[1] : line.slice(0, 80);
-  });
   const coverageMap = buildCoverageMap({
     omitted: {
       count: omitted.length,
@@ -1790,7 +1799,7 @@ async function assembleSmartWindowContext(
     },
     anchorIds: anchors.map((a) => a.message.id),
     threadMemory: threadMemoryMeta,
-    retrievalHints,
+    recallPointer: { candidateCount: recallCandidates.length },
     searchSuggestions: tombstone?.retrievalHints ?? [],
     semanticSearchTerms: tombstone?.keywords.length ? [tombstone.keywords.slice(0, 2).join(' ')] : [],
   });
@@ -1864,11 +1873,11 @@ async function assembleSmartWindowContext(
   }
 
   // Token trim with graduated degradation:
-  // evidence → coverageMap+threadMemory → anchors → tombstone → burst
+  // recall pointer → coverageMap+threadMemory → anchors → tombstone → burst
   let finalBurstLines = burstLines;
   let finalBurstMsgs = scrubbedBurst;
-  const finalEvidenceLines = [...evidenceLines];
-  const finalEvidenceCandidates = recalledEvidence.evidence.map((item) => item.candidate);
+  let finalRecallPointerText = recallPointerText;
+  let finalRecallCandidates = [...recallCandidates];
   const finalAnchorLines = [...anchorLines];
   const finalAnchors = [...promptAnchors];
   const anchorScores = anchors.map((a) => a.score);
@@ -1884,7 +1893,7 @@ async function assembleSmartWindowContext(
         finalThreadMemoryText,
         finalTombstoneText,
         ...finalAnchorLines,
-        ...finalEvidenceLines,
+        finalRecallPointerText,
         ...finalBurstLines,
       ]
         .filter(Boolean)
@@ -1892,10 +1901,11 @@ async function assembleSmartWindowContext(
     );
 
   if (totalTokens() > effectiveTokenBudget) {
-    // Stage 1: Drop evidence lines from oldest
-    while (finalEvidenceLines.length > 0 && totalTokens() > effectiveTokenBudget) {
-      finalEvidenceLines.shift();
-      finalEvidenceCandidates.shift();
+    // Stage 1: Drop the recall pointer as one unit (it is content-free and
+    // cheapest to re-acquire via an explicit drill).
+    if (finalRecallPointerText) {
+      finalRecallPointerText = '';
+      finalRecallCandidates = [];
     }
 
     // Stage 1.3: Drop coverage map + thread memory together
@@ -1941,7 +1951,7 @@ async function assembleSmartWindowContext(
       };
     }
 
-    tokenDegradation = `⚠️ 增量上下文 token 预算截断: evidence ${evidenceLines.length} → ${finalEvidenceLines.length}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
+    tokenDegradation = `⚠️ 增量上下文 token 预算截断: recall pointer ${recallPointerText ? 1 : 0} → ${finalRecallPointerText ? 1 : 0}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
   }
 
   // 8. Assemble context packet
@@ -1950,9 +1960,7 @@ async function assembleSmartWindowContext(
   if (finalThreadMemoryText) sections.push(finalThreadMemoryText);
   if (finalTombstoneText) sections.push(finalTombstoneText);
   if (finalAnchorLines.length > 0) sections.push(...finalAnchorLines);
-  if (finalEvidenceLines.length > 0) {
-    sections.push(`[Related evidence]\n${finalEvidenceLines.join('\n')}\n[/Related evidence]`);
-  }
+  if (finalRecallPointerText) sections.push(finalRecallPointerText);
   sections.push(...finalBurstLines);
 
   const includesCurrentUserMessage = Boolean(
@@ -2005,15 +2013,16 @@ async function assembleSmartWindowContext(
       ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
     navigationHeader,
-    ...(finalEvidenceCandidates.length > 0
+    ...(finalRecallCandidates.length > 0
       ? {
           pushRecallPresentations: [
             {
               surface: 'cold_context' as const,
+              presentationKind: 'pointer' as const,
               query: recalledEvidence.query,
               scope: 'docs',
               timestamp: Date.now(),
-              candidates: finalEvidenceCandidates,
+              candidates: finalRecallCandidates,
             },
           ],
         }

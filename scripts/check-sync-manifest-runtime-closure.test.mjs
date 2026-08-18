@@ -45,6 +45,86 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     return [...managedRoots].some((root) => repoPath === root || repoPath.startsWith(`${root}/`));
   }
 
+  it('claims ownership of the public release notes template', () => {
+    // Regression guard for clowder-ai#1370: this template existed in both source and
+    // clowder-ai main, but was absent from every manifest list — neither exported nor
+    // protected. A full sync therefore shipped an export that did not contain it,
+    // silently deleting a public release asset from the open-source repo.
+    // It must stay explicitly owned: exported (source-owned) OR target-owned, never
+    // unclaimed.
+    const template = '.github/release-notes-template.md';
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+
+    assert.ok(
+      isExported(template) || targetOwned.has(template),
+      `${template} must be explicitly owned by the manifest (exported or target-owned), otherwise full sync deletes it from the public repo`,
+    );
+
+    // Current decision: source-owned + sanitized on export (target is the public brand
+    // variant of the source file). If this is ever flipped to target-owned, drop the
+    // assertions below together with the managed_files entry — but never leave it in
+    // neither list.
+    assert.ok(managedFiles.has(template), `${template} must be listed in managed_files`);
+    assert.ok(!targetOwned.has(template), `${template} is source-owned and must not also be target-owned`);
+    assert.ok(!excluded.has(template), `${template} must not be excluded from export`);
+  });
+
+  it('protects community-contributed assets from sync deletion', () => {
+    // Regression guard for clowder-ai#1370 (F251 Layer 1, 2026-08-18): these paths were
+    // introduced into the open-source repo by community PRs (bug reports, feature specs,
+    // review notes, eval bundles, community-only tests). The matching source directories
+    // are `excluded` (internal docs are not published), so the export never contains them.
+    // Without an explicit target-owned claim, a full sync treats them as "should delete"
+    // and wipes community-authored work — the clowder-ai#290 incident shape.
+    //
+    // These must stay target-owned. They must NOT be exported: that would either publish
+    // internal documents or create an export obligation the source cannot honour.
+    // Two groups, because target_owned_files is enforced by backup → sync → restore:
+    // it protects a path even when that path sits inside a managed_root.
+    //
+    // Group A — internal-doc directories that are `excluded` on the source side. These
+    // must additionally never be exported, or we would publish internal documents.
+    const communityDocs = ['docs/bug-report/', 'review-notes/', 'feature-specs/', 'docs/plans/'];
+    // Group B — community evaluation evidence whose public verdicts have already diverged
+    // from their post-intake source copies. Keep the public evidence intact and do not
+    // accidentally turn these exact artifacts into a broader export obligation.
+    const communityEvidence = [
+      'docs/harness-feedback/bundles/2026-06-30-eval-a2a-no-data-telemetry-gap-build/',
+      'docs/harness-feedback/bundles/2026-06-30-eval-friction-c1-empty-window-after-singleton/',
+      'docs/harness-feedback/verdicts/2026-06-30-eval-a2a-no-data-telemetry-gap-build.md',
+      'docs/harness-feedback/verdicts/2026-06-30-eval-friction-c1-empty-window-after-singleton.md',
+    ];
+    // Group C — community-only files living inside an exported root (packages/api).
+    // isExported() is rule-based, so it reports true for anything under a managed_root;
+    // the real protection here is backup/restore, so only ownership is asserted.
+    const communityFiles = [
+      'packages/api/test/dual-path-strict-equality.test.js',
+      'packages/api/test/opencode-model-id-ci-contract.test.js',
+      'packages/api/test/redis-task-progress-store.test.js',
+    ];
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+
+    for (const path of [...communityDocs, ...communityEvidence, ...communityFiles]) {
+      assert.ok(
+        targetOwned.has(path),
+        `${path} carries community-contributed content and must be target-owned, otherwise full sync deletes it`,
+      );
+    }
+    for (const path of [...communityDocs, ...communityEvidence]) {
+      assert.ok(!isExported(path), `${path} is target-owned evidence and must not be exported`);
+    }
+
+    // clowder-ai#1075 also authored this one-time migration script, but the source repo
+    // explicitly absorbed the exact blob in intake commit 42e97cdf. Intake transfers
+    // source ownership: exporting it prevents deletion without freezing future source
+    // corrections behind a target-owned claim.
+    const absorbedScript = 'scripts/generate-hook-manifests.mjs';
+    assert.ok(managedScripts.has(absorbedScript), `${absorbedScript} must remain in managed_scripts after intake`);
+    assert.ok(isExported(absorbedScript), `${absorbedScript} must be exported from the source truth`);
+    assert.ok(!targetOwned.has(absorbedScript), `${absorbedScript} must not be both source-owned and target-owned`);
+    assert.ok(!excluded.has(absorbedScript), `${absorbedScript} must not be excluded from export`);
+  });
+
   it('exports every direct local import of an exported script', () => {
     const missing = [];
 

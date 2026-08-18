@@ -5,6 +5,7 @@ export interface MessageBundleForwardPayload {
   sourceThreadId: string;
   targetThreadId: string;
   targetCats: string[];
+  note?: string;
   items: readonly MessageBundleSelectionItem[];
 }
 
@@ -13,6 +14,7 @@ export function forwardPayloadFingerprint(payload: MessageBundleForwardPayload):
     sourceThreadId: payload.sourceThreadId,
     targetThreadId: payload.targetThreadId,
     targetCats: [...payload.targetCats].sort(),
+    ...(payload.note?.trim() ? { note: payload.note.trim() } : {}),
     items: payload.items,
   });
 }
@@ -43,6 +45,7 @@ export async function submitMessageBundleForward(
       idempotencyKey,
       messageBundle: {
         sourceThreadId: payload.sourceThreadId,
+        ...(payload.note?.trim() ? { note: payload.note.trim() } : {}),
         items: payload.items,
         targetCats: payload.targetCats,
       },

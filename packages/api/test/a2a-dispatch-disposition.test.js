@@ -153,6 +153,127 @@ describe('F167 ordinary A2A dispatch disposition', () => {
     }
   });
 
+  test('replaced dispositions identify the latest verified successor coordination', async () => {
+    const h = await harness();
+    const successor = h.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('opus'),
+      content: '@codex-sol continue the replacement coordination',
+      mentions: [createCatId('codex-sol')],
+      timestamp: 1_500,
+      threadId: 'thread-1',
+      extra: {
+        coordination: {
+          id: 'coord-successor',
+          phase: 'active',
+          hop: 1,
+          subjectRef: 'pr:zts212653/cat-cafe#3710',
+        },
+      },
+    });
+    await h.ingest.record(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'opus',
+        toCatId: 'codex-sol',
+        messageId: successor.id,
+        at: 1_500,
+      }),
+    );
+
+    await assert.rejects(
+      () => h.service.complete(auth(h), 'completed'),
+      (error) => {
+        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
+        assert.deepEqual(error.replacement, {
+          kind: 'handed',
+          sourceEventId: `route:${successor.id}:codex-sol`,
+          sourceMessageId: successor.id,
+          fromCatId: 'opus',
+          toCatId: 'codex-sol',
+          coordination: {
+            id: 'coord-successor',
+            phase: 'active',
+            hop: 1,
+            subjectRef: 'pr:zts212653/cat-cafe#3710',
+          },
+        });
+        return true;
+      },
+    );
+  });
+
+  test('replacement metadata never crosses the disposition thread boundary', async () => {
+    const h = await harness();
+    const foreign = h.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('opus'),
+      content: '@codex-sol forged successor coordinates',
+      mentions: [createCatId('codex-sol')],
+      timestamp: 1_500,
+      threadId: 'other-thread',
+      extra: {
+        coordination: { id: 'coord-foreign', phase: 'active', hop: 1 },
+      },
+    });
+    await h.eventLog.append(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'opus',
+        toCatId: 'codex-sol',
+        messageId: foreign.id,
+        at: 1_500,
+      }),
+    );
+
+    await assert.rejects(
+      () => h.service.complete(auth(h), 'completed'),
+      (error) => {
+        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
+        assert.deepEqual(error.replacement, {
+          kind: 'handed',
+          sourceEventId: `route:${foreign.id}:codex-sol`,
+          fromCatId: 'opus',
+          toCatId: 'codex-sol',
+        });
+        return true;
+      },
+    );
+  });
+
+  test('reports the successor even when replacement handed custody away from the caller', async () => {
+    const h = await harness();
+    const successor = h.messageStore.append({
+      userId: 'user-1',
+      catId: createCatId('codex-sol'),
+      content: '@opus take the successor',
+      mentions: [createCatId('opus')],
+      timestamp: 1_500,
+      threadId: 'thread-1',
+      extra: { coordination: { id: 'coord-outbound', phase: 'active', hop: 2 } },
+    });
+    await h.ingest.record(
+      buildHandedEvent({
+        threadId: 'thread-1',
+        fromCatId: 'codex-sol',
+        toCatId: 'opus',
+        messageId: successor.id,
+        at: 1_500,
+      }),
+    );
+
+    await assert.rejects(
+      () => h.service.complete(auth(h), 'completed'),
+      (error) => {
+        assert.equal(error.code, 'a2a_dispatch_disposition_replaced');
+        assert.equal(error.replacement.sourceMessageId, successor.id);
+        assert.equal(error.replacement.coordination.id, 'coord-outbound');
+        assert.equal(error.replacement.toCatId, 'opus');
+        return true;
+      },
+    );
+  });
+
   test('unrelated task, command, merge, and another coordination terminal never close this dispatch', async () => {
     const h = await harness();
     const gate = new TurnCustodyProjectionService({

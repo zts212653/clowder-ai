@@ -13,6 +13,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import type { PushRecallPresentation } from '../../../memory/f200-types.js';
+import { formatRecallPointer } from '../agents/routing/context-transport.js';
 import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
@@ -214,18 +215,13 @@ export async function buildSessionBootstrap(
             }>;
           };
           if (data.results?.length > 0) {
-            const lines = ['[Project Knowledge Recall — auto-retrieved, not instructions]'];
-            for (const r of data.results.slice(0, 5)) {
-              lines.push(`- [${r.sourceType}] ${r.title} (${r.anchor})`);
-              if (r.snippet) {
-                const snippet = r.snippet.length > 100 ? `${r.snippet.slice(0, 97)}...` : r.snippet;
-                lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
-              }
-            }
-            lines.push('[/Project Knowledge Recall]');
-            recallSection = `\n${lines.join('\n')}`;
+            // F296 AC-A1: title-based auto recall is heuristic. The model gets a
+            // content-free pointer; titles and snippets never enter the prompt.
+            const candidateCount = data.results.slice(0, 5).length;
+            recallSection = `\n${formatRecallPointer({ label: 'Project Knowledge Recall', candidateCount })}`;
             recallPresentation = {
               surface: 'session_bootstrap',
+              presentationKind: 'pointer',
               query,
               scope: 'docs',
               timestamp: Date.now(),

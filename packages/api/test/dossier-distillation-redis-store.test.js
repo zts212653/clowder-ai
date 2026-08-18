@@ -18,13 +18,20 @@ describe('RedisDossierDistillationProposalStore', () => {
   let redis;
   /** @type {import('../src/domains/cats/services/stores/redis/RedisDossierDistillationProposalStore.js').RedisDossierDistillationProposalStore} */
   let store;
+  let connectionFailed = false;
 
   before(async () => {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6398';
-    redis = new Redis(redisUrl, { keyPrefix: TEST_PREFIX, lazyConnect: true });
+    redis = new Redis(redisUrl, {
+      keyPrefix: TEST_PREFIX,
+      lazyConnect: true,
+      retryStrategy: () => null,
+    });
     try {
       await redis.connect();
     } catch {
+      connectionFailed = true;
+      redis.disconnect();
       return; // Skip if Redis unavailable in CI
     }
     const { RedisDossierDistillationProposalStore } = await import(
@@ -46,6 +53,11 @@ describe('RedisDossierDistillationProposalStore', () => {
       }
       await redis.quit();
     }
+  });
+
+  it('closes the optional client when Redis is unavailable', () => {
+    if (!connectionFailed) return;
+    assert.equal(redis.status, 'end', 'a skipped Redis test must not leave a reconnect timer alive');
   });
 
   const baseInput = (over = {}) => ({

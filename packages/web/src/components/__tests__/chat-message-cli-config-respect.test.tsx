@@ -8,6 +8,7 @@ import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 // Dynamic backing for the chatStore.messages mock so tests can populate companion messages.
 let storeMessages: ChatMessageType[] = [];
 let globalCliOutputDefault: 'expanded' | 'collapsed' = 'collapsed';
+let richBlocksForwardingEnabled: boolean | undefined;
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -47,7 +48,12 @@ vi.mock('@/components/MarkdownContent', () => ({
 }));
 vi.mock('@/components/MetadataBadge', () => ({ MetadataBadge: () => null }));
 vi.mock('@/components/SummaryCard', () => ({ SummaryCard: () => null }));
-vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
+vi.mock('@/components/rich/RichBlocks', () => ({
+  RichBlocks: ({ forwardingEnabled }: { forwardingEnabled?: boolean }) => {
+    richBlocksForwardingEnabled = forwardingEnabled;
+    return null;
+  },
+}));
 vi.mock('@/components/TimeoutDiagnosticsPanel', () => ({ TimeoutDiagnosticsPanel: () => null }));
 vi.mock('@/components/TtsPlayButton', () => ({ TtsPlayButton: () => null }));
 
@@ -91,10 +97,14 @@ function makeCallbackCompanion(): ChatMessageType {
   } as ChatMessageType;
 }
 
-describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility', () => {
+describe('ChatMessage stream presentation contracts', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
+  let ChatMessage: React.FC<{
+    message: ChatMessageType;
+    getCatById: (id: string) => CatData | undefined;
+    forwardingDisabled?: boolean;
+  }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -111,6 +121,7 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
   beforeEach(() => {
     storeMessages = [];
     globalCliOutputDefault = 'collapsed';
+    richBlocksForwardingEnabled = undefined;
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
       name: 'co-creator',
@@ -129,13 +140,15 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
     container.remove();
     resetCoCreatorConfigCacheForTest();
     storeMessages = [];
+    richBlocksForwardingEnabled = undefined;
   });
 
-  function renderMessage(message: ChatMessageType): void {
+  function renderMessage(message: ChatMessageType, forwardingDisabled = false): void {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
           message,
+          forwardingDisabled,
           getCatById: (id: string) => (id === 'opus' ? opusCat() : undefined),
         }),
       );
@@ -233,5 +246,21 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
     expect(container.textContent).toContain('CLI Output');
     const cliBody = container.querySelector('[data-testid="cli-output-body"]');
     expect(cliBody).toBeNull();
+  });
+
+  it('gates Rich Block forwarding on the projected source bubble terminal state', () => {
+    const rich = {
+      rich: { v: 1 as const, blocks: [{ id: 'card-live', kind: 'card' as const, v: 1 as const, title: 'Live' }] },
+      stream: { invocationId: INVOCATION_ID },
+    };
+
+    renderMessage(makeStreamMessage({ isStreaming: true, extra: rich }));
+    expect(richBlocksForwardingEnabled).toBe(false);
+
+    renderMessage(makeStreamMessage({ isStreaming: false, extra: rich }));
+    expect(richBlocksForwardingEnabled).toBe(true);
+
+    renderMessage(makeStreamMessage({ isStreaming: false, extra: rich }), true);
+    expect(richBlocksForwardingEnabled).toBe(false);
   });
 });

@@ -57,7 +57,9 @@ describe('MessageViewportBoundary', () => {
     });
 
     const boundary = container.querySelector<HTMLElement>('[data-message-viewport-boundary]');
-    expect(boundary?.style.contentVisibility).toBe('auto');
+    expect(boundary?.className).toContain('[content-visibility:auto]');
+    expect(boundary?.className).toContain('hover:[content-visibility:visible]');
+    expect(boundary?.className).toContain('focus-within:[content-visibility:visible]');
     expect(boundary?.style.containIntrinsicSize).toBe('auto 240px');
   });
 

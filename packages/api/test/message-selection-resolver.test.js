@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 await import('tsx/esm');
-const { MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN, MessageSelectionResolver, digestMessageBundleQuoteProjection } =
-  await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
+const {
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
+  MessageSelectionResolver,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV3,
+} = await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
 
 function makeThread(overrides = {}) {
   return {
@@ -50,6 +54,13 @@ function createResolver({ thread = makeThread(), messages = [makeMessage()] } = 
         async getById(messageId) {
           return messageMap.get(messageId) ?? null;
         },
+        // Whole-message admission resolves the canonical bubble group, so the store must expose
+        // the same timeline the browser projected from.
+        async getByThreadAfter(threadId) {
+          return [...messageMap.values()]
+            .filter((message) => message.threadId === threadId)
+            .sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id));
+        },
       },
     }),
   };
@@ -85,7 +96,7 @@ describe('MessageSelectionResolver admission', () => {
     assert.deepEqual(result.items[1].author, { kind: 'cat', catId: 'codex-sol' });
   });
 
-  it('anchors an exact Quote and stores a domain-separated digest of the full projection', async () => {
+  it('anchors an exact Quote and stores a domain-separated digest of the full bubble projection', async () => {
     const message = makeMessage({ content: 'alpha beta gamma' });
     const { resolver } = createResolver({ messages: [message] });
 
@@ -97,6 +108,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: message.id,
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 6,
             selectionEnd: 10,
             comment: 'focus here',
@@ -112,11 +124,11 @@ describe('MessageSelectionResolver admission', () => {
       messageId: message.id,
       selectionStart: 6,
       selectionEnd: 10,
-      sourceProjectionVersion: 1,
-      sourceProjectionSha256: digestMessageBundleQuoteProjection(message.content),
+      sourceProjectionVersion: 3,
+      sourceProjectionSha256: digestMessageBundleQuoteProjectionV3(message.content),
       comment: 'focus here',
     });
-    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN.endsWith('\0'), true);
+    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3.endsWith('\0'), true);
     assert.equal('text' in result.carrier.items[0], false);
     assert.equal(result.items[0].readableContent, 'beta');
   });
@@ -131,7 +143,7 @@ describe('MessageSelectionResolver admission', () => {
     const result = await resolver.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology' }],
+        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology', renderedOccurrences: 1 }],
       },
       auth,
     );
@@ -140,7 +152,7 @@ describe('MessageSelectionResolver admission', () => {
     assert.equal(result.items[0].readableContent, 'queue topology');
     assert.equal(
       result.carrier.items[0].sourceProjectionSha256,
-      digestMessageBundleQuoteProjection('[图片: queue topology]'),
+      digestMessageBundleQuoteProjectionV3('[图片: queue topology]'),
     );
   });
 
@@ -154,6 +166,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: 'message-1',
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 0,
             selectionEnd: 4,
           },
@@ -169,7 +182,7 @@ describe('MessageSelectionResolver admission', () => {
     const rejected = await ambiguous.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta' }],
+        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta', renderedOccurrences: 1 }],
       },
       auth,
     );

@@ -667,11 +667,11 @@
     "kind": "feature",
     "sourceRef": {
       "path": "docs/features/F294-selective-message-bundles.md",
-      "anchor": "Primary Journey: 把整条消息或消息片段转发给另一个 Thread 的人和猫"
+      "anchor": "Primary Journey: 把整条消息、精确片段或一个 Rich Block 转发给另一个 Thread 的人和猫"
     },
     "structureSource": {
       "path": "docs/features/F294-selective-message-bundles.md",
-      "anchor": "Primary Journey: 把整条消息或消息片段转发给另一个 Thread 的人和猫"
+      "anchor": "Primary Journey: 把整条消息、精确片段或一个 Rich Block 转发给另一个 Thread 的人和猫"
     },
     "bodySource": {
       "path": "docs/features/F294-selective-message-bundles.md",
@@ -679,11 +679,11 @@
     },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["cvo"],
-    "body": "只想留下或转发几条消息？点消息动作条里的“多选消息”图标，可导出 Markdown、TXT、PNG，也可搜索并选择目标 Thread 和接收猫，发送一张保留作者与来源的合并卡；框选消息文字也能单独转发。",
+    "body": "想把内容带走？从消息动作区多选消息后，可导出文件、文本或长图，也可选择目标 Thread 和接收猫转发成合并卡；转发还支持框选正文或 CLI Output 的精确片段、单独一个 Rich Block，并附整包留言。",
     "action": {
       "type": "open_concierge_draft",
       "label": "怎么选择和转发",
-      "draftPrompt": "请告诉我怎么在当前 Thread 多选整条消息或框选一段文字，再导出所选内容或把它作为合并卡转发到另一个 Thread 的指定猫猫。"
+      "draftPrompt": "请告诉我怎么多选消息并导出，或把正文、CLI Output 的精确选文、单个 Rich Block 转发给另一个 Thread 的指定猫猫并附上留言。"
     },
     "owner": "codex-sol"
   },

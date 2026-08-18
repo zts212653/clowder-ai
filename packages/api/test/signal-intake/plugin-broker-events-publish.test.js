@@ -9,13 +9,7 @@ import {
 import { signalSettlementKey } from '../../dist/domains/signal-intake/index.js';
 import { admissionHarness, publishInput, SIGNAL_TYPE } from './helpers.js';
 
-async function brokerHarness(options = {}) {
-  const admission = await admissionHarness();
-  await admission.inventory.transaction((transaction) => {
-    const instance = transaction.instances.get('pi_example');
-    transaction.instances.put({ ...instance, runtimeState: 'stopped' });
-  });
-  const store = new MemoryHostBrokerStore();
+async function openBrokerSession(admission, store, options = {}) {
   const productionHandler = createEventsPublishBrokerHandler({
     inventory: admission.inventory,
     brokerStore: store,
@@ -26,15 +20,16 @@ async function brokerHarness(options = {}) {
     createIntakeId: () => 'intake-broker',
   });
   const handler = options.wrapHandler?.(productionHandler) ?? productionHandler;
+  const sessionId = options.sessionId ?? 'broker';
   const broker = new HostBrokerControlPlane({
     inventory: admission.inventory,
     store,
     methods: [handler],
     now: () => 10_000,
-    createConnectionId: () => 'conn-broker',
-    createSessionId: () => 'session-broker',
-    createRuntimeLeaseId: () => 'lease-broker',
-    createBindingNonce: () => 'nonce-broker',
+    createConnectionId: () => `conn-${sessionId}`,
+    createSessionId: () => `session-${sessionId}`,
+    createRuntimeLeaseId: () => `lease-${sessionId}`,
+    createBindingNonce: () => `nonce-${sessionId}`,
   });
   const connection = await broker.openBuiltinConnection('pi_example');
   const inventory = await admission.inventory.snapshot();
@@ -47,7 +42,18 @@ async function brokerHarness(options = {}) {
     wireVersion: '0.1.0',
   });
   await connection.ready({ bindingNonce: binding.bindingNonce });
-  return { ...admission, connection, store };
+  return { broker, connection };
+}
+
+async function brokerHarness(options = {}) {
+  const admission = await admissionHarness();
+  await admission.inventory.transaction((transaction) => {
+    const instance = transaction.instances.get('pi_example');
+    transaction.instances.put({ ...instance, runtimeState: 'stopped' });
+  });
+  const store = new MemoryHostBrokerStore();
+  const session = await openBrokerSession(admission, store, options);
+  return { ...admission, ...session, store };
 }
 
 describe('K-2B events.publish production adapter', () => {
@@ -155,6 +161,74 @@ describe('K-2B events.publish production adapter', () => {
     assert.equal(call.phase, 'settled_error');
     assert.equal(call.revision, 3);
     assert.equal(call.error?.code, 'ROUTE_UNAVAILABLE');
+  });
+
+  it('retries a settled route rejection after a successor Broker session repairs the route', async () => {
+    const harness = await brokerHarness({ sessionId: 'route-missing' });
+    const route = await harness.routes.get('official.example-meeting', SIGNAL_TYPE);
+    await harness.routes.put({ ...route, state: 'inactive', updatedAt: 10_001 });
+
+    await assert.rejects(
+      harness.connection.call('events.publish', publishInput()),
+      (error) => error?.code === 'ROUTE_UNAVAILABLE',
+    );
+    await harness.connection.close('route-repair');
+    await harness.routes.put({ ...route, state: 'active', updatedAt: 10_002 });
+
+    const successor = await openBrokerSession(harness, harness.store, { sessionId: 'route-repaired' });
+    const accepted = await successor.connection.call('events.publish', publishInput());
+    const replay = await successor.connection.call('events.publish', publishInput());
+
+    assert.deepEqual(accepted, { publicationId: 'pub-broker', disposition: 'accepted' });
+    assert.deepEqual(replay, accepted);
+    assert.equal((await harness.intakes.list()).length, 1);
+    const [call] = (await harness.store.snapshot()).calls;
+    assert.equal(call.phase, 'settled_success');
+    assert.equal(call.brokerSessionId, 'session-route-repaired');
+    assert.equal(call.revision, 6);
+  });
+
+  it('keeps a successful settlement terminal across successor Broker sessions', async () => {
+    const harness = await brokerHarness({ sessionId: 'accepted' });
+    const accepted = await harness.connection.call('events.publish', publishInput());
+    await harness.connection.close('successor-replay');
+
+    const successor = await openBrokerSession(harness, harness.store, { sessionId: 'successor' });
+    assert.deepEqual(await successor.connection.call('events.publish', publishInput()), accepted);
+    assert.equal((await harness.intakes.list()).length, 1);
+    const [call] = (await harness.store.snapshot()).calls;
+    assert.equal(call.phase, 'settled_success');
+    assert.equal(call.brokerSessionId, 'session-accepted');
+    assert.equal(call.revision, 3);
+  });
+
+  it('keeps non-recoverable admission errors terminal across successor Broker sessions', async () => {
+    const harness = await brokerHarness({ sessionId: 'stale-route' });
+    const route = await harness.routes.get('official.example-meeting', SIGNAL_TYPE);
+    await harness.routes.put({ ...route, state: 'inactive', updatedAt: 10_001 });
+    await assert.rejects(
+      harness.connection.call('events.publish', publishInput()),
+      (error) => error?.code === 'ROUTE_UNAVAILABLE',
+    );
+    await harness.store.transaction((transaction) => {
+      const [call] = transaction.calls.list();
+      transaction.calls.put({
+        ...call,
+        error: { code: 'STALE_ROUTE', message: 'route generation changed before admission' },
+      });
+    });
+    await harness.connection.close('non-recoverable-replay');
+    await harness.routes.put({ ...route, state: 'active', updatedAt: 10_002 });
+
+    const successor = await openBrokerSession(harness, harness.store, { sessionId: 'stale-route-successor' });
+    await assert.rejects(
+      successor.connection.call('events.publish', publishInput()),
+      (error) => error?.code === 'STALE_ROUTE',
+    );
+    assert.equal((await harness.intakes.list()).length, 0);
+    const [call] = (await harness.store.snapshot()).calls;
+    assert.equal(call.brokerSessionId, 'session-stale-route');
+    assert.equal(call.revision, 3);
   });
 
   it('rejects a recovered F292 settlement whose canonical digest does not match the current input', async () => {

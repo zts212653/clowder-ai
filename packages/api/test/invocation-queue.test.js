@@ -178,13 +178,58 @@ describe('InvocationQueue', () => {
       assert.equal(byId.get(c.id).exactSteerBatch, undefined, 'unselected C is not reserved');
     });
 
+    it('keeps an exact reservation out of ordinary dequeue until its owner claims it', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const ordinary = queue.enqueue(
+        entry({ content: 'ordinary', ownerAuthProvenance: 'strict', targetCats: ['codex'] }),
+      ).entry;
+      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      assert.equal(
+        queue.markProcessingById('t1', a.id),
+        false,
+        'an id lookup without reservation identity must not steal an exact reservation',
+      );
+      assert.equal(
+        queue.markProcessing('t1', 'u1')?.id,
+        ordinary.id,
+        'ordinary dequeue skips the complete reserved allowlist',
+      );
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.equal(byId.get(a.id).status, 'queued');
+      assert.equal(byId.get(b.id).status, 'queued');
+    });
+
+    it('claims an activated reservation only with its exact process-local identity', () => {
+      const target = queue.enqueue(entry({ content: 'target', ownerAuthProvenance: 'strict' })).entry;
+      const reserved = queue.reserveExactUserEntry('t1', 'u1', target.id, 'opus');
+      assert.equal(reserved.outcome, 'reserved');
+
+      assert.equal(
+        queue.claimExactSteerReservation('t1', 'u1', target.id, reserved.reservationId),
+        null,
+        'durable reservation is not claimable before preemption begins and succeeds',
+      );
+      assert.equal(queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.claimExactSteerReservation('t1', 'u1', target.id, 'wrong-reservation'), null);
+
+      const claimed = queue.claimExactSteerReservation('t1', 'u1', target.id, reserved.reservationId);
+      assert.equal(claimed.id, target.id);
+      assert.equal(claimed.status, 'processing');
+    });
+
     it('marks the complete reservation processing in one dequeue transition', () => {
       const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
       const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
       const c = queue.enqueue(entry({ content: 'c', ownerAuthProvenance: 'strict' })).entry;
-      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+      const reserved = queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+      assert.equal(reserved.outcome, 'reserved');
+      assert.equal(queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
 
-      const primary = queue.markProcessing('t1', 'u1');
+      const primary = queue.claimExactSteerReservation('t1', 'u1', a.id, reserved.reservationId);
 
       assert.equal(primary.id, a.id);
       const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));

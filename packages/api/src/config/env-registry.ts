@@ -898,6 +898,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_PROCESS_EXECUTION_OWNER',
+    defaultValue: '(内部注入)',
+    description: '标记当前 CLI supervisor 是单次 invocation 的 execution owner，不需要手动设置',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_TEMPLATE_PATH',
     defaultValue: '(repo 根 cat-template.json)',
     description: '猫猫模板文件路径',
@@ -1067,6 +1076,15 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'cli',
     sensitive: false,
     hubVisible: false,
+  },
+  {
+    name: 'CAT_CAFE_EXECUTION_ID',
+    defaultValue: '(运行时注入)',
+    description: '当前 invocation 所属的父 execution ID（用于 CLI owner 投影与精确取消）',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_CREDENTIAL_FILE',

@@ -61,6 +61,10 @@ async function probeOpenCodeHelp(
       outputMode: 'plainText',
       ...(cwd ? { cwd } : {}),
       ...(env ? { env } : {}),
+      // Capability discovery is not an invocation. It must not write an owner
+      // manifest or retain the first caller's execution coordinates in the
+      // module-level cached probe.
+      bindExecutionOwner: false,
       timeoutMs: OPENCODE_AUTO_APPROVE_PROBE_TIMEOUT_MS,
     })) {
       if (isCliPlainTextResult(event)) {

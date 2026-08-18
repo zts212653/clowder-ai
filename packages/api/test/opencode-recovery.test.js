@@ -175,7 +175,7 @@ describe('opencode recovery boundary', () => {
       [
         'token=sk-review-secret-123',
         'C:\\Users\\Alice\\secrets\\config.json',
-        '/Users/alice/.ssh/id_rsa',
+        '/home/user/.ssh/id_rsa',
         '/usr/local/bin/opencode',
         '/root/.ssh/id_rsa',
         '/data/app/config.env',

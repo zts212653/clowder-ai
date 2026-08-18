@@ -14,6 +14,7 @@ interface HydratedMessageBundle {
   targetThreadId: string;
   createdBy: string;
   createdAt: number;
+  note?: string;
   sourceThread: { id: string; title: string } | null;
   items: BundleItem[];
 }
@@ -107,7 +108,10 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
   const sourceThreadId = data.sourceThread?.id;
 
   const renderItem = (item: BundleItem, index: number) => (
-    <div key={item.messageId} className="border-t border-cafe/70 pt-3 first:border-t-0 first:pt-0">
+    <div
+      key={`${item.messageId}:${item.status === 'available' ? item.kind : item.reason}:${index}`}
+      className="border-t border-cafe/70 pt-3 first:border-t-0 first:pt-0"
+    >
       <MessageBundleItemView
         item={item}
         index={index}
@@ -136,6 +140,12 @@ export function MessageBundleCard({ messageId, forwarderName, getCatLabel }: Mes
         </button>
         {!singleItem ? <span className="shrink-0 text-xs text-cafe-muted">{data.items.length} 条聊天记录</span> : null}
       </div>
+      {data.note ? (
+        <div data-message-bundle-note className="mt-3 rounded-lg bg-cafe-surface-sunken px-3 py-2 text-sm">
+          <div className="text-xs font-semibold text-cafe-secondary">{forwarderName} 的留言</div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-cafe-primary">{data.note}</div>
+        </div>
+      ) : null}
       {singleItem ? (
         <div className="mt-3">{renderItem(singleItem, 0)}</div>
       ) : (

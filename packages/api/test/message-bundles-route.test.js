@@ -20,6 +20,7 @@ function targetMessage(overrides = {}) {
       messageBundle: {
         v: 1,
         sourceThreadId: 'source-thread',
+        note: 'bundle-level reason',
         items: [{ kind: 'message', messageId: 'source-1' }],
       },
     },
@@ -53,6 +54,11 @@ describe('GET /api/message-bundles/:messageId', () => {
     deps = {
       messageStore: {
         getById: mock.fn(async (id) => messages.get(id) ?? null),
+        // Whole-message hydration resolves the canonical bubble group, so the store must expose
+        // the same timeline the browser projected from.
+        getByThreadAfter: mock.fn(async (threadId) =>
+          [...messages.values()].filter((message) => message.threadId === threadId),
+        ),
       },
       threadStore: {
         get: mock.fn(async (id) => ({
@@ -91,6 +97,7 @@ describe('GET /api/message-bundles/:messageId', () => {
       createdBy: 'user-1',
       createdAt: 200,
       sourceThread: { id: 'source-thread', title: 'Source Thread' },
+      note: 'bundle-level reason',
       items: [
         {
           status: 'available',

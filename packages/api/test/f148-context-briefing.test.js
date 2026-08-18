@@ -17,7 +17,7 @@ describe('F148 Phase E: formatContextBriefing (AC-E3 + AC-E4)', () => {
       burst: { count: 8, timeRange: { from: 1712003600000, to: 1712004000000 } },
       anchorIds: ['a1', 'a2', 'a3'],
       threadMemory: { available: true, sessionsIncorporated: 5 },
-      retrievalHints: ['search_evidence("redis")'],
+      recallPointer: { candidateCount: 1 },
     };
     const result = formatContextBriefing(coverageMap);
     // One-line summary must include key counts
@@ -36,7 +36,7 @@ describe('F148 Phase E: formatContextBriefing (AC-E3 + AC-E4)', () => {
       burst: { count: 5, timeRange: { from: 1712003600000, to: 1712004000000 } },
       anchorIds: [],
       threadMemory: null,
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     };
     const result = formatContextBriefing(coverageMap);
     assert.ok(result.summary.includes('5'), 'burst count present');
@@ -50,7 +50,7 @@ describe('F148 Phase E: formatContextBriefing (AC-E3 + AC-E4)', () => {
       burst: { count: 4, timeRange: { from: 1712003600000, to: 1712004000000 } },
       anchorIds: ['a1'],
       threadMemory: { available: true, sessionsIncorporated: 3 },
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     };
     const threadMemorySummary = 'Session #1: Created routes.ts. Modified index.ts.';
     const result = formatContextBriefing(coverageMap, threadMemorySummary);
@@ -63,20 +63,20 @@ describe('F148 Phase E: formatContextBriefing (AC-E3 + AC-E4)', () => {
       burst: { count: 6, timeRange: { from: 1712003600000, to: 1712004000000 } },
       anchorIds: ['a1', 'a2'],
       threadMemory: null,
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     };
     const anchorSummaries = ['[Thread opener] discussed Redis config', '[Anchor] decided on cluster mode'];
     const result = formatContextBriefing(coverageMap, undefined, anchorSummaries);
     assert.deepEqual(result.richBlock.anchorSummaries, anchorSummaries);
   });
 
-  test('summary includes evidence count from retrievalHints', () => {
+  test('summary includes evidence count from the recall pointer', () => {
     const coverageMap = {
       omitted: { count: 20, timeRange: { from: 1712000000000, to: 1712003600000 }, participants: [] },
       burst: { count: 4, timeRange: { from: 1712003600000, to: 1712004000000 } },
       anchorIds: [],
       threadMemory: null,
-      retrievalHints: ['search_evidence("redis")', 'search_evidence("deploy")'],
+      recallPointer: { candidateCount: 2 },
     };
     const result = formatContextBriefing(coverageMap);
     assert.ok(result.summary.includes('2'), 'summary should include evidence/hint count');
@@ -93,7 +93,7 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     burst: { count: 8, timeRange: { from: 1712003600000, to: 1712004000000 } },
     anchorIds: ['a1', 'a2', 'a3'],
     threadMemory: { available: true, sessionsIncorporated: 5 },
-    retrievalHints: ['search_evidence("redis")'],
+    recallPointer: { candidateCount: 1 },
   };
 
   test('returns AppendMessageInput with origin=briefing', () => {
@@ -135,22 +135,23 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.ok(labels.includes('下一步'), 'should have next step field');
   });
 
-  test('VG-2: bodyMarkdown includes retrieval hints when present', () => {
+  test('F296 AC-A1: bodyMarkdown shows a content-free recall pointer, never candidate titles', () => {
     const mapWithHints = {
       ...baseCoverageMap,
-      retrievalHints: ['ADR-005: Redis Key Prefix', 'F088: Chat Gateway'],
+      recallPointer: { candidateCount: 2 },
     };
     const msg = buildBriefingMessage(mapWithHints, 'thread-1');
     const card = msg.extra.rich.blocks[0];
     assert.ok(card.bodyMarkdown, 'should have bodyMarkdown');
-    assert.ok(card.bodyMarkdown.includes('ADR-005'), 'should include first evidence title');
-    assert.ok(card.bodyMarkdown.includes('F088'), 'should include second evidence title');
+    assert.ok(card.bodyMarkdown.includes('证据召回'), 'should keep the pointer section');
+    assert.ok(card.bodyMarkdown.includes('2'), 'should state the content-free candidate count');
+    assert.ok(card.bodyMarkdown.includes('cat_cafe_search_evidence'), 'should keep an exact drill entry');
   });
 
-  test('VG-2: bodyMarkdown omits evidence section when retrievalHints empty', () => {
+  test('VG-2: bodyMarkdown omits evidence section when no recall candidates', () => {
     const mapNoHints = {
       ...baseCoverageMap,
-      retrievalHints: [],
+      recallPointer: { candidateCount: 0 },
     };
     const msg = buildBriefingMessage(mapNoHints, 'thread-1');
     const card = msg.extra.rich.blocks[0];
@@ -176,8 +177,9 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     assert.ok(card.bodyMarkdown.includes('关键决策'), 'should have decisions section');
     assert.ok(card.bodyMarkdown.includes('用方案B'), 'should include first decision');
     assert.ok(card.bodyMarkdown.includes('不用cheap model'), 'should include second decision');
-    assert.ok(card.bodyMarkdown.includes('待决问题'), 'should have open questions section');
-    assert.ok(card.bodyMarkdown.includes('burst gap'), 'should include open question');
+    // F296 AC-A2: lifecycle-less open questions never render.
+    assert.ok(!card.bodyMarkdown.includes('待决问题'), 'must not have an open questions section');
+    assert.ok(!card.bodyMarkdown.includes('burst gap'), 'must not include the open question text');
   });
 
   test('VG-3: bodyMarkdown omits decisions section when no decisions', () => {
@@ -208,9 +210,9 @@ describe('F148 Phase E: buildBriefingMessage (AC-E1)', () => {
     // Count "- 决策" occurrences — should be 3 (capped)
     const decisionLines = card.bodyMarkdown.split('\n').filter((l) => l.startsWith('- 决策'));
     assert.equal(decisionLines.length, 3, `expected 3 decisions in display, got ${decisionLines.length}`);
-    // Count "- Q" occurrences — should be 2 (capped)
+    // F296 AC-A2: open questions are not displayed at all — no cap needed, zero rendered.
     const questionLines = card.bodyMarkdown.split('\n').filter((l) => l.startsWith('- Q'));
-    assert.equal(questionLines.length, 2, `expected 2 questions in display, got ${questionLines.length}`);
+    assert.equal(questionLines.length, 0, `expected 0 questions in display, got ${questionLines.length}`);
   });
 
   test('searchSuggestions rendered as actionable hints in bodyMarkdown', () => {
@@ -281,7 +283,7 @@ describe('F148 Phase F: Briefing card navigation context (AC-F5)', () => {
     burst: { count: 8, timeRange: { from: 1712003600000, to: 1712004000000 } },
     anchorIds: ['a1'],
     threadMemory: null,
-    retrievalHints: [],
+    recallPointer: { candidateCount: 0 },
   };
 
   test('AC-F5: bodyMarkdown includes baton info when provided', () => {

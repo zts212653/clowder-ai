@@ -10,6 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -83,6 +84,11 @@ import {
   type MemoryCueOpportunitySeed,
   memoryCueOpportunityId,
 } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
+import type { MemoryCueDeliveryReceipt } from '../../../../memory/cue/MemoryCuePlaneService.js';
+import {
+  AsrPersonMemoryOpportunityPromptService,
+  type AsrPersonMemoryPresentationReceipt,
+} from '../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
@@ -109,6 +115,7 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-writer.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
+import { resolveContextContinuity, supportsPreProviderContinuityHandshake } from './context-continuity.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
 import {
   applyActiveSessionCapacityPin,
@@ -134,6 +141,192 @@ const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
   'runtime_disconnected',
 ]);
 let _openCodeKnownModels: Set<string> | null = null;
+
+interface MemoryCueLegacyFallbackProjection {
+  readonly opportunityId: string;
+  readonly promptContext: string;
+}
+
+function resolveMemoryCueLegacyFallbacks(
+  fallbacks: InvocationParams['memoryCueLegacyFallbacks'],
+  serverScope: { ownerUserId: string; threadId: string; invocationId: string },
+  admittedOpportunityIds?: readonly string[],
+): { readonly promptSegment: string; readonly projections: readonly MemoryCueLegacyFallbackProjection[] } {
+  const admitted = new Set(admittedOpportunityIds ?? []);
+  const projections = (fallbacks ?? []).flatMap((item) => {
+    if (!item.promptContext) return [];
+    const opportunityId = memoryCueOpportunityId(item.seed, serverScope);
+    if (admitted.has(opportunityId)) return [];
+    return [{ opportunityId, promptContext: item.promptContext }];
+  });
+  return {
+    promptSegment: projections.map((projection) => projection.promptContext).join('\n'),
+    projections,
+  };
+}
+
+function isSubstantiveProviderOutput(message: AgentMessage): boolean {
+  return (
+    (message.type === 'text' && Boolean(message.content)) ||
+    message.type === 'tool_use' ||
+    message.type === 'tool_result'
+  );
+}
+
+async function recordWriteOpportunityPresentation(input: {
+  readonly catId: CatId;
+  readonly invocationId: string;
+  readonly promptGenerationId: string;
+  readonly evidenceRef: string;
+  readonly service?: AsrPersonMemoryOpportunityPromptService;
+  readonly continuity?: ContextContinuityHandshake;
+  readonly delivered: readonly AsrPersonMemoryPresentationReceipt[];
+  readonly omitted: readonly AsrPersonMemoryPresentationReceipt[];
+}): Promise<AgentMessage[]> {
+  if (!input.service || !input.continuity) return [];
+  const occurredAt = Date.now();
+  const messages: AgentMessage[] = [];
+  for (const [outcome, receipts] of [
+    ['delivered', input.delivered],
+    ['omitted', input.omitted],
+  ] as const) {
+    if (receipts.length === 0) continue;
+    const confirmation = {
+      outcome,
+      continuity: input.continuity,
+      generationId: input.promptGenerationId,
+      evidenceRef: input.evidenceRef,
+      occurredAt,
+    } as const;
+    const accepted = input.service.recordPresentation(receipts, confirmation);
+    if (accepted.length === 0) continue;
+    // Persist delivery evidence only after the state machine accepted the transition, so a rejected
+    // presentation can never leave a dispositionable record behind.
+    await input.service.persistDeliveredRecords(accepted, {
+      ...confirmation,
+      invocationId: input.invocationId,
+    });
+    messages.push({
+      type: 'system_info',
+      catId: input.catId,
+      content: JSON.stringify({
+        type: 'write_opportunity_presentation_receipt',
+        v: 1,
+        outcome,
+        invocationId: input.invocationId,
+        generationId: input.promptGenerationId,
+        evidenceRef: input.evidenceRef,
+        continuityDispositionRef: input.continuity.disposition.evidenceRef,
+        // Full triples, not just ids: dedupeLineage cannot be derived from opportunityId, so a
+        // receipt carrying only ids would leave the cat unable to attribute its own disposition.
+        opportunities: accepted.map((receipt) => ({
+          opportunityId: receipt.opportunityId,
+          dedupeLineage: receipt.state.scene.opportunity.dedupeLineage,
+          generation: receipt.state.scene.opportunity.generation,
+        })),
+      }),
+      timestamp: occurredAt,
+    });
+  }
+  return messages;
+}
+
+function createPresentationDeliveryAttempt(input: {
+  readonly catId: CatId;
+  readonly invocationId: string;
+  readonly effectivePrompt: string;
+  readonly deliveryReceipts: readonly MemoryCueDeliveryReceipt[];
+  readonly omittedOpportunityIds: readonly string[];
+  readonly legacyFallbackProjections: readonly MemoryCueLegacyFallbackProjection[];
+  readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
+  readonly asrPersonMemoryPromptService?: AsrPersonMemoryOpportunityPromptService;
+  readonly asrPersonMemoryReceipts: readonly AsrPersonMemoryPresentationReceipt[];
+  readonly contextContinuity?: ContextContinuityHandshake;
+}): { confirm(): Promise<AgentMessage[]> } {
+  const promptGenerationId = `sha256:${createHash('sha256').update(input.effectivePrompt).digest('hex')}`;
+  const evidenceRef = `context-delivery:${input.invocationId}:${promptGenerationId}`;
+  const presented = input.deliveryReceipts.filter((receipt) =>
+    input.effectivePrompt.includes(receipt.projectionMarker),
+  );
+  const presentedLegacyOpportunityIds = new Set(
+    input.legacyFallbackProjections
+      .filter((projection) => input.effectivePrompt.includes(projection.promptContext))
+      .map((projection) => projection.opportunityId),
+  );
+  const omitted = [
+    ...input.omittedOpportunityIds,
+    ...input.deliveryReceipts
+      .filter((receipt) => !input.effectivePrompt.includes(receipt.projectionMarker))
+      .map((receipt) => receipt.event.opportunityId),
+  ].filter(
+    (opportunityId, index, all) =>
+      !presentedLegacyOpportunityIds.has(opportunityId) && all.indexOf(opportunityId) === index,
+  );
+  const presentedWriteOpportunities = input.asrPersonMemoryReceipts.filter((receipt) =>
+    input.effectivePrompt.includes(receipt.projectionMarker),
+  );
+  const omittedWriteOpportunities = input.asrPersonMemoryReceipts.filter(
+    (receipt) => !input.effectivePrompt.includes(receipt.projectionMarker),
+  );
+  let confirmed = false;
+
+  return {
+    async confirm(): Promise<AgentMessage[]> {
+      if (confirmed) return [];
+      confirmed = true;
+      const messages: AgentMessage[] = [];
+      if (presented.length > 0 && input.memoryCuePromptService?.recordPresented) {
+        await input.memoryCuePromptService.recordPresented(presented, {
+          generationId: promptGenerationId,
+          evidenceRef,
+        });
+        messages.push({
+          type: 'system_info',
+          catId: input.catId,
+          content: JSON.stringify({
+            type: 'context_presentation_receipt',
+            v: 1,
+            outcome: 'presented',
+            invocationId: input.invocationId,
+            generationId: promptGenerationId,
+            evidenceRef,
+            projectionIds: presented.map((receipt) => receipt.cueId),
+          }),
+          timestamp: Date.now(),
+        });
+      }
+      if (omitted.length > 0) {
+        messages.push({
+          type: 'system_info',
+          catId: input.catId,
+          content: JSON.stringify({
+            type: 'context_presentation_receipt',
+            v: 1,
+            outcome: 'omitted',
+            invocationId: input.invocationId,
+            generationId: promptGenerationId,
+            evidenceRef,
+            opportunityIds: omitted,
+          }),
+          timestamp: Date.now(),
+        });
+      }
+      messages.push(
+        ...(await recordWriteOpportunityPresentation({
+          catId: input.catId,
+          invocationId: input.invocationId,
+          promptGenerationId,
+          evidenceRef,
+          ...(input.asrPersonMemoryPromptService ? { service: input.asrPersonMemoryPromptService } : {}),
+          ...(input.contextContinuity ? { continuity: input.contextContinuity } : {}),
+          delivered: presentedWriteOpportunities,
+          omitted: omittedWriteOpportunities,
+        })),
+      );
+      return messages;
+    },
+  };
+}
 
 export function getOpenCodeKnownModels(): Set<string> {
   if (_openCodeKnownModels !== null) return _openCodeKnownModels;
@@ -183,7 +376,14 @@ import type {
   TurnExecutionKind,
   TurnExecutionTerminalInput,
 } from '../../stores/ports/TurnExecutionStore.js';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  ContextContinuityHandshake,
+  InvocationOrigin,
+  RouteTopology,
+} from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import { agentSessionMutex } from './AgentSessionMutex.js';
@@ -637,6 +837,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F276 Wave 2 bridge: cross-invocation terminal truth consulted at opportunity admission. */
+  readonly writeOpportunityTerminalLedger?: import('../../../../memory/people/WriteOpportunityTerminalLedger.js').WriteOpportunityTerminalLedger;
+  /** F276 Wave 2 bridge: delivery evidence a later F276 tool callback is bound against. */
+  readonly writeOpportunityDeliveryStore?: import('../../../../memory/people/WriteOpportunityDeliveryStore.js').WriteOpportunityDeliveryStore;
   readonly registry: InvocationRegistry;
   readonly sessionManager: SessionManager;
   readonly threadStore: IThreadStore | null;
@@ -757,6 +961,9 @@ export interface InvocationParams {
   /** Strict owner authentication is a separate fact from the tenant-scoped userId. */
   readonly ownerAuthProvenance: import('./owner-auth-provenance.js').OwnerAuthProvenance;
   readonly threadId: string;
+  /** F296 B0: ingress provenance and route shape remain independent of carrier identity. */
+  readonly invocationOrigin?: InvocationOrigin;
+  readonly routeTopology?: RouteTopology;
   /**
    * F247 AC-B1c-2/12: For cloud-cat dispatches via the bridge, the **raw**
    * mention text (the user's / mentioning cat's words — NOT the fully
@@ -814,6 +1021,8 @@ export interface InvocationParams {
   >;
   /** Scope-free seeds are bound only after this child invocation id exists. */
   readonly memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[];
+  /** F276 trial: source-only ASR scenes bound to their exact owner trigger message. */
+  readonly asrPersonMemoryScenes?: readonly import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene[];
   /** Existing F260 prompt fragments retained when the corresponding subject cue resolves to zero. */
   readonly memoryCueLegacyFallbacks?: readonly {
     seed: MemoryCueOpportunitySeed;
@@ -961,6 +1170,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   const callbackEnv: Record<string, string> = {
     CAT_CAFE_API_URL: apiUrl,
+    // Internal, non-secret control-plane identity. The child invocation id below
+    // authenticates callbacks; this parent id lets a tracker-less supervisor be
+    // projected and canceled against the same execution handle as Queue/UI.
+    CAT_CAFE_EXECUTION_ID: executionParentInvocationId,
     CAT_CAFE_INVOCATION_ID: invocationId,
     CAT_CAFE_CALLBACK_TOKEN: callbackToken,
     CAT_CAFE_USER_ID: userId,
@@ -1018,7 +1231,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     });
   }
 
-  if (deps.memoryCuePromptService && params.memoryCueOpportunitySeeds?.length) {
+  let memoryCueDeliveryReceipts: readonly MemoryCueDeliveryReceipt[] = [];
+  let omittedMemoryCueOpportunityIds: readonly string[] = [];
+  let memoryCueLegacyFallbackProjections: readonly MemoryCueLegacyFallbackProjection[] = [];
+  const resolveInvocationMemoryCues = async (): Promise<void> => {
+    invocationPromptAdditions.length = 0;
+    memoryCueDeliveryReceipts = [];
+    omittedMemoryCueOpportunityIds = [];
+    memoryCueLegacyFallbackProjections = [];
+    if (!deps.memoryCuePromptService || !params.memoryCueOpportunitySeeds?.length) return;
     const serverScope = { ownerUserId: userId, threadId, invocationId };
     try {
       const cueResolution = await deps.memoryCuePromptService.resolve({
@@ -1027,24 +1248,44 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         now: Date.now(),
       });
       if (cueResolution.promptSegment) invocationPromptAdditions.push(cueResolution.promptSegment);
-      if (params.memoryCueLegacyFallbacks?.length) {
-        const admitted = new Set(cueResolution.admittedOpportunityIds);
-        const fallback = params.memoryCueLegacyFallbacks
-          .filter((item) => !admitted.has(memoryCueOpportunityId(item.seed, serverScope)))
-          .map((item) => item.promptContext)
-          .filter(Boolean)
-          .join('\n');
-        if (fallback) invocationPromptAdditions.push(fallback);
-      }
+      memoryCueDeliveryReceipts = cueResolution.deliveryReceipts ?? [];
+      omittedMemoryCueOpportunityIds = cueResolution.omittedOpportunityIds ?? [];
+      const fallback = resolveMemoryCueLegacyFallbacks(
+        params.memoryCueLegacyFallbacks,
+        serverScope,
+        cueResolution.admittedOpportunityIds,
+      );
+      memoryCueLegacyFallbackProjections = fallback.projections;
+      if (fallback.promptSegment) invocationPromptAdditions.push(fallback.promptSegment);
     } catch (err) {
       log.warn({ err, invocationId, threadId, catId }, '[F287] memory cue prompt resolution failed closed');
-      const fallback = params.memoryCueLegacyFallbacks
-        ?.map((item) => item.promptContext)
-        .filter(Boolean)
-        .join('\n');
-      if (fallback) invocationPromptAdditions.push(fallback);
+      const fallback = resolveMemoryCueLegacyFallbacks(params.memoryCueLegacyFallbacks, serverScope);
+      memoryCueLegacyFallbackProjections = fallback.projections;
+      if (fallback.promptSegment) invocationPromptAdditions.push(fallback.promptSegment);
     }
-  }
+  };
+  const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
+    ...(deps.writeOpportunityTerminalLedger ? { terminalLedger: deps.writeOpportunityTerminalLedger } : {}),
+    ...(deps.writeOpportunityDeliveryStore ? { deliveryStore: deps.writeOpportunityDeliveryStore } : {}),
+  });
+  let asrPersonMemoryReceipts: readonly AsrPersonMemoryPresentationReceipt[] = [];
+  const resolveAsrPersonMemoryOpportunities = async (
+    continuity: ContextContinuityHandshake | undefined,
+  ): Promise<void> => {
+    asrPersonMemoryReceipts = [];
+    if (!continuity || !params.asrPersonMemoryScenes?.length) return;
+    // Ledger-aware: suppresses generations already judged in an earlier invocation and lineages
+    // killed by correct/forget/scope-revoke. With either authority store absent, the prompt is
+    // withheld so the cat is never shown a disposition ref that its callback cannot bind.
+    const resolution = await asrPersonMemoryPromptService.resolveForInvocation({
+      candidates: params.asrPersonMemoryScenes,
+      serverScope: { ownerUserId: userId, threadId, consumerCatId: catId },
+      continuity,
+      now: Date.now(),
+    });
+    asrPersonMemoryReceipts = resolution.presentationReceipts;
+    if (resolution.promptSegment) invocationPromptAdditions.push(resolution.promptSegment);
+  };
 
   const auditLog = getEventAuditLog();
   const promptDigest = createPromptDigest([prompt, ...invocationPromptAdditions].filter(Boolean).join('\n'));
@@ -2396,6 +2637,27 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    const contextCapability = service.contextCapability?.();
+    let contextContinuityHandshake: ContextContinuityHandshake | undefined = contextCapability
+      ? resolveContextContinuity({
+          capability: contextCapability,
+          invocationId,
+          ...(sessionId ? { requestedRuntimeSessionId: sessionId } : {}),
+          invocationOrigin: params.invocationOrigin ?? 'unknown',
+          routeTopology: params.routeTopology ?? 'independent',
+        })
+      : undefined;
+    const hasTargetContinuityHandshake =
+      contextContinuityHandshake && supportsPreProviderContinuityHandshake(contextContinuityHandshake);
+    if (hasTargetContinuityHandshake && contextContinuityHandshake?.disposition.state === 'unknown' && sessionId) {
+      if (!params.rebuildPromptAfterSessionSeal) {
+        throw new Error('context_continuity_cold_rebuild_unavailable');
+      }
+      prompt = await params.rebuildPromptAfterSessionSeal();
+    }
+    await resolveInvocationMemoryCues();
+    await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new provider sessions.
     // Exception: compression detected → force re-inject (see _needsReinjection).
     //
@@ -2415,7 +2677,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       isResume &&
       lastStaticIdentityRevision !== undefined &&
       lastStaticIdentityRevision !== registryRevision;
-    const injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection || registryChangedSinceStaticIdentity;
+    const forceContinuityColdIdentity = Boolean(
+      hasTargetContinuityHandshake && contextContinuityHandshake?.contextMode === 'cold',
+    );
+    let injectSystemPrompt =
+      !canSkipOnResume ||
+      !isResume ||
+      forceReinjection ||
+      registryChangedSinceStaticIdentity ||
+      forceContinuityColdIdentity;
     if (canSkipOnResume) {
       if (injectSystemPrompt) {
         _staticIdentityRegistryRevision.set(identityKey, registryRevision);
@@ -2424,26 +2694,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // Prepend staticIdentity to prompt when injection is needed
-    // F070-P2: missionPrefix (dispatch context) is prepended for external projects
-    const promptWithInvocationAdditions = [prompt, ...invocationPromptAdditions].filter(Boolean).join('\n');
-    const promptWithMission = missionPrefix
-      ? `${missionPrefix}\n\n${promptWithInvocationAdditions}`
-      : promptWithInvocationAdditions;
-
-    let effectivePrompt =
-      injectSystemPrompt && params.systemPrompt
-        ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
-        : `${promptWithMission}`;
-
     // F225 软层: deliver a pending context-management hint into the cat's actual
     // prompt (a system_info output can't reach cat cognition — see
     // context-management-hint). Queued on the prior warn turn; independent of
     // injectSystemPrompt so it lands even on resumes that skip identity re-injection.
     const contextHintPrefix = takeContextHintPrefix(compressionKey);
-    if (contextHintPrefix) {
-      effectivePrompt = `${contextHintPrefix}\n\n---\n\n${effectivePrompt}`;
-    }
 
     // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging layer prepend.
     // Wired here (next to F225 contextHintPrefix) and NOT folded into
@@ -2454,12 +2709,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // (independent of injectSystemPrompt). Staging content goes to runtime
     // prompt path, NOT compiled native L0 (砚砚 PR #2221 R1 P2 boundary).
     const stagingPrepend = buildStagingPrepend(catId);
-    if (stagingPrepend) {
-      effectivePrompt = `${stagingPrepend}\n\n---\n\n${effectivePrompt}`;
-    }
-
-    /* @segment M2 — Transcript Path Hints */
-    effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);
+    let promptWithInvocationAdditions = '';
+    let effectivePrompt = '';
+    const rebuildEffectivePrompt = (includeSystemPrompt: boolean): void => {
+      // Prepend staticIdentity to prompt when injection is needed.
+      // F070-P2: missionPrefix (dispatch context) is prepended for external projects.
+      promptWithInvocationAdditions = [prompt, ...invocationPromptAdditions].filter(Boolean).join('\n');
+      const promptWithMission = missionPrefix
+        ? `${missionPrefix}\n\n${promptWithInvocationAdditions}`
+        : promptWithInvocationAdditions;
+      effectivePrompt =
+        includeSystemPrompt && params.systemPrompt
+          ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
+          : `${promptWithMission}`;
+      if (contextHintPrefix) effectivePrompt = `${contextHintPrefix}\n\n---\n\n${effectivePrompt}`;
+      if (stagingPrepend) effectivePrompt = `${stagingPrepend}\n\n---\n\n${effectivePrompt}`;
+      /* @segment M2 — Transcript Path Hints */
+      effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);
+    };
+    rebuildEffectivePrompt(injectSystemPrompt);
 
     capturePromptIfEnabled({
       catId: catId as string,
@@ -3826,6 +4094,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     let allowTransientRetry = true;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptStartedAt = Date.now();
+      const presentationDelivery = createPresentationDeliveryAttempt({
+        catId,
+        invocationId,
+        effectivePrompt,
+        deliveryReceipts: memoryCueDeliveryReceipts,
+        omittedOpportunityIds: omittedMemoryCueOpportunityIds,
+        legacyFallbackProjections: memoryCueLegacyFallbackProjections,
+        ...(deps.memoryCuePromptService ? { memoryCuePromptService: deps.memoryCuePromptService } : {}),
+        asrPersonMemoryPromptService,
+        asrPersonMemoryReceipts,
+        ...(contextContinuityHandshake ? { contextContinuity: contextContinuityHandshake } : {}),
+      });
+      if (contextContinuityHandshake && supportsPreProviderContinuityHandshake(contextContinuityHandshake)) {
+        yield {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({ type: 'context_continuity', v: 1, invocationId, ...contextContinuityHandshake }),
+          timestamp: Date.now(),
+        };
+      }
       const options: AgentServiceOptions = {
         ...(sessionId ? { sessionId } : {}),
         ...baseOptions,
@@ -4043,6 +4331,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
 
+        if (isSubstantiveProviderOutput(msg)) {
+          for (const receipt of await presentationDelivery.confirm()) {
+            for await (const out of streamProcessedOutputs(receipt)) yield out;
+          }
+        }
+
         // F149: Map provider_signal / liveness_signal → system_info for frontend delivery
         const deliveryMsg =
           msg.type === 'provider_signal' || msg.type === 'liveness_signal'
@@ -4143,6 +4437,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // when the original attempt was a resume (injectSystemPrompt=false).
         if (params.systemPrompt && !baseOptions.systemPrompt) {
           baseOptions.systemPrompt = params.systemPrompt;
+        }
+        if (hasTargetContinuityHandshake) {
+          if (!params.rebuildPromptAfterSessionSeal) {
+            throw new Error('context_continuity_cold_rebuild_unavailable');
+          }
+          prompt = await params.rebuildPromptAfterSessionSeal();
+          await resolveInvocationMemoryCues();
+          injectSystemPrompt = true;
+          contextContinuityHandshake = contextCapability
+            ? resolveContextContinuity({
+                capability: contextCapability,
+                invocationId,
+                freshReason: 'resume_failed',
+                invocationOrigin: params.invocationOrigin ?? 'unknown',
+                routeTopology: params.routeTopology ?? 'independent',
+              })
+            : undefined;
+          await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+          rebuildEffectivePrompt(true);
         }
         allowSessionRetry = false;
         continue;

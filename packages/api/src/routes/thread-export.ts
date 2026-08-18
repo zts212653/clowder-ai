@@ -10,7 +10,7 @@ export { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 
 export interface ThreadExportRoutesOptions {
   threadStore: IThreadStore;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById' | 'getByThreadAfter'>;
 }
 
 export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> = async (fastify, opts) => {

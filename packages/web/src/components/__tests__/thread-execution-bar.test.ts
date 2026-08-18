@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { _resetCatDataCache } from '@/hooks/useCatData';
 import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
+import { apiFetch } from '@/utils/api-client';
 import { ThreadExecutionBar } from '../ThreadExecutionBar';
 
 // Mock /api/cats to return dynamic cat data
@@ -91,6 +92,43 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.mocked(apiFetch)
+      .mockReset()
+      .mockImplementation((url: string) => {
+        if (url === '/api/cats') {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                cats: [
+                  {
+                    id: 'opus',
+                    displayName: '布偶猫',
+                    color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+                    mentionPatterns: ['@opus'],
+                    clientId: 'anthropic',
+                    defaultModel: 'claude-opus-4-6',
+                    avatar: '🐱',
+                    roleDescription: 'test',
+                    personality: 'test',
+                  },
+                  {
+                    id: 'codex',
+                    displayName: '缅因猫',
+                    color: { primary: '#4CAF50', secondary: '#C8E6C9' },
+                    mentionPatterns: ['@codex'],
+                    clientId: 'openai',
+                    defaultModel: 'gpt-5.3-codex',
+                    avatar: '🐱',
+                    roleDescription: 'test',
+                    personality: 'test',
+                  },
+                ],
+              }),
+          }) as Promise<Response>;
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) as Promise<Response>;
+      });
     _resetCatDataCache();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -166,6 +204,52 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('布偶猫');
     expect(text).toContain('缅因猫');
+  });
+
+  it('fences rapid repeated Stop All clicks before the first REST cancels settle', async () => {
+    let releaseCancel: ((response: Response) => void) | undefined;
+    const cancelResponse = new Promise<Response>((resolve) => {
+      releaseCancel = resolve;
+    });
+    const mockedApiFetch = vi.mocked(apiFetch);
+    mockedApiFetch.mockImplementation((url: string) => {
+      if (url === '/api/cats') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ cats: [] }),
+        }) as Promise<Response>;
+      }
+      if (url.includes('/cancel')) return cancelResponse;
+      return Promise.resolve(
+        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [] }), { status: 200 }),
+      );
+    });
+    seedExecutions([
+      liveExecution({ executionId: 'inv-1', catId: 'opus' }),
+      liveExecution({ executionId: 'inv-2', catId: 'codex' }),
+    ]);
+    await act(async () => root.render(React.createElement(ThreadExecutionBar)));
+
+    const stopAll = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('全部停止'),
+    );
+    expect(stopAll).toBeTruthy();
+
+    await act(async () => {
+      stopAll?.click();
+      stopAll?.click();
+      await Promise.resolve();
+    });
+
+    const cancelCalls = mockedApiFetch.mock.calls.filter(([url]) => String(url).includes('/cancel'));
+    expect(cancelCalls).toHaveLength(2);
+    expect((stopAll as HTMLButtonElement).disabled).toBe(true);
+
+    releaseCancel?.(new Response('{}', { status: 200 }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   });
 
   it('uses dynamic cat color from cat-config (not hardcoded)', async () => {

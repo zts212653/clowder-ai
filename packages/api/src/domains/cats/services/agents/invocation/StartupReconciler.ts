@@ -19,7 +19,7 @@ import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput, IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
-import type { InvocationQueue } from './InvocationQueue.js';
+import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
 import { QueuedMessageCustodyStartupReconciler } from './QueuedMessageCustodyStartupReconciler.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
@@ -83,6 +83,8 @@ export interface StartupReconcilerDeps {
   invocationQueue?: InvocationQueue;
   /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
   resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
+  /** Resume a durable exact-group retirement before any later entry in that scope may dispatch. */
+  resumePrestartRetirement?: (entries: readonly QueueEntry[]) => Promise<boolean>;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
@@ -135,9 +137,25 @@ export class StartupReconciler {
           new Set(queueCustodyRecovery.legacyVisibilityFallbackMessageIds),
         ))
       : await this.recoverOrphanedQueuedMessages(affectedThreads);
+    const blockedResumeScopes = new Set<string>();
+    for (const entries of queueCustodyRecovery?.prestartRetirements ?? []) {
+      const first = entries[0];
+      if (!first) continue;
+      const scopeKey = `${first.threadId}\u0000${first.userId}`;
+      try {
+        const retired = (await this.deps.resumePrestartRetirement?.(entries)) ?? false;
+        if (!retired) blockedResumeScopes.add(scopeKey);
+      } catch (err) {
+        blockedResumeScopes.add(scopeKey);
+        this.deps.log.warn(
+          `[startup-reconciler] Failed to resume durable pre-start retirement ${first.prestartRetirement?.id}: ${String(err)}`,
+        );
+      }
+    }
     let queueEntriesResumed = 0;
     if (queueCustodyRecovery && this.deps.resumeQueue) {
       for (const scope of queueCustodyRecovery.resumeScopes) {
+        if (blockedResumeScopes.has(`${scope.threadId}\u0000${scope.userId}`)) continue;
         try {
           await this.deps.resumeQueue(scope.threadId, scope.userId);
           queueEntriesResumed += 1;

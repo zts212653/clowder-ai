@@ -18,13 +18,20 @@ describe('RedisDossierObservationStore', () => {
   let redis;
   /** @type {import('../src/domains/cats/services/stores/redis/RedisDossierObservationStore.js').RedisDossierObservationStore} */
   let store;
+  let connectionFailed = false;
 
   before(async () => {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6398';
-    redis = new Redis(redisUrl, { keyPrefix: TEST_PREFIX, lazyConnect: true });
+    redis = new Redis(redisUrl, {
+      keyPrefix: TEST_PREFIX,
+      lazyConnect: true,
+      retryStrategy: () => null,
+    });
     try {
       await redis.connect();
     } catch {
+      connectionFailed = true;
+      redis.disconnect();
       // Skip if Redis unavailable in CI
       return;
     }
@@ -49,6 +56,11 @@ describe('RedisDossierObservationStore', () => {
       }
       await redis.quit();
     }
+  });
+
+  it('closes the optional client when Redis is unavailable', () => {
+    if (!connectionFailed) return;
+    assert.equal(redis.status, 'end', 'a skipped Redis test must not leave a reconnect timer alive');
   });
 
   it('add persists observation to Redis hash + sorted set index', async () => {

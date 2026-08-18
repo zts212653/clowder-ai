@@ -7,6 +7,7 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { MCP_CALLBACK_ENV_KEYS } from '../../../../../config/capabilities/mcp-constants.js';
+import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
@@ -192,12 +193,7 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
 }
 
 function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(input ?? {})) {
-    if (value === null) delete env[key];
-    else env[key] = value;
-  }
-  return env;
+  return buildChildEnv(input);
 }
 
 export function createCodexSocketDirectory(): string {

@@ -37,6 +37,7 @@ import { getCatModel } from './config/cat-models.js';
 import { resolveCodexCarrierTruth } from './config/codex-cli.js';
 import { configEventBus } from './config/config-event-bus.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
+import { resolveRuntimeDeploymentRevision } from './config/runtime-deployment-revision.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
 import { ApprovalIngress } from './domains/approval-hub/ApprovalIngress.js';
@@ -59,6 +60,9 @@ import { WaitContinuationRetryCommitter } from './domains/ball-custody/WaitConti
 import { WaitContinuationRetryPreflight } from './domains/ball-custody/WaitContinuationRetryPreflight.js';
 import { WaitTerminationService } from './domains/ball-custody/WaitTerminationService.js';
 import { agentSessionMutex } from './domains/cats/services/agents/invocation/AgentSessionMutex.js';
+// F297 Phase B: Sidebar C10 production source — domain-owned composition shared by
+// queue / active-execution / Sidebar 三个 consumer（PR #3748 R3 P2-1）。
+import { createActiveExecutionService } from './domains/cats/services/agents/invocation/active-execution-service.js';
 import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationOwnerReaper } from './domains/cats/services/agents/invocation/InvocationOwnerReaper.js';
@@ -81,6 +85,7 @@ import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueP
 import { reconcileZombies } from './domains/cats/services/agents/invocation/reconcileZombies.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
+import { createSidebarPresenceSource } from './domains/cats/services/agents/invocation/sidebar-presence-source.js';
 import {
   listenBeforeTurnExecutionRecovery,
   TurnExecutionStartupReconciler,
@@ -190,6 +195,8 @@ import { PersonMemoryDispositionSubjectProofResolver } from './domains/memory/pe
 import { PersonMemoryProposalStatusContextResolver } from './domains/memory/people/PersonMemoryProposalStatusContextResolver.js';
 import { PersonMemoryRecallService } from './domains/memory/people/PersonMemoryRecallService.js';
 import { RedisPersonMemoryStore } from './domains/memory/people/RedisPersonMemoryStore.js';
+import { RedisWriteOpportunityDeliveryStore } from './domains/memory/people/RedisWriteOpportunityDeliveryStore.js';
+import { RedisWriteOpportunityTerminalLedger } from './domains/memory/people/RedisWriteOpportunityTerminalLedger.js';
 import { EvidenceStoreWorkspacePersonResolver } from './domains/memory/people/WorkspacePersonResolver.js';
 import { RedisDeferredPersonMemoryReceiptStore } from './domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
@@ -373,6 +380,7 @@ import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { previewRoutes } from './routes/preview.js';
+import { resolveActiveInvocations } from './routes/queue.js';
 import { registerTasteProposalDecisionRoutes } from './routes/taste-proposal-decision-routes.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
@@ -382,6 +390,7 @@ import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { registerWaitTerminationRoutes } from './routes/wait-termination-routes.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveActiveProjectRoot } from './utils/active-project-root.js';
+import { createCliExecutionOwnerService } from './utils/cli-process-ownership.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { emitQueueUpdated } from './utils/queue-enrichment.js';
@@ -435,6 +444,7 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: customLogger as unknown as import('fastify').FastifyBaseLogger });
   const privateUserId = (process.env.CAT_CAFE_USER_ID ?? 'default-user').trim();
   if (!privateUserId) throw new Error('[api] CAT_CAFE_USER_ID must not be blank');
+  const runtimeDeploymentRevision = resolveRuntimeDeploymentRevision(process.env.CAT_CAFE_RUNTIME_ROOT);
 
   if (isDebugMode) {
     app.log.info({ logDir: LOG_DIR_PATH }, '[api] Debug mode enabled (--debug flag)');
@@ -470,7 +480,11 @@ async function main(): Promise<void> {
 
   // Health check. Keep root paths for direct API access and expose /api/*
   // aliases for same-origin reverse-proxy deployments.
-  const healthHandler = async () => ({ status: 'ok' as const, timestamp: Date.now() });
+  const healthHandler = async () => ({
+    status: 'ok' as const,
+    timestamp: Date.now(),
+    deploymentRevision: runtimeDeploymentRevision,
+  });
   app.get('/health', healthHandler);
   app.get('/api/health', healthHandler);
 
@@ -1384,6 +1398,10 @@ async function main(): Promise<void> {
   const deferredPersonMemoryReceiptStore = redisClient
     ? new RedisDeferredPersonMemoryReceiptStore(redisClient)
     : undefined;
+  // F276 Wave 2 bridge. Both are Redis-only: without a client the opportunity path degrades to
+  // in-invocation behavior rather than silently claiming nothing is terminal.
+  const writeOpportunityTerminalLedger = redisClient ? new RedisWriteOpportunityTerminalLedger(redisClient) : undefined;
+  const writeOpportunityDeliveryStore = redisClient ? new RedisWriteOpportunityDeliveryStore(redisClient) : undefined;
   const personMemoryDispositionProofResolver = redisClient
     ? new PersonMemoryDispositionProofResolver(redisClient)
     : null;
@@ -2164,6 +2182,7 @@ async function main(): Promise<void> {
       ballCustodyEventLog,
       ballCustodyProjectionStore,
       ballCustody: ballCustodyIngest,
+      log: app.log,
       ...(ballCustodyProjector
         ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
         : {}),
@@ -2268,6 +2287,8 @@ async function main(): Promise<void> {
       messageStore,
     ),
     memoryCuePromptService: memoryCueRuntime.promptService,
+    ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
+    ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
 
   // F39: Message queue delivery
@@ -2313,6 +2334,7 @@ async function main(): Promise<void> {
     sessionContinuationCoordinator,
     freshnessEventLog,
     freshnessClosureStore,
+    ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
     deliveryCursorStore,
   });
@@ -2722,6 +2744,22 @@ async function main(): Promise<void> {
   };
   await app.register(messagesRoutes, messagesOpts);
   await app.register(messageBundleRoutes, { messageStore, threadStore });
+  // F297 Phase B: 所有"什么在跑"的问题收口到同一个 domain service。
+  //
+  // 它比旧结构多做一件关键的事：**正向 working 投影**。live invocation / managed command /
+  // running child 三张执行面各自既提名候选、也自己定性。旧结构把三源都塞进候选、却统一交给
+  // 只认识 live invocation 的 classifier 定性，于是 managed command 与 standalone child
+  // 候选进来、定性落空、presence=null，被终态回落误报成 done/error（R3 P1-1 / P1-2）。
+  const activeExecutionService = createActiveExecutionService({
+    invocationTracker,
+    recordStore: invocationRecordStore,
+    draftStore,
+    turnExecutionStore,
+    invocationRegistry: registry,
+    dynamicTaskStore,
+    log: app.log,
+  });
+
   await app.register(queueRoutes, {
     threadStore,
     invocationQueue,
@@ -2738,6 +2776,8 @@ async function main(): Promise<void> {
     invocationRegistry: registry, // F194 Phase Z (KD-22): namespace bridge for parent↔child invocation
     getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
     dynamicTaskStore, // F295: canonical managed-command execution read projection
+    activeExecutionService, // F297 AC-D3: shared composition; project scan uses its live-candidate view
+    cliExecutionOwnerService: createCliExecutionOwnerService({ log: app.log }),
   });
   await app.register(invocationsRoutes, {
     invocationRecordStore,
@@ -3829,6 +3869,8 @@ async function main(): Promise<void> {
           personMemoryStore,
           workspacePersonResolver,
           ...(deferredPersonMemoryReceiptStore ? { deferredPersonMemoryReceiptStore } : {}),
+          ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
+          ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
           ...(proactiveCandidateRegistryResolver ? { proactiveCandidateRegistryResolver } : {}),
         }
       : {}),
@@ -3871,9 +3913,11 @@ async function main(): Promise<void> {
     redis, // F254 Phase B: raw Redis for freshness notice event log + state store
     holdBallDeps: {
       registry,
+      ownerUserId: privateUserId,
       taskRunner: taskRunnerV2,
       templateRegistry,
       dynamicTaskStore,
+      scheduleMutationAuditStore: scheduleMutationProposalStore,
       messageStore,
       socketManager,
       threadStore,
@@ -3978,8 +4022,15 @@ async function main(): Promise<void> {
       }
     },
   });
+  const sidebarPresenceSource = createSidebarPresenceSource({
+    buildSnapshot: (userId) => activeExecutionService.buildSnapshot(userId),
+    resolveWorkingPresence: (threadId, userId, snapshot) =>
+      activeExecutionService.resolveWorkingPresence(threadId, userId, snapshot),
+  });
+
   await app.register(threadsRoutes, {
     threadStore,
+    presenceSource: sidebarPresenceSource,
     messageStore,
     taskStore,
     memoryStore,
@@ -4084,6 +4135,15 @@ async function main(): Promise<void> {
   } = await import('./domains/signal-intake/index.js');
   const meetingIntakeStore = redis ? new RedisMeetingIntakeStore(redis) : new MemoryMeetingIntakeStore();
   const signalRouteStore = redis ? new RedisSignalRouteStore(redis) : new MemorySignalRouteStore();
+  const { ensureOfficialPluginSignalRoutes } = await import('./domains/plugin/official-signal-routes.js');
+  const officialSignalRouteBootstrap = await ensureOfficialPluginSignalRoutes({
+    routes: signalRouteStore,
+    ownerId: privateUserId,
+  });
+  app.log.info(
+    `[api] official plugin Host routes ready ` +
+      `(created=${officialSignalRouteBootstrap.created}, preserved=${officialSignalRouteBootstrap.preserved})`,
+  );
   const { createDormantPluginRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
   const externalPluginRuntime = createDormantPluginRuntimeComposition({
     projectRoot: resolveActiveProjectRoot(),
@@ -4101,16 +4161,42 @@ async function main(): Promise<void> {
     await officialPluginAuth.shutdown();
     await externalPluginRuntime.shutdown('api_shutdown');
   });
+  const { OFFICIAL_PLUGIN_POLICIES } = await import('./domains/plugin/official-catalog.js');
+  const { RefreshingOfficialPluginCatalog } = await import('./domains/plugin/official-catalog-provider.js');
   const { OfficialPluginPackageInstaller } = await import('./domains/plugin/official-package-installer.js');
+  const { OfficialPluginHistoryImportService } = await import('./domains/plugin/official-plugin-history-import.js');
+  const { createLarkCliFeishuArtifactInspector, normalizeGeneratedArtifact, parseFeishuMinutesReference } =
+    await import('@clowder-ai/feishu-meeting-intake');
   const { registerOfficialPluginRoutes } = await import('./routes/plugin-official-routes.js');
+  const officialPluginCatalog = new RefreshingOfficialPluginCatalog({ policies: OFFICIAL_PLUGIN_POLICIES });
+  const officialPluginHistoryImport = new OfficialPluginHistoryImportService({
+    inventory: externalPluginRuntime.inventoryStore,
+    broker: externalPluginRuntime.broker,
+    parseReference: (reference) => {
+      const locator = parseFeishuMinutesReference(reference);
+      if (locator.kind !== 'minute') {
+        throw new TypeError('Historical import only accepts Feishu Minutes references');
+      }
+      return {
+        artifactId: locator.artifactId,
+        kind: 'minute' as const,
+        ...(locator.revision === undefined ? {} : { revision: locator.revision }),
+      };
+    },
+    inspectArtifact: createLarkCliFeishuArtifactInspector({ homeDirectory: homedir() }),
+    normalizeArtifact: normalizeGeneratedArtifact,
+  });
   registerOfficialPluginRoutes(app, {
     inventory: externalPluginRuntime.inventoryStore,
     lifecycle: externalPluginRuntime.lifecycle,
     auth: officialPluginAuth,
+    catalogProvider: officialPluginCatalog,
     installer: new OfficialPluginPackageInstaller({
       inventory: externalPluginRuntime.inventory,
       packagesRoot: externalPluginRuntime.paths.packagesRoot,
+      catalogProvider: officialPluginCatalog,
     }),
+    historyImport: officialPluginHistoryImport,
   });
 
   // F246: Approval Hub — unified operator approval center, including F292 event-origin intake.
@@ -4777,6 +4863,11 @@ async function main(): Promise<void> {
     socketEmit: (event, data, room) => {
       socketManager?.broadcastToRoom(room, event, data);
     },
+    socketEmitWithAck: async (event, data, room) =>
+      socketManager ? socketManager.broadcastToRoomWithAck(room, event, data) : [],
+    callbackRegistry: registry,
+    agentKeyRegistry,
+    threadStore,
   });
   await app.register(avatarsRoutes);
   await app.register(skillsRoutes);
@@ -5275,6 +5366,7 @@ async function main(): Promise<void> {
       messageStore,
       socketManager: socketManager ?? undefined,
       invocationQueue,
+      resumePrestartRetirement: (entries) => queueProcessor.resumeDurablePrestartRetirement(entries),
       resumeQueue: (threadId, userId) => queueProcessor.processNext(threadId, userId),
       ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     });
@@ -6234,6 +6326,9 @@ async function main(): Promise<void> {
     taskRunnerV2.register(
       createDeferredPersonMemoryDailyTaskSpec({
         receiptStore: deferredPersonMemoryReceiptStore,
+        messageStore,
+        ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
+        ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
         ownerUserId: privateUserId,
       }),
     );

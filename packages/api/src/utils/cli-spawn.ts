@@ -25,6 +25,7 @@ import {
   type CliTimeoutTerminalContext,
   formatCliStderrForLog,
 } from './cli-diagnostics.js';
+import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from './cli-process-ownership.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
@@ -235,6 +236,10 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   // forwarding either value would let a raw dev command act like the runtime owner.
   'CONNECTOR_GATEWAY_AUTOSTART',
   'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+  // Per-invocation process ownership is a capability, not ambient config. A
+  // nested API or persistent host must not inherit the outer invocation.
+  CLI_EXECUTION_OWNER_BINDING_ENV,
+  CLI_EXECUTION_ID_ENV,
 ]);
 
 export interface CliPlainTextResult {
@@ -287,7 +292,10 @@ async function waitForIteratorUntil<T>(
   }
 }
 
-export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
+export function buildChildEnv(
+  overrides?: Record<string, string | null>,
+  options: { bindExecutionOwner?: boolean } = {},
+): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -298,6 +306,9 @@ export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS
     for (const [key, value] of Object.entries(overrides)) {
       if (ENV_VARS_TO_STRIP.has(key)) {
         delete merged[key];
+        if (key === CLI_EXECUTION_ID_ENV && options.bindExecutionOwner === true && value !== null) {
+          merged[key] = value;
+        }
         continue;
       }
       if (value === null) {
@@ -342,11 +353,12 @@ export async function* spawnCli(
 
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
-    env: buildChildEnv(options.env),
+    env: buildChildEnv(options.env, { bindExecutionOwner: options.bindExecutionOwner !== false }),
     // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
     // provided, open stdin as a pipe so the prompt can be streamed off the command
     // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
     stdio: [options.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    bindExecutionOwner: options.bindExecutionOwner !== false,
   });
 
   // Incident 2026-05-29: feed prompt via stdin instead of argv to prevent
@@ -1172,6 +1184,7 @@ function defaultSpawn(
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {
@@ -1208,7 +1221,10 @@ function defaultSpawn(
   }
 
   const plan = buildUnixSupervisedSpawnPlan(command, args, {
-    env: options.env,
+    env: {
+      ...options.env,
+      ...(options.bindExecutionOwner === false ? {} : { [CLI_EXECUTION_OWNER_BINDING_ENV]: '1' }),
+    },
     killGraceMs: Math.max(250, KILL_GRACE_MS - 500),
   });
 

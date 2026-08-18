@@ -33,6 +33,8 @@ export function mergePushRecallPresentations(
       resultCount: presentation.candidates.length,
       resultStatus: 'counted',
       _f263PushSurface: presentation.surface,
+      // F296 AC-A1: pointer-only surfaces must not be counted as presented bodies.
+      _f296PresentationKind: presentation.presentationKind,
       _f200Candidates: presentation.candidates,
     },
   }));

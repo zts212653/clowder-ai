@@ -1,7 +1,7 @@
 ---
 cell_id: ball-custody
 title: Ball Custody Engine
-summary: 球权与等待责任边界：BallCustodyProjection、Queue 普通 queued message、F254 closure/supplement、F167 action-successor 单账本，以及 F280 typed AwaitState lifecycle / owner fence / expiry / one-shot consume / canonical user-cancel termination event / immutable continuation carrier。责任对象各自持久化 origin/frontier/holder/generation/final；attention、carrier success、feedback why 与 source collection 都不裁决 action success 或 wake。
+summary: 球权与等待责任边界：BallCustodyProjection、Queue 普通 queued message、F254 closure/supplement、F167 action-successor 单账本与 hold rescue authorization，以及 F280 typed AwaitState lifecycle / owner fence / expiry / one-shot consume / canonical user-cancel termination event / immutable continuation carrier。责任对象各自持久化 origin/frontier/holder/generation/final；attention、carrier success、feedback why 与 source collection 都不裁决 action success 或 wake。
 canonical_features: [F167, F233, F254, F280]
 code_anchors:
   - packages/shared/src/types/action-successor.ts
@@ -19,6 +19,8 @@ code_anchors:
   - packages/api/src/domains/ball-custody/ActionSuccessorRecoverySweep.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
   - packages/api/src/domains/ball-custody/managed-command-wake-lifecycle.ts
+  - packages/api/src/domains/ball-custody/hold-ball-access-policy.ts
+  - packages/api/src/routes/callback-hold-ball-cancel-routes.ts
   - packages/api/src/domains/ball-custody/TurnCustodyProjectionService.ts
   - packages/api/src/domains/ball-custody/turn-custody-wake-provenance.ts
   - packages/api/src/domains/ball-custody/wait-state-machine.ts
@@ -59,6 +61,7 @@ code_anchors:
 doc_anchors:
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F167-a2a-chain-quality.md
+  - feature-specs/2026-08-18-f167-hold-rescue-authorization.md
   - feature-specs/2026-07-11-f167-phase-s-action-successor-single-flight.md
   - feature-specs/2026-07-16-f167-s1-phase-t-custody-cutover.md
   - docs/features/F233-ball-custody-observability.md
@@ -73,8 +76,9 @@ doc_anchors:
   - feature-specs/2026-07-09-f254-phase-e-catch-closure.md
   - feature-specs/2026-06-14-f233-phase-b-ball-custody-event-stream.md
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
-static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, WaitContinuationRetryPreflight, RetryAuthorityDecision, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, buildHandedEvent, ball.dispatch_dispositioned, dispatch_handled_continuation, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
+static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, HoldAccessRole, resolveHoldAccess, scheduleMutationAuditStore, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, WaitContinuationRetryPreflight, RetryAuthorityDecision, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, buildHandedEvent, ball.dispatch_dispositioned, dispatch_handled_continuation, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
 cited_by:
+  - {feature: F167-hold-rescue-authorization, date: 2026-08-18, delta: verified trigger principal, exact-thread collaborator, and configured operator become distinct hold access roles; collaborators retain rescue cancel but receive only a safe lifecycle summary, while exact task deletion and actor/owner audit commit atomically through the existing scheduler store}
   - {feature: F295, date: 2026-08-13, delta: active managed-command receipts are projected as cancelable executions without becoming a new lifecycle ledger; DELETE is fenced by exact taskId so an old hold bubble cannot cancel its replacement}
   - {feature: F280-Gate-5, date: 2026-08-12, delta: explicit retry reads the stored wait carrier for UX preflight, then atomically compares the raw Task/action-lease witness and Message custody revisions in the same commit that appends the attempt; stale witnesses and legacy unattributed agent work fail closed}
   - {feature: F280-Gate-4, date: 2026-08-12, delta: a consumed wait outcome retains its exact owner fence and publishes one immutable wait/outcome/fence carrier in the server-authored github-wait message; Queue and Invocation are projections, not new authority}
@@ -118,6 +122,20 @@ managed-command delivery: applied cancel excludes later visible wake, while an a
 excludes a false cancel terminal. Optional human why stays outside the event and is projected through
 F281's adapter.
 
+F167 hold status/cancel authority is also owned here. F174 supplies the verified invocation or
+agent-key principal but does not decide hold access; F295 consumes managed-command execution truth but
+does not own this endpoint. The exact task derives one trigger-principal owner from server-written
+`createdBy` plus `triggerUserId`. A verified invocation bound to that exact thread, or an agent key with
+canonical thread visibility and owner/participant standing, may rescue-cancel as a
+`thread_collaborator`. The configured operator must independently pass canonical ThreadStore
+visibility; `createdBy === 'system'` is never a universal pass. The physical `default` thread is
+logically user-isolated, so callback principals there must additionally match the exact hold's
+non-empty `triggerUserId`; this fence applies equally to invocation and agent-key principals. Trigger principal and operator reads
+retain the full lifecycle, while collaborator reads project only `{mode,status}`. Successful DELETE
+uses the task ID as the unchanged replacement fence and commits exact actor/owner/access-role evidence
+with the existing scheduler audit in the same transaction that removes the dynamic task; only then may
+the runner and exact managed command be stopped.
+
 For a consumed F280 wait, `WaitOutcomeV1` retains the exact owner fence that authorized that
 generation. `GitHubWaitLifecycleService` derives one closed `WaitContinuationCarrierV1` from the
 canonical task ID and outcome and persists it in the server-authored `github-wait` message source.
@@ -148,6 +166,7 @@ attributable canonical provenance remain non-executable.
 - 枚举、恢复或核销既有 blocked closure，尤其是一 closure 多 withheld invocation、exact transcript proof、conflict fail-closed、no-text accounting 或 migration CAS。
 - 改 F167 action successor identity、claim origin、predecessor route、holder outcome、return/safe-wait/replace、typed terminal predicate、completion candidate/verdict、fresh generation 或 external subject terminal truth。
 - 改 F167 managed-command/return recovery，或 turn-scoped wake provenance、三态 stop-gate projection 与阻断判决。
+- 改 F167 hold status/cancel principal、thread collaborator 救场、lifecycle 脱敏、exact task fence 或取消审计。
 - 改 F280 `AwaitState` admission、owner generation、expiry、terminalization、matched predicate
   consume 或 wait outcome。
 - 改 F280 canonical wait cancellation、termination replay/conflict、execution-projection recovery，
@@ -191,6 +210,7 @@ attributable canonical provenance remain non-executable.
 - Review delivery 与 action completion 耦合时必须先用 exact generation/holder/predicate fence 完成 lease，再 append/project community verdict；completion 非 committed 不得留下 delivered event。若 lease 已 verified succeeded 而 event append/project 失败，同 fence 重试必须幂等补齐 event。HEAD-fenced predicate 只接受 40/64 位小写完整 Git OID。
 - Fresh revision 只能由服务端 truth 验证 predicate freshness 后调用 `continueFreshRevision`；generation+1、旧 fence stale、候选/outcomes 清空，HEAD 永不进入 canonical action key。
 - Managed-command completion 与 action return recovery 必须复用各自 TTL=0 owner；dispatch 未获 positive carrier ack 时保持可恢复，sweep 只重放同一 idempotency key / lease generation。
+- Hold status/cancel 必须先按 verified callback principal 或 configured operator 解析明确角色。Invocation 只凭 exact thread binding 获 collaborator standing；agent key 还需 canonical visibility + owner/participant；物理 `default` 对两类 callback principal 都额外要求 userId 匹配 exact hold 的非空 `triggerUserId`；operator 还需 owner identity + canonical ThreadStore visibility。协作者只读安全摘要，但保留 exact taskId 救场取消。取消成功必须先在 scheduler SQLite 事务中 exact delete + append actor/owner audit，再停 runner；audit failure 与 stale delete 都 fail closed。
 - Stop-gate projection 只跟随本次 wake carrier 选出的 action lease 或 protocol subject；显式 A2A dispatch 必须先持久化当前 holder 的 `ball.handed` 再读取 thread-ball，exact hold source 读取原 hold subject。unstructured wake 直接 `covered_empty`，缺 carrier/query failure 保持 `unknown_legacy`，不得扫描猫名下其他任务补义务。
 
 ## Do NOT Unify With
@@ -209,6 +229,7 @@ attributable canonical provenance remain non-executable.
   或 connector 文案重建缺失 generation。
 - 不把 F281 feedback reason 塞进 termination event，也不为新路径调用或扩展 legacy
   `/api/callbacks/hold-ball/*` cancel API。
+- 不把 `thread.createdBy === 'system'` 当 hold 明文读取或取消的万能通行证；不让 callback cat 借同请求的 operator identity 升权；不向 collaborator 投影 command/cwd/output/wait source/resolved message 等敏感 lifecycle。
 - **唤醒投递（外部副作用）绝不放 projector** —— projector 零外部副作用（rebuild 安全）；投递在 ProbeScheduler 实时 tick 路径（best-effort + per-episode cooldown，plan §E），照 `community-auto-tracking` 的「副作用不放 projector」原则。
 - 不做 exactly-once 唤醒事务（KD-4 只读观测优先、不做 workflow engine；spec 只要求真实投递 + 重复可容忍可收紧）。
 - 不引入球 ID 新原语（KD-1）；轨迹从现有痕迹推导。

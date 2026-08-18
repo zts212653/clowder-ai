@@ -366,6 +366,68 @@ export interface AgentContextCapability {
   readonly reason: string;
 }
 
+/** F296 B0: concrete provider transport identity, independent of route/origin. */
+export type ProviderCarrier =
+  | { readonly provider: 'claude'; readonly carrier: 'print_sdk' | 'bg_daemon' | 'interactive_pty' | 'api_key' }
+  | { readonly provider: 'codex'; readonly carrier: 'exec_json' | 'app_server' }
+  | { readonly provider: 'gemini'; readonly carrier: 'gemini_cli' | 'antigravity_adapter' }
+  | { readonly provider: 'antigravity'; readonly carrier: 'cdp_bridge' }
+  | { readonly provider: 'kimi'; readonly carrier: 'stream_json' }
+  | { readonly provider: 'opencode'; readonly carrier: 'run_json' }
+  | { readonly provider: 'acp'; readonly carrier: 'acp'; readonly backend: 'opencode' | 'unknown' }
+  | { readonly provider: 'catagent'; readonly carrier: 'direct_api' }
+  | { readonly provider: 'a2a'; readonly carrier: 'remote' }
+  | {
+      readonly provider: 'unknown';
+      readonly carrier: 'unknown';
+      readonly rawProvider?: string;
+      readonly rawCarrier?: string;
+    };
+
+export type InvocationOrigin = 'interactive' | 'headless' | 'scheduled' | 'connector' | 'cloud' | 'unknown';
+export type RouteTopology = 'serial' | 'parallel' | 'independent';
+
+export interface ContextCoordinate {
+  readonly providerCarrier: ProviderCarrier;
+  readonly invocationOrigin: InvocationOrigin;
+  readonly routeTopology: RouteTopology;
+}
+
+export type FreshReason = 'no_prior_session' | 'resume_rejected' | 'resume_failed' | 'carrier_forces_fresh';
+export type UnknownReason = 'carrier_unsupported' | 'signal_unavailable' | 'binding_mismatch';
+
+export type ContinuityDisposition =
+  | {
+      readonly state: 'fresh';
+      readonly reason: FreshReason;
+      readonly evidenceRef: string;
+      readonly runtimeSessionId?: string;
+    }
+  | {
+      readonly state: 'resumed';
+      readonly reason: 'resume_confirmed';
+      readonly evidenceRef: string;
+      readonly runtimeSessionId: string;
+    }
+  | {
+      readonly state: 'replaced';
+      readonly reason: 'runtime_replaced';
+      readonly evidenceRef: string;
+      readonly previousRuntimeSessionId?: string;
+      readonly runtimeSessionId: string;
+    }
+  | {
+      readonly state: 'unknown';
+      readonly reason: UnknownReason;
+      readonly evidenceRef: string;
+    };
+
+export interface ContextContinuityHandshake {
+  readonly coordinate: ContextCoordinate;
+  readonly disposition: ContinuityDisposition;
+  readonly contextMode: 'cold' | 'hot';
+}
+
 /** The invocation-owned capacity snapshot passed to provider-native controls. */
 export interface AgentContextCapacity {
   readonly windowTokens: number;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import type { FloatingSelectionPosition } from './workspace/selection-action-position';
 
@@ -17,6 +17,8 @@ interface LiveSelectionAnnotationActionProps<T extends LiveSelectionTarget> {
   onSave: (action: T, comment: string) => void;
   onForward?: (action: T, comment: string) => void;
   canForward?: (action: T) => boolean;
+  triggerContent?: ReactNode;
+  triggerClassName?: string;
 }
 
 /**
@@ -31,6 +33,8 @@ export function LiveSelectionAnnotationAction<T extends LiveSelectionTarget>({
   onSave,
   onForward,
   canForward,
+  triggerContent,
+  triggerClassName,
 }: LiveSelectionAnnotationActionProps<T>) {
   const [snapshot, setSnapshot] = useState<T | null>(null);
 
@@ -51,6 +55,8 @@ export function LiveSelectionAnnotationAction<T extends LiveSelectionTarget>({
       onOpen={() => setSnapshot(ownedAction)}
       onClose={() => setSnapshot(null)}
       onSave={(comment) => onSave(ownedAction, comment)}
+      triggerContent={triggerContent}
+      triggerClassName={triggerClassName}
       {...(onForward && (canForward?.(ownedAction) ?? true)
         ? { onForward: (comment: string) => onForward(ownedAction, comment) }
         : {})}

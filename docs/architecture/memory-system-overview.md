@@ -1,11 +1,17 @@
 ---
 title: "Clowder AI Memory System Overview"
 doc_kind: architecture
+architecture_domain: memory
+truth_mode: mixed
+canonical_for: memory-system-topology
+as_of: 2026-08-15
+freshness_owner: memory-architecture
+view_state: fresh
 feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296]
 related_features: [F139, F148, F153, F169, F192, F229, F236, F242, F243, F246, F258, F267]
 topics: [memory, recall, write-side, write-opportunity, standing-reflex, cue-plane, derived-view, context-presentation, relationship-memory, lifecycle, evidence, profile, taste, event-memory, proactive, architecture]
 created: 2026-06-28
-revised: 2026-08-15
+revised: 2026-08-18
 status: active
 author: "Maine Coon/GPT-5.5"
 revised_by: "小太阳·Maine Coon/GPT-5.6 Sol"
@@ -15,11 +21,19 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-02T11:00:04Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-08-15T13:04:00Z
+description_updated_at: 2026-08-18T12:55:00Z
 ---
 
 # Clowder AI 记忆系统全景
 
+> **迷路时先回 [Memory Architecture Atlas](./memory/README.md)。** Atlas 负责一分钟心智模型、
+> 六层/八模块/九观察面的映射、问题路由与 claim 产权登记；本文只拥有 current + target
+> 拓扑，不再承担唯一导航入口。
+>
+> **时间语义**：拓扑与权力边界是 current/target 混合视图；运行数字和闭环账本是
+> `as_of: 2026-08-15` 的快照。phase、AC、`landed/live/UAT/verdict` 的现在时始终回对应
+> feature doc 与 roadmap，不能从本文的旧快照推断。
+>
 > 面向 You、新猫与工程实现者。本文同时回答“家里现在有什么”和“终态应怎样连成一个
 > 系统”：一段经历如何成为 canonical truth；写入机会与召回机会为何是两张并列的 plane；
 > 派生 view 如何加速而不夺权；动态上下文如何按连续性呈现；纠错/遗忘如何传播到全部读面。

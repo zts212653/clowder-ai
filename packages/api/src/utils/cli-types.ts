@@ -26,6 +26,8 @@ export interface CliSpawnOptions {
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** False for probes/non-invocation commands that must never create an execution-owner manifest. */
+  bindExecutionOwner?: boolean;
   /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
   invocationId?: string;
   /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
@@ -112,5 +114,6 @@ export type SpawnFn = (
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ) => ChildProcessLike;

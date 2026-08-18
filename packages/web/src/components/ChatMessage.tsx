@@ -153,6 +153,8 @@ interface ChatMessageProps {
    *  (head + N hidden subsequent duplicates). Passed through to CliDiagnosticsPanel for
    *  the "×N" badge rendering. */
   dedupCount?: number;
+  /** The current browser document has not been admitted to perform forwarding writes. */
+  forwardingDisabled?: boolean;
 }
 
 function needsTimelineProjection(message: ChatMessageType): boolean {
@@ -174,6 +176,7 @@ export const ChatMessage = memo(function ChatMessage({
   onEditCoCreator,
   hideDiagnosticsPanel,
   dedupCount,
+  forwardingDisabled = false,
 }: ChatMessageProps) {
   const coCreator = useCoCreatorConfig();
   const { state: ttsState, synthesize: ttsSynthesize, activeMessageId } = useTts();
@@ -933,7 +936,10 @@ export const ChatMessage = memo(function ChatMessage({
           blocks={message.extra.rich.blocks}
           catId={message.catId}
           messageId={message.id}
+          sourceThreadId={renderThreadId}
+          sourceMessageIds={message.projectionSourceMessageIds ?? [message.id]}
           messageSource={message.source}
+          forwardingEnabled={!message.isStreaming && !forwardingDisabled}
         />
       )}
       {freshnessNotice && !message.extra?.supplement && (

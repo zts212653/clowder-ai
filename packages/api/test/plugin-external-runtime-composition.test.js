@@ -7,6 +7,7 @@ import { test } from 'node:test';
 
 import {
   createDormantPluginRuntimeComposition,
+  EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
   resolvePluginRuntimePersistencePaths,
 } from '../dist/domains/plugin/index.js';
 import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
@@ -101,12 +102,69 @@ test('dormant composition recovers both durable stores without spawning a proces
   assert.equal(broker.sessions[0].closeReason, 'host_restart');
 });
 
+test('production handshake policy covers verified external source readiness without budget drift', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-readiness-'));
+  let now = 5_000;
+  const runtime = createDormantPluginRuntimeComposition({
+    projectRoot,
+    routes: new MemorySignalRouteStore(),
+    intakes: new MemoryMeetingIntakeStore(),
+    processes: new FakePluginProcessAdapter(),
+    now: () => now,
+  });
+  const installed = await runtime.inventory.installPackage({
+    manifest: externalManifest(),
+    computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    packagePluginId: externalCandidate().pluginId,
+    effectiveGrants: ['events.publish'],
+    signalSchemas: {
+      'schemas/external.signal.v1.schema.json': {
+        type: 'object',
+        properties: { payload: { type: 'object' }, source: { type: 'object' } },
+        required: ['payload', 'source'],
+      },
+    },
+  });
+  await runtime.inventoryStore.transaction((transaction) => {
+    const instance = transaction.instances.get(installed.pluginInstanceId);
+    transaction.instances.put({
+      ...instance,
+      configReadiness: 'ready',
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: now,
+    });
+  });
+
+  const connection = await runtime.broker.openExternalConnection(installed.pluginInstanceId);
+  const binding = await connection.hello(externalCandidate());
+  now += 20_603;
+
+  assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
+  assert.equal(EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS, 4 * 60_000);
+  assert.equal(runtime.broker.preActiveTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.equal(runtime.supervisor.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+});
+
 test('production composition constructs and recovers K-2D but exposes no startup activation', () => {
   const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 
+  const routeBootstrapIndex = source.indexOf('await ensureOfficialPluginSignalRoutes({');
+  const runtimeCompositionIndex = source.indexOf('createDormantPluginRuntimeComposition({');
+
   assert.match(source, /createDormantPluginRuntimeComposition/);
+  assert.match(source, /routes: signalRouteStore,\s*ownerId: privateUserId/);
+  assert.ok(routeBootstrapIndex >= 0, 'production must provision official Host signal routes');
+  assert.ok(
+    routeBootstrapIndex < runtimeCompositionIndex,
+    'Host signal routes must exist before the external runtime can accept owner activation',
+  );
   assert.match(source, /await externalPluginRuntime\.recoverAfterRestart\(\)/);
   assert.match(source, /await externalPluginRuntime\.shutdown\('api_shutdown'\)/);
+  assert.match(source, /OfficialPluginHistoryImportService/);
+  assert.match(source, /createLarkCliFeishuArtifactInspector/);
+  assert.match(source, /historyImport:/);
   assert.match(source, /registerOfficialPluginRoutes\(app/);
   assert.doesNotMatch(source, /externalPluginRuntime\.supervisor\.start\(/);
 });
