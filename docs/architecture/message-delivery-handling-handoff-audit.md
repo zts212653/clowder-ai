@@ -79,7 +79,7 @@ Issue #1354 与 #1371 暴露的是同一设计边界：系统没有把“消息�
 |---|---:|---|
 | Queue | 是 | 保存尚未完成 dispatch 的有序消息；“仍在 Queue 中”本身就表示 queued |
 | Chat History | 是 | 保存已经公开的输入、Agent 输出以及成功、失败、取消结果 |
-| Active Runs | 否，thread 内存态 | 记录当前哪些 client 正在运行，以及本轮 input refs 与各自 direct `pre` |
+| Active Runs | 否，thread 内存态 | 记录短暂 dispatching target slot、当前 client run，以及本轮 input refs 与各自 direct `pre` |
 
 client adapter 是执行边界，不是第四本账：它接收 `dispatch(target, messages, force)`，按自身能力启动、追加或中断运行，并返回本次调用结果。
 
@@ -119,6 +119,7 @@ flowchart LR
 | dispatch | 消息离开 Queue，并尝试交给目标 client 的动作 |
 | `force` | dispatch 给 client 的行为提示；`true` 表示 Immediate/Steer，`false` 表示普通投递或 Append |
 | Active Run | 某个 client 当前在这个 thread 中的运行；同一成员正常情况下只有一个 |
+| target slot | Active Runs 内部的短暂 dispatching 占位；client 接受后原位提升为 Active Run，接受前失败则释放，不是第四种持久状态 |
 | `pre` | 本次运行的直接发起方；仅在投递或执行失败时接收通知并决定重投或上升 |
 | terminal result | `completed`、`failed` 或 `canceled`；必须由一条 Chat History 结果体现 |
 | unread context | 目标成员本次被拉起时读取的最近消息与锚点消息集合 |
@@ -162,6 +163,7 @@ type QueueMessage = QueueMessageBase & (
 type RunInputRef = {
   queueMessageId: string
   sourceMessageId?: string
+  queueKind: QueueMessage['kind']
   directPre: DirectPre
 }
 
@@ -172,6 +174,15 @@ type ActiveRun = {
   inputs: RunInputRef[]
   startedAt: number
 }
+
+type TargetSlot =
+  | {
+      phase: 'dispatching'
+      threadId: string
+      targetId: string
+      reservationId: string
+    }
+  | { phase: 'running'; run: ActiveRun }
 
 type DispatchAcceptance = {
   mode: 'started' | 'appended' | 'steered'
@@ -184,7 +195,7 @@ type DispatchOutcome =
   | { kind: 'canceled'; reason: string }
 ```
 
-`DispatchAcceptance` 只告诉 Active Runs 是新增运行，还是把 input refs 并入已有运行。`DispatchOutcome` 是一次调用的分支结果；二者都不是要写回 QueueMessage 的持久状态。
+`TargetSlot` 与 `ActiveRun` 同属 Active Runs 内存面。它只封闭“确认 target 空闲”到“client 已接受”之间的 admission 窗口；不持久化、不恢复，也没有 lease、generation 或第二套状态账。`DispatchAcceptance` 只告诉 Active Runs 是新增运行，还是把 input refs 并入已有运行。`DispatchOutcome` 是一次调用的分支结果；二者都不是要写回 QueueMessage 的持久状态。
 
 `public_input.id` 从 Queue 延续为 Chat History 的稳定 message id；`agent_wake` 和 `private_control` 的 `id` 只标识 Queue entry，前者另以 `historyMessageId` 引用已公开消息。
 
@@ -234,6 +245,8 @@ A 执行中调用 post_message("@B 请复审")
 
 普通 `post_message @B` 不会立即打断 A，也不会绕过 Queue。只有用户对该 Queue entry 明确执行 Immediate/Steer，才进入强制投递流程。
 
+Active Run 发布到 History 的消息携带 `producerInvocationId` 因果元数据。它只用于把结果关联回输入，以及在用户对 wake entry 执行 Immediate 时精确识别仍存活的 source run；它不是新的 Queue 状态，也不能退化成按 `authorId` 猜测当前运行。
+
 ### 4.3 私有失败通知：只进入 Queue，不进入 Chat History
 
 client 不存在、拉起失败或执行失败时，系统先把失败结果写入 Chat History。若 direct `pre` 是 Agent，再创建一条 `priority=urgent` 的 `private_control` QueueMessage；它只用于唤醒这个 Agent，并把失败事实作为私有输入交给它，不再公开一遍。若 direct `pre` 是用户，公开失败结果已经足够。
@@ -245,7 +258,7 @@ B failed while handling inputs from A and C
   → Queue: private_control → C（urgent，不公开）
 ```
 
-同一个 Agent `pre` 在一轮中出现多次时只通知一次。通知本身若无法投递，仍产生公开失败结果，让用户自然看见；系统不递归持久化一棵责任树。
+同一个 Agent `pre` 在一轮中出现多次时只通知一次。通知本身若无法投递，仍产生公开失败结果，让用户自然看见；`private_control` 是终端恢复通知，它自己的失败不再调用 `notifyDirectPres`，系统不递归持久化一棵责任树。
 
 ### 4.4 写历史与移除 Queue 的原子边界
 
@@ -263,7 +276,7 @@ publishQueuedInputs(entryIds): {
 
 Agent wake entry 不重复写历史；它只在未读上下文已经覆盖对应 `historyMessageId` 后原子移除。`private_control` 也通过原子 `take` 移除，但正文只交给目标 client。
 
-如果进程在原子 take 之后、client 接受之前崩溃，本次输入已经公开但不会自动重放；第 9.2 节定义由用户根据 Chat History 主动恢复。这是本设计明确接受的边界。
+如果进程在原子 take 之后、client 接受之前崩溃，本次输入已经公开但不会自动重放；最坏的用户可见结果是“看得到输入，却一直没有对应结果”。第 9.2 节定义由用户根据 Chat History 主动恢复。这是本设计明确接受的边界。
 
 ### 4.5 双入口主链伪代码
 
@@ -371,7 +384,7 @@ sequenceDiagram
     S-->>P: urgent private failure notification for C
 ```
 
-一条多目标消息只有一个 Queue entry、一次出队和一条公开输入。出队后，每个 client 独立运行；某个目标失败不会取消已经成功启动的 sibling。
+一条多目标消息只有一个 Queue entry、一次出队和一条公开输入。它会等所有 target 都可接收后再整体出队；任一 target 繁忙都会让整个 entry 留在队首，这是 all-or-none fan-out 与严格 FIFO 的有意取舍。出队后，每个 client 独立运行；某个目标失败不会取消已经成功启动的 sibling。
 
 ## 6. Queue 调度规则
 
@@ -392,7 +405,7 @@ Queue:
 
 M1 一旦完成出队和 dispatch，Queue 对它的责任就结束；A 的新运行与随后启动的 B 可以并发。FIFO 约束的是 dispatch 顺序，不是要求所有 client 串行执行。
 
-直接失败通知属于 `urgent` 控制消息，可以排在 normal 消息之前；每个优先级内部仍保持 FIFO。除此以外不增加动态 fairness、parked head 或 paused slot。
+直接失败通知属于 `urgent` 控制消息，可以排在 normal 消息之前；每个优先级内部仍保持 FIFO。如果 urgent 通知的 Agent `pre` 正在运行，它会占据队首并让后续 normal 消息等待；这是“失败通知优先 + 严格队首”的明确取舍，而不是通过旁路或隐藏队列规避。除此以外不增加动态 fairness、parked head 或 paused slot。
 
 ### 6.2 连续用户/通知消息批量出队
 
@@ -447,53 +460,69 @@ for (const wake of queue.agentWakeEntries()) {
 
 ### 6.4 调度伪代码
 
+`processQueue` 在四种事件后触发：新 entry 入队、Active Run 进入终局、用户 Queue 操作移除或改变队首，以及进程启动时发现 durable Queue 非空。同一 thread 的并发触发合并到一个内存 single-flight drain；一个 thread 的 QueueProcessor 与 Active Runs 由同一进程持有。若部署以后分片，thread routing 仍必须保持 single writer，而不是给 QueueMessage 增加分布式 lifecycle 状态。
+
 ```ts
 async function processQueue(threadId: string): Promise<void> {
-  const head = await queue.peek(threadId)
-  if (!head) return
+  await queueDrains.runExclusive(threadId, async () => {
+    while (true) {
+      const head = await queue.peek(threadId)
+      if (!head) return
 
-  // 正常调度绝不跳过队首。
-  // 不存在的 client 可立即进入失败分支，不能让 head 永久卡住。
-  const busyTargets = head.targets.filter(target =>
-    clientRegistry.exists(target) && activeRuns.has(threadId, target)
-  )
-  if (busyTargets.length > 0) return
+      // 正常调度绝不跳过队首。
+      // 不存在的 client 可立即进入失败分支，不能让 head 永久卡住。
+      const existingTargets = head.targets.filter(target =>
+        clientRegistry.exists(target),
+      )
+      const reservation = activeRuns.tryReserveIdleTargets(
+        threadId,
+        existingTargets,
+      )
+      if (!reservation) return
 
-  if (head.kind === 'public_input') {
-    const batch = await queue.peekCompatiblePublicPrefix(head)
-    const taken = await stores.publishInputsAndRemoveQueueEntries(batch)
-    if (!taken.some(entry => entry.id === head.id)) return processQueue(threadId)
+      try {
+        if (head.kind === 'public_input') {
+          const batch = await queue.peekCompatiblePublicPrefix(head)
+          const taken = await stores.publishInputsAndRemoveQueueEntries(batch)
+          if (!taken.some(entry => entry.id === head.id)) continue
 
-    const plans = buildPublicDispatchPlans(taken)
-    await fanOut(plans, { force: false })
-    return processQueue(threadId)
-  }
+          await fanOut(buildPublicDispatchPlans(taken), {
+            force: false,
+            reservation,
+          })
+          continue
+        }
 
-  if (head.kind === 'private_control') {
-    const taken = await queue.takeExactHead(head.id)
-    if (!taken) return processQueue(threadId)
+        if (head.kind === 'private_control') {
+          const taken = await queue.takeExactHead(head.id)
+          if (!taken) continue
 
-    await fanOut(buildPrivateControlPlans(taken), { force: false })
-    return processQueue(threadId)
-  }
+          await fanOut(buildPrivateControlPlans(taken), {
+            force: false,
+            reservation,
+          })
+          continue
+        }
 
-  const plans = await buildAgentWakePlansPerTarget(head, {
-    mandatoryAnchorId: head.historyMessageId,
+        const plans = await buildAgentWakePlansPerTarget(head, {
+          mandatoryAnchorId: head.historyMessageId,
+        })
+        const takenWakes = await queue.takeAgentWakesFullyCoveredBy(plans)
+        if (!takenWakes.some(entry => entry.id === head.id)) continue
+
+        attachTakenWakeInputRefs(plans, takenWakes)
+        await fanOut(plans, { force: false, reservation })
+      } finally {
+        activeRuns.releaseUnpromotedTargets(reservation)
+      }
+    }
   })
-  const takenWakes = await queue.takeAgentWakesFullyCoveredBy(plans)
-  if (!takenWakes.some(entry => entry.id === head.id)) {
-    return processQueue(threadId)
-  }
-
-  attachTakenWakeInputRefs(plans, takenWakes)
-  await fanOut(plans, { force: false })
-  return processQueue(threadId)
 }
 ```
 
 `buildPublicDispatchPlans` 为每个 target 生成相同的公开输入，但保留 batch 内每条 QueueMessage 的 input ref 与 direct `pre`。`buildAgentWakePlansPerTarget` 则分别生成每个 target 的上下文；最近消息可以不同，不能把 B 的 anchors 原样交给 C。
 
-`processQueue` 只等待消息被 client 接受或明确拒绝，不等待 LLM 完整回复。client 拉起或 append 被接受后，下一条 Queue message 就可以继续 dispatch。
+`tryReserveIdleTargets` 对一个 target set 全有或全无；它既挡住同一个 head 的重复调度，也挡住相邻两个 head 在 client 接受前同时拉起同一 target。`processQueue` 只等待消息被 client 接受或明确拒绝，不等待 LLM 完整回复。client 拉起或 append 被接受后，下一条 Queue message 就可以继续 dispatch。
 
 ## 7. Dispatch、Active Runs 与结果
 
@@ -513,7 +542,7 @@ async function fanOut(plans: DispatchPlan[], options): Promise<void> {
   )
 }
 
-async function dispatchOne(plan, { force }): Promise<void> {
+async function dispatchOne(plan, { force, reservation }): Promise<void> {
   if (!clientRegistry.exists(plan.targetId)) {
     await recordFailureResult(plan, 'client_not_found')
     await notifyDirectPres(plan.inputs, plan, 'client_not_found')
@@ -537,7 +566,7 @@ async function dispatchOne(plan, { force }): Promise<void> {
       return
     }
 
-    activeRuns.set(plan.threadId, plan.targetId, {
+    activeRuns.promoteOrReplace(reservation, {
       threadId: plan.threadId,
       targetId: plan.targetId,
       invocationId: accepted.invocationId,
@@ -552,7 +581,7 @@ async function dispatchOne(plan, { force }): Promise<void> {
 }
 ```
 
-`notifyDirectPres` 对 `plan.inputs` 中的 Agent `pre` 去重后，各创建一条 urgent 私有 QueueMessage；用户 `pre` 不重复通知。`dispatch_failed` 不把消息放回原 Queue，也不暂停 thread。输入已经公开，失败已经成为结果；下一步由每条输入的 direct `pre` 决定。
+`promoteOrReplace` 在正常调度中把同一个 dispatching slot 原位提升为 running；在用户 Steer 等强制入口中替换已经终局化的旧 run。`notifyDirectPres` 先排除 `queueKind='private_control'` 的 input refs，再对其余 Agent `pre` 去重并各创建一条 urgent 私有 QueueMessage；因此 launch failure 与已启动后的 execution failure 都不会递归通知。用户 `pre` 不重复通知。`dispatch_failed` 不把消息放回原 Queue，也不暂停 thread。输入已经公开，失败已经成为结果；下一步由每条输入的 direct `pre` 决定。
 
 ### 7.2 运行终局
 
@@ -636,11 +665,21 @@ async function dispatchSelected(entryId, mode): Promise<void> {
   const plans = await materializeAndTakeSelectedEntry(entry)
   if (!plans) return // 已被正常调度或另一个用户动作取走
 
-  await fanOut(plans, { force: mode === 'immediate_or_steer' })
+  const force = mode === 'immediate_or_steer'
+  if (force && entry.kind === 'agent_wake') {
+    const sourceInvocation = await history.resolveProducingInvocation(
+      entry.historyMessageId,
+    )
+    if (sourceInvocation) {
+      await cancelIfStillActiveExact(sourceInvocation)
+    }
+  }
+
+  await fanOut(plans, { force })
 }
 ```
 
-`materializeAndTakeSelectedEntry` 复用第 6 节的 per-target dispatch plan：对 `public_input` 原子执行“写 History + 移除 Queue”，对 `agent_wake` 组装各 target 的未读上下文后移除引用，对 `private_control` 只取出私有正文。只有 take winner 能调用 client；因此不会重现“先 preempt，后发现 Queue 状态已经变化”的半提交顺序。
+`materializeAndTakeSelectedEntry` 复用第 6 节的 per-target dispatch plan：对 `public_input` 原子执行“写 History + 移除 Queue”，对 `agent_wake` 组装各 target 的未读上下文后移除引用，对 `private_control` 只取出私有正文。只有 take winner 能取消 source run 或调用 target client；因此不会重现“先 preempt，后发现 Queue 状态已经变化”的半提交顺序。
 
 ### 8.1 capability 边界
 
@@ -660,9 +699,9 @@ adapter 返回 `started / appended / steered`。`appended` 只把新 input refs 
 协议允许 UI 独立选择：
 
 1. 只有用户显式选择了目标、且目标支持 append 时才展示 Append；
-2. 用户消息始终展示 Steer 与 Append；没有显式 target 时，点击 Append 再列出可追加的 Active Runs。
+2. composer 始终展示 Steer 与 Append；没有显式 target 时，点击 Append 先列出可追加的 Active Runs，用户选中后再执行 `ingest`，被选运行的 member id 就是这条 QueueMessage 的结构化 target。
 
-两种方案都使用相同的 Queue 与 dispatch API，不需要改变后端生命周期。
+两种方案都使用相同的 Queue 与 dispatch API，不需要改变后端生命周期。Queue 中不存在“稍后再绑定 target”的半成品 entry，`dispatchSelected` 也不接受 target override。
 
 ### 8.3 Immediate 的隔离范围
 
@@ -671,7 +710,7 @@ Immediate 只影响这次操作直接涉及的 client，不做 thread-wide cance
 - A 正在运行，用户把一条无关的 `M2→B` 立即投给 B：A 继续运行；
 - B 正在运行，用户把 `M2→B` Steer 给 B：只取消 B 的旧 run；
 - A 运行中产生 `post_message @B`：默认只排队，A 正常完成；
-- 用户随后对这条 A 产生的 Queue entry 执行 Immediate 时，provider 可以终止与该强制交接直接相关的 source/target run，但必须分别留下 canceled 结果。
+- 用户随后对这条 A 产生的 Queue entry 执行 Immediate 时：若 History 的因果元数据表明产生该消息的 A invocation 仍在运行，服务端精确取消该 source run；target adapter 同时以 `force=true` 取消 B 的旧 run。两边都必须分别留下 canceled 结果，不能仅凭 `authorId` 猜测并取消 A 的较新运行。
 
 Queue entry 一旦被取出，后面的 cancel、append 或 steer 全是 client/Active Run 行为，Queue 不再保存它的状态。
 
@@ -703,7 +742,7 @@ Queue entry 一旦被取出，后面的 cancel、append 或 steer 全是 client/
 
 ## 10. 用户可见模型
 
-Timeline 与 Queue 表达不同阶段：
+Timeline 是 Chat History 的用户界面投影；它与 Queue 表达不同阶段：
 
 - 用户/通知输入 dispatch 前只在 Queue；dispatch 后只在 Timeline；
 - Agent 输出始终在 Timeline；若它还需要唤醒目标，Queue 展示的是带目标的 wake 引用，而不是第二条消息正文；
@@ -725,11 +764,11 @@ Queue 不再展示 `receipt processing`、`attempt failed`、thread-wide paused 
 |---|---|---|
 | 输入与结构化 target | `packages/api/src/routes/messages.ts` | 用户/通知先入 Queue；只接受结构化 member id；Agent 无 target 直接公开 |
 | durable Queue | `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts` | 从内存且带大量 attempt 字段的 QueueEntry，收敛为持久的最小 QueueMessage |
-| Queue 调度 | `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts` | 队首阻塞、连续同目标批量、Agent wake 未读清理、dispatch 后立即推进下一条 |
-| 历史消息 | `packages/api/src/domains/cats/services/stores/ports/MessageStore.ts`<br/>`packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts` | 提供稳定 message id 的幂等 append，并与用户 Queue 出队形成原子存储操作 |
+| Queue 调度 | `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts` | single-flight drain、队首阻塞、target slot admission、连续同目标批量、Agent wake 未读清理、dispatch 后立即推进下一条 |
+| 历史消息 | `packages/api/src/domains/cats/services/stores/ports/MessageStore.ts`<br/>`packages/api/src/domains/cats/services/stores/redis/RedisMessageStore.ts` | 提供稳定 message id 的幂等 append 与 `producerInvocationId`，并与用户 Queue 出队形成原子存储操作 |
 | 未读上下文 | `packages/api/src/domains/cats/services/context/MessageBundlePromptResolver.ts` | 最近 N 条 + 当前 head 必选锚点 + 显式目标锚点；按 target 返回实际覆盖的 message ids |
 | Agent wake | `packages/api/src/routes/callback-a2a-trigger.ts` | Agent 输出先公开，只把 historyMessageId + targets 放入 Queue |
-| Active Runs | `packages/api/src/domains/cats/services/agents/invocation/InvocationTracker.ts` | thread 内存态；记录当前 client、input refs 与各自 direct pre，不承担重启恢复 |
+| Active Runs | `packages/api/src/domains/cats/services/agents/invocation/InvocationTracker.ts` | thread 内存态；原子占用 dispatching target slot，再提升为 client run；记录 input refs 与各自 direct pre，不承担重启恢复 |
 | Queue 控制 API | `packages/api/src/routes/queue.ts` | Cancel、Append、Immediate/Steer 统一为取出 entry 后调用 dispatch(force) |
 | client capability | `packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts` 及各 provider adapter | 统一 start、append、steer、cancel 的接受/失败返回 |
 | Queue/Timeline UI | `packages/web/src/components/QueuePanel.tsx` 及消息气泡 | Queue 只显示尚未 dispatch 的消息或 wake；Timeline 显示公开事实与结果 |
@@ -741,9 +780,9 @@ Queue 不再展示 `receipt processing`、`attempt failed`、thread-wide paused 
 1. 先为本文伪代码写纯行为测试，锁定输入可见性、FIFO、多目标、失败结果和 `pre` 回退；
 2. 建立 minimal durable QueueMessage，并把 `queued` 定义为容器成员关系；
 3. 调整消息入口：用户/通知先入 Queue，Agent 输出先入 History 再创建 wake；
-4. 重写 QueueProcessor：严格队首、连续批量、未读覆盖清理、一次出队多目标扇出；
-5. 统一 provider dispatch capability，接通 Append 与 `force=true` 的 Immediate/Steer；
-6. 把所有 launch/run failure 接到同一个结果消息出口，并实现不会进入 History 的 urgent `pre` 通知；
+4. 重写 QueueProcessor：single-flight、target slot admission、严格队首、连续批量、未读覆盖清理、一次出队多目标扇出；
+5. 统一 provider dispatch capability，接通 Append 与 `force=true` 的 Immediate/Steer，并按 `producerInvocationId` 精确取消仍存活的 source run；
+6. 把所有 launch/run failure 接到同一个结果消息出口，并实现不会进入 History、失败后也不递归的 urgent `pre` 通知；
 7. 用 Active Runs 驱动 UI occupancy 与控制动作；
 8. 删除 per-target attempt、thread-wide pause、reconciliation 和旧 Queue receipt fallback；
 9. 在隔离环境跑完整验收矩阵后一次切换，不并行运行两套生命周期。
@@ -805,6 +844,10 @@ Queue 不再展示 `receipt processing`、`attempt failed`、thread-wide paused 
 | A25 | direct pre 是 Agent | failure result 进入 History；私有失败通知只进入该 Agent 的 Queue，不在 Timeline 重复 |
 | A26 | 两个 scheduler 同时读到同一 head | 只有原子 take winner 调用 client；另一方继续扫描，不产生第二次 dispatch |
 | A27 | 多目标 agent wake | 每个 target 使用自己的 unread context；只有所有 target 都覆盖 source 时才整体移除 wake |
+| A28 | 相邻 `M1→B`、`M2→B` 遇到并发 scheduler | M1 取得 B 的 dispatching slot；client 接受前 M2 不能拉起第二个 B |
+| A29 | `private_control→A` 自身投递失败 | 写公开失败结果后终止；不再生成另一条 `private_control` |
+| A30 | 用户 Immediate 一条仍由 A 生产中的 `A→B` wake | 只按 History 的 exact invocation 取消仍存活的 A source run，并 Steer B 的旧 run；普通 `post_message` 不触发取消 |
+| A31 | 无显式 target 的用户输入选择 Append | 在入 Queue 前先选择 Active Run 并固化其 member id；Queue entry 不等待后续绑定 target |
 
 ## 15. 必须保持不可能的状态
 
@@ -820,6 +863,8 @@ Queue 不再展示 `receipt processing`、`attempt failed`、thread-wide paused 
 - B 正常结束后因为 B 又 `@D` 而让 A→B 继续悬挂；
 - 合并多条输入的一轮失败后，只通知其中一个 direct `pre`；
 - 两个调度器从同一个 Queue head 拉起两次 client；
+- 相邻 Queue entry 在前一条 client 接受前并发拉起同一个 target；
+- `private_control` 投递失败后又递归创建 `private_control`；
 - 重启后根据旧内存投影猜测并自动恢复执行责任；
 - 为修复上述任一问题重新增加第二本 Queue 状态账或多层 fallback。
 
