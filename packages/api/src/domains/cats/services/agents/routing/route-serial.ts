@@ -136,8 +136,12 @@ import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveM
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
 import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
-// F237: Injection trace (v0 — fire-and-forget observability)
-import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
+// F237→F257: Injection trace — pipeline-aware (per-hook granularity)
+import {
+  buildTraceDetail,
+  buildTraceSummary,
+  collectTraceFromPipeline,
+} from '../../../../prompt-hooks/trace-collector.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -1163,9 +1167,15 @@ export async function* routeSerial(
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      // F257: for native L0 cats, the delivery uses the L0 compiler file, but
+      // the pipeline must still run session-init so the harness has full trace
+      // coverage of all hooks (L+S+B+C). The pipeline prompt output is discarded.
+      if (hasNativeL0) {
+        buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      }
       // F237: drain session trace synchronously — before any await between
       // buildStaticIdentity and buildInvocationContext (race-safety for parallel reuse).
-      drainCapturedTraces();
+      const pipelineSessionTrace = drainCapturedTraces();
       // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is NOT prepended
       // to staticIdentity here. Cloud R2 P1 #2237 L1099: folding staging into
       // staticIdentity breaks ADR-038 "每轮注入生效" contract on resumed
@@ -1288,7 +1298,7 @@ export async function* routeSerial(
         .filter(Boolean)
         .join('\n\n');
       // F237: drain turn trace synchronously — no yield between build and drain.
-      drainCapturedTraces();
+      const pipelineTurnTrace = drainCapturedTraces();
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -1359,34 +1369,24 @@ export async function* routeSerial(
         }
       }
 
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      // Placed after bootstrapContext so per-turn trace covers ALL route-level
-      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // F257: fire-and-forget injection trace persist (pipeline-aware).
+      // Uses the full pipeline traces (session + turn) captured above — no v0
+      // collectTrace re-invocation, no scope filtering. All hooks that fired in
+      // the pipeline are recorded as per-hook ObservedSegments.
       try {
         const traceStore = getTraceStore();
         if (traceStore) {
           const traceTurnId = crypto.randomUUID();
-          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
-          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapContext, mcpInstructions]
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-          const trace = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
+          const trace = collectTraceFromPipeline(pipelineSessionTrace.session, pipelineTurnTrace.turn, hasNativeL0);
           const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
           const summary = buildTraceSummary(trace, traceMeta);
           const detail = buildTraceDetail(trace, traceMeta);
           traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
+            log.warn({ err, threadId, catId }, '[F257] injection trace persist failed (fire-and-forget)');
           });
         }
-        // v0 collectTrace → buildStaticIdentity(annotateSegments: true) re-populates
-        // the module-global capturedSessionTrace without draining. Clear it so the next
-        // invocation (especially native-L0 pack-only) doesn't persist stale session traces.
-        if (deps.injectionTraceStore) drainCapturedTraces();
       } catch {
-        /* F237: trace collection must never break invocation */
+        /* F257: trace collection must never break invocation */
       }
 
       let deliveryBoundaryId: string | undefined;

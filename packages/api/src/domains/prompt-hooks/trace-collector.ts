@@ -21,6 +21,7 @@ import type {
 } from '@cat-cafe/shared';
 import { estimateTokens } from '../../utils/token-counter.js';
 import { buildStaticIdentity, type StaticIdentityOptions } from '../cats/services/context/SystemPromptBuilder.js';
+import type { PipelineResult } from './HookPipeline.js';
 
 export function hashContent(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
@@ -221,5 +222,92 @@ export function buildTraceDetail(
     turnCharCount: trace.turnCharCount,
     turnTokenEstimate: trace.turnTokenEstimate,
     segments: trace.segments,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// F257: Pipeline-aware trace collection
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert pipeline events to ObservedSegments.
+ * Each pipeline TraceEvent becomes one per-hook segment — fired hooks are
+ * 'observed' (with content data from matching patch), skipped/disabled are 'absent'.
+ */
+function pipelineEventsToSegments(result: PipelineResult, stage: InjectionStage): ObservedSegment[] {
+  const patchMap = new Map(result.patches.map((p) => [p.hookId, p]));
+  return result.events.map((event) => {
+    const patch = event.status === 'fired' ? patchMap.get(event.hookId) : undefined;
+    return {
+      segmentId: event.hookId,
+      stage,
+      status: patch ? ('observed' as const) : ('absent' as const),
+      contentHash: patch ? hashContent(patch.content) : null,
+      charCount: patch?.content.length ?? 0,
+      tokenEstimate: patch ? estimateTokens(patch.content) : 0,
+    };
+  });
+}
+
+/**
+ * Collect trace from HookPipeline results.
+ *
+ * F257: reads directly from the pipeline's trace events, giving per-hook
+ * granularity for ALL hooks (L+S+B+C+D+R+N). Unlike v0 `collectTrace()`
+ * which re-runs buildStaticIdentity(annotateSegments=true) and only sees
+ * S-prefix hooks, this captures whatever the pipeline actually executed.
+ */
+export function collectTraceFromPipeline(
+  sessionResult: PipelineResult | null,
+  turnResult: PipelineResult | null,
+  hasNativeL0: boolean,
+): CollectedTrace {
+  const startMs = performance.now();
+
+  const sessionSegments = sessionResult ? pipelineEventsToSegments(sessionResult, 'session-init') : [];
+  const turnSegments = turnResult ? pipelineEventsToSegments(turnResult, 'per-turn') : [];
+
+  const sessionCharCount = sessionResult ? sessionResult.patches.reduce((sum, p) => sum + p.content.length, 0) : 0;
+  const turnCharCount = turnResult ? turnResult.patches.reduce((sum, p) => sum + p.content.length, 0) : 0;
+
+  const sessionTokenEstimate = sessionResult
+    ? sessionResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0)
+    : 0;
+  const turnTokenEstimate = turnResult ? turnResult.patches.reduce((sum, p) => sum + estimateTokens(p.content), 0) : 0;
+
+  const delivery: StageDeliveryDecision[] = [
+    {
+      stage: 'session-init',
+      contentAssembled: sessionSegments.some((s) => s.status === 'observed'),
+      channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+      reason: hasNativeL0
+        ? 'Pipeline ran all hooks; delivery via native L0 compiler (file/instructions)'
+        : 'Pipeline ran all hooks; delivery via message-prepend',
+    },
+    {
+      stage: 'per-turn',
+      contentAssembled: turnSegments.some((s) => s.status === 'observed'),
+      channel: 'message-prepend',
+      reason: 'Per-turn context assembled for message-prepend',
+    },
+  ];
+
+  const sessionContentHash =
+    sessionResult && sessionCharCount > 0
+      ? hashContent(sessionResult.patches.map((p) => p.content).join('\n\n'))
+      : null;
+  const turnContentHash =
+    turnResult && turnCharCount > 0 ? hashContent(turnResult.patches.map((p) => p.content).join('\n\n')) : null;
+
+  return {
+    segments: [...sessionSegments, ...turnSegments],
+    delivery,
+    sessionContentHash,
+    turnContentHash,
+    sessionCharCount,
+    sessionTokenEstimate,
+    turnCharCount,
+    turnTokenEstimate,
+    durationMs: performance.now() - startMs,
   };
 }
