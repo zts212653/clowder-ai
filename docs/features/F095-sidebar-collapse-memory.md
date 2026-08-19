@@ -11,7 +11,7 @@ status: done
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1
 **Phase A~D completed: 2026-03-13** | **Phase E/F/G completed: 2026-03-27**
-**Implementation**: PR #366 / #370 / #373 / #376 / #378 / #380 / #779 / #2022
+**Implementation**: PR #366 / #370 / #373 / #376 / #378 / #380 / #779 / #2022 / #2851
 
 ## Why
 

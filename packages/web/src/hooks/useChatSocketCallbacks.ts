@@ -109,6 +109,16 @@ export function useChatSocketCallbacks({
       onMessageRestored: (data: { messageId: string; threadId: string }) => {
         requestStreamCatchUp(data.threadId);
       },
+      onMessageRecalled: (data) => {
+        if (data.verdict === 'zero_exposure') {
+          removeThreadMessage(data.threadId, data.messageId);
+          return;
+        }
+        requestStreamCatchUp(data.threadId);
+      },
+      onMessageReceiptUpdated: (data) => {
+        requestStreamCatchUp(data.threadId);
+      },
       onThreadBranched: () => {
         void apiFetch('/api/threads')
           .then((res) => (res.ok ? res.json() : null))

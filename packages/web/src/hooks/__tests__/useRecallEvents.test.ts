@@ -23,13 +23,13 @@ const SAMPLE_OUTPUT = `Found 2 result(s):
 `;
 
 describe('parseTextResults', () => {
-  it('extracts title, confidence, sourceType, anchor, snippet from standard output', () => {
+  it('extracts legacy title, match rank, sourceType, anchor, and snippet', () => {
     const results = parseTextResults(SAMPLE_OUTPUT);
     expect(results).toHaveLength(2);
 
     expect(results[0]).toMatchObject({
       title: 'F102 Memory Adapter Refactor',
-      confidence: 'high',
+      matchRank: 'high',
       sourceType: 'feature',
       anchor: 'doc:features/F102-memory-adapter-refactor',
       snippet: 'F102: 记忆组件 Adapter 化重构 — IEvidenceStore + 本地索引',
@@ -37,11 +37,39 @@ describe('parseTextResults', () => {
 
     expect(results[1]).toMatchObject({
       title: 'LL-045: Runtime worktree 污染',
-      confidence: 'mid',
+      matchRank: 'mid',
       sourceType: 'lesson',
       anchor: 'LL-045',
       snippet: '2026-03-29 runtime worktree 被多个布偶猫 session 反复弄脏',
     });
+  });
+
+  it('extracts the F263 match, authority, and updated axes', () => {
+    const text = `[match:high · authority:validated · updated:2026-07-12T00:00:00Z] F263 Result
+  anchor: F263
+  type: feature
+  > typed axes`;
+    const [result] = parseTextResults(text);
+    expect(result).toMatchObject({
+      title: 'F263 Result',
+      matchRank: 'high',
+      authority: 'validated',
+      updatedAt: '2026-07-12T00:00:00Z',
+    });
+  });
+
+  it('parses coverage directness as matchType without inventing a match rank', () => {
+    const text = `[matchType:direct] Coverage Result
+  anchor: F200
+  type: feature`;
+    const [result] = parseTextResults(text);
+
+    expect(result).toMatchObject({
+      title: 'Coverage Result',
+      matchType: 'direct',
+      anchor: 'F200',
+    });
+    expect(result?.matchRank).toBeUndefined();
   });
 
   it('handles results with no anchor/snippet lines gracefully', () => {
@@ -77,10 +105,9 @@ Found 2 result(s):
 `;
     const results = parseTextResults(text);
     expect(results).toHaveLength(2);
-    expect(results[0]!.confidence).toBe('high');
-    expect(results[1]!.confidence).toBe('mid');
-    // DEGRADED banner must not appear as a result
-    expect(results.every((r) => r.confidence !== 'DEGRADED')).toBe(true);
+    expect(results[0]!.matchRank).toBe('high');
+    expect(results[1]!.matchRank).toBe('mid');
+    expect(results.map((result) => result.title)).not.toContain('Evidence store error — results may be incomplete');
   });
 });
 
@@ -175,6 +202,77 @@ describe('deduplicateRecallEvents', () => {
   it('handles both empty — returns empty array', () => {
     expect(deduplicateRecallEvents([], [])).toEqual([]);
   });
+
+  // F263 B.5: consumed metadata merge from history into live
+  it('merges consumed metadata from history results into matching live event results', () => {
+    const live = [
+      makeRecall('live-1', 'F263', 1000, {
+        toolName: 'search_evidence',
+        results: [
+          { title: 'A', anchor: 'anchor-a' },
+          { title: 'B', anchor: 'anchor-b' },
+        ],
+      }),
+    ];
+    const history = [
+      makeRecall('hist-1', 'F263', 1000, {
+        toolName: 'search_evidence',
+        source: 'pull',
+        inspected: true,
+        outcome: 'used',
+        results: [
+          { title: 'A', anchor: 'anchor-a', consumed: true },
+          { title: 'B', anchor: 'anchor-b', consumed: false },
+        ],
+      }),
+    ];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.id).toBe('live-1');
+    // consumed merged from history
+    expect(result[0]!.results![0]!.consumed).toBe(true);
+    expect(result[0]!.results![1]!.consumed).toBe(false);
+    // source/inspected/outcome merged from history
+    expect(result[0]!.source).toBe('pull');
+    expect(result[0]!.inspected).toBe(true);
+    expect(result[0]!.outcome).toBe('used');
+  });
+
+  it('does not overwrite existing consumed field on live results', () => {
+    const live = [
+      makeRecall('live-1', 'F263', 1000, {
+        toolName: 'search_evidence',
+        results: [{ title: 'A', anchor: 'anchor-a', consumed: true }],
+      }),
+    ];
+    const history = [
+      makeRecall('hist-1', 'F263', 1000, {
+        toolName: 'search_evidence',
+        results: [{ title: 'A', anchor: 'anchor-a', consumed: false }],
+      }),
+    ];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result[0]!.results![0]!.consumed).toBe(true); // live wins
+  });
+
+  it('merges pushSurface from history into live event', () => {
+    const live = [makeRecall('live-1', '', 1000, { toolName: 'session_bootstrap' })];
+    const history = [
+      makeRecall('hist-1', '', 1000, {
+        toolName: 'session_bootstrap',
+        source: 'push',
+        pushSurface: 'session_bootstrap',
+        outcome: 'ignored',
+      }),
+    ];
+
+    const result = deduplicateRecallEvents(live, history);
+    expect(result[0]!.source).toBe('push');
+    expect(result[0]!.pushSurface).toBe('session_bootstrap');
+    expect(result[0]!.outcome).toBe('ignored');
+  });
 });
 
 describe('recallEventDisplayTitle', () => {
@@ -215,7 +313,7 @@ describe('recallEventResultLabel', () => {
     ).toBe('0 条命中');
   });
 
-  it('marks historical rows with candidates but missing resultCount as telemetry-unknown', () => {
+  it('marks status-less rows with unknown counts as pending parse', () => {
     expect(
       recallEventResultLabel({
         id: 'unknown',
@@ -223,7 +321,29 @@ describe('recallEventResultLabel', () => {
         timestamp: 1000,
         results: [],
       }),
-    ).toBe('命中数未记录');
+    ).toBe('统计待解析');
+  });
+
+  it('uses structured resultStatus when count is absent', () => {
+    expect(
+      recallEventResultLabel({
+        id: 'archived',
+        query: 'oversized search',
+        timestamp: 1000,
+        resultStatus: 'overflow',
+        results: [],
+      }),
+    ).toBe('结果已存档');
+
+    expect(
+      recallEventResultLabel({
+        id: 'legacy',
+        query: 'old search',
+        timestamp: 1000,
+        resultStatus: 'legacy_unknown',
+        results: [],
+      }),
+    ).toBe('历史统计缺失');
   });
 
   it('does not label pending live tool_use events before a result arrives', () => {

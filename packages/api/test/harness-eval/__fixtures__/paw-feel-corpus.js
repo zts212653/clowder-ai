@@ -28,6 +28,21 @@ export const PAW_FEEL_CORPUS = [
     markers: [{ tool: undefined, symptom: '这一整套流程太绕没有单一工具背锅' }],
   },
   {
+    caseId: 'f177-formatting-command-drift',
+    text: '[爪感差: formatting gate command drift]',
+    markers: [{ tool: 'formatting', symptom: 'gate command drift' }],
+  },
+  {
+    caseId: 'f177-shared-state-upstream-carry-in',
+    text: '[爪感差: shared-state pre-commit guard treats upstream-only merge staging as feature-branch ownership]',
+    markers: [
+      {
+        tool: 'shared-state',
+        symptom: 'pre-commit guard treats upstream-only merge staging as feature-branch ownership',
+      },
+    ],
+  },
+  {
     text: '两个连着 [爪感差: a 慢] [爪感差: b 卡]',
     markers: [
       { tool: 'a', symptom: '慢' },
@@ -40,6 +55,11 @@ export const PAW_FEEL_CORPUS = [
   { text: '[爪感差: test:redis 偶发超时]', markers: [{ tool: 'test:redis', symptom: '偶发超时' }] },
   // cloud review P2-2：symptom 内一层嵌套方括号不截断（recall）
   { text: '[爪感差: rg 输出含 [WARN] 标签太多]', markers: [{ tool: 'rg', symptom: '输出含 [WARN] 标签太多' }] },
+  // Workstream 4: Markdown context alone cannot prove intent. Keep these
+  // byte-valid historical positives for bounded legacy compatibility.
+  { text: 'inline `[爪感差: rg+真实 inline 报告]`', markers: [{ tool: 'rg', symptom: '真实 inline 报告' }] },
+  { text: '```\n[爪感差: pnpm+真实 fenced 报告]\n```', markers: [{ tool: 'pnpm', symptom: '真实 fenced 报告' }] },
+  { text: '> [爪感差: curl+真实 blockquote 报告]', markers: [{ tool: 'curl', symptom: '真实 blockquote 报告' }] },
 
   // ===== 干扰项（precision，零误抓）=====
   { text: '正常 markdown [链接文本](https://example.com/path) 不是 marker', markers: [] },
@@ -49,4 +69,6 @@ export const PAW_FEEL_CORPUS = [
   { text: '半截 [爪感差: 没有闭合括号就继续写下去', markers: [] },
   { text: '无前缀嵌套方括号 [外层 [内层] 收尾] 不是 marker', markers: [] },
   { text: '纯文本完全没有任何标记符号也没有 marker', markers: [] },
+  { text: '转义语法示例 \\[爪感差: 工具+现象]', markers: [] },
+  { text: '占位语法 [爪感差: 工具+现象] 不应铸成报告', markers: [] },
 ];

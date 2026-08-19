@@ -43,6 +43,8 @@ export interface LimbAccessEntry {
 export interface LimbCommandParamSchema {
   type: string;
   required?: boolean;
+  /** Handler-owned validation preserves domain-specific typed refusals such as authorization_required. */
+  validation?: 'adapter' | 'handler';
   default?: unknown;
   desc?: string;
 }
@@ -61,6 +63,22 @@ export interface LimbInvokeResult {
   data?: unknown;
   artifactUri?: string;
   error?: string;
+}
+
+/**
+ * Server-derived provenance for one local limb invocation.
+ *
+ * `userMessageId` is present only after the callback route has resolved the
+ * durable parent invocation and verified that its trigger is an owner-authored
+ * message in the same user/thread scope. Callers cannot supply these fields
+ * through limb params. Remote limb transports must not serialize this context.
+ */
+export interface LimbInvocationContext {
+  readonly catId?: string;
+  readonly invocationId?: string;
+  readonly userId?: string;
+  readonly threadId?: string;
+  readonly userMessageId?: string;
 }
 
 /**
@@ -84,7 +102,7 @@ export interface ILimbNode {
   /** 向 Registry 注册 */
   register(): Promise<void>;
   /** 调用节点能力 */
-  invoke(command: string, params: Record<string, unknown>): Promise<LimbInvokeResult>;
+  invoke(command: string, params: Record<string, unknown>, context?: LimbInvocationContext): Promise<LimbInvokeResult>;
   /** 健康检查 */
   healthCheck(): Promise<LimbNodeStatus>;
   /** 从 Registry 注销 */

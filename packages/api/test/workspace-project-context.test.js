@@ -26,6 +26,9 @@ describe('project-aware workspace worktrees', () => {
     execFileSync('git', ['init'], { cwd: TEMP_REPO });
     execFileSync('git', ['checkout', '-b', 'main'], { cwd: TEMP_REPO });
     await writeFile(join(TEMP_REPO, 'README.md'), '# temp\n');
+    await writeFile(join(TEMP_REPO, '100%-done.md'), '# Literal percent\n');
+    await writeFile(join(TEMP_REPO, 'foo%20bar.md'), '# Encoded-looking literal\n');
+    await writeFile(join(TEMP_REPO, 'foo bar.md'), '# Decoded sibling\n');
     execFileSync('git', ['add', '.'], { cwd: TEMP_REPO });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: TEMP_REPO });
 
@@ -176,5 +179,32 @@ describe('project-aware workspace worktrees', () => {
     assert.equal(fileRes.statusCode, 200, 'file endpoint should resolve foreign worktreeId');
     const fileData = JSON.parse(fileRes.body);
     assert.ok(fileData.content.includes('# temp'), 'should contain README content');
+  });
+
+  it('preserves native percent bytes from absolute document resolution through file reads', async () => {
+    const listRes = await app.inject({
+      method: 'GET',
+      url: `/api/workspace/worktrees?repoRoot=${encodeURIComponent(TEMP_REPO)}`,
+    });
+    assert.equal(listRes.statusCode, 200);
+
+    for (const [fileName, expectedContent] of [
+      ['100%-done.md', '# Literal percent'],
+      ['foo%20bar.md', '# Encoded-looking literal'],
+    ]) {
+      const resolveRes = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/resolve-document-link',
+        headers: { 'x-cat-cafe-user': 'default-user' },
+        payload: { href: join(TEMP_REPO, fileName) },
+      });
+      assert.equal(resolveRes.statusCode, 200);
+
+      const target = JSON.parse(resolveRes.body);
+      const query = new URLSearchParams({ worktreeId: target.worktreeId, path: target.path });
+      const fileRes = await app.inject({ method: 'GET', url: `/api/workspace/file?${query}` });
+      assert.equal(fileRes.statusCode, 200, fileName);
+      assert.ok(JSON.parse(fileRes.body).content.includes(expectedContent), fileName);
+    }
   });
 });

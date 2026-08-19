@@ -43,6 +43,7 @@ export function buildDefaultAgyProfileSmokeTargets(): readonly AgyProfileSmokeTa
     target('f210-opus46-thinking', 'f210-agy-opus46', 'Claude Opus 4.6 (Thinking)'),
     target('f210-gemini31-pro-high', 'f210-agy-gemini31', 'Gemini 3.1 Pro (High)'),
     target('f210-gemini35-flash-high', 'f210-agy-gemini35', 'Gemini 3.5 Flash (High)'),
+    target('f210-gemini36-flash-high', 'f210-agy-gemini36', 'Gemini 3.6 Flash (High)'),
   ];
 }
 

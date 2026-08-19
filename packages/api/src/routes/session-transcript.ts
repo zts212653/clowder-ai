@@ -10,7 +10,7 @@
 
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import { formatEventsChat, formatEventsHandoff } from '../domains/cats/services/session/TranscriptFormatter.js';
+import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -104,7 +104,6 @@ export async function sessionTranscriptRoutes(
       reply.status(400);
       return { error: 'Invalid cursor: must be a non-negative integer' };
     }
-    const cursor = cursorNum != null ? { eventNo: cursorNum } : undefined;
 
     const limitParam = request.query.limit;
     const limitNum = limitParam ? strictParseInt(limitParam) : undefined;
@@ -114,18 +113,32 @@ export async function sessionTranscriptRoutes(
     }
     const limit = limitNum != null ? Math.min(limitNum, 200) : 50;
 
+    // Handoff view: read all events, group into complete invocation summaries,
+    // paginate by raw-event budget. The cursor is a genuine raw eventNo —
+    // same semantics as raw/chat views — preserving the external API contract.
+    if (view === 'handoff') {
+      const handoffCursor = cursorNum != null ? { eventNo: cursorNum } : undefined;
+      const handoffResult = await transcriptReader.readEventsHandoff(
+        sessionId,
+        session.threadId,
+        session.catId,
+        handoffCursor,
+        limit,
+      );
+      return reply.send({
+        invocations: handoffResult.invocations,
+        ...(handoffResult.nextCursor ? { nextCursor: handoffResult.nextCursor } : {}),
+        total: handoffResult.total,
+      });
+    }
+
+    // Raw and chat views: paginate by raw event number
+    const cursor = cursorNum != null ? { eventNo: cursorNum } : undefined;
     const result = await transcriptReader.readEvents(sessionId, session.threadId, session.catId, cursor, limit);
 
     if (view === 'chat') {
       return reply.send({
         messages: formatEventsChat(result.events),
-        nextCursor: result.nextCursor,
-        total: result.total,
-      });
-    }
-    if (view === 'handoff') {
-      return reply.send({
-        invocations: formatEventsHandoff(result.events),
         nextCursor: result.nextCursor,
         total: result.total,
       });

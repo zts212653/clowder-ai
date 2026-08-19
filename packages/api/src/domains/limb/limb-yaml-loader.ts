@@ -23,6 +23,7 @@ export interface LimbErrorConfig {
 export interface LimbCommandParam {
   type: string;
   required?: boolean;
+  validation?: 'adapter' | 'handler';
   default?: unknown;
   desc?: string;
 }

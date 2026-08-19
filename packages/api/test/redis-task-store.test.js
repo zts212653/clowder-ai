@@ -22,6 +22,9 @@ class FakeRedisForTaskStore {
     this.ttls = new Map();
     this.versions = new Map();
     this.watchedVersions = null;
+    this.pairTtlTransitionCalls = 0;
+    this.failPairTtlTransition = false;
+    this.beforePairTtlTransition = null;
   }
 
   async hset(key, value) {
@@ -53,6 +56,53 @@ class FakeRedisForTaskStore {
   }
 
   async eval(script, _numKeys, ...keysAndArgs) {
+    if (script.includes('F275_APPLY_TASK_BINDING_TTL')) {
+      this.pairTtlTransitionCalls += 1;
+      if (this.failPairTtlTransition) throw new Error('simulated atomic pair TTL failure');
+      const [detailKey, bindingKey, mode, ttl, expectedUpdatedAt, expectedStatus] = keysAndArgs;
+      if (this.beforePairTtlTransition) {
+        const hook = this.beforePairTtlTransition;
+        this.beforePairTtlTransition = null;
+        await hook({ detailKey, bindingKey, mode, ttl });
+      }
+      if (!this.hashes.get(detailKey)?.id) {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const current = this.hashes.get(detailKey);
+      if (current.updatedAt !== expectedUpdatedAt || current.status !== expectedStatus) return -1;
+      if (mode === 'persist') {
+        this.ttls.delete(detailKey);
+        this.ttls.delete(bindingKey);
+      } else {
+        this.ttls.set(detailKey, Number(ttl));
+        if (this.strings.has(bindingKey)) this.ttls.set(bindingKey, Number(ttl));
+      }
+      return 1;
+    }
+    if (script.includes('F275_BIND_MANAGED_WORK')) {
+      const [detailKey, bindingKey, encodedBinding] = keysAndArgs;
+      if (this.hashes.get(detailKey)?.kind !== 'pr_tracking') {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const anchorTtl = this.ttls.get(detailKey) ?? -1;
+      if (anchorTtl === 0) {
+        this.strings.delete(bindingKey);
+        this.ttls.delete(bindingKey);
+        return 0;
+      }
+      const existing = this.strings.get(bindingKey);
+      if (existing === undefined) {
+        this.strings.set(bindingKey, encodedBinding);
+        this.bumpVersion(bindingKey);
+      }
+      if (anchorTtl === -1) this.ttls.delete(bindingKey);
+      else this.ttls.set(bindingKey, anchorTtl);
+      return existing === undefined ? 1 : existing === encodedBinding ? 2 : -1;
+    }
     if (script.includes("redis.call('HSET'") && script.includes("redis.call('ZADD'")) {
       // Atomic owned write: KEYS=[subject, detail, thread, kind], ARGV=[taskId, score, ...fields]
       const [subjectKey, detailKey, threadKey, kindKey, expectedId, score, ...flatFields] = keysAndArgs;
@@ -309,6 +359,128 @@ describe('RedisTaskStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => 
     const deleted2 = await store.delete('nonexistent');
     assert.equal(deleted2, false);
   });
+
+  it('allows exactly one concurrent private managed-work binding and persists it without TTL', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#999',
+      threadId: 'test-thread-private-race',
+      title: 'PR tracking: owner/repo#999',
+      createdBy: 'codex-sol',
+      why: 'verify F275 private binding race',
+    });
+    const candidates = [
+      { workId: 'work-race-a', attemptId: 'attempt-race-a' },
+      { workId: 'work-race-b', attemptId: 'attempt-race-b' },
+    ];
+
+    const results = await Promise.allSettled(
+      candidates.map((binding) => store.bindManagedWorkBinding(task.id, binding)),
+    );
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    const winner = await store.getManagedWorkBinding(task.id);
+    assert.ok(candidates.some((candidate) => candidate.workId === winner.workId));
+    assert.equal(await redis.ttl(TaskKeys.managedWorkBinding(task.id)), -1);
+    assert.equal(JSON.stringify(await store.get(task.id)).includes(winner.workId), false);
+  });
+
+  it('atomically couples the winning managed registration with its public task mutation', async () => {
+    const candidates = [
+      {
+        binding: { workId: 'work-register-a', attemptId: 'attempt-register-a' },
+        input: {
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#1002',
+          threadId: 'thread-register-a',
+          title: 'PR tracking winner A',
+          createdBy: 'codex-sol',
+          ownerCatId: 'codex-sol',
+          userId: 'user-1',
+          why: 'candidate A',
+          automationState: { trackingInstructions: 'candidate-a-instructions' },
+        },
+      },
+      {
+        binding: { workId: 'work-register-b', attemptId: 'attempt-register-b' },
+        input: {
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#1002',
+          threadId: 'thread-register-b',
+          title: 'PR tracking winner B',
+          createdBy: 'codex-sol',
+          ownerCatId: 'codex-sol',
+          userId: 'user-1',
+          why: 'candidate B',
+          automationState: { trackingInstructions: 'candidate-b-instructions' },
+        },
+      },
+    ];
+
+    const results = await Promise.allSettled(
+      candidates.map(({ input, binding }) => store.upsertBySubjectWithManagedWorkBinding(input, binding)),
+    );
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+
+    const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+    const winner = candidates[winnerIndex];
+    const task = await store.getBySubject('pr:owner/repo#1002');
+    assert.ok(task);
+    assert.equal(task.threadId, winner.input.threadId);
+    assert.equal(task.title, winner.input.title);
+    assert.equal(task.automationState.trackingInstructions, winner.input.automationState.trackingInstructions);
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), winner.binding);
+  });
+
+  it('expires private managed-work binding with its completed tracking-task anchor', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#1000',
+      threadId: 'test-thread-private-expiry',
+      title: 'PR tracking: owner/repo#1000',
+      createdBy: 'codex-sol',
+      why: 'verify F275 private binding lifetime',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-expiry',
+      attemptId: 'attempt-expiry',
+    });
+
+    await store.update(task.id, { status: 'done' });
+
+    const taskTtl = await redis.ttl(TaskKeys.detail(task.id));
+    const bindingTtl = await redis.ttl(TaskKeys.managedWorkBinding(task.id));
+    assert.ok(taskTtl > 0 && taskTtl <= 60);
+    assert.ok(bindingTtl > 0 && bindingTtl <= 60);
+    assert.ok(Math.abs(taskTtl - bindingTtl) <= 1);
+  });
+
+  it('preserves a completed tracking anchor TTL when binding after completion', async () => {
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#1001',
+      threadId: 'test-thread-private-late-bind',
+      title: 'PR tracking: owner/repo#1001',
+      createdBy: 'codex-sol',
+      why: 'verify a late private binding cannot outlive its completed anchor',
+    });
+    await store.update(task.id, { status: 'done' });
+    const taskTtlBeforeBind = await redis.ttl(TaskKeys.detail(task.id));
+
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-late-bind',
+      attemptId: 'attempt-late-bind',
+    });
+
+    const bindingTtl = await redis.ttl(TaskKeys.managedWorkBinding(task.id));
+    assert.ok(taskTtlBeforeBind > 0 && taskTtlBeforeBind <= 60);
+    assert.ok(bindingTtl > 0 && bindingTtl <= taskTtlBeforeBind);
+    assert.ok(taskTtlBeforeBind - bindingTtl <= 1);
+  });
 });
 
 describe('TaskStoreFactory', () => {
@@ -328,6 +500,250 @@ describe('TaskStoreFactory', () => {
 });
 
 describe('RedisTaskStore unit behavior', () => {
+  it('binds managed-work identity atomically, idempotently, and outside the public task hash', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-redis-1', attemptId: 'attempt-redis-1' };
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#501',
+      threadId: 'thread-private-binding',
+      title: 'PR tracking: owner/repo#501',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+
+    assert.deepEqual(await store.bindManagedWorkBinding(task.id, binding), binding);
+    assert.deepEqual(await store.bindManagedWorkBinding(task.id, { ...binding }), binding);
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), binding);
+    assert.equal(JSON.stringify(redis.hashes.get(TaskKeys.detail(task.id))).includes('work-redis-1'), false);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), undefined);
+
+    await assert.rejects(
+      () => store.bindManagedWorkBinding(task.id, { workId: 'work-redis-2', attemptId: 'attempt-redis-2' }),
+      (error) => error?.code === 'TASK_MANAGED_WORK_BINDING_CONFLICT',
+    );
+    assert.deepEqual(await store.getManagedWorkBinding(task.id), binding);
+
+    await store.update(task.id, { status: 'done' });
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+  });
+
+  it('applies task and private-binding lifetime changes through one atomic primitive', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502',
+      threadId: 'thread-private-pair-ttl',
+      title: 'PR tracking: owner/repo#502',
+      why: 'verify atomic pair TTL transition',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl',
+      attemptId: 'attempt-pair-ttl',
+    });
+    redis.pairTtlTransitionCalls = 0;
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal(redis.pairTtlTransitionCalls, 1);
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+
+    const failureTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-failure',
+      threadId: 'thread-private-pair-ttl-failure',
+      title: 'PR tracking pair TTL failure',
+      why: 'verify failure leaves prior lifetimes intact',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(failureTask.id, {
+      workId: 'work-pair-ttl-failure',
+      attemptId: 'attempt-pair-ttl-failure',
+    });
+    redis.failPairTtlTransition = true;
+
+    await assert.rejects(() => store.update(failureTask.id, { status: 'done' }), /simulated atomic pair TTL failure/);
+    assert.equal(redis.ttls.get(TaskKeys.detail(failureTask.id)), undefined);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(failureTask.id)), undefined);
+  });
+
+  it('does not apply a stale completion TTL after managed re-registration reopens the task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-race',
+      threadId: 'thread-private-pair-ttl-race',
+      title: 'PR tracking pair TTL race',
+      why: 'verify a stale completion cannot expire a reopened task',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl-race',
+      attemptId: 'attempt-pair-ttl-race',
+    });
+
+    redis.beforePairTtlTransition = async ({ detailKey, bindingKey }) => {
+      const completed = redis.hashes.get(detailKey);
+      redis.hashes.set(detailKey, {
+        ...completed,
+        status: 'todo',
+        updatedAt: String(Number(completed.updatedAt) + 1),
+      });
+      redis.ttls.delete(detailKey);
+      redis.ttls.delete(bindingKey);
+    };
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal((await store.get(task.id)).status, 'todo');
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), undefined);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), undefined);
+  });
+
+  it('reconciles completed pair lifetime after a same-status automation patch wins the CAS', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#502-same-status-race',
+      threadId: 'thread-private-pair-ttl-same-status-race',
+      title: 'PR tracking pair TTL same-status race',
+      why: 'verify a newer completed snapshot still receives the completed lifetime',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-pair-ttl-same-status-race',
+      attemptId: 'attempt-pair-ttl-same-status-race',
+    });
+    redis.pairTtlTransitionCalls = 0;
+
+    redis.beforePairTtlTransition = async ({ detailKey }) => {
+      const completed = redis.hashes.get(detailKey);
+      const originalNow = Date.now;
+      Date.now = () => Number(completed.updatedAt) + 1;
+      try {
+        await store.patchAutomationState(task.id, {
+          ci: { lastFingerprint: 'post-completion-patch' },
+        });
+      } finally {
+        Date.now = originalNow;
+      }
+    };
+
+    await store.update(task.id, { status: 'done' });
+
+    assert.equal((await store.get(task.id)).status, 'done');
+    assert.equal(redis.pairTtlTransitionCalls, 2);
+    assert.equal(redis.ttls.get(TaskKeys.detail(task.id)), 60);
+    assert.equal(redis.ttls.get(TaskKeys.managedWorkBinding(task.id)), 60);
+  });
+
+  it('fails closed for an invalid anchor or durable binding and deletes private metadata with its task', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-redis-3', attemptId: 'attempt-redis-3' };
+
+    assert.equal(await store.bindManagedWorkBinding('missing', binding), null);
+    const workTask = await store.create({
+      threadId: 'thread-work',
+      title: 'ordinary task',
+      why: 'not a tracking anchor',
+      createdBy: 'opus',
+    });
+    assert.equal(await store.bindManagedWorkBinding(workTask.id, binding), null);
+
+    const trackingTask = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#503',
+      threadId: 'thread-private-binding',
+      title: 'PR tracking: owner/repo#503',
+      why: 'track pr',
+      createdBy: 'opus',
+    });
+    await store.bindManagedWorkBinding(trackingTask.id, binding);
+    redis.strings.set(TaskKeys.managedWorkBinding(trackingTask.id), '{"workId":"partial"}');
+    await assert.rejects(() => store.getManagedWorkBinding(trackingTask.id), /invalid private binding/);
+
+    redis.strings.set(TaskKeys.managedWorkBinding(trackingTask.id), JSON.stringify(binding));
+    assert.equal(await store.delete(trackingTask.id), true);
+    assert.equal(await store.getManagedWorkBinding(trackingTask.id), null);
+  });
+
+  it('deletes orphaned private bindings even when task detail is already missing', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const binding = { workId: 'work-orphan', attemptId: 'attempt-orphan' };
+
+    const direct = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#504',
+      threadId: 'thread-orphan-direct',
+      title: 'orphan direct cleanup',
+      why: 'verify direct delete cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(direct.id, binding);
+    redis.hashes.delete(TaskKeys.detail(direct.id));
+
+    assert.equal(await store.delete(direct.id), false);
+    assert.equal(await store.getManagedWorkBinding(direct.id), null);
+
+    const byThread = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#505',
+      threadId: 'thread-orphan-bulk',
+      title: 'orphan thread cleanup',
+      why: 'verify deleteByThread cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(byThread.id, binding);
+    redis.hashes.delete(TaskKeys.detail(byThread.id));
+
+    assert.equal(await store.deleteByThread('thread-orphan-bulk'), 1);
+    assert.equal(await store.getManagedWorkBinding(byThread.id), null);
+  });
+
+  it('deletes orphaned private bindings while cleaning stale task indexes', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+    const task = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#506',
+      threadId: 'thread-orphan-index',
+      title: 'orphan index cleanup',
+      why: 'verify stale-index cleanup',
+      createdBy: 'codex-sol',
+    });
+    await store.bindManagedWorkBinding(task.id, {
+      workId: 'work-orphan-index',
+      attemptId: 'attempt-orphan-index',
+    });
+    redis.hashes.delete(TaskKeys.detail(task.id));
+
+    assert.deepEqual(await store.listByThread('thread-orphan-index'), []);
+    assert.equal(await store.getManagedWorkBinding(task.id), null);
+  });
+
   it('re-registering a done pr_tracking task resets it back to todo', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const redis = new FakeRedisForTaskStore();

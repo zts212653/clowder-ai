@@ -88,7 +88,7 @@ describe('ThreadSidebar online recovery', () => {
     });
     mockStore.fetchGlobalBubbleDefaults = vi.fn();
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/threads') {
+      if (path === '/api/threads?view=sidebar') {
         threadsFetchCount += 1;
         if (threadsFetchCount === 1) {
           return Promise.reject(new Error('network down'));
@@ -150,7 +150,7 @@ describe('ThreadSidebar online recovery', () => {
 
   it('reloads threads when the browser comes back online after initial load failure', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
 
@@ -162,6 +162,6 @@ describe('ThreadSidebar online recovery', () => {
     });
 
     expect(mockStore.setThreads).toHaveBeenCalledWith(TEST_THREADS);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads');
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads?view=sidebar');
   });
 });

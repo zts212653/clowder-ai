@@ -15,9 +15,9 @@ created: 2026-03-05
 
 ## Why
 
-我们当前在 Hub 能管理 MCP/Skills，但不能在 Cat Cafe 内统一管理“Ragdoll走订阅”与“Ragdoll走赞助 API”两种通道。operator要的是：
+我们当前在 Hub 能管理 MCP/Skills，但不能在 Clowder AI 内统一管理“Ragdoll走订阅”与“Ragdoll走赞助 API”两种通道。operator要的是：
 
-1. 在 Cat Cafe 里录入赞助方提供的 `BASE_URL + API Key`
+1. 在 Clowder AI 里录入赞助方提供的 `BASE_URL + API Key`
 2. 在配置中枢一键切换“自有订阅”或“赞助 API”
 3. 切换后马上对Ragdoll生效，不用手改外部脚本
 
@@ -78,7 +78,7 @@ created: 2026-03-05
 
 ### Step 0 三问（2026-03-05）
 
-1. operator最初核心问题：Ragdoll额度不足时，能在 Cat Cafe 内直接切换“订阅 / 赞助 API”，且不用外部脚本手改配置。
+1. operator最初核心问题：Ragdoll额度不足时，能在 Clowder AI 内直接切换“订阅 / 赞助 API”，且不用外部脚本手改配置。
 2. 交付物是否命中：命中。Hub 已支持 profile 管理、切换、测试，runtime 已按 active profile 生效，secrets 已做本机分层落盘与脱敏回读。
 3. operator实际体验：已完成半小时连续验证，Ragdoll调用链稳定，未再出现此前的误封/误切换抖动。
 

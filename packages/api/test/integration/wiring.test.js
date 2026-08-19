@@ -215,12 +215,18 @@ function installFakeCliPath() {
 let originalGlobalConfigRoot;
 let originalHome;
 let originalGeminiAdapter;
+let originalOpusModel;
+let originalCodexModel;
+let originalGeminiModel;
 let testGlobalConfigRoot;
 
 before(() => {
   originalGlobalConfigRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
   originalHome = process.env.HOME;
   originalGeminiAdapter = process.env.GEMINI_ADAPTER;
+  originalOpusModel = process.env.CAT_OPUS_MODEL;
+  originalCodexModel = process.env.CAT_CODEX_MODEL;
+  originalGeminiModel = process.env.CAT_GEMINI_MODEL;
 });
 
 beforeEach(async () => {
@@ -228,6 +234,9 @@ beforeEach(async () => {
   testGlobalConfigRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-wiring-global-'));
   process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = testGlobalConfigRoot;
   process.env.HOME = testGlobalConfigRoot;
+  process.env.CAT_OPUS_MODEL = 'claude-opus-test';
+  process.env.CAT_CODEX_MODEL = 'gpt-test';
+  process.env.CAT_GEMINI_MODEL = 'Gemini 3.1 Pro (High)';
 
   const { resetMigrationState } = await import('../../dist/config/catalog-accounts.js');
   resetMigrationState();
@@ -244,6 +253,12 @@ afterEach(() => {
   else process.env.HOME = originalHome;
   if (originalGeminiAdapter === undefined) delete process.env.GEMINI_ADAPTER;
   else process.env.GEMINI_ADAPTER = originalGeminiAdapter;
+  if (originalOpusModel === undefined) delete process.env.CAT_OPUS_MODEL;
+  else process.env.CAT_OPUS_MODEL = originalOpusModel;
+  if (originalCodexModel === undefined) delete process.env.CAT_CODEX_MODEL;
+  else process.env.CAT_CODEX_MODEL = originalCodexModel;
+  if (originalGeminiModel === undefined) delete process.env.CAT_GEMINI_MODEL;
+  else process.env.CAT_GEMINI_MODEL = originalGeminiModel;
 });
 
 // ===================================================================
@@ -590,11 +605,23 @@ describe('MCP callback end-to-end flow', () => {
   let registry;
   let messageStore;
   let socketManager;
+  let fakeCliDir;
+  const originalPath = process.env.PATH ?? '';
+
+  before(() => {
+    fakeCliDir = installFakeCliPath();
+    process.env.PATH = `${fakeCliDir}${process.platform === 'win32' ? ';' : ':'}${originalPath}`;
+  });
 
   beforeEach(() => {
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
+  });
+
+  after(() => {
+    process.env.PATH = originalPath;
+    if (fakeCliDir) rmSync(fakeCliDir, { recursive: true, force: true });
   });
 
   async function createApp() {

@@ -1,5 +1,6 @@
 ---
 name: collaborative-thinking
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   单人或多猫的创意探索、独立思考、讨论收敛。
   Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
@@ -37,7 +38,7 @@ triggers:
 
 ## Mode B: 多猫独立思考
 
-**何时启动 Mode B？** 参见 `shared-rules.md` §13 元思考触发器 A-D。
+**何时启动 Mode B？** 参见 `../.cat-cafe-shared-refs/shared-rules.md` §13 元思考触发器 A-D。
 调 `cat_cafe_multi_mention` 前必须带搜索证据（`searchEvidenceRefs`）。
 
 **⚠️ 成本警告**：Swarm token 消耗是单猫 N 倍（N = 参与猫数）。实现细节不值得开 swarm。
@@ -66,7 +67,7 @@ Phase 6: operator反馈 + 最终确认 → 进入 Mode C
 
 **Open Questions 分类（必须拆开）**：
 - **技术 OQ**：给猫猫解决的（实现细节、方案选型中可回滚的部分）
-- **价值 OQ**：需要 operator 判断的 → **必须附 Decision Packet**（格式见 `refs/decision-matrix.md`）
+- **价值 OQ**：需要 operator 判断的 → **必须附 Decision Packet**（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）
 
 如果所有 OQ 都是技术型且回滚成本低，不升级 operator——猫猫自决 + 事后通报。
 
@@ -91,7 +92,7 @@ Phase 6: operator反馈 + 最终确认 → 进入 Mode C
 
 ## Mode C: 收敛沉淀 (Convergence)
 
-**收敛时 operator 升级检查**：如果收敛结论中有需要 operator 拍板的 Open Question，必须附 Decision Packet（格式见 `refs/decision-matrix.md`）。先判断可逆性：回滚成本低的猫猫自决，不升级。
+**收敛时 operator 升级检查**：如果收敛结论中有需要 operator 拍板的 Open Question，必须附 Decision Packet（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）。先判断可逆性：回滚成本低的猫猫自决，不升级。
 
 **收敛三件套——每项必须显式回答"有/没有"，不允许跳过**：
 
@@ -99,7 +100,7 @@ Phase 6: operator反馈 + 最终确认 → 进入 Mode C
 
 **2. 踩坑教训 → public-lessons.md**：这次讨论有暴露新坑？有 → 追加到 `docs/public-lessons.md`（7 槽位格式）。
 
-**3. 操作规则 → 指引文件**：这次讨论有产生新的必须遵守的规则？有 → 更新 CLAUDE.md / AGENTS.md / GEMINI.md（或 `refs/shared-rules.md`）。
+**3. 操作规则 → 指引文件**：这次讨论有产生新的必须遵守的规则？有 → 更新 CLAUDE.md / AGENTS.md / GEMINI.md（或 `../.cat-cafe-shared-refs/shared-rules.md`）。
 
 **强制回答格式**（附在 commit message 或文档末尾）：
 ```

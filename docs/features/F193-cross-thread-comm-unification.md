@@ -4,6 +4,8 @@ related_features: [F043, F052, F178, F213]
 topics: [mcp, cross-thread, agent-first, harness]
 doc_kind: spec
 created: 2026-05-07
+user_journey_exempt: infrastructure feature — dispatch routing is invisible to end user
+tips_exempt: infrastructure — no user-facing capability to tip
 ---
 
 # F193: Cross-Thread Communication Unification
@@ -82,6 +84,7 @@ operator第二轮原话（接收侧补充）：
   | `cross_post_message` × agent-key | **必填** | **二选一必填**（缺 → reject） | target-thread notification requiring routing（**不注入** sourceThreadId — 见 KD-1 边界） |
 - [x] AC-A4: `cross_post_message` 缺 `targetCats` AND 无行首 @ → reject (400) + alternatives — commit `a5a04e8fe`
 - [x] AC-A5: 测试覆盖 principal × threadId × targetCats 全组合矩阵；F052 sourceThreadId 注入仍正确；同名猫跨线程豁免不退化 — commit `55edbe9b4`
+- [x] AC-A6: MCP 注册面按实际 principal 投影 `post_message` schema：invocation-token 不暴露 `threadId` 且 strict-reject 显式传入，agent-key-only 将其标为必填；handler 继续复用同一 invocation auth signal fail-closed。避免静态 optional union、Zod silent strip 与运行时契约分叉。— 2026-08-14 follow-up
 
 ### Phase B（认知路径修复）
 - [x] AC-B1: `SystemPromptBuilder.MCP_TOOLS_SECTION` 协作工具列表新增 `cat_cafe_cross_post_message` 并附最小认知路径示例 — commit `85a714d03`
@@ -100,6 +103,9 @@ operator第二轮原话（接收侧补充）：
 - [x] AC-D1: 移除 `reflect` 工具注册（含 server-toolsets / tools/index）+ 同步清理 `SystemPromptBuilder.MCP_TOOLS_SECTION` 中 `cat_cafe_reflect: 反思性合成` 这行 + `tool-registration.test.js` 守护 + 删除 `reflect-tools.ts` + `reflect-tools.test.js` + skill 文档无残留 — commit pending PR
 - [x] AC-D2: 移除 `guide_resolve` legacy alias + 同步清理 SystemPromptBuilder（确认无引用）+ tool-registration test 守护 + 删除 `handleGuideResolve` handler — commit pending PR
 - [x] AC-D3: `.mcp.json` / `.codex/config.toml` 中 `probe-connected` / `probe-env` / `probe-off` — gitignored user-local config，走 [Phase C migration guide](assets/F193/F193-phase-C-migration.md) probe-* 清理段（同 Phase C two-track 模式）— commit pending PR
+
+### Phase E（active）
+- [ ] AC-E3: SessionStart / shell hook 检测共享环境异常后主动注入溯源提示，不依赖猫主动检查。当前 blocker：实现 owner/custody 与交付 PR 尚未在本 feature 记录。
 
 ## 需求点 Checklist
 
@@ -248,7 +254,7 @@ sibling PR / thread per F209 D.0 delegation matrix):
 - [x] **AC-PCFU-2**: When AC-PCFU-1's condition holds, legacy `cat-cafe` is removed from `capabilities.json`; foreign external `cat-cafe-limb` ID collision still preserves legacy (regression of Phase C R4 P1). — `willHaveManagedLimb` extended with `hasSameRepoExternalLimb`; R4 P1 test (line 1304) untouched and green.
 - [x] **AC-PCFU-3**: New `capability-orchestrator.test.js` cases cover the three scenarios in Required Fix Scope above; existing 8 tests on `ensureCatCafeMainServer` still pass. — 3 new `ensureCatCafeMainServer` tests + 1 `healCatCafeMcpTopology` integration test for F209 D.0 shape; full suite 84/84 green via `env -u CAT_CAFE_RUNTIME_ROOT node --test packages/api/test/capability-orchestrator.test.js`.
 - [ ] **AC-PCFU-4**: After fix lands, run `GET /api/capabilities?probe=true` from a local install that reproduces the symptom; `tool_search` no longer shows duplicate `cat_cafe_*` across `mcp__cat_cafe__*` and `mcp__cat_cafe_{collab,memory,signals,limb}__*` namespaces. — runtime validation pending (alpha smoke after PR merges).
-- [x] **AC-PCFU-5**: `.mcp.json` + `.codex/config.toml` regeneration sequence preserves any user-added external (non-`source=cat-cafe`) MCP entries untouched. — AC-PCFU-5 unit test confirms unrelated externals (`filesystem`, `github-mcp`) pass through `ensureCatCafeMainServer` verbatim (args/enabled preserved); `generateCliConfigs` already respects external entries from Phase C R7 work.
+- [x] **AC-PCFU-5**: `.mcp.json` + `.codex/config.toml` regeneration sequence preserves user-added external (non-`source=cat-cafe`) MCP entries unless the surface is explicitly retired. — AC-PCFU-5 unit test confirms unrelated externals (`filesystem`, `example-mcp`) pass through `ensureCatCafeMainServer` verbatim (args/enabled preserved); the retired GitHub MCP is filtered by the later operator retirement guard.
 
 **Owner**: F193 / MCP topology thread — suggested handoff to Opus-47 or
 后端协议猫（per F209 spec line 184 delegation matrix）. F193 itself stays

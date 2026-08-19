@@ -2,7 +2,11 @@ import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
-import type { EntityMatch, EvidenceDrillDown } from '../domains/memory/interfaces.js';
+import type {
+  EntityMatch,
+  EvidenceDrillDown,
+  EvidenceStatus as MemoryEvidenceStatus,
+} from '../domains/memory/interfaces.js';
 
 export interface EvidenceFreshness {
   status: 'fresh' | 'stale' | 'unknown';
@@ -22,25 +26,31 @@ export type EvidenceSourceType =
   | 'decision'
   | 'phase'
   | 'feature'
+  | 'architecture'
   | 'lesson'
   | 'research'
+  | 'diary'
   | 'knowledge'
   | 'discussion'
   | 'commit';
-export type EvidenceConfidence = 'high' | 'mid' | 'low';
-export type EvidenceStatus = 'draft' | 'pending' | 'published' | 'archived';
+export type EvidenceMatchRank = 'high' | 'mid' | 'low';
+export type EvidenceStatus = MemoryEvidenceStatus | 'draft' | 'pending' | 'published';
 
 export interface EvidenceResult {
   title: string;
   anchor: string;
   snippet: string;
-  confidence: EvidenceConfidence;
+  matchRank: EvidenceMatchRank;
+  /** F263 AC-A2: retrieval score from the store, never used as direct-hit identity. */
+  retrievalScore?: number;
   sourceType: EvidenceSourceType;
   /** F102 Batch 3: knowledge dimension origin — project or global */
   source?: 'project' | 'global';
   status?: EvidenceStatus;
-  /** F163 Phase E: document authority — orthogonal to confidence (which reflects rank) */
+  /** F163 Phase E: document authority — orthogonal to match rank. */
   authority?: string;
+  /** Source freshness. Legacy/degraded results may omit it and render as unknown. */
+  updatedAt?: string;
   /** F163: boost source attribution — what F163 mechanisms affected this result's ranking */
   boostSource: BoostSource[];
   /** AC-I9: passage-level detail when depth=raw */
@@ -125,10 +135,14 @@ export function mapKindToSourceType(kind: string): EvidenceSourceType {
       return 'phase';
     case 'feature':
       return 'feature';
+    case 'architecture':
+      return 'architecture';
     case 'lesson':
       return 'lesson';
     case 'research':
       return 'research';
+    case 'diary':
+      return 'diary';
     case 'pack-knowledge':
       return 'knowledge';
     case 'session':
@@ -154,6 +168,7 @@ export function classifySource(path: string): EvidenceSourceType {
   if (path.includes('decisions')) return 'decision';
   if (path.includes('phases')) return 'phase';
   if (path.includes('features')) return 'feature';
+  if (path.includes('architecture')) return 'architecture';
   if (
     path.includes('lessons') ||
     path.includes('reflections') ||
@@ -172,7 +187,7 @@ export async function searchDocs(docsRoot: string, query: string, limit: number)
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return results;
 
-  const dirs = ['decisions', 'phases', 'discussions'];
+  const dirs = ['decisions', 'architecture', 'features', 'phases', 'plans', 'lessons', 'research', 'discussions'];
   for (const dir of dirs) {
     let files: string[];
     try {
@@ -209,7 +224,7 @@ export async function searchDocs(docsRoot: string, query: string, limit: number)
         title: firstLine,
         anchor: relPath,
         snippet,
-        confidence: 'low',
+        matchRank: 'low',
         sourceType: classifySource(relative('', relPath)),
         boostSource: ['legacy'],
       });
@@ -222,7 +237,7 @@ export async function searchDocs(docsRoot: string, query: string, limit: number)
 }
 
 /**
- * Validate anchors: downgrade confidence to 'low' if a docs/ file is missing.
+ * Validate anchors: downgrade match rank to 'low' if a docs/ file is missing.
  * Does not remove results — just reduces trust signal.
  */
 export async function validateAnchors(results: EvidenceResult[], docsRoot: string): Promise<EvidenceResult[]> {
@@ -237,14 +252,14 @@ export async function validateAnchors(results: EvidenceResult[], docsRoot: strin
       const relativeToDocs = relative(docsRootAbs, filePath);
 
       if (!relativePath || relativeToDocs.startsWith('..') || isAbsolute(relativeToDocs)) {
-        return { ...result, confidence: 'low' as EvidenceConfidence };
+        return { ...result, matchRank: 'low' as EvidenceMatchRank };
       }
 
       try {
         await access(filePath);
         return result;
       } catch {
-        return { ...result, confidence: 'low' as EvidenceConfidence };
+        return { ...result, matchRank: 'low' as EvidenceMatchRank };
       }
     }),
   );

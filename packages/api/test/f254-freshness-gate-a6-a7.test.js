@@ -75,6 +75,46 @@ describe('F254 AC-A6: cross_post_message + multi_mention tool coverage', async (
     assert.equal(result.toolName, 'cross_post_message');
   });
 
+  it('IR-8: sends FYI cross-thread dispatch without making the sender join target history', () => {
+    assert.deepEqual(wireModule.decideCrossThreadFreshnessGate({ isCrossThread: true, effectClass: 'fyi' }), {
+      mode: 'bypass',
+      reason: 'cross_thread_fyi_delivery',
+    });
+  });
+
+  it('IR-8: sends unrelated investigate dispatch with typed lag metadata', () => {
+    assert.deepEqual(wireModule.decideCrossThreadFreshnessGate({ isCrossThread: true, effectClass: 'investigate' }), {
+      mode: 'bypass',
+      reason: 'cross_thread_no_causal_overlap',
+    });
+  });
+
+  it('IR-8: gates only a coordinate/investigate dispatch with typed causal overlap', () => {
+    assert.deepEqual(
+      wireModule.decideCrossThreadFreshnessGate({
+        isCrossThread: true,
+        effectClass: 'coordinate',
+        coordinationId: 'coord-1',
+      }),
+      { mode: 'gate', reason: 'cross_thread_causal_overlap' },
+    );
+    assert.deepEqual(
+      wireModule.decideCrossThreadFreshnessGate({
+        isCrossThread: true,
+        effectClass: 'investigate',
+        replyToMessageId: 'msg-target',
+      }),
+      { mode: 'gate', reason: 'cross_thread_causal_overlap' },
+    );
+  });
+
+  it('IR-8: keeps same-thread post_message on the ordinary freshness gate', () => {
+    assert.deepEqual(wireModule.decideCrossThreadFreshnessGate({ isCrossThread: false }), {
+      mode: 'gate',
+      reason: 'same_thread_participation',
+    });
+  });
+
   it('cross_post_message toolName is preserved in forward decision', async () => {
     const cursorStore = makeMockCursorStore(msg3); // cursor caught up
     const messageStore = makeMockMessageStore([]);

@@ -3,9 +3,10 @@
  *
  * Redis-backed — must run via `pnpm --filter @cat-cafe/api test:redis`.
  *
- * Two chains:
- *  A. awaiting_external → OWNER maintainer comment → silent-log + state stays awaiting_external
- *  B. awaiting_external → external (CONTRIBUTOR) comment → wake-owner + state restores to in_progress
+ * Three chains:
+ *  A. awaiting_external → OWNER/MEMBER upstream maintainer comment → wake-owner + state restores to in_progress
+ *  B. awaiting_external → exact correlated self/setup noise → silent-log + state stays awaiting_external
+ *  C. awaiting_external → external (CONTRIBUTOR) comment → wake-owner + state restores to in_progress
  *
  * Verifies:
  *  1. CommunityEventLog.append + CommunityProjector.apply produce correct projection state
@@ -98,11 +99,11 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Chain A: awaiting_external + OWNER comment → silent, state stays
+  // Chain A: association is context — OWNER/MEMBER activity wakes + restores
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('Chain A: OWNER comment on awaiting_external → silent + state unchanged', () => {
-    it('appends case.awaiting_external → state=awaiting_external, then OWNER comment stays in state', async () => {
+  describe('Chain A: OWNER/MEMBER comment on awaiting_external → wake + in_progress restore', () => {
+    it('appends case.awaiting_external, then an OWNER reply restores in_progress', async () => {
       const sk = 'issue:owner/repo#101';
 
       // Setup: opened → routed → in_progress equivalent (using bootstrap to jump)
@@ -138,9 +139,11 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
       const awaitingProj = await objectStore.get(sk);
       assert.strictEqual(awaitingProj.state, 'awaiting_external', 'state must be awaiting_external after event');
 
-      // OWNER comments — should be silent-log and NOT restore state
+      // OWNER may be the upstream maintainer. Association alone is not suppression identity.
+      const at = Date.now() + 1000;
       const ownerCommentEvent = makeInformationalEvent('issue.commented', sk, 'OWNER', {
         sourceEventId: 'ca-e5',
+        at,
         payload: { commentId: 1001, authorLogin: 'repoowner', authorAssociation: 'OWNER' },
       });
       await eventLog.append(ownerCommentEvent);
@@ -149,12 +152,13 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
       const afterOwnerCommentProj = await objectStore.get(sk);
       assert.strictEqual(
         afterOwnerCommentProj.state,
-        'awaiting_external',
-        'OWNER comment must NOT restore state — stays awaiting_external',
+        'in_progress',
+        'OWNER comment must restore state when it has no exact suppression proof',
       );
-      assert.ok(
-        afterOwnerCommentProj.lastExternalActivityAt !== null,
-        'lastExternalActivityAt must be updated on OWNER comment',
+      assert.strictEqual(
+        afterOwnerCommentProj.lastExternalActivityAt,
+        at,
+        'lastExternalActivityAt must be updated to the OWNER reply timestamp',
       );
 
       // Delivery policy check
@@ -163,10 +167,10 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
         eventKind: 'issue.commented',
         authorAssociation: 'OWNER',
       });
-      assert.strictEqual(deliveryDecision, 'silent-log', 'OWNER comment must be silent-log');
+      assert.strictEqual(deliveryDecision, 'wake-owner', 'OWNER association alone must not suppress delivery');
     });
 
-    it('MEMBER comment on awaiting_external is also silent-log + state stays', async () => {
+    it('MEMBER comment on awaiting_external also wakes and restores in_progress', async () => {
       const sk = 'issue:owner/repo#102';
 
       // Bootstrap to awaiting_external directly
@@ -185,20 +189,61 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
       await projector.apply(memberCommentEvent);
 
       const proj = await objectStore.get(sk);
-      assert.strictEqual(proj.state, 'awaiting_external', 'MEMBER comment must not restore state');
+      assert.strictEqual(proj.state, 'in_progress', 'MEMBER association alone must not suppress state restoration');
 
       assert.strictEqual(
         decideDelivery({ state: 'awaiting_external', eventKind: 'issue.commented', authorAssociation: 'MEMBER' }),
+        'wake-owner',
+      );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chain B: exact correlated noise → silent + state stays
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('Chain B: exact suppression proof keeps awaiting_external unchanged', () => {
+    it('exact self echo is logged but does not change state or external-activity time', async () => {
+      const sk = 'issue:owner/repo#103';
+      const bootstrapEvent = makeEvent('case.bootstrap', sk, {
+        sourceEventId: 'cs-e1',
+        payload: { mappedState: 'awaiting_external', originalState: 'awaiting_external' },
+      });
+      await eventLog.append(bootstrapEvent);
+      await projector.apply(bootstrapEvent);
+
+      const selfEchoEvent = makeInformationalEvent('issue.commented', sk, 'OWNER', {
+        sourceEventId: 'cs-e2',
+        payload: {
+          commentId: 2101,
+          authorLogin: 'our-exact-login',
+          authorAssociation: 'OWNER',
+          suppressionReason: 'exact_self_echo',
+        },
+      });
+      await eventLog.append(selfEchoEvent);
+      await projector.apply(selfEchoEvent);
+
+      const proj = await objectStore.get(sk);
+      assert.strictEqual(proj.state, 'awaiting_external');
+      assert.strictEqual(proj.lastExternalActivityAt, null, 'exact self echo is not external activity');
+      assert.strictEqual(
+        decideDelivery({
+          state: 'awaiting_external',
+          eventKind: 'issue.commented',
+          authorAssociation: 'OWNER',
+          suppressionReason: 'exact_self_echo',
+        }),
         'silent-log',
       );
     });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Chain B: awaiting_external + external comment → wake + state restores
+  // Chain C: awaiting_external + external comment → wake + state restores
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('Chain B: external comment on awaiting_external → wake + in_progress restore', () => {
+  describe('Chain C: external comment on awaiting_external → wake + in_progress restore', () => {
     it('CONTRIBUTOR comment restores awaiting_external → in_progress + lastExternalActivityAt updated', async () => {
       const sk = 'issue:owner/repo#201';
 
@@ -273,7 +318,7 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
       );
     });
 
-    it('full chain: opened→awaiting_external→OWNER(silent)→CONTRIBUTOR(wake) rebuild is consistent', async () => {
+    it('full chain: opened→awaiting_external→exact self echo(silent)→CONTRIBUTOR(wake) rebuild is consistent', async () => {
       const sk = 'issue:owner/repo#301';
 
       const events = [
@@ -288,7 +333,12 @@ describe('F168 Phase B: awaiting_external e2e chain (Redis)', { skip: redisIsola
         }),
         makeInformationalEvent('issue.commented', sk, 'OWNER', {
           sourceEventId: 'ce-e4',
-          payload: { commentId: 5001, authorLogin: 'owner', authorAssociation: 'OWNER' },
+          payload: {
+            commentId: 5001,
+            authorLogin: 'owner',
+            authorAssociation: 'OWNER',
+            suppressionReason: 'exact_self_echo',
+          },
         }),
         makeInformationalEvent('issue.commented', sk, 'CONTRIBUTOR', {
           sourceEventId: 'ce-e5',

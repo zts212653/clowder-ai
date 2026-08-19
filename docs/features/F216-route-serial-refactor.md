@@ -16,7 +16,7 @@ Map delta: routeSerial 从 2302 行单函数拆为决策层(纯函数) + 执行�
 
 ## Why
 
-routeSerial 是 Cat Cafe 的核心路由引擎——所有 A2A 串行调度、mention 路由、callback、F215 relay 都经过这个函数。当前状态：
+routeSerial 是 Clowder AI 的核心路由引擎——所有 A2A 串行调度、mention 路由、callback、F215 relay 都经过这个函数。当前状态：
 
 - **2302 行单函数**，cognitive complexity 255（biome noExcessiveCognitiveComplexity 报 warning 但被豁免）
 - **5 套并行路由路径**（inline mention / deferred mention / callback A2A / F215 malformed relay / executed-relay dedup）共享同一个可变 `worklist`

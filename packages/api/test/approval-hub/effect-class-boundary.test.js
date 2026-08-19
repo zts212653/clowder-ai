@@ -26,7 +26,7 @@ describe('Effect-Class Boundary Tests', () => {
   describe('AC-B2: Effect-class → delivery decision', () => {
     it('assign_work: creates DispatchProposal (not auto-delivered)', async () => {
       const store = new InMemoryDispatchProposalStore();
-      const proposal = await store.create({
+      const { proposal } = await store.create({
         proposalId: 'dp-assign-1',
         sourceThreadId: 'thread-src',
         targetThreadId: 'thread-tgt',
@@ -65,7 +65,7 @@ describe('Effect-Class Boundary Tests', () => {
 
       // Proposal with merged targetCats — delivery path will wake the right cats
       const store = new InMemoryDispatchProposalStore();
-      const proposal = await store.create({
+      const { proposal } = await store.create({
         proposalId: 'dp-mention-merge',
         sourceThreadId: 'thread-src',
         targetThreadId: 'thread-tgt',
@@ -121,7 +121,7 @@ describe('Effect-Class Boundary Tests', () => {
 
       // Proposal stores only validated targets
       const store = new InMemoryDispatchProposalStore();
-      const proposal = await store.create({
+      const { proposal } = await store.create({
         proposalId: 'dp-validate-targets',
         sourceThreadId: 'thread-src',
         targetThreadId: 'thread-tgt',
@@ -270,6 +270,7 @@ describe('Effect-Class Boundary Tests', () => {
       mode: 'independent',
       teammates: [],
       mcpAvailable: false,
+      threadId: 'thread-tgt',
     };
 
     it('fyi effectClass → injects read-only constraint', () => {
@@ -282,10 +283,11 @@ describe('Effect-Class Boundary Tests', () => {
         },
       });
       assert.ok(prompt.includes('effect=fyi'), 'Should mention effect=fyi');
-      assert.ok(prompt.includes('不需要你写代码'), 'fyi should say no coding needed');
+      assert.ok(prompt.includes('不转移新的 implementation 球权'), 'fyi must not transfer implementation custody');
+      assert.ok(prompt.includes('送达回执由系统记录'), 'fyi transport receipt should be machine-owned');
     });
 
-    it('coordinate effectClass → injects discuss-only constraint', () => {
+    it('coordinate effectClass → does not transfer custody or revoke independently grounded standing', () => {
       const prompt = buildSystemPrompt({
         ...baseContext,
         crossThreadReplyHint: {
@@ -295,7 +297,15 @@ describe('Effect-Class Boundary Tests', () => {
         },
       });
       assert.ok(prompt.includes('effect=coordinate'), 'Should mention effect=coordinate');
-      assert.ok(prompt.includes('不要动代码'), 'coordinate should say no code changes');
+      assert.ok(
+        prompt.includes('不转移新的 implementation 球权'),
+        'coordinate must not transfer new implementation custody',
+      );
+      assert.ok(prompt.includes('不会撤销你已有的责任'), 'coordinate must preserve independently grounded standing');
+      assert.ok(prompt.includes('verified'), 'coordinate should name the verified branch');
+      assert.ok(prompt.includes('mismatch'), 'coordinate should name the mismatch branch');
+      assert.ok(prompt.includes('insufficient'), 'coordinate should name the insufficient branch');
+      assert.ok(!prompt.includes('只回复确认'), 'coordinate must not force courtesy-only ACK');
     });
 
     it('investigate effectClass → injects analysis-only constraint', () => {
@@ -308,7 +318,8 @@ describe('Effect-Class Boundary Tests', () => {
         },
       });
       assert.ok(prompt.includes('effect=investigate'), 'Should mention effect=investigate');
-      assert.ok(prompt.includes('不要写代码'), 'investigate should say no code writing');
+      assert.ok(prompt.includes('不授予写代码'), 'investigate should not grant implementation authority');
+      assert.ok(prompt.includes('不会撤销你已有的责任'), 'investigate must preserve existing standing');
     });
 
     it('assign_work effectClass → no behavior constraint injected (full authority)', () => {
@@ -436,6 +447,63 @@ describe('Effect-Class Boundary Tests', () => {
       const mergedTargetCats = [...new Set([...interceptAnalysis.mentions, ...explicitTargetCats])];
       assert.equal(mergedTargetCats.length, 1, 'duplicate must be removed');
       assert.ok(mergedTargetCats.includes('sonnet'));
+    });
+  });
+
+  // --- Convention contracts (F246 Phase J charter update) ---
+  // NOTE: The HTTP-level "coordinate does not create DispatchProposal" contract
+  // lives in cross-thread-coordination-chain.test.js — it hits the real callback
+  // intercept, not just an empty store. See: "coordinate effectClass cross-thread
+  // → delivered normally, no DispatchProposal created"
+
+  describe('Convention contracts: coordinate cannot grant implementation authority', () => {
+    it('coordinate effectClass cannot grant implementation authority (coding permission)', async () => {
+      // Convention: coordinate is for review/feedback — it must NOT grant the receiver
+      // permission to write code or take implementation actions. Only assign_work grants
+      // full implementation authority.
+      const { buildSystemPrompt } = await import('../../dist/domains/cats/services/context/SystemPromptBuilder.js');
+
+      const baseContext = {
+        catId: 'sonnet',
+        mode: 'independent',
+        teammates: [],
+        mcpAvailable: false,
+        threadId: 'thread-tgt',
+      };
+
+      const coordinatePrompt = buildSystemPrompt({
+        ...baseContext,
+        crossThreadReplyHint: {
+          sourceThreadId: 'thread-src',
+          senderCatId: 'opus',
+          effectClass: 'coordinate',
+        },
+      });
+
+      // coordinate must explicitly deny implementation custody
+      assert.ok(
+        coordinatePrompt.includes('不转移新的 implementation 球权'),
+        'coordinate must explicitly state it does not transfer implementation custody',
+      );
+
+      // coordinate must NOT contain implementation-granting language
+      assert.ok(!coordinatePrompt.includes('请你实现'), 'coordinate must not contain implementation-granting phrases');
+      assert.ok(!coordinatePrompt.includes('全权'), 'coordinate must not grant full authority');
+
+      // Contrast: assign_work does NOT have these restrictions
+      const assignPrompt = buildSystemPrompt({
+        ...baseContext,
+        crossThreadReplyHint: {
+          sourceThreadId: 'thread-src',
+          senderCatId: 'opus',
+          effectClass: 'assign_work',
+        },
+      });
+
+      assert.ok(
+        !assignPrompt.includes('不转移新的 implementation 球权'),
+        'assign_work must NOT restrict implementation custody (positive contrast)',
+      );
     });
   });
 });

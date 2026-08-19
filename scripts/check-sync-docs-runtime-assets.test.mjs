@@ -285,4 +285,34 @@ describe('sync-to-opensource.sh source-only guard contract', () => {
       'check:sync-docs-runtime-assets must be listed in internalScripts so the public package.json transform strips both the script definition and the pnpm check chain reference',
     );
   });
+
+  it('strips home-attested MCP governance commands from the public package surface', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    const match = syncScript.match(/const internalScripts = \[([\s\S]*?)\];/);
+    assert.ok(match, 'internalScripts array not found in sync-to-opensource.sh');
+    assert.match(
+      match[1],
+      /["']check:mcp-surface-governance["']/,
+      'the root public check chain must not execute a governance attestation bound to cat-cafe origin/main',
+    );
+    assert.match(
+      syncScript,
+      /key\.startsWith\(["']governance:["']\)/,
+      'public @cat-cafe/mcp-server package scripts must not advertise home-bound governance commands',
+    );
+  });
+
+  it('binds the post-merge tag handoff to the exported source snapshot', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    assert.match(
+      syncScript,
+      /PUBLISH_HANDOFF_CMD="bash scripts\/publish-sync-tag\.sh --source-sha=\$SOURCE_SHA --push"/,
+      'the handoff must publish the SOURCE_SHA selected for export, not the caller worktree HEAD',
+    );
+    assert.match(
+      syncScript,
+      /Release mapping: \$RELEASE_TAG ← \$SOURCE_SNAPSHOT_TAG ← \$SOURCE_SHA_SHORT/,
+      'the release mapping hint must report the same exported source snapshot',
+    );
+  });
 });

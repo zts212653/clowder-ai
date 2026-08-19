@@ -20,5 +20,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "规定猫每轮对话结束时必须决定球传给谁"

@@ -10,4 +10,5 @@ export interface CatAlternative {
 export type CatRoutingError =
   | { kind: 'cat_not_found'; mention: string; alternatives: CatAlternative[] }
   | { kind: 'cat_disabled'; catId: CatId; displayName: string; alternatives: CatAlternative[] }
-  | { kind: 'target_not_in_thread'; catId: CatId; threadId: string };
+  | { kind: 'target_not_in_thread'; catId: CatId; threadId: string }
+  | { kind: 'suppressed_by_terminal_ack'; droppedMentions: CatId[] };

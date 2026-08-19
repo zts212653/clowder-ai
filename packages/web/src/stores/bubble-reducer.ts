@@ -78,6 +78,16 @@ export function buildStreamExtraFromEvent(
   return { stream: { invocationId: id, ...(textMode ? { textMode } : {}) } };
 }
 
+function mergeEventExtra(event: BubbleEvent, existing: ChatMessage['extra']): ChatMessage['extra'] | undefined {
+  const eventExtra = event.payload?.extra as ChatMessage['extra'] | undefined;
+  const merged: ChatMessage['extra'] = {
+    ...(existing ?? {}),
+    ...(buildStreamExtraFromEvent(event) ?? {}),
+    ...(eventExtra ?? {}),
+  };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 export interface BubbleReducerInput {
   threadId: string;
   event: BubbleEvent;
@@ -139,7 +149,7 @@ function makePlaceholder(event: BubbleEvent, content = '', currentMessages: Chat
     timestamp: event.timestamp ?? 0,
     isStreaming: event.originPhase === 'stream',
     origin: originFromPhase(event.originPhase),
-    extra: buildStreamExtraFromEvent(event),
+    extra: mergeEventExtra(event, undefined),
   };
 }
 
@@ -276,10 +286,7 @@ function withCanonicalUpgrade(
     ...message,
     ...patch,
     id: ensureMessageId(event, currentMessages),
-    extra: {
-      ...message.extra,
-      ...(buildStreamExtraFromEvent(event) ?? {}),
-    },
+    extra: mergeEventExtra(event, message.extra),
   };
 }
 
@@ -307,10 +314,7 @@ function reduceStreamChunk(messages: ChatMessage[], event: BubbleEvent): ChatMes
     next[existing.index] = {
       ...existing.message,
       content: nextContent,
-      extra: {
-        ...existing.message.extra,
-        ...(buildStreamExtraFromEvent(event) ?? {}),
-      },
+      extra: mergeEventExtra(event, existing.message.extra),
     };
     return next;
   }
@@ -422,11 +426,17 @@ function reduceDoneEvent(messages: ChatMessage[], event: BubbleEvent): ChatMessa
     const matches =
       m.catId === event.actorId &&
       // F194 Phase Z3 R3 P1-1: dual-id stable key (turn > parent)
-      getStableInvocationKey(m) === event.canonicalInvocationId &&
-      m.isStreaming === true;
+      getStableInvocationKey(m) === event.canonicalInvocationId;
     if (matches) {
-      next.push({ ...m, isStreaming: false });
-      changed = true;
+      const hasLifecycleChange = m.isStreaming === true;
+      const hasExtraChange = event.payload?.extra !== undefined;
+      const mergedExtra = mergeEventExtra(event, m.extra);
+      next.push({
+        ...m,
+        ...(hasLifecycleChange ? { isStreaming: false } : {}),
+        ...(mergedExtra ? { extra: mergedExtra } : {}),
+      });
+      changed ||= hasLifecycleChange || hasExtraChange;
     } else {
       next.push(m);
     }
@@ -523,6 +533,7 @@ function reduceCallbackFinal(messages: ChatMessage[], event: BubbleEvent): ChatM
         content: finalContent,
         isStreaming: false,
         origin: 'callback',
+        extra: mergeEventExtra(event, next[idx].extra),
       };
       return next;
     }
@@ -542,6 +553,7 @@ function reduceCallbackFinal(messages: ChatMessage[], event: BubbleEvent): ChatM
       content: finalContent,
       isStreaming: false,
       origin: 'callback',
+      extra: mergeEventExtra(event, existing.message.extra),
     };
     return dropLocalOnlyStreamSiblings(next, event);
   }

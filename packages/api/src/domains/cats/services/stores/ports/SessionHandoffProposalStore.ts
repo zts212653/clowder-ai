@@ -7,13 +7,30 @@
  * continuationEntryId）由 recordCheckpoint 持久化，crash recovery 按这些续跑。
  */
 
-import type { CatHandoffNote, CatId, SessionHandoffProposal } from '@cat-cafe/shared';
-import { generateProposalId } from '@cat-cafe/shared';
+import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
+  CatHandoffNote,
+  CatId,
+  HumanDispositionLedgerEntry,
+  HumanDispositionLedgerReceipt,
+  SessionHandoffProposal,
+} from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposalId } from '@cat-cafe/shared';
+import { InMemoryHumanDispositionReceiptIndex } from '../../../../human-disposition/InMemoryHumanDispositionReceiptIndex.js';
+import { InMemorySessionHandoffDisposition } from './InMemorySessionHandoffDisposition.js';
+import type {
+  RejectSessionHandoffInput,
+  SessionHandoffDispositionEntryLookup,
+  SessionHandoffRejectionResult,
+} from './SessionHandoffDisposition.js';
+import { sessionHandoffProposalIdFromSourceRef } from './SessionHandoffDisposition.js';
 
 export interface CreateHandoffProposalInput {
   sourceThreadId: string;
   sourceSessionId: string;
   sourceCatId: CatId;
+  sourceMessageId: string;
   userId: string;
   /** 五件套留言（proposalId / sourceSessionId / persistedAt 由 store 填） */
   note: Omit<CatHandoffNote, 'proposalId' | 'sourceSessionId' | 'persistedAt'>;
@@ -35,37 +52,28 @@ export interface ISessionHandoffProposalStore {
   get(proposalId: string): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
   /** CAS pending → approving. Returns claimed snapshot, or null if status drifted (not pending). */
   claimForApproval(proposalId: string): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
-  /**
-   * Persist commit-point checkpoint fields WITHOUT changing status. Idempotent.
-   * Caller writes handoffNotePersistedAt (pre-commit) / sealedSessionId+sealAcceptedAt
-   * (commit point) / continuationEntryId (post-commit) as the transaction advances,
-   * so stale-claim recovery can resume from the last durable checkpoint (KD-9).
-   */
+  /** Persist monotonic commit-point fields without changing status. */
   recordCheckpoint(
     proposalId: string,
     patch: HandoffCheckpointPatch,
   ): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
   /** CAS approving → approved. Returns updated proposal or null if status drifted. */
   finalizeApproval(proposalId: string): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
-  /** CAS pending → rejected. null if not pending. */
-  markRejected(proposalId: string): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
+  /** Atomic pending → rejected + producer entry + content-free receipt. */
+  markRejected(
+    proposalId: string,
+    input: RejectSessionHandoffInput,
+  ): SessionHandoffRejectionResult | Promise<SessionHandoffRejectionResult>;
+  loadHumanDispositionEntry(
+    input: SessionHandoffDispositionEntryLookup,
+  ): HumanDispositionLedgerEntry | null | Promise<HumanDispositionLedgerEntry | null>;
   /** CAS pending|approving → expired. null if already terminal. */
   markExpired(proposalId: string): SessionHandoffProposal | null | Promise<SessionHandoffProposal | null>;
-  /**
-   * A4 abuse guard: pending|approving proposals for a given source session.
-   * Used to enforce ≤1 pending handoff proposal per active session.
-   */
+  /** A4 abuse guard: pending|approving proposals for one source session. */
   listActiveBySession(sourceSessionId: string): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
-  /**
-   * F246 Approval Hub: list pending proposals for a given user, newest first.
-   * Used by the Hub aggregation route to collect all pending handoff proposals
-   * across threads for the operator's unified approval view.
-   */
+  /** F246 Approval Hub: pending proposals for a user, newest first. */
   listPendingByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
-  /**
-   * F246 Phase G: list settled (approved|rejected) proposals for a given user, newest first.
-   * Used by F225ApprovalAdapter.listSettled to populate the approval history tab.
-   */
+  /** F246 Phase G: settled proposals for a user, newest first. */
   listSettledByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
   /**
    * A4 cooldown: most recent proposal (ANY status, incl. rejected/expired) for this cat+thread.
@@ -105,6 +113,9 @@ export interface ISessionHandoffProposalStore {
   reserveDedup(userId: string, clientRequestId: string, proposalId: string): string | Promise<string>;
   /** Release a reserved dedup key IFF it still points at expectedProposalId (compare-and-delete). */
   releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): void | Promise<void>;
+  getPublication(proposalId: string): ApprovalPublication | null | Promise<ApprovalPublication | null>;
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void | Promise<void>;
+  abortStaged(proposalId: string, reason: string): void | Promise<void>;
 }
 
 /** Dedup index key: scoped per-user so one user's clientRequestId can't collide with another's. */
@@ -120,11 +131,16 @@ const ACTIVE_STATUSES: ReadonlySet<SessionHandoffProposal['status']> = new Set([
  */
 export class InMemorySessionHandoffProposalStore implements ISessionHandoffProposalStore {
   private readonly proposals = new Map<string, SessionHandoffProposal>();
+  private readonly disposition: InMemorySessionHandoffDisposition;
   // clientRequestId → proposalId dedup index (transport-retry idempotency, 云端 P2).
   private readonly dedupCache = new Map<string, string>();
   // Monotonic clock: two proposals created in the same wall-clock ms still get a strictly
   // increasing createdAt, so getMostRecentByCatThread / cooldown is deterministic (砚砚 P1-3).
   private lastTs = 0;
+
+  constructor(receiptIndex = new InMemoryHumanDispositionReceiptIndex()) {
+    this.disposition = new InMemorySessionHandoffDisposition(receiptIndex);
+  }
 
   private monoNow(): number {
     const n = Date.now();
@@ -142,6 +158,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       sourceThreadId: input.sourceThreadId,
       sourceSessionId: input.sourceSessionId,
       sourceCatId: input.sourceCatId,
+      sourceMessageId: input.sourceMessageId,
       userId: input.userId,
       note: {
         ...input.note,
@@ -151,6 +168,7 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       },
       createdAt: now,
       updatedAt: now,
+      publication: { state: 'staged', stagedAt: now },
     };
     this.proposals.set(proposalId, clone(proposal));
     return clone(proposal);
@@ -189,12 +207,23 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
     return clone(p);
   }
 
-  markRejected(proposalId: string): SessionHandoffProposal | null {
+  markRejected(proposalId: string, input: RejectSessionHandoffInput): SessionHandoffRejectionResult {
     const p = this.proposals.get(proposalId);
-    if (!p || p.status !== 'pending') return null;
-    p.status = 'rejected';
-    p.updatedAt = Date.now();
-    return clone(p);
+    if (!p) return { outcome: 'not_available' };
+    const result = this.disposition.reject(p, input);
+    return { ...result, ...(result.proposal ? { proposal: clone(result.proposal) } : {}) };
+  }
+
+  loadHumanDispositionEntry(input: {
+    ownerUserId: string;
+    receipt: HumanDispositionLedgerReceipt;
+  }): HumanDispositionLedgerEntry | null {
+    const proposalId = sessionHandoffProposalIdFromSourceRef(input.receipt.sourceRef);
+    return this.disposition.load(
+      proposalId ? this.proposals.get(proposalId) : undefined,
+      input.ownerUserId,
+      input.receipt,
+    );
   }
 
   markExpired(proposalId: string): SessionHandoffProposal | null {
@@ -285,11 +314,36 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       this.dedupCache.delete(key);
     }
   }
+
+  getPublication(proposalId: string): ApprovalPublication | null {
+    return this.proposals.get(proposalId)?.publication ?? null;
+  }
+
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void {
+    const proposal = this.proposals.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F225',
+      ownerUserId: proposal.userId,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    proposal.publication = commitApprovalEnvelope(proposal.publication, envelope);
+    proposal.cardMessageId = envelope.approvalCardRef.messageId;
+    proposal.updatedAt = Date.now();
+  }
+
+  abortStaged(proposalId: string, _reason: string): void {
+    const proposal = this.proposals.get(proposalId);
+    if (proposal?.publication?.state === 'staged') this.delete(proposalId);
+  }
 }
 
 function clone(p: SessionHandoffProposal): SessionHandoffProposal {
   return {
     ...p,
     note: { ...p.note, ...(p.note.commits ? { commits: [...p.note.commits] } : {}) },
+    ...(p.publication ? { publication: structuredClone(p.publication) } : {}),
   };
 }

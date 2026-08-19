@@ -16,7 +16,7 @@ updated: 2026-03-05
 
 2026 年 6 月 HCI 大会预热需要让三只猫能**自主产出和发布社交媒体内容**。当前瓶颈：
 
-1. 小红书 MCP 只在operator的 Claude.ai App 上配置，猫猫们在 Cat Café runtime 中无法直接使用
+1. 小红书 MCP 只在operator的 Claude.ai App 上配置，猫猫们在 Clowder AI runtime 中无法直接使用
 2. 抖音/B站 尚无 MCP 接入
 3. 没有系统化的"名场面"素材采集和管理流程
 4. 猫猫性格档案散落在各处，没有结构化的 profile 数据
@@ -27,9 +27,9 @@ updated: 2026-03-05
 
 ### Phase 1: 社交媒体 MCP 接入（P0，3 月）
 
-让每只猫在 Cat Café 内可以直接使用社交媒体工具：
+让每只猫在 Clowder AI 内可以直接使用社交媒体工具：
 
-1. **小红书 MCP 接入 Cat Café**
+1. **小红书 MCP 接入 Clowder AI**
    - MCP Server 已确认：`mcp-remote http://<local-integration-endpoint>/mcp`（通过 `npx` 启动）
    - 接入方式：在 cat-cafe `.mcp.json` 中添加 xiaohongshu MCP server 配置，指向同一个 <local-integration-endpoint>（**已确认同一台机器，可直接接入**）
    - 权限模型：**猫猫自主发布 + operator可回溯**；内容含密码/token/内部吐槽时需审批
@@ -214,7 +214,7 @@ operator确认：出图后由Ragdoll写脚本自动切割。
 ## Acceptance Criteria
 
 - [x] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
-- [x] AC-1: 至少一个社交媒体平台（小红书）的 MCP 工具可在 Cat Café runtime 中被任意猫猫调用（2026-03-04 完成：disabledMcpServers 修复 + 三层配置，三猫均成功发帖）
+- [x] AC-1: 至少一个社交媒体平台（小红书）的 MCP 工具可在 Clowder AI runtime 中被任意猫猫调用（2026-03-04 完成：disabledMcpServers 修复 + 三层配置，三猫均成功发帖）
 - [x] AC-2: 发布内容有审核机制（2026-03-04 验证：猫猫自主发布 + 署名，operator可在小红书回溯）
 - [x] AC-3: 抖音/B站 MCP 可行性调研报告完成（2026-03-11 Maine Coon GPT-5.4 完成：B站优先，抖音后置）
 - [ ] AC-4: 至少 10 条名场面素材已采集、脱敏、格式化

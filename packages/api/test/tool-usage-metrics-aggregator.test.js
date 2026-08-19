@@ -7,6 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
+import Database from 'better-sqlite3';
 
 function createFakeRedis() {
   const store = new Map();
@@ -29,6 +30,40 @@ function createFakeRedis() {
     },
     async expire() {},
   };
+}
+
+function createRecallDb() {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE recall_events (expansion_funnel_json TEXT)');
+  return db;
+}
+
+function persistedExpansionOutcome({ followed = 0, used = followed, sourceRevision = 'f256-health-v2' } = {}) {
+  return JSON.stringify({
+    schemaVersion: 1,
+    cohort: 'natural_topk',
+    sourceRevision,
+    eligible: true,
+    gateReason: 'eligible',
+    followupWindow: { maxToolDistance: 20, maxWallClockMs: 300_000 },
+    attempted: true,
+    keyword: { probed: 1, added: 1, deduped: 0 },
+    sourceThread: { probed: 0, added: 0, deduped: 0 },
+    conventionEdge: { attempted: false, added: 0, deduped: 0, staleSkipped: 0 },
+    presented: 1,
+    hints: [
+      {
+        anchor: 'F208',
+        targetRef: {
+          kind: 'doc',
+          sourcePath: 'docs/features/F208-cat-capability-profile.md',
+          anchor: 'F208',
+        },
+      },
+    ],
+    followed,
+    used,
+  });
 }
 
 describe('ToolUsageMetricsAggregator (AC-F9)', () => {
@@ -286,14 +321,20 @@ describe('ToolUsageMetricsAggregator (AC-F9)', () => {
     assert.equal(report.listRecentAdoptionRate.sufficient, false);
   });
 
-  test('F256 Phase B (AC-B3): expansionFollowupRate aggregated from analyzeExpansionFollowup', async () => {
+  test('F256 Wave 1b: expansionFollowupRate reads durable V38 outcomes, not Redis result exposure', async () => {
     const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
     const { computeFromThreads } = await import('../dist/domains/memory/ToolUsageMetricsAggregator.js');
     const eventLog = new ToolEventLog(redis);
+    const recallDb = createRecallDb();
 
-    // 10 threads; each has a search_evidence with expansion hints.
-    // 6 of them have a followup graph_resolve that references a hint anchor → 60%.
+    recallDb
+      .prepare('INSERT INTO recall_events (expansion_funnel_json) VALUES (?)')
+      .run(persistedExpansionOutcome({ followed: 1, sourceRevision: 'f256-health-v1' }));
+
+    // The old Redis path falsely reports 100% because F208 merely appears in
+    // graph candidates. Durable typed-target outcomes correctly report 0%.
     for (let i = 0; i < 10; i++) {
+      recallDb.prepare('INSERT INTO recall_events (expansion_funnel_json) VALUES (?)').run(persistedExpansionOutcome());
       await eventLog.append({
         invocationId: `i${i}`,
         sessionId: 's1',
@@ -310,33 +351,32 @@ describe('ToolUsageMetricsAggregator (AC-F9)', () => {
           expansionHintAnchors: ['F208-capability-profile', 'thread-abc-digest'],
         },
       });
-      if (i < 6) {
-        // Cat followed the hint — graph_resolve with selectedAnchor matching a hint
-        await eventLog.append({
-          invocationId: `i${i}f`,
-          sessionId: 's1',
-          threadId: `tExp${i}`,
-          catId: 'c1',
-          toolName: 'graph_resolve',
-          timestamp: i * 100 + 10,
-          turnIndex: 1,
-          status: 'success',
-          summary: { selectedAnchor: 'F208-capability-profile' },
-        });
-      }
+      await eventLog.append({
+        invocationId: `i${i}f`,
+        sessionId: 's1',
+        threadId: `tExp${i}`,
+        catId: 'c1',
+        toolName: 'graph_resolve',
+        timestamp: i * 100 + 10,
+        turnIndex: 1,
+        status: 'success',
+        summary: { selectedAnchor: 'F2', rankedCandidateAnchors: ['F2', 'F208-capability-profile'] },
+      });
     }
 
     const threads = Array.from({ length: 10 }, (_, i) => ({ threadId: `tExp${i}` }));
-    const report = await computeFromThreads(eventLog, threads);
+    const report = await computeFromThreads(eventLog, threads, { recallDb });
     assert.equal(report.expansionFollowupRate.sufficient, true);
-    assert.equal(report.expansionFollowupRate.value, 60.0, '6/10 = 60% of hint events had followup');
-    assert.equal(report.expansionFollowupRate.sampleN, 10);
+    assert.equal(report.expansionFollowupRate.value, 0, 'ranked result exposure is not a typed-target followup');
+    assert.equal(report.expansionFollowupRate.sampleN, 10, 'pre-v2 attribution rows must not be mixed into v2 metrics');
+    recallDb.close();
   });
 
   test('F256 Phase B (AC-B3): expansionFollowupRate is zero when no expansion events exist', async () => {
     const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
     const { computeFromThreads } = await import('../dist/domains/memory/ToolUsageMetricsAggregator.js');
     const eventLog = new ToolEventLog(redis);
+    const recallDb = createRecallDb();
 
     // Regular search events without expansion hints
     await eventLog.append({
@@ -351,10 +391,11 @@ describe('ToolUsageMetricsAggregator (AC-F9)', () => {
       summary: { resultCount: 1, topScore: 0.9, nudgeEmitted: false },
     });
 
-    const report = await computeFromThreads(eventLog, [{ threadId: 'tNoExp' }]);
+    const report = await computeFromThreads(eventLog, [{ threadId: 'tNoExp' }], { recallDb });
     assert.equal(report.expansionFollowupRate.sufficient, false);
     assert.equal(report.expansionFollowupRate.value, null);
     assert.equal(report.expansionFollowupRate.sampleN, 0);
+    recallDb.close();
   });
 
   test('FM-5 nudge_failure_rate uses confound排除: failed iff !followed AND grep fallback', async () => {

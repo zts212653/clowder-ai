@@ -5,7 +5,7 @@
  * 遵照 LabelStore/GameStore 三件模式：port interface + Redis 实现 + Memory 实现（测试用）。
  *
  * dutyCatProfileId 默认值解析：
- * - 优先 'gemini35'（co-creator directive 2026-06-12：暹罗猫 Gemini 3.5 Flash）
+ * - 优先 'gemini35'（co-creator directive 2026-06-12：暹罗猫 Gemini Flash，当前 3.6 Flash）
  * - 不存在则取 catRegistry.getAllIds()[0]
  * - registry 为空时 fallback 'sonnet'
  */

@@ -213,7 +213,7 @@ const TIER1_HOOKS = [
   },
   {
     id: 'S8',
-    name: '铲屎官参考',
+    name: 'co-creator参考',
     stage: 'session-init',
     order: 1500,
     template: 's8-co-creator-reference.md',
@@ -223,7 +223,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'immutable',
     inputs: ['coCreatorReference'],
-    userExplanation: '铲屎官的偏好和沟通风格',
+    userExplanation: 'co-creator的偏好和沟通风格',
   },
   {
     id: 'S9',
@@ -351,7 +351,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'human-gated',
     inputs: ['directMessageSource'],
-    userExplanation: '标记消息是来自哪只猫或铲屎官',
+    userExplanation: '标记消息是来自哪只猫或co-creator',
   },
   {
     id: 'D3',
@@ -709,7 +709,7 @@ for (const hook of TIER1_HOOKS) {
       `transparencyTier: ${hook.transparencyTier}`,
       `governanceTier: ${hook.governanceTier}`,
       '',
-      '# CVO-facing',
+      '# operator-facing',
       ...(hook.userExplanation ? [`userExplanation: "${hook.userExplanation}"`] : []),
     ].join('\n') + '\n';
 

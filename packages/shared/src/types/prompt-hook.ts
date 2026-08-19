@@ -1,3 +1,5 @@
+import type { CrossThreadCoordination } from './cross-thread-coordination.js';
+
 /**
  * Prompt Hook Pipeline Types — F237 Phase 2
  *
@@ -57,7 +59,7 @@ export interface HookManifest {
   transparencyTier: TransparencyTier;
   governanceTier: GovernanceTier;
 
-  // -- CVO-facing --
+  // -- operator-facing --
   userExplanation?: string;
 }
 
@@ -244,6 +246,7 @@ export interface CrossThreadHintInput {
   sourceThreadId: string;
   senderCatId: string;
   effectClass?: string;
+  coordination?: CrossThreadCoordination;
 }
 
 /** Ping-pong warning info for D5. */

@@ -1,48 +1,115 @@
 'use client';
 
+import { metricRefKeyCandidates } from '@cat-cafe/shared';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { currentEvalDueAt } from './eval-lifecycle-display';
 import { HubEvalFrictionSections } from './HubEvalFrictionSections';
-import { type EvalHubItem, VERDICT_LABELS } from './HubEvalTypes';
+import { HubEvalLifecycleSummary } from './HubEvalLifecycleSummary';
+import { type EvalHubItem, type EvalMetricGlossary, VERDICT_LABELS } from './HubEvalTypes';
 
-export function HubEvalVerdictCard({ item }: { item: EvalHubItem }) {
+export function HubEvalVerdictCard({
+  item,
+  metricGlossary,
+  projectPath,
+  worktreeId,
+}: {
+  item: EvalHubItem;
+  metricGlossary?: EvalMetricGlossary;
+  /** Repo project path from the eval-hub summary (F248 Phase C fix). */
+  projectPath?: string;
+  /** Repo worktreeId from the eval-hub summary (F248 Phase C fix). */
+  worktreeId?: string;
+}) {
+  const currentThreadId = useChatStore((state) => state.currentThreadId);
+  const currentThreadProjectPath = useChatStore(
+    (state) => state.threads.find((thread) => thread.id === state.currentThreadId)?.projectPath ?? 'default',
+  );
+  const setCurrentThread = useChatStore((state) => state.setCurrentThread);
+  const setCurrentProject = useChatStore((state) => state.setCurrentProject);
   const setWorkspaceOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
+  const pathname = usePathname();
+  const router = useRouter();
   const openWorkspaceFile = useCallback(
     (path: string) => {
-      setWorkspaceOpenFile(path, null, null);
+      const shouldReturnToCurrentThread =
+        currentThreadId &&
+        currentThreadId !== 'default' &&
+        currentThreadProjectPath &&
+        currentThreadProjectPath === projectPath;
+      const routeTarget = shouldReturnToCurrentThread ? `/thread/${encodeURIComponent(currentThreadId)}` : '/';
+      if (pathname?.startsWith('/settings') && routeTarget === '/') {
+        setCurrentThread('default');
+      }
+      if (projectPath) {
+        setCurrentProject(projectPath);
+      }
+      setWorkspaceOpenFile(path, null, worktreeId ?? null);
+      if (pathname?.startsWith('/settings')) {
+        router.push(routeTarget);
+      }
     },
-    [setWorkspaceOpenFile],
+    [
+      currentThreadId,
+      currentThreadProjectPath,
+      pathname,
+      projectPath,
+      router,
+      setCurrentThread,
+      setCurrentProject,
+      setWorkspaceOpenFile,
+      worktreeId,
+    ],
   );
 
   return (
     <section className="rounded-lg bg-cafe-surface-elevated p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-medium uppercase tracking-wide text-cafe-muted">{item.domainId}</div>
-          <h3 className="mt-1 break-words text-base font-semibold text-cafe">{item.id}</h3>
-          <p className="mt-2 text-sm text-cafe-secondary">{item.phenomenon}</p>
+          <div className="text-xs font-medium text-cafe-muted">
+            {item.systemWorkspace.label} · {item.domainId}
+          </div>
+          <h3 className="mt-1 break-words text-base font-semibold text-cafe">{item.operatorNarrative.headline}</h3>
+          <p className="mt-2 text-sm leading-relaxed text-cafe-secondary">{item.operatorNarrative.summary}</p>
         </div>
         <StatusBadge verdict={item.verdict} stale={item.lifecycle.stale} />
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <InfoBlock label="评估目标" value={`${item.harnessUnderEval.featureId}/${item.harnessUnderEval.componentId}`} />
-        <InfoBlock label="组件名称" value={item.harnessUnderEval.name} />
-        <InfoBlock label="需要的动作" value={item.ownerAsk} />
-        <InfoBlock label="下次评估" value={formatReeval(item)} />
-        <InfoBlock label="工作域" value={item.systemWorkspace.label} />
-        <InfoBlock
-          label="趋势窗口"
-          value={`${item.trend.window.durationHours.toFixed(2)} 小时 · ${item.trend.components.length} 个组件`}
-        />
+        <InfoBlock label="现在要做" value={item.operatorNarrative.action} />
+        <InfoBlock label="下次看什么" value={formatOperatorNextCheck(item)} />
       </div>
 
-      <div className="mt-4 space-y-2">
-        <div className="text-xs font-medium text-cafe-muted">证据引用</div>
-        <EvidenceList
-          refs={[...item.evidence.snapshotRefs, ...item.evidence.attributionRefs, ...item.evidence.metricRefs]}
-        />
-      </div>
+      <HubEvalLifecycleSummary lifecycle={item.lifecycle} openWorkspaceFile={openWorkspaceFile} />
+
+      <details className="mt-4 rounded-md border border-cafe px-3 py-2">
+        <summary className="cursor-pointer text-xs font-medium text-cafe-secondary">机器原文与证据</summary>
+        <div className="mt-3 space-y-3">
+          <InfoBlock label="结论记录" value={item.id} />
+          <InfoBlock label="现象原文" value={item.phenomenon} />
+          <InfoBlock label="动作原文" value={item.ownerAsk} />
+          <div className="grid gap-3 md:grid-cols-2">
+            <InfoBlock
+              label="评估目标"
+              value={`${item.harnessUnderEval.featureId}/${item.harnessUnderEval.componentId}`}
+            />
+            <InfoBlock label="组件名称" value={item.harnessUnderEval.name} />
+            <InfoBlock label="原始复评字段" value={formatRawReeval(item)} />
+            <InfoBlock
+              label="趋势窗口"
+              value={`${item.trend.window.durationHours.toFixed(2)} 小时 · ${item.trend.components.length} 个组件`}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-cafe-muted">证据引用</div>
+            <EvidenceList
+              refs={[...item.evidence.snapshotRefs, ...item.evidence.attributionRefs, ...item.evidence.metricRefs]}
+              metricGlossary={metricGlossary}
+            />
+          </div>
+        </div>
+      </details>
 
       {item.domainId === 'eval:friction' && (
         <HubEvalFrictionSections friction={item.friction} openWorkspaceFile={openWorkspaceFile} />
@@ -98,16 +165,38 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function EvidenceList({ refs }: { refs: string[] }) {
+function EvidenceList({ refs, metricGlossary }: { refs: string[]; metricGlossary?: EvalMetricGlossary }) {
   return (
     <ul className="space-y-1">
-      {refs.map((ref) => (
-        <li key={ref} className="break-all rounded-md bg-cafe-surface px-2 py-1 font-mono text-xs text-cafe-secondary">
-          {ref}
-        </li>
-      ))}
+      {refs.map((ref) => {
+        const metric = resolveMetricGlossaryEntry(ref, metricGlossary);
+        return (
+          <li key={ref} className="break-all rounded-md bg-cafe-surface px-2 py-1 text-xs text-cafe-secondary">
+            {metric ? (
+              <div className="space-y-0.5">
+                <div>
+                  <span className="font-medium text-cafe">{metric.label}</span>{' '}
+                  <span className="font-mono text-cafe-muted">{ref}</span>
+                </div>
+                <div>{metric.means}</div>
+              </div>
+            ) : (
+              <span className="font-mono">{ref}</span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
+}
+
+function resolveMetricGlossaryEntry(ref: string, glossary?: EvalMetricGlossary) {
+  if (!glossary || !ref.startsWith('metric:')) return undefined;
+  for (const candidate of metricRefKeyCandidates(ref)) {
+    const entry = glossary[candidate];
+    if (entry) return entry;
+  }
+  return undefined;
 }
 
 function JumpButton({ children, onClick }: { children: string; onClick: () => void }) {
@@ -122,9 +211,20 @@ function JumpButton({ children, onClick }: { children: string; onClick: () => vo
   );
 }
 
-function formatReeval(item: EvalHubItem): string {
+function formatRawReeval(item: EvalHubItem): string {
   if (item.reeval.nextEvalAt) {
-    return `${item.reeval.status} · ${new Date(item.reeval.nextEvalAt).toLocaleString()}`;
+    return `${item.reeval.status} · ${formatEvalDate(item.reeval.nextEvalAt)}`;
   }
   return `${item.reeval.status} · ${item.reeval.summary}`;
+}
+
+function formatOperatorNextCheck(item: EvalHubItem): string {
+  const nextEvalAt = currentEvalDueAt(item);
+  if (!nextEvalAt) return item.operatorNarrative.nextCheck;
+  const date = formatEvalDate(nextEvalAt);
+  return `${item.operatorNarrative.nextCheck} 原计划：${date}。`;
+}
+
+function formatEvalDate(value: string): string {
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }

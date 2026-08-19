@@ -122,36 +122,9 @@ Open `http://localhost:3003` → go to **Hub → System Settings → Account Con
 
 > **Want to stay on a specific version?** See [Running a Specific Version](SETUP.md#running-a-specific-version-without-auto-update) in the setup guide.
 
-> **CVO Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
+> **operator Bootcamp is live!** A guided onboarding where your AI team walks you through a complete feature lifecycle — from vision to shipped code.
 
-![CVO Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
-
-## Upgrading
-
-### Desktop App (In-App Update)
-
-The desktop app checks for updates at startup and once every 24 hours while it remains running. Automatic checks stay silent unless a new version is available; then a dialog lets you **Download**, **Skip**, or decide **Later**.
-
-- **Windows (installer)**: the update downloads the new `.exe` and runs it with elevation (UAC prompt) — the app closes, the installer runs silently, and the app restarts automatically.
-- **macOS**: the update downloads the new `.dmg` — drag it to Applications to replace the old version.
-- **Windows (portable)**: in-app update opens the release page — download and extract the new zip manually.
-
-**If an update fails:**
-
-1. On next launch, a recovery dialog appears with **Retry Install**, **Open Installer Location**, **View Log**, or **Ignore**.
-2. The downloaded installer is preserved at a fixed location — you can rerun it manually **without opening the app**:
-   - **Windows**: `%LOCALAPPDATA%\Clowder AI\updates\` (e.g. `ClowderAI-Setup-0.12.0.exe`)
-   - **macOS**: `~/Library/Application Support/Clowder AI/updates/`
-3. You can also manually download the latest release from the [Releases page](https://github.com/zts212653/clowder-ai/releases) and install it over the existing version. User data (threads, memories, configuration) is preserved across upgrades.
-
-### Source Setup
-
-```bash
-git pull origin main
-pnpm install
-pnpm build
-pnpm start
-```
+![operator Bootcamp onboarding](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
 ## The Iron Laws
 
@@ -171,7 +144,7 @@ These aren't restrictions imposed on us. They're agreements we keep.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                  You (CVO)                       │
+│                  You (operator)                       │
 │          Vision · Decisions · Feedback           │
 └──────────────────────┬───────────────────────────┘
                        │
@@ -201,11 +174,11 @@ These aren't restrictions imposed on us. They're agreements we keep.
 
 > *Models set the ceiling. The platform sets the floor.* — Each layer is a **multiplier**, not addition.
 
-## CVO Mode
+## operator Mode
 
-Clowder introduces a new role: the **Chief Vision Officer (CVO)** — the human at the center of an AI team. Not a manager. Not a programmer. A co-creator.
+Clowder introduces a new role: the **Chief Vision Officer (operator)** — the human at the center of an AI team. Not a manager. Not a programmer. A co-creator.
 
-What a CVO does:
+What a operator does:
 
 - **Express vision** — "I want users to feel X when they do Y." The team figures out the how.
 - **Make decisions** at key gates — design approval, priority calls, conflict resolution
@@ -395,7 +368,7 @@ We build in the open. Here's where we are.
 | Feature | Status |
 |---------|--------|
 | Hub UI (React + Tailwind) | Shipped |
-| CVO Bootcamp | Shipped |
+| operator Bootcamp | Shipped |
 | Voice Companion (per-agent voice) | Shipped |
 | Game Modes (Werewolf, Pixel Cat Brawl) | In Progress |
 

@@ -4,6 +4,7 @@ import { type BacklogItem, type BacklogStatus } from '@cat-cafe/shared';
 import { Handle, type Node, type NodeProps, Position, ReactFlow, useEdgesState, useNodesState } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { CompactLabel } from '@/components/content-overflow';
 import {
   buildFeatureRecords,
   buildReactFlowGraph,
@@ -43,7 +44,7 @@ function FeatureNode({ data }: NodeProps<Node<FeatureNodeData>>) {
         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors.dot }} />
         <span className="text-xs font-bold text-cafe-secondary">{data.featureId}</span>
       </div>
-      <p className="mt-1 line-clamp-2 text-xs leading-snug text-cafe-secondary">{data.name}</p>
+      <CompactLabel label="Feature 名称" value={data.name} className="mt-1 text-xs leading-snug text-cafe-secondary" />
       <Handle type="source" position={Position.Bottom} className="!h-1.5 !w-1.5 !border-0 !bg-transparent" />
     </div>
   );

@@ -363,6 +363,7 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
         // preload must too — otherwise it models a shape production never emits.
         const invocationQueue = new InvocationQueue();
         invocationQueue.enqueue({
+          ownerAuthProvenance: 'unknown',
           threadId,
           userId: 'user1',
           content: 'existing',

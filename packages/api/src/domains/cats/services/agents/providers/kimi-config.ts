@@ -17,6 +17,7 @@ import {
   resolveServersForCat,
   summarizeMcpInjection,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
+import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('kimi-config');
@@ -372,6 +373,7 @@ export async function writeMcpConfigFile(
           ...Object.keys(mcpServers),
         ]);
         for (const [name, entry] of Object.entries(userConfig.mcpServers)) {
+          if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
           if (!excludedMcpServerNames.has(name) && !(name in mcpServers) && entry && typeof entry === 'object') {
             mcpServers[name] = entry as Record<string, unknown>;
           }

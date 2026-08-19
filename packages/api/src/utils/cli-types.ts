@@ -16,16 +16,24 @@ export interface CliSpawnOptions {
   command: string;
   /** Arguments to pass to the CLI */
   args: readonly string[];
+  /**
+   * Exact flag names injected by the harness itself for this invocation.
+   * Never populate this from operator cliConfigArgs: diagnostics use it as
+   * provenance before attributing an argv rejection to harness/CLI drift.
+   */
+  managedArgvFlags?: readonly string[];
   /** stdout parser mode. Defaults to NDJSON for existing CLI providers. */
   outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
   cwd?: string;
-  /** Timeout in milliseconds before auto-kill (default: 300_000 = 5 min) */
+  /** Opt-in timeout in milliseconds before automatic termination (default: 0 = manual cancel only) */
   timeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** False for probes/non-invocation commands that must never create an execution-owner manifest. */
+  bindExecutionOwner?: boolean;
   /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
   invocationId?: string;
   /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
@@ -39,6 +47,8 @@ export interface CliSpawnOptions {
     minCpuGrowthMs?: number;
     /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
     stallAutoKill?: boolean;
+    /** F118/F212: Codex opts into a bounded SIGINT-first stall shutdown; default stays SIGTERM-first. */
+    stallTerminationMode?: 'interrupt-first' | 'terminate-first';
   };
   /** F118 Phase B: Provider-scoped raw archive path for diagnostic enrichment */
   rawArchivePath?: string;
@@ -110,5 +120,6 @@ export type SpawnFn = (
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ) => ChildProcessLike;

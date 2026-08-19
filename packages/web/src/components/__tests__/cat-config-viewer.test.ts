@@ -23,9 +23,21 @@ const CONFIG: ConfigData & {
     codex: { displayName: '缅因猫', clientId: 'openai', model: 'codex-2025-03', mcpSupport: false },
     antigravity: { displayName: '孟加拉猫', clientId: 'antigravity', model: 'gemini-bridge', mcpSupport: true },
   },
-  perCatBudgets: {
-    opus: { maxPromptTokens: 150000, maxContextTokens: 200000, maxMessages: 50, maxContentLengthPerMsg: 64000 },
-    codex: { maxPromptTokens: 100000, maxContextTokens: 128000, maxMessages: 30, maxContentLengthPerMsg: 32000 },
+  perCatCapacities: {
+    opus: {
+      windowTokens: 200000,
+      inputCeilingTokens: 184000,
+      source: 'manual',
+      actionable: true,
+      provenance: 'manual',
+    },
+    codex: {
+      windowTokens: 128000,
+      inputCeilingTokens: 112000,
+      source: 'catalog',
+      actionable: false,
+      provenance: 'catalog',
+    },
   },
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
@@ -79,7 +91,7 @@ const CATS: CatData[] = [
     id: 'antigravity',
     displayName: '孟加拉猫 Antigravity',
     breedDisplayName: '孟加拉猫',
-    nickname: '阿吉',
+    nickname: '斑斑',
     clientId: 'antigravity',
     defaultModel: 'gemini-bridge',
     commandArgs: ['npx', 'antigravity', '--bridge'],
@@ -121,7 +133,7 @@ describe('CatOverviewTab', () => {
     expect(html.indexOf('+ 添加成员')).toBeLessThan(html.indexOf('布偶猫 · 宪宪'));
     expect(html).toContain('布偶猫 · 宪宪');
     expect(html).toContain('缅因猫 · 砚砚');
-    expect(html).toContain('孟加拉猫 · 阿吉');
+    expect(html).toContain('孟加拉猫 · 斑斑');
     expect(html).toContain('CLI（OAuth）账号');
     expect(html).toContain('CLI（配置） · sponsor1');
     expect(html).toContain('已启用');

@@ -122,9 +122,9 @@ pnpm stop
 
 > **特定のバージョンに留まりたい？** セットアップガイドの [Running a Specific Version](SETUP.md#running-a-specific-version-without-auto-update) を参照してください。
 
-> **CVO Bootcamp が公開中！** あなたの AI チームがビジョンから出荷されたコードまで、完全な機能ライフサイクルをガイドしてくれるオンボーディングです。
+> **operator Bootcamp が公開中！** あなたの AI チームがビジョンから出荷されたコードまで、完全な機能ライフサイクルをガイドしてくれるオンボーディングです。
 
-![CVO Bootcamp オンボーディング](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
+![operator Bootcamp オンボーディング](https://github.com/user-attachments/assets/9d9c8d89-27fe-4788-812a-ffc28f47d3f9)
 
 ## アイアン・ロー（鉄の掟）
 
@@ -144,7 +144,7 @@ pnpm stop
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                  You (CVO)                       │
+│                  You (operator)                       │
 │          Vision · Decisions · Feedback           │
 └──────────────────────┬───────────────────────────┘
                        │
@@ -174,11 +174,11 @@ pnpm stop
 
 > *モデルは天井を決め、プラットフォームは床を決める。* — 各層は加算ではなく、**乗算**です。
 
-## CVO モード
+## operator モード
 
-Clowder は新しいロールを導入しています：**Chief Vision Officer (CVO)** — AI チームの中心にいる人間です。マネージャーでも、プログラマーでもありません。共創者です。
+Clowder は新しいロールを導入しています：**Chief Vision Officer (operator)** — AI チームの中心にいる人間です。マネージャーでも、プログラマーでもありません。共創者です。
 
-CVO が行うこと：
+operator が行うこと：
 
 - **ビジョンを表現する** — 「ユーザーに Y をするときに X を感じてほしい。」チームが方法を考えます。
 - **重要なゲートで決定を下す** — 設計の承認、優先順位の判断、対立の解決
@@ -368,7 +368,7 @@ https://github.com/user-attachments/assets/349d53e7-5285-4638-ade2-901766af03e8
 | 機能 | ステータス |
 |------|------------|
 | Hub UI (React + Tailwind) | リリース済み |
-| CVO Bootcamp | リリース済み |
+| operator Bootcamp | リリース済み |
 | Voice Companion（エージェントごとの音声） | リリース済み |
 | ゲームモード（人狼、Pixel Cat Brawl） | 進行中 |
 

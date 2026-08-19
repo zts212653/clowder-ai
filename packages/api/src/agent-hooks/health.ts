@@ -55,6 +55,19 @@ export interface AgentHookOptions {
   ownerAuthorized?: boolean;
 }
 
+interface CapabilityTruth {
+  root: string;
+  skillsSource?: string;
+}
+
+function resolveCapabilityTruth(projectRoot: string): CapabilityTruth {
+  const projectSkillsSource = join(projectRoot, 'cat-cafe-skills');
+  if (existsSync(join(projectSkillsSource, 'manifest.yaml'))) {
+    return { root: projectRoot, skillsSource: projectSkillsSource };
+  }
+  return { root: resolveStartupProjectRoot() };
+}
+
 type JsonObject = Record<string, unknown>;
 
 function buildSelectedAgentHookTargets(options: AgentHookOptions): SyncTarget[] {
@@ -188,7 +201,7 @@ function targetHealth(target: SyncTarget): HealthResult {
 
 // ── Skill & MCP drift helpers (#1049 Step 3) ────────────────────────────────
 
-async function checkSkillHealth(projectRoot: string): Promise<HealthResult> {
+async function checkSkillHealth(projectRoot: string, truth: CapabilityTruth): Promise<HealthResult> {
   try {
     // Skip skill drift check if the project has no capabilities.json —
     // uninitialised projects have no skill config to drift against.
@@ -201,7 +214,10 @@ async function checkSkillHealth(projectRoot: string): Promise<HealthResult> {
         reason: 'no project capabilities',
       };
     }
-    const ctx = await computeSkillDrift(projectRoot);
+    const ctx = await computeSkillDrift(projectRoot, {
+      mainProjectRoot: truth.root,
+      ...(truth.skillsSource ? { skillsSource: truth.skillsSource } : {}),
+    });
     if (!ctx) {
       return { name: 'skills', drifted: false, status: 'configured', targetPath: '', reason: 'no skill source' };
     }
@@ -242,16 +258,15 @@ function filterOrphanIssues(drift: McpDriftResult, globalConfigValid: boolean): 
   });
 }
 
-async function checkMcpHealth(projectRoot: string): Promise<HealthResult> {
+async function checkMcpHealth(projectRoot: string, truth: CapabilityTruth): Promise<HealthResult> {
   try {
     // Skip MCP drift check if the project has no capabilities.json —
     // uninitialised projects have no MCP config to drift against.
     if (!existsSync(join(projectRoot, '.cat-cafe', 'capabilities.json'))) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'no project capabilities' };
     }
-    const startupRoot = resolveStartupProjectRoot();
-    const globalConfig = await readCapabilitiesConfig(startupRoot);
-    const drift = await checkMcpProject(projectRoot, startupRoot, globalConfig);
+    const globalConfig = await readCapabilitiesConfig(truth.root);
+    const drift = await checkMcpProject(projectRoot, truth.root, globalConfig);
     const actionableIssues = filterOrphanIssues(drift, globalConfig !== null);
     if (actionableIssues.length === 0) {
       return { name: 'mcp', drifted: false, status: 'configured', targetPath: '', reason: 'configured' };
@@ -268,6 +283,50 @@ async function checkMcpHealth(projectRoot: string): Promise<HealthResult> {
   }
 }
 
+async function syncSkillDriftIfNeeded(capRoot: string, truth: CapabilityTruth): Promise<void> {
+  const ctx = await computeSkillDrift(capRoot, {
+    mainProjectRoot: truth.root,
+    ...(truth.skillsSource ? { skillsSource: truth.skillsSource } : {}),
+  });
+  if (!ctx) return;
+
+  const { newSkills, stale, conflicts } = ctx.drift;
+  if (newSkills.length + stale.length + conflicts.length === 0) return;
+
+  await syncDrift(ctx.effectiveRoot, ctx.skillsSource, ctx.mountRules, ctx.drift, ctx.syncOpts, 'keep-project');
+}
+
+async function syncMcpDriftIfNeeded(
+  capRoot: string,
+  truth: CapabilityTruth,
+  globalConfig: Awaited<ReturnType<typeof readCapabilitiesConfig>>,
+): Promise<void> {
+  const drift = await checkMcpProject(capRoot, truth.root, globalConfig);
+  const nonDestructiveIssues = filterOrphanIssues(drift, globalConfig !== null);
+  if (nonDestructiveIssues.length === 0) return;
+
+  const safeDrift = { ...drift, issues: nonDestructiveIssues };
+  await syncMcpDrift(capRoot, truth.root, safeDrift, undefined, 'keep-project');
+}
+
+async function syncCapabilityDrift(capRoot: string, truth: CapabilityTruth): Promise<void> {
+  const globalConfig = await readCapabilitiesConfig(truth.root);
+
+  if (globalConfig !== null) {
+    try {
+      await syncSkillDriftIfNeeded(capRoot, truth);
+    } catch {
+      /* skill sync failure should not block hook sync result */
+    }
+  }
+
+  try {
+    await syncMcpDriftIfNeeded(capRoot, truth, globalConfig);
+  } catch {
+    /* MCP sync failure should not block hook sync result */
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export async function getAgentHookStatus(options: AgentHookOptions): Promise<AgentHookStatusResponse> {
@@ -278,7 +337,11 @@ export async function getAgentHookStatus(options: AgentHookOptions): Promise<Age
   // capabilityProjectRoot targets the thread's project; projectRoot stays
   // the install repo for hook templates.
   const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
-  const [skillHealth, mcpHealth] = await Promise.all([checkSkillHealth(capRoot), checkMcpHealth(capRoot)]);
+  const truth = resolveCapabilityTruth(capRoot);
+  const [skillHealth, mcpHealth] = await Promise.all([
+    checkSkillHealth(capRoot, truth),
+    checkMcpHealth(capRoot, truth),
+  ]);
   const results = [...hookResults, skillHealth, mcpHealth];
 
   return {
@@ -305,48 +368,11 @@ export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHo
   // capabilityProjectRoot targets the thread's project for skill/MCP sync;
   // projectRoot stays the install repo for hook templates.
   const capRoot = options.capabilityProjectRoot ?? options.projectRoot;
+  const truth = resolveCapabilityTruth(capRoot);
   const projectConfig = options.ownerAuthorized === true ? await readCapabilitiesConfig(capRoot) : null;
-  const hasCapabilities = projectConfig !== null;
 
-  if (hasCapabilities) {
-    // Read global config once — both skill and MCP sync compare project
-    // against global.  When global is unreadable (missing / malformed),
-    // every project entry looks like an orphan; skip destructive sync
-    // paths to avoid wiping valid project config.
-    const startupRoot = resolveStartupProjectRoot();
-    const globalConfig = await readCapabilitiesConfig(startupRoot);
-
-    if (globalConfig !== null) {
-      try {
-        const ctx = await computeSkillDrift(capRoot);
-        if (ctx) {
-          const { newSkills, stale, conflicts } = ctx.drift;
-          if (newSkills.length + stale.length + conflicts.length > 0) {
-            await syncDrift(
-              ctx.effectiveRoot,
-              ctx.skillsSource,
-              ctx.mountRules,
-              ctx.drift,
-              ctx.syncOpts,
-              'keep-project',
-            );
-          }
-        }
-      } catch {
-        /* skill sync failure should not block hook sync result */
-      }
-    }
-
-    try {
-      const drift = await checkMcpProject(capRoot, startupRoot, globalConfig);
-      const nonDestructiveIssues = filterOrphanIssues(drift, globalConfig !== null);
-      if (nonDestructiveIssues.length > 0) {
-        const safeDrift = { ...drift, issues: nonDestructiveIssues };
-        await syncMcpDrift(capRoot, startupRoot, safeDrift, undefined, 'keep-project');
-      }
-    } catch {
-      /* MCP sync failure should not block hook sync result */
-    }
+  if (projectConfig !== null) {
+    await syncCapabilityDrift(capRoot, truth);
   }
 
   const status = await getAgentHookStatus(options);

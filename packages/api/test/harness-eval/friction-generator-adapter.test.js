@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { buildFrictionRollupReport } from '../../dist/infrastructure/harness-eval/friction/friction-rollup-report.js';
 import { createFrictionGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/friction-generator-adapter.js';
 
 /**
@@ -11,7 +12,7 @@ import { createFrictionGeneratorAdapter } from '../../dist/infrastructure/harnes
  * Mirrors capability-wakeup-generator-adapter.test.js:
  *   - Discriminator: rejects non-friction-rollup-snapshot sourceRefs (wrong kind)
  *   - Validation: rejects invalid selector (delegates to validateFrictionRollupSelector)
- *   - Provider: calls provider.resolve(selector) for the rollup input; passes selector unchanged
+ *   - Provider: calls provider.resolve(selector) for the frozen measurement capture; passes selector unchanged
  *   - Registry: loads EvalDomainRegistryEntry from isolated harness root; unknown domain throws
  *   - Happy path: returns verdictPath + bundleDir (bundle-only, no extraStagedPaths — Decision 2)
  */
@@ -114,6 +115,23 @@ const SELECTOR = {
   windowEndMs: 1_780_600_000_000,
 };
 
+function buildMeasurementCapture(options = {}) {
+  const rollupInput = buildRollupInput(options);
+  const capturedAt = '2026-06-20T00:00:00.000Z';
+  return {
+    capturedAt,
+    expectedCancelIds: [],
+    channelCaptures: {
+      'paw-feel': { status: 'ok', emittedIds: rollupInput.signals.map((item) => item.id) },
+      cancel: { status: 'ok', emittedIds: [] },
+      'user-feedback': { status: 'ok', emittedIds: [] },
+      'eval-domain': { status: 'ok', emittedIds: [] },
+    },
+    rollupInput,
+    rollupReport: buildFrictionRollupReport(rollupInput, capturedAt),
+  };
+}
+
 describe('createFrictionGeneratorAdapter', () => {
   it('rejects sourceRefs with wrong kind (a2a)', async () => {
     const provider = { resolve: async () => buildRollupInput() };
@@ -172,7 +190,7 @@ describe('createFrictionGeneratorAdapter', () => {
     const provider = {
       resolve: async (selector) => {
         resolveCalledWith = selector;
-        return buildRollupInput({ clusters: 2 });
+        return buildMeasurementCapture({ clusters: 2 });
       },
     };
     const adapter = createFrictionGeneratorAdapter(provider);
@@ -195,5 +213,7 @@ describe('createFrictionGeneratorAdapter', () => {
     // bundle snapshot exists + carries F245
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
     assert.equal(snapshot.featureId, 'F245');
+    const validity = JSON.parse(readFileSync(join(result.bundleDir, 'raw', 'measurement-validity.json'), 'utf8'));
+    assert.equal(validity.baselineKind, 'prospective_paired_capture');
   });
 });

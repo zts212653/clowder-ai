@@ -17,6 +17,7 @@ const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default:
 
 const NAV_ITEMS = [
   { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
+  { id: 'starry', path: '/starry', label: '猫猫星球', match: (p: string) => p.startsWith('/starry') },
   { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
   { id: 'mission', path: '/mission-hub', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
   { id: 'signals', path: '/signals', label: '信号', match: (p: string) => p.startsWith('/signals') },
@@ -65,6 +66,17 @@ function SignalIcon({ className = 'w-5 h-5' }: { className?: string }) {
   );
 }
 
+function PlanetIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>猫猫星球</title>
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M3.4 14.7c1.8 2.2 6.6 1.7 10.8-.5 4.2-2.1 7.1-5.1 6.4-6.7-.5-1.1-2.7-1.2-5.5-.4" strokeLinecap="round" />
+      <path d="m18.7 3.6.4 1.1 1.1.4-1.1.4-.4 1.1-.4-1.1-1.1-.4 1.1-.4.4-1.1Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
@@ -81,6 +93,7 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 
 const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
   home: ChatIcon,
+  starry: PlanetIcon,
   signals: SignalIcon,
   memory: MemoryIcon,
   mission: MissionIcon,
@@ -155,7 +168,7 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
 function BellIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>审批中心</title>
+      <title>Needs Me</title>
       <path
         d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
         strokeLinecap="round"
@@ -191,7 +204,7 @@ function ApprovalHubButton() {
       type="button"
       onClick={handleClick}
       className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]"
-      title={count > 0 ? `${count} 项待审批` : '审批中心'}
+      title={count > 0 ? `${count} 项需要处理` : 'Needs Me'}
       data-testid="approval-hub-button"
     >
       <BellIcon className="h-5 w-5" />
@@ -314,6 +327,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
                 : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
             }`}
             title={item.label}
+            aria-label={item.label}
             aria-current={active ? 'page' : undefined}
             data-guide-id={`nav.${item.id}`}
           >

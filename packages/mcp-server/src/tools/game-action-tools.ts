@@ -1,6 +1,14 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import { getInvocationAuthSignal } from './invocation-auth.js';
+
+const defineTool = defineMcpMigrationFactory('game-action-tools.ts', undefined, {
+  resourceFamily: 'game',
+  authority: 'callback-owner',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -10,7 +18,7 @@ function buildHeaders(): Record<string, string> {
   if (userId) headers['x-cat-cafe-user'] = userId;
   const catId = process.env['CAT_CAFE_CAT_ID'];
   if (catId) headers['x-cat-id'] = catId;
-  const invocationId = process.env['CAT_CAFE_INVOCATION_ID'];
+  const invocationId = getInvocationAuthSignal().invocationId;
   if (invocationId) headers['x-callback-invocation-id'] = invocationId;
   headers['content-type'] = 'application/json';
   return headers;
@@ -33,7 +41,7 @@ function emitGameActionTrace(
   console.error(
     `[cat-cafe-game-action] ${JSON.stringify({
       stage,
-      invocationId: process.env['CAT_CAFE_INVOCATION_ID'] ?? null,
+      invocationId: getInvocationAuthSignal().invocationId ?? null,
       catId: process.env['CAT_CAFE_CAT_ID'] ?? null,
       userId: process.env['CAT_CAFE_USER_ID'] ?? null,
       gameId: input.gameId,
@@ -115,7 +123,7 @@ export async function handleSubmitGameAction(input: {
 }
 
 export const gameActionTools = [
-  {
+  defineTool({
     name: 'cat_cafe_submit_game_action',
     description:
       'Submit a game action (kill/guard/divine/vote/speak/last_words). ' +
@@ -125,5 +133,12 @@ export const gameActionTools = [
       'GOTCHA: target is required for kill/guard/divine/vote; text is required for speak/last_words.',
     inputSchema: submitGameActionInputSchema,
     handler: handleSubmitGameAction,
-  },
+    governance: {
+      implementationExport: 'handleSubmitGameAction',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

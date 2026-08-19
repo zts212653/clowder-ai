@@ -62,8 +62,20 @@ describe('parseSearchResults', () => {
   it('maps API response to display items', () => {
     const apiResponse = {
       results: [
-        { title: 'ADR-001', anchor: 'adr-001', snippet: 'Some decision', confidence: 'mid', sourceType: 'decision' },
-        { title: 'F102 Spec', anchor: 'f102', snippet: 'Memory adapter', confidence: 'high', sourceType: 'phase' },
+        {
+          title: 'ADR-001',
+          anchor: 'adr-001',
+          snippet: 'Some decision',
+          matchRank: 'mid' as const,
+          sourceType: 'decision',
+        },
+        {
+          title: 'F102 Spec',
+          anchor: 'f102',
+          snippet: 'Memory adapter',
+          matchRank: 'high' as const,
+          sourceType: 'phase',
+        },
       ],
       degraded: false,
     };
@@ -81,7 +93,7 @@ describe('parseSearchResults', () => {
 
   it('preserves results for graceful degradation (raw_lexical_only)', () => {
     const response = {
-      results: [{ title: 'T', anchor: 'a', snippet: 's', confidence: 'mid', sourceType: 'decision' }],
+      results: [{ title: 'T', anchor: 'a', snippet: 's', matchRank: 'mid' as const, sourceType: 'decision' }],
       degraded: true,
       degradeReason: 'raw_lexical_only',
       effectiveMode: 'lexical' as const,
@@ -125,7 +137,7 @@ describe('AC-K2: passage fields match backend shape', () => {
           title: 'Thread',
           anchor: 'thread-123',
           snippet: 'Discussion',
-          confidence: 'mid',
+          matchRank: 'mid' as const,
           sourceType: 'discussion',
           passages: [{ passageId: 'p1', content: 'Hello world', speaker: 'opus', createdAt: '2026-04-13T00:00:00Z' }],
         },
@@ -145,7 +157,7 @@ describe('AC-K2: passage fields match backend shape', () => {
           title: 'Thread',
           anchor: 'thread-456',
           snippet: 'Context test',
-          confidence: 'mid',
+          matchRank: 'mid' as const,
           sourceType: 'discussion',
           passages: [
             {
@@ -166,7 +178,17 @@ describe('AC-K2: passage fields match backend shape', () => {
 });
 
 describe('SOURCE_TYPE_COLORS / LABELS (Issue 2)', () => {
-  const expectedTypes = ['decision', 'phase', 'feature', 'lesson', 'research', 'knowledge', 'discussion', 'commit'];
+  const expectedTypes = [
+    'decision',
+    'phase',
+    'feature',
+    'architecture',
+    'lesson',
+    'research',
+    'knowledge',
+    'discussion',
+    'commit',
+  ];
 
   it('has a color for every expanded source type', () => {
     for (const type of expectedTypes) {

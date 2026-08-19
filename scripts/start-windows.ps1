@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Clowder AI (Cat Cafe) - Windows Startup Script
+  Clowder AI (Clowder AI) - Windows Startup Script
 
 .DESCRIPTION
   Starts API server and Frontend (Next.js) with .env loading.
@@ -35,6 +35,19 @@ function Write-Ok    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundC
 function Write-Warn  { param([string]$msg) Write-Host "  [!!] $msg" -ForegroundColor Yellow }
 function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -ForegroundColor Red }
 
+function Stop-RedisStartup {
+    param([string]$Reason)
+    $bootstrapJob = Get-Job -Name "redis-bootstrap" -ErrorAction SilentlyContinue
+    if ($bootstrapJob) {
+        Stop-Job -Job $bootstrapJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $bootstrapJob -Force -ErrorAction SilentlyContinue
+    }
+    Write-Err $Reason
+    Write-Err "Persistent storage is required. Run .\scripts\install.ps1 to install Redis, or fix REDIS_URL."
+    Write-Err "To deliberately use volatile storage, restart with -Memory (all data will be lost on restart)."
+    exit 1
+}
+
 # -- Resolve project root ------------------------------------
 $ScriptPath = if ($PSCommandPath) { $PSCommandPath } elseif ($MyInvocation.MyCommand.Path) { $MyInvocation.MyCommand.Path } else { $null }
 if (-not $ScriptPath) {
@@ -47,7 +60,8 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 Set-Location $ProjectRoot
 
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
-Write-Host "Cat Cafe - Windows Startup" -ForegroundColor Cyan
+$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")
+Write-Host "Clowder AI - Windows Startup" -ForegroundColor Cyan
 Write-Host "=========================="
 if ($Profile_) { Write-Host "  Profile: $Profile_" -ForegroundColor Cyan }
 
@@ -84,6 +98,14 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded"
 } else {
     Write-Warn ".env not found - using defaults"
+}
+
+# -- Restore connector launcher authority after dotenv -------
+# Project dotenv is configuration, not permission to attach real IM connectors.
+if ([string]::IsNullOrEmpty($connectorGatewayAutostartOverride)) {
+    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $null, "Process")
+} else {
+    [System.Environment]::SetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", $connectorGatewayAutostartOverride, "Process")
 }
 
 function Preserve-ServiceFlagForApiLifecycle {
@@ -286,7 +308,7 @@ $embedEnabled = if ($null -ne $embedEnabledRaw -and $embedEnabledRaw -ne "") {
 $env:EMBED_ENABLED = if ($embedEnabled) { "1" } else { "0" }
 
 # Embedding sidecar lifecycle is owned by the API startup reconciler: it reads
-# .cat-cafe/services.json and starts or cleans Cat Cafe-owned listeners based
+# .cat-cafe/services.json and starts or cleans Clowder AI-owned listeners based
 # on Console state. This script only computes EMBED_URL/EMBED_PORT so the API
 # can locate the sidecar.
 $embedPortDefault = if ($env:EMBED_PORT) { [int]$env:EMBED_PORT } else { 9880 }
@@ -321,15 +343,21 @@ $configuredIsManagedRedis = $configuredRedisUrl -and (Test-LocalRedisUrl -RedisU
 $useExternalRedis = $useRedis -and $configuredRedisUrl -and -not $configuredIsManagedRedis
 $safeConfiguredRedisUrl = Get-RedactedRedisUrl -RedisUrl $configuredRedisUrl
 
+if ($Memory) {
+    Write-Warn "Memory mode - data will be lost on restart"
+    Remove-Item Env:REDIS_URL -ErrorAction SilentlyContinue
+    $env:MEMORY_STORE = "1"
+} else {
+    Remove-Item Env:MEMORY_STORE -ErrorAction SilentlyContinue
+}
+
 if ($useRedis) {
     if ($configuredRedisUrl -and (Test-RedisReachable -RedisUrl $configuredRedisUrl)) {
         # A configured reachable Redis endpoint can be used without redis-cli.
         Write-Ok "Redis reachable at $safeConfiguredRedisUrl"
         $env:REDIS_URL = $configuredRedisUrl
     } elseif ($useExternalRedis) {
-        Write-Warn "Redis not reachable at $safeConfiguredRedisUrl - falling back to memory storage"
-        Write-Warn "Check your REDIS_URL or use -Memory to skip Redis."
-        $useRedis = $false
+        Stop-RedisStartup -Reason "Redis is not reachable at $safeConfiguredRedisUrl."
     } else {
         # No reachable configured Redis endpoint; manage Redis on $RedisPort.
         $localUrl = "redis://localhost:$RedisPort"
@@ -400,30 +428,20 @@ if ($useRedis) {
                         }
                         $startedRedis = $true
                     } else {
-                        Write-Warn "Redis start failed - falling back to memory storage"
-                        $useRedis = $false
+                        Stop-RedisStartup -Reason "Managed Redis failed to start on port $RedisPort. Check $redisLogFile for details."
                     }
                 } else {
-                    Write-Warn "Redis not installed - using memory storage"
-                    Write-Warn "Run .\\scripts\\install.ps1 again to fetch the project-local Redis bundle into .cat-cafe/redis/windows."
-                    $useRedis = $false
+                    Stop-RedisStartup -Reason "Redis is not installed."
                 }
             } catch {
                 if ($_.Exception -and $_.Exception.Message -like "Redis port $RedisPort is in use by a non-Clowder process") {
                     throw
                 }
-                Write-Warn "Redis start failed - using memory storage"
                 Write-InstallerExceptionDetails -Context "Redis start" -ErrorRecord $_
-                $useRedis = $false
+                Stop-RedisStartup -Reason "Redis bootstrap failed."
             }
         }
     }
-}
-
-if (-not $useRedis) {
-    Write-Warn "Memory mode - data will be lost on restart"
-    Remove-Item Env:REDIS_URL -ErrorAction SilentlyContinue
-    $env:MEMORY_STORE = "1"
 }
 
 try {
@@ -498,6 +516,13 @@ try {
     # -Dev controls whether the API runs in development or production mode.
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
+    $connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART) {
+        $env:CONNECTOR_GATEWAY_AUTOSTART
+    } elseif (-not $Dev) {
+        "1"
+    } else {
+        "0"
+    }
     $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
     $workspaceRootMarker = if (-not $Dev) {
         if ($env:CAT_CAFE_WORKSPACE_ROOT) { $env:CAT_CAFE_WORKSPACE_ROOT } else { $ProjectRoot }
@@ -521,11 +546,12 @@ try {
         CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
         CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
+        CONNECTOR_GATEWAY_AUTOSTART = $connectorGatewayAutostart
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
         CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }
 
-    # Embedding sidecar (and other Cat Cafe ML services) are reconciled by the
+    # Embedding sidecar (and other Clowder AI ML services) are reconciled by the
     # API startup lifecycle after it starts, per .cat-cafe/services.json. No
     # manual Start-Job here.
 
@@ -627,7 +653,7 @@ try {
 
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
-    Write-Host "  Cat Cafe started!" -ForegroundColor Green
+    Write-Host "  Clowder AI started!" -ForegroundColor Green
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Frontend: http://localhost:$WebPort"

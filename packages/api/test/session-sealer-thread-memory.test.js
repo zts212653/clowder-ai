@@ -97,13 +97,7 @@ describe('SessionSealer — ThreadMemory integration', () => {
     fakeReader = createMockTranscriptReader();
     fakeWriter = createMockTranscriptWriter(fakeReader);
 
-    sealer = new SessionSealer(
-      chainStore,
-      fakeWriter,
-      threadStore,
-      fakeReader,
-      () => 180000, // Opus maxPromptTokens
-    );
+    sealer = new SessionSealer(chainStore, fakeWriter, threadStore, fakeReader);
   });
 
   it('updates ThreadMemory on finalize', async () => {
@@ -166,7 +160,7 @@ describe('SessionSealer — ThreadMemory integration', () => {
       throw new Error('boom');
     };
 
-    const brokenSealer = new SessionSealer(chainStore, fakeWriter, brokenThreadStore, fakeReader, () => 180000);
+    const brokenSealer = new SessionSealer(chainStore, fakeWriter, brokenThreadStore, fakeReader);
 
     const thread = brokenThreadStore.create('user1', 'broken');
     const session = chainStore.create({
@@ -184,9 +178,8 @@ describe('SessionSealer — ThreadMemory integration', () => {
     assert.equal(record.status, 'sealed');
   });
 
-  it('uses dynamic token cap based on getMaxPromptTokens', async () => {
-    // Spark: 64k → cap = max(1200, min(3000, floor(64000*0.03))) = max(1200,1920) = 1920
-    const sparkSealer = new SessionSealer(chainStore, fakeWriter, threadStore, fakeReader, () => 64000);
+  it('uses the sealing invocation health for summary sizing', async () => {
+    const sparkSealer = new SessionSealer(chainStore, fakeWriter, threadStore, fakeReader);
 
     const thread = threadStore.create('user1', 'spark');
     const session = chainStore.create({
@@ -194,6 +187,16 @@ describe('SessionSealer — ThreadMemory integration', () => {
       threadId: thread.id,
       catId: 'spark',
       userId: 'user1',
+    });
+    chainStore.update(session.id, {
+      contextHealth: {
+        usedTokens: 60_000,
+        windowTokens: 80_000,
+        fillRatio: 0.9375,
+        source: 'exact',
+        usedFrom: 'context',
+        measuredAt: Date.now(),
+      },
     });
     await sparkSealer.requestSeal({ sessionId: session.id, reason: 'threshold' });
     await sparkSealer.finalize({ sessionId: session.id });
@@ -233,7 +236,6 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       writer,
       threadStore,
       reader,
-      () => 180000,
       undefined, // handoffConfig
       summaryStore,
     );
@@ -262,13 +264,12 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
     const reader = createDecisionAwareReader(digestStore, events);
     const writer = createMockTranscriptWriter(reader);
 
-    // No summaryStore — 7th param undefined
+    // No summaryStore.
     const sealer = new SessionSealer(
       chainStore,
       writer,
       threadStore,
       reader,
-      () => 180000,
       undefined, // handoffConfig
       undefined, // summaryStore — not available
     );
@@ -304,7 +305,7 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       { id: 'sum1', threadId: 't1', conclusions: [], openQuestions: ['阈值待定', 'burst gap 怎么算'], createdAt: 1000 },
     ]);
 
-    const sealer = new SessionSealer(chainStore, writer, threadStore, reader, () => 180000, undefined, summaryStore);
+    const sealer = new SessionSealer(chainStore, writer, threadStore, reader, undefined, summaryStore);
 
     const thread = threadStore.create('user1', 'openq-only');
     const session = chainStore.create({
@@ -336,7 +337,6 @@ describe('SessionSealer — VG-3 DecisionSignals wiring', () => {
       writer,
       threadStore,
       brokenReader,
-      () => 180000,
       undefined,
       createMockSummaryStore(),
     );

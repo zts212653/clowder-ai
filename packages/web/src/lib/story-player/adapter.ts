@@ -96,6 +96,9 @@ function classifyEvent(
   if (evtType === 'thinking') {
     return { replayType: 'thinking', role: 'assistant' };
   }
+  if (evtType === 'cli_stdout') {
+    return { replayType: 'cli_stdout', role: 'assistant' };
+  }
   // system_info may carry thinking content as JSON: { type: 'thinking', text: '...' }.
   // Some system_info payloads are visible live-chat notices; format them through
   // the same helper used by useAgentMessages so replay doesn't invent a second

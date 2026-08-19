@@ -1,0 +1,30 @@
+finding_yield:
+  label: 每次评审的有效发现数
+  means: 每次 QC review 平均产出的可执行 finding 数；长期为零可能表示流程只走形式、没有识别真实问题。
+  goodDirection: higher
+  category: activation
+  component: qc-pipeline
+false_positive_rate:
+  label: 误报率
+  means: 被作者以证据否定的 finding 占全部 finding 的比例；越低表示评审信号越可信。
+  goodDirection: lower
+  category: friction
+  component: qc-pipeline
+reviewer_delta:
+  label: 正式评审新增发现率
+  means: 正式 reviewer 相比 fresh-context 预审额外发现的问题比例；用于验证跨模型盲点是否真的互补。
+  goodDirection: higher
+  category: activation
+  component: qc-pipeline
+post_merge_bug_rate:
+  label: 合入后缺陷率
+  means: 已合入 PR 在观察窗口内需要 hotfix 的比例；越低表示 QC 更能在合入前拦住问题。
+  goodDirection: lower
+  category: friction
+  component: qc-pipeline
+pr_count:
+  label: 本窗口评审 PR 数
+  means: 当前 QC rollup 覆盖的 PR 样本量；用于判断 finding、误报和缺陷率是否有足够分母。
+  goodDirection: neutral
+  category: context
+  component: qc-pipeline

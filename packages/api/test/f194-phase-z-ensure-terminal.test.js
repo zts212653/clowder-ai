@@ -23,17 +23,25 @@ import {
   RouteChainCompletionTracker,
 } from '../dist/domains/cats/services/agents/invocation/ensureTerminalStatus.js';
 
-function makeRecordStore({ initialStatus = 'running', allowTransition = true } = {}) {
+function makeRecordStore({ initialStatus = 'running', allowTransition = true, statusOnRejectedUpdate } = {}) {
   let current = { id: 'parent-1', status: initialStatus, threadId: 't1', userId: 'u1' };
   const updates = [];
+  let updateAttempts = 0;
   return {
     updates,
+    get updateAttempts() {
+      return updateAttempts;
+    },
     get: async () => ({ ...current }),
     update: async (id, input) => {
+      updateAttempts += 1;
       if (id !== 'parent-1') return null;
       // Simulate CAS expectedStatus
       if (input.expectedStatus && current.status !== input.expectedStatus) return null;
-      if (!allowTransition) return null;
+      if (!allowTransition) {
+        if (statusOnRejectedUpdate) current = { ...current, status: statusOnRejectedUpdate };
+        return null;
+      }
       const before = current.status;
       const after = { ...current, ...input };
       delete after.expectedStatus;
@@ -63,7 +71,7 @@ describe('F194 Phase Z3 — ensureTerminalStatus producer try/finally helper', (
     const result = await ensureTerminalStatus(
       'parent-1',
       { invocationRecordStore: store, chainCompletion: tracker, log },
-      { reqId: 'req-1' },
+      { reqId: 'req-1', successfulCatIds: ['opus'] },
     );
 
     assert.equal(result.written, true);
@@ -72,6 +80,7 @@ describe('F194 Phase Z3 — ensureTerminalStatus producer try/finally helper', (
     assert.equal(store.updates.length, 1);
     assert.equal(store.updates[0].input.status, 'succeeded');
     assert.equal(store.updates[0].input.expectedStatus, 'running', 'must use CAS expectedStatus guard');
+    assert.deepEqual(store.updates[0].input.successfulCatIds, ['opus']);
     // Trace log
     const traceLog = log.records.info.find((args) => args[1]?.includes?.('terminal write'));
     assert.ok(traceLog, 'must emit trace log on terminal write');
@@ -190,7 +199,11 @@ describe('F194 Phase Z3 — ensureTerminalStatus producer try/finally helper', (
 
   it('CAS race: status flipped to terminal between get() and update() → reports final state, no error', async () => {
     // Simulates concurrent terminal write (e.g., abort path wrote canceled).
-    const store = makeRecordStore({ initialStatus: 'running', allowTransition: false }); // update returns null (CAS rejected)
+    const store = makeRecordStore({
+      initialStatus: 'running',
+      allowTransition: false,
+      statusOnRejectedUpdate: 'canceled',
+    });
     const tracker = new RouteChainCompletionTracker();
     tracker.succeed('parent-1');
     const log = makeRecordingLog();
@@ -202,7 +215,24 @@ describe('F194 Phase Z3 — ensureTerminalStatus producer try/finally helper', (
     );
 
     assert.equal(result.written, false, 'CAS rejected → no write reported');
+    assert.equal(result.finalStatus, 'canceled');
     assert.equal(store.updates.length, 0);
+  });
+
+  it('store rejects terminal write while record remains running → retries once then surfaces the invariant breach', async () => {
+    const store = makeRecordStore({ initialStatus: 'running', allowTransition: false });
+    const tracker = new RouteChainCompletionTracker();
+    tracker.succeed('parent-1');
+
+    await assert.rejects(
+      ensureTerminalStatus('parent-1', {
+        invocationRecordStore: store,
+        chainCompletion: tracker,
+        log: makeRecordingLog(),
+      }),
+      /terminal update rejected.*still running/i,
+    );
+    assert.equal(store.updateAttempts, 2, 'must make exactly one bounded retry');
   });
 });
 

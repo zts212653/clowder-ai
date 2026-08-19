@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -154,6 +154,113 @@ describe('createMemoryServices', () => {
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('binds legacy private external collections to the configured runtime owner', async () => {
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const { saveExternalCollection } = await import('../../dist/domains/memory/external-collections.js');
+    const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-external-data-'));
+    const root = mkdtempSync(join(tmpdir(), 'f263-private-external-root-'));
+    const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-external-docs-'));
+    try {
+      saveExternalCollection(dataDir, {
+        id: 'domain:legacy-private',
+        kind: 'domain',
+        name: 'legacy-private',
+        displayName: 'Legacy Private',
+        root,
+        sensitivity: 'private',
+        scannerLevel: 0,
+        indexPolicy: { autoRebuild: false },
+        reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
+        createdAt: '2026-05-22T00:00:00.000Z',
+        updatedAt: '2026-05-22T00:00:00.000Z',
+      });
+
+      const services = await createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: join(dataDir, 'project.sqlite'),
+        globalDbPath: join(dataDir, 'global.sqlite'),
+        dataDir,
+        docsRoot,
+        privateUserId: 'owner-1',
+      });
+
+      assert.equal(services.catalog.get('domain:legacy-private').ownerUserId, 'owner-1');
+      assert.equal(services.catalog.getRoutable('collection', ['domain:legacy-private']).length, 0);
+      assert.equal(
+        services.catalog.getRoutable('collection', ['domain:legacy-private'], ['domain:legacy-private']).length,
+        1,
+      );
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+      rmSync(docsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('F263 binds canonical profile and personal memory as owner-private collections', async () => {
+    const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
+    const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-data-'));
+    const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-docs-'));
+    const memoryRoot = mkdtempSync(join(tmpdir(), 'f263-private-memory-'));
+    try {
+      const profileRoot = join(dataDir, 'profiles', 'owner-1', 'relationship');
+      mkdirSync(profileRoot, { recursive: true });
+      writeFileSync(
+        join(profileRoot, 'current-primer.md'),
+        '# Synthetic Relationship\n\nSYNTHETIC_CANONICAL_PROFILE_TOKEN',
+      );
+      const memoryDir = join(memoryRoot, '-Users-synthetic-project', 'memory');
+      mkdirSync(memoryDir, { recursive: true });
+      writeFileSync(
+        join(memoryDir, 'user_preferences.md'),
+        '---\nname: Synthetic preference\ntype: user\n---\nSYNTHETIC_PERSONAL_MEMORY_TOKEN',
+      );
+
+      const services = await createMemoryServices({
+        type: 'sqlite',
+        sqlitePath: join(dataDir, 'project.sqlite'),
+        globalDbPath: join(dataDir, 'global.sqlite'),
+        dataDir,
+        docsRoot,
+        memoryRoot,
+        privateUserId: 'owner-1',
+      });
+      await services.globalIndexBuilder.rebuild();
+
+      const profile = services.catalog.get('domain:user-profile');
+      const personal = services.catalog.get('domain:personal-memory');
+      assert.equal(profile.ownerUserId, 'owner-1');
+      assert.equal(profile.sensitivity, 'private');
+      assert.equal(personal.ownerUserId, 'owner-1');
+      assert.equal(personal.sensitivity, 'private');
+
+      const profileResult = await services.knowledgeResolver.resolve('SYNTHETIC_CANONICAL_PROFILE_TOKEN', {
+        dimension: 'collection',
+        collections: ['domain:user-profile'],
+        authorizedCollections: ['domain:user-profile'],
+      });
+      assert.equal(profileResult.collectionGroups.length, 1, 'authorized owner reaches canonical profile collection');
+
+      const personalResult = await services.knowledgeResolver.resolve('SYNTHETIC_PERSONAL_MEMORY_TOKEN', {
+        dimension: 'collection',
+        collections: ['domain:personal-memory'],
+        authorizedCollections: ['domain:personal-memory'],
+      });
+      assert.equal(personalResult.collectionGroups.length, 1, 'authorized owner reaches re-layered personal memory');
+      assert.equal((await services.globalStore.search('SYNTHETIC_PERSONAL_MEMORY_TOKEN')).length, 0);
+
+      const expeditionResult = await services.knowledgeResolver.resolve('SYNTHETIC', { dimension: 'library' });
+      assert.ok(
+        !expeditionResult.collectionGroups.some((group) => group.collectionId.startsWith('domain:user-')),
+        'default/expedition context excludes private profile scope',
+      );
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+      rmSync(docsRoot, { recursive: true, force: true });
+      rmSync(memoryRoot, { recursive: true, force: true });
     }
   });
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { extractFrontmatter, extractSupersedes } from './CatCafeScanner.js';
 import type { CollectionManifest } from './collection-types.js';
 import { embedIndexedItems } from './embed-utils.js';
 import type { EvidenceItem, IEmbeddingService, RepoScanner, ScannedEvidence } from './interfaces.js';
@@ -64,6 +65,7 @@ export class CollectionIndexBuilder {
     }
 
     const { indexed, skipped, indexedItems } = await this.indexResults(results, force);
+    await this.replaceFrontmatterSupersedesEdges(results);
 
     if (this.embedDeps && indexedItems.length > 0) {
       const { getEmbeddingService, vectorStore } = this.embedDeps;
@@ -110,6 +112,7 @@ export class CollectionIndexBuilder {
         authority: this.manifest.reviewPolicy.authorityCeiling,
       };
       await this.store.upsert([item]);
+      await this.refreshFrontmatterSupersedesEdges(item.anchor, scanned.rawContent);
     }
   }
 
@@ -157,6 +160,7 @@ export class CollectionIndexBuilder {
     for (const row of rows) {
       await this.store.deleteByAnchor(row.anchor);
     }
+    await this.deleteCollectionFrontmatterSupersedesEdges();
   }
 
   private async cleanStale(currentAnchors: Set<string>): Promise<void> {
@@ -170,5 +174,64 @@ export class CollectionIndexBuilder {
         await this.store.deleteByAnchor(row.anchor);
       }
     }
+  }
+
+  private async replaceFrontmatterSupersedesEdges(results: ScannedEvidence[]): Promise<void> {
+    await this.deleteCollectionFrontmatterSupersedesEdges();
+
+    for (const result of results) {
+      await this.addFrontmatterSupersedesEdges(result.item.anchor, result.rawContent);
+    }
+  }
+
+  private async refreshFrontmatterSupersedesEdges(anchor: string, rawContent: string): Promise<void> {
+    await this.deleteFrontmatterSupersedesEdges(anchor);
+    await this.addFrontmatterSupersedesEdges(anchor, rawContent);
+  }
+
+  private async deleteCollectionFrontmatterSupersedesEdges(): Promise<void> {
+    const prefix = `${this.manifest.id}:`;
+    await this.store.runExclusive(() => {
+      this.store
+        .getDb()
+        .prepare(
+          "DELETE FROM edges WHERE relation = 'supersedes' AND provenance = 'frontmatter' AND from_anchor LIKE ?",
+        )
+        .run(`${prefix}%`);
+    });
+  }
+
+  private async deleteFrontmatterSupersedesEdges(anchor: string): Promise<void> {
+    await this.store.runExclusive(() => {
+      this.store
+        .getDb()
+        .prepare("DELETE FROM edges WHERE relation = 'supersedes' AND provenance = 'frontmatter' AND from_anchor = ?")
+        .run(anchor);
+    });
+  }
+
+  private async addFrontmatterSupersedesEdges(fromAnchor: string, rawContent: string): Promise<void> {
+    if (!rawContent) return;
+    const refs = extractSupersedes(extractFrontmatter(rawContent));
+    if (refs.length === 0) return;
+
+    for (const ref of refs) {
+      const toAnchor = this.collectionScopedAnchor(ref);
+      if (toAnchor === fromAnchor) continue;
+      await this.store.addEdge({
+        fromAnchor,
+        toAnchor,
+        relation: 'supersedes',
+        provenance: 'frontmatter',
+        fromCollectionId: this.manifest.id,
+        toCollectionId: this.manifest.id,
+        edgeSensitivity: this.manifest.sensitivity,
+      });
+    }
+  }
+
+  private collectionScopedAnchor(anchor: string): string {
+    const prefix = `${this.manifest.id}:`;
+    return anchor.startsWith(prefix) ? anchor : `${prefix}${anchor}`;
   }
 }

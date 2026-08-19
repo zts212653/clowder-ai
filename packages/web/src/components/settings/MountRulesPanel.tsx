@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { CriticalText } from '@/components/content-overflow';
 import { apiFetch } from '../../utils/api-client';
 
 const STANDARD_IDS = ['claude', 'codex', 'gemini', 'kimi'] as const;
@@ -34,12 +35,17 @@ interface MountRulesPanelProps {
   onSaved?: () => void | Promise<void>;
 }
 
+interface MountRulesError {
+  summary: string;
+  details?: string;
+}
+
 export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: MountRulesPanelProps) {
   const [open, setOpen] = useState(false);
   const [rules, setRules] = useState<MountRules | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<MountRulesError | null>(null);
   const [newAlias, setNewAlias] = useState('');
   const [newPath, setNewPath] = useState('');
 
@@ -60,7 +66,10 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
       const data = (await res.json()) as MountRulesResponse;
       setRules(data.rules);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'unknown error');
+      setError({
+        summary: '无法加载 Mount Rules',
+        details: err instanceof Error ? err.message : 'unknown error',
+      });
     } finally {
       setLoading(false);
     }
@@ -88,12 +97,19 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
         });
         if (!res.ok) {
           const txt = await res.text();
-          throw new Error(`PUT /api/mount-rules failed: ${res.status} ${txt.slice(0, 120)}`);
+          setError({
+            summary: `保存 Mount Rules 失败（HTTP ${res.status}）`,
+            details: txt || undefined,
+          });
+          return;
         }
         setRules(next);
         await onSaved?.();
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'unknown error');
+        setError({
+          summary: '保存 Mount Rules 失败',
+          details: err instanceof Error ? err.message : 'unknown error',
+        });
       } finally {
         setSaving(false);
       }
@@ -119,7 +135,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
     if (!rules) return;
     if (!newAlias.trim() || !newPath.trim()) return;
     if (rules.customPaths.some((cp) => cp.alias === newAlias.trim())) {
-      setError(`Alias "${newAlias.trim()}" already exists`);
+      setError({ summary: `Alias "${newAlias.trim()}" already exists` });
       return;
     }
     void saveRules({
@@ -169,7 +185,7 @@ export function MountRulesPanel({ projectPath, scope = 'project', onSaved }: Mou
       {open && (
         <div className="px-4 pb-3">
           {loading && <p className="text-xs text-cafe-muted">加载中…</p>}
-          {error && <p className="text-xs text-conn-red-text">⚠ {error}</p>}
+          {error && <CriticalText summary={error.summary} details={error.details} className="mb-3" />}
           {rules && !loading && (
             <>
               <p className="mb-2 text-xs font-semibold text-cafe-secondary">标准 Mount Point</p>

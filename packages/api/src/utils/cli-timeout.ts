@@ -1,5 +1,5 @@
-export const DEFAULT_CLI_TIMEOUT_MS = 30 * 60 * 1000;
-export const DEFAULT_CLI_TIMEOUT_LABEL = `${DEFAULT_CLI_TIMEOUT_MS} (30分钟)`;
+export const DEFAULT_CLI_TIMEOUT_MS = 0;
+export const DEFAULT_CLI_TIMEOUT_LABEL = '0 (默认关闭，仅人工取消)';
 
 export function parseCliTimeoutMs(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;

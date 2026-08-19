@@ -88,6 +88,10 @@ export function mapAnthropicUsage(usage: AnthropicUsage | undefined): TokenUsage
     inputTokens: totalInput,
     outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
   };
+  // This mapper handles one Anthropic API response, so its normalized input
+  // is current-context evidence. mergeTokenUsage keeps this latest snapshot
+  // while continuing to aggregate inputTokens for telemetry/cost accounting.
+  if (totalInput > 0) result.lastTurnInputTokens = totalInput;
   if (cacheRead > 0) result.cacheReadTokens = cacheRead;
   if (cacheCreate > 0) result.cacheCreationTokens = cacheCreate;
   return result;

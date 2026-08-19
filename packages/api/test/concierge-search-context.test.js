@@ -1,8 +1,10 @@
 /**
- * ConciergeSearchContext tests (F229 KD-17)
+ * ConciergeSearchContext tests (F229 KD-23)
  *
  * Pre-fetches search results, numbers them R1-R{n},
- * writes to HandleMap, returns formatted prompt context string.
+ * returns handle table + formatted prompt context string.
+ *
+ * KD-23: No HandleMapStore — handle table is a per-invocation flowing value.
  */
 
 import assert from 'node:assert/strict';
@@ -10,13 +12,16 @@ import { beforeEach, describe, it } from 'node:test';
 
 describe('buildConciergeSearchContext', () => {
   let buildConciergeSearchContext;
-  let MemoryConciergeHandleMapStore;
+  let computeConciergeHandleDigest;
+  let formatConciergeHandleBinding;
+  let normalizeConciergeHandleTitle;
 
   beforeEach(async () => {
     const ctxMod = await import('../dist/domains/concierge/concierge-search-context.js');
     buildConciergeSearchContext = ctxMod.buildConciergeSearchContext;
-    const storeMod = await import('../dist/domains/concierge/ConciergeHandleMapStore.js');
-    MemoryConciergeHandleMapStore = storeMod.MemoryConciergeHandleMapStore;
+    computeConciergeHandleDigest = ctxMod.computeConciergeHandleDigest;
+    formatConciergeHandleBinding = ctxMod.formatConciergeHandleBinding;
+    normalizeConciergeHandleTitle = ctxMod.normalizeConciergeHandleTitle;
   });
 
   /** Fake evidence store that returns canned results */
@@ -26,8 +31,65 @@ describe('buildConciergeSearchContext', () => {
     };
   }
 
-  it('numbers results R1..R{n} and writes to HandleMap', async () => {
-    const store = new MemoryConciergeHandleMapStore();
+  it('normalizes every marker delimiter and newline before formatting a binding', () => {
+    assert.equal(
+      normalizeConciergeHandleTitle('  F229｜猫猫球 | [concierge]\nfeature  '),
+      'F229 猫猫球 concierge feature',
+    );
+    const anchor = { threadId: 'thread_a', title: 'F229｜[猫猫球]\nfeature', type: 'thread' };
+    assert.equal(
+      formatConciergeHandleBinding('R1', anchor),
+      `R1｜F229 猫猫球 feature｜${computeConciergeHandleDigest('R1', anchor)}`,
+    );
+  });
+
+  it('formats an empty normalized title with a copyable canonical fallback', () => {
+    const anchor = { threadId: 'thread_empty', title: '[｜|]\n', type: 'thread' };
+    assert.equal(normalizeConciergeHandleTitle('[｜|]\n'), '未命名记录');
+    assert.equal(
+      formatConciergeHandleBinding('R1', anchor),
+      `R1｜未命名记录｜${computeConciergeHandleDigest('R1', anchor)}`,
+    );
+  });
+
+  it('formats markdown metacharacters with a copyable canonical-safe title', () => {
+    const anchor = {
+      threadId: 'thread_md',
+      title: 'Bug *fix* _audit_ `cmd` \\path [link](target) ~done~',
+      type: 'thread',
+    };
+    assert.equal(normalizeConciergeHandleTitle(anchor.title), 'Bug *fix* _audit_ `cmd` \\path link (target) ~done~');
+    assert.equal(
+      formatConciergeHandleBinding('R1', anchor),
+      `R1｜Bug ＊fix＊ ＿audit＿ ｀cmd｀ ＼path link （target） ～done～｜${computeConciergeHandleDigest('R1', anchor)}`,
+    );
+  });
+
+  it('escapes autolink delimiters so remarkGfm cannot split the marker', () => {
+    // P2 R3 fix: titles containing an angle-bracket autolink (e.g. `Spec <https://example.com>`)
+    // would leak raw `<`/`>` into the generated marker; ReactMarkdown/remarkGfm then treats the
+    // URL as its own autolink node and the marker regex no longer sees one contiguous marker.
+    // The canonical Markdown-safe mapping must neutralize angle brackets.
+    const anchor = {
+      threadId: 'thread_autolink',
+      title: 'Spec <https://example.com>',
+      type: 'thread',
+    };
+    const binding = formatConciergeHandleBinding('R1', anchor);
+    assert.equal(binding, `R1｜Spec ＜https://example.com＞｜${computeConciergeHandleDigest('R1', anchor)}`);
+    // Also verify no raw autolink delimiter survives — belt-and-suspenders against future regex drift.
+    assert.ok(!binding.includes('<'), 'binding must not contain raw < after escape');
+    assert.ok(!binding.includes('>'), 'binding must not contain raw > after escape');
+  });
+
+  it('gives duplicate titles different anchor digests', () => {
+    const first = { threadId: 'thread_a', title: '同名讨论', type: 'thread' };
+    const second = { threadId: 'thread_b', title: '同名讨论', type: 'thread' };
+
+    assert.notEqual(computeConciergeHandleDigest('R1', first), computeConciergeHandleDigest('R2', second));
+  });
+
+  it('numbers results R1..R{n} and returns handles', async () => {
     const evidenceStore = fakeEvidenceStore([
       { anchor: 'thread-thread_abc', title: 'F229 讨论', kind: 'thread', summary: '前台猫设计' },
       { anchor: 'feature:F155', title: 'F155 引导系统', kind: 'feature', summary: '引导流程' },
@@ -36,7 +98,6 @@ describe('buildConciergeSearchContext', () => {
     const result = await buildConciergeSearchContext({
       userMessage: '怎么用前台猫？',
       threadId: 'concierge_t1',
-      handleMapStore: store,
       evidenceStore,
     });
 
@@ -46,36 +107,34 @@ describe('buildConciergeSearchContext', () => {
     assert.ok(result.contextString.includes('F229 讨论'), 'context should contain title');
     assert.equal(result.handleCount, 2);
 
-    // HandleMap should be populated
-    const r1 = await store.getHandle('concierge_t1', 'R1');
-    assert.ok(r1, 'R1 should exist in HandleMap');
-    assert.equal(r1.title, 'F229 讨论');
-
-    const r2 = await store.getHandle('concierge_t1', 'R2');
-    assert.ok(r2, 'R2 should exist in HandleMap');
-    assert.equal(r2.title, 'F155 引导系统');
+    // KD-23: handles returned directly (not stored)
+    assert.equal(result.handles.length, 2);
+    assert.equal(result.handles[0].label, 'R1');
+    assert.equal(result.handles[0].anchor.title, 'F229 讨论');
+    assert.equal(result.handles[1].label, 'R2');
+    assert.equal(result.handles[1].anchor.title, 'F155 引导系统');
+    const r1Binding = formatConciergeHandleBinding(result.handles[0].label, result.handles[0].anchor);
+    assert.ok(
+      result.contextString.includes(`[跳过去 ${r1Binding}]`),
+      'each result should provide a copyable bound marker',
+    );
   });
 
   it('returns empty context when no results found', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const evidenceStore = fakeEvidenceStore([]);
 
     const result = await buildConciergeSearchContext({
       userMessage: '完全不相关的话题',
       threadId: 'concierge_t2',
-      handleMapStore: store,
       evidenceStore,
     });
 
     assert.equal(result.contextString, '');
     assert.equal(result.handleCount, 0);
-
-    const all = await store.getAllHandles('concierge_t2');
-    assert.equal(all.length, 0);
+    assert.deepEqual(result.handles, []);
   });
 
   it('caps at maxResults (default 10)', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const items = Array.from({ length: 15 }, (_, i) => ({
       anchor: `thread:t_${i}`,
       title: `Topic ${i}`,
@@ -87,70 +146,62 @@ describe('buildConciergeSearchContext', () => {
     const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_t3',
-      handleMapStore: store,
       evidenceStore,
     });
 
     assert.ok(result.handleCount <= 10, 'should cap at 10 results');
     assert.ok(result.contextString.includes('R10'), 'should have R10');
     assert.ok(!result.contextString.includes('R11'), 'should not have R11');
+    assert.equal(result.handles.length, 10);
   });
 
   it('extracts threadId from thread-type anchor (thread- prefix)', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const evidenceStore = fakeEvidenceStore([
       { anchor: 'thread-thread_xyz', title: '某个讨论', kind: 'thread', summary: '...' },
     ]);
 
-    await buildConciergeSearchContext({
+    const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_t4',
-      handleMapStore: store,
       evidenceStore,
     });
 
-    const r1 = await store.getHandle('concierge_t4', 'R1');
+    const r1 = result.handles[0];
     assert.ok(r1);
-    assert.equal(r1.threadId, 'thread_xyz');
-    assert.equal(r1.type, 'thread');
+    assert.equal(r1.anchor.threadId, 'thread_xyz');
+    assert.equal(r1.anchor.type, 'thread');
   });
 
   it('handles non-thread anchors (feature/doc)', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const evidenceStore = fakeEvidenceStore([
       { anchor: 'feature:F229', title: 'F229 前台猫', kind: 'feature', summary: '...' },
     ]);
 
-    await buildConciergeSearchContext({
+    const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_t5',
-      handleMapStore: store,
       evidenceStore,
     });
 
-    const r1 = await store.getHandle('concierge_t5', 'R1');
+    const r1 = result.handles[0];
     assert.ok(r1);
-    assert.equal(r1.type, 'feature');
-    // Non-thread anchors use the anchor string as threadId (best-effort)
-    assert.equal(r1.threadId, 'feature:F229');
+    assert.equal(r1.anchor.type, 'feature');
+    assert.equal(r1.anchor.threadId, 'feature:F229');
   });
 
   it('gracefully handles missing evidenceStore (returns empty)', async () => {
-    const store = new MemoryConciergeHandleMapStore();
-
     const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_t6',
-      handleMapStore: store,
       evidenceStore: undefined,
     });
 
     assert.equal(result.contextString, '');
     assert.equal(result.handleCount, 0);
+    assert.deepEqual(result.handles, []);
   });
 
   it('custom maxResults overrides default', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const items = Array.from({ length: 10 }, (_, i) => ({
       anchor: `thread:t_${i}`,
       title: `Topic ${i}`,
@@ -162,7 +213,6 @@ describe('buildConciergeSearchContext', () => {
     const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_t7',
-      handleMapStore: store,
       evidenceStore,
       maxResults: 3,
     });
@@ -170,31 +220,27 @@ describe('buildConciergeSearchContext', () => {
     assert.equal(result.handleCount, 3);
     assert.ok(result.contextString.includes('R3'));
     assert.ok(!result.contextString.includes('R4'));
+    assert.equal(result.handles.length, 3);
   });
 
-  // P1-1 fix: real memory index uses thread-{threadId} format, not thread:{threadId}
   it('parses real memory anchor format thread-{threadId}', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const evidenceStore = fakeEvidenceStore([
       { anchor: 'thread-thread_real123', title: '真实讨论', kind: 'thread', summary: '...' },
     ]);
 
-    await buildConciergeSearchContext({
+    const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_p1',
-      handleMapStore: store,
       evidenceStore,
     });
 
-    const r1 = await store.getHandle('concierge_p1', 'R1');
+    const r1 = result.handles[0];
     assert.ok(r1);
-    assert.equal(r1.threadId, 'thread_real123', 'should strip thread- prefix to get real threadId');
-    assert.equal(r1.type, 'thread');
+    assert.equal(r1.anchor.threadId, 'thread_real123', 'should strip thread- prefix to get real threadId');
+    assert.equal(r1.anchor.type, 'thread');
   });
 
-  // P1-1 fix: drillDown.params has normalized threadId + messageId — use them
   it('uses drillDown.params for threadId/messageId when available', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const evidenceStore = fakeEvidenceStore([
       {
         anchor: 'thread-thread_abc',
@@ -209,86 +255,80 @@ describe('buildConciergeSearchContext', () => {
       },
     ]);
 
-    await buildConciergeSearchContext({
+    const result = await buildConciergeSearchContext({
       userMessage: 'test',
       threadId: 'concierge_p1b',
-      handleMapStore: store,
       evidenceStore,
     });
 
-    const r1 = await store.getHandle('concierge_p1b', 'R1');
+    const r1 = result.handles[0];
     assert.ok(r1);
-    assert.equal(r1.threadId, 'thread_abc');
-    assert.equal(r1.messageId, 'msg_456', 'should use drillDown.params.messageId');
+    assert.equal(r1.anchor.threadId, 'thread_abc');
+    assert.equal(r1.anchor.messageId, 'msg_456', 'should use drillDown.params.messageId');
   });
 
-  // P1-2 fix: empty search results must clear stale handles
-  it('clears stale handles when search returns empty', async () => {
-    const store = new MemoryConciergeHandleMapStore();
-
-    // First turn: populate handles
+  // KD-23: Cross-turn isolation — each invocation builds its own handle table.
+  // Previous turn's handles are NOT available (no shared store to leak from).
+  it('each invocation returns independent handles (cross-turn isolation)', async () => {
     const evidenceStore1 = fakeEvidenceStore([
-      { anchor: 'thread-thread_old', title: 'Old Topic', kind: 'thread', summary: '...' },
+      { anchor: 'thread-thread_old', title: 'Turn 1 Topic', kind: 'thread', summary: '...' },
     ]);
-    await buildConciergeSearchContext({
+    const result1 = await buildConciergeSearchContext({
       userMessage: 'first query',
-      threadId: 'concierge_p2',
-      handleMapStore: store,
+      threadId: 'concierge_iso',
       evidenceStore: evidenceStore1,
     });
-    assert.ok(await store.getHandle('concierge_p2', 'R1'), 'R1 should exist after first turn');
 
-    // Second turn: empty results → stale handles MUST be cleared
-    const evidenceStore2 = fakeEvidenceStore([]);
-    await buildConciergeSearchContext({
-      userMessage: 'unrelated query',
-      threadId: 'concierge_p2',
-      handleMapStore: store,
+    const evidenceStore2 = fakeEvidenceStore([
+      { anchor: 'thread-thread_new', title: 'Turn 2 Topic', kind: 'thread', summary: '...' },
+    ]);
+    const result2 = await buildConciergeSearchContext({
+      userMessage: 'second query',
+      threadId: 'concierge_iso',
       evidenceStore: evidenceStore2,
     });
 
-    const staleR1 = await store.getHandle('concierge_p2', 'R1');
-    assert.strictEqual(staleR1, null, 'stale R1 must be cleared after empty search');
+    // Each result has its own independent handles
+    assert.equal(result1.handles[0].anchor.threadId, 'thread_old');
+    assert.equal(result2.handles[0].anchor.threadId, 'thread_new');
+
+    // Turn 1's R1 still points to old topic (it's a snapshot, not a reference)
+    assert.equal(result1.handles[0].anchor.title, 'Turn 1 Topic');
+    assert.equal(result2.handles[0].anchor.title, 'Turn 2 Topic');
   });
 
-  // P1-2 fix: search failure must also clear stale handles
-  it('clears stale handles when search throws', async () => {
-    const store = new MemoryConciergeHandleMapStore();
-
-    // First turn: populate
-    const evidenceStore1 = fakeEvidenceStore([
-      { anchor: 'thread-thread_old2', title: 'Old2', kind: 'thread', summary: '...' },
-    ]);
-    await buildConciergeSearchContext({
-      userMessage: 'first',
-      threadId: 'concierge_p2b',
-      handleMapStore: store,
-      evidenceStore: evidenceStore1,
+  // KD-23: Empty search returns empty handles (no stale data possible)
+  it('empty search returns empty handles — no stale data possible', async () => {
+    const emptyStore = fakeEvidenceStore([]);
+    const result = await buildConciergeSearchContext({
+      userMessage: 'unrelated',
+      threadId: 'concierge_empty',
+      evidenceStore: emptyStore,
     });
-    assert.ok(await store.getHandle('concierge_p2b', 'R1'));
 
-    // Second turn: search throws → stale handles MUST be cleared
+    assert.deepEqual(result.handles, []);
+    assert.equal(result.handleCount, 0);
+  });
+
+  it('search failure returns empty handles — no crash', async () => {
     const brokenStore = {
       search: async () => {
         throw new Error('search failed');
       },
     };
-    await buildConciergeSearchContext({
+
+    const result = await buildConciergeSearchContext({
       userMessage: 'test',
-      threadId: 'concierge_p2b',
-      handleMapStore: store,
+      threadId: 'concierge_fail',
       evidenceStore: brokenStore,
     });
 
-    const staleR1 = await store.getHandle('concierge_p2b', 'R1');
-    assert.strictEqual(staleR1, null, 'stale R1 must be cleared after search failure');
+    assert.equal(result.contextString, '');
+    assert.equal(result.handleCount, 0);
+    assert.deepEqual(result.handles, []);
   });
 
-  // P1-A + P1-C fix (AC-A3 recall, KD-19): search must request thread-scoped + hybrid + passage-level.
-  // P1-C: scope=threads recalls discussion threads (AC-A3 finds discussions, not conclusion docs).
-  // P1-A: depth=raw yields passage-level messageId (peek was always skipped without it).
   it('requests scope=threads, mode=hybrid, depth=raw from evidence search', async () => {
-    const store = new MemoryConciergeHandleMapStore();
     const calls = [];
     const evidenceStore = {
       search: async (query, options) => {
@@ -300,7 +340,6 @@ describe('buildConciergeSearchContext', () => {
     await buildConciergeSearchContext({
       userMessage: '之前讨论 X 在哪',
       threadId: 'concierge_scope',
-      handleMapStore: store,
       evidenceStore,
     });
 

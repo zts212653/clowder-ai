@@ -22,6 +22,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
   const input = (over = {}) => ({
     sourceCatId: 'opus-45',
     sourceThreadId: 't1',
+    sourceMessageId: 'msg-origin-1',
     userId: 'u1',
     note: { done: 'wrote A3', nextSteps: 'wire MCP tool', commits: ['abc123'] },
     ...over,
@@ -33,6 +34,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
     assert.equal(res.ok, true);
     assert.equal(res.proposal.status, 'pending');
     assert.equal(res.proposal.note.done, 'wrote A3');
+    assert.equal(res.proposal.sourceMessageId, 'msg-origin-1');
     // sourceSessionId resolved from getActive, not trusted from caller
     assert.equal(res.proposal.sourceSessionId, chainStore.getActive('opus-45', 't1').id);
     const card = buildHandoffProposalCardBlock(res.proposal);
@@ -64,7 +66,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
     chainStore.create({ cliSessionId: 'c1', threadId: 't1', catId: 'opus-45', userId: 'u1' });
     const r1 = await proposeSessionHandoff(deps(), input());
     assert.equal(r1.ok, true);
-    handoffStore.markRejected(r1.proposal.proposalId); // pending slot freed
+    handoffStore.markRejected(r1.proposal.proposalId, { decidedAt: Date.now() }); // pending slot freed
     const r2 = await proposeSessionHandoff(deps(), input()); // immediate → within default 5min cooldown
     assert.equal(r2.ok, false);
     assert.equal(r2.reason, 'cooldown', 'reject does not bypass cooldown');
@@ -75,7 +77,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
     const fast = { handoffProposalStore: handoffStore, sessionChainStore: chainStore, cooldownMs: 0 };
     const r1 = await proposeSessionHandoff(fast, input());
     assert.equal(r1.ok, true);
-    handoffStore.markRejected(r1.proposal.proposalId);
+    handoffStore.markRejected(r1.proposal.proposalId, { decidedAt: Date.now() });
     const r2 = await proposeSessionHandoff(fast, input()); // cooldownMs=0 → no cooldown
     assert.equal(r2.ok, true, 'no cooldown when window is 0');
   });
@@ -87,7 +89,7 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
     for (let i = 0; i < 3; i++) {
       const r = await proposeSessionHandoff(cfg, input());
       assert.equal(r.ok, true, `proposal ${i + 1}/3 within cap allowed`);
-      handoffStore.markRejected(r.proposal.proposalId); // free the ≤1-pending slot for the next try
+      handoffStore.markRejected(r.proposal.proposalId, { decidedAt: Date.now() }); // free the ≤1-pending slot
     }
     const blocked = await proposeSessionHandoff(cfg, input());
     assert.equal(blocked.ok, false);

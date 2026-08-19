@@ -16,6 +16,7 @@
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { AuthInvocationInput, IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
+import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 
 const DEFAULT_MAX_RECORDS = 500;
 const MAX_CLIENT_MESSAGE_IDS = 1000;
@@ -70,7 +71,11 @@ export class MemoryAuthInvocationBackend implements IAuthInvocationBackend {
     }
 
     const expiresAt = Date.now() + ttlMs;
-    const record: InvocationRecord = { ...input, expiresAt };
+    const record: InvocationRecord = {
+      ...input,
+      ownerAuthProvenance: normalizeOwnerAuthProvenance(input.ownerAuthProvenance),
+      expiresAt,
+    };
     this.records.set(input.invocationId, record);
     this.latestByThreadCat.set(`${input.threadId}:${input.catId as string}`, input.invocationId);
   }

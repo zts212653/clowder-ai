@@ -3,10 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockApiFetch = vi.fn();
-const mockAddMessage = vi.fn();
 const mockAddMessageToThread = vi.fn();
-const mockSetLoading = vi.fn();
-const mockSetHasActiveInvocation = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
 const mockResetRefs = vi.fn();
@@ -27,10 +24,7 @@ vi.mock('@/hooks/useChatCommands', () => ({
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
     () => ({
-      addMessage: mockAddMessage,
       addMessageToThread: mockAddMessageToThread,
-      setLoading: mockSetLoading,
-      setHasActiveInvocation: mockSetHasActiveInvocation,
       setThreadLoading: mockSetThreadLoading,
       setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
       currentThreadId: 'thread-stale',
@@ -66,7 +60,7 @@ function SendWithImageRunner({
     if (called.current) return;
     called.current = true;
     const file = new File([new Uint8Array([1, 2, 3])], 'cat.png', { type: 'image/png' });
-    handleSend('@布偶 看图', [file]).then(onDone);
+    handleSend('@布偶 看图', [file], undefined, undefined, 'queue', undefined, 'continue_current').then(onDone);
   }, [handleSend, onDone]);
 
   return null;
@@ -100,10 +94,7 @@ describe('useSendMessage upload status', () => {
 
   beforeEach(() => {
     mockApiFetch.mockReset();
-    mockAddMessage.mockReset();
     mockAddMessageToThread.mockReset();
-    mockSetLoading.mockReset();
-    mockSetHasActiveInvocation.mockReset();
     mockSetThreadLoading.mockReset();
     mockSetThreadHasActiveInvocation.mockReset();
     mockResetRefs.mockReset();
@@ -159,12 +150,31 @@ describe('useSendMessage upload status', () => {
     const last = snapshots[snapshots.length - 1];
     expect(last.status).toBe('failed');
     expect(last.error).toContain('上传超时');
-    expect(mockAddMessage).toHaveBeenCalledWith(
+    expect(mockAddMessageToThread).toHaveBeenCalledWith(
+      'thread-route',
       expect.objectContaining({
         type: 'system',
         variant: 'error',
         content: expect.stringContaining('Failed to send message: 上传超时'),
       }),
     );
+  });
+
+  it('sends the typed author disposition in multipart admission', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ userMessageId: 'message-1' }) });
+
+    await act(async () => {
+      root.render(
+        React.createElement(SendWithImageRunner, {
+          onDone: () => {},
+          onSnapshot: () => {},
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const form = mockApiFetch.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('messageDisposition')).toBe('continue_current');
   });
 });

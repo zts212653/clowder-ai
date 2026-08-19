@@ -1,16 +1,21 @@
 'use client';
 
 import { type ConnectorIconSpec, getConnectorDefinition } from '@cat-cafe/shared';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { tintedLight } from '@/lib/color-utils';
+import { connectorThemeToken } from '@/lib/connector-theme-token';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { ExecutionCancelButton } from './ExecutionCancelButton';
 import {
   AuthKeyIcon,
   ConnectorImage,
   GitHubIcon,
   HoldBallIcon,
+  RobotIcon,
   SchedulerIcon,
+  SearchIcon,
   SettingsIcon,
   UsersIcon,
 } from './icons/ConnectorIcons';
@@ -29,6 +34,8 @@ const SVG_ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> 
   settings: SettingsIcon,
   'hold-ball': HoldBallIcon,
   'auth-key': AuthKeyIcon,
+  search: SearchIcon,
+  robot: RobotIcon,
 };
 
 function formatTime(ts: number): string {
@@ -83,6 +90,35 @@ function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpe
 
 function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; threadId?: string; catId?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [terminalStatus, setTerminalStatus] = useState<'retired_by_event' | 'fired' | null>(null);
+  const managedExecution = useActiveExecutionStore((store) => store.executionsByKey[`managed_command:${taskId}`]);
+
+  useEffect(() => {
+    if (managedExecution) return;
+    let cancelled = false;
+    void apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/status`)
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const body = (await res.json().catch(() => null)) as { status?: unknown; cancelable?: unknown } | null;
+        if (body?.cancelable !== false) {
+          setTerminalStatus(null);
+          return;
+        }
+        if (body.status === 'retired_by_event') {
+          setTerminalStatus('retired_by_event');
+        } else if (body.status === 'fired') {
+          setTerminalStatus('fired');
+        } else {
+          setTerminalStatus(null);
+        }
+      })
+      .catch(() => {
+        // Status is a read-side affordance. Keep the existing cancel controls if it fails.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [managedExecution, taskId]);
 
   const handleCancel = useCallback(
     async (withFeedback = false) => {
@@ -117,7 +153,19 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
     [catId, taskId, threadId],
   );
 
+  if (terminalStatus === 'retired_by_event') {
+    return <span className="text-xs text-cafe-muted">已被事件唤醒</span>;
+  }
+  if (terminalStatus === 'fired') return <span className="text-xs text-cafe-muted">已完成</span>;
   if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
+  if (managedExecution) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-cafe-secondary">托管命令运行中</span>
+        <ExecutionCancelButton execution={managedExecution} label="取消命令" />
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2">
       <button
@@ -141,6 +189,12 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
   );
 }
 
+function getHoldStatusRefreshKey(message: ChatMessageType): string {
+  const source = message.source;
+  if (source?.connector !== 'hold-ball') return '';
+  return `${message.id}:${message.timestamp}:${message.content}:${JSON.stringify(source.meta ?? {})}`;
+}
+
 interface ConnectorBubbleProps {
   message: ChatMessageType;
   threadId?: string;
@@ -156,6 +210,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
   if (message.extra?.scheduler?.hiddenTrigger) return null;
 
   const connId = source.connector;
+  const themeToken = connectorThemeToken(connId);
   const connDef = getConnectorDefinition(connId);
   const themeHex = connDef?.themeColor;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
@@ -163,6 +218,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
   const rawUrl = source.url;
   const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
+  const holdStatusRefreshKey = getHoldStatusRefreshKey(message);
 
   const avatar = (
     <div
@@ -184,12 +240,15 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs font-semibold hover:underline"
-          style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}
+          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
         >
           {source.label}
         </a>
       ) : (
-        <span className="text-xs font-semibold" style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}>
+        <span
+          className="text-xs font-semibold"
+          style={{ color: `var(--color-${themeToken}-bubble, var(--cafe-text))` }}
+        >
           {source.label}
         </span>
       )}
@@ -206,7 +265,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
       avatar={avatar}
       header={header}
       bubbleStyle={{
-        backgroundColor: `var(--color-${connId}-surface, var(--cafe-surface))`,
+        backgroundColor: `var(--color-${themeToken}-surface, var(--cafe-surface))`,
         color: 'var(--cat-msg-text, var(--cafe-text))',
       }}
     >
@@ -214,7 +273,12 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
       {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}
       {source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
         <div className="mt-2 pt-2 border-t border-cafe-border">
-          <HoldBallCancelButton taskId={source.meta.taskId} threadId={threadId} catId={sourceCatId} />
+          <HoldBallCancelButton
+            key={holdStatusRefreshKey}
+            taskId={source.meta.taskId}
+            threadId={threadId}
+            catId={sourceCatId}
+          />
         </div>
       )}
     </MessageBubble>

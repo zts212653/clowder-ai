@@ -268,6 +268,12 @@ describe('F254 B3 — createFreshnessReinvokeCheck', () => {
   it('P1-1: uses getSeenCursor dep for seenCursor (not lastNoticeToolCallNum)', async () => {
     const redis = createRedisStub();
     const messageStore = createMessageStoreStub([{ id: 'msg-latest', threadId: 'thread-1' }]);
+    const originalGetByThreadAfter = messageStore.getByThreadAfter;
+    let readOptions;
+    messageStore.getByThreadAfter = async (...args) => {
+      readOptions = args[4];
+      return originalGetByThreadAfter(...args);
+    };
 
     // getSeenCursor returns cursor that matches latest message → caught up → no re-invoke
     const check = createFreshnessReinvokeCheck({
@@ -305,6 +311,7 @@ describe('F254 B3 — createFreshnessReinvokeCheck', () => {
     assert.ok(result);
     assert.equal(result.shouldReinvoke, false, 'seenCursor caught up → no re-invoke');
     assert.equal(result.skipReason, 'cursor_caught_up');
+    assert.deepEqual(readOptions, { unresolvedCursorPolicy: 'empty' });
   });
 
   it('P1-1: seenCursor behind latest message → re-invoke', async () => {
@@ -374,7 +381,10 @@ describe('F254 B3 — createFreshnessReinvokeCheck', () => {
     assert.ok(result.reinvokePrompt, 'reinvokePrompt should be present');
     assert.ok(result.reinvokePrompt.includes('user'), 'prompt should mention sender');
     assert.ok(result.reinvokePrompt.includes('1'), 'prompt should mention notice count');
-    assert.ok(result.reinvokePrompt.includes('list_recent'), 'prompt should instruct to call list_recent');
+    assert.ok(result.reinvokePrompt.includes('get_thread_context'), 'prompt should name the thread read surface');
+    assert.ok(result.reinvokePrompt.includes('thread-1'), 'prompt should bind the current thread');
+    assert.ok(result.reinvokePrompt.includes('responseMode'), 'prompt should require a full read');
+    assert.ok(!result.reinvokePrompt.includes('list_recent'), 'prompt must not name the project-memory recent surface');
   });
 
   it('P1-2: reinvokePrompt is NOT present when shouldReinvoke=false', async () => {

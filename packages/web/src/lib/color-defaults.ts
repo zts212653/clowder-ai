@@ -22,6 +22,7 @@ export interface CatColorPair {
 export const CAT_COLORS: Record<string, CatColorPair> = {
   opus: { primary: '#9B7EBD', secondary: '#E8DFF5' },
   codex: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+  'codex-sol': { primary: '#5B8C5A', secondary: '#D4E6D3' },
   gemini: { primary: '#5B9BD5', secondary: '#D6E9F8' },
   kimi: { primary: '#4B5563', secondary: '#E5E7EB' },
 };

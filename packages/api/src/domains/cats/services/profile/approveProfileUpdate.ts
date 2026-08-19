@@ -28,6 +28,7 @@
 import type { ProfileUpdateProposal } from '@cat-cafe/shared';
 import type { SessionMutex } from '../agents/invocation/SessionMutex.js';
 import type { IProfileUpdateProposalStore } from '../stores/ports/ProfileUpdateProposalStore.js';
+import type { FileProfileRepository } from './ProfileRepository.js';
 import {
   writeProfilePrimer as defaultWritePrimer,
   writeProfileProvenance as defaultWriteProvenance,
@@ -45,11 +46,12 @@ export type ApproveProfileUpdateResult =
 export interface ApproveProfileUpdateDeps {
   store: IProfileUpdateProposalStore;
   lock: SessionMutex;
-  profileDir: string;
+  repository: FileProfileRepository;
   /** Injectable for failure-mode tests; default to the real fs writers. */
   writePrimer?: (
     proposal: WritableProfileUpdate,
     profileDir: string,
+    relationshipKey: string,
     options?: WriteProfilePrimerOptions,
   ) => { writtenPath: string };
   writeProvenance?: (proposal: WritableProfileUpdate, profileDir: string) => { provenancePath: string };
@@ -61,7 +63,7 @@ export async function approveProfileUpdate(
   deps: ApproveProfileUpdateDeps,
   signal?: AbortSignal,
 ): Promise<ApproveProfileUpdateResult> {
-  const { store, lock, profileDir } = deps;
+  const { store, lock, repository } = deps;
   const writePrimer = deps.writePrimer ?? defaultWritePrimer;
   const writeProvenance = deps.writeProvenance ?? defaultWriteProvenance;
 
@@ -71,7 +73,16 @@ export async function approveProfileUpdate(
   if (peek.status === 'approved') return { ok: true, proposal: peek, recovered: false };
   if (peek.status === 'rejected') return { ok: false, reason: 'rejected', proposal: peek };
 
-  const release = await lock.acquire(peek.targetPath, signal);
+  let scope;
+  let lockKey: string;
+  try {
+    scope = repository.scopeForPinnedPrimerTarget(peek.createdBy, peek.sourceCatId as string, peek.targetPath);
+    lockKey = repository.resolvePrimerTarget(scope, peek.targetPath);
+  } catch (err) {
+    return { ok: false, reason: 'write_failed', error: errMessage(err), proposal: peek };
+  }
+  const profileDir = repository.profileDir(scope.userId);
+  const release = await lock.acquire(lockKey, signal);
   try {
     // Re-read inside the lock — another holder may have settled it while we waited.
     let proposal = await store.get(proposalId);
@@ -94,7 +105,9 @@ export async function approveProfileUpdate(
     if (!proposal.writtenPath) {
       let writtenPath: string;
       try {
-        ({ writtenPath } = writePrimer(proposal, profileDir, { allowAlreadyApplied: recovered }));
+        ({ writtenPath } = writePrimer(proposal, profileDir, scope.relationshipKey, {
+          allowAlreadyApplied: recovered,
+        }));
       } catch (err) {
         // Primer not committed → safe to roll back to pending (ADV-3 / INV-8 stale).
         await store.rollbackClaim(proposalId);

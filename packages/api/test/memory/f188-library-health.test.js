@@ -142,6 +142,7 @@ describe('F188 Phase B: computeLibraryHealth', () => {
       assert.equal(result.searchQuality.lowHitCount, 1);
       assert.equal(result.searchQuality.recentMisses.length, 1);
       assert.equal(result.searchQuality.recentMisses[0].query, 'missing');
+      assert.equal(result.searchQuality.identifierProbeZeroHitCount, 0);
     });
 
     it('returns zeros when no search logs', () => {
@@ -149,6 +150,127 @@ describe('F188 Phase B: computeLibraryHealth', () => {
       const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
       assert.equal(result.searchQuality.totalSearches, 0);
       assert.equal(result.searchQuality.zeroHitCount, 0);
+      assert.equal(result.searchQuality.identifierProbeZeroHitCount, 0);
+    });
+
+    it('separates identifier probe zero-hits from content zero-hits', () => {
+      const db = createTestDb();
+      const ins = db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at)
+         VALUES ('search', 'v1', '{}', ?, ?)`,
+      );
+      // Identifier probes — should NOT inflate zeroHitCount
+      ins.run(JSON.stringify({ query: 'thread_mrhm42npxgkcsvco', resultCount: 0 }), '2026-07-15T01:00:00Z');
+      ins.run(
+        JSON.stringify({ query: '302ba2df-638d-4f1b-b6e6-5bdeda036c33', resultCount: 0 }),
+        '2026-07-15T01:01:00Z',
+      );
+      ins.run(JSON.stringify({ query: '0001784067144578', resultCount: 0 }), '2026-07-15T01:02:00Z');
+      ins.run(JSON.stringify({ query: '0001783500568565-000061-c5c6bc89', resultCount: 0 }), '2026-07-15T01:03:00Z');
+      ins.run(
+        JSON.stringify({ query: 'b6b556dd2a38f08e6698364a015d02957d85b79e', resultCount: 0 }),
+        '2026-07-15T01:04:00Z',
+      );
+      ins.run(JSON.stringify({ query: '045c879ce', resultCount: 0 }), '2026-07-15T01:05:00Z');
+      // Real content zero-hit — SHOULD count
+      ins.run(JSON.stringify({ query: '图片是二进制文件 愿景守护', resultCount: 0 }), '2026-07-15T01:06:00Z');
+      ins.run(JSON.stringify({ query: 'workspace-worktree-labels', resultCount: 0 }), '2026-07-15T01:07:00Z');
+      // Non-zero results — neither bucket
+      ins.run(JSON.stringify({ query: 'good search', resultCount: 5 }), '2026-07-15T01:08:00Z');
+
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      assert.equal(result.searchQuality.zeroHitCount, 2, 'only real content misses count');
+      assert.equal(result.searchQuality.identifierProbeZeroHitCount, 6, 'identifier probes counted separately');
+      assert.equal(result.searchQuality.observedSearches, 9);
+
+      // recentMisses should contain ONLY content misses, NOT identifier probes
+      // (ordered by created_at DESC — most recent first)
+      assert.equal(result.searchQuality.recentMisses.length, 2, 'only content misses in recentMisses');
+      assert.equal(result.searchQuality.recentMisses[0].query, 'workspace-worktree-labels');
+      assert.equal(result.searchQuality.recentMisses[1].query, '图片是二进制文件 愿景守护');
+    });
+
+    it('does not misclassify mixed-content queries as identifier probes', () => {
+      const db = createTestDb();
+      const ins = db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at)
+         VALUES ('search', 'v1', '{}', ?, ?)`,
+      );
+      // These contain identifiers but mixed with words — NOT identifier probes
+      ins.run(
+        JSON.stringify({ query: '045c879ce feat/workspace-worktree-labels', resultCount: 0 }),
+        '2026-07-15T01:00:00Z',
+      );
+      ins.run(JSON.stringify({ query: 'F242 其他猫 真实调用', resultCount: 0 }), '2026-07-15T01:01:00Z');
+      ins.run(
+        JSON.stringify({ query: 'WORKTREE_PORT_OFFSET=-70 REDIS_URL=redis://localhost:6399', resultCount: 0 }),
+        '2026-07-15T01:02:00Z',
+      );
+
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      assert.equal(result.searchQuality.zeroHitCount, 3, 'mixed queries are content misses, not probes');
+      assert.equal(result.searchQuality.identifierProbeZeroHitCount, 0);
+    });
+
+    it('many probes do not crowd content misses out of recentMisses (cap=10)', () => {
+      const db = createTestDb();
+      const ins = db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at)
+         VALUES ('search', 'v1', '{}', ?, ?)`,
+      );
+      // Insert 15 probe zero-hits (would fill 10-slot cap if probes were included)
+      for (let i = 0; i < 15; i++) {
+        ins.run(
+          JSON.stringify({ query: `thread_probe${String(i).padStart(10, '0')}`, resultCount: 0 }),
+          `2026-07-15T00:${String(i).padStart(2, '0')}:00Z`,
+        );
+      }
+      // Insert 3 content zero-hits after the probes
+      ins.run(JSON.stringify({ query: 'real content miss A', resultCount: 0 }), '2026-07-15T00:20:00Z');
+      ins.run(JSON.stringify({ query: 'real content miss B', resultCount: 0 }), '2026-07-15T00:21:00Z');
+      ins.run(JSON.stringify({ query: 'real content miss C', resultCount: 0 }), '2026-07-15T00:22:00Z');
+
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      assert.equal(result.searchQuality.identifierProbeZeroHitCount, 15);
+      assert.equal(result.searchQuality.zeroHitCount, 3, 'content misses counted correctly');
+      // All 3 content misses should appear — probes must not consume any slots
+      assert.equal(result.searchQuality.recentMisses.length, 3, 'all content misses visible despite 15 probes');
+      assert.ok(
+        result.searchQuality.recentMisses.every((m) => m.query.startsWith('real content miss')),
+        'recentMisses contains only content misses',
+      );
+    });
+
+    it('excludes eval/diagnostic origin searches from health metrics (F192 reprobe filter)', () => {
+      const db = createTestDb();
+      const insUser = db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at, origin)
+         VALUES ('search', 'v1', '{}', ?, ?, 'user')`,
+      );
+      const insEval = db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at, origin)
+         VALUES ('search', 'v1', '{}', ?, ?, 'eval')`,
+      );
+      // Real user searches
+      insUser.run(JSON.stringify({ query: 'real search', resultCount: 5 }), '2026-07-20T01:00:00Z');
+      insUser.run(JSON.stringify({ query: 'user zero hit', resultCount: 0 }), '2026-07-20T01:01:00Z');
+      // Eval reprobe searches — should be excluded from health metrics
+      insEval.run(JSON.stringify({ query: 'user zero hit', resultCount: 3 }), '2026-07-20T01:02:00Z');
+      insEval.run(JSON.stringify({ query: 'thread_abc12345678', resultCount: 0 }), '2026-07-20T01:03:00Z');
+      insEval.run(JSON.stringify({ query: 'another reprobe', resultCount: 0 }), '2026-07-20T01:04:00Z');
+      // Default origin (NULL / legacy rows) should still be counted
+      db.prepare(
+        `INSERT INTO f163_logs (log_type, variant_id, effective_flags, payload, created_at)
+         VALUES ('search', 'v1', '{}', ?, ?)`,
+      ).run(JSON.stringify({ query: 'legacy search', resultCount: 2 }), '2026-07-20T01:05:00Z');
+
+      const result = computeLibraryHealth(db, { docsRoot: tmpDocsRoot(), markers: [] });
+      // Only user + legacy rows should be counted (3 total), not eval rows (3)
+      assert.equal(result.searchQuality.totalSearches, 3, 'eval searches excluded from totalSearches');
+      assert.equal(result.searchQuality.observedSearches, 3, 'eval searches excluded from observedSearches');
+      assert.equal(result.searchQuality.zeroHitCount, 1, 'only user zero-hit counted');
+      assert.equal(result.searchQuality.recentMisses.length, 1, 'eval zero-hits excluded from recentMisses');
+      assert.equal(result.searchQuality.recentMisses[0].query, 'user zero hit');
     });
   });
 

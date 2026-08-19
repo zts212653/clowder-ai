@@ -92,6 +92,7 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
       targetCats: ['opus-47'],
       intent: 'execute',
       idempotencyKey: 'idem-1',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(created.invocationId, { status: 'running' });
 
@@ -119,6 +120,7 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'idem-2',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(created.invocationId, { status: 'running' });
     const emptyDraftStore = { getByThread: async () => [] };
@@ -135,6 +137,7 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
       targetCats: ['sonnet'],
       intent: 'execute',
       idempotencyKey: 'idem-3',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(created.invocationId, { status: 'running' });
     const future = Date.now() + 700_000;
@@ -162,6 +165,7 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'idem-failed',
+      actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(created.invocationId, { status: 'failed', error: 'spend-limit' });
     const emptyDraftStore = { getByThread: async () => [] };

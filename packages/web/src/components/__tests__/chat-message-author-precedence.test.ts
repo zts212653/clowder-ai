@@ -208,4 +208,54 @@ describe('ChatMessage author precedence', () => {
     expect(container.textContent).toContain('该喝水了，去接一杯温水。');
     expect(container.textContent).not.toContain('内部 trigger');
   });
+
+  it('labels an in-place F254 salvage without changing the original cat or content', async () => {
+    const { ChatMessage } = await import('@/components/ChatMessage');
+    const getCatById = vi.fn((id: string) => {
+      if (id !== 'fable-5') return undefined;
+      return {
+        id: 'fable-5',
+        displayName: '布偶猫',
+        nickname: '宪宪',
+        variantLabel: 'Fable 5',
+        color: { primary: '#7258A8', secondary: '#EEE8FA' },
+        mentionPatterns: [],
+        breedId: 'ragdoll',
+        clientId: 'anthropic',
+        defaultModel: 'claude-fable-5',
+        avatar: '/avatars/fable-5.png',
+        roleDescription: '',
+        personality: '',
+      };
+    });
+    const msg = {
+      id: 'm-recovered',
+      type: 'assistant' as const,
+      catId: 'fable-5',
+      content: '买到了，正在回家。',
+      timestamp: 1700000000000,
+      contentBlocks: [],
+      extra: {
+        recovery: {
+          kind: 'f254_withheld_message',
+          cvoDecisionRef: '0001783820437069-000027-a6cebcce',
+          recoveredAt: 1700000005000,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message: msg as never,
+          getCatById: getCatById as never,
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain('布偶猫（Fable 5）');
+    expect(container.textContent).toContain('买到了，正在回家。');
+    expect(container.textContent).toContain('事故恢复');
+    expect(container.querySelector('[title*="事故恢复"]')).not.toBeNull();
+  });
 });

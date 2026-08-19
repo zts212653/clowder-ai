@@ -13,6 +13,28 @@ describe('F148 VG-3: extractDecisionSignals', () => {
     assert.ok(signals.decisions.some((d) => d.includes('方案B')));
   });
 
+  test('keeps exact transcript event coordinates aligned with extracted signals', () => {
+    const signals = extractDecisionSignals({
+      transcriptText: '我们决定用方案B。后续阈值需要实验。',
+      transcriptEntries: [
+        {
+          content: '我们决定用方案B。后续阈值需要实验。',
+          sourceRef: { threadId: 't1', sessionId: 's1', eventNo: 12, invocationId: 'inv-1' },
+        },
+      ],
+      summaryConclusions: [],
+      summaryOpenQuestions: [],
+    });
+
+    assert.deepEqual(signals.decisionRefs[0], {
+      threadId: 't1',
+      sessionId: 's1',
+      eventNo: 12,
+      invocationId: 'inv-1',
+    });
+    assert.deepEqual(signals.openQuestionRefs[0], signals.decisionRefs[0]);
+  });
+
   test('extracts open questions from transcript text via regex', () => {
     const signals = extractDecisionSignals({
       transcriptText: 'burst gap阈值需要实验确定。后续是否要加prompt cache？',

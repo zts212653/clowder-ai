@@ -16,7 +16,7 @@ created: 2026-04-10
 
 1. **撤回噪音**：当前流程是 `sendPlaceholder("🤔 思考中...")` → 流式编辑 → `deleteMessage`（撤回）→ 发最终回复。飞书把 `im.message.delete` 表现为"xxx 撤回了一条消息"，用户每次都看到一条撤回通知，困惑且突兀。
 
-2. **缺乏猫味**：`🤔 思考中...` 是冷冰冰的通用 loading 文案，不符合 Cat Cafe "猫猫和你" 的产品语义。
+2. **缺乏猫味**：`🤔 思考中...` 是冷冰冰的通用 loading 文案，不符合 Clowder AI "猫猫和你" 的产品语义。
 
 **operator experience**：
 > "飞书显示思考中后撤回消息"

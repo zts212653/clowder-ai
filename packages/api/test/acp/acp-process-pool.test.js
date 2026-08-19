@@ -14,7 +14,8 @@ import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 
 let clientIdCounter = 0;
 
-function createMockClient() {
+/** @param {Promise<void>} [initializeGate] */
+function createMockClient(initializeGate) {
   const id = ++clientIdCounter;
   let alive = false;
   let closed = false;
@@ -35,6 +36,7 @@ function createMockClient() {
       return !unsafeSessionIds.has('*') && !unsafeSessionIds.has(sessionId);
     },
     async initialize() {
+      if (initializeGate) await initializeGate;
       alive = true;
       return { agentInfo: { name: 'mock', version: '1.0' } };
     },
@@ -759,6 +761,64 @@ describe('AcpProcessPool', () => {
   });
 
   describe('closeAll', () => {
+    test('retirement cannot close a spawned process before its first acquire owns the lease', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      let releaseInitialization = () => {};
+      const initializeGate = new Promise((resolve) => {
+        releaseInitialization = resolve;
+      });
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, () => createMockClient(initializeGate));
+
+      const leasePromise = pool.acquire(key1);
+      releaseInitialization();
+      while (pool.getMetrics().coldStartCount === 0) await Promise.resolve();
+
+      assert.equal(
+        pool.getMetrics().activeLeaseCount,
+        1,
+        'a published cold-start entry must already be owned by the acquire that spawned it',
+      );
+      pool.retireWhenIdle();
+
+      const lease = await leasePromise;
+      assert.equal(lease.client.isAlive, true, 'retirement must preserve the admitted in-flight acquire');
+      assert.equal(pool.getMetrics().idleProcessCount, 0, 'the new active process was never counted idle');
+
+      lease.release();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(lease.client.isAlive, false, 'the retired generation closes after the admitted lease releases');
+      assert.deepEqual(pool.getMetrics(), {
+        liveProcessCount: 0,
+        activeLeaseCount: 0,
+        idleProcessCount: 0,
+        warmHitCount: 0,
+        coldStartCount: 1,
+        evictionCount: 0,
+        zombieCleanupCount: 0,
+      });
+    });
+
+    test('retirement keeps active leases alive and closes their process after release', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient);
+      const lease = await pool.acquire(key1);
+
+      pool.retireWhenIdle();
+
+      assert.equal(lease.client.isAlive, true, 'config refresh must not interrupt the active invocation');
+      await assert.rejects(() => pool.acquire(key1), /retired/i);
+
+      lease.release();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(lease.client.isAlive, false, 'the retired generation closes after its final lease drains');
+      assert.equal(pool.getMetrics().activeLeaseCount, 0);
+      assert.equal(pool.getMetrics().liveProcessCount, 0);
+    });
+
     test('closeAll shuts down all processes', async () => {
       const { AcpProcessPool } = await import(
         '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'

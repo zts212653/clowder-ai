@@ -160,7 +160,7 @@ export function SelectField({
   label: string;
   ariaLabel?: string;
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
   onChange: (value: string) => void;
   disabled?: boolean;
   required?: boolean;
@@ -181,7 +181,7 @@ export function SelectField({
         className={`w-full rounded-[10px] border px-3 py-1.5 text-compact leading-5 text-cafe-black outline-none transition focus:ring-1 disabled:cursor-not-allowed disabled:opacity-60 ${inputColors}`}
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}
           </option>
         ))}

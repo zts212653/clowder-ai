@@ -16,7 +16,7 @@ import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordSto
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { isSystemUserMessage } from '../stores/visibility.js';
+import { getTimelineOrderTime, isSystemUserMessage } from '../stores/visibility.js';
 import type {
   AggregatorExpiredHold,
   AggregatorMentionCandidate,
@@ -220,14 +220,16 @@ async function collectMentionCandidates(
     const tail = await messageStore.getByThread(thread.id, 1, userId);
     const last = tail[tail.length - 1];
     if (!last || !last.mentionsUser || last.catId == null) continue;
-    const after = await messageStore.getByThreadAfter(thread.id, last.id, undefined, userId);
+    const after = await messageStore.getByThreadAfter(thread.id, last.id, undefined, userId, {
+      unresolvedCursorPolicy: 'empty',
+    });
     if (after.some((m) => m.catId == null && !isSystemUserMessage(m))) continue; // 真正的 operator 已回应 → 球不在 operator 手上
     candidates.push({
       threadId: thread.id,
       messageId: last.id,
       catId: last.catId,
       title: deriveTitle(last.content, thread.title),
-      timestamp: last.deliveredAt ?? last.timestamp,
+      timestamp: getTimelineOrderTime(last),
     });
   }
   return candidates;

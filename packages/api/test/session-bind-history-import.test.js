@@ -153,6 +153,45 @@ describe('Session bind history import', () => {
     }
   });
 
+  test('#1329 backfill inspects only the requesting owner session chain', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { backfillBoundSessionHistory } = await import(
+      '../dist/domains/cats/services/session/BoundSessionHistoryImporter.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const ownerA = sessionChainStore.create({
+      cliSessionId: 'cli-owner-a',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+    const ownerB = sessionChainStore.create({
+      cliSessionId: 'cli-owner-b',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-b',
+    });
+    sessionChainStore.update(ownerA.id, { status: 'sealed' });
+    sessionChainStore.update(ownerB.id, { status: 'sealed' });
+    const inspected = [];
+    const result = await backfillBoundSessionHistory({
+      sessionChainStore,
+      transcriptReader: {
+        hasTranscript: async (sessionId) => {
+          inspected.push(sessionId);
+          return false;
+        },
+      },
+      messageStore: { getByThread: async () => [], append: async () => {} },
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+
+    assert.equal(result.reason, 'no_transcript_found');
+    assert.deepEqual(inspected, [ownerA.id]);
+  });
+
   test('bind reports no_transcript_found when there is nothing importable yet', async () => {
     const { app, threadStore } = await buildApp();
     try {

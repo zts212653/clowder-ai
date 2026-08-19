@@ -41,6 +41,8 @@ describe('CommunityRepoConfigStore (in-memory)', () => {
       assert.equal(config.repo, 'zts212653/clowder-ai');
       assert.equal(config.guardThreadId, 'thread_abc123');
       assert.equal(config.guardCatId, 'codex');
+      assert.equal(config.reviewMode, 'observe_only');
+      assert.equal(config.cloudReviewPolicy, 'optional');
       assert.ok(config.createdAt > 0);
       assert.ok(config.updatedAt > 0);
 
@@ -53,6 +55,8 @@ describe('CommunityRepoConfigStore (in-memory)', () => {
         repo: 'zts212653/clowder-ai',
         guardThreadId: 'thread_old',
         guardCatId: 'opus',
+        reviewMode: 'maintainer_review',
+        cloudReviewPolicy: 'required',
       });
 
       const updated = await store.upsert({
@@ -63,10 +67,52 @@ describe('CommunityRepoConfigStore (in-memory)', () => {
 
       assert.equal(updated.guardThreadId, 'thread_new');
       assert.equal(updated.guardCatId, 'codex');
+      assert.equal(updated.reviewMode, 'maintainer_review');
+      assert.equal(updated.cloudReviewPolicy, 'required');
 
       // Only one config for this repo
       const all = await store.listAll();
       assert.equal(all.length, 1);
+    });
+
+    it('supports explicit maintainer-review opt-in without widening missing configs', async () => {
+      const config = await store.upsert({
+        repo: 'acme/widgets',
+        guardThreadId: 'thread-review',
+        guardCatId: 'codex-sol',
+        reviewMode: 'maintainer_review',
+        cloudReviewPolicy: 'required',
+      });
+
+      assert.equal(config.reviewMode, 'maintainer_review');
+      assert.equal(config.cloudReviewPolicy, 'required');
+      assert.equal(await store.getByRepo('missing/repo'), null);
+    });
+
+    it('uses one canonical identity for mixed-case GitHub repo names across CRUD', async () => {
+      const created = await store.upsert({
+        repo: 'Owner/Repo',
+        guardThreadId: 'thread-old',
+        guardCatId: 'opus47',
+        reviewMode: 'maintainer_review',
+        cloudReviewPolicy: 'required',
+      });
+
+      assert.equal(created.repo, 'owner/repo');
+      assert.deepStrictEqual(await store.getByRepo('owner/repo'), created);
+
+      const updated = await store.upsert({
+        repo: 'OWNER/REPO',
+        guardThreadId: 'thread-new',
+        guardCatId: 'codex-sol',
+      });
+
+      assert.equal(updated.repo, 'owner/repo');
+      assert.equal(updated.guardThreadId, 'thread-new');
+      assert.equal(updated.reviewMode, 'maintainer_review');
+      assert.equal((await store.listAll()).length, 1);
+      assert.equal(await store.deleteByRepo('Owner/Repo'), true);
+      assert.equal(await store.getByRepo('owner/repo'), null);
     });
   });
 

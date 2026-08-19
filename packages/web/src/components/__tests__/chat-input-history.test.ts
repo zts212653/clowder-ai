@@ -18,6 +18,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 vi.mock('@/hooks/useCoCreatorConfig', () => ({
   useCoCreatorConfig: () => ({
@@ -96,7 +97,7 @@ describe('ChatInput history completion', () => {
       pressKey(getTextarea(), 'Enter');
     });
 
-    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined, undefined);
     expect(useInputHistoryStore.getState().entries).toContain('hello world');
   });
 

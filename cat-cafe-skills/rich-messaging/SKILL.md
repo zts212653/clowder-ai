@@ -111,7 +111,7 @@ triggers:
 ```
 
 4 种 interactiveType：`select`（单选）、`multi-select`（多选）、`card-grid`（卡片网格）、`confirm`（确认/取消）。
-用户选择后 block 自动 disabled + 结果持久化。详见 `refs/rich-blocks.md`。
+用户选择后 block 自动 disabled + 结果持久化。详见 `../.cat-cafe-shared-refs/rich-blocks.md`。
 
 ### 内联 HTML Widget（html_widget）
 
@@ -123,6 +123,21 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - 用 sandboxed iframe `srcdoc` 渲染，**禁止** `allow-same-origin`（比 browser panel 更严格）
 - 适合：Chart.js 图表、CSS 动画、计算器等纯前端组件
 - 不适合：需要网络请求、需要访问外部资源的复杂应用（那些用 `browser-preview` skill）
+
+#### 内联 `on*` 会被剥掉
+
+DOMPurify 静默剥掉所有 `on*` 属性——widget 照常渲染，点击不生效，不报错。`<script>` 保留，从里面绑事件：
+
+```html
+<!-- 不行：onclick 被剥掉 -->
+<button onclick="show()">点我</button>
+
+<!-- 可以：从 <script> 绑 -->
+<button id="btn">点我</button>
+<script>document.getElementById('btn').addEventListener('click', e => e.target.textContent = '点了')</script>
+```
+
+轻交互用 `<details><summary>` 或 CSS `:hover`，不用 JS。
 
 ## 发送方式
 
@@ -169,9 +184,9 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 ## 和其他 skill 的区别
 
 - `request-review` / `quality-gate`：这些 skill 的**产出**可能包含 card/checklist block，但**何时用 block、怎么调**看这个 skill
-- `refs/rich-blocks.md`：更详细的字段规格参考，本 skill 是精简决策版
+- `../.cat-cafe-shared-refs/rich-blocks.md`：更详细的字段规格参考，本 skill 是精简决策版
 
 ## 参考
 
-- 完整字段规格：`refs/rich-blocks.md`
+- 完整字段规格：`../.cat-cafe-shared-refs/rich-blocks.md`
 - MCP 工具实时规则：`get_rich_block_rules`

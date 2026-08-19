@@ -22,6 +22,8 @@ export interface AgentHookTargetHealth {
 export interface AgentHookStatusResponse {
   status: AgentHookHealthStatus;
   targets: AgentHookTargetHealth[];
+  /** The project has not been initialized, so no capability targets were probed. */
+  uninitialised?: true;
 }
 
 interface UseAgentHookHealthOptions {
@@ -35,6 +37,7 @@ interface UseAgentHookHealthResult {
   loading: boolean;
   syncing: boolean;
   synced: boolean;
+  syncAttempted: boolean;
   error: string | null;
   refresh: () => Promise<void>;
   sync: () => Promise<void>;
@@ -46,6 +49,13 @@ let hasCachedHealth = false;
 let inFlightProjectPath: string | undefined;
 let inFlightStatus: Promise<AgentHookStatusResponse> | null = null;
 
+function cacheStatus(status: AgentHookStatusResponse, projectPath?: string): AgentHookStatusResponse {
+  cachedHealth = status;
+  cachedProjectPath = projectPath;
+  hasCachedHealth = true;
+  return status;
+}
+
 function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResponse {
   return (
     !!value &&
@@ -53,6 +63,13 @@ function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResp
     typeof (value as { status?: unknown }).status === 'string' &&
     Array.isArray((value as { targets?: unknown }).targets)
   );
+}
+
+async function readUninitialisedProject(res: Response): Promise<AgentHookStatusResponse | null> {
+  if (res.status !== 400) return null;
+  const { code } = (await res.json().catch(() => ({}))) as { code?: unknown };
+  if (code !== 'PROJECT_NOT_INITIALIZED') return null;
+  return { status: 'unsupported', targets: [], uninitialised: true };
 }
 
 async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatusResponse> {
@@ -66,17 +83,16 @@ async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatu
   inFlightProjectPath = projectPath;
   inFlightStatus = apiFetch(url)
     .then(async (res) => {
-      if (!res.ok) throw new Error(`agent hook status failed (${res.status})`);
+      if (!res.ok) {
+        const uninitialised = await readUninitialisedProject(res);
+        if (uninitialised) return uninitialised;
+        throw new Error(`agent hook status failed (${res.status})`);
+      }
       const status = await res.json();
       if (!isAgentHookStatusResponse(status)) throw new Error('agent hook status response is invalid');
       return status;
     })
-    .then((status) => {
-      cachedHealth = status;
-      cachedProjectPath = projectPath;
-      hasCachedHealth = true;
-      return status;
-    })
+    .then((status) => cacheStatus(status, projectPath))
     .finally(() => {
       inFlightStatus = null;
     });
@@ -90,13 +106,14 @@ async function postAgentHookSync(projectPath?: string): Promise<AgentHookStatusR
     headers: projectPath ? { 'Content-Type': 'application/json' } : undefined,
     body: projectPath ? JSON.stringify({ projectPath }) : undefined,
   });
-  if (!res.ok) throw new Error(`agent hook sync failed (${res.status})`);
+  if (!res.ok) {
+    const uninitialised = await readUninitialisedProject(res);
+    if (uninitialised) return cacheStatus(uninitialised, projectPath);
+    throw new Error(`agent hook sync failed (${res.status})`);
+  }
   const status = await res.json();
   if (!isAgentHookStatusResponse(status)) throw new Error('agent hook sync response is invalid');
-  cachedHealth = status;
-  cachedProjectPath = projectPath;
-  hasCachedHealth = true;
-  return status;
+  return cacheStatus(status, projectPath);
 }
 
 function errorMessage(error: unknown): string {
@@ -119,6 +136,7 @@ export function useAgentHookHealth({
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [synced, setSynced] = useState(false);
+  const [syncAttempted, setSyncAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const applyStatus = useCallback(async (readStatus: () => Promise<AgentHookStatusResponse>) => {
@@ -135,6 +153,7 @@ export function useAgentHookHealth({
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setSyncAttempted(false);
     cachedHealth = null;
     hasCachedHealth = false;
     await applyStatus(() => readAgentHookStatus(projectPath));
@@ -144,8 +163,10 @@ export function useAgentHookHealth({
   const sync = useCallback(async () => {
     setSyncing(true);
     setSynced(false);
+    setSyncAttempted(false);
     setError(null);
     const status = await applyStatus(() => postAgentHookSync(projectPath));
+    setSyncAttempted(status !== null);
     setSynced(status?.status === 'configured');
     setSyncing(false);
   }, [applyStatus, projectPath]);
@@ -162,6 +183,7 @@ export function useAgentHookHealth({
     setLoading(true);
     setError(null);
     setHealth(null);
+    setSyncAttempted(false);
     readAgentHookStatus(projectPath)
       .then(
         (status) => {
@@ -180,5 +202,5 @@ export function useAgentHookHealth({
     };
   }, [enabled, projectPath]);
 
-  return { health, loading, syncing, synced, error, refresh, sync };
+  return { health, loading, syncing, synced, syncAttempted, error, refresh, sync };
 }

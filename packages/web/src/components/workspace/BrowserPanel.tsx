@@ -1,6 +1,8 @@
 'use client';
 
+import { buildPreviewGatewayUrl } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { BrowserTabBar } from './BrowserTabBar';
 import { BrowserToolbar } from './BrowserToolbar';
@@ -46,13 +48,16 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   const [targetPath, setTargetPath] = useState(initialPath ?? '/');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // F120 × F284: liveness of the preview target. A restored preview whose dev
+  // server died must show an explicit stopped state, never an error-shell iframe.
+  const [targetHealth, setTargetHealth] = useState<'checking' | 'reachable' | 'unreachable' | null>(null);
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const tabIdCounter = useRef(0);
   const hmrStatus = useHmrStatus(gatewayPort, targetPort);
   const { consoleEntries, consoleOpen, setConsoleOpen, isCapturing, screenshotUrl, handleScreenshot, clearConsole } =
-    usePreviewBridge(iframeRef, gatewayPort);
+    usePreviewBridge(iframeRef, gatewayPort, targetPort);
 
   const activateView = useCallback((port: number, path: string) => {
     setTargetPort(port);
@@ -63,6 +68,53 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
   useEffect(() => {
     if (onNavigate) onNavigate(targetPort, targetPath);
   }, [targetPort, targetPath, onNavigate]);
+
+  // F120 × F284: probe target liveness whenever the target port changes.
+  // Dead dev server → stopped/unavailable UI with a retry action; reachable →
+  // the iframe loads through the gateway as before.
+  const probeSeq = useRef(0);
+  const probeTarget = useCallback((port: number) => {
+    const seq = ++probeSeq.current;
+    setTargetHealth('checking');
+    apiFetch(`/api/preview/target-health?port=${port}`)
+      .then((res) => res.json() as Promise<{ reachable?: boolean }>)
+      .then((data) => {
+        if (probeSeq.current !== seq) return;
+        setTargetHealth(data.reachable ? 'reachable' : 'unreachable');
+        if (!data.reachable) setIsLoading(false);
+      })
+      .catch(() => {
+        if (probeSeq.current !== seq) return;
+        setTargetHealth('unreachable');
+        setIsLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!targetPort) {
+      setTargetHealth(null);
+      return;
+    }
+    probeTarget(targetPort);
+  }, [targetPort, probeTarget]);
+
+  // F120 × F284 review P1: the panel stays mounted across folds (F284), so a
+  // port-change effect alone never re-probes on reactivation — a target that
+  // died while folded would reopen as a stale iframe. Re-probe whenever the
+  // browser surface becomes visible again.
+  const browserSurfaceVisible = useChatStore(
+    (s) => s.rightPanelOpen && s.rightPanelMode === 'workspace' && s.workspaceSurface === 'browser',
+  );
+  const wasVisibleRef = useRef(browserSurfaceVisible);
+  useEffect(() => {
+    const becameVisible = browserSurfaceVisible && !wasVisibleRef.current;
+    wasVisibleRef.current = browserSurfaceVisible;
+    if (becameVisible && targetPort) probeTarget(targetPort);
+  }, [browserSurfaceVisible, targetPort, probeTarget]);
+
+  const handleRetryProbe = useCallback(() => {
+    if (targetPort) probeTarget(targetPort);
+  }, [targetPort, probeTarget]);
 
   // Fetch gateway port on mount
   useEffect(() => {
@@ -94,34 +146,9 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
     activateView(initialPort, path);
   }, [initialPort, initialPath, activateView]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Audit: close on unmount only (use ref to avoid stale closure)
-  const targetPortRef = useRef(targetPort);
-  targetPortRef.current = targetPort;
-  useEffect(() => {
-    return () => {
-      if (targetPortRef.current) {
-        apiFetch('/api/preview/close', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ port: targetPortRef.current }),
-        }).catch(() => {});
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const gatewayUrl = (() => {
     if (!targetPort || !gatewayPort) return '';
-    const url = new URL(`http://localhost:${gatewayPort}`);
-    const qIdx = targetPath.indexOf('?');
-    if (qIdx >= 0) {
-      url.pathname = targetPath.slice(0, qIdx);
-      const existingParams = new URLSearchParams(targetPath.slice(qIdx + 1));
-      for (const [k, v] of existingParams) url.searchParams.set(k, v);
-    } else {
-      url.pathname = targetPath;
-    }
-    url.searchParams.set('__preview_port', String(targetPort));
-    return url.toString();
+    return buildPreviewGatewayUrl(gatewayPort, targetPort, targetPath);
   })();
 
   const [warning, setWarning] = useState<string | null>(null);
@@ -212,6 +239,20 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
   const handleTabClose = useCallback(
     (tabId: string) => {
+      const closingTab = tabs.find((tab) => tab.id === tabId);
+      const portStillOpen = closingTab ? tabs.some((tab) => tab.id !== tabId && tab.port === closingTab.port) : false;
+
+      // F284: collapsing or switching the Workspace shell may unmount this
+      // component, but that is not user intent to terminate a live preview.
+      // Only an explicit tab close owns the backend lifecycle transition.
+      if (closingTab?.port && !portStillOpen) {
+        void apiFetch('/api/preview/close', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: closingTab.port }),
+        }).catch(() => {});
+      }
+
       setTabs((prev) => {
         const next = prev.filter((t) => t.id !== tabId);
         if (activeTabId === tabId) {
@@ -227,7 +268,7 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
         return next;
       });
     },
-    [activeTabId, activateView],
+    [activeTabId, activateView, tabs],
   );
 
   const handleTabAdd = useCallback(() => {
@@ -306,7 +347,23 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
         </div>
       )}
 
-      {gatewayUrl ? (
+      {targetPort && targetHealth === 'unreachable' ? (
+        <div
+          data-testid="preview-unavailable"
+          className="flex-1 flex items-center justify-center text-[var(--ws-text)]/60 text-sm text-center"
+        >
+          <div>
+            <p>localhost:{targetPort} 无响应 — preview 目标已停止或不可达</p>
+            <button
+              type="button"
+              className="mt-3 px-3 py-1 text-xs rounded border border-[var(--console-border-soft)] hover:text-[var(--ws-accent)]"
+              onClick={handleRetryProbe}
+            >
+              重试恢复
+            </button>
+          </div>
+        </div>
+      ) : gatewayUrl && targetHealth === 'reachable' ? (
         <div className="relative flex-1">
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-[var(--ws-surface)]/80 z-10">
@@ -327,6 +384,10 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
             }}
           />
         </div>
+      ) : targetPort ? (
+        <div className="flex-1 flex items-center justify-center bg-[var(--ws-surface)]/80">
+          <div className="text-xs text-[var(--ws-text)]/50">Loading preview...</div>
+        </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-[var(--ws-text)]/40 text-sm text-center">
           <div>
@@ -341,7 +402,12 @@ export function BrowserPanel({ initialPort, initialPath, previewOnly, onNavigate
 
       {!previewOnly && (
         <div className="flex items-center px-2 py-0.5 console-divider-t text-micro text-[var(--ws-text)]/40 bg-cafe-surface/40">
-          {targetPort && gatewayPort ? (
+          {targetPort && gatewayPort && targetHealth === 'unreachable' ? (
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--semantic-critical)] inline-block" />
+              localhost:{targetPort} stopped / unavailable
+            </span>
+          ) : targetPort && gatewayPort ? (
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-conn-green-text inline-block" />
               localhost:{targetPort} via gateway:{gatewayPort}

@@ -29,6 +29,7 @@ function invocationCreateInput(idempotencyKey, threadId = 'thread-race') {
     targetCats: ['opus'],
     intent: 'execute',
     idempotencyKey,
+    actionLeaseCarrier: { kind: 'none' },
   };
 }
 

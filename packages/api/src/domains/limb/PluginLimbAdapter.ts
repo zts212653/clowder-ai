@@ -1,4 +1,11 @@
-import type { ILimbNode, LimbCapability, LimbCommandSchema, LimbInvokeResult, LimbNodeStatus } from '@cat-cafe/shared';
+import type {
+  ILimbNode,
+  LimbCapability,
+  LimbCommandSchema,
+  LimbInvocationContext,
+  LimbInvokeResult,
+  LimbNodeStatus,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { LimbDeclaration } from './limb-yaml-loader.js';
 import { PluginRestExecutor } from './PluginRestExecutor.js';
@@ -9,6 +16,8 @@ import { PluginTokenManager } from './PluginTokenManager.js';
 export interface InvokeContext {
   pluginConfig: Record<string, string>;
   tokenManager: PluginTokenManager;
+  /** Trusted server-derived callback provenance. Absent for legacy/direct invocations. */
+  invocation?: LimbInvocationContext;
   /** Call another REST command defined in the same YAML */
   executeRest: (commandId: string, params: Record<string, unknown>) => Promise<LimbInvokeResult>;
 }
@@ -77,7 +86,11 @@ export class PluginLimbAdapter implements ILimbNode {
   async register(): Promise<void> {}
   async deregister(): Promise<void> {}
 
-  async invoke(command: string, params: Record<string, unknown>): Promise<LimbInvokeResult> {
+  async invoke(
+    command: string,
+    params: Record<string, unknown>,
+    invocation?: LimbInvocationContext,
+  ): Promise<LimbInvokeResult> {
     const commandDef = this.declaration.commands[command];
     if (!commandDef) {
       return { success: false, error: `Unknown command: ${command}` };
@@ -93,7 +106,7 @@ export class PluginLimbAdapter implements ILimbNode {
       if (commandDef.type === 'rest') {
         return await this.executeRestCommand(command, commandDef, params);
       }
-      return await this.executeInvokeCommand(commandDef, params);
+      return await this.executeInvokeCommand(commandDef, params, invocation);
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -134,6 +147,7 @@ export class PluginLimbAdapter implements ILimbNode {
   private async executeInvokeCommand(
     commandDef: (typeof this.declaration.commands)[string],
     params: Record<string, unknown>,
+    invocation?: LimbInvocationContext,
   ): Promise<LimbInvokeResult> {
     if (!commandDef.handler) {
       return { success: false, error: 'Invoke command missing handler' };
@@ -154,6 +168,7 @@ export class PluginLimbAdapter implements ILimbNode {
     const ctx: InvokeContext = {
       pluginConfig: this.pluginConfig,
       tokenManager: this.tokenManager!,
+      ...(invocation ? { invocation } : {}),
       executeRest: (cmdId, p) => {
         const def = this.declaration.commands[cmdId];
         if (!def || def.type !== 'rest') {
@@ -166,11 +181,11 @@ export class PluginLimbAdapter implements ILimbNode {
   }
 
   private findMissingRequired(
-    paramDefs: Record<string, { required?: boolean }>,
+    paramDefs: Record<string, { required?: boolean; validation?: 'adapter' | 'handler' }>,
     params: Record<string, unknown>,
   ): string[] {
     return Object.entries(paramDefs)
-      .filter(([key, def]) => def.required && params[key] === undefined)
+      .filter(([key, def]) => def.required && def.validation !== 'handler' && params[key] === undefined)
       .map(([key]) => key);
   }
 }

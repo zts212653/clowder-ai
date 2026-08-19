@@ -179,6 +179,45 @@ describe('Search Mode Split (KD-44)', () => {
     assert.ok(anchors.includes('doc-redis-pitfall'), 'redis doc should appear (BM25 hit)');
   });
 
+  it('enforces the exact thread filter in lexical, semantic, and hybrid top-k paths', async () => {
+    if (!vectorStore) return;
+    await store.upsert([
+      {
+        anchor: 'thread-thread_target',
+        kind: 'thread',
+        status: 'active',
+        title: 'Target thread filter needle',
+        summary: 'Only this thread may cross the structured filter boundary.',
+        updatedAt: '2026-07-15T00:00:00Z',
+      },
+      {
+        anchor: 'thread-thread_other',
+        kind: 'thread',
+        status: 'active',
+        title: 'Other thread filter needle',
+        summary: 'This historical thread must never leak into the target response.',
+        updatedAt: '2026-07-15T00:00:00Z',
+      },
+    ]);
+    vectorStore.upsert('thread-thread_target', new Float32Array([0.82, 0.18, 0.0]));
+    vectorStore.upsert('thread-thread_other', new Float32Array([0.85, 0.15, 0.0]));
+
+    for (const mode of ['lexical', 'semantic', 'hybrid']) {
+      const results = await store.search('thread filter needle', {
+        mode,
+        scope: 'threads',
+        threadId: 'thread_target',
+        limit: 5,
+      });
+      assert.ok(results.length > 0, `${mode} should retain the requested thread when indexed`);
+      assert.deepEqual(
+        [...new Set(results.map((item) => item.anchor))],
+        ['thread-thread_target'],
+        `${mode} must not return evidence from another thread`,
+      );
+    }
+  });
+
   it('hybrid mode: surfaces docs that BM25 misses but NN finds', async () => {
     if (!vectorStore) return;
     // Query with no BM25 match but strong NN match for cat-names

@@ -228,5 +228,10 @@ describe('MCP Graph Resolve Tool (AC-F1)', () => {
     const result = await handleGraphResolve({ query: 'F186' });
     assert.equal(result.isError, true);
     assert.ok(result.content[0].text.includes('connection refused'));
+    assert.ok(result.content[0].text.includes('<recall-meta>'), 'error output should include recall result metadata');
+    assert.ok(
+      result.content[0].text.includes('"resultStatus":"error"'),
+      'error output should declare resultStatus:error',
+    );
   });
 });

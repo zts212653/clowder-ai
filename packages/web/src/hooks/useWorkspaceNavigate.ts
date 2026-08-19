@@ -1,19 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { io } from 'socket.io-client';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import {
   areWorktreeIdsEquivalent,
-  getNavigateWorktreeRoomIds,
   resolveNavigateTargetWorktreeId,
   scopeWorktreeAliases,
   type WorktreeAliasMap,
 } from '@/utils/worktree-id-alias';
-
-export function shouldAcceptNavigate(sessionThreadId: string | null, eventThreadId: string | undefined): boolean {
-  if (!eventThreadId) return true;
-  if (!sessionThreadId) return true;
-  return eventThreadId === sessionThreadId;
-}
+import {
+  consumePendingWorkspaceNavigation,
+  deliverWorkspaceNavigateEvent,
+  queuePendingWorkspaceNavigation,
+  type WorkspaceNavigationReceipt,
+  type WorkspaceNavigationStorage,
+} from './workspace-navigation-pending';
 
 export interface NavigateEvent {
   path: string;
@@ -25,13 +26,22 @@ export interface NavigateEvent {
 }
 
 const OPEN_REVEAL_GRACE_MS = 2000;
+const WORKSPACE_NAVIGATION_ACK_ROOM = 'workspace:navigate:ack';
 
-function shouldProcessNavigateEvent(
+function shouldSuppressReveal(
   data: NavigateEvent,
-  sessionThreadId: string | null,
-  lastEventIdRef: { current: string | null },
+  recentOpen: { path: string; worktreeId?: string; ts: number } | null | undefined,
+  worktreeAliases?: WorktreeAliasMap,
 ): boolean {
-  if (!shouldAcceptNavigate(sessionThreadId, data.threadId)) return false;
+  return (
+    recentOpen != null &&
+    recentOpen.path === data.path &&
+    areWorktreeIdsEquivalent(recentOpen.worktreeId ?? null, data.worktreeId ?? null, worktreeAliases) &&
+    Date.now() - recentOpen.ts < OPEN_REVEAL_GRACE_MS
+  );
+}
+
+function shouldProcessNavigateEvent(data: NavigateEvent, lastEventIdRef: { current: string | null }): boolean {
   if (data.eventId && data.eventId === lastEventIdRef.current) return false;
   if (data.eventId) lastEventIdRef.current = data.eventId;
   return true;
@@ -42,8 +52,13 @@ export function handleNavigateEvent(
   currentWorktreeId: string | null,
   actions: {
     setWorkspaceWorktreeId: (id: string | null) => void;
-    setWorkspaceRevealPath: (path: string | null) => void;
-    setWorkspaceOpenFile: (path: string | null, line: number | null, targetWorktreeId?: string | null) => void;
+    setWorkspaceRevealPath: (path: string | null, originThreadId?: string) => void;
+    setWorkspaceOpenFile: (
+      path: string | null,
+      line: number | null,
+      targetWorktreeId?: string | null,
+      originThreadId?: string,
+    ) => void;
     setWorkspaceMode?: (mode: 'dev' | 'recall') => void;
   },
   recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
@@ -62,20 +77,20 @@ export function handleNavigateEvent(
   // File-oriented actions: auto-switch back to dev mode so the file is visible
   if (data.action === 'open') {
     actions.setWorkspaceMode?.('dev');
-    actions.setWorkspaceOpenFile(
-      data.path,
-      data.line ?? null,
-      resolveNavigateTargetWorktreeId(currentWorktreeId, data.worktreeId ?? null, worktreeAliases),
+    const targetWorktreeId = resolveNavigateTargetWorktreeId(
+      currentWorktreeId,
+      data.worktreeId ?? null,
+      worktreeAliases,
     );
+    if (data.threadId) {
+      actions.setWorkspaceOpenFile(data.path, data.line ?? null, targetWorktreeId, data.threadId);
+    } else {
+      actions.setWorkspaceOpenFile(data.path, data.line ?? null, targetWorktreeId);
+    }
     return true;
   }
 
-  if (
-    recentOpen &&
-    recentOpen.path === data.path &&
-    areWorktreeIdsEquivalent(recentOpen.worktreeId ?? null, data.worktreeId ?? null, worktreeAliases) &&
-    Date.now() - recentOpen.ts < OPEN_REVEAL_GRACE_MS
-  ) {
+  if (shouldSuppressReveal(data, recentOpen, worktreeAliases)) {
     return false;
   }
 
@@ -83,11 +98,26 @@ export function handleNavigateEvent(
     actions.setWorkspaceWorktreeId(data.worktreeId);
   }
   actions.setWorkspaceMode?.('dev');
-  actions.setWorkspaceRevealPath(data.path);
+  if (data.threadId) {
+    actions.setWorkspaceRevealPath(data.path, data.threadId);
+  } else {
+    actions.setWorkspaceRevealPath(data.path);
+  }
   return true;
 }
 
-export function useWorkspaceNavigate(worktreeId: string | null, threadId: string | null) {
+function sessionNavigationStorage(): WorkspaceNavigationStorage | null {
+  try {
+    return typeof window === 'undefined' ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function useWorkspaceNavigate(
+  threadId: string | null,
+  options: { isChatRoute: boolean; isWorkspaceVisible?: boolean; enabled?: boolean } = { isChatRoute: true },
+) {
   const setWorkspaceWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
   const setWorkspaceRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
@@ -95,64 +125,93 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
   const worktreeAliases = useChatStore((s) => s.workspaceWorktreeAliases);
   const worktreeAliasesProjectPath = useChatStore((s) => s.workspaceWorktreeAliasesProjectPath);
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
+  const presentationLocked = useChatStore((s) => s.presentationLock != null);
   const scopedWorktreeAliases = scopeWorktreeAliases(worktreeAliases, worktreeAliasesProjectPath, currentProjectPath);
   const lastEventIdRef = useRef<string | null>(null);
   const recentOpenRef = useRef<{ path: string; worktreeId?: string; ts: number } | null>(null);
+  const isWorkspaceVisible = options.isWorkspaceVisible ?? true;
+
+  const applyNavigate = useCallback(
+    (data: NavigateEvent): boolean => {
+      const state = useChatStore.getState();
+      const processed = handleNavigateEvent(
+        data,
+        state.workspaceWorktreeId,
+        {
+          setWorkspaceWorktreeId,
+          setWorkspaceRevealPath,
+          setWorkspaceOpenFile,
+          setWorkspaceMode,
+        },
+        recentOpenRef.current,
+        state.presentationLock != null,
+        scopedWorktreeAliases,
+      );
+      if (processed && data.action === 'open') {
+        recentOpenRef.current = { path: data.path, worktreeId: data.worktreeId, ts: Date.now() };
+      }
+      return processed;
+    },
+    [scopedWorktreeAliases, setWorkspaceMode, setWorkspaceOpenFile, setWorkspaceRevealPath, setWorkspaceWorktreeId],
+  );
+  const deliveryStateRef = useRef({
+    threadId,
+    isChatRoute: options.isChatRoute,
+    isWorkspaceVisible,
+    applyNavigate,
+  });
+  deliveryStateRef.current = {
+    threadId,
+    isChatRoute: options.isChatRoute,
+    isWorkspaceVisible,
+    applyNavigate,
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => void) | null = null;
-
-    import('socket.io-client').then(({ io }) => {
-      if (cancelled) return;
-      const apiUrl = new URL(API_URL);
-      const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
-
-      socket.emit('join_room', 'workspace:global');
-      for (const roomWorktreeId of getNavigateWorktreeRoomIds(worktreeId, scopedWorktreeAliases)) {
-        socket.emit('join_room', `worktree:${roomWorktreeId}`);
-      }
-
-      const handler = (data: NavigateEvent) => {
-        if (!shouldProcessNavigateEvent(data, threadId, lastEventIdRef)) return;
-        const locked = useChatStore.getState().presentationLock != null;
-        const processed = handleNavigateEvent(
-          data,
-          worktreeId,
-          {
-            setWorkspaceWorktreeId,
-            setWorkspaceRevealPath,
-            setWorkspaceOpenFile,
-            setWorkspaceMode,
-          },
-          recentOpenRef.current,
-          locked,
-          scopedWorktreeAliases,
-        );
-        if (processed && data.action === 'open') {
-          recentOpenRef.current = { path: data.path, worktreeId: data.worktreeId, ts: Date.now() };
-        }
-      };
-
-      socket.on('workspace:navigate', handler);
-
-      cleanup = () => {
-        socket.off('workspace:navigate', handler);
-        socket.disconnect();
-      };
+    if (options.enabled === false || !options.isChatRoute || !threadId || !isWorkspaceVisible) return;
+    const storage = sessionNavigationStorage();
+    if (!storage) return;
+    consumePendingWorkspaceNavigation({
+      storage,
+      threadId,
+      canDisplay: true,
+      presentationLocked,
+      apply: applyNavigate,
     });
+  }, [applyNavigate, isWorkspaceVisible, options.enabled, options.isChatRoute, presentationLocked, threadId]);
+
+  useEffect(() => {
+    if (options.enabled === false) return;
+    const apiUrl = new URL(API_URL);
+    const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
+
+    socket.emit('join_room', WORKSPACE_NAVIGATION_ACK_ROOM);
+
+    const handler = (data: NavigateEvent, acknowledge?: (receipt: WorkspaceNavigationReceipt) => void) => {
+      if (!shouldProcessNavigateEvent(data, lastEventIdRef)) return;
+      const deliveryState = deliveryStateRef.current;
+      const storage = sessionNavigationStorage();
+      const queuedData =
+        data.threadId || !deliveryState.threadId ? data : { ...data, threadId: deliveryState.threadId };
+      const receipt = deliverWorkspaceNavigateEvent({
+        data,
+        activeThreadId: deliveryState.threadId,
+        isChatRoute: deliveryState.isChatRoute,
+        isWorkspaceVisible: deliveryState.isWorkspaceVisible,
+        presentationLocked: useChatStore.getState().presentationLock != null,
+        apply: deliveryState.applyNavigate,
+        persist: () => (storage ? queuePendingWorkspaceNavigation(storage, queuedData) : false),
+      });
+      if (acknowledge) {
+        acknowledge(receipt);
+      }
+    };
+
+    socket.on('workspace:navigate', handler);
 
     return () => {
-      cancelled = true;
-      cleanup?.();
+      socket.off('workspace:navigate', handler);
+      socket.disconnect();
     };
-  }, [
-    worktreeId,
-    threadId,
-    scopedWorktreeAliases,
-    setWorkspaceWorktreeId,
-    setWorkspaceRevealPath,
-    setWorkspaceOpenFile,
-    setWorkspaceMode,
-  ]);
+  }, [options.enabled]);
 }

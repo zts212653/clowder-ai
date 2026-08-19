@@ -10,6 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { anchorApproval } from './helpers.js';
 
 describe('F246 Phase F: Approval History', () => {
   let InMemoryDispatchProposalStore;
@@ -80,8 +81,12 @@ describe('F246 Phase F: Approval History', () => {
     it('returns both approved and rejected in decidedAt desc order', async () => {
       const store = new InMemoryDispatchProposalStore();
       // Create and decide in order: reject dp-old first, approve dp-new second
-      await store.create(createInput({ proposalId: 'dp-old', createdAt: Date.now() - 600_000 }));
-      await store.create(createInput({ proposalId: 'dp-new', createdAt: Date.now() - 300_000 }));
+      await store.create(
+        createInput({ proposalId: 'dp-old', targetThreadId: 'thread-A', createdAt: Date.now() - 600_000 }),
+      );
+      await store.create(
+        createInput({ proposalId: 'dp-new', targetThreadId: 'thread-B', createdAt: Date.now() - 300_000 }),
+      );
       await store.reject('dp-old', 'user-landy');
       await store.approve('dp-new', 'user-landy');
 
@@ -97,7 +102,9 @@ describe('F246 Phase F: Approval History', () => {
     it('respects the limit parameter', async () => {
       const store = new InMemoryDispatchProposalStore();
       for (let i = 0; i < 5; i++) {
-        await store.create(createInput({ proposalId: `dp-${i}`, createdAt: Date.now() - i * 10_000 }));
+        await store.create(
+          createInput({ proposalId: `dp-${i}`, targetThreadId: `thread-${i}`, createdAt: Date.now() - i * 10_000 }),
+        );
         await store.approve(`dp-${i}`, 'user-landy');
       }
 
@@ -126,16 +133,29 @@ describe('F246 Phase F: Approval History', () => {
 
   // ── AC-F4: F193ApprovalAdapter.listSettled ───────────────────────────────────
 
+  /** Create + anchor a dispatch proposal so adapter projection works. */
+  const createAnchored = async (store, overrides = {}) => {
+    const input = createInput(overrides);
+    const { proposal } = await store.create(input);
+    anchorApproval(store, {
+      proposalId: proposal.proposalId,
+      sourceFeatureId: 'F193',
+      ownerUserId: proposal.ownerUserId,
+      requesterCatId: proposal.senderCatId,
+      threadId: proposal.sourceThreadId,
+      createdAt: proposal.createdAt,
+    });
+    return proposal;
+  };
+
   describe('F193ApprovalAdapter.listSettled', () => {
     it('returns SettledApprovalItem[] for approved dispatch proposals', async () => {
       const store = new InMemoryDispatchProposalStore();
-      await store.create(
-        createInput({
-          proposalId: 'dp-settled-1',
-          content: 'Investigate the F246 history feature',
-          targetCats: ['sonnet', 'gpt52'],
-        }),
-      );
+      await createAnchored(store, {
+        proposalId: 'dp-settled-1',
+        content: 'Investigate the F246 history feature',
+        targetCats: ['sonnet', 'gpt52'],
+      });
       await store.approve('dp-settled-1', 'user-landy');
 
       const adapter = new F193ApprovalAdapter(store);
@@ -155,7 +175,7 @@ describe('F246 Phase F: Approval History', () => {
 
     it('returns SettledApprovalItem with status=rejected for rejected proposals', async () => {
       const store = new InMemoryDispatchProposalStore();
-      await store.create(createInput({ proposalId: 'dp-rejected' }));
+      await createAnchored(store, { proposalId: 'dp-rejected' });
       await store.reject('dp-rejected', 'user-landy');
 
       const adapter = new F193ApprovalAdapter(store);
@@ -179,7 +199,7 @@ describe('F246 Phase F: Approval History', () => {
     it('respects limit option', async () => {
       const store = new InMemoryDispatchProposalStore();
       for (let i = 0; i < 5; i++) {
-        await store.create(createInput({ proposalId: `dp-s-${i}` }));
+        await createAnchored(store, { proposalId: `dp-s-${i}`, targetThreadId: `thread-${i}` });
         await store.approve(`dp-s-${i}`, 'user-landy');
       }
 

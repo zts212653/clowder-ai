@@ -6,6 +6,8 @@ import { after, before, describe, it } from 'node:test';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { createTaskOutcomeGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
+import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import { runTwoConnectionSameValueRace } from './task-outcome-writeback-race-fixture.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-taskoutcome-guard-'));
 const harnessFeedbackRoot = join(root, 'docs/harness-feedback');
@@ -98,6 +100,7 @@ function buildMockGitPublisher() {
         join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
         readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
       );
+      seedCanonicalMeasurementCensusState(iso);
       try {
         const stageResult = await opts.stage(iso);
         await stageResult.afterPublish?.();
@@ -147,6 +150,35 @@ describe('task-outcome episode verdict writeback guards', () => {
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
   });
 
+  it('accepts an exact same-value verdict when a replacement evidence PR is published', async () => {
+    const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-replacement-${Date.now()}.sqlite`);
+    const seeded = seedTerminalEpisode(taskOutcomeDbPath, 'success');
+    const result = await handlePublishVerdict(
+      {
+        harnessFeedbackRoot,
+        gitPublisher: buildMockGitPublisher(),
+        generator: createTaskOutcomeGeneratorAdapter(),
+        taskOutcomeDbPath,
+      },
+      {
+        packet: buildPacket('vhp-task-outcome-e2e-writeback-replacement'),
+        domain: 'eval:task-outcome',
+        catId: 'opus-47',
+        ownerUserId: 'you',
+        sourceRefs: {
+          kind: 'task-outcome-snapshot',
+          windowStartMs: seeded.baseMs - 60_000,
+          windowEndMs: seeded.baseMs + 60_000,
+          episodeVerdicts: [{ episodeId: seeded.episodeId, verdict: 'success' }],
+        },
+      },
+    );
+
+    const store = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
+    assert.equal(result.ok, true);
+    assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
+  });
+
   it('does not expose a verdict PR when the final writeback claim fails', async () => {
     const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-stale-pr-${Date.now()}.sqlite`);
     const seeded = seedTerminalEpisode(taskOutcomeDbPath);
@@ -159,6 +191,7 @@ describe('task-outcome episode verdict writeback guards', () => {
           join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
           readFileSync(join(harnessFeedbackRoot, 'eval-domains', 'eval-task-outcome.yaml'), 'utf8'),
         );
+        seedCanonicalMeasurementCensusState(iso);
         try {
           const stageResult = await opts.stage(iso);
           new TaskOutcomeEpisodeStore(taskOutcomeDbPath).updateVerdict(seeded.episodeId, 'success');
@@ -197,7 +230,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     assert.equal(exposedPr, false);
   });
 
-  it('rejects stale concurrent writeback callbacks without overwriting the first verdict', async () => {
+  it('accepts stale concurrent writeback callbacks when they replay the same verdict', async () => {
     const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-concurrent-${Date.now()}.sqlite`);
     const seeded = seedTerminalEpisode(taskOutcomeDbPath);
     const generator = createTaskOutcomeGeneratorAdapter();
@@ -224,7 +257,7 @@ describe('task-outcome episode verdict writeback guards', () => {
       buildPacket('vhp-task-outcome-concurrent-second'),
       {
         ...sourceRefs,
-        episodeVerdicts: [{ episodeId: seeded.episodeId, verdict: 'corrected_success' }],
+        episodeVerdicts: [{ episodeId: seeded.episodeId, verdict: 'success' }],
       },
       deps,
     );
@@ -232,8 +265,54 @@ describe('task-outcome episode verdict writeback guards', () => {
 
     first.afterPublish?.();
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
-    await assert.rejects(async () => second.afterPublish?.(), /already has verdict='success'/);
+    await assert.doesNotReject(async () => second.afterPublish?.());
     assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
+  });
+
+  it('accepts a true two-connection same-value race after the first writer reads pending state', async () => {
+    const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-wal-race-${Date.now()}.sqlite`);
+    const seeded = seedTerminalEpisode(taskOutcomeDbPath);
+    const outcomes = await runTwoConnectionSameValueRace({
+      taskOutcomeDbPath,
+      episodeId: seeded.episodeId,
+    });
+
+    assert.deepEqual(outcomes, [
+      { role: 'first', result: { ok: true } },
+      { role: 'second', result: { ok: true } },
+    ]);
+    const store = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
+    assert.equal(store.getEpisode(seeded.episodeId)?.verdict, 'success');
+  });
+
+  it('claims pending rows atomically when the same batch also replays an identical verdict', async () => {
+    const taskOutcomeDbPath = join(tmpdir(), `publish-verdict-taskoutcome-mixed-batch-${Date.now()}.sqlite`);
+    const preexisting = seedTerminalEpisode(taskOutcomeDbPath, 'success');
+    const pending = seedTerminalEpisode(taskOutcomeDbPath);
+    const generator = createTaskOutcomeGeneratorAdapter();
+    const artifact = await generator(
+      buildPacket('vhp-task-outcome-mixed-idempotent-batch'),
+      {
+        kind: 'task-outcome-snapshot',
+        windowStartMs: Math.min(preexisting.baseMs, pending.baseMs) - 60_000,
+        windowEndMs: Math.max(preexisting.baseMs, pending.baseMs) + 60_000,
+        episodeVerdicts: [
+          { episodeId: preexisting.episodeId, verdict: 'success' },
+          { episodeId: pending.episodeId, verdict: 'corrected_success' },
+        ],
+      },
+      {
+        harnessFeedbackRoot,
+        liveHarnessFeedbackRoot: harnessFeedbackRoot,
+        ownerUserId: 'you',
+        taskOutcomeDbPath,
+      },
+    );
+
+    artifact.afterPublish?.();
+    const store = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
+    assert.equal(store.getEpisode(preexisting.episodeId)?.verdict, 'success');
+    assert.equal(store.getEpisode(pending.episodeId)?.verdict, 'corrected_success');
   });
 
   it('rolls back earlier episode writebacks when a later episode is claimed concurrently', async () => {

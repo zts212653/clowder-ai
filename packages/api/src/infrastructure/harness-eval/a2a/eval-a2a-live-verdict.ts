@@ -135,7 +135,10 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
       attributionRefs: resolved.attributionRefs,
     },
   });
-  const markdown = formatLiveVerdictMarkdown(input.verdictId, packetWithBundleRefs, resolved.snapshotRef);
+  const markdown = formatLiveVerdictMarkdown(input.verdictId, packetWithBundleRefs, resolved.snapshotRef, {
+    domainId: input.domain.domainId,
+    featureId: input.domain.handoffTargetResolver.featureId,
+  });
   writeFileSync(verdictPath, markdown, 'utf8');
 
   return {

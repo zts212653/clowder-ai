@@ -8,6 +8,7 @@ function entry(overrides = {}) {
   return {
     threadId: 't1',
     userId: 'u1',
+    ownerAuthProvenance: 'unknown',
     content: 'hello',
     source: 'user',
     targetCats: ['opus'],
@@ -24,6 +25,13 @@ describe('InvocationQueue', () => {
   });
 
   // ── Basic FIFO ──
+
+  it('rejects a producer that omits explicit owner authentication provenance', () => {
+    assert.throws(
+      () => queue.enqueue(entry({ ownerAuthProvenance: undefined })),
+      /ownerAuthProvenance must be explicit/,
+    );
+  });
 
   it('enqueue + dequeue FIFO order', () => {
     queue.enqueue(entry({ content: 'first' }));
@@ -150,6 +158,163 @@ describe('InvocationQueue', () => {
     assert.equal(queue.size('t1', 'u1'), 2);
   });
 
+  // ── #1291 Gate 6: exact ordinary-user Batch Steer reservation ──
+
+  describe('exact user Batch Steer reservation (#1291)', () => {
+    it('atomically reserves only the explicit allowlist and marks every selected entry as steering', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const c = queue.enqueue(entry({ content: 'c', ownerAuthProvenance: 'strict' })).entry;
+
+      const result = queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      assert.equal(result.outcome, 'reserved');
+      assert.deepEqual(result.entryIds, [a.id, b.id]);
+      assert.equal(queue.list('t1', 'u1')[0].id, a.id, 'primary entry is promoted');
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.deepEqual(byId.get(a.id).steerRequestedByCatIds, ['opus']);
+      assert.deepEqual(byId.get(b.id).steerRequestedByCatIds, ['opus']);
+      assert.equal(byId.get(c.id).steerRequestedByCatIds, undefined, 'unselected C is untouched');
+      assert.equal(byId.get(c.id).exactSteerBatch, undefined, 'unselected C is not reserved');
+    });
+
+    it('keeps an exact reservation out of ordinary dequeue until its owner claims it', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const ordinary = queue.enqueue(
+        entry({ content: 'ordinary', ownerAuthProvenance: 'strict', targetCats: ['codex'] }),
+      ).entry;
+      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      assert.equal(
+        queue.markProcessingById('t1', a.id),
+        false,
+        'an id lookup without reservation identity must not steal an exact reservation',
+      );
+      assert.equal(
+        queue.markProcessing('t1', 'u1')?.id,
+        ordinary.id,
+        'ordinary dequeue skips the complete reserved allowlist',
+      );
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.equal(byId.get(a.id).status, 'queued');
+      assert.equal(byId.get(b.id).status, 'queued');
+    });
+
+    it('claims an activated reservation only with its exact process-local identity', () => {
+      const target = queue.enqueue(entry({ content: 'target', ownerAuthProvenance: 'strict' })).entry;
+      const reserved = queue.reserveExactUserEntry('t1', 'u1', target.id, 'opus');
+      assert.equal(reserved.outcome, 'reserved');
+
+      assert.equal(
+        queue.claimExactSteerReservation('t1', 'u1', target.id, reserved.reservationId),
+        null,
+        'durable reservation is not claimable before preemption begins and succeeds',
+      );
+      assert.equal(queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.claimExactSteerReservation('t1', 'u1', target.id, 'wrong-reservation'), null);
+
+      const claimed = queue.claimExactSteerReservation('t1', 'u1', target.id, reserved.reservationId);
+      assert.equal(claimed.id, target.id);
+      assert.equal(claimed.status, 'processing');
+    });
+
+    it('marks the complete reservation processing in one dequeue transition', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      const c = queue.enqueue(entry({ content: 'c', ownerAuthProvenance: 'strict' })).entry;
+      const reserved = queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+      assert.equal(reserved.outcome, 'reserved');
+      assert.equal(queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
+
+      const primary = queue.claimExactSteerReservation('t1', 'u1', a.id, reserved.reservationId);
+
+      assert.equal(primary.id, a.id);
+      const byId = new Map(queue.list('t1', 'u1').map((candidate) => [candidate.id, candidate]));
+      assert.equal(byId.get(a.id).status, 'processing');
+      assert.equal(byId.get(b.id).status, 'processing');
+      assert.equal(byId.get(a.id).processingStartedAt, byId.get(b.id).processingStartedAt);
+      assert.equal(byId.get(c.id).status, 'queued');
+    });
+
+    it('withdrawing one deferred member releases the reservation and leaves siblings ordinary', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const b = queue.enqueue(entry({ content: 'b', ownerAuthProvenance: 'strict' })).entry;
+      queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+
+      const removed = queue.remove('t1', 'u1', b.id);
+
+      assert.equal(removed.id, b.id);
+      const remaining = queue.list('t1', 'u1');
+      assert.equal(remaining.length, 1);
+      assert.equal(remaining[0].id, a.id);
+      assert.equal(remaining[0].exactSteerBatch, undefined);
+      assert.equal(remaining[0].steerRequestedByCatIds, undefined);
+    });
+
+    it('rejects the complete reserved set without mutating any entry when one carrier is ineligible', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const fenced = queue.enqueue(
+        entry({
+          content: 'fenced',
+          ownerAuthProvenance: 'strict',
+          actionSuccessorFence: { leaseId: 'lease-1' },
+        }),
+      ).entry;
+
+      const before = queue.list('t1', 'u1');
+      const result = queue.reserveExactUserBatch('t1', 'u1', [a.id, fenced.id]);
+
+      assert.deepEqual(result, { outcome: 'rejected', reason: 'entry_ineligible' });
+      assert.deepEqual(queue.list('t1', 'u1'), before);
+    });
+
+    it('rejects incompatible target cats and intents without partial reservation', () => {
+      const a = queue.enqueue(entry({ content: 'a', ownerAuthProvenance: 'strict' })).entry;
+      const otherCat = queue.enqueue(
+        entry({ content: 'b', ownerAuthProvenance: 'strict', targetCats: ['codex'] }),
+      ).entry;
+      const before = queue.list('t1', 'u1');
+
+      assert.deepEqual(queue.reserveExactUserBatch('t1', 'u1', [a.id, otherCat.id]), {
+        outcome: 'rejected',
+        reason: 'entries_incompatible',
+      });
+      assert.deepEqual(queue.list('t1', 'u1'), before);
+    });
+
+    it('rejects connector/system, freshness, continuation/A2A, pinned, and legacy-unattributed carriers', () => {
+      const cases = [
+        { source: 'connector' },
+        { source: 'agent', sourceCategory: 'scheduled' },
+        { sourceCategory: 'freshness', freshnessClosureId: 'closure-1' },
+        { sourceCategory: 'continuation' },
+        { sourceCategory: 'a2a', a2aTriggerMessageId: 'trigger-1' },
+        { source: 'agent', sourceCategory: 'continuation', continuationKey: 'pinned-1' },
+        { ownerAuthProvenance: 'unknown' },
+        {
+          authorIntentByCatId: {
+            opus: { requested: 'continue_current', boundParentInvocationId: 'parent-1' },
+          },
+        },
+      ];
+
+      for (const [index, carrier] of cases.entries()) {
+        const isolated = new InvocationQueue();
+        const a = isolated.enqueue(entry({ content: `a-${index}`, ownerAuthProvenance: 'strict' })).entry;
+        const blocked = isolated.enqueue(
+          entry({ content: `blocked-${index}`, ownerAuthProvenance: 'strict', ...carrier }),
+        ).entry;
+        assert.deepEqual(isolated.reserveExactUserBatch('t1', 'u1', [a.id, blocked.id]), {
+          outcome: 'rejected',
+          reason: 'entry_ineligible',
+        });
+      }
+    });
+  });
+
   it('preserves senderMeta on enqueued connector entry', () => {
     const r = queue.enqueue(
       entry({
@@ -159,6 +324,266 @@ describe('InvocationQueue', () => {
     );
     assert.equal(r.outcome, 'enqueued');
     assert.deepEqual(r.entry.senderMeta, { id: 'ou_abc', name: 'You' });
+  });
+
+  // ── F254 D1.2a: per-cat queued_seen ──
+
+  it('binds exact child creation before body exposure and clears only the retry-matching witness', () => {
+    const r = queue.enqueue(entry({ content: 'wake before read', targetCats: ['opus', 'codex'] }));
+
+    assert.equal(queue.markQueuedAwakened('t1', 'u1', r.entry.id, 'opus', 'child-opus', 1_100), true);
+    assert.equal(queue.markQueuedAwakened('t1', 'u1', r.entry.id, 'opus', 'child-opus', 1_100), false);
+    assert.equal(queue.markQueuedAwakened('t1', 'u1', r.entry.id, 'codex', 'child-codex', 1_200), true);
+
+    let snapshot = queue.getEntrySnapshot('t1', 'u1', r.entry.id);
+    assert.deepEqual(snapshot.queuedAwakenedInvocationIdByCatId, {
+      opus: 'child-opus',
+      codex: 'child-codex',
+    });
+    assert.deepEqual(snapshot.queuedAwakenedAtByCatId, { opus: 1_100, codex: 1_200 });
+    assert.equal(snapshot.queuedSeenByCatIds, undefined);
+    assert.throws(
+      () => queue.markQueuedAwakened('t1', 'u1', r.entry.id, 'opus', 'child-opus', 1_101),
+      /timestamp is immutable/,
+    );
+
+    assert.equal(queue.clearQueuedSeenInvocationForCats('t1', ['opus'], 'child-opus'), 1);
+    snapshot = queue.getEntrySnapshot('t1', 'u1', r.entry.id);
+    assert.deepEqual(snapshot.queuedAwakenedInvocationIdByCatId, { codex: 'child-codex' });
+    assert.deepEqual(snapshot.queuedAwakenedAtByCatId, { codex: 1_200 });
+  });
+
+  it('markQueuedSeen hides queued freshness only for that cat target', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'queued for two cats',
+        targetCats: ['opus', 'codex'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-opus' },
+          codex: { requested: 'continue_current', boundParentInvocationId: 'parent-codex' },
+        },
+      }),
+    );
+
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus'), true);
+
+    assert.deepEqual(
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus', { parentInvocationId: 'parent-opus' }),
+      [],
+      'seen target should not be nagged again',
+    );
+    assert.equal(
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'codex', { parentInvocationId: 'parent-codex' }).length,
+      1,
+      'other targets must not be consumed by opus reading',
+    );
+  });
+
+  it('markQueuedSeen does not hide queued bodies from full read view', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'body stays readable after seen',
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-opus' },
+        },
+      }),
+    );
+
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus'), true);
+    assert.equal(
+      queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus', { parentInvocationId: 'parent-opus' }).length,
+      0,
+    );
+
+    const readable = queue.getQueuedBodyMessagesForCat('t1', 'u1', 'opus', 'parent-opus');
+    assert.equal(readable.length, 1);
+    assert.equal(readable[0].entryId, r.entry.id);
+    assert.equal(readable[0].content, 'body stays readable after seen');
+  });
+
+  it('queued body visibility is target-cat scoped, not thread-wide', () => {
+    queue.enqueue(
+      entry({
+        content: 'sol-only queued body',
+        targetCats: ['codex-sol'],
+        authorIntentByCatId: {
+          'codex-sol': { requested: 'continue_current', boundParentInvocationId: 'parent-sol' },
+        },
+      }),
+    );
+
+    assert.equal(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'codex-sol', 'parent-sol').length, 1);
+    assert.deepEqual(queue.getQueuedBodyMessagesForCat('t1', 'u1', 'gpt52', 'parent-sol'), []);
+  });
+
+  it('coalescing queued agent content clears queued_seen so new content can nag again', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'first handoff',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        callerCatId: 'codex',
+        targetCats: ['opus'],
+      }),
+    );
+
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus'), true);
+    assert.equal(queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus').length, 0);
+
+    assert.equal(
+      queue.coalesceContentIntoQueuedAgent('t1', 'u1', r.entry.id, 'second handoff', 'msg-2', 'codex'),
+      true,
+    );
+
+    const queued = queue.getQueuedFreshnessMessagesForCat('t1', 'u1', 'opus');
+    assert.equal(queued.length, 1);
+    assert.match(queued[0].content, /second handoff/);
+  });
+
+  it('does not coalesce A2A carriers across owner authentication provenance', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'strict handoff',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        callerCatId: 'codex',
+        a2aParentInvocationId: 'parent-1',
+        targetCats: ['opus'],
+        ownerAuthProvenance: 'strict',
+      }),
+    );
+
+    assert.equal(queue.findInFlightAgentEntry('t1', 'opus', 'codex', 'parent-1', 'compatibility_fallback'), null);
+    assert.equal(
+      queue.coalesceContentIntoQueuedAgent(
+        't1',
+        'u1',
+        r.entry.id,
+        'fallback handoff',
+        'msg-fallback',
+        'codex',
+        'parent-1',
+        'compatibility_fallback',
+      ),
+      false,
+    );
+    assert.equal(queue.getEntrySnapshot('t1', 'u1', r.entry.id).content, 'strict handoff');
+  });
+
+  // ── F254 D1.2b: queued_handled consumes only the completed target ──
+
+  it('markQueuedHandledForCatAcrossUsers removes only the seen target from a multi-target entry', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'multi target queued body',
+        targetCats: ['opus', 'codex'],
+        messageId: 'msg-1',
+      }),
+    );
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-opus-1'), true);
+
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-opus-1');
+
+    assert.equal(handled.length, 1);
+    assert.deepEqual(handled[0].messageIds, ['msg-1']);
+    assert.deepEqual(handled[0].remainingTargetCats, ['codex']);
+    assert.equal(handled[0].fullyConsumed, false);
+    const remaining = queue.list('t1', 'u1');
+    assert.equal(remaining.length, 1);
+    assert.deepEqual(remaining[0].targetCats, ['codex']);
+  });
+
+  it('markQueuedHandledForCatAcrossUsers removes the entry when the last seen target is handled', () => {
+    const r = queue.enqueue(
+      entry({
+        content: 'single target queued body',
+        targetCats: ['opus'],
+        messageId: 'msg-1',
+      }),
+    );
+    queue.backfillMessageId('t1', 'u1', r.entry.id, 'msg-1b');
+    r.entry.mergedMessageIds.push('msg-2');
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-opus-1'), true);
+
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-opus-1');
+
+    assert.equal(handled.length, 1);
+    assert.deepEqual(handled[0].messageIds, ['msg-1', 'msg-1b', 'msg-2']);
+    assert.deepEqual(handled[0].remainingTargetCats, []);
+    assert.equal(handled[0].fullyConsumed, true);
+    assert.equal(queue.size('t1', 'u1'), 0);
+  });
+
+  it('markQueuedHandledForCatAcrossUsers ignores entries not seen by the completing cat', () => {
+    const r = queue.enqueue(entry({ targetCats: ['opus'], messageId: 'msg-1' }));
+
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-opus-1');
+
+    assert.deepEqual(handled, []);
+    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.deepEqual(queue.list('t1', 'u1')[0].targetCats, ['opus']);
+    assert.equal(queue.list('t1', 'u1')[0].id, r.entry.id);
+  });
+
+  it('markQueuedHandledForCatAcrossUsers ignores processing entries', () => {
+    const r = queue.enqueue(entry({ targetCats: ['opus'], messageId: 'msg-1' }));
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-opus-1'), true);
+    queue.markProcessing('t1', 'u1');
+
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-opus-1');
+
+    assert.deepEqual(handled, []);
+    assert.equal(queue.list('t1', 'u1')[0].status, 'processing');
+  });
+
+  it('markQueuedHandledForCatAcrossUsers ignores stale seen markers from another invocation', () => {
+    const r = queue.enqueue(entry({ targetCats: ['opus'], messageId: 'msg-1' }));
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-failed'), true);
+
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-unrelated-success');
+
+    assert.deepEqual(handled, []);
+    assert.equal(queue.size('t1', 'u1'), 1);
+    assert.deepEqual(queue.list('t1', 'u1')[0].targetCats, ['opus']);
+  });
+
+  it('clearQueuedSeenInvocationForCats removes only matching retry evidence', () => {
+    const r = queue.enqueue(entry({ targetCats: ['opus', 'codex'], messageId: 'msg-1' }));
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-retry'), true);
+    assert.equal(queue.markQueuedSeen('t1', 'u1', r.entry.id, 'codex', 'inv-other'), true);
+
+    const cleared = queue.clearQueuedSeenInvocationForCats('t1', ['opus'], 'inv-retry');
+
+    assert.equal(cleared, 1);
+    const remaining = queue.list('t1', 'u1')[0];
+    assert.deepEqual(remaining.queuedSeenByCatIds.sort(), ['codex', 'opus']);
+    assert.deepEqual(remaining.queuedSeenInvocationIdByCatId, { codex: 'inv-other' });
+    const handled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-retry');
+    assert.deepEqual(handled, [], 'cleared retry evidence must not consume stale queued_seen');
+
+    assert.equal(
+      queue.markQueuedSeen('t1', 'u1', r.entry.id, 'opus', 'inv-retry'),
+      false,
+      'retry read refreshes evidence without creating a second queued_seen transition',
+    );
+    const currentAttemptHandled = queue.markQueuedHandledForCatAcrossUsers('t1', 'opus', 'inv-retry');
+    assert.equal(currentAttemptHandled.length, 1, 'fresh retry read evidence remains eligible for handled closure');
+  });
+
+  it('clearQueuedSeenInvocationForCats also clears the exact stale Steer invocation', () => {
+    const r = queue.enqueue(entry({ targetCats: ['opus'], messageId: 'msg-steer' }));
+    assert.equal(queue.markSteering('t1', 'u1', r.entry.id, 'opus'), true);
+    queue.markProcessing('t1', 'u1');
+    assert.deepEqual(queue.markProcessingSeen('t1', 'u1', r.entry.id, ['opus'], 'inv-steer-retry'), ['opus']);
+    assert.equal(queue.rollbackProcessing('t1', r.entry.id), true);
+
+    const cleared = queue.clearQueuedSeenInvocationForCats('t1', ['opus'], 'inv-steer-retry');
+
+    assert.equal(cleared, 1);
+    const remaining = queue.list('t1', 'u1')[0];
+    assert.equal(remaining.queuedSeenInvocationIdByCatId, undefined);
+    assert.equal(remaining.steeredInvocationIdByCatId, undefined);
   });
 
   // ── Backfill / Merge IDs ──
@@ -421,6 +846,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -436,6 +862,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'fresh handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -451,6 +878,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -461,6 +889,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'fresh',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opus'],
       intent: 'execute',
       autoExecute: true,
@@ -485,6 +914,7 @@ describe('InvocationQueue', () => {
         userId: 'system',
         content: `stale-${i}`,
         source: 'agent',
+        ownerAuthProvenance: 'unknown',
         targetCats: [`cat${i}`],
         intent: 'execute',
         autoExecute: true,
@@ -502,6 +932,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'fresh handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -517,6 +948,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -535,6 +967,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -559,6 +992,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'A2A handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opus'],
       intent: 'execute',
       autoExecute: true,
@@ -583,6 +1017,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'A2A handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opus'],
       intent: 'execute',
       autoExecute: true,
@@ -600,6 +1035,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'callback handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -615,6 +1051,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'callback handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -639,6 +1076,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'callback handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -660,6 +1098,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -676,6 +1115,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'fresh',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -686,6 +1126,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opencode'],
       intent: 'execute',
       autoExecute: true,
@@ -708,6 +1149,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'stale but still dispatchable',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -732,6 +1174,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -750,6 +1193,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -771,6 +1215,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -790,6 +1235,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'current multi-target handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opus-47', 'codex'],
       intent: 'execute',
       autoExecute: true,
@@ -811,6 +1257,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'current route',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['opus-47', 'codex'],
       intent: 'execute',
       autoExecute: true,
@@ -822,6 +1269,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'already queued callback handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -841,6 +1289,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -857,6 +1306,7 @@ describe('InvocationQueue', () => {
       userId: 'u1',
       content: 'queued in another thread',
       source: 'user',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
     });
@@ -875,6 +1325,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -897,6 +1348,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -920,6 +1372,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -944,6 +1397,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -1151,6 +1605,33 @@ describe('InvocationQueue', () => {
     assert.equal(batch.map((e) => e.content).join('\n'), 'a\nb\nc');
   });
 
+  it('does not batch user entries across owner authentication provenance', () => {
+    queue.enqueue(
+      entry({
+        content: 'strict-owner-message',
+        source: 'user',
+        targetCats: ['c1'],
+        intent: 'execute',
+        ownerAuthProvenance: 'strict',
+      }),
+    );
+    queue.enqueue(
+      entry({
+        content: 'fallback-owner-message',
+        source: 'user',
+        targetCats: ['c1'],
+        intent: 'execute',
+        ownerAuthProvenance: 'compatibility_fallback',
+      }),
+    );
+
+    const batch = queue.collectUserBatch('t1', 'u1');
+
+    assert.equal(batch.length, 1);
+    assert.equal(batch[0].content, 'strict-owner-message');
+    assert.equal(batch[0].ownerAuthProvenance, 'strict');
+  });
+
   it('collectUserBatch stops at different intent', () => {
     queue.enqueue(entry({ content: 'a', source: 'user', targetCats: ['c1'], intent: 'execute' }));
     queue.enqueue(entry({ content: 'b', source: 'user', targetCats: ['c1'], intent: 'search' }));
@@ -1274,6 +1755,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -1310,6 +1792,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'A2A handoff',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,
@@ -1325,6 +1808,7 @@ describe('InvocationQueue', () => {
       userId: 'system',
       content: 'continuation',
       source: 'agent',
+      ownerAuthProvenance: 'unknown',
       sourceCategory: 'continuation',
       targetCats: ['opus'],
       intent: 'execute',

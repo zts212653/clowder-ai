@@ -5,7 +5,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
@@ -13,15 +13,26 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
 import {
+  CliTerminationController,
+  type CliTerminationGraces,
+  type CliTerminationMode,
+} from './CliTerminationController.js';
+import {
   buildCliDiagnostics,
   buildCliExitDiagnostic,
   type CliDiagnostics,
   type CliErrorReasonCode,
+  type CliTimeoutTerminalContext,
   formatCliStderrForLog,
 } from './cli-diagnostics.js';
+import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from './cli-process-ownership.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
+import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
+
+export { resolveCliSupervisorNodeArgs } from './cli-supervised-process.js';
+
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
@@ -30,6 +41,67 @@ import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
+const CAT_CAFE_RUNTIME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const GUARDED_GH_BIN = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-bin');
+const GUARDED_ZSH_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-zsh');
+type GuardedChildEnv = Record<string, string | null | undefined>;
+type SourceEnvOverrides = Readonly<Record<string, string | null>> | undefined;
+
+function hasSourceOverride(sourceOverrides: SourceEnvOverrides, key: string): boolean {
+  return sourceOverrides !== undefined && Object.hasOwn(sourceOverrides, key);
+}
+
+function shouldRefreshOriginalZdotdir(
+  env: GuardedChildEnv,
+  sourceOverrides: SourceEnvOverrides,
+  currentZdotdir: string,
+): boolean {
+  if (hasSourceOverride(sourceOverrides, 'CAT_CAFE_ORIGINAL_ZDOTDIR')) return false;
+  if (resolve(currentZdotdir) === GUARDED_ZSH_DIR) return false;
+  return hasSourceOverride(sourceOverrides, 'ZDOTDIR') || !env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+}
+
+function shouldRefreshHistfile(env: GuardedChildEnv, sourceOverrides: SourceEnvOverrides): boolean {
+  if (hasSourceOverride(sourceOverrides, 'HISTFILE')) return false;
+  return hasSourceOverride(sourceOverrides, 'ZDOTDIR') || !env.HISTFILE;
+}
+
+function configureGuardedZshEnv(env: GuardedChildEnv, sourceOverrides: SourceEnvOverrides): void {
+  const currentZdotdir = env.ZDOTDIR ?? env.HOME ?? process.env.HOME;
+  // An explicit ZDOTDIR selects a new startup context. Refresh inherited companion values unless
+  // the caller supplied those companions explicitly; otherwise parent-shell state leaks across contexts.
+  if (currentZdotdir && shouldRefreshOriginalZdotdir(env, sourceOverrides, currentZdotdir)) {
+    env.CAT_CAFE_ORIGINAL_ZDOTDIR = currentZdotdir;
+  }
+  if (currentZdotdir && shouldRefreshHistfile(env, sourceOverrides)) {
+    env.HISTFILE = resolve(currentZdotdir, '.zsh_history');
+  }
+  env.SHELL_SESSIONS_DISABLE ||= '1';
+  env.ZDOTDIR = GUARDED_ZSH_DIR;
+}
+
+export function withVerdictGhGuardEnv<T extends Record<string, string | null | undefined>>(
+  env: T,
+  sourceOverrides?: Readonly<Record<string, string | null>>,
+): T {
+  if (IS_WINDOWS || !existsSync(resolve(GUARDED_GH_BIN, 'gh'))) return env;
+  const mutable = env as Record<string, string | null | undefined>;
+  const currentPath = typeof mutable.PATH === 'string' ? mutable.PATH : (process.env.PATH ?? '');
+  const pathEntries = currentPath.split(':').filter(Boolean);
+  if (!pathEntries.includes(GUARDED_GH_BIN)) {
+    mutable.PATH = currentPath ? `${GUARDED_GH_BIN}:${currentPath}` : GUARDED_GH_BIN;
+  }
+  mutable.CAT_CAFE_VERDICT_GH_GUARD_ROOT = CAT_CAFE_RUNTIME_ROOT;
+  mutable.CAT_CAFE_VERDICT_GH_GUARD_BIN = GUARDED_GH_BIN;
+  if (existsSync(resolve(GUARDED_ZSH_DIR, '.zprofile'))) {
+    configureGuardedZshEnv(mutable, sourceOverrides);
+  }
+  if (!mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME) {
+    mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME =
+      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
+  }
+  return env;
+}
 
 /**
  * F212 Phase A — collect text from NDJSON stream `error` events. CLI providers (Codex, opencode)
@@ -116,7 +188,10 @@ export function maybeCollectStreamError(value: unknown, sink: string[], structur
   }
 }
 
-function isStallAutoKillWarning(options: CliSpawnOptions, warning: unknown): boolean {
+function isStallAutoKillWarning(
+  options: CliSpawnOptions,
+  warning: unknown,
+): warning is import('./ProcessLivenessProbe.js').LivenessWarningEvent {
   return (
     options.livenessProbe?.stallAutoKill === true &&
     isLivenessWarning(warning) &&
@@ -128,6 +203,15 @@ function isStallAutoKillWarning(options: CliSpawnOptions, warning: unknown): boo
 /** Grace period between SIGTERM and SIGKILL */
 export const KILL_GRACE_MS = 3_000;
 
+/** Codex gets a short cooperative interrupt window before the existing terminate path. */
+export const INTERRUPT_GRACE_MS = 2_000;
+
+/** Drain queued liveness warnings frequently without increasing the CPU sampling cadence. */
+export const LIVENESS_WARNING_DRAIN_INTERVAL_MS = 1_000;
+
+/** Final bounded window for close/stderr delivery after exit or the SIGKILL attempt. */
+export const TERMINATION_STDIO_DRAIN_GRACE_MS = 100;
+
 /** Grace period after semantic completion before force-killing a lingering process */
 export const SEMANTIC_COMPLETION_GRACE_MS = 5_000;
 
@@ -137,40 +221,25 @@ export const SEMANTIC_COMPLETION_GRACE_MS = 5_000;
 export interface CliSpawnerDeps {
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
-}
-
-const CLI_SUPERVISOR_ENV_FILE_FLAGS = new Set(['--env-file', '--env-file-if-exists']);
-
-function sanitizeCliSupervisorExecArgv(execArgv: string[]): string[] {
-  const safeArgs: string[] = [];
-  for (let index = 0; index < execArgv.length; index += 1) {
-    const arg = execArgv[index];
-    if (CLI_SUPERVISOR_ENV_FILE_FLAGS.has(arg)) {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('--env-file=') || arg.startsWith('--env-file-if-exists=')) {
-      continue;
-    }
-    safeArgs.push(arg);
-  }
-  return safeArgs;
-}
-
-export function resolveCliSupervisorNodeArgs(moduleUrl = import.meta.url, execArgv = process.execArgv): string[] {
-  const jsPath = fileURLToPath(new URL('./cli-supervisor.js', moduleUrl));
-  if (existsSync(jsPath)) return [jsPath];
-
-  const tsPath = fileURLToPath(new URL('./cli-supervisor.ts', moduleUrl));
-  if (existsSync(tsPath)) return [...sanitizeCliSupervisorExecArgv(execArgv), tsPath];
-
-  return [jsPath];
+  /** Short grace windows for lifecycle tests; production uses the exported constants. */
+  terminationGraces?: Partial<CliTerminationGraces>;
+  /** Test-only clock override; CPU sampling remains owned by ProcessLivenessProbe. */
+  livenessWarningDrainIntervalMs?: number;
 }
 
 /** Env vars to strip from child processes to prevent E2BIG (overly large values). */
 const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   'LS_COLORS', // typically 1-2 KB of color mappings
   'LSCOLORS', // BSD/macOS equivalent
+  // Runtime-only lifecycle capabilities must stop at the API process boundary.
+  // Agent CLIs and terminal shells may launch commands inside feature worktrees;
+  // forwarding either value would let a raw dev command act like the runtime owner.
+  'CONNECTOR_GATEWAY_AUTOSTART',
+  'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+  // Per-invocation process ownership is a capability, not ambient config. A
+  // nested API or persistent host must not inherit the outer invocation.
+  CLI_EXECUTION_OWNER_BINDING_ENV,
+  CLI_EXECUTION_ID_ENV,
 ]);
 
 export interface CliPlainTextResult {
@@ -182,22 +251,74 @@ export interface CliPlainTextResult {
   command: string;
 }
 
-export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
+function terminationStageForSignal(signal: NodeJS.Signals | undefined): CliTimeoutTerminalContext['finalStage'] {
+  if (signal === 'SIGINT') return 'interrupt';
+  if (signal === 'SIGTERM') return 'terminate';
+  if (signal === 'SIGKILL') return 'kill';
+  return 'none';
+}
+
+/** Stable, secret-free dimensions consumed by the F118/F212 timeout verdict. */
+export function buildCliTimeoutTelemetryAttributes(terminal: CliTimeoutTerminalContext) {
+  return {
+    'cli.reason_code': terminal.kind === 'stall_timeout' ? 'cli_stall_timeout' : 'cli_response_timeout',
+    'cli.timeout_reason': terminal.kind,
+    'cli.timeout_ms': terminal.configuredTimeoutMs,
+    'cli.silence_ms': terminal.observedSilenceDurationMs,
+    'cli.process_alive_at_timeout': terminal.processAliveAtTimeout,
+    'cli.first_termination_stage': terminationStageForSignal(terminal.signalsSent[0]),
+    'cli.termination_stage': terminal.finalStage,
+    'cli.termination_signals': terminal.signalsSent.join(','),
+  } as const;
+}
+
+async function waitForIteratorUntil<T>(
+  pending: Promise<IteratorResult<T>>,
+  deadlineMs: number,
+): Promise<IteratorResult<T> | undefined> {
+  const remainingMs = deadlineMs - Date.now();
+  if (remainingMs <= 0) return undefined;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+export function buildChildEnv(
+  overrides?: Record<string, string | null>,
+  options: { bindExecutionOwner?: boolean } = {},
+): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (ENV_VARS_TO_STRIP.has(key)) continue;
     merged[key] = value;
   }
-  if (!overrides) return merged;
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === null) {
-      delete merged[key];
-      continue;
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (ENV_VARS_TO_STRIP.has(key)) {
+        delete merged[key];
+        if (key === CLI_EXECUTION_ID_ENV && options.bindExecutionOwner === true && value !== null) {
+          merged[key] = value;
+        }
+        continue;
+      }
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
+      merged[key] = value;
     }
-    merged[key] = value;
   }
-  return merged;
+  return withVerdictGhGuardEnv(merged, overrides);
 }
 
 /**
@@ -210,6 +331,7 @@ export async function* spawnCli(
   deps?: CliSpawnerDeps,
 ): AsyncGenerator<unknown, void, undefined> {
   const doSpawn: SpawnFn = deps?.spawnFn ?? defaultSpawn;
+  const livenessWarningDrainIntervalMs = deps?.livenessWarningDrainIntervalMs ?? LIVENESS_WARNING_DRAIN_INTERVAL_MS;
   // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
   const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
 
@@ -231,11 +353,12 @@ export async function* spawnCli(
 
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
-    env: buildChildEnv(options.env),
+    env: buildChildEnv(options.env, { bindExecutionOwner: options.bindExecutionOwner !== false }),
     // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
     // provided, open stdin as a pipe so the prompt can be streamed off the command
     // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
     stdio: [options.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    bindExecutionOwner: options.bindExecutionOwner !== false,
   });
 
   // Incident 2026-05-29: feed prompt via stdin instead of argv to prevent
@@ -303,10 +426,46 @@ export async function* spawnCli(
     };
   });
 
+  let killed = false;
+  let timedOut = false;
+  let stallKilled = false; // #774: set when idle-silent stall triggers auto-kill
+  let processAliveAtTimeout = false;
+  let timeoutObservedSilenceMs: number | undefined;
+  let terminalCause: 'response_timeout' | 'stall_timeout' | 'abort' | 'cleanup' | undefined;
+  const terminationController = new CliTerminationController({
+    child,
+    isChildExited: () => childExited,
+    graces: {
+      interruptMs: deps?.terminationGraces?.interruptMs ?? INTERRUPT_GRACE_MS,
+      terminateMs: deps?.terminationGraces?.terminateMs ?? KILL_GRACE_MS,
+    },
+    onTransition: ({ signal, stage, state, sequence }) => {
+      const attributes = {
+        command: options.command,
+        ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+        signal,
+        stage,
+        state,
+        sequence,
+        cause: terminalCause ?? 'cleanup',
+      };
+      if (terminalCause === 'response_timeout' || terminalCause === 'stall_timeout') {
+        log.warn(attributes, 'CLI termination signal sent');
+      } else {
+        log.debug(attributes, 'CLI termination signal sent');
+      }
+      cliSpan?.addEvent('cli.termination_signal', attributes);
+    },
+  });
+  const terminationCommittedRace = terminationController
+    .waitForCommit()
+    .then(() => ({ source: 'termination' as const }));
+
   child.once('exit', (code, signal) => {
     childExited = true;
     exitCode = code;
     exitSignal = signal;
+    terminationController.markExited();
     log.debug({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
   });
   child.once('close', (code: unknown, signal: unknown) => {
@@ -316,6 +475,7 @@ export async function* spawnCli(
       exitCode = typeof code === 'number' ? code : null;
       exitSignal = typeof signal === 'string' ? (signal as NodeJS.Signals) : null;
     }
+    terminationController.markExited();
     log.debug({ pid: child.pid, command: options.command, exitCode, signal: exitSignal }, 'CLI process stdio closed');
     resolveCloseWait();
   });
@@ -333,25 +493,25 @@ export async function* spawnCli(
     }
   });
 
-  let killed = false;
-  let timedOut = false;
-  let stallKilled = false; // #774: set when idle-silent stall triggers auto-kill
-  // F118 P1-fix: Snapshot process liveness at the moment timeout fires,
-  // BEFORE killChild() — otherwise childExited is always true by yield time.
-  let processAliveAtTimeout = false;
-  let escalationTimer: ReturnType<typeof setTimeout> | undefined;
-
-  function killChild(): void {
+  function killChild(mode: CliTerminationMode = 'terminate-first', cause: typeof terminalCause = 'cleanup'): void {
     if (killed || childExited) return;
-    killed = true;
-    child.kill('SIGTERM');
-    escalationTimer = setTimeout(() => {
-      child.kill('SIGKILL');
-    }, KILL_GRACE_MS);
-    escalationTimer.unref();
-    child.on('exit', () => {
-      if (escalationTimer !== undefined) clearTimeout(escalationTimer);
-    });
+    terminalCause ??= cause;
+    killed = terminationController.request(mode);
+  }
+
+  function commitTimeout(
+    kind: 'response_timeout' | 'stall_timeout',
+    observedSilenceDurationMs: number,
+    mode: CliTerminationMode,
+  ): boolean {
+    if (timedOut || killed || childExited) return false;
+    terminalCause = kind;
+    timedOut = true;
+    stallKilled = kind === 'stall_timeout';
+    processAliveAtTimeout = !childExited;
+    timeoutObservedSilenceMs = observedSilenceDurationMs;
+    killChild(mode, kind);
+    return true;
   }
 
   // Timeout: reset on any output, timeoutMs=0 disables
@@ -370,9 +530,8 @@ export async function* spawnCli(
           return;
         }
       }
-      timedOut = true;
-      processAliveAtTimeout = !childExited;
-      killChild();
+      const observedSilenceDurationMs = lastEventAt === null ? Date.now() - startedAt : Date.now() - lastEventAt;
+      commitTimeout('response_timeout', observedSilenceDurationMs, 'terminate-first');
     }, timeoutMs);
     timeoutTimer.unref();
   };
@@ -388,10 +547,10 @@ export async function* spawnCli(
   });
 
   // AbortSignal
-  const abortHandler = (): void => killChild();
+  const abortHandler = (): void => killChild('terminate-first', 'abort');
   if (options.signal) {
     if (options.signal.aborted) {
-      killChild();
+      killChild('terminate-first', 'abort');
     } else {
       options.signal.addEventListener('abort', abortHandler, { once: true });
     }
@@ -413,6 +572,8 @@ export async function* spawnCli(
   let firstEventAt: number | null = null;
   let lastEventAt: number | null = null;
   let lastEventType: string | null = null;
+  /** F212 Phase H cloud R5 P2: chronological last terminal signal (defeats sticky abort). */
+  let localFinalTerminal: 'completed' | 'failed' | null = null;
 
   // F118 Phase B: Initialize liveness probe
   if (options.livenessProbe && child.pid !== undefined) {
@@ -424,6 +585,29 @@ export async function* spawnCli(
       registerLivenessProbe(options.invocationId, catId, () => probe!.getState());
     }
   }
+
+  const withStreamContext = (
+    warning: import('./ProcessLivenessProbe.js').LivenessWarningEvent,
+  ): import('./ProcessLivenessProbe.js').LivenessWarningEvent => ({
+    ...warning,
+    firstEventAt,
+    lastEventAt,
+    lastEventType,
+  });
+
+  let timeoutTerminalContext: CliTimeoutTerminalContext | undefined;
+  let terminationStreamDrainDeadline: number | undefined;
+  const snapshotTimeoutTerminalContext = (): CliTimeoutTerminalContext => ({
+    kind: terminalCause === 'stall_timeout' ? 'stall_timeout' : 'response_timeout',
+    configuredTimeoutMs: terminalCause === 'stall_timeout' ? (probe?.config.stallWarningMs ?? timeoutMs) : timeoutMs,
+    observedSilenceDurationMs:
+      timeoutObservedSilenceMs ?? (lastEventAt === null ? Date.now() - startedAt : Date.now() - lastEventAt),
+    processAliveAtTimeout,
+    postKillExitCode: exitCode,
+    postKillSignal: exitSignal,
+    signalsSent: terminationController.getSignalsSent(),
+    finalStage: terminationController.getFinalStage(),
+  });
 
   try {
     if (!child.stdout) {
@@ -444,56 +628,67 @@ export async function* spawnCli(
 
       // Keep plainText providers protected by the same liveness fast-fail path
       // as NDJSON providers while still buffering raw stdout until completion.
-      let pendingStallKill = false;
+      let pendingStallKill: import('./ProcessLivenessProbe.js').LivenessWarningEvent | undefined;
 
       for (;;) {
         if (spawnError) throw spawnError;
 
-        if (probe) {
+        if (probe && terminationStreamDrainDeadline === undefined) {
           for (const warning of probe.drainWarnings()) {
-            yield warning;
+            yield withStreamContext(warning);
             if (isStallAutoKillWarning(options, warning)) {
-              pendingStallKill = true;
+              pendingStallKill = warning;
             }
           }
           if (probe.getState() === 'dead') {
-            killChild();
+            killChild('terminate-first', 'cleanup');
             break;
           }
         }
 
         let raceTimer: ReturnType<typeof setTimeout> | undefined;
-        const raceResult = probe
+        const stdoutRace = pendingNext.then((result) => ({ source: 'stdout' as const, result }));
+        let raceResult = probe
           ? await Promise.race([
-              pendingNext.then((r) => {
-                if (raceTimer !== undefined) clearTimeout(raceTimer);
-                return { source: 'stdout' as const, result: r };
-              }),
-              new Promise<{ source: 'probe' }>((r) => {
-                raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
+              stdoutRace,
+              terminationCommittedRace,
+              new Promise<{ source: 'probe' }>((resolve) => {
+                const pollMs = Math.min(probe.config.sampleIntervalMs, livenessWarningDrainIntervalMs);
+                raceTimer = setTimeout(() => resolve({ source: 'probe' }), pollMs);
               }),
             ])
-          : { source: 'stdout' as const, result: await pendingNext };
+          : await Promise.race([stdoutRace, terminationCommittedRace]);
+        if (raceTimer !== undefined) clearTimeout(raceTimer);
+
+        if (raceResult.source === 'termination') {
+          terminationStreamDrainDeadline ??= Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
+          const drained = await waitForIteratorUntil(pendingNext, terminationStreamDrainDeadline);
+          if (!drained) break;
+          raceResult = { source: 'stdout', result: drained };
+        }
 
         if (raceResult.source === 'probe') {
           if (pendingStallKill) {
-            stallKilled = true;
-            timedOut = true;
-            processAliveAtTimeout = !childExited;
-            killChild();
+            commitTimeout(
+              'stall_timeout',
+              pendingStallKill.silenceDurationMs,
+              options.livenessProbe?.stallTerminationMode ?? 'terminate-first',
+            );
             break;
           }
           continue;
         }
 
-        pendingStallKill = false;
+        pendingStallKill = undefined;
 
         const { done, value } = raceResult.result;
         if (done) break;
 
         stdoutChunks.push(value.toString());
-        resetTimeout();
-        if (probe) probe.notifyActivity();
+        if (terminationStreamDrainDeadline === undefined) {
+          resetTimeout();
+          if (probe) probe.notifyActivity();
+        }
         const now = Date.now();
         if (firstEventAt === null) firstEventAt = now;
         lastEventAt = now;
@@ -509,54 +704,63 @@ export async function* spawnCli(
       // meaning no NDJSON event arrived. If NDJSON wins, the pending kill is cancelled
       // because CLI has recovered. This prevents the stale-warning race condition where
       // a recovery event is pending in the stream but hasn't been consumed yet.
-      let pendingStallKill = false;
+      let pendingStallKill: import('./ProcessLivenessProbe.js').LivenessWarningEvent | undefined;
 
       for (;;) {
         if (spawnError) throw spawnError;
 
         // F118: Drain probe warnings and check for dead process
-        if (probe) {
+        if (probe && terminationStreamDrainDeadline === undefined) {
           for (const warning of probe.drainWarnings()) {
-            yield warning;
+            yield withStreamContext(warning);
             // #774: Mark for deferred kill — don't kill here (recovery NDJSON may be pending)
             if (isStallAutoKillWarning(options, warning)) {
-              pendingStallKill = true;
+              pendingStallKill = warning;
             }
           }
           if (probe.getState() === 'dead') {
-            killChild();
+            killChild('terminate-first', 'cleanup');
             break;
           }
         }
 
         // Race NDJSON event vs probe poll interval
         let raceTimer: ReturnType<typeof setTimeout> | undefined;
-        const raceResult = probe
+        const ndjsonRace = pendingNext.then((result) => ({ source: 'ndjson' as const, result }));
+        let raceResult = probe
           ? await Promise.race([
-              pendingNext.then((r) => {
-                if (raceTimer !== undefined) clearTimeout(raceTimer);
-                return { source: 'ndjson' as const, result: r };
-              }),
-              new Promise<{ source: 'probe' }>((r) => {
-                raceTimer = setTimeout(() => r({ source: 'probe' }), probe.config.sampleIntervalMs);
+              ndjsonRace,
+              terminationCommittedRace,
+              new Promise<{ source: 'probe' }>((resolve) => {
+                const pollMs = Math.min(probe.config.sampleIntervalMs, livenessWarningDrainIntervalMs);
+                raceTimer = setTimeout(() => resolve({ source: 'probe' }), pollMs);
               }),
             ])
-          : { source: 'ndjson' as const, result: await pendingNext };
+          : await Promise.race([ndjsonRace, terminationCommittedRace]);
+        if (raceTimer !== undefined) clearTimeout(raceTimer);
+
+        if (raceResult.source === 'termination') {
+          terminationStreamDrainDeadline ??= Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
+          const drained = await waitForIteratorUntil(pendingNext, terminationStreamDrainDeadline);
+          if (!drained) break;
+          raceResult = { source: 'ndjson', result: drained };
+        }
 
         if (raceResult.source === 'probe') {
           // No NDJSON arrived — if stall-kill is pending, execute it now
           if (pendingStallKill) {
-            stallKilled = true;
-            timedOut = true;
-            processAliveAtTimeout = !childExited;
-            killChild();
+            commitTimeout(
+              'stall_timeout',
+              pendingStallKill.silenceDurationMs,
+              options.livenessProbe?.stallTerminationMode ?? 'terminate-first',
+            );
             break;
           }
           continue;
         }
 
         // NDJSON event arrived — CLI is alive, cancel any pending stall-kill
-        pendingStallKill = false;
+        pendingStallKill = undefined;
 
         const { done, value } = raceResult.result;
         if (done) break;
@@ -570,8 +774,10 @@ export async function* spawnCli(
         }
         // Reset timeout only after a valid NDJSON event.
         // Invalid chatter should not keep a stuck invocation alive forever.
-        resetTimeout();
-        if (probe) probe.notifyActivity();
+        if (terminationStreamDrainDeadline === undefined) {
+          resetTimeout();
+          if (probe) probe.notifyActivity();
+        }
         // F118: Record event timestamps for diagnostic enrichment
         const now = Date.now();
         if (firstEventAt === null) firstEventAt = now;
@@ -581,6 +787,16 @@ export async function* spawnCli(
         }
         // F212 AC-A8: collect stream error events for cliDiagnostics
         maybeCollectStreamError(value, streamErrorTexts, structuredErrorTexts);
+        // F212 Phase H cloud R5 P2 (2026-07-10): track LAST terminal event locally.
+        // Symmetric to tmux-agent-spawner. AbortSignal (semanticCompletionSignal) is
+        // sticky — a subsequent turn.failed after turn.completed cannot clear it,
+        // so `.aborted === true` at exit reports "complete" for real multi-turn
+        // failures. Use localFinalTerminal (below) to gate the exit=1 suppress.
+        if (value && typeof value === 'object' && 'type' in value) {
+          const payloadType = (value as { type?: string }).type;
+          if (payloadType === 'turn.completed') localFinalTerminal = 'completed';
+          else if (payloadType === 'turn.failed') localFinalTerminal = 'failed';
+        }
         yield value;
         pendingNext = ndjson.next();
       }
@@ -589,12 +805,13 @@ export async function* spawnCli(
     if (probe) {
       await probe.flushPendingWarnings();
       for (const warning of probe.drainWarnings()) {
-        yield warning;
+        yield withStreamContext(warning);
         if (isStallAutoKillWarning(options, warning)) {
-          stallKilled = true;
-          timedOut = true;
-          processAliveAtTimeout = !childExited;
-          killChild();
+          commitTimeout(
+            'stall_timeout',
+            warning.silenceDurationMs,
+            options.livenessProbe?.stallTerminationMode ?? 'terminate-first',
+          );
         }
       }
     }
@@ -608,8 +825,21 @@ export async function* spawnCli(
     const semanticDone = options.semanticCompletionSignal?.aborted === true;
 
     if (!semanticDone) {
-      // Wait for stdio close after stdout iteration so trailing stderr cannot be truncated.
-      await closePromise;
+      if (killed) {
+        // A timeout/abort must not depend forever on a broken wrapper closing stdout.
+        // Wait through the bounded signal sequence, then allow one final short stdio drain.
+        await Promise.race([closePromise, terminationController.waitForCompletion()]);
+        if (!childClosed) {
+          const drainDeadline = terminationStreamDrainDeadline ?? Date.now() + TERMINATION_STDIO_DRAIN_GRACE_MS;
+          const remainingDrainMs = drainDeadline - Date.now();
+          if (remainingDrainMs > 0) {
+            await Promise.race([closePromise, new Promise<void>((resolve) => setTimeout(resolve, remainingDrainMs))]);
+          }
+        }
+      } else {
+        // Healthy completion still waits for close so trailing stderr is not truncated.
+        await closePromise;
+      }
     } else if (!childClosed) {
       // Grace period: give the process time to exit naturally before force-killing.
       // If it exits within grace, great; if not, killChild() in finally will clean up.
@@ -648,13 +878,27 @@ export async function* spawnCli(
       } satisfies CliPlainTextResult;
     }
 
-    // Yield error on abnormal exit (only if WE didn't kill it AND no semantic completion)
-    // Covers both non-zero exitCode AND external signal kills
-    // Windows: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN) is a libuv
-    // assertion crash in the MCP subprocess shutdown path. If we already received valid
-    // NDJSON events, the CLI output is fine — suppress the spurious error.
-    const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && semanticDone;
-    if (!semanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
+    // F212 Phase H Sol Final确权 P1-A (2026-07-10) — unified `finalSemanticDone`
+    // predicate that handles all four cells of the 2×2 truth table:
+    //   1. sticky signal + turn.completed → localFinalTerminal='completed' → SUPPRESS
+    //   2. sticky signal + completed then failed → localFinalTerminal='failed' → SURFACE (cloud R5 P2)
+    //   3. sticky signal + no terminal event → localFinalTerminal=null, sig aborted → SUPPRESS
+    //      (preserves the "caller-side signal-only" contract — see Group A test in
+    //      cli-spawn.test.js:1427: `item.completed` counts as work but is NOT a
+    //      turn-level terminal, so localFinalTerminal stays null)
+    //   4. no signal + no terminal → both falsy → SURFACE (unchanged behavior)
+    //
+    // Local terminal WINS over sticky abort — a chronological `turn.failed` always
+    // outranks a prior `turn.completed`. Sticky abort only fires when we saw NO
+    // turn-level terminal at all (cell 3).
+    const finalSemanticDone = localFinalTerminal === 'completed' || (localFinalTerminal === null && semanticDone);
+    // Yield error on abnormal exit (only if WE didn't kill it AND semantic completion
+    // did not truly land). Covers non-zero exitCode + external signal kills.
+    // Windows libuv-crash quirk: exit code 3221226505 (0xC0000409 STATUS_STACK_BUFFER_OVERRUN)
+    // is a libuv assertion crash on MCP subprocess shutdown. Use the same unified
+    // predicate for the tie-break so cell 2 (multi-turn failure) still surfaces.
+    const isWindowsLibuvCrash = process.platform === 'win32' && exitCode === 3221226505 && finalSemanticDone;
+    if (!finalSemanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
       // F212 AC-A1 + AC-A8: build structured diagnostics from BOTH stderr and stream error events.
       // Stream errors (NDJSON `{type:"error"}`) often carry the real semantic (Codex code 1 case).
       const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
@@ -665,6 +909,7 @@ export async function* spawnCli(
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
         stderrEmpty: stderrTrimLen === 0,
+        ...(options.managedArgvFlags ? { managedArgvFlags: options.managedArgvFlags } : {}),
         debugRef: {
           command: options.command,
           exitCode,
@@ -742,25 +987,40 @@ export async function* spawnCli(
 
     // Yield timeout error (distinct from user cancel which stays silent)
     if (timedOut) {
-      // F212 AC-A1: include cliDiagnostics on timeout too (network timeout etc. often classifiable)
-      // F212 Phase F (砚砚 R2 P1, post-merge follow-up): timeout branch was missing the
-      // `stderrEmpty` signal to buildCliDiagnostics — without it, a timeout + empty stderr +
-      // unknown classifier falls back to the legacy UNKNOWN_TEXT hint that points at
-      // LOG_CLI_STDERR=1, exactly the dead-end UX Phase F was meant to kill. Same fix as the
-      // abnormal-exit branch (same template, same gap).
+      // Timeout is a causal terminal state, not an abnormal-exit classification. Snapshot
+      // the timeout before projecting diagnostics so a cooperative exit=0 cannot overwrite
+      // the user-visible reason with "CLI exited".
+      timeoutTerminalContext = snapshotTimeoutTerminalContext();
       const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
       const timeoutStderrTrimLen = stderrBuffer.trim().length;
       const cliDiagnostics: CliDiagnostics = buildCliDiagnostics({
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
         stderrEmpty: timeoutStderrTrimLen === 0,
+        ...(options.managedArgvFlags ? { managedArgvFlags: options.managedArgvFlags } : {}),
         debugRef: {
           command: options.command,
-          exitCode,
-          signal: exitSignal,
+          signal: null,
           ...(options.invocationId ? { invocationId: options.invocationId } : {}),
         },
+        terminalContext: timeoutTerminalContext,
       });
+      const timeoutDiagLog = options.diagnosticLogger ?? log;
+      timeoutDiagLog.error(
+        {
+          ...(options.invocationId ? { invocationId: options.invocationId } : {}),
+          command: options.command,
+          reasonCode: cliDiagnostics.reasonCode,
+          configuredTimeoutMs: timeoutTerminalContext.configuredTimeoutMs,
+          observedSilenceDurationMs: timeoutTerminalContext.observedSilenceDurationMs,
+          processAliveAtTimeout: timeoutTerminalContext.processAliveAtTimeout,
+          signalsSent: timeoutTerminalContext.signalsSent,
+          finalStage: timeoutTerminalContext.finalStage,
+          postKillExitCode: timeoutTerminalContext.postKillExitCode,
+          postKillSignal: timeoutTerminalContext.postKillSignal,
+        },
+        'CLI timeout',
+      );
       // F212 AC-A7 + Phase F AC-F3 (砚砚 R2 P1 follow-up): gated + sanitized stderr log via
       // shared helper. AC-F3 spec covers BOTH 'CLI stderr (LOG_CLI_STDERR=1)' and 'CLI stderr
       // on timeout' — the post-merge R2 review caught that the timeout branch was still hard-
@@ -768,7 +1028,6 @@ export async function* spawnCli(
       // `diagLog = options.diagnosticLogger ?? log` so AC-F3 spec line is actually testable.
       const stderrForLog = formatCliStderrForLog(stderrBuffer);
       if (stderrForLog) {
-        const timeoutDiagLog = options.diagnosticLogger ?? log;
         timeoutDiagLog.error(
           {
             ...(options.invocationId ? { invocationId: options.invocationId } : {}),
@@ -779,21 +1038,21 @@ export async function* spawnCli(
           'CLI stderr on timeout (LOG_CLI_STDERR=1)',
         );
       }
-      const stallWarningMs = probe?.config.stallWarningMs;
       yield {
         __cliTimeout: true,
-        timeoutMs: stallKilled && stallWarningMs ? stallWarningMs : timeoutMs,
+        timeoutMs: timeoutTerminalContext.configuredTimeoutMs,
         // AC-A9 红线: humanized only, no raw stderr
         message: stallKilled
-          ? `CLI idle-silent 超时 (${Math.round((stallWarningMs ?? timeoutMs) / 1000)}s — stall auto-kill)`
+          ? `CLI idle-silent 超时 (${Math.round(timeoutTerminalContext.configuredTimeoutMs / 1000)}s — stall auto-kill)`
           : `CLI 响应超时 (${Math.round(timeoutMs / 1000)}s)`,
         command: options.command,
         // F118: Diagnostic enrichment
         firstEventAt,
         lastEventAt,
         lastEventType,
-        silenceDurationMs: lastEventAt ? Date.now() - lastEventAt : timeoutMs,
+        silenceDurationMs: timeoutTerminalContext.observedSilenceDurationMs,
         processAlive: processAliveAtTimeout,
+        terminalContext: timeoutTerminalContext,
         ...(stallKilled ? { stallKill: true } : {}),
         ...(options.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -803,7 +1062,6 @@ export async function* spawnCli(
     }
   } finally {
     if (timeoutTimer) clearTimeout(timeoutTimer);
-    if (escalationTimer !== undefined) clearTimeout(escalationTimer);
     if (options.signal) {
       options.signal.removeEventListener('abort', abortHandler);
     }
@@ -816,8 +1074,11 @@ export async function* spawnCli(
     // F153 Phase B: End CLI session span with appropriate status
     if (cliSpan) {
       if (timedOut) {
+        timeoutTerminalContext ??= snapshotTimeoutTerminalContext();
         cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'CLI timeout' });
-        emitOtelLog('ERROR', 'cli_session_timeout', { 'cli.timeout_ms': timeoutMs }, cliSpan);
+        const timeoutAttributes = buildCliTimeoutTelemetryAttributes(timeoutTerminalContext);
+        cliSpan.setAttributes(timeoutAttributes);
+        emitOtelLog('ERROR', 'cli_session_timeout', timeoutAttributes, cliSpan);
       } else if (exitCode !== null && exitCode !== 0) {
         cliSpan.setStatus({ code: SpanStatusCode.ERROR, message: `CLI exit code ${exitCode}` });
         emitOtelLog('ERROR', 'cli_session_error', { 'cli.exit_code': exitCode }, cliSpan);
@@ -869,7 +1130,7 @@ export function isCliPlainTextResult(value: unknown): value is CliPlainTextResul
  * Type guard for CLI timeout objects (process killed due to timeout)
  * Note: `message` is sanitized for user display; raw stderr is logged to console only.
  */
-export function isCliTimeout(value: unknown): value is {
+export interface CliTimeoutEvent {
   __cliTimeout: true;
   timeoutMs: number;
   message: string;
@@ -883,9 +1144,14 @@ export function isCliTimeout(value: unknown): value is {
   cliSessionId?: string;
   invocationId?: string;
   rawArchivePath?: string;
+  stallKill?: true;
+  /** Causal timeout snapshot; post-kill fields are explicitly observational. */
+  terminalContext?: CliTimeoutTerminalContext;
   // F212 Phase A: structured CLI diagnostics on timeout events (mirrors __cliError shape)
   cliDiagnostics?: CliDiagnostics;
-} {
+}
+
+export function isCliTimeout(value: unknown): value is CliTimeoutEvent {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -920,6 +1186,7 @@ function defaultSpawn(
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {
@@ -955,26 +1222,17 @@ function defaultSpawn(
     });
   }
 
-  // macOS GUI apps (Electron) have a minimal PATH that excludes version
-  // managers (nvm/fnm/Volta). CLI shims use `#!/usr/bin/env node`, so the
-  // child process must be able to find `node` in its PATH. Prepend the
-  // directory containing the resolved CLI binary — it typically sits next
-  // to the `node` binary that installed it (e.g. ~/.nvm/versions/node/v24/bin/).
-  const env = { ...options.env };
-  if (isAbsolute(command)) {
-    const binDir = dirname(command);
-    env.PATH = env.PATH ? `${binDir}:${env.PATH}` : binDir;
-  }
-
-  const supervisorArgs = resolveCliSupervisorNodeArgs();
-
-  return nodeSpawn(process.execPath, [...supervisorArgs, '--', command, ...args], {
-    cwd: options.cwd,
+  const plan = buildUnixSupervisedSpawnPlan(command, args, {
     env: {
-      ...env,
-      CAT_CAFE_SUPERVISOR_PARENT_PID: String(process.pid),
-      CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: String(Math.max(250, KILL_GRACE_MS - 500)),
+      ...options.env,
+      ...(options.bindExecutionOwner === false ? {} : { [CLI_EXECUTION_OWNER_BINDING_ENV]: '1' }),
     },
+    killGraceMs: Math.max(250, KILL_GRACE_MS - 500),
+  });
+
+  return nodeSpawn(plan.command, plan.args, {
+    cwd: options.cwd,
+    env: plan.env,
     stdio: options.stdio,
   });
 }

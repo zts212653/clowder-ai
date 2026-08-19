@@ -18,6 +18,7 @@ export interface AuthorizationRoutesOptions {
   auditStore: IAuthorizationAuditStore;
   socketManager: SocketManager;
   onPermissionCancel?: (input: {
+    invocationId: string;
     toolName: string;
     paramsSummary?: string;
     catId: string;
@@ -27,7 +28,7 @@ export interface AuthorizationRoutesOptions {
     cancelReason?: string;
     /** F222 UX-3: user clicked "取消并反馈" — trigger immediate auto-issue */
     withFeedback?: boolean;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 function resolveAuthorizationUserId(request: import('fastify').FastifyRequest): string | null {
@@ -79,7 +80,8 @@ export const authorizationRoutes: FastifyPluginAsync<AuthorizationRoutesOptions>
     // F192 Phase G: Record permission cancel as task outcome signal
     if (!granted && onPermissionCancel) {
       try {
-        onPermissionCancel({
+        await onPermissionCancel({
+          invocationId: updated.invocationId,
           toolName: updated.action,
           paramsSummary: updated.context,
           catId: updated.catId,

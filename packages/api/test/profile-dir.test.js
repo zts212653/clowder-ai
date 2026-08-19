@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
-// F231: resolveProfileDir is the single source of truth shared by the L0 compiler (read capsule)
-// and the profile-update routes (write primer). These tests pin the resolution rules so the two
-// can never drift.
+// F231: deprecated adapters must retain the canonical repository topology. They deliberately do
+// not inspect cwd, script roots, or legacy private/profile trees.
 describe('resolveProfileDir (read/write path consistency)', () => {
   let tmp;
   let mod;
@@ -18,29 +17,19 @@ describe('resolveProfileDir (read/write path consistency)', () => {
 
   afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it('returns cwd/private/profile when it exists', () => {
-    mkdirSync(join(tmp, 'private', 'profile'), { recursive: true });
-    assert.equal(mod.resolveProfileDir(tmp, undefined), resolve(tmp, 'private', 'profile'));
+  it('resolves a user beneath the explicit data root', () => {
+    assert.equal(mod.resolveProfileDir('alice', tmp), resolve(tmp, 'profiles', 'alice'));
   });
 
-  it('falls back to script-relative dir when cwd/private/profile is absent', () => {
-    const scriptPath = join(tmp, 'scripts', 'compile-system-prompt-l0.mjs');
-    assert.equal(mod.resolveProfileDir(tmp, scriptPath), resolve(dirname(scriptPath), '..', 'private', 'profile'));
+  it('uses the same canonical root for reads and writes', () => {
+    assert.equal(mod.resolveWritableProfileDir('alice', tmp), mod.resolveProfileDir('alice', tmp));
   });
 
-  it('returns cwd-based dir (best-effort) when absent and no scriptPath', () => {
-    assert.equal(mod.resolveProfileDir(tmp, undefined), resolve(tmp, 'private', 'profile'));
+  it('defaults the user id without treating a path as cwd', () => {
+    assert.equal(mod.resolveProfileDir(undefined, tmp), resolve(tmp, 'profiles', 'default-user'));
   });
 
-  it('P1: writable profile dir stays under cwd for first-ever writes', () => {
-    const scriptPath = join(tmp, 'install', 'scripts', 'compile-system-prompt-l0.mjs');
-    assert.equal(mod.resolveWritableProfileDir(tmp, scriptPath), resolve(tmp, 'private', 'profile'));
-  });
-
-  it('P1: writable profile dir uses an existing read profile dir before creating cwd/private/profile', () => {
-    const scriptPath = join(tmp, 'install', 'scripts', 'compile-system-prompt-l0.mjs');
-    const scriptProfileDir = resolve(dirname(scriptPath), '..', 'private', 'profile');
-    mkdirSync(scriptProfileDir, { recursive: true });
-    assert.equal(mod.resolveWritableProfileDir(tmp, scriptPath), scriptProfileDir);
+  it('encodes traversal-like external user ids into one safe segment', () => {
+    assert.equal(mod.resolveProfileDir('../escape', tmp), resolve(tmp, 'profiles', '..%2Fescape'));
   });
 });

@@ -2,6 +2,7 @@ import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
 import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
+import { formatThreadContextDrill } from './thread-drill-pointer.js';
 
 export interface BatonContext {
   fromMessageId: string;
@@ -40,7 +41,6 @@ export function extractBatonContext(
     let staleHoldWarning = false;
     for (let j = i - 1; j >= 0; j--) {
       const prev = messages[j];
-      if (prev.origin === 'stream') continue;
       const prevSpeaker = prev.catId ?? 'user';
       if (prevSpeaker !== fromSpeaker) continue;
       if (HOLD_PATTERNS.test(prev.content)) {
@@ -49,13 +49,10 @@ export function extractBatonContext(
       break;
     }
 
-    const excerpt =
-      m.origin === 'stream'
-        ? ''
-        : m.content
-            .split('\n')[0]
-            .replace(/@[\p{L}\p{N}_-]+/gu, '')
-            .trim();
+    const excerpt = m.content
+      .split('\n')[0]
+      .replace(/@[\p{L}\p{N}_-]+/gu, '')
+      .trim();
 
     return {
       fromMessageId: m.id,
@@ -100,6 +97,7 @@ export interface TruthSourceInfo {
 }
 
 export interface NavigationContext {
+  threadId?: string;
   baton: BatonContext | null;
   tasks: TaskSummary[];
   artifacts?: NavigationArtifact[];
@@ -107,13 +105,24 @@ export interface NavigationContext {
   bestNextSource?: string;
 }
 
+export interface NavigationFormatOptions {
+  nowMs?: number;
+}
+
 /**
  * Build navigation inner content (conditional blocks).
  * Template envelope ([导航]...[/导航]) is in n1-navigation.md.
  */
-function buildNavigationInner(ctx: NavigationContext): string {
+function buildNavigationInner(ctx: NavigationContext, options?: NavigationFormatOptions): string {
   const lines: string[] = [];
   const coCreatorTimeZone = getCoCreatorConfig().timeZone;
+  const nowMs = options?.nowMs;
+
+  if (typeof nowMs === 'number') {
+    lines.push(
+      `当前时间: ${formatPromptTime(nowMs, { timeZone: coCreatorTimeZone })} (relative terms use this now; refreshed per invocation)`,
+    );
+  }
 
   if (ctx.baton) {
     const timeStr = formatPromptTime(ctx.baton.timestamp, { timeZone: coCreatorTimeZone });
@@ -143,13 +152,16 @@ function buildNavigationInner(ctx: NavigationContext): string {
 
   if (ctx.truthSource !== undefined) {
     if (ctx.truthSource === null) {
-      lines.push('真相源: 未定位');
+      const coordinate = ctx.threadId ? `（threadId=${ctx.threadId}）` : '';
+      lines.push(`真相源: 未定位${coordinate}`);
     } else {
       const tag = ctx.truthSource.provenance === 'regex' ? ' (推断)' : '';
-      lines.push(`真相源: ${ctx.truthSource.label}${tag}`);
+      lines.push(`真相源: ${ctx.truthSource.label}${tag} — ${ctx.truthSource.ref}`);
     }
     if (ctx.bestNextSource) {
       lines.push(`下一步: ${ctx.bestNextSource}`);
+    } else if (ctx.truthSource === null && ctx.threadId) {
+      lines.push(`下一步: ${formatThreadContextDrill(ctx.threadId)}`);
     }
   }
 
@@ -157,6 +169,6 @@ function buildNavigationInner(ctx: NavigationContext): string {
 }
 
 /* @segment N1 — 导航块 (template: n1-navigation.md) */
-export function formatNavigationHeader(ctx: NavigationContext): string {
-  return renderSegment('N1', { INNER_CONTENT: buildNavigationInner(ctx) }) ?? '[导航]\n[/导航]';
+export function formatNavigationHeader(ctx: NavigationContext, options?: NavigationFormatOptions): string {
+  return renderSegment('N1', { INNER_CONTENT: buildNavigationInner(ctx, options) }) ?? '[导航]\n[/导航]';
 }

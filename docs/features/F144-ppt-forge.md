@@ -389,7 +389,7 @@ imagegen 猫: 逐页生成精美 raster PNG
 | KD-1 | ~~四层~~ → **五层架构**（Research → Narrative → Blueprint → Style → Export） | 头脑风暴收敛：金渐层+Maine Coon一致认为 Narrative→Visual 之间缺 Blueprint 契约层 | 2026-03-27 |
 | KD-2 | ~~Pencil MCP 主力~~ → **Pencil 降级为可选审批器**，Phase A 主路径不依赖 | Maine Coon pushback：Pencil 不支持 PPTX 导出，Phase A 核心胜负手是稳定产出，不能被集成卡住 | 2026-03-27 |
 | KD-3 | **pptxgenjs 作为导出引擎** | 金渐层七方案对比 + 对方 pptx-craft 也用它（业界共识），原生 OOXML 可编辑可搜索 | 2026-03-27 |
-| KD-4 | Phase A 首个风格选 **nvidia-like 企业风格**，不选 Cat Cafe | Maine Coon pushback：目标是"现场对比打脸"，Cat Cafe 适合 smoke test 不适合证明能力 | 2026-03-27 |
+| KD-4 | Phase A 首个风格选 **nvidia-like 企业风格**，不选 Clowder AI | Maine Coon pushback：目标是"现场对比打脸"，Clowder AI 适合 smoke test 不适合证明能力 | 2026-03-27 |
 | KD-5 | **五份中间产物作为 contract chain** | Maine Coon提出：research.md → storyline.md → deck.blueprint.json → theme.tokens.json → deck.pptx，每份可审计可回溯 | 2026-03-27 |
 | KD-6 | **五道门禁嵌入管线** | Maine Coon提出：Research/Narrative/Blueprint/Export/Vision Gate，审批点前置防止级联浪费 | 2026-03-27 |
 | KD-7 | **叙事引擎 = 结构化模板 + prompt 增强** | 金渐层+Maine Coon共识：纯 prompt 不稳定，纯模板僵硬，混合方案最优 | 2026-03-27 |

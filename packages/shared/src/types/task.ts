@@ -9,6 +9,7 @@
 
 import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
+import type { GitHubIssueAwaitStateV1, GitHubPrAwaitStateV1, WaitOutcomeV1 } from './github-wait.js';
 import type { CatId } from './ids.js';
 
 // Re-export affordance types so existing consumers don't break
@@ -42,8 +43,30 @@ export interface CiAutomationState {
   readonly lastNotifiedAt?: number;
   readonly enabled?: boolean;
   readonly skipNotified?: boolean;
+  /**
+   * Empty statusCheckRollup is ambiguous for a fresh HEAD: it can mean either
+   * "this PR has no checks" or "GitHub has not created the check runs yet".
+   * Persist the same-HEAD observation streak so the poller can require one
+   * full stability interval before treating a genuinely empty rollup as pass.
+   */
+  readonly rollupObservation?: {
+    readonly headSha: string;
+    readonly state: 'empty' | 'present';
+    readonly streakStartedAt: number;
+  };
   /** Terminal PR state — persisted by CiCdRouter on lifecycle close (F200 AC-D2.3). */
   readonly prState?: 'merged' | 'closed';
+  /**
+   * Durable receipts for PR-terminal world-truth effects. The terminal collector
+   * remains schedulable until `completedAt` is present for the current `prState`.
+   */
+  readonly terminalEffects?: {
+    readonly prState: 'merged' | 'closed';
+    readonly prLifecycle?: true;
+    readonly distillation?: true;
+    readonly communityProjection?: true;
+    readonly completedAt?: number;
+  };
 }
 
 /** Conflict detection automation state for pr_tracking tasks */
@@ -59,22 +82,21 @@ export interface ReviewAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastInlineCommentCursor?: number;
   readonly lastConversationCommentCursor?: number;
+  /**
+   * True while a legacy combined cursor is being replayed into the two source-specific
+   * cursors. Backfill through the frozen source targets remains state-only until durable.
+   */
+  readonly commentCursorMigrationPending?: boolean;
+  /** Snapshot frontier for the one-time legacy backfill; later source activity remains live. */
+  readonly commentCursorMigrationTargets?: {
+    readonly inline: number;
+    readonly conversation: number;
+  };
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
   /** Terminal PR state observed by ReviewFeedbackTaskSpec before CI lifecycle delivery. */
   readonly prState?: 'merged' | 'closed';
 }
-
-/**
- * F140: what the cat is currently waiting on for this tracked PR — the wake intent, NOT the repo
- * type (a private PR can be 'merge'; an open-source PR can be 'review'). Decides whether a CI-pass
- * is noise (review-wait) or an action signal (merge-wait). Cats re-register to flip it.
- *   - review (default): waiting on review feedback → CI-pass is recorded state-only, with no connector message.
- *   - merge: waiting on CI-green to merge (own approved PR / outbound PR / owner-merge of another's
- *     PR) → CI-pass wakes (→ merge-gate).
- * CI fail / review feedback / conflict always wake under both intents.
- */
-export type PrTrackingIntent = 'review' | 'merge';
 
 /** Issue comment automation state for issue_tracking tasks (F202 Phase 2D) */
 export interface IssueAutomationState {
@@ -102,18 +124,32 @@ export interface IssuePendingWake {
   readonly closeTaskAfterWake?: boolean;
 }
 
-/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D) */
-export interface AutomationState {
+/** F280 Phase B: PR-only collector and wait state. */
+export interface PrAutomationState {
   readonly ci?: CiAutomationState;
   readonly conflict?: ConflictAutomationState;
   readonly review?: ReviewAutomationState;
+  readonly closedAt?: number;
+  readonly await?: GitHubPrAwaitStateV1;
+  readonly waitOutcome?: WaitOutcomeV1;
+  /** Type-level quarantine: issue compatibility cannot be installed on a PR state. */
+  readonly issue?: never;
+}
+
+/** F280 Phase C: issue collector and typed one-shot wait state. */
+export interface IssueWaitAutomationState {
   readonly issue?: IssueAutomationState;
   readonly closedAt?: number;
-  /** F140: wake intent for this tracked PR (defaults to 'review' when absent). */
-  readonly intent?: PrTrackingIntent;
-  /** F202 Phase 2C: user-provided instructions appended to trigger messages. Task preference, not system override. */
-  readonly trackingInstructions?: string;
+  readonly await?: GitHubIssueAwaitStateV1;
+  readonly waitOutcome?: WaitOutcomeV1;
+  /** Type-level quarantine: PR facts cannot be installed on an issue state. */
+  readonly ci?: never;
+  readonly conflict?: never;
+  readonly review?: never;
 }
+
+/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D). */
+export type AutomationState = PrAutomationState | IssueWaitAutomationState;
 
 export type TaskProbeSpec =
   | {

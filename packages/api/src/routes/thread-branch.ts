@@ -141,7 +141,9 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
 
     // ③ Get all visible messages up to and including fromMessage
     // getByThread filters soft-deleted/tombstone — cannot branch from deleted messages
-    const allMessages = await messageStore.getByThread(id, 10000);
+    const allMessages = await messageStore.getByThread(id, 10000, undefined, {
+      includeQueuedCatMessages: true,
+    });
     const cutIndex = allMessages.findIndex((m) => m.id === fromMessageId);
     if (cutIndex === -1) {
       reply.status(400);

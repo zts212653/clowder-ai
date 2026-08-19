@@ -21,7 +21,7 @@ function createSandbox() {
   cpSync(reviewStartSource, join(root, 'scripts', 'review-start.sh'));
   writeFileSync(
     join(root, 'scripts', 'start-dev.sh'),
-    '#!/bin/sh\nprintf "START_DEV:%s/%s\\n" "$FRONTEND_PORT" "$API_SERVER_PORT"\n',
+    '#!/bin/sh\nprintf "START_DEV:%s/%s OFFSET:%s\\n" "$FRONTEND_PORT" "$API_SERVER_PORT" "$WORKTREE_PORT_OFFSET"\n',
     { mode: 0o755 },
   );
 
@@ -69,6 +69,24 @@ afterEach(async () => {
 });
 
 describe('review-start.sh', () => {
+  it('neutralizes an inherited worktree offset before launching explicit review ports', () => {
+    const { root, binDir } = createSandbox();
+
+    const result = spawnSync('bash', [join(root, 'scripts', 'review-start.sh'), '--web-port=6201', '--api-port=6202'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        WORKTREE_PORT_OFFSET: '-10',
+        CAT_CAFE_ALLOW_NON_SANDBOX_REVIEW: '1',
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /START_DEV:6201\/6202 OFFSET:0/);
+  });
+
   it('dev tcp probe falls back when timeout is unavailable', async () => {
     const { root, binDir } = createSandbox();
     const server = await listen(0);

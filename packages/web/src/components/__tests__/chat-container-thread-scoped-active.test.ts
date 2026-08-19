@@ -49,6 +49,7 @@ function createMockStoreState() {
     setViewMode: vi.fn(),
     clearUnread: vi.fn(),
     confirmUnreadAck: vi.fn(),
+    settleUnreadAck: vi.fn(),
     armUnreadSuppression: vi.fn(),
     splitPaneThreadIds: [],
     setSplitPaneThreadIds: vi.fn(),
@@ -120,7 +121,6 @@ vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('../MobileStatusSheet', () => ({ MobileStatusSheet: () => null }));
 vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));

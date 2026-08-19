@@ -13,6 +13,8 @@ export interface PawFeelMarker {
   symptom: string;
   /** 原始匹配文本（整条 `[爪感差: …]`） */
   raw: string;
+  /** Ephemeral source offset used by typed capture grammar; never persisted. */
+  sourceIndex: number;
 }
 
 /**
@@ -28,11 +30,50 @@ export function extractPawFeelMarkers(text: string): PawFeelMarker[] {
   const markers: PawFeelMarker[] = [];
   if (!text) return markers;
   for (const match of text.matchAll(MARKER_RE)) {
+    const index = match.index ?? 0;
+    if (isEscaped(text, index)) continue;
     const raw = match[0];
     const content = match[1].trim();
-    markers.push({ ...parseToolSymptom(content), raw });
+    if (content === '工具+现象') continue;
+    markers.push({ ...parseToolSymptom(content), raw, sourceIndex: index });
   }
   return markers;
+}
+
+/**
+ * Typed-intent grammar: intentional reports occupy one unescaped standalone
+ * line. Legacy recall remains permissive; only confirmed post-activation
+ * capture applies this provenance guard.
+ */
+export function isStandalonePawFeelMarker(text: string, marker: PawFeelMarker): boolean {
+  const lineStart = text.lastIndexOf('\n', marker.sourceIndex - 1) + 1;
+  const nextBreak = text.indexOf('\n', marker.sourceIndex + marker.raw.length);
+  const lineEnd = nextBreak === -1 ? text.length : nextBreak;
+  return text.slice(lineStart, lineEnd).trim() === marker.raw && !isInsideMarkdownFence(text, lineStart);
+}
+
+function isInsideMarkdownFence(text: string, lineStart: number): boolean {
+  let fence: { character: '`' | '~'; length: number } | undefined;
+  for (const line of text.slice(0, lineStart).split('\n')) {
+    const match = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (!match) continue;
+    const run = match[1];
+    const character = run[0] as '`' | '~';
+    if (!fence) {
+      fence = { character, length: run.length };
+      continue;
+    }
+    if (character === fence.character && run.length >= fence.length && match[2].trim() === '') {
+      fence = undefined;
+    }
+  }
+  return fence !== undefined;
+}
+
+function isEscaped(text: string, markerStart: number): boolean {
+  let slashCount = 0;
+  for (let index = markerStart - 1; index >= 0 && text[index] === '\\'; index -= 1) slashCount += 1;
+  return slashCount % 2 === 1;
 }
 
 /**

@@ -136,6 +136,19 @@ describe('F244 CapabilityTip contract', () => {
     expect(withPrivateText.success).toBe(false);
   });
 
+  it('accepts the pre-output pending bubble as a typed exposure surface', () => {
+    expect(
+      CapabilityTipUsageEventSchema.safeParse({
+        event: 'capability_tip_exposed',
+        tipId: 'capability-browser-preview',
+        context: 'thinking',
+        surface: 'pending_bubble',
+        outcome: 'shown',
+        timestamp: 1,
+      }).success,
+    ).toBe(true);
+  });
+
   it('accepts eval context tips and usage events', () => {
     expect(CAPABILITY_TIP_CONTEXTS).toContain('eval');
 

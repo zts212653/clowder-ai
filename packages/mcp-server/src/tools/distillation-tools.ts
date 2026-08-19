@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * F152 Phase C: Distillation MCP Tools
  * cat_cafe_mark_generalizable — mark evidence item for global reflow
@@ -8,6 +10,11 @@
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('distillation-tools.ts', undefined, {
+  resourceFamily: 'distillation',
+  authority: 'callback-owner',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -91,28 +98,49 @@ export async function handleReviewDistillation(input: {
 }
 
 export const distillationTools = [
-  {
+  defineTool({
     name: 'cat_cafe_mark_generalizable',
     description:
       'Mark an evidence item (lesson/decision) as generalizable for cross-project reflow, or as project-private. ' +
       'Items marked generalizable=true become candidates for distillation to the global knowledge layer.',
     inputSchema: markGeneralizableInputSchema,
     handler: handleMarkGeneralizable,
-  },
-  {
+    governance: {
+      implementationExport: 'handleMarkGeneralizable',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_nominate_for_global',
     description:
       'Nominate a generalizable evidence item for distillation to global knowledge. ' +
       'The item must have generalizable=true. Creates a deidentified candidate for review.',
     inputSchema: nominateForGlobalInputSchema,
     handler: handleNominateForGlobal,
-  },
-  {
+    governance: {
+      implementationExport: 'handleNominateForGlobal',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'cat_cafe_review_distillation',
     description:
       'Approve or reject a distillation candidate. Approved candidates are written to the global knowledge layer ' +
       'with project-specific identifiers removed. Rejected candidates are discarded.',
     inputSchema: reviewDistillationInputSchema,
     handler: handleReviewDistillation,
-  },
+    governance: {
+      implementationExport: 'handleReviewDistillation',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

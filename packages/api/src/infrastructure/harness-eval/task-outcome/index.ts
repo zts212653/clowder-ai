@@ -10,6 +10,7 @@ export type {
   MagicWordRecord,
   PermissionCancelRecord,
   ProxySignal,
+  TaskOutcomeAttribution,
   TaskOutcomeEpisode,
   TaskOutcomeVerdict,
 } from './task-outcome-episode.js';
@@ -19,6 +20,7 @@ export {
   parseMagicWordRecord,
   parsePermissionCancelRecord,
   parseTaskOutcomeEpisode,
+  TASK_OUTCOME_ATTRIBUTIONS,
   VERDICT_CLASSES,
 } from './task-outcome-episode.js';
 
@@ -54,6 +56,7 @@ export {
 export type {
   AppendSignalInput,
   CreateEpisodeInput,
+  EpisodeAttributionLookup,
   StoredEpisode,
   StoredSignal,
 } from './task-outcome-store.js';

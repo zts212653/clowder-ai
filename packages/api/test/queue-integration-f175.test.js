@@ -17,6 +17,7 @@ describe('#564 regression: urgent connector does not break A2A chain', () => {
 
     // 2. Urgent connector message arrives and enqueues (F175: no preemption)
     const result = queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'CI failed',
@@ -44,6 +45,7 @@ describe('#564 regression: urgent connector does not break A2A chain', () => {
 
     for (let i = 0; i < 3; i++) {
       queue.enqueue({
+        ownerAuthProvenance: 'unknown',
         threadId: 't1',
         userId: 'u1',
         content: `urgent-${i}`,
@@ -65,6 +67,7 @@ describe('cross-priority auto-dequeue', () => {
 
     // Normal enqueued first
     queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'normal first',
@@ -76,6 +79,7 @@ describe('cross-priority auto-dequeue', () => {
 
     // Urgent enqueued second
     queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u2',
       content: 'urgent second',
@@ -95,6 +99,7 @@ describe('cross-priority auto-dequeue', () => {
     const queue = new InvocationQueue();
 
     queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'normal',
@@ -104,6 +109,7 @@ describe('cross-priority auto-dequeue', () => {
       priority: 'normal',
     });
     queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u2',
       content: 'urgent',
@@ -128,6 +134,7 @@ describe('cross-priority auto-dequeue', () => {
     const queue = new InvocationQueue();
 
     const urgentResult = queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'urgent',
@@ -138,6 +145,7 @@ describe('cross-priority auto-dequeue', () => {
     });
 
     const normalResult = queue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: 't1',
       userId: 'u1',
       content: 'normal-pinned',

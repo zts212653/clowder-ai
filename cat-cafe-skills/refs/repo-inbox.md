@@ -165,6 +165,13 @@ cat-cafe projectPath。只有 conflict rebase、public-only hotfix、release tar
 这类明确需要在公开仓 checkout 操作的任务，才把 proposal projectPath 设为 `clowder-ai`，并在
 handoff 中写明原因。
 
+**propose-thread 回报契约：`final-only`（默认 · 自治推进，任务闭环后回报一次）。** 社区
+守门 thread 新建下游 thread 时必须显式传
+`reportingMode: "final-only"`。下游在任务闭环前禁止向守门 thread 过程回报 FYI、checkpoint、
+测试进度、摩擦或 ACK；闭环后只 cross-post 一次最终总结。路由到已有 thread 时，handoff 也要
+写明同一契约。纯 FYI 不需要守门 thread ACK；只有要求守门 thread / operator 立即采取动作的真实
+阻塞或不可逆风险才升级。
+
 #### Direction Card（F168 台账联动）
 
 每个 verdict 确定后，**必须发 Direction Card** 到 Inbox thread（模板见 [direction-card-template.md](./direction-card-template.md)）：
@@ -173,30 +180,37 @@ handoff 中写明原因。
 - 非 bugfix：`multi_mention` 第二只猫独立评估
 - 两猫卡片都到了 → 汇总 → 标记是否需要operator拍板
 
-#### PR WELCOME 后：注册 F140 追踪（F141→F140 桥接）
+#### PR WELCOME 后：按真实阻塞点注册显式等待（F141→F280）
 
-WELCOME 的 PR **必须有 owner 注册 PR tracking**，否则 F140 的追踪信号不会激活：
+WELCOME 只建立 owner/case 真相，不自动订阅 PR activity。只有当前工作确实被一个外部条件阻塞时，owner 才注册 typed wait。例如，等 external author push：
 
 ```
-cat_cafe_register_pr_tracking(repoFullName, prNumber)
+cat_cafe_register_pr_tracking(
+  repoFullName,
+  prNumber,
+  when=[{ kind: "pr_head_changed" }],
+  nextStep="Re-lock exact HEAD and review the delta.",
+  expiresAt=<future unix ms>
+)
 ```
 
 | 参数 | 来源 |
 |------|------|
 | `repoFullName` | Repo Inbox 通知 `source.meta.repoFullName` |
 | `prNumber` | 通知 `source.meta.number` |
+| `when` | 当前真正改变下一步的 typed condition |
+| `nextStep` | 条件满足后 owner 要做的动作 |
+| `expiresAt` | 当前责任失效时间 |
 
-> **catId / threadId 由服务端自动解析**：API 从调用猫的 invocation record 取 `catId` 和 `threadId`，不接受 payload 覆盖。即：谁调用 `register_pr_tracking`，PR 就归谁追踪。
+> **owner / baseline 由服务端解析**：API 从当前 task/custody 和 GitHub live truth 生成，不接受 payload 覆盖。注册历史不会被回灌为 wake。
 
-> **wake intent（F140）**：WELCOME 阶段 owner 是在**审 / triage** 这个 incoming PR，用默认 `intent='review'`（CI-pass 静默，不被打扰）。等你决定"**CI 绿就用 owner 权限 merge 这个 PR**"时，再 `register_pr_tracking(..., intent='merge')` 翻一下，CI 全绿才会唤醒你去 merge（时机契约见 merge-gate skill）。
-
-注册后 F139 调度框架自动激活 `conflict-check` + `review-feedback` poller，PR 进入 F140 追踪层。
+等 CI 时改为 `when=[{kind:"pr_ci_terminal"},{kind:"pr_became_conflicting"}]`；等 cloud review 时必须锚定 exact trigger comment。等待目标变化就 re-register，新 generation 原子替换旧 generation。
 
 如果守门 thread 把 PR 或 issue 交给下游 thread，Direction Card / handoff 必须写清：
 
 - 接球 thread 负责注册 PR tracking
 - 接球 thread 负责后续 CI / review feedback / conflict 的 hold 或事件驱动
-- 完成后用 `cat_cafe_cross_post_message` 回报守门 thread
+- 任务闭环后用 `cat_cafe_cross_post_message` **恰好一次**回报守门 thread；过程中不得回报
 
 **cross-post 语义精度（#796 教训）**：cross-post 消息的内容必须和 Direction Card 的"下一步"字段一致。
 
@@ -227,6 +241,7 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 | WELCOME 后只给 verdict，不给 owner / route | 球权掉地上 | Direction Card 必填 route、owner、next action、report-back |
 | 分发给下游 thread 后继续在守门 thread hold | 双 owner、重复轮询、死锁 | 谁接球谁 hold；守门 thread 只保留路由记录 |
 | 把 `clowder-ai#NNN` 的下游 thread projectPath 填成 `clowder-ai` | 下游猫进入错误 workspace，家里 SOP/skills/feature docs 不在 cwd | projectPath 跟工作区真相源走；普通社区 review/triage/intake 用 cat-cafe，只有公开仓 checkout 操作例外 |
+| propose 社区下游 thread 时用 `none`，或把每个 checkpoint 都 cross-post 回守门 thread | 主 thread 被过程消息与 ACK 往返污染 | 显式传 `reportingMode: "final-only"`；闭环前 0 次过程回报，闭环后恰好 1 次最终总结；纯 FYI 不 ACK |
 | PR 还没 accepted issue 就深度 code review | 方向错也浪费 reviewer | 先 issue-first；无 accepted issue 不进代码 review |
 | 有更优雅方案就立刻 @co-creator | operator 变回人肉路由 | 猫猫先 maintainer reframing；只有硬决策才升级 |
 | 明显 spam 仍开 thread 讨论 | 浪费协作带宽 | `invalid` + `triaged` + close |

@@ -43,7 +43,8 @@ const CAT_ALERT_BADGE: Record<1 | 2 | 3, string> = {
 
 export function BrakeModal() {
   const resolveCatName = useCatNameResolver();
-  const { visible, level, activeMinutes, nightMode, submitting, checkin, bypassDisabled } = useBrakeStore();
+  const { visible, level, activeMinutes, nightMode, submitting, checkin, bypassDisabled, settingsMode } =
+    useBrakeStore();
   const { synthesize, state: ttsState } = useTts();
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState('');
@@ -154,62 +155,79 @@ export function BrakeModal() {
           </button>
         )}
 
-        {/* Continue reason input */}
-        {showReason && (
-          <div className="space-y-2">
-            {/* biome-ignore lint/a11y/noLabelWithoutControl: label wraps adjacent input */}
-            <label className="text-xs text-cafe-secondary">为什么需要继续？（必填）</label>
-            <input
-              ref={(el) => el?.focus()}
-              type="text"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="例：正在修复线上 P0 故障"
-              className="w-full border border-cafe rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conn-amber-ring"
-              onCompositionStart={ime.onCompositionStart}
-              onCompositionEnd={ime.onCompositionEnd}
-              onKeyDown={(e) => {
-                if (ime.isComposing()) return;
-                if (e.key === 'Enter' && reason.trim()) handleContinue();
-              }}
-            />
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => checkin('rest')}
-            disabled={submitting}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-green-text hover:bg-conn-green-hover transition-colors disabled:opacity-50"
-          >
-            立刻休息（5 分钟）
-          </button>
-          <button
-            type="button"
-            onClick={() => checkin('wrap_up')}
-            disabled={submitting}
-            className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-[var(--semantic-warning)] hover:opacity-90 transition-colors disabled:opacity-50"
-          >
-            收尾（10 分钟）
-          </button>
-          {!bypassDisabled && (
+        {/* Phase 6: Gentle mode — simple dismiss (AC4) */}
+        {settingsMode === 'gentle' ? (
+          <div className="flex flex-col gap-2">
             <button
               type="button"
-              onClick={handleContinue}
-              disabled={submitting || (showReason && !reason.trim())}
-              className="w-full py-2 rounded-xl text-sm text-cafe-secondary hover:bg-cafe-surface-elevated transition-colors disabled:opacity-50"
+              onClick={() => checkin('rest')}
+              disabled={submitting}
+              className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-green-text hover:bg-conn-green-hover transition-colors disabled:opacity-50"
             >
-              {showReason ? '确认继续' : '我有紧急情况（需要理由）'}
+              知道了，我会注意的
             </button>
-          )}
-          {bypassDisabled && (
-            <p className="text-center text-xs text-conn-red-text py-1">
-              紧急跳过次数已用完（4 小时内 3 次），请选择休息或收尾
-            </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* Hardcore mode — typed check-in (original behavior, AC3) */}
+            {/* Continue reason input */}
+            {showReason && (
+              <div className="space-y-2">
+                {/* biome-ignore lint/a11y/noLabelWithoutControl: label wraps adjacent input */}
+                <label className="text-xs text-cafe-secondary">为什么需要继续？（必填）</label>
+                <input
+                  ref={(el) => el?.focus()}
+                  type="text"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="例：正在修复线上 P0 故障"
+                  className="w-full border border-cafe rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conn-amber-ring"
+                  onCompositionStart={ime.onCompositionStart}
+                  onCompositionEnd={ime.onCompositionEnd}
+                  onKeyDown={(e) => {
+                    if (ime.isComposing()) return;
+                    if (e.key === 'Enter' && reason.trim()) handleContinue();
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => checkin('rest')}
+                disabled={submitting}
+                className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-conn-green-text hover:bg-conn-green-hover transition-colors disabled:opacity-50"
+              >
+                立刻休息（5 分钟）
+              </button>
+              <button
+                type="button"
+                onClick={() => checkin('wrap_up')}
+                disabled={submitting}
+                className="w-full py-2.5 rounded-xl text-sm font-medium text-[var(--cafe-surface)] bg-[var(--semantic-warning)] hover:opacity-90 transition-colors disabled:opacity-50"
+              >
+                收尾（10 分钟）
+              </button>
+              {!bypassDisabled && (
+                <button
+                  type="button"
+                  onClick={handleContinue}
+                  disabled={submitting || (showReason && !reason.trim())}
+                  className="w-full py-2 rounded-xl text-sm text-cafe-secondary hover:bg-cafe-surface-elevated transition-colors disabled:opacity-50"
+                >
+                  {showReason ? '确认继续' : '我有紧急情况（需要理由）'}
+                </button>
+              )}
+              {bypassDisabled && (
+                <p className="text-center text-xs text-conn-red-text py-1">
+                  紧急跳过次数已用完（4 小时内 3 次），请选择休息或收尾
+                </p>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Footer */}
         <p className="text-center text-xs text-cafe-muted">

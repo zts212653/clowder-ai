@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { buildWorktreeAliasMap, resolveListedWorktreeId } from '@/utils/worktree-id-alias';
+import { buildWorktreeAliasMap, resolveListedWorktreeId, type WorktreeAliasMap } from '@/utils/worktree-id-alias';
 
 export interface WorktreeEntry {
   id: string;
@@ -53,6 +53,39 @@ export interface SearchResult {
   matchType?: 'filename' | 'content';
 }
 
+async function discoverWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
+  const params = new URLSearchParams();
+  if (projectPath && projectPath !== 'default') params.set('repoRoot', projectPath);
+  const qs = params.toString();
+  const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error('worktree discovery failed');
+  const data = await res.json();
+  return data.worktrees ?? [];
+}
+
+function reconcileDiscoveredWorktree(
+  entries: WorktreeEntry[],
+  projectPath: string,
+  setAliases: (aliases: WorktreeAliasMap, projectPath?: string) => void,
+  normalizeWorktreeId: (id: string | null) => void,
+  setWorktreeId: (id: string | null) => void,
+) {
+  const aliases = buildWorktreeAliasMap(entries);
+  setAliases(aliases, projectPath);
+
+  const currentId = useChatStore.getState().workspaceWorktreeId;
+  const listedId = resolveListedWorktreeId(entries, currentId, aliases);
+  if (listedId) {
+    if (listedId !== currentId) normalizeWorktreeId(listedId);
+    return;
+  }
+
+  const normalizedProjectPath = projectPath.replace(/[\\/]+$/, '');
+  const projectWorktree = entries.find((entry) => entry.root.replace(/[\\/]+$/, '') === normalizedProjectPath);
+  const discoveredId = projectWorktree?.id ?? entries[0]?.id ?? null;
+  if (discoveredId !== currentId) setWorktreeId(discoveredId);
+}
+
 export function useWorkspace() {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
@@ -62,40 +95,45 @@ export function useWorkspace() {
   const projectPath = useChatStore((s) => s.currentProjectPath);
 
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
+  const [worktreesProjectPath, setWorktreesProjectPath] = useState<string | null>(null);
+  const [worktreesLoading, setWorktreesLoading] = useState(true);
+  const [worktreesError, setWorktreesError] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [file, setFile] = useState<FileData | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const worktreeRequestSeq = useRef(0);
+  const projectKey = projectPath || 'default';
+  const worktreesReadyForProject = worktreesProjectPath === projectKey;
+  const currentWorktrees = worktreesReadyForProject ? worktrees : [];
 
   // Fetch worktrees — re-fetches when project changes
   const fetchWorktrees = useCallback(async () => {
+    const requestSeq = ++worktreeRequestSeq.current;
+    setWorktreesLoading(true);
+    setWorktreesError(null);
     try {
-      const params = new URLSearchParams();
-      if (projectPath && projectPath !== 'default') {
-        params.set('repoRoot', projectPath);
-      }
-      const qs = params.toString();
-      const res = await apiFetch(`/api/workspace/worktrees${qs ? `?${qs}` : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        const newList: typeof worktrees = data.worktrees ?? [];
-        setWorktrees(newList);
-        const worktreeAliases = buildWorktreeAliasMap(newList);
-        setWorktreeAliases(worktreeAliases, projectPath);
-        // Auto-select first worktree if none selected or current was removed
-        const listedWorktreeId = resolveListedWorktreeId(newList, worktreeId, worktreeAliases);
-        if (listedWorktreeId && listedWorktreeId !== worktreeId) {
-          normalizeWorktreeId(listedWorktreeId);
-        } else if (!listedWorktreeId && newList.length > 0) {
-          setWorktreeId(newList[0].id);
-        }
-      }
+      const newList = await discoverWorktrees(projectPath);
+      if (requestSeq !== worktreeRequestSeq.current) return;
+
+      setWorktrees(newList);
+      setWorktreesProjectPath(projectKey);
+      // The ordinary flow is discovery + choice, never filesystem-path entry.
+      reconcileDiscoveredWorktree(newList, projectPath, setWorktreeAliases, normalizeWorktreeId, setWorktreeId);
     } catch {
-      /* ignore */
+      if (requestSeq === worktreeRequestSeq.current) {
+        setWorktrees([]);
+        setWorktreesProjectPath(projectKey);
+        setWorktreesError('暂时没能读取工作区');
+      }
+    } finally {
+      if (requestSeq === worktreeRequestSeq.current) {
+        setWorktreesLoading(false);
+      }
     }
-  }, [worktreeId, setWorktreeId, normalizeWorktreeId, setWorktreeAliases, projectPath]);
+  }, [normalizeWorktreeId, projectKey, projectPath, setWorktreeAliases, setWorktreeId]);
 
   useEffect(() => {
     fetchWorktrees();
@@ -325,7 +363,9 @@ export function useWorkspace() {
   );
 
   return {
-    worktrees,
+    worktrees: currentWorktrees,
+    worktreesLoading: !worktreesReadyForProject || worktreesLoading,
+    worktreesError: worktreesReadyForProject ? worktreesError : null,
     worktreeId,
     tree,
     file,

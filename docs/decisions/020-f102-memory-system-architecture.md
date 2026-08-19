@@ -15,7 +15,7 @@ decision_id: ADR-020
 
 ## Context
 
-Cat Café 需要一个记忆系统，让猫猫能：
+Clowder AI 需要一个记忆系统，让猫猫能：
 1. 搜索项目知识（feature specs、决策、教训、对话历史）
 2. 跨语言搜索（英文 query 命中中文文档）
 3. 自动生成 thread 摘要（不靠人工）
@@ -37,7 +37,7 @@ Cat Café 需要一个记忆系统，让猫猫能：
 用户消息 (飞书/Telegram/Hub)
   │
   ▼
-Connector Binding          外部 chat → Cat Café thread 的映射
+Connector Binding          外部 chat → Clowder AI thread 的映射
   connector:{id}:{externalChat} → threadId
   │
   ▼

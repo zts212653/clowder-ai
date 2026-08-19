@@ -1,9 +1,10 @@
 ---
 feature_ids: [F223]
-related_features: [F038, F041, F131, F150, F192, F203, F211, F212]
+related_features: [F038, F041, F131, F150, F192, F203, F211, F212, F286]
 topics: [capability-surface, skills, mcp, hub-action-surface, harness-eval, workspace-navigator]
 doc_kind: spec
 created: 2026-06-03
+tips_exempt: post-close contract-truth update for the existing workspace-navigator capability; user guidance remains covered by capability-workspace-navigator
 ---
 
 # F223: Capability Surface Registry — 把隐藏能力产品化成可发现、可执行、可验证的能力面
@@ -25,6 +26,9 @@ operator 2026-06-03 指出：workspace-navigator 这种能力已经存在，但�
 ## Current State / 现状基线
 
 - F131 已完成 workspace navigator 的基础管道，但当时把“猫猫自己 `curl POST /api/workspace/navigate`”写成硬实力层。2026-06-03 现场复现显示，这个边界已经不够稳：Ragdoll调用了 navigate API，Hub 也拉到了文件内容，但operator只看到 Workspace 面板，没有可靠看到目标文档。
+- 2026-07-28 follow-up 关闭这个 verification 缺口：typed MCP/API 返回
+  `applied / queued / blocked / unconfirmed`；只有 client ack 的 applied 才证明 Workspace
+  状态已写入。native absolute path 在边界归一化，不再要求猫手工改写成 relative + worktreeId。
 - `cat-cafe-skills/refs/capability-wakeup-index.md` 已把 Tier 1 / Tier 2 能力列出来，并把 `workspace-navigator`、`rich-messaging`、`browser-preview` 判为 habit-resistant；但它仍偏“何时想起”，不是完整执行面 registry。
 - F192 Phase F `eval:capability-wakeup` 正在衡量猫“该用没用”的 miss rate；它不负责定义每个能力应该通过 MCP、callback route、helper 还是 ActionService 执行。
 - 家里已有大量 MCP 工具（例如 `cat_cafe_create_rich_block`、`cat_cafe_generate_document`、`cat_cafe_update_workflow`、`cat_cafe_multi_mention`、`cat_cafe_start_vote`），但部分能力在 skill / L0 / tool description 里的触发条件不够显眼。
@@ -78,6 +82,10 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 - `rich-messaging`：已有 `cat_cafe_create_rich_block` MCP，不重复造工具；补 trigger、tool description、F192 predicate，使长结构化回复默认走 rich block。
 
 `workspace-navigator` 的 worktreeId canonicalization + Files view 修复是 2026-06-03 现场暴露的 user-visible bug；如实现排期被 Phase B batching 拖住，可按 hotfix 路径先修 AC-B2，再回到 F223 registry 批处理。
+
+**Phase B1 verification follow-up（2026-07-28）**：原始 audit + Socket emit 只能证明请求进入
+管道，不能证明用户看见。现由 AppShell client 返回 applied/queued/blocked ack；API 在无 client
+ack 时返回 unconfirmed。这个修复属于 `hub-action-surface` 的确定契约，不另挂 Eval Hub。
 
 ### Phase C: Tier 1 Capability Normalization
 
@@ -186,7 +194,19 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 
 非作者（Maine Coon/GPT-5.5）非 reviewer（opus-47）跨个体守护。独立 trace 完整 runtime 数据流，不信传话：
 
-MCP `cat_cafe_workspace_navigate`（已注册进 `collabTools` + `AGENT_KEY_TOOLS`，非死代码）→ `callbackPost /api/workspace/navigate` → `workspace.ts` canonicalize worktreeId + emit `worktree:${canonical}` / `workspace:global` → `useWorkspaceNavigate` 收 `action=open` → `setWorkspaceOpenFile` 写 `workspaceOpenFilePath` + `_workspaceFileSetAt` stamp → `WorkspacePanel` useEffect 监听 path/stamp → `setViewMode('files')`。
+MCP `cat_cafe_workspace_navigate`（已注册进 `collabTools` + `AGENT_KEY_TOOLS`，非死代码）→
+MCP ingress 按实际认证模式绑定 thread（invocation-token 可继承 invocation thread；
+agent-key 必须显式提供有权访问的 `threadId`，缺失时不发 HTTP）→
+`callbackPost /api/workspace/navigate` → Workspace plugin 在 `workspace.ts` 验证
+callback-token / agent-key，并用 `resolvePrincipalThread` 绑定 principal 可见 thread →
+`workspace-navigate-handler.ts` 解析 absolute/repo-relative target、canonicalize worktreeId →
+`emitWorkspaceNavigate` 先通过 composition root 注入的 `socketEmit` 向 legacy
+`worktree:*` 与 `workspace:global` fire-and-forget，兼容迁移期旧 Hub；随后通过
+`socketEmitWithAck` 只向 `workspace:navigate:ack` 投递并收集回执 → AppShell 的
+`useWorkspaceNavigate` 返回 `applied / queued / blocked` receipt。legacy 广播不参与
+`deliveryStatus`；服务端只聚合 ack-room 回执，无有效回执保持 `unconfirmed`。可见 chat
+上的 `action=open` 才继续写 `workspaceOpenFilePath` + `_workspaceFileSetAt` stamp，随后
+`WorkspacePanel` 切到 Files view。
 
 **结论：代码层愿景对齐 PASS。** 链路直击 6/3 痛点“调了但用户看不到”，每环有单元/组件测试覆盖；F192 test delta 经核实只跟随 `docs/harness-feedback/eval-domains/eval-task-outcome.yaml` 的 `frequency: daily` 真相源，未越界改 production/registry。
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { useMessageDisclosureState } from '@/components/message-disclosure-state';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { CliEvent, CliStatus } from '@/stores/chat-types';
 import typographyTokens from '@/styles/typography-tokens.json';
@@ -29,6 +30,19 @@ function lighten(hex: string, ratio: number): string {
 
 /* ── Divider stays neutral; surface colors are now breed-tinted (see buildSurface) ── */
 const DIVIDER = 'var(--console-border-strong)';
+const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
+
+function usePublishLayoutAfterDisclosure(disclosed: boolean) {
+  const hasMounted = useRef(false);
+  useLayoutEffect(() => {
+    void disclosed;
+    if (!hasMounted.current) {
+      hasMounted.current = true;
+      return;
+    }
+    window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+  }, [disclosed]);
+}
 
 /* ── Inline SVG icons (Lucide-style, from Pencil design) ── */
 
@@ -209,6 +223,7 @@ function ToolRow({
 }) {
   const [rowExpanded, setRowExpanded] = useState(false);
   const hasResult = event.detail != null;
+  usePublishLayoutAfterDisclosure(rowExpanded);
   // Design: active = breed bg 20% + left border 2px + lighter text
   const accentLight = lighten(accent, 0.6); // ~#C084FC equivalent
   const accentVeryLight = lighten(accent, 0.9); // ~#F5F3FF equivalent
@@ -229,7 +244,7 @@ function ToolRow({
         onUserInteract?.();
       }}
     >
-      <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div data-context-quote-segment-id={`tool-label:${event.id}`} className="flex items-center gap-2 min-w-0 flex-1">
         {/* Status icon */}
         {isActive ? <LoaderIcon color={accentLight} /> : hasResult ? <CheckIcon /> : null}
         {/* Wrench icon — design: #E2E8F0 normal, #F5F3FF active */}
@@ -247,7 +262,11 @@ function ToolRow({
       {/* Detail — hidden by default, shown on click */}
       {hasResult && !rowExpanded && <ChevronIcon expanded={false} />}
       {rowExpanded && hasResult && event.detail && (
-        <div className="w-full mt-1 pl-7 whitespace-pre-wrap text-micro" style={{ color: 'var(--cat-msg-inset-text)' }}>
+        <div
+          data-context-quote-segment-id={`tool-detail:${event.id}`}
+          className="w-full mt-1 pl-7 whitespace-pre-wrap text-micro"
+          style={{ color: 'var(--cat-msg-inset-text)' }}
+        >
           {event.detail}
         </div>
       )}
@@ -275,6 +294,7 @@ function ToolsSection({
   const isStreaming = status === 'streaming';
   const [toolsExpanded, setToolsExpanded] = useState(isStreaming);
   const toolsUserInteracted = useRef(false);
+  usePublishLayoutAfterDisclosure(toolsExpanded);
 
   const prevStatus = useRef(status);
   useEffect(() => {
@@ -337,6 +357,7 @@ interface CliOutputBlockProps {
   thinkingMode?: 'debug' | 'play';
   defaultExpanded?: boolean;
   breedColor?: string;
+  disclosureKey?: string;
 }
 
 export function CliOutputBlock({
@@ -345,46 +366,41 @@ export function CliOutputBlock({
   thinkingMode,
   defaultExpanded = false,
   breedColor,
+  disclosureKey,
 }: CliOutputBlockProps) {
   const isExport =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const forceExpanded = status === 'streaming' || isExport;
-  const [expanded, setExpanded] = useState(forceExpanded || defaultExpanded);
-  const userInteracted = useRef(false);
-  const hasMounted = useRef(false);
+  const { expanded, setExpanded, hasOverride } = useMessageDisclosureState(
+    disclosureKey,
+    forceExpanded || defaultExpanded,
+  );
+  const userInteracted = useRef(hasOverride);
+  usePublishLayoutAfterDisclosure(expanded);
 
-  if (forceExpanded && !expanded && !userInteracted.current) {
+  if (!disclosureKey && forceExpanded && !expanded && !userInteracted.current) {
     setExpanded(true);
   }
 
   const prevStatusRef = useRef(status);
   useEffect(() => {
-    if (prevStatusRef.current !== 'streaming' && status === 'streaming') {
+    if (disclosureKey) {
+      prevStatusRef.current = status;
+    } else if (prevStatusRef.current !== 'streaming' && status === 'streaming') {
       userInteracted.current = false;
       setExpanded(true);
     } else if (prevStatusRef.current === 'streaming' && status !== 'streaming' && !userInteracted.current) {
       setExpanded(defaultExpanded);
     }
     prevStatusRef.current = status;
-  }, [status, defaultExpanded]);
+  }, [disclosureKey, status, defaultExpanded, setExpanded]);
 
   // Sync expanded state when defaultExpanded prop changes (e.g. async config load)
   useEffect(() => {
-    if (!userInteracted.current) {
+    if (!disclosureKey && !userInteracted.current) {
       setExpanded(forceExpanded || defaultExpanded);
     }
-  }, [defaultExpanded, forceExpanded]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
-  useLayoutEffect(() => {
-    if (!hasMounted.current) {
-      hasMounted.current = true;
-      return;
-    }
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('catcafe:chat-layout-changed'));
-    }
-  }, [expanded]);
+  }, [defaultExpanded, disclosureKey, forceExpanded, setExpanded]);
 
   if (events.length === 0) return null;
 
@@ -430,7 +446,11 @@ export function CliOutputBlock({
 
       {/* Expanded body */}
       {expanded && (
-        <div data-testid="cli-output-body" style={{ backgroundColor: 'var(--cat-msg-inset)' }}>
+        <div
+          data-testid="cli-output-body"
+          data-context-quote-source="cli_output"
+          style={{ backgroundColor: 'var(--cat-msg-inset)' }}
+        >
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           {toolUses.length > 0 && (
             <ToolsSection
@@ -462,6 +482,7 @@ export function CliOutputBlock({
                 </>
               )}
               <div
+                data-context-quote-segment-id="stdout"
                 style={{ padding: '8px 12px 10px 12px' }}
                 className="font-mono text-xs leading-relaxed cli-output-md"
               >

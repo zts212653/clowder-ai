@@ -39,6 +39,7 @@ export const RICH_BLOCK_RULES = `### 富消息块使用规则（B 风格：平�
   - 本地视频/通用文件需先放到 \`/uploads/...\`；当前自动发布合约只覆盖图片
 - **media_gallery**（图片展示 — 不一定要现场生成！）
   - 发送已有图片（头像 \`/avatars/\`、照片 \`/uploads/\`、设计稿）
+  - \`/uploads/xxx\` 的磁盘真身是 \`cat-cafe-runtime/packages/api/uploads/\`（运行中 API 的 uploadDir）；不要手动 cp 到源码仓 \`uploads/\` 或 \`packages/api/uploads/\`
   - 截图展示、多图对比
   - 定时任务/主动触发中展示图片
 - **audio**（语音消息 — 你"说出来"的话）

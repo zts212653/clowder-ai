@@ -20,7 +20,7 @@ triggers:
 
 ## 价值门禁 / Why This Is a Skill
 
-这是 Cat Café 特有的方法论：把 repo 里的“约定层关联”（MCP tool、skill trigger、route、workflow callback、配置驱动注册）画成带 provenance/freshness 的图。它不是通用 AST 教程，也不是让猫依赖 codegraph/GitNexus；它把 F242 的 dogfood 经验沉淀成未来进 repo 的第一步。
+这是 Clowder AI 特有的方法论：把 repo 里的“约定层关联”（MCP tool、skill trigger、route、workflow callback、配置驱动注册）画成带 provenance/freshness 的图。它不是通用 AST 教程，也不是让猫依赖 codegraph/GitNexus；它把 F242 的 dogfood 经验沉淀成未来进 repo 的第一步。
 
 ## 核心知识 / Overview
 
@@ -54,7 +54,7 @@ LSP 看符号，grep 看文本；约定图看“这个 repo 的规矩”。每�
 
 ## Product Entry / Commands
 
-在 Cat Café repo 根目录，先重建当前 repo 的图：
+在 Clowder AI repo 根目录，先重建当前 repo 的图：
 
 ```bash
 pnpm convention-graph:index -- --repo .
@@ -65,6 +65,13 @@ pnpm convention-graph:index -- --repo .
 ```bash
 MCP_TOOL_NAME=replace_with_tool_name
 pnpm convention-graph:code-consumers -- --repo . --domain mcp-tool --kind mcp_tool --name "$MCP_TOOL_NAME"
+```
+
+查某个 skill manifest 的触发/消费方（CLI 接受 `skill` 作为 `skill_manifest` 的人类友好别名）：
+
+```bash
+SKILL_NAME=replace_with_skill_name
+pnpm convention-graph:code-consumers -- --repo . --domain skill-manifest --kind skill --name "$SKILL_NAME"
 ```
 
 输出是 JSON，包含 `targets`、`consumers`、每条 edge 的 `provenance`，以及 `freshness`。如果 `freshness.stale=true`，这次查询只能当 stale 证据；先重跑 `convention-graph:index`，再决定影响面。

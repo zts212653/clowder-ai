@@ -81,7 +81,6 @@ export function TranscriptPanel() {
   const [selectedSource, setSelectedSource] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
-  const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
   const setFloatingTranscriptVisible = useChatStore((s) => s.setFloatingTranscriptVisible);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
 
@@ -292,14 +291,6 @@ export function TranscriptPanel() {
           title="Pop out to floating window"
         >
           &#8599;
-        </button>
-        <button
-          type="button"
-          onClick={() => setRightPanelMode('status')}
-          className="rounded px-1 py-0.5 text-xs text-cafe-text-muted hover:text-cafe-text-primary"
-          title="Close transcript panel"
-        >
-          &times;
         </button>
       </div>
 

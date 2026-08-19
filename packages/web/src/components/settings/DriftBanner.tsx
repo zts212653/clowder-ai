@@ -1,10 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CriticalText } from '@/components/content-overflow';
 import { apiFetch } from '@/utils/api-client';
 import type { DriftCheckResult, DriftIssue, DriftType } from './drift-types';
 import { DRIFT_ISSUE_LABELS, driftTypeLabel } from './drift-types';
 import { ModalOverlay } from './skill-issue-view';
+
+interface DriftError {
+  summary: string;
+  details?: string;
+}
 
 // ── DriftIssueList (shared issue renderer) ──────────────────────────────────
 
@@ -57,12 +63,14 @@ function DriftIssueDetailDialog({
   type,
   issues,
   syncing,
+  error,
   onSync,
   onClose,
 }: {
   type: DriftType;
   issues: DriftIssue[];
   syncing: boolean;
+  error: DriftError | null;
   onSync: () => void;
   onClose: () => void;
 }) {
@@ -82,6 +90,7 @@ function DriftIssueDetailDialog({
 
       <section className="mt-3 min-h-0 flex-1 overflow-y-auto text-xs">
         {issues.length > 0 ? <DriftIssueList issues={issues} /> : <p className="text-cafe-muted">暂无异常。</p>}
+        {error && <CriticalText summary={error.summary} details={error.details} className="mt-3" />}
       </section>
 
       <div className="mt-4 flex shrink-0 gap-2">
@@ -116,7 +125,7 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
   const [drift, setDrift] = useState<DriftCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DriftError | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const fetchGen = useRef(0);
 
@@ -141,7 +150,10 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
       } catch (err) {
         if (signal?.aborted) return;
         if (!isCurrent()) return;
-        setError(err instanceof Error ? err.message : 'unknown error');
+        setError({
+          summary: `无法检查 ${driftTypeLabel(type)} 配置`,
+          details: err instanceof Error ? err.message : 'unknown error',
+        });
       } finally {
         if (!signal?.aborted && fetchGen.current === generation) setLoading(false);
       }
@@ -177,13 +189,20 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
       });
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(`drift-resolve ${res.status} ${txt.slice(0, 80)}`);
+        setError({
+          summary: `同步 ${driftTypeLabel(type)} 失败（HTTP ${res.status}）`,
+          details: txt || undefined,
+        });
+        return;
       }
       setShowDetail(false);
       await fetchDrift();
       await onResolved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'unknown error');
+      setError({
+        summary: `同步 ${driftTypeLabel(type)} 失败`,
+        details: err instanceof Error ? err.message : 'unknown error',
+      });
     } finally {
       setBusy(false);
     }
@@ -194,6 +213,9 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
 
   if (loading && !drift && issues.length === 0) {
     return <p className="text-xs text-cafe-muted">{label} 配置检测中…</p>;
+  }
+  if (error && issues.length === 0) {
+    return <CriticalText summary={error.summary} details={error.details} appearance="panel" />;
   }
   if (issues.length === 0) {
     return (
@@ -215,12 +237,12 @@ export function DriftBanner({ type, projectPath, refreshToken = 0, onResolved }:
           查看详情
         </button>
       </div>
-      {error && <p className="mt-1 text-xs text-conn-red-text">⚠ {error}</p>}
       {showDetail && (
         <DriftIssueDetailDialog
           type={type}
           issues={issues}
           syncing={busy}
+          error={error}
           onSync={sync}
           onClose={() => setShowDetail(false)}
         />

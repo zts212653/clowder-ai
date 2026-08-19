@@ -46,7 +46,7 @@ export function registerLimbNodeRoutes(
     const parsed = registerSchema.safeParse(request.body);
     if (!parsed.success) return reply.status(400).send({ error: parsed.error.message });
 
-    const req = pairingStore.createRequest(parsed.data);
+    let req = pairingStore.createRequest(parsed.data);
 
     // Reconnect: approved node → verify apiKey before allowing endpoint change
     if (req.status === 'approved') {
@@ -55,9 +55,12 @@ export function registerLimbNodeRoutes(
         return reply.status(403).send({ error: 'Reconnect requires valid apiKey' });
       }
       const endpointChanged = req.endpointUrl !== parsed.data.endpointUrl;
-      // Update pairing record endpoint if changed
       if (endpointChanged) {
-        req.endpointUrl = parsed.data.endpointUrl;
+        const updated = await pairingStore.updateApprovedEndpoint(req.nodeId, parsed.data.endpointUrl);
+        if (!updated) {
+          return reply.status(409).send({ error: 'Approved pairing disappeared during reconnect' });
+        }
+        req = updated;
       }
 
       const existing = limbRegistry.getNode(req.nodeId);

@@ -43,6 +43,11 @@ export interface RuntimeCapabilityDescriptor {
   permissionMode: string;
 }
 
+export interface FreshnessDescriptorProviderConfig {
+  clientId?: string;
+  provider?: string;
+}
+
 // --- Carrier tier mapping ---
 
 /**
@@ -66,8 +71,11 @@ export function carrierTierToCarrierName(tier: string): string {
 
 // --- Provider capability profiles ---
 
-/** Providers that run async (no interactive tool loop for freshness) */
-const ASYNC_CLOUD_PROVIDERS = new Set(['openai']);
+/** Providers that run async when the carrier is explicitly cloud/api_key. */
+const ASYNC_CLOUD_PROVIDERS = new Set(['openai', 'openai-chatgpt-pro']);
+
+/** Providers whose name alone is enough to prove cloud-only transport. */
+const PROVIDER_ONLY_CLOUD_PROVIDERS = new Set(['openai-chatgpt-pro']);
 
 /**
  * Carriers that cannot meaningfully act on held responses or notices.
@@ -112,26 +120,38 @@ export function descriptorFromDriver(provider: string, carrierTier: CarrierTier 
   };
 }
 
+/**
+ * Resolve the provider identity used by RuntimeCapabilityDescriptor.
+ *
+ * `clientId` is the local client family (e.g. openai), while `provider` can
+ * carry a more specific runtime marker (e.g. openai-chatgpt-pro cloud-only).
+ * Freshness gates need the specific provider when present so cloud-only cats
+ * do not become fail-open just because their client family is openai.
+ */
+export function resolveFreshnessDescriptorProvider(config?: FreshnessDescriptorProviderConfig | null): string {
+  return config?.provider ?? config?.clientId ?? 'unknown';
+}
+
 // --- Provider-only fallback (gpt52 terminal review P1 fix) ---
 
 /**
  * Derive descriptor from provider alone when carrierTier is unavailable.
  *
- * Non-Claude services (openai, google, kimi, etc.) don't have _carrierTier on
- * their service wrapper, so the producer side (invoke-single-cat) never writes
- * carrierTier to Redis. The consumer side needs a fallback to still derive
- * the correct descriptor for providers that should be restricted.
+ * Some services don't have _carrierTier on their service wrapper, so the
+ * producer side (invoke-single-cat) may not write carrierTier to Redis. The
+ * consumer side needs a fallback only when provider identity alone proves the
+ * transport is cloud-only.
  *
- * - ASYNC_CLOUD_PROVIDERS (openai) → api_key carrier → restricted
+ * - PROVIDER_ONLY_CLOUD_PROVIDERS → api_key carrier → restricted
  * - All others → undefined (= DEFAULT_DESCRIPTOR = fail-open, which is correct
- *   for local SDK providers like google/kimi/antigravity)
+ *   for local/headless providers like openai Codex, google, kimi, antigravity)
  *
  * When Phase D adds proper producer-side wiring for all services, the
  * primary path (carrierTier from Redis) takes precedence and this fallback
  * becomes dead code.
  */
 export function descriptorFromProviderFallback(provider: string): RuntimeCapabilityDescriptor | undefined {
-  if (ASYNC_CLOUD_PROVIDERS.has(provider)) {
+  if (PROVIDER_ONLY_CLOUD_PROVIDERS.has(provider)) {
     return descriptorFromDriver(provider, 'api_key');
   }
   // Non-async providers: fail-open is correct (same as DEFAULT_DESCRIPTOR)

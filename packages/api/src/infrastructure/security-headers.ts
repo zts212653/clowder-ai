@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
 
@@ -15,6 +15,11 @@ export interface SecurityHeadersOptions {
 interface HostAllowlist {
   exact: Set<string>;
   patterns: RegExp[];
+}
+
+export function applySecurityHeaders(reply: Pick<FastifyReply, 'header'>): void {
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Content-Security-Policy', "frame-ancestors 'none'");
 }
 
 /**
@@ -86,8 +91,7 @@ function securityHeaders(app: FastifyInstance, opts: SecurityHeadersOptions, don
 
   // F156 D-2: Anti-Clickjacking headers
   app.addHook('onSend', (_request, reply, _payload, next) => {
-    reply.header('X-Frame-Options', 'DENY');
-    reply.header('Content-Security-Policy', "frame-ancestors 'none'");
+    applySecurityHeaders(reply);
     next();
   });
   done();

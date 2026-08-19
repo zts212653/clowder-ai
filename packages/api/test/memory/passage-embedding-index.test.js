@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -117,6 +117,112 @@ describe('IndexBuilder passage embeddings', () => {
     builder.startPassageEmbeddingWarmup();
     await waitFor(() => passageVectorStore.count() === 2);
     assert.equal(passageVectorStore.count(), 2, 'rebuild should embed every indexed passage (background warm-up)');
+  });
+
+  it('deleteByAnchor removes markdown passage vectors with the passages', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'architecture', 'vector-delete.md'),
+      `---
+title: Vector Delete
+doc_kind: architecture
+---
+
+# Vector Delete
+
+The vectorcleanuptoken appears only in this markdown passage.
+`,
+    );
+
+    const builder = new IndexBuilder(store, docsDir, { embedding: makeEmbedding(), vectorStore, passageVectorStore });
+    await builder.rebuild();
+    builder.startPassageEmbeddingWarmup();
+    await waitFor(() => passageVectorStore.count() > 0);
+
+    await store.deleteByAnchor('doc:architecture/vector-delete');
+    assert.equal(store.searchPassages('vectorcleanuptoken').length, 0);
+    assert.equal(passageVectorStore.count(), 0, 'deleting a markdown doc must remove its stale passage vectors');
+  });
+
+  it('deleteByAnchor fails open when persisted passage vectors exist but sqlite-vec is not loaded', async () => {
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { passageVectorKey } = await import('../../dist/domains/memory/PassageVectorStore.js');
+    const { ensurePassageVectorTable } = await import('../../dist/domains/memory/schema.js');
+    const dbPath = join(tmpDir, 'persisted-passage-vectors.sqlite');
+    const anchor = 'doc:architecture/unavailable-vector';
+    const passageId = 'md-0';
+
+    const seedStore = new SqliteEvidenceStore(dbPath);
+    await seedStore.initialize();
+    sqliteVec.load(seedStore.getDb());
+    assert.equal(ensurePassageVectorTable(seedStore.getDb(), 4), true);
+    await seedStore.upsert([
+      {
+        anchor,
+        kind: 'architecture',
+        status: 'active',
+        title: 'Unavailable Vector Cleanup',
+        summary: 'Lexical cleanup must survive persisted vec0 tables.',
+        sourcePath: 'docs/architecture/unavailable-vector.md',
+        updatedAt: '2026-07-05T00:00:00Z',
+      },
+    ]);
+    seedStore
+      .getDb()
+      .prepare(
+        'INSERT INTO evidence_passages (doc_anchor, passage_id, content, speaker, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        anchor,
+        passageId,
+        'unavailablevectortoken appears in this markdown passage.',
+        null,
+        0,
+        '2026-07-05T00:00:00Z',
+      );
+    seedStore
+      .getDb()
+      .prepare('INSERT INTO passage_vectors (passage_key, embedding) VALUES (?, ?)')
+      .run(passageVectorKey(anchor, passageId), new Float32Array([1, 0, 0, 0]));
+    seedStore.close();
+
+    const lexicalOnlyStore = new SqliteEvidenceStore(dbPath);
+    await lexicalOnlyStore.initialize();
+    await assert.doesNotReject(() => lexicalOnlyStore.deleteByAnchor(anchor));
+    assert.equal(await lexicalOnlyStore.getByAnchor(anchor), null);
+    assert.equal(lexicalOnlyStore.searchPassages('unavailablevectortoken').length, 0);
+    lexicalOnlyStore.close();
+  });
+
+  it('does not churn unchanged markdown passage vectors on rebuild', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    mkdirSync(join(docsDir, 'architecture'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'architecture', 'unchanged-doc.md'),
+      `---
+title: Unchanged Doc
+doc_kind: architecture
+---
+
+# Unchanged Doc
+
+The unchangedvectortoken remains stable across warm rebuilds.
+`,
+    );
+
+    const builder = new IndexBuilder(store, docsDir, { embedding: makeEmbedding(), vectorStore, passageVectorStore });
+    await builder.rebuild();
+    builder.startPassageEmbeddingWarmup();
+    await waitFor(() => passageVectorStore.count() > 0);
+    const warmCount = passageVectorStore.count();
+
+    await builder.rebuild();
+    assert.equal(
+      passageVectorStore.count(),
+      warmCount,
+      'unchanged markdown docs should not delete/reinsert md-* passages and lose warm passage vectors',
+    );
   });
 
   it('does not block rebuild() on passage embedding — fire-and-forget (F209 regression)', async () => {

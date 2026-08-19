@@ -10,13 +10,14 @@ import type { ApprovalItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const NOW = Date.now();
 const SAMPLE_ITEMS: ApprovalItem[] = [
   {
     proposalId: 'dp-f128-1',
     sourceFeatureId: 'F128',
-    sourceThreadId: 'thread-abc',
+    navigation: anchoredApprovalNavigation('thread-abc'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
     status: 'pending',
@@ -28,7 +29,7 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
   {
     proposalId: 'dp-f193-1',
     sourceFeatureId: 'F193',
-    sourceThreadId: 'thread-xyz',
+    navigation: anchoredApprovalNavigation('thread-xyz'),
     requesterCatId: 'sonnet',
     ownerUserId: 'user-1',
     status: 'pending',
@@ -40,7 +41,7 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
   {
     proposalId: 'dp-f231-1',
     sourceFeatureId: 'F231',
-    sourceThreadId: 'thread-profile',
+    navigation: anchoredApprovalNavigation('thread-profile'),
     requesterCatId: 'opus',
     ownerUserId: 'user-1',
     status: 'pending',
@@ -112,11 +113,19 @@ describe('F246 v2: ApprovalPanel F231 filter regression', () => {
     container.remove();
   });
 
+  const openFeatureMenu = async () => {
+    const trigger = container.querySelector('[data-testid="approval-filter-feature-trigger"]');
+    await act(async () => {
+      trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  };
+
   it('renders filter bar with F231 chip', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalPanel));
     });
 
+    await openFeatureMenu();
     expect(container.querySelector('[data-testid="approval-filter-feature-F231"]')).not.toBeNull();
   });
 
@@ -125,9 +134,10 @@ describe('F246 v2: ApprovalPanel F231 filter regression', () => {
       root.render(React.createElement(ApprovalPanel));
     });
 
+    await openFeatureMenu();
     const f231Btn = container.querySelector('[data-testid="approval-filter-feature-F231"]');
     expect(f231Btn).not.toBeNull();
-    expect(f231Btn!.textContent).toBe('画像');
+    expect(f231Btn!.textContent).toContain('画像');
   });
 
   it('F231 filter shows only profile proposals', async () => {
@@ -135,6 +145,7 @@ describe('F246 v2: ApprovalPanel F231 filter regression', () => {
       root.render(React.createElement(ApprovalPanel));
     });
 
+    await openFeatureMenu();
     const f231Btn = container.querySelector('[data-testid="approval-filter-feature-F231"]');
     await act(async () => {
       f231Btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

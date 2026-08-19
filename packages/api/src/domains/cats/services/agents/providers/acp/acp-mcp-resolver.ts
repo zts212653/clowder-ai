@@ -20,6 +20,10 @@ import {
   resolvePencilCommand,
   SENSITIVE_KEY_PATTERNS,
 } from '../../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  isRetiredGithubMcpCapability,
+  isRetiredGithubMcpConfigEntry,
+} from '../../../../../../config/capabilities/retired-github-mcp.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { AcpMcpServer, AcpMcpServerStdio } from './types.js';
 
@@ -261,6 +265,9 @@ export async function resolveAcpMcpServers(
   // fall back to direct read only for backward compat / tests.
   const capConfig =
     opts?.capabilitiesConfig !== undefined ? opts.capabilitiesConfig : readCapabilitiesConfigSync(projectRoot);
+  const retiredCapabilityIds = new Set(
+    capConfig?.capabilities.filter(isRetiredGithubMcpCapability).map((capability) => capability.id) ?? [],
+  );
 
   // #712: Build effective whitelist.
   // - Non-empty whitelist: use as-is (intersection with enabled project MCPs in Phase 1/2)
@@ -272,7 +279,9 @@ export async function resolveAcpMcpServers(
     effectiveWhitelist = whitelist;
   } else if (opts?.mcpSupport === true) {
     const allEnabledIds = capConfig
-      ? capConfig.capabilities.filter((c) => c.type === 'mcp' && !disabled?.has(c.id)).map((c) => c.id)
+      ? capConfig.capabilities
+          .filter((c) => c.type === 'mcp' && !disabled?.has(c.id) && !retiredCapabilityIds.has(c.id))
+          .map((c) => c.id)
       : [];
     const hasCatCafe = allEnabledIds.some((id) => id === 'cat-cafe' || CAT_CAFE_SPLIT_ENTRYPOINTS.has(id));
     effectiveWhitelist = hasCatCafe ? allEnabledIds : ['cat-cafe', ...allEnabledIds];
@@ -294,6 +303,10 @@ export async function resolveAcpMcpServers(
 
   // Phase 1: resolve builtins from projectRoot (no .mcp.json needed)
   for (const name of expanded) {
+    if (retiredCapabilityIds.has(name)) {
+      log.info({ name }, 'Skipping retired GitHub MCP server (capabilities.json)');
+      continue;
+    }
     if (disabled?.has(name)) {
       log.info({ name }, 'Skipping disabled server (capabilities.json)');
       continue;
@@ -356,11 +369,13 @@ export async function resolveAcpMcpServers(
     );
   }
 
-  const disabledFromWhitelist = disabled ? [...expanded].filter((n) => disabled.has(n)).length : 0;
-  if (effectiveWhitelist.length > 0 && servers.length === 0 && (disabledFromWhitelist === 0 || missing.length > 0)) {
+  const inactiveFromWhitelist = [...expanded].filter(
+    (name) => disabled?.has(name) || retiredCapabilityIds.has(name),
+  ).length;
+  if (effectiveWhitelist.length > 0 && servers.length === 0 && (inactiveFromWhitelist === 0 || missing.length > 0)) {
     throw new Error(
       `All ${effectiveWhitelist.length} MCP whitelist entries [${effectiveWhitelist.join(', ')}] are missing. ` +
-        `Active missing: [${missing.join(', ')}], disabled: ${disabledFromWhitelist}. ` +
+        `Active missing: [${missing.join(', ')}], inactive: ${inactiveFromWhitelist}. ` +
         'ACP agent would start with zero MCP servers — aborting to prevent silent tool-call stalls.',
     );
   }
@@ -373,6 +388,7 @@ export async function resolveAcpMcpServers(
     const userServers = readMcpJson(userMcpJsonPath);
 
     for (const [name, entry] of Object.entries(userServers)) {
+      if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
       if (resolvedNames.has(name)) {
         log.debug({ name }, 'User project server shadowed by higher-priority server');
         continue;
@@ -439,6 +455,7 @@ export function resolveUserProjectMcpServers(userProjectRoot: string, exclude: R
   const servers: AcpMcpServer[] = [];
 
   for (const [name, entry] of Object.entries(entries)) {
+    if (isRetiredGithubMcpConfigEntry(name, entry)) continue;
     if (exclude.has(name)) {
       log.debug({ name, userProjectRoot }, 'User project server shadowed by base server');
       continue;

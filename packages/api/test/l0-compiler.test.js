@@ -88,6 +88,12 @@ function seedRepoRoot() {
   const root = mkdtempSync(join(tmpdir(), 'l0-repo-'));
   mkdirSync(join(root, 'scripts'), { recursive: true });
   writeFileSync(join(root, 'scripts', 'compile-system-prompt-l0.mjs'), '// fake');
+  mkdirSync(join(root, 'assets', 'system-prompts'), { recursive: true });
+  mkdirSync(join(root, 'assets', 'prompt-templates'), { recursive: true });
+  mkdirSync(join(root, 'cat-cafe-skills', 'refs'), { recursive: true });
+  writeFileSync(join(root, 'assets', 'system-prompts', 'system-prompt-l0.md'), 'BASE L0 TEMPLATE');
+  writeFileSync(join(root, 'assets', 'prompt-templates', 'l5-mcp-tools-index.md'), 'INITIAL L5');
+  writeFileSync(join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md'), 'INITIAL GOVERNANCE RULES');
   return root;
 }
 
@@ -95,7 +101,7 @@ test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async 
   clearL0Cache();
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ stdout: '你是 布偶猫（Claude Opus）...L0 BODY...' });
-  const out = await compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn });
+  const out = await compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, dataDir: root, spawnFn });
   assert.match(out, /布偶猫/);
   const call = spawnFn.calls[0];
   assert.deepEqual(call.args, [
@@ -103,9 +109,40 @@ test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async 
     '--cat',
     'opus-47',
     '--profile-dir',
-    resolve(root, 'private/profile'),
+    resolve(root, 'profiles/default-user'),
   ]);
   assert.ok(!call.args.includes('--out'), 'no --out when outPath omitted');
+});
+
+test('F231: canonical profileDir is user-scoped and independent of compiler cwd', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f231-canonical-data-'));
+  const spawnFn = buildFakeSpawn({ stdout: 'USER-SCOPED-L0' });
+
+  await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn });
+
+  const call = spawnFn.calls[0];
+  assert.equal(call.args[call.args.indexOf('--profile-dir') + 1], resolve(dataDir, 'profiles', 'alice'));
+});
+
+test('F231: L0 cache key isolates users with the same catId', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f231-cache-data-'));
+  const aliceSpawn = buildFakeSpawn({ stdout: 'ALICE-L0' });
+  const bobSpawn = buildFakeSpawn({ stdout: 'BOB-L0' });
+
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: aliceSpawn }),
+    'ALICE-L0',
+  );
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'bob', cwd: root, dataDir, spawnFn: bobSpawn }),
+    'BOB-L0',
+  );
+  assert.equal(aliceSpawn.calls.length, 1);
+  assert.equal(bobSpawn.calls.length, 1, 'bob must not receive alice cache entry');
 });
 
 test('compileL0ViaSubprocess (outPath) passes --out and returns file content', async () => {
@@ -113,7 +150,7 @@ test('compileL0ViaSubprocess (outPath) passes --out and returns file content', a
   const root = seedRepoRoot();
   const outPath = join(mkdtempSync(join(tmpdir(), 'l0-out-')), 'system-prompt-l0.md');
   const spawnFn = buildFakeSpawn({ stderr: `Wrote compiled L0 → ${outPath}`, writeOut: 'COMPILED-L0-FILE-CONTENT' });
-  const out = await compileL0ViaSubprocess({ catId: 'codex', cwd: root, outPath, spawnFn });
+  const out = await compileL0ViaSubprocess({ catId: 'codex', cwd: root, dataDir: root, outPath, spawnFn });
   assert.equal(out, 'COMPILED-L0-FILE-CONTENT');
   const call = spawnFn.calls[0];
   assert.deepEqual(call.args, [
@@ -121,7 +158,7 @@ test('compileL0ViaSubprocess (outPath) passes --out and returns file content', a
     '--cat',
     'codex',
     '--profile-dir',
-    resolve(root, 'private/profile'),
+    resolve(root, 'profiles/default-user'),
     '--out',
     outPath,
   ]);
@@ -190,51 +227,117 @@ test('compileL0ViaSubprocess caches result and clearL0Cache invalidates', async 
   assert.equal(spawnFn2.calls.length, 1);
 });
 
-// --- F231: profileDir cwd-first resolution (gpt52 封板 review) ---
-
-test('F231: profileDir prefers cwd/private/profile when it exists (packaged install scenario)', async () => {
+test('compileL0ViaSubprocess invalidates cached L0 when prompt-template assets change', async () => {
   clearL0Cache();
-  // Simulate packaged install: cwd (project dir) has private/profile/,
-  // but scripts/ lives elsewhere (install dir).
+  const root = seedRepoRoot();
+  const l5TemplatePath = join(root, 'assets', 'prompt-templates', 'l5-mcp-tools-index.md');
+  const spawnFn = buildFakeSpawn({ stdout: 'L0 BEFORE TEMPLATE CHANGE' });
+
+  const out1 = await compileL0ViaSubprocess({ catId: 'template-change-cat', cwd: root, spawnFn });
+  assert.equal(out1, 'L0 BEFORE TEMPLATE CHANGE');
+  assert.equal(spawnFn.calls.length, 1);
+
+  writeFileSync(l5TemplatePath, 'UPDATED L5 WITH PROJECTPATH GUARD CONTENT');
+
+  const spawnFn2 = buildFakeSpawn({ stdout: 'L0 AFTER TEMPLATE CHANGE' });
+  const out2 = await compileL0ViaSubprocess({ catId: 'template-change-cat', cwd: root, spawnFn: spawnFn2 });
+  assert.equal(out2, 'L0 AFTER TEMPLATE CHANGE');
+  assert.equal(spawnFn2.calls.length, 1, 'template changes must force a fresh L0 compiler subprocess');
+});
+
+test('compileL0ViaSubprocess invalidates cached L0 when governance rules change', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const sharedRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.md');
+  const localRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local.md');
+  const overrideRulesPath = join(root, 'cat-cafe-skills', 'refs', 'shared-rules.local-override.md');
+  const spawnFn = buildFakeSpawn({ stdout: 'L0 BEFORE GOVERNANCE CHANGE' });
+
+  const out1 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn });
+  assert.equal(out1, 'L0 BEFORE GOVERNANCE CHANGE');
+  assert.equal(spawnFn.calls.length, 1);
+
+  writeFileSync(sharedRulesPath, 'UPDATED GOVERNANCE RULES');
+
+  const spawnFn2 = buildFakeSpawn({ stdout: 'L0 AFTER SHARED RULES CHANGE' });
+  const out2 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn: spawnFn2 });
+  assert.equal(out2, 'L0 AFTER SHARED RULES CHANGE');
+  assert.equal(spawnFn2.calls.length, 1, 'shared-rules changes must force a fresh L0 compiler subprocess');
+
+  writeFileSync(localRulesPath, 'LOCAL GOVERNANCE OVERLAY');
+
+  const spawnFn3 = buildFakeSpawn({ stdout: 'L0 AFTER LOCAL GOVERNANCE OVERLAY' });
+  const out3 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn: spawnFn3 });
+  assert.equal(out3, 'L0 AFTER LOCAL GOVERNANCE OVERLAY');
+  assert.equal(spawnFn3.calls.length, 1, 'shared-rules.local changes must force a fresh L0 compiler subprocess');
+
+  writeFileSync(overrideRulesPath, 'LOCAL GOVERNANCE OVERRIDE');
+
+  const spawnFn4 = buildFakeSpawn({ stdout: 'L0 AFTER LOCAL GOVERNANCE OVERRIDE' });
+  const out4 = await compileL0ViaSubprocess({ catId: 'governance-change-cat', cwd: root, spawnFn: spawnFn4 });
+  assert.equal(out4, 'L0 AFTER LOCAL GOVERNANCE OVERRIDE');
+  assert.equal(
+    spawnFn4.calls.length,
+    1,
+    'shared-rules.local-override changes must force a fresh L0 compiler subprocess',
+  );
+});
+
+test('F231: profile content changes invalidate only that user/cat L0 cache entry', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'f231-profile-cache-'));
+  const relationshipDir = join(dataDir, 'profiles', 'alice', 'relationship');
+  mkdirSync(relationshipDir, { recursive: true });
+  const primerPath = join(relationshipDir, 'maine-coon-primer.md');
+  writeFileSync(primerPath, 'FIRST');
+
+  const firstSpawn = buildFakeSpawn({ stdout: 'L0-FIRST' });
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: firstSpawn }),
+    'L0-FIRST',
+  );
+
+  writeFileSync(primerPath, 'SECOND');
+  const secondSpawn = buildFakeSpawn({ stdout: 'L0-SECOND' });
+  assert.equal(
+    await compileL0ViaSubprocess({ catId: 'codex', userId: 'alice', cwd: root, dataDir, spawnFn: secondSpawn }),
+    'L0-SECOND',
+  );
+  assert.equal(secondSpawn.calls.length, 1, 'profile edits must force a fresh compiler subprocess');
+});
+
+// --- F231: canonical profile root is not coupled to install/worktree layout ---
+
+test('F231: legacy cwd/private/profile never shadows the canonical data root', async () => {
+  clearL0Cache();
   const projectDir = mkdtempSync(join(tmpdir(), 'l0-project-'));
-  const installDir = mkdtempSync(join(tmpdir(), 'l0-install-'));
-
-  // Install dir has the compile script
-  mkdirSync(join(installDir, 'scripts'), { recursive: true });
-  writeFileSync(join(installDir, 'scripts', 'compile-system-prompt-l0.mjs'), '// fake');
-
-  // Project dir has private/profile/ (user data)
+  const dataDir = mkdtempSync(join(tmpdir(), 'l0-data-'));
   mkdirSync(join(projectDir, 'private', 'profile'), { recursive: true });
-
-  // Symlink scripts into project dir so resolveL0CompilerScriptPath can find it from cwd
-  // (in real packaged install, this would be an NTFS junction — but cwd-based candidate
-  // would find it. The key is that profileDir should prefer projectDir.)
   mkdirSync(join(projectDir, 'scripts'), { recursive: true });
   writeFileSync(join(projectDir, 'scripts', 'compile-system-prompt-l0.mjs'), '// fake');
 
   const spawnFn = buildFakeSpawn({ stdout: 'PACKAGED-L0' });
-  await compileL0ViaSubprocess({ catId: 'packaged-cat', cwd: projectDir, spawnFn });
+  await compileL0ViaSubprocess({ catId: 'packaged-cat', userId: 'alice', cwd: projectDir, dataDir, spawnFn });
   const call = spawnFn.calls[0];
-  // profileDir should be project dir (cwd), not install dir
   assert.equal(
     call.args[call.args.indexOf('--profile-dir') + 1],
-    resolve(projectDir, 'private/profile'),
-    'profileDir must prefer cwd-based path when private/profile/ exists at cwd',
+    resolve(dataDir, 'profiles/alice'),
+    'legacy worktree data must not shadow the canonical user root',
   );
 });
 
-test('F231: profileDir falls back to script-path-based when cwd has no private/profile/', async () => {
+test('F231: packaged script lookup and profile storage use independent roots', async () => {
   clearL0Cache();
-  // Simulate cwd=packages/api: no private/profile/ at cwd, script is at ../../scripts/
   const root = seedRepoRoot();
+  const dataDir = mkdtempSync(join(tmpdir(), 'l0-data-'));
   const spawnFn = buildFakeSpawn({ stdout: 'FALLBACK-L0' });
-  await compileL0ViaSubprocess({ catId: 'fallback-cat', cwd: root, spawnFn });
+  await compileL0ViaSubprocess({ catId: 'fallback-cat', userId: 'alice', cwd: root, dataDir, spawnFn });
   const call = spawnFn.calls[0];
-  // Should fall back to script-path-based derivation
   assert.equal(
     call.args[call.args.indexOf('--profile-dir') + 1],
-    resolve(root, 'private/profile'),
-    'profileDir must fall back to script-path-based when cwd has no private/profile/',
+    resolve(dataDir, 'profiles/alice'),
+    'install root must never become a profile storage fallback',
   );
 });
 
@@ -246,6 +349,18 @@ test('L0 template includes limb tool quick index (via L5 segment)', () => {
   const content = readFileSync(l5Path, 'utf8');
   assert.match(content, /limb_list_available/, 'L5 MCP tools template must mention limb_list_available');
   assert.match(content, /limb_invoke_tool/, 'L5 MCP tools template must mention limb_invoke_tool');
+  assert.match(content, /cat_cafe_propose_thread/, 'L5 MCP tools template must mention propose_thread');
+  assert.match(content, /cat_cafe_withdraw_thread_proposal/, 'L5 MCP tools template must mention requester withdrawal');
+  assert.match(
+    content,
+    /(GitHub target≠projectPath|projectPath=归属≠GitHub target)/,
+    'L5 MCP tools template must separate GitHub target from projectPath',
+  );
+  assert.match(
+    content,
+    /triage reportingMode=none/,
+    'L5 MCP tools template must preserve PR triage reportingMode guidance',
+  );
 });
 
 // --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---

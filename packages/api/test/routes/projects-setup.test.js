@@ -178,7 +178,7 @@ describe('POST /api/projects/setup', () => {
     }
   });
 
-  it('rejects Cat Cafe descendants as external governance targets', async () => {
+  it('rejects Clowder AI descendants as external governance targets', async () => {
     const internalPackage = join(fakeCatCafeRoot, 'packages', 'api');
     await mkdir(internalPackage, { recursive: true });
 

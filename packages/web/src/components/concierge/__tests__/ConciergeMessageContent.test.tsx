@@ -91,6 +91,82 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
     expect(buttons[0].textContent).toContain('R1');
   });
 
+  it('renders a title-and-digest-bound marker as the matching inline button', () => {
+    const actions = [
+      {
+        action: 'concierge_teleport' as const,
+        label: '跳过去：猫猫球传送门bug',
+        handle: 'R3',
+        verb: '跳过去',
+        payload: { threadId: 'thread_bug' },
+      },
+    ];
+
+    act(() => {
+      root.render(
+        createElement(ConciergeMessageContent, {
+          content: 'PR 在这里。[跳过去 R3｜猫猫球传送门bug｜a1b2c3d4e5f6]',
+          actions,
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.textContent).not.toContain('｜猫猫球传送门bug｜a1b2c3d4e5f6]');
+  });
+
+  it('renders a lowercase bound marker through the canonical uppercase action handle', () => {
+    const actions = [
+      {
+        action: 'concierge_teleport' as const,
+        label: '跳过去：Topic A',
+        handle: 'R1',
+        verb: '跳过去',
+        payload: { threadId: 'thread_a' },
+      },
+    ];
+
+    act(() => {
+      root.render(
+        createElement(ConciergeMessageContent, {
+          content: '这里可以 [跳过去 r1｜Topic A｜a1b2c3d4e5f6] 查看',
+          actions,
+        }),
+      );
+    });
+
+    const button = container.querySelector('button');
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toContain('R1');
+    expect(container.textContent).not.toContain('r1｜Topic A｜a1b2c3d4e5f6');
+  });
+
+  it('renders markdown-safe canonical title bindings without exposing the digest', () => {
+    const actions = [
+      {
+        action: 'concierge_teleport' as const,
+        label: '跳过去：Bug *fix* _audit_ `cmd` \\path [link](target) ~done~',
+        handle: 'R1',
+        verb: '跳过去',
+        payload: { threadId: 'thread_md' },
+      },
+    ];
+
+    act(() => {
+      root.render(
+        createElement(ConciergeMessageContent, {
+          content: '详情：[跳过去 R1｜Bug ＊fix＊ ＿audit＿ ｀cmd｀ ＼path link （target） ～done～｜a1b2c3d4e5f6]',
+          actions,
+        }),
+      );
+    });
+
+    expect(container.querySelectorAll('button')).toHaveLength(1);
+    expect(container.textContent).not.toContain('a1b2c3d4e5f6');
+    expect(container.querySelector('em')).toBeNull();
+    expect(container.querySelector('code')).toBeNull();
+  });
+
   // AC-2: teleport click triggers pathname navigation (NOT query)
   it('teleport button click navigates via pushState pathname', () => {
     const actions = [

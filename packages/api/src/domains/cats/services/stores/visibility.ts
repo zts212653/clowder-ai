@@ -4,7 +4,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { type IMessageStore, isDelivered, type StoredMessage } from './ports/MessageStore.js';
+import type { IMessageStore, StoredMessage, ThreadMessageReadOptions } from './ports/MessageStore.js';
 
 /**
  * System-level userIds whose messages are visible to ALL thread participants
@@ -20,6 +20,108 @@ export const SYSTEM_USER_IDS: ReadonlySet<string> = new Set(['scheduler', 'syste
  */
 export function isSystemUserMessage(msg: Pick<StoredMessage, 'userId' | 'catId'>): boolean {
   return SYSTEM_USER_IDS.has(msg.userId) && (msg.catId === 'system' || msg.catId === null);
+}
+
+/**
+ * Cat-visible publication is independent from execution custody: cat-authored
+ * speech is published as soon as it is persisted. Queued user/system/briefing
+ * work remains private until delivery.
+ */
+export function isTimelinePublished(msg: StoredMessage): boolean {
+  if (!msg.deliveryStatus || msg.deliveryStatus === 'delivered') return true;
+  return msg.deliveryStatus === 'queued' && isRealCatSpeech(msg);
+}
+
+/**
+ * A queued user body that was already exposed to one exact child is durable
+ * cognition for that target cat. The append-only exposure witness survives
+ * child/session replacement, while other cats remain unable to read the body.
+ */
+export function hasDurableQueueBodyExposure(msg: StoredMessage, catId: CatId): boolean {
+  return (
+    msg.deliveryStatus === 'queued' &&
+    msg.catId === null &&
+    (msg.queueCustody?.bodyExposures ?? []).some((exposure) => exposure.targetCatId === catId)
+  );
+}
+
+/** Published history plus target-scoped queued bodies the cat has already read. */
+export function isDurablyReadableByCat(msg: StoredMessage, catId: CatId): boolean {
+  return isTimelinePublished(msg) || hasDurableQueueBodyExposure(msg, catId);
+}
+
+/** Resolve the publication predicate for a thread read in one place. */
+export function resolveThreadMessageVisibility(
+  options?: ThreadMessageReadOptions,
+): (message: StoredMessage) => boolean {
+  return (message) =>
+    isDeliveredMessage(message) ||
+    (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
+    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
+    (options?.includeExposedQueuedUserMessagesForCatId !== undefined &&
+      hasDurableQueueBodyExposure(message, options.includeExposedQueuedUserMessagesForCatId)) ||
+    (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message));
+}
+
+/**
+ * Delivery time and publication order are distinct for real-cat speech: it is
+ * published when authored, even if recipient execution custody ends later.
+ */
+export function resolveDeliveryTimelineScore(message: StoredMessage, deliveredAt: number): number {
+  return isTimelinePublished(message) || isQueuedUserTimelineMessage(message) ? message.timestamp : deliveredAt;
+}
+
+/** Match the Redis timeline score when constructing pagination cursors in memory. */
+export function getTimelineOrderTime(message: StoredMessage): number {
+  if (message.timelineOrderAt !== undefined) return message.timelineOrderAt;
+  if (isQueuedCatTimelineMessage(message) || isQueuedUserTimelineMessage(message)) return message.timestamp;
+  return message.deliveredAt ?? message.timestamp;
+}
+
+function isDeliveredMessage(message: StoredMessage): boolean {
+  return !message.deliveryStatus || message.deliveryStatus === 'delivered';
+}
+
+function isRealCatSpeech(message: StoredMessage): boolean {
+  return (
+    message.catId !== null &&
+    message.catId !== 'system' &&
+    message.userId !== 'system' &&
+    message.userId !== 'scheduler' &&
+    message.origin !== 'briefing'
+  );
+}
+
+function isQueuedCatTimelineMessage(message: StoredMessage): boolean {
+  return message.deliveryStatus === 'queued' && isRealCatSpeech(message);
+}
+
+/**
+ * Owner-facing timeline publication for durable queued user work. This is kept
+ * separate from `isTimelinePublished`: callback/context/prompt readers must not
+ * learn an undelivered body merely because the browser can render its receipt.
+ */
+function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
+  if (
+    message.deliveryStatus !== 'queued' ||
+    message.catId !== null ||
+    message.source !== undefined ||
+    message.userId === 'system' ||
+    message.userId === 'scheduler' ||
+    message.origin === 'briefing'
+  ) {
+    return false;
+  }
+  return message.queueCustody !== undefined;
+}
+
+function isOwnerVisibleRecalledUserMessage(message: StoredMessage): boolean {
+  return (
+    message.deliveryStatus === 'canceled' &&
+    message.catId === null &&
+    message._tombstone === true &&
+    message.recall?.exposure === 'seen'
+  );
 }
 
 /** Who is viewing */
@@ -52,7 +154,7 @@ export function canViewMessage(msg: StoredMessage, viewer: Viewer): boolean {
  *
  * A fetched parent message is eligible for inline preview only if it passes
  * the SAME predicates used to build prompt context. This prevents leaking
- * system/undelivered/deleted/whisper/stream content via formatMessage preview.
+ * system/undelivered/deleted/whisper content via formatMessage preview.
  *
  * Used by: route-helpers cursor-gap fetch, callbacks replyTo validation.
  */
@@ -61,8 +163,6 @@ export interface ReplyParentEligibilityOptions {
   threadId: string;
   /** Viewer context for whisper visibility */
   viewer: Viewer;
-  /** When true, other-cat stream messages are hidden (play mode default) */
-  hideOtherCatStreams?: boolean;
   /** The catId of the child message sender — NOT filtered out (own messages are valid parents) */
   childCatId?: CatId | null;
 }
@@ -95,8 +195,8 @@ export function isInternalNonQuotableParent(msg: Pick<StoredMessage, 'userId' | 
 export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEligibilityOptions): boolean {
   // Must be same thread
   if (parent.threadId !== opts.threadId) return false;
-  // Must be delivered (not queued/canceled)
-  if (!isDelivered(parent)) return false;
+  // Must already be cat-visible published speech; queued user work is browser-only.
+  if (!isTimelinePublished(parent)) return false;
   // Must not be deleted
   if (parent.deletedAt) return false;
   // System-generated / briefing messages are internal, non-routable — never valid parents
@@ -104,8 +204,6 @@ export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEl
   if (isInternalNonQuotableParent(parent)) return false;
   // Whisper visibility
   if (!canViewMessage(parent, opts.viewer)) return false;
-  // Play-mode: hide other cats' stream (thinking) messages
-  if (opts.hideOtherCatStreams && parent.catId !== null && parent.origin === 'stream') return false;
   return true;
 }
 

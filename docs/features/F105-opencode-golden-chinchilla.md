@@ -15,14 +15,14 @@ created: 2026-03-11
 
 ## Why
 
-Cat Cafe 已有 DARE（狸花猫，L1 CLI）和 Antigravity（Bengal，CDP 桥）两条外部 agent 接入通道。现在需要接入第三位：**opencode** — 一个开源、provider-agnostic 的 AI coding agent。
+Clowder AI 已有 DARE（狸花猫，L1 CLI）和 Antigravity（Bengal，CDP 桥）两条外部 agent 接入通道。现在需要接入第三位：**opencode** — 一个开源、provider-agnostic 的 AI coding agent。
 
 opencode 的独特价值：
 
 1. **开源 + provider-agnostic** — MIT 协议，支持 Anthropic/OpenAI/Google/本地模型等 75+ provider
 2. **Oh My OpenCode (OMOC)** — 杀手级插件生态，自带 Sisyphus 多专家编排 + Ralph Loop 自循环 + Context 智能管理
 3. **多接入方式** — CLI headless (`opencode run --format json`)、HTTP API (`opencode serve`)、ACP stdio
-4. **原生 MCP 支持** — opencode 内建 MCP client，与 Cat Cafe MCP 编排天然兼容
+4. **原生 MCP 支持** — opencode 内建 MCP client，与 Clowder AI MCP 编排天然兼容
 5. **强 TUI/主题生态** — 社区活跃，插件丰富
 
 operator定性：**金渐层**（Golden Chinchilla / British Shorthair）——毛色渐变如同 opencode 的"开放渐进"理念，圆润沉稳的英短体型体现稳定可靠。
@@ -31,12 +31,12 @@ operator定性：**金渐层**（Golden Chinchilla / British Shorthair）——�
 
 ## What
 
-通过 L1 CLI Adapter（复用 F050 DARE 模式），将 opencode 作为独立家族（金渐层）接入 Cat Cafe。
+通过 L1 CLI Adapter（复用 F050 DARE 模式），将 opencode 作为独立家族（金渐层）接入 Clowder AI。
 
 ### 核心架构
 
 ```
-Cat Cafe AgentRouter
+Clowder AI AgentRouter
   → OpenCodeAgentService (新 provider)
     → spawn `opencode run --format json`
       → opencode CLI (TypeScript/Bun)
@@ -59,8 +59,8 @@ Cat Cafe AgentRouter
 **方向 B（受控 OMOC）**：安装 Oh My OpenCode，但编排权分层——
 
 - **OMOC Sisyphus 编排器**：仅管理金渐层自己的内部专家子 agent（Oracle/Librarian/Frontend 等），即只编排 opencode 自己的 API 调用
-- **Cat Cafe CatOrchestration**：管理跨猫调度（金渐层 ↔ Ragdoll/Maine Coon/Siamese）
-- **不允许 Sisyphus 编排其他 Cat Cafe 猫猫**
+- **Clowder AI CatOrchestration**：管理跨猫调度（金渐层 ↔ Ragdoll/Maine Coon/Siamese）
+- **不允许 Sisyphus 编排其他 Clowder AI 猫猫**
 
 保留 OMOC 的：LSP 工具集成、Ralph Loop 自循环、Context 智能管理（70% 预警 / 85% 自动压缩）。
 
@@ -99,7 +99,7 @@ opencode 使用 Anthropic 格式 API，通过 proxy 支持所有 Claude 模型�
 | 句柄 | `@opencode`, `@金渐层`, `@golden` |
 | 角色 | coding, multi-agent-orchestration |
 | 特长 | 开源多模型编码 agent，自带 OMOC 多专家编排 + LSP + 主题生态 |
-| 注意 | OMOC Sisyphus 只编排自己的子 agent，不编排其他猫；opencode 原生 MCP 和 Cat Cafe MCP 需避免冲突 |
+| 注意 | OMOC Sisyphus 只编排自己的子 agent，不编排其他猫；opencode 原生 MCP 和 Clowder AI MCP 需避免冲突 |
 | Avatar | `assets/avatars/opencode.png` ✅ 已生成 |
 
 ---
@@ -117,7 +117,7 @@ opencode 使用 Anthropic 格式 API，通过 proxy 支持所有 Claude 模型�
 - OMOC 插件注入约 12K tokens system prompt，包含 Sisyphus 编排器 + 专家团队定义
 - API baseURL 需要加 `/v1` 后缀（opencode Anthropic SDK 调用 `{baseURL}/messages` 而非 `{baseURL}/v1/messages`）
 
-### Phase 1: Cat Cafe L1 接入 ✅ COMPLETE
+### Phase 1: Clowder AI L1 接入 ✅ COMPLETE
 - [x] AC-4: `CatProvider` 扩展支持 `'opencode'`（shared types + Zod enum + switch case）
 - [x] AC-5: `OpenCodeAgentService` 实现 `AgentService` 接口（11 tests green）
 - [x] AC-6: `opencode-event-transform.ts` 完成 JSON → AgentMessage 映射（10 tests green）
@@ -125,8 +125,8 @@ opencode 使用 Anthropic 格式 API，通过 proxy 支持所有 Claude 模型�
 - [x] AC-8: AgentRouter 注册 `case 'opencode'`，cat-config-loader 解析验证通过
 
 ### Phase 2: OMOC 集成 + 高级能力 ✅ COMPLETE
-- [x] AC-9: OMOC Sisyphus 编排限制在金渐层内部子 agent — 5 isolation tests: delegate-task targets are OMOC-internal (oracle/librarian/frontend-engineer), no Cat Cafe handles in events
-- [x] AC-10: opencode MCP 与 Cat Cafe MCP 编排不冲突 — 5 namespace tests: no MCP env leakage, no CLI MCP flags, zero tool name overlap, config isolation by process + file boundary
+- [x] AC-9: OMOC Sisyphus 编排限制在金渐层内部子 agent — 5 isolation tests: delegate-task targets are OMOC-internal (oracle/librarian/frontend-engineer), no Clowder AI handles in events
+- [x] AC-10: opencode MCP 与 Clowder AI MCP 编排不冲突 — 5 namespace tests: no MCP env leakage, no CLI MCP flags, zero tool name overlap, config isolation by process + file boundary
 - [x] AC-11: Ralph Loop + Context 管理正常工作 — 6 context tests: multi-cycle Ralph Loop yields correct sequence (1 session_init dedup), high token counts handled, auto-compact gaps handled
 
 ### Phase 3: 协作路由 ✅ COMPLETE
@@ -140,7 +140,7 @@ opencode 使用 Anthropic 格式 API，通过 proxy 支持所有 Claude 模型�
 1. **OMOC Sisyphus vs CatOrchestration 冲突** — 双重编排可能导致任务重复或死锁，需严格隔离编排域
 2. **opencode JSON 事件格式稳定性** — opencode 是活跃开源项目，事件格式可能变化
 3. **Proxy API 兼容性** — `https://chat.nuoda.vip/claudecode` 需确认支持所有 Claude 模型的 API 特性（streaming、tool use 等）
-4. **MCP 双注入** — opencode 自带 MCP + Cat Cafe MCP 编排可能产生工具冲突
+4. **MCP 双注入** — opencode 自带 MCP + Clowder AI MCP 编排可能产生工具冲突
 
 ---
 

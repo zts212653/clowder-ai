@@ -166,6 +166,25 @@ export function WrenchIcon(props: SvgProps) {
   );
 }
 
+/**
+ * shield-x — upstream_policy_reject (F212 Phase H, Sol runtime forensics 2026-07-09).
+ * Shield outline conveys "gated / blocked at a boundary"; the inner X marks refusal.
+ * Semantic distinction from auth_failed (KeyRoundIcon = credential) and from
+ * invalid_config (SettingsXIcon = user misconfiguration): here the request itself
+ * passed our validation but the UPSTREAM policy engine (Codex 0.98+) rejected it.
+ * KD-4 self-drawn (Lucide shield + inline x).
+ */
+export function ShieldXIcon(props: SvgProps) {
+  return baseSvg(
+    <>
+      <path d="M20 13c0 5-3.5 7.5-8 8.5-4.5-1-8-3.5-8-8.5V6l8-3 8 3v7Z" />
+      <path d="m14.5 9-5 5" />
+      <path d="m9.5 9 5 5" />
+    </>,
+    props,
+  );
+}
+
 /** circle-help — fallback for unknown reasonCode (Lucide circle-help) */
 export function UnknownReasonIcon(props: SvgProps) {
   return baseSvg(

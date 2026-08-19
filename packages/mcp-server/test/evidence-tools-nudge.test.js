@@ -49,8 +49,8 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
       json: async () => ({
         degraded: false,
         results: [
-          // Only low-confidence and non-doc sourceType — should trigger nudge
-          { title: 'Random msg', anchor: 'thread-x:1', snippet: 'unrelated', confidence: 'low', sourceType: 'thread' },
+          // Only low match-rank and non-doc sourceType — should trigger nudge
+          { title: 'Random msg', anchor: 'thread-x:1', snippet: 'unrelated', matchRank: 'low', sourceType: 'thread' },
         ],
       }),
     });
@@ -62,7 +62,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     assert.ok(text.includes('memory-search-best-practices'), 'low_hit nudge links to search skill');
   });
 
-  test('high-confidence doc anchor present → NO nudge (would be noise)', async () => {
+  test('high match-rank doc anchor present → NO nudge (would be noise)', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -73,7 +73,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'F102: Memory System',
             anchor: 'F102',
             snippet: 'core',
-            confidence: 'high',
+            matchRank: 'high',
             sourceType: 'feature',
           },
         ],
@@ -81,12 +81,36 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     });
     const result = await handleSearchEvidence({ query: 'F102' });
     const text = result.content[0].text;
-    assert.ok(!text.includes('Memory navigation —'), 'high-confidence hit must NOT emit nudge');
-    // But the existing "高置信度文档命中" Read-reminder hook should still appear
-    assert.ok(text.includes('高置信度文档命中'));
+    assert.ok(!text.includes('Memory navigation —'), 'high match-rank hit must NOT emit nudge');
+    // But the existing "高匹配文档命中" Read-reminder hook should still appear
+    assert.ok(text.includes('高匹配文档命中'));
   });
 
-  test('coverage intent emits coverage nudge even with high-confidence doc hits', async () => {
+  test('high match-rank architecture doc anchor present → NO nudge and still emits Read reminder', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'Memory System Overview',
+            anchor: 'doc:architecture/memory-system-overview',
+            snippet: 'architecture map',
+            matchRank: 'high',
+            sourceType: 'architecture',
+          },
+        ],
+      }),
+    });
+    const result = await handleSearchEvidence({ query: '记忆系统全景 overview' });
+    const text = result.content[0].text;
+    assert.ok(!text.includes('Memory navigation —'), 'architecture docs are document hits, not low-hit noise');
+    assert.ok(text.includes('高匹配文档命中'), 'architecture docs should trigger the Read reminder');
+    assert.ok(text.includes('doc:architecture/memory-system-overview'));
+  });
+
+  test('coverage intent emits coverage nudge even with high match-rank doc hits', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -97,7 +121,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'AUDHD operating manual',
             anchor: 'docs/stories/audhd-self-observation/landy-audhd-operating-manual.md',
             snippet: 'canonical doc',
-            confidence: 'high',
+            matchRank: 'high',
             sourceType: 'lesson',
           },
         ],
@@ -123,7 +147,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'ADR-019 Memory Routing',
             anchor: 'ADR-019',
             snippet: 'defines memory routing',
-            confidence: 'high',
+            matchRank: 'high',
             sourceType: 'decision',
           },
         ],
@@ -147,7 +171,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'AUDHD thread digest',
             anchor: 'thread_mp70b8oyhx0xlif6',
             snippet: 'ADHD and ASD discussion',
-            confidence: 'high',
+            matchRank: 'high',
             sourceType: 'thread',
           },
         ],
@@ -171,7 +195,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'AUDHD operating manual',
             anchor: 'docs/stories/audhd-self-observation/landy-audhd-operating-manual.md',
             snippet: 'canonical doc',
-            confidence: 'high',
+            matchRank: 'high',
             sourceType: 'lesson',
           },
         ],
@@ -184,7 +208,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     assert.ok(text.includes('Coverage task'), 'mention should emit coverage nudge');
   });
 
-  test('mid-confidence doc anchor → NO nudge (still relevant doc match)', async () => {
+  test('mid match-rank doc anchor → NO nudge (still relevant doc match)', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
@@ -195,7 +219,7 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
             title: 'ADR-019',
             anchor: 'docs/decisions/019',
             snippet: 'related',
-            confidence: 'mid',
+            matchRank: 'mid',
             sourceType: 'decision',
           },
         ],
@@ -203,18 +227,18 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     });
     const result = await handleSearchEvidence({ query: 'hooks' });
     const text = result.content[0].text;
-    assert.ok(!text.includes('Memory navigation —'), 'mid-confidence doc hit must NOT emit nudge');
+    assert.ok(!text.includes('Memory navigation —'), 'mid match-rank doc hit must NOT emit nudge');
   });
 
-  test('mixed low-confidence non-doc results → emit nudge (low-hit)', async () => {
+  test('mixed low match-rank non-doc results → emit nudge (low-hit)', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
     globalThis.fetch = async () => ({
       ok: true,
       json: async () => ({
         degraded: false,
         results: [
-          { title: 'thread msg', anchor: 'tx:1', snippet: '...', confidence: 'low', sourceType: 'thread' },
-          { title: 'session', anchor: 'sx:1', snippet: '...', confidence: 'mid', sourceType: 'discussion' },
+          { title: 'thread msg', anchor: 'tx:1', snippet: '...', matchRank: 'low', sourceType: 'thread' },
+          { title: 'session', anchor: 'sx:1', snippet: '...', matchRank: 'mid', sourceType: 'discussion' },
         ],
       }),
     });

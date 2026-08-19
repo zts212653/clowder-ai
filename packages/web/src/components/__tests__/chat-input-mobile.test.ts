@@ -13,6 +13,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
+vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({
   compressImage: (f: File) => Promise.resolve(f),
 }));
@@ -49,45 +50,63 @@ function render(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   return defaults;
 }
 
-describe('ChatInput mobile toolbar', () => {
-  it('shows mobile + button (hidden on md+)', () => {
+describe('ChatInput progressive add menu', () => {
+  it('shows one stable + entry at every width', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]');
+    const plusBtn = container.querySelector('button[aria-label="添加"]');
     expect(plusBtn).toBeTruthy();
-    // Button should have md:hidden class
-    expect(plusBtn?.className).toContain('md:hidden');
+    expect(plusBtn?.className).not.toContain('md:hidden');
+    expect(container.querySelectorAll('button[aria-label="添加"]')).toHaveLength(1);
   });
 
-  it('expands toolbar on + click and shows attach/whisper buttons', () => {
+  it('reveals secondary actions only after + is clicked', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
+    expect(container.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
+
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
     act(() => {
       plusBtn.click();
     });
-    // MobileInputToolbar should now be visible
-    expect(container.textContent).toContain('附件');
+
+    expect(container.textContent).toContain('引用 Thread 或文件');
+    expect(container.textContent).toContain('上传附件');
     expect(container.textContent).toContain('悄悄话');
+    expect(container.textContent).toContain('游戏');
   });
 
-  it('collapses toolbar when + is clicked again (rotate-45 toggle)', () => {
+  it('collapses the secondary menu when + is clicked again', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
     // Open
     act(() => {
       plusBtn.click();
     });
-    expect(container.textContent).toContain('附件');
+    expect(container.querySelector('[data-testid="composer-add-menu"]')).toBeTruthy();
     // Close
     act(() => {
       plusBtn.click();
     });
-    // MobileInputToolbar should be gone
-    expect(container.textContent).not.toContain('附件');
+    expect(container.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
   });
 
-  it('+ button has rotate-45 class when toolbar is open', () => {
+  it('collapses on a real pointer click without the outside-click handler reopening it', () => {
     render();
-    const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
+    act(() => plusBtn.click());
+    expect(container.querySelector('[data-testid="composer-add-menu"]')).toBeTruthy();
+
+    act(() => {
+      plusBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      plusBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      plusBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="composer-add-menu"]')).toBeNull();
+  });
+
+  it('+ button has rotate-45 class when its menu is open', () => {
+    render();
+    const plusBtn = container.querySelector('button[aria-label="添加"]') as HTMLButtonElement;
     expect(plusBtn.className).not.toContain('rotate-45');
     act(() => {
       plusBtn.click();
@@ -146,9 +165,13 @@ describe('ChatInput composer layout', () => {
   });
 
   it('keeps the active invocation stop affordance visible while preserving hover and keyboard focus styling', () => {
-    render({ hasActiveInvocation: true, onStop: vi.fn() });
+    render({ hasActiveInvocation: true });
 
-    const stopButton = container.querySelector('button[aria-label="Stop generation"]');
+    const stopButton = Array.from(container.querySelectorAll('button[aria-label="Stop generation"]')).find((button) =>
+      button.className.includes('bg-conn-red-text'),
+    ) as HTMLButtonElement | undefined;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton?.disabled).toBe(true);
     expect(stopButton?.className).not.toContain('opacity-0');
     expect(stopButton?.className).toContain('bg-conn-red-text');
     expect(stopButton?.className).toContain('hover:bg-conn-red-hover');

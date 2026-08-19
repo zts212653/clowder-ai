@@ -16,11 +16,13 @@ import { useChatStore } from '@/stores/chatStore';
 export const GUIDE_START_CALLBACK_PATH = '/api/guide-actions/start';
 export const GUIDE_CANCEL_CALLBACK_PATH = '/api/guide-actions/cancel';
 export const GUIDE_PREVIEW_CALLBACK_PATH = '/api/guide-actions/preview';
+export const CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH = '/api/auto-dream/life-settings/decision';
 
-const GUIDE_ACTIONS_CALLBACK_ALLOWLIST = new Set([
+const INTERACTIVE_CALLBACK_ALLOWLIST = new Set([
   GUIDE_START_CALLBACK_PATH,
   GUIDE_CANCEL_CALLBACK_PATH,
   GUIDE_PREVIEW_CALLBACK_PATH,
+  CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH,
 ]);
 
 /**
@@ -31,7 +33,7 @@ export function resolveSafeInteractiveCallbackEndpoint(endpoint: string): string
   try {
     const url = new URL(endpoint, window.location.origin);
     if (url.origin !== window.location.origin) return null;
-    if (!GUIDE_ACTIONS_CALLBACK_ALLOWLIST.has(url.pathname)) return null;
+    if (!INTERACTIVE_CALLBACK_ALLOWLIST.has(url.pathname)) return null;
     return `${url.pathname}${url.search}`;
   } catch {
     return null;

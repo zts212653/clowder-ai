@@ -21,9 +21,12 @@ export interface EvidenceSnippet {
   title: string;
   anchor: string;
   snippet: string;
-  confidence: 'high' | 'mid' | 'low';
+  matchRank: 'high' | 'mid' | 'low';
+  retrievalScore?: number;
   sourceType: string;
   sourcePath?: string;
+  authority?: string;
+  updatedAt?: string;
 }
 
 interface EvidenceSearchResponse {

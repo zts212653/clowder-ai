@@ -8,6 +8,7 @@ import {
   ACP_TRANSPORT_OPTIONS,
   autoSlug,
   CLIENT_OPTIONS,
+  CODEX_CARRIER_OPTIONS,
   defaultAcpCommandForClient,
   defaultAcpStartupArgsForClient,
   getAcpWarning,
@@ -377,6 +378,8 @@ export function AccountSection({
   modelOptions,
   availableProfiles,
   loadingProfiles,
+  effectiveCodexCarrier,
+  codexLocalCapable = true,
   onChange,
 }: {
   form: HubCatEditorFormState;
@@ -384,6 +387,10 @@ export function AccountSection({
   modelOptions: string[];
   availableProfiles: ProfileItem[];
   loadingProfiles: boolean;
+  /** F254 D2: server-resolved effective carrier for the edited cat (null for new cats). */
+  effectiveCodexCarrier?: { effective: 'exec_json' | 'app_server'; source: 'per-cat' | 'env' | 'default' } | null;
+  /** F254 D2: false for cloud-only cats (cli removed) — the Codex carrier never applies. */
+  codexLocalCapable?: boolean;
   onChange: (patch: FormPatch) => void;
 }) {
   const accountOptions = availableProfiles;
@@ -415,6 +422,7 @@ export function AccountSection({
               clientId: nextClient,
               provider: '',
               cliEffort: '',
+              codexCarrier: '',
               acpEnabled: nextAcpEnabled,
               ...(nextAcpEnabled ? acpDefaultsForClientSwitch(form, nextClient) : {}),
             });
@@ -448,6 +456,35 @@ export function AccountSection({
           const acpWarn = getAcpWarning(form.clientId, form.acpEnabled);
           return acpWarn ? <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ {acpWarn}</p> : null;
         })()}
+
+        {form.clientId === 'openai' && !form.acpEnabled && codexLocalCapable ? (
+          <>
+            <SelectField
+              label="接入方式（Carrier）"
+              ariaLabel="Codex Carrier"
+              value={form.codexCarrier}
+              options={CODEX_CARRIER_OPTIONS}
+              onChange={(value) => onChange({ codexCarrier: value as HubCatEditorFormState['codexCarrier'] })}
+            />
+            <p className="-mt-1 text-micro leading-4 text-cafe-muted">
+              App Server 走池化常驻宿主（F254，持久会话、可复用宿主）；CLI 走一次性 <code>codex exec</code>
+              。「默认」跟随服务端环境变量 <code>CAT_CAFE_CODEX_CARRIER</code>。
+            </p>
+            {effectiveCodexCarrier ? (
+              <p className="-mt-1 text-micro leading-4 text-cafe-secondary" data-testid="codex-carrier-effective">
+                当前生效：
+                {effectiveCodexCarrier.effective === 'app_server' ? 'App Server' : 'CLI（codex exec）'}
+                （来源：
+                {effectiveCodexCarrier.source === 'per-cat'
+                  ? '本成员覆盖'
+                  : effectiveCodexCarrier.source === 'env'
+                    ? '全局环境变量'
+                    : '默认值'}
+                ）
+              </p>
+            ) : null}
+          </>
+        ) : null}
 
         {form.clientId === 'antigravity' ? (
           <>

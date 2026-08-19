@@ -25,6 +25,7 @@ import { parse as parseToml } from 'smol-toml';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { DEPRECATED_MANAGED_SERVERS, isOurOwnedDeprecatedEntry } from './deprecated-managed-servers.js';
 import { MCP_CALLBACK_ENV_KEYS } from './mcp-constants.js';
+import { isRetiredGithubMcpConfigEntry } from './retired-github-mcp.js';
 
 /**
  * F213 Phase B (2026-05-26): shared L5 cleanup helper for any MCP config writer.
@@ -47,6 +48,14 @@ import { MCP_CALLBACK_ENV_KEYS } from './mcp-constants.js';
  * See ADR-036 amendment 2026-05-26 + `docs/features/F213-stale-mcp-config-cleanup.md`.
  */
 export function applyDeprecatedManagedCleanup(existingServers: Record<string, unknown>, contextLabel: string): void {
+  for (const [serverName, entry] of Object.entries(existingServers)) {
+    if (!isRetiredGithubMcpConfigEntry(serverName, entry)) continue;
+    delete existingServers[serverName];
+    log.warn(
+      { serverName, context: contextLabel },
+      `GitHub MCP retirement [${contextLabel}]: removed retired server '${serverName}'; use canonical gh`,
+    );
+  }
   for (const deprecated of DEPRECATED_MANAGED_SERVERS) {
     const entry = existingServers[deprecated.serverName];
     if (entry === undefined || entry === null) continue;
@@ -66,6 +75,24 @@ export function applyDeprecatedManagedCleanup(existingServers: Record<string, un
         { serverName: deprecated.serverName, context: contextLabel },
         `F213 cleanup [${contextLabel}]: reserved server id '${deprecated.serverName}' shadowed by deprecation registry but kept as user-owned (no known managed marker matched)`,
       );
+    }
+  }
+}
+
+/**
+ * Remove only legacy colon-named plugin entries whose ownership is proven by
+ * the resolved descriptor's original capability ID. Name similarity alone is
+ * insufficient because users may own an unrelated `foo:bar` entry alongside
+ * an external `foo__bar` server.
+ */
+function migrateOwnedPluginNames(
+  existingServers: Record<string, unknown>,
+  servers: readonly McpServerDescriptor[],
+): void {
+  for (const server of servers) {
+    const legacyName = server.capabilityId;
+    if (server.source === 'plugin' && legacyName?.includes(':') && legacyName.replace(/:/g, '__') === server.name) {
+      delete existingServers[legacyName];
     }
   }
 }
@@ -307,14 +334,7 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
   // F213 Phase B: L5 cleanup of deprecated managed entries before update.
   applyDeprecatedManagedCleanup(existingMcp, 'gemini');
 
-  // Migration: remove old colon-named entries that were renamed to double-
-  // underscore names (resolveServersForCat replaces `:` with `__`).
-  const newGeminiNames = new Set(servers.map((s) => s.name));
-  for (const key of Object.keys(existingMcp)) {
-    if (key.includes(':') && newGeminiNames.has(key.replace(/:/g, '__'))) {
-      delete existingMcp[key];
-    }
-  }
+  migrateOwnedPluginNames(existingMcp, servers);
 
   // Update/add managed entries; remove disabled managed; preserve user's own
   for (const s of servers) {
@@ -483,14 +503,7 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
   // F213 Phase B: L5 cleanup of deprecated managed entries before update.
   applyDeprecatedManagedCleanup(existingMcp, 'antigravity');
 
-  // Migration: remove old colon-named entries that were renamed to double-
-  // underscore names (resolveServersForCat replaces `:` with `__`).
-  const newAgNames = new Set(servers.map((s) => s.name));
-  for (const key of Object.keys(existingMcp)) {
-    if (key.includes(':') && newAgNames.has(key.replace(/:/g, '__'))) {
-      delete existingMcp[key];
-    }
-  }
+  migrateOwnedPluginNames(existingMcp, servers);
 
   for (const s of servers) {
     if (s.transport === 'streamableHttp') {

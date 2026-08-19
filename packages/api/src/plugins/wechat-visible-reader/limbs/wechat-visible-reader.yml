@@ -1,0 +1,51 @@
+nodeId: wechat-visible-reader-mac
+displayName: 微信当前会话读取（Mac）
+platform: macos
+
+capabilities:
+  - cap: visible_conversation_read
+    commands:
+      - wechat_visible_reader.read_visible_conversation
+    authLevel: leased
+  - cap: named_conversation_read
+    commands:
+      - wechat_visible_reader.read_conversation_recent
+    authLevel: leased
+
+commands:
+  wechat_visible_reader.read_visible_conversation:
+    type: invoke
+    handler: wechat-visible-reader:read_visible_conversation
+    description: 只读识别 Mac 微信当前选中会话的可见正文。调用前必须由本机 owner 在 Plugin Hub 短时授权；不会保存截图或操控微信，但返回文字会进入调用猫的模型上下文与 Clowder AI invocation trace。只覆盖当前页，不导航、不滚屏、不扫描其他会话。
+    params:
+      maxBlocks:
+        type: number
+        default: 80
+        desc: 最多返回的结构化消息单元数，范围 1-200
+      maxChars:
+        type: number
+        default: 8000
+        desc: 最多返回的正文字符数，范围 1-20000
+  wechat_visible_reader.read_conversation_recent:
+    type: invoke
+    handler: wechat-visible-reader:read_conversation_recent
+    description: 只读打开名称精确匹配且唯一的 1:1 微信会话，返回最近 1-30 条结构化消息并恢复原会话和原前台 app。每次调用必须来自 owner 当前消息，并明确确认：微信会被短暂前置、目标会话可能被标记已读、原滚动位置可能无法完全恢复。不会发送消息、点击链接、读取数据库或保存截图；返回文字会进入调用猫的模型上下文与 Clowder AI invocation trace。
+    params:
+      contact:
+        type: string
+        required: true
+        desc: 联系人显示名；只接受 OCR 唯一精确匹配，范围 1-128 个可见字符
+      limit:
+        type: number
+        required: true
+        desc: 最近消息条数，范围 1-30
+      acknowledgeUiNavigation:
+        type: boolean
+        required: true
+        validation: handler
+        desc: 必须为 true，确认本次读取会短暂前置并操控微信搜索与滚动
+      acknowledgeMayMarkRead:
+        type: boolean
+        required: true
+        validation: handler
+        desc: 必须为 true，确认打开目标会话可能清除其未读标记

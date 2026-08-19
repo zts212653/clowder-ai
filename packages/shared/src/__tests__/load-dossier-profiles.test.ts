@@ -8,9 +8,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   _resetDossierCache,
+  getDossierL0Pronouns,
+  getDossierL0RoutingNote,
+  getDossierL0SelfDescription,
   getDossierRosterSummary,
   hasDossierEntry,
   isDossierAvailable,
@@ -25,8 +29,13 @@ const MINIMAL_DOSSIER = `
 \`\`\`yaml
 # structured-profile: cat:opus
 entityId: "cat:opus"
+identity:
+  pronouns: "他/he"  # operator-confirmed identity fact
+  l0PronounReminder: true  # repeated correction; hydrate into the scarce roster
 oneLiner: "Main architect"
 l0RosterSummary: "Architecture and deep thinking"
+l0RoutingNote: "Architecture decisions only"
+l0SelfDescription: "Architect; state the stopping condition before deep research"
 \`\`\`
 
 ## sonnet
@@ -34,10 +43,14 @@ l0RosterSummary: "Architecture and deep thinking"
 \`\`\`yaml
 # structured-profile: cat:sonnet
 entityId: "cat:sonnet"
+identity:
+  pronouns: "她/she"
 oneLiner: "Fast and flexible"
 l0RosterSummary: "Quick and versatile coding"
 \`\`\`
 `;
+
+const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
 afterEach(() => {
   _resetDossierCache();
@@ -77,6 +90,61 @@ describe('R2-P1: ENOENT vs non-ENOENT error classification', () => {
 });
 
 describe('R2-P2: hasDossierEntry warning scope', () => {
+  test('canonical Fable engagement policy survives the typed loader', () => {
+    const policy = loadDossierProfiles(REPO_ROOT).get('fable-5')?.engagementPolicy;
+
+    expect(policy?.defaultMode).toBe('one_shot_calibration');
+    expect(policy?.reentry).toBe('only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request');
+  });
+
+  test('hydrates identity.pronouns from the structured dossier profile', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-pronouns-'));
+    const dossierDir = join(tempRoot, 'docs', 'team');
+    mkdirSync(dossierDir, { recursive: true });
+    writeFileSync(join(dossierDir, 'cat-dossier.md'), MINIMAL_DOSSIER);
+
+    try {
+      const profiles = loadDossierProfiles(tempRoot);
+      expect(profiles.get('opus')?.identity?.pronouns).toBe('他/he');
+      expect(getDossierL0Pronouns('opus', tempRoot)).toBe('他/he');
+      expect(profiles.get('sonnet')?.identity?.pronouns).toBe('她/she');
+      expect(getDossierL0Pronouns('sonnet', tempRoot)).toBeUndefined();
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('hydrates the compact L0 routing note independently from the capability summary', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-routing-note-'));
+    const dossierDir = join(tempRoot, 'docs', 'team');
+    mkdirSync(dossierDir, { recursive: true });
+    writeFileSync(join(dossierDir, 'cat-dossier.md'), MINIMAL_DOSSIER);
+
+    try {
+      expect(getDossierL0RoutingNote('opus', tempRoot)).toBe('Architecture decisions only');
+      expect(getDossierL0RoutingNote('sonnet', tempRoot)).toBeUndefined();
+      expect(getDossierRosterSummary('opus', tempRoot)).toBe('Architecture and deep thinking');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('hydrates the self-facing persona projection independently from teammate diagnosis', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-self-description-'));
+    const dossierDir = join(tempRoot, 'docs', 'team');
+    mkdirSync(dossierDir, { recursive: true });
+    writeFileSync(join(dossierDir, 'cat-dossier.md'), MINIMAL_DOSSIER);
+
+    try {
+      expect(getDossierL0SelfDescription('opus', tempRoot)).toBe(
+        'Architect; state the stopping condition before deep research',
+      );
+      expect(getDossierL0SelfDescription('sonnet', tempRoot)).toBeUndefined();
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('tracked cat with dossier entry → hasDossierEntry = true', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'dossier-r2p2-'));
     const dossierDir = join(tempRoot, 'docs', 'team');

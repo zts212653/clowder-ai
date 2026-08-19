@@ -24,6 +24,10 @@ const fixtures = [
   ['fetch failed: connect ECONNREFUSED 127.0.0.1:9879', 'network_error'],
   ['Error: ETIMEDOUT after 30000ms', 'network_error'],
   ['getaddrinfo ENOTFOUND api.example.com', 'network_error'],
+  [
+    'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)',
+    'network_error',
+  ],
   ['Error loading config.toml: invalid transport "foo"', 'invalid_config'],
   ['Failed to parse config at line 3', 'invalid_config'],
   ['config.json is malformed', 'invalid_config'],
@@ -42,9 +46,22 @@ const fixtures = [
   ['API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited', 'server_overloaded'],
   ['529 Overloaded: anthropic temporarily limiting', 'server_overloaded'],
   ['Server is busy, please retry after 30 seconds', 'server_overloaded'],
+  // F212 Phase H (AC-H3, Sol runtime forensics 2026-07-09): upstream policy reject —
+  // exact witnessed phrase from archive 97449e4b-0dec-433e-885a-0e37ab977b1e (cyber-safety).
+  // Sol R4 push back: only add exact witnessed phrase; do NOT add /content policy/i
+  // imagined variants (LL-059 allowlist-grows-from-evidence discipline).
+  [
+    'This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing',
+    'upstream_policy_reject',
+  ],
+  ['flagged for possible cybersecurity risk', 'upstream_policy_reject'],
   // Unknown — must return undefined
   ['some random weird thing happened', undefined],
   ['', undefined],
+  // Phase H sibling regression: content policy variants (not witnessed) MUST stay unknown
+  // until upstream archive evidence justifies expansion (LL-059 反模式防护)
+  ['content policy violated', undefined],
+  ['moderation flagged', undefined],
 ];
 
 for (const [input, expected] of fixtures) {

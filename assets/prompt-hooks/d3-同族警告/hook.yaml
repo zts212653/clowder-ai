@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "当同族猫互相 review 时给出警告"

@@ -4,6 +4,7 @@ related_features: [F153, F118, F173]
 topics: [cli, error-handling, diagnostics, sanitizer, frontend, observability]
 doc_kind: spec
 created: 2026-05-25
+tips_exempt: Codex CLI diagnostics regression fixes; Phase H and post-close timeout truth reuse the existing CliDiagnosticsPanel already tips-covered by F212 Phase D and add no new user action or capability surface
 ---
 
 # F212: CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示
@@ -175,7 +176,7 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 
 ### Phase G: Silent-stdout observability follow-up（2026-06-08 Maine Coon cross-thread packet 自 clowder-ai#875）
 
-**触发**：社区 issue clowder-ai#875 — OpenCode + DeepSeek 用户撞到 silent-stdout case：fresh OpenCode CLI 直接 reproduce — NDJSON stream 只有 1 个 `{"type":"step_start"}` event，无 text，无 explicit error。新 API key/新猫 rebind 不解决。当前 Cat Cafe surface 给用户 generic `"{catName} completed without textual output."`（route-serial:2165 + route-parallel:1193），**所有诊断证据丢失**：event count、event 类型、model/provider、session id prefix、exit status、stderr presence 都拿不到。Maine Coon跨 thread 投递完整 packet + verify scope。
+**触发**：社区 issue clowder-ai#875 — OpenCode + DeepSeek 用户撞到 silent-stdout case：fresh OpenCode CLI 直接 reproduce — NDJSON stream 只有 1 个 `{"type":"step_start"}` event，无 text，无 explicit error。新 API key/新猫 rebind 不解决。当前 Clowder AI surface 给用户 generic `"{catName} completed without textual output."`（route-serial:2165 + route-parallel:1193），**所有诊断证据丢失**：event count、event 类型、model/provider、session id prefix、exit status、stderr presence 都拿不到。Maine Coon跨 thread 投递完整 packet + verify scope。
 
 **根因（verified in main `92433bcc0`）**：
 1. `OpenCodeAgentService.ts:322` — `textEventCount === 0` 只 backend `log.warn`，**不 yield 任何 cliDiagnostics surface** 给前端
@@ -183,7 +184,7 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 3. `route-serial.ts:2165` + `route-parallel.ts:1193` — fallback collapse 到 generic message，丢失所有诊断证据
 4. F212 当前 scope 只覆盖 stderr-error 路径（Phase A-D + E + F），**silent-stdout 路径完全 lossy**
 
-**Scope（不动 OpenCode/DeepSeek upstream，只动 Cat Cafe diagnostics surface）**：
+**Scope（不动 OpenCode/DeepSeek upstream，只动 Clowder AI diagnostics surface）**：
 1. 触发条件: `eventCount > 0 && textEventCount === 0`
 2. Track + surface safe fields:
    - `eventCount` (total events received)
@@ -205,6 +206,58 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 2. **新 helper `buildSilentCompletionDiagnostic`**（`cli-diagnostics.ts`）：输入 `{eventCount, eventTypes, model, sessionIdPrefix, exitStatus, stderrPresent, stderrExcerpt?}`，返回 structured `CliDiagnostics`
 3. **OpenCode + Claude no-text branch**: track `Set<string>` of unique event types during stream，textEventCount===0 时 build diagnostic + yield `type: 'system_info'` event with `metadata.cliDiagnostics`（observability-only，不走 provider error path；cloud R1 P1 修正）
 4. **REASON_TEXT entry**: publicSummary `"CLI 完成但无文字输出"`, publicHint 解释 step_start-only pattern + 建议（换猫 / 换 model / 直接跑 CLI 看 raw output）
+
+### Phase H: Codex silent false-success regression（2026-07-09 Sol runtime forensics 发现）
+
+**触发**：小太阳Maine Coon（@codex-sol / GPT-5.6 Sol，跨 thread 投递自 `[thread-id]`）live-runtime forensics 发现 F212 post-close 新 failure class。真实 archive `packages/api/data/cli-raw-internal-archive/2026-07-09/97449e4b-0dec-433e-885a-0e37ab977b1e.ndjson` 事件序列：
+1. Substantive text + 4 command_execution items
+2. Explicit `{type:"error", message:"...flagged for possible cybersecurity risk..."}`
+3. `turn.failed`
+4. `__cliError exit 1, streamErrorCount=1`
+
+Sol runtime census: **21 terminal failures across 9 threads**（quota×16 / capacity×3 / transport×1 / cyber-safety×1）；**5 silent false-success subset in 4 threads**（substantive output before failure，被 provider suppress 成 `isFinal:false` half-sentence 洗白）。Recovery counterexample: `217969a7` (`turn.failed → new turn.started → item.completed → turn.completed`) validates canonical semanticDone architecture.
+
+**根因（3 层 T0 chain verified）**：
+1. `CodexAgentService.ts:1137-1148` 有 exit-1 suppress branch：`sawSubstantiveOutput && !hasNonSuppressibleCodexExitOneDiagnostics(...)` → 吞掉 exit 1
+2. Guard `hasNonSuppressibleCodexExitOneDiagnostics` (line 145-162) regex = **`/remote compaction failed|compact_error/i` only** — compaction-narrow，quota/capacity/safety/transport 全漏
+3. Provider 已经 duplicate 了 `cli-spawn.ts:608` `semanticDone = options.semanticCompletionSignal?.aborted === true` 逻辑，违反 **P4 single truth source**：`CodexAgentService.ts:1222` 上已经 `if (raw.type === 'turn.completed') semanticCompletionController.abort()`；`cli-spawn.ts:632` 只在 `!semanticDone` 时合成 `__cliError`。因此 `isCliError(event)` reaching provider **tautologically 证明 `semanticDone === false`**。加 provider-level exit-1 suppress heuristic = 复制已 own 的 assertion。
+
+**Sol 5 rounds refinement convergence（保存 delta 记录避下次重犯）**：
+- R1 initial: sequence-aware terminal state
+- R2 sequence-aware not monotonic + route-serial `:~2188` precise + census correction
+- R3: **DELETE provider suppress branch entirely**（P4 canonical `semanticDone` own — sequence-aware state 是复制层）
+- R4: scope audit — AC-H5 crosses shared+API+web+FrustrationDetector boundaries
+- R5: bookkeeping — helper location + "9 production files" phrasing
+
+**修复（Sol R5-sealed shape，9 production files + tests + docs + guards）**：
+
+**Backend (5)**：
+1. `CodexAgentService.ts` — DELETE `sawSubstantiveOutput` boolean + DELETE `hasNonSuppressibleCodexExitOneDiagnostics` helper (line 145-162) + DELETE 整个 suppress branch (line 1137-1148)。每个 `isCliError(event)` 到达 → surface F212 cliDiagnostics 走 Phase A AC-A8 mechanism。
+2. `cli-diagnostics.ts` — add `REASON_TEXT.upstream_policy_reject` entry (publicSummary "上游 policy 拒绝" + publicHint "internal/upstream policy 拒绝，非 Clowder AI bug；建议 rephrase 或换猫")
+3. `cli-error-patterns.ts` — add regex `/flagged for possible cybersecurity risk/i` for `upstream_policy_reject`。**只加 exact witnessed phrase**，不加 imagined variants (LL-059 反模式，Sol R4 push back)
+4. `route-serial.ts:~2188` text-content branch 补 `!hadError` gate（与 :2107 no-text 对齐，防 partial-text failed turn 被 remedial 洗白；route-parallel 无此 path 不动）
+5. `FrustrationDetector.ts:35` `EXCLUDED_REASON_CODES` set 加 `upstream_policy_reject`（不是 Clowder AI bug 值得 auto-issue）
+
+**Shared (1)**：
+6. `packages/shared/src/types/cli-diagnostics.ts` `CliErrorReasonCode` union 加 `upstream_policy_reject`
+
+**Web (3)**：
+7. `CliDiagnosticsPanel.tsx` `REASON_PALETTE` 加 `upstream_policy_reject` entry (cognitive tier — 与 `invalid_thinking_signature` / `tool_call_parse_failed` 同族 model/policy side)
+8. `cli-reason-icons.tsx` 加 per-reason SVG icon (F212 KD-4：自绘 SVG，不 emoji)
+9. `CliDiagnosticsPanel.test.ts` enumerated palette rendering 加 test case
+
+**Tests + Docs + Hard/Eval**：
+- Real archive fixtures: `217969a7` recovery + terminal failures pool (`39f2bc4d` / `7c3fd591` / `2ffa505f` / `261c3754` / `97449e4b`)
+- 旧 "substantive + exit 1 suppressed" test → RED expect surface
+- route-serial `!hadError` regression test
+- FrustrationDetector `upstream_policy_reject` excluded regression test
+- `check:no-codex-provider-exit-suppression` script — grep `sawSubstantiveOutput` / `hasNonSuppressibleCodex` pattern in `packages/api/src/domains/cats/services/agents/providers/`
+- Eval reconciliation invariant (F192 pattern)：`log.error('CLI abnormal exit', {streamErrorCount>0, invocationId})` 必须匹配 same invocationId 的 persisted/broadcast F212 error；unmatched = verdict fail
+
+**Boundary sweep**（LL-069 应用）：
+- 只 `CodexAgentService.ts` 有 substantive-only suppress heuristic（grep 确认）
+- 只 `route-serial.ts` 有 remedial path（`route-parallel.ts` 无 `shouldRemediateRouting` call）
+- Antigravity / Gemini / Dare / CatAgent Phase G 已 sweep 无同 pattern
 
 ## Acceptance Criteria
 
@@ -261,6 +314,28 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 - [x] AC-G5: 红测先行：fixture 1 用 step_start-only NDJSON (Maine Coon packet 第一 regression case) — OpenCode + Claude 两 providers 各一份；fixture 2 验证 sessionIdPrefix 只暴露前 8 char（full session id 不 leak）；fixture 3 验证 stderrExcerpt 不暴露 raw paths/tokens（走 sanitizer + generic path scrub）；fixture 4 验证 tool-only / Claude A2 result-error 不误报 silent_completion
 - [x] AC-G6: route-serial.ts:2165 + route-parallel.ts:1193 generic fallback — cliDiagnostics path dominates generic message；新增 serial/parallel route tests 证明 `silent_completion` system_info 不产生 provider error row / persisted `Error:`，前端 `ChatMessage` 可渲染 system_info 上的 cliDiagnostics
 - [x] AC-G7: 跨族 review (@codex) + 云端 codex review — Maine Coon R1/R2 blocking review（hint safeExcerpt vs debugRef）+ cloud codex 多轮 P1/P2（tool-only, exitCode, bounded evidence, successful-exit stderr, error-path, Claude A2 result-error）全部修复；`pnpm gate` 全绿；PR #2150 squash merged at `a22164f58`
+
+### Phase H（Codex silent false-success regression）— ✅ merged PR #2847 (2026-07-10 @ merge commit `fcdf9bac4`)
+
+- [x] AC-H1: DELETE `CodexAgentService.ts` `sawSubstantiveOutput` boolean + DELETE suppress branch (line 1137-1148)。**post-R5 correction**：R3 论证里那句 "`isCliError(event)` reaching provider **tautologically 证明 `semanticDone === false`**" 在 multi-turn Codex 场景下不再成立——sticky abort signal 可能是 true 但 `finalSemanticDone` 是 false（Sol Final确权 R5 P2 sticky-signal 发现）。正确 canonical：cli-spawn / tmux-agent-spawner 双路径都用统一 `finalSemanticDone := localFinalTerminal === 'completed' || (localFinalTerminal === null && semanticDone)` predicate，chronological 最后 terminal 决定；provider 无 exit-1 判权。删除后每个 `isCliError(event)` reaching provider 已由 spawn 层证明是 authentic terminal failure（不是 sticky-signal false positive），直接 surface F212 cliDiagnostics 走 Phase A AC-A8 mechanism ✅ `d45fbd8db`
+- [x] AC-H2: DELETE `CodexAgentService.ts:145-162` `hasNonSuppressibleCodexExitOneDiagnostics` helper 整个函数。compaction-only regex 是 LL-059 反模式（"白名单加一个补一个"），AC-H1 delete 后此 guard 无 caller ✅ `d45fbd8db`
+- [x] AC-H3: `cli-error-patterns.ts` add regex `/flagged for possible cybersecurity risk/i` for classifier → `upstream_policy_reject`（只加 exact witnessed phrase from `97449e4b` archive；**不加** `/content policy/i` 兜底或 imagined variants — allowlist grows from evidence not variants, Sol R4 push back） ✅ `d45fbd8db`
+- [x] AC-H4: `route-serial.ts:~2188` text-content branch 补 `!hadError` gate（与 :2107 no-text 对齐）；防 partial-text failed turn 被 remedial 洗白（Sol T0 precise：只 route-serial 有 remedial，route-parallel 无 `shouldRemediateRouting` call 不动） ✅ `35048ee2c`
+- [x] AC-H5: `FrustrationDetector.ts:35` `EXCLUDED_REASON_CODES` set add `upstream_policy_reject`（upstream policy 拒绝不是 Clowder AI bug 值得 auto-issue，与 `server_overloaded` transient / `invalid_thinking_signature` internal 同族 "not user-actionable within our scope"） ✅ `35048ee2c`
+- [x] AC-H6: `packages/shared/src/types/cli-diagnostics.ts` `CliErrorReasonCode` union add `'upstream_policy_reject'` ✅ `d45fbd8db`
+- [x] AC-H7: `packages/api/src/utils/cli-diagnostics.ts` `REASON_TEXT` add `upstream_policy_reject` entry（publicSummary "上游 provider policy 拒绝" + publicHint 引导 rephrase or 换 provider） ✅ `d45fbd8db`
+- [x] AC-H8: Web palette + icon + test（`CliDiagnosticsPanel.tsx` `REASON_PALETTE` cognitive tier + `cli-reason-icons.tsx` 自绘 `ShieldXIcon` per F212 KD-4 + `CliDiagnosticsPanel.test.ts` enumerated rendering test case 兼补 `silent_completion` 遗漏） ✅ `35048ee2c`
+- [x] AC-H9: Real archive fixture red→green — `217969a7` recovery fixture (canonical semanticDone 应允许 suppress，无 F212 error emit)；terminal failure pool `39f2bc4d` / `7c3fd591` / `2ffa505f` / `261c3754` / `97449e4b` (删 suppress 后必须 surface cliDiagnostics)；旧 "substantive + exit 1 suppressed" test → 现测 `item.completed WITHOUT turn.completed → error`；route-serial `!hadError` regression 独立；FrustrationDetector excluded regression 全部 Green ✅ `d26fdf1db` + earlier commits
+- [x] AC-H10: **soft + hard + eval 三层落地全部到位**（Sol R1..R4 + cloud R1..R5 + Sol Final确权 P1-A/B/C 全部采纳）：
+  1. **Hard check** `check:no-codex-provider-exit-suppression`（wired into root `pnpm check`）— two-layer guard split into modules per Sol R8 P1-B (350-line hard cap): (a) `literal-guard.mjs` — grep-based forbidden-pattern for legacy identifier names, allowlist 已收紧不覆盖 `CodexAgentService.ts`（Sol R1 P1-3）；(b) `ast-ownership.mjs` — **Sol R7 P1 + R8 P1-A hardened AST ownership rule** via `ts.createSourceFile`：任何 basename 以 `Codex` 起始的 provider 文件 (Sol R8 P1-A scope narrowing — sibling providers e.g. Gemini/OpenCode 未被 gate) 里的 `IfStatement.condition` 只要 mention `exitCode === 1` AND `signal === null` (含 destructure alias `{exitCode: code}` + reversed operands `1 === x`) 就是 violation。**Fail-CLOSED** on unreadable file / missing typescript / parse diagnostics / **missing Codex provider target (Sol R9 P1)** — zero Codex-prefixed files = guard target renamed/deleted/scope-drifted, MUST NOT report clean。配套 canary tests **22/22 Green**（split 为 literal 5 + AST 17: R2/R6 rename × 3 + R7 fatal × 3 + R8 alias/reversed/scope × 5 + R7/R8 anti-FP × 3 + R9 fail-CLOSED × 3 (missing root / empty scope / clean-target control)）；
+  2. **Bounded eval reconciliation** `check:f212-reconciliation-eval` + `eval:f212-reconciliation`（Sol R1 P1-4 修复 + R2/R3 收敛 + cloud R1 timestamp sort + Sol Final确权 P1-B + Sol R6 P2 line-number）— **单元测试 30/30 Green**（5 suites: baseline/window/matcher/sequence/malformed，含 R6 1-based physical line-number test）。落地契约：`∀ invocationId: 若 __cliError + streamErrorCount>0 **AND finalTerminal ≠ 'completed'** → 必有 persisted F212 error 同 invocationId`。**Sol R2/R3 + Final确权 P1-B 全部 fail-CLOSED 覆盖**：
+     - source 缺失（archive dir / message store 任一）→ `verdict: error`, exit=1（不再 verdict:pass 假绿）
+     - window 缺失/非 YYYY-MM-DD/since>until/**非真实日历日期（Feb 30 / month 13 / 非闰年 2/29 / April 31）**→ verdict:error（R3 P1-D，UTC round-trip 校验）
+     - message store 支持 single-file JSONL AND directory of JSONL shards（R2 P1-A #1）
+     - matcher 只认真实 F212 error shape：`userId=system + catId=null + content 起始 "Error:"`（R2 P1-B，system_info 诊断行 / narrative 提到 invocationId 都不算 persisted）
+     - **sequence-aware scanner**：`finalTerminal === 'completed'` 的 invocation（`invoke-single-cat` transient retry 或 Codex 0.98+ compaction retry 成功恢复）从 abnormal universe 剔除，单列 `recovered[]` telemetry（R3 P1-C）；recovery-then-fail 仍计入
+  3. **Runtime code guard** — cli-spawn.ts + tmux-agent-spawner.ts 双路径都由统一 `finalSemanticDone` predicate 判定（Sol Final确权 R6 P1-A 闭合的 2×2 truth table：`localFinalTerminal === 'completed' || (localFinalTerminal === null && semanticDone)`）；chronological 最后 terminal 决定，不是 "any completion ever fired"。CodexAgentService 不含 provider-side 冗余 bookkeeping
+- [x] AC-H11: 跨族 review — **本世界Maine Coon Sol** (@codex-sol 当前 thread) R1..R10 迭代收敛 → **R10 CODE CLEAN on `ad27125ec`** (post-R10 PR body-only truth sync + `pnpm gate` rebase 到 `f2c19612` non-behavioral gate-satisfaction commits：docs-index regen + tips_exempt frontmatter + sync-manifest 17-file closure)；云端 codex R1..R5 迭代（R5 P2 sticky-signal 修 + 3 stale = 75% stale rate 触发 **LL-072 5-round/>50%-stale 封板协议**，不再 re-trigger cloud），终局确权归属本地 Sol。Phase H merge 不 reopen F212 status（仍 done），同 Phase E/F/G follow-up pattern ✅ merge `fcdf9bac4`
 
 ## Dependencies
 

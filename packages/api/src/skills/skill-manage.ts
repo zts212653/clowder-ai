@@ -249,7 +249,16 @@ export async function addSkill(
   // raw caller input and may be undefined, which would mount everywhere even
   // when the effective policy restricts to a subset (Codex R3 P2).
   const result: SkillOperationResult = enabled
-    ? await mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, effectiveMountPaths)
+    ? await mountSkillSymlinks(
+        projectRoot,
+        skillName,
+        skillsSource,
+        mountRules,
+        effectiveMountPaths,
+        pluginId
+          ? (opts.builtInSkillsSource ?? opts.cascade?.catCafeSkillsSource ?? join(projectRoot, 'cat-cafe-skills'))
+          : skillsSource,
+      )
     : { mounted: [], unmounted: [], conflicts: [] };
 
   // 3. Cascade to governance-registered projects (non-critical)

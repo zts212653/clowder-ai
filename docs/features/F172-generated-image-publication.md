@@ -26,11 +26,11 @@ created: 2026-04-22
 
 ## Why
 
-目前猫用 built-in `image_gen` 生成图片时，文件默认落在 `~/.codex/generated_images/...`。图片本身能生成，但**没有自动晋升为 Cat Cafe 的一等产物**：
+目前猫用 built-in `image_gen` 生成图片时，文件默认落在 `~/.codex/generated_images/...`。图片本身能生成，但**没有自动晋升为 Clowder AI 的一等产物**：
 
 1. 前端 rich block / message content 的真资源链路以 `/uploads/...` 为准，`.codex` 路径不在当前 runtime 服务范围内。
 2. 猫如果想展示这张图，只能靠手工把本地文件搬进当前 `uploadDir`，再自己发 `media_gallery` rich block。
-3. Bengal/Antigravity 虽然本来就有图片生成能力，但其 provider 输出同样还没有接到 Cat Cafe 的统一图片 artifact 发布链路上。
+3. Bengal/Antigravity 虽然本来就有图片生成能力，但其 provider 输出同样还没有接到 Clowder AI 的统一图片 artifact 发布链路上。
 4. `image-generation` / `rich-messaging` 等家里 skill 现在仍在教猫“手工搬图 + 手工写 `/uploads/...`”，这说明契约还停留在人工约定，没有下沉成基础设施。
 5. jsonl / thread artifact / connector outbound 缺少统一的“生成图已发布”记录，导致“生成成功但没有归档/展示”的前端感知断裂。
 
@@ -58,7 +58,7 @@ operator已经明确拍板方向：不要把这件事留在 skill 约定层，�
 
 把 OpenAI/Codex 的 built-in `image_gen` 输出，接到 Phase A 的共享发布内核上。
 
-目标不是只“让 Codex 能显示图”，而是让它生成的图片从一开始就是 Cat Cafe 的正式 artifact。
+目标不是只“让 Codex 能显示图”，而是让它生成的图片从一开始就是 Clowder AI 的正式 artifact。
 
 ### Phase C: Antigravity 图片输出接入
 
@@ -66,7 +66,7 @@ operator已经明确拍板方向：不要把这件事留在 skill 约定层，�
 
 注意边界：
 - F061 继续拥有 Antigravity provider/bridge/step taxonomy 本身
-- F172 只拥有“当 Antigravity 已经生成出图片后，如何发布成 Cat Cafe artifact 并呈现”这条后半段
+- F172 只拥有“当 Antigravity 已经生成出图片后，如何发布成 Clowder AI artifact 并呈现”这条后半段
 
 ### Phase D: Skill 契约与使用路径收口
 

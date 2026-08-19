@@ -20,5 +20,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "告诉猫同一个身份可能在多个对话中同时存在"

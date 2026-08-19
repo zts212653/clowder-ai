@@ -3,11 +3,28 @@ const path = require('node:path');
 const fs = require('node:fs');
 const checker = require('./update-checker');
 const dl = require('./update-downloader');
-const { fetchReleases, downloadAsset, spawnInstaller } = require('./update-installer');
+const { fetchReleases, downloadAsset } = require('./update-installer');
+const UpdateInstallFlow = require('./update-install-flow');
+const { safeErrorMessage } = require('./update-network-diagnostics');
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const MAX_RENDERED_RELEASE_NOTES_LENGTH = 32_000;
+const RELEASE_NOTES_TRUNCATED_SUFFIX = '\n\n_Release notes truncated. Open the version link for the complete notes._';
 const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
+const RELEASES_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
+
+function releaseUrl(version) {
+  if (!checker.parseVersion(version)) throw new TypeError('Invalid update version');
+  return `${RELEASES_URL}/tag/v${version}`;
+}
+
+function releaseNotesForRenderer(releaseNotes) {
+  if (typeof releaseNotes !== 'string') return '';
+  const normalized = releaseNotes.trim();
+  if (normalized.length <= MAX_RENDERED_RELEASE_NOTES_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_RENDERED_RELEASE_NOTES_LENGTH - RELEASE_NOTES_TRUNCATED_SUFFIX.length)}${RELEASE_NOTES_TRUNCATED_SUFFIX}`;
+}
 
 class UpdateManager {
   /** @param {object} deps — injected Electron deps (app, net, showDialog, setProgressBar, openExternal, openPath, quitApp, stopServices, startServices, dbg, userDataRoot, platform, arch) */
@@ -15,7 +32,7 @@ class UpdateManager {
     this._d = deps;
     this._updatesDir = dl.updatesDir(deps.userDataRoot);
     this._settingsPath = path.join(deps.userDataRoot, 'update-settings.json');
-    this._spawn = deps.spawn || require('node:child_process').spawn;
+    this._installFlow = new UpdateInstallFlow(deps, this._updatesDir);
     this._setInterval = deps.setInterval || setInterval;
     this._clearInterval = deps.clearInterval || clearInterval;
     this._intervalTimer = null;
@@ -65,6 +82,7 @@ class UpdateManager {
 
   /** Check once at startup, then once daily while the app remains running. */
   startSchedule() {
+    if (this._intervalTimer !== null) return;
     const settings = checker.loadSettings(this._settingsPath);
     if (!settings.autoCheck) {
       this._d.dbg('Auto-check disabled');
@@ -75,10 +93,24 @@ class UpdateManager {
   }
 
   stopSchedule() {
-    if (this._intervalTimer) {
+    if (this._intervalTimer !== null) {
       this._clearInterval(this._intervalTimer);
       this._intervalTimer = null;
     }
+  }
+
+  getSettings() {
+    const { autoCheck } = checker.loadSettings(this._settingsPath);
+    return { autoCheck };
+  }
+
+  setAutoCheck(enabled) {
+    if (typeof enabled !== 'boolean') throw new TypeError('autoCheck must be a boolean');
+    const settings = checker.loadSettings(this._settingsPath);
+    checker.saveSettings(this._settingsPath, { ...settings, autoCheck: enabled });
+    if (enabled) this.startSchedule();
+    else this.stopSchedule();
+    return { autoCheck: enabled };
   }
 
   checkForUpdates(opts) {
@@ -89,50 +121,27 @@ class UpdateManager {
 
   async _runUpdateCheck(opts) {
     const manual = opts?.manual === true;
-    const { dbg, net, platform, arch, showDialog } = this._d;
+    const { dbg, platform, arch } = this._d;
     const currentVersion = this._d.app.getVersion();
     const settings = checker.loadSettings(this._settingsPath);
     dbg(`Checking for updates (current: ${currentVersion}, manual: ${manual})`);
 
     try {
-      const result = await fetchReleases(net, currentVersion, settings.etag);
-
-      let releaseData;
-      let newEtag = settings.etag;
-
-      if (result === 'not-modified') {
-        const fresh = await fetchReleases(net, currentVersion);
-        if (!fresh || fresh === 'not-modified') {
-          dbg('304 metadata refresh failed');
-          return;
-        }
-        releaseData = fresh.data;
-        newEtag = fresh.etag;
-        dbg('304 — using unconditionally refreshed release metadata');
-      } else if (result) {
-        releaseData = result.data;
-        newEtag = result.etag || settings.etag;
-      } else {
-        dbg('Release fetch failed');
-        if (manual)
-          await showDialog({
-            type: 'warning',
-            buttons: ['OK'],
-            title: 'Update Check Failed',
-            message: 'Could not check for updates',
-            detail: 'Could not reach GitHub. Please check your network connection and try again.',
-          });
+      const metadata = await this._fetchReleaseMetadata(currentVersion, settings.etag);
+      if (!metadata) {
+        if (manual) await this._showCheckFailed(currentVersion);
         return;
       }
 
-      const target = checker.selectUpdateTarget(releaseData, currentVersion, platform, arch, {
-        skippedVersion: settings.skippedVersion,
+      const latestSettings = checker.loadSettings(this._settingsPath);
+      const target = checker.selectUpdateTarget(metadata.releaseData, currentVersion, platform, arch, {
+        skippedVersion: manual ? null : latestSettings.skippedVersion,
       });
 
       const refreshedSettings = {
-        ...settings,
+        ...latestSettings,
         lastCheckAt: new Date().toISOString(),
-        etag: newEtag,
+        etag: metadata.etag,
       };
       checker.saveSettings(this._settingsPath, refreshedSettings);
 
@@ -142,46 +151,76 @@ class UpdateManager {
         return;
       }
       dbg(`Update available: v${target.version}`);
-      await this._promptUpdate(target, refreshedSettings);
+      await this._promptUpdate(target);
     } catch (err) {
-      dbg(`Update check failed: ${err.message}`);
-      if (manual)
-        await this._d.showDialog({
-          type: 'warning',
-          buttons: ['OK'],
-          title: 'Update Check Failed',
-          message: 'Something went wrong',
-          detail: 'Check the logs for details.',
-        });
+      dbg(`Update check failed: ${safeErrorMessage(err)}`);
+      if (manual) await this._showCheckFailed(currentVersion);
     }
   }
 
-  async _showUpToDate(currentVersion) {
-    await this._d.showDialog({
-      type: 'info',
-      buttons: ['OK'],
-      title: 'No Updates Available',
-      message: `Clowder AI v${currentVersion} is up to date`,
-      detail: 'You are running the latest version.',
-    });
+  async _fetchReleaseMetadata(currentVersion, etag) {
+    const result = await fetchReleases(this._d.net, currentVersion, etag);
+    if (!result) {
+      this._d.dbg('Release fetch failed');
+      return null;
+    }
+    if (result !== 'not-modified') {
+      return { releaseData: result.data, etag: result.etag || etag };
+    }
+
+    const fresh = await fetchReleases(this._d.net, currentVersion);
+    if (!fresh || fresh === 'not-modified') {
+      this._d.dbg('304 metadata refresh failed');
+      return null;
+    }
+    this._d.dbg('304 — using unconditionally refreshed release metadata');
+    return { releaseData: fresh.data, etag: fresh.etag };
   }
 
-  async _promptUpdate(target, settings) {
-    const notes = target.releaseNotes?.slice(0, 500) || '';
-    const detail = `Current: v${this._d.app.getVersion()}${notes ? `\n\n${notes}` : ''}`;
-    const btn = await this._d.showDialog({
-      type: 'info',
-      buttons: ['Download', 'Later', 'Skip This Version'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Update Available',
-      message: `Clowder AI v${target.version} is available`,
-      detail,
-    });
+  _showUpToDate(currentVersion) {
+    return this._showCheckResult({ kind: 'up-to-date', version: currentVersion });
+  }
 
-    if (btn === 0) await this.downloadAndInstall(target);
-    else if (btn === 2) {
-      checker.saveSettings(this._settingsPath, { ...settings, skippedVersion: target.version });
+  _showCheckFailed(currentVersion) {
+    return this._showCheckResult({ kind: 'check-failed', version: currentVersion, releaseUrl: RELEASES_URL });
+  }
+
+  async _showCheckResult(prompt) {
+    if (!this._d.showUpdatePrompt) {
+      this._d.dbg(`Rendered ${prompt.kind} result unavailable`);
+      return;
+    }
+    try {
+      await this._d.showUpdatePrompt(prompt);
+    } catch (error) {
+      this._d.dbg(`Rendered ${prompt.kind} result unavailable: ${safeErrorMessage(error)}`);
+    }
+  }
+
+  async _promptUpdate(target) {
+    const prompt = {
+      kind: 'available',
+      version: target.version,
+      currentVersion: this._d.app.getVersion(),
+      platform: this._d.platform === 'win32' ? 'windows' : 'macos',
+      assetName: target.asset.name,
+      releaseUrl: releaseUrl(target.version),
+      releaseNotes: releaseNotesForRenderer(target.releaseNotes),
+    };
+    let action;
+    if (this._d.showUpdatePrompt) {
+      try {
+        action = await this._d.showUpdatePrompt(prompt);
+      } catch (error) {
+        this._d.dbg(`Rendered update prompt unavailable: ${error.message}`);
+      }
+    }
+    if (!action) this._d.dbg(`Rendered update prompt returned no action for v${target.version}`);
+
+    if (action === 'download') await this.downloadAndInstall(target);
+    else if (action === 'skip') {
+      const latestSettings = checker.loadSettings(this._settingsPath);
+      checker.saveSettings(this._settingsPath, { ...latestSettings, skippedVersion: target.version });
       this._d.dbg(`Skipped v${target.version}`);
     }
   }
@@ -192,15 +231,17 @@ class UpdateManager {
     const installType = dl.getInstallType(this._d.app.getAppPath(), this._d.userDataRoot);
     if (this._d.platform === 'win32' && installType !== 'installer') {
       this._d.dbg('Non-installer — opening release page (skipping download)');
-      this._d.openExternal(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/v${target.version}`);
+      await this._openReleasePage(target.version);
       return;
     }
     this._downloading = true;
     const { dbg, setProgressBar } = this._d;
     const destPath = path.join(this._updatesDir, target.asset.name);
-    fs.mkdirSync(this._updatesDir, { recursive: true });
+    const progressContext = { version: target.version, assetName: target.asset.name };
+    const reportProgress = (progress) => setProgressBar(progress, progressContext);
 
     try {
+      fs.mkdirSync(this._updatesDir, { recursive: true });
       let valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
       if (valid) {
         dbg('Reusing previously verified download');
@@ -215,24 +256,28 @@ class UpdateManager {
           });
           return;
         }
-        await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), setProgressBar, dbg);
+        reportProgress(0);
+        await downloadAsset(this._d.net, target.asset, destPath, this._d.app.getVersion(), reportProgress, dbg, {
+          session: this._d.netSession,
+        });
         valid = await dl.verifyFileIntegrity(destPath, target.asset.digest, target.asset.size);
         if (!valid) {
           dbg('Integrity check FAILED');
           try {
             fs.unlinkSync(destPath);
           } catch {}
-          setProgressBar(-1);
+          reportProgress(-1);
           await this._offerDownloadRetry(target, 'Integrity verification failed', 'The file may be corrupted.');
           return;
         }
       }
-      setProgressBar(-1);
+      reportProgress(-1);
       await this._executeInstall(target, destPath);
     } catch (err) {
-      dbg(`Download failed: ${err.message}`);
-      setProgressBar(-1);
-      await this._offerDownloadRetry(target, 'Could not download update', err.message);
+      const detail = safeErrorMessage(err);
+      dbg(`Download failed: ${detail}`);
+      reportProgress(-1);
+      await this._offerDownloadRetry(target, 'Could not download update', detail);
     } finally {
       this._downloading = false;
     }
@@ -241,110 +286,48 @@ class UpdateManager {
   async _offerDownloadRetry(target, message, detail) {
     const retry = await this._d.showDialog({
       type: 'error',
-      buttons: ['Retry', 'Cancel'],
+      buttons: ['Retry', 'Download in Browser', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
       title: 'Download Failed',
       message,
-      detail,
+      detail: `${detail}\n\nRetry the automatic download, or download the installer in your browser and install it over the current version. Your data will be preserved.`,
     });
+    if (retry === 1) {
+      await this._openReleasePage(target.version);
+      return;
+    }
     if (retry !== 0) return;
     this._downloading = false;
     await this.downloadAndInstall(target);
   }
-  async _executeInstall(target, installerPath) {
-    const { platform, dbg, showDialog, quitApp } = this._d;
-    const isWin = platform === 'win32';
-    const msg = {
-      buttons: [isWin ? 'Restart & Upgrade' : 'Quit & Install', 'Later'],
-      message: `v${target.version} ${isWin ? 'is ready' : 'downloaded'}`,
-      detail: isWin
-        ? 'The app will close and the installer will run.\nYour data will be preserved.'
-        : 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
-    };
-    const btn = await showDialog({ type: 'info', defaultId: 0, cancelId: 1, title: 'Ready to Install', ...msg });
-    if (btn !== 0) return;
-    if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
-      dbg('Installer modified after confirmation (TOCTOU) — aborting');
-      return;
-    }
-
-    const logPath = isWin ? path.join(this._updatesDir, 'install.log') : '';
-    dl.writeJournal(this._updatesDir, {
-      targetVersion: target.version,
-      assetId: target.asset.id,
-      assetName: target.asset.name,
-      digest: target.asset.digest,
-      assetSize: target.asset.size,
-      installerPath,
-      startedAt: new Date().toISOString(),
-    });
+  async _openReleasePage(version) {
+    const url = releaseUrl(version);
     try {
-      if (isWin && this._d.stopServices) await this._d.stopServices();
-      if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
-        dl.clearJournal(this._updatesDir);
-        throw new Error('Installer changed before launch');
-      }
-      await this._spawnInstaller(installerPath, logPath || null);
-      await quitApp();
-    } catch (err) {
-      dbg(`Installer launch failed: ${err.message}`);
-      // Restore services so the UI isn't left running with no backend (UAC declined / spawn error)
-      if (this._d.startServices) await this._d.startServices().catch(() => {});
-      await this._showInstallFailure(err);
-    }
-  }
-  _showInstallFailure(err) {
-    return this._d.showDialog({
-      type: 'error',
-      buttons: ['OK'],
-      title: 'Install Failed',
-      message: 'Could not start the installer',
-      detail: err.message,
-    });
-  }
-  async _retryInstall(journal) {
-    if (!journal?.targetVersion) return;
-    const releases = await fetchReleases(this._d.net, this._d.app.getVersion());
-    const target = checker.selectUpdateTarget(
-      releases?.data ?? [],
-      this._d.app.getVersion(),
-      this._d.platform,
-      this._d.arch,
-      { requiredVersion: journal.targetVersion },
-    );
-    if (!target) {
-      this._d.dbg('Retry install metadata could not be authenticated');
-      await this._showInstallFailure(new Error('Could not verify installer release metadata'));
-      return;
-    }
-    const installerPath = path.join(this._updatesDir, target.asset.name);
-    if (!fs.existsSync(installerPath)) {
+      await this._d.openExternal(url);
+    } catch (error) {
+      this._d.dbg(`Could not open update release page: ${safeErrorMessage(error)}`);
       await this._d.showDialog({
         type: 'error',
         buttons: ['OK'],
-        title: 'Cannot Retry',
-        message: 'Installer file not found',
-        detail: `Expected: ${installerPath}`,
+        title: 'Could Not Open Browser',
+        message: 'Open the release page manually',
+        detail: url,
       });
-      dl.clearJournal(this._updatesDir);
-      return;
     }
-    if (!(await dl.verifyFileIntegrity(installerPath, target.asset.digest, target.asset.size))) {
-      dl.clearJournal(this._updatesDir);
-      return;
-    }
-    try {
-      const logPath = this._d.platform === 'win32' ? path.join(this._updatesDir, 'install.log') : null;
-      await this._spawnInstaller(installerPath, logPath);
-      await this._d.quitApp();
-      return 'quitting';
-    } catch (err) {
-      this._d.dbg(`Retry install failed: ${err.message}`);
-      await this._showInstallFailure(err);
-    }
+  }
+  async _executeInstall(target, installerPath) {
+    return this._installFlow.execute(target, installerPath);
+  }
+  _showInstallFailure(err) {
+    return this._installFlow.showInstallFailure(err);
+  }
+  async _retryInstall(journal) {
+    return this._installFlow.retry(journal);
   }
 
   _spawnInstaller(installerPath, logPath) {
-    return spawnInstaller(this._spawn, this._d.platform, this._d.dbg, installerPath, logPath);
+    return this._installFlow.spawnInstaller(installerPath, logPath);
   }
 }
 

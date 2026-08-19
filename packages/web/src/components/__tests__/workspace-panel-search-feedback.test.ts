@@ -99,6 +99,12 @@ function setupMocks() {
       _workspaceFileSetAt: { ts: 0, threadId: null },
       workspaceMode: 'dev',
       setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
+      workspaceSurface: 'files',
+      setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: 3000, path: '/' },
+      setWorkspacePreview: vi.fn(),
     };
     return sel(store);
   });

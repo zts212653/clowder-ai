@@ -3,10 +3,11 @@
  *
  * Mirrors ReviewFeedbackRouter pattern: route(signal, tracking) → connector message.
  * AC-D-security: External comment bodies wrapped in [UNTRUSTED EXTERNAL CONTENT].
- * AC-C2: trackingInstructions appended when present.
+ * AC-C2: the Phase-C issue continuation note is appended when present.
  */
 import type { ConnectorSource } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import { selectIssueFixReadiness } from '../../domains/community/issue-analysis/issue-fix-evidence.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
 
@@ -15,11 +16,11 @@ import { deliverConnectorMessage } from './deliver-connector-message.js';
 export interface IssueComment {
   readonly id: number;
   readonly author: string;
+  /** GitHub REST `user.type`; absent when the upstream actor cannot be classified reliably. */
+  readonly actorType?: string;
   readonly body: string;
   readonly createdAt: string;
-  /** GitHub author_association field — present when fetched via GitHub API.
-   * Undefined in legacy paths or when association cannot be determined.
-   * Preserved in community events for projection/state-machine decisions. */
+  /** GitHub author_association field. Context only; never used as actor identity. */
   readonly authorAssociation?: string;
 }
 
@@ -49,13 +50,13 @@ export class IssueCommentRouter {
 
   async route(
     signal: IssueCommentSignal,
-    tracking: { threadId: string; catId: string; userId: string; trackingInstructions?: string },
+    tracking: { threadId: string; catId: string; userId: string },
   ): Promise<IssueCommentRouteResult> {
     if (signal.newComments.length === 0) {
       return { kind: 'skipped', reason: 'no new comments' };
     }
 
-    const content = buildIssueCommentContent(signal, tracking.trackingInstructions);
+    const content = buildIssueCommentContent(signal);
 
     const source: ConnectorSource = {
       connector: 'github-issue-comment',
@@ -89,7 +90,7 @@ export class IssueCommentRouter {
 
 // ── Message Formatting ────────────────────────────────────────────
 
-export function buildIssueCommentContent(signal: IssueCommentSignal, trackingInstructions?: string): string {
+export function buildIssueCommentContent(signal: IssueCommentSignal): string {
   const lines: string[] = [
     `💬 **Issue Comments** — Issue #${signal.issueNumber} (${signal.repoFullName})`,
     '',
@@ -101,13 +102,37 @@ export function buildIssueCommentContent(signal: IssueCommentSignal, trackingIns
     lines.push(`💬 **${c.author}**: ${bodySnippet}`);
   }
 
+  const fixReadiness = selectIssueFixReadiness({
+    events: signal.newComments.map((comment) => ({
+      sourceEventId: `issue-comment:${comment.id}`,
+      subjectKey: `issue:${signal.repoFullName}#${signal.issueNumber}`,
+      kind: 'issue.commented',
+      classification: 'informational',
+      payload: { body: comment.body },
+      at: Date.parse(comment.createdAt),
+    })),
+  });
+  if (fixReadiness.kind === 'ready') {
+    const evidence =
+      fixReadiness.evidence.kind === 'pull_request'
+        ? fixReadiness.evidence.url
+        : fixReadiness.evidence.kind === 'commit'
+          ? (fixReadiness.evidence.url ?? fixReadiness.evidence.sha)
+          : fixReadiness.evidence.kind === 'release'
+            ? fixReadiness.evidence.url
+            : fixReadiness.evidence.evidence;
+    lines.push('', '🚦 **Fix evidence — ready for re-review**', `- Evidence: ${evidence}`);
+  } else if (fixReadiness.kind === 'waiting') {
+    lines.push(
+      '',
+      '⏳ **Fix claim detected — evidence missing**',
+      '- Keep awaiting evidence; do not mark re-review ready.',
+    );
+  }
+
   lines.push('', '---', '🔧 **自动处理**');
   lines.push(`- 目标: ${signal.repoFullName}#${signal.issueNumber} (issue)`);
   lines.push('- 操作: 阅读评论内容，需要回复则回复');
-
-  if (trackingInstructions) {
-    lines.push('', '📌 **Tracking Instructions**', trackingInstructions);
-  }
 
   return lines.join('\n');
 }

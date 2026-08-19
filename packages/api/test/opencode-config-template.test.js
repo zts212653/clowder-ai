@@ -5,14 +5,17 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveWorkspaceRoot } from '../dist/config/capabilities/mcp-config-adapters.js';
+import { CONTEXT_WINDOW_SIZES } from '../dist/config/context-window-sizes.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../dist/domains/cats/services/agents/providers/opencode-acp-spawn-config.js';
 import {
   deriveOpenCodeApiType,
   generateOpenCodeConfig,
   generateOpenCodeRuntimeConfig,
+  inferOpenCodeProviderFromModelName,
   OC_API_KEY_ENV,
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
   summarizeOpenCodeRuntimeConfigForDebug,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import {
@@ -222,6 +225,40 @@ describe('parseOpenCodeModel', () => {
   });
 });
 
+describe('resolveEffectiveOpenCodeModel', () => {
+  test('canonicalizes recognized bare native models', () => {
+    const scenarios = [
+      ['claude-opus-4-6', 'anthropic'],
+      ['gpt-5.4', 'openai'],
+      ['o3', 'openai'],
+      ['gemini-3-flash', 'google'],
+      ['kimi-k2', 'kimi'],
+      ['deepseek-v4', 'deepseek'],
+      ['glm-5.2', 'zhipu'],
+      ['qwen3-coder', 'dashscope'],
+      ['MiniMax-M3', 'minimax'],
+    ];
+    for (const [model, providerName] of scenarios) {
+      assert.equal(inferOpenCodeProviderFromModelName(model), providerName);
+      assert.deepEqual(resolveEffectiveOpenCodeModel(undefined, model), {
+        providerName,
+        model: `${providerName}/${model}`,
+      });
+    }
+  });
+
+  test('keeps unknown bare models unresolved without an explicit provider', () => {
+    assert.equal(resolveEffectiveOpenCodeModel(undefined, 'vendor-model'), null);
+  });
+
+  test('resolves every bare model in the context-window catalog', () => {
+    const unresolved = Object.keys(CONTEXT_WINDOW_SIZES).filter(
+      (model) => resolveEffectiveOpenCodeModel(undefined, model) == null,
+    );
+    assert.deepEqual(unresolved, []);
+  });
+});
+
 describe('deriveOpenCodeApiType', () => {
   test('derives apiType solely from providerName', () => {
     const scenarios = [
@@ -252,7 +289,7 @@ describe('deriveOpenCodeApiType', () => {
 });
 
 describe('prepareOpenCodeAcpSpawnConfig', () => {
-  test('writes OPENCODE_CONFIG and credential env for OpenCode ACP api_key accounts', async () => {
+  test('writes OPENCODE_CONFIG and credential env for bare OpenCode ACP api_key models', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-acp-'));
     try {
       const prepared = await prepareOpenCodeAcpSpawnConfig({
@@ -260,14 +297,15 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
         profileId: 'opencode-acp',
         clientId: 'opencode',
         command: '/opt/homebrew/bin/opencode',
-        providerName: 'anthropic',
-        defaultModel: 'anthropic/claude-opus-4-6',
+        providerName: undefined,
+        defaultModel: 'claude-opus-4-6',
         account: {
           id: 'anthropic-proxy',
           authType: 'api_key',
           apiKey: 'sk-test-secret',
           baseUrl: 'https://proxy.example/v1',
           models: ['claude-opus-4-6'],
+          modelAliases: { 'claude-opus-4-6': 'claude-opus-4-6-20260101' },
         },
       });
 
@@ -281,7 +319,20 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
       assert.equal(config.small_model, 'anthropic/claude-opus-4-6');
       assert.equal(config.provider.anthropic.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
       assert.equal(config.provider.anthropic.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
+      assert.deepEqual(config.provider.anthropic.models, {
+        'claude-opus-4-6': {
+          id: 'claude-opus-4-6-20260101',
+          name: 'claude-opus-4-6',
+        },
+      });
+      assert.deepEqual(prepared.runtimeConfigSummary.providerSummary.anthropic.modelMappings, {
+        'claude-opus-4-6': 'claude-opus-4-6-20260101',
+      });
       assert.ok(!JSON.stringify(config).includes('sk-test-secret'), 'runtime config must not write secrets');
+      assert.ok(
+        !JSON.stringify(prepared.runtimeConfigSummary).includes('sk-test-secret'),
+        'debug summary must not include secrets',
+      );
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -340,6 +391,63 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
   });
 });
 
+// ── OpenCode limit block: we emit none ─────────────────────────────────────
+// #1208 began writing `limit: { context }` with no `output`. OpenCode requires
+// `output` whenever `limit` exists, so every affected cat died at config-parse.
+// Supplying a guessed `output` is not a fix either: OpenCode merges
+// `config ?? catalog ?? 0`, so our value would overwrite an authoritative,
+// sometimes smaller catalog output limit. With no authoritative per-carrier
+// output source at this layer, we emit neither field.
+describe('generateOpenCodeRuntimeConfig — no limit block', () => {
+  test('never writes a limit block, so the catalog stays authoritative', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'zhipu',
+      models: ['glm-5.2'],
+      defaultModel: 'glm-5.2',
+      hasBaseUrl: true,
+    });
+
+    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], { name: 'glm-5.2' });
+  });
+
+  test('a catalog-backed sub-32K model keeps its own output limit', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'openrouter',
+      models: ['openai/gpt-4o'],
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.provider.openrouter.models['openai/gpt-4o'].limit, undefined);
+  });
+
+  test('model aliases still survive without a limit block', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'zhipu',
+      models: ['glm-5.2'],
+      modelAliases: { 'glm-5.2': 'glm-5.2-0714' },
+      hasBaseUrl: true,
+    });
+
+    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], {
+      id: 'glm-5.2-0714',
+      name: 'glm-5.2',
+    });
+  });
+
+  test('every context-window catalog entry still emits a limit-free entry', () => {
+    for (const model of Object.keys(CONTEXT_WINDOW_SIZES)) {
+      const resolved = resolveEffectiveOpenCodeModel(undefined, model);
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: resolved.providerName,
+        models: [model],
+        hasBaseUrl: true,
+      });
+      const providerKey = Object.keys(config.provider)[0];
+      assert.equal(config.provider[providerKey].models[model].limit, undefined, `${model} must stay limit-free`);
+    }
+  });
+});
+
 describe('generateOpenCodeRuntimeConfig', () => {
   test('generates custom provider config with env placeholders and stripped model keys', () => {
     const config = generateOpenCodeRuntimeConfig({
@@ -359,6 +467,48 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.equal(config.provider.maas.npm, '@ai-sdk/openai-compatible');
     assert.equal(config.provider.maas.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
     assert.equal(config.provider.maas.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
+  });
+
+  test('uses account model aliases as upstream ids while preserving local keys', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'kimi',
+      models: ['kimi-code/k3'],
+      defaultModel: 'kimi/kimi-code/k3',
+      apiType: 'openai',
+      hasBaseUrl: true,
+      modelAliases: { 'kimi-code/k3': 'kimi-k3' },
+    });
+
+    assert.equal(config.model, 'kimi/kimi-code/k3');
+    assert.deepStrictEqual(config.provider.kimi.models, {
+      'kimi-code/k3': { id: 'kimi-k3', name: 'kimi-code/k3' },
+    });
+  });
+
+  test('keeps unknown models on identity routing without guessing aliases', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'vendor',
+      models: ['vendor/custom-model'],
+      defaultModel: 'vendor/custom-model',
+      apiType: 'openai',
+    });
+
+    assert.deepStrictEqual(config.provider.vendor.models, {
+      'custom-model': { name: 'custom-model' },
+    });
+  });
+
+  test('keeps prototype-named local models on identity routing without inherited aliases', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'vendor',
+      models: ['toString', 'constructor'],
+      modelAliases: { configured: 'upstream-configured' },
+    });
+
+    assert.deepStrictEqual(config.provider.vendor.models, {
+      toString: { name: 'toString' },
+      constructor: { name: 'constructor' },
+    });
   });
 
   test('apiType maps to correct npm adapters', () => {
@@ -612,6 +762,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       defaultModel: 'anthropic/minimax-m2.7',
       apiType: 'anthropic',
       hasBaseUrl: true,
+      modelAliases: { 'minimax-m2.7': 'upstream-minimax-m2.7' },
     });
 
     assert.equal(summary.model, 'anthropic/minimax-m2.7');
@@ -621,6 +772,10 @@ describe('generateOpenCodeRuntimeConfig', () => {
       anthropic: {
         npm: '@ai-sdk/anthropic',
         modelKeys: ['minimax-m2.7', 'minimax-text-01'],
+        modelMappings: {
+          'minimax-m2.7': 'upstream-minimax-m2.7',
+          'minimax-text-01': 'minimax-text-01',
+        },
         hasBaseUrl: true,
         apiKeySource: `env:${OC_API_KEY_ENV}`,
         baseUrlSource: `env:${OC_BASE_URL_ENV}`,
@@ -935,6 +1090,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
         JSON.stringify({
           mcp: {
             filesystem: { type: 'local', command: ['npx', '-y', '@mcp/fs-stale'] },
+            github: { type: 'remote', url: 'https://api.githubcopilot.com/mcp/', enabled: true },
             'cat-cafe': { type: 'local', command: ['node', 'legacy-monolith.js'] },
             'my-tool': { type: 'local', command: ['node', 'tool.js'] },
           },
@@ -958,6 +1114,7 @@ describe('writeOpenCodeRuntimeConfig', () => {
 
       const content = JSON.parse(readFileSync(configPath, 'utf-8'));
       assert.equal(content.mcp.filesystem, undefined, 'disabled capability must not be re-added from opencode.json');
+      assert.equal(content.mcp.github, undefined, 'retired GitHub MCP must not be re-added from opencode.json');
       assert.equal(content.mcp['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from opencode.json');
       assert.ok(content.mcp['my-tool'], 'unmanaged user server should still be merged');
       assert.ok(content.mcp['cat-cafe-memory'], 'enabled capability should still be injected');

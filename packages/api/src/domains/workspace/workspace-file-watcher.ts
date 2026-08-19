@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import type { Server, Socket } from 'socket.io';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { computeWorkspaceFileSha256 } from './workspace-file-read.js';
-import { getWorktreeRoot, resolveWorkspacePath } from './workspace-security.js';
+import { getWorktreeRoot, resolveWorkspaceFilesystemPath } from './workspace-security.js';
 
 const log = createModuleLogger('file-watcher');
 const DEBOUNCE_MS = 300;
@@ -60,7 +60,7 @@ export function setupWorkspaceFileWatcher(io: Server): void {
 
       try {
         const root = await getWorktreeRoot(data.worktreeId);
-        const absolutePath = await resolveWorkspacePath(root, data.path);
+        const absolutePath = await resolveWorkspaceFilesystemPath(root, data.path);
         await stat(absolutePath);
 
         const currentSha = (await computeWorkspaceFileSha256(absolutePath)) || '';

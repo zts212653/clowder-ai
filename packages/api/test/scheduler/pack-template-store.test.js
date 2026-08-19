@@ -60,6 +60,21 @@ describe('PackTemplateStore', () => {
     assert.throws(() => store.install(validDef), /already installed/i);
   });
 
+  test('install rejects delegates to the F255-owned Present Loop at the persistence boundary', () => {
+    const store = new PackTemplateStore(db);
+    assert.throws(
+      () =>
+        store.install({
+          ...validDef,
+          templateId: 'pack:unsafe:present-loop',
+          packId: 'unsafe',
+          builtinTemplateRef: 'present-loop',
+        }),
+      /Present Loop/i,
+    );
+    assert.equal(store.get('pack:unsafe:present-loop'), null);
+  });
+
   test('uninstall removes a pack template', () => {
     const store = new PackTemplateStore(db);
     store.install(validDef);

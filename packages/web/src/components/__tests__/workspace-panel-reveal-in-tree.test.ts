@@ -39,7 +39,8 @@ vi.mock('@/components/workspace/BrowserPanel', () => ({
 }));
 vi.mock('@/components/workspace/JsxPreview', () => ({ JsxPreview: () => null }));
 vi.mock('@/components/workspace/LinkedRootsManager', () => ({
-  LinkedRootsManager: () => null,
+  LinkedRootsManager: () =>
+    React.createElement('button', { type: 'button', 'data-testid': 'add-external-worktree' }, '添加外部文件夹'),
   LinkedRootRemoveButton: () => null,
 }));
 vi.mock('@/components/workspace/CodeViewer', () => ({
@@ -50,11 +51,15 @@ vi.mock('@/components/workspace/ResizeHandle', () => ({ ResizeHandle: () => null
 
 /* WorkspaceTree: render expanded paths as data attributes so we can assert */
 vi.mock('@/components/workspace/WorkspaceTree', () => ({
-  WorkspaceTree: (props: { expandedPaths: Set<string> }) =>
-    React.createElement('div', {
-      'data-testid': 'workspace-tree',
-      'data-expanded': JSON.stringify([...props.expandedPaths].sort()),
-    }),
+  WorkspaceTree: (props: { expandedPaths: Set<string>; emptyDescription?: string }) =>
+    React.createElement(
+      'div',
+      {
+        'data-testid': 'workspace-tree',
+        'data-expanded': JSON.stringify([...props.expandedPaths].sort()),
+      },
+      props.emptyDescription,
+    ),
 }));
 
 /* ---- Tree fixtures ---- */
@@ -124,6 +129,8 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
     file: null,
     searchResults: SEARCH_RESULTS,
     loading: false,
+    worktreesLoading: false,
+    worktreesError: null,
     error: null,
     search: vi.fn(),
     setSearchResults,
@@ -154,6 +161,14 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
       workspaceExpanded: true,
       setWorkspaceExpanded: vi.fn(),
       currentWorktree: { id: 'main', branch: 'main', root: '/tmp/repo' },
+      workspaceMode: 'dev',
+      setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
+      workspaceSurface: 'files',
+      setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: undefined, path: '/' },
+      setWorkspacePreview: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
     };
     return sel(store);
@@ -172,6 +187,17 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
     currentThreadId: 'thread-f223',
     rightPanelMode: 'workspace',
     workspaceMode: 'dev',
+    workspaceSurface: 'home',
+    setWorkspaceSurface: vi.fn((surface: string) => {
+      store.workspaceSurface = surface;
+    }),
+    restoreWorkspaceSurface: vi.fn((surface: string) => {
+      store.workspaceSurface = surface;
+    }),
+    workspacePreview: { port: undefined, path: '/' },
+    setWorkspacePreview: vi.fn((preview: { port?: number; path: string }) => {
+      store.workspacePreview = preview;
+    }),
     pendingPreviewAutoOpen: null,
     consumePreviewAutoOpen: vi.fn(() => {
       const pending = store.pendingPreviewAutoOpen;
@@ -186,6 +212,9 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
       store.workspaceRevealPath = path;
     }),
     setWorkspaceMode: vi.fn((mode: string) => {
+      store.workspaceMode = mode;
+    }),
+    restoreWorkspaceMode: vi.fn((mode: string) => {
       store.workspaceMode = mode;
     }),
     setRightPanelMode: vi.fn(),
@@ -207,6 +236,8 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
     file: null,
     searchResults: [],
     loading: false,
+    worktreesLoading: false,
+    worktreesError: null,
     searchLoading: false,
     error: null,
     search: vi.fn(),
@@ -293,6 +324,69 @@ describe('WorkspacePanel reveal-in-tree', () => {
     expect(expanded).toContain('packages/web/src');
   });
 
+  it('shows automatic discovery instead of asking for a path while worktrees are loading', async () => {
+    const { workspaceValue } = setupWithMutableStore({
+      workspaceWorktreeId: null,
+      workspaceSurface: 'files',
+    });
+    workspaceValue.worktrees = [];
+    workspaceValue.worktreeId = null;
+    workspaceValue.worktreesLoading = true;
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const sourceBar = container.querySelector('[data-testid="workspace-source-bar"]');
+    expect(sourceBar).not.toBeNull();
+    expect(sourceBar?.textContent).toContain('正在查找可用工作区');
+    expect(sourceBar?.querySelector('[data-testid="add-external-worktree"]')).toBeNull();
+    expect(container.textContent).not.toContain('连接一个工作区后即可浏览文件');
+  });
+
+  it('shows every discovered worktree as a choice and identifies the current one', async () => {
+    const { workspaceValue } = setupWithMutableStore({
+      workspaceWorktreeId: 'main',
+      workspaceSurface: 'files',
+    });
+    workspaceValue.worktrees = [
+      { id: 'main', branch: 'main', root: '/tmp/cat-cafe', head: 'a3cbaff6' },
+      { id: 'f284', branch: 'feat/f284', root: '/tmp/cat-cafe-f284', head: '7e18bb7f' },
+    ];
+    workspaceValue.worktreeId = 'main';
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const picker = container.querySelector<HTMLSelectElement>('select[aria-label="当前工作区"]');
+    expect(picker).not.toBeNull();
+    expect(picker?.value).toBe('main');
+    expect([...((picker?.options ?? []) as unknown as HTMLOptionElement[])]).toHaveLength(2);
+    expect(picker?.selectedOptions[0]?.textContent).toContain('cat-cafe — main (a3cbaff6)');
+  });
+
+  it('keeps manual external folders behind the secondary workspace menu', async () => {
+    setupWithMutableStore({
+      workspaceWorktreeId: 'main',
+      workspaceSurface: 'files',
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const externalAction = container.querySelector('[data-testid="add-external-worktree"]');
+    expect(externalAction).not.toBeNull();
+    expect(externalAction?.closest('details')).not.toBeNull();
+    expect(externalAction?.closest('details')?.querySelector('summary')?.getAttribute('aria-label')).toBe(
+      '工作区更多操作',
+    );
+  });
+
   it('calls fetchSubtree for unloaded ancestor directories in shallow tree', async () => {
     const { fetchSubtree } = setupWithSearchResults(SHALLOW_TREE);
     const { WorkspacePanel } = await import('@/components/WorkspacePanel');
@@ -328,7 +422,7 @@ describe('WorkspacePanel reveal-in-tree', () => {
     // packages/web/src not yet expanded because it wasn't in the tree yet — will expand on next tree update
   });
 
-  it('switches back to Files view when a workspace open file arrives after browser auto-open', async () => {
+  it('switches to the actual document when a workspace open file arrives after browser auto-open', async () => {
     const { store, workspaceValue } = setupWithMutableStore({
       pendingPreviewAutoOpen: { port: 5173, path: '/' },
     });
@@ -352,9 +446,12 @@ describe('WorkspacePanel reveal-in-tree', () => {
     await act(async () => {
       root.render(React.createElement(WorkspacePanel));
     });
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
 
     expect(container.querySelector('[data-testid="browser-panel"]')).toBeNull();
-    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="code-viewer"]')).not.toBeNull();
   });
 
   it('keeps preview auto-open on mount when a selected file already exists', async () => {
@@ -378,7 +475,7 @@ describe('WorkspacePanel reveal-in-tree', () => {
     expect(container.querySelector('[data-testid="browser-panel"]')).not.toBeNull();
   });
 
-  it('switches to Files view when the selected file is reopened after preview auto-open', async () => {
+  it('switches to the actual document when the selected file is reopened after preview auto-open', async () => {
     const { store, workspaceValue } = setupWithMutableStore({
       workspaceOpenFilePath: 'packages/web/src/App.tsx',
       workspaceOpenTabs: ['packages/web/src/App.tsx'],
@@ -407,6 +504,6 @@ describe('WorkspacePanel reveal-in-tree', () => {
     });
 
     expect(container.querySelector('[data-testid="browser-panel"]')).toBeNull();
-    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="code-viewer"]')).not.toBeNull();
   });
 });

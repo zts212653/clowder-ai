@@ -41,6 +41,19 @@
       "teamStrengths": "审美、前端设计风格、打破常规"
     },
     {
+      "id": "dragon-li",
+      "name": "狸花猫",
+      "nickname": "小狸花",
+      "avatar": "/avatars/glm52.png",
+      "color": {
+        "primary": "#D4A76A",
+        "secondary": "#F5EBD7"
+      },
+      "roleDescription": "GLM 对话猫；中文实证",
+      "personality": "先证后答，机警蓄势",
+      "teamStrengths": "实证"
+    },
+    {
       "id": "bengal",
       "name": "孟加拉猫",
       "nickname": "斑斑",
@@ -88,6 +101,7 @@
       "models": [
         "Gemini 3.1 Pro (High)",
         "Gemini 3.1 Pro (Low)",
+        "Gemini 3.6 Flash (High)",
         "Gemini 3.5 Flash (High)",
         "Claude Opus 4.6 (Thinking)"
       ]
@@ -116,6 +130,13 @@
       "available": true,
       "evaluation": "代码审查专家，安全意识强，反应快"
     },
+    "codex-sol": {
+      "family": "maine-coon",
+      "roles": ["coding", "reasoning", "peer-reviewer"],
+      "lead": false,
+      "available": true,
+      "evaluation": "小太阳型攻坚猫，擅长复杂系统分析与实现"
+    },
     "gemini": {
       "family": "siamese",
       "roles": ["designer"],
@@ -129,6 +150,13 @@
       "lead": false,
       "available": true,
       "evaluation": "Gemini 3.5 Flash 轻量 triage/narrator，适合高频社区初筛，强 review，禁自合"
+    },
+    "glm52": {
+      "family": "dragon-li",
+      "roles": ["chat", "memory-spike", "reasoning"],
+      "lead": true,
+      "available": true,
+      "evaluation": "GLM-5.2 新猫"
     },
     "antigravity": {
       "family": "bengal",
@@ -210,12 +238,6 @@
           },
           "personality": "温柔但有主见，喜欢深入分析问题，写代码快但注重质量",
           "strengths": ["architecture", "backend", "mcp"],
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -250,12 +272,6 @@
           "strengths": ["chat", "quick-tasks"],
           "teamStrengths": "快速灵活，适合日常对话和轻量任务",
           "caution": null,
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -290,12 +306,6 @@
           "strengths": ["deep-reasoning", "analysis", "architecture"],
           "teamStrengths": "架构设计、创意写作最优秀",
           "caution": "写代码不如 4.6",
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -331,12 +341,6 @@
           "strengths": ["deep-reasoning", "architecture", "writing", "synthesis"],
           "teamStrengths": "深度推理、架构判断、长文共创（新猫，待校准）",
           "caution": "新猫，能力画像待校准",
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -383,12 +387,6 @@
           },
           "personality": "严谨认真，注重细节，会直言不讳地指出问题",
           "strengths": ["code-review", "security", "testing"],
-          "contextBudget": {
-            "maxPromptTokens": 240000,
-            "maxContextTokens": 216000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -434,12 +432,6 @@
           "strengths": ["reasoning", "code-review", "analysis", "debugging"],
           "teamStrengths": "架构思考、Review、bug 定位专家",
           "caution": null,
-          "contextBudget": {
-            "maxPromptTokens": 240000,
-            "maxContextTokens": 216000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -474,12 +466,6 @@
           "strengths": ["fast-coding", "quick-edits", "low-latency"],
           "teamStrengths": "快速编码、精确点改",
           "caution": "128k context, 不会自动跑测试",
-          "contextBudget": {
-            "maxPromptTokens": 64000,
-            "maxContextTokens": 40000,
-            "maxMessages": 100,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -489,11 +475,26 @@
             "instruct": "用一个简单直接的野性少年语气说话，短句为主，像狼一样直觉敏锐",
             "temperature": 0.3
           }
+        },
+        {
+          "id": "codex-sol",
+          "catId": "codex-sol",
+          "variantLabel": "Sol",
+          "clientId": "openai",
+          "defaultModel": "gpt-5.6-sol",
+          "mcpSupport": true,
+          "cli": {
+            "command": "codex",
+            "outputFormat": "json",
+            "defaultArgs": ["exec", "--json", "-m", "gpt-5.6-sol"],
+            "effort": "xhigh"
+          }
         }
       ]
     },
     {
       "id": "gpt-pro",
+      "relationshipKey": "maine-coon",
       "catId": "gpt-pro",
       "name": "缅因猫Pro (云端)",
       "displayName": "缅因猫Pro",
@@ -555,12 +556,6 @@
           },
           "personality": "热血奔放，善用富文本语音，表达力最强",
           "strengths": ["visual-design", "ui-ux", "creativity"],
-          "contextBudget": {
-            "maxPromptTokens": 350000,
-            "maxContextTokens": 300000,
-            "maxMessages": 300,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -595,12 +590,6 @@
           "personality": "经典版，创意丰富",
           "teamStrengths": "创意",
           "strengths": ["visual-design", "creativity", "multimodal"],
-          "contextBudget": {
-            "maxPromptTokens": 350000,
-            "maxContextTokens": 300000,
-            "maxMessages": 300,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -615,8 +604,9 @@
     },
     {
       "id": "gemini35",
+      "relationshipKey": "siamese",
       "catId": "gemini35",
-      "name": "暹罗猫 Gemini 3.5 Flash",
+      "name": "暹罗猫 Gemini 3.6 Flash",
       "displayName": "暹罗猫",
       "nickname": "烁烁",
       "avatar": "/avatars/gemini25.png",
@@ -624,8 +614,19 @@
         "primary": "#2563EB",
         "secondary": "#DBEAFE"
       },
-      "mentionPatterns": ["@gemini35", "@gemini-35", "@gemini3.5", "@flash", "@暹罗flash", "@暹罗gemini35"],
-      "roleDescription": "暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问",
+      "mentionPatterns": [
+        "@gemini35",
+        "@gemini-35",
+        "@gemini3.5",
+        "@gemini36",
+        "@gemini-36",
+        "@gemini3.6",
+        "@flash",
+        "@暹罗flash",
+        "@暹罗gemini35",
+        "@暹罗gemini36"
+      ],
+      "roleDescription": "暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问",
       "teamStrengths": "审美、前端设计风格、打破常规",
       "caution": "新猫加入还在测评；开发任务需要强 reviewer 守门",
       "defaultVariantId": "gemini35-default",
@@ -636,8 +637,8 @@
         {
           "id": "gemini35-default",
           "clientId": "google",
-          "variantLabel": "Gemini 3.5 Flash",
-          "defaultModel": "Gemini 3.5 Flash (High)",
+          "variantLabel": "Gemini 3.6 Flash",
+          "defaultModel": "Gemini 3.6 Flash (High)",
           "mcpSupport": true,
           "cli": {
             "command": "agy",
@@ -646,12 +647,6 @@
           "accountRef": "gemini",
           "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
           "strengths": ["visual-design", "creativity", "multimodal"],
-          "contextBudget": {
-            "maxPromptTokens": 350000,
-            "maxContextTokens": 300000,
-            "maxMessages": 300,
-            "maxContentLengthPerMsg": 15000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -661,6 +656,55 @@
             "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
             "temperature": 0.3
           }
+        }
+      ]
+    },
+    {
+      "id": "dragon-li",
+      "catId": "glm52",
+      "name": "狸花猫",
+      "displayName": "狸花猫",
+      "nickname": "小狸花",
+      "avatar": "/avatars/glm52.png",
+      "color": {
+        "primary": "#D4A76A",
+        "secondary": "#F5EBD7"
+      },
+      "mentionPatterns": ["@glm52", "@glm5.2", "@glm-5.2", "@狸花glm52", "@小狸花", "@狸花猫"],
+      "roleDescription": "GLM-5.2 新猫；中文实证",
+      "teamStrengths": "实证",
+      "caution": "新猫",
+      "defaultVariantId": "glm52-default",
+      "features": {
+        "sessionChain": true
+      },
+      "variants": [
+        {
+          "id": "glm52-default",
+          "catId": "glm52",
+          "name": "狸花猫",
+          "displayName": "狸花猫",
+          "nickname": "小狸花",
+          "variantLabel": "GLM-5.2",
+          "mentionPatterns": ["@glm52", "@glm5.2", "@glm-5.2", "@狸花glm52", "@小狸花"],
+          "avatar": "/avatars/glm52.png",
+          "color": {
+            "primary": "#D4A76A",
+            "secondary": "#F5EBD7"
+          },
+          "clientId": "opencode",
+          "provider": "zhipu",
+          "defaultModel": "zhipu/glm-5.2",
+          "mcpSupport": true,
+          "cli": {
+            "command": "opencode",
+            "outputFormat": "ndjson",
+            "defaultArgs": ["run", "--format", "json"]
+          },
+          "roleDescription": "GLM-5.2 新猫；中文实证",
+          "personality": "先证后答，不硬塞记忆",
+          "teamStrengths": "实证",
+          "strengths": ["memory-judgment", "chinese-context", "conservative-reasoning"]
         }
       ]
     },
@@ -692,12 +736,6 @@
           "mcpSupport": true,
           "personality": "精力旺盛、好奇心爆棚，像一只永远在探索新领地的豹猫——什么都想试，什么都敢碰",
           "strengths": ["image-generation", "browser-automation", "visual-evidence", "multi-model"],
-          "contextBudget": {
-            "maxPromptTokens": 350000,
-            "maxContextTokens": 300000,
-            "maxMessages": 300,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -724,12 +762,6 @@
           },
           "personality": "同一只豹猫，换了一副布偶猫的灵魂——更沉稳但依然大胆",
           "strengths": ["image-generation", "browser-automation", "deep-reasoning", "coding"],
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -765,12 +797,6 @@
           "teamStrengths": "AGY Opus、深度推理、跨模型验证",
           "caution": "AGY CLI；无 IDE/CDP 浏览器桥",
           "strengths": ["deep-reasoning", "agy-cli", "multi-model", "architecture-review"],
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -815,12 +841,6 @@
           },
           "personality": "沉稳可靠，像一只圆润的英短金渐层——什么 provider 都能接，什么任务都能扛",
           "strengths": ["coding", "multi-agent-orchestration", "lsp", "open-source"],
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",
@@ -861,18 +881,13 @@
             "defaultArgs": ["--print", "--output-format", "stream-json"]
           },
           "personality": "稳健细致，擅长长文阅读和中文语境下的结构化表达",
-          "strengths": ["long-context", "chinese-writing", "summarization"],
-          "contextBudget": {
-            "maxPromptTokens": 240000,
-            "maxContextTokens": 216000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          }
+          "strengths": ["long-context", "chinese-writing", "summarization"]
         }
       ]
     },
     {
       "id": "opus-47",
+      "relationshipKey": "ragdoll",
       "catId": "opus-47",
       "name": "布偶猫 Opus 4.7",
       "displayName": "布偶猫",
@@ -903,12 +918,6 @@
           },
           "personality": "试用中——猫格待观察，据co-creator反馈风格偏缅因猫",
           "strengths": ["architecture", "reasoning", "coding"],
-          "contextBudget": {
-            "maxPromptTokens": 180000,
-            "maxContextTokens": 160000,
-            "maxMessages": 200,
-            "maxContentLengthPerMsg": 100000
-          },
           "voiceConfig": {
             "voice": "zm_yunjian",
             "langCode": "zh",

@@ -436,12 +436,18 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(appShell).toContain('showLine={false}');
   });
 
-  it('Chat voice entries stay beside the export action in the conversation header', () => {
+  it('routes actions by scope: Workspace owns companions, thread overflow owns export, composer owns additions', () => {
     const header = readSrc('ChatContainerHeader.tsx');
     const input = readSrc('ChatInput.tsx');
+    const launcher = readSrc('workspace/WorkspaceLauncher.tsx');
+    const threadItem = readSrc('ThreadSidebar/ThreadItem.tsx');
 
-    expect(header).toContain('<ExportButton threadId={threadId} />');
-    expect(header).toContain('<ChatVoiceFeatureControls threadId={threadId} defaultCatId={defaultCatId} />');
+    expect(header).not.toContain('ExportButton');
+    expect(header).not.toContain('ChatVoiceFeatureControls');
+    expect(header).not.toContain('status-panel-toggle');
+    expect(launcher).toContain('ChatVoiceFeatureControls');
+    expect(launcher).toContain("id: 'status'");
+    expect(threadItem).toContain('<ExportButton');
     expect(input).not.toContain('ChatVoiceFeatureControls');
   });
 });
@@ -764,12 +770,13 @@ describe('#723 interactive button guard — no grey pill on action/toggle contro
     expect(src).toContain('text-cafe-secondary');
   });
 
-  it('ChatContainerHeader: PanelToggle text color in conditional branches, no cascade conflict', () => {
+  it('ChatContainerHeader: PanelToggle uses the same borderless icon grammar as the calm header', () => {
     const src = readSrc('ChatContainerHeader.tsx');
     const lines = src.split('\n');
     const start = lines.findIndex((l) => l.includes('function PanelToggle'));
     const fnSrc = lines.slice(start, start + 50).join('\n');
-    expect(fnSrc).not.toContain('hover:bg-[var(--console-hover-bg)]');
+    expect(fnSrc).toContain('bg-transparent');
+    expect(fnSrc).not.toContain('border-cafe');
     expect(fnSrc).toContain('hover:text-cafe-accent');
     const classBase = fnSrc.match(/className=\{`([^$]*)\$/);
     if (classBase) {
@@ -1451,7 +1458,6 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
       'ConfirmDialog.tsx',
       'mission-control/ImportProjectModal.tsx',
       'BootcampListModal.tsx',
-      'MobileStatusSheet.tsx',
       'ChatContainer.tsx',
       'first-run-quest/BootcampGuideOverlay.tsx',
       'HubCoCreatorEditor.tsx',

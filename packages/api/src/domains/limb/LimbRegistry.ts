@@ -7,7 +7,14 @@
  * Phase B: invoke 升级为 pipeline — policy check → lease → action log → execute。
  */
 
-import type { ILimbNode, LimbAuthLevel, LimbInvokeResult, LimbNodeRecord, LimbNodeStatus } from '@cat-cafe/shared';
+import type {
+  ILimbNode,
+  LimbAuthLevel,
+  LimbInvocationContext,
+  LimbInvokeResult,
+  LimbNodeRecord,
+  LimbNodeStatus,
+} from '@cat-cafe/shared';
 import type { LimbAccessPolicy } from './LimbAccessPolicy.js';
 import type { LimbActionLog } from './LimbActionLog.js';
 import type { LimbLeaseManager } from './LimbLeaseManager.js';
@@ -83,7 +90,7 @@ export class LimbRegistry {
     nodeId: string,
     command: string,
     params: Record<string, unknown>,
-    context?: { catId?: string; invocationId?: string },
+    context?: LimbInvocationContext,
   ): Promise<LimbInvokeResult> {
     const entry = this.entries.get(nodeId);
     if (!entry) {
@@ -137,7 +144,7 @@ export class LimbRegistry {
 
     // Execute — auto-release lease after invoke (single-shot semantics)
     try {
-      const result = await entry.node.invoke(command, params);
+      const result = await entry.node.invoke(command, params, context);
       if (requestId && this.deps.actionLog) {
         if (result.success) {
           this.deps.actionLog.complete(requestId, { artifactUri: result.artifactUri });

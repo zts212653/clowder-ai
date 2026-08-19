@@ -1,6 +1,6 @@
 ---
 feature_ids: [F256]
-related_features: [F200, F209, F242, F188]
+related_features: [F200, F209, F242, F188, F263]
 topics: [memory, search-strategy, retrieval, expansion, skill, hook, agent-autonomy]
 doc_kind: spec
 created: 2026-06-29
@@ -22,6 +22,8 @@ operator用"场景驱动渐进式激活"策略引导猫写路由架构文档时�
 - **搜索结果不"带泥"**：搜"路由"不会自动提示"F208 画像跟路由有关联"——expansion hints 只在 `intent=coverage` 模式暴露，默认 `topk` 不带
 
 operator的核心洞察：**问题不在搜索算法（BM25/向量/RRF），在搜索策略层——猫拿到模糊 query 时的第一步做什么。** 而且这和 retrieval pipeline 优化是**同一个问题的两个面**——pipeline 负责"水管通不通"，策略负责"往哪浇水"。
+
+> **思想层挂边（2026-07-04，编号随纲领 v2 更新）**：本 feature 在[记忆系统思想纲领](../architecture/memory-philosophy.md)中的定位是 **M9 策略层是器官不是补丁**——把检索决策权交给猫的系统，教猫决策就是系统职责（push 型系统结构上没有这个器官的位置）。同时它背着纲领 §7.1 session 幽灵豁口的最后防线（幽灵补漏依赖策略层导流到 `depth=raw`）。
 
 ## Current State / 现状基线
 
@@ -109,9 +111,9 @@ operator的核心洞察：**问题不在搜索算法（BM25/向量/RRF），在�
 - [x] AC-B2: 相关方向的来源（frontmatter/source-thread/convention-edge）对猫透明可见
 - [x] AC-B3: F200 记录 expansion hint 的 followup rate（猫追了 vs 没追）
 
-### Phase C（Extractor 扩展）
-- [ ] AC-C1: 新增 ≥1 个 extractor 覆盖 capsule/l0/prompt-injection 类依赖
-- [ ] AC-C2: 搜"路由"能通过 convention edge 带出 F208 画像（当前 Ground Truth 复现）
+### Phase C（Extractor 扩展）✅
+- [x] AC-C1: 新增 ≥1 个 extractor 覆盖 capsule/l0/prompt-injection 类依赖
+- [x] AC-C2: 搜"路由"能通过 convention edge 带出 F208 画像（当前 Ground Truth 复现）
 
 ### Phase D（Eval + 迭代）
 - [ ] AC-D1: 基于 ≥30 天 dogfood 数据的 expansion followup rate 报告

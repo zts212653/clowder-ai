@@ -1,17 +1,39 @@
 'use client';
 
+import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import type { CatInvocationInfo } from '@/stores/chat-types';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import type { AppServerLifecycleSnapshot, AppServerLifecycleStage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { isSilentActiveTurn, isStreamingTipSuppressed } from './capability-tip-placement';
+import { ExecutionCancelButton } from './ExecutionCancelButton';
 import { ForceResetDialog } from './ForceResetDialog';
-import { deriveActiveCats } from './status-helpers';
 
-type ActiveInvocationSlots = Record<string, { catId: string; mode: string; startedAt?: number }>;
+const APP_SERVER_STAGE_LABELS: Record<AppServerLifecycleStage, string> = {
+  child_spawned: '启动子进程',
+  initialized: '初始化 app-server',
+  thread_ready: '会话已就绪',
+  turn_accepted: '回合已接受',
+  active: '运行回合',
+  completed: '回合完成',
+  interrupted: '回合已中断',
+  failed: '回合失败',
+  closing: '清理进程',
+  closed: '进程已关闭',
+};
+
+function formatActivityAge(lastActivityAt: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - lastActivityAt) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  return `${Math.floor(seconds / 60)} 分钟前`;
+}
 
 interface ThreadExecutionBarProps {
   threadId?: string;
@@ -22,30 +44,30 @@ interface ThreadExecutionBarProps {
 export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const effectiveThreadId = threadId ?? currentThreadId;
-  const {
-    activeInvocations,
-    catInvocations,
-    catStatuses,
-    hasActive: hasActiveInvocation,
-    intentMode,
-    targetCats,
-  } = useThreadLiveness(effectiveThreadId);
+  const { catInvocations, catStatuses } = useThreadLiveness(effectiveThreadId);
+  const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
+  const cancelPendingByKey = useActiveExecutionStore((state) => state.cancelPendingByKey);
+  const executionHydration = useActiveExecutionStore((state) => state.hydration);
+  const executionAnchorThreadId = useActiveExecutionStore((state) => state.anchorThreadId);
   const { getCatById } = useCatData();
   const [, setTick] = useState(0);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
 
-  const activeCats = deriveActiveCats({
-    targetCats,
-    activeInvocations,
-    hasActiveInvocation,
-    intentMode,
-  }).map((catId) => ({ catId, startedAt: getStartedAt(catId, activeInvocations, catInvocations) }));
+  const activeExecutions = useMemo(
+    () =>
+      Object.values(executionsByKey)
+        .filter((execution) => execution.threadId === effectiveThreadId)
+        .sort((left, right) => left.startedAt - right.startedAt || left.executionId.localeCompare(right.executionId)),
+    [effectiveThreadId, executionsByKey],
+  );
+
+  const { hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(threadId);
 
   // Build display info from cat-config (dynamic, not hardcoded)
   const catDisplayMap = useMemo(() => {
     const map = new Map<string, { label: string; color: string }>();
-    for (const { catId } of activeCats) {
+    for (const { catId } of activeExecutions) {
       const cat = getCatById(catId);
       if (cat) {
         map.set(catId, {
@@ -57,32 +79,38 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
       }
     }
     return map;
-  }, [activeCats, getCatById]);
+  }, [activeExecutions, getCatById]);
 
   // Auto-update elapsed time every second when cats are active
   useEffect(() => {
-    if (activeCats.length === 0) return;
+    if (activeExecutions.length === 0) return;
     const interval = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(interval);
-  }, [activeCats.length]);
-
-  const handleStopCat = useCallback(
-    async (catId: string) => {
-      if (!effectiveThreadId) return;
-      await apiFetch(`/api/threads/${effectiveThreadId}/cancel/${catId}`, { method: 'POST' });
-    },
-    [effectiveThreadId],
-  );
+  }, [activeExecutions.length]);
 
   const handleStopAll = useCallback(async () => {
-    if (!effectiveThreadId) return;
-    await Promise.all(activeCats.map(({ catId }) => handleStopCat(catId)));
-  }, [effectiveThreadId, activeCats, handleStopCat]);
+    const cancelableExecutions = activeExecutions.filter((execution) => execution.cancelability.state === 'cancelable');
+    const results = await Promise.allSettled(
+      cancelableExecutions.map((execution) => cancelProjectedExecution(execution)),
+    );
+    if (results.some((result) => result.status === 'rejected')) {
+      useToastStore.getState().addToast({
+        type: 'error',
+        title: '部分执行未能停止',
+        message: '运行状态已重新同步，请按仍显示的精确执行重试。',
+        duration: 5000,
+      });
+    }
+  }, [activeExecutions]);
+  const stopAllPending = activeExecutions.some(
+    (execution) => cancelPendingByKey[activeExecutionKey(execution)] === true,
+  );
+  const hasCancelableExecution = activeExecutions.some((execution) => execution.cancelability.state === 'cancelable');
 
   // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
-  const stalled = activeCats.some(({ catId }) => {
-    const s = catStatuses[catId];
-    return s === 'suspected_stall' || s === 'alive_but_silent';
+  const stalled = activeExecutions.some((execution) => {
+    if (execution.kind !== 'live_invocation') return false;
+    return isStreamingTipSuppressed(catStatuses[execution.catId], catInvocations[execution.catId]?.appServerLifecycle);
   });
   // F220 Phase 3: 确认后调 force-reset 端点（只清运行态，LL-048 不碰持久化）→ toast → 关弹窗。
   const handleForceReset = useCallback(async () => {
@@ -102,32 +130,68 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     }
   }, [effectiveThreadId]);
 
-  if (activeCats.length === 0) return null;
+  // Canonical truth is empty but unsettled while the legacy socket still reports a
+  // live turn. Returning null here used to remove the force-reset entry — the only
+  // escape — at exactly the moment the user needs it, because ChatInput
+  // simultaneously hard-locks Cancel to `unavailable`. Keep a reachable exit.
+  if (activeExecutions.length === 0 && hasUnverifiedLegacyExecution) {
+    return (
+      <div className="console-divider-b" data-testid="execution-unverified-recovery">
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
+          <span className="text-cafe-muted shrink-0" title="本轮没有留下可核对的终态，可能已经结束。">
+            运行状态待确认
+          </span>
+        </div>
+        <ForceResetEntry escalated onClick={() => setResetDialogOpen(true)} />
+        <ForceResetDialog
+          open={resetDialogOpen}
+          busy={resetting}
+          onCancel={() => setResetDialogOpen(false)}
+          onConfirm={handleForceReset}
+        />
+      </div>
+    );
+  }
+  if (activeExecutions.length === 0) return null;
 
   return (
     <div className="console-divider-b">
       <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
         <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-        {activeCats.map(({ catId, startedAt }) => {
-          const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
+        {executionHydration === 'error' && executionAnchorThreadId === effectiveThreadId && (
+          <span
+            data-testid="execution-hydration-stale"
+            className="text-micro text-conn-amber-text shrink-0"
+            title="同步暂时失败，显示最近一次已验证状态。"
+          >
+            状态暂不可核对
+          </span>
+        )}
+        {activeExecutions.map((execution) => {
+          const info = catDisplayMap.get(execution.catId) ?? {
+            label: execution.catId,
+            color: 'var(--cafe-accent)',
+          };
           return (
             <CatStatusChip
-              key={catId}
-              catId={catId}
+              key={`${execution.kind}:${execution.executionId}`}
+              execution={execution}
               label={info.label}
               color={info.color}
-              startedAt={startedAt}
-              onStop={handleStopCat}
+              lifecycle={
+                execution.kind === 'live_invocation' ? catInvocations[execution.catId]?.appServerLifecycle : undefined
+              }
             />
           );
         })}
-        {activeCats.length > 1 && (
+        {activeExecutions.length > 1 && (
           <button
             type="button"
             onClick={handleStopAll}
-            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
+            disabled={stopAllPending || !hasCancelableExecution}
+            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0 disabled:cursor-wait disabled:opacity-50"
           >
-            全部停止
+            {stopAllPending ? '停止中…' : '全部停止'}
           </button>
         )}
       </div>
@@ -201,57 +265,41 @@ function ForceResetEntry({ escalated, onClick }: { escalated: boolean; onClick: 
   );
 }
 
-function getStartedAt(
-  catId: string,
-  activeInvocations: ActiveInvocationSlots,
-  catInvocations: Record<string, CatInvocationInfo>,
-) {
-  const slot = Object.values(activeInvocations).find((inv) => inv.catId === catId);
-  if (typeof slot?.startedAt === 'number') return slot.startedAt;
-
-  const invocationStartedAt = catInvocations[catId]?.startedAt;
-  if (typeof invocationStartedAt === 'number') return invocationStartedAt;
-
-  return Date.now();
-}
-
 function CatStatusChip({
-  catId,
+  execution,
   label,
   color,
-  startedAt,
-  onStop,
+  lifecycle,
 }: {
-  catId: string;
+  execution: ActiveExecutionProjection;
   label: string;
   color: string;
-  startedAt: number;
-  onStop: (catId: string) => void;
+  lifecycle?: AppServerLifecycleSnapshot;
 }) {
-  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const elapsed = Math.floor((Date.now() - execution.startedAt) / 1000);
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
   const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const appServerStalled = isSilentActiveTurn(lifecycle);
 
   return (
-    <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50">
+    <span
+      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cafe-surface/50"
+      data-app-server-stalled={appServerStalled ? 'true' : undefined}
+    >
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
       <span className="text-cafe-secondary font-medium">{label}</span>
+      <span className="text-cafe-muted">
+        {execution.kind === 'managed_command' ? '托管命令' : '实时回合'} · {execution.threadTitle ?? execution.threadId}
+      </span>
+      {lifecycle && (
+        <span className={appServerStalled ? 'text-conn-amber-text' : 'text-cafe-muted'}>
+          {APP_SERVER_STAGE_LABELS[lifecycle.stage]} ·{' '}
+          {appServerStalled ? '可能在等待模型' : `活动 ${formatActivityAge(lifecycle.lastActivityAt)}`}
+        </span>
+      )}
       <span className="text-cafe-muted tabular-nums">{timeStr}</span>
-      <button
-        type="button"
-        onClick={() => onStop(catId)}
-        className="ml-0.5 text-cafe-muted hover:text-conn-red-text transition-colors"
-        aria-label={`Stop ${label}`}
-      >
-        <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-          <path
-            fillRule="evenodd"
-            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </button>
+      <ExecutionCancelButton execution={execution} label="×" />
     </span>
   );
 }

@@ -156,8 +156,7 @@ test('cloud codex P2 round-16: drain failure after successful streaming → usag
   };
   writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
 
-  // Schedule: after stream phase, delete transcript + set state to done
-  setTimeout(() => {
+  const makeTerminalTranscriptUnreadable = () => {
     rmSync(transcriptPath, { force: true });
     // Replace path with a directory so subsequent readNew throws
     mkdirSync(transcriptPath);
@@ -170,7 +169,7 @@ test('cloud codex P2 round-16: drain failure after successful streaming → usag
         output: { result: 'Streamed.' },
       }),
     );
-  }, 150);
+  };
 
   const fakeSpawn = buildFakeSpawn({ stdout: `backgrounded · ${shortId}\n` });
   const service = new ClaudeBgCarrierService({
@@ -182,7 +181,15 @@ test('cloud codex P2 round-16: drain failure after successful streaming → usag
   });
 
   const events = [];
-  for await (const msg of service.invoke('hi')) events.push(msg);
+  let terminalizedAfterStreaming = false;
+  for await (const msg of service.invoke('hi')) {
+    events.push(msg);
+    if (!terminalizedAfterStreaming && msg.type === 'text' && msg.content === 'Streamed.') {
+      terminalizedAfterStreaming = true;
+      makeTerminalTranscriptUnreadable();
+    }
+  }
+  assert.ok(terminalizedAfterStreaming, 'test fixture must observe a streaming event before terminal drain failure');
 
   const done = events[events.length - 1];
   assert.equal(done.type, 'done');

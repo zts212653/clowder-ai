@@ -5,15 +5,15 @@ doc_kind: note
 created: 2026-02-26
 ---
 
-# Cat Café Design System 🐾
+# Clowder AI Design System 🐾
 
-> **Version**: 1.1.0
+> **Version**: 1.2.0
 > **Maintainer**: Gemini (Siamese)
-> **Last Updated**: 2026-04-13
+> **Last Updated**: 2026-07-21
 
 ## 1. Brand Identity
 
-The **Cat Café** aesthetic is "Cozy, Playful, and Collaborative". It should feel like stepping into a warm, sunlit room with three distinct cat personalities.
+The **Clowder AI** aesthetic is "Cozy, Playful, and Collaborative". It should feel like stepping into a warm, sunlit room with three distinct cat personalities.
 
 ### Core Values
 - **Warmth**: Use soft, creamy backgrounds. Avoid stark white (#FFFFFF).
@@ -154,6 +154,37 @@ Scheduled task UX is intentionally split by intent:
 - **Grid**: 3x4 layout (12 expressions per cat).
 - **Style**: Edge-to-edge cropping, no text labels.
 - **Key Expressions**: Happy, Thinking, Punching (Motion Blur), Identity-Specific (e.g. Wallet Burning).
+
+---
+
+## 5. Recoverable Content Overflow
+
+省略号表示“还有内容”，不能成为信息终点。选择模式时先看内容语义和 canonical full content 是否存在，不按字符数机械套组件。规范真相源见 [F269](features/F269-recoverable-content-overflow.md)，operator 已确认的视觉契约见 Design Gate (internal)。
+
+| 模式 | 使用场景 | 必需恢复入口 | 禁止项 |
+|------|----------|--------------|--------|
+| `CompactLabel` | 文件名、路径、SHA、ID、短标题 | 真溢出时 focus/hover 全文 + 可操作 copy/detail；路径保留可辨识首尾 | 裸 `truncate`、只给 pointer hover、让元数据无限撑宽布局 |
+| `ExpandableProse` | 描述、理由、摘要、评论等短正文 | 真溢出时出现真实 button；维护 `aria-expanded` / `aria-controls` | 整段文字伪装 button、tooltip-only、无 overflow 也显示控制 |
+| `LongFormReader` | 长 Markdown、日志、文章、完整 tool result | 语义 summary → reader；搜索、复制、来源、Escape/关闭与焦点返回 | 把 1000-word 正文原地撑开、把 producer preview 冒充全文 |
+| `CriticalText` | 错误、校验、审批依据、不可逆影响 | 关键人类摘要不静默截断；完整技术详情有醒目 disclosure/source；嵌入既有 surface 时默认使用无额外容器的 inline 外观 | 静默 clamp、只显示错误码、全文已丢失却显示“展开全文”、在现有卡片内再套一张 panel |
+
+### Shared rules
+
+- 仅在尺寸实测发生 overflow 时显示恢复控制；容器宽度、缩放、字体和语言变化后重新测量。
+- 恢复能力默认融入原 surface，不额外制造背景、边框或大块内边距。`CriticalText` 的 `appearance="panel"` 只用于它本身就是唯一告警容器的独立阻塞态；卡片、列表行、toast 和 banner 内部使用 inline。
+- Tooltip 只能辅助 Compact Label，不能承载段落正文。
+- Mouse、touch、Enter/Space 与 screen reader 必须到达同一完整内容；交互使用真实 `button`，reader trigger 以 `aria-expanded` / `aria-controls` 暴露状态与目标。视觉 clamp 不得把无上界全文留在高密度列表的无障碍树中；此时提供有界语义摘要，并让全文只在 reader 中出现。
+- 保留原字符串，不用自制 `slice` / `substring` 切 CJK、emoji ZWJ 或组合字符。需要摘要时写语义摘要。
+- payload 只有 preview 时，producer 必须暴露 `truncated` / `requiresDrill` 与可执行 source；canonical content 不存在时明确“信息已丢失”，不制造假入口。
+- 子级 copy/expand/reader action 必须阻止父卡片 click；reader 关闭后把焦点还给触发点，窄屏不得产生页面级横向滚动。
+
+### Examples
+
+- `FileBlock.fileName` → `CompactLabel`；下载是独立 link，copy button 不嵌在 link 内。
+- `SettingsRow` 的 string meta → `ExpandableProse`；结构化 ReactNode meta 不做无法恢复的通用 clamp。
+- `ReplayEventBubble` 的 tool result → 只有取得完整 result/source 后才能进入 `LongFormReader`。
+- `ApprovalItemCard.reason` → inline `CriticalText`；批准前依据必须原地可发现，但不能在审批卡内再嵌一张视觉卡。
+- Toast → 标题与短消息保持原生轻量排版；消息真实超过两行时才出现低强调 reader 入口，不把每条成功通知包装成 diagnostic panel。
 
 ---
 

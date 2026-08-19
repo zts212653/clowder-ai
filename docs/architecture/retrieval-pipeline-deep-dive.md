@@ -1,20 +1,23 @@
 ---
 title: "Retrieval Pipeline Deep Dive — 14-Layer Search Architecture"
 doc_kind: architecture
-feature_ids: [F102, F163, F186, F188, F193, F200, F209]
-related_features: [F148, F152, F169, F242, F256]
+feature_ids: [F102, F163, F186, F188, F193, F200, F209, F263]
+related_features: [F148, F152, F169, F242, F256, F260]
 topics: [search, retrieval, BM25, embedding, RRF, reranking, salience, memory, recall]
 created: 2026-06-29
+revised: 2026-07-27
 status: published
 author: "Ragdoll/claude-opus-4-6"
 reviewed_by: "Maine Coon/gpt-5.5"
 ---
 
-# Cat Cafe 检索管线深度解析：14 层搜索架构
+# Clowder AI 检索管线深度解析：14 层搜索架构
 
 > 面向想理解"搜索结果是怎么从 query 变成排好序的 top-K"的工程师。
 >
 > 如果你想了解记忆系统的全景（六种记忆、feature map、治理闭环），请先阅读 [memory-system-overview.md](./memory-system-overview.md)。本文聚焦其中的**检索管线**——从一条 query 进来到排好序的结果出去，中间经过的 14 个主要信号 / 处理层。
+>
+> **Freshness / contract boundary（2026-07-27）**：14 层主体描述 store/query 算法；MCP schema、coverage bypass、renderer envelope、主动注入与 lifecycle eval 属 wrapper/消费契约层。F263 Phase A/B/C 已完成结果合同、注入纳管、trace 与三轴仪表盘；只剩 Phase D 慢裁决。当前全系统地图与运行缺口见 [memory-system-overview.md](./memory-system-overview.md)。代码与 feature truth 优先于本文快照。
 
 ---
 
@@ -48,7 +51,7 @@ reviewed_by: "Maine Coon/gpt-5.5"
 
 ## 总览
 
-Cat Cafe 的记忆检索不是一个简单的搜索引擎。它是一个 **多策略召回 → 多信号融合 → 多维度重排 → 输出可行动证据** 的 14 层管线，核心目标是让 AI 猫猫（Agent）在协作中能精准、快速地从项目知识库中找到需要的信息。
+Clowder AI 的记忆检索不是一个简单的搜索引擎。它是一个 **多策略召回 → 多信号融合 → 多维度重排 → 输出可行动证据** 的 14 层管线，核心目标是让 AI 猫猫（Agent）在协作中能精准、快速地从项目知识库中找到需要的信息。
 
 底层技术栈：**SQLite FTS5**（全文检索）+ **sqlite-vec / vec0**（向量近邻）+ **自研实体注册表** + **贝叶斯行为学习排序**。全部运行在本地，无外部搜索服务依赖。
 
@@ -93,7 +96,7 @@ Cat Cafe 的记忆检索不是一个简单的搜索引擎。它是一个 **多�
 | 5 | Vector NN Search | **F102 Phase C**（文档级）+ **F209 Phase A**（passage 级） | 纯 lexical 找不到同义、跨语言和隐含表达。F102 加文档向量，F209 把 `depth=raw` 的 message passage 也接入 semantic/hybrid。后续 LL-034 把 embedding 从 API 进程内模型改成独立 GPU HTTP 服务。 |
 | 6 | RRF Fusion | **F102 KD-44**（文档级）+ **F209 Phase A**（passage 级）+ **F186/F102**（collection federation） | BM25 分和向量距离量纲不同，直接加权不稳。RRF 用排名融合，不需要 score normalization，适合 BM25 + NN + collection 多路合并。 |
 | 7 | CJK NN Weight | **F200 v1.1 DF-8 dogfood fix** | 中文 query 下 FTS5 召回弱，hybrid 会被英文/符号 lexical 噪音压住。CJK 检测后给 NN 路 `1.5x` 投票权。 |
-| 8 | Authority Boost | **F163 Phase A/D/E** | F163 要让 ADR / lesson / canon 等稳定真相源在同等相关时更靠前。A-C 先建了 metadata/flag，LL-051 发现 authority 全是 observed 导致空转，Phase D 用 `pathToAuthority()` 装弹，Phase E 再把 confidence 和 authority 解耦。 |
+| 8 | Authority Boost | **F163 Phase A/D/E** + **F263 Phase A**（消费语义） | F163 要让 ADR / lesson / canon 等稳定真相源在同等相关时更靠前。A-C 先建 metadata/flag，LL-051 发现 authority 全是 observed 导致空转，Phase D 用 `pathToAuthority()` 装弹；F263 后续移除歧义的 rank-derived `confidence` 消费字段，让 match 与 authority 成为明确独立轴。 |
 | 9 | Consumption Rerank | **F200 Phase C**（HW-4/HW-7 后校准可信度） | 搜索排序要学猫真实行为：搜到后是否真的 Read / grep / drill-down。F200 明确只评价 navigation utility，不改 truth/authority；HW-4 修 consumption attribution，HW-7 修 shadow baseline。 |
 | 10 | Recency Decay | **F200 Phase C** | thread/session/discussion 时效短，feature/decision 中等，ADR/lesson/canon 不应自然过期。F200 用分桶半衰期避免旧临时讨论长期压住新上下文。 |
 | 11 | Constitutional Immunity | **F200 Phase C** + **F163 authority metadata** | 低 consumption 不代表低重要性。宪法级文档在 consumption prior 中只升不降，并在 rerank 时 pinned，避免"不常读"把基础规则沉底。 |
@@ -367,7 +370,7 @@ boost_score(doc) = 1/(rank + 60) × authority_weight
 - `shadow`：计算但不重排，用于 A/B 对比日志
 - `on`：实际重排
 
-**实现归属**：F163 Phase A 设计 authority / activation / status 多轴元数据和 boost flag；Phase D 用 `pathToAuthority()` 补齐 authority 数据；Phase E 把 confidence 改为 rank 派生，让 authority 成为独立字段而不是"相关性"标签。
+**实现归属**：F163 Phase A 设计 authority / activation / status 多轴元数据和 boost flag；Phase D 用 `pathToAuthority()` 补齐 authority 数据；F263 Phase A 在消费契约上删除歧义的 rank-derived `confidence`，明确拆成 match、authority 与 freshness 三轴。authority 参与排序不等于它能证明内容为真。
 
 **关键源文件**：`SqliteEvidenceStore.ts:applyAuthorityBoost()`、`f163-types.ts`
 
@@ -589,26 +592,51 @@ return [...withDist.map(w => w.item), ...noVec];
 
 **实现归属**：F102 G-4 / Phase I 提供 drillDown 和 passage context；F209 Phase B/C 提供 entity match 与 typed bounded readers；F193 Phase E 提供 cross-thread action affordance。新增原因是 agentic search 的关键动作不是"看摘要相信它"，而是"拿到坐标后打开原文验证"。
 
+### 当前输出 envelope：三轴语义已拆分
+
+F263 Phase A 已把 2026-07-11 快照里的三处裂缝关闭：类型层不再用裸 `confidence` 把“排位靠前”伪装成“事实可信”；coverage direct hit 不再用 `?? 1` 造满分；常规 top-K 主消费行统一为 `[match:… · authority:… · updated:…]`。
+
+当前字段应这样读：
+
+| 轴 | 字段 | 回答什么 | 不回答什么 |
+|---|---|---|---|
+| 匹配 | `matchRank`、可选 `retrievalScore` | 结果与本次 query 的排序/检索关系 | 内容是否真实、是否仍有效 |
+| 权威 | `authority` | 文档在项目治理中的可靠性层级 | 与当前 query 是否相关 |
+| 时效 | `updatedAt`（缺值显式 `unknown`） | 当前可见的更新时间 | 内容已被重新验证 |
+| 关系类型 | `matchType`、扩展时的 `edgeStrength` | direct / alias / source-thread / convention 等“为何出现” | 事实置信度 |
+
+这是**消费合同诚实**，不是 correctness 已自动解决。完整 usage envelope、verification events 与 lifecycle trace 仍归 [F263 Phase C/D](../features/F263-memory-lifecycle-repair-and-metrics.md)；在它们落地前，猫仍需沿 `drillDown` 回原文验证。
+
 ---
 
 ## 特殊模式
 
 ### Coverage Search（覆盖式搜索，intent=coverage）
 
-不同于 Top-K 检索，Coverage 做穷举式搜索，回答"关于 X 的所有相关内容在哪里"。
+不同于 Top-K 检索，Coverage 做有界的多来源 source-map，回答“关于 X 的相关内容分布在哪里、哪些来源可能仍有遗漏”。它提高覆盖率，但不承诺数学意义上的全集证明。
 
 **五步流程**：
-1. **并行搜索** docs + threads（各自走 hybrid 模式，各有独立配额）
+1. **按 requested scope 搜索** docs / threads；`scope=all` 时两路并行，窄 scope 不偷偷扩域
 2. **合并去重**（直接命中优先）
 3. **Frontmatter 扩展**：通过命中文档的关键词和别名发现间接相关文档
 4. **Source-thread 扩展**：通过文档摘要中的 thread 引用发现讨论记录
-5. **Convention Graph 扩展**：通过依赖图发现消费者 / 被消费者关系
+5. **Convention Graph 扩展**：只在 `scope=all` 且图可用时，通过依赖图发现消费者 / 被消费者关系
 
 **输出**：覆盖矩阵（哪些来源被搜到、每类命中多少、哪些可能遗漏）。
 
-**实现归属**：F200 HW-1，F242 convention graph 是 soft dependency。新增原因是 coverage/source-map 任务问的是"哪些地方都提过 X"，单次 Top-K 不足以证明全集。
+**当前合同（F263 Phase A，2026-07-13）**：
 
-**关键源文件**：`CoverageSearchService.ts`
+- `scope=docs|threads|all`、`mode` 与 `limit=1..20` 会进入 service 的 requested/executed contract；窄 scope 不执行另一来源，也不调用 convention graph。
+- 每一页都从同一个固定、有界的 50-candidate discovery envelope 重建 canonical stream，再按 source quota、去重和稳定顺序做 `offset` slice。页码不会再通过改变 hybrid retrieval k 重算另一条候选前缀。
+- 全调用共享 15s deadline；partial timeout 保留已完成来源，只把实际超时来源标为 degraded。`conventionGraphUsed` 只记录真实执行，不把“adapter 可用”冒充“本次跑过”。
+- API JSON 与 MCP rendered text 各自受 24,000 字符预算约束。预算逐出时显式报告 `truncated/omittedItems/hasMore`，并给严格前进的 `coverage_offset`；单个超大候选降级为 ≤512 字符的可见 placeholder，携带 callable drill 或 typed `drillUnavailable`。
+- `hasMore=true` 必须有 lookahead/已知未消费候选作证；`hasMore=false` 与 timeout 状态一起判读，不能把 retryable incomplete 冒充完整终态。
+
+PR #2909 修复了首轮 post-merge dogfood 暴露的跨页重复：canonical runtime 上同一 `threads + hybrid + limit=5` 查询的 offset 0/5 两页 anchor 已互斥。F263 OQ-4 的“调用方并行多路 top-K 编排”仍是相邻未决问题，不应拿它反向否定 coverage 合同已完成，也不能把 coverage 完成外推成所有检索延迟问题都解决。
+
+**实现归属**：F200 HW-1 建立 coverage；F263 Phase A 修复并冻结消费合同；F242 convention graph 是 `scope=all` 的 soft dependency。新增原因是 coverage/source-map 任务问的是“哪些地方都提过 X”，单次 Top-K 不足以形成有边界的来源地图。
+
+**关键源文件**：`CoverageSearchService.ts`、`coverage-search-contract.ts`、`coverage-search-types.ts`、`evidence-coverage-response.ts`
 
 ### Passage-Level 检索（depth=raw）
 
@@ -660,6 +688,12 @@ return [...withDist.map(w => w.item), ...noVec];
 | Decay: Thread/Session | 14 天 | #10 Decay | 消费 dormancy / 文档年龄共用半衰期表 |
 | MMR λ | 0.7 | #12 MMR | 相关性 vs 多样性平衡 |
 | MMR 触发阈值 | candidates ≥ 3×limit | #12 MMR | 小结果集不去重 |
+| MCP public limit | 1–20 | wrapper/schema | schema 与 tool contract 显式声明；coverage 按 requested limit 切页 |
+| Coverage discovery envelope | fixed 50 | special mode | 每页重建同一有界候选流，再做 offset slice |
+| Coverage quota | docs 25 / threads 20 / graph 10；total cap 50 | special mode | source 可达性与全局上限；不替代调用者 page limit |
+| Coverage latency budget | 15,000 ms | special mode | 共享 deadline；超时显式 degraded |
+| Coverage response budget | 24,000 chars（API + MCP 各自） | wrapper/contract | 超预算显式截断并给 continuation |
+| Coverage oversize placeholder | ≤512 chars | wrapper/contract | 候选可见且消费进度前进，不 silent skip |
 
 ---
 
@@ -695,13 +729,13 @@ F256 Memory Search Strategy Evolution 正在系统化这一层：
 | Phase | 做什么 | 与管线的关系 |
 |-------|--------|-------------|
 | **A（已上线）** | Session hook 注入策略提示 + nudge skill link | 不改管线；改猫的行为——让猫知道 skill 存在、知道"搜一刀就停"是病 |
-| B | Expansion hints 从 `coverage` 投影到 `topk` 默认输出 | 复用管线已有的三类 expansion provenance，只改输出格式层 |
-| C | Doc-code 桥 extractor | 扩展 F242 convention graph，让管线的 expansion 覆盖 doc↔code 关联 |
-| D | Eval + 策略迭代 | 基于 F200 数据评估策略效果 |
+| **B（已上线）** | Expansion hints 从 `coverage` 投影到 `topk` 默认输出 | 复用三类 expansion provenance；独立于主排序，并已接 followup 观测基建 |
+| **C（已上线）** | Doc-code 桥 extractor | 扩展 F242 convention graph，使 expansion 覆盖 doc↔code 关联 |
+| **D（pending）** | Eval + 策略迭代 | 需 ≥30 天 dogfood、冷启动占比与单猫 coverage 对照；不能用“已接线”冒充闭环 |
 
 operator的核心洞察：**管线优化和搜索策略是同一个问题的两面——pipeline 负责"水管通不通"，strategy 负责"往哪浇水"。**
 
-详见 [F256 spec](../features/F256-memory-search-strategy-evolution.md)。
+详见 [F256 spec](../features/F256-memory-search-strategy-evolution.md)。F260 的输入流 entity nudge 位于“query 之前是否意识到要解引用”的触发面，不属于这 14 层 query pipeline；它应作为 typed candidate push 单独评估，不能塞进第 1 层 Entity Registry 假装同一能力。
 
 ---
 
@@ -713,6 +747,8 @@ operator的核心洞察：**管线优化和搜索策略是同一个问题的两�
 | **KnowledgeResolver** | `packages/api/src/domains/memory/KnowledgeResolver.ts` | 联邦多 store 协调、collection 级 RRF |
 | **evidence route** | `packages/api/src/routes/evidence.ts` | API/MCP search route：coverage bypass、KnowledgeResolver 调度、F163 salience rerank、结果格式化 |
 | **CoverageSearchService** | `packages/api/src/domains/memory/CoverageSearchService.ts` | 覆盖式穷举搜索 |
+| **coverage contract/types** | `packages/api/src/domains/memory/coverage-search-contract.ts` / `coverage-search-types.ts` | scope/limit/latency/24k budget、placeholder、continuation 与结果不变量 |
+| **coverage MCP renderer** | `packages/mcp-server/src/tools/evidence-coverage-response.ts` | MCP 24k 二次预算、显式 omission 与 local continuation |
 | **VectorStore** | `packages/api/src/domains/memory/VectorStore.ts` | 文档级向量 CRUD（sqlite-vec） |
 | **PassageVectorStore** | `packages/api/src/domains/memory/PassageVectorStore.ts` | 段落级向量 CRUD |
 | **EmbeddingService** | `packages/api/src/domains/memory/EmbeddingService.ts` | GPU embedding HTTP 客户端 |
@@ -728,6 +764,6 @@ operator的核心洞察：**管线优化和搜索策略是同一个问题的两�
 
 ---
 
-*Cat Café Retrieval Pipeline Deep Dive · 14-Layer Architecture · v1.0*
-*Author: Ragdoll/claude-opus-4-6 · 2026-06-29*
+*Clowder AI Retrieval Pipeline Deep Dive · 14-Layer Architecture · v1.1*
+*Author: Ragdoll/claude-opus-4-6 · 2026-06-29 · F263 contract sync: 2026-07-13*
 *Based on: SqliteEvidenceStore.ts (F102) + f163-types.ts (F163) + consumption-prior.ts / mmr.ts / fts-query-builder.ts (F200) + EntityRegistry / PassageVectorStore (F209)*

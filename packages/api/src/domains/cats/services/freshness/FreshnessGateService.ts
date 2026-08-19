@@ -18,6 +18,8 @@ export interface UnseenMessage {
   id: string;
   from: string; // catId or 'user'
   preview: string; // first ~200 chars
+  /** Explicit source classification when stable identity is finer than catId. */
+  selfSource?: boolean;
 }
 
 export interface FreshnessCheckInput {
@@ -75,9 +77,10 @@ export class FreshnessGateService {
     }
 
     // No unseen messages: seenCursor >= latestMessageId
+    // #1200 §8.7: Both seenCursor and latestMessageId are now v2 cursors
+    // (visibility-domain), so lex comparison handles late-delivered messages.
     // Skip this shortcut if the caller provided unseenMessages — the caller
-    // fetches by delivery order (sorted set score in Redis), which may diverge
-    // from lexicographic ID order for queued-then-delivered messages (cloud P1).
+    // fetches by delivery order which may provide more precise data (cloud P1).
     const hasCallerProvidedMessages = (input.unseenMessages?.length ?? 0) > 0;
     if (!hasCallerProvidedMessages && seenCursor >= latestMessageId) {
       return {
@@ -90,7 +93,7 @@ export class FreshnessGateService {
 
     // There are unseen messages. Filter out self-messages.
     const unseenMessages = input.unseenMessages ?? [];
-    const nonSelfUnseen = unseenMessages.filter((msg) => msg.from !== catId);
+    const nonSelfUnseen = unseenMessages.filter((msg) => !(msg.selfSource ?? msg.from === catId));
 
     // All unseen are from self — don't hold
     if (nonSelfUnseen.length === 0 && unseenMessages.length > 0) {

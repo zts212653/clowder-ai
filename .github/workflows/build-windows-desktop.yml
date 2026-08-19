@@ -61,6 +61,9 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Test desktop config metadata
+        run: node --test desktop/generate-desktop-config.test.js desktop/generate-desktop-config-behavior.test.js
+
       - name: Install Inno Setup
         # Inno Setup is required to compile cat-cafe.iss into the final .exe
         # installer. windows-latest does not ship with it by default.

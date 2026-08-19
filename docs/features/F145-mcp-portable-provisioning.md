@@ -67,7 +67,7 @@ created: 2026-03-27
    - 输出 ready/missing/unresolved 报告
    - 不能自动安装的宿主软件（如 Antigravity / VS Code 本体），给出一条明确安装指引
 
-### Phase C: Built-in Cat Café MCP Auto-Provision for ACP ✅
+### Phase C: Built-in Clowder AI MCP Auto-Provision for ACP ✅
 
 **痛点**：ACP resolver (`acp-mcp-resolver.ts`) 把内置 `cat-cafe*` servers 和外部 MCP 一视同仁，全从 `.mcp.json` 读取。社区用户 clone 后没有 `.mcp.json`（gitignored），Gemini ACP 就拿不到任何 MCP server。
 
@@ -82,20 +82,20 @@ created: 2026-03-27
 
 ### Phase E: Per-Project MCP for ACP Sessions ✅
 
-**痛点**：社区用户用 Cat Café 开发自己的项目。不同项目目录下有不同的 `.mcp.json`（database MCP、docker MCP、figma MCP 等）。当前各猫猫对用户项目 `.mcp.json` 的支持情况：
+**痛点**：社区用户用 Clowder AI 开发自己的项目。不同项目目录下有不同的 `.mcp.json`（database MCP、docker MCP、figma MCP 等）。当前各猫猫对用户项目 `.mcp.json` 的支持情况：
 
 | 猫猫 | 读用户项目 `.mcp.json` | 原因 |
 |---|---|---|
 | Ragdoll（Claude Code） | ✅ 原生支持 | Claude Code 运行在项目目录，自动发现 `.mcp.json` |
 | Maine Coon（Codex） | ✅ 原生支持 | 同上 |
-| Siamese（Gemini ACP） | ❌ 不支持 | `acp-mcp-resolver.ts` 的 `projectRoot` 硬编码为 `findMonorepoRoot()`，只读 Cat Café monorepo 的 `.mcp.json` |
+| Siamese（Gemini ACP） | ❌ 不支持 | `acp-mcp-resolver.ts` 的 `projectRoot` 硬编码为 `findMonorepoRoot()`，只读 Clowder AI monorepo 的 `.mcp.json` |
 
 **根因**：`resolveAcpMcpServers(projectRoot, whitelist)` 只走两条路：
 1. 内建 cat-cafe-* → 从 `projectRoot/packages/mcp-server/dist/` 自动生成
 2. 外部 server → 从 `projectRoot/.mcp.json` 读取（但只匹配 `whitelist` 里的 server）
 
 **两个缺口**：
-1. `projectRoot` 固定为 Cat Café monorepo，不是用户的项目目录
+1. `projectRoot` 固定为 Clowder AI monorepo，不是用户的项目目录
 2. 即使 `projectRoot` 指向用户项目，resolver 也只读 `whitelist` 里声明的 server，不会 merge 用户项目 `.mcp.json` 里的全部 server
 
 **改法**：

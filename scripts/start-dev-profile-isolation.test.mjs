@@ -38,11 +38,13 @@ function createSandbox(envFile = '') {
   return dir;
 }
 
-function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
-  const command = [
-    `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
-    'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
-  ].join('; ');
+function runSourceOnly({ sandboxDir, env = {}, extraArgs = [], commands }) {
+  const command = (
+    commands ?? [
+      `source scripts/start-dev.sh --source-only ${extraArgs.join(' ')}`,
+      'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
+    ]
+  ).join('; ');
 
   return spawnSync('bash', ['-lc', command], {
     cwd: sandboxDir,
@@ -357,6 +359,137 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-dev wires F247 cloud supporting services through optional helper stage', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-dev.sh'), 'utf8');
+    const mainSource = source.slice(source.indexOf('\nmain() {'));
+    const apiReadyIndex = mainSource.indexOf(
+      'wait_for_port_or_exit "$API_PORT" "API Server" "$API_PID" "${API_WAIT_TIMEOUT:-120}"',
+    );
+    const cloudStartIndex = mainSource.indexOf('\n    maybe_start_f247_cloud_services');
+
+    assert.match(source, /f247-cloud-services\.mjs/);
+    assert.match(source, /start --optional/);
+    assert.match(source, /CAT_CAFE_F247_CLOUD_AUTOSTART/);
+    assert.match(source, /start --optional --owner-file=/);
+    assert.match(source, /stop-owned --owner-file=/);
+    assert.ok(apiReadyIndex >= 0, 'API readiness wait must remain discoverable');
+    assert.ok(
+      cloudStartIndex > apiReadyIndex,
+      'F247 cloud autostart must run only after the API-dependent principal probe can reach a ready API',
+    );
+  });
+
+  it('contains an optional F247 helper process failure inside the cloud capability boundary', () => {
+    const sandboxDir = createSandbox();
+    writeFileSync(join(sandboxDir, 'scripts', 'f247-cloud-services.mjs'), '', 'utf8');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        commands: [
+          'source scripts/start-dev.sh --source-only',
+          'node() { return 17; }',
+          'maybe_start_f247_cloud_services',
+          'printf "CONTINUED=1\\nOWNER=%s\\n" "${F247_CLOUD_OWNER_FILE:-empty}"',
+        ],
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /CONTINUED=1/);
+      assert.match(result.stdout, /OWNER=empty/);
+      assert.match(result.stdout, /F247 cloud supporting services degraded/i);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports live F247 degradation without changing daemon status semantics', () => {
+    const sandboxDir = createSandbox();
+    writeFileSync(join(sandboxDir, 'scripts', 'f247-cloud-services.mjs'), '', 'utf8');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        commands: [
+          'source scripts/start-dev.sh --source-only',
+          'node() { printf "%s\\n" "$*" > node-args; return 1; }',
+          'print_f247_cloud_status_summary',
+          'printf "NODE_ARGS=%s\\n" "$(cat node-args)"',
+          'printf "RESULT=%s\\n" "$?"',
+        ],
+      });
+
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /F247 cloud: degraded/i);
+      assert.match(result.stdout, /NODE_ARGS=.*status --summary/);
+      assert.match(result.stdout, /RESULT=0/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('official runtime launchers opt in to connector autostart without overriding explicit false', () => {
+    const runtimeScript = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf8');
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const unixOptIns = runtimeScript.match(
+      /export CONNECTOR_GATEWAY_AUTOSTART="\$\{CONNECTOR_GATEWAY_AUTOSTART:-1\}"/g,
+    );
+
+    assert.equal(unixOptIns?.length, 2, 'both Unix runtime paths must explicitly opt in');
+    assert.match(windowsScript, /CONNECTOR_GATEWAY_AUTOSTART\s*=\s*\$connectorGatewayAutostart/);
+    assert.match(
+      windowsScript,
+      /\$connectorGatewayAutostart\s*=\s*if\s*\(\$env:CONNECTOR_GATEWAY_AUTOSTART\)[\s\S]*?elseif\s*\(-not \$Dev\)/,
+      'Windows production runtime must compute an explicit connector opt-in',
+    );
+  });
+
+  it('Windows launcher snapshots connector authority before dotenv and restores only that wrapper decision', () => {
+    const windowsScript = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const snapshot =
+      '$connectorGatewayAutostartOverride = [System.Environment]::GetEnvironmentVariable("CONNECTOR_GATEWAY_AUTOSTART", "Process")';
+    const dotenvLoad = '# -- Load .env';
+    const restore = '# -- Restore connector launcher authority after dotenv';
+    const runtimeProjection = '$connectorGatewayAutostart = if ($env:CONNECTOR_GATEWAY_AUTOSTART)';
+
+    assert.ok(windowsScript.indexOf(snapshot) >= 0, 'Windows launcher must snapshot wrapper authority');
+    assert.ok(
+      windowsScript.indexOf(snapshot) < windowsScript.indexOf(dotenvLoad),
+      'wrapper authority must be captured before dotenv mutates the process environment',
+    );
+    assert.ok(
+      windowsScript.indexOf(restore) > windowsScript.indexOf(dotenvLoad) &&
+        windowsScript.indexOf(restore) < windowsScript.indexOf(runtimeProjection),
+      'dotenv-only grants must be removed before runtimeEnvOverrides are computed',
+    );
+    assert.match(
+      windowsScript,
+      /SetEnvironmentVariable\("CONNECTOR_GATEWAY_AUTOSTART", \$null, "Process"\)/,
+      'an absent wrapper decision must remain absent after dotenv loading',
+    );
+  });
+
+  it('does not advertise connector lifecycle authority through the .env template', () => {
+    const envExample = readFileSync(resolve(ROOT, '.env.example'), 'utf8');
+
+    assert.doesNotMatch(envExample, /^\s*#?\s*CONNECTOR_GATEWAY_AUTOSTART=/m);
+  });
+
+  it('runtime-only lifecycle capabilities are stripped from agent and terminal shells', () => {
+    const acpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpClient.ts'),
+      'utf8',
+    );
+    const acpHttpClient = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts'),
+      'utf8',
+    );
+    const tmuxGateway = readFileSync(resolve(ROOT, 'packages/api/src/domains/terminal/tmux-gateway.ts'), 'utf8');
+
+    assert.match(acpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(tmuxGateway, /'CONNECTOR_GATEWAY_AUTOSTART'/);
+    assert.match(tmuxGateway, /'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/);
+  });
+
   it('Windows status succeeds only when required API and web PID files are running', () => {
     const sandboxDir = mkdtempSync(join(tmpdir(), 'cc-windows-status-'));
     try {
@@ -539,6 +672,73 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-windows.ps1 fails closed when an external Redis URL is unreachable', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /function Stop-RedisStartup\s*\{[\s\S]*?Get-Job -Name "redis-bootstrap"[\s\S]*?Stop-Job[\s\S]*?Remove-Job[\s\S]*?install\.ps1[\s\S]*?REDIS_URL[\s\S]*?-Memory[\s\S]*?exit 1[\s\S]*?\}/,
+      'the shared failure path must clean the bootstrap job, explain both persistent-storage repairs, and exit non-zero',
+    );
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not reachable at \$safeConfiguredRedisUrl\."/,
+      'an unreachable external REDIS_URL must stop startup instead of selecting memory storage',
+    );
+    assert.ok(
+      ps1.lastIndexOf('Stop-RedisStartup -Reason') < ps1.indexOf('Start-Job -Name "api"'),
+      'every Redis failure path must run before API startup',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when managed Redis does not start', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Managed Redis failed to start on port \$RedisPort\. Check \$redisLogFile for details\."/,
+      'a failed managed Redis start must stop startup before the API and web jobs are created',
+    );
+  });
+
+  it('start-windows.ps1 fails closed when no Redis binary is installed', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /Stop-RedisStartup\s+-Reason\s+"Redis is not installed\."/,
+      'a missing Redis binary must stop startup instead of silently choosing volatile storage',
+    );
+  });
+
+  it('start-windows.ps1 fails closed on an unexpected Redis bootstrap exception', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+
+    assert.match(
+      ps1,
+      /catch\s*\{[\s\S]*?Write-InstallerExceptionDetails\s+-Context\s+"Redis start"[\s\S]*?Stop-RedisStartup\s+-Reason\s+"Redis bootstrap failed\."/,
+      'an unexpected Redis bootstrap exception must stop startup after printing its diagnostic details',
+    );
+  });
+
+  it('start-windows.ps1 enables volatile storage only for explicit -Memory mode', () => {
+    const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
+    const assignments = ps1.match(/\$env:MEMORY_STORE\s*=\s*["']1["']/g) ?? [];
+
+    assert.equal(assignments.length, 1, 'the launcher must have exactly one MEMORY_STORE opt-in');
+    assert.match(
+      ps1,
+      /if\s*\(\$Memory\)\s*\{[\s\S]*?Remove-Item Env:REDIS_URL[\s\S]*?\$env:MEMORY_STORE\s*=\s*["']1["'][\s\S]*?\}/,
+      'MEMORY_STORE=1 must be scoped to the explicit -Memory switch',
+    );
+    assert.doesNotMatch(
+      ps1,
+      /\$useRedis\s*=\s*\$false/,
+      'Redis failure branches must not converge on an implicit memory fallback',
+    );
+  });
+
   it('start-windows.ps1 reapplies profile defaults inside Start-Job after .env reload', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
 
@@ -702,6 +902,10 @@ describe('TTS sidecar startup guards', () => {
 
     assert.match(installScript, /POST_INSTALL_HOOK_ARM64=["']tts_install_arm64_warmup["']/);
     assert.match(installScript, /generate_audio/);
+    assert.match(installScript, /mlx-audio>=0\.4\.7/);
+    assert.match(installScript, /QWEN3_CLONE_DEFAULT_MODEL=/);
+    assert.match(installScript, /TTS_MODEL:-[\s\S]*qwen3-clone[\s\S]*TTS_MODEL="\$QWEN3_CLONE_DEFAULT_MODEL"/);
+    assert.match(apiScript, /MIN_MLX_AUDIO_VERSION/);
     assert.match(installScript, /zm_yunjian/);
     assert.match(installScript, /_CATCAFE_HF_PROXY_FOR_DOWNLOAD/);
     assert.match(serverScript, /HF_HUB_OFFLINE/);

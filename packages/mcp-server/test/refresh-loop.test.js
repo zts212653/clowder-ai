@@ -194,6 +194,32 @@ describe('refresh loop algorithm (F174-C)', () => {
     assert.equal(exitCode, 128 + 2, 'SIGINT must exit with 130 (128+SIGINT=2)');
   });
 
+  test('signal shutdown waits for active audio finalization before exiting', async () => {
+    const { installShutdownHandlers } = await import('../dist/refresh-loop.js');
+    const captured = new Map();
+    const exits = [];
+    let finishCleanup;
+    const cleanup = new Promise((resolve) => {
+      finishCleanup = resolve;
+    });
+
+    installShutdownHandlers(
+      { stop: () => {} },
+      {
+        on: (signal, handler) => captured.set(signal, handler),
+        exit: (code) => exits.push(code),
+      },
+      () => cleanup,
+    );
+
+    captured.get('SIGTERM')();
+    assert.deepEqual(exits, [], 'process must remain alive while capture artifacts finalize');
+    finishCleanup();
+    await cleanup;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(exits, [143]);
+  });
+
   // Cloud Codex P1 (PR #1368, 07:36Z, e521cc7aa): performRefreshTick issued
   // fetch() with no abort/timeout. A hung TCP socket would leave the await
   // pending forever, blocking the next setTimeout from firing → token expires

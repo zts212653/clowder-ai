@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
+import { __testing__ } from '../useVoiceAutoPlay';
 
 /**
  * F092: Tests for voice auto-play logic.
@@ -29,7 +31,32 @@ vi.stubGlobal(
 
 beforeEach(() => {
   useVoiceSessionStore.setState({ session: null });
+  useListenModeStore.setState({ session: null });
   vi.clearAllMocks();
+});
+
+describe('F279 listen-mode admission', () => {
+  it('suppresses fallback autoplay for the full listen session, including paused documents', () => {
+    useListenModeStore.setState({
+      session: {
+        identity: { projectPath: '/repo', relativePath: 'docs/research.md', contentDigest: 'sha' },
+        title: 'research.md',
+        worktreeId: null,
+        sentences: [],
+        phase: 'paused',
+        currentIndex: 0,
+        currentTime: 0,
+        duration: 0,
+        playbackRate: 1,
+        retention: '7d',
+        cachedAnchors: [],
+        cacheBytes: 0,
+        error: null,
+      },
+    });
+
+    expect(__testing__.isListenModeActive()).toBe(true);
+  });
 });
 
 describe('voiceSessionStore session-binding contracts', () => {

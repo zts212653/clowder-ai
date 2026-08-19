@@ -8,6 +8,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { LongFormReader } from '@/components/content-overflow';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import type { ReplayEvent } from '@/lib/story-player/types';
 
@@ -143,22 +144,13 @@ function ToolCallCard({ event }: { event: ReplayEvent }) {
           {event.toolResult && (
             <div>
               <div style={{ opacity: 0.5, marginBottom: '2px' }}>Result{event.toolIsError ? ' (error)' : ''}:</div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: '6px',
-                  background: event.toolIsError ? 'rgba(239, 68, 68, 0.1)' : 'var(--color-surface, #0d0d1a)',
-                  borderRadius: '4px',
-                  overflow: 'auto',
-                  maxHeight: '300px',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                }}
-              >
-                {event.toolResult.length > 2000
-                  ? `${event.toolResult.slice(0, 2000)}...\n[${event.toolResult.length - 2000} chars truncated]`
-                  : event.toolResult}
-              </pre>
+              <LongFormReader
+                title={`${event.toolName ?? 'Tool'} result${event.toolIsError ? ' (error)' : ''}`}
+                summary={`完整工具结果 · ${event.toolResult.length.toLocaleString()} 字符`}
+                content={event.toolResult}
+                format="plaintext"
+                className={event.toolIsError ? 'rounded bg-red-500/10 p-2' : 'rounded bg-cafe-surface-sunken p-2'}
+              />
             </div>
           )}
         </div>
@@ -227,6 +219,27 @@ export function ReplayEventBubble({ event, displayMode, isRevealing, speedMultip
         }}
       >
         <span style={{ fontSize: 'var(--console-font-label)', opacity: 0.6 }}>💭 Thinking</span>
+        <div style={{ marginTop: '4px' }}>{displayText}</div>
+      </div>
+    );
+  }
+
+  if (event.type === 'cli_stdout') {
+    return (
+      <div
+        style={{
+          background: 'var(--color-surface-secondary, #1e1e30)',
+          border: '1px solid var(--color-border, #333)',
+          borderRadius: '6px',
+          padding: '8px 12px',
+          margin: '4px 0',
+          fontSize: 'var(--console-font-compact)',
+          fontFamily: 'var(--font-mono, monospace)',
+          whiteSpace: 'pre-wrap',
+          opacity: 0.85,
+        }}
+      >
+        <span style={{ fontSize: 'var(--console-font-label)', opacity: 0.6 }}>CLI Output</span>
         <div style={{ marginTop: '4px' }}>{displayText}</div>
       </div>
     );

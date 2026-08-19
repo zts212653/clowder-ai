@@ -2,9 +2,7 @@
  * F167 Phase O PR-O4: Cross-store queries for gate-keeping policy decisions.
  *
  * Wires the data dependencies that PR-O3 left as skeleton:
- *   1. detectEventCallback — query TaskStore for active PR/issue tracking
- *      in the same thread → hasEventCallback for hold_ball policy
- *   2. verifyKeeperOwnership — cross-query TaskStore to verify that an
+ *   1. verifyKeeperOwnership — cross-query TaskStore to verify that an
  *      issue tracking registration is genuinely keeper-owned (not already
  *      tracked in a downstream thread) → issueOwnership for issue tracking policy
  *
@@ -14,24 +12,13 @@
  */
 
 import type { TaskItem } from '@cat-cafe/shared';
-import { isTrackingKind } from '@cat-cafe/shared';
 
 /**
  * Minimal TaskStore interface — only the methods cross-store queries need.
  * Kept narrow so test stubs don't have to implement the full ITaskStore.
  */
 export interface CrossStoreTaskStore {
-  listByThread(threadId: string): TaskItem[] | Promise<TaskItem[]>;
   getBySubject(subjectKey: string): TaskItem | null | Promise<TaskItem | null>;
-}
-
-/**
- * Active tracking task predicate. A task "covers" a thread when:
- *   - kind is pr_tracking or issue_tracking
- *   - status is not 'done' (done = tracking completed, no longer watching)
- */
-function isActiveTracking(task: TaskItem): boolean {
-  return isTrackingKind(task.kind) && task.status !== 'done';
 }
 
 /**
@@ -65,80 +52,6 @@ export function extractRepoAndNumber(input: string): { repo: string; number: str
 }
 
 /**
- * Detect whether active event-backed callbacks cover the current wait.
- *
- * Spec L904: "已有 event/callback → 不调 hold_ball，依赖 event path"
- * — the callback must cover THIS wait, not just any wait in the thread.
- *
- * Checks two scopes:
- *   1. Same-thread: active tracking tasks in this thread
- *   2. Cross-thread (R5): active tracking for the same GitHub subject in ANY
- *      thread — spec L900-904: "球已分发下游 → keeper 不能 hold_ball"
- *
- * When `waitSourceRef` is provided:
- *   - Non-GitHub kinds (thread_message, task, reporter_handle, managed_command)
- *     → return false: GitHub tracking can't cover non-GitHub waits.
- *   - GitHub kinds (github_issue, github_comment) → extract subject
- *     (repo + number) and match against same-thread + cross-thread tracking.
- *     Unparseable GitHub URL → conservative thread-level fallback.
- *
- * When `waitSourceRef` is absent, falls back to thread-level detection
- * (any active tracking = callback) — conservative.
- *
- * Fail-open: returns false on store error (conservative — allows hold).
- */
-export async function detectEventCallback(
-  taskStore: CrossStoreTaskStore,
-  threadId: string,
-  log?: { warn: (obj: Record<string, unknown>, msg: string) => void },
-  waitSourceRef?: { kind: string; value: string },
-): Promise<boolean> {
-  try {
-    const tasks = await taskStore.listByThread(threadId);
-    const activeTasks = tasks.filter(isActiveTracking);
-
-    // No waitSourceRef → fall back to thread-level (any active tracking = callback)
-    if (!waitSourceRef) return activeTasks.length > 0;
-
-    // PR-O4 R2: tracking tasks are GitHub-based (pr_tracking, issue_tracking).
-    // Non-GitHub waitSourceRef kinds (thread_message, task, reporter_handle,
-    // managed_command) are definitionally not covered by GitHub tracking.
-    const isGitHubWait = waitSourceRef.kind === 'github_issue' || waitSourceRef.kind === 'github_comment';
-    if (!isGitHubWait) return false;
-
-    // GitHub-kind: extract subject for precise matching (PR-O4 R1)
-    const holdRef = extractRepoAndNumber(waitSourceRef.value);
-    if (!holdRef) return activeTasks.length > 0; // unparseable → conservative thread-level fallback
-
-    // Check same-thread tracking for this specific subject
-    const sameThreadMatch = activeTasks.some((task) => {
-      if (!task.subjectKey) return false;
-      const trackRef = extractRepoAndNumber(task.subjectKey);
-      return trackRef !== null && trackRef.repo === holdRef.repo && trackRef.number === holdRef.number;
-    });
-    if (sameThreadMatch) return true;
-
-    // PR-O4 R5: Cross-thread subject lookup (spec L900-904).
-    // If this GitHub subject is actively tracked in ANY other thread,
-    // that thread's callback covers this subject — block this hold.
-    // hold_ball route has no verifyKeeperOwnership; this is the only
-    // cross-store guard for the hold_ball path.
-    for (const prefix of ['pr', 'issue'] as const) {
-      const subjectKey = `${prefix}:${holdRef.repo}#${holdRef.number}`;
-      const crossTask = await taskStore.getBySubject(subjectKey);
-      if (crossTask && isActiveTracking(crossTask) && crossTask.threadId !== threadId) {
-        return true; // downstream already tracking → callback covers this subject
-      }
-    }
-
-    return false;
-  } catch (err) {
-    log?.warn({ err, threadId }, 'F167 PR-O4: detectEventCallback failed (fail-open → no callback assumed)');
-    return false;
-  }
-}
-
-/**
  * Verify keeper ownership claim for issue tracking in gate-keeping threads.
  *
  * Decision logic:
@@ -148,8 +61,7 @@ export async function detectEventCallback(
  *      → distributed (block in gate-keeping thread)
  *
  * Fail-open: returns 'distributed' on store error (conservative — blocks).
- * This is intentionally the opposite of detectEventCallback's fail-open
- * direction: for ownership verification, the safe default is to deny
+ * For ownership verification, the safe default is to deny
  * unverified claims, not to allow them.
  */
 export async function verifyKeeperOwnership(

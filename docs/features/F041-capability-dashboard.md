@@ -45,7 +45,7 @@ operator 2026-02-26 明确提出：
 ### 功能验收
 
 - [x] Hub 能力看板 tab 显示所有实际注册的 MCP 工具 + Skills，无硬编码假数据
-- [x] 可按类型（MCP/Skill）、来源（Cat Cafe/外部）、猫猫过滤
+- [x] 可按类型（MCP/Skill）、来源（Clowder AI/外部）、猫猫过滤
 - [x] 全局开关：关掉某能力后，三猫下次 spawn 均不加载（MCP: CLI 配置级; Skills: capabilities.json 级，CLI 运行时见 Known Limitations）
 - [x] 每猫覆盖：全局开启的能力，可对单只猫关闭（同 provider 限制见 Known Limitations）
 - [x] 猫 tab 精简：不再展示 Skills/MCP 列表，只保留模型&预算
@@ -58,8 +58,8 @@ operator 2026-02-26 明确提出：
 
 - [x] 每条能力有**描述**（不是只有 raw ID），operator一眼能知道这个能力干什么
 - [x] 猫猫过滤按**猫族**（Ragdoll/Maine Coon/Siamese），不是按 8 个 cat variant（codex/gpt52/opus/opus-45/...）
-- [x] Skills 来源分类正确：Cat Cafe 项目级 skills 标 `cat-cafe`，用户级/外部 skills 标 `external`
-- [x] 来源过滤可用：选 "Cat Cafe" 能看到 Cat Cafe 的 skills + MCP
+- [x] Skills 来源分类正确：Clowder AI 项目级 skills 标 `cat-cafe`，用户级/外部 skills 标 `external`
+- [x] 来源过滤可用：选 "Clowder AI" 能看到 Clowder AI 的 skills + MCP
 - [x] 视觉层级清晰：有分类/分组，不是纯 data grid（参考 Skills 看板的呈现水平）
 - [x] 表格宽度合理：不需要横向滚动就能看清全部信息
 
@@ -75,7 +75,7 @@ operator 2026-02-26 明确提出：
 
 - [x] `.cat-cafe/capabilities.json` 存在且作为唯一真相源
 - [x] 配置编排器能正确生成 `.mcp.json`、`.codex/config.toml`、`.gemini/settings.json`
-- [x] Cat Cafe 自有工具对三猫均通过原生 MCP 协议提供
+- [x] Clowder AI 自有工具对三猫均通过原生 MCP 协议提供
 - [x] McpPromptInjector 不再给走原生 MCP 的猫注入 HTTP callback 指令
 - [x] 热加载验证：翻开关 → 下次 spawn → 能力变化生效（e2e 测试覆盖）
 
@@ -130,7 +130,7 @@ operator 2026-02-26 明确提出：
 
 保留 `/api/capabilities` 名称，拆分读写职责：
 
-- `GET /api/capabilities`：返回看板聚合视图（Skills + 外部 MCP + Cat Cafe 自有 MCP + 开关状态）
+- `GET /api/capabilities`：返回看板聚合视图（Skills + 外部 MCP + Clowder AI 自有 MCP + 开关状态）
 - `PATCH /api/capabilities`：支持单能力/批量更新，含 `scope: global|cat`、`capabilityId`、`enabled`、`overrides`
 
 > Maine Coon提议，Ragdoll同意。前端一次请求渲染看板，开关操作走 PATCH。
@@ -176,7 +176,7 @@ interface CapabilityDescriptor {
 | 优先级 | 问题 | 位置 | 说明 |
 |--------|------|------|------|
 | P1 | `mcpSupport` 是 false | `cat.ts:107`, `cat-config.json` | 会把新架构锁在 callback 老路径 |
-| P1 | `/api/capabilities` 不完整 | `capabilities.ts:59-75` | 不读 `.codex/config.toml`，不返回 Cat Cafe 自有 MCP |
+| P1 | `/api/capabilities` 不完整 | `capabilities.ts:59-75` | 不读 `.codex/config.toml`，不返回 Clowder AI 自有 MCP |
 | P2 | `mcpAvailable` 混用逻辑 | `route-serial.ts:102-105`, `route-parallel.ts:67-70` | 需统一改为能力源头驱动 |
 
 #### 6. 三猫 CLI 配置格式映射（Maine Coon确认）
@@ -212,7 +212,7 @@ startup_timeout_sec = 30
 
 > **映射备注**：
 > - Codex 支持 `enabled` 字段（可直接用于开关），Gemini/Claude 不支持 → 编排器对 Gemini/Claude 通过"不生成该条目"实现关闭
-> - Codex 额外支持 `url`（远端 MCP）和 `startup_timeout_sec`，这些在 Cat Cafe 场景暂不使用
+> - Codex 额外支持 `url`（远端 MCP）和 `startup_timeout_sec`，这些在 Clowder AI 场景暂不使用
 
 #### 7. Gemini CLI enable/disable 边界（Maine Coon确认）
 
@@ -240,7 +240,7 @@ startup_timeout_sec = 30
 翻 mcpSupport=true 但编排器还没做时：
   needsMcpInjection(true) = false → 不注入 HTTP callback ❌
   原生 MCP 配置也没生成 → 没有原生工具 ❌
-  → 猫猫丧失所有 Cat Cafe 工具能力 💀
+  → 猫猫丧失所有 Clowder AI 工具能力 💀
 ```
 
 ### 待确认

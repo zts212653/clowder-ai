@@ -1,17 +1,21 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import { MessageSelectionResolver } from '../domains/cats/services/context/MessageSelectionResolver.js';
+import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { ImageExporter } from '../services/ImageExporter.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 
 export { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
 
 export interface ThreadExportRoutesOptions {
   threadStore: IThreadStore;
+  messageStore: Pick<IMessageStore, 'getById' | 'getByThreadAfter'>;
 }
 
 export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> = async (fastify, opts) => {
-  const { threadStore } = opts;
+  const { messageStore, threadStore } = opts;
+  const selectionResolver = new MessageSelectionResolver({ messageStore, threadStore });
 
   // Plugin-scoped singleton ImageExporter for browser reuse across requests
   let sharedExporter: ImageExporter | null = null;
@@ -75,4 +79,43 @@ export const threadExportRoutes: FastifyPluginAsync<ThreadExportRoutesOptions> =
       });
     }
   });
+
+  fastify.post<{ Params: { threadId: string } }>(
+    '/api/threads/:threadId/export-selection-image',
+    async (request, reply) => {
+      const { threadId } = request.params;
+      const userId = resolveStrictUserId(request);
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+      }
+
+      const body = request.body as { items?: unknown } | null;
+      const resolution = await selectionResolver.resolveForAdmission(
+        { sourceThreadId: threadId, items: body?.items },
+        { userId },
+      );
+      if (resolution.status === 'invalid') {
+        reply.status(resolution.reason === 'not_authorized' ? 403 : 400);
+        return {
+          error: resolution.reason,
+          ...(resolution.messageId ? { messageId: resolution.messageId } : {}),
+        };
+      }
+
+      try {
+        const frontendUrl = resolveFrontendBaseUrl(process.env, fastify.log);
+        const url = `${frontendUrl}/thread/${threadId}`;
+        const exporter = sharedExporter ?? (sharedExporter = new ImageExporter());
+        const imageBuffer = await exporter.capture(url, userId, {
+          selectionMessageIds: resolution.carrier.items.map((item) => item.messageId),
+        });
+        reply.type('image/png').send(imageBuffer);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        fastify.log.error({ error: errorMessage }, 'Selection image export failed');
+        return reply.code(500).send({ error: 'Export failed', message: errorMessage });
+      }
+    },
+  );
 };

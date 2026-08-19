@@ -27,6 +27,7 @@ import { apiFetch } from '@/utils/api-client';
 import { ConciergeBall } from '../ConciergeBall';
 import { ConciergeHost } from '../ConciergeHost';
 import { ConciergePanel } from '../ConciergePanel';
+import { resolvePanelPetState } from '../ConciergePanelChrome';
 import { ConciergeRailToggle } from '../ConciergeRailToggle';
 
 const mockApiFetch = vi.mocked(apiFetch);
@@ -46,6 +47,7 @@ function configOk() {
           dutyCatProfileId: 'gemini25',
           proactivePolicy: 'quiet-badge',
           skin: 'ragdoll-v1',
+          behaviorEnabled: true,
         },
       }),
   } as unknown as Response);
@@ -94,6 +96,8 @@ beforeEach(() => {
     threadIdLoaded: false,
     threadIdLoading: false,
     threadId: null,
+    behaviorEnabled: true,
+    lastMessageTimestamp: 0,
   });
 });
 
@@ -313,39 +317,99 @@ describe('Block 6: a11y + motion', () => {
     expect(useConciergeStore.getState().surfaceState).toBe('toolbar');
   });
 
-  it('panel has mute toggle button when bubble is open (AC-A6)', async () => {
+  it('panel names the destructive visibility action "隐藏猫猫球" instead of "静音"', async () => {
     useConciergeStore.setState({ surfaceState: 'bubble', muted: false, configLoaded: true });
     await render(<ConciergePanel />);
-    // Mute toggle button must be present in panel header
-    const muteBtn = container.querySelector('button[aria-label="静音"]');
-    expect(muteBtn).not.toBeNull();
+    const hideBtn = container.querySelector('button[aria-label="隐藏猫猫球"]');
+    expect(hideBtn).not.toBeNull();
+    expect(hideBtn?.textContent).toContain('隐藏');
+    expect(container.querySelector('button[aria-label="静音"]')).toBeNull();
   });
 
-  it('panel mute toggle shows "取消静音" when already muted (AC-A6)', async () => {
+  it('panel offers "显示猫猫球" when opened from the rail while hidden', async () => {
     useConciergeStore.setState({ surfaceState: 'bubble', muted: true, configLoaded: true });
     await render(<ConciergePanel />);
-    const unmuteBtn = container.querySelector('button[aria-label="取消静音"]');
-    expect(unmuteBtn).not.toBeNull();
+    const showBtn = container.querySelector('button[aria-label="显示猫猫球"]');
+    expect(showBtn).not.toBeNull();
+    expect(showBtn?.textContent).toContain('显示');
   });
 
-  it('panel mute toggle calls setMuted when clicked (AC-A6)', async () => {
+  it('hiding the cat persists muted=true and collapses the panel', async () => {
     useConciergeStore.setState({ surfaceState: 'bubble', muted: false, configLoaded: true });
-    // Mock setMuted call — apiFetch is already mocked (configOk)
     mockApiFetch.mockImplementation(() =>
       Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) } as unknown as Response),
     );
     await render(<ConciergePanel />);
     await flushEffects();
 
-    const muteBtn = container.querySelector('button[aria-label="静音"]') as HTMLButtonElement;
-    expect(muteBtn).not.toBeNull();
+    const hideBtn = container.querySelector('button[aria-label="隐藏猫猫球"]') as HTMLButtonElement;
+    expect(hideBtn).not.toBeNull();
     act(() => {
-      muteBtn.click();
+      hideBtn.click();
     });
     await flushEffects();
 
-    // setMuted(true) → optimistic store update → muted becomes true
     expect(useConciergeStore.getState().muted).toBe(true);
+    expect(useConciergeStore.getState().surfaceState).toBe('collapsed');
+  });
+
+  it('moves autonomous behavior out of the panel header', async () => {
+    useConciergeStore.setState({ surfaceState: 'bubble', configLoaded: true });
+    await render(<ConciergePanel />);
+    expect(container.querySelector('button[aria-label="关闭自主行为"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="开启自主行为"]')).toBeNull();
+  });
+
+  it('gives expand and close controls visible accessible tooltips', async () => {
+    useConciergeStore.setState({ surfaceState: 'bubble', configLoaded: true });
+    await render(<ConciergePanel />);
+    expect(container.querySelector('button[aria-label="放大面板"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="关闭面板"]')).not.toBeNull();
+    const tooltips = Array.from(container.querySelectorAll('[role="tooltip"]')).map((el) => el.textContent);
+    expect(tooltips).toContain('放大面板');
+    expect(tooltips).toContain('关闭面板');
+  });
+
+  it('shows a visible resize grip and expands/restores the panel', async () => {
+    useConciergeStore.setState({ surfaceState: 'bubble', configLoaded: true });
+    await render(<ConciergePanel />);
+    const panel = container.querySelector('[role="dialog"]') as HTMLElement;
+    const grip = container.querySelector('[data-testid="concierge-resize-grip"]');
+    expect(grip).not.toBeNull();
+
+    const initialWidth = panel.style.width;
+    const expandBtn = container.querySelector('button[aria-label="放大面板"]') as HTMLButtonElement;
+    act(() => expandBtn.click());
+    await flushEffects();
+    expect(panel.style.width).not.toBe(initialWidth);
+    expect(container.querySelector('button[aria-label="恢复面板大小"]')).not.toBeNull();
+
+    const restoreBtn = container.querySelector('button[aria-label="恢复面板大小"]') as HTMLButtonElement;
+    act(() => restoreBtn.click());
+    await flushEffects();
+    expect(panel.style.width).toBe(initialWidth);
+  });
+
+  it('shows the animated duty-cat state in the panel header', async () => {
+    useConciergeStore.setState({
+      surfaceState: 'bubble',
+      configLoaded: true,
+      invocationStatus: 'in_progress',
+      skin: 'yanyan-codex',
+      threadId: 'thread-status',
+      threadIdLoaded: true,
+    });
+    await render(<ConciergePanel />);
+    const avatar = container.querySelector('[data-testid="concierge-status-avatar"]');
+    expect(avatar).not.toBeNull();
+    expect(avatar?.getAttribute('data-pet-state')).toBe('running');
+  });
+
+  it('maps panel activity and fresh replies onto visible pet states', () => {
+    expect(resolvePanelPetState('pending', false)).toBe('running');
+    expect(resolvePanelPetState('error', true)).toBe('failed');
+    expect(resolvePanelPetState('idle', true)).toBe('jumping');
+    expect(resolvePanelPetState('idle', false)).toBe('idle');
   });
 
   it('reduced-motion: ball renders without animation class when prefers-reduced-motion matches', async () => {
@@ -476,18 +540,21 @@ describe('A3a: three-layer surfaceState interaction', () => {
     await flushEffects();
     const wrapper = container.querySelector('[data-testid="concierge-ball-wrapper"]');
     expect(wrapper).not.toBeNull();
-    expect(wrapper!.querySelector('[data-testid="concierge-toolbar"]')).not.toBeNull();
+    expect(wrapper?.querySelector('[data-testid="concierge-toolbar"]')).not.toBeNull();
   });
 
   // -------------------------------------------------------------------------
   // Cloud P1-B: muted wake path (muted=true early return suppressed toolbar)
   // -------------------------------------------------------------------------
-  it('P1-B (cloud fix): muted=true + surfaceState=toolbar → toolbar renders for unmute', async () => {
-    useConciergeStore.setState({ muted: true, configLoaded: true, surfaceState: 'toolbar' });
-    await render(<ConciergeHost />);
+  it('rail wake clears hidden state and opens the toolbar', async () => {
+    useConciergeStore.setState({ muted: true, configLoaded: true, surfaceState: 'collapsed' });
+    await render(<ConciergeRailToggle />);
     await flushEffects();
-    // Toolbar must be accessible so user can reach panel's unmute button
-    expect(container.querySelector('[data-testid="concierge-toolbar"]')).not.toBeNull();
+    const rail = container.querySelector('[data-testid="concierge-rail-toggle"]') as HTMLButtonElement;
+    act(() => rail.click());
+    await flushEffects();
+    expect(useConciergeStore.getState().muted).toBe(false);
+    expect(useConciergeStore.getState().surfaceState).toBe('toolbar');
   });
 
   it('P1-B (cloud fix): muted=true + surfaceState=collapsed → nothing renders (INV-3 preserved)', async () => {
@@ -500,33 +567,18 @@ describe('A3a: three-layer surfaceState interaction', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Toolbar simplification: 4 buttons → 2 honest entries (co-creator 拍板)
+  // Toolbar simplification: one honest entry; capability discovery lives in-panel.
   // -------------------------------------------------------------------------
-  it('toolbar has exactly 2 buttons (help + chat)', async () => {
+  it('toolbar has exactly one clearly labelled chat entry', async () => {
     useConciergeStore.setState({ configLoaded: true, surfaceState: 'toolbar' });
     await render(<ConciergeHost />);
     await flushEffects();
 
     const toolbar = container.querySelector('[data-testid="concierge-toolbar"]');
     const buttons = toolbar?.querySelectorAll('button');
-    expect(buttons?.length).toBe(2);
-  });
-
-  it('help button opens bubble with prefilled prompt', async () => {
-    useConciergeStore.setState({ configLoaded: true, surfaceState: 'toolbar' });
-    await render(<ConciergeHost />);
-    await flushEffects();
-
-    const helpBtn = container.querySelector('button[aria-label="能帮什么"]') as HTMLButtonElement;
-    expect(helpBtn).not.toBeNull();
-    act(() => {
-      helpBtn.click();
-    });
-    await flushEffects();
-
-    expect(useConciergeStore.getState().surfaceState).toBe('bubble');
-    const inputEl = container.querySelector('textarea[aria-label="消息输入框"]') as HTMLTextAreaElement;
-    expect(inputEl?.value).toBe('你能帮我什么？');
+    expect(buttons?.length).toBe(1);
+    expect(buttons?.[0]?.textContent).toContain('聊聊');
+    expect(container.querySelector('button[aria-label="能帮什么"]')).toBeNull();
   });
 
   it('chat button opens bubble with empty input', async () => {
@@ -546,37 +598,18 @@ describe('A3a: three-layer surfaceState interaction', () => {
     expect(inputEl?.value).toBe('');
   });
 
-  it('chat clears existing draft set by previous help button', async () => {
-    useConciergeStore.setState({ configLoaded: true, surfaceState: 'toolbar' });
+  it('empty panel offers an in-context capability starter', async () => {
+    useConciergeStore.setState({ configLoaded: true, surfaceState: 'bubble', threadId: 'thread-empty' });
     await render(<ConciergeHost />);
     await flushEffects();
 
-    // Step 1: help → bubble with prefilled draft
-    const helpBtn = container.querySelector('button[aria-label="能帮什么"]') as HTMLButtonElement;
-    act(() => {
-      helpBtn.click();
-    });
+    const starter = container.querySelector('button[aria-label="问问猫猫能帮什么"]') as HTMLButtonElement;
+    expect(starter).not.toBeNull();
+    act(() => starter.click());
     await flushEffects();
     expect((container.querySelector('textarea[aria-label="消息输入框"]') as HTMLTextAreaElement)?.value).toBe(
       '你能帮我什么？',
     );
-
-    // Step 2: Escape → back to toolbar
-    act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    });
-    await flushEffects();
-    expect(useConciergeStore.getState().surfaceState).toBe('toolbar');
-
-    // Step 3: chat → bubble must open with *empty* input (not the old draft)
-    const chatBtn = container.querySelector('button[aria-label="聊聊"]') as HTMLButtonElement;
-    act(() => {
-      chatBtn.click();
-    });
-    await flushEffects();
-
-    expect(useConciergeStore.getState().surfaceState).toBe('bubble');
-    expect((container.querySelector('textarea[aria-label="消息输入框"]') as HTMLTextAreaElement)?.value).toBe('');
   });
 
   it('P2 (cloud fix): Escape in toolbar state collapses to collapsed', async () => {
@@ -909,7 +942,7 @@ describe('Block 7: P0 Liveness', () => {
     });
     await flushEffects();
 
-    const statusEl = container.querySelector('[role="status"]');
+    const statusEl = container.querySelector('output');
     expect(statusEl).not.toBeNull();
     expect(statusEl?.textContent).toContain('猫猫球处理中');
   });
@@ -937,7 +970,7 @@ describe('Block 7: P0 Liveness', () => {
     await render(<ConciergeHost />);
     await flushEffects();
 
-    const statusEl = container.querySelector('[role="status"]');
+    const statusEl = container.querySelector('output');
     expect(statusEl).not.toBeNull();
     expect(statusEl?.textContent).toContain('发送中');
   });

@@ -28,7 +28,7 @@
   <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
   
   
-  <text x="1100" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe Harness Engineering：六大件 + 第七类</tspan></text>
+  <text x="1100" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1100" dy="0" fill="#263238" font-weight="850" font-size="48">Clowder AI Harness Engineering：六大件 + 第七类</tspan></text>
   <text x="1100" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#667085" font-weight="600" font-size="24">行业六大构件我们全有落地；多猫协作还需要协作语义与球权治理</tspan></text>
   <rect x="720" y="132" width="760" height="44" rx="22" fill="#ede7ff" stroke="#7c3aed" stroke-width="2"/>
   <text x="1100" y="162.84" text-anchor="middle" font-size="26" font-weight="700" fill="#7c3aed">Agent Quality = Model Capability × Environment Fit</text>
@@ -90,7 +90,7 @@
   
   <rect x="1512" y="240" width="586" height="44" rx="22" fill="#dc262622" stroke="#dc2626" stroke-width="2"/>
   <text x="1805" y="270.16" text-anchor="middle" font-size="24" font-weight="700" fill="#dc2626">3. Feedback Loops</text>
-  <text x="1524" y="312" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#263238" font-weight="650" font-size="23">Computational: lint / test / gate / CI</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Inferential: 跨族 review / 愿景守护</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Human Runtime: Magic Words 拉闸</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">CVO 漏斗决策</tspan></text>
+  <text x="1524" y="312" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#263238" font-weight="650" font-size="23">Computational: lint / test / gate / CI</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Inferential: 跨族 review / 愿景守护</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">Human Runtime: Magic Words 拉闸</tspan><tspan x="1524" dy="28.75" fill="#263238" font-weight="650" font-size="23">operator 漏斗决策</tspan></text>
   <line x1="1520" y1="439" x2="2090" y2="439" stroke="#dc2626" stroke-width="2" opacity="0.24"/>
   <text x="1524" y="469" text-anchor="start" opacity="1" class=""><tspan x="1524" dy="0" fill="#dc2626" font-weight="850" font-size="17">外部概念锚点</tspan></text>
   
@@ -189,8 +189,8 @@
     <rect x="180" y="1090" width="1840" height="370" rx="30" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
     <rect x="204" y="1068" width="728" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="222" y="1098" font-size="25" font-weight="800" fill="white">7. Collaboration Semantics</text>
   
-  <text x="1100" y="1150" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#f97316" font-weight="900" font-size="35">六大件之外，Cat Cafe 独有</tspan></text>
-  <text x="280" y="1225" text-anchor="start" opacity="1" class=""><tspan x="280" dy="0" fill="#263238" font-weight="760" font-size="32">@ 路由 · targetCats · hold_ball · 接 / 退 / 升三选一</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">统一执行平面：InvocationQueue 接住所有 handoff</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">跨厂商多样性：Claude × GPT × Gemini = 结构性纠错</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">CVO 终裁：愿景层拍板，执行层自治</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">核心定律：状态迁移必须由现实动作产生</tspan></text>
+  <text x="1100" y="1150" text-anchor="middle" opacity="1" class=""><tspan x="1100" dy="0" fill="#f97316" font-weight="900" font-size="35">六大件之外，Clowder AI 独有</tspan></text>
+  <text x="280" y="1225" text-anchor="start" opacity="1" class=""><tspan x="280" dy="0" fill="#263238" font-weight="760" font-size="32">@ 路由 · targetCats · hold_ball · 接 / 退 / 升三选一</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">统一执行平面：InvocationQueue 接住所有 handoff</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">跨厂商多样性：Claude × GPT × Gemini = 结构性纠错</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">operator 终裁：愿景层拍板，执行层自治</tspan><tspan x="280" dy="40" fill="#263238" font-weight="760" font-size="32">核心定律：状态迁移必须由现实动作产生</tspan></text>
   
   <g>
     <path d="M 1643.2 1245.8 C 1615.9 1284.8, 1660.36 1312.1, 1690 1298.84 C 1719.64 1312.88, 1764.1 1284.8, 1736.8 1245.8" fill="#e7b76b" stroke="#344054" stroke-width="2.34"/>

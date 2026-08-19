@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { MarkdownContent } from './MarkdownContent';
+import { useMessageDisclosureState } from './message-disclosure-state';
 
 const DIVIDER = 'var(--console-border-strong)';
 
@@ -62,6 +63,7 @@ export function ThinkingContent({
   defaultExpanded = false,
   expandInExport = true,
   breedColor,
+  disclosureKey,
 }: {
   content: string;
   className?: string;
@@ -69,18 +71,19 @@ export function ThinkingContent({
   defaultExpanded?: boolean;
   expandInExport?: boolean;
   breedColor?: string;
+  disclosureKey?: string;
 }) {
   const isExport =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const shouldExpand = (isExport && expandInExport) || defaultExpanded;
-  const [expanded, setExpanded] = useState(shouldExpand);
-  const userInteracted = useRef(false);
+  const { expanded, setExpanded, hasOverride } = useMessageDisclosureState(disclosureKey, shouldExpand);
+  const userInteracted = useRef(hasOverride);
   const hasMounted = useRef(false);
   useEffect(() => {
-    if (!userInteracted.current) {
+    if (!disclosureKey && !userInteracted.current) {
       setExpanded((isExport && expandInExport) || defaultExpanded);
     }
-  }, [isExport, expandInExport, defaultExpanded]);
+  }, [disclosureKey, isExport, expandInExport, defaultExpanded, setExpanded]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is intentional — dispatch on toggle
   useLayoutEffect(() => {
     if (!hasMounted.current) {

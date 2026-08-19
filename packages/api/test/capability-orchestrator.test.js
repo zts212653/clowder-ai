@@ -788,6 +788,31 @@ describe('bootstrapCapabilities', () => {
     assert.equal(persisted.capabilities.length, 7);
   });
 
+  it('does not rediscover a retired GitHub MCP from existing harness config', async () => {
+    const claudeFile = join(dir, '.mcp.json');
+    await writeFile(
+      claudeFile,
+      JSON.stringify({
+        mcpServers: {
+          github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
+          filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        },
+      }),
+    );
+
+    const config = await bootstrapCapabilities(dir, {
+      claudeConfig: claudeFile,
+      codexConfig: join(dir, 'nonexistent.toml'),
+      geminiConfig: join(dir, 'nonexistent.json'),
+    });
+
+    assert.equal(
+      config.capabilities.some((cap) => cap.id === 'github'),
+      false,
+    );
+    assert.ok(config.capabilities.some((cap) => cap.id === 'filesystem'));
+  });
+
   it('normalizes pencil into a resolver-backed capability on bootstrap', async () => {
     const claudeFile = join(dir, '.mcp.json');
     await writeFile(
@@ -1924,7 +1949,7 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
         source: 'external',
         mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
       },
-      // User-added external MCP entries (filesystem, github, etc.)
+      // User-added external MCP entries unrelated to retired GitHub MCP.
       {
         id: 'filesystem',
         type: 'mcp',
@@ -1933,11 +1958,11 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
         mcpServer: { command: 'npx', args: ['@modelcontextprotocol/server-filesystem', '/tmp'] },
       },
       {
-        id: 'github-mcp',
+        id: 'example-mcp',
         type: 'mcp',
         enabled: false,
         source: 'external',
-        mcpServer: { command: 'docker', args: ['run', 'github-mcp'] },
+        mcpServer: { command: 'docker', args: ['run', 'example-mcp'] },
       },
     ]);
 
@@ -1952,10 +1977,10 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
     const fs = result.config.capabilities.find((c) => c.id === 'filesystem');
     assert.ok(fs);
     assert.deepEqual(fs.mcpServer.args, ['@modelcontextprotocol/server-filesystem', '/tmp']);
-    const gh = result.config.capabilities.find((c) => c.id === 'github-mcp');
-    assert.ok(gh);
-    assert.equal(gh.enabled, false, 'user-disabled external must stay disabled');
-    assert.deepEqual(gh.mcpServer.args, ['run', 'github-mcp']);
+    const example = result.config.capabilities.find((c) => c.id === 'example-mcp');
+    assert.ok(example);
+    assert.equal(example.enabled, false, 'user-disabled external must stay disabled');
+    assert.deepEqual(example.mcpServer.args, ['run', 'example-mcp']);
   });
 
   // Cloud codex review #1883 P1 (2026-05-24): the external limb must be
@@ -2145,6 +2170,74 @@ describe('inheritFullyBlockedMcpCapabilitiesForNewCat', () => {
 // ────────── Resolve per-cat ──────────
 
 describe('resolveServersForCat', () => {
+  it('filters retired GitHub MCP entries while preserving unrelated user servers', () => {
+    const config = makeConfig([
+      {
+        id: 'github',
+        type: 'mcp',
+        enabled: true,
+        source: 'plugin',
+        pluginId: 'github',
+        mcpServer: { transport: 'streamableHttp', url: 'https://api.githubcopilot.com/mcp/' },
+      },
+      {
+        id: 'legacy-github',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['-y', '@anthropic-ai/mcp-server-github'] },
+      },
+      {
+        id: 'github',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['custom-non-mcp-tool.js'] },
+      },
+      {
+        id: 'filesystem',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['-y', '@mcp/fs'] },
+      },
+    ]);
+
+    const servers = resolveServersForCat(config, 'opus');
+    assert.equal(
+      servers.some((server) => server.url === 'https://api.githubcopilot.com/mcp/'),
+      false,
+    );
+    assert.equal(
+      servers.some((server) => server.args.includes('@anthropic-ai/mcp-server-github')),
+      false,
+    );
+    assert.ok(servers.some((server) => server.args.includes('custom-non-mcp-tool.js')));
+    assert.ok(servers.some((server) => server.name === 'filesystem'));
+  });
+
+  it('carries the original capability id as managed-name ownership provenance', () => {
+    const config = makeConfig([
+      {
+        id: 'plugin:video-gen:protocol-server',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        pluginId: 'video-gen',
+        mcpServer: { command: 'node', args: ['protocol-server.js'] },
+      },
+    ]);
+
+    const [server] = resolveServersForCat(config, 'opus');
+    assert.equal(server.name, 'plugin__video-gen__protocol-server');
+    assert.equal(server.capabilityId, 'plugin:video-gen:protocol-server');
+    assert.equal(
+      server.source,
+      'plugin',
+      'pluginId must become runtime plugin provenance even when stored source is cat-cafe',
+    );
+  });
+
   it('applies global enabled state', () => {
     const config = makeConfig([
       {
@@ -2694,6 +2787,33 @@ describe('generateCliConfigs', () => {
 // ────────── healCatCafeMcpTopology shared chain (cloud round 7 P1) ──────────
 
 describe('healCatCafeMcpTopology (F193 Phase C shared migration chain)', () => {
+  it('removes retired GitHub MCP capabilities from persisted topology', () => {
+    const config = makeConfig([
+      {
+        id: 'github-mcp-server',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'docker', args: ['run', 'ghcr.io/github/github-mcp-server'] },
+      },
+      {
+        id: 'custom',
+        type: 'mcp',
+        enabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['custom.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/healed-root' });
+    assert.equal(result.migrated, true);
+    assert.equal(
+      result.config.capabilities.some((cap) => cap.id === 'github-mcp-server'),
+      false,
+    );
+    assert.ok(result.config.capabilities.some((cap) => cap.id === 'custom'));
+  });
+
   // codex round 7 P1 (PR #1605): write paths must run the same chain as GET
   // so legacy-only configs auto-migrate before any mutation lands.
   it('legacy-only cat-cafe -> 5 splits + no main (full migration chain)', () => {

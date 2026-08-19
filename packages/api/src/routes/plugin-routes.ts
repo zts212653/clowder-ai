@@ -4,8 +4,7 @@
  * Dynamic plugin discovery, configuration, and resource lifecycle management.
  */
 
-import { join } from 'node:path';
-import type { PluginInfo, PluginManifest } from '@cat-cafe/shared';
+import type { PluginInfo } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import {
@@ -29,6 +28,7 @@ interface PluginRoutesOpts {
   pluginActivator: PluginResourceActivatorType;
   limbRegistry: LimbRegistry;
   pluginsDir: string;
+  beforePluginDisable?: (pluginId: string) => void | Promise<void>;
 }
 
 function refreshPluginRegistry(pluginRegistry: PluginRegistry) {
@@ -46,7 +46,7 @@ interface PluginWriteAccessError {
   error: string;
 }
 
-function requirePluginReadAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
+export function requirePluginReadAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
   const operator = resolveCapabilityWriteSessionUserId(request);
   if (!operator) {
     return { status: 401, error: 'Plugin read endpoint requires an authenticated session' };
@@ -55,7 +55,7 @@ function requirePluginReadAccess(request: FastifyRequest): PluginWriteAccess | P
   return { operator };
 }
 
-function requirePluginWriteAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
+export function requirePluginWriteAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
   const localError = requireLocalCapabilityWriteRequest(request);
   if (localError) {
     return { status: localError.status, error: localError.error };
@@ -74,7 +74,7 @@ function requirePluginWriteAccess(request: FastifyRequest): PluginWriteAccess | 
   return { operator };
 }
 
-function pluginAccessError(reply: FastifyReply, error: PluginWriteAccessError): { error: string } {
+export function pluginAccessError(reply: FastifyReply, error: PluginWriteAccessError): { error: string } {
   reply.status(error.status);
   return { error: error.error };
 }
@@ -163,6 +163,7 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
       return { error: `Plugin '${id}' not found` };
     }
 
+    await opts.beforePluginDisable?.(id);
     const result = await pluginActivator.disablePlugin(manifest);
 
     try {

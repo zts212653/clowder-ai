@@ -13,14 +13,20 @@ import { useChatStore } from '@/stores/chatStore';
 import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { saveThreadActiveState } from '@/utils/offline-store';
+import { refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
+import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
+import { normalizeQueueMessageReceiptProjections } from './queue-message-receipt-normalizer';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
 // dispatch entry，useSocket 不再做 active path drop guard。
 import { reconnectGame } from './useGameReconnect';
+import { type ExplicitStopIntent, emitExplicitCancel, newCancelIdentity } from './useSocket-cancel-provenance';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
 import { type AgentMessageCoalescer, createAgentMessageCoalescer } from './useSocket-message-coalescer';
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
+import { useRoomMembershipReconciler } from './useSocket-room-membership';
 import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
 interface AgentMessage {
@@ -100,6 +106,8 @@ export interface SocketCallbacks {
   onHeartbeat?: (data: { threadId: string; timestamp: number }) => void;
   onMessageDeleted?: (data: { messageId: string; threadId: string; deletedBy: string }) => void;
   onMessageRestored?: (data: { messageId: string; threadId: string }) => void;
+  onMessageRecalled?: (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => void;
+  onMessageReceiptUpdated?: (data: { messageId: string; threadId: string }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
   onAuthorizationRequest?: (data: {
     requestId: string;
@@ -148,7 +156,6 @@ const STALE_IDLE_THRESHOLD_MS = 3 * 60_000;
 const STALE_PROBE_COOLDOWN_MS = 60_000;
 /** Direction-2 gate: only probe current thread for missed slots if user engaged within this window. */
 const STALE_RECENT_ENGAGEMENT_MS = 5 * 60_000;
-
 /** Generation counter: each reconnect increments, stale callbacks discard themselves. */
 let reconcileGeneration = 0;
 /** Per-thread last-probe timestamp used by the watchdog cooldown. */
@@ -164,6 +171,40 @@ function bumpLiveQueueHydrateEpoch(threadId: string): number {
 
 function getLiveQueueHydrateEpoch(threadId: string): number {
   return liveQueueHydrateEpoch.get(threadId) ?? 0;
+}
+
+async function hydrateFreshnessClosureProjections(
+  threadId: string,
+  onMessage: (message: AgentMessage) => void,
+): Promise<void> {
+  try {
+    const response = await apiFetch(`/api/threads/${threadId}/freshness-closures`);
+    if (!response.ok) return;
+    const payload = (await response.json()) as {
+      closures?: Array<{ catId: string; updatedAt: number; [key: string]: unknown }>;
+      supplements?: Array<{ catId: string; updatedAt: number; [key: string]: unknown }>;
+    };
+    for (const projection of payload.closures ?? []) {
+      onMessage({
+        type: 'system_info',
+        catId: projection.catId,
+        threadId,
+        content: JSON.stringify(projection),
+        timestamp: projection.updatedAt,
+      });
+    }
+    for (const projection of payload.supplements ?? []) {
+      onMessage({
+        type: 'system_info',
+        catId: projection.catId,
+        threadId,
+        content: JSON.stringify(projection),
+        timestamp: projection.updatedAt,
+      });
+    }
+  } catch {
+    // Rebuildable projection only; live socket events and the next reconnect retry.
+  }
 }
 
 function hasStaleActiveThreadPresentation(state: ReturnType<typeof useChatStore.getState>, threadId: string): boolean {
@@ -211,7 +252,7 @@ export async function reconcileThreadWithServer(
     if (shouldAbort()) return;
     if (!res.ok) return;
     const data = (await res.json()) as {
-      activeInvocations?: Array<{ catId: string; startedAt: number }>;
+      activeInvocations?: QueueActiveInvocationSlot[];
     };
     if (shouldAbort()) return;
     const store = useChatStore.getState();
@@ -225,13 +266,8 @@ export async function reconcileThreadWithServer(
       // F173 PR-C Task 10: thread-scoped writers throughout — flat is mirror, no
       // active vs background branch needed.
       const serverActiveCats = serverSlots.map((s) => s.catId);
-      store.clearThreadActiveInvocation(threadId);
-      store.replaceThreadTargetCats(threadId, serverActiveCats);
-      for (const slot of serverSlots) {
-        store.updateThreadCatStatus(threadId, slot.catId, 'streaming');
-        const syntheticId = `hydrated-${threadId}-${slot.catId}`;
-        store.addThreadActiveInvocation(threadId, syntheticId, slot.catId, 'execute', slot.startedAt);
-      }
+      const activeInvocations = hydrateQueueActiveInvocationSlots({ threadId, slots: serverSlots });
+      persistThreadActiveSnapshot(threadId, { hasActiveInvocation: true, activeInvocations });
       finalizeStreamingBubblesAbsentFromServerSlots(threadId, new Set(serverActiveCats));
       console.log(`[ws] ${source} reconciliation: re-hydrated active slots from server`, {
         threadId,
@@ -248,12 +284,43 @@ export async function reconcileThreadWithServer(
     const shouldClear = isActiveThread
       ? store.hasActiveInvocation || hasStaleActiveThreadPresentation(store, threadId)
       : ts.hasActiveInvocation;
+    // `/queue` is the canonical liveness source. Persist idle even when memory
+    // already agrees, otherwise an older IndexedDB active snapshot can return
+    // on the next F5 before queue hydration completes.
+    persistThreadActiveSnapshot(threadId, { hasActiveInvocation: false, activeInvocations: {} });
     if (!shouldClear) return;
+
+    const terminalSource = isActiveThread ? store : ts;
+    const { catStatuses = {}, catInvocations = {} } = terminalSource;
+    const terminalStatuses = new Map<string, 'done' | 'error'>();
+    for (const [catId, status] of Object.entries(catStatuses)) {
+      switch (status) {
+        case 'done':
+        case 'error':
+          terminalStatuses.set(catId, status);
+      }
+    }
+    for (const [catId, info] of Object.entries(catInvocations)) {
+      switch (info.appServerLifecycle?.stage) {
+        case 'failed':
+          terminalStatuses.set(catId, 'error');
+          break;
+        case 'completed':
+        case 'interrupted':
+        case 'closing':
+        case 'closed':
+          terminalStatuses.set(catId, 'done');
+          break;
+      }
+    }
 
     store.clearThreadActiveInvocation(threadId);
     store.setThreadLoading(threadId, false);
     store.setThreadIntentMode(threadId, null);
     store.clearThreadCatStatuses(threadId);
+    for (const [catId, status] of terminalStatuses) {
+      store.updateThreadCatStatus(threadId, catId, status);
+    }
     const messagesToCheck = isActiveThread ? store.messages : ts.messages;
     for (const msg of messagesToCheck) {
       if (msg.type === 'assistant' && msg.isStreaming) {
@@ -272,6 +339,13 @@ export async function reconcileThreadWithServer(
   } catch {
     // Non-critical — don't break the caller
   }
+}
+
+function persistThreadActiveSnapshot(threadId: string, state: Parameters<typeof saveThreadActiveState>[1]): void {
+  void saveThreadActiveState(threadId, state).catch(() => {
+    // IndexedDB is a first-paint cache. Canonical in-memory reconciliation
+    // remains authoritative when storage is unavailable.
+  });
 }
 
 /**
@@ -375,9 +449,11 @@ function checkForStaleActiveInvocations(): void {
   }
 }
 
-export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
+export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregroundThreadIds?: string[]) {
   const socketRef = useRef<Socket | null>(null);
   const [socketConnected, setSocketConnected] = useState<boolean | null>(null);
+  // Desired membership survives temporary disconnects. Confirmed membership is
+  // connection-scoped and is only written after the server acknowledges socket.join().
   const joinedRoomsRef = useRef<Set<string>>(new Set());
   const pendingGuideStartsRef = useRef<Map<string, { guideId: string; threadId: string; timestamp: number }>>(
     new Map(),
@@ -385,6 +461,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   // F173 Phase E (KD-1): bg refs (bgStreamRefs / bgFinalizedRefs / bgSeq) moved to
   // useAgentMessages — single dispatch handler owns them now。
   const userIdRef = useRef(getUserId());
+  const cancelClientInstanceIdRef = useRef<string | null>(null);
+  if (cancelClientInstanceIdRef.current === null) {
+    cancelClientInstanceIdRef.current = newCancelIdentity('client');
+  }
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
 
@@ -420,6 +500,14 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     saveJoinedRoomsToSession(userIdRef.current, joinedRoomsRef.current);
   }, []);
 
+  const {
+    forgetRoom,
+    reconcileDesiredRoomMembership,
+    reconcileUnconfirmedRoomMembership,
+    requestRoomJoin,
+    resetConfirmedRoomMembership,
+  } = useRoomMembershipReconciler(socketRef, joinedRoomsRef);
+
   useEffect(() => {
     userIdRef.current = getUserId();
     joinedRoomsRef.current = loadJoinedRoomsFromSession(userIdRef.current);
@@ -449,6 +537,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       transports: ['websocket', 'polling'],
       auth: { userId: userIdRef.current },
     });
+    socketRef.current = socket;
 
     const getTransportName = () => {
       const engine = socket.io.engine as unknown as SocketIoEngineLike | undefined;
@@ -473,34 +562,24 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('connect', () => {
       setSocketConnected(true);
+      const tid = threadIdRef.current;
+      if (tid) joinedRoomsRef.current.add(`thread:${tid}`);
+      persistJoinedRooms();
       console.log('[ws] Connected', {
         socketId: socket.id,
         transport: getTransportName(),
-        threadId: threadIdRef.current ?? null,
+        threadId: tid ?? null,
         rooms: [...joinedRoomsRef.current],
       });
       attachNativeCloseLogger();
 
-      // Rejoin all tracked rooms on reconnect
-      const rejoinedRooms: string[] = [];
-      for (const room of joinedRoomsRef.current) {
-        socket.emit('join_room', room);
-        rejoinedRooms.push(room);
-      }
-      // Ensure active thread room is joined
-      const tid = threadIdRef.current;
-      if (tid) {
-        const room = `thread:${tid}`;
-        if (!joinedRoomsRef.current.has(room)) {
-          socket.emit('join_room', room);
-          joinedRoomsRef.current.add(room);
-          rejoinedRooms.push(room);
-        }
-      }
-      persistJoinedRooms();
-      console.log('[ws] Rejoined rooms', {
-        count: rejoinedRooms.length,
-        rooms: rejoinedRooms,
+      // A reconnect creates a new server-side Socket.IO session. Reconcile every
+      // desired room and only mark it confirmed after the server ACKs socket.join().
+      const desiredRooms = [...joinedRoomsRef.current];
+      reconcileDesiredRoomMembership();
+      console.log('[ws] Requested room membership reconciliation', {
+        count: desiredRooms.length,
+        rooms: desiredRooms,
       });
       recordInvocationEvent({
         event: 'connect',
@@ -510,12 +589,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       recordInvocationEvent({
         event: 'rejoin_rooms',
         threadId: tid ?? undefined,
-        queueLength: rejoinedRooms.length,
+        queueLength: desiredRooms.length,
       });
 
       // F101: Recover game state on reconnect
       if (tid) {
         reconnectGame(tid).catch(() => {});
+        void hydrateFreshnessClosureProjections(tid, (message) => callbacksRef.current.onMessage(message));
       }
 
       // Reconnect reconciliation: verify invocation state against server truth.
@@ -531,6 +611,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       // useChatHistory's Phase C subscription (debounce + retry + ack +
       // Phase D merge filter); see useChatHistory.ts:872 catchUpVersion.
       if (hasConnectedOnceRef.current) {
+        void refreshSidebarThreadSnapshot();
         const store = useChatStore.getState();
         const bumped = new Set<string>();
         // Active thread always covered.
@@ -651,7 +732,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
                   useChatStore.getState().removeActiveInvocation(key);
                 }
               }
-              useChatStore.getState().addActiveInvocation(invId, cats[i]!, data.mode);
+              // Preserve the first-seen startedAt when re-registering an
+              // existing key (spawn_started may have registered it earlier);
+              // re-stamping would restart execution timing.
+              useChatStore.getState().addActiveInvocation(invId, cats[i]!, data.mode, cur[invId]?.startedAt);
             }
           }
           return;
@@ -673,7 +757,14 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
                   store.removeThreadActiveInvocation(data.threadId, key);
                 }
               }
-              store.addThreadActiveInvocation(data.threadId, invId, cats[i]!, data.mode);
+              // Preserve the first-seen startedAt on same-key re-registration.
+              store.addThreadActiveInvocation(
+                data.threadId,
+                invId,
+                cats[i]!,
+                data.mode,
+                threadState.activeInvocations[invId]?.startedAt,
+              );
             }
           } else {
             store.setThreadHasActiveInvocation(data.threadId, true);
@@ -698,6 +789,24 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         for (const catId of cats) {
           useChatStore.getState().setCatStatus(catId, 'spawning');
         }
+        // Register exact invocation slots at spawn time so the pending-bubble
+        // projection renders immediately. intent_mode is deferred to the first
+        // CLI event (#768), so without this the chat area stays blank while the
+        // status bar already shows the cat running (targetCats fallback).
+        // Same fan-out key convention as intent_mode. On duplicate
+        // spawn_started (or a slot already refined by intent_mode), preserve
+        // the existing mode/startedAt — re-stamping startedAt would restart
+        // execution timing and shift the stale watchdog.
+        if (data.invocationId) {
+          const cur = useChatStore.getState().activeInvocations;
+          for (let i = 0; i < cats.length; i++) {
+            const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+            const existing = cur[invId];
+            useChatStore
+              .getState()
+              .addActiveInvocation(invId, cats[i]!, existing?.mode ?? 'execute', existing?.startedAt);
+          }
+        }
         return;
       }
 
@@ -707,6 +816,23 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
         store.setThreadLoading(data.threadId, true);
         store.setThreadHasActiveInvocation(data.threadId, true);
         store.setThreadTargetCats(data.threadId, data.targetCats ?? []);
+        // Same reasoning as the active path: exact slots let the background
+        // thread project pending bubbles before intent_mode arrives.
+        if (data.invocationId) {
+          const cats = data.targetCats ?? [];
+          const threadActive = store.getThreadState(data.threadId).activeInvocations;
+          for (let i = 0; i < cats.length; i++) {
+            const invId = i === 0 ? data.invocationId : `${data.invocationId}-${cats[i]}`;
+            const existing = threadActive[invId];
+            store.addThreadActiveInvocation(
+              data.threadId,
+              invId,
+              cats[i]!,
+              existing?.mode ?? 'execute',
+              existing?.startedAt,
+            );
+          }
+        }
       }
     });
 
@@ -733,6 +859,15 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     socket.on('message_restored', (data: { messageId: string; threadId: string }) => {
       callbacksRef.current.onMessageRestored?.(data);
     });
+    socket.on(
+      'message_recalled',
+      (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => {
+        callbacksRef.current.onMessageRecalled?.(data);
+      },
+    );
+    socket.on('message_receipt_updated', (data: { messageId: string; threadId: string }) => {
+      callbacksRef.current.onMessageReceiptUpdated?.(data);
+    });
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);
     });
@@ -751,6 +886,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
 
     const normalizeQueueForDebug = (queue: unknown): unknown[] => (Array.isArray(queue) ? queue : []);
+    const isQueueEntryObject = (entry: unknown): entry is import('../stores/chat-types').QueueEntry =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry);
+    const normalizeQueueEntries = (queue: unknown): import('../stores/chat-types').QueueEntry[] =>
+      Array.isArray(queue) ? queue.filter(isQueueEntryObject) : [];
     const getQueueStatusesForDebug = (queue: unknown) =>
       normalizeQueueForDebug(queue).map((entry) => {
         if (!entry || typeof entry !== 'object') return 'unknown';
@@ -759,62 +898,121 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       });
 
     // F39: Queue events — always write via store (no dual-pointer guard needed, queue is thread-scoped)
-    socket.on('queue_updated', (data: { threadId: string; queue: unknown[]; action: string }) => {
-      const store = useChatStore.getState();
-      store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
-      // Queue processor started executing an entry: restore the coarse "active"
-      // marker immediately, then hydrate current-thread slot truth from /queue.
-      // This covers the gap where processing resumes before intent_mode lands:
-      // without slot hydration, the top single-cat cancel can stay hidden even
-      // though the server is already executing this thread.
-      if (data.action === 'processing') {
-        store.setThreadHasActiveInvocation(data.threadId, true);
-        if (data.threadId === store.currentThreadId) {
-          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
-          void reconcileThreadWithServer(
-            data.threadId,
-            () =>
-              useChatStore.getState().currentThreadId !== data.threadId ||
-              getLiveQueueHydrateEpoch(data.threadId) !== epoch,
-            'QueueProcessing',
-          );
+    socket.on(
+      'queue_updated',
+      (data: { threadId: string; queue: unknown[]; action: string; messageReceipts?: unknown }) => {
+        const store = useChatStore.getState();
+        const queue = normalizeQueueEntries(data.queue);
+        const messageReceipts = normalizeQueueMessageReceiptProjections(data.messageReceipts);
+        if (messageReceipts.length > 0) {
+          store.setQueue(data.threadId, queue, messageReceipts);
+        } else {
+          store.setQueue(data.threadId, queue);
         }
-      }
-      if (data.action === 'completed') {
-        bumpLiveQueueHydrateEpoch(data.threadId);
-        if (data.threadId === store.currentThreadId) {
-          const epoch = getLiveQueueHydrateEpoch(data.threadId);
-          // Queue `completed` is the thread-terminal signal for this processing
-          // path. We invalidate the earlier processing-time hydrate here, then
-          // fetch `/queue` once more so a stale response that already won the
-          // race gets actively cleared instead of lingering until watchdog.
+        // F264: every durable user queue entry is owner-visible from admission.
+        // Hydrate the authoritative message so its receipt stays live and the
+        // same projection is recovered after F5. Connector/agent work remains
+        // queue-only and must not trigger a browser history read.
+        if (queue.some((entry) => entry.source === 'user' && typeof entry.messageId === 'string')) {
+          store.requestStreamCatchUp(data.threadId);
+        }
+        // Queue processor started executing an entry: restore the coarse "active"
+        // marker immediately, then hydrate current-thread slot truth from /queue.
+        // This covers the gap where processing resumes before intent_mode lands:
+        // without slot hydration, the top single-cat cancel can stay hidden even
+        // though the server is already executing this thread.
+        if (data.action === 'processing') {
+          // A processing event is causally newer than any identity-matched
+          // terminal slot still cached for this thread. Retire only those proven
+          // stale slots before raising the coarse marker; preserve uncorrelated
+          // slots until canonical `/queue` supplies the new exact identity.
+          store.setThreadHasActiveInvocation(data.threadId, true);
+          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
+          if (data.threadId === store.currentThreadId) {
+            void reconcileThreadWithServer(
+              data.threadId,
+              () =>
+                useChatStore.getState().currentThreadId !== data.threadId ||
+                getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+              'QueueProcessing',
+            );
+          }
+        }
+        if (data.action === 'completed') {
+          const epoch = bumpLiveQueueHydrateEpoch(data.threadId);
+          // Queue `completed` is terminal for the event's own thread regardless
+          // of which thread is currently visible. Reconcile that thread in place;
+          // a later processing/completed event advances the epoch and invalidates
+          // this request without coupling correctness to navigation timing.
           void reconcileThreadWithServer(
             data.threadId,
-            () =>
-              useChatStore.getState().currentThreadId !== data.threadId ||
-              getLiveQueueHydrateEpoch(data.threadId) !== epoch,
+            () => getLiveQueueHydrateEpoch(data.threadId) !== epoch,
             'QueueCompleted',
           );
         }
-      }
-      // P1 fix: 'processing' means continue/auto-dequeue resumed the queue — clear paused state
-      if (data.action === 'processing' || data.action === 'cleared') {
-        store.setQueuePaused(data.threadId, false);
-      }
-      if (isDebugEnabled()) {
-        const stateAfterUpdate = store.getThreadState(data.threadId);
-        recordInvocationEvent({
-          event: 'queue_updated',
-          threadId: data.threadId,
-          action: data.action,
-          queueLength: normalizeQueueForDebug(data.queue).length,
-          queueStatuses: getQueueStatusesForDebug(data.queue),
-          hasActiveInvocation: data.action === 'processing' ? true : stateAfterUpdate?.hasActiveInvocation,
-          queuePaused:
-            data.action === 'processing' || data.action === 'cleared' ? false : stateAfterUpdate?.queuePaused,
-        });
-      }
-    });
+        // P1 fix: 'processing' means continue/auto-dequeue resumed the queue — clear paused state
+        if (data.action === 'processing' || data.action === 'cleared') {
+          store.setQueuePaused(data.threadId, false);
+        }
+        if (isDebugEnabled()) {
+          const stateAfterUpdate = store.getThreadState(data.threadId);
+          recordInvocationEvent({
+            event: 'queue_updated',
+            threadId: data.threadId,
+            action: data.action,
+            queueLength: normalizeQueueForDebug(data.queue).length,
+            queueStatuses: getQueueStatusesForDebug(data.queue),
+            hasActiveInvocation: data.action === 'processing' ? true : stateAfterUpdate?.hasActiveInvocation,
+            queuePaused:
+              data.action === 'processing' || data.action === 'cleared' ? false : stateAfterUpdate?.queuePaused,
+          });
+        }
+      },
+    );
+    // F264: a cross-thread Queue carrier is visible as soon as durable custody
+    // accepts it. This does not mark the backend message delivered; it only
+    // installs the original source message so live queueReceipt updates have a
+    // stable timeline anchor before terminal completion.
+    socket.on(
+      'messages_queued',
+      (data: {
+        threadId: string;
+        messageIds: string[];
+        messages: Array<{
+          id: string;
+          content: string;
+          catId: string | null;
+          timestamp: number;
+          contentBlocks?: readonly unknown[];
+          extra?: Record<string, unknown>;
+          origin?: 'stream' | 'callback' | 'briefing';
+          replyTo?: string;
+          replyPreview?: { senderCatId: string | null; content: string; deleted?: boolean; kind?: string };
+          mentionsUser?: boolean;
+        }>;
+      }) => {
+        const store = useChatStore.getState();
+        for (const message of data.messages) {
+          store.addMessageToThread(data.threadId, {
+            id: message.id,
+            type: message.catId ? 'assistant' : 'user',
+            content: message.content,
+            timestamp: message.timestamp,
+            ...(message.catId ? { catId: message.catId } : {}),
+            ...(message.contentBlocks
+              ? { contentBlocks: message.contentBlocks as import('../stores/chat-types').ChatMessage['contentBlocks'] }
+              : {}),
+            ...(message.extra ? { extra: message.extra as import('../stores/chat-types').ChatMessage['extra'] } : {}),
+            ...(message.origin ? { origin: message.origin } : {}),
+            ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+            ...(message.replyPreview
+              ? { replyPreview: message.replyPreview as import('../stores/chat-types').ChatMessage['replyPreview'] }
+              : {}),
+            ...(message.mentionsUser ? { mentionsUser: true } : {}),
+          });
+        }
+      },
+    );
     // F098-D + F117: Messages delivered — update deliveredAt + insert user bubbles for queue sends
     socket.on(
       'messages_delivered',
@@ -827,6 +1025,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
           content: string;
           catId: string | null;
           timestamp: number;
+          timelineOrderAt?: number;
           mentions: readonly string[];
           userId: string;
           contentBlocks?: readonly unknown[];
@@ -898,7 +1097,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     // F085 Phase 4: Hyperfocus brake trigger from backend activity tracking
     socket.on(
       'brake:trigger',
-      (data: { level: 1 | 2 | 3; activeMinutes: number; nightMode: boolean; timestamp: number }) => {
+      (data: {
+        level: 1 | 2 | 3;
+        activeMinutes: number;
+        nightMode: boolean;
+        mode?: 'gentle' | 'hardcore';
+        timestamp: number;
+      }) => {
         useBrakeStore.getState().show(data);
       },
     );
@@ -1010,6 +1215,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('disconnect', (...args: unknown[]) => {
       setSocketConnected(false);
+      resetConfirmedRoomMembership();
       const [reason, details] = args;
       console.warn('[ws] Disconnected', {
         reason: typeof reason === 'string' ? reason : String(reason),
@@ -1041,15 +1247,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       });
     });
 
-    socketRef.current = socket;
-
     // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
     // on a still-connected socket (won't trigger reconcile-on-reconnect).
     const watchdogTimer = setInterval(checkForStaleActiveInvocations, STALE_WATCHDOG_INTERVAL_MS);
     const visibilityHandler =
       typeof document !== 'undefined'
         ? () => {
-            if (document.visibilityState === 'visible') checkForStaleActiveInvocations();
+            if (document.visibilityState === 'visible') {
+              checkForStaleActiveInvocations();
+              reconcileUnconfirmedRoomMembership();
+            }
           }
         : null;
     if (visibilityHandler) {
@@ -1061,74 +1268,95 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
       }
+      resetConfirmedRoomMembership();
       socket.disconnect();
+      if (socketRef.current === socket) socketRef.current = null;
       joinedRoomsRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks accessed via callbacksRef
-  }, [persistJoinedRooms]);
+  }, [
+    persistJoinedRooms,
+    reconcileDesiredRoomMembership,
+    reconcileUnconfirmedRoomMembership,
+    resetConfirmedRoomMembership,
+  ]);
 
   /** Join a single room (additive — does not leave other rooms) */
   const joinRoom = useCallback(
     (roomThreadId: string) => {
-      const socket = socketRef.current;
-      if (!socket) return;
       const room = `thread:${roomThreadId}`;
-      if (joinedRoomsRef.current.has(room)) return;
-      socket.emit('join_room', room);
-      joinedRoomsRef.current.add(room);
-      persistJoinedRooms();
+      if (!joinedRoomsRef.current.has(room)) {
+        joinedRoomsRef.current.add(room);
+        persistJoinedRooms();
+      }
+      requestRoomJoin(room);
     },
-    [persistJoinedRooms],
+    [persistJoinedRooms, requestRoomJoin],
   );
 
   /** Leave a single room */
   const leaveRoom = useCallback(
     (roomThreadId: string) => {
       const socket = socketRef.current;
-      if (!socket) return;
       const room = `thread:${roomThreadId}`;
       if (!joinedRoomsRef.current.has(room)) return;
-      socket.emit('leave_room', room);
-      joinedRoomsRef.current.delete(room);
+      forgetRoom(room);
+      if (socket?.connected) socket.emit('leave_room', room);
       persistJoinedRooms();
     },
-    [persistJoinedRooms],
+    [forgetRoom, persistJoinedRooms],
   );
 
-  /** Sync joined rooms to exactly the given set of thread IDs */
+  /** Sync joined rooms to foreground threads plus background work that is still live. */
   const syncRooms = useCallback(
     (threadIds: string[]) => {
       const socket = socketRef.current;
-      if (!socket) return;
-
       const targetRooms = new Set(threadIds.map((id) => `thread:${id}`));
 
       // Leave rooms no longer needed
       for (const room of joinedRoomsRef.current) {
-        if (!targetRooms.has(room)) {
-          socket.emit('leave_room', room);
-          joinedRoomsRef.current.delete(room);
+        const roomThreadId = room.slice('thread:'.length);
+        const store = useChatStore.getState();
+        const threadState = store.getThreadState(roomThreadId);
+        const hasKnownState = roomThreadId === store.currentThreadId || Object.hasOwn(store.threadStates, roomThreadId);
+        const mustRetainForBackgroundWork =
+          !hasKnownState || threadState.hasActiveInvocation || threadState.queue.length > 0;
+        if (!targetRooms.has(room) && !mustRetainForBackgroundWork) {
+          forgetRoom(room);
+          if (socket?.connected) socket.emit('leave_room', room);
         }
       }
 
       // Join new rooms
       for (const room of targetRooms) {
-        if (!joinedRoomsRef.current.has(room)) {
-          socket.emit('join_room', room);
-          joinedRoomsRef.current.add(room);
-        }
+        joinedRoomsRef.current.add(room);
+        requestRoomJoin(room);
       }
       persistJoinedRooms();
     },
-    [persistJoinedRooms],
+    [forgetRoom, persistJoinedRooms, requestRoomJoin],
   );
 
-  // Automatically ensure active thread room is joined when threadId changes
+  const foregroundThreadIdsRef = useRef(foregroundThreadIds);
+  foregroundThreadIdsRef.current = foregroundThreadIds;
+  const foregroundRoomsKey = (foregroundThreadIds ?? (threadId ? [threadId] : [])).join('\u0000');
+  const previousForegroundRoomsKeyRef = useRef<string | null>(null);
+
+  // Initial mount restores a bounded legacy set for background catch-up. Once
+  // foreground ownership changes, synchronize and prune inactive rooms.
   useEffect(() => {
-    if (threadId) {
-      joinRoom(threadId);
+    const requestedThreadIds = foregroundThreadIdsRef.current ?? (threadId ? [threadId] : []);
+    if (previousForegroundRoomsKeyRef.current === null) {
+      previousForegroundRoomsKeyRef.current = foregroundRoomsKey;
+      for (const requestedThreadId of requestedThreadIds) joinRoom(requestedThreadId);
+    } else if (previousForegroundRoomsKeyRef.current !== foregroundRoomsKey) {
+      previousForegroundRoomsKeyRef.current = foregroundRoomsKey;
+      syncRooms(requestedThreadIds);
     }
-  }, [threadId, joinRoom]);
+    if (threadId) {
+      void hydrateFreshnessClosureProjections(threadId, (message) => callbacksRef.current.onMessage(message));
+    }
+  }, [foregroundRoomsKey, threadId, joinRoom, syncRooms]);
 
   const storeThreadId = useChatStore((s) => s.currentThreadId);
   useEffect(() => {
@@ -1144,8 +1372,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
     });
   }, [threadId, storeThreadId]);
 
-  const cancelInvocation = useCallback((tid: string, catId?: string) => {
-    socketRef.current?.emit('cancel_invocation', catId ? { threadId: tid, catId } : { threadId: tid });
+  const cancelInvocation = useCallback((tid: string, catId: string | undefined, intent: ExplicitStopIntent) => {
+    const clientInstanceId = cancelClientInstanceIdRef.current;
+    if (!clientInstanceId) return false;
+    return emitExplicitCancel(socketRef.current, {
+      threadId: tid,
+      ...(catId ? { catId } : {}),
+      clientInstanceId,
+      actionId: newCancelIdentity('action'),
+      intent,
+    });
   }, []);
 
   return { socketRef, joinRoom, leaveRoom, syncRooms, cancelInvocation, socketConnected };

@@ -82,6 +82,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'scheduler-trigger-1',
+      actionLeaseCarrier: { kind: 'none' },
     });
     const running = await invocationRecordStore.update(createResult.invocationId, {
       status: 'running',

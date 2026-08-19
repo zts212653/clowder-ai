@@ -14,7 +14,6 @@
 import type { SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import { getSessionStrategy } from '../config/session-strategy.js';
 import {
   completeCapsuleForCompact,
   isCollaborationContinuityCapsuleV1,
@@ -57,7 +56,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
         threadId: record.threadId,
         catId: record.catId,
         sessionId: record.id,
-        compressionCount: record.compressionCount ?? 0,
+        compressionCount: record.compressionCount,
       },
     };
   }
@@ -103,58 +102,92 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       };
     }
 
-    // F33: Strategy-aware seal decision
-    const strategy = getSessionStrategy(record.catId as string);
-
-    if (strategy.strategy === 'compress') {
-      // compress strategy: never seal from hook, just record the compression event
-      // Atomic increment avoids race when concurrent hook calls overlap (P1 fix)
-      const newCount = await sessionChainStore.incrementCompressionCount(record.id);
-      if (newCount == null) {
-        reply.status(409);
-        return { error: 'Session disappeared during compression increment (race)', sessionId: record.id };
-      }
-      const updated = await sessionChainStore.get(record.id);
+    // #1329: the hook consumes the policy snapshot owned by this managed
+    // invocation. A config read here would let a mid-invocation settings edit
+    // change the action family and would re-introduce the policy/capability bug.
+    const policy = record.appliedPolicy;
+    if (!policy) {
       return reply.send({
-        action: 'compress_allowed',
+        action: 'no_action',
         sessionId: record.id,
-        compressionCount: newCount,
-        strategy: 'compress',
-        ...(updated ? { continuity: compactContinuityFor(updated) } : {}),
+        compressionCount: record.compressionCount,
+        executionStatus: {
+          status: 'unavailable',
+          missingCapabilities: ['managed_invocation_boundary'],
+        },
       });
     }
 
-    if (strategy.strategy === 'hybrid') {
-      const max = strategy.hybrid?.maxCompressions ?? 2;
-      // Atomic increment-then-check: avoids TOCTOU race on concurrent hook calls (P1 fix)
-      const newCount = await sessionChainStore.incrementCompressionCount(record.id);
-      if (newCount == null) {
-        reply.status(409);
-        return { error: 'Session disappeared during compression increment (race)', sessionId: record.id };
-      }
-      if (newCount <= max) {
-        const updated = await sessionChainStore.get(record.id);
+    // Atomically update lifetime telemetry (when its origin is known) and the
+    // revision-scoped hybrid counter. A concurrent policy revision makes the
+    // event stale instead of attributing it to the new epoch.
+    const observed = await sessionChainStore.recordCompressionEvent(record.id, policy.revision);
+    if (!observed) {
+      reply.status(409);
+      return { error: 'Session disappeared during compression observation (race)', sessionId: record.id };
+    }
+    const updated = await sessionChainStore.get(record.id);
+
+    if (!observed.revisionMatched) {
+      return reply.send({
+        action: 'no_action',
+        reason: 'stale_policy_revision',
+        sessionId: record.id,
+        compressionCount: observed.compressionCount,
+        strategy: policy.config.strategy,
+        policyRevision: policy.revision,
+        ...(updated?.appliedPolicy ? { activePolicyRevision: updated.appliedPolicy.revision } : {}),
+      });
+    }
+
+    const strategy = policy.config;
+    const canExecuteHandoff = policy.execution.status === 'active';
+    const maxCompressions = strategy.hybrid?.maxCompressions ?? 2;
+    const hybridCount = observed.hybridProgress?.observedCount ?? null;
+    // PreCompact arrives before the pending compaction and the store records
+    // that signal atomically before this decision. Count N is therefore the
+    // Nth compaction to allow; only signal N+1 exhausts an N-compaction policy.
+    const hybridShouldSeal =
+      strategy.strategy === 'hybrid' && canExecuteHandoff && hybridCount !== null && hybridCount > maxCompressions;
+
+    if (strategy.strategy === 'compress' || strategy.strategy === 'hybrid' || !canExecuteHandoff) {
+      if (!hybridShouldSeal) {
         return reply.send({
-          action: 'compress_allowed',
+          action: canExecuteHandoff || strategy.strategy === 'compress' ? 'compress_allowed' : 'no_action',
           sessionId: record.id,
-          compressionCount: newCount,
-          maxCompressions: max,
-          strategy: 'hybrid',
+          compressionCount: observed.compressionCount,
+          hybridProgress: observed.hybridProgress,
+          ...(strategy.strategy === 'hybrid' ? { maxCompressions } : {}),
+          strategy: strategy.strategy,
+          executionStatus: policy.execution,
           ...(updated ? { continuity: compactContinuityFor(updated) } : {}),
         });
       }
-      // At or over max → seal with max_compressions reason (not the hook's reason)
     }
 
-    // Determine seal reason: hybrid over max → 'max_compressions', otherwise use hook reason
+    // Hybrid only crosses into handoff after its active, revision-scoped count
+    // is exhausted. Degraded hybrid always stays in its own action family.
     const sealReason = strategy.strategy === 'hybrid' ? 'max_compressions' : reason;
 
     const sealResult = await sessionSealer.requestSeal({
       sessionId: record.id,
       reason: sealReason,
+      expectedPolicyRevision: policy.revision,
     });
 
     if (!sealResult.accepted) {
+      if (sealResult.rejectionReason === 'policy_revision_mismatch') {
+        const active = await sessionChainStore.get(record.id);
+        return reply.send({
+          action: 'no_action',
+          reason: 'stale_policy_revision',
+          sessionId: record.id,
+          compressionCount: observed.compressionCount,
+          strategy: policy.config.strategy,
+          policyRevision: policy.revision,
+          ...(active?.appliedPolicy ? { activePolicyRevision: active.appliedPolicy.revision } : {}),
+        });
+      }
       reply.status(409);
       return {
         error: 'Seal request not accepted (race condition)',
@@ -173,6 +206,8 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       threadId: record.threadId,
       catId: record.catId,
       status: 'sealing',
+      strategy: strategy.strategy,
+      executionStatus: policy.execution,
     });
   });
 
@@ -194,8 +229,11 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       return { error: 'No session found for this CLI session ID' };
     }
 
+    const hasObservedCompact =
+      (record.compressionCount !== null && record.compressionCount > 0) ||
+      (record.hybridProgress?.observedCount ?? 0) > 0;
     const activeCompactContinuity =
-      record.status === 'active' && (record.compressionCount ?? 0) > 0 ? compactContinuityFor(record) : undefined;
+      record.status === 'active' && hasObservedCompact ? compactContinuityFor(record) : undefined;
     if (activeCompactContinuity) {
       return reply.send({
         sessionId: record.id,
@@ -209,7 +247,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     }
 
     // Get the full chain for this cat+thread, find the latest sealed session
-    const chain = await sessionChainStore.getChain(record.catId, record.threadId);
+    const chain = await sessionChainStore.getChain(record.catId, record.threadId, record.userId);
     const sealedSessions = chain
       .filter((s) => s.status === 'sealed' && s.sealedAt != null)
       .sort((a, b) => (b.sealedAt ?? 0) - (a.sealedAt ?? 0));

@@ -31,6 +31,7 @@ function formatTokenCount(n: number): string {
 }
 
 function describeContextHealthSource(health: ContextHealthData): string {
+  if (health.usedFrom === 'context') return 'Current context fill reported by the active carrier';
   if (health.usedFrom === 'last_turn') return 'Current context fill';
   if (health.usedFrom === 'input') return 'Input-token fallback for context health; may be cumulative';
   if (health.usedFrom === 'total') return 'Total-token fallback estimate for context health';

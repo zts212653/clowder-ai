@@ -50,6 +50,17 @@ function makeStepFinish(ts, tokens = 5000, sessionID = 'ses_ralph') {
   };
 }
 
+function getMissingUsageWarnings(messages) {
+  return messages.filter((message) => {
+    if (message.type !== 'system_info') return false;
+    try {
+      return JSON.parse(message.content).type === 'warning';
+    } catch {
+      return false;
+    }
+  });
+}
+
 describe('Ralph Loop + Context Management (AC-11)', () => {
   // ── Ralph Loop: multiple step cycles produce valid event stream ──
 
@@ -104,10 +115,13 @@ describe('Ralph Loop + Context Management (AC-11)', () => {
     // clowder#915: step_finish now emits agent_loop with metadata.usage so
     // invoke-single-cat's F8 token block + F24 contextHealth path can compute
     // fillRatio and trigger handoff before context fills.
-    // Total: 1 session_init + 3 text + 3 tool_use + 3 step_finish (agent_loop) + 1 done = 11
-    assert.strictEqual(messages.length, 11, `expected 11 messages total, got ${messages.length}`);
+    // tokens.total remains useful aggregate telemetry, but cannot prove current-context usage.
+    // Total: 1 session_init + 3 text + 3 tool_use + 3 step_finish (agent_loop)
+    // + 1 missing-usage warning + 1 done = 12.
+    assert.strictEqual(messages.length, 12, `expected 12 messages total, got ${messages.length}`);
     const agentLoops = messages.filter((m) => m.type === 'agent_loop');
     assert.strictEqual(agentLoops.length, 3, 'must have 3 agent_loop telemetry markers (one per step_finish)');
+    assert.strictEqual(getMissingUsageWarnings(messages).length, 1, 'total-only telemetry must yield one warning');
   });
 
   // ── Context management: elevated token counts surface as usage telemetry ──
@@ -205,9 +219,11 @@ describe('Ralph Loop + Context Management (AC-11)', () => {
 
     // Unknown events should be dropped (transformOpenCodeEvent returns null).
     // clowder#915: step_finish now emits agent_loop with usage telemetry.
-    // Expected: 1 session_init + 2 text + 2 step_finish (agent_loop) + 1 done = 6
-    assert.strictEqual(messages.length, 6, `expected 6 messages, got ${messages.length}`);
+    // Expected: 1 session_init + 2 text + 2 step_finish (agent_loop)
+    // + 1 missing-usage warning + 1 done = 7.
+    assert.strictEqual(messages.length, 7, `expected 7 messages, got ${messages.length}`);
     assert.strictEqual(messages.filter((m) => m.type === 'agent_loop').length, 2);
+    assert.strictEqual(getMissingUsageWarnings(messages).length, 1, 'total-only telemetry must yield one warning');
   });
 
   // ── Ralph Loop continuation maintains consistent catId ──

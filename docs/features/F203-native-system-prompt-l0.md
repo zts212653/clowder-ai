@@ -1,10 +1,11 @@
 ---
 feature_ids: [F203]
-related_features: [F086, F167, F198, F210, F211, F061]
+related_features: [F086, F128, F167, F198, F210, F211, F061]
 topics: [system-prompt, governance, prompt-engineering, compression-immunity, l0-injection]
 doc_kind: spec
+tips_exempt: internal native L0 cache freshness fix; no user-facing capability surface
 created: 2026-05-15
-updated: 2026-06-19
+updated: 2026-08-01
 ---
 
 # F203: Native System Prompt L0 — 压缩免疫核心规则注入
@@ -153,11 +154,11 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 - `/api/rules` 返回 `consumption` 元数据：`actual-prompt` / `reference` / `skill-on-demand`。
 - 「规则与 SOP」面板显示四类标签：
   - **实际进 prompt**：`shared-rules.md` → governance L0 compiler → native/fallback；L0 template / per-cat compiled L0。
-  - **harness 注入**：root `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` 这类 provider project-doc 会被对应 CLI/harness 注入上下文，但不是 Cat Café native L0 真相源。
+  - **harness 注入**：root `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` 这类 provider project-doc 会被对应 CLI/harness 注入上下文，但不是 Clowder AI native L0 真相源。
   - **只是参考**：`docs/SOP.md` 等人工流程文档，不直接进入 native L0。
   - **skill 按需加载**：`SKILL.md` 仅在 skill 被选择/调用时读取。
 
-**#748**（SOP vocabulary / `sop_navigation` 分散）：#747/#749 已合入；2026-05-22 社区（terrenceeLeung / 天一）提交设计提案（第三选项——新建 `SopDefinition` 单一源、`sop_navigation` 并入），方向对齐 green light。operator 决策：归 F203、不新开 F 号，作为 Phase G 之后的独立 work item；实现路径同 #747（Cat Café 上游实现 + 同步）。**2026-05-23 design pivot**（operator 反思 "skill = 软约束需硬约束兜底"）：① `hard_rules / pitfalls` **keep + 加 machine-checkable predicate 字段**（不 drop 不 park）——它们是 `eval:sop` domain 的 ground truth，feeds F192 Phase E-sop；② schema **domain-generic from day 1**——`development` 只是第一个 domain，未来 video-cocreation / tech-article / family-office 同 schema 不同实例（消除当前 video-forge / ppt-forge / tech-writing / expert-panel 等多阶段 skill = SOP 错位写进 skill body 的归位错位）；③ `sopDefinitionId` seam 定位重新校准——不是 "YAGNI future-proofing"，是多 domain 装载入口（§6.2 的真正价值）。**2026-05-23 implementation merged**（PR #1868, squash `3d5c76772`）：`sop-definitions/development.yaml` 成为 development SOP stage 单一机器可读源，`manifest.yaml:sop_navigation` 删除；schema/codegen/check 生成 runtime `SopStage` / `SOP_DEFINITIONS` catalog，API + Mission Control 面板改读 definition-derived suggested skill，`nextSkill` 明确为 override；18 条 hard rules / pitfalls 迁入 predicate-backed ground truth，cross-domain stubs 只参与 schema 校验不进 runtime union；F192 `eval:sop` runtime evaluator 仍按计划 out of scope。详见 Timeline 2026-05-22 / 2026-05-23 + clowder-ai#748 + F192 Phase E-sop。
+**#748**（SOP vocabulary / `sop_navigation` 分散）：#747/#749 已合入；2026-05-22 社区（terrenceeLeung / 天一）提交设计提案（第三选项——新建 `SopDefinition` 单一源、`sop_navigation` 并入），方向对齐 green light。operator 决策：归 F203、不新开 F 号，作为 Phase G 之后的独立 work item；实现路径同 #747（Clowder AI 上游实现 + 同步）。**2026-05-23 design pivot**（operator 反思 "skill = 软约束需硬约束兜底"）：① `hard_rules / pitfalls` **keep + 加 machine-checkable predicate 字段**（不 drop 不 park）——它们是 `eval:sop` domain 的 ground truth，feeds F192 Phase E-sop；② schema **domain-generic from day 1**——`development` 只是第一个 domain，未来 video-cocreation / tech-article / family-office 同 schema 不同实例（消除当前 video-forge / ppt-forge / tech-writing / expert-panel 等多阶段 skill = SOP 错位写进 skill body 的归位错位）；③ `sopDefinitionId` seam 定位重新校准——不是 "YAGNI future-proofing"，是多 domain 装载入口（§6.2 的真正价值）。**2026-05-23 implementation merged**（PR #1868, squash `3d5c76772`）：`sop-definitions/development.yaml` 成为 development SOP stage 单一机器可读源，`manifest.yaml:sop_navigation` 删除；schema/codegen/check 生成 runtime `SopStage` / `SOP_DEFINITIONS` catalog，API + Mission Control 面板改读 definition-derived suggested skill，`nextSkill` 明确为 override；18 条 hard rules / pitfalls 迁入 predicate-backed ground truth，cross-domain stubs 只参与 schema 校验不进 runtime union；F192 `eval:sop` runtime evaluator 仍按计划 out of scope。详见 Timeline 2026-05-22 / 2026-05-23 + clowder-ai#748 + F192 Phase E-sop。
 
 ## Acceptance Criteria
 
@@ -255,6 +256,7 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 | Codex CLI argv override 在某些 model（如 spark）下不生效 | S4 已验证主线 codex，spark/gpt52 在 Phase C runtime 重启时同步验（AC-C5 三猫 invocation 覆盖） |
 | CC 大版本升级带来新功能性指令，我们 L0 没补上导致功能退化 | Phase E SOP + cron 自动化触发 audit |
 | 直接切（不灰度）导致全猫一起故障 | `git revert` + runtime 重启 3 分钟回滚；spike S0-S4 已验证替换式 basic feasibility |
+| 长驻 API 进程在 prompt/governance merge 后继续服务 startup-warmed native L0 cache | `compileL0ViaSubprocess` 在 cache hit 前计算 L0 dependency signature；`assets/system-prompts/system-prompt-l0.md`、`assets/prompt-templates/`、`cat-cafe-skills/refs/shared-rules.md` + `.local*`、workflow overlay 目录变更即 lazy clear cache；`l0-compiler.test.js` 覆盖 L5 template 与 governance 变更后必须重新 spawn |
 | 把 Gemini consumer 6/18 deadline 误读为“Gemini CLI 对所有人死亡” | KD-20：consumer path 不再主线，但 enterprise / Google Cloud / paid API-key fallback 保留；不删除可用企业通道 |
 | 把 AGY CLI 当成 Gemini ACP drop-in replacement | F210 Phase G 已证 `agy 1.0.1` 无 supported ACP；本机 `agy 1.0.3` help 仍无 `--acp` / `--model` / `--system`。必须 spike 后再接，不允许替换 `GeminiAcpAdapter` command |
 | 把 Antigravity Rules / first-prompt prepend 当作 native L0 | AC-H2 要求区分 prompt-level fallback vs privileged system/preamble channel；只有后者才能标记 F203 native |
@@ -282,13 +284,14 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 | KD-16 | Rules & SOP 面板必须展示 prompt 消费链，而不只是文件列表 | #749：operator需要知道“实际进 prompt / 只是参考 / skill 按需加载”。`/api/rules` 增 `consumption` 元数据，前端用四类标签显式展示 shared-rules→governance L0→native/fallback、root provider project-doc 的 harness 注入、SOP 参考文档、SKILL.md 按需加载。#748 词汇收敛 deferred，不抢跑。 | 2026-05-21 |
 | KD-17 | Governance L0 compiler anchors must be sanitizer-invariant | Outbound sync public gate exposed a cross-repo drift: `_sanitize-rules.pl` rewrites family names in `cat-cafe-skills/refs/shared-rules.md`（`Maine Coon`→`Maine Coon`、`Siamese`→`Siamese`），but `packages/api/.../governance-l0.ts` was not sanitized and asserted exact localized headings. Result: exported public API startup failed before touching clowder-ai. Fix: assert stable protocol core anchors（`fallback 层数检测协议` / `创意-实现解耦协议`）and derive output labels from the actual heading, so internal output keeps localized labels and public output follows sanitized `Maine Coon` / `Siamese`. Do not sanitize `packages/` code to avoid rewriting runtime identifiers. | 2026-05-21 |
 | KD-18 | Claude carrier 选择正交于 F203 native L0 注入 | AC-C5 alpha probe 发现 runtime default 仍走 `ClaudeAgentService(-p)`，而 Phase C 只在 opt-in `ClaudeBgCarrierService(--bg)` 接了 compiled L0。正确 invariant：`-p` vs `--bg` 只决定执行/会话模式，不能决定身份/家规是否进压缩免疫层；两条 Claude carrier 都必须用 `--system-prompt-file <compiled L0>`，且用户 `cliConfigArgs` 不得覆盖该保留 flag。 | 2026-05-24 |
-| KD-19 | L0 必须把"家里独有能力 trigger reflex"显式注入认知路径，软提示发现率由 eval 数据驱动 iterate | operator观察："家里做了 browser-preview / rich-messaging / propose_thread 等很多功能猫猫竟然不知道可以用"——skills 在 manifest ≠ 在认知路径。猜测式选 Tier 1 不够；需 eval 跟测掉球率数据驱动 iterate。三猫盘点（47 6 self-check + Siamese 10 UX trigger + Maine Coon 8 backend trigger，合并去重 → 13 条 Tier 1）→ L0 §8 "Cat Café 家里独有能力唤醒指南（场景→skill 触发反射）"+ `cat-cafe-skills/refs/capability-wakeup-index.md` ref doc。Path C double-track：ship v1 不阻塞 + 并行 F192 reopen Phase F `eval:capability-wakeup`（per-cat per-scenario weekly miss rate verdict）→ N 周后数据驱动 §8 v2 iterate。operator 2026-05-27 sign-off Path C.1 + F192 reopen。 | 2026-05-27 |
+| KD-19 | L0 必须把"家里独有能力 trigger reflex"显式注入认知路径，软提示发现率由 eval 数据驱动 iterate | operator观察："家里做了 browser-preview / rich-messaging / propose_thread 等很多功能猫猫竟然不知道可以用"——skills 在 manifest ≠ 在认知路径。猜测式选 Tier 1 不够；需 eval 跟测掉球率数据驱动 iterate。三猫盘点（47 6 self-check + Siamese 10 UX trigger + Maine Coon 8 backend trigger，合并去重 → 13 条 Tier 1）→ L0 §8 "Clowder AI 家里独有能力唤醒指南（场景→skill 触发反射）"+ `cat-cafe-skills/refs/capability-wakeup-index.md` ref doc。Path C double-track：ship v1 不阻塞 + 并行 F192 reopen Phase F `eval:capability-wakeup`（per-cat per-scenario weekly miss rate verdict）→ N 周后数据驱动 §8 v2 iterate。operator 2026-05-27 sign-off Path C.1 + F192 reopen。 | 2026-05-27 |
 | KD-20 | Gemini CLI / `gemini --acp` 不再作为 F203 native L0 主线，只保留 enterprise/API-key fallback | Google 2026-05-19 官方公告：consumer Gemini CLI / Gemini Code Assist IDE / GitHub requests for free, Google AI Pro, Ultra, and individuals stop being served on 2026-06-18；Standard/Enterprise、Google Cloud、paid Gemini / Gemini Enterprise Agent Platform API keys 继续。`gemini --acp` 是 Gemini CLI 的 ACP mode，不是独立免疫路线。家里 F210 已把非 ACP Google route 默认迁到 `GEMINI_ADAPTER=antigravity-cli`，但 catalog ACP entries 仍优先走 `gemini --acp`。因此 F203 不应继续把 S5 当主线投入。 | 2026-05-31 |
 | KD-21 | Antigravity native L0 后续必须拆成两个 spike：AGY CLI 与 Antigravity Desktop/IDE | 两者不是同一个 carrier：AGY CLI 是 F210 headless Google successor，目标是替代 consumer Gemini CLI/ACP；Antigravity Desktop/IDE 是 F061/F211 Bengal bridge，目标是让Bengal获得 F203 native L0。当前 `agy 1.0.3` help 无 `--acp` / `--model` / `--system`；Desktop `SendUserCascadeMessage` payload 只有 text/media/model/cascadeConfig，无 system/preamble 字段。Rules / first-prompt prepend 只能算 prompt-level fallback。 | 2026-05-31 |
 | KD-22 | AGY CLI native L0 不可达 → 转 prompt-level fallback | S6 spike（47 binary 深挖 + Maine Coon公开文档侦察协作）：agy 1.0.4 公开面无 default/root agent override（CLI 无 `--agent`/`--system`、`settings.json` 无 agent field、Plugins/Hooks 只暴露 subagent 层 `define_subagent` + `agents/`）；binary 有 `agent_script`/`GetMainAgent`/`CustomAgentSpec` proto 但无公开提供入口。subagent `system_prompt` 是 reachable candidate 但非 main-cat L0 carrier（主 agent 仍裸 + 路由靠自觉 invoke）。POC 边际价值 < 成本（不改"root agent 无 override"主结论）故不做。AGY 身份注入维持 prompt-level（profile 隔离 + 污染收口 AC-H0 + 每轮 prepend + drift/版本守护）。retraction：官方未来出 custom root agent / default-agent override / `--agent` flag 重开。 | 2026-06-01 |
-| KD-23 | OpenCode `instructions` 是 native L0 可达通道——压缩免疫 by design | S8 源码验证（Ragdoll 46，pin `sst/opencode@v1.15.13` commit `385cb69`）：OpenCode 的 `opencode.json` `instructions` 数组指向的文件**每轮 fresh 读取**（`instruction.ts` `system()`）→ 注入为 `role: "system"` messages（`request.ts` `prepare()`，非 OpenAI-OAuth provider）→ **不进对话历史**（`compaction.ts` 只压缩 user/assistant turns）→ **功能等价 Claude `--system-prompt-file`**。Cat Café 的 `OpenCodeAgentService` 当前不调用 `compileL0`、不声明 `injectsL0Natively()`，route 层对金渐层走 full `buildStaticIdentity` prepend = 可被 compaction 吃。修复路径：runtime config `instructions` 注入 compiled L0 temp file + `injectsL0Natively() → true`。golden-chinchilla 需独立 workflow triggers（评估复用 ragdoll 或独立定义，因 model 是 opus-4-6 但 family 不同）。 | 2026-06-03 |
+| KD-23 | OpenCode `instructions` 是 native L0 可达通道——压缩免疫 by design | S8 源码验证（Ragdoll 46，pin `sst/opencode@v1.15.13` commit `385cb69`）：OpenCode 的 `opencode.json` `instructions` 数组指向的文件**每轮 fresh 读取**（`instruction.ts` `system()`）→ 注入为 `role: "system"` messages（`request.ts` `prepare()`，非 OpenAI-OAuth provider）→ **不进对话历史**（`compaction.ts` 只压缩 user/assistant turns）→ **功能等价 Claude `--system-prompt-file`**。Clowder AI 的 `OpenCodeAgentService` 当前不调用 `compileL0`、不声明 `injectsL0Natively()`，route 层对金渐层走 full `buildStaticIdentity` prepend = 可被 compaction 吃。修复路径：runtime config `instructions` 注入 compiled L0 temp file + `injectsL0Natively() → true`。golden-chinchilla 需独立 workflow triggers（评估复用 ragdoll 或独立定义，因 model 是 opus-4-6 但 family 不同）。 | 2026-06-03 |
 | KD-24 | AGY 1.0.9 复核 retraction 条件 = 仍不触发 | 47 2026-06-19 复核 `agy --help` 公开面（从 1.0.4 跳到 1.0.9，5 个 minor 版本）：flags 仍只有 `--add-dir` / `-c` / `--continue` / `--conversation` / `--dangerously-skip-permissions` / `-i/--prompt-interactive` / `--log-file` / `--model` / `-p/--print` / `--prompt` / `--sandbox`；subcommands 只有 `changelog/help/install/models/plugin/update`。**没有 `--agent` flag / `--system` / root agent override / system channel**。KD-22 "AGY CLI native L0 不可达"主结论维持 valid；prompt-level fallback 维持。retraction trigger 重申：官方 CLI 出现 `--agent` / `--system-prompt` / root-agent override / system prompt config field 之一时重开 spike。 | 2026-06-19 |
 | KD-25 | OpenCode AC-I8 runtime 验收 deferred — operator 签字降级 | operator 2026-06-19 directive："opencode 这个我们没有 api 哈哈哈 那我们标记一下？"。家里 runtime carrier flow 不接入 OpenCode invocation（无 API/subscription），AC-I8 alpha 体感测试无 production 路径可跑。Phase I 已合入的 implementation（PR #2069）+ S8 源码验证（KD-23）证明 OpenCode `instructions` 通道 by-design compression-immune；运行时验收只是体感确认（identity/governance compaction 后不丢）。**Retraction condition**：OpenCode API/subscription 接入产线 carrier flow（OpenCodeAgentService 实际承载 invocation）时，开 mini-spec 或 reopen issue 重跑 AC-I8 alpha smoke。**不留 stub 尾巴**：F203 整体 close，未来重开走新单据，不挂虚 follow-up。 | 2026-06-19 |
+| KD-26 | Native L0 cache hit 前必须校验 L0 dependency signature | F128 projectPath guard 愿景守护发现：PR merge 改了 L5 template，但 prod API 长驻进程的 `warmL0Cache()` 结果不会因 `assets/prompt-templates/` 变化失效；cloud review 补充指出 `{{GOVERNANCE_L0}}` 也由 `shared-rules.md` + `.local*` 编译进 native L0。选择 lazy stat signature 而不是 watcher：调用点单一、无后台生命周期、长驻进程下一次 invocation 自动刷新；签名不可计算时 bypass cache，优先 freshness。 | 2026-07-07 |
 
 ## Spike Log
 
@@ -322,3 +325,44 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 - [x] Eval Contract 4 项（Primary Users + Activation: 全猫每次 invocation；Friction: token 总量 + 压缩后规则保留率 + 客观性能力覆盖；Regression Fixture: SystemPromptBuilder 80+ test + S2 6 项功能性 spike；Sunset Signal: Phase E cleanup + cron audit ≥ 3 个 CC 版本无新增遗漏）
 - [x] Design Gate 元审美自检（这是坐标变换——把 L0 从可压缩通道切到压缩免疫通道是结构改变，不是多项式堆补丁）
 - [x] In-context Observability 字段（primary_surface: runtime 重启后猫猫 invocation 实际行为；why_not_dashboard_only: 行为退化在猫的回答里现场可见，dashboard 只是后置 metric；deep_dive_surface: docs/audits/cc-system-prompt-vN.N.N.md；noise_dedup_policy: `git revert` + runtime 重启快速回滚）
+
+## Phase E — workspace-navigator branch 1 verify（2026-07-26 sinked by opus-47）
+
+**Context**: eval:capability-wakeup weekly verdict PR #2891/#3108/#3217 三轮 fix loop，workspace-navigator miss_rate 保持 100%，all cognitive. 2026-07-20 三方 coord confirm 的 branch 1 verify (`node scripts/compile-system-prompt-l0.mjs --cat codex-sol`) 于 2026-07-26 03:45Z 执行。
+
+**Case C 结论（不是预设的 A/B）**:
+
+Branch 1 verify 未落到 case A（L6/L7 compile pull 断裂）或 case B（advisory 无效），撞到未预料的 **Case C: catId 未注册**：
+
+- `compileL0` 抛 `unknown catId "codex-sol"`；registered = `opus, sonnet, opus-45, fable-5, codex, gpt52, spark, gpt-pro, gemini, gemini25, gemini35, glm52, antigravity, antig-opus, agy-opus, opencode, kimi, opus-47`
+- `cat-template.json` 无 codex-sol variant
+- `assets/system-prompts/system-prompt-l0.md` teammate roster 无 codex-sol 段
+- 但 `codex-sol` 在 4 处代码路径被引用：`route-serial.ts` / `routing-guard-remedial.ts` / `InputEntityDetector.ts` / `f254-codex-native-freshness-live-fixture.ts`
+
+**根因**: codex-sol 作为 identity 存在于 routing/detection 层但**从未 register 成正式 catId**。Compile chain 从 catRegistry 拿不到 → 生成不了 L0 → workspace-navigator recipe 根本没到达 codex-sol 的 prompt。三轮 verdict fix loop 100% miss 是**结构性**的，不是 advisory 内容问题。
+
+**Fix path（下次 F203 sprint 开工首动作）**:
+1. **在 `cat-template.json` register codex-sol variant**（含 breed=maine-coon / model=gpt-5.6-sol / pronouns=他/he / dossier link / operator signoff）
+2. **补 `assets/system-prompts/system-prompt-l0.md` teammate roster codex-sol 段**
+3. **verify compile succeeds** for codex-sol：`node scripts/compile-system-prompt-l0.mjs --cat codex-sol` should emit prompt containing workspace-navigator recipe
+4. 走 quality-gate + cross-family review + merge-gate
+
+**交付真相（2026-08-01，PR #3329）**：上述是实现前候选路径，最终按 registry-derived compiler 的单一真相源收敛：
+
+- [x] canonical template 注册最小 `codex-sol` variant，并补 top-level roster、stale-catalog persistence/resolved-read 与 reviewer visibility；完整 dossier/persona 字段没有为修复 Case C 而重复灌入。
+- [x] teammate roster 由 catalog 编译生成；不再手改 `assets/system-prompts/system-prompt-l0.md` 静态段，避免静态矩阵与 runtime catalog 再次漂移。
+- [x] `compileL0(codex-sol)` 成功且包含 `workspace-navigator` capability wakeup；预算与跨 surface 回归见 Timeline 的 PR #3329 证据。
+- [ ] live runtime 尚未同步/重启；真实 invocation smoke 与下一轮 weekly eval 才验证 cognitive miss 是否下降。
+
+**Scope discipline**:
+- 本 Case C 是 F203 owner slice — cat identity registration is native L0 system 组成部分
+- 与 F192/F211 harness plumbing（scheduler override / runtime-session index / MCP schema / sealed-vs-live jsonl）解耦
+- 修完 Case C 后 next weekly eval 才能真验 case A/B 是否也需要修（advisory recipe reaches or not）
+
+**Closure ETA**: before 2026-08-02T03:00:00Z eval fire（下次 F203 sprint 开工立即做，避免"下次一定"累犯 — feedback_xiaci_yiding 反射）
+
+**Provenance**:
+- Verdict PRs: #2891 / #3108 / #3217 (main HEAD `f859bbc4ec29...`)
+- Verdict docs: `docs/harness-feedback/verdicts/2026-07-1[29]-capability-wakeup-workspace-navigator-*-.md` + `2026-07-26-*-insufficient-fix-v2.md`
+- Coord: thread `thread_eval_capability_wakeup` messages `0001785037108887 → 0001785037230275 → 0001785037388966`（terminal Release）
+- Previous parallel-self F203 fix: `50ec90163` (2026-07-16, advisory-only, predicted case-C failure in fallback 段)

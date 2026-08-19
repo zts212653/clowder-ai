@@ -76,6 +76,15 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('persists and hydrates the cat_bedroom system kind', async () => {
+    const created = await store.create('user1', 'codex-sol 的卧室');
+
+    await store.updateSystemKind(created.id, 'cat_bedroom');
+
+    const fetched = await store.get(created.id);
+    assert.equal(fetched.systemKind, 'cat_bedroom');
+  });
+
   it('ensureExternalRuntimeAnchorThread stores a persistent hidden anchor', async () => {
     const anchor = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
     const again = await store.ensureExternalRuntimeAnchorThread('antigravity-desktop', 'user1');
@@ -380,6 +389,39 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(activity.length, 0, 'Should not have orphaned activity data for deleted thread');
   });
 
+  // F297 AC-B3: Sidebar 列表规模下必须批量读；纯 in-memory route 测试测不到 Redis 行为
+  it('getParticipantsWithActivityBatch() matches the single-thread contract across threads', async () => {
+    const busy = await store.create('user1', 'Busy thread');
+    const quiet = await store.create('user1', 'Quiet thread');
+    const empty = await store.create('user1', 'No participants');
+
+    await store.updateParticipantActivity(busy.id, 'sonnet', false);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await store.updateParticipantActivity(busy.id, 'opus5', true);
+    await store.updateParticipantActivity(quiet.id, 'opus5', true);
+
+    const batch = await store.getParticipantsWithActivityBatch([busy.id, quiet.id, empty.id, 'thread_missing']);
+
+    // 降序契约：F297 的 done/error 取 [0] 当作"最近一次回应"，顺序错了会挑错猫
+    assert.equal(batch.get(busy.id)[0].catId, 'opus5', 'batch must sort by lastMessageAt desc');
+    assert.equal(batch.get(busy.id)[0].lastResponseHealthy, true);
+    assert.equal(batch.get(busy.id)[1].catId, 'sonnet');
+    assert.equal(batch.get(busy.id)[1].lastResponseHealthy, false);
+    assert.equal(batch.get(quiet.id).length, 1);
+    assert.deepEqual(batch.get(empty.id), []);
+    assert.deepEqual(batch.get('thread_missing'), [], 'unknown threads resolve to empty, not undefined');
+
+    // 与单条版本逐字段一致——批量不得是第二套语义
+    for (const threadId of [busy.id, quiet.id, empty.id]) {
+      assert.deepEqual(batch.get(threadId), await store.getParticipantsWithActivity(threadId));
+    }
+  });
+
+  it('getParticipantsWithActivityBatch() handles an empty request without touching Redis', async () => {
+    const batch = await store.getParticipantsWithActivityBatch([]);
+    assert.equal(batch.size, 0);
+  });
+
   it('get() self-heals orphaned thread metadata from surviving message timeline', async () => {
     const recoveredTitleSource = 'F100 Self-Evolution discussion kickoff';
     const recoveredTitle =
@@ -529,6 +571,79 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(await redis.ttl(threadActivityKey(thread.id)), -1);
   });
 
+  it('F262: stores member effort as isolated sidecar fields and bulk reads once', async () => {
+    const thread = await store.create('user1', 'Effort Overrides');
+
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    await store.updateMemberEffort(thread.id, 'opus', 'low');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberEffort:codex-sol'), 'max');
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), 'max');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {
+      'codex-sol': 'max',
+      opus: 'low',
+    });
+    assert.equal((await store.get(thread.id)).memberEffortOverrides, undefined);
+  });
+
+  it('F262: clear, corrupt raw value, and deleted-thread writes fail closed', async () => {
+    const thread = await store.create('user1', 'Effort Safety');
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'ultra');
+    await store.updateMemberEffort(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberEffort(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberEffort:codex-sol', 'bogus');
+    assert.deepEqual(await store.getMemberEfforts(thread.id, 'user1'), {});
+
+    await store.delete(thread.id);
+    await store.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F262: persistent effort mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Effort TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberEffort(thread.id, 'codex-sol', 'max');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
+  it('F291: stores persistent member speed as isolated sidecar fields and rejects corrupt values', async () => {
+    const thread = await store.create('user1', 'Speed Overrides');
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    await store.updateMemberSpeed(thread.id, 'codex-terra', 'standard');
+
+    assert.equal(await redis.hget(threadDetailKey(thread.id), 'memberSpeed:codex-sol'), 'fast');
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), 'fast');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), {
+      'codex-sol': 'fast',
+      'codex-terra': 'standard',
+    });
+
+    await store.updateMemberSpeed(thread.id, 'codex-sol', null);
+    assert.equal(await store.getMemberSpeed(thread.id, 'codex-sol', 'user1'), undefined);
+
+    await redis.hset(threadDetailKey(thread.id), 'memberSpeed:codex-sol', 'turbo');
+    assert.deepEqual(await store.getMemberSpeeds(thread.id, 'user1'), { 'codex-terra': 'standard' });
+
+    await store.delete(thread.id);
+    await store.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.deepEqual(await redis.hkeys(threadDetailKey(thread.id)), []);
+  });
+
+  it('F291: persistent speed mutation clears a legacy detail TTL', async () => {
+    const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
+    const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
+    const thread = await expiringStore.create('user1', 'Speed TTL');
+    assert.ok((await redis.ttl(threadDetailKey(thread.id))) > 0);
+
+    await persistentStore.updateMemberSpeed(thread.id, 'codex-sol', 'fast');
+    assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
   it('persistent mode also clears legacy TTL on detail-only mutations', async () => {
     const expiringStore = new RedisThreadStore(redis, { ttlSeconds: 60 });
     const persistentStore = new RedisThreadStore(redis, { ttlSeconds: 0 });
@@ -544,6 +659,80 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
 
     await persistentStore.updateMentionActionabilityMode(thread.id, 'strict');
     assert.equal(await redis.ttl(threadDetailKey(thread.id)), -1);
+  });
+
+  it('F297 (local R11 P1-2) — participants pipeline: unknown replies fail closed', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 两段 pipeline 各自的失败链此前没有 durable regression：106/106 全绿也证明不了
+    // 短 reply / entry error / 非法 member 会抛。
+    const thread = await store.create('u-neg', 'neg thread');
+    await store.addParticipants(thread.id, ['opus5']);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withFirstReply = (reply) => {
+      let first = true;
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        if (first) {
+          first = false;
+          p.exec = async () => reply;
+        }
+        return p;
+      };
+    };
+    try {
+      for (const [label, reply] of [
+        ['short reply', []],
+        ['entry error', [[new Error('transient-participants'), null]]],
+        ['non-array payload', [[null, 'not-a-set']]],
+        ['non-string member', [[null, [123]]]],
+      ]) {
+        withFirstReply(reply);
+        await assert.rejects(
+          () => store.getParticipantsWithActivityBatch([thread.id]),
+          (err) => err instanceof Error,
+          `participants stage must fail closed: ${label}`,
+        );
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+
+  it('F297 (local R11 P1-2) — activity pipeline: unknown replies fail closed', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    const thread = await store.create('u-neg2', 'neg thread 2');
+    await store.addParticipants(thread.id, ['opus5']);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withSecondReply = (reply) => {
+      let call = 0;
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        call += 1;
+        if (call === 2) p.exec = async () => reply;
+        return p;
+      };
+    };
+    try {
+      for (const [label, reply] of [
+        ['short reply', []],
+        ['entry error', [[new Error('transient-activity'), null]]],
+        ['non-hash payload', [[null, 'not-a-hash']]],
+        ['non-string field', [[null, { 'opus5:lastMessageAt': 5 }]]],
+      ]) {
+        withSecondReply(reply);
+        await assert.rejects(
+          () => store.getParticipantsWithActivityBatch([thread.id]),
+          (err) => err instanceof Error,
+          `activity stage must fail closed: ${label}`,
+        );
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
   });
 });
 

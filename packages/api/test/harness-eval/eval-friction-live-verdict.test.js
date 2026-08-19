@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
+import { buildFrictionRollupReport } from '../../dist/infrastructure/harness-eval/friction/friction-rollup-report.js';
+
 /**
  * F245 Phase C PR1b — eval-friction live-verdict file-writer tests (L3).
  *
@@ -98,6 +100,29 @@ const SELECTOR = {
   windowEndMs: 1_780_600_000_000,
 };
 
+function stubMeasurementCapture(options = {}, captureSelector = SELECTOR) {
+  const rollupInput = stubRollupInput(options);
+  const capturedAt = '2026-06-20T00:00:00.000Z';
+  return {
+    capturedAt,
+    expectedCancelIds: [],
+    channelCaptures: {
+      'paw-feel': {
+        status: 'ok',
+        emittedIds: rollupInput.signals.filter((item) => item.channel === 'paw-feel').map((item) => item.id),
+      },
+      cancel: { status: 'ok', emittedIds: [] },
+      'user-feedback': { status: 'ok', emittedIds: [] },
+      'eval-domain': { status: 'ok', emittedIds: [] },
+    },
+    rollupInput,
+    rollupReport: buildFrictionRollupReport(rollupInput, capturedAt, {
+      ...(captureSelector.topN !== undefined ? { topN: captureSelector.topN } : {}),
+      ...(captureSelector.tokenCap !== undefined ? { tokenCap: captureSelector.tokenCap } : {}),
+    }),
+  };
+}
+
 describe('generateFrictionLiveVerdict', () => {
   let tmpDir;
 
@@ -120,7 +145,7 @@ describe('generateFrictionLiveVerdict', () => {
       verdictId,
       harnessFeedbackRoot,
       domain: DOMAIN,
-      rollupInput: stubRollupInput({ clusters: 2 }),
+      measurementCapture: stubMeasurementCapture({ clusters: 2 }),
       selector: SELECTOR,
       submittedPacket: stubPacket(),
       generatedAt: '2026-06-20T00:00:00.000Z',
@@ -142,12 +167,22 @@ describe('generateFrictionLiveVerdict', () => {
     assert.ok(existsSync(join(result.bundleDir, 'provenance.json')));
     // raw rollup report under bundle/raw (task-outcome shape — Decision 2)
     assert.ok(existsSync(join(result.bundleDir, 'raw', 'rollup-report.json')), 'raw rollup report must be written');
+    assert.ok(
+      existsSync(join(result.bundleDir, 'raw', 'measurement-validity.json')),
+      'decision-bearing friction bundle must carry measurement validity',
+    );
     const rawReport = JSON.parse(readFileSync(join(result.bundleDir, 'raw', 'rollup-report.json'), 'utf8'));
     assert.ok(Array.isArray(rawReport.report.actionableCandidates), 'raw report must surface actionableCandidates');
     assert.ok(Array.isArray(rawReport.report.referenceOnly), 'raw report must surface referenceOnly');
     assert.equal(rawReport.report.actionableCandidates.length, 2, 'two paw-feel clusters → two actionable candidates');
     assert.equal(rawReport.report.referenceOnly.length, 0, 'no eval-domain clusters in this fixture');
     assert.ok(rawReport.report.actionableCandidates[0].followupDraft, 'actionable candidate must carry followupDraft');
+    const validity = JSON.parse(readFileSync(join(result.bundleDir, 'raw', 'measurement-validity.json'), 'utf8'));
+    assert.equal(validity.baselineKind, 'prospective_paired_capture');
+    assert.equal(validity.historicalBaseline.classification, 'symptom_cohort');
+    assert.equal(validity.cancelJoin.status, 'no_opportunity');
+    assert.equal(validity.cancelJoin.recall, null);
+    assert.equal(validity.decision.status, 'insufficient');
 
     // snapshot conforms to a2a bundle schema
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
@@ -162,8 +197,12 @@ describe('generateFrictionLiveVerdict', () => {
     const provenance = JSON.parse(readFileSync(join(result.bundleDir, 'provenance.json'), 'utf8'));
     assert.equal(provenance.verdictId, verdictId);
     assert.equal(provenance.generator.name, 'eval-friction-live-verdict');
-    assert.ok(provenance.rawInputs.length >= 1);
-    assert.match(provenance.rawInputs[0].sha256, /^[0-9a-f]{64}$/);
+    assert.equal(provenance.rawInputs.length, 2);
+    for (const rawInput of provenance.rawInputs) assert.match(rawInput.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(
+      provenance.rawInputs.some((item) => item.path.endsWith('/raw/measurement-validity.json')),
+      'measurement validity artifact must be independently hashed',
+    );
 
     // canonical refs
     assert.match(result.refs.snapshotRef, /^snapshot:bundle\//);
@@ -182,7 +221,7 @@ describe('generateFrictionLiveVerdict', () => {
       verdictId: 'vhp-friction-empty',
       harnessFeedbackRoot,
       domain: DOMAIN,
-      rollupInput: stubRollupInput({ clusters: 0 }),
+      measurementCapture: stubMeasurementCapture({ clusters: 0 }),
       selector: SELECTOR,
       submittedPacket: stubPacket({ id: 'vhp-friction-empty' }),
       generatedAt: '2026-06-20T00:00:00.000Z',
@@ -206,7 +245,7 @@ describe('generateFrictionLiveVerdict', () => {
       harnessFeedbackRoot,
       domain: DOMAIN,
       // 12 clusters + tokenCap=1 → fold-down loop drives cut to 0: topClusters empty, tail holds all.
-      rollupInput: stubRollupInput({ clusters: 12 }),
+      measurementCapture: stubMeasurementCapture({ clusters: 12 }, { ...SELECTOR, tokenCap: 1 }),
       selector: { ...SELECTOR, tokenCap: 1 },
       submittedPacket: stubPacket({ id: 'vhp-friction-tail' }),
       generatedAt: '2026-06-20T00:00:00.000Z',
@@ -234,7 +273,7 @@ describe('generateFrictionLiveVerdict', () => {
           verdictId: 'vhp-friction-mismatch',
           harnessFeedbackRoot,
           domain: DOMAIN,
-          rollupInput: stubRollupInput({ clusters: 1 }),
+          measurementCapture: stubMeasurementCapture({ clusters: 1 }),
           selector: SELECTOR,
           submittedPacket: stubPacket({
             id: 'vhp-friction-mismatch',
@@ -243,6 +282,47 @@ describe('generateFrictionLiveVerdict', () => {
           generatedAt: '2026-06-20T00:00:00.000Z',
         }),
       /submitted_packet_evidence_mismatch|F245/,
+    );
+  });
+
+  it('hard-rejects a point-only rollup that omits the measurement capture', async () => {
+    const { generateFrictionLiveVerdict } = await import(IMPORT_LIVE_VERDICT);
+    const harnessFeedbackRoot = join(tmpDir, 'docs', 'harness-feedback');
+    mkdirSync(harnessFeedbackRoot, { recursive: true });
+
+    assert.throws(
+      () =>
+        generateFrictionLiveVerdict({
+          verdictId: 'vhp-friction-point-only',
+          harnessFeedbackRoot,
+          domain: DOMAIN,
+          selector: SELECTOR,
+          submittedPacket: stubPacket({ id: 'vhp-friction-point-only' }),
+          generatedAt: '2026-06-20T00:00:00.000Z',
+        }),
+      /friction_measurement_capture_required/,
+    );
+  });
+
+  it('hard-rejects a measurement capture from a different exact window', async () => {
+    const { generateFrictionLiveVerdict } = await import(IMPORT_LIVE_VERDICT);
+    const harnessFeedbackRoot = join(tmpDir, 'docs', 'harness-feedback');
+    mkdirSync(harnessFeedbackRoot, { recursive: true });
+    const measurementCapture = stubMeasurementCapture({ clusters: 1 });
+    measurementCapture.rollupInput.window.untilMs += 1;
+
+    assert.throws(
+      () =>
+        generateFrictionLiveVerdict({
+          verdictId: 'vhp-friction-window-mismatch',
+          harnessFeedbackRoot,
+          domain: DOMAIN,
+          measurementCapture,
+          selector: SELECTOR,
+          submittedPacket: stubPacket({ id: 'vhp-friction-window-mismatch' }),
+          generatedAt: '2026-06-20T00:00:00.000Z',
+        }),
+      /friction_measurement_window_mismatch/,
     );
   });
 });

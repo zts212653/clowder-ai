@@ -46,6 +46,8 @@ describe('workspace file/raw endpoint (integration)', () => {
     await mkdir(testBase, { recursive: true });
     await writeFile(join(testBase, 'logo.png'), TINY_PNG);
     await writeFile(join(testBase, 'photo.jpg'), TINY_PNG); // fake jpg
+    await writeFile(join(testBase, 'literal%20image.png'), Buffer.from([0x11, 0x22, 0x33]));
+    await writeFile(join(testBase, 'literal image.png'), Buffer.from([0x44, 0x55, 0x66]));
     await writeFile(join(testBase, 'code.ts'), 'export {}');
     // Fake audio/video files (content doesn't matter for MIME routing)
     await writeFile(join(testBase, 'clip.mp3'), Buffer.from([0xff, 0xfb, 0x90, 0x00]));
@@ -87,6 +89,17 @@ describe('workspace file/raw endpoint (integration)', () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'image/jpeg');
+  });
+
+  it('preserves native percent bytes in raw media paths', async () => {
+    const query = new URLSearchParams({
+      worktreeId,
+      path: `${TEST_DIR}/literal%20image.png`,
+    });
+    const res = await app.inject({ method: 'GET', url: `/api/workspace/file/raw?${query}` });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.rawPayload, Buffer.from([0x11, 0x22, 0x33]));
   });
 
   // ── Audio/video files served (Gap 5) ──

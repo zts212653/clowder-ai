@@ -1,6 +1,10 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH,
+  resolveSafeInteractiveCallbackEndpoint,
+} from '@/components/rich/guideClientActions';
 import { InteractiveBlock } from '@/components/rich/InteractiveBlock';
 import type { RichInteractiveBlock } from '@/stores/chat-types';
 import { useGuideStore } from '@/stores/guideStore';
@@ -72,6 +76,74 @@ describe('InteractiveBlock direct callback actions', () => {
     });
     container.remove();
     useGuideStore.setState({ session: null, completionPersisted: false, completionFailed: false, pendingStart: null });
+  });
+
+  it('allows only the exact cat-life decision callback path', () => {
+    expect(resolveSafeInteractiveCallbackEndpoint(CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH)).toBe(
+      CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH,
+    );
+    expect(resolveSafeInteractiveCallbackEndpoint('/api/auto-dream/life-settings/preview')).toBeNull();
+    expect(resolveSafeInteractiveCallbackEndpoint('/api/auto-dream/life-settings/decision/force')).toBeNull();
+    expect(
+      resolveSafeInteractiveCallbackEndpoint('https://example.com/api/auto-dream/life-settings/decision'),
+    ).toBeNull();
+  });
+
+  it.each([
+    { buttonLabel: '确认这个作息', decision: 'confirm' },
+    { buttonLabel: '先不改变', decision: 'cancel' },
+  ])('submits the $decision action attached to the actual F255 MCP confirmation option', async (selection) => {
+    apiFetchMock.mockResolvedValue({ ok: true, status: 200 });
+    const mcpCatLifePreviewBlock: RichInteractiveBlock = {
+      id: 'cat-life-preview-test',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'confirm',
+      title: '确认 codex-sol 的生活作息？',
+      description: '确认前不会写配置，也不会创建 Present Loop。',
+      options: [
+        {
+          id: 'confirm',
+          label: '确认这个作息',
+          description: '采用预览（low 成本档）',
+          action: {
+            type: 'callback',
+            endpoint: CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH,
+            payload: { previewId: 'lifepreview_one', decision: 'confirm' },
+          },
+        },
+        {
+          id: 'cancel',
+          label: '先不改变',
+          description: '取消预览，保留现在的生活',
+          action: {
+            type: 'callback',
+            endpoint: CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH,
+            payload: { previewId: 'lifepreview_one', decision: 'cancel' },
+          },
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(React.createElement(InteractiveBlock, { block: mcpCatLifePreviewBlock }));
+    });
+
+    const actionButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes(selection.buttonLabel),
+    );
+    expect(actionButton).toBeTruthy();
+    await act(async () => {
+      actionButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(apiFetchMock).toHaveBeenCalledWith(CAT_LIFE_SETTINGS_DECISION_CALLBACK_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ previewId: 'lifepreview_one', decision: selection.decision }),
+    });
   });
 
   it('does not queue a local guide start when callback endpoint fails', async () => {

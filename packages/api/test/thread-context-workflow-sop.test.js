@@ -93,7 +93,7 @@ describe('GET thread-context with workflowSop', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     // Seed workflow SOP for the backlog item
-    await workflowSopStore.upsert('item-73', 'F073', {}, 'opus');
+    await workflowSopStore.upsert('item-73', 'F073', {}, 'opus', 'test-user');
 
     // Add a message so we have content
     messageStore.append({
@@ -214,7 +214,7 @@ describe('GET thread-context with workflowSop', () => {
     threadStore.linkBacklogItem(otherThread.id, 'item-73');
 
     // Seed SOP for the backlog item
-    await workflowSopStore.upsert('item-73', 'F073', {}, 'opus');
+    await workflowSopStore.upsert('item-73', 'F073', {}, 'opus', 'test-user');
 
     // Create invocation for user-1 in their own thread
     const ownThread = threadStore.create('user-1', 'My thread', 'default');

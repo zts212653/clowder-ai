@@ -14,6 +14,7 @@ import type { ISessionHandoffProposalStore } from '../stores/ports/SessionHandof
 export interface ProposeHandoffInput {
   sourceCatId: CatId;
   sourceThreadId: string;
+  sourceMessageId: string;
   userId: string;
   /** 五件套留言（proposalId/sourceSessionId/persistedAt 由 store 填） */
   note: {
@@ -53,7 +54,7 @@ export async function proposeSessionHandoff(
 ): Promise<ProposeResult> {
   const { handoffProposalStore: store, sessionChainStore } = deps;
 
-  const active = await sessionChainStore.getActive(input.sourceCatId, input.sourceThreadId);
+  const active = await sessionChainStore.getActive(input.sourceCatId, input.sourceThreadId, input.userId);
   if (!active) return { ok: false, reason: 'no_active_session' };
 
   // A4: ≤1 pending|approving handoff proposal per active session.
@@ -89,6 +90,7 @@ export async function proposeSessionHandoff(
     sourceThreadId: input.sourceThreadId,
     sourceSessionId: active.id,
     sourceCatId: input.sourceCatId,
+    sourceMessageId: input.sourceMessageId,
     userId: input.userId,
     note: input.note,
     ...(input.proposalId ? { proposalId: input.proposalId } : {}),

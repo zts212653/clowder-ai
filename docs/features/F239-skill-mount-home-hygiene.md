@@ -164,3 +164,26 @@ Why: scripts/sync-skills.sh + GovernanceBootstrapService 路径无对应 cell；
   - F239-C: `pnpm clean:stale-skill-links --dry-run` → 列出但不删
   - F239-D: 用户自建 `~/.claude/skills/my-skill -> /some/other/path` → cleanup 不动
 - **Sunset Signal**: ADR-025 整体被 supersede（如未来出新 ADR 修改 canonical mount policy），或 cat-cafe 完全弃用 HOME-level skill 概念（极不可能）
+
+## Post-completion friction log (contributor DX gap, 待独立 feat)
+
+F239 spec 已 complete (Phase A + B merged)，但 contributor 从 feature worktree 跑 `pnpm sync:skills` 时的三个 DX gap 未在 spec scope 内（详见 investigate 2026-07-11 thread_mqguyzozyzfphdmi）：
+
+1. **输出行 `源: main/cat-cafe-skills` 语义歧义**（描述 skill **名单**来源，contributor 误以为 skill **内容** anchor）
+2. **默认横扫全部 worktree × 4 providers 执行税**（缺 `--scope=current` opt-in）
+3. **未合入新 skill 缺 `--source=current-worktree` 名单入口**（新增 skill 未 commit → 不在 canonical 名单 → sync 不认）
+
+**复现累积**：
+
+| 日期 | Reporter | 环境 | 触发命令 | 输出规模 |
+|------|----------|------|----------|---------|
+| 2026-07-11 | @codex-sol | worktree `cat-cafe-f167-successor-single-flight` | `pnpm sync:skills` (改 `cross-cat-handoff/SKILL.md` 后) | 55 worktrees × 4 providers → 334 修复 |
+| 2026-07-16 | @codex-sol | worktree `cat-cafe-source-audit-decision-validity` | `pnpm sync:skills` (改 2 份 skill 后) | 66 worktrees × 4 providers → 770 修复 |
+
+Trend: worktree 数量 5 天内 55 → 66（+11），横扫税放大 334 → 770（+130%）。复现 ≥2 次 = 独立 DX feat 优先级 signal。
+
+**处置边界**：
+- 不 reopen F239（Phase A + B 已 complete signoff）
+- 不在其他 in-flight feat 顺手改（避免 scope 污染，@codex-sol 2026-07-11 拒绝 Phase S 内联）
+- 待 operator 拍板独立 DX feat 优先级（如 "F26x: sync-skills contributor DX — scope/verify/current-source flags"）
+- 本 log 作为持续证据累积，每次复现追加行

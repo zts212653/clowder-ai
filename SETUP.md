@@ -172,7 +172,7 @@ The daemon writes logs to `cat-cafe-daemon.log` in the project root (or runtime 
 ```ini
 # /etc/systemd/system/clowder-ai.service
 [Unit]
-Description=Clowder AI (Cat Café)
+Description=Clowder AI
 After=network.target
 
 [Service]
@@ -299,7 +299,8 @@ NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 
 # Text-to-Speech (TTS)
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
+# Optional override; by default Clowder AI uses ~/.cat-cafe/assets/tts
+# TTS_CACHE_DIR=/absolute/path/to/tts-cache
 
 # Speech correction (LLM post-processing)
 NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
@@ -381,33 +382,16 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
 ### GitHub PR Review Notifications
 
-Get notified when GitHub review emails arrive (polls IMAP). Review comments are automatically routed to the right cat and thread.
+Get notified when GitHub reviews arrive. Tracked PRs are polled via the GitHub API — no mailbox setup required — and review comments are automatically routed to the right cat and thread.
 
 ```bash
-# QQ Mail example
-GITHUB_REVIEW_IMAP_USER=xxx@qq.com
-GITHUB_REVIEW_IMAP_PASS=<auth-code>    # app-specific password, not login
-GITHUB_REVIEW_IMAP_HOST=imap.qq.com
-GITHUB_REVIEW_IMAP_PORT=993
-
-# Gmail example (requires 2FA + App Password)
-# GITHUB_REVIEW_IMAP_USER=xxx@gmail.com
-# GITHUB_REVIEW_IMAP_PASS=<app-password>    # Google Account → Security → App Passwords
-# GITHUB_REVIEW_IMAP_HOST=imap.gmail.com
-# GITHUB_REVIEW_IMAP_PORT=993
-
-# Outlook / Hotmail example
-# GITHUB_REVIEW_IMAP_USER=xxx@outlook.com
-# GITHUB_REVIEW_IMAP_PASS=<app-password>    # Microsoft Account → Security → App Passwords
-# GITHUB_REVIEW_IMAP_HOST=outlook.office365.com
-# GITHUB_REVIEW_IMAP_PORT=993
-
-# GitHub MCP tools (for PR operations + review content fetching)
+# Optional background GitHub API token for review-content fetching.
+# Repository operations use authenticated gh CLI; GitHub MCP is retired.
 GITHUB_MCP_PAT=ghp_...
 ```
 
 **How routing works (3-tier):**
-1. **PR Registration** (primary): Cats register PRs via `register_pr_tracking` MCP tool when they open a PR. When a review email arrives, it routes directly to that cat's thread.
+1. **PR Registration** (primary): Cats register PRs via `register_pr_tracking` MCP tool when they open a PR. When a review arrives, it routes directly to that cat's thread.
 2. **Title Tag** (fallback): If no registration found, the system looks for a cat name tag in the PR title (e.g., `[宪宪🐾]`) and routes to that cat's Review Inbox.
 3. **Triage** (last resort): If no cat can be identified, the review goes to a Triage thread for manual assignment.
 
@@ -591,7 +575,7 @@ The API automatically accepts requests from:
 - `localhost` / `127.0.0.1` (any port)
 - The `FRONTEND_URL` you set
 
-If you open Cat Cafe directly from a LAN / Tailscale IP (for example `http://192.168.x.x:3003` or `http://100.x.x.x:3003`), also set:
+If you open Clowder AI directly from a LAN / Tailscale IP (for example `http://192.168.x.x:3003` or `http://100.x.x.x:3003`), also set:
 
 ```bash
 API_SERVER_HOST=0.0.0.0

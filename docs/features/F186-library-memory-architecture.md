@@ -262,7 +262,7 @@ GBrain 亮点第三条的前端可视化层。Phase F 做了后端数据层（ed
 | KD-4 | 跨域结果多字段返回，不拉平成单一 score | 避免高权威 ADR 在金融查询乱杀 / 金融笔记误污染项目决策 | 2026-05-03 |
 | KD-5 | Secret gate 在 chunk/embed 前执行 | embedding 吃进 secret 后删 markdown 也不能证明向量无残留 | 2026-05-03 |
 | KD-6 | 记忆是数据不是指令 — Collection 内容不能改变系统规则 | 防 prompt injection，外部 AGENTS.md/System Instructions 只作为 evidence | 2026-05-03 |
-| KD-7 | 外部 Collection 的 compiled index 必须落在 Cat Café 管理目录，不写回外部 root | 恢复隔离 + 不污染用户目录 + 安全审计可追踪 + 卸载 Collection 可清理；路径模板 `<dataDir>/library/<collectionId>/index.sqlite` | 2026-05-03 |
+| KD-7 | 外部 Collection 的 compiled index 必须落在 Clowder AI 管理目录，不写回外部 root | 恢复隔离 + 不污染用户目录 + 安全审计可追踪 + 卸载 Collection 可清理；路径模板 `<dataDir>/library/<collectionId>/index.sqlite` | 2026-05-03 |
 | KD-8 | Collection ID 格式固定为 `<kind>:<name>`，`kind` 初始枚举 `project | world | domain | research | global` | LibraryResolver 路由 key、index 路径、安全策略 dispatch 都依赖稳定命名空间 | 2026-05-03 |
 | KD-9 | F186 不重载既有 `scope`，collection 联邦维度使用 `dimension` + `collections` | 避免和现有 `scope: docs/threads/sessions/all` 冲突；`dimension: all` 保留为 project+global 兼容 alias，不等于全图书馆 | 2026-05-03 |
 | KD-10 | 新审核成熟度字段命名为 `reviewStatus`，不得复用 `provenanceTier` | 复用 F152 `provenance.tier` 表示来源类型，复用 F163 `authority` 表示知识权威，避免三套概念互相污染 | 2026-05-03 |

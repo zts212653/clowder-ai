@@ -135,11 +135,29 @@ interface ShutdownProcess {
 
 const SIGNAL_NUMBERS: Record<'SIGTERM' | 'SIGINT', number> = { SIGTERM: 15, SIGINT: 2 };
 
-export function installShutdownHandlers(loop: RefreshLoopHandle, proc: ShutdownProcess = process): void {
+export function installShutdownHandlers(
+  loop: RefreshLoopHandle,
+  proc: ShutdownProcess = process,
+  beforeExit?: () => Promise<void> | void,
+): void {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     proc.on(signal, () => {
       loop.stop();
-      proc.exit(128 + SIGNAL_NUMBERS[signal]);
+      const exit = () => proc.exit(128 + SIGNAL_NUMBERS[signal]);
+      if (!beforeExit) {
+        exit();
+        return;
+      }
+      try {
+        const cleanup = beforeExit();
+        if (cleanup && typeof cleanup.then === 'function') {
+          void cleanup.then(exit, exit);
+        } else {
+          exit();
+        }
+      } catch {
+        exit();
+      }
     });
   }
 }

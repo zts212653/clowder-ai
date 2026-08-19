@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Perspective Run Tool
  * MCP 工具: run git-backed live query plans and return traceable anchors.
@@ -6,6 +8,11 @@
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('perspective-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -176,12 +183,18 @@ function formatDrillDownLines(drillDown: PerspectiveDrillDown): string[] {
 }
 
 export const perspectiveTools = [
-  {
+  defineTool({
     name: 'cat_cafe_run_perspective',
     description:
       'Run a git-backed Perspective live query plan by id and return traceable steps, candidate anchors, typed reader route hints, degraded metadata, and warnings. ' +
       'Use this when a cat-authored plan should reopen a known investigation route. It returns route hints and anchors only; cats must invoke the typed reader to fetch evidence content. It does not write conclusions or store result sets.',
     inputSchema: runPerspectiveInputSchema,
     handler: handleRunPerspective,
-  },
+    governance: {
+      implementationExport: 'handleRunPerspective',
+      action: 'derive',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+    },
+  }),
 ] as const;

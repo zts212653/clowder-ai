@@ -3,11 +3,16 @@
  *
  * Pure function — zero IO, zero side-effects.
  *
- * Task 4: skeleton that always returns 'wake-owner' (current behaviour preserved).
- * Task 6: full rule table — awaiting_external state + OWNER/MEMBER association silencing.
+ * Association is context, not identity. Exact echo/setup-noise filters live at
+ * the connector boundary where identity and trigger correlation are available.
  */
 
-import type { CommunityEventKind, CommunityObjectState, GitHubAuthorAssociation } from '@cat-cafe/shared';
+import type {
+  CommunityEventKind,
+  CommunityObjectState,
+  GitHubAuthorAssociation,
+  IssueCommentSuppressionReason,
+} from '@cat-cafe/shared';
 
 export type DeliveryDecision = 'wake-owner' | 'silent-log';
 
@@ -15,14 +20,13 @@ export interface DeliveryPolicyInput {
   state: CommunityObjectState;
   eventKind: CommunityEventKind;
   authorAssociation?: GitHubAuthorAssociation;
+  critical?: boolean;
+  suppressionReason?: IssueCommentSuppressionReason;
 }
 
 // ---------------------------------------------------------------------------
 // Rule constants
 // ---------------------------------------------------------------------------
-
-/** GitHub associations treated as "maintainer/internal" — their activity is silent. */
-const MAINTAINER_ASSOCIATIONS = new Set<GitHubAuthorAssociation>(['OWNER', 'MEMBER']);
 
 /**
  * Event kinds that are always silent (noise for owners regardless of who authored them).
@@ -31,6 +35,7 @@ const MAINTAINER_ASSOCIATIONS = new Set<GitHubAuthorAssociation>(['OWNER', 'MEMB
  * discussion, so they are always silent.
  */
 const ALWAYS_SILENT_KINDS = new Set<CommunityEventKind>(['issue.labeled']);
+const EXACT_SUPPRESSION_REASONS = new Set<IssueCommentSuppressionReason>(['exact_self_echo', 'exact_setup_noise']);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -41,25 +46,24 @@ const ALWAYS_SILENT_KINDS = new Set<CommunityEventKind>(['issue.labeled']);
  * just append silently to the event log.
  *
  * Rule priority (highest → lowest):
- *  1. Always-silent event kinds (issue.labeled, issue.unlabeled) → silent-log
- *  2. Maintainer author (OWNER/MEMBER) → silent-log
- *  3. All other cases → wake-owner
+ *  1. P0/security/data-loss override → wake-owner
+ *  2. Exact connector-correlated echo/setup noise → silent-log
+ *  3. Always-silent metadata kinds → silent-log
+ *  4. All activity, including OWNER/MEMBER → wake-owner
  *
  * The awaiting_external→in_progress state restoration is handled by the state
  * machine (community-state-machine.ts) separately — this function only decides
  * whether to wake the owner, not whether to change state.
  */
 export function decideDelivery(input: DeliveryPolicyInput): DeliveryDecision {
-  // Rule 1: event kind is unconditionally silent
+  if (input.critical) return 'wake-owner';
+
+  if (input.suppressionReason && EXACT_SUPPRESSION_REASONS.has(input.suppressionReason)) {
+    return 'silent-log';
+  }
+
   if (ALWAYS_SILENT_KINDS.has(input.eventKind)) {
     return 'silent-log';
   }
-
-  // Rule 2: maintainer-authored activity is silent regardless of case state
-  if (input.authorAssociation !== undefined && MAINTAINER_ASSOCIATIONS.has(input.authorAssociation)) {
-    return 'silent-log';
-  }
-
-  // Rule 3: default — external actor activity wakes the owner
   return 'wake-owner';
 }

@@ -8,29 +8,48 @@
 
 import type { SessionStrategyConfig } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import { isSessionChainEnabled, sessionStrategySchema } from '../config/cat-config-loader.js';
+import type { FastifyPluginAsync } from 'fastify';
+import { sessionStrategySchema } from '../config/cat-config-loader.js';
 import { getSessionStrategyWithSource } from '../config/session-strategy.js';
 import {
   deleteRuntimeOverride,
   getAllRuntimeOverrides,
   setRuntimeOverride,
 } from '../config/session-strategy-overrides.js';
+import { resolveSessionExecutionStatus } from '../domains/cats/services/agents/context-lifecycle-capability.js';
+import type { AgentContextCapability } from '../domains/cats/services/types.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
-/** Providers that support compression event signaling (PreCompact hook) */
-const HOOK_CAPABLE_PROVIDERS = new Set(['anthropic']);
-
-function resolveOperator(raw: unknown): string | null {
-  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
-  if (Array.isArray(raw)) {
-    const first = raw.find((value) => typeof value === 'string' && value.trim().length > 0);
-    if (typeof first === 'string') return first.trim();
-  }
-  return null;
+interface SessionStrategyRouteOptions {
+  resolveContextCapability?: (catId: string) => AgentContextCapability;
 }
 
-export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: FastifyPluginOptions): Promise<void> {
+const UNAVAILABLE_CONTEXT_CAPABILITY: AgentContextCapability = {
+  provider: 'unknown',
+  carrier: 'unknown',
+  reportsRuntimeWindow: false,
+  authoritativeUsage: false,
+  usageTelemetry: 'unavailable',
+  nativeWindowControl: false,
+  nativeCompressionControl: false,
+  observesCompression: false,
+  reason: 'No concrete context capability is registered for this member',
+};
+
+function executionStatusFor(capability: AgentContextCapability, strategy: SessionStrategyConfig['strategy']) {
+  const hasWindowBinding = capability.reportsRuntimeWindow || capability.nativeWindowControl;
+  return resolveSessionExecutionStatus(strategy, {
+    managedInvocationBoundary: true,
+    effectiveInputCeiling: hasWindowBinding,
+    carrierBinding: hasWindowBinding,
+    authoritativeUsage: capability.authoritativeUsage && capability.usageTelemetry === 'available',
+    sessionRotation: true,
+    continuityBootstrap: true,
+    observesCompression: capability.observesCompression,
+  });
+}
+
+export const sessionStrategyConfigRoutes: FastifyPluginAsync<SessionStrategyRouteOptions> = async (app, opts) => {
   /**
    * GET /api/config/session-strategy
    * Returns every registered variant cat's effective strategy, source, and override status.
@@ -44,8 +63,9 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
       const entry = catRegistry.tryGet(catId);
       if (!entry) continue;
 
-      const { effective, source } = getSessionStrategyWithSource(catId);
+      const { effective, source, revision, changedAt } = getSessionStrategyWithSource(catId);
       const override = allOverrides.get(catId);
+      const capability = opts.resolveContextCapability?.(catId) ?? UNAVAILABLE_CONTEXT_CAPABILITY;
 
       cats.push({
         catId,
@@ -54,10 +74,11 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
         breedId: entry.config.breedId,
         effective,
         source,
+        revision,
+        changedAt,
+        executionStatus: executionStatusFor(capability, effective.strategy),
         hasOverride: override != null,
         override: override ?? null,
-        hybridCapable: HOOK_CAPABLE_PROVIDERS.has(entry.config.clientId),
-        sessionChainEnabled: isSessionChainEnabled(catId),
       });
     }
 
@@ -85,6 +106,11 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
       return { error: `Unknown cat ID: "${catId}"` };
     }
 
+    if (request.body != null && typeof request.body === 'object' && Object.hasOwn(request.body, 'sessionChain')) {
+      reply.status(400);
+      return { error: 'Legacy sessionChain writes are not accepted; save session strategy intent only' };
+    }
+
     // Validate the override payload with the shared Zod schema
     const parseResult = sessionStrategySchema.safeParse(request.body);
     if (!parseResult.success) {
@@ -98,15 +124,7 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
       return { error: 'Empty override — use DELETE to remove an override' };
     }
 
-    // Guard: hybrid requires hook-capable provider
-    if (override.strategy === 'hybrid' && !HOOK_CAPABLE_PROVIDERS.has(entry.config.clientId)) {
-      reply.status(422);
-      return {
-        error:
-          `hybrid strategy requires a hook-capable provider (${[...HOOK_CAPABLE_PROVIDERS].join(', ')}), ` +
-          `but "${catId}" uses provider "${entry.config.clientId}"`,
-      };
-    }
+    const capability = opts.resolveContextCapability?.(catId) ?? UNAVAILABLE_CONTEXT_CAPABILITY;
 
     // Zod .optional() produces `T | undefined` for nested props; our type uses optional-only.
     // Shapes are equivalent at runtime after validation.
@@ -114,11 +132,14 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
     request.log.info({ operator, catId, override }, 'session strategy override set');
 
     // Return the new effective config after applying the override
-    const { effective, source } = getSessionStrategyWithSource(catId);
+    const { effective, source, revision, changedAt } = getSessionStrategyWithSource(catId);
     return {
       catId,
       effective,
       source,
+      revision,
+      changedAt,
+      executionStatus: executionStatusFor(capability, effective.strategy),
       override,
     };
   });
@@ -150,7 +171,16 @@ export async function sessionStrategyConfigRoutes(app: FastifyInstance, _opts: F
     }
 
     // Return the new effective config after removing the override
-    const { effective, source } = getSessionStrategyWithSource(catId);
-    return { catId, effective, source, deleted: true };
+    const { effective, source, revision, changedAt } = getSessionStrategyWithSource(catId);
+    const capability = opts.resolveContextCapability?.(catId) ?? UNAVAILABLE_CONTEXT_CAPABILITY;
+    return {
+      catId,
+      effective,
+      source,
+      revision,
+      changedAt,
+      executionStatus: executionStatusFor(capability, effective.strategy),
+      deleted: true,
+    };
   });
-}
+};

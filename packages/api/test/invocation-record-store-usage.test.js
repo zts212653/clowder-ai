@@ -24,6 +24,7 @@ function createAndRun(store) {
     targetCats: ['opus'],
     intent: 'execute',
     idempotencyKey: `key-${Date.now()}-${Math.random()}`,
+    actionLeaseCarrier: { kind: 'none' },
   });
   // 'queued' → 'running' is required before writing succeeded usage
   store.update(invocationId, { status: 'running' });

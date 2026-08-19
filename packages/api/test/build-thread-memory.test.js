@@ -255,11 +255,15 @@ describe('VG-3: buildThreadMemory with DecisionSignals', () => {
       decisions: ['用方案B'],
       openQuestions: ['gap阈值?'],
       artifacts: ['ADR-011'],
+      decisionRefs: [{ threadId: 't1', sessionId: 's1', eventNo: 3, invocationId: 'inv-1' }],
+      openQuestionRefs: [{ threadId: 't1', sessionId: 's1', eventNo: 5 }],
     };
     const result = buildThreadMemory(null, baseDigest, 3000, signals);
     assert.deepStrictEqual(result.decisions, ['用方案B']);
     assert.deepStrictEqual(result.openQuestions, ['gap阈值?']);
     assert.deepStrictEqual(result.artifacts, ['ADR-011']);
+    assert.deepStrictEqual(result.decisionRefs, signals.decisionRefs);
+    assert.deepStrictEqual(result.openQuestionRefs, signals.openQuestionRefs);
   });
 
   it('accumulates decisions across sessions', () => {
@@ -269,19 +273,33 @@ describe('VG-3: buildThreadMemory with DecisionSignals', () => {
       sessionsIncorporated: 1,
       updatedAt: 1000,
       decisions: ['用方案A'],
+      decisionRefs: [{ threadId: 't1', sessionId: 's0', eventNo: 1 }],
       openQuestions: ['端口?'],
+      openQuestionRefs: [{ threadId: 't1', sessionId: 's0', eventNo: 2 }],
       artifacts: ['F148'],
     };
     const signals = {
       decisions: ['改用方案B'],
       openQuestions: ['gap阈值?'],
       artifacts: ['ADR-011'],
+      decisionRefs: [{ threadId: 't1', sessionId: 's1', eventNo: 7 }],
+      openQuestionRefs: [{ threadId: 't1', sessionId: 's1', eventNo: 8 }],
     };
     const digest2 = { ...baseDigest, seq: 1 };
     const result = buildThreadMemory(existing, digest2, 3000, signals);
     assert.ok(result.decisions?.includes('改用方案B'), 'new decisions appear');
     assert.ok(result.decisions?.includes('用方案A'), 'old decisions preserved');
     assert.ok(result.openQuestions?.includes('gap阈值?'));
+    assert.equal(result.decisionRefs?.length, result.decisions?.length, 'decision refs stay aligned after merge');
+    assert.equal(
+      result.openQuestionRefs?.length,
+      result.openQuestions?.length,
+      'question refs stay aligned after merge',
+    );
+    assert.ok(
+      result.decisionRefs?.some((ref) => ref.sessionId === 's0'),
+      'old source coordinates are preserved',
+    );
     assert.ok(result.artifacts?.includes('ADR-011'));
     assert.ok(result.artifacts?.includes('F148'));
   });

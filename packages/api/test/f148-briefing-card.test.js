@@ -16,8 +16,9 @@ function makeCoverage(overrides = {}) {
     burst: { count: 5, timeRange: { from: Date.now() - 1800000, to: Date.now() } },
     anchorIds: ['a1'],
     threadMemory: { available: true, sessionsIncorporated: 3, decisions: [], openQuestions: [] },
-    retrievalHints: ['hint-1'],
-    searchSuggestions: ['search_evidence("F148")'],
+    recallPointer: { candidateCount: 1 },
+    searchSuggestions: ['search_evidence("legacy body hint")'],
+    semanticSearchTerms: ['F148'],
     ...overrides,
   };
 }
@@ -35,7 +36,13 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
           staleHoldWarning: false,
         },
         rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'canonical' },
+          {
+            type: 'feature-doc',
+            ref: 'docs/features/F148-*.md',
+            label: 'F148 spec',
+            provenance: 'canonical',
+            directiveEligible: true,
+          },
         ],
       });
       const card = result.extra.rich.blocks[0];
@@ -79,7 +86,13 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
           staleHoldWarning: false,
         },
         rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'canonical' },
+          {
+            type: 'feature-doc',
+            ref: 'docs/features/F148-*.md',
+            label: 'F148 spec',
+            provenance: 'canonical',
+            directiveEligible: true,
+          },
         ],
       });
       const card = result.extra.rich.blocks[0];
@@ -114,16 +127,22 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
     it('真相源 field shows top source label', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
         rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'canonical' },
+          {
+            type: 'feature-doc',
+            ref: 'docs/features/F148-*.md',
+            label: 'F148 spec',
+            provenance: 'canonical',
+            directiveEligible: true,
+          },
           { type: 'pr', ref: '#1303', label: 'PR #1303', provenance: 'recency' },
         ],
       });
       const card = result.extra.rich.blocks[0];
       const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, 'F148 spec');
+      assert.equal(sourceField.value, 'F148 spec — docs/features/F148-*.md');
     });
 
-    it('真相源 field shows (推断) for regex provenance', () => {
+    it('F296 AC-A3: regex provenance fails closed instead of becoming a truth source', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
         rankedSources: [
           { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'regex' },
@@ -131,20 +150,31 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       });
       const card = result.extra.rich.blocks[0];
       const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.ok(sourceField.value.includes('(推断)'), `regex source should be tagged, got: ${sourceField.value}`);
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(sourceField.value, '未定位（threadId=thread-1）');
+      assert.ok(
+        !nextField.value.includes('F148 spec'),
+        `regex source must not drive next step, got: ${nextField.value}`,
+      );
     });
 
     it('真相源 field shows 未定位 when empty', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', { rankedSources: [] });
       const card = result.extra.rich.blocks[0];
       const sourceField = card.fields.find((f) => f.label === '真相源');
-      assert.equal(sourceField.value, '未定位');
+      assert.equal(sourceField.value, '未定位（threadId=thread-1）');
     });
 
     it('下一步 field includes both label and ref for actionable pointer', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
         rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'canonical' },
+          {
+            type: 'feature-doc',
+            ref: 'docs/features/F148-*.md',
+            label: 'F148 spec',
+            provenance: 'canonical',
+            directiveEligible: true,
+          },
         ],
       });
       const card = result.extra.rich.blocks[0];
@@ -156,25 +186,68 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       );
     });
 
-    it('下一步 field suggests search when no sources', () => {
+    it('下一步 field renders a structured semantic search when a real query is available', () => {
       const result = buildBriefingMessage(makeCoverage(), 'thread-1', {
         rankedSources: [],
       });
       const card = result.extra.rich.blocks[0];
       const nextField = card.fields.find((f) => f.label === '下一步');
-      assert.ok(
-        nextField.value.includes('search_evidence') || nextField.value.includes('搜索'),
-        `next step should suggest search, got: ${nextField.value}`,
+      assert.equal(
+        nextField.value,
+        'cat_cafe_search_evidence({ query: "F148", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
+      );
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+    });
+
+    it('下一步 field uses a structured thread lookup when no semantic query is available', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: [] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+      assert.ok(!nextField.value.includes('cat_cafe_search_evidence'), nextField.value);
+    });
+
+    it('下一步 field never treats the thread identifier as a semantic query', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['thread-1'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
+      assert.ok(!nextField.value.includes('query: "thread-1"'), nextField.value);
+    });
+
+    it('下一步 field escapes semantic queries while retaining the structured thread filter', () => {
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [], semanticSearchTerms: ['My "Redis" notes'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
+      const card = result.extra.rich.blocks[0];
+      const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(
+        nextField.value,
+        'cat_cafe_search_evidence({ query: "My \\"Redis\\" notes", threadId: "thread-1", scope: "threads", mode: "hybrid" })',
       );
     });
 
     it('下一步 field sanitizes search suggestion (no backticks/newlines)', () => {
       const dirty = 'search_evidence(`F148`)\nwith newline\\backslash';
-      const result = buildBriefingMessage(makeCoverage({ searchSuggestions: [dirty] }), 'thread-1', {
-        rankedSources: [],
-      });
+      const result = buildBriefingMessage(
+        makeCoverage({ searchSuggestions: [dirty], semanticSearchTerms: ['F148\nwith newline'] }),
+        'thread-1',
+        { rankedSources: [] },
+      );
       const card = result.extra.rich.blocks[0];
       const nextField = card.fields.find((f) => f.label === '下一步');
+      assert.equal(nextField.value, 'cat_cafe_get_thread_context({ threadId: "thread-1" })');
       assert.ok(!nextField.value.includes('`'), `should not contain backticks, got: ${nextField.value}`);
       assert.ok(!nextField.value.includes('\n'), `should not contain newlines, got: ${nextField.value}`);
       assert.ok(!nextField.value.includes('\\'), `should not contain backslashes, got: ${nextField.value}`);
@@ -194,7 +267,13 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
         },
         activeTasks: [{ id: 't1', title: 'Fix bug', status: 'in-progress', ownerCatId: 'opus' }],
         rankedSources: [
-          { type: 'feature-doc', ref: 'docs/features/F148-*.md', label: 'F148 spec', provenance: 'canonical' },
+          {
+            type: 'feature-doc',
+            ref: 'docs/features/F148-*.md',
+            label: 'F148 spec',
+            provenance: 'canonical',
+            directiveEligible: true,
+          },
         ],
       });
       const card = result.extra.rich.blocks[0];
@@ -213,6 +292,29 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       assert.ok(result.extra.rich.v === 1);
       assert.ok(Array.isArray(result.extra.rich.blocks));
     });
+  });
+
+  it('renders a drill pointer beside every thread-memory decision, and drops lifecycle-less open questions', () => {
+    const coverage = makeCoverage({
+      threadMemory: {
+        available: true,
+        sessionsIncorporated: 2,
+        decisions: ['采用方案B'],
+        decisionRefs: [{ threadId: 'thread-1', sessionId: 'session-7', eventNo: 42, invocationId: 'inv-9' }],
+        openQuestions: ['阈值待定'],
+        openQuestionRefs: [{ threadId: 'thread-1', sessionId: 'session-7', eventNo: 44 }],
+      },
+    });
+    const result = buildBriefingMessage(coverage, 'thread-1', {});
+    const body = result.extra.rich.blocks[0].bodyMarkdown;
+
+    assert.ok(
+      body.includes('采用方案B [provenance: threadId=thread-1; sessionId=session-7; eventNo=42; invocationId=inv-9]'),
+      body,
+    );
+    // F296 AC-A2: an open question without lifecycle state cannot be shown as current work.
+    assert.ok(!body.includes('阈值待定'), body);
+    assert.ok(!body.includes('待决问题'), body);
   });
 
   describe('formatContextBriefing (pure function)', () => {

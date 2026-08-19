@@ -3,8 +3,9 @@
  * 将 Node.js Readable 流逐行解析为 JSON 对象
  */
 
-import { createInterface } from 'node:readline';
 import type { Readable } from 'node:stream';
+
+const SKIP_RECORD = Symbol('skip-record');
 
 /** Sentinel object for JSON parse errors */
 interface ParseError {
@@ -21,25 +22,40 @@ interface ParseError {
  * Lines that fail JSON.parse are yielded as ParseError objects.
  */
 export async function* parseNDJSON(stream: Readable): AsyncGenerator<unknown> {
-  const rl = createInterface({
-    input: stream,
-    crlfDelay: Infinity,
-  });
+  stream.setEncoding('utf8');
+  let pending = '';
 
-  for await (const line of rl) {
+  const parseRecord = (line: string): unknown | typeof SKIP_RECORD => {
     const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
+    if (trimmed.length === 0) return SKIP_RECORD;
 
     try {
-      yield JSON.parse(trimmed) as unknown;
+      return JSON.parse(trimmed) as unknown;
     } catch {
-      yield {
+      return {
         __parseError: true,
         line: trimmed,
         error: 'Failed to parse JSON line',
       } satisfies ParseError as unknown;
     }
+  };
+
+  for await (const chunk of stream) {
+    if (typeof chunk !== 'string') throw new TypeError('NDJSON stream emitted a non-text chunk after UTF-8 decoding');
+    pending += chunk;
+
+    let newlineIndex = pending.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const recordEnd = newlineIndex > 0 && pending[newlineIndex - 1] === '\r' ? newlineIndex - 1 : newlineIndex;
+      const parsed = parseRecord(pending.slice(0, recordEnd));
+      if (parsed !== SKIP_RECORD) yield parsed;
+      pending = pending.slice(newlineIndex + 1);
+      newlineIndex = pending.indexOf('\n');
+    }
   }
+
+  const finalRecord = parseRecord(pending);
+  if (finalRecord !== SKIP_RECORD) yield finalRecord;
 }
 
 /**

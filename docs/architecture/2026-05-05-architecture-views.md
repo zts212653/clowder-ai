@@ -1,5 +1,5 @@
 ---
-title: "Cat Cafe 架构图谱设计（三猫总汇）"
+title: "Clowder AI 架构图谱设计（三猫总汇）"
 created: 2026-05-05
 doc_kind: architecture-snapshot
 status: draft
@@ -12,9 +12,9 @@ related:
   - feature-discussions/2026-04-20-claude-multi-agent-coordination-patterns/article-complete-technical-edition-v2.md
 ---
 
-# Cat Cafe 架构图谱设计（三猫总汇）
+# Clowder AI 架构图谱设计（三猫总汇）
 
-> **一句话**：用 5 张图说清楚 Cat Cafe——1 张产品叙事 + 4 张 harness/技术切片。
+> **一句话**：用 5 张图说清楚 Clowder AI——1 张产品叙事 + 4 张 harness/技术切片。
 >
 > 本文是 2026-05-05 三猫并行独立思考后的收敛文档。每只猫各自提了方案（46 提 6 张、55 提 6 张、47 提 4 张），本文汇总分歧、找到共识、输出最终图谱。
 
@@ -39,7 +39,7 @@ related:
 
 | # | 图名 | 焦点 |
 |---|------|------|
-| 1 | Cat Cafe 是什么（总图） | 产品叙事 |
+| 1 | Clowder AI 是什么（总图） | 产品叙事 |
 | 2 | Harness 闭环图 | ADR-031 闭环 |
 | 3 | 产品技术栈（Hub/API/Runtime/MCP/Storage） | 开发者视角 |
 | 4 | A2A 球权与统一执行平面 | 协作协议 |
@@ -131,7 +131,7 @@ related:
 
 ![图 1：猫咖全景 Hero 图](assets/2026-05-05/01-hero-overview.png)
 
-**答**：Cat Cafe 是什么？
+**答**：Clowder AI 是什么？
 
 **给谁看**：新人、外部观众、非技术读者
 
@@ -188,10 +188,10 @@ related:
 
 **立意**：行业六大构件我们全有落地，但多猫协作需要第七类——协作语义与球权治理。Agent Quality = Model Capability × Environment Fit。
 
-**画法**：6 个工具盒 + 1 个独特区域。每个工具盒分两层：上层标注 Cat Cafe 的具体落地实现；下层标注外部概念锚点（`OAI` = OpenAI、`ANT` = Anthropic、`FOW` = Fowler / Thoughtworks），说明中文社区六大件在其它体系里大致对应的问题域。
+**画法**：6 个工具盒 + 1 个独特区域。每个工具盒分两层：上层标注 Clowder AI 的具体落地实现；下层标注外部概念锚点（`OAI` = OpenAI、`ANT` = Anthropic、`FOW` = Fowler / Thoughtworks），说明中文社区六大件在其它体系里大致对应的问题域。
 
 ```
-┌─ Cat Cafe Harness ─ Agent Quality = Capability × Environment Fit ──────┐
+┌─ Clowder AI Harness ─ Agent Quality = Capability × Environment Fit ──────┐
 │                                                                         │
 │  ┌─ 1. Durable State ────┐  ┌─ 2. Plans & Decomposition ──────────┐   │
 │  │ docs/ 真相源            │  │ feat-lifecycle → Design Gate         │   │
@@ -222,7 +222,7 @@ related:
 │  │  去的地方"               │  │  = 糊锅匠"                          │   │
 │  └────────────────────────┘  └──────────────────────────────────────┘   │
 │                                                                         │
-│  ┌─ 7. Collaboration Semantics（六大件之外，Cat Cafe 独有）──────────┐  │
+│  ┌─ 7. Collaboration Semantics（六大件之外，Clowder AI 独有）──────────┐  │
 │  │ @路由 · targetCats · hold_ball · 接/退/升三选一                    │  │
 │  │ 统一执行平面（InvocationQueue 接住所有 handoff）                    │  │
 │  │ 跨厂商多样性（Claude×GPT×Gemini = 结构性纠错）                     │  │
@@ -233,7 +233,7 @@ related:
 
 图中 `OAI / ANT / FOW` 不是来源归属，也不是官方一一对应分类；它们只是外部概念支点。底部必须保留说明："六大件 = 中文社区综合归纳；OAI / ANT / FOW 是外部概念锚点，不是官方一一对应分类。"
 
-**风格**：6 个工具盒用行业标准色调（中性），第 7 个用 Cat Cafe 品牌色高亮。盒内标注我们家的具体落地实现，同时用 `OAI / ANT / FOW` 小标签补外部概念锚点。底部小字注明"分类来源：中文社区综合归纳，参见 concept-map-2026-05-05.md"。不要把六大件画成 OpenAI / Anthropic / Fowler 的官方六分法。
+**风格**：6 个工具盒用行业标准色调（中性），第 7 个用 Clowder AI 品牌色高亮。盒内标注我们家的具体落地实现，同时用 `OAI / ANT / FOW` 小标签补外部概念锚点。底部小字注明"分类来源：中文社区综合归纳，参见 concept-map-2026-05-05.md"。不要把六大件画成 OpenAI / Anthropic / Fowler 的官方六分法。
 
 ---
 
@@ -300,7 +300,7 @@ State    thread · task · docs · evidence · InvocationQueue
 
 **答**：知识怎么积累不腐？规则怎么不越积越重？
 
-**给谁看**：行业研究者、harness 设计者、**不了解 Cat Cafe 的技术读者**
+**给谁看**：行业研究者、harness 设计者、**不了解 Clowder AI 的技术读者**
 
 **立意**：Agent 每次对话都从空白上下文开始——如果不管理知识，团队记忆会丢；如果只加规则不删规则，harness 会越来越重直到无法移动。我们用两个咬合飞轮解决这两个问题。
 
@@ -405,7 +405,7 @@ State    thread · task · docs · evidence · InvocationQueue
 │                              ↓ 知识质量有保障                        │
 │  ┌─ F152 出：把飞轮带到新地方 ────────────────────────────────────┐ │
 │  │                                                                 │ │
-│  │  Cat Cafe          F152 远征            外部项目                 │ │
+│  │  Clowder AI          F152 远征            外部项目                 │ │
 │  │  ┌──────┐         ┌───────┐            ┌──────────┐            │ │
 │  │  │双飞轮 │──驻场──→│冷启动  │──改造──→  │ AI native │            │ │
 │  │  │方法论 │         │记忆    │           │ 项目      │            │ │
@@ -417,7 +417,7 @@ State    thread · task · docs · evidence · InvocationQueue
 │                              ↓ 经验从外部回来了                      │
 │  ┌─ F186 联：让所有知识互通 ──────────────────────────────────────┐ │
 │  │                                                                 │ │
-│  │     Cat Cafe      项目 A       项目 B       方法论库             │ │
+│  │     Clowder AI      项目 A       项目 B       方法论库             │ │
 │  │     ┌───┐         ┌───┐       ┌───┐        ┌───┐              │ │
 │  │     │   │         │   │       │   │        │   │              │ │
 │  │     └─┬─┘         └─┬─┘       └─┬─┘        └─┬─┘              │ │
@@ -490,7 +490,7 @@ State    thread · task · docs · evidence · InvocationQueue
 *(internal reference removed)* 里原有两张图：
 
 - Part IV 的旧“记忆系统架构图”
-- 附录的旧“Cat Cafe 架构总图”
+- 附录的旧“Clowder AI 架构总图”
 
 这两张图的职责和上面的 5 张主图不同。它们不是产品叙事图，也不是单个 harness 切片，而是 article 正文的“管线说明 / 全局索引”。因此不直接复用现有图 4、4.1 或图 5，新增两张 article 专用补图。
 
@@ -502,7 +502,7 @@ State    thread · task · docs · evidence · InvocationQueue
 
 **替换位置**：`article-complete-technical-edition-v2.md` Part IV “架构总览”处的 `memory-architecture-illustrated-by-codex.png`
 
-**答**：Cat Cafe 的记忆系统现在到底怎么从文档/外部项目变成 agent 可用的 recall？
+**答**：Clowder AI 的记忆系统现在到底怎么从文档/外部项目变成 agent 可用的 recall？
 
 **给谁看**：读 article 的技术读者、想复刻记忆系统的团队
 
@@ -575,15 +575,15 @@ State    thread · task · docs · evidence · InvocationQueue
 
 ---
 
-### 图 7：Cat Cafe 全局架构总图（2026-05 最新版）
+### 图 7：Clowder AI 全局架构总图（2026-05 最新版）
 
 **文件名**：`docs/architecture/assets/2026-05-05/07-cat-cafe-global-architecture.png`
 
-![图 7：Cat Cafe 全局架构总图（2026-05 最新版）](assets/2026-05-05/07-cat-cafe-global-architecture.png)
+![图 7：Clowder AI 全局架构总图（2026-05 最新版）](assets/2026-05-05/07-cat-cafe-global-architecture.png)
 
 **替换位置**：`article-complete-technical-edition-v2.md` 附录处的 `architecture-overview-illustrated-by-codex.png`
 
-**答**：从operator到猫、从 UI 到队列、从记忆到治理，Cat Cafe 这套系统全貌是什么？
+**答**：从operator到猫、从 UI 到队列、从记忆到治理，Clowder AI 这套系统全貌是什么？
 
 **给谁看**：读完 article 后想“一眼复盘全系统”的技术读者
 
@@ -706,7 +706,7 @@ State    thread · task · docs · evidence · InvocationQueue
 └────────────────────────────────────────────────────────────────┘
                          │
            ┌─────────────┴─────────────┐
-           │  Cat Cafe Orchestrator     │
+           │  Clowder AI Orchestrator     │
            │  （route-serial.ts）       │
            └─────────────┬─────────────┘
                          │
@@ -846,8 +846,8 @@ State    thread · task · docs · evidence · InvocationQueue
 │  │  │   hyperfocus-brake-timer.sh（刹车计时器）         │     │
 │  │  │                                                   │     │
 │  │  │  其他 Claude hooks:                               │     │
-│  │  │   PreCompact / UserPromptSubmit /                  │     │
-│  │  │   Stop(f177-routing-guard)                         │     │
+│  │  │   PreCompact / UserPromptSubmit                    │     │
+│  │  │  Route settle: F167 structured custody stop gate  │     │
 │  │  │                                                   │     │
 │  │  │  ⚠ PreToolUse/PostToolUse 仅 Claude project hooks │     │
 │  │  │    Codex F180: 仅 SessionStart/Stop user hooks    │     │

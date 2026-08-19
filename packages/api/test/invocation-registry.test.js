@@ -37,6 +37,76 @@ describe('InvocationRegistry', () => {
     assert.equal(result.record.catId, 'opus');
     assert.equal(result.record.invocationId, invocationId);
     assert.equal(result.record.callbackToken, callbackToken);
+    assert.equal(result.record.ownerAuthProvenance, 'unknown');
+  });
+
+  test('strict owner authentication provenance survives registry round-trip', async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+
+    const registry = new InvocationRegistry();
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'opus',
+      'thread-1',
+      undefined,
+      undefined,
+      undefined,
+      'msg-user-1',
+      'strict',
+    );
+
+    const result = await registry.verify(invocationId, callbackToken);
+    assert.equal(result.ok, true);
+    assert.equal(result.record.ownerAuthProvenance, 'strict');
+  });
+
+  test('server-resolved managed-work binding survives registry round-trip', async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+
+    const registry = new InvocationRegistry();
+    const binding = { workId: 'wrk_test', attemptId: 'wat_test' };
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'opus',
+      'thread-1',
+      undefined,
+      undefined,
+      undefined,
+      'msg-user-1',
+      'strict',
+      binding,
+    );
+
+    const result = await registry.verify(invocationId, callbackToken);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.record.managedWorkBinding, binding);
+  });
+
+  test('managed-work binding requires strict owner authentication provenance', async () => {
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+
+    const registry = new InvocationRegistry();
+    await assert.rejects(
+      () =>
+        registry.create(
+          'user-1',
+          'opus',
+          'thread-1',
+          undefined,
+          undefined,
+          undefined,
+          'msg-user-1',
+          'compatibility_fallback',
+          { workId: 'wrk_spoof', attemptId: 'wat_spoof' },
+        ),
+      /requires strict owner authentication/,
+    );
   });
 
   // F174 Phase A — Structured failure reasons (KD-4)

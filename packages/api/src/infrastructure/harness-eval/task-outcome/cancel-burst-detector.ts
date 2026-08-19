@@ -1,7 +1,7 @@
 /**
  * F192 Phase G AC-G13 — Cancel Burst Detector.
  *
- * Tracks permission cancel frequency per thread. When ≥ threshold
+ * Tracks permission cancel frequency per caller-selected causal partition. When ≥ threshold
  * cancels occur within a sliding window, signals a "cancel burst" —
  * a mechanical interrupt proxy signal indicating sustained user dissatisfaction.
  *
@@ -24,7 +24,7 @@ export interface CancelBurstResult {
 export class CancelBurstDetector {
   private readonly threshold: number;
   private readonly windowMs: number;
-  /** threadId → array of cancel timestamps (within window) */
+  /** partitionKey → array of cancel timestamps (within window) */
   private windows = new Map<string, number[]>();
 
   constructor(config: CancelBurstConfig) {
@@ -34,10 +34,10 @@ export class CancelBurstDetector {
 
   /**
    * Record a cancel event. Returns whether this triggers a burst.
-   * After a burst fires, the window resets for that thread.
+   * After a burst fires, the window resets for that causal partition.
    */
-  record(threadId: string, timestamp: number): CancelBurstResult {
-    let timestamps = this.windows.get(threadId) ?? [];
+  record(partitionKey: string, timestamp: number): CancelBurstResult {
+    let timestamps = this.windows.get(partitionKey) ?? [];
 
     // Evict entries outside the window
     const cutoff = timestamp - this.windowMs;
@@ -48,11 +48,11 @@ export class CancelBurstDetector {
 
     if (timestamps.length >= this.threshold) {
       // Burst detected — reset window
-      this.windows.set(threadId, []);
+      this.windows.set(partitionKey, []);
       return { burst: true, count: timestamps.length };
     }
 
-    this.windows.set(threadId, timestamps);
+    this.windows.set(partitionKey, timestamps);
     return { burst: false, count: timestamps.length };
   }
 }

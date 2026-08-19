@@ -20,11 +20,12 @@ export const DEVELOPMENT_SOP_DEFINITION = {
   id: 'development',
   domain: 'engineering',
   label: 'Development SOP',
-  description: 'Clowder AI coding feature lifecycle. This is the runtime SOP definition used by WorkflowSop.',
+  description:
+    'Risk-routed development lane catalog used by WorkflowSop. Stage ids are bulletin-board lanes, not a mandatory serial pipeline; cats select only the lanes justified by behavior, data, security, contract, or irreversibility risk.\n',
   stages: [
     {
       id: 'kickoff',
-      label: '立项',
+      label: '立项（按需）',
       suggestedSkill: 'feat-lifecycle',
       hardRules: [
         {
@@ -56,15 +57,15 @@ export const DEVELOPMENT_SOP_DEFINITION = {
     },
     {
       id: 'impl',
-      label: '实现',
-      suggestedSkill: 'writing-plans',
+      label: '实现隔离（按需）',
+      suggestedSkill: 'worktree',
       hardRules: [
         {
           id: 'impl-main-sync-before-worktree',
           kind: 'hard_rule',
           text: 'worktree 开之前必须 main 双向同步 (ahead=0 behind=0)',
           severity: 'blocker',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: {
             type: 'git_state_predicate',
             repository: 'cat-cafe',
@@ -78,20 +79,20 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           kind: 'hard_rule',
           text: 'Redis 只用 6398，禁碰 6399',
           severity: 'blocker',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: { type: 'env_check', key: 'REDIS_URL', mustInclude: ':6398', mustNotInclude: ':6399' },
         },
         {
-          id: 'impl-design-gate-before-code',
+          id: 'impl-risk-route-before-action',
           kind: 'hard_rule',
-          text: '跳过 Design Gate（含 User Journey 落盘）直接写代码',
+          text: '实现前未按行为面 / 数据 / 安全 / 契约 / 不可逆五轴判断风险，就机械套用或机械跳过流程',
           severity: 'blocker',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: {
             type: 'manual_only',
             reason:
-              'Design Gate evidence and User Journey section are feature-doc fields; upgrade to feature_doc_readiness_check when checker script is available.',
-            futureCandidate: 'feature_doc_readiness_check',
+              'Risk classification is semantic; machine guards enforce concrete safety and contract boundaries after the lane is selected.',
+            futureCandidate: 'risk_route_attestation',
           },
         },
         {
@@ -99,12 +100,36 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           kind: 'hard_rule',
           text: '用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）',
           severity: 'blocker',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: {
             type: 'command_pattern',
             reason:
               'check-feature-truth.mjs now checks changed feature docs for ## User Journey presence. F252 root cause — session vs thread scope mismatch went undetected because journey was never written down.',
             mustMatch: 'pnpm check:features|node scripts/check-feature-truth',
+          },
+        },
+        {
+          id: 'impl-co-creation-docs-lane',
+          kind: 'hard_rule',
+          text: '共创型 docs-only 可自决直推；进入 worktree / PR / cloud / full gate 前才必须用 classifier 证明风险，且不得越过结果支付代码级流程税',
+          severity: 'blocker',
+          owner: { type: 'skill', skill: 'co-creation-docs' },
+          predicate: {
+            type: 'co_creation_docs_lane',
+            includeGlobs: ['docs/*.md', 'docs/**/*.md'],
+            classifierRequiredGlobs: [
+              'docs/SOP.md',
+              'docs/VISION.md',
+              'docs/lessons-learned.md',
+              'docs/architecture/ownership/**',
+              'docs/canon/**',
+              'docs/decisions/**',
+            ],
+            classifierMatch: 'pnpm classify:co-creation-docs|node scripts/co-creation-docs-lane.mjs',
+            worktreeMatch: 'git worktree add',
+            pullRequestMatch: 'gh pr create',
+            cloudReviewMatch: 'gh pr comment .*@codex review',
+            fullGateMatch: 'pnpm gate',
           },
         },
       ],
@@ -114,7 +139,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           kind: 'pitfall',
           text: '压缩后忘了当前在做什么',
           severity: 'warn',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: {
             type: 'manual_only',
             reason: 'Current runtime has no stable post-compact recall-failure telemetry.',
@@ -124,20 +149,27 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'impl-convention-graph-before-convention-edit',
           kind: 'pitfall',
-          text: '改 MCP tool / skill manifest / route / callback 等约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
-          severity: 'warn',
-          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          text: '改 MCP tool / skill manifest 等当前已索引约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
           predicate: {
-            type: 'manual_only',
-            reason: 'Convention graph CLI usage is not yet emitted as structured telemetry.',
-            futureCandidate: 'convention_graph_usage_event',
+            type: 'changed_files_require_command',
+            reason:
+              'F242 adoption guard; convention-surface edits need a successful impact query before editing/merge.',
+            mustMatch: 'pnpm convention-graph:code-consumers|cat-cafe-convention-graph code-consumers',
+            includeGlobs: [
+              'packages/mcp-server/src/tools/*.ts',
+              'packages/mcp-server/src/server-toolsets.ts',
+              'cat-cafe-skills/*/SKILL.md',
+            ],
+            excludeGlobs: ['**/*.test.ts', '**/*.test.js'],
           },
         },
       ],
     },
     {
       id: 'quality_gate',
-      label: '自检',
+      label: '自检（按风险）',
       suggestedSkill: 'quality-gate',
       hardRules: [
         {
@@ -156,12 +188,15 @@ export const DEVELOPMENT_SOP_DEFINITION = {
       ],
       pitfalls: [
         {
-          id: 'quality-gate-full-test-evidence',
+          id: 'quality-gate-risk-matched-evidence',
           kind: 'pitfall',
-          text: '声称完成但没跑全量测试',
+          text: '声称完成但没有与风险面匹配的验证证据（至少 targeted；高风险才要求 full gate）',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'quality-gate' },
-          predicate: { type: 'command_pattern', mustMatch: 'pnpm gate|pnpm test|pnpm --filter .* test|node --test' },
+          predicate: {
+            type: 'command_pattern',
+            mustMatch: 'pnpm gate|pnpm (check|lint|test)|pnpm --filter .* test|node --test|git diff --check',
+          },
         },
       ],
     },
@@ -186,7 +221,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
     },
     {
       id: 'review',
-      label: 'Review',
+      label: '独立验证（按风险择源）',
       suggestedSkill: 'request-review',
       hardRules: [
         {
@@ -200,7 +235,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'review-original-requirements',
           kind: 'hard_rule',
-          text: 'Review 请求必须附原始需求摘录',
+          text: '涉及用户意图或愿景的 Review 请求必须附原始需求摘录',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'request-review' },
           predicate: {
@@ -214,20 +249,21 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'review-retrigger-after-p1',
           kind: 'pitfall',
-          text: '收到 P1 修完后没 re-trigger review',
+          text: 'P1/P2 修复后的实质内容未被对应 review source 覆盖；SHA-only / 可证明机械变化用 continuityProof，不重开 reviewer',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'request-review' },
           predicate: {
-            type: 'command_sequence',
-            absent: ['@codex review'],
-            mustInclude: ['git push', 'gh pr comment'],
+            type: 'manual_only',
+            reason:
+              'Final-SHA review coverage is the boundary; the trigger channel is lane-dependent (cloud re-trigger vs local stateful re-review). The old command_sequence predicate hardcoded the cloud incantation ("@codex review") and false-flags local-lane PRs. Truth source is merge-gate Review Provenance Matrix.',
+            futureCandidate: 'review_coverage_final_sha_check',
           },
         },
       ],
     },
     {
       id: 'merge',
-      label: '合入',
+      label: '合入（载体触发）',
       suggestedSkill: 'merge-gate',
       hardRules: [
         {
@@ -263,6 +299,19 @@ export const DEVELOPMENT_SOP_DEFINITION = {
             futureCandidate: 'feature_doc_truth_check',
           },
         },
+        {
+          id: 'merge-runtime-activation-truth',
+          kind: 'hard_rule',
+          text: '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；未获co-creator授权时记录 live=dormant，不得冒充已生效',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Runtime impact, current live-load state, and operator authorization are semantic and external truths; changed filenames alone cannot prove activation.',
+            futureCandidate: 'runtime_activation_receipt',
+          },
+        },
       ],
       pitfalls: [
         {
@@ -289,13 +338,13 @@ export const DEVELOPMENT_SOP_DEFINITION = {
     },
     {
       id: 'completion',
-      label: '完成',
+      label: '愿景守护（终态触发）',
       suggestedSkill: 'feat-lifecycle',
       hardRules: [
         {
           id: 'completion-vision-guardian',
           kind: 'hard_rule',
-          text: 'feat close 前必须跨猫愿景守护',
+          text: '用户可见或愿景变化的 feat close 前必须有独立愿景守护',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'feat-lifecycle' },
           predicate: {
@@ -317,7 +366,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'completion-missing-guardian-handoff',
           kind: 'pitfall',
-          text: '没有 @ 其他猫做愿景守护就直接 close',
+          text: '用户可见或愿景变化的 feat 没有 @ 独立守护猫就直接 close',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'feat-lifecycle' },
           predicate: { type: 'handle_check', constraint: 'guardian_handoff_present' },

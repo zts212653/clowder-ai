@@ -1,6 +1,7 @@
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
+import { getSessionStrategyWithSource } from '../config/session-strategy.js';
 import {
   RUNTIME_SESSION_SURFACES,
   type RuntimeSessionExternalRegistrationBinding,
@@ -98,7 +99,7 @@ export async function externalRuntimeSessionsRoutes(
       return { error: 'Access denied' };
     }
 
-    return formatExternalRuntimeSession(record, readable.thread);
+    return formatExternalRuntimeSession(record, readable.thread, readable.session);
   });
 }
 
@@ -188,7 +189,7 @@ async function scanReadableRuntimeSessionsForSurface({
     for (const record of records) {
       const readable = await resolveReadableRuntimeSession(record, userId, callerCatId, sessionChainStore, threadStore);
       if (!readable) continue;
-      sessions.push(formatExternalRuntimeSession(record, readable.thread));
+      sessions.push(formatExternalRuntimeSession(record, readable.thread, readable.session));
       if (sessions.length >= limit) break;
     }
     if (records.length < EXTERNAL_RUNTIME_SESSION_LIST_PAGE_SIZE) break;
@@ -203,19 +204,38 @@ async function resolveReadableRuntimeSession(
   callerCatId: string | undefined,
   sessionChainStore: ISessionChainStore,
   threadStore: IThreadStore,
-): Promise<{ thread: Thread } | null> {
+): Promise<{ thread: Thread; session: SessionRecord } | null> {
   if (callerCatId && record.catId !== callerCatId) return null;
   const session = await sessionChainStore.get(record.sessionId);
   if (!session || session.userId !== userId || session.catId !== record.catId) return null;
   const thread = await threadStore.get(session.threadId);
   if (!thread) return null;
-  if (thread.createdBy === userId) return { thread };
-  if (thread.id === DEFAULT_THREAD_ID && thread.createdBy === 'system') return { thread };
-  if (thread.externalRuntimeAnchorState?.userId === userId && record.userId === userId) return { thread };
+  if (thread.createdBy === userId) return { thread, session };
+  if (thread.id === DEFAULT_THREAD_ID && thread.createdBy === 'system') return { thread, session };
+  if (thread.externalRuntimeAnchorState?.userId === userId && record.userId === userId) return { thread, session };
   return null;
 }
 
-function formatExternalRuntimeSession(record: RuntimeSessionMetadata, thread: Thread): Record<string, unknown> {
+function projectedPolicy(record: RuntimeSessionMetadata, session: SessionRecord): SessionPolicySnapshot {
+  if (record.surface === 'cat-cafe-dispatch' && session.appliedPolicy) return session.appliedPolicy;
+  const policy = getSessionStrategyWithSource(record.catId as string);
+  return {
+    config: policy.effective,
+    source: policy.source,
+    revision: policy.revision,
+    changedAt: policy.changedAt,
+    execution: {
+      status: 'unavailable',
+      missingCapabilities: ['managed_invocation_boundary'],
+    },
+  };
+}
+
+function formatExternalRuntimeSession(
+  record: RuntimeSessionMetadata,
+  thread: Thread,
+  session: SessionRecord,
+): Record<string, unknown> {
   const sessionId = record.sessionId;
   const identity = record.identityHistory.at(-1);
   return {
@@ -233,6 +253,13 @@ function formatExternalRuntimeSession(record: RuntimeSessionMetadata, thread: Th
     binding: record.externalRegistration?.binding ?? inferBinding(record.runtime, thread),
     provenance: record.externalRegistration?.provenance,
     title: record.externalRegistration?.title,
+    sessionState: {
+      seq: session.seq,
+      status: session.status,
+      compressionCount: session.compressionCount,
+      hybridProgress: session.hybridProgress ?? null,
+    },
+    sessionPolicy: projectedPolicy(record, session),
     drilldown: {
       sessionRecord: `/api/sessions/${sessionId}`,
       events: `/api/sessions/${sessionId}/events`,

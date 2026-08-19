@@ -48,3 +48,31 @@ test('with-test-home strips runtime API host binding from outer shell', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), '');
 });
+
+test('with-test-home strips the runtime Codex carrier from outer shell', () => {
+  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CODEX_CARRIER ?? ""'], {
+    cwd: resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      CAT_CAFE_CODEX_CARRIER: 'app_server',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '');
+});
+
+test('with-test-home strips the runtime Claude carrier from outer shell', () => {
+  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.CAT_CAFE_CLAUDE_CARRIER ?? ""'], {
+    cwd: resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      CAT_CAFE_CLAUDE_CARRIER: 'bg_daemon',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '');
+});

@@ -3,7 +3,7 @@
 > **核心铁律**：**统计是事后审计，现场可感知性是第一入口。**
 >
 > 来源：F174 callback auth lifecycle D2b 设计实战（2026-04-25）。
-> 类比范式：Cat Café 的 memory entity 自带状态、browser-preview 把页面端上桌——
+> 类比范式：Clowder AI 的 memory entity 自带状态、browser-preview 把页面端上桌——
 > entity carries its own state, surface it where it happens.
 >
 > 反面：Datadog/前 agent 时代的 stats dashboard——出问题了，等用户主动切到 tab 才看到数字 +1。
@@ -26,7 +26,7 @@
 
 1. 这个失败/状态，**谁第一时间需要看到**？（出问题的猫 / 受影响的operator / 旁观的猫）
 2. 第一现场有没有 **in-context 通道**（thread 富块、entity 自带状态、avatar dot、cat status badge）？
-3. 类比哪个已有 Cat Café entity 范式？（memory entity 自带状态？browser-preview 端上桌？sigil status dot？）
+3. 类比哪个已有 Clowder AI entity 范式？（memory entity 自带状态？browser-preview 端上桌？sigil status dot？）
 4. 如果只能保留一个 surface，是 in-context 还是 dashboard？（**默认必须 in-context 优先**）
 5. dashboard 是否被定位为"事后审计"而非"日常感知"？
 
@@ -55,7 +55,7 @@ in-context 富块只应该用于**影响当前行动 / 需要用户或猫立即�
 - ❌ 把所有失败统计塞进一个 stats card，等用户主动去 tab 看
 - ❌ 出问题的现场没有任何提示，只在 dashboard 数字 +1
 - ❌ 每次失败都发一条 in-context 富块，没有 dedup/聚合
-- ❌ Primary surface 写"dashboard"——这不是 Cat Café 的产品哲学
+- ❌ Primary surface 写"dashboard"——这不是 Clowder AI 的产品哲学
 - ❌ "等以后再做 in-context，现在先把 dashboard 做了"——本末倒置，dashboard 永远比 in-context 好做，先做 in-context
 
 ## 三层模型（参考实现）

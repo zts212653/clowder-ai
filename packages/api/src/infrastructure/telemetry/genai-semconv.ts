@@ -37,10 +37,16 @@ export const TOOL_CATEGORY = 'tool.category';
 export const ROUTING_STRATEGY = 'cat_cafe.routing.strategy';
 export const ROUTING_TARGET_CATS = 'cat_cafe.routing.target_cats';
 export const ROUTING_INTENT = 'cat_cafe.routing.intent';
+/** Bounded F177 event-wait resolver reject reason (12 enum values maximum). */
+export const ROUTING_EVENT_WAIT_REASON = 'routing_event_wait_reason';
+/** F167 Phase S bounded successor cardinality mode: single | parallel. */
+export const ACTION_SUCCESSOR_MODE = 'action_successor.mode';
 
 // --- F174 Phase D1: callback auth failure attributes ---
 export const CALLBACK_TOOL = 'callback.tool';
 export const CALLBACK_REASON = 'callback.reason';
+/** Bounded F254 relevance suppressions; values come from FreshnessRelevanceReason. */
+export const FRESHNESS_RELEVANCE_REASON = 'freshness.relevance_reason';
 
 // --- F236 Track-1: anchor-first telemetry attributes ---
 /**

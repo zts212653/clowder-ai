@@ -58,6 +58,7 @@ function makeDraft(overrides = {}) {
  * @param {Record<string, {parentInvocationId?: string, threadId: string, catId: string, createdAt: number}>} [opts.turnInvocations]
  *        - registry namespace: child invocationId → {parentInvocationId, threadId, catId, createdAt}
  * @param {Record<string, string>} [opts.latestTurnByCat] - {`${threadId}:${catId}`: latestChildInvocationId}
+ * @param {Record<string, Array>} [opts.turnExecutionsByParent] - durable child executions keyed by parent id
  */
 function makeDeps({
   records = [],
@@ -66,6 +67,7 @@ function makeDeps({
   trackerUserIds = {},
   turnInvocations = {},
   latestTurnByCat = {},
+  turnExecutionsByParent = {},
 } = {}) {
   return {
     listRunningRecords: () => records,
@@ -75,6 +77,21 @@ function makeDeps({
     // Phase Z new deps (砚砚 R1 P1-1: 结构化 not boolean)
     getTurnInvocation: (childInvocationId) => turnInvocations[childInvocationId] ?? null,
     getLatestTurnInvocationId: (threadId, catId) => latestTurnByCat[`${threadId}:${catId}`] ?? null,
+    listTurnExecutionsByParent: (parentInvocationId) => turnExecutionsByParent[parentInvocationId] ?? [],
+  };
+}
+
+function makeTurnExecution(overrides = {}) {
+  return {
+    invocationId: overrides.invocationId ?? 'child-execution-1',
+    parentInvocationId: overrides.parentInvocationId ?? 'parent-execution-1',
+    threadId: overrides.threadId ?? THREAD_ID,
+    userId: overrides.userId ?? USER_ID,
+    catId: overrides.catId ?? 'fable5',
+    executionKind: overrides.executionKind ?? 'ordinary',
+    startedAt: overrides.startedAt ?? 900_000,
+    status: overrides.status ?? 'running',
+    ...overrides,
   };
 }
 
@@ -1112,6 +1129,195 @@ describe('F194 Phase Z — namespace-aware (parent recordStore vs child registry
     assert.match(z.reason, /cat_slot_reused/);
   });
 
+  it('durable running child keeps an aged parent live during the no-draft handoff gap', async () => {
+    const now = 2_000_000;
+    const parentId = 'parent-with-running-child';
+    const childId = 'child-running-durable';
+    const childStartedAt = now - 5_000;
+    const record = makeRecord({
+      id: parentId,
+      updatedAt: now - 700_000,
+      createdAt: now - 700_000,
+      targetCats: ['codex-sol'],
+    });
+    const runningChild = makeTurnExecution({
+      invocationId: childId,
+      parentInvocationId: parentId,
+      catId: 'fable5',
+      startedAt: childStartedAt,
+    });
+    const completedSibling = makeTurnExecution({
+      invocationId: 'child-codex-completed',
+      parentInvocationId: parentId,
+      catId: 'codex-sol',
+      startedAt: now - 20_000,
+      status: 'succeeded',
+      endedAt: now - 10_000,
+    });
+    const deps = makeDeps({
+      records: [record],
+      turnExecutionsByParent: { [parentId]: [completedSibling, runningChild] },
+    });
+
+    const result = await getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now });
+
+    assert.equal(result.zombies.length, 0, 'running durable child is positive liveness proof for its parent');
+    assert.deepEqual(result.active, [
+      {
+        catId: 'fable5',
+        executionId: parentId,
+        invocationId: childId,
+        startedAt: childStartedAt,
+        source: 'parent+child-execution',
+        degraded: false,
+        reason: 'child_execution_running',
+      },
+    ]);
+  });
+
+  it('running durable child prevents cross-parent same-cat dedup from zombifying its parent', async () => {
+    const now = 2_000_000;
+    const oldParentId = 'parent-preempted-finalizing';
+    const newParentId = 'parent-current-slot-owner';
+    const oldChildId = 'child-old-fable-running';
+    const newChildId = 'child-new-fable-draft';
+    const newChildCreatedAt = now - 4_000;
+    const oldRecord = makeRecord({
+      id: oldParentId,
+      updatedAt: now - 700_000,
+      createdAt: now - 700_000,
+      targetCats: ['codex-sol'],
+    });
+    const newRecord = makeRecord({
+      id: newParentId,
+      updatedAt: now - 20_000,
+      createdAt: now - 20_000,
+      targetCats: ['fable5'],
+    });
+    const newDraft = makeDraft({
+      invocationId: newChildId,
+      catId: 'fable5',
+      createdAt: newChildCreatedAt,
+      updatedAt: now - 100,
+    });
+    const deps = makeDeps({
+      records: [oldRecord, newRecord],
+      drafts: [newDraft],
+      turnInvocations: {
+        [newChildId]: {
+          parentInvocationId: newParentId,
+          threadId: THREAD_ID,
+          userId: USER_ID,
+          catId: 'fable5',
+          createdAt: newChildCreatedAt,
+        },
+      },
+      latestTurnByCat: { [`${THREAD_ID}:fable5`]: newChildId },
+      turnExecutionsByParent: {
+        [oldParentId]: [
+          makeTurnExecution({
+            invocationId: oldChildId,
+            parentInvocationId: oldParentId,
+            catId: 'fable5',
+            startedAt: now - 8_000,
+          }),
+        ],
+      },
+    });
+
+    const result = await getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now });
+
+    assert.deepEqual(
+      result.active.map((entry) => entry.invocationId),
+      [newChildId],
+      'UI-facing active list still exposes only the current same-cat slot owner',
+    );
+    assert.equal(
+      result.zombies.length,
+      0,
+      'losing UI dedup cannot become parent death while its canonical child execution is running',
+    );
+  });
+
+  it('terminal durable child does not suppress normal parent zombie detection', async () => {
+    const now = 2_000_000;
+    const parentId = 'parent-with-terminal-child';
+    const record = makeRecord({
+      id: parentId,
+      updatedAt: now - 700_000,
+      createdAt: now - 700_000,
+      targetCats: ['codex-sol'],
+    });
+    const succeededChild = makeTurnExecution({
+      invocationId: 'child-already-succeeded',
+      parentInvocationId: parentId,
+      status: 'succeeded',
+      endedAt: now - 10_000,
+    });
+    const deps = makeDeps({
+      records: [record],
+      turnExecutionsByParent: { [parentId]: [succeededChild] },
+    });
+
+    const result = await getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now });
+
+    assert.equal(result.active.length, 0);
+    assert.equal(result.zombies.length, 1);
+    assert.equal(result.zombies[0].invocationId, parentId);
+    assert.equal(result.zombies[0].reason, 'no_tracker_no_fresh_draft_age_exceeded');
+  });
+
+  it('out-of-scope durable running child cannot keep another user or thread alive', async () => {
+    const now = 2_000_000;
+    const parentId = 'parent-with-cross-scope-child';
+    const record = makeRecord({
+      id: parentId,
+      updatedAt: now - 700_000,
+      createdAt: now - 700_000,
+    });
+    const deps = makeDeps({
+      records: [record],
+      turnExecutionsByParent: {
+        [parentId]: [
+          makeTurnExecution({ parentInvocationId: parentId, userId: 'other-user' }),
+          makeTurnExecution({
+            parentInvocationId: parentId,
+            invocationId: 'other-thread-child',
+            threadId: 'other-thread',
+          }),
+        ],
+      },
+    });
+
+    const result = await getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now });
+
+    assert.equal(result.active.length, 0);
+    assert.equal(result.zombies.length, 1);
+    assert.equal(result.zombies[0].invocationId, parentId);
+  });
+
+  it('durable child lookup failure fails open to the route instead of manufacturing a zombie', async () => {
+    const now = 2_000_000;
+    const parentId = 'parent-ledger-read-failed';
+    const record = makeRecord({
+      id: parentId,
+      updatedAt: now - 700_000,
+      createdAt: now - 700_000,
+    });
+    const deps = {
+      ...makeDeps({ records: [record] }),
+      listTurnExecutionsByParent: async () => {
+        throw new Error('ledger unavailable');
+      },
+    };
+
+    await assert.rejects(
+      () => getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now }),
+      /ledger unavailable/,
+      'configured canonical-store failure must reach the route fallback, never look like negative liveness proof',
+    );
+  });
+
   it('Phase A/B backward compat: helper still works when new namespace deps are absent (legacy callers)', async () => {
     // Phase A/B existing tests don't pass getTurnInvocation/getLatestTurnInvocationId.
     // Helper must keep working — fall back to existing record/draft/tracker matching by invocationId.
@@ -1137,5 +1343,27 @@ describe('F194 Phase Z — namespace-aware (parent recordStore vs child registry
     assert.equal(result.active.length, 1);
     assert.equal(result.active[0].invocationId, 'inv-legacy');
     assert.equal(result.active[0].source, 'record+draft');
+  });
+
+  it('Cloud R5 P1-A: a transient registry bridge failure must propagate, not read as "no fresh child"', async () => {
+    // 病理链：running parent 超过 record-only grace（唯一 live 证明是 fresh child draft）
+    // → getTurnInvocation 瞬时抛错被 resolveDraftToTurn 吞成 null（"draft 不存在"）
+    // → strict 路径**权威空**而非抛错 → presence complete:true → sidebar 落历史 done/error。
+    // 语义边界：getRecord 返回 null 是权威"无 turn info"（合法 skip，Z 系列已锁）；
+    // **抛错是未知**，必须传播——未知不得当成否定（F297 语义铁律）。
+    const now = 1_000_000;
+    const record = makeRecord({ id: 'parent-bridge', updatedAt: now - 600_000, createdAt: now - 600_000 });
+    const draft = makeDraft({ invocationId: 'child-bridge', catId: 'opus', updatedAt: now - 100 });
+    const deps = {
+      ...makeDeps({ records: [record], drafts: [draft] }),
+      getTurnInvocation: () => {
+        throw new Error('transient registry read failure');
+      },
+    };
+    await assert.rejects(
+      () => getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now }),
+      /transient registry read failure/,
+      'a bridge read failure is unknown, not an authoritative "draft has no turn"',
+    );
   });
 });

@@ -116,7 +116,6 @@ describe('SplitPaneView input routing (P1-1)', () => {
       root.render(
         React.createElement(SplitPaneView, {
           onSend: mockOnSend,
-          onStop: vi.fn(),
           onZoomToThread: vi.fn(),
         }),
       );
@@ -130,7 +129,15 @@ describe('SplitPaneView input routing (P1-1)', () => {
       (btn as HTMLElement).click();
     });
 
-    // SplitPaneView wraps onSend: (content, images, whisper, deliveryMode, replyToId) => onSend(content, images, splitPaneTargetId, whisper, deliveryMode, replyToId)
-    expect(mockOnSend).toHaveBeenCalledWith('test message', undefined, 'thread-2', undefined, undefined, undefined);
+    // SplitPaneView preserves the typed disposition after injecting the split-pane target thread.
+    expect(mockOnSend).toHaveBeenCalledWith(
+      'test message',
+      undefined,
+      'thread-2',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
   });
 });

@@ -16,6 +16,23 @@ import { describe, it } from 'node:test';
 const instruments = await import('../dist/infrastructure/telemetry/instruments.js');
 
 describe('F254 AC-B5: Freshness telemetry counters', () => {
+  it('exports Codex app-server lifecycle operational instruments', () => {
+    for (const name of [
+      'codexAppServerLifecycleTransition',
+      'codexAppServerStageDuration',
+      'codexAppServerRecovery',
+      'codexAppServerInterrupt',
+      'codexAppServerForcedCleanup',
+    ]) {
+      assert.ok(instruments[name], `${name} should be exported`);
+    }
+    assert.equal(typeof instruments.codexAppServerLifecycleTransition.add, 'function');
+    assert.equal(typeof instruments.codexAppServerStageDuration.record, 'function');
+    assert.equal(typeof instruments.codexAppServerRecovery.add, 'function');
+    assert.equal(typeof instruments.codexAppServerInterrupt.add, 'function');
+    assert.equal(typeof instruments.codexAppServerForcedCleanup.add, 'function');
+  });
+
   // --- Counter existence tests ---
 
   it('exports freshnessGateHeld counter', () => {
@@ -26,6 +43,14 @@ describe('F254 AC-B5: Freshness telemetry counters', () => {
   it('exports freshnessGateForward counter', () => {
     assert.ok(instruments.freshnessGateForward, 'freshnessGateForward should be exported');
     assert.equal(typeof instruments.freshnessGateForward.add, 'function', 'should have add()');
+  });
+
+  it('exports bounded typed relevance suppression telemetry', async () => {
+    const { ALLOWED_METRIC_ATTRIBUTES } = await import('../dist/infrastructure/telemetry/metric-allowlist.js');
+    const { FRESHNESS_RELEVANCE_REASON } = await import('../dist/infrastructure/telemetry/genai-semconv.js');
+    assert.ok(instruments.freshnessRelevanceSuppressed);
+    assert.equal(typeof instruments.freshnessRelevanceSuppressed.add, 'function');
+    assert.equal(ALLOWED_METRIC_ATTRIBUTES.has(FRESHNESS_RELEVANCE_REASON), true);
   });
 
   it('exports freshnessNoticeAttached counter', () => {
@@ -53,6 +78,13 @@ describe('F254 AC-B5: Freshness telemetry counters', () => {
     assert.equal(typeof instruments.freshnessReinvokeSkipped.add, 'function', 'should have add()');
   });
 
+  it('exports queued read/handled closure counters', () => {
+    assert.ok(instruments.freshnessQueuedSeen, 'freshnessQueuedSeen should be exported');
+    assert.equal(typeof instruments.freshnessQueuedSeen.add, 'function', 'freshnessQueuedSeen should have add()');
+    assert.ok(instruments.freshnessQueuedHandled, 'freshnessQueuedHandled should be exported');
+    assert.equal(typeof instruments.freshnessQueuedHandled.add, 'function', 'freshnessQueuedHandled should have add()');
+  });
+
   // --- Incrementability (no-throw) tests ---
 
   it('all freshness counters can be incremented without throwing', () => {
@@ -60,11 +92,18 @@ describe('F254 AC-B5: Freshness telemetry counters', () => {
     // (lazy proxy defers to NoopMeter)
     assert.doesNotThrow(() => instruments.freshnessGateHeld.add(1));
     assert.doesNotThrow(() => instruments.freshnessGateForward.add(1));
+    assert.doesNotThrow(() =>
+      instruments.freshnessRelevanceSuppressed.add(1, {
+        'freshness.relevance_reason': 'same_user_wave_sibling_reply',
+      }),
+    );
     assert.doesNotThrow(() => instruments.freshnessNoticeAttached.add(1));
     assert.doesNotThrow(() => instruments.freshnessNoticeAcked.add(1));
     assert.doesNotThrow(() => instruments.freshnessNoticeDeferred.add(1));
     assert.doesNotThrow(() => instruments.freshnessReinvokeTriggered.add(1));
     assert.doesNotThrow(() => instruments.freshnessReinvokeSkipped.add(1));
+    assert.doesNotThrow(() => instruments.freshnessQueuedSeen.add(1));
+    assert.doesNotThrow(() => instruments.freshnessQueuedHandled.add(1));
   });
 
   // --- warmupCounters includes freshness counters ---

@@ -40,8 +40,6 @@ function extractDeliveredIds(prompt) {
   return ids;
 }
 
-const { getCatContextBudget } = await import('../../dist/config/cat-budgets.js');
-
 describe('Incremental Delivery', () => {
   let messageStore;
   let registry;
@@ -101,9 +99,9 @@ describe('Incremental Delivery', () => {
     const codexPrompt1 = codex.capturedPrompts[0] ?? '';
     const codexPrompt2 = codex.capturedPrompts[1] ?? '';
 
-    // First codex invocation should include previous user messages + current
-    // Note: opus-reply-1 is origin:'stream', hidden in play mode (cats don't see each other's thinking)
+    // First codex invocation should include all persisted unread visible speech + current.
     assert.ok(codexPrompt1.includes('alpha'), 'codex first prompt should include prior user message alpha');
+    assert.ok(codexPrompt1.includes('opus-reply-1'), 'codex first prompt should include unread persisted opus speech');
     assert.ok(codexPrompt1.includes('beta'), 'codex first prompt should include current user message beta');
 
     // Second codex invocation should not replay alpha/beta again
@@ -112,10 +110,9 @@ describe('Incremental Delivery', () => {
     assert.ok(codexPrompt2.includes('gamma'), 'codex second prompt should include new user message gamma');
   });
 
-  test('#91 regression: message between 2000~budget chars must NOT be truncated in incremental path', async () => {
-    const budget = getCatContextBudget('codex').maxContentLengthPerMsg;
-    // Construct a user message longer than old hardcoded 2000 but within budget
-    const msgLength = Math.min(budget - 500, 5000);
+  test('#91 regression: a 5000-char message must NOT be truncated in incremental path', async () => {
+    // Message formatting has an internal injection-safety ceiling, not a per-cat prompt-policy field.
+    const msgLength = 5000;
     assert.ok(msgLength > 2000, `test requires msgLength > 2000, got ${msgLength}`);
     const longUserMsg = `@opus ${'X'.repeat(msgLength - 30)}_TAIL_MARKER_91`;
 

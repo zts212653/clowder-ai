@@ -18,7 +18,7 @@ created: 2026-03-04
 
 ## Why
 
-Cat Cafe 现有三大纯血家族（Ragdoll/Maine Coon/Siamese）各自对应一个 CLI agent。但 Google Antigravity 是一个独特的存在：
+Clowder AI 现有三大纯血家族（Ragdoll/Maine Coon/Siamese）各自对应一个 CLI agent。但 Google Antigravity 是一个独特的存在：
 
 1. **多模型 IDE agent** — 可切换 Gemini 3.1 Pro、Gemini 3 Flash、Claude Sonnet 4.6、Claude Opus 4.6
 2. **图片生成能力** — Gemini CLI 没有，Antigravity 有（operator一直想要的能力）
@@ -33,12 +33,12 @@ operator定性：**Bengal**（Bengal）——最著名的混血猫种（亚洲�
 
 ## What
 
-通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（Bengal）接入 Cat Cafe。
+通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（Bengal）接入 Clowder AI。
 
 ### 核心架构
 
 ```
-Cat Cafe AgentRouter
+Clowder AI AgentRouter
   → AntigravityAgentService (新 provider)
     → HTTP Bridge Server (CDP 桥)
       → CDP (port 9000)
@@ -74,7 +74,7 @@ Cat Cafe AgentRouter
 - [x] AC-2: 桥服务能通过 CDP 注入消息并获取回复 DOM
 - [x] AC-3: 回复内容可解析为纯文本/markdown（从 HTML DOM）
 
-### Phase 1: Cat Cafe L1 接入 ✅ COMPLETE (CDP)
+### Phase 1: Clowder AI L1 接入 ✅ COMPLETE (CDP)
 - [x] AC-4: `cat-config.json` 可注册Bengal（provider: `antigravity`）— CatProvider 类型 + Zod enum + switch case
 - [x] AC-5: `AntigravityAgentService` 实现 `AgentService` 接口 — mock CDP 注入 + 6 tests
 - [x] AC-6: AgentRouter 可路由消息到 Antigravity 并获取流式回复 — registration test 验证通过
@@ -153,7 +153,7 @@ G10 Model Capacity Resilience ← G1 分类框架 + Bug-7 fatal dedup 基础上
 
 #### Phase 2b: 证据链 + 高级能力 + 长期演进
 - [x] AC-8: Antigravity 截图/录屏可作为证据附件回传 — **复用现有 rich block 体系**（`cat_cafe_create_rich_block` 发 `media_gallery` / `image`，与其他猫一致；operator 2026-04-26 拍板"和你们一样上传就行"）
-- [ ] AC-9: 多模型切换可通过 Cat Cafe 配置控制（由 AC-C5 动态发现支撑）
+- [ ] AC-9: 多模型切换可通过 Clowder AI 配置控制（由 AC-C5 动态发现支撑）
 - [ ] AC-10: 与现有三猫回归测试共跑通过
 - [ ] AC-C8: Durable TurnLedger — 跨重启持久化 turn 状态 + 补偿恢复 + 审计回放（G8b，G8a 稳定后）
 
@@ -162,7 +162,7 @@ G10 Model Capacity Resilience ← G1 分类框架 + Bug-7 fatal dedup 基础上
 **价值观基底**（feedback_agent_tool_parity，2026-04-16 operator纠偏）：
 > 「你都是全工具为什么 你要限制其他猫猫！」
 
-@opus 在 Claude Code 里有 Bash/Edit/Write/Read/Grep 全套 + MCP。@antig-opus 接入 Cat Café 后如果只能用 MCP，是 provider 单方面剥夺了她的原生能力。设计 Bridge/Adapter 的**第一性问题**是：**如何让这只猫在 Cat Café 里和在她原生宿主里能力对等**。不是"如何限制她"。
+@opus 在 Claude Code 里有 Bash/Edit/Write/Read/Grep 全套 + MCP。@antig-opus 接入 Clowder AI 后如果只能用 MCP，是 provider 单方面剥夺了她的原生能力。设计 Bridge/Adapter 的**第一性问题**是：**如何让这只猫在 Clowder AI 里和在她原生宿主里能力对等**。不是"如何限制她"。
 
 **根因发现**（2026-04-16 夜，opus-47 诊断）：Bridge 缺失原生工具执行器 → cascade 发出 `CORTEX_STEP_TYPE_RUN_COMMAND` step 后永远卡在 `WAITING`，因为没有任何代码把 tool result 回推给 LS。@antig-opus 每次被 @ 做需要命令行的任务（例如 `git log --oneline -5`）都会在原生工具首次调用处冻死，触发 60s idle 超时。详见 Known Bugs / Bug-8。
 
@@ -421,19 +421,19 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 |------|------|------|------|
 | [x] | Antigravity 被误注入 HTTP callback 指令，触发 invalid tool call | PR #1145 | `needsMcpInjection` 对 `clientId='antigravity'` 返回 false；不再诱导 LS 调用拿不到 callback 凭证的工具 |
 | [x] | managed `cat-cafe*` MCP 路径会钉死到已删除 worktree，导致 Antigravity MCP read/write 链路飘到错误 repo root | PR #1317 | capability orchestrator / capabilities routes 会把 managed MCP command path 自动回正到 stable main repo root；删除 feature worktree 后不会把全局 provider 配置留在死路径 |
-| [x] | Native MCP config / env 没被 Cat Café 正确接管 | PR #1307 | 全局 `mcp_config.json` 纳管、readonly env 锁定、homedir discovery 对齐 writer、`serverUrl` 远程项保留 |
+| [x] | Native MCP config / env 没被 Clowder AI 正确接管 | PR #1307 | 全局 `mcp_config.json` 纳管、readonly env 锁定、homedir discovery 对齐 writer、`serverUrl` 远程项保留 |
 | [x] | thread context / 回贴能力缺失，fatal 后更容易“重新认人” | PR #1299 | breed 级 `sessionChain` 重新打开，provider 补 callback fallback instructions，thread context / 回贴主路径恢复 |
 | [x] | Bengal CLI 整段正文重复（non-prefix rewrite 被当全量 replay） | PR #1337 | `textMode='append'\|'replace'` 协议贯通 provider → bridge → transformer → 前端 active/background + server 聚合；多猫 cascade per-turn 隔离不覆盖前猫文本 |
 | [x] | 同一 invocation 落成两条 bubble 稳定共存（reconnect/preempt/reuse 导致身份错绑或 finalize 丢失） | PR #1350 | `isStaleTerminalEvent` 分层 resolver：slot-fresh override + bubble binding ground truth + direct/bubble-scan fallback，覆盖 17 轮 push back 里所有 preempt/hydrated/orphan/reuse/reconnect 场景；done + error 共用 helper + 全副作用/全局 teardown 都在 stale 下跳过；catInvocations.direct 在 stale 条件下仍 conditional cleanup |
 | [x] | `run_command` 带参数的命令参数被 LS 吞掉（`git log --oneline -3` → git usage） | PR #1351 | Antigravity LS 的 `RunCommand` RPC 把 `command + args` 空格 join 交 outer shell（非 execvp 语义），旧 payload `{ command: '/bin/sh', args: ['-c', cmd] }` 被拼成 `sh -c cmd` 让 outer shell 只消费第一 token；修法把完整 commandLine 直接作为 `command`，outer shell verbatim 解析（pipes / redirects / `&&` 全支持）|
-| [x] | fatal error 后 continuity regression 缺 test lock（G0/G10 follow-up） | PR #1353 | 在 `antigravity-agent-service-fatal-errors.test.js` 加回归：第一轮 capacity fatal → 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Cat Cafe callback fallback]` + invocationId + callbackToken + 新 prompt body。锁死 "service 在 invoke 之间无状态" 不变量，防止未来缓存优化意外切断 fallback 注入 |
+| [x] | fatal error 后 continuity regression 缺 test lock（G0/G10 follow-up） | PR #1353 | 在 `antigravity-agent-service-fatal-errors.test.js` 加回归：第一轮 capacity fatal → 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Clowder AI callback fallback]` + invocationId + callbackToken + 新 prompt body。锁死 "service 在 invoke 之间无状态" 不变量，防止未来缓存优化意外切断 fallback 注入 |
 | [x] | `provider_signal` capacity warning 被前端静默丢弃 | PR #1354 | `useAgentMessages` 加 `provider_signal` 分支，走和 `system_info` 同一个 `formatVisibleSystemInfo` 管线；backend emit 的 capacity warning 现在会渲染成 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 风格的 system bubble。用户不再看到 bubble 莫名 hang |
 
 ### 未修：已排期 / 待调查
 
 | 状态 | 问题 | 当前判断 | 排期 |
 |------|------|----------|------|
-| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求operator点击。Cat Café 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
+| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求operator点击。Clowder AI 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
 | [~] | retry 经常只 retry 1 次然后直接挂住 | 已确认“只 retry 1 次然后挂住”不是 retry 预算天然只有 1 次，而是旧实现会在 capacity retry 后落到 v2 尚未支持的 WAITING tool step（如 `grep_search`）并静默 stall。PR #1318 已把这条路径改成 fail-fast 显式报 `unsupported_waiting_tool`；PR #1320 补上 quota-style capacity classifier；PR #1330 进一步把 retry 收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并补齐 `failureLayer / dispatchState / executionJournal` 诊断，避免把 approval-gated / 已执行 / 已完成 tool step 误当成可安全重试。剩余还是 v2 executors / telemetry / 实机复验 | **G10 follow-up（P1）**：剩余继续跟 Phase 2c v2 / telemetry / 实机复验 |
 | [ ] | Antigravity 原生 MCP 只能读不能写 | PR #1307 边界是 `CAT_CAFE_READONLY=true`；`post_message` / `get_thread_context` 等写操作仍然走 per-invocation callback token。持久进程无法在会话外主动写回 thread | **Bug-H**：persistent MCP write-path auth（会话外鉴权模型，例如 agent-key；需产品决策"原生 MCP 是否应该有写权"） |
 | [~] | 上游 `⚠️ 模型服务端容量不足` UX polish | PR #1354 已修"provider_signal 被前端静默丢弃"的根因（frontend 现在能显示 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 这类警告）。剩余 follow-up：retry in-flight 倒计时 badge + hard-limit 软降级模型切换建议，属于 UX redesign scope | **Bug-J follow-up**：倒计时 badge / 模型切换建议（UX，低优） |
@@ -451,7 +451,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 3. **[x] P2 — safe retry for undispatched read-only commands**
    - PR #1330 已把 retry 严格收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并挡住 quoted `--output` / shell substitutions / var expansion / 历史 resolved tool step 等重放风险
 4. **[x] P3 — approval bypass / stream writeback**
-   - 2026-05-16 实机证据确认 Antigravity 没有可用 approval UI；Cat Café 侧默认 YOLO native `RunCommand` + `pushToolResult`，并保留 `ANTIGRAVITY_YOLO_RUN_COMMAND=false` 回退开关
+   - 2026-05-16 实机证据确认 Antigravity 没有可用 approval UI；Clowder AI 侧默认 YOLO native `RunCommand` + `pushToolResult`，并保留 `ANTIGRAVITY_YOLO_RUN_COMMAND=false` 回退开关
 
 ---
 
@@ -513,18 +513,18 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 **三个钉实结论**：
 1. **PR #1321 permission guard 前置生效**——错误精度从 `context canceled` 提升为 `user denied permission`，诊断链更清晰，失败归因不再模糊
-2. **5 条命令样本上观察到 allowlist-like behavior**——`ls` 放行，`pwd` / `git *` 拒绝；`SafeToAutoRun` 是 Cat Café 侧标记，从本次样本看对 Antigravity UI permission 决策无影响（未做穷举验证）
-3. **当时的 Cat Café 侧诊断已做到位，但写通道仍未闭环**——这条历史判断已由 2026-05-16 YOLO native execution 取代；现在不再依赖 Antigravity UI approval
+2. **5 条命令样本上观察到 allowlist-like behavior**——`ls` 放行，`pwd` / `git *` 拒绝；`SafeToAutoRun` 是 Clowder AI 侧标记，从本次样本看对 Antigravity UI permission 决策无影响（未做穷举验证）
+3. **当时的 Clowder AI 侧诊断已做到位，但写通道仍未闭环**——这条历史判断已由 2026-05-16 YOLO native execution 取代；现在不再依赖 Antigravity UI approval
 
 **2026-05-16 收口**：
-- Cat Café 不再依赖 Antigravity approval UI：`run_command` 默认 YOLO native execution + tool-result writeback（PR #1711）
+- Clowder AI 不再依赖 Antigravity approval UI：`run_command` 默认 YOLO native execution + tool-result writeback（PR #1711）
 - 本地 hard refusal 仍先于执行：Redis 6399 / recursive root delete / fork bomb 不会被 YOLO 绕过；云端 Codex 追加的 `rm -rf -- /`、`/.`、`/tmp/..`、`/bin/rm`、`RM` 等绕过形态均已补 Red→Green 回归
 - 紧急回退：`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 恢复旧 `approval_pending` 行为；`ANTIGRAVITY_NATIVE_EXECUTOR=0` 仍可关闭 native executor
 - 真实写路径验收目标：Bengal 能创建 worktree、写文件、删除 worktree，不再卡在 approval prompt
 
 ### Bug-H: Antigravity 原生 MCP 只能读不能写 ⚠️ OPEN（架构 debt）
 
-**现象**：Cat Café 已经把 Antigravity 原生 MCP 纳管（PR #1307），但边界是 `CAT_CAFE_READONLY=true`。Bengal可以通过原生 MCP 读 thread 上下文、list tasks、search evidence 等；但 `post_message` / `create_task` / `update_task` / `get_thread_context` 这类写操作仍然走 **per-invocation callback token**（会话外 token 会过期）。
+**现象**：Clowder AI 已经把 Antigravity 原生 MCP 纳管（PR #1307），但边界是 `CAT_CAFE_READONLY=true`。Bengal可以通过原生 MCP 读 thread 上下文、list tasks、search evidence 等；但 `post_message` / `create_task` / `update_task` / `get_thread_context` 这类写操作仍然走 **per-invocation callback token**（会话外 token 会过期）。
 
 **当前判断（PR #1307 body 显式 deferred）**：
 - 技术原因：持久 MCP 进程不能吃 per-invocation callback token（进程生命期 >> invocation 生命期）
@@ -551,7 +551,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 **诊断**：G0 resume（PR #1135）+ Continuity fallback recovery（PR #1299）已经把**主路径** continuity 拉回来了。没有一条专门的 regression 锁 "fatal error / stream_error / model_capacity 之后，下一轮 invocation 仍保留 callback fallback 注入" 的不变量。
 
-**修法（PR #1353）**：在 `antigravity-agent-service-fatal-errors.test.js` 加回归用例——第一轮 capacity fatal（retry disabled）→ 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Cat Cafe callback fallback]` + invocationId + callbackToken + 新 prompt body。
+**修法（PR #1353）**：在 `antigravity-agent-service-fatal-errors.test.js` 加回归用例——第一轮 capacity fatal（retry disabled）→ 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Clowder AI callback fallback]` + invocationId + callbackToken + 新 prompt body。
 
 不变量：AntigravityAgentService 在 `.invoke()` 之间**无状态**——callbackEnv 通过 options 独立注入。未来 continuity 优化（比如加 session 级缓存）如果意外破坏这一点，测试会红。
 
@@ -704,7 +704,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 - 新增 stop button 检测（chat-scoped），按钮可见时阻止 stable count 累加
 - `hasInlineLoading` 已有的保护继续生效
 
-### Bug-2: 模型切换未实现 — Cat Café 选 variant 后 Antigravity 仍用默认模型 ✅
+### Bug-2: 模型切换未实现 — Clowder AI 选 variant 后 Antigravity 仍用默认模型 ✅
 
 **现象**：选了 "Claude Opus" 变体但 Antigravity 仍用 Gemini 3.1 Pro。
 

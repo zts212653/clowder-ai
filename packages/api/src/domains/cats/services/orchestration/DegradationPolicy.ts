@@ -4,53 +4,14 @@
  * Part of 4-D-lite feature for Phase 4.0.
  */
 
-import type { ContextBudget } from '@cat-cafe/shared';
-
 export type DegradationStrategy = 'full' | 'truncated' | 'pattern_only' | 'abort';
 
 export interface DegradationResult {
   degraded: boolean;
   strategy: DegradationStrategy;
   reason?: string;
-  /** Adjusted options for context assembly */
-  adjustedMaxMessages?: number;
-  adjustedMaxTotalTokens?: number;
-}
-
-/**
- * Check if context assembly needs degradation based on message count and budget.
- *
- * Degradation ladder:
- * - 'full': within budget, no degradation
- * - 'truncated': exceeds 50%+ of maxMessages, truncate to budget
- * - 'abort': cannot proceed (shouldn't happen in practice)
- */
-export function checkContextBudget(messageCount: number, budget: ContextBudget): DegradationResult {
-  if (messageCount <= budget.maxMessages) {
-    return {
-      degraded: false,
-      strategy: 'full',
-    };
-  }
-
-  // Exceeds budget — truncate
-  const ratio = messageCount / budget.maxMessages;
-  if (ratio > 1.5) {
-    return {
-      degraded: true,
-      strategy: 'truncated',
-      reason: `消息数 ${messageCount} 超出预算 ${budget.maxMessages}，已截断`,
-      adjustedMaxMessages: budget.maxMessages,
-    };
-  }
-
-  // Slightly over — still truncate but less severe
-  return {
-    degraded: true,
-    strategy: 'truncated',
-    reason: `消息数略超预算，已截断至 ${budget.maxMessages}`,
-    adjustedMaxMessages: budget.maxMessages,
-  };
+  /** Number of selected messages that fit the invocation ceiling. */
+  includedMessages?: number;
 }
 
 /**
@@ -61,9 +22,9 @@ export function checkContextBudget(messageCount: number, budget: ContextBudget):
  * - 'pattern_only': history too large, use regex matching only
  * - 'abort': cannot proceed
  */
-export function checkExtractionBudget(historyTokens: number, budget: ContextBudget): DegradationResult {
-  // Use 80% of maxPromptTokens as threshold for extraction
-  const extractionBudget = budget.maxPromptTokens * 0.8;
+export function checkExtractionBudget(historyTokens: number, inputCeilingTokens: number): DegradationResult {
+  // Leave headroom within the invocation-owned input ceiling.
+  const extractionBudget = inputCeilingTokens * 0.8;
 
   if (historyTokens <= extractionBudget) {
     return {
@@ -73,7 +34,7 @@ export function checkExtractionBudget(historyTokens: number, budget: ContextBudg
   }
 
   // Too large for LLM — pattern matching only
-  if (historyTokens <= budget.maxPromptTokens * 2) {
+  if (historyTokens <= inputCeilingTokens * 2) {
     return {
       degraded: true,
       strategy: 'pattern_only',

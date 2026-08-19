@@ -152,6 +152,64 @@ describe('ClaudeInteractivePtyCarrierService — Step 1: happy path (B-hook)', {
     assert.equal(mock.calls.injectPrompt, 1, 'injectPrompt() called once');
     assert.equal(mock.calls.dispose, 1, 'dispose() called once (cleanup)');
   });
+
+  it('F262 applies a compatible thread reasoning effort override to PTY argv', async () => {
+    const sidecarPath = await writeSidecar(tmpDir, [stopEventLine('effort applied')]);
+    let capturedOpts = null;
+    const mock = new MockPtyDriver();
+    mock.injectResult = { transcriptPath: join(tmpDir, 'effort.jsonl'), sessionId: TEST_SESSION_ID };
+    const carrier = new ClaudeInteractivePtyCarrierService({
+      driverFactory: (opts) => {
+        capturedOpts = opts;
+        return mock;
+      },
+      transcriptDirOverride: tmpDir,
+      hookSidecarPathOverride: sidecarPath,
+      pollIntervalMs: 20,
+      terminalTimeoutMs: 5_000,
+    });
+
+    await collect(carrier.invoke('test prompt', { reasoningEffortOverride: 'low' }));
+
+    const effortIdx = capturedOpts.extraArgs.indexOf('--effort');
+    assert.ok(effortIdx >= 0, '--effort must be present for interactive PTY');
+    assert.equal(capturedOpts.extraArgs[effortIdx + 1], 'low');
+  });
+
+  it('F254 read-only policy locks PTY tools, MCP, and env after account overrides', async () => {
+    const sidecarPath = await writeSidecar(tmpDir, [stopEventLine('read-only complete')]);
+    let capturedOpts = null;
+    const mock = new MockPtyDriver();
+    mock.injectResult = { transcriptPath: join(tmpDir, 'read-only.jsonl'), sessionId: TEST_SESSION_ID };
+    const carrier = new ClaudeInteractivePtyCarrierService({
+      driverFactory: (opts) => {
+        capturedOpts = opts;
+        return mock;
+      },
+      transcriptDirOverride: tmpDir,
+      hookSidecarPathOverride: sidecarPath,
+      mcpServerPath: sidecarPath,
+      pollIntervalMs: 20,
+      terminalTimeoutMs: 5_000,
+    });
+    const policy = { mode: 'read_only', replayDeniedToolNames: ['cat_cafe_post_message'] };
+
+    await collect(
+      carrier.invoke('supplement check', {
+        toolExecutionPolicy: policy,
+        callbackEnv: { CAT_CAFE_INVOCATION_ID: 'inv-policy' },
+        accountEnv: { CAT_CAFE_READONLY: 'false' },
+      }),
+    );
+
+    assert.equal(carrier.supportsToolExecutionPolicy(policy), true);
+    const args = capturedOpts.extraArgs;
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+    assert.equal(args[args.indexOf('--tools') + 1], '');
+    assert.ok(args.includes('--strict-mcp-config'));
+    assert.equal(args.includes('--mcp-config'), false);
+    assert.equal(capturedOpts.env.CAT_CAFE_READONLY, 'true');
+  });
 });
 
 // ─── Step 2: abort signal ────────────────────────────────────────────────────

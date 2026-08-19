@@ -60,4 +60,40 @@ describe('MediaGalleryBlock', () => {
     const img = container.querySelector('img');
     expect(img?.getAttribute('src')).toBe('https://example.com/test.png');
   });
+
+  it('shows error placeholder when image fails to load', () => {
+    renderBlock([{ url: '/uploads/missing.png', alt: 'gone' }]);
+    const img = container.querySelector('img');
+    expect(img).toBeTruthy();
+
+    // Simulate the browser firing an error event (404)
+    act(() => {
+      img?.dispatchEvent(new Event('error'));
+    });
+
+    const errorEl = container.querySelector('[data-testid="media-gallery-error"]');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl?.textContent).toContain('Image failed to load');
+    expect(errorEl?.textContent).toContain('/uploads/missing.png');
+    // The <img> should be gone, replaced by the placeholder
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('still shows other images when one fails', () => {
+    renderBlock([
+      { url: '/uploads/ok.png', alt: 'good' },
+      { url: '/uploads/broken.png', alt: 'bad' },
+    ]);
+    const imgs = container.querySelectorAll('img');
+    expect(imgs.length).toBe(2);
+
+    // Fail the second image
+    act(() => {
+      imgs[1].dispatchEvent(new Event('error'));
+    });
+
+    // First image still present, second replaced
+    expect(container.querySelectorAll('img').length).toBe(1);
+    expect(container.querySelector('[data-testid="media-gallery-error"]')).toBeTruthy();
+  });
 });

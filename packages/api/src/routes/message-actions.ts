@@ -6,13 +6,10 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { type ComposerDraftRecallRoutesOptions, composerDraftRecallRoutes } from './composer-draft-recall.js';
 
-export interface MessageActionsRoutesOptions {
-  messageStore: IMessageStore;
-  socketManager: SocketManager;
+export interface MessageActionsRoutesOptions extends ComposerDraftRecallRoutesOptions {
   threadStore?: IThreadStore;
 }
 
@@ -28,6 +25,8 @@ const restoreBodySchema = z.object({
 });
 
 export const messageActionsRoutes: FastifyPluginAsync<MessageActionsRoutesOptions> = async (app, opts) => {
+  await app.register(composerDraftRecallRoutes, opts);
+
   // DELETE /api/messages/:id — soft or hard delete a single message
   app.delete<{ Params: { id: string } }>('/api/messages/:id', async (request, reply) => {
     const parseResult = deleteBodySchema.safeParse(request.body);

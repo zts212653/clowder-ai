@@ -94,7 +94,7 @@ describe('detectCrossFeatureEvent', () => {
     expect(result?.targetThreadId).toBe('thread_other');
   });
 
-  it('truncates long content to snippet', () => {
+  it('preserves long cross-feature content for the visible recovery surface', () => {
     const longContent = 'A'.repeat(200);
     const event = makeEvent({
       type: 'tool_call',
@@ -104,7 +104,7 @@ describe('detectCrossFeatureEvent', () => {
     });
     const result = detectCrossFeatureEvent(event, FEATURE_THREADS);
     expect(result).not.toBeNull();
-    expect(result?.contentSnippet.length).toBeLessThanOrEqual(103); // 100 + '...'
+    expect(result?.contentSnippet).toBe(longContent);
   });
 
   it('returns null when toolInput is missing', () => {

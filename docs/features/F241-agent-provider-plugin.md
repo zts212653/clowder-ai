@@ -16,7 +16,7 @@ tips_exempt: spec-only — plugin framework not yet implemented, no user-facing 
 
 接入一个新的外部 agent runtime（独立产品 `clowder-code`，或未来任何第三方 coding agent）现在要做"心脏手术"：改 `ClientId` union、加 `index.ts` provider switch case、写一整套 `XxxAgentService` 适配、改 Hub cat editor enum。后果是**社区第三方 agent runtime 永远进不来**——每来一个新 agent 都得改 core，外部贡献者既碰不到也不该碰我们的核心代码。
 
-终态：外部 agent runtime 以**声明式 plugin** 形式接入，**provider 实现离开 Cat Café core**；Cat Café 只拥有北向契约、路由/身份、callback/MCP 注入、审计、session lifecycle、安全策略和 UI/配置面。`clowder-code` 是证明这个扩展点的 reference runtime，不是要 vendor 进 core 的东西。
+终态：外部 agent runtime 以**声明式 plugin** 形式接入，**provider 实现离开 Clowder AI core**；Clowder AI 只拥有北向契约、路由/身份、callback/MCP 注入、审计、session lifecycle、安全策略和 UI/配置面。`clowder-code` 是证明这个扩展点的 reference runtime，不是要 vendor 进 core 的东西。
 
 > 来源：开源社区 clowder-ai issue #941（提案人彭潇/bouillipx）+ 2026-06-16 clowder-code 接入猫咖讨论。operator 2026-06-17 signoff 立项。
 
@@ -56,7 +56,7 @@ tips_exempt: spec-only — plugin framework not yet implemented, no user-facing 
 - [ ] AC-A3: 一只 routeable cat 能调用该外部 runtime，**无需新增硬编码 core provider 分支**（grep 证明 `index.ts` 无新 case）
 - [ ] AC-A4: 流式输出映射进 `AgentMessage` / thread 可见事件
 - [ ] AC-A5: session chain、audit metadata、cancel、timeout、failure state 在 UI/日志可见
-- [ ] AC-A6: callback/MCP 凭证**只由 Cat Café host 代码注入**，plugin 代码无法接收或制造 token（红测覆盖）
+- [ ] AC-A6: callback/MCP 凭证**只由 Clowder AI host 代码注入**，plugin 代码无法接收或制造 token（红测覆盖）
 - [ ] AC-A7: cwd/workspace/sandbox 策略由 host 代码强制（非 plugin 声明即生效）
 - [ ] AC-A8: health check host-owned + 声明式配置，**非任意 plugin 脚本执行**
 - [ ] AC-A9: 测试覆盖 success / startup failure / timeout-cancel / invalid manifest-transport / denied capability 五类
@@ -72,7 +72,7 @@ tips_exempt: spec-only — plugin framework not yet implemented, no user-facing 
 
 ## 需求点 Checklist
 
-- [ ] provider 实现可移出 Cat Café core（新 agent 接入不改 `ClientId` union / `index.ts` switch / 不写 bespoke provider class）
+- [ ] provider 实现可移出 Clowder AI core（新 agent 接入不改 `ClientId` union / `index.ts` switch / 不写 bespoke provider class）
 - [ ] 声明式 manifest 接入（transport / command / mcpWhitelist / sandbox / healthCheck）
 - [ ] host-owned transport registry（ACP 优先，A2A/cli-jsonl 可选）
 - [ ] 安全边界全部 host-owned（token / MCP / sandbox / cwd / healthcheck）
@@ -104,6 +104,7 @@ tips_exempt: spec-only — plugin framework not yet implemented, no user-facing 
 | KD-2 | 安全边界 host-owned，plugin 只声明；禁任意 JS factory / 禁 Phase A plugin installer / 禁 plugin 碰 callback token | provider 接 token/MCP/workspace/sandbox 是全家最高危边界，F129 继承 | 2026-06-17 |
 | KD-3 | owner = Community(彭潇/bouillipx) + Ragdoll家族 maintainer；彭潇 own 提案+reference，**core 安全 + merge-gate maintainer 守** | 沿用 F150/F202/F205 社区核心主导 + maintainer 把关模式；社区账号够不到私有仓 core | operator 2026-06-17 signoff |
 | KD-4 | `clowder-code` 作 reference runtime 证明扩展点，**不 vendor 进 core** | 保持运行时解耦，不污染依赖边界 | 2026-06-17 |
+| KD-5 | #1221「把 pi 作 runtime core 接入猫猫」方向 **WELCOME**；F241 承接为 Phase A/C reference-runtime candidate，**walking-cat 全链 = 首要 acceptance**，capability/security/framing 为支撑门禁；pi=runtime core、`pi-rpc`=transport（不混称） | operator 2026-07-27 亲自纠偏（WeChat 与天一对齐，原话核验 msg `…4d698996`/`…8a86c1a4`）+ F241 AC-A2~A5 本就拥有该终态；纠正前期「契约化」偏航（顺序反了——应先钉「猫猫用上 pi」再只留必需边界） | 2026-07-27 |
 
 ## Architecture Cell (F191)
 

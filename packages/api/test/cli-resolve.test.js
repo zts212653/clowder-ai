@@ -23,11 +23,7 @@ test('formatCliNotFoundError returns install hint for known CLI', () => {
 test('formatCliNotFoundError returns native installer hint for agy', () => {
   const msg = formatCliNotFoundError('agy');
   assert.match(msg, /agy CLI 未找到/);
-  if (process.platform === 'win32') {
-    assert.match(msg, /install\.cmd/);
-  } else {
-    assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
-  }
+  assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
 });
 
 test('formatCliNotFoundError points opencode users at the npm package that installs the opencode binary', () => {

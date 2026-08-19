@@ -2,13 +2,25 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
 import { resolveBuiltinClientForProvider } from './account-resolver.js';
+import {
+  GEMINI35_CAT_ID,
+  GEMINI35_OLD_NAME,
+  GEMINI35_OLD_ROLE_DESCRIPTION,
+  GEMINI35_OLD_VARIANT_LABEL,
+  LEGACY_GEMINI_CONSUMER_CAT_IDS,
+  resolveAgyGeminiDefaultModel,
+} from './agy-gemini-models.js';
 import { inheritFullyBlockedMcpCapabilitiesForNewCatsSync } from './capabilities/capability-orchestrator.js';
 import {
   pickSeedBreed,
   pruneRosterToRuntimeBreeds,
   type RuntimeBreedWithCatIds,
 } from './cat-catalog-bootstrap-roster.js';
-import { isTemplateVariantBackfillAllowed, normalizeMentionAlias } from './template-variant-backfill.js';
+import {
+  isTemplateBreedBackfillAllowed,
+  isTemplateVariantBackfillAllowed,
+  normalizeMentionAlias,
+} from './template-variant-backfill.js';
 import { isTemplateVariantTombstoned } from './template-variant-tombstones.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
@@ -41,22 +53,6 @@ function writeFileAtomic(filePath: string, content: string): void {
 
 /** clowder-ai#340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
 const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'a2a']);
-const LEGACY_GEMINI_CONSUMER_CAT_IDS = new Set(['gemini', 'gemini25', 'gemini35']);
-const AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID = new Map([
-  ['gemini', 'Gemini 3.1 Pro (High)'],
-  ['gemini25', 'Gemini 3.5 Flash (High)'],
-  ['gemini35', 'Gemini 3.5 Flash (High)'],
-]);
-const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
-  ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-pro-preview', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-pro-exp', 'Gemini 3.1 Pro (High)'],
-  ['gemini-2.5-flash', 'Gemini 3.5 Flash (High)'],
-  ['gemini-2.5-flash-preview', 'Gemini 3.5 Flash (High)'],
-  ['gemini-3.1-pro', 'Gemini 3.1 Pro (High)'],
-  ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (High)'],
-  ['gemini-3.5-flash', 'Gemini 3.5 Flash (High)'],
-]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -77,12 +73,6 @@ function isLegacyGeminiAcpConfig(value: unknown): boolean {
 
 function isAgyPlainTextCliConfig(value: unknown): boolean {
   return isRecord(value) && value.command === 'agy' && value.outputFormat === 'plainText';
-}
-
-function resolveAgyGeminiDefaultModel(resolvedCatId: string, defaultModel: unknown): string | undefined {
-  const model = typeof defaultModel === 'string' ? defaultModel.trim() : '';
-  if (!model.startsWith('gemini-')) return undefined;
-  return AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID.get(model) ?? AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID.get(resolvedCatId);
 }
 
 function migrateLegacyGeminiConsumerCarrier(
@@ -326,6 +316,12 @@ function resolveVariantMentionPatterns(
   return [`@${catId}`];
 }
 
+const GEMINI35_OLD_MENTION_ALIASES = new Set(
+  ['@gemini35', '@gemini-35', '@gemini3.5', '@flash', '@暹罗flash', '@暹罗gemini35']
+    .map(normalizeMentionAlias)
+    .filter((alias): alias is string => !!alias),
+);
+
 function collectRuntimeIdentityOccupancy(breeds: Record<string, unknown>[]): RuntimeIdentityOccupancy {
   const catIds = new Set<string>();
   const mentionAliases = new Set<string>();
@@ -344,6 +340,93 @@ function collectRuntimeIdentityOccupancy(breeds: Record<string, unknown>[]): Run
     }
   }
   return { catIds, mentionAliases };
+}
+
+function hasTombstonedTemplateBreedVariant(
+  catalog: Record<string, unknown>,
+  templateBreed: Record<string, unknown>,
+): boolean {
+  const breedId = typeof templateBreed.id === 'string' ? templateBreed.id : undefined;
+  const breedCatId = typeof templateBreed.catId === 'string' ? templateBreed.catId : undefined;
+  const variants = Array.isArray(templateBreed.variants) ? (templateBreed.variants as unknown[]) : [];
+  if (!breedId) return false;
+
+  for (const variant of variants) {
+    if (!isRecord(variant)) continue;
+    if (typeof variant.id !== 'string') continue;
+    const catId = resolveVariantCatId({ catId: breedCatId }, variant);
+    if (!catId) continue;
+    if (isTemplateVariantTombstoned(catalog, { breedId, variantId: variant.id, catId })) return true;
+  }
+  return false;
+}
+
+function persistMissingTemplateBreeds(projectRoot: string, catalogPath: string, templatePath: string): boolean {
+  let catalogRaw: string;
+  let templateRaw: string;
+  try {
+    catalogRaw = readFileSync(catalogPath, 'utf-8');
+    templateRaw = readFileSync(templatePath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  const template = JSON.parse(templateRaw) as CatCafeConfig;
+  const next = structuredClone(catalog) as CatCafeConfig;
+  const nextBreeds = next.breeds as unknown as Record<string, unknown>[];
+  const existingBreedIds = new Set(
+    nextBreeds.map((breed) => breed.id).filter((id): id is string => typeof id === 'string'),
+  );
+  const templateRoster =
+    template.version === 2 ? (template.roster as unknown as Record<string, unknown>) : ({} as Record<string, unknown>);
+  const nextRoster =
+    next.version === 2 ? (next.roster as unknown as Record<string, unknown>) : ({} as Record<string, unknown>);
+  const occupancy = collectRuntimeIdentityOccupancy(nextBreeds);
+  const existingCatIds = new Set(occupancy.catIds);
+  const backfilledCatIds: string[] = [];
+
+  let dirty = false;
+  for (const templateBreed of template.breeds as unknown as Record<string, unknown>[]) {
+    if (typeof templateBreed.id !== 'string') continue;
+    if (typeof templateBreed.catId !== 'string') continue;
+    if (existingBreedIds.has(templateBreed.id)) continue;
+    if (hasTombstonedTemplateBreedVariant(catalog as unknown as Record<string, unknown>, templateBreed)) continue;
+
+    const templateBreedOccupancy = collectRuntimeIdentityOccupancy([templateBreed]);
+    const templateBreedCatIds = [...templateBreedOccupancy.catIds];
+    const templateBreedAliases = [...templateBreedOccupancy.mentionAliases];
+    if (
+      !isTemplateBreedBackfillAllowed(
+        {
+          breedId: templateBreed.id,
+          catId: templateBreed.catId,
+          catIds: templateBreedCatIds,
+          mentionPatterns: templateBreedAliases,
+        },
+        occupancy,
+      )
+    ) {
+      continue;
+    }
+
+    nextBreeds.push(structuredClone(templateBreed));
+    existingBreedIds.add(templateBreed.id);
+    for (const catId of templateBreedCatIds) {
+      occupancy.catIds.add(catId);
+      backfilledCatIds.push(catId);
+      if (next.version === 2 && !nextRoster[catId] && templateRoster[catId]) {
+        nextRoster[catId] = structuredClone(templateRoster[catId]);
+      }
+    }
+    for (const alias of templateBreedAliases) occupancy.mentionAliases.add(alias);
+    dirty = true;
+  }
+
+  if (!dirty) return false;
+  writeFileAtomic(catalogPath, `${JSON.stringify(next, null, 2)}\n`);
+  inheritFullyBlockedMcpCapabilitiesForNewCatsSync(projectRoot, backfilledCatIds, existingCatIds);
+  return true;
 }
 
 function persistMissingTemplateVariants(projectRoot: string, catalogPath: string, templatePath: string): boolean {
@@ -445,6 +528,131 @@ function persistMissingTemplateVariants(projectRoot: string, catalogPath: string
   return true;
 }
 
+function isGemini35Breed(breed: Record<string, unknown>): boolean {
+  if (breed.catId === GEMINI35_CAT_ID) return true;
+  const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+  return variants.some((variant) => resolveVariantCatId(breed, variant) === GEMINI35_CAT_ID);
+}
+
+function collectMentionAliasesExcludingBreed(
+  breeds: Record<string, unknown>[],
+  excludedBreed: Record<string, unknown>,
+): Set<string> {
+  const aliases = new Set<string>();
+  for (const breed of breeds) {
+    if (breed === excludedBreed) continue;
+    for (const pattern of readStringArray(breed.mentionPatterns)) {
+      const normalized = normalizeMentionAlias(pattern);
+      if (normalized) aliases.add(normalized);
+    }
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    for (const variant of variants) {
+      const catId = resolveVariantCatId(breed, variant);
+      if (!catId) continue;
+      for (const pattern of resolveVariantMentionPatterns(breed, variant, catId)) {
+        const normalized = normalizeMentionAlias(pattern);
+        if (normalized) aliases.add(normalized);
+      }
+    }
+  }
+  return aliases;
+}
+
+function collectMentionAliasesForBreed(breed: Record<string, unknown>): Set<string> {
+  const aliases = new Set<string>();
+  for (const pattern of readStringArray(breed.mentionPatterns)) {
+    const normalized = normalizeMentionAlias(pattern);
+    if (normalized) aliases.add(normalized);
+  }
+  const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+  for (const variant of variants) {
+    const catId = resolveVariantCatId(breed, variant);
+    if (!catId) continue;
+    for (const pattern of resolveVariantMentionPatterns(breed, variant, catId)) {
+      const normalized = normalizeMentionAlias(pattern);
+      if (normalized) aliases.add(normalized);
+    }
+  }
+  return aliases;
+}
+
+function syncGemini35TemplateUpgrade(catalogPath: string, templatePath: string): boolean {
+  let catalogRaw: string;
+  let templateRaw: string;
+  try {
+    catalogRaw = readFileSync(catalogPath, 'utf-8');
+    templateRaw = readFileSync(templatePath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  const catalog = JSON.parse(catalogRaw) as CatCafeConfig;
+  const template = JSON.parse(templateRaw) as CatCafeConfig;
+  const templateBreed = (template.breeds as unknown as Record<string, unknown>[]).find(isGemini35Breed);
+  if (!templateBreed) return false;
+  const templateVariants = Array.isArray(templateBreed.variants)
+    ? (templateBreed.variants as Record<string, unknown>[])
+    : [];
+
+  const next = structuredClone(catalog) as CatCafeConfig;
+  const nextBreeds = next.breeds as unknown as Record<string, unknown>[];
+  let dirty = false;
+
+  for (const breed of nextBreeds) {
+    if (!isGemini35Breed(breed)) continue;
+
+    if (breed.name === GEMINI35_OLD_NAME && typeof templateBreed.name === 'string') {
+      breed.name = templateBreed.name;
+      dirty = true;
+    }
+    if (breed.roleDescription === GEMINI35_OLD_ROLE_DESCRIPTION && typeof templateBreed.roleDescription === 'string') {
+      breed.roleDescription = templateBreed.roleDescription;
+      dirty = true;
+    }
+
+    const breedPatterns = readStringArray(breed.mentionPatterns);
+    const existingAliases = collectMentionAliasesForBreed(breed);
+    const occupiedAliases = collectMentionAliasesExcludingBreed(nextBreeds, breed);
+    let patternsDirty = false;
+    for (const pattern of readStringArray(templateBreed.mentionPatterns)) {
+      const normalized = normalizeMentionAlias(pattern);
+      if (
+        !normalized ||
+        GEMINI35_OLD_MENTION_ALIASES.has(normalized) ||
+        existingAliases.has(normalized) ||
+        occupiedAliases.has(normalized)
+      ) {
+        continue;
+      }
+      breedPatterns.push(pattern);
+      existingAliases.add(normalized);
+      patternsDirty = true;
+      dirty = true;
+    }
+    if (patternsDirty) breed.mentionPatterns = breedPatterns;
+
+    const variants = Array.isArray(breed.variants) ? (breed.variants as Record<string, unknown>[]) : [];
+    for (const variant of variants) {
+      if (resolveVariantCatId(breed, variant) !== GEMINI35_CAT_ID) continue;
+      const templateVariant =
+        templateVariants.find((candidate) => candidate.id === variant.id) ??
+        templateVariants.find((candidate) => resolveVariantCatId(templateBreed, candidate) === GEMINI35_CAT_ID);
+      if (
+        variant.variantLabel === GEMINI35_OLD_VARIANT_LABEL &&
+        templateVariant &&
+        typeof templateVariant.variantLabel === 'string'
+      ) {
+        variant.variantLabel = templateVariant.variantLabel;
+        dirty = true;
+      }
+    }
+  }
+
+  if (!dirty) return false;
+  writeFileAtomic(catalogPath, `${JSON.stringify(next, null, 2)}\n`);
+  return true;
+}
+
 export function resolveCatCatalogPath(projectRoot: string): string {
   return safePath(projectRoot, CONFIG_SUBDIR, CAT_CATALOG_FILENAME);
 }
@@ -521,9 +729,15 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
     stripLegacySourceField(catalogPath);
     // Ensure owner is always present in roster.
     ensureOwnerInRoster(catalogPath);
+    // Persist allowlisted template-added breeds so promoted house cats become
+    // runtime members without reopening the template-only breed leak fixed by #772.
+    persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
     // Persist template-added variants into already-enabled runtime breeds so
     // read and write paths agree after upgrades.
     persistMissingTemplateVariants(projectRoot, catalogPath, templatePath);
+    // Keep built-in Gemini Flash identity fields aligned for existing catalogs
+    // whose runtime copy would otherwise keep pre-upgrade 3.5 names and aliases.
+    syncGemini35TemplateUpgrade(catalogPath, templatePath);
     return catalogPath;
   }
 
@@ -559,6 +773,7 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
 
   mkdirSync(dirname(catalogPath), { recursive: true });
   writeFileAtomic(catalogPath, `${JSON.stringify(runtimeCatalog, null, 2)}\n`);
+  persistMissingTemplateBreeds(projectRoot, catalogPath, templatePath);
   return catalogPath;
 }
 

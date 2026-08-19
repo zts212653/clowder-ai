@@ -105,7 +105,7 @@ describe('ThreadSidebar scroll memory', () => {
     mockPush.mockReset();
     mockApiFetch.mockReset();
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/threads') return jsonOk({ threads: TEST_THREADS });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: TEST_THREADS });
       if (path === '/api/governance/health') return jsonOk({ projects: [] });
       return jsonOk({});
     });
@@ -185,7 +185,7 @@ describe('ThreadSidebar scroll memory', () => {
 
   it('keeps sidebar scroll position when switching to a thread far below', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll(container);
@@ -206,7 +206,7 @@ describe('ThreadSidebar scroll memory', () => {
     mockStore.currentThreadId = 'thread-18';
     root = createRoot(container);
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll(container);
@@ -217,7 +217,7 @@ describe('ThreadSidebar scroll memory', () => {
 
   it('does not overwrite sessionStorage with 0 when sidebar unmounts (detached DOM)', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll(container);

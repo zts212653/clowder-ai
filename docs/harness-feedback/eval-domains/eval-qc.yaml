@@ -1,6 +1,8 @@
 ---
 domainId: eval:qc
 displayName: QC Pipeline Eval
+descriptionForHuman: 质量门禁管不管用——QC 流程拦住坏改动了吗、是不是老在同一处放水
+metricGlossaryRef: eval-qc.metrics.yaml
 systemThreadId: thread_eval_qc
 evalCat:
   catId: opus

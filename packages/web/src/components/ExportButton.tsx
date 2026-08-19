@@ -18,7 +18,15 @@ const EXPORT_OPTIONS: ExportOption[] = [
   { format: 'txt', label: '下载聊天记录', description: '纯文本' },
 ];
 
-export function ExportButton({ threadId }: { threadId: string }) {
+export function ExportButton({
+  threadId,
+  variant = 'thread-menu',
+  onSelect,
+}: {
+  threadId: string;
+  variant?: 'thread-menu';
+  onSelect?: () => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,6 +46,7 @@ export function ExportButton({ threadId }: { threadId: string }) {
   const handleExport = useCallback(
     async (format: ExportFormat) => {
       setMenuOpen(false);
+      onSelect?.();
       setLoading(true);
       try {
         if (format === 'png') {
@@ -52,23 +61,28 @@ export function ExportButton({ threadId }: { threadId: string }) {
         setLoading(false);
       }
     },
-    [threadId],
+    [onSelect, threadId],
   );
 
   return (
     <div ref={containerRef} className="relative">
       <button
+        type="button"
         onClick={() => setMenuOpen((v) => !v)}
         disabled={loading}
-        className="flex h-8 w-8 items-center justify-center rounded-full bg-transparent text-cafe-secondary transition-colors hover:text-cafe-accent disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex w-full items-center gap-2 bg-transparent px-3 py-1.5 text-left text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-black disabled:cursor-not-allowed disabled:opacity-50"
         title="导出对话"
         aria-label="导出对话"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        role={variant === 'thread-menu' ? 'menuitem' : undefined}
       >
         {loading ? (
           <svg
+            aria-hidden="true"
             viewBox="0 0 24 24"
             fill="none"
-            className="w-4 h-4 animate-spin text-cafe-secondary"
+            className="h-3 w-3 animate-spin text-cafe-secondary"
             stroke="currentColor"
             strokeWidth="2"
           >
@@ -76,16 +90,23 @@ export function ExportButton({ threadId }: { threadId: string }) {
             <path d="M12 2a10 10 0 019.8 8" />
           </svg>
         ) : (
-          <DownloadIcon className="w-4 h-4 text-cafe-secondary" />
+          <DownloadIcon className="h-3 w-3 text-cafe-secondary" />
         )}
+        <span>导出对话</span>
       </button>
 
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 w-52 bg-[var(--console-card-bg)] border border-[var(--console-border-soft)] rounded-lg shadow-lg z-50 py-1">
+        <div
+          className="absolute right-0 top-full z-[60] mt-1 w-52 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-1 shadow-lg"
+          role="menu"
+          aria-label="导出格式"
+        >
           {EXPORT_OPTIONS.map((opt) => (
             <button
+              type="button"
               key={opt.format}
               onClick={() => handleExport(opt.format)}
+              role="menuitem"
               className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--console-hover-bg)] transition-colors flex items-center justify-between"
             >
               <span className="text-cafe-black">{opt.label}</span>

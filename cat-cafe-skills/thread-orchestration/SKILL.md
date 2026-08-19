@@ -65,6 +65,11 @@ triggers:
 
 **返回值**：`{ proposalId, status: "pending" }` —— **不是 threadId**。Thread 还未存在，不要尝试 `cross_post` 到一个尚未批准的 proposal。
 
+**社区 PR 特例（硬门禁）：** title / reason / initialMessage 引用 `zts212653/clowder-ai` PR 时，
+服务端会自动前置 `opensource-ops` maintainer 五问和真实 GitHub author / fix-custody 边界。子
+thread 的第一项工作是判断贡献是否有益、实际改动、merge/intake 价值与更优架构，不是让
+`preferredCats` 里的家猫替外部作者修代码；家猫 fixup 需要显式 Strategy B 授权 provenance。
+
 **命名规则**：`[优先级/批次] 动词 + 对象`
 - 例："P1 功能完善：Web UI + Semantic Scholar + API 降级"
 - 例："P2 工程质量：CI/CD + Linting"
@@ -87,8 +92,8 @@ triggers:
 
 | Mode | 语义 | 何时用 |
 |------|------|--------|
-| `final-only`（**默认**） | 子 thread **自治推进**，全部任务完成（PR 合入 / 任务关闭）后回报**一次**最终总结；**过程中禁止 cross_post 回报主 thread** | Feature work fork / 大多数情况——要最终结果、不要过程噪音 |
-| `none`（autonomous，显式 opt-in） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | Repo Inbox / PR triage / 分发——踢出去就让下游自闭环 |
+| `final-only`（**默认**） | 子 thread **自治推进**，全部任务完成（PR 合入 / 任务关闭）后回报**一次**最终总结；**过程中禁止 cross_post 回报主 thread** | Feature work fork / 社区守门分发 / 大多数情况——要最终结果、不要过程噪音 |
+| `none`（autonomous，显式 opt-in） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | 明确不需要任何最终结果返回的一次性自治空间；社区守门分发不使用本模式 |
 | `state-transitions` | 每个 phase boundary（阶段完成 / 重要决策 / 状态切换）回报 | Bug 调查 / Research——主 thread 要跟过程 |
 | `blocking-ack` | 子 thread **遇阻塞点**（at each blocker，非每步）才等主 thread ack 再继续；持球在**子 thread**（被阻塞方）自己 `hold_ball` + 发 `[BLOCKING]`，主 thread 不背 polling | 等 review / 等 operator / blocking handoff |
 
@@ -100,6 +105,7 @@ triggers:
 
 **约束**：
 - mode 是 thread contract，创建后**不可动态切换**（要换就 propose 新 thread）。
+- **`opensource-ops` 优先约束**：社区守门 thread 分发 issue / PR / review / intake 时必须显式传 `reportingMode: "final-only"`；下游任务闭环前禁止过程 cross-post，闭环后只回报一次。
 - `none` ≠ 禁止上报——关键事件永远按家规 cross_post。**即使 `none` 下主动上报也必须携带 `targetCats` 或行首 `@sourceHandle`**，避免消息存了但没人醒。
 - `#ideate`（并行 wake-all）与 reportingMode **正交**：`#ideate` 只决定并行 vs 串行接龙；report-back owner 由 reportingMode 决定。`#ideate + none` 不指定汇总 owner；`#ideate + final-only/state-transitions` 才指定第一棒为汇总 owner。
 - 下面 Step 5「汇聚」铁律默认针对需回报的 mode（`final-only` / `state-transitions` / `blocking-ack`）；`none` 模式下子 thread 自闭环，不走 Step 5 强制回报。
@@ -235,6 +241,7 @@ Worktree = 隔离（不冲突）
 | 把 propose 返回的 proposalId 当成 threadId 用 | cross_post 到不存在的 thread | propose 不创建 thread，只有 user 批准后才有 threadId。等批准事件再发首条消息 |
 | 提议一个 proposal 后立刻假设 thread 存在 | 后续操作全失败 | 必须等用户在 proposal 卡片上点"批准"。批准前继续主 thread 工作 |
 | 把 `projectPath` 当成外部目标仓，给社区 PR review thread 填 `clowder-ai` | 子 thread 进入错误 workspace，家里 SOP/skills/feature docs 不在工作区，球路污染 | projectPath 填工作区真相源；`clowder-ai#NNN` 放在标题/正文/gh 命令里，只有明确目标仓 checkout 操作才填 clowder-ai |
+| 社区守门分发选 `none`，或 final-only 过程中回 checkpoint | 守门 thread 被过程噪音与 ACK 回音链污染 | 遵循 `opensource-ops`：显式 `reportingMode: "final-only"`，闭环前 0 次过程 cross-post，闭环后 1 次最终总结 |
 
 ## 和其他 Skill 的区别
 

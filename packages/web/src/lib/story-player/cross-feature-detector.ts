@@ -22,7 +22,7 @@ export interface CrossFeatureInfo {
   eventIndex: number;
   /** Target thread ID (outside current feature) */
   targetThreadId: string;
-  /** Truncated content preview (max 100 chars) */
+  /** Full cross-feature content; the renderer owns recoverable presentation. */
   contentSnippet: string;
   /** Cat that initiated the cross-feature interaction */
   catId: string | undefined;
@@ -41,7 +41,6 @@ export interface CrossFeatureInfo {
  * (route-serial.ts:267-268). Cloud R4 P2 fix.
  */
 const CROSS_POST_SUFFIX = 'cross_post_message';
-const MAX_SNIPPET_LENGTH = 100;
 
 /**
  * Normalize MCP-prefixed tool names to bare form.
@@ -92,15 +91,13 @@ export function detectCrossFeatureEvent(
   // If target thread is in the current feature → not cross-feature
   if (featureThreadIds.has(targetThreadId)) return null;
 
-  // Extract content snippet
+  // Preserve canonical content; the visible GuestCard owns compact presentation.
   const rawContent = typeof parsed.content === 'string' ? parsed.content : '';
-  const contentSnippet =
-    rawContent.length > MAX_SNIPPET_LENGTH ? `${rawContent.slice(0, MAX_SNIPPET_LENGTH)}...` : rawContent;
 
   return {
     eventIndex: event.index,
     targetThreadId,
-    contentSnippet,
+    contentSnippet: rawContent,
     catId: event.catId,
   };
 }

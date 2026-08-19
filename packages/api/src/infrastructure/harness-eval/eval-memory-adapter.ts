@@ -37,7 +37,13 @@ export interface MemoryLibraryHealth {
   staleAnchors: { count: number };
   orphanEdges: { count: number };
   verificationDebt: { needsReviewCount: number };
-  searchQuality: { totalSearches: number; observedSearches: number; zeroHitCount: number; lowHitCount: number };
+  searchQuality: {
+    totalSearches: number;
+    observedSearches: number;
+    zeroHitCount: number;
+    identifierProbeZeroHitCount?: number;
+    lowHitCount: number;
+  };
   knowledgeFeed: { pendingCount: number; needsReviewCount: number };
 }
 
@@ -225,7 +231,13 @@ export function recallMetricRefs(): string[] {
 }
 
 function libraryHealthMetricRefs(): string[] {
-  return ['orphan_edge_count', 'stale_anchor_count', 'verification_debt_count', 'search_zero_hit_count'];
+  return [
+    'orphan_edge_count',
+    'stale_anchor_count',
+    'verification_debt_count',
+    'search_zero_hit_count',
+    'search_identifier_probe_zero_hit_count',
+  ];
 }
 
 function recallMetricValues(metrics: MemoryRecallMetrics): Record<string, number> {
@@ -245,12 +257,18 @@ function libraryHealthValues(health: MemoryLibraryHealth): Record<string, number
     stale_anchor_count: health.staleAnchors.count,
     verification_debt_count: health.verificationDebt.needsReviewCount,
     search_zero_hit_count: health.searchQuality.zeroHitCount,
+    // Identifier probes (thread IDs, session UUIDs, git SHAs searched as free text)
+    // counted separately — they're routing errors, not recall failures.
+    search_identifier_probe_zero_hit_count: health.searchQuality.identifierProbeZeroHitCount ?? 0,
     // HW-7: rate is the primary recall signal (in recallMetricRefs);
-    // count alone doesn't normalize for search volume changes
-    search_zero_hit_rate:
-      health.searchQuality.observedSearches > 0
-        ? health.searchQuality.zeroHitCount / health.searchQuality.observedSearches
-        : 0,
+    // count alone doesn't normalize for search volume changes.
+    // Denominator excludes identifier probes for consistency with numerator
+    // (zeroHitCount already excludes probes after the split).
+    search_zero_hit_rate: (() => {
+      const probes = health.searchQuality.identifierProbeZeroHitCount ?? 0;
+      const contentSearches = health.searchQuality.observedSearches - probes;
+      return contentSearches > 0 ? health.searchQuality.zeroHitCount / contentSearches : 0;
+    })(),
   };
 }
 

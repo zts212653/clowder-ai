@@ -4,12 +4,15 @@ import { beforeEach, describe, it } from 'node:test';
 // F225 Task A1: SessionHandoffProposal store — CAS claim + commit-point checkpoints.
 describe('SessionHandoffProposalStore (in-memory)', () => {
   let store;
+  let receiptIndex;
 
   beforeEach(async () => {
-    const { InMemorySessionHandoffProposalStore } = await import(
-      '../dist/domains/cats/services/stores/ports/SessionHandoffProposalStore.js'
-    );
-    store = new InMemorySessionHandoffProposalStore();
+    const [{ InMemorySessionHandoffProposalStore }, { InMemoryHumanDispositionReceiptIndex }] = await Promise.all([
+      import('../dist/domains/cats/services/stores/ports/SessionHandoffProposalStore.js'),
+      import('../dist/domains/human-disposition/InMemoryHumanDispositionReceiptIndex.js'),
+    ]);
+    receiptIndex = new InMemoryHumanDispositionReceiptIndex();
+    store = new InMemorySessionHandoffProposalStore(receiptIndex);
   });
 
   const baseInput = (over = {}) => ({
@@ -67,17 +70,49 @@ describe('SessionHandoffProposalStore (in-memory)', () => {
 
   it('markRejected: CAS pending→rejected (null if already claimed)', () => {
     const p = store.create(baseInput());
-    assert.equal(store.markRejected(p.proposalId).status, 'rejected');
+    const rejected = store.markRejected(p.proposalId, { decidedAt: 100 });
+    assert.equal(rejected.outcome, 'applied');
+    assert.equal(rejected.proposal.status, 'rejected');
+    assert.equal(rejected.proposal.humanDispositionLedgerEntry.envelope, undefined);
+    assert.ok(receiptIndex.get('user_1', rejected.proposal.humanDispositionLedgerEntry.episode.sourceRef));
     const p2 = store.create(baseInput());
     store.claimForApproval(p2.proposalId);
-    assert.equal(store.markRejected(p2.proposalId), null, 'cannot reject approving');
+    assert.equal(store.markRejected(p2.proposalId, { decidedAt: 101 }).outcome, 'not_available');
+  });
+
+  it('markRejected atomically captures normalized feedback without allowing terminal mutation', () => {
+    const p = store.create(baseInput());
+    const result = store.markRejected(p.proposalId, {
+      decidedAt: 200,
+      feedback: { reasonCode: 'other', detail: '  内容不属于本次交接  ' },
+    });
+    assert.equal(result.outcome, 'applied');
+    const rejected = result.proposal;
+    assert.equal(rejected.status, 'rejected');
+    assert.deepEqual(rejected.latestHumanDisposition, {
+      reasonCode: 'other',
+      detail: '内容不属于本次交接',
+    });
+    assert.equal(
+      store.markRejected(p.proposalId, { decidedAt: 201, feedback: { reasonCode: 'wrong' } }).outcome,
+      'conflict',
+    );
+    assert.equal(
+      store.markRejected(p.proposalId, {
+        decidedAt: 999,
+        feedback: { reasonCode: 'other', detail: '内容不属于本次交接' },
+      }).outcome,
+      'replayed',
+    );
+    assert.deepEqual(store.get(p.proposalId).latestHumanDisposition, rejected.latestHumanDisposition);
+    assert.equal(rejected.humanDispositionLedgerEntry.episode.decidedAt, 200);
   });
 
   it('markExpired: pending|approving→expired, terminal stays', () => {
     const p = store.create(baseInput());
     assert.equal(store.markExpired(p.proposalId).status, 'expired');
     const p2 = store.create(baseInput());
-    store.markRejected(p2.proposalId);
+    store.markRejected(p2.proposalId, { decidedAt: 300 });
     assert.equal(store.markExpired(p2.proposalId), null, 'cannot expire rejected');
   });
 
@@ -96,7 +131,7 @@ describe('SessionHandoffProposalStore (in-memory)', () => {
   it('listPendingByUser: excludes rejected/expired/approved proposals', () => {
     const p1 = store.create(baseInput({ userId: 'user_1' }));
     store.create(baseInput({ userId: 'user_1', sourceSessionId: 'sess_2' }));
-    store.markRejected(p1.proposalId);
+    store.markRejected(p1.proposalId, { decidedAt: 301 });
     const result = store.listPendingByUser('user_1');
     assert.equal(result.length, 1);
     assert.notEqual(result[0].proposalId, p1.proposalId);

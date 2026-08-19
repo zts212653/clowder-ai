@@ -1,12 +1,28 @@
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { withHiddenGhCliWindow } from '../../github/gh-cli-env.js';
+import { createGitVerdictPrRefresher } from './git-verdict-pr-refresher.js';
 import type { GitPublisher, PublishOnIsolatedWorktreeOpts } from './publish-verdict.js';
 
 const exec = promisify(execFile);
+
+const ALLOWED_PATH_PREFIXES = [
+  'docs/harness-feedback/verdicts/',
+  'docs/harness-feedback/bundles/',
+  'generated/capability-wakeup/',
+  'generated/memory/',
+  'generated/sop/',
+];
+const ALLOWED_EXACT_PATHS = new Set(['docs/harness-feedback/registry/measurement-bundles.yaml']);
+
+export function isAllowedVerdictStagePath(relativePath: string): boolean {
+  return (
+    ALLOWED_EXACT_PATHS.has(relativePath) || ALLOWED_PATH_PREFIXES.some((prefix) => relativePath.startsWith(prefix))
+  );
+}
 
 /**
  * F192 Phase H — Real GitPublisher impl using `git worktree add` + `gh pr create`.
@@ -27,11 +43,70 @@ const exec = promisify(execFile);
 export interface GitWorktreePublisherDeps {
   /** Repo root the API server is running in (must be a git checkout with `origin`). */
   repoRoot: string;
+  /** Canonical GitHub owner/repo; publishing fails closed if origin differs. */
+  expectedRepoFullName: string;
+  /** Test seam for the shared executable publication contract. */
+  contractRunner?: VerdictPublishContractRunner;
+}
+
+export interface VerdictPublishContractInput {
+  repoRoot: string;
+  expectedRepoFullName: string;
+  remoteName: string;
+  baseRef: string;
+  sourceRef: string;
+  identityOnly?: boolean;
+}
+
+export type VerdictPublishContractRunner = (input: VerdictPublishContractInput) => Promise<void>;
+
+export function withGitHubRepoScope(args: string[], expectedRepoFullName: string): string[] {
+  return [...args, '--repo', expectedRepoFullName];
+}
+
+async function runVerdictPublishContract(input: VerdictPublishContractInput): Promise<void> {
+  const scriptPath = resolve(input.repoRoot, 'scripts/check-verdict-publish-contract.mjs');
+  await exec(
+    process.execPath,
+    [
+      scriptPath,
+      '--repo-root',
+      input.repoRoot,
+      '--expected-repo',
+      input.expectedRepoFullName,
+      '--remote',
+      input.remoteName,
+      '--base-ref',
+      input.baseRef,
+      '--source-ref',
+      input.sourceRef,
+      ...(input.identityOnly ? ['--identity-only', 'true'] : []),
+    ],
+    { timeout: 60_000 },
+  );
 }
 
 export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitPublisher {
+  const contractRunner = deps.contractRunner ?? runVerdictPublishContract;
   return {
     async publishOnIsolatedWorktree(opts: PublishOnIsolatedWorktreeOpts) {
+      const sourceContract = {
+        repoRoot: deps.repoRoot,
+        expectedRepoFullName: deps.expectedRepoFullName,
+        remoteName: 'origin',
+        baseRef: opts.sourceBase,
+        sourceRef: opts.sourceBase,
+      } satisfies VerdictPublishContractInput;
+
+      // Verify repository identity before contacting the remote, then validate
+      // corpus completeness against the freshly fetched source ref. A stale
+      // local origin/main must not recreate the missing-census failure mode.
+      await contractRunner({ ...sourceContract, identityOnly: true });
+      await exec('git', ['-C', deps.repoRoot, 'fetch', 'origin', 'main'], { timeout: 60_000 });
+      // Re-check the freshly fetched source so an incomplete origin/main cannot
+      // produce a generator_failed result that invites a manual escape hatch.
+      await contractRunner(sourceContract);
+
       // Use mkdtemp to get a guaranteed-unique path; suffix with PID for debuggability
       const worktreePath = mkdtempSync(`${tmpdir()}/cat-cafe-publish-verdict-${process.pid}-`);
 
@@ -45,9 +120,6 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
       let branchExistedBefore = false;
 
       try {
-        // 1. Fetch latest origin/main to ensure isolated worktree is current
-        await exec('git', ['-C', deps.repoRoot, 'fetch', 'origin', 'main'], { timeout: 60_000 });
-
         // Probe upfront so partial-failure cleanup never deletes a pre-existing branch.
         try {
           await exec('git', ['-C', deps.repoRoot, 'rev-parse', '--verify', `refs/heads/${opts.branchName}`], {
@@ -74,18 +146,91 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         }
 
         // 4. Add + commit artifacts inside isolated worktree
-        // Convert absolute paths to repo-relative so `git add` works inside worktree
+        // 砚砚 PR #2682 R2: normalize stage paths against the WORKTREE root (not
+        // process.cwd()) before any allowlist check, so traversal segments are
+        // collapsed BEFORE prefix comparison.
+        // R1 bug 砚砚 caught: `resolve(p)` resolves relative paths against process.cwd
+        // (likely the API server's cwd, not the worktree), and if the result didn't
+        // start with worktreePath, the old code fell through to the raw string `p`.
+        // A stage callback returning the literal string
+        //   `docs/harness-feedback/verdicts/../../../cat-config.json`
+        // would (a) fail the resolve(p).startsWith(worktreePath) check, (b) fall
+        // through to the raw string, (c) pass `startsWith('docs/harness-feedback/verdicts/')`
+        // by字面 match, and (d) be interpreted by `git -C <worktreePath> add` as a
+        // worktree-relative path → after collapsing `..`, write to `cat-config.json`
+        // at the worktree root. Trivial bypass of the allowlist.
+        // Fix: `resolve(worktreePath, p)` so relative paths normalize relative to the
+        // worktree, then explicitly reject anything that escapes the worktree root
+        // (e.g. p = `/etc/passwd` or `../../../../../../etc/passwd`).
         const relativePaths = paths.map((p) => {
-          const rel = resolve(p).startsWith(worktreePath) ? resolve(p).slice(worktreePath.length + 1) : p;
-          return rel;
+          const absolute = resolve(worktreePath, p);
+          // Escape detection: absolute must equal worktreePath (= the root itself, an
+          // edge case we still reject because committing the root is meaningless) or
+          // start with `worktreePath + sep`. The sep guard prevents the same-prefix
+          // masquerade case (e.g. `/tmp/worktreePath-evil/...` vs `/tmp/worktreePath`).
+          if (absolute !== worktreePath && !absolute.startsWith(worktreePath + sep)) {
+            throw new Error(
+              `staged_path_outside_worktree: stage callback returned path '${p}' which resolved to '${absolute}', outside the isolated worktree root '${worktreePath}'. Stage callbacks must only write inside the worktree.`,
+            );
+          }
+          // Slice off worktreePath + sep to get the repo-relative path. Equality case
+          // (absolute === worktreePath) returns empty string, which the allowlist
+          // below rejects (no prefix matches empty).
+          return absolute === worktreePath ? '' : absolute.slice(worktreePath.length + 1);
         });
+
+        // 砚砚 PR #2682 R1: publisher-level hard allowlist (replaces R0's comment-only
+        // scope claim). The commit below uses `--no-verify` to bypass `.githooks/pre-commit`
+        // (necessary because the isolated worktree has no node_modules, so the hook's
+        // `pnpm run check:biome-version` deterministically fails). With hooks bypassed, the
+        // ONLY backstop preventing a buggy/compromised generator adapter from staging
+        // `packages/web/...` (brand-protected), `docs/ROADMAP.md` / `cat-config.json`
+        // (shared-state), or root debris (`*.log` / `*.rdb`) IS this allowlist.
+        // The 5 prefixes plus one exact F267 census file mirror the artifact contract:
+        //   - `docs/harness-feedback/verdicts/<id>.md`   ← verdict markdown
+        //   - `docs/harness-feedback/bundles/<id>/`      ← bundle dir
+        //   - `generated/{capability-wakeup,memory,sop}/<verdictId>/`
+        //                                                ← extraStagedPaths (cw/memory/sop
+        //                                                  raw inputs referenced by
+        //                                                  provenance.json sha256)
+        //   - `docs/harness-feedback/registry/measurement-bundles.yaml`
+        //                                                ← refreshed derived verdict counts
+        // Any new generator adding a new path MUST extend this allowlist explicitly +
+        // add a regression test below — defaulting to deny.
+        const outsideAllowlist = relativePaths.filter((rel) => !isAllowedVerdictStagePath(rel));
+        if (outsideAllowlist.length > 0) {
+          throw new Error(
+            `staged_path_outside_allowlist: stage callback returned ${outsideAllowlist.length} path(s) outside the verdict allowlist: ${JSON.stringify(outsideAllowlist)}. Allowed prefixes: ${ALLOWED_PATH_PREFIXES.join(', ')}. Allowed exact paths: ${[...ALLOWED_EXACT_PATHS].join(', ')}. Verdict commits use --no-verify so the pre-commit guards (biome/brand/shared-state) cannot catch foreign paths; this allowlist is the only backstop.`,
+          );
+        }
+
         // cloud R4 P1 (PR-2): some generators write evidence that lives at paths covered by
         // .gitignore (cw raw inputs at `generated/capability-wakeup/<verdictId>/` — see
         // `.gitignore:209`). Stage callback's path list is explicit contract for "must be in
         // commit"; `-f` forces inclusion (no-op for non-ignored paths). Without -f, `git add`
         // exits non-zero with "paths are ignored" and the whole publish fails.
         await exec('git', ['-C', worktreePath, 'add', '-f', '--', ...relativePaths], { timeout: 30_000 });
-        await exec('git', ['-C', worktreePath, 'commit', '-m', commitMessage], { timeout: 30_000 });
+        // `--no-verify`: skip `.githooks/pre-commit` for machine-generated verdict commits.
+        // The hook runs `pnpm run check:biome-version` + `pnpm exec biome check .`, both
+        // requiring `node_modules` in the working tree. Isolated worktrees created by
+        // `git worktree add` (line ~64) have NO `node_modules` (we never `pnpm install`
+        // inside them — they are throwaway), so the hook deterministically fails with
+        // truncated 500 `git_or_gh_failed` from the publish_verdict MCP tool.
+        // The path allowlist above is the backstop that replaces the bypassed guards.
+        // Friction provenance: 砚砚 2026-06-29 [爪感差] (transient) → 2026-06-30 [爪感差]
+        // (deterministic root cause pinned to this line) on thread_eval_a2a;
+        // 砚砚 PR #2682 R1: scope论证 was only in comment → promoted to hard guard above.
+        await exec('git', ['-C', worktreePath, 'commit', '--no-verify', '-m', commitMessage], { timeout: 30_000 });
+
+        // The shared guard is the final transport boundary for owner identity,
+        // census continuity, and same-domain/same-window collision checks.
+        await contractRunner({
+          repoRoot: worktreePath,
+          expectedRepoFullName: deps.expectedRepoFullName,
+          remoteName: 'origin',
+          baseRef: opts.sourceBase,
+          sourceRef: 'HEAD',
+        });
 
         // 5. Push branch to origin
         await exec('git', ['-C', worktreePath, 'push', '-u', 'origin', opts.branchName], { timeout: 120_000 });
@@ -126,7 +271,11 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
             args.push('--color', meta.color, '--description', meta.description);
           }
           try {
-            await exec('gh', args, withHiddenGhCliWindow({ cwd: worktreePath, timeout: 15_000 }));
+            await exec(
+              'gh',
+              withGitHubRepoScope(args, deps.expectedRepoFullName),
+              withHiddenGhCliWindow({ cwd: worktreePath, timeout: 15_000 }),
+            );
           } catch (err) {
             // Best-effort: surface error on gh pr create below if it actually breaks PR.
             // (Swallowing here = avoid double-fail on label step; PR create will retry.)
@@ -136,19 +285,22 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         const labelFlags = (labels ?? []).flatMap((label) => ['--label', label]);
         const prResult = await exec(
           'gh',
-          [
-            'pr',
-            'create',
-            '--base',
-            'main',
-            '--head',
-            opts.branchName,
-            '--title',
-            prTitle,
-            '--body',
-            prBody,
-            ...labelFlags,
-          ],
+          withGitHubRepoScope(
+            [
+              'pr',
+              'create',
+              '--base',
+              'main',
+              '--head',
+              opts.branchName,
+              '--title',
+              prTitle,
+              '--body',
+              prBody,
+              ...labelFlags,
+            ],
+            deps.expectedRepoFullName,
+          ),
           withHiddenGhCliWindow({ cwd: worktreePath, timeout: 60_000 }),
         );
         prUrl =
@@ -165,14 +317,17 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
           try {
             await exec(
               'gh',
-              [
-                'pr',
-                'close',
-                prUrl,
-                '--delete-branch',
-                '--comment',
-                'Closing stale auto-verdict PR because post-publish writeback failed.',
-              ],
+              withGitHubRepoScope(
+                [
+                  'pr',
+                  'close',
+                  prUrl,
+                  '--delete-branch',
+                  '--comment',
+                  'Closing stale auto-verdict PR because post-publish writeback failed.',
+                ],
+                deps.expectedRepoFullName,
+              ),
               withHiddenGhCliWindow({ cwd: worktreePath, timeout: 60_000 }),
             );
             prOpened = false;
@@ -226,7 +381,10 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
             try {
               const probe = await exec(
                 'gh',
-                ['pr', 'list', '--head', opts.branchName, '--state', 'open', '--json', 'state', '--limit', '1'],
+                withGitHubRepoScope(
+                  ['pr', 'list', '--head', opts.branchName, '--state', 'open', '--json', 'state', '--limit', '1'],
+                  deps.expectedRepoFullName,
+                ),
                 withHiddenGhCliWindow({ cwd: deps.repoRoot, timeout: 30_000 }),
               );
               const parsed = JSON.parse(probe.stdout) as Array<{ state?: string }>;
@@ -253,5 +411,9 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         }
       }
     },
+    refreshPublishedVerdictPr: createGitVerdictPrRefresher({
+      repoRoot: deps.repoRoot,
+      expectedRepoFullName: deps.expectedRepoFullName,
+    }),
   };
 }

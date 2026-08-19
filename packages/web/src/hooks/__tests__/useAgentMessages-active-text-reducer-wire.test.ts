@@ -193,6 +193,67 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
     expect(mockAppendToMessage).not.toHaveBeenCalled();
   });
 
+  it('keeps typed child execution identity on the live stream bubble before F5', () => {
+    const existing: ChatMessage = {
+      id: 'msg-child-ordinary-codex',
+      type: 'assistant',
+      catId: 'codex',
+      content: 'visible reply',
+      isStreaming: true,
+      origin: 'stream',
+      extra: { stream: { invocationId: 'parent-1', turnInvocationId: 'child-ordinary' } },
+      timestamp: 1000,
+    };
+    storeState.messages = [existing];
+    storeState.catInvocations = { codex: { invocationId: 'parent-1' } };
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'text',
+        catId: 'codex',
+        threadId: 'thread-1',
+        content: ' complete',
+        origin: 'stream',
+        invocationId: 'parent-1',
+        turnInvocationId: 'child-ordinary',
+        extra: {
+          turnExecution: {
+            invocationId: 'child-ordinary',
+            parentInvocationId: 'parent-1',
+            executionKind: 'ordinary',
+          },
+          auxiliaryTurnExecutions: [
+            {
+              invocationId: 'child-routing-guard',
+              parentInvocationId: 'parent-1',
+              executionKind: 'routing_guard',
+            },
+          ],
+        },
+        timestamp: 1100,
+      });
+    });
+
+    const liveBubble = storeState.messages.find((message) => message.id === existing.id);
+    expect(liveBubble?.content).toBe('visible reply complete');
+    expect(liveBubble?.extra?.turnExecution).toEqual({
+      invocationId: 'child-ordinary',
+      parentInvocationId: 'parent-1',
+      executionKind: 'ordinary',
+    });
+    expect(liveBubble?.extra?.auxiliaryTurnExecutions).toEqual([
+      {
+        invocationId: 'child-routing-guard',
+        parentInvocationId: 'parent-1',
+        executionKind: 'routing_guard',
+      },
+    ]);
+  });
+
   it('preserves hasMore when applying reducer result (round 1 P1, cloud codex)', () => {
     // Pre-state: existing streaming bubble + hasMore=true (older history still loadable)
     const existing: ChatMessage = {

@@ -171,6 +171,27 @@ describe('workspace-file-watcher', () => {
     }
   });
 
+  it('watches the native percent path instead of an encoded-looking sibling', async () => {
+    await writeFile(join(tmpDir, 'literal%20.md'), 'literal-percent');
+    await writeFile(join(tmpDir, 'literal .md'), 'decoded-sibling');
+    const client = await connectClient(port);
+
+    try {
+      const changed = waitForSocketEvent(client, 'workspace:file-changed');
+      client.emit('workspace:watch-file', {
+        worktreeId: 'test-wt',
+        path: 'literal%20.md',
+        sha256: null,
+      });
+
+      const event = await changed;
+      assert.equal(event.path, 'literal%20.md');
+      assert.equal(event.sha256, sha256('literal-percent'));
+    } finally {
+      await disconnectClient(client);
+    }
+  });
+
   it('cleans up watcher on disconnect', async () => {
     const filePath = join(tmpDir, 'cleanup-test.txt');
     await writeFile(filePath, 'initial');

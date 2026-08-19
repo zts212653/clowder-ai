@@ -4,6 +4,7 @@
 const { spawn, execSync } = require('node:child_process');
 const path = require('node:path');
 const net = require('node:net');
+const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
@@ -169,8 +170,8 @@ class ServiceManager {
     // ---- Web ----
     this.onStatus('Starting Web frontend...');
     this._startNextJs();
-    log(`Web process spawned, waiting for port ${this.frontendPort}`);
-    await this._waitForPort(this.frontendPort, 'Web');
+    log(`Web process spawned, waiting for HTTP on port ${this.frontendPort}`);
+    await this._waitForHttpReady(this.frontendPort, 'Web');
 
     this.onStatus('Ready!');
   }
@@ -675,6 +676,29 @@ class ServiceManager {
     });
   }
 
+  _isHttpReady(port) {
+    return new Promise((resolve) => {
+      const request = http.get(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/',
+          headers: { 'Cache-Control': 'no-cache' },
+        },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode >= 200 && response.statusCode < 400);
+        },
+      );
+      request.setTimeout(1000, () => {
+        request.destroy();
+        resolve(false);
+      });
+      request.once('error', () => resolve(false));
+      request.once('close', () => resolve(false));
+    });
+  }
+
   _verifyRedisPing(port) {
     return new Promise((resolve) => {
       const sock = new net.Socket();
@@ -720,6 +744,25 @@ class ServiceManager {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
     throw new Error(`${label} did not start within ${MAX_WAIT_MS / 1000}s (port ${port})`);
+  }
+
+  async _waitForHttpReady(port, label) {
+    const deadline = Date.now() + MAX_WAIT_MS;
+    while (Date.now() < deadline) {
+      if (await this._isHttpReady(port)) {
+        this.onStatus(`${label} ready on port ${port}`);
+        return;
+      }
+      const proc = this.procs.web;
+      if (proc && proc.exitCode !== null && !proc.killed) {
+        log(`[${label}] process exited unexpectedly (code=${proc.exitCode}) during wait`);
+        throw new Error(
+          `${label} process exited with code ${proc.exitCode} before HTTP on port ${port} was ready. Check ${LOG_FILE} for details.`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+    throw new Error(`${label} did not start within ${MAX_WAIT_MS / 1000}s (HTTP port ${port})`);
   }
 
   async _waitForPortWithFallback(port, label, procName) {

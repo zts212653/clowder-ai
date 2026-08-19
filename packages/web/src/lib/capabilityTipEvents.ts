@@ -1,4 +1,7 @@
-import { type CapabilityTipUsageEvent, CapabilityTipUsageEventSchema } from '@cat-cafe/shared';
+import { type CapabilityTipUsageEvent, CapabilityTipUsageEventSchema, TIP_MAX_AGE_MS } from '@cat-cafe/shared';
+import { getTipEventQueue } from './capabilityTipQueue';
+// Side-effect import: wires the sender to the queue singleton (auto-init)
+import './capabilityTipSender';
 
 const MAX_EVENTS = 100;
 const EVENT_NAME = 'cat-cafe:capability-tip-event';
@@ -14,7 +17,15 @@ function loadFromStorage(): CapabilityTipUsageEvent[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     // Validate each entry to guard against corrupted data
-    return parsed.filter((e: unknown) => CapabilityTipUsageEventSchema.safeParse(e).success);
+    const valid = parsed.filter((e: unknown) => CapabilityTipUsageEventSchema.safeParse(e).success);
+    // Sol R2 P1-1: prune events older than 7d max-age AND persist clean array back
+    const cutoff = Date.now() - TIP_MAX_AGE_MS;
+    const fresh = valid.filter((e: CapabilityTipUsageEvent) => e.timestamp >= cutoff);
+    // Persist pruned result so stale entries don't permanently occupy localStorage
+    if (fresh.length < parsed.length) {
+      saveToStorage(fresh);
+    }
+    return fresh;
   } catch {
     return [];
   }
@@ -41,6 +52,13 @@ export function recordCapabilityTipEvent(input: CapabilityTipUsageEvent): boolea
   }
 
   saveToStorage(records);
+
+  // F268: Enqueue into batch upload queue (non-blocking, fire-and-forget)
+  try {
+    getTipEventQueue().enqueue(parsed.data);
+  } catch {
+    // Queue failure must never block tip display (AC-A2)
+  }
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: parsed.data }));

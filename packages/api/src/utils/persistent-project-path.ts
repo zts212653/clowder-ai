@@ -3,7 +3,7 @@
  *
  * The runtime checkout is a disposable binary worktree. User-owned project
  * writes must target the persistent workspace, while portable governance must
- * reject Cat Cafe itself (including descendants) because it is external-only.
+ * reject Clowder AI itself (including descendants) because it is external-only.
  */
 
 import { realpath, stat } from 'node:fs/promises';
@@ -201,7 +201,7 @@ export async function validateExternalProjectPathDetailed(
       return {
         ok: false,
         reason: 'cat_cafe_root_invalid',
-        message: `Cat Cafe root is invalid: ${root.message ?? root.reason}`,
+        message: `Clowder AI root is invalid: ${root.message ?? root.reason}`,
       };
     }
     if (!ownedRoots.some((existing) => pathsEqual(existing, root.path))) ownedRoots.push(root.path);
@@ -211,7 +211,7 @@ export async function validateExternalProjectPathDetailed(
     return {
       ok: false,
       reason: 'cat_cafe_owned_path',
-      message: 'Portable governance can only bootstrap an external project, not Cat Cafe or its descendants',
+      message: 'Portable governance can only bootstrap an external project, not Clowder AI or its descendants',
     };
   }
   return target;

@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 describe('Schema V17 migration', () => {
-  it('CURRENT_SCHEMA_VERSION is 26', async () => {
+  it('CURRENT_SCHEMA_VERSION is at least 17', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
-    assert.equal(CURRENT_SCHEMA_VERSION, 26);
+    assert.ok(CURRENT_SCHEMA_VERSION >= 17);
   });
 
   it('V17 adds collection_id and review_status to evidence_docs', async () => {

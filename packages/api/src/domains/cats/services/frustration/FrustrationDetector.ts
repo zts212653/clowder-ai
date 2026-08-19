@@ -29,6 +29,12 @@ export const TRIGGERING_REASON_CODES = new Set([
   'tool_call_parse_failed',
   'spawn_failed',
   'invalid_config',
+  // clowder-ai#1324/#1325: the harness's managed argv drifted from the installed CLI
+  // version. Unlike upstream_policy_reject (an upstream decision we should not file
+  // against ourselves), this IS our bug — auto-filing is the point. @codex-terra P2:
+  // shouldTrigger()'s final gate is this allowlist, NOT the EXCLUDED denylist above,
+  // so merely staying out of the denylist silently produced the opposite behaviour.
+  'incompatible_cli_arguments',
 ]);
 
 /** Transient/internal codes that should NOT trigger (not user-actionable). */
@@ -36,6 +42,12 @@ const EXCLUDED_REASON_CODES = new Set([
   'server_overloaded', // transient
   'invalid_thinking_signature', // internal
   'missing_rollout', // internal
+  // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream
+  // provider policy engine rejected the prompt as cyber-safety risk. This is
+  // NOT a Clowder AI bug — auto-filing an issue against ourselves adds noise
+  // and operator fatigue. F212 cliDiagnostics already surfaces the rephrase hint
+  // to the user, and the underlying decision is upstream policy (not our layer).
+  'upstream_policy_reject',
 ]);
 
 /** Minimum permission denials in CANCEL_WINDOW_MS to trigger cancel_burst. */

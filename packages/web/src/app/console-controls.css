@@ -121,13 +121,13 @@ select.console-form-input {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  color: var(--cafe-crosspost);
+  color: var(--conn-blue-text);
   font-size: var(--console-font-compact);
   font-weight: 600;
 }
 
 .console-inline-link:hover {
-  color: color-mix(in srgb, var(--cafe-crosspost) 76%, var(--cafe-text) 24%);
+  color: var(--conn-blue-hover);
   text-decoration: underline;
   text-underline-offset: 0.18em;
 }

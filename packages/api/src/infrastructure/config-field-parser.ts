@@ -77,8 +77,15 @@ function parseInputField(raw: Record<string, unknown>, context: string): InputCo
 
   if (raw.requiredWhen && typeof raw.requiredWhen === 'object') {
     const rw = raw.requiredWhen as Record<string, unknown>;
-    if (typeof rw.envName === 'string' && typeof rw.value === 'string') {
-      field.requiredWhen = { envName: rw.envName, value: rw.value };
+    const values = rw.value;
+    const parsedValue =
+      typeof values === 'string'
+        ? values
+        : Array.isArray(values) && values.length > 0 && values.every((value) => typeof value === 'string')
+          ? (values as string[])
+          : undefined;
+    if (typeof rw.envName === 'string' && parsedValue !== undefined) {
+      field.requiredWhen = { envName: rw.envName, value: parsedValue };
     }
   }
 

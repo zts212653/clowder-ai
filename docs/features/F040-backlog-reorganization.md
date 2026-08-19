@@ -85,7 +85,7 @@ docs/
 #### `docs/ROADMAP.md`（热层 - 活跃 Feature 索引）
 
 ```markdown
-# Cat Cafe Feature Roadmap
+# Clowder AI Feature Roadmap
 
 > 维护者：三猫 | 最后更新：YYYY-MM-DD
 >
@@ -106,7 +106,7 @@ docs/
 #### `docs/TECH-DEBT.md`（技术债务独立文件）
 
 ```markdown
-# Cat Cafe 技术债务
+# Clowder AI 技术债务
 
 > 维护者：三猫 | 最后更新：YYYY-MM-DD
 >
@@ -246,7 +246,7 @@ created: 2026-02-26           # 创建日期
 
 ## Feature 演化图（operator梳理 2026-02-26）
 
-operator用 Mermaid 可视化了 Cat Café 的 Feature 演化关系，分为 5 个逻辑栈：
+operator用 Mermaid 可视化了 Clowder AI 的 Feature 演化关系，分为 5 个逻辑栈：
 
 ### 1. 语音栈（Voice Stack）
 ```

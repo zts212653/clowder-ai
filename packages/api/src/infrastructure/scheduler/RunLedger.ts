@@ -11,8 +11,12 @@ export class RunLedger {
   record(row: RunLedgerRow): void {
     this.db
       .prepare(
-        `INSERT INTO task_run_ledger (task_id, subject_key, outcome, signal_summary, duration_ms, started_at, assigned_cat_id, error_summary)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO task_run_ledger (
+           task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+           assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+           missed_slots, trigger_kind, misfire_policy
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.task_id,
@@ -23,13 +27,21 @@ export class RunLedger {
         row.started_at,
         row.assigned_cat_id,
         row.error_summary ?? null,
+        row.scheduled_at ?? null,
+        row.fired_at ?? null,
+        row.lateness_ms ?? null,
+        row.missed_slots ?? null,
+        row.trigger_kind ?? null,
+        row.misfire_policy ?? null,
       );
   }
 
   query(taskId: string, limit: number): RunLedgerRow[] {
     return this.db
       .prepare(
-        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at, assigned_cat_id, error_summary
+        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+                assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+                missed_slots, trigger_kind, misfire_policy
          FROM task_run_ledger WHERE task_id = ? ORDER BY id DESC LIMIT ?`,
       )
       .all(taskId, limit) as RunLedgerRow[];
@@ -39,7 +51,9 @@ export class RunLedger {
   queryBySubject(taskId: string, subjectKey: string, limit: number): RunLedgerRow[] {
     return this.db
       .prepare(
-        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at, assigned_cat_id, error_summary
+        `SELECT task_id, subject_key, outcome, signal_summary, duration_ms, started_at,
+                assigned_cat_id, error_summary, scheduled_at, fired_at, lateness_ms,
+                missed_slots, trigger_kind, misfire_policy
          FROM task_run_ledger WHERE task_id = ? AND subject_key = ? ORDER BY id DESC LIMIT ?`,
       )
       .all(taskId, subjectKey, limit) as RunLedgerRow[];

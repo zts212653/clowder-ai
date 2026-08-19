@@ -201,6 +201,41 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
     assert.equal(response.statusCode, 200, 'targetCats present → cross-post accepted');
   });
 
+  test('reject cross-post to soft-deleted target thread before storing or waking', async () => {
+    threadStore.seed({
+      id: 'deleted-target-thread',
+      userId: 'user-1',
+      createdBy: 'user-1',
+      title: 'Deleted Target Thread',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      deletedAt: Date.now(),
+    });
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', {
+      threadId: 'source-thread',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        threadId: 'deleted-target-thread',
+        content: 'deleted thread relay',
+        targetCats: ['codex'],
+        clientMessageId: 'deleted-target-1',
+      },
+    });
+
+    assert.equal(response.statusCode, 410, response.body);
+    const body = response.json();
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(messageStore.getByThread('deleted-target-thread', 10, 'user-1').length, 0);
+    assert.deepEqual(invocationRecordStore.getRecords(), []);
+  });
+
   test('accept cross-post to indexed system thread when targetCats provided', async () => {
     threadStore.seed({
       id: 'thread_eval_memory',

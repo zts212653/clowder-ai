@@ -1,9 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { classifyFseventsdPressure, fseventsdAdvisoryRssKb } from './lib/fseventsd-pressure.mjs';
+import { cleanupStaleRedisTestLeases, redisTestRegistryDir } from './lib/redis-test-leases.mjs';
 
-const DEFAULT_FSEVENTSD_RSS_MAX_KB = 4 * 1024 * 1024;
+// Backward-compatible advisory ceiling. The legacy env var keeps its name, but
+// RSS alone no longer proves active pressure and therefore does not hard-block.
+const DEFAULT_FSEVENTSD_RSS_ADVISORY_KB = 4 * 1024 * 1024;
 // 6099=fork runtime sanctuary / 6398=worktree dev /
 // 6399=runtime sanctuary / 6401=user-redis persistent user data.
 // 6401 must be protected too — flagging it as a killable orphan led to it being murdered
@@ -12,9 +16,9 @@ const PROTECTED_REDIS_PORTS = new Set([6099, 6398, 6399, 6401]);
 const ALLOWED_LOCAL_REDIS_PORTS = new Set([6379, ...PROTECTED_REDIS_PORTS]);
 // Concurrent-gate detection — another gate / pre-merge-check is already running.
 // Downgraded from hard-block to soft-warning (#1912 added this hard-block): gates run in
-// parallel safely — no shared writable state (git objects immutable, pnpm store
-// writes are atomic hard-links, node_modules/dist/.next are per-worktree), and
-// resource pressure has its own independent valves (fseventsd RSS + redis orphan
+// parallel safely — worktree outputs are isolated and Redis test metadata uses
+// per-instance owner-verified leases — while resource pressure has its own
+// independent valves (fseventsd RSS + redis orphan
 // checks below). The old hard-block was incident-era over-defense that mis-killed
 // legitimate multi-cat concurrency with zero independent protection value.
 const CONCURRENT_GATE_PATTERNS = [/pnpm\s+gate\b/, /pre-merge-check\.sh\b/];
@@ -51,13 +55,13 @@ function readFixtureOrCommand(envKey, command, args) {
 }
 
 function readProcessRows() {
-  const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_PS_FIXTURE', 'ps', ['-axo', 'pid=,ppid=,rss=,command=']);
+  const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_PS_FIXTURE', 'ps', ['-axo', 'pid=,ppid=,rss=,%cpu=,command=']);
   return text
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const match = line.match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
+      const match = line.match(/^(\d+)\s+(\d+)\s+(\d+)\s+(?:(\d+(?:\.\d+)?)\s+)?(.+)$/);
       if (!match) {
         return null;
       }
@@ -65,7 +69,8 @@ function readProcessRows() {
         pid: Number(match[1]),
         ppid: Number(match[2]),
         rssKb: Number(match[3]),
-        command: match[4],
+        cpuPercent: match[4] === undefined ? null : Number(match[4]),
+        command: match[5],
       };
     })
     .filter(Boolean);
@@ -106,19 +111,10 @@ function holderIgnoreSet(rows, holderPid) {
   return ignored;
 }
 
-function findFseventsdPressure(rows, maxRssKb) {
-  return rows.filter((row) => /(^|\/)fseventsd(\s|$)/.test(row.command)).filter((row) => row.rssKb > maxRssKb);
-}
-
-function formatFseventsdPressureFailure(row, maxRssKb) {
-  return [
-    `fseventsd RSS ${row.rssKb}KB exceeds ${maxRssKb}KB (pid ${row.pid}); gate blocked to avoid amplifying macOS file-event pressure.`,
-    `  diagnose stale/no-listener Clowder AI dev/watch process groups: pnpm process:doctor`,
-    `  safe cleanup for Clowder AI-owned stale rows: pnpm process:cleanup`,
-    `  re-check fseventsd RSS: ps -axo pid=,rss=,command= | rg '(^|/)fseventsd'`,
-    `  cleanup can reduce new file-event load but will not necessarily reduce fseventsd RSS once the daemon is inflated; OS-level recovery or reboot may still be required.`,
-    `  Manual gate bypass is a operator override, not a pnpm gate pass.`,
-  ].join('\n');
+function readSystemMemoryFreePercent() {
+  const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_MEMORY_PRESSURE_FIXTURE', 'memory_pressure', ['-Q']);
+  const match = text.match(/System-wide memory free percentage:\s*(\d+(?:\.\d+)?)%/i);
+  return match ? Number(match[1]) : null;
 }
 
 function readRedisListeners() {
@@ -139,12 +135,10 @@ function readRedisListeners() {
     .filter(Boolean);
 }
 
-// True ownership proof: query Redis-owned filesystem paths via CONFIG GET.
-// Redis 8 can report an empty `dir` while still exposing absolute pidfile/logfile
-// paths, so check the whole read-only CONFIG response for known Clowder AI test
-// tempdir prefixes.
-function isOwnedTestRedis(port) {
-  const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE', 'redis-cli', [
+// Bind a live lease to the actual Redis listener via Redis-owned CONFIG paths.
+// Redis 8 can report an empty `dir`, so query pidfile/logfile too.
+function readRedisConfig(port) {
+  return readFixtureOrCommand('CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE', 'redis-cli', [
     '-h',
     '127.0.0.1',
     '-p',
@@ -155,12 +149,32 @@ function isOwnedTestRedis(port) {
     'pidfile',
     'logfile',
   ]);
-  return /cat-cafe-(?:redis-test\.|rdb-first-start-)/.test(text);
 }
 
-function findRedisOrphans() {
-  return readRedisListeners().filter(({ port }) => {
-    return port >= 6300 && port <= 65535 && !ALLOWED_LOCAL_REDIS_PORTS.has(port);
+function leaseMatchesRedis(lease) {
+  const canonicalize = (filePath) => {
+    try {
+      return realpathSync(filePath);
+    } catch {
+      return path.resolve(filePath);
+    }
+  };
+  const expected = canonicalize(lease.dataDir);
+  return readRedisConfig(lease.port)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => path.isAbsolute(line))
+    .some((line) => {
+      const candidate = canonicalize(line);
+      return candidate === expected || path.dirname(candidate) === expected;
+    });
+}
+
+function findRedisOrphans(liveLeases = []) {
+  const uniqueListeners = [...new Map(readRedisListeners().map((listener) => [listener.port, listener])).values()];
+  return uniqueListeners.filter(({ port }) => {
+    if (port < 6300 || port > 65535 || ALLOWED_LOCAL_REDIS_PORTS.has(port)) return false;
+    return !liveLeases.some((lease) => lease.port === port && leaseMatchesRedis(lease));
   });
 }
 
@@ -178,27 +192,11 @@ function findMatchingProcesses(rows, holderPid, patterns) {
   });
 }
 
-function shutdownOwnedOrphanRedis(rows) {
-  const orphanRedisPattern = /(?:^|\/)redis-server\s+\S*:(\d{2,5})\b/;
-  for (const row of rows) {
-    if (row.ppid !== 1) continue;
-    const m = row.command.match(orphanRedisPattern);
-    if (!m) continue;
-    const port = Number(m[1]);
-    if (ALLOWED_LOCAL_REDIS_PORTS.has(port) || port < 6300 || port > 65535) continue;
-    if (!isOwnedTestRedis(port)) continue;
-    spawnSync('redis-cli', ['-h', '127.0.0.1', '-p', String(port), 'shutdown', 'nosave'], {
-      timeout: 3000,
-      stdio: 'ignore',
-    });
-  }
-}
-
-function collectRedisOrphanFailures() {
-  let orphans = findRedisOrphans();
+function collectRedisOrphanFailures(liveLeases) {
+  let orphans = findRedisOrphans(liveLeases);
   if (orphans.length > 0) {
     spawnSync('sleep', ['3'], { stdio: 'ignore' });
-    orphans = findRedisOrphans();
+    orphans = findRedisOrphans(liveLeases);
   }
   return orphans.map(
     (orphan) =>
@@ -215,29 +213,40 @@ function runPressureChecks(holderPid) {
   }
 
   const rows = readProcessRows();
-  const maxFseventsdRssKb = Number(process.env.CAT_CAFE_FSEVENTSD_RSS_MAX_KB ?? DEFAULT_FSEVENTSD_RSS_MAX_KB);
+  const configuredMaxRssKb = Number(process.env.CAT_CAFE_FSEVENTSD_RSS_MAX_KB ?? DEFAULT_FSEVENTSD_RSS_ADVISORY_KB);
+  const totalMemoryKb = Number(process.env.CAT_CAFE_GATE_GUARD_TOTAL_MEMORY_KB_FIXTURE ?? os.totalmem() / 1024);
+  const advisoryRssKb = fseventsdAdvisoryRssKb(configuredMaxRssKb, totalMemoryKb);
   const failures = [];
   const warnings = [];
 
-  for (const row of findFseventsdPressure(rows, maxFseventsdRssKb)) {
-    failures.push(formatFseventsdPressureFailure(row, maxFseventsdRssKb));
+  const fseventsdRows = rows.filter((row) => /(^|\/)fseventsd(\s|$)/.test(row.command));
+  const memoryFreePercent = fseventsdRows.some((row) => row.rssKb > advisoryRssKb)
+    ? readSystemMemoryFreePercent()
+    : null;
+  for (const row of fseventsdRows) {
+    const result = classifyFseventsdPressure(row, advisoryRssKb, totalMemoryKb, memoryFreePercent);
+    if (result?.level === 'failure') failures.push(result.message);
+    if (result?.level === 'warning') warnings.push(result.message);
   }
 
-  // Phase 1: clean orphan Redis with TRUE ownership proof.
-  // Step 1: find candidates (ppid=1 + redis-server proctitle + non-sanctuary port).
-  // Step 2: for each candidate, query read-only CONFIG paths. If dir/pidfile/logfile
-  //   matches a known Clowder AI test tmpdir prefix, it's ours.
-  // Step 3: port-based shutdown on OWNED instances only.
-  // Non-owned Redis (different datadir) is never touched — fails to manual guidance.
-  shutdownOwnedOrphanRedis(rows);
+  // A daemonized Redis has ppid=1 even while its test runner is alive. Cleanup
+  // therefore requires an exact owner identity from the per-instance lease;
+  // CONFIG ownership alone is not owner-death proof.
+  const leaseCleanup = cleanupStaleRedisTestLeases(redisTestRegistryDir());
+  for (const lease of leaseCleanup.unknown) {
+    warnings.push(`cannot prove isolated Redis lease owner dead on port ${lease.port}; instance preserved`);
+  }
+  for (const file of leaseCleanup.invalidFiles) {
+    warnings.push(`invalid isolated Redis lease metadata preserved for manual inspection: ${file}`);
+  }
 
   // Phase 2: wait briefly for transient orphans (trap fired, Redis still exiting).
-  failures.push(...collectRedisOrphanFailures());
+  failures.push(...collectRedisOrphanFailures(leaseCleanup.live));
 
   for (const row of findMatchingProcesses(rows, holderPid, CONCURRENT_GATE_PATTERNS)) {
     warnings.push(
       `concurrent gate detected: pid ${row.pid} ${row.command}. Gates run in parallel safely ` +
-        `(no shared writable state); if gate feels slow, concurrent gates are a likely cause.`,
+        `(isolated worktree outputs; owner-verified Redis test leases); if gate feels slow, concurrent gates are a likely cause.`,
     );
   }
 

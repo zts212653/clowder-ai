@@ -45,6 +45,8 @@ export type McpTransport = 'stdio' | 'streamableHttp';
 export interface McpServerDescriptor {
   /** MCP server name (e.g. 'cat-cafe', 'filesystem') */
   name: string;
+  /** Original capability ID used to prove ownership of managed name migrations. */
+  capabilityId?: string;
   /** Transport type (default: 'stdio'). TD104: 'streamableHttp' for URL-based servers. */
   transport?: McpTransport;
   /** Optional local resolver hint for machine-specific stdio servers (e.g. pencil). */
@@ -96,7 +98,7 @@ export interface CapabilityEntry {
    */
   overrides?: CatCapabilityOverride[];
   /** MCP server descriptor (only for type: 'mcp') */
-  mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
+  mcpServer?: Omit<McpServerDescriptor, 'name' | 'capabilityId' | 'enabled' | 'source'>;
   /** Source origin: cat-cafe = built-in managed, external = user-installed, plugin = plugin-installed */
   source: 'cat-cafe' | 'external' | 'plugin';
   /**
@@ -132,7 +134,7 @@ export interface CapabilityEntry {
    * Absent = use global mcpServer.
    * Only meaningful for type: 'mcp' in project-level capabilities.json.
    */
-  mcpServerOverride?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
+  mcpServerOverride?: Omit<McpServerDescriptor, 'name' | 'capabilityId' | 'enabled' | 'source'>;
   /**
    * Which external config file this MCP was discovered from.
    * e.g. "claude-project", "codex-user", "gemini-user", "kimi-project".

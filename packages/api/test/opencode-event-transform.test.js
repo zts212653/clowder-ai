@@ -109,10 +109,8 @@ describe('transformOpenCodeEvent', () => {
     // step_finish reports per-step input which IS per-API-call from opencode's perspective.
     assert.strictEqual(result.metadata.usage.lastTurnInputTokens, 36928);
     // clowder#915 R5 cloud P2: transformer must NOT attach a default
-    // contextWindowSize — that would override `getContextWindowFallback`'s
-    // precise lookup for known opencode models (e.g. claude-opus-4-6 → 200k).
-    // The unknown-model default is now applied as a LAST RESORT inside
-    // invoke-single-cat's helper, only after the fallback table also misses.
+    // contextWindowSize — the invocation-owned member capacity snapshot is the
+    // only denominator, and unknown bindings remain unresolved.
     assert.strictEqual(result.metadata.usage.contextWindowSize, undefined);
   });
 
@@ -180,12 +178,9 @@ describe('transformOpenCodeEvent', () => {
     assert.strictEqual(result.metadata.usage.cacheCreationTokens, 10_000);
   });
 
-  test('clowder#915 R5 cloud P2: transformer leaves contextWindowSize blank — invoke-single-cat resolves via 3-tier chain', () => {
-    // After R5: transformer never sets contextWindowSize. Window resolution
-    // happens in invoke-single-cat.ts via:
-    //   usage.contextWindowSize ?? getContextWindowFallback(model) ?? (provider==='opencode' ? OPENCODE_DEFAULT : undefined)
-    // This test pins the transformer's contract; the full chain is tested
-    // end-to-end in invoke-single-cat.test.js (clowder#915 R5 fallback test).
+  test('#1208: transformer leaves contextWindowSize blank for the invocation-owned resolver', () => {
+    // The transformer contributes usage only. The single member capacity
+    // resolver owns catalog/manual/runtime window selection.
     const event = {
       type: 'step_finish',
       timestamp: 1773304958508,
@@ -199,7 +194,7 @@ describe('transformOpenCodeEvent', () => {
     };
     const result = transformOpenCodeEvent(event, catId);
     assert.ok(result);
-    // contextWindowSize MUST be undefined — leaving it for the helper to resolve
+    // contextWindowSize MUST be undefined — leaving it for the bound snapshot
     assert.strictEqual(result.metadata.usage.contextWindowSize, undefined);
     // Usage data still surfaces correctly
     assert.strictEqual(result.metadata.usage.inputTokens, 109_000);

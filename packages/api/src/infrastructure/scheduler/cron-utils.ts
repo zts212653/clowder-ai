@@ -66,3 +66,30 @@ export function computeNextCronSlot(
   }
   return nextMs;
 }
+
+/**
+ * Count additional cron slots that became due after an already-selected
+ * scheduled slot and at or before the actual fire time. This is the
+ * `merge_late_one` accounting number: the scheduler fires one compensating
+ * run for `scheduledSlotMs`, and this count records how many later slots were
+ * merged into that same run instead of being replayed one by one.
+ */
+export function countAdditionalDueCronSlots(
+  expression: string,
+  timezone: string | undefined,
+  scheduledSlotMs: number,
+  firedMs: number,
+): number {
+  if (firedMs <= scheduledSlotMs) return 0;
+  const options: Record<string, unknown> = { currentDate: new Date(scheduledSlotMs) };
+  if (timezone) options.tz = timezone;
+  const parsed = CronExpressionParser.parse(expression, options);
+  const MAX_MISSED_SLOTS = 1440;
+  let count = 0;
+  for (let i = 0; i < MAX_MISSED_SLOTS; i++) {
+    const nextMs = parsed.next().toDate().getTime();
+    if (nextMs > firedMs) return count;
+    count++;
+  }
+  return count;
+}

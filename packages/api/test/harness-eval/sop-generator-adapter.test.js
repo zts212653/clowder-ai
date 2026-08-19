@@ -26,6 +26,7 @@ function stubTrace(overrides = {}) {
       { command: 'git worktree add ../wt -b feat/x', exitCode: 0 },
       { command: 'pnpm install', exitCode: 0 },
     ],
+    changedFiles: [],
     envSnapshot: { REDIS_URL: 'redis://localhost:6398' },
     gitState: {
       branch: 'feat/x',
@@ -132,6 +133,58 @@ describe('sop sourceRefs validation', () => {
     assert.ok(err.includes('trace'), err);
   });
 
+  it('validateSopTraceSelector rejects missing trace.changedFiles', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const trace = stubTrace();
+    delete trace.changedFiles;
+    const err = validateSopTraceSelector({
+      kind: 'sop-trace-eval',
+      sopDefinitionId: 'development',
+      trace,
+    });
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('trace.changedFiles'), err);
+  });
+
+  it('validateSopTraceSelector rejects changedFileEvents without ordering evidence', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const err = validateSopTraceSelector(
+      stubSopSourceRefs({
+        trace: stubTrace({
+          changedFiles: ['packages/mcp-server/src/tools/callback-tools.ts'],
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts' }],
+        }),
+      }),
+    );
+
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('changedFileEvents'), err);
+    assert.ok(err.includes('eventNo or timestamp'), err);
+  });
+
+  it('validateSopTraceSelector rejects convention graph commands without shared ordering coordinates', async () => {
+    const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
+    const err = validateSopTraceSelector(
+      stubSopSourceRefs({
+        trace: stubTrace({
+          commands: [
+            {
+              command: 'pnpm convention-graph:code-consumers --domain mcp-tool --name callback-tools',
+              exitCode: 0,
+              timestamp: 1000,
+            },
+          ],
+          changedFiles: ['packages/mcp-server/src/tools/callback-tools.ts'],
+          changedFileEvents: [{ path: 'packages/mcp-server/src/tools/callback-tools.ts', eventNo: 5 }],
+        }),
+      }),
+    );
+
+    assert.ok(err, 'should return error string');
+    assert.ok(err.includes('changedFileEvents'), err);
+    assert.ok(err.includes('shared eventNo or timestamp'), err);
+  });
+
   it('validateSopTraceSelector accepts valid selector', async () => {
     const { validateSopTraceSelector } = await import(IMPORT_PATH_VALIDATION);
     const good = stubSopSourceRefs();
@@ -163,6 +216,7 @@ describe('generateSopLiveVerdict', () => {
     mkdirSync(harnessFeedbackRoot, { recursive: true });
 
     const verdictId = 'vhp-eval-sop-development-test-001';
+    const packet = stubPacket();
     const result = generateSopLiveVerdict({
       verdictId,
       harnessFeedbackRoot,
@@ -171,7 +225,7 @@ describe('generateSopLiveVerdict', () => {
         { ruleId: 'R-WT-1', status: 'pass' },
         { ruleId: 'R-WT-2', status: 'skipped', reason: 'manual_only' },
       ],
-      submittedPacket: stubPacket(),
+      submittedPacket: packet,
     });
 
     // verdict.md exists with YAML frontmatter (P1-2 fix)
@@ -192,6 +246,12 @@ describe('generateSopLiveVerdict', () => {
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
     assert.ok(snapshot.evalSnapshotId, 'snapshot must have evalSnapshotId');
     assert.ok(snapshot.window, 'snapshot must have window');
+    assert.equal(snapshot.window.endMs, Date.parse(packet.createdAt), 'snapshot.window.endMs must use packet time');
+    assert.equal(
+      snapshot.window.startMs,
+      Date.parse(packet.createdAt) - 336 * 60 * 60 * 1000,
+      'snapshot.window.startMs must cover the weekly SOP eval window',
+    );
     assert.ok(snapshot.window.durationHours > 0, 'snapshot.window must have durationHours');
     assert.ok(Array.isArray(snapshot.components), 'snapshot must have components array');
     assert.ok(snapshot.components.length >= 1, 'snapshot must have at least 1 component');

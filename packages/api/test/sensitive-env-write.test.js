@@ -254,7 +254,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
-    writeFileSync(envFilePath, 'FRONTEND_URL=http://old\nF102_API_KEY=sk-old\n', 'utf8');
+    writeFileSync(envFilePath, 'PREVIEW_GATEWAY_PORT=4100\nF102_API_KEY=sk-old\n', 'utf8');
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
     const auditEvents = [];
 
@@ -274,7 +274,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
         headers: { 'x-test-session-user': 'you' },
         payload: {
           updates: [
-            { name: 'FRONTEND_URL', value: 'http://new' },
+            { name: 'PREVIEW_GATEWAY_PORT', value: '4200' },
             { name: 'F102_API_KEY', value: 'sk-new' },
           ],
         },
@@ -284,7 +284,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       const sensitiveAudit = auditEvents.find((e) => e.type === 'env_sensitive_write');
       assert.ok(sensitiveAudit, 'should have env_sensitive_write event');
       assert.deepEqual(sensitiveAudit.data.keys, ['F102_API_KEY']);
-      assert.ok(!sensitiveAudit.data.keys.includes('FRONTEND_URL'), 'non-sensitive key must not appear');
+      assert.ok(!sensitiveAudit.data.keys.includes('PREVIEW_GATEWAY_PORT'), 'non-sensitive key must not appear');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
@@ -402,7 +402,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
-    writeFileSync(envFilePath, 'FRONTEND_URL=http://old\n', 'utf8');
+    writeFileSync(envFilePath, 'PREVIEW_GATEWAY_PORT=4100\n', 'utf8');
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
 
     const app = Fastify({ logger: false });
@@ -418,7 +418,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
         method: 'PATCH',
         url: '/api/config/env',
         headers: { 'x-cat-cafe-user': 'codex' },
-        payload: { updates: [{ name: 'FRONTEND_URL', value: 'http://new' }] },
+        payload: { updates: [{ name: 'PREVIEW_GATEWAY_PORT', value: '4200' }] },
       });
 
       assert.equal(res.statusCode, 200);

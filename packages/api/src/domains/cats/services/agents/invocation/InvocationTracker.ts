@@ -6,16 +6,19 @@
  * - 同一 catId 在同一 thread 仍保持单锁语义（新调用 abort 旧调用）
  * - 不同 catId 在同一 thread 可以并发执行
  *
- * F118 D3: TTL guard — slots exceeding maxSlotTtlMs are auto-cleaned on read.
+ * F118 post-close: age only marks a lease as a reaper candidate. Read APIs are
+ * observational and never abort or delete provider ownership.
  */
-
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 
 const log = createModuleLogger('invocation-tracker');
+export const DEFAULT_INVOCATION_SLOT_TTL_MS = 75 * 60_000;
 
 interface ActiveInvocation {
   controller: AbortController;
+  threadId: string;
+  /** Parent execution identity for exact terminal ownership / mutex recovery. */
+  executionId?: string;
   userId: string;
   catId: string;
   /** Cat(s) being invoked — used for cancel feedback broadcast */
@@ -46,9 +49,29 @@ export interface ActiveSlotInfo {
   startedAt: number;
 }
 
+export interface StaleInvocationSlotInfo {
+  threadId: string;
+  catId: string;
+  userId: string;
+  executionId?: string;
+  startedAt: number;
+  ageMs: number;
+  state: 'active' | 'canceled';
+}
+
 export interface CancelResult {
   cancelled: boolean;
   catIds: string[];
+  /** Exact runner(s) aborted by this action; safe witness for holder preservation. */
+  executionIds?: string[];
+}
+
+export interface CancelAllResult {
+  catIds: string[];
+  /** Deduplicated InvocationRecord identities aborted by this action. */
+  executionIds: string[];
+  /** Exact active execution owner for each canceled slot. */
+  executionIdByCatId: Readonly<Record<string, string>>;
 }
 
 export interface DeleteGuard {
@@ -58,28 +81,24 @@ export interface DeleteGuard {
   release: () => void;
 }
 
+/** Result of atomically comparing a terminal execution with the current slot owner. */
+export type ExactExecutionOwnerState = 'released' | 'absent' | 'replacement';
+/** Non-destructive projection used to fence async terminal side effects. */
+export type ExecutionOwnerMatch = 'matching' | 'absent' | 'replacement';
+
 export class InvocationTracker {
   /** Key: `${threadId}:${catId}` (slotKey) */
   private active = new Map<string, ActiveInvocation>();
   private deleting = new Set<string>();
-  /** F118 D3: max age before a slot is considered stale (default 2.5× CLI timeout = 75min) */
+  /** F118: max age before a slot becomes a reaper candidate; `0` disables candidacy. */
   private maxSlotTtlMs: number;
 
   constructor(opts?: { maxSlotTtlMs?: number }) {
-    this.maxSlotTtlMs = opts?.maxSlotTtlMs ?? 2.5 * resolveCliTimeoutMs(undefined);
+    this.maxSlotTtlMs = opts?.maxSlotTtlMs ?? DEFAULT_INVOCATION_SLOT_TTL_MS;
   }
 
   private slotKey(threadId: string, catId: string): string {
     return `${threadId}:${catId}`;
-  }
-
-  /** F118 D3: Check if an invocation has exceeded the TTL. Auto-deletes if expired. */
-  private isExpired(key: string, inv: ActiveInvocation): boolean {
-    if (Date.now() - inv.startedAt > this.maxSlotTtlMs) {
-      this.active.delete(key);
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -87,7 +106,13 @@ export class InvocationTracker {
    * Only aborts existing invocation for the SAME slot — other cats' slots untouched.
    * If thread is being deleted, returns a pre-aborted controller.
    */
-  start(threadId: string, catId: string, userId: string = 'unknown', catIds: string[] = []): AbortController {
+  start(
+    threadId: string,
+    catId: string,
+    userId: string = 'unknown',
+    catIds: string[] = [],
+    executionId?: string,
+  ): AbortController {
     if (this.deleting.has(threadId)) {
       const controller = new AbortController();
       controller.abort();
@@ -97,7 +122,16 @@ export class InvocationTracker {
     // Abort existing invocation for this SAME slot only
     this.active.get(key)?.controller.abort('preempted');
     const controller = new AbortController();
-    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now(), state: 'active' });
+    this.active.set(key, {
+      controller,
+      threadId,
+      userId,
+      catId,
+      catIds,
+      startedAt: Date.now(),
+      state: 'active',
+      executionId,
+    });
     return controller;
   }
 
@@ -114,12 +148,22 @@ export class InvocationTracker {
     catId: string,
     userId: string = 'unknown',
     catIds: string[] = [],
+    executionId?: string,
   ): AbortController | null {
     if (this.deleting.has(threadId)) return null;
     if (this.has(threadId)) return null;
     const controller = new AbortController();
     const key = this.slotKey(threadId, catId);
-    this.active.set(key, { controller, userId, catId, catIds, startedAt: Date.now(), state: 'active' });
+    this.active.set(key, {
+      controller,
+      threadId,
+      userId,
+      catId,
+      catIds,
+      startedAt: Date.now(),
+      state: 'active',
+      executionId,
+    });
     return controller;
   }
 
@@ -151,8 +195,10 @@ export class InvocationTracker {
   cancel(threadId: string, catId: string, requestUserId?: string, abortReason?: string): CancelResult {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
-    if (!inv) return { cancelled: false, catIds: [] };
-    if (requestUserId && inv.userId !== requestUserId) return { cancelled: false, catIds: [] };
+    if (!inv) return { cancelled: false, catIds: [], executionIds: [] };
+    if (requestUserId && inv.userId !== requestUserId) {
+      return { cancelled: false, catIds: [], executionIds: [] };
+    }
     const { catIds } = inv;
     inv.controller.abort(abortReason);
     // F211-REG6 instrument (observation-only): the cancel funnel is the complete chokepoint for the
@@ -176,18 +222,21 @@ export class InvocationTracker {
     // gate). Purged at the next start-family or complete-family call for this slot.
     inv.state = 'canceled';
     inv.cancelReason = abortReason;
-    return { cancelled: true, catIds };
+    return { cancelled: true, catIds, executionIds: inv.executionId ? [inv.executionId] : [] };
   }
 
   /**
    * Cancel ALL active slots for a thread.
    * F156: When requestUserId is provided, only cancels invocations owned by that user.
    * Without requestUserId, cancels all (system/admin action, e.g. thread deletion).
-   * Returns the catIds that were actually cancelled (for orchestrator scoping).
+   * Returns both the aggregate InvocationRecord identities used by SessionMutex
+   * and the exact cat→execution ownership used by slot-scoped terminal effects.
    */
-  cancelAll(threadId: string, requestUserId?: string, abortReason?: string): string[] {
+  cancelAll(threadId: string, requestUserId?: string, abortReason?: string): CancelAllResult {
     const prefix = `${threadId}:`;
     const cancelledCatIds: string[] = [];
+    const cancelledExecutionIds = new Set<string>();
+    const cancelledExecutionIdByCatId = new Map<string, string>();
     // F211-REG6 instrument (observation-only): per-cat age evidence for the all-scope path,
     // mirroring cancel()'s msSinceStart. An all-scope cancel / force-reset must also answer
     // "just started" vs "ran a while" — without this, the cancelAll log can't distinguish them.
@@ -200,6 +249,10 @@ export class InvocationTracker {
       if (key.startsWith(prefix)) {
         if (requestUserId && inv.userId !== requestUserId) continue;
         cancelledCatIds.push(inv.catId);
+        if (inv.executionId) {
+          cancelledExecutionIds.add(inv.executionId);
+          cancelledExecutionIdByCatId.set(inv.catId, inv.executionId);
+        }
         cancelledSlots.push({ catId: inv.catId, msSinceStart: Date.now() - inv.startedAt });
         inv.controller.abort(abortReason);
         if (inv.batchController) batchControllers.add(inv.batchController);
@@ -221,7 +274,11 @@ export class InvocationTracker {
         'F211-REG6: invocations aborted (cancelAll funnel) — abortReason provenance',
       );
     }
-    return cancelledCatIds;
+    return {
+      catIds: cancelledCatIds,
+      executionIds: [...cancelledExecutionIds],
+      executionIdByCatId: Object.fromEntries(cancelledExecutionIdByCatId),
+    };
   }
 
   /**
@@ -266,6 +323,13 @@ export class InvocationTracker {
     return this.active.get(key)?.userId ?? null;
   }
 
+  /** Exact execution fence for non-interrupting per-target reminder attempts. */
+  getExecutionId(threadId: string, catId: string): string | undefined {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    if (!inv || inv.state !== 'active') return undefined;
+    return inv.executionId;
+  }
+
   /** Get target cat IDs of the active invocation for a specific slot. */
   getCatIds(threadId: string, catId: string): string[] {
     const key = this.slotKey(threadId, catId);
@@ -275,7 +339,7 @@ export class InvocationTracker {
   /**
    * Get the AbortController for a specific slot, so the execution layer can subscribe
    * to a cat's OWN cancel signal (per-cat isolation). Returns undefined if there is no
-   * active (non-expired) slot.
+   * tracked slot.
    *
    * F-parallel-cancel: startAll/tryStartThreadAll give each cat an INDEPENDENT controller
    * but only RETURN primaryController (catIds[0]'s). Concurrent execution must resolve
@@ -286,7 +350,6 @@ export class InvocationTracker {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
     if (!inv) return undefined;
-    if (this.isExpired(key, inv)) return undefined;
     // NOTE: a 'canceled' tombstone intentionally still returns its (now aborted) controller —
     // that is the whole point of the tombstone (pre-invoke cancel must surface an aborted signal).
     return inv.controller;
@@ -302,7 +365,6 @@ export class InvocationTracker {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
     if (!inv) return 'absent';
-    if (this.isExpired(key, inv)) return 'absent';
     return inv.state;
   }
 
@@ -345,6 +407,33 @@ export class InvocationTracker {
   }
 
   /**
+   * Classify whether an execution still matches the current slot without
+   * changing ownership. Async terminal paths use this after awaited reads so a
+   * replacement cannot inherit an older invocation's slot-keyed side effects.
+   */
+  classifyExecutionId(threadId: string, catId: string, executionId: string): ExecutionOwnerMatch {
+    const inv = this.active.get(this.slotKey(threadId, catId));
+    if (!inv) return 'absent';
+    return inv.executionId === executionId ? 'matching' : 'replacement';
+  }
+
+  /**
+   * Retire a terminal slot only when the caller still owns its exact execution.
+   *
+   * Runtime zombie reconciliation can race with a replacement invocation for the
+   * same (thread, cat) slot. Comparing only that pair would delete the replacement;
+   * executionId is the ownership fence that makes late terminal cleanup safe.
+   */
+  completeByExecutionId(threadId: string, catId: string, executionId: string): ExactExecutionOwnerState {
+    const key = this.slotKey(threadId, catId);
+    const ownerMatch = this.classifyExecutionId(threadId, catId, executionId);
+    if (ownerMatch === 'absent') return 'absent';
+    if (ownerMatch === 'replacement') return 'replacement';
+    this.active.delete(key);
+    return 'released';
+  }
+
+  /**
    * Mark a SINGLE slot from a batch invocation as complete.
    * Unlike complete(), this also matches batchController so a startAll()/tryStartThreadAll()
    * caller can retire finished cats one-by-one without waiting for the whole batch.
@@ -375,12 +464,12 @@ export class InvocationTracker {
       // F-parallel-cancel: a canceled tombstone is INACTIVE (slot retained only so getController
       // can still hand back the aborted controller for a pre-invoke cancel).
       if (inv.state === 'canceled') return false;
-      return !this.isExpired(key, inv);
+      return true;
     }
-    // Thread-level: check if ANY non-expired, non-canceled slot is active
+    // Thread-level: check if ANY non-canceled slot is active.
     const prefix = `${threadId}:`;
     for (const [key, inv] of this.active) {
-      if (key.startsWith(prefix) && inv.state !== 'canceled' && !this.isExpired(key, inv)) return true;
+      if (key.startsWith(prefix) && inv.state !== 'canceled') return true;
     }
     return false;
   }
@@ -391,7 +480,7 @@ export class InvocationTracker {
    * Returns the primaryCat's (catIds[0]) controller for execution signal.
    * All slots share a `batchController` ref so completeAll can match the batch.
    */
-  startAll(threadId: string, catIds: string[], userId: string = 'unknown'): AbortController {
+  startAll(threadId: string, catIds: string[], userId: string = 'unknown', executionId?: string): AbortController {
     if (this.deleting.has(threadId)) {
       const controller = new AbortController();
       controller.abort();
@@ -409,7 +498,17 @@ export class InvocationTracker {
       const key = this.slotKey(threadId, catId);
       this.active.get(key)?.controller.abort('preempted');
       const controller = new AbortController();
-      this.active.set(key, { controller, userId, catId, catIds, startedAt: now, batchController, state: 'active' });
+      this.active.set(key, {
+        controller,
+        threadId,
+        userId,
+        catId,
+        catIds,
+        startedAt: now,
+        batchController,
+        state: 'active',
+        executionId,
+      });
     }
     return batchController;
   }
@@ -425,6 +524,7 @@ export class InvocationTracker {
     controller: AbortController,
     userId: string = 'unknown',
     catIds: string[] = [catId],
+    executionId?: string,
   ): boolean {
     if (this.deleting.has(threadId)) return false;
     const key = this.slotKey(threadId, catId);
@@ -435,7 +535,7 @@ export class InvocationTracker {
     // aborted signal via signalForCat and skips the target at the top of the worklist loop — the cat
     // silently never invokes. Tombstones are purged by start-/complete-family calls; trackExternalSlot
     // is the A2A re-occupation path and must do the same. (bug: 2026-06-11 a2a-handoff-no-spawn.)
-    if (existing && !this.isExpired(key, existing) && existing.state !== 'canceled') {
+    if (existing && existing.state !== 'canceled') {
       // Idempotent if this slot already tracks the same batch. The passed `controller` is the
       // batch gate (route-serial's options.invocationController), stored as batchController below.
       return existing.batchController === controller || existing.controller === controller;
@@ -448,12 +548,14 @@ export class InvocationTracker {
     // batch gate as batchController so cancelAll (whole-invocation stop) still cascades.
     this.active.set(key, {
       controller: new AbortController(),
+      threadId,
       userId,
       catId,
       catIds,
       startedAt: Date.now(),
       batchController: controller,
       state: 'active',
+      executionId,
     });
     return true;
   }
@@ -462,7 +564,12 @@ export class InvocationTracker {
    * Non-preemptive thread-level start for ALL target cats.
    * Atomically checks if ANY slot is active, then registers all cats with independent controllers.
    */
-  tryStartThreadAll(threadId: string, catIds: string[], userId: string = 'unknown'): AbortController | null {
+  tryStartThreadAll(
+    threadId: string,
+    catIds: string[],
+    userId: string = 'unknown',
+    executionId?: string,
+  ): AbortController | null {
     if (this.deleting.has(threadId)) return null;
     if (this.has(threadId)) return null;
     const now = Date.now();
@@ -472,9 +579,32 @@ export class InvocationTracker {
     for (const catId of catIds) {
       const key = this.slotKey(threadId, catId);
       const controller = new AbortController();
-      this.active.set(key, { controller, userId, catId, catIds, startedAt: now, batchController, state: 'active' });
+      this.active.set(key, {
+        controller,
+        threadId,
+        userId,
+        catId,
+        catIds,
+        startedAt: now,
+        batchController,
+        state: 'active',
+        executionId,
+      });
     }
     return batchController;
+  }
+
+  /**
+   * Bind an InvocationRecord created after an atomic tracker reservation.
+   * Controller matching prevents a late create from stamping a replacement slot.
+   */
+  bindExecutionId(threadId: string, catIds: readonly string[], controller: AbortController, executionId: string): void {
+    for (const catId of catIds) {
+      const inv = this.active.get(this.slotKey(threadId, catId));
+      if (!inv) continue;
+      if (inv.controller !== controller && inv.batchController !== controller) continue;
+      inv.executionId = executionId;
+    }
   }
 
   /**
@@ -504,9 +634,50 @@ export class InvocationTracker {
     const result: ActiveSlotInfo[] = [];
     for (const [key, inv] of this.active) {
       // F-parallel-cancel: a canceled tombstone is not an active slot.
-      if (key.startsWith(prefix) && inv.state !== 'canceled' && !this.isExpired(key, inv)) {
+      if (key.startsWith(prefix) && inv.state !== 'canceled') {
         result.push({ catId: inv.catId, startedAt: inv.startedAt });
       }
+    }
+    return result;
+  }
+
+  /**
+   * F297 OQ-1: sparse active-candidate index for list-scale presence reads.
+   *
+   * Sidebar 有 ~1760 行但同时活跃的通常个位数；逐 thread 跑 4-store 对账是 O(T)。
+   * 本方法只枚举**进程内已持有 slot** 的 thread，把候选集压到 O(A)。
+   *
+   * 它是**候选发现**，不是 liveness 判定 —— tracker 按 F194 明确不是 lifecycle 真相源。
+   * 候选拿到后仍必须交给 canonical classifier 定性。
+   */
+  listActiveThreadIds(): string[] {
+    const threadIds = new Set<string>();
+    for (const inv of this.active.values()) {
+      if (inv.state === 'canceled') continue;
+      threadIds.add(inv.threadId);
+    }
+    return [...threadIds];
+  }
+
+  /**
+   * Enumerate old ownership leases for the explicit liveness reaper. This method
+   * is deliberately non-mutating: age alone is never terminal evidence.
+   */
+  listStaleSlots(now = Date.now()): StaleInvocationSlotInfo[] {
+    if (this.maxSlotTtlMs <= 0) return [];
+    const result: StaleInvocationSlotInfo[] = [];
+    for (const inv of this.active.values()) {
+      const ageMs = now - inv.startedAt;
+      if (ageMs <= this.maxSlotTtlMs) continue;
+      result.push({
+        threadId: inv.threadId,
+        catId: inv.catId,
+        userId: inv.userId,
+        ...(inv.executionId ? { executionId: inv.executionId } : {}),
+        startedAt: inv.startedAt,
+        ageMs,
+        state: inv.state,
+      });
     }
     return result;
   }

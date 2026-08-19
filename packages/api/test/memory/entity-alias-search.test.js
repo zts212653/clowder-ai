@@ -411,6 +411,7 @@ describe('F209 entity alias search', () => {
     const privateResult = await resolver.resolve('operator', {
       dimension: 'collection',
       collections: ['world:private-family'],
+      authorizedCollections: ['world:private-family'],
       limit: 5,
     });
     assert.equal(privateResult.results[0].anchor, 'private-family-alias-note');
@@ -471,5 +472,52 @@ describe('F209 entity alias search', () => {
 
     const limited = await store.search('operator', { mode: 'semantic', scope: 'docs', limit: 1 });
     assert.equal(limited.length, 1, 'entity merge must still honor the requested limit');
+  });
+
+  it('demotes superseded entity-prepended semantic and hybrid results before the final top-k cut', async () => {
+    const { VectorStore } = await import('../../dist/domains/memory/VectorStore.js');
+    const { ensureVectorTable } = await import('../../dist/domains/memory/schema.js');
+
+    await seedYouEntity();
+    await store.upsert([
+      {
+        anchor: 'superseded-entity-hit',
+        kind: 'feature',
+        status: 'superseded',
+        title: 'Superseded entity hit',
+        summary: 'co-creator appears in this stale entity-only document.',
+        updatedAt: '2026-05-20T00:00:00Z',
+      },
+      {
+        anchor: 'active-vector-hit',
+        kind: 'feature',
+        status: 'active',
+        title: 'Active semantic vector hit',
+        summary: 'This result has no entity alias but is the closest active embedding hit.',
+        updatedAt: '2026-05-22T00:00:00Z',
+      },
+    ]);
+
+    const db = store.getDb();
+    sqliteVec.load(db);
+    ensureVectorTable(db, 3);
+    const vectorStore = new VectorStore(db, 3);
+    vectorStore.upsert('superseded-entity-hit', new Float32Array([0, 1, 0]));
+    vectorStore.upsert('active-vector-hit', new Float32Array([1, 0, 0]));
+    store.setEmbedDeps({
+      embedding: createEmbedding(new Float32Array([1, 0, 0])),
+      vectorStore,
+      mode: 'on',
+    });
+
+    for (const mode of ['semantic', 'hybrid']) {
+      const results = await store.search('operator', { mode, scope: 'docs', limit: 1 });
+
+      assert.equal(
+        results[0]?.anchor,
+        'active-vector-hit',
+        `${mode} should not let stale entity hits preempt active vectors`,
+      );
+    }
   });
 });

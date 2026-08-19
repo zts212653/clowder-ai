@@ -2,6 +2,7 @@ import type { ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { JSX } from 'react';
 import { useArtifactContent } from '@/hooks/useArtifactContent';
 import { API_URL } from '@/utils/api-client';
+import { CompactLabel } from '../content-overflow/CompactLabel';
 import { MarkdownContent } from '../MarkdownContent';
 import { CodeViewer } from '../workspace/CodeViewer';
 import { artifactContentSource, classifyArtifactView, prRefToUrl, resolveAssetUrl } from './artifact-view';
@@ -58,9 +59,11 @@ function PrBody({ artifact }: { artifact: ThreadArtifactDTO }): JSX.Element {
 function DownloadBody({ artifact, url }: { artifact: ThreadArtifactDTO; url: string }): JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-      <div className="truncate text-sm font-medium text-cafe-secondary" title={artifact.name}>
-        {artifact.name}
-      </div>
+      <CompactLabel
+        label="产物名称"
+        value={artifact.name}
+        className="w-full max-w-md text-sm font-medium text-cafe-secondary"
+      />
       <div className="text-xs text-cafe-muted">此类型无法在面板内预览</div>
       <div className="mt-1 flex gap-2">
         <a href={url} download className={actionBtnClass}>
@@ -83,9 +86,11 @@ function FallbackBody({
 }): JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-      <div className="truncate text-sm font-medium text-cafe-secondary" title={artifact.name}>
-        {artifact.name}
-      </div>
+      <CompactLabel
+        label="产物名称"
+        value={artifact.name}
+        className="w-full max-w-md text-sm font-medium text-cafe-secondary"
+      />
       <div className="text-xs text-cafe-muted">此产物无内容源，无法在面板内查看</div>
       {artifact.sourceMessageId && (
         <button
@@ -170,9 +175,11 @@ export function ArtifactDetailView({
         >
           <IconBack />
         </button>
-        <span className="truncate text-xs font-semibold text-cafe-secondary" title={artifact.name}>
-          {artifact.name}
-        </span>
+        <CompactLabel
+          label="产物名称"
+          value={artifact.name}
+          className="min-w-0 flex-1 text-xs font-semibold text-cafe-secondary"
+        />
       </div>
       <div className="flex flex-1 flex-col overflow-auto">
         {view === 'image' && url && (

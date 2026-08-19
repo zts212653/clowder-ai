@@ -1121,7 +1121,7 @@ function harnessLoadingSequenceDiagram() {
       'SessionStart：f24-post-compact-bootstrap、preflight-shared-state',
       'Claude PreToolUse：runtime-sanctuary-guard、pretool-brake-check、pretool-evidence-guard',
       'Claude PostToolUse：evidence-marker、post-edit-check、shared-doc-push-guard、sop-bookmark、brake-timer',
-      '其他：PreCompact / UserPromptSubmit / Stop(f177-routing-guard)',
+      '其他：PreCompact / UserPromptSubmit；route settle：F167 structured custody stop gate',
       '注意：Codex F180 当前只有 SessionStart/Stop user hooks；Gemini/OpenCode 走 provider-native audit',
     ],
     C.green,

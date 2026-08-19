@@ -42,8 +42,10 @@ function createMockDeps(services) {
   let invocationSeq = 0;
   let messageSeq = 0;
   const storedById = new Map();
+  const storedMessages = [];
   return {
     services,
+    storedMessages,
     toolEventLog: { append: async () => {}, updateSummary: async () => {} },
     invocationDeps: {
       registry: {
@@ -66,6 +68,7 @@ function createMockDeps(services) {
       append: async (msg) => {
         const stored = { id: `msg-${++messageSeq}`, ...msg, threadId: msg.threadId ?? 'default' };
         storedById.set(stored.id, stored);
+        storedMessages.push(stored);
         return stored;
       },
       getById: async (id) => storedById.get(id) ?? null,
@@ -377,6 +380,56 @@ describe('cloud-#4: route-parallel suppresses abort-induced error (cancel AFTER 
       messages.some((m) => m.type === 'text' && m.catId === 'codex'),
       'codex (not cancelled) streamed normally',
     );
+    assert.ok(
+      deps.storedMessages.some((m) => m.catId === 'opus' && m.content === 'partial'),
+      'partial pre-abort output must pass through the normal done finalizer and persist',
+    );
+  });
+
+  it('persists canceled cat partial output before a healthy sibling finishes', async () => {
+    const opusCtrl = new AbortController();
+    const codexCtrl = new AbortController();
+    const signalForCat = (catId) => (catId === 'opus' ? opusCtrl.signal : codexCtrl.signal);
+    const services = {
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: 'partial-before-cancel', timestamp: Date.now() };
+          opusCtrl.abort('user_cancel');
+          await new Promise(() => {});
+        },
+      },
+      codex: {
+        async *invoke() {
+          yield { type: 'text', catId: 'codex', content: 'healthy-still-running', timestamp: Date.now() };
+          await new Promise(() => {});
+        },
+      },
+    };
+    const deps = createMockDeps(services);
+    const iterator = routeParallel(deps, ['opus', 'codex'], 'msg', 'user1', 't1', { signalForCat })[
+      Symbol.asyncIterator
+    ]();
+
+    while (!deps.storedMessages.some((m) => m.catId === 'opus' && m.content === 'partial-before-cancel')) {
+      const result = await Promise.race([
+        iterator.next(),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),
+      ]);
+      assert.notEqual(result, 'timeout', 'opus terminal finalizer must not wait for the healthy codex sibling');
+      assert.equal(result.done, false);
+    }
+
+    assert.equal(codexCtrl.signal.aborted, false, 'partial persistence happens while the sibling is still active');
+    codexCtrl.abort('test_cleanup');
+    for (let i = 0; i < 10; i++) {
+      const result = await Promise.race([
+        iterator.next(),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 100)),
+      ]);
+      assert.notEqual(result, 'timeout', 'route cleanup must finish after aborting the test sibling');
+      if (result.done) break;
+      assert.ok(i < 9, 'route did not finish within the bounded cleanup drain');
+    }
   });
 });
 

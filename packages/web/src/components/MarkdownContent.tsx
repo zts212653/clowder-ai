@@ -1,14 +1,92 @@
 'use client';
 
-import { Children, isValidElement, type ReactNode, useCallback, useRef, useState } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import { Children, isValidElement, memo, type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
+import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
+import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { createListenSentenceRemarkPlugin, type ListenSentence } from '@/lib/listen-mode/markdown-sentences';
 import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
+import { ChatWorkspaceLink } from './ChatWorkspaceLink';
+import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
 import { MermaidDiagram } from './MermaidDiagram';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
+
+const BARE_MARKDOWN_LINE_HREF_RE = /^[^/:\\?#]+\.mdx?:\d+$/i;
+const WINDOWS_MARKDOWN_HREF_RE = /^[a-z]:[\\/].*\.mdx?(?::\d+)?$/i;
+
+/** Preserve safe file-like forms that react-markdown mistakes for custom URI schemes. */
+export function transformChatMarkdownUrl(url: string): string {
+  const transformed = defaultUrlTransform(url);
+  if (transformed) return transformed;
+  if (BARE_MARKDOWN_LINE_HREF_RE.test(url) || WINDOWS_MARKDOWN_HREF_RE.test(url)) return url;
+  return transformed;
+}
+
+/* ── LaTeX delimiter normalization ─────────────────────────── */
+
+/**
+ * Parse with the real Markdown parser so code fences (``` and ~~~), indented
+ * code blocks, and code spans (any backtick run length) are located by their
+ * AST positions instead of a hand-rolled regex. Delimiter rewriting must never
+ * touch these ranges.
+ */
+const mdRangeParser = unified().use(remarkParse).use(remarkGfm);
+
+type OffsetRange = [start: number, end: number];
+
+function collectLiteralRanges(md: string): OffsetRange[] {
+  const ranges: OffsetRange[] = [];
+  const walk = (node: {
+    type: string;
+    position?: { start: { offset?: number }; end: { offset?: number } };
+    children?: unknown[];
+  }) => {
+    if (node.type === 'code' || node.type === 'inlineCode') {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start != null && end != null) ranges.push([start, end]);
+      return;
+    }
+    for (const child of node.children ?? []) walk(child as typeof node);
+  };
+  walk(mdRangeParser.parse(md) as Parameters<typeof walk>[0]);
+  return ranges;
+}
+
+/** Matches \[...\] (group 1) or \(...\) (group 2). */
+const BACKSLASH_MATH_RE = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)/g;
+
+/**
+ * remark-math only parses $/$$ delimiters; LLMs frequently emit \[...\] and
+ * \(...\) instead. Rewrite those to $$...$$ (inline $$ renders as inline math
+ * when singleDollarTextMath is off) outside code ranges so KaTeX can render
+ * them.
+ */
+export function normalizeMathDelimiters(md: string): string {
+  BACKSLASH_MATH_RE.lastIndex = 0;
+  if (!BACKSLASH_MATH_RE.test(md)) return md;
+  BACKSLASH_MATH_RE.lastIndex = 0;
+
+  const ranges = collectLiteralRanges(md);
+  let out = '';
+  let last = 0;
+  for (const m of md.matchAll(BACKSLASH_MATH_RE)) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (ranges.some(([s, e]) => start < e && end > s)) continue;
+    out += md.slice(last, start);
+    out += `$${'$'}${m[1] ?? m[2]}$${'$'}`;
+    last = end;
+  }
+  return out + md.slice(last);
+}
 
 /* ── @mention highlighting ─────────────────────────────────── */
 
@@ -240,13 +318,18 @@ function inlineCodeClassName(className = ''): string {
  * Using a factory avoids duplicating component definitions: styling is defined once,
  * and textProcessor composition is injected into the mention-processing pipeline.
  */
-function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components {
+interface ListenSentenceRendering {
+  activeAnchor?: string;
+  onStart: (index: number) => void;
+}
+
+function buildMdComponents(tp?: (children: ReactNode) => ReactNode, listen?: ListenSentenceRendering): Components {
   // Compose text processing: tp runs first (e.g. replace markers with buttons),
   // then withMentions/withMentionsAndLinks processes remaining strings.
   const m = tp ? (c: ReactNode) => withMentions(tp(c)) : withMentions;
   const ml = tp ? (c: ReactNode) => withMentionsAndLinks(tp(c)) : withMentionsAndLinks;
 
-  return {
+  const components: Components = {
     p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{ml(children)}</p>,
     strong: ({ children }) => <strong className="font-semibold">{m(children)}</strong>,
     em: ({ children }) => <em>{m(children)}</em>,
@@ -283,16 +366,7 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components 
     blockquote: ({ children }) => (
       <blockquote className="border-l-[3px] border-cafe pl-3 my-2 italic opacity-80">{children}</blockquote>
     ),
-    a: ({ href, children }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-conn-blue-text hover:underline break-all"
-      >
-        {m(children)}
-      </a>
-    ),
+    a: ({ href, children }) => <ChatWorkspaceLink href={href}>{m(children)}</ChatWorkspaceLink>,
     hr: () => <hr className="my-3 border-cafe" />,
 
     /* Code blocks with copy button — textProcessor intentionally excluded */
@@ -316,6 +390,29 @@ function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components 
     ),
     td: ({ children }) => <td className="border border-cafe px-2 py-1">{m(children)}</td>,
   };
+  if (listen) {
+    components.span = ({ children, node: _node, ...props }) => {
+      void _node;
+      const listenProps = props as Record<string, unknown>;
+      const anchor = listenProps['data-listen-sentence-anchor'];
+      const rawIndex = listenProps['data-listen-sentence-index'];
+      if (typeof anchor === 'string' && (typeof rawIndex === 'number' || typeof rawIndex === 'string')) {
+        const index = Number(rawIndex);
+        return (
+          <ListenSentenceSpan
+            anchor={anchor}
+            index={index}
+            active={listen.activeAnchor === anchor}
+            onStart={listen.onStart}
+          >
+            {children}
+          </ListenSentenceSpan>
+        );
+      }
+      return <span {...props}>{children}</span>;
+    };
+  }
+  return components;
 }
 
 /** Default components — no textProcessor, built once at module load */
@@ -336,6 +433,10 @@ interface Props {
    *  are excluded — textProcessor never touches code block content.
    *  Useful for replacing text patterns (e.g. markers) with interactive elements. */
   textProcessor?: (children: ReactNode) => ReactNode;
+  /** F279 sentence projection for rendered Workspace Markdown. */
+  listenSentences?: ListenSentence[];
+  activeListenAnchor?: string;
+  onListenSentenceStart?: (index: number) => void;
 }
 
 /** Check if href is a relative markdown link (not absolute, not external) */
@@ -348,7 +449,14 @@ export function isRelativeMdLink(href: string | undefined): href is string {
 /** Resolve a relative path against a base directory */
 export function resolveRelativePath(base: string, relative: string): string {
   // Strip fragment/hash
-  const clean = relative.split('#')[0];
+  const rawPathname = relative.split('#')[0];
+  let clean = rawPathname;
+  try {
+    clean = decodeURIComponent(rawPathname);
+  } catch {
+    // Preserve malformed percent bytes literally. Workspace state carries a
+    // native path after this one Markdown-URL decoding boundary.
+  }
   // base is the directory of the current file (e.g. "docs/features")
   const parts = base ? base.split('/') : [];
   for (const seg of clean.split('/')) {
@@ -358,34 +466,58 @@ export function resolveRelativePath(base: string, relative: string): string {
   return parts.join('/');
 }
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   content,
   className,
   disableCommandPrefix,
   basePath,
   worktreeId,
   textProcessor,
+  listenSentences,
+  activeListenAnchor,
+  onListenSentenceStart,
 }: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
-  const md = cmdMatch ? content.slice(cmdMatch[1].length) : content;
+  const md = normalizeMathDelimiters(cmdMatch ? content.slice(cmdMatch[1].length) : content);
 
-  let components: Components = textProcessor ? buildMdComponents(textProcessor) : mdComponents;
+  const listen = useMemo(
+    () =>
+      listenSentences?.length && onListenSentenceStart
+        ? { activeAnchor: activeListenAnchor, onStart: onListenSentenceStart }
+        : undefined,
+    [activeListenAnchor, listenSentences, onListenSentenceStart],
+  );
+  const components = useMemo(() => {
+    let nextComponents: Components = textProcessor || listen ? buildMdComponents(textProcessor, listen) : mdComponents;
 
-  if (basePath != null) {
-    // When textProcessor is active, the workspace link component must also compose it
-    const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
-    components = { ...components, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
-    if (worktreeId) {
-      components = { ...components, img: createWorkspaceImageComponent(basePath, worktreeId) };
+    if (basePath != null) {
+      // When textProcessor is active, the workspace link component must also compose it
+      const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
+      nextComponents = { ...nextComponents, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
+      if (worktreeId) {
+        nextComponents = { ...nextComponents, img: createWorkspaceImageComponent(basePath, worktreeId) };
+      }
     }
-  }
+
+    return nextComponents;
+  }, [basePath, listen, textProcessor, worktreeId]);
 
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
       {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[
+          remarkGfm,
+          remarkBreaks,
+          [remarkMath, { singleDollarTextMath: false }],
+          ...(listenSentences?.length ? [createListenSentenceRemarkPlugin(listenSentences)] : []),
+        ]}
+        rehypePlugins={[rehypeKatex]}
+        components={components}
+        urlTransform={transformChatMarkdownUrl}
+      >
         {md}
       </ReactMarkdown>
     </div>
   );
-}
+});

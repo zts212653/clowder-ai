@@ -4,19 +4,28 @@
  * record across the propose-approve flow.
  */
 
-import type { CatId, ProposalApproveOverrides, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
-import { generateProposalId } from '@cat-cafe/shared';
+import type {
+  ApprovalEnvelope,
+  ApprovalPublication,
+  CatId,
+  ProposalApproveOverrides,
+  ReportingMode,
+  ThreadProposal,
+} from '@cat-cafe/shared';
+import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposalId } from '@cat-cafe/shared';
 
 export interface CreateProposalInput {
   sourceThreadId: string;
   sourceInvocationId: string;
   sourceCatId: CatId;
+  sourceMessageId: string;
   title: string;
   reason: string;
   parentThreadId: string;
   preferredCats: CatId[];
   projectPath: string;
   initialMessage?: string;
+  communityPrContext?: ThreadProposal['communityPrContext'];
   /** F128: reporting mode for the created thread (default final-only if omitted). */
   reportingMode?: ReportingMode;
   createdBy: string;
@@ -43,6 +52,11 @@ export interface RejectProposalInput {
   proposalId: string;
   rejectedBy: string;
   rejectionReason?: string;
+}
+
+export interface WithdrawProposalInput {
+  proposalId: string;
+  withdrawnBy: CatId;
 }
 
 export interface IProposalStore {
@@ -75,6 +89,8 @@ export interface IProposalStore {
   rollbackClaim(proposalId: string): boolean | Promise<boolean>;
   /** CAS pending → rejected. Returns null if status is not pending (e.g. already approving/approved). */
   markRejected(input: RejectProposalInput): ThreadProposal | null | Promise<ThreadProposal | null>;
+  /** CAS pending → withdrawn. Requester identity is authorized by the callback route before this store transition. */
+  withdrawPending(input: WithdrawProposalInput): ThreadProposal | null | Promise<ThreadProposal | null>;
   /** Idempotency: return cached proposalId for (userId, clientRequestId) if any. */
   getDedupProposalId(userId: string, clientRequestId: string): string | null | Promise<string | null>;
   /**
@@ -102,6 +118,9 @@ export interface IProposalStore {
    * someone else's winning reservation).
    */
   releaseDedup(userId: string, clientRequestId: string, expectedProposalId: string): void | Promise<void>;
+  getPublication(proposalId: string): ApprovalPublication | null | Promise<ApprovalPublication | null>;
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void | Promise<void>;
+  abortStaged(proposalId: string, reason: string): void | Promise<void>;
 }
 
 const DEFAULT_LIST_LIMIT = 100;
@@ -121,6 +140,7 @@ export class InMemoryProposalStore implements IProposalStore {
       sourceThreadId: input.sourceThreadId,
       sourceInvocationId: input.sourceInvocationId,
       sourceCatId: input.sourceCatId,
+      sourceMessageId: input.sourceMessageId,
       title: input.title,
       reason: input.reason,
       parentThreadId: input.parentThreadId,
@@ -128,8 +148,10 @@ export class InMemoryProposalStore implements IProposalStore {
       projectPath: input.projectPath,
       createdBy: input.createdBy,
       createdAt: now,
+      publication: { state: 'staged', stagedAt: now },
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
+      ...(input.communityPrContext ? { communityPrContext: { ...input.communityPrContext } } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
     return cloneProposal(proposal);
@@ -198,6 +220,15 @@ export class InMemoryProposalStore implements IProposalStore {
     return cloneProposal(proposal);
   }
 
+  withdrawPending(input: WithdrawProposalInput): ThreadProposal | null {
+    const proposal = this.proposals.get(input.proposalId);
+    if (!proposal || proposal.status !== 'pending') return null;
+    proposal.status = 'withdrawn';
+    proposal.withdrawnBy = input.withdrawnBy;
+    proposal.withdrawnAt = Date.now();
+    return cloneProposal(proposal);
+  }
+
   getDedupProposalId(userId: string, clientRequestId: string): string | null {
     return this.dedupCache.get(dedupKey(userId, clientRequestId)) ?? null;
   }
@@ -220,6 +251,29 @@ export class InMemoryProposalStore implements IProposalStore {
   setCardMessageId(proposalId: string, cardMessageId: string): void {
     const proposal = this.proposals.get(proposalId);
     if (proposal) proposal.cardMessageId = cardMessageId;
+  }
+
+  getPublication(proposalId: string): ApprovalPublication | null {
+    return this.proposals.get(proposalId)?.publication ?? null;
+  }
+
+  commitEnvelope(proposalId: string, envelope: ApprovalEnvelope): void {
+    const proposal = this.proposals.get(proposalId);
+    if (!proposal) throw new Error(`proposal not found: ${proposalId}`);
+    assertApprovalEnvelopeIdentity(envelope, {
+      canonicalProposalId: proposal.proposalId,
+      sourceFeatureId: 'F128',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      createdAt: proposal.createdAt,
+    });
+    proposal.publication = commitApprovalEnvelope(proposal.publication, envelope);
+    proposal.cardMessageId = envelope.approvalCardRef.messageId;
+  }
+
+  abortStaged(proposalId: string, _reason: string): void {
+    const proposal = this.proposals.get(proposalId);
+    if (proposal?.publication?.state === 'staged') this.delete(proposalId);
   }
 
   delete(proposalId: string): void {
@@ -255,5 +309,7 @@ function cloneProposal(proposal: ThreadProposal): ThreadProposal {
   return {
     ...proposal,
     preferredCats: [...proposal.preferredCats],
+    ...(proposal.communityPrContext ? { communityPrContext: { ...proposal.communityPrContext } } : {}),
+    ...(proposal.publication ? { publication: structuredClone(proposal.publication) } : {}),
   };
 }

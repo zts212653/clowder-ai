@@ -3,6 +3,7 @@ feature_ids: [F120]
 related_features: [F063, F089]
 topics: [hub, ux, browser, preview, dev-server, frontend]
 doc_kind: spec
+tips_exempt: existing Browser Preview reliability correction; no new user-invokable action or workflow to teach
 created: 2026-03-14
 ---
 
@@ -10,11 +11,15 @@ created: 2026-03-14
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-15
 
+Architecture cell: hub-action-surface
+Map delta: none
+Why: Repairs the request coordinate inside the existing Browser Preview gateway without changing cell ownership or adding a parallel surface.
+
 ## Why
 
 operator截图展示了 Claude Code 的 embedded browser panel：猫猫跑 `pnpm dev` 后，旁边直接嵌一个浏览器看 `localhost:3847` 的完整应用，改代码 → HMR 热更新 → 浏览器实时刷新。
 
-Cat Café 目前的差距：
+Clowder AI 目前的差距：
 
 1. **F063 AC-5 只做了静态渲染**：单文件 HTML/JSX 通过 esbuild-wasm + iframe sandbox 渲染，不是运行中的应用
 2. **看前端效果要切浏览器**：猫猫在 worktree 写前端代码，operator想看效果必须切到 Chrome 打开 localhost——这和 F063 愿景（"不用打开 IDE 也能协作"）同源，但 scope 是全新的
@@ -66,6 +71,7 @@ operator experience（2026-03-14，Phase C 讨论）：
 1. **Preview Gateway（反向代理）**
    - Hub 后端启动 preview gateway，iframe 永远打开网关 URL，不直接连 `localhost:xxxx`
    - **独立预览 origin**：网关必须和 Hub 主站不同 origin（不同端口），避免 `allow-same-origin + allow-scripts` 暴露 Hub 存储
+   - **请求坐标随 origin 继承**：每个目标端口使用 `preview-<target>.localhost:<gateway>`；CSS/JS、动态 import、fetch、导航与 WebSocket 不依赖首个文档 query 或全局“最近端口”
    - 代理层可控地剥离/重写目标 dev server 的 `X-Frame-Options` / `CSP frame-ancestors` 响应头
    - WebSocket 代理：HMR/Hot Reload 的 WebSocket 连接必须穿透代理层
 
@@ -127,7 +133,7 @@ operator experience（2026-03-14，Phase C 讨论）：
 ### Phase B（安全与隔离） ✅
 - [x] AC-B1: browser panel 只能访问 localhost，尝试访问外部 URL 被拦截
 - [x] AC-B2: iframe 内页面无法访问 Hub 的 Cookie/Storage/DOM
-- [x] AC-B3: 禁止访问 Cat Café 自身 API 端口（可配置排除列表）
+- [x] AC-B3: 禁止访问 Clowder AI 自身 API 端口（可配置排除列表）
 
 ### Phase C（增强体验） ✅
 - [x] AC-C1: 猫可通过 API 触发 `preview:auto-open`，前端自动打开 browser panel（无需用户点击 toast）
@@ -179,6 +185,7 @@ operator experience（2026-03-14，Phase C 讨论）：
 | KD-5 | 独立预览 origin（preview gateway 独立端口） | allow-same-origin + allow-scripts 同 origin 不安全。Maine Coon安全审查结论 | 2026-03-14 |
 | KD-6 | **两层可视化策略**：简单走 `html_widget` rich block 内联，复杂走猫主动打开浏览器 | operator拍板："简单的用富文本，复杂的用猫主动打开浏览器"。参考 Claude.ai `visualize:show_widget` | 2026-03-14 |
 | KD-7 | `html_widget` 用 iframe `srcdoc` 渲染，不走 Preview Gateway | 内联 widget 是纯前端沙箱，不需要反向代理；sandbox 禁止 `allow-same-origin`（比 browser panel 更严格） | 2026-03-14 |
+| KD-8 | Preview target identity 进入 per-port `.localhost` origin；query 仅保留兼容 | 浏览器不会把文档 query 复制给根路径子资源；origin 是 HTTP/WS 请求图共同继承且可按 tab 隔离的坐标 | 2026-08-16 |
 
 ## Review Gate
 

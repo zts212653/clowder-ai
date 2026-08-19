@@ -53,8 +53,10 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
       title: 'F097 CLI 重构',
       anchor: 'F097',
       snippet: 'tintedDark 品种色方案',
-      confidence: 'high',
+      matchRank: 'high',
       sourceType: 'decision',
+      authority: 'validated',
+      updatedAt: '2026-07-12T00:00:00Z',
     };
 
     act(() => {
@@ -67,14 +69,16 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     // Should NOT use old light-mode CSS vars
     expect(html).not.toContain('--color-base-white');
     expect(html).not.toContain('--color-gemini-bg');
+    expect(html).toContain('match:high · authority:validated · updated:');
+    expect(html).toContain('2026-07-12T00:00:00Z');
   });
 
-  it('EvidenceCard confidence badge uses appropriate dark colors', () => {
+  it('EvidenceCard match-rank badge uses appropriate dark colors', () => {
     const result: EvidenceResult = {
       title: 'Test',
       anchor: 'test',
       snippet: 'test',
-      confidence: 'high',
+      matchRank: 'high',
       sourceType: 'decision',
     };
 
@@ -83,8 +87,45 @@ describe('Evidence Panel dark theme (F098-B1)', () => {
     });
 
     const html = container.innerHTML;
-    // High confidence should use semantic emerald tokens
+    // High match rank should use semantic emerald tokens
     expect(html).toContain('bg-semantic-success-surface');
     expect(html).toContain('text-semantic-success');
+  });
+
+  it('EvidenceCard renders legacy persisted confidence without crashing', () => {
+    const legacyResult = {
+      title: 'Legacy cached result',
+      anchor: 'legacy-anchor',
+      snippet: 'Persisted before F263 split the result axes',
+      confidence: 'high',
+      sourceType: 'decision',
+    } as unknown as EvidenceResult;
+
+    act(() => {
+      root.render(React.createElement(EvidenceCard, { result: legacyResult }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('match:high · authority:unknown · updated:');
+    expect(html).toContain('bg-semantic-success-surface');
+    expect(html).toContain('高匹配');
+  });
+
+  it('EvidenceCard renders architecture source type without falling through', () => {
+    const result: EvidenceResult = {
+      title: 'Memory System Overview',
+      anchor: 'doc:architecture/memory-system-overview',
+      snippet: 'Architecture map',
+      matchRank: 'high',
+      sourceType: 'architecture',
+    };
+
+    act(() => {
+      root.render(React.createElement(EvidenceCard, { result }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('架构');
+    expect(html).toContain('doc:architecture/memory-system-overview');
   });
 });

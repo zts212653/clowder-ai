@@ -3,12 +3,15 @@
 import { usePathname } from 'next/navigation';
 import { useLayoutEffect, useState } from 'react';
 import { ChatContainer } from '@/components/ChatContainer';
-import { CHAT_THREAD_ROUTE_EVENT, getThreadIdFromPathname } from '@/components/ThreadSidebar/thread-navigation';
+import {
+  getBrowserThreadRoutePathname,
+  getThreadIdFromPathname,
+  subscribeBrowserThreadRoute,
+} from '@/components/ThreadSidebar/thread-navigation';
 import { resolveLayoutThreadId } from './layout-thread-id';
 
 function getThreadRouteSnapshot(): string {
-  if (typeof window === 'undefined') return 'default';
-  return getThreadIdFromPathname(window.location.pathname);
+  return getThreadIdFromPathname(getBrowserThreadRoutePathname());
 }
 
 /**
@@ -28,12 +31,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   useLayoutEffect(() => {
     const syncBrowserRoute = () => setBrowserThreadId(getThreadRouteSnapshot());
     syncBrowserRoute();
-    window.addEventListener('popstate', syncBrowserRoute);
-    window.addEventListener(CHAT_THREAD_ROUTE_EVENT, syncBrowserRoute);
-    return () => {
-      window.removeEventListener('popstate', syncBrowserRoute);
-      window.removeEventListener(CHAT_THREAD_ROUTE_EVENT, syncBrowserRoute);
-    };
+    return subscribeBrowserThreadRoute(syncBrowserRoute);
   }, []);
   const threadId = resolveLayoutThreadId(pathnameThreadId, browserThreadId, immediateBrowserThreadId);
 

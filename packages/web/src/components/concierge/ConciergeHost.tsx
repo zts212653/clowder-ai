@@ -23,7 +23,7 @@
  * P1-B cloud fix: muted=true → ballState=hidden → early return suppressed panel + toolbar,
  *   making the rail-toggle unmute path unreachable. Fix: when muted+surfaceState≠collapsed
  *   (user explicitly opened toolbar via rail toggle), override hidden→sleeping so the cat
- *   body and toolbar both render, allowing access to the panel's "取消静音" control.
+ *   body and toolbar still render as a defensive fallback if a legacy wake path opens first.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -173,7 +173,7 @@ export function ConciergeHost() {
 
   // P1-B cloud fix: muted users who explicitly open toolbar/bubble via rail toggle
   // (surfaceState != collapsed) should see the ball + toolbar so the panel's
-  // "取消静音" control is reachable. We override hidden → sleeping only in this case.
+  // visibility control remains reachable. We override hidden → sleeping only in this case.
   // When surfaceState = collapsed the normal INV-3 "muted → zero DOM" is preserved.
   const effectiveBallState =
     ballState === 'hidden' && muted && surfaceState !== 'collapsed' ? ('sleeping' as const) : ballState;

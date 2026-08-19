@@ -16,7 +16,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mergeLiveActivityIntoThreads, sortAndGroupThreads } from '@/components/ThreadSidebar/thread-utils';
 import { clearDebugEvents, configureDebug } from '@/debug/invocationEventDebug';
+import type { Thread } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
 const ACTIVE_TID = 'thread-active';
@@ -72,6 +74,150 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       expect(s.threadStates[BG_TID]?.catInvocations?.opus?.invocationId).toBe('inv-bg');
       expect(s.catInvocations.opus).toBeUndefined();
     });
+
+    it('active thread: a new parent without a child clears the previous child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-old',
+        turnInvocationId: 'child-old',
+      });
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', { invocationId: 'parent-new' });
+
+      const s = useChatStore.getState();
+      expect(s.catInvocations.opus?.invocationId).toBe('parent-new');
+      expect(s.catInvocations.opus?.turnInvocationId).toBeUndefined();
+      expect(s.threadStates[ACTIVE_TID]?.catInvocations?.opus?.turnInvocationId).toBeUndefined();
+    });
+
+    it('background thread: a new parent without a child clears the previous child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(BG_TID, 'opus', {
+        invocationId: 'parent-bg-old',
+        turnInvocationId: 'child-bg-old',
+      });
+      store.setThreadCatInvocation(BG_TID, 'opus', { invocationId: 'parent-bg-new' });
+
+      const invocation = useChatStore.getState().threadStates[BG_TID]?.catInvocations?.opus;
+      expect(invocation?.invocationId).toBe('parent-bg-new');
+      expect(invocation?.turnInvocationId).toBeUndefined();
+    });
+
+    it('same-parent authoritative replacement clears an explicitly absent child identity', () => {
+      const store = useChatStore.getState();
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-same',
+        turnInvocationId: 'child-old',
+      });
+      store.setThreadCatInvocation(ACTIVE_TID, 'opus', {
+        invocationId: 'parent-same',
+        turnInvocationId: undefined,
+      });
+
+      const state = useChatStore.getState();
+      expect(state.catInvocations.opus).toMatchObject({
+        invocationId: 'parent-same',
+        turnInvocationId: undefined,
+      });
+      expect(state.threadStates[ACTIVE_TID]?.catInvocations?.opus?.turnInvocationId).toBeUndefined();
+    });
+  });
+
+  describe('setCatInvocation identity boundary', () => {
+    it('clears the previous child when the active parent changes without a child', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-direct-old',
+        turnInvocationId: 'child-direct-old',
+      });
+      store.setCatInvocation('opus', { invocationId: 'parent-direct-new' });
+
+      expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+        invocationId: 'parent-direct-new',
+        turnInvocationId: undefined,
+      });
+    });
+
+    it('preserves the child for a telemetry-only patch on the same parent', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-direct',
+        turnInvocationId: 'child-direct',
+      });
+      store.setCatInvocation('opus', { durationMs: 42 });
+
+      expect(useChatStore.getState().catInvocations.opus).toMatchObject({
+        invocationId: 'parent-direct',
+        turnInvocationId: 'child-direct',
+        durationMs: 42,
+      });
+    });
+
+    it('clears the previous app-server lifecycle when the parent rebinds without new lifecycle evidence', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-old',
+        turnInvocationId: 'child-old',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 60_000,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      // Mirrors the invocation_created patch shape (useAgentMessages active + background):
+      // new parent identity, no lifecycle payload.
+      store.setCatInvocation('opus', { invocationId: 'parent-new', turnInvocationId: undefined });
+
+      const info = useChatStore.getState().catInvocations.opus;
+      expect(info?.invocationId).toBe('parent-new');
+      expect(info?.appServerLifecycle).toBeUndefined();
+    });
+
+    it('preserves the lifecycle for a telemetry-only patch on the same parent', () => {
+      const store = useChatStore.getState();
+      const lifecycle = {
+        stage: 'active' as const,
+        lastActivityAt: Date.now(),
+        recoveryAttempt: 0,
+        turnStartSent: true,
+        turnAccepted: true,
+        itemObserved: true,
+      };
+      store.setCatInvocation('opus', { invocationId: 'parent-same', appServerLifecycle: lifecycle });
+      store.setCatInvocation('opus', { durationMs: 42 });
+
+      expect(useChatStore.getState().catInvocations.opus?.appServerLifecycle).toMatchObject(lifecycle);
+    });
+
+    it('keeps lifecycle supplied in the same patch as the parent rebind', () => {
+      const store = useChatStore.getState();
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-old',
+        appServerLifecycle: {
+          stage: 'active',
+          lastActivityAt: Date.now() - 60_000,
+          recoveryAttempt: 0,
+          turnStartSent: true,
+          turnAccepted: true,
+          itemObserved: true,
+        },
+      });
+      store.setCatInvocation('opus', {
+        invocationId: 'parent-new',
+        appServerLifecycle: {
+          stage: 'child_spawned',
+          lastActivityAt: Date.now(),
+          recoveryAttempt: 0,
+          turnStartSent: false,
+          turnAccepted: false,
+          itemObserved: false,
+        },
+      });
+
+      expect(useChatStore.getState().catInvocations.opus?.appServerLifecycle?.stage).toBe('child_spawned');
+    });
   });
 
   describe('addThreadActiveInvocation', () => {
@@ -94,6 +240,69 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       const s = useChatStore.getState();
       expect(s.isLoading).toBe(true);
       expect(s.threadStates[ACTIVE_TID]?.isLoading).toBe(true);
+    });
+  });
+
+  describe('setThreadLoadingHistory', () => {
+    it('active thread: writes flat hydration state AND mirrors to threadStates', () => {
+      useChatStore.getState().setThreadLoadingHistory(ACTIVE_TID, true);
+
+      const state = useChatStore.getState();
+      expect(state.isLoadingHistory).toBe(true);
+      expect(state.threadStates[ACTIVE_TID]?.isLoadingHistory).toBe(true);
+    });
+
+    it('background hydration preserves activity and sidebar order through delayed completion', () => {
+      const originalBackgroundActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const newerSemanticActivity = Date.now() - 60_000;
+      const sidebarThreads: Thread[] = [
+        {
+          id: BG_TID,
+          projectPath: '/projects/history',
+          title: 'Old cached thread',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: originalBackgroundActivity,
+          createdAt: originalBackgroundActivity - 1,
+        },
+        {
+          id: 'thread-recent',
+          projectPath: '/projects/history',
+          title: 'Recent semantic activity',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: newerSemanticActivity,
+          createdAt: newerSemanticActivity - 1,
+        },
+      ];
+      const sidebarOrder = () =>
+        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+          .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
+          ?.threads.map((thread) => thread.id);
+
+      useChatStore.setState({
+        threadStates: {
+          [BG_TID]: { ...DEFAULT_THREAD_STATE, lastActivity: originalBackgroundActivity },
+        },
+      });
+
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
+
+      const store = useChatStore.getState();
+      store.setThreadLoadingHistory(BG_TID, true);
+
+      let state = useChatStore.getState();
+      expect(state.isLoadingHistory).toBe(false);
+      expect(state.threadStates[BG_TID]?.isLoadingHistory).toBe(true);
+      expect(state.threadStates[BG_TID]?.lastActivity).toBe(originalBackgroundActivity);
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
+
+      store.setThreadLoadingHistory(BG_TID, false);
+
+      state = useChatStore.getState();
+      expect(state.threadStates[BG_TID]?.isLoadingHistory).toBe(false);
+      expect(state.threadStates[BG_TID]?.lastActivity).toBe(originalBackgroundActivity);
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
     });
   });
 
@@ -128,6 +337,51 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       expect(s.messages.find((m) => m.id === 'm1')).toBeDefined();
       // mirror (RED)
       expect(s.threadStates[ACTIVE_TID]?.messages.find((m) => m.id === 'm1')).toBeDefined();
+    });
+
+    it('background real message activity still advances its sidebar position', () => {
+      const originalBackgroundActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const newerSummaryActivity = Date.now() - 60_000;
+      const sidebarThreads: Thread[] = [
+        {
+          id: BG_TID,
+          projectPath: '/projects/history',
+          title: 'Old cached thread',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: originalBackgroundActivity,
+          createdAt: originalBackgroundActivity - 1,
+        },
+        {
+          id: 'thread-recent',
+          projectPath: '/projects/history',
+          title: 'Recent semantic activity',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: newerSummaryActivity,
+          createdAt: newerSummaryActivity - 1,
+        },
+      ];
+      const sidebarOrder = () =>
+        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+          .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
+          ?.threads.map((thread) => thread.id);
+
+      useChatStore.setState({
+        threadStates: {
+          [BG_TID]: { ...DEFAULT_THREAD_STATE, lastActivity: originalBackgroundActivity },
+        },
+      });
+
+      useChatStore.getState().addMessageToThread(BG_TID, {
+        id: 'bg-real-message',
+        type: 'user',
+        content: 'A real message arrived.',
+        timestamp: Date.now(),
+      });
+
+      expect(useChatStore.getState().threadStates[BG_TID]?.lastActivity).toBeGreaterThan(newerSummaryActivity);
+      expect(sidebarOrder()).toEqual([BG_TID, 'thread-recent']);
     });
   });
 

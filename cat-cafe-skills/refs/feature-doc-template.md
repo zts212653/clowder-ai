@@ -15,6 +15,10 @@ related_features: []
 topics: []
 doc_kind: spec
 created: {YYYY-MM-DD}
+description: "{stable identity statement, <=160 chars; not status/phase/implementation detail}"
+description_source: human
+description_author: {cat_id}
+description_updated_at: {YYYY-MM-DDTHH:mm:ssZ}
 ---
 
 # F{NNN}: {Feature Name}
@@ -126,6 +130,10 @@ created: {YYYY-MM-DD}
 | `topics` | ✅ | 分类标签，可为空 |
 | `doc_kind` | ✅ | `spec`（活跃）/ `note`（回顾/关闭） |
 | `created` | ✅ | `YYYY-MM-DD` |
+| `description` | ✅ | 一句话稳定身份说明，≤160 字；不能复述标题、阶段或实现状态 |
+| `description_source` | ✅ | `human` / `model`；`imported` 预留，暂不使用 |
+| `description_author` | ✅ | 负责写入或确认 description 的猫 |
+| `description_updated_at` | ✅ | ISO 8601 时间戳 |
 
 ### 2. Status 行（必须）
 ```

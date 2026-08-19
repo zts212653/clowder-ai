@@ -14,6 +14,7 @@ import type { CatId } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveDefaultClaudeMcpServerPath } from '../domains/cats/services/agents/providers/ClaudeAgentService.js';
+import { isKimiNativeL0ChannelAvailable } from '../domains/cats/services/agents/providers/kimi-l0-agent-file.js';
 import { compileL0ViaSubprocess } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import { getTemplateRawContent, stripComments } from '../domains/cats/services/context/prompt-template-loader.js';
 import {
@@ -25,15 +26,27 @@ import { PackStore } from '../domains/packs/PackStore.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
-/** ClientIds whose AgentService.injectsL0Natively() returns true */
+/** ClientIds whose AgentService.injectsL0Natively() returns true unconditionally */
 const NATIVE_L0_CLIENT_IDS = new Set(['anthropic', 'openai', 'opencode']);
+
+/**
+ * kimi injects L0 natively only when the new kimi-code CLI is the resolvable
+ * binary (legacy `kimi-cli` has no native channel) — probe the machine instead
+ * of hard-coding the clientId (gpt52 review on PR #3201).
+ */
+function isNativeL0Client(clientId: string): boolean {
+  if (NATIVE_L0_CLIENT_IDS.has(clientId)) return true;
+  if (clientId === 'kimi') return isKimiNativeL0ChannelAvailable();
+  return false;
+}
 
 export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
   const packStoreDir = join(findMonorepoRoot(), '.cat-cafe', 'packs');
   const packStore = new PackStore(packStoreDir);
 
   app.get<{ Querystring: { catId?: string } }>('/api/prompt-injection/compiled-preview', async (request, reply) => {
-    if (!resolveUserId(request)) {
+    const userId = resolveUserId(request);
+    if (!userId) {
       reply.status(401);
       return { error: 'Authentication required' };
     }
@@ -56,7 +69,7 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
         return { error: `Cat "${catId}" not found or has no identity config` };
       }
 
-      const isNativeL0 = NATIVE_L0_CLIENT_IDS.has(catConfig?.clientId ?? '');
+      const isNativeL0 = isNativeL0Client(catConfig?.clientId ?? '');
 
       // For native-L0: show actual compiled L0 (includes L1-L7, identity, governance, etc.)
       // For non-native: show S-segment view from buildStaticIdentity
@@ -64,7 +77,7 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
       let nativePackContext = '';
       if (isNativeL0) {
         try {
-          systemPromptContent = await compileL0ViaSubprocess({ catId });
+          systemPromptContent = await compileL0ViaSubprocess({ catId, userId });
           nativePackContext = buildStaticIdentityPackOnly(catId as CatId, { packBlocks });
         } catch (e) {
           const nativeL0CompileError = e instanceof Error ? e.message : String(e);

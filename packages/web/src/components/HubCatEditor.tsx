@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { supportsCodexFastModel } from '@cat-cafe/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
-import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
+import type { AccountsResponse, BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
@@ -33,6 +34,7 @@ import { AccountSection, IdentitySection, RoutingSection } from './hub-cat-edito
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import type { CatStrategyEntry } from './hub-strategy-types';
+import { UnifiedAuthModal } from './UnifiedAuthModal';
 import { useConfirm } from './useConfirm';
 
 interface HubCatEditorProps {
@@ -68,11 +70,17 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const pendingProfileIdRef = useRef<string | null>(null);
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
     () => availableProfiles.find((profile) => profile.id === form.accountRef) ?? null,
     [availableProfiles, form.accountRef],
+  );
+  const originalProfile = useMemo(
+    () => profiles.find((profile) => profile.id === cat?.accountRef) ?? null,
+    [cat?.accountRef, profiles],
   );
   const modelOptions = useMemo(() => {
     if (form.clientId === 'antigravity') return [];
@@ -104,6 +112,8 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     setCodexSettingsBaseline(null);
     setSelectedTemplateId('custom');
     setHasUnsavedChanges(false);
+    setShowAuthModal(false);
+    pendingProfileIdRef.current = null;
   }, [open, cat, draft]);
 
   // Re-fetch profiles when Provider Profiles page creates/saves/deletes an account.
@@ -146,7 +156,20 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
         return (await res.json()) as AccountsResponse;
       })
       .then((body) => {
-        if (!cancelled) setProfiles(body.providers);
+        if (cancelled) return;
+        setProfiles(body.providers);
+        const pendingProfileId = pendingProfileIdRef.current;
+        if (!pendingProfileId) return;
+        const createdProfile = body.providers.find((profile) => profile.id === pendingProfileId);
+        if (!createdProfile) return;
+        pendingProfileIdRef.current = null;
+        setHasUnsavedChanges(true);
+        setForm((prev) => ({
+          ...prev,
+          accountRef: createdProfile.id,
+          defaultModel: createdProfile.models?.[0] ?? '',
+          provider: '',
+        }));
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : '账号配置加载失败');
@@ -279,7 +302,11 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
 
   if (!open) return null;
 
-  const saveBlockedByProfileBinding = false;
+  const createAccountClient: BuiltinAccountClient | undefined =
+    form.clientId === 'antigravity' ? undefined : form.clientId === 'catagent' ? 'anthropic' : form.clientId;
+  const hasEmptyCreatableAccounts =
+    !cat && !loadingProfiles && createAccountClient !== undefined && availableProfiles.length === 0;
+  const saveBlockedByProfileBinding = hasEmptyCreatableAccounts;
 
   const patchForm = (patch: Partial<HubCatEditorFormState>) => {
     setHasUnsavedChanges(true);
@@ -430,11 +457,17 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     try {
       const effectiveForm =
         !cat && selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
-      const catPayload = cat ? buildCatPatchPayload(effectiveForm, cat) : buildCatPayload(effectiveForm, cat);
-      const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
-      const strategyEditable = Boolean(
-        cat && form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true),
-      );
+      const payloadContext = { accountAuthType: selectedProfile?.authType ?? null };
+      const catPayload = cat
+        ? buildCatPatchPayload(effectiveForm, cat, payloadContext)
+        : buildCatPayload(effectiveForm, cat, payloadContext);
+      const rollbackCatPayload = cat
+        ? buildCatPayload(initialState(cat, null), cat, {
+            accountAuthType: originalProfile?.authType ?? null,
+            forceServiceTier: true,
+          })
+        : null;
+      const strategyEditable = Boolean(cat && strategyForm);
       const nextStrategyPayload = strategyEditable && strategyForm ? buildStrategyPayload(strategyForm) : null;
       const baselineStrategyPayload =
         strategyEditable && strategyBaseline ? buildStrategyPayload(strategyBaseline) : null;
@@ -546,7 +579,9 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm"
-      onClick={requestClose}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) void requestClose();
+      }}
       data-bootcamp-host="cat-editor-modal"
     >
       <div
@@ -573,6 +608,11 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-7 py-5">
+          {!cat ? (
+            <p className="rounded-[14px] bg-[var(--console-field-bg)] px-4 py-3 text-xs font-semibold text-cafe-secondary">
+              首次安装默认只启用一个品种；可在成员管理继续添加其他成员。
+            </p>
+          ) : null}
           {!cat && templates.length > 0 && (
             <section
               data-guide-id="add-member.template-picker"
@@ -626,9 +666,28 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
             hasError={fieldErrors.account}
             modelOptions={modelOptions}
             availableProfiles={availableProfiles}
-            loadingProfiles={loadingProfiles}
+            loadingProfiles={hasEmptyCreatableAccounts ? true : loadingProfiles}
+            effectiveCodexCarrier={cat?.codexCarrier ?? null}
+            codexLocalCapable={cat ? cat.cli != null : true}
             onChange={patchForm}
           />
+          {hasEmptyCreatableAccounts ? (
+            <section
+              aria-label="认证账号空状态"
+              className="rounded-[18px] border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] p-[18px]"
+            >
+              <p className="text-xs leading-5 text-cafe-secondary">
+                当前没有可用的认证账号。先新建或登录账号，再继续选择模型并保存成员。
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="mt-2 rounded-lg bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition hover:bg-cafe-accent-hover"
+              >
+                新建 / 登录账号
+              </button>
+            </section>
+          ) : null}
           <RoutingSection
             form={form}
             hasError={fieldErrors.routing}
@@ -646,6 +705,13 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
             codexSettingsError={codexSettingsError}
             codexSettingsEditable={codexSettingsEditable}
             showCodexSettings={showCodexSettings}
+            codexSpeedVisible={
+              form.clientId === 'openai' &&
+              selectedProfile?.authType === 'oauth' &&
+              !form.acpEnabled &&
+              (cat ? cat.cli != null : true)
+            }
+            codexFastSupported={supportsCodexFastModel(form.defaultModel)}
             onChange={patchForm}
             onStrategyChange={patchStrategy}
             onCodexChange={patchCodex}
@@ -665,6 +731,16 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
           </button>
         </div>
       </div>
+      <UnifiedAuthModal
+        open={showAuthModal && createAccountClient !== undefined}
+        initialClientId={createAccountClient}
+        onClose={() => setShowAuthModal(false)}
+        onCreated={(profileId) => {
+          pendingProfileIdRef.current = profileId;
+          setShowAuthModal(false);
+          setProfilesVersion((version) => version + 1);
+        }}
+      />
     </div>,
     document.body,
   );

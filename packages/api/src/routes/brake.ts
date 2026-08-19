@@ -1,15 +1,15 @@
 /**
- * F085 Phase 4+5 — Brake Routes
+ * F085 Phase 4+5+6 — Brake Routes
  * POST /api/brake/checkin    — handle user check-in response
  * GET  /api/brake/state      — debug: view current brake state
  * GET  /api/brake/settings   — read user brake settings
- * PUT  /api/brake/settings   — update user brake settings
+ * PUT  /api/brake/settings   — update user brake settings (async: TD110 Redis persist)
  */
 
 import type { BrakeCheckinRequest, BrakeSettings } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import type { ActivityTracker } from '../domains/health/ActivityTracker.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 
 export interface BrakeRoutesOptions {
   activityTracker: ActivityTracker;
@@ -50,14 +50,17 @@ export const brakeRoutes: FastifyPluginAsync<BrakeRoutesOptions> = async (app, o
   });
 
   app.put<{ Body: Partial<BrakeSettings> }>('/api/brake/settings', async (request, reply) => {
-    const userId = resolveUserId(request);
+    // Strict identity: settings now persist to Redis with TTL=0 — an unauthenticated
+    // trusted-origin browser request must NOT be able to permanently rewrite
+    // default-user's brake settings (R3 P1).
+    const userId = resolveStrictUserId(request);
     if (!userId) {
       reply.status(401);
       return { error: 'Identity required' };
     }
-    const result = activityTracker.updateSettings(userId, request.body ?? {});
+    const result = await activityTracker.updateSettings(userId, request.body ?? {});
     if ('error' in result) {
-      reply.status(400);
+      reply.status(result.code === 'PERSIST_FAILED' ? 500 : 400);
       return result;
     }
     return result;

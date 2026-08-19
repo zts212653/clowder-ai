@@ -82,6 +82,33 @@ export function getDossierRosterSummary(catId: string, projectRoot: string): str
 }
 
 /**
+ * Get the compact, route-critical note for the always-on L0 roster.
+ * Capability profiles stay in l0RosterSummary / the dossier and load on demand.
+ */
+export function getDossierL0RoutingNote(catId: string, projectRoot: string): string | undefined {
+  return loadDossierProfiles(projectRoot).get(catId)?.l0RoutingNote;
+}
+
+/**
+ * Get the self-facing identity projection. Unlike oneLiner/routingSignals, this
+ * field must be phrased as role/style plus an actionable correction, never as
+ * a diagnosis delivered back to its subject.
+ */
+export function getDossierL0SelfDescription(catId: string, projectRoot: string): string | undefined {
+  return loadDossierProfiles(projectRoot).get(catId)?.l0SelfDescription;
+}
+
+/**
+ * Get pronouns only when the dossier explicitly opts this identity fact into
+ * the scarce L0 roster. The marker is reserved for evidence-backed repeat
+ * failures; ordinary dossier pronouns stay available without spending tokens.
+ */
+export function getDossierL0Pronouns(catId: string, projectRoot: string): string | undefined {
+  const identity = loadDossierProfiles(projectRoot).get(catId)?.identity;
+  return identity?.l0PronounReminder ? identity.pronouns : undefined;
+}
+
+/**
  * Whether a specific cat has a structured-profile entry in the dossier.
  * Used to scope KD-9 drift warnings: only warn for tracked cats (those with
  * dossier entries) whose l0RosterSummary is missing. Runtime/custom cats

@@ -746,10 +746,10 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id, deliveredAt) {
         deliveredIds.push({ id, deliveredAt });
-        // CAS contract (PR #1193): running invocation's message is already visible →
-        // markDelivered returns null (CAS no-op). Only queued orphans actually transition.
-        if (id === 'umsg-1') return null; // already visible (running invocation)
-        return { id, deliveryStatus: 'delivered', deliveredAt }; // queued orphan → CAS wins
+        if (id === 'umsg-1') {
+          return { id, deliveryStatus: 'delivered', deliveredAt, deliveryTransitioned: false };
+        }
+        return { id, deliveryStatus: 'delivered', deliveredAt, deliveryTransitioned: true };
       },
     };
 
@@ -850,8 +850,12 @@ describe('StartupReconciler', () => {
       },
       markDelivered(id) {
         markDeliveredCallCount++;
-        // CAS no-op: message already delivered → returns null (PR #1193 contract)
-        return null;
+        return {
+          id,
+          deliveryStatus: 'delivered',
+          deliveredAt: Date.now() - 60_000,
+          deliveryTransitioned: false,
+        };
       },
     };
 
@@ -865,7 +869,7 @@ describe('StartupReconciler', () => {
     const result = await reconciler.reconcileOrphans();
 
     // markDelivered IS called (ensures crash-recovery path is exercised), but CAS
-    // returns null for already-visible messages → not counted as recovered.
+    // reports applied=false for already-visible messages → not counted as recovered.
     assert.equal(markDeliveredCallCount, 1, 'markDelivered should be called');
     assert.equal(result.messagesRecovered, 0, 'CAS no-op: already-visible message not counted as recovered');
     assert.equal(result.running, 1);
@@ -875,7 +879,6 @@ describe('StartupReconciler', () => {
 
   test('#697: recovers orphaned queued messages when no InvocationRecord exists', async () => {
     // No InvocationRecords — message is purely orphaned
-    const scannedIds = [];
     const deliveredIds = [];
     const messageStore = {
       append(msg) {
@@ -911,6 +914,7 @@ describe('StartupReconciler', () => {
     assert.ok(deliveredIds.includes('orphan-msg-1'));
     assert.ok(deliveredIds.includes('orphan-msg-2'));
     assert.equal(result.messagesRecovered, 2);
+    assert.equal(result.notifiedThreads, 1, 'owner-authored queued work still produces one thread notice');
   });
 
   test('#805 P2-1: InvocationRecord cleanup — queued record with matching userMessageId is marked failed', async () => {

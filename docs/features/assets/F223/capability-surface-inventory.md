@@ -10,7 +10,7 @@ created: 2026-06-03
 
 > Status: Phase A source of truth.
 > Owner: Maine Coon/Maine Coon.
-> Scope: current Cat Cafe first-party capability surfaces that cats should discover, execute, verify, and feed into F192 eval.
+> Scope: current Clowder AI first-party capability surfaces that cats should discover, execute, verify, and feed into F192 eval.
 
 ## Phase A Decisions
 

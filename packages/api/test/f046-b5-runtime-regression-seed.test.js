@@ -74,6 +74,15 @@ function createMockDeps(services, threadStore = null) {
   };
 }
 
+function withClaimedA2ASlot(options = {}) {
+  return {
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
+    ...options,
+  };
+}
+
 describe('F046 B5 runtime regression scenarios', () => {
   it('debug mode: downstream cat can see upstream response text', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
@@ -83,7 +92,14 @@ describe('F046 B5 runtime regression scenarios', () => {
       codex: codexService,
     });
 
-    for await (const _ of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', { thinkingMode: 'debug' })) {
+    for await (const _ of routeSerial(
+      deps,
+      ['opus'],
+      'write code',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
     }
 
     assert.equal(codexService.calls.length, 1, 'codex should be called once');
@@ -98,7 +114,14 @@ describe('F046 B5 runtime regression scenarios', () => {
       codex: codexService,
     });
 
-    for await (const _ of routeSerial(deps, ['opus'], 'write code', 'user1', 'thread1', { thinkingMode: 'play' })) {
+    for await (const _ of routeSerial(
+      deps,
+      ['opus'],
+      'write code',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'play' }),
+    )) {
     }
 
     assert.equal(codexService.calls.length, 1, 'codex should be called once');
@@ -124,9 +147,14 @@ describe('F046 B5 runtime regression scenarios', () => {
         opus: opusService,
       });
 
-      for await (const _ of routeSerial(deps, ['codex'], 'debug review chain', 'user1', 'thread1', {
-        thinkingMode: 'debug',
-      })) {
+      for await (const _ of routeSerial(
+        deps,
+        ['codex'],
+        'debug review chain',
+        'user1',
+        'thread1',
+        withClaimedA2ASlot({ thinkingMode: 'debug' }),
+      )) {
       }
 
       assert.equal(opusService.calls.length, 1, 'downstream opus should be called once');
@@ -154,7 +182,14 @@ describe('F046 B5 runtime regression scenarios', () => {
     });
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'status', 'user1', 'thread1', { thinkingMode: 'debug' })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'status',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
       messages.push(msg);
     }
 
@@ -172,9 +207,14 @@ describe('F046 B5 runtime regression scenarios', () => {
     });
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'review request', 'user1', 'thread1', {
-      thinkingMode: 'debug',
-    })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'review request',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
       messages.push(msg);
     }
 
@@ -192,7 +232,14 @@ describe('F046 B5 runtime regression scenarios', () => {
     });
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'confirm', 'user1', 'thread1', { thinkingMode: 'debug' })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'confirm',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
       messages.push(msg);
     }
 
@@ -214,9 +261,14 @@ describe('F046 B5 runtime regression scenarios', () => {
     );
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'review request', 'user1', thread.id, {
-      thinkingMode: 'debug',
-    })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'review request',
+      'user1',
+      thread.id,
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
       messages.push(msg);
     }
 
@@ -234,7 +286,14 @@ describe('F046 B5 runtime regression scenarios', () => {
     });
 
     const messages = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'boundary', 'user1', 'thread1', { thinkingMode: 'debug' })) {
+    for await (const msg of routeSerial(
+      deps,
+      ['opus'],
+      'boundary',
+      'user1',
+      'thread1',
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
       messages.push(msg);
     }
 
@@ -270,9 +329,23 @@ describe('F046 B5 runtime regression scenarios', () => {
     const codexService = createSequentialCapturingService('codex', ['@布偶猫', '第二次调用']);
     const deps = createMockDeps({ codex: codexService, opus: opusService }, threadStore);
 
-    for await (const _ of routeSerial(deps, ['codex'], 'first', 'user1', thread.id, { thinkingMode: 'debug' })) {
+    for await (const _ of routeSerial(
+      deps,
+      ['codex'],
+      'first',
+      'user1',
+      thread.id,
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
     }
-    for await (const _ of routeSerial(deps, ['codex'], 'second', 'user1', thread.id, { thinkingMode: 'debug' })) {
+    for await (const _ of routeSerial(
+      deps,
+      ['codex'],
+      'second',
+      'user1',
+      thread.id,
+      withClaimedA2ASlot({ thinkingMode: 'debug' }),
+    )) {
     }
 
     // Bare @布偶猫 now routes, and no feedback is injected

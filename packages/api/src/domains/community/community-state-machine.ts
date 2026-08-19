@@ -19,6 +19,7 @@
  */
 
 import type { CommunityEvent, CommunityObjectProjection, CommunityObjectState } from '@cat-cafe/shared';
+import { validateIssueFixEvidence } from './issue-analysis/issue-fix-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -44,7 +45,7 @@ type StateMatcher = '*' | Set<CommunityObjectState>;
 
 interface TransitionRule {
   from: StateMatcher;
-  to: CommunityObjectState | 'WAIVED' | 'BOOTSTRAP';
+  to: CommunityObjectState | 'WAIVED' | 'BOOTSTRAP' | 'FIX_EVIDENCE';
 }
 
 const TRANSITION_TABLE: Record<string, TransitionRule> = {
@@ -66,6 +67,7 @@ const TRANSITION_TABLE: Record<string, TransitionRule> = {
   'case.route_rejected': { from: new Set<CommunityObjectState>(['routed']), to: 'triaged' },
   'case.declined': { from: '*', to: 'declined' },
   'case.reported': { from: '*', to: 'reported' },
+  'case.fix_evidence_recorded': { from: '*', to: 'FIX_EVIDENCE' },
 
   // F168 Phase B: owner declares "waiting for external response"
   // Valid from in_progress, routed (primary post-accept workflow — Cloud R6 P1-1), or
@@ -123,8 +125,13 @@ function isBootstrapPayloadValid(
 // Main pure function
 // ---------------------------------------------------------------------------
 
-/** OWNER and MEMBER are the two GitHub associations treated as "maintainer" for delivery policy. */
-const MAINTAINER_ASSOCIATIONS = new Set(['OWNER', 'MEMBER']);
+const EXACT_SUPPRESSION_REASONS = new Set(['exact_self_echo', 'exact_setup_noise']);
+
+export function isExactSuppressedCommunityEvent(event: CommunityEvent): boolean {
+  const payload = event.payload as Record<string, unknown>;
+  const suppressionReason = typeof payload.suppressionReason === 'string' ? payload.suppressionReason : '';
+  return payload.critical !== true && EXACT_SUPPRESSION_REASONS.has(suppressionReason);
+}
 
 export function transition(
   current: CommunityObjectState,
@@ -133,22 +140,18 @@ export function transition(
 ): TransitionResult {
   // ─── F168 Phase B: informational events in awaiting_external ────────────
   // When the owner has declared they're waiting for an external response and
-  // a new activity arrives, automatically restore state based on who acted:
-  //   - External actor (not OWNER/MEMBER) → in_progress (wake owner)
-  //   - Maintainer (OWNER/MEMBER)         → stay in awaiting_external (silent)
+  // a new activity arrives, automatically restore state. GitHub author
+  // association is context only: an OWNER/MEMBER may be the upstream maintainer.
   //
   // From any other state, informational events are not state-changing — the
   // projector handles them as lastExternalActivityAt updates only.
   if (event.classification === 'informational') {
     if (current === 'awaiting_external') {
-      const payload = event.payload as Record<string, unknown>;
-      const authorAssociation = typeof payload.authorAssociation === 'string' ? payload.authorAssociation : undefined;
-      // Cloud R9 P2: treat missing authorAssociation as "not an external respondent".
-      // Label/unlabeled events carry no authorAssociation in GitHubRepoWebhookHandler —
-      // they are silent metadata and must NOT wake the owner. Only a confirmed external
-      // actor (authorAssociation present and not OWNER/MEMBER) triggers in_progress.
-      const isExternalRespondent = authorAssociation !== undefined && !MAINTAINER_ASSOCIATIONS.has(authorAssociation);
-      return { ok: true, next: isExternalRespondent ? 'in_progress' : 'awaiting_external' };
+      if (event.kind === 'issue.labeled') return { ok: true, next: 'awaiting_external' };
+      if (isExactSuppressedCommunityEvent(event)) {
+        return { ok: true, next: 'awaiting_external' };
+      }
+      return { ok: true, next: 'in_progress' };
     }
     // From any other state: informational event has no state transition
     return { ok: false, reason: 'invalid_transition' };
@@ -175,6 +178,13 @@ export function transition(
   // case.waived: validate payload, do not change state
   if (rule.to === 'WAIVED') {
     if (!isWaiverPayloadValid(event.payload)) {
+      return { ok: false, reason: 'invalid_transition' };
+    }
+    return { ok: true, next: current };
+  }
+
+  if (rule.to === 'FIX_EVIDENCE') {
+    if (!validateIssueFixEvidence(event.payload.fixEvidence)) {
       return { ok: false, reason: 'invalid_transition' };
     }
     return { ok: true, next: current };

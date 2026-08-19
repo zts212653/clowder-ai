@@ -41,9 +41,14 @@ function makeMessageStore() {
 }
 
 function makeInvocationRecordStore() {
+  const record = {
+    invocationId: 'inv-parallel-release',
+    status: 'running',
+  };
   return {
     create: async () => ({ outcome: 'created', invocationId: 'inv-parallel-release' }),
-    update: async () => {},
+    get: async () => record,
+    update: async (_invocationId, patch) => Object.assign(record, patch),
   };
 }
 
@@ -69,7 +74,7 @@ function makeQueueProcessor() {
 }
 
 describe('POST /api/messages parallel slot release', () => {
-  it('drops finished cats from InvocationTracker before the whole batch completes', async () => {
+  it('drops finished cats from InvocationTracker before the whole batch completes', async (t) => {
     const gate = deferred();
     const tracker = new InvocationTracker();
     const invocationQueue = new InvocationQueue();
@@ -108,15 +113,21 @@ describe('POST /api/messages parallel slot release', () => {
       socketManager: makeSocketManager(broadcastEvents),
     });
     await app.ready();
+    t.after(async () => {
+      gate.resolve();
+      await app.close();
+    });
 
-    await app.inject({
+    const sendRes = await app.inject({
       method: 'POST',
       url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a' },
       payload: {
         content: 'parallel status repro',
         threadId,
       },
     });
+    assert.equal(sendRes.statusCode, 200, sendRes.body);
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     const queueRes = await app.inject({
@@ -150,11 +161,9 @@ describe('POST /api/messages parallel slot release', () => {
     gate.resolve();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(tracker.has(threadId), false, 'all slots should clear once the last cat finishes');
-
-    await app.close();
   });
 
-  it('drops errored cats from InvocationTracker before the whole batch completes', async () => {
+  it('drops errored cats from InvocationTracker before the whole batch completes', async (t) => {
     const gate = deferred();
     const tracker = new InvocationTracker();
     const invocationQueue = new InvocationQueue();
@@ -193,15 +202,21 @@ describe('POST /api/messages parallel slot release', () => {
       socketManager: makeSocketManager(broadcastEvents),
     });
     await app.ready();
+    t.after(async () => {
+      gate.resolve();
+      await app.close();
+    });
 
-    await app.inject({
+    const sendRes = await app.inject({
       method: 'POST',
       url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a' },
       payload: {
         content: 'parallel error status repro',
         threadId,
       },
     });
+    assert.equal(sendRes.statusCode, 200, sendRes.body);
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     const queueRes = await app.inject({
@@ -235,7 +250,5 @@ describe('POST /api/messages parallel slot release', () => {
     gate.resolve();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(tracker.has(threadId), false, 'all slots should clear once the last cat finishes');
-
-    await app.close();
   });
 });

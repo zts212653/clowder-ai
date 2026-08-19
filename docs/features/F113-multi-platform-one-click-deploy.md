@@ -5,6 +5,7 @@ doc_kind: spec
 created: 2026-03-13
 source: community
 community_issue: https://github.com/zts212653/clowder-ai/issues/14
+tips_exempt: post-close intake provenance and timeline correction; no new user action or capability surface
 ---
 
 # F113: Multi-Platform One-Click Deploy

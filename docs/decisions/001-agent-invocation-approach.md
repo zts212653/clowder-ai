@@ -15,7 +15,7 @@ created: 2026-02-26
 
 ## 背景
 
-Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并保留它们的完整 agent 能力（文件操作、命令执行、MCP 工具使用）。
+Clowder AI 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并保留它们的完整 agent 能力（文件操作、命令执行、MCP 工具使用）。
 
 经过三猫研究团队的调研，我们评估了四种可能的方案。
 
@@ -41,7 +41,7 @@ Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并�
 **在方案 B 保持默认主路径不变的前提下**，允许通过 F143 provider 契约接入 opt-in 的 native provider（API 直连）。
 
 - **定位**：F143 框架下的 provider 扩展，和 anthropic/openai/google 同级，不是新的独立 runtime
-- **内部实现**：native provider 自有 agent loop / tools / compact 是其内部实现细节（类比 Claude CLI 也有自己的内部 loop），不与 Cat Cafe 控制面混淆
+- **内部实现**：native provider 自有 agent loop / tools / compact 是其内部实现细节（类比 Claude CLI 也有自己的内部 loop），不与 Clowder AI 控制面混淆
 - **北向接口**：复用现有 `AgentService.invoke()` 门面，不新增北向 API
 - **激活方式**：通过 F143 provider registration / variant profile 显式 opt-in，默认不影响任何现有猫猫
 
@@ -111,7 +111,7 @@ Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并�
 - **备选方案 A**：继续采用官方 Agent SDK（原 ADR 初稿方向）
   - 不选原因：SDK 路径绑定 API key 计费，无法复用 Max/Plus/Pro 订阅额度，长期成本不可接受。
 - **备选方案 B**：三猫统一改成纯 API 模式
-  - 不选原因：纯 API 丢失 CLI 侧 agent 能力（文件操作、命令执行、MCP 工具链），与 Cat Café 协作目标冲突。
+  - 不选原因：纯 API 丢失 CLI 侧 agent 能力（文件操作、命令执行、MCP 工具链），与 Clowder AI 协作目标冲突。
 - **备选方案 C**：外部独立进程编排（仅保留 D 方案）
   - 不选原因：进程同步、会话对齐和回传链路复杂度过高，不符合当期交付节奏。
 

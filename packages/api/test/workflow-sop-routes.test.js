@@ -61,6 +61,7 @@ function createStubBacklogStore() {
 // Minimal in-memory workflow SOP store
 function createInMemoryWorkflowSopStore() {
   const store = new Map();
+  const calls = [];
 
   const DEFAULT_CHECKS = {
     remoteMainSynced: 'unknown',
@@ -71,10 +72,12 @@ function createInMemoryWorkflowSopStore() {
 
   return {
     store,
+    calls,
     async get(backlogItemId) {
       return store.get(backlogItemId) ?? null;
     },
-    async upsert(backlogItemId, featureId, input, updatedBy) {
+    async upsert(backlogItemId, featureId, input, updatedBy, ownerUserId) {
+      calls.push({ backlogItemId, featureId, updatedBy, ownerUserId });
       const existing = store.get(backlogItemId);
 
       if (existing && input.expectedVersion !== undefined && existing.version !== input.expectedVersion) {
@@ -141,7 +144,20 @@ describe('WorkflowSop API routes', () => {
       title: 'F073 Test',
       summary: 'Test item',
       priority: 'p1',
-      tags: ['f073'],
+      tags: ['source:docs-backlog', 'feature:f073', 'status:active'],
+      status: 'open',
+      createdBy: 'user',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      audit: [],
+    });
+    backlogStore.items.set('item-default-user', {
+      id: 'item-default-user',
+      userId: 'default-user',
+      title: 'F275 trusted-origin regression',
+      summary: 'Unauthenticated browser requests must not mint managed-work identity',
+      priority: 'p1',
+      tags: ['source:docs-backlog', 'feature:f275', 'status:active'],
       status: 'open',
       createdBy: 'user',
       createdAt: Date.now(),
@@ -159,6 +175,7 @@ describe('WorkflowSop API routes', () => {
 
   beforeEach(() => {
     workflowSopStore.store.clear();
+    workflowSopStore.calls.length = 0;
   });
 
   it('GET returns 404 when no SOP exists', async () => {
@@ -197,6 +214,12 @@ describe('WorkflowSop API routes', () => {
     assert.equal(sop.stage, 'impl');
     assert.equal(sop.batonHolder, 'opus');
     assert.equal(sop.version, 1);
+    assert.deepEqual(workflowSopStore.calls.at(-1), {
+      backlogItemId: 'item-1',
+      featureId: 'F073',
+      updatedBy: 'test-user',
+      ownerUserId: 'test-user',
+    });
 
     const getRes = await app.inject({
       method: 'GET',
@@ -206,6 +229,21 @@ describe('WorkflowSop API routes', () => {
     assert.equal(getRes.statusCode, 200);
     const fetched = JSON.parse(getRes.payload);
     assert.equal(fetched.stage, 'impl');
+  });
+
+  it('PUT rejects a trusted-origin browser without a session before admission', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/backlog/item-default-user/workflow-sop',
+      headers: {
+        origin: 'http://localhost:3003',
+        'content-type': 'application/json',
+      },
+      payload: { featureId: 'F275', stage: 'kickoff' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(workflowSopStore.calls.length, 0);
   });
 
   it('PUT accepts runtime sopDefinitionId and preserves nextSkill override semantics', async () => {

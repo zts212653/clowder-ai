@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -11,6 +20,7 @@ function runGuard(tempDir, args, env = {}) {
   const psFixture = path.join(tempDir, 'ps.txt');
   const lsofFixture = path.join(tempDir, 'lsof.txt');
   const redisConfigFixture = path.join(tempDir, 'redis-config.txt');
+  const memoryPressureFixture = path.join(tempDir, 'memory-pressure.txt');
   if (!existsSync(psFixture)) {
     writeFileSync(psFixture, `1 0 16016 /System/Library/PrivateFrameworks/fseventsd\n${process.pid} 1 100 node\n`);
   }
@@ -24,6 +34,9 @@ function runGuard(tempDir, args, env = {}) {
       'dir\n/usr/local/var/db/redis\npidfile\n/var/run/redis.pid\nlogfile\n/var/log/redis.log\n',
     );
   }
+  if (!existsSync(memoryPressureFixture)) {
+    writeFileSync(memoryPressureFixture, 'System-wide memory free percentage: 93%\n');
+  }
 
   // Strip SKIP_PRESSURE from parent env so tests exercise actual pressure checks
   const { CAT_CAFE_GATE_GUARD_SKIP_PRESSURE: _, ...cleanEnv } = process.env;
@@ -36,6 +49,7 @@ function runGuard(tempDir, args, env = {}) {
       CAT_CAFE_GATE_GUARD_PS_FIXTURE: psFixture,
       CAT_CAFE_GATE_GUARD_LSOF_FIXTURE: lsofFixture,
       CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE: redisConfigFixture,
+      CAT_CAFE_GATE_GUARD_MEMORY_PRESSURE_FIXTURE: memoryPressureFixture,
       ...env,
     },
   });
@@ -50,6 +64,32 @@ appendFileSync(${JSON.stringify(logPath)}, process.argv.slice(2).join(' ') + '\\
 `,
     { mode: 0o755 },
   );
+}
+
+function currentProcessIdentity() {
+  const env = { ...process.env, LC_ALL: 'C' };
+  return {
+    pid: process.pid,
+    startedAt: execFileSync('ps', ['-p', String(process.pid), '-o', 'lstart='], {
+      encoding: 'utf8',
+      env,
+    }).trim(),
+    command: execFileSync('ps', ['-p', String(process.pid), '-o', 'command='], {
+      encoding: 'utf8',
+      env,
+    }).trim(),
+  };
+}
+
+function writeRedisTestLease(tempDir, lease) {
+  const registryDir = path.join(tempDir, 'redis-test-registry');
+  const leasesDir = path.join(registryDir, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  writeFileSync(
+    path.join(leasesDir, `redis-${lease.port}-${lease.redisPid}.json`),
+    `${JSON.stringify({ version: 1, ...lease }, null, 2)}\n`,
+  );
+  return registryDir;
 }
 
 describe('pre-merge gate guard', () => {
@@ -73,10 +113,10 @@ describe('pre-merge gate guard', () => {
     }
   });
 
-  it('fails fast on high fseventsd RSS and does not leave a lock', () => {
+  it('blocks elevated fseventsd RSS when the daemon is actively consuming CPU', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
     const lockDir = path.join(tempDir, 'pre-merge-check.lock');
-    writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 5000000 /System/Library/PrivateFrameworks/fseventsd\n');
+    writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 5000000 100.0 /System/Library/PrivateFrameworks/fseventsd\n');
     try {
       const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
         CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
@@ -89,6 +129,59 @@ describe('pre-merge gate guard', () => {
       assert.match(result.stderr, /will not necessarily reduce fseventsd RSS/);
       assert.match(result.stderr, /Manual gate bypass is a operator override/);
       assert.doesNotMatch(result.stderr, /kill -9|pkill|lsof -ti tcp:/);
+      assert.equal(existsSync(lockDir), false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('warns but allows inflated idle fseventsd when system memory is healthy', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
+    const lockDir = path.join(tempDir, 'pre-merge-check.lock');
+    writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 5000000 0.0 /System/Library/PrivateFrameworks/fseventsd\n');
+    try {
+      const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
+        CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
+        CAT_CAFE_GATE_GUARD_TOTAL_MEMORY_KB_FIXTURE: '50000000',
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, /fseventsd RSS/);
+      assert.match(result.stderr, /advisory threshold/);
+      assert.match(result.stderr, /gate allowed/);
+      assert.equal(existsSync(lockDir), true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks idle fseventsd when RSS reaches a critical share of total memory', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
+    const lockDir = path.join(tempDir, 'pre-merge-check.lock');
+    writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 2500000 0.0 /System/Library/PrivateFrameworks/fseventsd\n');
+    try {
+      const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
+        CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
+        CAT_CAFE_GATE_GUARD_TOTAL_MEMORY_KB_FIXTURE: '10000000',
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /25\.0% of system memory/);
+      assert.equal(existsSync(lockDir), false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks elevated idle fseventsd when system memory is constrained', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
+    const lockDir = path.join(tempDir, 'pre-merge-check.lock');
+    writeFileSync(path.join(tempDir, 'ps.txt'), '318 1 5000000 0.0 /System/Library/PrivateFrameworks/fseventsd\n');
+    writeFileSync(path.join(tempDir, 'memory-pressure.txt'), 'System-wide memory free percentage: 5%\n');
+    try {
+      const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
+        CAT_CAFE_FSEVENTSD_RSS_MAX_KB: '1000',
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /system memory free 5%/);
       assert.equal(existsSync(lockDir), false);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
@@ -126,9 +219,8 @@ describe('pre-merge gate guard', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
     const lockDir = path.join(tempDir, 'pre-merge-check.lock');
     // Simulate another pnpm gate running in a different worktree (different PID).
-    // Gates run in parallel safely: no shared writable state (git objects are
-    // content-addressable/immutable, pnpm store writes are atomic hard-links,
-    // node_modules/dist/.next are per-worktree). Resource pressure has its own
+    // Gates run in parallel safely: worktree outputs are isolated and Redis
+    // metadata uses per-instance owner-verified leases. Resource pressure has its own
     // independent valves (fseventsd RSS + redis orphan checks), so a concurrent
     // gate must NOT hard-block the worktree — it only warns. (#1912 added the
     // HARD_BLOCK as incident-era over-defense with zero independent protection.)
@@ -219,10 +311,59 @@ describe('pre-merge gate guard', () => {
     }
   });
 
-  it('does shutdown owned orphan Redis (CONFIG paths match Clowder AI test dirs)', () => {
+  it('preserves an owned Redis while its isolated-test lease owner is alive', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
     const lockDir = path.join(tempDir, 'pre-merge-check.lock');
-    // Fake redis-cli that logs calls — lets us assert shutdown WAS called.
+    const realRoot = path.join(tempDir, 'real');
+    const linkedRoot = path.join(tempDir, 'linked');
+    mkdirSync(realRoot);
+    symlinkSync(realRoot, linkedRoot, 'dir');
+    const dataDir = path.join(linkedRoot, 'cat-cafe-redis-test.live-owner');
+    mkdirSync(dataDir);
+    const registryDir = writeRedisTestLease(tempDir, {
+      port: 63552,
+      dataDir,
+      startedAt: new Date().toISOString(),
+      owner: currentProcessIdentity(),
+      redis: {
+        pid: 101,
+        startedAt: 'Tue Jul 21 02:00:00 2026',
+        command: 'redis-server 127.0.0.1:63552',
+      },
+    });
+    const fakeBinDir = path.join(tempDir, 'bin');
+    mkdirSync(fakeBinDir);
+    const redisCliLog = path.join(tempDir, 'redis-cli.log');
+    writeFakeRedisCli(path.join(fakeBinDir, 'redis-cli'), redisCliLog);
+    writeFileSync(
+      path.join(tempDir, 'ps.txt'),
+      `1 0 16016 /System/Library/PrivateFrameworks/fseventsd\n${process.pid} 1 100 node\n101 1 4096 redis-server 127.0.0.1:63552\n`,
+    );
+    writeFileSync(path.join(tempDir, 'lsof.txt'), 'redis-ser 101 user 6u IPv4 0x0 0t0 TCP 127.0.0.1:63552 (LISTEN)\n');
+    writeFileSync(
+      path.join(tempDir, 'redis-config.txt'),
+      `dir\n${realpathSync(dataDir)}\npidfile\n${realpathSync(dataDir)}/redis.pid\nlogfile\n${realpathSync(dataDir)}/redis.log\n`,
+    );
+    try {
+      const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
+        PATH: `${fakeBinDir}:${process.env.PATH}`,
+        CAT_CAFE_REDIS_TEST_REGISTRY_DIR: registryDir,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const log = existsSync(redisCliLog) ? readFileSync(redisCliLog, 'utf8') : '';
+      assert.doesNotMatch(log, /shutdown/, 'a live isolated-test lease must survive another gate preflight');
+
+      const release = runGuard(tempDir, ['release', '--lock-dir', lockDir, '--holder-pid', String(process.pid)]);
+      assert.equal(release.status, 0, release.stderr);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not shutdown an unleased owned Redis without owner-death proof', () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
+    const lockDir = path.join(tempDir, 'pre-merge-check.lock');
+    // CONFIG ownership proves the Redis is ours, but not that its runner died.
     const fakeBinDir = path.join(tempDir, 'bin');
     mkdirSync(fakeBinDir);
     const redisCliLog = path.join(tempDir, 'redis-cli.log');
@@ -253,12 +394,11 @@ describe('pre-merge gate guard', () => {
       const result = runGuard(tempDir, ['acquire', '--lock-dir', lockDir, '--holder-pid', String(process.pid)], {
         PATH: `${fakeBinDir}:${process.env.PATH}`,
       });
-      // Gate still fails (fixture static, orphan "survives"), but shutdown WAS attempted
+      // Gate fails closed with manual guidance, but must not kill without a lease.
       assert.notEqual(result.status, 0);
-      // Critical behavior assertion: redis-cli WAS called with shutdown for owned Redis
       const log = existsSync(redisCliLog) ? readFileSync(redisCliLog, 'utf8') : '';
-      assert.match(log, /shutdown/, 'owned Redis must receive shutdown attempt');
-      assert.match(log, /63552/, 'shutdown must target the orphan port');
+      assert.doesNotMatch(log, /shutdown/, 'CONFIG ownership alone is not owner-death proof');
+      assert.match(result.stderr, /port 63552/);
       assert.equal(existsSync(lockDir), false);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

@@ -7,6 +7,8 @@ import { EventAuditLog } from '../dist/domains/cats/services/orchestration/Event
 import { registerWorktrees } from '../dist/domains/workspace/workspace-security.js';
 import { workspaceRoutes } from '../dist/routes/workspace.js';
 
+const NAVIGATE_HEADERS = { 'x-cat-cafe-user': 'default-user' };
+
 describe('POST /api/workspace/navigate (F131)', () => {
   const app = Fastify();
   const emittedEvents = [];
@@ -43,6 +45,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt' },
     });
     assert.equal(res.statusCode, 400);
@@ -50,10 +53,52 @@ describe('POST /api/workspace/navigate (F131)', () => {
     assert.ok(body.error);
   });
 
+  it('resolves an absolute Markdown document link to a typed Workspace target', async () => {
+    const href = resolve(repoRoot, 'docs/features/F063-hub-workspace-explorer.md');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-document-link',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+      payload: { href: `${href}:59` },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), {
+      worktreeId: canonicalWorktreeId,
+      path: 'docs/features/F063-hub-workspace-explorer.md',
+      line: 59,
+    });
+  });
+
+  it('rejects document links outside registered worktrees', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-document-link',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+      payload: { href: '/definitely/not/registered/guide.md' },
+    });
+
+    assert.equal(res.statusCode, 404);
+    assert.match(JSON.parse(res.body).error, /registered workspace/i);
+  });
+
+  it('rejects an unauthenticated document resolver request before exposing filesystem truth', async () => {
+    const href = resolve(repoRoot, 'docs/features/F063-hub-workspace-explorer.md');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-document-link',
+      payload: { href },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.match(JSON.parse(res.body).error, /authentication required/i);
+  });
+
   it('returns 400 when worktreeId is missing', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { path: 'package.json' },
     });
     assert.equal(res.statusCode, 400);
@@ -61,10 +106,29 @@ describe('POST /api/workspace/navigate (F131)', () => {
     assert.ok(body.error);
   });
 
+  it('accepts a Codex-native absolute path without worktreeId and emits a relative typed target', async () => {
+    emittedEvents.length = 0;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
+      payload: { path: resolve(repoRoot, 'package.json'), action: 'open', line: 7 },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.path, 'package.json');
+    assert.equal(body.worktreeId, canonicalWorktreeId);
+    assert.equal(emittedEvents[0].data.path, 'package.json');
+    assert.equal(emittedEvents[0].data.worktreeId, canonicalWorktreeId);
+    assert.equal(emittedEvents[0].data.line, 7);
+  });
+
   it('returns 404 for non-existent path', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'does-not-exist-xyzzy.ts' },
     });
     assert.equal(res.statusCode, 404);
@@ -76,6 +140,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json' },
     });
     assert.equal(res.statusCode, 200);
@@ -109,6 +174,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json', action: 'open' },
     });
     assert.equal(res.statusCode, 200);
@@ -124,6 +190,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'alias-wt', path: 'package.json', action: 'open' },
     });
 
@@ -166,6 +233,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await appFallback.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: fallbackWorktreeId, path: 'package.json', action: 'open' },
     });
 
@@ -190,18 +258,20 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json', action: 'open', line: 42 },
     });
     assert.equal(res.statusCode, 200);
     assert.equal(emittedEvents[0].data.line, 42);
   });
 
-  it('passes threadId through to emitted events for session isolation', async () => {
+  it('passes threadId through while ignoring an unverified payload catId', async () => {
     emittedEvents.length = 0;
     appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json', threadId: 'thread-abc', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
@@ -209,7 +279,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     assert.equal(emittedEvents[1].data.threadId, 'thread-abc');
     assert.equal(appendedAuditEvents.length, 1);
     assert.equal(appendedAuditEvents[0].threadId, 'thread-abc');
-    assert.equal(appendedAuditEvents[0].data.catId, 'gpt52');
+    assert.equal(appendedAuditEvents[0].data.catId, undefined);
   });
 
   it('records audit events for knowledge-feed navigation', async () => {
@@ -218,6 +288,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', action: 'knowledge-feed', threadId: 'thread-knowledge', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
@@ -235,7 +306,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
       path: '',
       action: 'knowledge-feed',
       line: undefined,
-      catId: 'gpt52',
+      catId: undefined,
     });
   });
 
@@ -244,6 +315,7 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json' },
     });
     assert.equal(res.statusCode, 200);
@@ -259,11 +331,13 @@ describe('POST /api/workspace/navigate (F131)', () => {
     const res = await app2.inject({
       method: 'POST',
       url: '/api/workspace/navigate',
+      headers: NAVIGATE_HEADERS,
       payload: { worktreeId: 'test-wt', path: 'package.json' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
+    assert.equal(body.deliveryStatus, 'unconfirmed');
 
     await app2.close();
   });

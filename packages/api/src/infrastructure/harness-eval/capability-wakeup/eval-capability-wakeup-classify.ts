@@ -1,10 +1,10 @@
 import { capabilityUsageEvidence, collectWindowText, nextInvocation } from './eval-capability-wakeup-trials.js';
 import {
   CAPABILITY_SKILL_IDS,
-  type CapabilityMissLabel,
   type CapabilityName,
   type CapabilityTrace,
   type CapabilityWakeupTrial,
+  CHANGE_TOOL_NAMES,
   type ClassifiedCapabilityWakeupTrial,
   DOUBT_PATTERNS,
   HOW_TO_PATH_HINTS,
@@ -65,14 +65,27 @@ function hasPriorCapabilityUse(trace: CapabilityTrace, capability: CapabilityNam
 }
 
 function hasHowToProof(trace: CapabilityTrace, capability: CapabilityName, atOrBeforeIndex: number): boolean {
-  const hints = HOW_TO_PATH_HINTS[capability] ?? [];
-  const skills = new Set(CAPABILITY_SKILL_IDS[capability] ?? []);
+  const hints = howToPathHintsFor(capability);
+  const skills = new Set([...(CAPABILITY_SKILL_IDS[capability] ?? []), capability]);
   return trace.invocations
     .filter((invocation) => invocation.invocationIndex <= atOrBeforeIndex)
     .some((invocation) => {
       if (invocation.skillLoadEvents.some((event) => skills.has(event.skillId))) return true;
-      return invocation.referencedPaths.some((path) => hints.some((hint) => path.includes(hint)));
+      return invocation.transcriptToolUses.some(
+        (toolUse) =>
+          !CHANGE_TOOL_NAMES.has(toolUse.normalizedToolName) &&
+          toolUse.referencedPaths.some((path) => hints.some((hint) => path.includes(hint))),
+      );
     });
+}
+
+function howToPathHintsFor(capability: CapabilityName): string[] {
+  return [
+    ...(HOW_TO_PATH_HINTS[capability] ?? []),
+    `cat-cafe-skills/${capability}/SKILL.md`,
+    `${capability}/SKILL.md`,
+    'capability-wakeup-index.md',
+  ];
 }
 
 function hasAttentionAmplifier(

@@ -1,13 +1,22 @@
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type {
-  CapabilitiesConfig,
-  PluginInfo,
-  PluginManifest,
-  PluginResourceStatus,
-  PluginStatus,
+import {
+  type CapabilitiesConfig,
+  matchesRequiredWhen,
+  type PluginInfo,
+  type PluginManifest,
+  type PluginResourceStatus,
+  type PluginStatus,
 } from '@cat-cafe/shared';
 import { BUILTIN_PLUGIN_IDS, parsePluginManifest, validateEnvSafety } from './plugin-manifest.js';
+
+function isPluginConfigured(manifest: PluginManifest, env: Record<string, string | undefined>): boolean {
+  return manifest.config.every((field) => {
+    const requiredWhen = field.type === 'input' ? field.requiredWhen : undefined;
+    const isRequired = requiredWhen ? matchesRequiredWhen(requiredWhen, env[requiredWhen.envName]) : field.required;
+    return !isRequired || !!env[field.envName];
+  });
+}
 
 function maskValue(raw: string | undefined, sensitive: boolean): string | null {
   if (!raw) return null;
@@ -96,7 +105,7 @@ export class PluginRegistry {
     capabilities: CapabilitiesConfig | null,
     env: Record<string, string | undefined>,
   ): PluginStatus {
-    const allConfigured = manifest.config.filter((f) => f.required).every((f) => !!env[f.envName]);
+    const allConfigured = isPluginConfigured(manifest, env);
     if (!capabilities) return allConfigured ? 'configured' : 'not_configured';
 
     const capEntries = capabilities.capabilities.filter((c) => c.pluginId === manifest.id);
@@ -128,7 +137,7 @@ export class PluginRegistry {
     env: Record<string, string | undefined>,
   ): PluginInfo {
     const status = this.deriveStatus(manifest, capabilities, env);
-    const allConfigured = manifest.config.filter((f) => f.required).every((f) => !!env[f.envName]);
+    const allConfigured = isPluginConfigured(manifest, env);
 
     const isSensitive = (f: (typeof manifest.config)[number]) => f.type === 'input' && f.sensitive;
     const configWithValues = manifest.config.map((f) => ({

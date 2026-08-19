@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+[data-lineage-focus="true"] {
+  outline: 2px solid var(--color-cocreator-primary);
+  outline-offset: 3px;
+  border-radius: 0.75rem;
+  transition: outline-color 160ms ease;
+}
+
 /* Design tokens live in theme-tokens.css (imported via layout.tsx) */
 
 body {
@@ -301,4 +308,11 @@ body {
 .cli-output-md code {
   background: rgba(255, 255, 255, 0.08);
   color: var(--cat-msg-inset-text, var(--cafe-text-secondary));
+}
+
+/* KaTeX display math: long formulas must scroll horizontally inside the
+ * message bubble instead of being clipped by the container. */
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
 }

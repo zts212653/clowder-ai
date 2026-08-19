@@ -87,7 +87,7 @@ export function ThreadPanel({ threadId, threadName, participants, mode, messages
       {/* Message area */}
       <div className={`flex-1 overflow-y-auto px-3 py-2 ${mode === 'dim' ? 'pointer-events-none' : ''}`}>
         {messages.length > 0 ? (
-          <ReplayMessageList messages={messages} autoScroll={mode === 'spotlight'} displayMode={displayMode} />
+          <ReplayMessageList messages={messages} autoScroll={mode !== 'dim'} displayMode={displayMode} />
         ) : (
           <div className="flex items-center justify-center h-full">
             <span className="text-[length:var(--console-font-xs,11px)] text-[var(--console-text-tertiary,#888)]">

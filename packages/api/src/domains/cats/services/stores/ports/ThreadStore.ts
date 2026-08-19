@@ -6,11 +6,23 @@
  * Phase 3.3 可扩展 Redis 版本。
  */
 
-import type { CatId, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
 import { generateThreadId } from '@cat-cafe/shared';
+import type { StoreReadOptions } from './StoreReadOptions.js';
+import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
+
+/** Canonical first-message title derivation shared by append, recovery, and true recall. */
+export function deriveAutoThreadTitle(content: string): string | null {
+  const normalized = content.trim();
+  if (!normalized) return null;
+  return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
+}
+
+/** System-owned thread surfaces that stay distinct from ordinary user conversations. */
+export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
 
 /**
  * F032 Phase C: Participant activity data for reviewer matching.
@@ -52,6 +64,14 @@ export interface ThreadRoutingPolicyV1 {
 }
 
 /** F065 Phase B + F148 VG-3: Rolling thread-level memory across sealed sessions. */
+export interface ThreadMemorySourceRef {
+  threadId: string;
+  sessionId?: string;
+  eventNo?: number;
+  invocationId?: string;
+  messageId?: string;
+}
+
 export interface ThreadMemoryV1 {
   v: 1;
   /** Rolling summary text */
@@ -62,8 +82,12 @@ export interface ThreadMemoryV1 {
   updatedAt: number;
   /** VG-3: Key decisions extracted from sessions (max 8) */
   decisions?: string[];
+  /** Drill coordinates aligned by index with decisions. */
+  decisionRefs?: ThreadMemorySourceRef[];
   /** VG-3: Open questions extracted from sessions (max 5) */
   openQuestions?: string[];
+  /** Drill coordinates aligned by index with openQuestions. */
+  openQuestionRefs?: ThreadMemorySourceRef[];
   /** VG-3: Referenced artifacts — ADRs, Feature IDs (max 8) */
   artifacts?: string[];
   /** F148 Phase H: Deterministic file/PR artifacts from session seal (max 5) */
@@ -164,9 +188,9 @@ export interface Thread {
   approvedAt?: number;
   /** F171: First-Run Quest onboarding state. */
   firstRunQuestState?: FirstRunQuestStateV1;
-  /** F192 livefix: System thread kind — determines sidebar "系统" section visibility.
-   *  connector_hub = IM Hub thread, eval_domain = harness eval domain thread. */
-  systemKind?: 'connector_hub' | 'eval_domain';
+  /** System thread kind — determines sidebar "系统" section visibility.
+   *  connector_hub = IM Hub, eval_domain = harness eval, cat_bedroom = F255 private bedroom. */
+  systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
   /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
@@ -180,7 +204,8 @@ export interface Thread {
     | 'community'
     | 'artifacts'
     | 'approval'
-    | 'trajectory';
+    | 'trajectory'
+    | 'eval';
   /** F187: User-defined label IDs for thread categorization. */
   labels?: string[];
   /** #872: Thread metadata anchor for session recovery (worktrees, PRs, issues, features, notes). */
@@ -197,6 +222,10 @@ export interface Thread {
    *  'resume' (default) = normal session continuation / bootstrap / continuation capsule.
    *  'reborn' = force new session every invocation, skip bootstrap digest, skip continuation. */
   memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
+  /** F262: In-memory raw thread × cat effort overrides. Redis keeps these as sidecar hash fields. */
+  memberEffortOverrides?: Partial<Record<CatId, CliEffortPreset>>;
+  /** F291: In-memory raw thread × cat speed overrides. Redis keeps these as persistent sidecar hash fields. */
+  memberSpeedOverrides?: Partial<Record<CatId, CodexSpeedValue>>;
   /** F247 AC-B1c-1 (KD-20 + KD-21): Local-only operational sidecar — per-cloud-cat
    *  ChatGPT chat URL binding.
    *
@@ -556,16 +585,28 @@ export interface IThreadStore {
     parentThreadId?: string,
     proposalAudit?: ThreadProposalAudit,
   ): Thread | Promise<Thread>;
-  get(threadId: string): Thread | null | Promise<Thread | null>;
-  list(userId: string): Thread[] | Promise<Thread[]>;
+  get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
+  list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
   addParticipants(threadId: string, catIds: CatId[]): void | Promise<void>;
   getParticipants(threadId: string): CatId[] | Promise<CatId[]>;
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
   getParticipantsWithActivity(threadId: string): ThreadParticipantActivity[] | Promise<ThreadParticipantActivity[]>;
+  /**
+   * F297 AC-B3: batched variant for list-scale reads (Sidebar snapshot).
+   *
+   * 逐 thread 调用 `getParticipantsWithActivity` 在 Redis 后端下是 2×T 次串行往返；
+   * Sidebar 现网 ~1760 行，必须 pipeline。实现方**必须**保持与单条版本相同的
+   * lastMessageAt 降序契约（F297 的 done/error 取 `[0]` 作为"最近一次回应"）。
+   */
+  getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Map<string, ThreadParticipantActivity[]> | Promise<Map<string, ThreadParticipantActivity[]>>;
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
   updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
+  /** Exact title CAS used to scrub/restore message-derived copies without clobbering user edits. */
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean | Promise<boolean>;
   /** ISSUE-16: backfill projectPath for threads created before the fix */
   updateProjectPath(threadId: string, projectPath: string): void | Promise<void>;
   updatePin(threadId: string, pinned: boolean): void | Promise<void>;
@@ -610,12 +651,22 @@ export interface IThreadStore {
   /** F171: Get/update first-run quest state. */
   updateFirstRunQuestState(threadId: string, state: FirstRunQuestStateV1 | null): void | Promise<void>;
   /** F192 livefix: Set/clear system thread kind for sidebar "系统" section visibility. */
-  updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void | Promise<void>;
+  updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | 'approval' | 'trajectory' | null,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
   ): void | Promise<void>;
   /** F187: Update thread labels (replaces entire array). */
   updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
@@ -631,6 +682,39 @@ export interface IThreadStore {
     catId: string,
     strategy: 'resume' | 'reborn' | null,
   ): void | Promise<void>;
+  /** F262: Set or clear one raw thread × cat effort override. */
+  updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): void | Promise<void>;
+  /**
+   * F262: Read one raw effort override.
+   * `userId` carries the caller's authenticated scope for port consistency; implementations key only by
+   * `(threadId, catId)`, so the route/invocation caller MUST enforce thread ownership before this read.
+   */
+  getMemberEffort(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+  ): CliEffortPreset | undefined | Promise<CliEffortPreset | undefined>;
+  /**
+   * F262: Bulk read all raw overrides for one thread.
+   * `userId` is caller-enforced context, not part of the persisted key; ownership checks stay above the store.
+   */
+  getMemberEfforts(
+    threadId: string,
+    userId: string,
+  ): Partial<Record<CatId, CliEffortPreset>> | Promise<Partial<Record<CatId, CliEffortPreset>>>;
+  /** F291: Set or clear one raw thread × cat requested speed override. */
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void | Promise<void>;
+  /** F291: Read one raw speed override. Authorization is enforced by the caller. */
+  getMemberSpeed(
+    threadId: string,
+    catId: CatId,
+    userId: string,
+  ): CodexSpeedValue | undefined | Promise<CodexSpeedValue | undefined>;
+  /** F291: Bulk read all raw speed overrides for one thread. */
+  getMemberSpeeds(
+    threadId: string,
+    userId: string,
+  ): Partial<Record<CatId, CodexSpeedValue>> | Promise<Partial<Record<CatId, CodexSpeedValue>>>;
   /** F247 AC-B1c-1: Set or clear a cloud cat's ChatGPT chat URL binding for this thread.
    *  `chatUrl=null` clears the specific catId binding (stale binding recovery / explicit unbind).
    *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
@@ -813,7 +897,8 @@ export class ThreadStore implements IThreadStore {
     return thread;
   }
 
-  get(threadId: string): Thread | null {
+  get(threadId: string, options?: StoreReadOptions): Thread | null {
+    throwIfStoreReadAborted(options);
     // Auto-create default thread on first access
     if (threadId === DEFAULT_THREAD_ID && !this.threads.has(DEFAULT_THREAD_ID)) {
       const defaultThread: Thread = {
@@ -831,10 +916,12 @@ export class ThreadStore implements IThreadStore {
     return this.threads.get(threadId) ?? null;
   }
 
-  list(userId: string): Thread[] {
+  list(userId: string, options?: StoreReadOptions): Thread[] {
+    throwIfStoreReadAborted(options);
     const indexed = this.userThreadIndex.get(userId);
     const result: Thread[] = [];
     for (const thread of this.threads.values()) {
+      throwIfStoreReadAborted(options);
       if (thread.externalRuntimeAnchorState) continue;
       const ownedOrDefault = thread.createdBy === userId || thread.id === DEFAULT_THREAD_ID;
       const userIndexed = indexed?.has(thread.id) ?? false;
@@ -842,6 +929,7 @@ export class ThreadStore implements IThreadStore {
         result.push(thread);
       }
     }
+    throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending (most recent first)
     result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     return result;
@@ -887,6 +975,15 @@ export class ThreadStore implements IThreadStore {
     return result;
   }
 
+  /** F297 AC-B3: in-memory 无 I/O，逐条复用单查即可；契约同单条版本（lastMessageAt 降序）。 */
+  getParticipantsWithActivityBatch(threadIds: readonly string[]): Map<string, ThreadParticipantActivity[]> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    for (const threadId of threadIds) {
+      result.set(threadId, this.getParticipantsWithActivity(threadId));
+    }
+    return result;
+  }
+
   /** F032 P1-2 fix: Update participant activity on every message */
   updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void {
     const thread = this.get(threadId);
@@ -910,6 +1007,13 @@ export class ThreadStore implements IThreadStore {
   updateTitle(threadId: string, title: string): void {
     const thread = this.get(threadId);
     if (thread) thread.title = title;
+  }
+
+  compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): boolean {
+    const thread = this.get(threadId);
+    if (!thread || thread.title !== expectedTitle) return false;
+    thread.title = nextTitle;
+    return true;
   }
 
   updateProjectPath(threadId: string, projectPath: string): void {
@@ -1078,7 +1182,7 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
-  updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): void {
+  updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
     if (kind === null) {
@@ -1111,7 +1215,17 @@ export class ThreadStore implements IThreadStore {
 
   updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | 'approval' | 'trajectory' | null,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
   ): void {
     const thread = this.get(threadId);
     if (!thread) return;
@@ -1180,6 +1294,48 @@ export class ThreadStore implements IThreadStore {
         }
       }
     }
+  }
+
+  updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (effort === null) {
+      if (!thread.memberEffortOverrides) return;
+      delete thread.memberEffortOverrides[catId];
+      if (Object.keys(thread.memberEffortOverrides).length === 0) delete thread.memberEffortOverrides;
+      return;
+    }
+    if (!thread.memberEffortOverrides) thread.memberEffortOverrides = {};
+    thread.memberEffortOverrides[catId] = effort;
+  }
+
+  getMemberEffort(threadId: string, catId: CatId, _userId: string): CliEffortPreset | undefined {
+    return this.get(threadId)?.memberEffortOverrides?.[catId];
+  }
+
+  getMemberEfforts(threadId: string, _userId: string): Partial<Record<CatId, CliEffortPreset>> {
+    return { ...(this.get(threadId)?.memberEffortOverrides ?? {}) };
+  }
+
+  updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (speed === null) {
+      if (!thread.memberSpeedOverrides) return;
+      delete thread.memberSpeedOverrides[catId];
+      if (Object.keys(thread.memberSpeedOverrides).length === 0) delete thread.memberSpeedOverrides;
+      return;
+    }
+    if (!thread.memberSpeedOverrides) thread.memberSpeedOverrides = {};
+    thread.memberSpeedOverrides[catId] = speed;
+  }
+
+  getMemberSpeed(threadId: string, catId: CatId, _userId: string): CodexSpeedValue | undefined {
+    return this.get(threadId)?.memberSpeedOverrides?.[catId];
+  }
+
+  getMemberSpeeds(threadId: string, _userId: string): Partial<Record<CatId, CodexSpeedValue>> {
+    return { ...(this.get(threadId)?.memberSpeedOverrides ?? {}) };
   }
 
   updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void {

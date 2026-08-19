@@ -463,4 +463,74 @@ describe('library register + rebuild endpoints', () => {
     });
     assert.equal(JSON.parse(res3.body).indexed, 1, 'with force, file should be re-indexed');
   });
+
+  it('POST /rebuild delegates built-in project collection to the primary IndexBuilder', async () => {
+    await app.close();
+
+    const dir = mkdtempSync(join(tmpdir(), 'builtin-project-'));
+    writeFileSync(join(dir, 'safe.md'), '# Safe\n\nNormal project doc.');
+    writeFileSync(join(dir, 'secret-shaped.md'), '# Example\n\ntoken: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n');
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'builtin-project-db-')), 'evidence.sqlite');
+    const projectStore = new SqliteEvidenceStore(dbPath);
+    await projectStore.initialize();
+
+    const builtinCatalog = new LibraryCatalog();
+    builtinCatalog.register({
+      id: 'project:cat-cafe',
+      kind: 'project',
+      name: 'cat-cafe',
+      displayName: 'Clowder AI Project',
+      root: dir,
+      sensitivity: 'internal',
+      scannerLevel: 0,
+      indexPolicy: { autoRebuild: true },
+      reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: false },
+      status: 'registered',
+      createdAt: '2026-07-05',
+      updatedAt: '2026-07-05',
+    });
+
+    let receivedForce = null;
+    const indexBuilder = {
+      async rebuild(options) {
+        receivedForce = options?.force ?? false;
+        return { docsIndexed: 7, docsSkipped: 3, durationMs: 12 };
+      },
+      startPassageEmbeddingWarmup() {},
+      isPassageWarmupActive() {
+        return false;
+      },
+      async incrementalUpdate() {},
+      async checkConsistency() {
+        return { ok: true, docCount: 0, ftsCount: 0, mismatches: [] };
+      },
+    };
+
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: builtinCatalog,
+      stores: new Map([['project:cat-cafe', projectStore]]),
+      dataDir,
+      indexBuilder,
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/library/project:cat-cafe/rebuild',
+      payload: { force: true },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(receivedForce, true, 'force flag should pass through to the primary IndexBuilder');
+    assert.deepEqual(JSON.parse(res.body), {
+      indexed: 7,
+      skipped: 3,
+      blocked: false,
+      secretFindings: [],
+    });
+    assert.equal(builtinCatalog.get('project:cat-cafe').status, 'active');
+  });
 });

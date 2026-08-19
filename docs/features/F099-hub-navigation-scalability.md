@@ -62,7 +62,7 @@ operator反馈治理看板"像配置类，该放 Hub 里"，Phase B 不急。
 - [x] AC-A3: 顶栏常驻 5 个（导出、语音、Signal、Hub 齿轮、面板切换），分屏隐藏
 - [x] AC-A4: 现有所有功能仍可达（无功能丢失）
 - [x] AC-A5: operator确认视觉方案（SVG 图标 + 品种色，Design Gate）
-- [x] AC-A6: 齿轮 tooltip 改为"Cat Café Hub"
+- [x] AC-A6: 齿轮 tooltip 改为"Clowder AI Hub"
 - [x] AC-A7: Hub 齿轮在顶栏常驻（工作区模式下仍可达）
 
 ### Phase B（重页面毕业）— de-scoped
@@ -87,7 +87,7 @@ Phase B 从 F099 移出，后续按需独立立项。
 | KD-1 | 采用 Bento Box 网格而非侧边栏 | Siamese提出：温馨调性 > B 端企业味；2D 空间利用率高 | 2026-03-11 |
 | KD-2 | 复用 F042 三层导航原则 | Maine Coon GPT-5.4 提出：前端 IA 和知识架构是同一个病 | 2026-03-11 |
 | KD-3 | 新功能默认 Layer 2，需审批升级 | Maine Coon提出硬规则防止再次膨胀 | 2026-03-11 |
-| KD-4 | 齿轮入口位置不动，tooltip 改为"Cat Café Hub" | 入口心智模型已建立；改 tooltip 提升开源新用户功能发现性 | 2026-03-11 |
+| KD-4 | 齿轮入口位置不动，tooltip 改为"Clowder AI Hub" | 入口心智模型已建立；改 tooltip 提升开源新用户功能发现性 | 2026-03-11 |
 | KD-5 | Hub Bento Box 分三组 | operator确认：三组够用，四组增加认知负担且最大组没变小 | 2026-03-11 |
 | KD-6 | 导出按钮保留在顶栏 | operator确认：导出是高频操作，不能移走 | 2026-03-11 |
 | KD-7 | 分屏功能候选废弃 | operator评价"太简陋"，"左边监控进度好像够了"；不优化则移除 | 2026-03-11 |

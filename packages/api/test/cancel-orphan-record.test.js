@@ -90,9 +90,10 @@ function makeThreadStore() {
   };
 }
 
-function makeQueueProcessor() {
+function makeQueueProcessor({ canReleaseSlotForUser = true } = {}) {
   const actions = [];
   return {
+    canReleaseSlotForUser: () => canReleaseSlotForUser,
     clearPause: (tid, cid) => actions.push({ op: 'clearPause', tid, cid }),
     releaseSlot: (tid, cid) => actions.push({ op: 'releaseSlot', tid, cid }),
     releaseThread: (tid) => actions.push({ op: 'releaseThread', tid }),
@@ -118,6 +119,7 @@ async function buildApp(opts = {}) {
     invocationTracker: tracker,
     socketManager,
     invocationRecordStore: recordStore,
+    ...(opts.agentSessionMutex ? { agentSessionMutex: opts.agentSessionMutex } : {}),
   });
 
   await app.ready();
@@ -141,6 +143,36 @@ describe('cancel route: no slot, no record → 404', () => {
     assert.equal(res.statusCode, 404);
     const body = JSON.parse(res.body);
     assert.equal(body.code, 'CAT_NOT_ACTIVE');
+  });
+
+  it('does not turn stale-lock recovery into terminal cleanup after a foreign slot appears', async () => {
+    const queueProcessor = makeQueueProcessor({ canReleaseSlotForUser: false });
+    const socketManager = makeSocketManager();
+    const { app } = await buildApp({
+      tracker: makeTracker({ hasSlot: false }),
+      recordStore: makeRecordStore({ runningRecord: null }),
+      queueProcessor,
+      socketManager,
+      agentSessionMutex: {
+        forceReleaseByScope() {
+          return { releasedHolders: 1, rejectedWaiters: 0, catIds: [CAT_ID] };
+        },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { ok: true, cancelled: false });
+    assert.equal(socketManager.broadcasts.length, 0);
+    assert.equal(
+      queueProcessor.actions.some((action) => action.op === 'releaseSlot'),
+      false,
+    );
   });
 });
 
@@ -195,6 +227,46 @@ describe('cancel route: orphan record cleanup (Thread 1 regression)', () => {
     assert.ok(
       releaseSlotAction,
       `releaseSlot must be called for orphan cancel to clear processingSlots. Actions: ${JSON.stringify(queueProcessor.actions)}`,
+    );
+  });
+
+  it('cancels the stale record without terminal-cleaning a foreign processing owner', async () => {
+    const runningRecord = {
+      id: 'inv-orphan-foreign-owner',
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      targetCats: [CAT_ID],
+      status: 'running',
+      idempotencyKey: 'idem-foreign-owner',
+      intent: 'execute',
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    const queueProcessor = makeQueueProcessor({ canReleaseSlotForUser: false });
+    const socketManager = makeSocketManager();
+    const { app, recordStore } = await buildApp({
+      tracker: makeTracker({ hasSlot: false }),
+      recordStore: makeRecordStore({ runningRecord }),
+      queueProcessor,
+      socketManager,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { ok: true, cancelled: true });
+    assert.equal(
+      recordStore.updates.some((update) => update.input.status === 'canceled'),
+      true,
+    );
+    assert.equal(socketManager.broadcasts.length, 0);
+    assert.equal(
+      queueProcessor.actions.some((action) => action.op === 'releaseSlot'),
+      false,
     );
   });
 
@@ -285,11 +357,18 @@ describe('cancel route: orphan record cleanup (Thread 1 regression)', () => {
     };
     const socketManager = makeSocketManager();
     const queueProcessor = makeQueueProcessor();
+    const lockScopes = [];
     const { app } = await buildApp({
       tracker: makeTracker({ hasSlot: false }), // all slots gone → all-orphan
       recordStore: makeRecordStore({ runningRecord }),
       socketManager,
       queueProcessor,
+      agentSessionMutex: {
+        forceReleaseByScope(scope) {
+          lockScopes.push(scope);
+          return { releasedHolders: 1, rejectedWaiters: 0 };
+        },
+      },
     });
 
     const res = await app.inject({
@@ -303,5 +382,64 @@ describe('cancel route: orphan record cleanup (Thread 1 regression)', () => {
     const released = queueProcessor.actions.filter((a) => a.op === 'releaseSlot').map((a) => a.cid);
     assert.ok(released.includes(CAT_ID), 'requested cat (opus) slot must be released');
     assert.ok(released.includes('codex'), 'sibling cat (codex) slot must ALSO be released when whole record canceled');
+    assert.deepEqual(lockScopes, [
+      { threadId: THREAD_ID, userId: USER_ID, catId: CAT_ID },
+      { threadId: THREAD_ID, userId: USER_ID, catId: 'codex' },
+    ]);
+  });
+
+  it('marks the orphan record canceled before releasing its session locks', async () => {
+    const runningRecord = {
+      id: 'inv-orphan-ordering',
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      targetCats: [CAT_ID],
+      status: 'running',
+      idempotencyKey: 'idem-ordering',
+      intent: 'execute',
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 60_000,
+    };
+    const recordStore = makeRecordStore({ runningRecord });
+    const originalUpdate = recordStore.update;
+    let allowUpdate;
+    const updateGate = new Promise((resolve) => {
+      allowUpdate = resolve;
+    });
+    let updateStarted = false;
+    recordStore.update = async (...args) => {
+      updateStarted = true;
+      await updateGate;
+      return originalUpdate(...args);
+    };
+    const lockScopes = [];
+    const { app } = await buildApp({
+      tracker: makeTracker({ hasSlot: false }),
+      recordStore,
+      agentSessionMutex: {
+        forceReleaseByScope(scope) {
+          lockScopes.push(scope);
+          return { releasedHolders: 1, rejectedWaiters: 0 };
+        },
+      },
+    });
+
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: `/api/threads/${THREAD_ID}/cancel/${CAT_ID}`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    while (!updateStarted) await new Promise((resolve) => setImmediate(resolve));
+    const releasedBeforeRecordCleanup = lockScopes.length > 0;
+    allowUpdate();
+    const res = await responsePromise;
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      releasedBeforeRecordCleanup,
+      false,
+      'a promoted invocation must not observe the orphan record while it is still running',
+    );
+    assert.deepEqual(lockScopes, [{ threadId: THREAD_ID, userId: USER_ID, catId: CAT_ID }]);
   });
 });

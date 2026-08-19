@@ -92,6 +92,15 @@ function createMockDeps(services) {
   };
 }
 
+function withClaimedA2ASlot(options = {}) {
+  return {
+    invocationController: new AbortController(),
+    trackA2ASlot: () => true,
+    completeA2ASlots: () => {},
+    ...options,
+  };
+}
+
 async function loadRealRoster() {
   const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
   const runtimeConfigs = toAllCatConfigs(loadCatConfig(REPO_TEMPLATE_PATH));
@@ -112,9 +121,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, codex: codexService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'ping-pong test', 'user1', 'thread-pp-block', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'ping-pong test',
+        'user1',
+        'thread-pp-block',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -143,9 +157,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const codexService = createCapturingService('codex', '看了\n@opus 确认一下');
       const deps = createMockDeps({ opus: opusService, codex: codexService });
 
-      for await (const _ of routeSerial(deps, ['opus'], 'warn test', 'user1', 'thread-pp-warn', {
-        thinkingMode: 'play',
-      })) {
+      for await (const _ of routeSerial(
+        deps,
+        ['opus'],
+        'warn test',
+        'user1',
+        'thread-pp-warn',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
       }
 
       // opus 第 2 次被 invoke 时（round 2），streakPair.count=2，prompt 应含警告
@@ -176,9 +195,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, codex: codexService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'substantive review test', 'user1', 'thread-pp-substantive', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'substantive review test',
+        'user1',
+        'thread-pp-substantive',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -208,9 +232,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, codex: codexService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'long-text discussion test', 'user1', 'thread-pp-longtext', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'long-text discussion test',
+        'user1',
+        'thread-pp-longtext',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -246,9 +275,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, gemini: geminiService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'F172 愿景守护 replay', 'user1', 'thread-f172-replay', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'F172 愿景守护 replay',
+        'user1',
+        'thread-f172-replay',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -283,14 +317,21 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       let callCount = 0;
       const deferredEntries = [];
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'ping-pong deferred test', 'user1', 'thread-pp-defer', {
-        thinkingMode: 'play',
-        queueHasQueuedMessages: () => {
-          callCount++;
-          return callCount >= 4;
-        },
-        deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'ping-pong deferred test',
+        'user1',
+        'thread-pp-defer',
+        withClaimedA2ASlot({
+          thinkingMode: 'play',
+          queueHasQueuedMessages: () => {
+            callCount++;
+            return callCount >= 4;
+          },
+          deferA2AEnqueue: (entry) => deferredEntries.push(entry),
+        }),
+      )) {
         events.push(msg);
       }
 
@@ -322,9 +363,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, codex: codexService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'single handoff', 'user1', 'thread-pp-single', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'single handoff',
+        'user1',
+        'thread-pp-single',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -382,9 +428,14 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       const deps = createMockDeps({ opus: opusService, codex: codexService, gemini: geminiService });
 
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'multi-mention streak test', 'user1', 'thread-pp-multi', {
-        thinkingMode: 'play',
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'multi-mention streak test',
+        'user1',
+        'thread-pp-multi',
+        withClaimedA2ASlot({ thinkingMode: 'play' }),
+      )) {
         events.push(msg);
       }
 
@@ -441,14 +492,21 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       let callCount = 0;
       const deferredEntries = [];
       const events = [];
-      for await (const msg of routeSerial(deps, ['opus'], 'deferred streak test', 'user1', 'thread-pp-defer-multi', {
-        thinkingMode: 'play',
-        queueHasQueuedMessages: () => {
-          callCount++;
-          return callCount >= 4; // rounds 0,1,2 inline (build streak); round 3 deferred (multi-mention)
-        },
-        deferA2AEnqueue: (entry) => deferredEntries.push(entry),
-      })) {
+      for await (const msg of routeSerial(
+        deps,
+        ['opus'],
+        'deferred streak test',
+        'user1',
+        'thread-pp-defer-multi',
+        withClaimedA2ASlot({
+          thinkingMode: 'play',
+          queueHasQueuedMessages: () => {
+            callCount++;
+            return callCount >= 4; // rounds 0,1,2 inline (build streak); round 3 deferred (multi-mention)
+          },
+          deferA2AEnqueue: (entry) => deferredEntries.push(entry),
+        }),
+      )) {
         events.push(msg);
       }
 

@@ -191,6 +191,8 @@ describe('RealGitRunner', () => {
       assert.strictEqual(extractCatHandle('gpt52@x.y'), 'gpt52');
       assert.strictEqual(extractCatHandle('gemini@x.y'), 'gemini');
       assert.strictEqual(extractCatHandle('gemini35@x.y'), 'gemini35');
+      assert.strictEqual(extractCatHandle('gemini36@x.y'), 'gemini35');
+      assert.strictEqual(extractCatHandle('gemini-3.6@x.y'), 'gemini35');
     });
 
     test('null when email matches no known cat handle', async () => {

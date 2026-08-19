@@ -317,20 +317,15 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   app.get<{ Params: { id: string } }>('/api/threads/:id/active-pane', async (req, reply) => {
     if (!agentPaneRegistry) return reply.status(501).send({ error: 'Agent pane tracking not enabled' });
     const session = agentPaneRegistry.getBgCarrierByThread(req.params.id);
-    if (session) {
-      return {
-        active: true,
-        invocationId: session.invocationId,
-        daemonShortId: session.daemonShortId,
-        catId: session.catId,
-        threadId: session.threadId,
-        status: session.status,
-        startedAt: session.startedAt,
-      };
-    }
-    // Serial continuation children: canonical liveness belongs on /queue.activeInvocations
-    // (Phase 2b). Sol review P2-2: tracker fallback removed — no UI consumer (frontend
-    // requires daemonShortId), and maintainer explicitly rejected it.
-    return { active: false };
+    if (!session) return { active: false };
+    return {
+      active: true,
+      invocationId: session.invocationId,
+      daemonShortId: session.daemonShortId,
+      catId: session.catId,
+      threadId: session.threadId,
+      status: session.status,
+      startedAt: session.startedAt,
+    };
   });
 };

@@ -19,6 +19,7 @@ import { checkMcpProject } from '../../mcp/mcp-drift-detector.js';
 import { syncMcpDrift } from '../../mcp/mcp-drift-resolver.js';
 import { updateSkillMountPaths, writeSkillsSyncState } from '../../skills/skill-sync-config.js';
 import { pathsEqual } from '../../utils/project-path.js';
+import { ensureSharedSkillRefsMount, SHARED_SKILL_REFS_ALIAS } from '../../utils/skill-mount.js';
 import { computeSourceManifestHash } from '../../utils/skill-source.js';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../capabilities/capability-orchestrator.js';
 import { readMountRules } from '../mount/mount-rules-store.js';
@@ -373,6 +374,17 @@ export class GovernanceBootstrapService {
         }
       }
       await mkdir(targetDir, { recursive: true });
+      const sharedRefsMount = await ensureSharedSkillRefsMount(targetDir, sourceRoot);
+      actions.push({
+        file: `${displayDir}/${SHARED_SKILL_REFS_ALIAS}`,
+        action: sharedRefsMount === 'created' ? 'symlinked' : 'skipped',
+        reason:
+          sharedRefsMount === 'created'
+            ? 'linked to shared skill refs'
+            : sharedRefsMount === 'existing'
+              ? 'shared refs symlink already correct'
+              : 'shared refs coordinate is unavailable or conflicted',
+      });
     }
 
     for (const name of skillNames) {

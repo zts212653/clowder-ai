@@ -29,11 +29,11 @@ function restoreEnv() {
 describe('ConfigRegistry', () => {
   afterEach(() => restoreEnv());
 
-  it('snapshot contains all 7 categories', async () => {
+  it('snapshot contains runtime categories without legacy context knobs', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.ok(snapshot.context, 'has context');
+    assert.equal(snapshot.context, undefined, 'legacy context policy is not public');
     assert.ok(snapshot.cli, 'has cli');
     assert.ok(snapshot.storage, 'has storage');
     assert.ok(snapshot.upload, 'has upload');
@@ -42,7 +42,7 @@ describe('ConfigRegistry', () => {
     assert.ok(snapshot.a2a, 'has a2a');
   });
 
-  it('uses default values when env vars are missing', async () => {
+  it('does not revive retired context policy from environment variables', async () => {
     setEnv('CONTEXT_HISTORY_LIMIT', undefined);
     setEnv('MAX_CONTEXT_MSG_CHARS', undefined);
     setEnv('MAX_PROMPT_TOKENS', undefined);
@@ -52,10 +52,7 @@ describe('ConfigRegistry', () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.equal(snapshot.context.maxMessages, 20);
-    assert.equal(snapshot.context.maxContentLength, 1500);
-    assert.equal(snapshot.context.maxPromptTokens, 32000);
-    assert.equal(snapshot.context.maxTotalChars, 8000);
+    assert.equal(snapshot.context, undefined);
     assert.equal(snapshot.cli.codexSandboxMode, 'danger-full-access');
     assert.equal(snapshot.cli.codexApprovalPolicy, 'on-request');
   });
@@ -71,7 +68,7 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.cli.codexApprovalPolicy, 'never');
   });
 
-  it('reads context env overrides', async () => {
+  it('ignores retired context env overrides', async () => {
     setEnv('CONTEXT_HISTORY_LIMIT', '50');
     setEnv('MAX_CONTEXT_MSG_CHARS', '3000');
     setEnv('MAX_PROMPT_TOKENS', '64000');
@@ -79,9 +76,7 @@ describe('ConfigRegistry', () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.equal(snapshot.context.maxMessages, 50);
-    assert.equal(snapshot.context.maxContentLength, 3000);
-    assert.equal(snapshot.context.maxPromptTokens, 64000);
+    assert.equal(snapshot.context, undefined);
   });
 
   it('shows redis=memory when REDIS_URL not set', async () => {
@@ -145,49 +140,56 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.a2a.enabled, true);
   });
 
-  it('has perCatBudgets for all three cats', async () => {
+  it('has perCatCapacities for all three cats', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.ok(snapshot.perCatBudgets, 'has perCatBudgets');
-    assert.ok(snapshot.perCatBudgets.opus, 'has opus budget');
-    assert.ok(snapshot.perCatBudgets.codex, 'has codex budget');
-    assert.ok(snapshot.perCatBudgets.gemini, 'has gemini budget');
+    assert.ok(snapshot.perCatCapacities, 'has perCatCapacities');
+    assert.ok(snapshot.perCatCapacities.opus, 'has opus capacity');
+    assert.ok(snapshot.perCatCapacities.codex, 'has codex capacity');
+    assert.ok(snapshot.perCatCapacities.gemini, 'has gemini capacity');
   });
 
-  it('perCatBudgets contains all budget fields', async () => {
+  it('perCatCapacities contains provenance but no prompt-policy fields', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    const opusBudget = snapshot.perCatBudgets.opus;
-    assert.ok(opusBudget.maxPromptTokens > 0, 'opus has maxPromptTokens');
-    assert.ok(opusBudget.maxContextTokens > 0, 'opus has maxContextTokens');
-    assert.ok(opusBudget.maxMessages > 0, 'opus has maxMessages');
-    assert.ok(opusBudget.maxContentLengthPerMsg > 0, 'opus has maxContentLengthPerMsg');
+    const opusCap = snapshot.perCatCapacities.opus;
+    // Capacity metadata
+    assert.ok(typeof opusCap.inputCeilingTokens === 'number', 'opus has inputCeilingTokens');
+    assert.ok(typeof opusCap.source === 'string', 'opus has source');
+    assert.ok(typeof opusCap.actionable === 'boolean', 'opus has actionable');
+    assert.ok(typeof opusCap.windowTokens === 'number', 'opus has windowTokens');
+    assert.ok(typeof opusCap.provenance === 'string', 'opus has provenance');
+    assert.equal('confidence' in opusCap, false);
+    assert.equal('bindingKey' in opusCap, false);
+    assert.equal('fingerprint' in opusCap, false);
+    assert.equal('observedAt' in opusCap, false);
+    assert.equal('budget' in opusCap, false);
   });
 
-  it('context section has deprecation note', async () => {
+  it('perCatCapacities reflects different capacities per cat', async () => {
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.ok(snapshot.context.note, 'context has note');
-    assert.ok(snapshot.context.note.includes('perCatBudgets'), 'note mentions perCatBudgets');
+    // Compare inputCeilingTokens across cats — models with larger windows
+    // should have higher ceilings (unless manually capped or unresolved).
+    const geminiCeil = snapshot.perCatCapacities.gemini?.inputCeilingTokens ?? 0;
+    const codexCeil = snapshot.perCatCapacities.codex?.inputCeilingTokens ?? 0;
+    const opusCeil = snapshot.perCatCapacities.opus?.inputCeilingTokens ?? 0;
+    // At least one should be resolved with a non-zero ceiling
+    assert.ok(geminiCeil > 0 || codexCeil > 0 || opusCeil > 0, 'at least one cat should have resolved capacity');
   });
 
-  it('perCatBudgets reflects different budgets per cat', async () => {
+  it('perCatCapacities resolves the same effective model shown for an env-overridden member', async () => {
+    setEnv('CAT_CODEX_MODEL', 'o3');
+
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    // MAX_PROMPT_TOKENS may flatten prompt budgets via env, so compare the
-    // cat-specific aggregate context budget that still differs by breed.
-    assert.ok(
-      snapshot.perCatBudgets.gemini.maxContextTokens > snapshot.perCatBudgets.codex.maxContextTokens,
-      'gemini should have higher maxContextTokens than codex',
-    );
-    assert.ok(
-      snapshot.perCatBudgets.codex.maxContextTokens > snapshot.perCatBudgets.opus.maxContextTokens,
-      'codex should have higher maxContextTokens than opus',
-    );
+    assert.equal(snapshot.cats.codex.model, 'o3');
+    assert.equal(snapshot.perCatCapacities.codex.windowTokens, 200_000);
+    assert.match(snapshot.perCatCapacities.codex.provenance, /Model catalog \(o3\)/);
   });
 
   it('has memory section (F3-lite)', async () => {
@@ -222,8 +224,7 @@ describe('ConfigRegistry', () => {
     const snapshot = collectConfigSnapshot();
 
     const categories = [
-      'context',
-      'perCatBudgets',
+      'perCatCapacities',
       'cli',
       'storage',
       'upload',

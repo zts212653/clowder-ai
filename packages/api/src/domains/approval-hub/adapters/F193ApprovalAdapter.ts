@@ -10,6 +10,7 @@
 
 import type { ApprovalItem, DispatchProposal, SettledApprovalItem } from '@cat-cafe/shared';
 import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 import type { IDispatchProposalStore } from '../stores/ports/IDispatchProposalStore.js';
 
 const F193_STALE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
@@ -22,22 +23,25 @@ export class F193ApprovalAdapter implements IApprovalAdapter {
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     const proposals = await this.store.listPendingByUser(userId);
-    return proposals.map((p) => toItem(p));
+    return compactApprovalProjections(proposals.map((p) => toItem(p)));
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
     const limit = opts?.limit ?? DEFAULT_SETTLED_LIMIT;
     const proposals = await this.store.listSettledByUser(userId, limit);
-    return proposals.map((p) => toSettledItem(p));
+    return compactApprovalProjections(proposals.map((p) => toSettledItem(p)));
   }
 }
 
-function toItem(p: DispatchProposal): ApprovalItem {
+function toItem(p: DispatchProposal): ApprovalItem | null {
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F193' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.senderCatId,
     ownerUserId: p.ownerUserId,
     status: 'pending' as const,
@@ -47,22 +51,27 @@ function toItem(p: DispatchProposal): ApprovalItem {
       targetCats: p.targetCats,
       content: p.content,
       effectClass: p.effectClass,
+      ...actionDetail(p),
     },
+    navigation,
     inlineApprovable: true,
     expiresAt: p.createdAt + F193_STALE_MS,
     createdAt: p.createdAt,
   };
 }
 
-function toSettledItem(p: DispatchProposal): SettledApprovalItem {
+function toSettledItem(p: DispatchProposal): SettledApprovalItem | null {
   if (p.status !== 'approved' && p.status !== 'rejected') {
     throw new Error(`toSettledItem: unexpected status ${p.status} for proposal ${p.proposalId}`);
   }
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F193' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.senderCatId,
     ownerUserId: p.ownerUserId,
     status: p.status,
@@ -72,9 +81,24 @@ function toSettledItem(p: DispatchProposal): SettledApprovalItem {
       targetCats: p.targetCats,
       content: p.content,
       effectClass: p.effectClass,
+      ...actionDetail(p),
     },
+    navigation,
     decidedAt: p.decidedAt ?? 0,
     decidedBy: p.decidedBy ?? '',
     createdAt: p.createdAt,
+  };
+}
+
+function actionDetail(p: DispatchProposal): Record<string, unknown> {
+  if (!p.proposedAction) return {};
+  return {
+    actionFamily: p.proposedAction.actionFamily,
+    subjectRef: p.proposedAction.subjectRef,
+    successorSlot: p.proposedAction.successorSlot,
+    mode: p.proposedAction.mode,
+    terminalPredicate: p.proposedAction.terminalPredicate,
+    envelopeDigest: p.envelopeDigest,
+    actionLeaseRef: p.actionLeaseRef,
   };
 }

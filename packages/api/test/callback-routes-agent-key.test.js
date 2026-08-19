@@ -32,6 +32,7 @@ describe('Callback routes: agent-key auth path', () => {
   const TEST_CAT = 'bengal';
 
   beforeEach(async () => {
+    process.env.DEFAULT_OWNER_USER_ID = TEST_USER;
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
@@ -72,6 +73,66 @@ describe('Callback routes: agent-key auth path', () => {
     return agentKeyRegistry.issue(TEST_CAT, TEST_USER);
   }
 
+  async function issueGptProKey(userId = TEST_USER) {
+    return agentKeyRegistry.issue('gpt-pro', userId);
+  }
+
+  // ---- GET /api/callbacks/auth-probe ----
+
+  test('auth-probe verifies an agent-key principal without reading thread data', async () => {
+    const app = await createApp();
+    const { secret } = await issueGptProKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { ok: true });
+  });
+
+  test('auth-probe rejects a valid agent key for another cat', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+  });
+
+  test('auth-probe rejects a gpt-pro key for another user', async () => {
+    const app = await createApp();
+    const { secret } = await issueGptProKey('other-user');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+  });
+
+  test('auth-probe rejects an unknown sidecar secret', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': 'stale-sidecar-secret' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.json().reason, 'agent_key_unknown');
+  });
+
   // ---- POST /api/callbacks/post-message ----
 
   test('post-message with agent-key requires threadId', async () => {
@@ -102,6 +163,46 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.status, 'ok');
+  });
+
+  test('post-message with agent-key rejects unsupported coordination instead of silently dropping it', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'agent-key cannot establish relay provenance',
+        threadId: ownedThreadId,
+        coordination: { phase: 'active' },
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().kind, 'coordination_agent_key_unsupported');
+    assert.equal(messageStore.getByThread(ownedThreadId, 10, TEST_USER).length, 0);
+  });
+
+  test('post-message with agent-key rejects soft-deleted owned thread without storing or broadcasting', async () => {
+    const deletedThread = await threadStore.create(TEST_USER, 'Deleted Agent-Key Target');
+    assert.equal(await threadStore.softDelete(deletedThread.id), true);
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'should not land in deleted thread', threadId: deletedThread.id },
+    });
+
+    assert.equal(res.statusCode, 410);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(messageStore.getByThread(deletedThread.id, 10, TEST_USER).length, 0);
+    assert.equal(socketManager.getMessages().length, 0);
   });
 
   test('post-message with agent-key synthesizes text-only audio rich blocks before storing', async () => {
@@ -322,6 +423,35 @@ describe('Callback routes: agent-key auth path', () => {
     assert.ok(Array.isArray(body.messages));
   });
 
+  test('thread-context with agent-key can read owned soft-deleted thread tombstones', async () => {
+    const deletedThread = await threadStore.create(TEST_USER, 'Deleted Readable Thread');
+    messageStore.append({
+      userId: TEST_USER,
+      catId: TEST_CAT,
+      content: 'context survives deletion',
+      mentions: [],
+      origin: 'callback',
+      timestamp: Date.now(),
+      threadId: deletedThread.id,
+    });
+    assert.equal(await threadStore.softDelete(deletedThread.id), true);
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?threadId=${deletedThread.id}`,
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.threadId, deletedThread.id);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].preview, 'context survives deletion');
+    assert.equal('content' in body.messages[0], false);
+  });
+
   // ---- GET /api/callbacks/list-threads ----
 
   test('list-threads with agent-key succeeds (no threadId needed)', async () => {
@@ -406,6 +536,7 @@ describe('Callback routes: agent-key auth path', () => {
       timestamp: Date.now(),
       threadId: ownedThreadId,
       deliveryStatus: 'queued',
+      extra: { isExplicitPost: true },
     });
 
     const res = await app.inject({

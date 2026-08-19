@@ -103,12 +103,16 @@ function findCatCafeSkillCapability(
   config: { capabilities: CapabilityEntry[] } | null | undefined,
   skillId: string,
 ): CapabilityEntry | null {
-  // Look up built-in cat-cafe skill (not plugin-owned) for global policy.
-  // Plugin skills carry their own enabled/mountPaths — they should not
-  // contribute to global disabled-policy seeding for external projects.
+  // Built-in/default-source skills participate in global policy. Plugin-owned
+  // and custom-source skills keep their own enablement and mount semantics.
   return (
     config?.capabilities.find(
-      (entry) => entry.type === 'skill' && entry.id === skillId && entry.source === 'cat-cafe' && !entry.pluginId,
+      (entry) =>
+        entry.type === 'skill' &&
+        entry.id === skillId &&
+        entry.source === 'cat-cafe' &&
+        !entry.pluginId &&
+        !entry.skillsSource,
     ) ?? null
   );
 }
@@ -121,10 +125,7 @@ function createCatCafeSkillCapabilityFromGlobalPolicy(
   const entry: CapabilityEntry = {
     id: skillId,
     type: 'skill',
-    // F228: `enabled` is required by CapabilityEntry but only meaningful for MCP/limb.
-    // Skills use `globalEnabled` exclusively; startup migration fills it from `enabled`
-    // for legacy entries, so new entries just set `enabled: true` as a type placeholder.
-    enabled: true,
+    enabled: globalEnabled,
     globalEnabled,
     source: 'cat-cafe',
   };
@@ -267,9 +268,7 @@ function shouldKeepSkillCapability(
   declaredPluginSkillIds: Map<string, Set<string>> | null,
 ): boolean {
   if (cap.type !== 'skill') return true;
-  // F228: external skills (from user directories) are outside cat-cafe's
-  // managed scope — prune them from capabilities.json.
-  if (cap.source === 'external') return false;
+  if (cap.source === 'external') return allSkillNames.has(cap.id);
   if (cap.pluginId) return isDeclaredPluginSkill(cap, allSkillNames, declaredPluginSkillIds);
   return allSkillNames.has(cap.id);
 }
@@ -291,21 +290,15 @@ export async function buildKnownProjectPaths(
   projectRoot: string,
   _registry?: GovernanceRegistry,
 ): Promise<string[]> {
-  // F228: Only return the queried projectRoot as a server-known path.
-  // catCafeRoot (the Clowder AI instance directory) is NOT a user project —
-  // it's the global config source. Including it caused ambiguity between
-  // "global config" and "project config" in the UI project dropdown.
-  // In packaged installs the install dir shouldn't appear as a project;
-  // in source dev the working dir is discovered via thread project paths.
-  // The full project list is assembled client-side by merging server paths
-  // with thread-derived project paths (same source as the 新建对話 picker).
+  // F228: Only return catCafeRoot + projectRoot as server-known paths.
+  // The full project list is assembled client-side by merging these with
+  // thread-derived project paths (same source as the 新建對話 picker).
   const paths: string[] = [];
   const addPath = (path: string): void => {
     if (!paths.some((existing) => pathsEqual(existing, path))) paths.push(path);
   };
-  if (!pathsEqual(projectRoot, catCafeRoot)) {
-    addPath(projectRoot);
-  }
+  addPath(catCafeRoot);
+  addPath(projectRoot);
   return paths;
 }
 
@@ -716,10 +709,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     for (const skillName of allSkillNames) {
       const isCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName);
       if (!isCatCafe) continue; // Skip non-cat-cafe skills — don't add external entries
-      // Only check non-plugin entries — plugin-owned skills (with pluginId) coexist
-      // with built-in cat-cafe skills of the same name.
+      // Plugin-owned and custom-source skills may share an id with a built-in
+      // skill; neither should suppress the built-in registry entry.
       const exists = config.capabilities.some(
-        (c) => c.type === 'skill' && c.id === skillName && c.source === 'cat-cafe' && !c.pluginId,
+        (c) => c.type === 'skill' && c.id === skillName && c.source === 'cat-cafe' && !c.pluginId && !c.skillsSource,
       );
       if (!exists) {
         config.capabilities.push(
@@ -734,7 +727,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // external entries from user-directory scan results).
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
-      if (cap.skillsSource || cap.source === 'external') continue;
+      if (cap.pluginId || cap.skillsSource || cap.source === 'external') continue;
       const shouldBeCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id);
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
         cap.source = 'cat-cafe';
@@ -1036,10 +1029,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Registration consistency: capabilities.json vs source dir
     // Source directory = truth for "which skills exist"
     // capabilities.json = truth for "which skills are configured"
-    // Plugin-owned skills (pluginId set) are managed by their plugin, not the
+    // Plugin-owned and custom-source skills are managed outside the default
     // source-tree scanner — exclude them from consistency checks.
     const capSkillNames = new Set(
-      config.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id),
+      config.capabilities
+        .filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId && !c.skillsSource)
+        .map((c) => c.id),
     );
     const unregistered = [...mountSourceNames].filter((n) => !capSkillNames.has(n));
     // Skills with custom skillsSource live outside the default source dir —

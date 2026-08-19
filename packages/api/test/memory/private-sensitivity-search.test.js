@@ -8,7 +8,7 @@ describe('AC-C2: private Collection excluded from library search', () => {
     ({ LibraryCatalog } = await import('../../dist/domains/memory/LibraryCatalog.js'));
   });
 
-  function makeManifest(id, sensitivity) {
+  function makeManifest(id, sensitivity, ownerUserId) {
     const [kind, name] = id.split(':');
     return {
       id,
@@ -17,6 +17,7 @@ describe('AC-C2: private Collection excluded from library search', () => {
       displayName: name,
       root: '/tmp/fake',
       sensitivity,
+      ...(ownerUserId ? { ownerUserId } : {}),
       scannerLevel: 0,
       indexPolicy: { autoRebuild: false },
       reviewPolicy: { authorityCeiling: 'validated', requireOwnerApproval: true },
@@ -41,11 +42,21 @@ describe('AC-C2: private Collection excluded from library search', () => {
     assert.ok(!ids.includes('research:vault'), 'restricted excluded');
   });
 
-  it('getRoutable("collection") allows explicit include of private', () => {
+  it('getRoutable("collection") rejects explicit private include without server authorization', () => {
     const catalog = new LibraryCatalog();
-    catalog.register(makeManifest('world:diary', 'private'));
+    catalog.register(makeManifest('world:diary', 'private', 'owner-1'));
 
     const routable = catalog.getRoutable('collection', ['world:diary']);
+    assert.equal(routable.length, 0);
+  });
+
+  it('getRoutable("collection") requires explicit include and matching authorized collection', () => {
+    const catalog = new LibraryCatalog();
+    catalog.register(makeManifest('world:diary', 'private', 'owner-1'));
+
+    assert.equal(catalog.getRoutable('collection', undefined, ['world:diary']).length, 0);
+    assert.equal(catalog.getRoutable('collection', ['world:diary'], ['world:other']).length, 0);
+    const routable = catalog.getRoutable('collection', ['world:diary'], ['world:diary']);
     assert.equal(routable.length, 1);
     assert.equal(routable[0].id, 'world:diary');
   });

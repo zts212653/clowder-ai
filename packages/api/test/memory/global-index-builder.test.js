@@ -283,4 +283,141 @@ describe('GlobalIndexBuilder', () => {
       `old file (${oldUpdatedAt}) should have earlier updatedAt than new file (${newUpdatedAt})`,
     );
   });
+
+  it('W5: excludes personal memory from global input and re-layers it into the private store', async () => {
+    const memoryDir = join(tmpDir, 'projects', '-Users-test-private', 'memory');
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(
+      join(memoryDir, 'team_method.md'),
+      '---\nname: Shared Method\ntype: reference\n---\nA reusable coordination method.',
+    );
+    writeFileSync(
+      join(memoryDir, 'user_preferences.md'),
+      '---\nname: Synthetic User Preference\ntype: user\n---\nSYNTHETIC_PRIVATE_PAYLOAD',
+    );
+    writeFileSync(
+      join(memoryDir, 'personal_note.md'),
+      '---\nname: Synthetic Personal Note\nscope: personal\n---\nSYNTHETIC_PERSONAL_PAYLOAD',
+    );
+    writeFileSync(
+      join(memoryDir, 's8_hourly_log.md'),
+      '---\nname: Synthetic Hourly Log\ntype: reference\n---\nSYNTHETIC_LEGACY_PRIVATE_PAYLOAD',
+    );
+
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    const personalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+    await personalStore.initialize();
+
+    // Seed a pre-gate leak. Rebuild must purge it before completing the private projection.
+    await globalStore.upsert([
+      {
+        anchor: 'global:memory/Users-test-private/user_preferences',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Legacy leaked row',
+        summary: 'SYNTHETIC_PRIVATE_PAYLOAD',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+      personalStore,
+    });
+
+    const result = await builder.rebuild();
+    assert.equal(result.docsIndexed, 1, 'only the shared method belongs in the global compiler');
+    assert.equal(result.docsSkipped, 3, 'all personal-family files are excluded from global input');
+    assert.deepEqual(result.privacyAudit, {
+      personalSources: 3,
+      purgedFromGlobal: 1,
+      reLayeredPrivate: 3,
+    });
+
+    assert.equal((await globalStore.search('SYNTHETIC_PRIVATE_PAYLOAD')).length, 0);
+    assert.equal((await globalStore.search('SYNTHETIC_PERSONAL_PAYLOAD')).length, 0);
+    assert.equal((await globalStore.search('SYNTHETIC_LEGACY_PRIVATE_PAYLOAD')).length, 0);
+    assert.equal((await globalStore.search('reusable coordination')).length, 1);
+
+    assert.equal((await personalStore.search('SYNTHETIC_PRIVATE_PAYLOAD')).length, 1);
+    assert.equal((await personalStore.search('SYNTHETIC_PERSONAL_PAYLOAD')).length, 1);
+    assert.equal((await personalStore.search('SYNTHETIC_LEGACY_PRIVATE_PAYLOAD')).length, 1);
+
+    globalStore.close();
+    personalStore.close();
+  });
+
+  it('W5: purges a legacy global leak before a private projection failure', async () => {
+    const memoryDir = join(tmpDir, 'projects', '-Users-test-private-failure', 'memory');
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(
+      join(memoryDir, 'user_preferences.md'),
+      '---\nname: Synthetic User Preference\ntype: user\n---\nSYNTHETIC_PRIVATE_FAILURE_PAYLOAD',
+    );
+
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    const personalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+    await personalStore.initialize();
+    await globalStore.upsert([
+      {
+        anchor: 'global:memory/Users-test-private-failure/user_preferences',
+        kind: 'lesson',
+        status: 'active',
+        title: 'Legacy leaked row',
+        summary: 'SYNTHETIC_PRIVATE_FAILURE_PAYLOAD',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ]);
+    personalStore.upsert = async () => {
+      throw new Error('synthetic private projection failure');
+    };
+
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+      personalStore,
+    });
+
+    await assert.rejects(builder.rebuild(), /synthetic private projection failure/);
+    assert.equal((await globalStore.search('SYNTHETIC_PRIVATE_FAILURE_PAYLOAD')).length, 0);
+
+    globalStore.close();
+    personalStore.close();
+  });
+
+  it('W5: personal basenames are excluded even when frontmatter omits personal type', async () => {
+    const memoryDir = join(tmpDir, 'projects', '-Users-test-private', 'memory');
+    mkdirSync(memoryDir, { recursive: true });
+    for (const stem of [
+      'user_identity',
+      'user_preferences',
+      'user_context',
+      'user_relationships',
+      'user_working_style',
+      'user_private_notes',
+      's8_hourly_log',
+    ]) {
+      writeFileSync(join(memoryDir, `${stem}.md`), `---\nname: ${stem}\ntype: reference\n---\nSYNTHETIC ${stem}`);
+    }
+
+    const globalStore = new SqliteEvidenceStore(':memory:');
+    await globalStore.initialize();
+    const builder = new GlobalIndexBuilder({
+      skillsRoot: '/nonexistent',
+      memoryRoot: join(tmpDir, 'projects'),
+      globalStore,
+    });
+
+    const result = await builder.rebuild();
+    assert.equal(result.docsIndexed, 0);
+    assert.equal(result.docsSkipped, 7);
+    assert.equal(result.privacyAudit.personalSources, 7);
+    assert.equal((await globalStore.search('SYNTHETIC')).length, 0);
+    globalStore.close();
+  });
 });

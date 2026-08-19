@@ -5,9 +5,16 @@
  * 纯函数，无副作用。读取 catRegistry 生成身份上下文。
  */
 
-import type { CatConfig, CatId, CompiledPackBlocks, ConciergeConfig, WorldContextEnvelope } from '@cat-cafe/shared';
+import type {
+  CatConfig,
+  CatId,
+  CompiledPackBlocks,
+  ConciergeConfig,
+  CrossThreadCoordination,
+  WorldContextEnvelope,
+} from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
-import { getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
+import { getDossierL0Pronouns, getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
 import {
   catHasRole,
   getCoCreatorConfig,
@@ -82,13 +89,13 @@ export interface InvocationContext {
     count: number;
   };
   /**
-   * F193 AC-B2: Cross-thread reply hint.
-   * When present (cross-post triggered invocation per F052), inject reply
-   * guidance so the receiving cat knows: (1) source thread id, (2) sender cat
-   * handle, (3) reply path (cross_post_message — local @ won't route back).
+   * F193 AC-B2 / F167 Phase R: routing and coordination hint.
+   * A distinct source thread injects cross-thread reply guidance. Same-thread
+   * coordination may still carry terminal lifecycle state for the route guard,
+   * but D4 must not describe it as a cross-thread message.
    *
    * Hydrated from trigger message id (worklist a2aTriggerMessageId / queue
-   * path backfill) → StoredMessage.extra.crossPost + StoredMessage.catId.
+   * path backfill) → StoredMessage.extra.crossPost / extra.coordination + catId.
    * MUST be structured (not parsed from prompt text) — ContextAssembler
    * only renders slice(0,8) truncated thread + lacks senderCatId.
    *
@@ -102,6 +109,8 @@ export interface InvocationContext {
     senderCatId: CatId;
     /** F246 Phase B: effect-class label for receiving-side behavior constraints */
     effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+    /** F167 Phase R: active/terminal coordination projection. */
+    coordination?: CrossThreadCoordination;
   };
   /**
    * F046 D3: One-shot feedback injected when previous @mention was not routed.
@@ -388,6 +397,9 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
       : config.nickname
         ? `${config.displayName}/${config.nickname}`
         : config.displayName;
+    const projectRoot = findMonorepoRoot();
+    const pronouns = getDossierL0Pronouns(id, projectRoot)?.split('/')[0]?.trim();
+    const rosterLabel = pronouns ? `${config.nickname ?? label}（${pronouns}）` : label;
     const mention = pickVariantMention(id, config);
     // F167 Phase F (KD-21): surface resolved runtime model next to the @mention so
     // sender's 认知真相 aligns with runtime catalog. Handle is identity constant;
@@ -404,7 +416,6 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
     resolvedModel = compactRosterModel(resolvedModel);
     const mentionCell = resolvedModel ? `${mention} · ${resolvedModel}` : mention;
     // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
-    const projectRoot = findMonorepoRoot();
     const dossierSummary = getDossierRosterSummary(id, projectRoot);
     // KD-9: warn only for tracked cats (have dossier entry) missing l0RosterSummary.
     // Runtime/custom cats with no dossier entry silently use config fallback.
@@ -423,7 +434,7 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
       [config.caution ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
       72,
     );
-    rows.push(`| ${label} | ${mentionCell} | ${strengths} | ${cautionCell} |`);
+    rows.push(`| ${rosterLabel} | ${mentionCell} | ${strengths} | ${cautionCell} |`);
   }
 
   return [

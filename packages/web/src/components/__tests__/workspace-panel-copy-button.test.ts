@@ -75,7 +75,7 @@ function makeFile(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setupMocks(fileOverrides: Record<string, unknown> = {}) {
+function setupMocks(fileOverrides: Record<string, unknown> = {}, surface: 'files' = 'files') {
   const file = makeFile(fileOverrides);
   mocks.useWorkspace.mockReturnValue({
     worktrees: [{ id: 'main', branch: 'main', root: '/tmp/repo', isBare: false, isMain: true }],
@@ -116,6 +116,12 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       _workspaceFileSetAt: { ts: 0, threadId: null },
       workspaceMode: 'dev',
       setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
+      workspaceSurface: surface,
+      setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: 3000, path: '/' },
+      setWorkspacePreview: vi.fn(),
     };
     return sel(store);
   });
@@ -199,10 +205,10 @@ describe('WorkspacePanel Copy button', () => {
   });
 
   it('prevents Enter default in workspace search input while composing', async () => {
-    setupMocks();
+    setupMocks({}, 'files');
     await renderPanel();
 
-    const searchInput = container.querySelector('input[placeholder="搜索全部..."]') as HTMLInputElement | null;
+    const searchInput = container.querySelector('input[placeholder="搜索当前工作区…"]') as HTMLInputElement | null;
     if (!searchInput) throw new Error('Missing workspace search input');
 
     await act(async () => {

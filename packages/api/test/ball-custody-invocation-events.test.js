@@ -19,6 +19,7 @@ describe('F233 PR3: invocation ball-custody events', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: 'dead-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     store.update(created.invocationId, { status: 'running' });
 

@@ -114,4 +114,20 @@ describe('TrajectoryCard 渲染', () => {
     expect(c.textContent).toContain('分支已推送');
     expect(c.textContent).toContain('fix/f188-phase-k');
   });
+
+  it('keeps the complete diagnostic detail reachable through the compact-label contract', () => {
+    const branchName = `fix/${'recoverable-overflow-'.repeat(20)}tail-marker`;
+    const c = renderCard(
+      makeEntry({
+        kind: 'branch_pushed',
+        source: 'git-ref-snapshot',
+        at: 2000,
+        payload: { snapshot: { ...baseSnapshot, branchName } },
+      }),
+    );
+    const detail = c.querySelector<HTMLElement>('[data-testid="trajectory-detail"]');
+    expect(detail?.querySelector('[data-overflow-measure="inline"]')).not.toBeNull();
+    expect(detail?.querySelector('[class*="line-clamp-"]')).toBeNull();
+    expect(detail?.textContent).toContain('tail-marker');
+  });
 });

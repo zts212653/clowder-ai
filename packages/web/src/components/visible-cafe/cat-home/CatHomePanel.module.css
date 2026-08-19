@@ -1,0 +1,341 @@
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--console-overlay-light);
+  backdrop-filter: blur(6px);
+}
+
+.backdropClose {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.panel {
+  --home-paper: color-mix(in srgb, var(--semantic-warning-surface) 42%, var(--cafe-surface) 58%);
+  --home-paper-line: color-mix(in srgb, var(--semantic-warning) 11%, transparent);
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(460px, 100vw);
+  height: 100%;
+  overflow: hidden;
+  color: var(--cafe-text);
+  background: color-mix(in srgb, var(--console-card-bg) 94%, transparent);
+  border-left: 1px solid var(--console-border-soft);
+  box-shadow: var(--shadow-elevation-4);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 18px 12px;
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 1px solid var(--console-border-soft);
+  background: var(--console-field-bg);
+}
+
+.titleGroup {
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  margin: 0;
+  font-family: Fraunces, serif;
+  font-size: var(--console-font-xl);
+  line-height: 1.25;
+}
+
+.subtitle {
+  margin: 3px 0 0;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-xs);
+}
+
+.closeButton,
+.iconButton {
+  border: 1px solid var(--console-border-soft);
+  border-radius: 999px;
+  color: var(--cafe-text-secondary);
+  background: var(--console-field-bg);
+  cursor: pointer;
+}
+
+.closeButton {
+  width: 34px;
+  height: 34px;
+}
+
+.catSelect {
+  max-width: 150px;
+  margin-top: 9px;
+  padding: 5px 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 999px;
+  color: var(--cafe-text-secondary);
+  background: var(--console-field-bg);
+  font-size: var(--console-font-xs);
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  padding: 0 18px 14px;
+  border-bottom: 1px solid var(--console-border-soft);
+}
+
+.tab,
+.button,
+.buttonSecondary {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--console-border-soft);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+
+.tab,
+.buttonSecondary {
+  color: var(--cafe-text-secondary);
+  background: var(--console-field-bg);
+}
+
+.tabActive,
+.button {
+  color: var(--cafe-surface);
+  background: var(--cafe-accent);
+  border-color: var(--cafe-accent);
+}
+
+.button:disabled,
+.buttonSecondary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.content {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 24px;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+.sectionHeading {
+  margin: 0;
+  font-family: Fraunces, serif;
+  font-size: var(--console-font-lg);
+}
+
+.muted,
+.hint {
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-xs);
+  line-height: 1.6;
+}
+
+.empty,
+.error,
+.statusCard,
+.previewCard {
+  padding: 14px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 16px;
+  background: var(--console-field-bg);
+  font-size: var(--console-font-compact);
+  line-height: 1.6;
+}
+
+.error {
+  color: var(--semantic-critical);
+  background: var(--semantic-critical-surface);
+  border-color: var(--semantic-critical);
+}
+
+.success {
+  color: var(--semantic-success);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.field,
+.wideField {
+  display: grid;
+  gap: 6px;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+  font-weight: 600;
+}
+
+.wideField {
+  grid-column: 1 / -1;
+}
+
+.input,
+.select {
+  min-width: 0;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 11px;
+  color: var(--cafe-text);
+  background: var(--console-field-bg);
+  font: inherit;
+}
+
+.switchRow,
+.weekdayRow,
+.actions,
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.switchRow {
+  justify-content: space-between;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--console-field-bg);
+}
+
+.switchRow input,
+.weekdayRow input {
+  accent-color: var(--cafe-accent);
+}
+
+.weekday {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--console-field-bg);
+  font-size: var(--console-font-xs);
+}
+
+.previewFacts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.fact {
+  padding: 9px;
+  border-radius: 12px;
+  background: var(--console-hover-bg);
+}
+
+.fact strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: var(--console-font-xs);
+}
+
+.diaryCard {
+  position: relative;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--semantic-warning) 24%, transparent);
+  border-radius: 16px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0, transparent 23px, var(--home-paper-line) 24px), var(--home-paper);
+  box-shadow: var(--shadow-elevation-2);
+}
+
+.diaryCard::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20px;
+  width: 58px;
+  height: 10px;
+  background: color-mix(in srgb, var(--cafe-accent) 28%, transparent);
+}
+
+.diaryDate {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+
+.diaryTitle {
+  margin: 12px 0 6px;
+  font-family: Fraunces, serif;
+  font-size: var(--console-font-lg);
+  line-height: 1.35;
+}
+
+.summary {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.diaryBody {
+  max-height: min(340px, 44vh);
+  margin-top: 12px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cafe-surface) 80%, transparent);
+}
+
+.notice {
+  margin: 10px 0 0;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+
+.cardActions {
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .panel {
+    width: 100vw;
+    border-left: 0;
+  }
+
+  .formGrid,
+  .previewFacts {
+    grid-template-columns: 1fr;
+  }
+}

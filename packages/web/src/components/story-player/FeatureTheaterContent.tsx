@@ -10,7 +10,7 @@
  * AC-E3: Spotlight/dim visual state per panel
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { GuestCardState } from '@/lib/story-player/types';
 import { useFeatureReplay } from '@/lib/story-player/useFeatureReplay';
 import { GuestCard } from './GuestCard';
@@ -39,9 +39,8 @@ export function FeatureTheaterContent({ featId }: { featId: string }) {
     doToggleAdaptivePacing,
   } = useFeatureReplay({ featId });
 
-  // Guest card state: snapshot triggered card data so it persists even when
-  // playback advances past the cross-feature event (Cloud P2-1 fix).
-  // activeCardData holds the card props until onFadeComplete fires.
+  // Snapshot the latest cross-feature event so its canonical-thread jump stays
+  // reachable after the rich card compacts and playback advances.
   const [activeCardData, setActiveCardData] = useState<GuestCardState | null>(null);
   const lastTriggeredIndex = useRef(-1);
 
@@ -54,10 +53,6 @@ export function FeatureTheaterContent({ featId }: { featId: string }) {
   } else if (!guestCard && lastTriggeredIndex.current !== -1) {
     lastTriggeredIndex.current = -1;
   }
-
-  const handleGuestCardFade = useCallback(() => {
-    setActiveCardData(null);
-  }, []);
 
   if (isLoading) {
     return (
@@ -116,7 +111,6 @@ export function FeatureTheaterContent({ featId }: { featId: string }) {
               contentSnippet={activeCardData.contentSnippet}
               catId={activeCardData.catId}
               visible={!!activeCardData}
-              onFadeComplete={handleGuestCardFade}
             />
           </div>
         )}

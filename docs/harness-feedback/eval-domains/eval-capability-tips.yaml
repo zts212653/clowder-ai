@@ -1,32 +1,38 @@
 ---
 # F244 Phase D AC-D2 — Capability Tips eval domain registration.
 #
-# Data flow (design — not yet wired):
-#   1. Web client records CapabilityTipUsageEvent in localStorage (PR-D1)
-#   2. Future: web→API telemetry rollup sends daily usage batch
-#   3. Source adapter reads rollup, produces eval traces
-#   4. Eval cat (opus-47 in capability-wakeup domain) extends verdict
-#      to include tips effectiveness signals
+# Data flow (F268 Phase B wired):
+#   1. Web client records events into a bounded, retrying 7d queue
+#   2. Authenticated API atomically writes a 14d receipt + 90d UTC-day aggregate
+#   3. capability-tips-usage projects an explicit window with no_data/insufficient
+#   4. Future Phase C verdict consumes the projection after F267 certification
 #
-# Current state (Phase D):
-#   - Usage events persist in localStorage (PR-D1 ✅)
-#   - Stale/sunset check script validates sourceRef integrity (PR-D2)
-#   - Dogfood report produced from operator's 5 manual rounds (PR-D2)
-#   - enabled: false — sourceAdapter trace producer not yet wired;
-#     re-enable when web→API telemetry pipeline is built
+# Current state:
+#   - Web→API→durable aggregate→source adapter is implemented (F268 Phase B)
+#   - Opportunity denominator is unavailable; exposure is not substituted
+#   - enabled: false — F267 certificate + checked-in replay evidence refs are absent
+#   - Production pnpm check consumes registry/eval-capability-tips-enable-gate.yaml
+#     and validates typed/provenanced F267 certificate + F268 replay artifacts
 #
 # Why a separate domain (not extending eval:capability-wakeup):
 #   - Different signal source: tips usage events vs session trace analysis
 #   - Different cadence: tips effectiveness needs multi-week window
-#   - Different handoff target: tips → F244 owner, wakeup → F203 owner
-#   - Can share evalCat (opus-47) — domain runner, not signal source
+#   - Different handoff target: tips → F244, wakeup → F203
+#
+# Phase C ownership:
+#   - operator message 0001785105866266-000010-8f3261db assigns the active run to
+#     Sol with Terra as the independent calibrator while the Ragdoll seats are
+#     unavailable.
+#   - Terra is a review role, not a second runtime evalCat field; final Phase C
+#     artifacts still require his non-author exact-artifact review.
 domainId: eval:capability-tips
 displayName: Capability Tips Effectiveness
+descriptionForHuman: 能力提示有没有用——给猫弹的 tip 真被点了吗、点完真用上了吗
 systemThreadId: thread_eval_capability_tips
 evalCat:
-  catId: opus-47
-  handle: "@opus47"
-  model: claude-opus-4-7
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
 frequency: weekly
 sourceAdapter: capability-tips-usage
 sourceRefsKind: capability-tips-usage-window
@@ -40,7 +46,7 @@ threadPolicy:
 legacyScheduledTaskIds: []
 handoffTargetResolver:
   featureId: F244
-  ownerCatId: opus
+  ownerCatId: codex-sol
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 72

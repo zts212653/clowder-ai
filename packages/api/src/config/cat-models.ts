@@ -20,7 +20,7 @@ function getCatModelEnvKey(catId: string): string {
  * 获取猫的实际模型。
  * 运行时读 catRegistry（.cat-cafe/cat-catalog.json），环境变量可 override。
  */
-export function getCatModel(catName: string): string {
+export function getCatModel(catName: string, configuredFallback?: string): string {
   // 1. 环境变量最高优先 (dynamic key: CAT_{CATID}_MODEL)
   const envKey = getCatModelEnvKey(catName);
   const envValue = process.env[envKey]?.trim();
@@ -33,6 +33,11 @@ export function getCatModel(catName: string): string {
   if (entry) {
     return entry.config.defaultModel;
   }
+
+  // Read models may project a resolved runtime-catalog member before that
+  // member has been reconciled into the process registry. Keep the same env
+  // precedence while accepting the caller's concrete catalog value.
+  if (configuredFallback) return configuredFallback;
 
   throw new Error(`No model configured for cat "${catName}"`);
 }

@@ -21,6 +21,7 @@ async function collect(iterable) {
 
 let tempDir;
 let invokeSingleCat;
+let SessionChainStore;
 
 describe('#774 CLI timeout retry on session resume', () => {
   before(async () => {
@@ -28,6 +29,7 @@ describe('#774 CLI timeout retry on session resume', () => {
     process.env.AUDIT_LOG_DIR = tempDir;
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     invokeSingleCat = mod.invokeSingleCat;
+    ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
   });
 
   after(async () => {
@@ -55,6 +57,24 @@ describe('#774 CLI timeout retry on session resume', () => {
       apiUrl: 'http://127.0.0.1:3004',
       ...overrides,
     };
+  }
+
+  function makeManagedSessionStore({ threadId, cliSessionId, onUpdate }) {
+    const store = new SessionChainStore();
+    store.create({
+      cliSessionId,
+      threadId,
+      catId: 'codex',
+      userId: 'u1',
+    });
+    if (onUpdate) {
+      const update = store.update.bind(store);
+      store.update = (id, patch) => {
+        onUpdate(id, patch);
+        return update(id, patch);
+      };
+    }
+    return store;
   }
 
   it('resume + timeout + only system_info → drops session and retries fresh', async () => {
@@ -86,23 +106,10 @@ describe('#774 CLI timeout retry on session resume', () => {
     };
 
     const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-stale',
-            cliSessionId: 'cli-sess-stale',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-stale',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async () => {},
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-timeout-retry',
+        cliSessionId: 'cli-sess-stale',
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -165,26 +172,11 @@ describe('#774 CLI timeout retry on session resume', () => {
         },
         resolveWorkingDirectory: () => '/tmp/test',
       },
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-full',
-            cliSessionId: 'cli-sess-full',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-full',
-          cliSessionId: 'cli-sess-full',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async (id, patch) => {
-          updateCalls.push({ id, patch });
-        },
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-overflow-retry',
+        cliSessionId: 'cli-sess-full',
+        onUpdate: (id, patch) => updateCalls.push({ id, patch }),
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -223,7 +215,7 @@ describe('#774 CLI timeout retry on session resume', () => {
   it('resume + timeout + substantive model output → does NOT retry', async () => {
     let attempt = 0;
     const service = {
-      async *invoke(_prompt, opts) {
+      async *invoke(_prompt, _opts) {
         attempt++;
         // Has real model output before timeout → should not retry
         yield { type: 'text', catId: 'codex', content: 'partial work', timestamp: Date.now() };
@@ -244,23 +236,10 @@ describe('#774 CLI timeout retry on session resume', () => {
     };
 
     const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-active',
-            cliSessionId: 'cli-sess-active',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-active',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async () => {},
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-no-retry-substantive',
+        cliSessionId: 'cli-sess-active',
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -332,5 +311,109 @@ describe('#774 CLI timeout retry on session resume', () => {
     // Error should be present
     const errors = msgs.filter((m) => m.type === 'error');
     assert.ok(errors.length > 0, 'timeout error should be delivered');
+  });
+
+  // F212 Phase H R1 P1-2 (Sol runtime forensics 2026-07-10): the REAL 217969a7 archive
+  // pattern lives at the invoke-single-cat layer, not inside a single spawnCli iteration.
+  // The archived sequence:
+  //   1. Attempt #1: thread.started → turn.started → 6× error → turn.failed → __cliError (transient CLI exit)
+  //   2. invoke-single-cat suppresses the transient error (isTransientCliExitCode1) and retries
+  //   3. Attempt #2: thread.started → turn.started → item.completed → turn.completed → success
+  // My earlier codex-agent-service.test.js `archive 217969a7 recovery pattern` test compressed
+  // both attempts into a single mock process which does NOT reflect the real control flow.
+  // It was refactored to `semanticDone contract` (still valid but honestly named). This test
+  // covers the authentic retry boundary at the correct layer.
+  // Provenance: cat-cafe-runtime/packages/api/data/cli-raw-archive/2026-07-09/217969a7-*.ndjson
+  it('F212 Phase H R1 P1-2 archive 217969a7 authentic pattern: transient exit-1 → retry → success', async () => {
+    let attempt = 0;
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, opts) {
+        attempt++;
+        optionsSeen.push(opts);
+        if (attempt === 1) {
+          // Attempt #1: mirrors real archive first spawn — six transient upstream error
+          // events + turn.failed + cli-spawn synthesizes __cliError with the F212
+          // canonical "CLI 异常退出" message that isTransientCliExitCode1 matches on.
+          for (let i = 0; i < 6; i++) {
+            yield {
+              type: 'system_info',
+              catId: 'codex',
+              content: JSON.stringify({ type: 'stream_error', message: 'stream disconnected before completion' }),
+              timestamp: Date.now(),
+            };
+          }
+          yield {
+            type: 'error',
+            catId: 'codex',
+            error: 'CLI 异常退出 (code: 1, signal: none)',
+            metadata: {
+              cliDiagnostics: {
+                reasonCode: undefined,
+                publicSummary: '未识别的 CLI 错误',
+                publicHint: '重试或换猫',
+                safeExcerpt: 'stream disconnected before completion',
+                debugRef: { command: 'codex', exitCode: 1, signal: null },
+              },
+            },
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        } else {
+          // Attempt #2: fresh spawn, semantic success (item.completed + turn.completed
+          // → canonical semanticDone → cli-spawn does NOT synthesize __cliError even
+          // if the shell exits 1 as the Codex 0.98+ quirk).
+          yield {
+            type: 'text',
+            catId: 'codex',
+            content: 'Recovered result after transient exit retry.',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        }
+      },
+    };
+
+    // Session resume path (matches archive: existing runtime session cliSessionId).
+    const deps = makeDeps({
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-archive-217969a7',
+        cliSessionId: 'cli-sess-217969a7',
+      }),
+      sessionSealer: {
+        reconcileStuck: async () => {},
+      },
+    });
+
+    const params = {
+      catId: 'codex',
+      userId: 'u1',
+      threadId: 't-archive-217969a7',
+      prompt: 'archive-driven retry pattern',
+      service,
+    };
+
+    const msgs = await collect(invokeSingleCat(deps, params));
+
+    // The invariant: two SEPARATE service.invoke() calls, second yields recovered text.
+    assert.equal(attempt, 2, 'authentic 217969a7 pattern requires two separate service.invoke calls');
+
+    // Attempt #1 transient error must NOT appear as a persisted user-visible error —
+    // the retry path swallowed it. Only the recovered text should surface.
+    const textMsgs = msgs.filter((m) => m.type === 'text');
+    assert.ok(textMsgs.length > 0, 'recovered text from attempt #2 must reach consumer');
+    assert.ok(
+      textMsgs.some((m) => m.content === 'Recovered result after transient exit retry.'),
+      'the exact recovered content should be yielded',
+    );
+
+    // Attempt #1's transient error must be suppressed (not yielded as user-facing error)
+    // since retry succeeded. This is the authentic 217969a7 outcome.
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(
+      errors.length,
+      0,
+      'transient exit-1 must be suppressed when retry succeeds (matches archive 217969a7 real outcome)',
+    );
   });
 });

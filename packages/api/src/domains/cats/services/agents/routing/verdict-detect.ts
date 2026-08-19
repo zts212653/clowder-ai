@@ -7,6 +7,7 @@
  * 设计原则：
  * - Prompt-first、非阻断：仅用于提示，不影响链路。
  * - 保守关键词：只匹配明确 review 语义的信号词（"通过/拒绝"因与日常用法重叠过多不列入）。
+ * - 来源在 route 前分类：进入本模块的 text 已是 cat output；provider failure 必须是 structured error。
  * - 纯函数：route-serial 层负责调用 + 广播连接器消息。
  *
  * 与 Phase A 乒乓球警告同属 harness 安全网；prompt 层规则（AC-C5/C6）在 exit check 与

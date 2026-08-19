@@ -21,7 +21,7 @@ created: 2026-03-11
 
 ### 核心动机
 
-Cat Café 有完整的 Web 前端，交互能力远超 CLI。可交互 Rich Block 是**通用基础设施**，不只服务 F087 训练营，还能用于 operator 决策、Review 投票、确认操作等所有需要用户选择的场景。
+Clowder AI 有完整的 Web 前端，交互能力远超 CLI。可交互 Rich Block 是**通用基础设施**，不只服务 F087 训练营，还能用于 operator 决策、Review 投票、确认操作等所有需要用户选择的场景。
 
 ## What
 

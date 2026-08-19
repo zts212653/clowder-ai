@@ -14,6 +14,13 @@ export const ProfileUpdateProposalKeys = {
   threadList: (threadId: string) => `profile-update:thread:${threadId}`,
 
   /**
+   * Sorted set of settled (approved/rejected) proposal IDs for a user, scored by decision timestamp.
+   * profile-update:settled:{userId}
+   * F246 Phase H: enables history listing without full-scan.
+   */
+  userSettled: (userId: string) => `profile-update:settled:${userId}`,
+
+  /**
    * Idempotency cache for cat propose calls: dedup:profile-update:{userId}:{clientRequestId} → proposalId
    * Short TTL (minutes), strictly per-user.
    */

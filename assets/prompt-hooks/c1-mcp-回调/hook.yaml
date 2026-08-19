@@ -22,5 +22,5 @@ safetyTier: editable
 transparencyTier: opt-in-view
 governanceTier: auto-evolve
 
-# CVO-facing
+# operator-facing
 userExplanation: "MCP 服务可用时注入的回调提示"

@@ -9,7 +9,7 @@
 import { catRegistry } from '@cat-cafe/shared';
 import { DEFAULT_CLI_TIMEOUT_MS, readCliTimeoutMsFromEnv } from '../utils/cli-timeout.js';
 import { configStore } from './ConfigStore.js';
-import { getAllCatBudgets } from './cat-budgets.js';
+import { getAllCatCapacities } from './cat-budgets.js';
 import { getCoCreatorConfig } from './cat-config-loader.js';
 import { getCatModel } from './cat-models.js';
 import { getCodexApprovalPolicy, getCodexSandboxMode } from './codex-cli.js';
@@ -45,11 +45,6 @@ function formatTtl(raw: string | undefined, defaultSeconds: number): string {
 export function collectConfigSnapshot(): ConfigSnapshot {
   const env = process.env;
 
-  // Context (from ContextAssembler defaults + env overrides)
-  const maxMessages = Number(env.CONTEXT_HISTORY_LIMIT) || 20;
-  const maxContentLength = Number(env.MAX_CONTEXT_MSG_CHARS) || 1500;
-  const maxTotalChars = 8000;
-  const maxPromptTokens = Number(env.MAX_PROMPT_TOKENS) || 32000;
   const coCreator = getCoCreatorConfig();
 
   // CLI (from cli-spawn.ts defaults, configurable via CLI_TIMEOUT_MS, 0 = disable)
@@ -110,14 +105,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       ...(coCreator.avatar ? { avatar: coCreator.avatar } : {}),
       ...(coCreator.color ? { color: coCreator.color } : {}),
     },
-    context: {
-      maxMessages,
-      maxContentLength,
-      maxTotalChars,
-      maxPromptTokens,
-      note: 'These are assembleContext defaults; see perCatBudgets for actual per-cat limits',
-    },
-    perCatBudgets: getAllCatBudgets(),
+    perCatCapacities: getAllCatCapacities(),
     cli: { timeoutMs, killGraceMs, codexSandboxMode, codexApprovalPolicy },
     storage: { messageTTL, threadTTL, taskTTL, maxMessages: maxMessagesStore, maxThreads },
     upload: { maxFileSize, maxFiles },

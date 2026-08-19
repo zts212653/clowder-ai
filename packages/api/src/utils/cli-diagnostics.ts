@@ -2,7 +2,7 @@
  * F212 Phase A — CLI error diagnostics builder + classifier.
  *
  * Public API:
- *  - `classifyCliError(text)`: text → reasonCode | undefined
+ *  - `classifyCliError(text, context?)`: text + provenance → reasonCode | undefined
  *  - `buildCliDiagnostics({ rawText, debugRef })`: full CliDiagnostics payload
  *
  * Design contract:
@@ -12,7 +12,7 @@
  *  - AC-A9 red line: no raw stderr ever in publicSummary / publicHint (humanized only)
  */
 
-import type { CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
+import type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from '@cat-cafe/shared';
 import { CLASSIFIER_PATTERNS } from './cli-error-patterns.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 
@@ -20,14 +20,32 @@ import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 // folded panel can import the same contract. Re-exported here for existing api callers.
 export type { CliDiagnostics, CliErrorReasonCode };
 
+export interface CliErrorClassificationContext {
+  /** Exact flag names added by the harness for this invocation, never operator args. */
+  managedArgvFlags?: readonly string[];
+}
+
+const UNKNOWN_MANAGED_ARGV_FLAG = /unknown option\s+['"`]?(--agent-file)(?=['"`\s]|$)/i;
+
+function hasManagedArgvProvenance(text: string, context?: CliErrorClassificationContext): boolean {
+  const managed = new Set(context?.managedArgvFlags ?? []);
+  const rejectedFlag = UNKNOWN_MANAGED_ARGV_FLAG.exec(text)?.[1]?.toLowerCase();
+  return rejectedFlag !== undefined && managed.has(rejectedFlag);
+}
+
 /**
  * F212 AC-A4 + AC-A8: classify stderr OR NDJSON stream error text into known reasonCodes.
  * Returns undefined for unknown; callers must surface generic message + never expose raw text.
  */
-export function classifyCliError(text: string): CliErrorReasonCode | undefined {
+export function classifyCliError(
+  text: string,
+  context?: CliErrorClassificationContext,
+): CliErrorReasonCode | undefined {
   if (!text) return undefined;
   for (const { code, regex } of CLASSIFIER_PATTERNS) {
-    if (regex.test(text)) return code;
+    if (!regex.test(text)) continue;
+    if (code === 'incompatible_cli_arguments' && !hasManagedArgvProvenance(text, context)) continue;
+    return code;
   }
   return undefined;
 }
@@ -97,6 +115,14 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // Markdown version. Provider-neutral phrasing per cloud codex R2 P2.
     hint: '不是你的额度问题——是 CLI 上游 provider 服务器侧临时限流（provider 错误里通常会明示如 "not your usage limit" / "529 Overloaded"）。等 30-60 秒重试或换一只猫（不同 provider）；反复出现去你用的 provider 状态页（Anthropic / OpenAI / Google / DeepSeek 各有 status 页）。',
   },
+  cli_response_timeout: {
+    summary: 'CLI 响应超时',
+    hint: 'CLI 在配置的响应时限内没有产生新输出；系统已按有界终止流程清理进程。可用 invocationId 检索后台时序证据。',
+  },
+  cli_stall_timeout: {
+    summary: 'CLI 长时间无响应',
+    hint: 'CLI 长时间静默且进程仍存活；系统先请求优雅中断，未及时结束才逐级清理，整个退出链有硬上限。可用 invocationId 检索后台时序证据。',
+  },
   // F212 Phase G (AC-G1): silent_completion — CLI 正常完成但事件流里没有 text event
   // (e.g. OpenCode + DeepSeek 用户撞的 step_start-only NDJSON, clowder-ai#875)。NOT 真错误
   // 但走 cliDiagnostics surface 让用户拿到结构化证据替代 generic "completed without
@@ -110,7 +136,41 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // invocationId. Previous hint sent users to debugRef — wrong place, killed UX value.
     hint: 'CLI 进程正常退出，但没有可显示的文字输出（事件流没有 text event，或 plain-text stdout 为空）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream / auth / profile 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
   },
+  active_writer_recovery: {
+    summary: '原生会话仍绑定原 writer host',
+    hint: '原 Session 已保留，本轮没有新建或封存会话。正在等待原 host 释放；若持续不恢复，重启对应 runtime 后重试。',
+  },
+  // F212 Phase H (Sol runtime forensics 2026-07-09, archive 97449e4b): upstream provider
+  // policy engine (Codex 0.98+) rejected content ("flagged for possible cybersecurity risk").
+  // NOT a Clowder AI bug — the upstream policy layer made the call. User needs actionable
+  // rephrase guidance, not "unknown CLI error" fallback. Excluded from F222 auto-issue.
+  // clowder-ai#1324 (refs #848): harness argv vs installed CLI version drifted apart.
+  // Plain text only — CliDiagnosticsPanel renders publicHint verbatim in a <span>.
+  // Deliberately says "重试也不会好" because the retry is now suppressed: users who saw
+  // the old "未识别的 CLI 错误 ×2" were watching a deterministic failure counted twice.
+  incompatible_cli_arguments: {
+    summary: 'CLI 参数与当前 CLI 版本不兼容',
+    hint: 'CLI 自身的参数解析器拒绝了这次调用——通常是 CLI 升级后某个 flag 被移除、改名，或变成了与其他 flag 互斥，和猫咖的调用方式产生了版本漂移。这不是你的配置或额度问题，重试也不会好（同样的参数会被同样拒绝，系统已跳过无谓重试）。展开下方“详细诊断”能看到 CLI 原文点名的具体参数；把它连同 CLI 版本（例如 kimi --version / codex --version）反馈给维护者即可修复。',
+  },
+  upstream_policy_reject: {
+    summary: '上游 provider policy 拒绝',
+    hint: 'CLI 上游 provider 的 policy 引擎拒绝了这次请求（例如判断为敏感内容）。这不是 Clowder AI bug — 是 provider 侧决策。建议：换个表达方式重试 prompt（provider 通常给了 "try rephrasing" 提示）；换一只不同 provider 的猫；反复触发去查你用的 provider policy 文档（Anthropic / OpenAI / DeepSeek 各有 acceptable use policy）。展开下方"详细诊断"看具体 policy 消息。',
+  },
 };
+
+export function buildActiveWriterRecoveryDiagnostic(input: {
+  state: CliActiveWriterRecoveryState;
+  debugRef: CliDiagnostics['debugRef'];
+}): CliDiagnostics {
+  const text = REASON_TEXT.active_writer_recovery;
+  return {
+    reasonCode: 'active_writer_recovery',
+    publicSummary: text.summary,
+    publicHint: text.hint,
+    activeWriterRecovery: { state: input.state },
+    debugRef: input.debugRef,
+  };
+}
 
 const UNKNOWN_TEXT = {
   summary: '未识别的 CLI 错误',
@@ -168,7 +228,7 @@ function truncateEvidenceString(value: string, maxChars: number, additionalHomeP
 function redactNonHomePaths(input: string): string {
   return input
     .replace(/\b[A-Za-z]:\\(?:[^\s"'`<>|]+\\)*[^\s"'`<>|]+/g, '[PATH_REDACTED]')
-    .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
+    .replace(/(^|[\s"'`(=:[{,])\/(?!\/|tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
 }
 
 function truncateSilentEvidenceString(
@@ -190,7 +250,7 @@ function extractSafeExcerpt(
   additionalHomePaths?: readonly string[],
 ): string {
   // KD-2: sanitize entire blob first; truncation happens on sanitized output.
-  const sanitized = sanitizeCliStderr(rawText, childHomeSanitizerOptions(additionalHomePaths));
+  const sanitized = redactNonHomePaths(sanitizeCliStderr(rawText, childHomeSanitizerOptions(additionalHomePaths)));
   const allLines = sanitized.split('\n');
   // Keep meaningful lines (non-empty after trim) but preserve original line content (don't trim away whitespace details).
   const lines = allLines.filter((l) => l.trim().length > 0);
@@ -235,10 +295,13 @@ function maybeExtractSafeExcerpt(args: {
   rawText: string;
   reasonCode: CliErrorReasonCode;
   additionalHomePaths?: readonly string[];
+  classificationContext?: CliErrorClassificationContext;
   requireClassifierMatch: boolean;
 }): string | undefined {
   if (!args.rawText.trim()) return undefined;
-  if (args.requireClassifierMatch && classifyCliError(args.rawText) !== args.reasonCode) return undefined;
+  if (args.requireClassifierMatch && classifyCliError(args.rawText, args.classificationContext) !== args.reasonCode) {
+    return undefined;
+  }
   return extractSafeExcerpt(args.rawText, args.reasonCode, args.additionalHomePaths) || undefined;
 }
 
@@ -275,9 +338,29 @@ export function formatCliStderrForLog(stderrBuffer: string, env: NodeJS.ProcessE
   return sanitizeCliStderr(stderrBuffer).slice(-1000);
 }
 
+export type CliTimeoutTerminalKind = 'response_timeout' | 'stall_timeout';
+export type CliTimeoutTerminationStage = 'none' | 'interrupt' | 'terminate' | 'kill';
+
+/**
+ * Causal timeout snapshot. postKill fields are observations made after the
+ * timeout commit and must never be projected as the terminal cause.
+ */
+export interface CliTimeoutTerminalContext {
+  kind: CliTimeoutTerminalKind;
+  configuredTimeoutMs: number;
+  observedSilenceDurationMs: number;
+  processAliveAtTimeout: boolean;
+  postKillExitCode: number | null;
+  postKillSignal: NodeJS.Signals | string | null;
+  signalsSent: readonly NodeJS.Signals[];
+  finalStage: CliTimeoutTerminationStage;
+}
+
 export function buildCliDiagnostics(args: {
   rawText: string;
   debugRef: CliDiagnostics['debugRef'];
+  /** Harness-owned argv flags for this exact invocation; operator args must never enter this list. */
+  managedArgvFlags?: readonly string[];
   /** F212 Phase D (AC-D3): CC structured result error message (errors[] / result fields from a
    *  Claude CLI result error event). Safe to surface even when reasonCode is unknown — it is
    *  CC's own standard wording, NOT raw stderr. */
@@ -294,8 +377,30 @@ export function buildCliDiagnostics(args: {
   safeExcerptRawText?: string;
   /** Extra HOME roots used by an isolated child CLI spawn, redacted before public excerpts. */
   additionalHomePaths?: readonly string[];
+  /** F212 hotfix: explicit timeout cause bypasses stderr classification. */
+  terminalContext?: CliTimeoutTerminalContext;
 }): CliDiagnostics {
-  const reasonCode = classifyCliError(args.rawText);
+  if (args.terminalContext) {
+    const { exitCode: _postKillExitCode, ...causalDebugRef } = args.debugRef;
+    const terminal = args.terminalContext;
+    const reasonCode: CliErrorReasonCode =
+      terminal.kind === 'stall_timeout' ? 'cli_stall_timeout' : 'cli_response_timeout';
+    const configuredSeconds = Math.round(terminal.configuredTimeoutMs / 1000);
+    const observedSeconds = Math.round(terminal.observedSilenceDurationMs / 1000);
+    const baseText = REASON_TEXT[reasonCode];
+    const timing = `配置阈值 ${configuredSeconds}s，实际静默 ${observedSeconds}s。`;
+    return {
+      reasonCode,
+      publicSummary: baseText.summary,
+      publicHint: `${timing}${baseText.hint}`,
+      debugRef: causalDebugRef,
+    };
+  }
+
+  const classificationContext: CliErrorClassificationContext = {
+    ...(args.managedArgvFlags ? { managedArgvFlags: args.managedArgvFlags } : {}),
+  };
+  const reasonCode = classifyCliError(args.rawText, classificationContext);
   const additionalHomePaths = args.additionalHomePaths;
   const excerptRawText = args.safeExcerptRawText ?? args.rawText;
   const classifierSafeExcerpt = reasonCode
@@ -303,6 +408,7 @@ export function buildCliDiagnostics(args: {
         rawText: excerptRawText,
         reasonCode,
         additionalHomePaths,
+        classificationContext,
         requireClassifierMatch: args.safeExcerptRawText !== undefined,
       })
     : undefined;

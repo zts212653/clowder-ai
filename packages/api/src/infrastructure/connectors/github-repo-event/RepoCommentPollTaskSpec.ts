@@ -41,6 +41,10 @@ import type { CommunityEvent } from '@cat-cafe/shared';
 import { issueSubjectKey } from '@cat-cafe/shared';
 import type { ICommunityEventLog } from '../../../domains/community/CommunityEventLog.js';
 import { issueCommentEventId } from '../../../domains/community/community-keys.js';
+import {
+  classifyIssueComment,
+  type IssueCommentClassification,
+} from '../../../domains/community/issue-analysis/issue-comment-classifier.js';
 import type { GateResult, TaskSpec_P1 } from '../../scheduler/types.js';
 
 /** Minimal projector interface — only apply() is needed here. */
@@ -85,6 +89,8 @@ export interface RepoCommentPollTaskSpecOptions {
   readonly readCursor: (repo: string) => Promise<string | undefined>;
   /** Per-repo collection cursor write. */
   readonly writeCursor: (repo: string, cursor: string) => Promise<void>;
+  /** Canonical classifier shared with webhook and per-issue polling paths. */
+  readonly classifyComment?: (comment: RepoIssueComment) => IssueCommentClassification;
   readonly log: {
     info: (...args: unknown[]) => void;
     warn: (...args: unknown[]) => void;
@@ -128,6 +134,7 @@ async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string
     // here. They still advance the cursor below, so a repo with PR activity but no new issue
     // comments doesn't re-fetch the same pages every tick (cloud review R4 P2 — churn).
     if (!c.isPullRequest) {
+      const commentClassification = opts.classifyComment?.(c) ?? classifyIssueComment(c);
       const event: CommunityEvent = {
         sourceEventId: issueCommentEventId(repo, c.issueNumber, c.commentId),
         subjectKey: issueSubjectKey(repo, c.issueNumber),
@@ -138,6 +145,10 @@ async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string
           authorLogin: c.author,
           authorAssociation: c.authorAssociation,
           body: c.body,
+          critical: commentClassification.critical,
+          ...(commentClassification.suppressionReason
+            ? { suppressionReason: commentClassification.suppressionReason }
+            : {}),
         },
         at: Date.now(),
       };

@@ -37,8 +37,8 @@ export interface RightStatusPanelProps {
     evidence: number;
     followup: number;
   };
-  /** Panel width in px (clowder-ai#28: drag-to-resize). Falls back to 304. */
-  width?: number;
+  /** Resizable desktop width; responsive hosts pass 100% on narrow viewports. */
+  width?: number | string;
   /** Allow tests to render history section expanded (SSR default: collapsed). */
   initialHistoryOpen?: boolean;
 }
@@ -365,7 +365,7 @@ export function RightStatusPanel({
   // F26: Split into active (working now) vs history (appeared before)
   // review-#784 P2 + AC-Z15: pass intentMode so deriveActiveCats preserves the
   // full targetCats union during ideate rounds (matches ParallelStatusBar /
-  // MobileStatusSheet behavior; without this, finished-cat slots get demoted
+  // Responsive status-host behavior; without this, finished-cat slots get demoted
   // to history while the round is still running).
   const { activeCats, historyCats } = useMemo(() => {
     const snapshotCats = collectSnapshotActiveCats(catInvocations);
@@ -391,7 +391,7 @@ export function RightStatusPanel({
 
   return (
     <aside
-      className="hidden lg:flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
+      className="flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
       data-console-panel="status"
       style={{
         width: width ?? 304,
@@ -400,7 +400,6 @@ export function RightStatusPanel({
       }}
     >
       <div className="px-0.5 pb-1">
-        <p className="text-sm font-bold text-cafe">状态栏</p>
         <span className="text-micro text-cafe-secondary">当前模式：{modeLabel(intentMode)}</span>
       </div>
 

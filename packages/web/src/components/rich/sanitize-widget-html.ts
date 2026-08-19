@@ -8,6 +8,13 @@
  * - <base> tag (URL hijacking)
  *
  * Scripts are intentionally preserved — widgets need JS for charts/interactivity.
+ *
+ * Inline event handler attributes (onclick, onmouseover, …) are NOT preserved:
+ * DOMPurify's default ALLOWED_ATTR carries no on* handlers and we deliberately do
+ * not add them back. Nothing is lost — widgets bind listeners from inside <script>
+ * (addEventListener, or `el.onclick = …`, which never passes through the sanitizer),
+ * so allowing inline handlers would widen the XSS surface for syntax sugar alone.
+ * Authoring guidance lives in cat-cafe-skills/rich-messaging/SKILL.md.
  */
 import DOMPurify from 'dompurify';
 
@@ -21,5 +28,6 @@ export function sanitizeWidgetHtml(html: string): string {
     FORBID_TAGS: ['form', 'base', 'meta'],
     // Block attributes that could exfiltrate data
     FORBID_ATTR: ['formaction'],
+    // No ADD_ATTR by design — see the note on inline event handlers above
   });
 }

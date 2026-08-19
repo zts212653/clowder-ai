@@ -4,6 +4,8 @@ import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
 import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { formatTaskOutcomeLiveVerdictMarkdown } from './eval-task-outcome-renderer.js';
+import { buildClusterMetrics } from './task-outcome-cluster-metrics.js';
+import { projectPublicStoredEpisode } from './task-outcome-public-projection.js';
 import type { ResolvedTaskOutcomeWindow } from './task-outcome-source-resolver.js';
 import { sha256File } from './task-outcome-source-resolver.js';
 
@@ -57,7 +59,7 @@ export function generateTaskOutcomeLiveVerdict(
     windowEndMs: input.sourceWindow.windowEndMs,
     taskOutcomeDbPath: input.sourceWindow.taskOutcomeDbPath,
     eventMemoryDbPath: input.sourceWindow.eventMemoryDbPath,
-    episodes: input.sourceWindow.episodes,
+    episodes: input.sourceWindow.episodes.map(projectPublicStoredEpisode),
     signals: input.sourceWindow.signals,
     eventRows: input.sourceWindow.eventRows,
   });
@@ -122,6 +124,18 @@ function buildSnapshot(
   );
   const confidenceCounts = countBy(sourceWindow.eventRows, (event) => event.confidence);
 
+  // Day-24 verdict fix: deduplicate magic_word_ref by eventId.
+  // Historical signals may contain duplicate rows from pre-idempotency-guard era.
+  const magicWordRefSignals = sourceWindow.signals.filter(
+    (s) => s.record.type === 'magic_word_ref' && typeof s.record.eventId === 'string',
+  );
+  const distinctMagicWordRefCount = new Set(magicWordRefSignals.map((s) => s.record.eventId as string)).size;
+
+  // Day-36 verdict build: cluster-aware A2 rollup metrics.
+  // Group magic_word_ref by source messageId (from event-memory) to distinguish
+  // "one operator message with 4 magic words" from "4 independent interventions".
+  const clusterMetrics = buildClusterMetrics(sourceWindow, magicWordRefSignals);
+
   return {
     verdictId,
     evalSnapshotId: `eval-${domain.handoffTargetResolver.featureId}-${generatedAt.slice(0, 10)}`,
@@ -154,8 +168,9 @@ function buildSnapshot(
         frictionCounts: {
           permission_cancel_total: typeCounts.permission_cancel ?? 0,
           proposal_reject_total: typeCounts.proposal_reject ?? 0,
-          magic_word_ref_total: typeCounts.magic_word_ref ?? 0,
+          magic_word_ref_total: distinctMagicWordRefCount,
         },
+        clusterMetrics,
       },
       {
         id: 'F227-event-memory',

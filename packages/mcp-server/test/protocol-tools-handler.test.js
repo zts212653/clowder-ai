@@ -146,6 +146,39 @@ describe('poll tool handler — loop semantics', () => {
     assert.ok(result.content[0].text.includes('malformed result'));
   });
 
+  it('extracts the first image URL from a JSON fallback payload', async () => {
+    globalThis.fetch = mock.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: 'done',
+            resp_data: JSON.stringify({ image_urls: ['https://cdn.test/generated.png'] }),
+          }),
+        ),
+    );
+    const config = makeConfig({
+      text2video: {
+        submit: { method: 'POST', path: '/submit', response: { taskId: '$.id' } },
+        poll: {
+          method: 'GET',
+          path: '/status/{{taskId}}',
+          interval: 10,
+          maxAttempts: 3,
+          response: {
+            status: '$.status',
+            statusMap: { succeeded: ['done'], failed: ['error'] },
+            resultUrl: '$.missing_url',
+            fallbackResultUrl: '$.resp_data',
+          },
+        },
+      },
+    });
+    const poll = findTool(createProtocolTools(config), '_poll');
+    const result = await poll.handler({ capability: 'text2video', task_id: 'task-image-fallback' });
+    const data = JSON.parse(result.content[0].text);
+    assert.equal(data.resultUrl, 'https://cdn.test/generated.png');
+  });
+
   it('exhausts maxAttempts with exactly N requests (no extra poll)', async () => {
     let fetchCount = 0;
     globalThis.fetch = mock.fn(async () => {
@@ -358,6 +391,47 @@ describe('template variable wiring — vars reach request body', () => {
     assert.ok(body, 'fetch must receive body');
     assert.equal(body.image, 'https://t.co/img.png', 'imageUrl must render into request body');
     assert.equal(body.prompt, 'dance');
+  });
+
+  it('preserves submit vars when polling the returned task', async () => {
+    const bodies = [];
+    globalThis.fetch = mock.fn(async (_url, options) => {
+      if (options?.body) bodies.push(JSON.parse(options.body));
+      if (bodies.length === 1) return new Response(JSON.stringify({ id: 'model-task' }));
+      return new Response(JSON.stringify({ status: 'done', url: 'https://cdn.test/model-task.mp4' }));
+    });
+    const config = makeConfig({
+      text2video: {
+        submit: {
+          method: 'POST',
+          path: '/submit',
+          body: { req_key: '{{model | default:default-model}}', prompt: '{{prompt}}' },
+          response: { taskId: '$.id' },
+        },
+        poll: {
+          method: 'POST',
+          path: '/poll',
+          interval: 10,
+          maxAttempts: 1,
+          body: { req_key: '{{model | default:default-model}}', task_id: '{{taskId}}' },
+          response: {
+            status: '$.status',
+            statusMap: { succeeded: ['done'] },
+            resultUrl: '$.url',
+          },
+        },
+      },
+    });
+    const tools = createProtocolTools(config);
+    const submitted = await findTool(tools, '_submit').handler({
+      capability: 'text2video',
+      vars: { model: 'custom-model', prompt: 'dance' },
+    });
+    const { taskId } = JSON.parse(submitted.content[0].text);
+    await findTool(tools, '_poll').handler({ capability: 'text2video', task_id: taskId });
+
+    assert.equal(bodies[0].req_key, 'custom-model');
+    assert.equal(bodies[1].req_key, 'custom-model', 'poll must reuse the vars from the matching submit task');
   });
 
   it('videoUrl var renders into execute request body', async () => {

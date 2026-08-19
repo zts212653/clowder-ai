@@ -17,7 +17,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { signEditToken, verifyEditToken, writeWorkspaceFile } from '../domains/workspace/workspace-edit.js';
 import {
   getWorktreeRoot,
-  resolveWorkspacePath,
+  resolveWorkspaceFilesystemPath,
   WorkspaceSecurityError,
 } from '../domains/workspace/workspace-security.js';
 
@@ -114,7 +114,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
       // Reject non-editable files (binary, images, unknown extensions)
       if (!isEditable(filePath)) {
         reply.status(400);
@@ -157,7 +157,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
       // Check if file already exists
       try {
         await stat(resolved);
@@ -197,7 +197,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, dirPath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, dirPath);
       await mkdir(resolved, { recursive: true });
       return { path: dirPath };
     } catch (e) {
@@ -225,7 +225,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
       const s = await stat(resolved).catch(() => null);
       if (!s) {
         reply.status(404);
@@ -262,8 +262,8 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       const root = await getWorktreeRoot(worktreeId);
-      const resolvedOld = await resolveWorkspacePath(root, oldPath);
-      const resolvedNew = await resolveWorkspacePath(root, newPath);
+      const resolvedOld = await resolveWorkspaceFilesystemPath(root, oldPath);
+      const resolvedNew = await resolveWorkspaceFilesystemPath(root, newPath);
       // Source must exist
       const s = await stat(resolvedOld).catch(() => null);
       if (!s) {
@@ -322,7 +322,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
 
       const overwrite = (request.query as Record<string, string>).overwrite === 'true';
       const root = await getWorktreeRoot(worktreeId);
-      const resolved = await resolveWorkspacePath(root, filePath);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
 
       if (!overwrite) {
         try {

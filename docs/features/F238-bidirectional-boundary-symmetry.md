@@ -22,12 +22,12 @@ F237 Round-3 audit found a real dual-repo boundary gap while reviewing clowder-a
 
 | Surface | Evidence |
 |---------|----------|
-| PWA manifest | `packages/web/public/manifest.json` exported `Cat Café`, `猫猫`, and `三只 AI 猫猫的协作空间`. |
-| Concierge pet skin | `packages/web/public/concierge/skins/ragdoll-v1/pet.json` exported `Ragdoll v1` and `Cat Cafe default concierge skin`. |
-| L0 compiler | `scripts/compile-system-prompt-l0.mjs` exported `operator/operator`, Chinese cat-family governance, and `Cat Café MCP`. |
+| PWA manifest | `packages/web/public/manifest.json` exported `Clowder AI`, `猫猫`, and `Your AI team collaboration space`. |
+| Concierge pet skin | `packages/web/public/concierge/skins/ragdoll-v1/pet.json` exported `Ragdoll v1` and `Clowder AI default concierge skin`. |
+| L0 compiler | `scripts/compile-system-prompt-l0.mjs` exported `operator/operator`, Chinese cat-family governance, and `Clowder AI MCP`. |
 | Native L0 | `assets/system-prompts/system-prompt-l0.md` exported residual `production data boundary` and `operator`. |
-| YAML roots | `sop-definitions/development.yaml` exported `Cat Cafe`, `operator`, and `operator`; `plugins/github/plugin.yaml` exported `Cat Cafe`. |
-| Desktop root | `desktop/**` retained Cat Cafe product strings in package metadata, installer, shell scripts, and splash UI. |
+| YAML roots | `sop-definitions/development.yaml` exported `Clowder AI`, `operator`, and `operator`; `plugins/github/plugin.yaml` exported `Clowder AI`. |
+| Desktop root | `desktop/**` retained Clowder AI product strings in package metadata, installer, shell scripts, and splash UI. |
 | Public skills | `cat-cafe-skills/**` retained multiple home-only role and culture terms after current sanitizer rules. |
 
 Mock intake plan verification also confirmed these paths currently fall through to `safe-cherry-pick`: `assets/system-prompts/**`, `assets/prompt-templates/**`, `sop-definitions/**`, `guides/**`, and `desktop/**`. The root cause is structural: outbound rules, inbound classifier, pre-commit hook, test fixtures, and `opensource-ops` prose each maintain their own partial boundary lists.
@@ -89,7 +89,7 @@ Add representative round-trip fixtures and a recurring verdict: public export ha
 - [x] AC-A4: `cat-cafe-skills/opensource-ops/SKILL.md` principles 12/13/22 reference `assets/brand-dictionary.yaml` as the boundary truth source.
 
 ### Phase B（Outbound Dictionary Enforcement）✅
-- [x] AC-B1: `_sanitize-rules.pl` extended to cover `.json`, `.mjs`, `.yaml/.yml` brand/L4 mappings (operator→co-creator/operator, operator→operator, production data boundary, 猫猫, Cat Cafe/Café); two-pass key quoting for JS/TS; mentionPatterns dedupe. Remaining extensions (.html/.iss/.ps1/.bat/.py/.sh) deferred — no current leaks found in those types. (PR #2324)
+- [x] AC-B1: `_sanitize-rules.pl` extended to cover `.json`, `.mjs`, `.yaml/.yml` brand/L4 mappings (operator→co-creator/operator, operator→operator, production data boundary, 猫猫, Clowder AI/Café); two-pass key quoting for JS/TS; mentionPatterns dedupe. Remaining extensions (.html/.iss/.ps1/.bat/.py/.sh) deferred — no current leaks found in those types. (PR #2324)
 - [~] ~~AC-B2~~: Removed — `check:boundary-roundtrip` (AC-E1/E3) + reverse sanitizer `pnpm check` gate provide equivalent fail-closed protection in the development workflow. The sync script is a manual tool always run after `pnpm check`; in-script redundant gate adds complexity without additional protection. Reverse sanitizer can integrate into sync as a separate enhancement if needed.
 - [x] AC-B3: Regression coverage proves the current leaks are blocked: manifest, pet.json, cat-config generated roster text, native L0 residuals (production data boundary, operator), sop-definitions YAML, plugin manifest YAML, and public skill surfaces. 77 total regression tests. (PR #2324)
 

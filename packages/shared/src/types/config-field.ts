@@ -14,6 +14,11 @@
 
 export type ConfigFieldType = 'input' | 'toggle' | 'select' | 'list' | 'operation';
 
+export interface RequiredWhen {
+  envName: string;
+  value: string | string[];
+}
+
 // ── Value fields: env-backed, have envName ──────────────────────────
 
 /** Base shape shared by all env-backed (value) config fields */
@@ -33,7 +38,7 @@ export interface InputConfigField extends ValueConfigFieldBase {
   /** Default value (string) */
   default?: string;
   /** Conditional requirement */
-  requiredWhen?: { envName: string; value: string };
+  requiredWhen?: RequiredWhen;
 }
 
 export interface ToggleConfigField extends ValueConfigFieldBase {
@@ -101,6 +106,12 @@ export function isValueField(field: ConfigField): field is ValueConfigField {
 /** Type guard: operation field with name (no envName) */
 export function isOperationField(field: ConfigField): field is OperationConfigField {
   return field.type === 'operation';
+}
+
+export function matchesRequiredWhen(requirement: RequiredWhen, actual: string | undefined): boolean {
+  return Array.isArray(requirement.value)
+    ? actual !== undefined && requirement.value.includes(actual)
+    : actual === requirement.value;
 }
 
 // ── Operation state (persisted in _operations namespace) ────────────

@@ -76,11 +76,13 @@ function button(label: string): HTMLButtonElement {
 }
 
 describe('ChatVoiceFeatureControls', () => {
-  it('renders both header voice entries as inactive gray icon buttons', () => {
+  it('renders both companion capabilities as labeled Workspace cards', () => {
     render();
 
     expect(button('语音陪伴').className).toContain('text-cafe-secondary');
-    expect(button('音频采集').className).toContain('text-cafe-secondary');
+    expect(button('语音陪伴').textContent).toContain('语音陪伴');
+    expect(button('会议伴随').className).toContain('text-cafe-secondary');
+    expect(button('会议伴随').textContent).toContain('会议伴随');
   });
 
   it('starts installed-but-disabled TTS service before enabling voice companion', async () => {
@@ -203,7 +205,7 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
 
     expect(apiFetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/toggle'), expect.anything());
@@ -227,14 +229,44 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
 
     expect(useChatStore.getState().rightPanelMode).toBe('status');
     expect(useToastStore.getState().toasts[0]?.message).toContain('语音管理');
   });
 
-  it('opens install preview from the audio capture header action before installing', async () => {
+  it('preserves every returned service log line in startup failure details', async () => {
+    const lines = Array.from({ length: 30 }, (_, index) => `log-${index}-${'diagnostic'.repeat(12)}`);
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/services') {
+        return jsonResponse({
+          services: [
+            {
+              id: 'mlx-tts',
+              installed: true,
+              enabled: true,
+              installable: true,
+              status: 'unhealthy',
+              error: 'fetch failed',
+              features: ['voice-output', 'voice-companion'],
+            },
+          ],
+        });
+      }
+      if (path === '/api/services/mlx-tts/logs') return jsonResponse({ lines });
+      return jsonResponse({ error: `unexpected ${path}` }, false);
+    });
+    render();
+
+    await act(async () => button('语音陪伴').click());
+
+    const message = useToastStore.getState().toasts[0]?.message ?? '';
+    expect(message).toContain('log-0-');
+    expect(message).toContain('log-29-');
+  });
+
+  it('opens install preview from the meeting companion card before installing', async () => {
     const profile = {
       os: 'win32',
       arch: 'x64',
@@ -295,7 +327,7 @@ describe('ChatVoiceFeatureControls', () => {
     render();
 
     await act(async () => {
-      button('音频采集').click();
+      button('会议伴随').click();
     });
     await act(async () => {
       await Promise.resolve();

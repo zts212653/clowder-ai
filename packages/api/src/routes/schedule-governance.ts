@@ -11,6 +11,7 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
+import { f255ConfigRequired, isF255PresentLoopBuiltinRef } from '../infrastructure/scheduler/f255-template-boundary.js';
 import type { GlobalControlStore } from '../infrastructure/scheduler/GlobalControlStore.js';
 import type { PackTemplateStore } from '../infrastructure/scheduler/PackTemplateStore.js';
 import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.js';
@@ -119,6 +120,11 @@ export const governanceRoutes: FastifyPluginAsync<GovernanceRoutesOptions> = asy
     if (!body.templateId || !body.packId || !body.builtinTemplateRef) {
       reply.status(400);
       return { error: 'Missing required fields: templateId, packId, builtinTemplateRef' };
+    }
+
+    if (isF255PresentLoopBuiltinRef(body.builtinTemplateRef)) {
+      reply.status(409);
+      return f255ConfigRequired();
     }
 
     if (templateRegistry && !templateRegistry.get(body.builtinTemplateRef)) {

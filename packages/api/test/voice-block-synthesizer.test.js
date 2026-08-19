@@ -69,6 +69,40 @@ function expectedCacheFilename(text) {
   return `${hash}.wav`;
 }
 
+/** Build a small mono PCM16 WAV fixture with the supplied sample values. */
+function makePcmWav(samples, sampleRate = 24_000) {
+  const dataSize = samples.length * 2;
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write('RIFF', 0, 'ascii');
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write('WAVE', 8, 'ascii');
+  wav.write('fmt ', 12, 'ascii');
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write('data', 36, 'ascii');
+  wav.writeUInt32LE(dataSize, 40);
+  samples.forEach((sample, index) => wav.writeInt16LE(sample, 44 + index * 2));
+  return wav;
+}
+
+function readPcmWavSamples(wav) {
+  assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
+  assert.equal(wav.toString('ascii', 36, 40), 'data');
+  const dataSize = wav.readUInt32LE(40);
+  assert.equal(wav.length, 44 + dataSize, 'WAV header reflects the complete PCM payload');
+  const samples = [];
+  for (let offset = 44; offset < wav.length; offset += 2) {
+    samples.push(wav.readInt16LE(offset));
+  }
+  return samples;
+}
+
 // ---------------------------------------------------------------------------
 // Singleton lifecycle
 // ---------------------------------------------------------------------------
@@ -258,6 +292,41 @@ describe('VoiceBlockSynthesizer.resolveVoiceBlocks — synthesis', () => {
     if (opusVoice.temperature != null) {
       assert.equal(receivedArgs.temperature, opusVoice.temperature, 'temperature passed through');
     }
+  });
+
+  it('chunks long text and joins every synthesized WAV segment without losing the tail', async () => {
+    const receivedTexts = [];
+    const registry = makeMockRegistry({
+      synthesize: async (args) => {
+        receivedTexts.push(args.text);
+        return {
+          audio: makePcmWav([receivedTexts.length]),
+          format: 'wav',
+          metadata: { provider: 'mock', model: 'test', voice: 'test' },
+        };
+      },
+    });
+    cleanTmpDir('vbs-test-long-text');
+    const cacheDir = path.join(os.tmpdir(), 'vbs-test-long-text');
+    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const tailMarker = '结尾标记必须被完整说出来';
+    const longText = `${'领导的注意力很稀缺，所以汇报要先讲结论，再补证据和行动建议。'.repeat(20)}${tailMarker}`;
+    const block = { id: 'long-audio', kind: 'audio', v: 1, text: longText };
+
+    const [resolved] = await synthesizer.resolveVoiceBlocks([block], 'opus');
+
+    assert.equal(resolved.kind, 'audio');
+    assert.ok(receivedTexts.length > 1, 'long static audio should use bounded provider requests');
+    assert.equal(receivedTexts.join(''), longText, 'chunking must preserve the complete input text');
+    assert.ok(receivedTexts.at(-1).includes(tailMarker), 'the final provider request contains the tail marker');
+
+    const filename = path.basename(resolved.url);
+    const output = fs.readFileSync(path.join(cacheDir, filename));
+    assert.deepEqual(
+      readPcmWavSamples(output),
+      receivedTexts.map((_, index) => index + 1),
+      'the output WAV contains every synthesized segment in order',
+    );
   });
 
   it('uses block.speaker override instead of catId for voice lookup (F085-P3)', async () => {
@@ -488,6 +557,32 @@ describe('VoiceBlockSynthesizer — cache hit', () => {
     assert.equal(synthesizeCalls, 1, 'synthesis called once on cache miss');
     assert.equal(result[0].kind, 'audio');
     assert.ok(result[0].url.startsWith('/api/tts/audio/'));
+  });
+
+  it('does not reuse a pre-chunking cache entry for long text', async () => {
+    let synthesizeCalls = 0;
+    const registry = makeMockRegistry({
+      synthesize: async () => {
+        synthesizeCalls++;
+        return {
+          audio: makePcmWav([synthesizeCalls]),
+          format: 'wav',
+          metadata: { provider: 'mock', model: 'test', voice: 'test' },
+        };
+      },
+    });
+    cleanTmpDir('vbs-test-stale-long-cache');
+    const cacheDir = path.join(os.tmpdir(), 'vbs-test-stale-long-cache');
+    await mkdir(cacheDir, { recursive: true });
+    const text = `${'旧版静态合成会在模型上限处截断，这个缓存不能继续复用。'.repeat(20)}完整尾句`;
+    const staleFilename = expectedCacheFilename(text);
+    await writeFile(path.join(cacheDir, staleFilename), makePcmWav([999]));
+    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+
+    const [resolved] = await synthesizer.resolveVoiceBlocks([{ id: 'long-cache', kind: 'audio', v: 1, text }], 'opus');
+
+    assert.ok(synthesizeCalls > 1, 'long text is synthesized through the chunked pipeline');
+    assert.notEqual(path.basename(resolved.url), staleFilename, 'chunked output uses a versioned cache key');
   });
 });
 

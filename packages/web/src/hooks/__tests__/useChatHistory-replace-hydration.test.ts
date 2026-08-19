@@ -192,6 +192,44 @@ describe('useChatHistory replace hydration', () => {
     expect(useChatStore.getState().messages.map((m) => m.id)).toEqual(['b1', 'live-1']);
   });
 
+  it('preserves server timeline order when a published seed is delivered later', async () => {
+    const history = installDeferredHistoryResponse();
+    const seedPublishedAt = Date.now() - 4_000;
+    const replyPublishedAt = seedPublishedAt + 1_000;
+    mountReplaceHydrationThread(makeThreadBState(seedPublishedAt));
+
+    await history.waitUntilPending();
+    history.expectPending();
+
+    await history.resolve({
+      messages: [
+        {
+          id: 'b1',
+          catId: 'codex-sol',
+          content: 'source-cat seed',
+          timestamp: seedPublishedAt,
+          deliveredAt: seedPublishedAt + 3_000,
+          timelineOrderAt: seedPublishedAt,
+        },
+        {
+          id: 'reply-1',
+          catId: 'opus',
+          content: 'reply after seed',
+          timestamp: replyPublishedAt,
+        },
+      ],
+      hasMore: false,
+    });
+
+    expect(useChatStore.getState().messages.map((message) => message.id)).toEqual(['b1', 'reply-1']);
+    expect(useChatStore.getState().messages[0]).toEqual(
+      expect.objectContaining({
+        deliveredAt: seedPublishedAt + 3_000,
+        timelineOrderAt: seedPublishedAt,
+      }),
+    );
+  });
+
   it('keeps a richer local stream bubble instead of a stale draft duplicate', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;

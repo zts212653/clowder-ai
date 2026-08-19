@@ -77,21 +77,9 @@ export function transcriptEntriesToAgentMessages(
     const entry = raw as Record<string, unknown>;
 
     if (entry.type === 'assistant') {
-      // F230 P2-synthetic: Claude CLI synthesizes assistant entries locally for two cases:
-      //   1. "No response requested." — nothing to do (zero API calls, zero tokens)
-      //   2. "API Error: ..." — ECONNRESET / network hiccup (CLI makes it look like a reply)
-      // These must NEVER surface as cat chat bubbles. Filter before transformClaudeEvent.
-      const msg = entry.message as Record<string, unknown> | undefined;
-      if (msg?.model === '<synthetic>') {
-        const content = msg?.content as Array<{ type: string; text?: string }> | undefined;
-        const text = content?.find((c) => c.type === 'text')?.text ?? '';
-        if (text.startsWith('API Error:') || text.startsWith('Error:')) {
-          out.push({ type: 'error', catId, error: text, timestamp: Date.now() });
-        }
-        // "No response requested." and other synthetic variants → silently drop
-        continue;
-      }
       // assistant shape matches -p NDJSON assistant event → feed directly.
+      // transformClaudeEvent owns the shared `<synthetic>` provenance boundary
+      // for both foreground and background carriers.
       const result = transformClaudeEvent(entry, catId, state);
       if (result == null) continue;
       if (Array.isArray(result)) out.push(...result);
@@ -133,6 +121,8 @@ export interface UsageAccumulator {
   outputTokens: number | undefined;
   cacheRead: number | undefined;
   cacheCreation: number | undefined;
+  /** Total input observed on the most recent real assistant/API turn. */
+  lastTurnInputTokens: number | undefined;
   assistantTurnCount: number;
   totalTurnDurationMs: number;
   sawTurnDuration: boolean;
@@ -144,10 +134,20 @@ export function createUsageAccumulator(): UsageAccumulator {
     outputTokens: undefined,
     cacheRead: undefined,
     cacheCreation: undefined,
+    lastTurnInputTokens: undefined,
     assistantTurnCount: 0,
     totalTurnDurationMs: 0,
     sawTurnDuration: false,
   };
+}
+
+function resolveLastTurnInputTokens(usage: Record<string, unknown> | undefined): number | undefined {
+  if (!usage) return undefined;
+  const raw = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+  const cacheRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+  const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+  const total = raw + cacheRead + cacheCreation;
+  return total > 0 ? total : undefined;
 }
 
 /**
@@ -171,6 +171,9 @@ export function accumulateUsageFromEntries(acc: UsageAccumulator, entries: unkno
 
       acc.assistantTurnCount++;
       const usage = message?.usage as Record<string, unknown> | undefined;
+      // Match the foreground Claude stream contract: a real assistant turn
+      // replaces (and may clear) the prior current-context measurement.
+      acc.lastTurnInputTokens = resolveLastTurnInputTokens(usage);
       if (usage) {
         // Per-field: undefined = never observed, real number = observed.
         // (?? 0) only kicks in on FIRST observation; subsequent additions
@@ -224,7 +227,9 @@ export function finalizeTranscriptUsage(acc: UsageAccumulator, terminalMeta?: Te
   const turns = terminalMeta?.numTurns ?? acc.assistantTurnCount;
   if (turns > 0) syntheticResult.num_turns = turns;
 
-  return extractClaudeUsage(syntheticResult);
+  const result = extractClaudeUsage(syntheticResult);
+  if (acc.lastTurnInputTokens != null) result.lastTurnInputTokens = acc.lastTurnInputTokens;
+  return result;
 }
 
 /**

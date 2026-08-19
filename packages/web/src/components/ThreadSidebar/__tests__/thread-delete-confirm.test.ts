@@ -87,7 +87,7 @@ describe('Thread delete confirmation (I-1)', () => {
     mockApiFetch.mockReset();
     mockPush.mockReset();
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/threads') return jsonOk({ threads: [TEST_THREAD] });
+      if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [TEST_THREAD] });
       return jsonOk({});
     });
     // Provide localStorage stub for collapse-state persistence
@@ -148,7 +148,7 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('shows confirmation dialog when clicking delete', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();
@@ -175,7 +175,7 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('dismisses dialog when clicking cancel', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();
@@ -199,7 +199,7 @@ describe('Thread delete confirmation (I-1)', () => {
 
   it('calls DELETE API only after clicking confirm', async () => {
     act(() => {
-      root.render(React.createElement(ThreadSidebar));
+      root.render(React.createElement(ThreadSidebar, { routeThreadId: mockStore.currentThreadId as string }));
     });
     await flush();
     expandAll();

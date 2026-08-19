@@ -1,4 +1,4 @@
-import type { UpdateWorkflowSopInput, WorkflowSop } from '@cat-cafe/shared';
+import type { CatId, UpdateWorkflowSopInput, WorkflowSop, WorkflowSopAdmissionBundle } from '@cat-cafe/shared';
 
 export class VersionConflictError extends Error {
   readonly currentState: WorkflowSop;
@@ -9,6 +9,14 @@ export class VersionConflictError extends Error {
   }
 }
 
+export class ManagedWorkExecutorConflictError extends Error {
+  readonly code = 'MANAGED_WORK_EXECUTOR_CONFLICT';
+  constructor(readonly executorCatId: CatId) {
+    super(`Managed-work attempt is already bound to ${executorCatId}`);
+    this.name = 'ManagedWorkExecutorConflictError';
+  }
+}
+
 export interface IWorkflowSopStore {
   get(backlogItemId: string): Promise<WorkflowSop | null>;
   upsert(
@@ -16,6 +24,13 @@ export interface IWorkflowSopStore {
     featureId: string,
     input: UpdateWorkflowSopInput,
     updatedBy: string,
+    ownerUserId: string,
   ): Promise<WorkflowSop>;
+  getManagedWorkAdmission(ownerUserId: string, backlogItemId: string): Promise<WorkflowSopAdmissionBundle | null>;
+  bindManagedWorkAttempt(
+    ownerUserId: string,
+    backlogItemId: string,
+    executorCatId: CatId,
+  ): Promise<WorkflowSopAdmissionBundle | null>;
   delete(backlogItemId: string): Promise<boolean>;
 }

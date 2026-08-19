@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { evalHubRoutes } from '../../dist/routes/eval-hub.js';
+import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 /**
  * 砚砚 R17 P1: snapshots/attributions are gitignored, raw evidence lives in LIVE
@@ -111,17 +112,29 @@ describe('Eval Hub API route', () => {
       };
       const mockGitPublisher = {
         async publishOnIsolatedWorktree(opts) {
-          // 砚砚 R17 P1: empty isolated worktree; stage copies LIVE evidence in.
+          // A real publisher checks out the complete repository before stage.
           const wt = mkdtempSync(`${tmpdir()}/phase-h-r10-route-`);
+          seedCanonicalMeasurementCensusState(wt);
           await opts.stage(wt);
           return { commitSha: 'mock-sha', prUrl: 'https://example.com/pr/1' };
+        },
+        async refreshPublishedVerdictPr(opts) {
+          return {
+            outcome: 'updated',
+            previousHeadSha: opts.expectedHeadSha,
+            commitSha: 'b'.repeat(40),
+            baseSha: 'c'.repeat(40),
+            prUrl: 'https://example.com/pr/1',
+          };
         },
       };
       const mockGenerator = async (packet, sources, deps) => {
         if (generatorSpy) generatorSpy(packet, sources, deps);
+        const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
+        mkdirSync(bundleDir, { recursive: true });
         return {
           verdictPath: `${deps.harnessFeedbackRoot}/verdicts/${packet.id}.md`,
-          bundleDir: `${deps.harnessFeedbackRoot}/bundles/${packet.id}`,
+          bundleDir,
         };
       };
       app.register(evalHubRoutes, {
@@ -145,7 +158,7 @@ describe('Eval Hub API route', () => {
         // are bundle-overridden, but metric/trace come from cat's submitted packet.
         snapshotRefs: ['placeholder:overridden'],
         attributionRefs: ['placeholder:overridden'],
-        metricRefs: ['metric:c1.r10.test'],
+        metricRefs: ['metric:turn_custody.projections_total'],
         sampleTraceRefs: ['trace:r10-route-001'],
       },
       dailyTrend: { window: '24h', current: { a: 1 }, baseline: { a: 1 }, threshold: { a: 5 }, direction: 'flat' },
@@ -185,6 +198,30 @@ describe('Eval Hub API route', () => {
       const body = response.json();
       assert.equal(body.commitSha, 'mock-sha');
       assert.equal(body.prUrl, 'https://example.com/pr/1');
+      await app.close();
+    });
+
+    it('agent-key refresh action reaches the exact-head verdict PR lifecycle', async () => {
+      const app = buildAgentKeyPublishApp();
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/eval-domains/eval:a2a/publish-verdict/refresh',
+        headers: { 'x-agent-key-secret': 'agent-key-test-secret', 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          verdictId: '2026-08-02-eval-a2a-refresh',
+          expectedHeadSha: 'a'.repeat(40),
+        }),
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json(), {
+        ok: true,
+        outcome: 'updated',
+        previousHeadSha: 'a'.repeat(40),
+        commitSha: 'b'.repeat(40),
+        baseSha: 'c'.repeat(40),
+        prUrl: 'https://example.com/pr/1',
+      });
       await app.close();
     });
 

@@ -10,9 +10,11 @@
  * 默认持久化；用户可见状态禁止默认 TTL（LL-048）。
  */
 
-import type { CatId, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
-import { generateThreadId } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import { CLI_EFFORT_VALUES, CODEX_SPEED_VALUES, generateThreadId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
+import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
@@ -26,19 +28,32 @@ import type {
   ThreadMetadataV1,
   ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
+  ThreadSystemKind,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
 import {
   buildExternalRuntimeAnchorThreadId,
   DEFAULT_THREAD_ID,
+  deriveAutoThreadTitle,
   mergeThreadMetadata,
   parseThreadMetadataJson,
   validateMergedTotals,
 } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
+import { readAuthoritativeHash, readAuthoritativeMembers } from './redis-pipeline-reply.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
+const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
+const CODEX_SPEED_VALUE_SET = new Set<string>(CODEX_SPEED_VALUES);
+
+function parseCliEffortValue(raw: string | null | undefined): CliEffortPreset | undefined {
+  return raw && CLI_EFFORT_VALUE_SET.has(raw) ? (raw as CliEffortPreset) : undefined;
+}
+
+function parseCodexSpeedValue(raw: string | null | undefined): CodexSpeedValue | undefined {
+  return raw && CODEX_SPEED_VALUE_SET.has(raw) ? (raw as CodexSpeedValue) : undefined;
+}
 
 /**
  * Atomic hash update guard:
@@ -289,24 +304,27 @@ export class RedisThreadStore implements IThreadStore {
     return thread;
   }
 
-  async get(threadId: string): Promise<Thread | null> {
-    const data = await this.redis.hgetall(ThreadKeys.detail(threadId));
+  async get(threadId: string, options?: StoreReadOptions): Promise<Thread | null> {
+    throwIfStoreReadAborted(options);
+    const data = await awaitStoreRead(this.redis.hgetall(ThreadKeys.detail(threadId)), options);
     if (!data || !data.id) {
+      throwIfStoreReadAborted(options);
       if (threadId === DEFAULT_THREAD_ID) {
-        return this.createDefaultThread();
+        return this.createDefaultThread(options);
       }
-      return this.recoverThreadFromMessages(threadId);
+      return this.recoverThreadFromMessages(threadId, options);
     }
 
     const thread = this.hydrateThread(data);
     // Load participants from Set
-    const members = await this.redis.smembers(ThreadKeys.participants(threadId));
+    const members = await awaitStoreRead(this.redis.smembers(ThreadKeys.participants(threadId)), options);
     thread.participants = members as CatId[];
     return thread;
   }
 
-  async list(userId: string): Promise<Thread[]> {
-    const ids = await this.loadUserThreadIds(userId);
+  async list(userId: string, options?: StoreReadOptions): Promise<Thread[]> {
+    throwIfStoreReadAborted(options);
+    const ids = await this.loadUserThreadIds(userId, options);
 
     // Ensure default thread is included
     const hasDefault = ids.includes(DEFAULT_THREAD_ID);
@@ -314,24 +332,31 @@ export class RedisThreadStore implements IThreadStore {
 
     const threads: Thread[] = [];
     for (const id of ids) {
-      const thread = await this.get(id);
+      throwIfStoreReadAborted(options);
+      const thread = await this.get(id, options);
       if (thread?.externalRuntimeAnchorState) continue;
       if (thread && !thread.deletedAt) threads.push(thread);
     }
 
+    throwIfStoreReadAborted(options);
     // Sort by lastActiveAt descending
     threads.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     return threads;
   }
 
-  async repairIndex(userId?: string): Promise<{ repairedUsers: number; repairedMembers: number }> {
-    const indexedByUser = await this.collectIndexedThreadsFromDetails(userId);
+  async repairIndex(
+    userId?: string,
+    options?: StoreReadOptions,
+  ): Promise<{ repairedUsers: number; repairedMembers: number }> {
+    throwIfStoreReadAborted(options);
+    const indexedByUser = await this.collectIndexedThreadsFromDetails(userId, options);
     let repairedUsers = 0;
     let repairedMembers = 0;
 
     for (const [ownerId, members] of indexedByUser) {
+      throwIfStoreReadAborted(options);
       const userListKey = ThreadKeys.userList(ownerId);
-      const existingIds = new Set(await this.redis.zrange(userListKey, 0, -1));
+      const existingIds = new Set(await awaitStoreRead(this.redis.zrange(userListKey, 0, -1), options));
       const missing = [...members.entries()].filter(([threadId]) => !existingIds.has(threadId));
       if (missing.length === 0) continue;
 
@@ -347,7 +372,7 @@ export class RedisThreadStore implements IThreadStore {
       } else {
         pipeline.expire(userListKey, this.ttlSeconds);
       }
-      await pipeline.exec();
+      await awaitStoreRead(pipeline.exec(), options);
 
       repairedUsers += 1;
       repairedMembers += missing.length;
@@ -411,6 +436,55 @@ export class RedisThreadStore implements IThreadStore {
     return result;
   }
 
+  /**
+   * F297 AC-B3: pipeline 批量读，把 2×T 次串行往返压成 2 个 pipeline stage。
+   * 排序契约与单条版本一致（lastMessageAt 降序）—— F297 的 done/error 依赖 `[0]` 是最近一次回应。
+   */
+  async getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Promise<Map<string, ThreadParticipantActivity[]>> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    if (threadIds.length === 0) return result;
+
+    const participantsPipeline = this.redis.pipeline();
+    for (const threadId of threadIds) participantsPipeline.smembers(ThreadKeys.participants(threadId));
+    const participantsReplies = (await participantsPipeline.exec()) ?? [];
+
+    // R10 / cloud R11 P1：两段 pipeline 以前都用 `[, x] = replies[i] ?? []` 丢掉 entry error，
+    // 短 reply 也静默变成空。读失败当时**碰巧**产出 idle（安全方向），但那是碰巧安全不是
+    // 显式安全：一次读故障会让真实回过话的行被显示成 idle，且上层无从得知知识不完整。
+    // 判据统一到 readAuthoritative*，让故障显式抛出，由 composeSidebarPresence 封 idle。
+    const withParticipants: Array<{ threadId: string; participants: CatId[] }> = [];
+    threadIds.forEach((threadId, index) => {
+      const members = readAuthoritativeMembers(participantsReplies[index], `thread participants ${threadId}`);
+      const participants = members as CatId[];
+      if (participants.length === 0) result.set(threadId, []);
+      else withParticipants.push({ threadId, participants });
+    });
+    if (withParticipants.length === 0) return result;
+
+    const activityPipeline = this.redis.pipeline();
+    for (const { threadId } of withParticipants) activityPipeline.hgetall(ThreadKeys.activity(threadId));
+    const activityReplies = (await activityPipeline.exec()) ?? [];
+
+    withParticipants.forEach(({ threadId, participants }, index) => {
+      // 权威空 hash（从未记录过 activity）→ 所有 cat lastMessageAt=0 → idle，这是正确的。
+      const activityData = readAuthoritativeHash(activityReplies[index], `thread activity ${threadId}`) ?? {};
+      const entries: ThreadParticipantActivity[] = participants.map((catId) => {
+        const healthyRaw = activityData[`${catId}:healthy`];
+        return {
+          catId,
+          lastMessageAt: parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10),
+          messageCount: parseInt(activityData[`${catId}:messageCount`] ?? '0', 10),
+          lastResponseHealthy: healthyRaw === undefined ? undefined : healthyRaw === '1',
+        };
+      });
+      entries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+      result.set(threadId, entries);
+    });
+    return result;
+  }
+
   /** F032 P1-2 fix: Update participant activity on every message */
   async updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): Promise<void> {
     // Cloud Codex P2 fix: Use Lua script to atomically check thread existence
@@ -437,6 +511,20 @@ export class RedisThreadStore implements IThreadStore {
   async updateTitle(threadId: string, title: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'title', title);
+  }
+
+  async compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const changed = (await this.redis.eval(
+      CAS_HSET_IF_HAS_ID_LUA,
+      1,
+      key,
+      'title',
+      expectedTitle,
+      nextTitle,
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
   }
 
   async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
@@ -596,7 +684,7 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  async updateSystemKind(threadId: string, kind: 'connector_hub' | 'eval_domain' | null): Promise<void> {
+  async updateSystemKind(threadId: string, kind: ThreadSystemKind | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (kind === null) {
       await this.deleteDetailFields(key, 'systemKind');
@@ -626,7 +714,17 @@ export class RedisThreadStore implements IThreadStore {
 
   async updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | 'approval' | 'trajectory' | null,
+    mode:
+      | 'dev'
+      | 'recall'
+      | 'schedule'
+      | 'tasks'
+      | 'community'
+      | 'artifacts'
+      | 'approval'
+      | 'trajectory'
+      | 'eval'
+      | null,
   ): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (mode === null) {
@@ -788,7 +886,8 @@ export class RedisThreadStore implements IThreadStore {
     return (result as number) > 0;
   }
 
-  private async createDefaultThread(): Promise<Thread> {
+  private async createDefaultThread(options?: StoreReadOptions): Promise<Thread> {
+    throwIfStoreReadAborted(options);
     const now = Date.now();
     const thread: Thread = {
       id: DEFAULT_THREAD_ID,
@@ -801,25 +900,27 @@ export class RedisThreadStore implements IThreadStore {
     };
 
     const key = ThreadKeys.detail(DEFAULT_THREAD_ID);
-    await this.redis.hset(key, this.serializeThread(thread));
+    await awaitStoreRead(this.redis.hset(key, this.serializeThread(thread)), options);
     if (this.ttlSeconds !== null) {
-      await this.redis.expire(key, this.ttlSeconds);
+      await awaitStoreRead(this.redis.expire(key, this.ttlSeconds), options);
     }
     return thread;
   }
 
-  private async loadUserThreadIds(userId: string): Promise<string[]> {
-    let ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+  private async loadUserThreadIds(userId: string, options?: StoreReadOptions): Promise<string[]> {
+    let ids = await awaitStoreRead(this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1), options);
+    throwIfStoreReadAborted(options);
     if (!this.canAttemptListRepair(userId, ids.length)) {
       return ids;
     }
 
     this.lastListRepairAt.set(userId, Date.now());
-    const repaired = await this.repairIndex(userId);
+    const repaired = await this.repairIndex(userId, options);
+    throwIfStoreReadAborted(options);
     if (repaired.repairedMembers === 0) {
       return ids;
     }
-    ids = await this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1);
+    ids = await awaitStoreRead(this.redis.zrevrange(ThreadKeys.userList(userId), 0, -1), options);
     return ids;
   }
 
@@ -829,16 +930,21 @@ export class RedisThreadStore implements IThreadStore {
     return Date.now() - lastAttempt >= RedisThreadStore.LIST_REPAIR_COOLDOWN_MS;
   }
 
-  private async collectIndexedThreadsFromDetails(userId?: string): Promise<Map<string, Map<string, number>>> {
+  private async collectIndexedThreadsFromDetails(
+    userId?: string,
+    options?: StoreReadOptions,
+  ): Promise<Map<string, Map<string, number>>> {
+    throwIfStoreReadAborted(options);
     const matchPattern = `${this.keyPrefix}${ThreadKeys.detail('thread_*')}`;
     let cursor = '0';
     const indexedByUser = new Map<string, Map<string, number>>();
 
     do {
-      const [nextCursor, rawKeys] = (await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200)) as [
-        string,
-        string[],
-      ];
+      throwIfStoreReadAborted(options);
+      const [nextCursor, rawKeys] = (await awaitStoreRead(
+        this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200),
+        options,
+      )) as [string, string[]];
       cursor = nextCursor;
 
       const detailKeys = rawKeys
@@ -848,11 +954,13 @@ export class RedisThreadStore implements IThreadStore {
 
       const pipeline = this.redis.multi();
       for (const key of detailKeys) {
+        throwIfStoreReadAborted(options);
         pipeline.hgetall(key);
       }
-      const results = await pipeline.exec();
+      const results = await awaitStoreRead(pipeline.exec(), options);
 
       for (let i = 0; i < detailKeys.length; i += 1) {
+        throwIfStoreReadAborted(options);
         const data = results?.[i]?.[1];
         if (!data || typeof data !== 'object') continue;
         const hash = data as Record<string, string>;
@@ -873,33 +981,34 @@ export class RedisThreadStore implements IThreadStore {
     return indexedByUser;
   }
 
-  private async recoverThreadFromMessages(threadId: string): Promise<Thread | null> {
+  private async recoverThreadFromMessages(threadId: string, options?: StoreReadOptions): Promise<Thread | null> {
+    throwIfStoreReadAborted(options);
     // Don't resurrect intentionally hard-deleted threads
-    const tombstone = await this.redis.get(ThreadKeys.tombstone(threadId));
+    const tombstone = await awaitStoreRead(this.redis.get(ThreadKeys.tombstone(threadId)), options);
     if (tombstone) return null;
 
     const timelineKey = MessageKeys.thread(threadId);
-    const [firstIds, lastIds] = await Promise.all([
-      this.redis.zrange(timelineKey, 0, 4),
-      this.redis.zrevrange(timelineKey, 0, 4),
-    ]);
+    const [firstIds, lastIds] = await awaitStoreRead(
+      Promise.all([this.redis.zrange(timelineKey, 0, 4), this.redis.zrevrange(timelineKey, 0, 4)]),
+      options,
+    );
     if (firstIds.length === 0 && lastIds.length === 0) {
       return null;
     }
 
     const candidateIds = [...new Set([...firstIds, ...lastIds])];
-    const candidateMessages = await this.loadMessageSnapshots(candidateIds);
+    const candidateMessages = await this.loadMessageSnapshots(candidateIds, options);
     const firstMessage = firstIds.map((id) => candidateMessages.get(id)).find((msg) => msg !== null);
     const lastMessage = lastIds.map((id) => candidateMessages.get(id)).find((msg) => msg !== null);
     if (!firstMessage || !lastMessage) {
       return null;
     }
 
-    const participants = await this.recoverParticipants(threadId, candidateIds, candidateMessages);
+    const participants = await this.recoverParticipants(threadId, candidateIds, candidateMessages, options);
     const recovered: Thread = {
       id: threadId,
       projectPath: 'default',
-      title: this.deriveRecoveredTitle(firstMessage.content),
+      title: deriveAutoThreadTitle(firstMessage.content),
       createdBy: firstMessage.userId,
       participants,
       createdAt: firstMessage.timestamp,
@@ -916,18 +1025,22 @@ export class RedisThreadStore implements IThreadStore {
     if (participants.length > 0) {
       pipeline.sadd(participantsKey, ...participants);
     }
-    await pipeline.exec();
-    await this.applyKeyRetention([detailKey, participantsKey, userListKey]);
+    await awaitStoreRead(pipeline.exec(), options);
+    await this.applyKeyRetention([detailKey, participantsKey, userListKey], options);
     return recovered;
   }
 
-  private async loadMessageSnapshots(messageIds: string[]): Promise<Map<string, RecoveredMessageSnapshot | null>> {
+  private async loadMessageSnapshots(
+    messageIds: string[],
+    options?: StoreReadOptions,
+  ): Promise<Map<string, RecoveredMessageSnapshot | null>> {
+    throwIfStoreReadAborted(options);
     if (messageIds.length === 0) return new Map();
     const pipeline = this.redis.multi();
     for (const messageId of messageIds) {
       pipeline.hgetall(MessageKeys.detail(messageId));
     }
-    const results = await pipeline.exec();
+    const results = await awaitStoreRead(pipeline.exec(), options);
     const snapshots = new Map<string, RecoveredMessageSnapshot | null>();
     for (let i = 0; i < messageIds.length; i += 1) {
       const data = results?.[i]?.[1];
@@ -955,8 +1068,10 @@ export class RedisThreadStore implements IThreadStore {
     threadId: string,
     messageIds: string[],
     candidateMessages: Map<string, RecoveredMessageSnapshot | null>,
+    options?: StoreReadOptions,
   ): Promise<CatId[]> {
-    const activityData = await this.redis.hgetall(ThreadKeys.activity(threadId));
+    throwIfStoreReadAborted(options);
+    const activityData = await awaitStoreRead(this.redis.hgetall(ThreadKeys.activity(threadId)), options);
     const fromActivity = [
       ...new Set(
         Object.keys(activityData)
@@ -975,13 +1090,8 @@ export class RedisThreadStore implements IThreadStore {
     return [...new Set(fromMessages)];
   }
 
-  private deriveRecoveredTitle(content: string): string | null {
-    const normalized = content.trim();
-    if (!normalized) return null;
-    return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
-  }
-
-  private async applyKeyRetention(keys: string[]): Promise<void> {
+  private async applyKeyRetention(keys: string[], options?: StoreReadOptions): Promise<void> {
+    throwIfStoreReadAborted(options);
     const uniqueKeys = [...new Set(keys.filter(Boolean))];
     if (uniqueKeys.length === 0) return;
     const pipeline = this.redis.multi();
@@ -992,7 +1102,7 @@ export class RedisThreadStore implements IThreadStore {
         pipeline.expire(key, this.ttlSeconds);
       }
     }
-    await pipeline.exec();
+    await awaitStoreRead(pipeline.exec(), options);
   }
 
   private async setDetailFields(key: string, ...fields: string[]): Promise<void> {
@@ -1208,8 +1318,11 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
-    if (data.systemKind && (data.systemKind === 'connector_hub' || data.systemKind === 'eval_domain')) {
-      result.systemKind = data.systemKind as 'connector_hub' | 'eval_domain';
+    if (
+      data.systemKind &&
+      (data.systemKind === 'connector_hub' || data.systemKind === 'eval_domain' || data.systemKind === 'cat_bedroom')
+    ) {
+      result.systemKind = data.systemKind as ThreadSystemKind;
     }
     if (data.connectorHubState) {
       try {
@@ -1247,6 +1360,7 @@ export class RedisThreadStore implements IThreadStore {
       'artifacts',
       'approval',
       'trajectory',
+      'eval',
     ]);
     if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
       result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
@@ -1367,6 +1481,62 @@ export class RedisThreadStore implements IThreadStore {
         );
       }
     }
+  }
+
+  async updateMemberEffort(threadId: string, catId: CatId, effort: CliEffortPreset | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberEffort:${catId}`;
+    if (effort === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, effort);
+    }
+  }
+
+  async getMemberEffort(threadId: string, catId: CatId, _userId: string): Promise<CliEffortPreset | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberEffort:${catId}`);
+    return parseCliEffortValue(raw);
+  }
+
+  async getMemberEfforts(threadId: string, _userId: string): Promise<Partial<Record<CatId, CliEffortPreset>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const efforts: Partial<Record<CatId, CliEffortPreset>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberEffort:')) continue;
+      const effort = parseCliEffortValue(raw);
+      if (!effort) continue;
+      const catId = field.slice('memberEffort:'.length) as CatId;
+      efforts[catId] = effort;
+    }
+    return efforts;
+  }
+
+  async updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberSpeed:${catId}`;
+    if (speed === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, speed);
+    }
+  }
+
+  async getMemberSpeed(threadId: string, catId: CatId, _userId: string): Promise<CodexSpeedValue | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSpeed:${catId}`);
+    return parseCodexSpeedValue(raw);
+  }
+
+  async getMemberSpeeds(threadId: string, _userId: string): Promise<Partial<Record<CatId, CodexSpeedValue>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const speeds: Partial<Record<CatId, CodexSpeedValue>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberSpeed:')) continue;
+      const speed = parseCodexSpeedValue(raw);
+      if (!speed) continue;
+      const catId = field.slice('memberSpeed:'.length) as CatId;
+      speeds[catId] = speed;
+    }
+    return speeds;
   }
 
   /** #836: Check if cat uses reborn strategy in this thread. */

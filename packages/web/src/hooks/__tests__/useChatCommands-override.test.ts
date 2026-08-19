@@ -35,9 +35,11 @@ vi.mock('@/utils/userId', () => ({
 // Note: vi.mock is hoisted, so values must be inlined (no top-level refs)
 vi.mock('@/stores/chatStore', () => {
   const addMessage = vi.fn();
+  const addMessageToThread = vi.fn();
   const state = {
     currentThreadId: 'store-current-thread',
     addMessage,
+    addMessageToThread,
   };
   const hook = Object.assign((selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state), {
     getState: () => state,
@@ -46,6 +48,7 @@ vi.mock('@/stores/chatStore', () => {
 });
 
 import { useChatCommands } from '@/hooks/useChatCommands';
+import { useChatStore } from '@/stores/chatStore';
 
 /**
  * Thin component that extracts processCommand and invokes it
@@ -86,6 +89,14 @@ describe('processCommand overrideThreadId (P1-2 R2)', () => {
 
   beforeEach(() => {
     mockApiFetch.mockReset();
+    const state = useChatStore.getState() as unknown as {
+      currentThreadId: string;
+      addMessage: ReturnType<typeof vi.fn>;
+      addMessageToThread: ReturnType<typeof vi.fn>;
+    };
+    state.currentThreadId = 'store-current-thread';
+    state.addMessage.mockClear();
+    state.addMessageToThread.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -131,6 +142,50 @@ describe('processCommand overrideThreadId (P1-2 R2)', () => {
     expect(body.threadId).not.toBe('store-current-thread');
     expect(body.key).toBe('mykey');
     expect(body.value).toBe('myvalue');
+    const store = useChatStore.getState() as unknown as {
+      addMessage: ReturnType<typeof vi.fn>;
+      addMessageToThread: ReturnType<typeof vi.fn>;
+    };
+    expect(store.addMessageToThread).toHaveBeenCalledWith(OVERRIDE_THREAD, expect.objectContaining({ type: 'user' }));
+    expect(store.addMessage).not.toHaveBeenCalled();
+  });
+
+  it('/remember keeps its async result on the captured override after the flat selection changes', async () => {
+    let resolveFetch!: (value: { ok: true; json: () => Promise<object> }) => void;
+    mockApiFetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const state = useChatStore.getState() as unknown as {
+      currentThreadId: string;
+      addMessage: ReturnType<typeof vi.fn>;
+      addMessageToThread: ReturnType<typeof vi.fn>;
+    };
+    state.addMessage.mockClear();
+    state.addMessageToThread.mockClear();
+
+    await act(async () => {
+      root.render(
+        React.createElement(CommandRunner, {
+          input: '/remember key value',
+          overrideThreadId: 'thread-A',
+          onDone: () => {},
+        }),
+      );
+      await Promise.resolve();
+    });
+    state.currentThreadId = 'thread-B';
+
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({}) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(state.addMessageToThread.mock.calls.every(([threadId]) => threadId === 'thread-A')).toBe(true);
+    expect(state.addMessage).not.toHaveBeenCalled();
   });
 
   it('/remember without override falls back to store currentThreadId', async () => {

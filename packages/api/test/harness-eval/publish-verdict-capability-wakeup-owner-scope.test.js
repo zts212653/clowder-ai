@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { createCapabilityWakeupGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/capability-wakeup-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
+import { seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 const root = mkdtempSync(join(tmpdir(), 'publish-verdict-cw-owner-'));
 
@@ -79,7 +80,9 @@ describe('handlePublishVerdict capability-wakeup owner scope', () => {
     const cwGenerator = createCapabilityWakeupGeneratorAdapter(provider);
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        await opts.stage(join(root, '..', 'cw-owner-iso'));
+        const isolatedRoot = join(root, '..', 'cw-owner-iso');
+        seedCanonicalMeasurementCensusState(isolatedRoot);
+        await opts.stage(isolatedRoot);
         return { commitSha: 'unreachable', prUrl: 'unreachable' };
       },
     };

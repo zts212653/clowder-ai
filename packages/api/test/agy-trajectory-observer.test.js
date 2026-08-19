@@ -30,13 +30,22 @@ const STEPS_SCHEMA = `CREATE TABLE steps (
   task_details blob, render_info blob, step_payload blob, step_format integer,
   PRIMARY KEY(idx));`;
 
+function encodeProtoString(field, value) {
+  const bytes = Buffer.from(value, 'utf8');
+  assert.ok(field > 0 && field < 16, 'test helper only supports one-byte field tags');
+  assert.ok(bytes.length < 128, 'test helper only supports one-byte lengths');
+  return Buffer.concat([Buffer.from([(field << 3) | 2, bytes.length]), bytes]);
+}
+
 function makeTrajectoryDb(steps) {
   const dir = mkdtempSync(join(tmpdir(), 'agy-traj-'));
   const dbPath = join(dir, 'conv.db');
   const db = new Database(dbPath);
   db.exec(STEPS_SCHEMA);
-  const ins = db.prepare('INSERT INTO steps (idx, step_type, status, step_payload) VALUES (?, ?, ?, ?)');
-  for (const s of steps) ins.run(s.idx, s.step_type, s.status, s.step_payload ?? null);
+  const ins = db.prepare(
+    'INSERT INTO steps (idx, step_type, status, step_payload, error_details) VALUES (?, ?, ?, ?, ?)',
+  );
+  for (const s of steps) ins.run(s.idx, s.step_type, s.status, s.step_payload ?? null, s.error_details ?? null);
   db.close();
   return { dbPath, dir };
 }
@@ -85,6 +94,52 @@ test('poll labels step_type with conservative semantics (H3)', () => {
     ),
     'unknown step_type 不猜语义',
   );
+  obs.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('poll surfaces a bounded AGY step error instead of treating failed permission as normal progress', () => {
+  const message = 'User denied permission for mcp(cat-cafe-collab/cat_cafe_get_thread_context).';
+  const { dbPath, dir } = makeTrajectoryDb([
+    {
+      idx: 6,
+      step_type: 38,
+      status: 7,
+      error_details: Buffer.concat([
+        encodeProtoString(1, message),
+        encodeProtoString(3, 'private stack trace must not be surfaced'),
+      ]),
+    },
+  ]);
+  const obs = new AgyTrajectoryObserver(dbPath);
+  const r = obs.poll(-1);
+
+  assert.equal(r.enabled, true);
+  assert.equal(r.events.length, 1);
+  assert.equal(r.events[0].error, message);
+  assert.match(r.events[0].label, /failed/i);
+  assert.doesNotMatch(r.events[0].error, /stack trace/i);
+
+  obs.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('poll surfaces error_details that arrive after an unchanged failed status', () => {
+  const message = 'User denied permission for mcp(cat-cafe-collab/cat_cafe_get_thread_context).';
+  const { dbPath, dir } = makeTrajectoryDb([{ idx: 6, step_type: 38, status: 7 }]);
+  const obs = new AgyTrajectoryObserver(dbPath);
+  const first = obs.poll(-1);
+  assert.equal(first.events.length, 1);
+  assert.equal(first.events[0].error, undefined);
+
+  const db = new Database(dbPath);
+  db.prepare('UPDATE steps SET error_details = ? WHERE idx = 6').run(encodeProtoString(1, message));
+  db.close();
+
+  const second = obs.poll(first.cursor);
+  assert.equal(second.events.length, 1, 'new error_details must emit even when status is unchanged');
+  assert.equal(second.events[0].error, message);
+
   obs.close();
   rmSync(dir, { recursive: true, force: true });
 });

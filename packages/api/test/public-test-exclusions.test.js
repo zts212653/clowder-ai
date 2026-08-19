@@ -9,13 +9,11 @@ const packageRoot = resolve(__dirname, '..');
 const registryPath = resolve(packageRoot, 'config/public-test-exclusions.json');
 const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-public-test-files.mjs')).href;
 
-const LEGACY_EXCLUSIONS = [
+const RECONCILED_EXCLUSIONS = [
   'redis-',
-  'concurrent-fault-drill',
   'task-progress-store',
   'session-strategy-phase3',
   'signal-article-store',
-  'persistence-fault-drill',
   'cursor-store-atomicity',
   'workflow-sop-store',
   'codex-agent-service',
@@ -37,7 +35,6 @@ const LEGACY_EXCLUSIONS = [
   'governance-pack\\.test',
   'pack-integration\\.test',
   'project-setup-flow\\.test',
-  'process-liveness-probe\\.test',
   'expedition-bootstrap\\.test',
   'rules-route\\.test',
   'root-md-slim\\.test',
@@ -45,13 +42,16 @@ const LEGACY_EXCLUSIONS = [
   'f188-cold-start-fixtures\\.test',
   'f188-harness-consistency\\.test',
   'orphan-chrome-cleaner\\.test',
-  'capabilities-route\\.test',
-  'antigravity-run-command-executor\\.test',
   'f203-phase-i-opencode-l0\\.test',
   'f236-cc-anchor-hook\\.test',
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
+  'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
+  'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
+  'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
+  'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
+  'harness-eval/legacy-reeval-case-(?:hub|migration)\\.test',
 ];
 
 async function listTestFiles(rootDir, relDir = '') {
@@ -71,18 +71,22 @@ async function listTestFiles(rootDir, relDir = '') {
   return files.sort();
 }
 
-function applyLegacySelection(files) {
-  const patterns = LEGACY_EXCLUSIONS.map((value) => new RegExp(value));
+function applyReconciledSelection(files) {
+  const patterns = RECONCILED_EXCLUSIONS.map((value) => new RegExp(value));
   return files.filter((file) => patterns.every((pattern) => !pattern.test(file))).sort();
 }
 
-test('registry preserves metadata for active legacy exclusions and drops stale ones', async () => {
+test('registry preserves metadata for reconciled exclusions and drops retired ones', async () => {
   const { loadPublicTestExclusions } = await import(resolverModuleUrl);
   const registry = await loadPublicTestExclusions({ configPath: registryPath });
 
   assert.equal(registry.version, 1);
   assert.equal(
     registry.entries.some((entry) => entry.match === 'antigravity-cdp-client\\.test'),
+    false,
+  );
+  assert.equal(
+    registry.entries.some((entry) => entry.match === 'capabilities-route\\.test'),
     false,
   );
 
@@ -98,15 +102,15 @@ test('registry preserves metadata for active legacy exclusions and drops stale o
       category: 'source_only',
       owner: '@zts212653',
       introducedBy: '069d0f0fb',
-      expiresOn: '2026-07-31',
+      expiresOn: '2026-08-31',
     },
   );
 });
 
-test('resolver preserves legacy public test file selection parity', async () => {
+test('resolver preserves the reconciled public test file selection', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const allTestFiles = await listTestFiles(resolve(packageRoot, 'test'));
-  const expected = applyLegacySelection(allTestFiles);
+  const expected = applyReconciledSelection(allTestFiles);
 
   const resolved = await resolvePublicTestFiles({
     packageRoot,
@@ -125,6 +129,101 @@ test('resolver excludes source-only cc anchor hook coverage from the public gate
 
   assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
+});
+
+test('resolver excludes private evidence consumers but keeps self-contained public contracts', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  for (const file of [
+    'test/f254-freshness-instruction-private-evidence.test.js',
+    'test/f254-freshness-replay-provider.test.js',
+    'test/f254-provider-native-freshness.test.js',
+    'test/harness-eval/measurement-bundle-census.test.js',
+    'test/harness-eval/publish-verdict-memory.test.js',
+  ]) {
+    assert.ok(resolved.excludedFiles.includes(file), `${file} should be private-fixture-only`);
+  }
+  for (const file of [
+    'test/cicd-router.test.js',
+    'test/embed-runtime-policy.test.js',
+    'test/f254-freshness-instruction-surface.test.js',
+    'test/harness-eval/eval-capability-tips-enable-gate.test.js',
+    'test/system-prompt-builder.test.js',
+    'test/weixin-mp-path-security.test.js',
+  ]) {
+    assert.ok(resolved.selectedFiles.includes(file), `${file} should remain a public behavior contract`);
+  }
+});
+
+test('focused public selection accepts only explicit files from the live selected suite', async () => {
+  const { resolvePublicTestFiles, selectFocusedPublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  assert.deepEqual(
+    selectFocusedPublicTestFiles(
+      resolved,
+      'test/cicd-router.test.js,test/harness-eval/eval-capability-tips-enable-gate.test.js',
+    ),
+    ['test/cicd-router.test.js', 'test/harness-eval/eval-capability-tips-enable-gate.test.js'],
+  );
+  assert.throws(
+    () => selectFocusedPublicTestFiles(resolved, 'test/harness-eval/publish-verdict-memory.test.js'),
+    /excluded by registry/,
+  );
+  assert.throws(() => selectFocusedPublicTestFiles(resolved, 'test/not-real.test.js'), /does not exist/);
+  assert.throws(
+    () => selectFocusedPublicTestFiles(resolved, 'test/cicd-router.test.js,test/cicd-router.test.js'),
+    /duplicate/,
+  );
+});
+
+test('resolver re-admits capabilities-route once the product regression is fixed', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  assert.ok(!resolved.excludedFiles.includes('test/capabilities-route.test.js'));
+  assert.ok(resolved.selectedFiles.includes('test/capabilities-route.test.js'));
+});
+
+test('default expiry date helper uses the configured policy timezone rather than UTC', async () => {
+  const { formatLocalIsoDate } = await import(resolverModuleUrl);
+  const utcAfterPacificMidnight = new Date('2026-07-01T01:30:00.000Z');
+
+  assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'America/Los_Angeles'), '2026-06-30');
+  assert.equal(formatLocalIsoDate(utcAfterPacificMidnight, 'UTC'), '2026-07-01');
+});
+
+test('default expiry date helper falls back to the repo policy timezone when env is unset', async () => {
+  const { formatLocalIsoDate } = await import(resolverModuleUrl);
+  const utcAfterPacificMidnight = new Date('2026-07-01T01:30:00.000Z');
+  const previousPolicyTimezone = process.env.CAT_CAFE_POLICY_TIMEZONE;
+  const previousHostTimezone = process.env.TZ;
+  delete process.env.CAT_CAFE_POLICY_TIMEZONE;
+  process.env.TZ = 'UTC';
+  try {
+    assert.equal(formatLocalIsoDate(utcAfterPacificMidnight), '2026-06-30');
+  } finally {
+    if (previousPolicyTimezone === undefined) {
+      delete process.env.CAT_CAFE_POLICY_TIMEZONE;
+    } else {
+      process.env.CAT_CAFE_POLICY_TIMEZONE = previousPolicyTimezone;
+    }
+    if (previousHostTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousHostTimezone;
+    }
+  }
 });
 
 test('validator rejects malformed, expired, or zero-match exclusion entries', async () => {

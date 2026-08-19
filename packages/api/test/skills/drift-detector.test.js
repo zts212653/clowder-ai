@@ -341,6 +341,23 @@ describe('DriftDetector (F228 Phase 2)', () => {
     assert.deepEqual(result.newSkills, []);
   });
 
+  test('stale: reserved .cat-cafe-shared-refs alias is never reported as stale', async () => {
+    await makeSkill('tdd');
+    // Mirror production: source has refs/ plus a `.cat-cafe-shared-refs -> refs`
+    // symlink, and each provider mount carries the managed alias symlink.
+    await mkdir(join(skillsSource, 'refs'), { recursive: true });
+    await symlink('refs', join(skillsSource, '.cat-cafe-shared-refs'));
+    const dir = join(projectRoot, '.claude', 'skills');
+    await mkdir(dir, { recursive: true });
+    await symlink(join(skillsSource, 'refs'), join(dir, '.cat-cafe-shared-refs'));
+    const result = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    assert.deepEqual(result.stale, []);
+    assert.deepEqual(
+      result.issues.filter((i) => i.type === 'stale-mount'),
+      [],
+    );
+  });
+
   test('stale: disabled skill remains loadable through legacy directory-level provider symlink', async () => {
     await makeSkill('tdd');
     await mountLegacySkillsRoot('claude');

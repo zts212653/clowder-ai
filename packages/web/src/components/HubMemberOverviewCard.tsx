@@ -199,7 +199,6 @@ function AvailabilityToggle({
 }
 
 function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig }) {
-  const sessionChainEnabled = cat.sessionChain !== false;
   return (
     <>
       <span>
@@ -209,19 +208,22 @@ function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig })
         {getMetaSummary(cat, configCat)}
         {cat.adapterMode && (
           <SettingsBadge
-            tone={cat.adapterMode === 'acp' ? 'emerald' : 'slate'}
+            tone={cat.adapterMode === 'acp' || cat.codexCarrier?.effective === 'app_server' ? 'emerald' : 'slate'}
             size="xxs"
             className="ml-1.5 inline-block"
           >
-            {cat.adapterMode.toUpperCase()}
+            {/* F254 D2: ACP wins over the Codex carrier (assembly checks getAcpConfig first) */}
+            {cat.adapterMode === 'acp'
+              ? 'ACP'
+              : cat.codexCarrier?.effective === 'app_server'
+                ? 'APP SERVER'
+                : cat.adapterMode.toUpperCase()}
           </SettingsBadge>
         )}
       </span>
       <span className="mt-0.5 flex flex-wrap items-center gap-2">
         <SettingsText tone="purple">{formatMentionPreview(cat.mentionPatterns)}</SettingsText>
-        <SettingsBadge tone={sessionChainEnabled ? 'emerald' : 'slate'}>
-          {sessionChainEnabled ? 'Session Chain 已开启' : 'Session Chain 未开启'}
-        </SettingsBadge>
+        <SettingsBadge tone="emerald">Session Chain 始终可见</SettingsBadge>
       </span>
     </>
   );

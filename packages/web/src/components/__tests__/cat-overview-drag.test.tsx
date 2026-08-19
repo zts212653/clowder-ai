@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 describe('CatOverviewTab drag & drop (F166)', () => {
-  it('shows Session Chain status on member overview cards', async () => {
+  it('shows always-visible Session Chain state regardless of the legacy byte', async () => {
     const cats = [minimalCat('A', true), minimalCat('B', false)];
     const config = { coCreator: null, cats: {} } as unknown as import('../config-viewer-types').ConfigData;
 
@@ -69,8 +69,8 @@ describe('CatOverviewTab drag & drop (F166)', () => {
       root.render(React.createElement(CatOverviewTab, { config, cats }));
     });
 
-    expect(container.querySelector('[data-testid="cat-card-A"]')?.textContent).toContain('Session Chain 已开启');
-    expect(container.querySelector('[data-testid="cat-card-B"]')?.textContent).toContain('Session Chain 未开启');
+    expect(container.querySelector('[data-testid="cat-card-A"]')?.textContent).toContain('Session Chain 始终可见');
+    expect(container.querySelector('[data-testid="cat-card-B"]')?.textContent).toContain('Session Chain 始终可见');
   });
 
   it('rolls back local order and shows error when saveCatOrder rejects', async () => {

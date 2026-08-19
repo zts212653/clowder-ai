@@ -4,16 +4,19 @@
  */
 
 import assert from 'node:assert/strict';
-import { spawn as nodeSpawn } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 import { clearTimeout as clearKeepAliveTimeout, setTimeout as setKeepAliveTimeout } from 'node:timers';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { waitForSupervisorExit } from './helpers/cli-supervisor-exit.js';
+
+const REPO_ROOT = dirname(fileURLToPath(new URL('../../../package.json', import.meta.url)));
 
 const {
   spawnCli,
@@ -23,6 +26,7 @@ const {
   KILL_GRACE_MS,
   SEMANTIC_COMPLETION_GRACE_MS,
   resolveCliSupervisorNodeArgs,
+  buildChildEnv,
 } = await import('../dist/utils/cli-spawn.js');
 const { DEFAULT_CLI_TIMEOUT_MS } = await import('../dist/utils/cli-timeout.js');
 const { isParseError } = await import('../dist/utils/ndjson-parser.js');
@@ -168,14 +172,17 @@ test(
         command: process.execPath,
         args: [
           '-e',
-          'console.log(JSON.stringify({ type: "env", parentPid: process.env.CAT_CAFE_SUPERVISOR_PARENT_PID ?? null }))',
+          'console.log(JSON.stringify({ type: "env", parentPid: process.env.CAT_CAFE_SUPERVISOR_PARENT_PID ?? null, executionOwnerBinding: process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER ?? null, executionId: process.env.CAT_CAFE_EXECUTION_ID ?? null }))',
         ],
+        env: { CAT_CAFE_EXECUTION_ID: 'parent-execution-spawn-contract' },
         timeoutMs: 5_000,
       }),
     );
 
     const event = results.find((item) => item?.type === 'env');
     assert.equal(event?.parentPid, String(process.pid));
+    assert.equal(event?.executionOwnerBinding, '1', 'the production supervised spawn must opt into owner manifests');
+    assert.equal(event?.executionId, 'parent-execution-spawn-contract');
   },
 );
 
@@ -293,6 +300,7 @@ test(
       supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
         env: {
           ...process.env,
+          CAT_CAFE_DATA_DIR: tempDir,
           CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
           CAT_CAFE_SUPERVISOR_POLL_MS: '500',
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '300',
@@ -304,18 +312,9 @@ test(
         stderr += chunk.toString();
       });
 
-      const exit = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          supervisor.kill('SIGKILL');
-          resolve({ timedOut: true, stderr });
-        }, 3_000);
-        supervisor.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          resolve({ code, signal, stderr });
-        });
-      });
+      const exit = await waitForSupervisorExit(supervisor);
 
-      assert.notEqual(exit.timedOut, true, `supervisor did not exit: ${exit.stderr}`);
+      assert.notEqual(exit.timedOut, true, `supervisor did not exit: ${stderr}`);
       assert.equal(existsSync(markerPath), true, `child did not receive SIGTERM; stderr=${exit.stderr}`);
       assert.equal(await readFile(markerPath, 'utf8'), 'SIGTERM');
     } finally {
@@ -348,6 +347,7 @@ test(
       supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
         env: {
           ...process.env,
+          CAT_CAFE_DATA_DIR: tempDir,
           CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
           CAT_CAFE_SUPERVISOR_POLL_MS: '2000',
           CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '150',
@@ -365,18 +365,9 @@ test(
       }
       assert.equal(existsSync(readyPath), true, `stubborn child was not ready; stderr=${stderr}`);
 
-      const exit = await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          supervisor?.kill('SIGKILL');
-          resolve({ timedOut: true, stderr });
-        }, 5_000);
-        supervisor.once('exit', (code, signal) => {
-          clearTimeout(timer);
-          resolve({ code, signal, stderr });
-        });
-      });
+      const exit = await waitForSupervisorExit(supervisor);
 
-      assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${exit.stderr}`);
+      assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${stderr}`);
       assert.equal(await readFile(termPath, 'utf8'), 'SIGTERM');
       assert.equal(exit.code, 137, `SIGKILL child should surface as 137; stderr=${exit.stderr}`);
     } finally {
@@ -635,7 +626,7 @@ test('CLI_TIMEOUT_MS=0 disables timeout (no auto-kill on silence)', async () => 
   }
 });
 
-test('spawnCli uses the configured fallback timeout when CLI_TIMEOUT_MS is unset', async () => {
+test('spawnCli defaults to manual-cancel-only when CLI_TIMEOUT_MS is unset', async () => {
   const savedEnv = process.env.CLI_TIMEOUT_MS;
   delete process.env.CLI_TIMEOUT_MS;
 
@@ -656,8 +647,9 @@ test('spawnCli uses the configured fallback timeout when CLI_TIMEOUT_MS is unset
     proc._emitter.emit('exit', 0, null);
     await promise;
 
-    assert.ok(delays.length > 0);
-    assert.equal(delays[0], DEFAULT_CLI_TIMEOUT_MS);
+    assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'automatic CLI timeout must be opt-in');
+    assert.deepEqual(delays, [], 'unset CLI_TIMEOUT_MS must not arm an automatic response timeout');
+    assert.equal(proc.kill.mock.callCount(), 0, 'manual-cancel-only default must not signal the process');
   } finally {
     global.setTimeout = originalSetTimeout;
     if (savedEnv === undefined) {
@@ -791,6 +783,123 @@ test('spawnCli removes inherited env vars when override is null', async () => {
   if (saved === undefined) delete process.env.SPAWN_DELETE_ME;
   else process.env.SPAWN_DELETE_ME = saved;
 });
+
+test('buildChildEnv never forwards runtime-only lifecycle capabilities to agent shells', () => {
+  const previousConnectorAutostart = process.env.CONNECTOR_GATEWAY_AUTOSTART;
+  const previousGlobalSidecarOwner = process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR;
+  const previousExecutionOwnerBinding = process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER;
+  const previousExecutionId = process.env.CAT_CAFE_EXECUTION_ID;
+  try {
+    process.env.CONNECTOR_GATEWAY_AUTOSTART = '1';
+    process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = '1';
+    process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER = '1';
+    process.env.CAT_CAFE_EXECUTION_ID = 'outer-execution';
+
+    const childEnv = buildChildEnv({
+      CONNECTOR_GATEWAY_AUTOSTART: '1',
+      CAT_CAFE_PROVISION_GLOBAL_SIDECAR: '1',
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_EXECUTION_ID: 'outer-execution',
+      KEEP_ME: '1',
+    });
+
+    assert.equal(childEnv.CONNECTOR_GATEWAY_AUTOSTART, undefined);
+    assert.equal(childEnv.CAT_CAFE_PROVISION_GLOBAL_SIDECAR, undefined);
+    assert.equal(childEnv.CAT_CAFE_PROCESS_EXECUTION_OWNER, undefined);
+    assert.equal(childEnv.CAT_CAFE_EXECUTION_ID, undefined);
+    assert.equal(childEnv.KEEP_ME, '1');
+  } finally {
+    if (previousConnectorAutostart === undefined) delete process.env.CONNECTOR_GATEWAY_AUTOSTART;
+    else process.env.CONNECTOR_GATEWAY_AUTOSTART = previousConnectorAutostart;
+    if (previousGlobalSidecarOwner === undefined) delete process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR;
+    else process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = previousGlobalSidecarOwner;
+    if (previousExecutionOwnerBinding === undefined) delete process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER;
+    else process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER = previousExecutionOwnerBinding;
+    if (previousExecutionId === undefined) delete process.env.CAT_CAFE_EXECUTION_ID;
+    else process.env.CAT_CAFE_EXECUTION_ID = previousExecutionId;
+  }
+});
+
+test(
+  'buildChildEnv keeps the verdict gh guard first after a zsh login profile rewrites PATH',
+  { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
+  () => {
+    const childEnv = buildChildEnv({
+      PATH: '/usr/local/bin:/usr/bin',
+      CAT_CAFE_VERDICT_REPO_FULL_NAME: 'example/cat-cafe',
+    });
+
+    assert.equal(childEnv.PATH?.split(':')[0], join(REPO_ROOT, 'scripts', 'guarded-bin'));
+    assert.equal(childEnv.CAT_CAFE_VERDICT_GH_GUARD_ROOT, REPO_ROOT);
+    assert.equal(childEnv.CAT_CAFE_VERDICT_REPO_FULL_NAME, 'example/cat-cafe');
+    assert.equal(childEnv.ZDOTDIR, join(REPO_ROOT, 'scripts', 'guarded-zsh'));
+
+    const loginShell = spawnSync('/bin/zsh', ['-lc', 'command -v gh'], {
+      encoding: 'utf8',
+      env: childEnv,
+    });
+    assert.equal(loginShell.status, 0, loginShell.stderr);
+    assert.equal(loginShell.stdout.trim(), join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh'));
+  },
+);
+
+test(
+  'buildChildEnv delegates original zsh startup files before restoring the verdict gh guard',
+  { skip: !existsSync('/bin/zsh') && 'zsh is not installed' },
+  async () => {
+    const originalZdotdir = await mkdtemp(join(tmpdir(), 'cat-cafe-original-zdotdir-'));
+    const previousHistfile = process.env.HISTFILE;
+    const previousOriginalZdotdir = process.env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+    process.env.HISTFILE = join(tmpdir(), 'cat-cafe-inherited-history');
+    process.env.CAT_CAFE_ORIGINAL_ZDOTDIR = join(tmpdir(), 'cat-cafe-inherited-zdotdir');
+    try {
+      await Promise.all([
+        writeFile(join(originalZdotdir, '.zshenv'), 'export ORIGINAL_ZSHENV=1\n'),
+        writeFile(join(originalZdotdir, '.zprofile'), 'export ORIGINAL_ZPROFILE=1\nexport PATH=/usr/bin\n'),
+        writeFile(
+          join(originalZdotdir, '.zshrc'),
+          'export ORIGINAL_ZSHRC=1\nexport HISTFILE="$ZDOTDIR/.zsh_history"\n',
+        ),
+        writeFile(join(originalZdotdir, '.zlogin'), 'export ORIGINAL_ZLOGIN=1\n'),
+      ]);
+      const childEnv = buildChildEnv({
+        PATH: '/usr/bin',
+        ZDOTDIR: originalZdotdir,
+      });
+      assert.equal(childEnv.HISTFILE, join(originalZdotdir, '.zsh_history'));
+      assert.equal(childEnv.CAT_CAFE_ORIGINAL_ZDOTDIR, originalZdotdir);
+
+      const explicitHistfile = join(originalZdotdir, 'custom-history');
+      const childEnvWithExplicitHistfile = buildChildEnv({
+        PATH: '/usr/bin',
+        ZDOTDIR: originalZdotdir,
+        HISTFILE: explicitHistfile,
+      });
+      assert.equal(childEnvWithExplicitHistfile.HISTFILE, explicitHistfile);
+
+      const loginShell = spawnSync(
+        '/bin/zsh',
+        [
+          '-lic',
+          'printf "%s|%s|%s|%s|%s|%s\\n" "$ORIGINAL_ZSHENV" "$ORIGINAL_ZPROFILE" "$ORIGINAL_ZSHRC" "$ORIGINAL_ZLOGIN" "$HISTFILE" "$(command -v gh)"',
+        ],
+        { encoding: 'utf8', env: childEnv },
+      );
+
+      assert.equal(loginShell.status, 0, loginShell.stderr);
+      assert.equal(
+        loginShell.stdout.trim(),
+        `1|1|1|1|${join(originalZdotdir, '.zsh_history')}|${join(REPO_ROOT, 'scripts', 'guarded-bin', 'gh')}`,
+      );
+    } finally {
+      await rm(originalZdotdir, { recursive: true, force: true });
+      if (previousHistfile === undefined) delete process.env.HISTFILE;
+      else process.env.HISTFILE = previousHistfile;
+      if (previousOriginalZdotdir === undefined) delete process.env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+      else process.env.CAT_CAFE_ORIGINAL_ZDOTDIR = previousOriginalZdotdir;
+    }
+  },
+);
 
 test('spawnCli handles already-aborted signal', async () => {
   const proc = createMockProcess();
@@ -1064,7 +1173,12 @@ test('timeout with no events has null firstEventAt/lastEventAt/lastEventType', a
   assert.equal(timeout.firstEventAt, null);
   assert.equal(timeout.lastEventAt, null);
   assert.equal(timeout.lastEventType, null);
-  assert.equal(timeout.silenceDurationMs, timeout.timeoutMs, 'silence = full timeout when no events');
+  assert.ok(
+    timeout.silenceDurationMs >= timeout.timeoutMs - 5,
+    'observed silence stays near the configured timer despite millisecond clock granularity',
+  );
+  assert.equal(timeout.terminalContext.configuredTimeoutMs, timeout.timeoutMs);
+  assert.equal(timeout.terminalContext.observedSilenceDurationMs, timeout.silenceDurationMs);
 });
 
 test('timeout includes invocationId and cliSessionId when passed in options', async () => {
@@ -1135,8 +1249,6 @@ test('B4: yields alive_but_silent warning during CLI silence', async () => {
   const proc = createMockProcess({ pid: process.pid });
   const spawnFn = createMockSpawnFn(proc);
 
-  proc.stdout.write(JSON.stringify({ type: 'init' }) + '\n');
-
   const promise = collect(
     spawnCli(
       {
@@ -1155,7 +1267,11 @@ test('B4: yields alive_but_silent warning during CLI silence', async () => {
   const results = await promise;
   const warnings = results.filter((e) => e?.__livenessWarning);
   assert.ok(warnings.length > 0, 'should have liveness warnings');
-  assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+  const warning = warnings.find((w) => w.level === 'alive_but_silent');
+  assert.ok(warning);
+  assert.equal(warning.firstEventAt, null);
+  assert.equal(warning.lastEventAt, null);
+  assert.equal(warning.lastEventType, null);
 });
 
 test('B4 regression: drains pending liveness warning even if stdout closes before next loop drain', async () => {
@@ -1202,7 +1318,11 @@ test('B4 regression: drains pending liveness warning even if stdout closes befor
 
     const results = await promise;
     const warnings = results.filter((e) => e?.__livenessWarning);
-    assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+    const warning = warnings.find((w) => w.level === 'alive_but_silent');
+    assert.ok(warning);
+    assert.equal(warning.lastEventType, 'init');
+    assert.equal(typeof warning.firstEventAt, 'number');
+    assert.equal(typeof warning.lastEventAt, 'number');
   } finally {
     ProcessLivenessProbe.prototype.drainWarnings = originalDrainWarnings;
   }
@@ -1784,6 +1904,29 @@ test('F212 AC-A1: __cliError includes cliDiagnostics with reasonCode for known s
   assert.equal(err.cliDiagnostics.debugRef.invocationId, 'inv-A1');
 });
 
+test('#1325: spawnCli forwards managed argv provenance and fails closed without it', async () => {
+  const run = async (options) => {
+    const proc = createMockProcess({ exitOnKill: false });
+    const spawnFn = createMockSpawnFn(proc);
+    const promise = collect(spawnCli(options, { spawnFn }));
+    proc.stderr.write("error: unknown option '--agent-file'\n");
+    proc.stdout.end();
+    proc._emitter.emit('exit', 1, null);
+    const results = await promise;
+    return results.find((result) => result?.__cliError)?.cliDiagnostics;
+  };
+
+  const managed = await run({
+    command: '/usr/local/bin/kimi',
+    args: ['--agent-file', '/tmp/agent.md'],
+    managedArgvFlags: ['--agent-file'],
+  });
+  assert.equal(managed?.reasonCode, 'incompatible_cli_arguments');
+
+  const operatorOwned = await run({ command: 'gemini', args: ['--agent-file', '/tmp/operator.md'] });
+  assert.notEqual(operatorOwned?.reasonCode, 'incompatible_cli_arguments');
+});
+
 test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with sanitized safeExcerpt (#857)', async () => {
   const proc = createMockProcess({ exitOnKill: false });
   const spawnFn = createMockSpawnFn(proc);
@@ -2023,7 +2166,7 @@ test('F212 Phase F (AC-F3, 砚砚 P1-1): stderr log payload includes invocationI
 // Without these tests, removing stderrEmpty pass-through OR removing diagnosticLogger
 // injection in timeout branch would not be caught by the existing AC-F3/F4 suite.
 
-test('F212 Phase F (AC-F4, 砚砚 R2 P1): timeout + empty stderr + unknown → honest hint, NO LOG_CLI_STDERR dangle', async () => {
+test('F212 timeout terminal truth: empty stderr still gets explicit timeout reason and no dead-end hint', async () => {
   delete process.env.LOG_CLI_STDERR;
   const proc = createMockProcess(); // default exitOnKill — kills on timeout
   const spawnFn = createMockSpawnFn(proc);
@@ -2038,16 +2181,14 @@ test('F212 Phase F (AC-F4, 砚砚 R2 P1): timeout + empty stderr + unknown → h
   const results = await promise;
   const timeout = results.find((r) => r?.__cliTimeout);
   assert.ok(timeout, 'should yield __cliTimeout when no stderr + timeout fires');
-  assert.equal(timeout.cliDiagnostics.reasonCode, undefined, 'unknown classifier (empty rawText)');
-  // Same AC-F4 assertions as abnormal-exit branch
-  assert.ok(
-    timeout.cliDiagnostics.publicHint.includes('没有输出 stderr'),
-    `timeout empty-stderr hint must mention "没有输出 stderr": ${timeout.cliDiagnostics.publicHint}`,
-  );
+  assert.equal(timeout.cliDiagnostics.reasonCode, 'cli_response_timeout');
   assert.ok(
     timeout.cliDiagnostics.publicHint.includes('invocationId'),
     `timeout empty-stderr hint must mention invocationId: ${timeout.cliDiagnostics.publicHint}`,
   );
+  assert.doesNotMatch(timeout.cliDiagnostics.publicSummary, /未识别|CLI 已退出/);
+  assert.doesNotMatch(timeout.cliDiagnostics.publicHint, /未识别|CLI 已退出/);
+  assert.equal(Object.hasOwn(timeout.cliDiagnostics.debugRef, 'exitCode'), false);
   // Critical regression guard: do NOT dangle LOG_CLI_STDERR=1 false hope
   assert.ok(
     !timeout.cliDiagnostics.publicHint.includes('LOG_CLI_STDERR'),
@@ -2206,4 +2347,190 @@ test('F212 AC-A1: __cliTimeout also carries cliDiagnostics', async () => {
   }
   // At least one of them must have happened
   assert.ok(to || err, 'expected either __cliTimeout or __cliError');
+});
+
+// F212 Phase H Sol Final确权 P1-A (2026-07-10): 2×2 truth table for the unified
+// `finalSemanticDone` predicate on direct spawn. Symmetric to tmux tests.
+//
+// Cells:
+//   (1) sticky signal + turn.completed → localFinalTerminal='completed' → SUPPRESS
+//   (2) sticky + completed then failed → localFinalTerminal='failed' → SURFACE
+//   (3) sticky + no terminal event → localFinalTerminal=null, sig aborted → SUPPRESS
+//   (4) no signal + no terminal → SURFACE
+// Group A above covers cell (3). Group B covers cell (4). We add cells (1) and (2)
+// explicitly to lock the multi-turn contract.
+
+test('F212 Phase H R5 cell 1: direct-spawn turn.completed + exit 1 → __cliError suppressed', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const semanticController = new AbortController();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+  semanticController.abort();
+  proc.stdout.end();
+  setTimeout(() => proc._emitter.emit('exit', 1, null), 50);
+
+  const results = await promise;
+  const hasCliError = results.some((r) => r?.__cliError);
+  assert.equal(hasCliError, false, 'turn.completed then exit 1 must NOT synthesize __cliError');
+});
+
+test('F212 Phase H R5 cell 2: direct-spawn multi-turn (completed then failed) + exit 1 → __cliError surfaces', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const semanticController = new AbortController();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  // Multi-turn: turn.completed fires (signal aborted), THEN real turn.failed.
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+  semanticController.abort();
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'real failure' } })}\n`);
+  proc.stdout.end();
+  setTimeout(() => proc._emitter.emit('exit', 1, null), 50);
+
+  const results = await promise;
+  const hasCliError = results.some((r) => r?.__cliError);
+  assert.equal(
+    hasCliError,
+    true,
+    'multi-turn completed→failed→exit 1 MUST surface __cliError (Sol P1-A truth table cell 2)',
+  );
+});
+
+test('F212 Phase H R5 cell 2 companion: multi-turn recovery (failed then completed) + exit 1 → __cliError suppressed', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const semanticController = new AbortController();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: ['exec'],
+        semanticCompletionSignal: semanticController.signal,
+      },
+      { spawnFn },
+    ),
+  );
+
+  // Multi-turn recovery: first turn.failed, then recovery turn.completed.
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'transient' } })}\n`);
+  proc.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+  semanticController.abort();
+  proc.stdout.end();
+  setTimeout(() => proc._emitter.emit('exit', 1, null), 50);
+
+  const results = await promise;
+  const hasCliError = results.some((r) => r?.__cliError);
+  assert.equal(
+    hasCliError,
+    false,
+    'multi-turn failed→completed→exit 1 MUST NOT surface __cliError (Codex retry recovery)',
+  );
+});
+
+// F212 Phase H Sol R6 P1-B (2026-07-10): Windows libuv crash-code (0xC0000409 =
+// 3221226505) is a spurious shutdown crash. The tie-break at cli-spawn.ts:657 must
+// be gated by the SAME `finalSemanticDone` predicate as the main suppress branch:
+//   Cell 1: turn.completed only + crash-code → SUPPRESS
+//   Cell 2: multi-turn completed→failed + crash-code → SURFACE
+// Sol R5 established the runtime fix but the previous test suite had zero direct
+// coverage of `3221226505` — this suite closes the gap.
+
+test('F212 Phase H R6 cell 1 (Windows tie-break): turn.completed only + libuv crash-code → __cliError suppressed', async () => {
+  const origPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  try {
+    const proc = createMockProcess({ exitOnKill: false });
+    const spawnFn = createMockSpawnFn(proc);
+    const semanticController = new AbortController();
+
+    const promise = collect(
+      spawnCli(
+        {
+          command: 'codex',
+          args: ['exec'],
+          semanticCompletionSignal: semanticController.signal,
+        },
+        { spawnFn },
+      ),
+    );
+
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+    semanticController.abort();
+    proc.stdout.end();
+    // Windows spurious crash on MCP subprocess shutdown: exit code 3221226505.
+    setTimeout(() => proc._emitter.emit('exit', 3221226505, null), 50);
+
+    const results = await promise;
+    const hasCliError = results.some((r) => r?.__cliError);
+    assert.equal(
+      hasCliError,
+      false,
+      'R6 cell 1: Windows libuv crash after only turn.completed MUST be suppressed (isWindowsLibuvCrash tie-break)',
+    );
+  } finally {
+    Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+  }
+});
+
+test('F212 Phase H R6 cell 2 (Windows tie-break): multi-turn (completed then failed) + libuv crash-code → __cliError surfaces', async () => {
+  const origPlatform = process.platform;
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  try {
+    const proc = createMockProcess({ exitOnKill: false });
+    const spawnFn = createMockSpawnFn(proc);
+    const semanticController = new AbortController();
+
+    const promise = collect(
+      spawnCli(
+        {
+          command: 'codex',
+          args: ['exec'],
+          semanticCompletionSignal: semanticController.signal,
+        },
+        { spawnFn },
+      ),
+    );
+
+    // Multi-turn: turn.completed fires (signal aborted), then turn.failed marks a
+    // REAL failure. The Windows crash-code that follows is now a real failure
+    // signal, not the spurious libuv shutdown quirk.
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed' })}\n`);
+    semanticController.abort();
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.failed', error: { message: 'real failure' } })}\n`);
+    proc.stdout.end();
+    setTimeout(() => proc._emitter.emit('exit', 3221226505, null), 50);
+
+    const results = await promise;
+    const hasCliError = results.some((r) => r?.__cliError);
+    assert.equal(
+      hasCliError,
+      true,
+      'R6 cell 2: Windows crash-code after multi-turn completed→failed MUST surface __cliError (finalSemanticDone=false)',
+    );
+  } finally {
+    Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
+  }
 });

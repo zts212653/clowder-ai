@@ -1,9 +1,10 @@
 'use client';
 
-import type { CapabilityTipContext } from '@cat-cafe/shared';
+import type { CapabilityTipContext, MessageBundleSelectionItem } from '@cat-cafe/shared';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
+import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
@@ -27,7 +28,7 @@ import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSel
 import { useVadInterrupt } from '@/hooks/useVadInterrupt';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
-import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
@@ -44,8 +45,14 @@ import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
+import { ChatMessageRow } from './ChatMessageRow';
 import { ConnectionStatusBar } from './ConnectionStatusBar';
-import { getStreamingTipContexts, isStreamingTipSuppressedByStatus } from './capability-tip-placement';
+import {
+  getSilentActiveTurnDeadline,
+  getStreamingTipContexts,
+  isStreamingTipSuppressed,
+} from './capability-tip-placement';
+import { buildChatTimelineProjectionKey } from './chat-timeline-projection-key';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
 import { QuestBanner } from './first-run-quest/QuestBanner';
@@ -57,24 +64,32 @@ import { HubCatEditor } from './HubCatEditor';
 import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
-import { MessageActions } from './MessageActions';
 import { MessageNavigator } from './MessageNavigator';
-import { MobileStatusSheet } from './MobileStatusSheet';
+import { MessageSelectionToolbar } from './MessageSelectionToolbar';
+import { MobileApprovalSheet } from './MobileApprovalSheet';
+import { loadExportThreadTitle, selectMessagesForExport } from './message-export-selection';
+import { messageMountPolicy } from './message-mount-policy';
+import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES, normalizeSelectedMessageIds } from './message-selection';
 import { ParallelStatusBar } from './ParallelStatusBar';
 import { PendingMemberBubble } from './PendingMemberBubble';
 import { ProjectSetupCard } from './ProjectSetupCard';
-
+import { derivePendingMemberInvocations } from './pending-member-projection';
 import { QueuePanel } from './QueuePanel';
+import { collectExactLiveInvocationIds } from './queue-receipt-projection';
 import { RightStatusPanel } from './RightStatusPanel';
+import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadExecutionBar } from './ThreadExecutionBar';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
+import { TransferTargetPicker } from './TransferTargetPicker';
 import { VoteActiveBar } from './VoteActiveBar';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
+
 import { WorkspacePanel } from './WorkspacePanel';
+import { ContextualWorkspaceChrome } from './workspace/ContextualWorkspaceChrome';
 import { FloatingTranscriptContainer } from './workspace/FloatingTranscriptContainer';
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { TranscriptPanel } from './workspace/TranscriptPanel';
@@ -93,14 +108,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setViewMode,
     isLoading: chatIsLoading,
     clearUnread,
-    confirmUnreadAck,
+    settleUnreadAck,
     armUnreadSuppression,
     rightPanelMode,
+    workspaceMode,
+    workspaceSurface,
+    presentationLock,
+    setWorkspaceMode,
+    setWorkspaceSurface,
     setRightPanelMode,
     closeRightPanel,
     showVoteModal,
     setShowVoteModal,
-    addMessage,
+    addMessageToThread,
   } = useChatStore(
     useShallow((s) => ({
       setCurrentThread: s.setCurrentThread,
@@ -108,14 +128,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setViewMode: s.setViewMode,
       isLoading: s.isLoading,
       clearUnread: s.clearUnread,
-      confirmUnreadAck: s.confirmUnreadAck,
+      settleUnreadAck: s.settleUnreadAck,
       armUnreadSuppression: s.armUnreadSuppression,
       rightPanelMode: s.rightPanelMode,
+      workspaceMode: s.workspaceMode,
+      workspaceSurface: s.workspaceSurface,
+      presentationLock: s.presentationLock,
+      setWorkspaceMode: s.setWorkspaceMode,
+      setWorkspaceSurface: s.setWorkspaceSurface,
       setRightPanelMode: s.setRightPanelMode,
       closeRightPanel: s.closeRightPanel,
       showVoteModal: s.showVoteModal,
       setShowVoteModal: s.setShowVoteModal,
-      addMessage: s.addMessage,
+      addMessageToThread: s.addMessageToThread,
     })),
   );
   // F173 Phase C Task 3 — full read-side migration. All thread liveness +
@@ -125,26 +150,57 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // covered hasActiveInvocation; this finishes the job).
   const allMessages = useThreadMessages(threadId);
 
-  // #697: Filter out messages that are still queued (not yet delivered).
-  // Without this, queued messages render in the chat stream AND in QueuePanel,
-  // causing visual duplication until the queue processor dequeues them.
-  const queueRaw = useChatStore((s) => s.queue);
-  const queuedMessageIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (!queueRaw || queueRaw.length === 0) return ids;
-    for (const entry of queueRaw) {
-      if (entry.status !== 'queued') continue;
-      if (entry.messageId) ids.add(entry.messageId);
-      if (entry.mergedMessageIds) {
-        for (const mid of entry.mergedMessageIds) ids.add(mid);
-      }
-    }
-    return ids;
-  }, [queueRaw]);
-  const messages = useMemo(
-    () => (queuedMessageIds.size === 0 ? allMessages : allMessages.filter((m) => !queuedMessageIds.has(m.id))),
-    [allMessages, queuedMessageIds],
+  // F264: the timeline is the durable authoring history. QueuePanel presents
+  // custody/actions for the same message, but must not erase its user bubble.
+  const messages = allMessages;
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
+  const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
+  const normalizedSelectedMessageIds = useMemo(
+    () => normalizeSelectedMessageIds(messages, selectedMessageIds),
+    [messages, selectedMessageIds],
   );
+  const selectedBundleItems = useMemo<MessageBundleSelectionItem[]>(
+    () => normalizedSelectedMessageIds.map((messageId) => ({ kind: 'message', messageId })),
+    [normalizedSelectedMessageIds],
+  );
+
+  const clearMessageSelection = useCallback(() => {
+    setSelectionForwardOpen(false);
+    setSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const enterMessageSelection = useCallback(
+    (messageId: string) => {
+      const candidate = messages.find((message) => message.id === messageId);
+      if (!candidate || !isMessageSelectableForBundle(candidate)) return;
+      setSelectedMessageIds(new Set([messageId]));
+      setSelectionMode(true);
+    },
+    [messages],
+  );
+
+  const toggleMessageSelection = useCallback((messageId: string) => {
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else if (next.size < MAX_SELECTED_MESSAGES) {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setSelectedMessageIds((current) => {
+      const selectableIds = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
+      const next = new Set([...current].filter((messageId) => selectableIds.has(messageId)));
+      if (next.size === current.size && [...next].every((messageId) => current.has(messageId))) return current;
+      return next;
+    });
+  }, [messages]);
   const {
     hasActive: hasActiveInvocation,
     activeInvocations,
@@ -153,6 +209,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     intentMode,
     targetCats,
   } = useThreadLiveness(threadId);
+  const activeInvocationIds = useMemo(
+    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
+    [activeInvocations, catInvocations],
+  );
   const navigateToThread = useCallback((tid: string) => {
     pushThreadRouteWithHistory(tid, typeof window !== 'undefined' ? window : undefined);
   }, []);
@@ -181,17 +241,42 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // Export mode: ?export=true triggers print-friendly layout (no scroll containers)
   const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isExport = searchParams?.get('export') === 'true';
+  const exportMessageIds = searchParams?.getAll('messageId') ?? [];
+  const [exportThreadTitle, setExportThreadTitle] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!isExport) {
+      setExportThreadTitle(undefined);
+      return;
+    }
+    let active = true;
+    setExportThreadTitle(undefined);
+    loadExportThreadTitle(threadId)
+      .then((title) => {
+        if (active) setExportThreadTitle(title);
+      })
+      .catch(() => {
+        if (active) setExportThreadTitle(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isExport, threadId]);
   // AC-6: research=multi hint from Signal study "多猫研究" button
   const isResearchMode = searchParams?.get('research') === 'multi';
   const { clearTasks } = useTaskStore();
   const { cats, getCatById, refresh: refreshCats, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   usePreviewAutoOpen(workspaceWorktreeId, threadId);
-  useWorkspaceNavigate(workspaceWorktreeId, threadId);
   useTeleport(); // F227: drive the Hub to a teleport target message (thread:teleport)
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
-  const [statusPanelOpen, setStatusPanelOpen] = useState(true);
-  const [mobileStatusOpen, setMobileStatusOpen] = useState(false);
+  // F284: Chat is the calm default. Typed workspace/transcript actions still
+  // open the contextual shell through the existing rightPanelMode effect.
+  // F284 × F120 review P1: panel visibility is canonical per-thread store
+  // state (snapshotted in ThreadState), not route-local component state.
+  const statusPanelOpen = useChatStore((s) => s.rightPanelOpen);
+  const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
+  const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
+  const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
@@ -253,18 +338,45 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F063/F195: auto-open panel when workspace or transcript mode is set
   useEffect(() => {
     if ((rightPanelMode === 'workspace' || rightPanelMode === 'transcript') && !statusPanelOpen) {
-      setStatusPanelOpen(true);
+      setRightPanelOpen(true);
     }
-  }, [rightPanelMode, statusPanelOpen]);
+    if (rightPanelMode === 'workspace') setWorkspacePanelMounted(true);
+    if (rightPanelMode === 'status' && statusPanelOpen) setActivityPanelMounted(true);
+  }, [rightPanelMode, statusPanelOpen, setRightPanelOpen]);
 
   // F232 P2（云端 round 5）：显式关闭右侧 panel——先退出 workspace/transcript mode（否则上面的 auto-open
   // effect 立即重开，关不掉），再关闭。所有 close 入口（header toggle / ResizeHandle 折叠）统一走这里。
+  // F284 × F120: closeRightPanel 同时退出 mode 并关闭 canonical visibility。
   const closeStatusPanel = useCallback(() => {
     closeRightPanel();
-    setStatusPanelOpen(false);
   }, [closeRightPanel]);
 
+  const openStatusPanel = useCallback(() => {
+    setActivityPanelMounted(true);
+    setRightPanelMode('status');
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setRightPanelOpen]);
+
+  const openWorkspaceLauncher = useCallback(() => {
+    setWorkspacePanelMounted(true);
+    setWorkspaceMode('dev');
+    setWorkspaceSurface('home');
+    setRightPanelMode('workspace');
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
+
   const isDesktop = useIsDesktop();
+
+  useEffect(() => {
+    if (isDesktop || !statusPanelOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeStatusPanel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [closeStatusPanel, isDesktop, statusPanelOpen]);
 
   // Desktop: open sidebar before first paint (useLayoutEffect avoids false→true flicker).
   useLayoutEffect(() => {
@@ -273,7 +385,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [isDesktop, openSidebar]);
 
-  const { handleAgentMessage, handleStop: stopHandler, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
+  const { handleAgentMessage, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const {
@@ -308,7 +420,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           body: JSON.stringify(config),
         });
         if (res.status === 409) {
-          addMessage({
+          addMessageToThread(threadId, {
             id: `vote-${Date.now()}`,
             type: 'system',
             variant: 'error',
@@ -328,7 +440,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const notifyMsg = `${mentions}\n投票请求：${data.question}\n\n选项：\n${optionList}\n\n请在回复中包含 [VOTE:你的选项]，例如 [VOTE:${config.options[0]}]`;
         handleSend(notifyMsg);
       } catch (err) {
-        addMessage({
+        addMessageToThread(threadId, {
           id: `vote-${Date.now()}`,
           type: 'system',
           variant: 'error',
@@ -337,7 +449,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         });
       }
     },
-    [threadId, handleSend, setShowVoteModal, addMessage],
+    [threadId, handleSend, setShowVoteModal, addMessageToThread],
   );
 
   const messageSummary = useMemo(() => {
@@ -567,6 +679,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     if (prevThreadRef.current !== threadId) {
       // Thread switch: store saves/restores per-thread state automatically
       setCurrentThread(threadId);
+      clearMessageSelection();
       // F173 A.12 — resetRefs no longer touches suppression markers (invocation-driven cleanup).
       // It still clears activeRefs / finalizedStreamRef / sawStreamData per the original purpose.
       resetRefs();
@@ -579,6 +692,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     reconnectGame(threadId).catch(() => {});
   }, [
     threadId,
+    clearMessageSelection,
     clearTasks, // Clean up non-thread-scoped refs
     resetRefs, // First mount — sync threadId to store without save/restore
     setCurrentThread,
@@ -623,6 +737,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       error: agentHookHealth.error,
       syncing: agentHookHealth.syncing,
       synced: agentHookHealth.synced,
+      syncAttempted: agentHookHealth.syncAttempted,
     });
 
   // F152 Phase B: memory bootstrap state
@@ -648,90 +763,117 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     onNavigateToThread: navigateToThread,
     onIndexEvent: handleIndexSocketEvent,
   });
+  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
+  const socketThreadIds = useMemo(
+    () =>
+      viewMode === 'split' && splitPaneThreadIds.length > 0
+        ? [...new Set([...splitPaneThreadIds, threadId])]
+        : [threadId],
+    [viewMode, splitPaneThreadIds, threadId],
+  );
+  const { socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
+  useActiveExecutionProjection(threadId, socketConnected);
+  const connectionStatus = useConnectionStatus(socketConnected);
+  const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
   const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
   // F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
   // Compute once per messages change; map is keyed by messageId.
   const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
-  // F244: Tips show in PendingMemberBubble (the "分析处理中" wait phase), not in
-  // streaming ChatMessage — operator dogfood confirmed pending is the correct timing.
-  // streamingTipMessageId removed; contexts kept for PendingMemberBubble.
+  const timelineProjectionKey = useMemo(() => buildChatTimelineProjectionKey(messages), [messages]);
+  // Keep the previous message-array identity while only stream text/tool events
+  // change. Cross-message projections do not consume those fields.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the projection key intentionally represents the consumed message fields
+  const timelineProjectionMessages = useMemo(
+    () => messages,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [timelineProjectionKey],
+  );
+  const renderSingleMessage = useCallback(
+    (msg: ChatMessageData, index: number) => {
+      const dedupInfo = cliDedupMap.get(msg.id);
+      const selected = selectedMessageIds.has(msg.id);
+      const mountPolicy = messageMountPolicy(index, messages.length);
+      const selectionEligible =
+        isMessageSelectableForBundle(msg) &&
+        (!selectionMode || selected || selectedMessageIds.size < MAX_SELECTED_MESSAGES);
+      return (
+        <ChatMessageRow
+          key={msg.id}
+          message={msg}
+          threadId={threadId}
+          timelineMessages={timelineProjectionMessages}
+          activeInvocationIds={msg.extra?.queueReceipt ? activeInvocationIds : undefined}
+          getCatById={getCatById}
+          onEditCat={handleEditCat}
+          onEditCoCreator={handleEditCoCreator}
+          hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
+          dedupCount={dedupInfo?.dedupCount}
+          selectionMode={selectionMode}
+          selected={selected}
+          selectionEligible={selectionEligible}
+          onEnterSelection={enterMessageSelection}
+          onToggleSelection={toggleMessageSelection}
+          forwardingDisabled={connectionStatus.forwardingBlocked}
+          eager={mountPolicy.eager}
+          backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
+        />
+      );
+    },
+    [
+      threadId,
+      messages.length,
+      activeInvocationIds,
+      getCatById,
+      handleEditCat,
+      handleEditCoCreator,
+      cliDedupMap,
+      timelineProjectionMessages,
+      enterMessageSelection,
+      selectedMessageIds,
+      selectionMode,
+      toggleMessageSelection,
+      connectionStatus.forwardingBlocked,
+    ],
+  );
+
+  const pendingInvocations = useMemo(
+    () => (hasActiveInvocation ? derivePendingMemberInvocations(activeInvocations, messages, threadId) : []),
+    [hasActiveInvocation, activeInvocations, messages, threadId],
+  );
   const pendingTipContexts = useMemo<readonly CapabilityTipContext[]>(
     () => getStreamingTipContexts(intentMode),
     [intentMode],
   );
-  const renderSingleMessage = useCallback(
-    (msg: ChatMessageData) => {
-      const dedupInfo = cliDedupMap.get(msg.id);
-      return (
-        <MessageActions key={msg.id} message={msg} threadId={threadId}>
-          <ChatMessage
-            message={msg}
-            getCatById={getCatById}
-            onEditCat={handleEditCat}
-            onEditCoCreator={handleEditCoCreator}
-            hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
-            dedupCount={dedupInfo?.dedupCount}
-          />
-        </MessageActions>
-      );
-    },
-    [threadId, getCatById, handleEditCat, handleEditCoCreator, cliDedupMap],
-  );
-
-  const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
-  const connectionStatus = useConnectionStatus(socketConnected);
-
-  // Single-slot execution can be recovered from queue truth even when the
-  // active-thread flat intentMode has not been restored yet (for example after
-  // queue hydration or a missed intent_mode event). In that case we still need
-  // the top cancel affordance — otherwise the thread looks active in the
-  // execution bar but offers no single-cat cancel control.
-  const activeInvocationCount = Object.keys(activeInvocations).length;
-  const singleSpawningTarget =
-    targetCats.length === 1 && targetCats[0] !== undefined && catStatuses[targetCats[0]] === 'spawning';
-  const showThinkingIndicator =
-    intentMode === 'execute' ||
-    (intentMode == null && hasActiveInvocation && (activeInvocationCount === 1 || singleSpawningTarget));
-
-  // #936: Identify active invocations that don't yet have a corresponding message
-  // bubble — these need a pending placeholder with member avatar + animation.
-  const pendingInvocations = useMemo(() => {
-    if (!hasActiveInvocation || activeInvocationCount === 0) return [];
-    // Collect catIds that already have a streaming/recent assistant message
-    const streamingCatIds = new Set<string>();
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.type === 'user') break; // stop at last user message boundary
-      if (m.type === 'assistant' && m.catId) {
-        streamingCatIds.add(m.catId);
-      }
+  const [, bumpPendingTipLiveness] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    const futureDeadlines = new Set<number>();
+    for (const invocation of pendingInvocations) {
+      const deadline = getSilentActiveTurnDeadline(catInvocations[invocation.catId]?.appServerLifecycle);
+      if (deadline !== null && deadline > now) futureDeadlines.add(deadline);
     }
-    // Active invocations without a corresponding bubble = pending
-    return Object.entries(activeInvocations)
-      .filter(([, inv]) => !streamingCatIds.has(inv.catId))
-      .map(([invId, inv]) => ({ invocationId: invId, catId: inv.catId }));
-  }, [hasActiveInvocation, activeInvocationCount, activeInvocations, messages]);
+    if (futureDeadlines.size === 0) return;
 
-  // F244 dedup: only one pending bubble per thread shows tips (cloud P2).
-  // Pick the first non-stalled pending invocation.
-  const pendingTipInvocationId = useMemo(() => {
-    for (const inv of pendingInvocations) {
-      if (!isStreamingTipSuppressedByStatus(catStatuses[inv.catId])) {
-        return inv.invocationId;
-      }
-    }
-    return null;
-  }, [pendingInvocations, catStatuses]);
+    const timers = [...futureDeadlines].map((deadline) =>
+      window.setTimeout(() => bumpPendingTipLiveness((epoch) => epoch + 1), Math.max(1, deadline - now + 1)),
+    );
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+    };
+  }, [pendingInvocations, catInvocations]);
+  const pendingTipInvocationId =
+    pendingInvocations.find(
+      (invocation) =>
+        !isStreamingTipSuppressed(catStatuses[invocation.catId], catInvocations[invocation.catId]?.appServerLifecycle),
+    )?.invocationId ?? null;
 
   useVoiceAutoPlay();
   useVoiceStream();
   useVadInterrupt();
 
   useSplitPaneKeys();
-  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
   const setSplitPaneThreadIds = useChatStore((s) => s.setSplitPaneThreadIds);
   const setSplitPaneTarget = useChatStore((s) => s.setSplitPaneTarget);
 
@@ -741,14 +883,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       setSplitPaneTarget(threadId);
     }
   }, [viewMode, splitPaneThreadIds.length, threadId, setSplitPaneThreadIds, setSplitPaneTarget]);
-
-  useEffect(() => {
-    if (viewMode === 'split' && splitPaneThreadIds.length > 0) {
-      // Join rooms for all threads in panes + the current active thread
-      const allIds = new Set([...splitPaneThreadIds, threadId]);
-      syncRooms([...allIds]);
-    }
-  }, [viewMode, splitPaneThreadIds, threadId, syncRooms]);
 
   useEffect(() => {
     clearUnread(threadId);
@@ -802,32 +936,25 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _messageCount = messages.length;
   useEffect(() => {
-    // Re-arm suppression before each ack. /read/latest is idempotent — any
-    // successful POST means server cursor is at latest, so any successful ack
-    // can safely clear suppression (no generation tracking needed).
     armUnreadSuppression(threadId);
     apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     })
-      .then((res) => {
-        if (res.ok) {
-          confirmUnreadAck(threadId);
+      .then(async (res) => {
+        if (!res.ok) {
+          settleUnreadAck(threadId, false);
+          return;
         }
+        const payload = (await res.json()) as { caughtUp?: unknown };
+        settleUnreadAck(threadId, payload.caughtUp === true);
       })
       .catch((err) => {
+        settleUnreadAck(threadId, false);
         console.debug('[F069] read ack failed:', err);
       });
-  }, [threadId, _messageCount, confirmUnreadAck, armUnreadSuppression]);
-
-  const handleStop = useCallback(
-    (overrideThreadId?: unknown) => {
-      const targetThreadId = typeof overrideThreadId === 'string' ? overrideThreadId : threadId;
-      stopHandler(cancelInvocation, targetThreadId);
-    },
-    [stopHandler, cancelInvocation, threadId],
-  );
+  }, [threadId, _messageCount, settleUnreadAck, armUnreadSuppression]);
 
   const handleZoomToThread = useCallback(
     (tid: string) => {
@@ -867,9 +994,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   if (viewMode === 'split') {
     return (
       <>
+        {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
         <SplitPaneView
+          isReadonly={connectionStatus.isReadonly}
           onSend={handleSend}
-          onStop={handleStop}
           uploadStatus={uploadStatus}
           uploadError={uploadError}
           onZoomToThread={handleZoomToThread}
@@ -881,19 +1009,45 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // Export mode: print-friendly layout — no sidebars, no scroll containers.
   // data-export-ready signals to Puppeteer that messages + cat data are fully loaded and rendered.
   if (isExport) {
-    const exportReady = !isLoadingHistory && messages.length > 0 && !isLoading;
+    const exportSelection = selectMessagesForExport(messages, exportMessageIds);
+    const exportReady = !isLoadingHistory && !isLoading && exportSelection.ready && exportThreadTitle !== undefined;
     return (
       <div
-        className="min-h-screen bg-[var(--console-shell-bg)]"
+        className="bg-[var(--console-shell-bg)]"
+        data-export-root
         {...(exportReady ? { 'data-export-ready': 'true' } : {})}
+        data-export-message-count={exportSelection.messages.length}
       >
-        <div className="max-w-4xl mx-auto p-4">{messages.map(renderSingleMessage)}</div>
+        <div className="max-w-4xl mx-auto p-4">
+          <header className="mb-4 border-b border-cafe-divider pb-3">
+            <h1 className="text-lg font-semibold text-cafe-primary">{exportThreadTitle ?? '未命名对话'}</h1>
+            <p className="mt-1 text-xs text-cafe-muted">来源 Thread: {threadId}</p>
+          </header>
+          {exportSelection.messages.map((msg) => {
+            const dedupInfo = cliDedupMap.get(msg.id);
+            return (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                threadId={threadId}
+                activeInvocationIds={activeInvocationIds}
+                getCatById={getCatById}
+                onEditCat={handleEditCat}
+                onEditCoCreator={handleEditCoCreator}
+                hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
+                dedupCount={dedupInfo?.dedupCount}
+                forwardingDisabled
+              />
+            );
+          })}
+        </div>
       </div>
     );
   }
 
   return (
     <div ref={containerRef} className="flex h-screen h-dvh">
+      {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
         <>
@@ -903,7 +1057,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             aria-hidden="true"
           />
           <div className="fixed inset-y-0 left-0 z-30 w-[240px]">
-            <ThreadSidebar onClose={closeSidebar} className="w-full" />
+            <ThreadSidebar onClose={closeSidebar} className="w-full" routeThreadId={threadId} />
           </div>
         </>
       )}
@@ -923,23 +1077,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           authPendingCount={authPending.length}
           viewMode={viewMode}
           onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
-          onOpenMobileStatus={() => setMobileStatusOpen(true)}
-          statusPanelOpen={statusPanelOpen}
+          statusPanelOpen={statusPanelOpen && rightPanelMode === 'workspace'}
+          hasWorkspaceActivity={hasProjectedExecution || workspaceSurface !== 'home' || presentationLock !== null}
           onToggleStatusPanel={() => {
-            if (statusPanelOpen) {
+            if (statusPanelOpen && rightPanelMode === 'workspace') {
               closeStatusPanel();
             } else {
-              // closeRightPanel() 退回 'status' 防 auto-open 循环；重新打开时默认进 workspace
-              // （status/transcript 各有底部工具栏图标单独入口，不需要 PanelTabs tab 栏切换）。
+              setWorkspacePanelMounted(true);
               setRightPanelMode('workspace');
-              setStatusPanelOpen(true);
+              setRightPanelOpen(true);
             }
           }}
-          defaultCatId={targetCats[0] || 'opus'}
         />
 
-        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
-        {showThinkingIndicator && <ThinkingIndicator onCancel={cancelInvocation} threadId={threadId} />}
+        {intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
+        <ThinkingIndicator threadId={threadId} />
 
         <div className="flex-1 relative overflow-hidden">
           <main
@@ -967,6 +1119,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     error={agentHookHealth.error}
                     syncing={agentHookHealth.syncing}
                     synced={agentHookHealth.synced}
+                    syncAttempted={agentHookHealth.syncAttempted}
                     onSync={agentHookHealth.sync}
                   />
                 </div>
@@ -994,10 +1147,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                       agentHookHealthError={agentHookHealth.error}
                       agentHookSyncing={agentHookHealth.syncing}
                       agentHookSynced={agentHookHealth.synced}
+                      agentHookSyncAttempted={agentHookHealth.syncAttempted}
                       onSyncAgentHooks={agentHookHealth.sync}
                       onComplete={() => {
                         setSetupDone(true);
                         govRefetch();
+                        void agentHookHealth.refresh();
                       }}
                     />
                   </div>
@@ -1058,14 +1213,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             ) : (
               <>
                 {messages.map(renderSingleMessage)}
-                {pendingInvocations.map((inv) => (
+                {pendingInvocations.map((invocation) => (
                   <PendingMemberBubble
-                    key={`pending-${inv.invocationId}`}
-                    catId={inv.catId}
-                    invocationId={inv.invocationId}
-                    catStatus={catStatuses[inv.catId]}
+                    key={`pending-${invocation.invocationId}`}
+                    catId={invocation.catId}
+                    invocationId={invocation.invocationId}
+                    catStatus={catStatuses[invocation.catId]}
+                    appServerLifecycle={catInvocations[invocation.catId]?.appServerLifecycle}
                     tipContexts={pendingTipContexts}
-                    showCapabilityTip={inv.invocationId === pendingTipInvocationId}
+                    showCapabilityTip={invocation.invocationId === pendingTipInvocationId}
                   />
                 ))}
               </>
@@ -1118,35 +1274,54 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               多猫研究模式 — 文章上下文已注入。请输入研究问题，猫猫会自动调用 multi_mention 邀请其他猫参与分析。
             </div>
           )}
-          <div
-            className={(() => {
-              if (showFirstRunQuestPrompt || showQuestWizard) return '';
-              const ct = storeThreads.find((t) => t.id === threadId);
-              // Bootcamp phase-1 with no messages: highlight + punch through overlay
-              const bs = ct?.bootcampState as { phase: string } | undefined;
-              if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
-                return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
-              }
-              // Legacy quest support
-              const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
-                | { phase: string }
-                | undefined;
-              return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
-            })()}
-          >
-            <ChatInput
-              key={threadId}
+          {selectionMode ? (
+            <MessageSelectionToolbar
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId) =>
-                handleSend(content, images, undefined, whisper, deliveryMode, replyToId)
-              }
-              onStop={handleStop}
-              disabled={connectionStatus.isReadonly}
-              hasActiveInvocation={hasActiveInvocation}
-              uploadStatus={uploadStatus}
-              uploadError={uploadError}
+              selectedMessageIds={normalizedSelectedMessageIds}
+              onCancel={clearMessageSelection}
+              onExportSuccess={clearMessageSelection}
+              forwardingDisabled={connectionStatus.forwardingBlocked}
+              onForward={() => setSelectionForwardOpen(true)}
             />
-          </div>
+          ) : (
+            <div
+              className={(() => {
+                if (showFirstRunQuestPrompt || showQuestWizard) return '';
+                const ct = storeThreads.find((t) => t.id === threadId);
+                // Bootcamp phase-1 with no messages: highlight + punch through overlay
+                const bs = ct?.bootcampState as { phase: string } | undefined;
+                if (bs?.phase === 'phase-1-intro' && messages.length === 0) {
+                  return 'relative z-[70] quest-input-highlight rounded-xl mx-1';
+                }
+                // Legacy quest support
+                const qs = (ct as Record<string, unknown> | undefined)?.firstRunQuestState as
+                  | { phase: string }
+                  | undefined;
+                return qs?.phase === 'quest-2-cat-intro' ? 'quest-input-highlight rounded-xl mx-1' : '';
+              })()}
+            >
+              <ChatInput
+                key={threadId}
+                threadId={threadId}
+                onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+                  handleSend(
+                    content,
+                    images,
+                    undefined,
+                    whisper,
+                    deliveryMode,
+                    replyToId,
+                    messageDisposition,
+                    contextAttachments,
+                  )
+                }
+                disabled={connectionStatus.isReadonly}
+                hasActiveInvocation={hasActiveInvocation}
+                uploadStatus={uploadStatus}
+                uploadError={uploadError}
+              />
+            </div>
+          )}
 
           {/* F101: "Return to game" banner when overlay is minimized */}
           {isGameActive && overlayMinimized && gameView?.threadId === threadId && (
@@ -1157,6 +1332,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               🎮 返回游戏
             </button>
           )}
+          <TransferTargetPicker
+            open={selectionForwardOpen && !connectionStatus.forwardingBlocked}
+            admissionBlocked={connectionStatus.forwardingBlocked}
+            sourceThreadId={threadId}
+            items={selectedBundleItems}
+            onClose={() => setSelectionForwardOpen(false)}
+            onSuccess={clearMessageSelection}
+          />
         </div>
 
         {/* F101: Game overlay — renders when a game is active */}
@@ -1215,38 +1398,55 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         />
       </div>
 
-      {/* P2-2（云端 review）：右侧 panel 仅桌面渲染——小屏走 MobileStatusSheet。 */}
-      {statusPanelOpen && isDesktop && (
-        <>
-          {/* rightPanelMode：status 固定宽（statusPanelWidth）；workspace/transcript 百分比（chatBasis）。
-              mode 切换从底部工具栏图标触发（ChatVoiceFeatureControls / header toggle），面板内不再有 tab 栏。 */}
-          {rightPanelMode === 'status' ? (
-            <div className="hidden lg:flex">
-              <ResizeHandle
-                direction="horizontal"
-                label="右侧面板"
-                onResize={handleStatusPanelResize}
-                onCollapse={closeStatusPanel}
-                onDoubleClick={resetStatusPanelWidth}
-              />
-            </div>
-          ) : (
-            <ResizeHandle
-              direction="horizontal"
-              label="右侧面板"
-              onResize={handleHorizontalResize}
-              onCollapse={closeStatusPanel}
-              onDoubleClick={resetChatBasis}
-            />
-          )}
-          <div
-            className="flex flex-col min-h-0 overflow-hidden"
-            style={
-              rightPanelMode === 'status' ? { width: statusPanelWidth, flexShrink: 0 } : { flex: '1 1 0%', minWidth: 0 }
-            }
+      {/* F284: visited Workspace/Activity panels stay mounted across fold and sibling-host switches.
+          At 768px+ they use the split host; below 768px the same host becomes a full-screen overlay. */}
+      {statusPanelOpen &&
+        isDesktop &&
+        (rightPanelMode === 'status' ? (
+          <ResizeHandle
+            direction="horizontal"
+            label="右侧面板"
+            onResize={handleStatusPanelResize}
+            onCollapse={closeStatusPanel}
+            onDoubleClick={resetStatusPanelWidth}
+          />
+        ) : (
+          <ResizeHandle
+            direction="horizontal"
+            label="右侧面板"
+            onResize={handleHorizontalResize}
+            onCollapse={closeStatusPanel}
+            onDoubleClick={resetChatBasis}
+          />
+        ))}
+      {(statusPanelOpen || workspacePanelMounted || activityPanelMounted) && (
+        <div
+          className={
+            !statusPanelOpen || (!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval')
+              ? 'hidden'
+              : isDesktop
+                ? 'flex min-h-0 flex-col overflow-hidden'
+                : 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]'
+          }
+          style={
+            statusPanelOpen && isDesktop
+              ? rightPanelMode === 'status'
+                ? { width: statusPanelWidth, flexShrink: 0 }
+                : { flex: '1 1 0%', minWidth: 0 }
+              : undefined
+          }
+          role="region"
+          aria-label="上下文侧栏"
+          aria-hidden={!statusPanelOpen}
+          data-testid="contextual-workspace-host"
+        >
+          <ContextualWorkspaceChrome
+            mode={rightPanelMode}
+            onFold={closeStatusPanel}
+            onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
           >
-            <div className="flex min-h-0 flex-1 overflow-hidden">
-              {rightPanelMode === 'status' && (
+            {activityPanelMounted && (
+              <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>
                 <RightStatusPanel
                   intentMode={intentMode}
                   targetCats={targetCats}
@@ -1256,27 +1456,30 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   hasActiveInvocation={hasActiveInvocation}
                   threadId={threadId}
                   messageSummary={messageSummary}
-                  width={statusPanelWidth}
+                  width={isDesktop ? statusPanelWidth : '100%'}
                 />
-              )}
-              {rightPanelMode === 'workspace' && <WorkspacePanel />}
-              {rightPanelMode === 'transcript' && <TranscriptPanel />}
-            </div>
-          </div>
-        </>
+              </div>
+            )}
+            {workspacePanelMounted && (
+              <div
+                className={rightPanelMode === 'workspace' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}
+                data-testid="workspace-host-pane"
+              >
+                <WorkspacePanel
+                  threadId={threadId}
+                  defaultCatId={targetCats[0] || 'opus'}
+                  onOpenStatus={openStatusPanel}
+                />
+              </div>
+            )}
+            {rightPanelMode === 'transcript' && statusPanelOpen && <TranscriptPanel />}
+          </ContextualWorkspaceChrome>
+        </div>
       )}
       <FloatingTranscriptContainer />
-      <MobileStatusSheet
-        open={mobileStatusOpen}
-        onClose={() => setMobileStatusOpen(false)}
-        intentMode={intentMode}
-        targetCats={targetCats}
-        catStatuses={catStatuses}
-        catInvocations={catInvocations}
-        activeInvocations={activeInvocations}
-        hasActiveInvocation={hasActiveInvocation}
-        threadId={threadId}
-        messageSummary={messageSummary}
+      <MobileApprovalSheet
+        open={!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval'}
+        onClose={closeStatusPanel}
       />
       {showFirstRunQuestPrompt &&
         createPortal(

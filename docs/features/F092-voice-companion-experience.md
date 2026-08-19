@@ -11,7 +11,7 @@ completed: 2026-03-18
 
 > **Status**: done | **Completed**: 2026-03-18 | **Owner**: Ragdoll (Opus 4.6)
 > **Evolved from**: F066 (Voice Pipeline Upgrade) + F086 (Cat Orchestration)
-> **Evolved to**: F124 (Apple Ecosystem × Cat Café 语音交互系统)
+> **Evolved to**: F124 (Apple Ecosystem × Clowder AI 语音交互系统)
 > **Related**: F066, F086, F124
 
 ## Why

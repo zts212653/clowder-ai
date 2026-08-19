@@ -20,5 +20,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "确保猫的基础能力不因自定义 prompt 而退化"

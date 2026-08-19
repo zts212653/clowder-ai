@@ -1,4 +1,5 @@
 import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
+import { CompactLabel, ExpandableProse } from '../../content-overflow';
 
 type RowTone = 'default' | 'active' | 'inactive';
 
@@ -30,6 +31,22 @@ interface SettingsRowProps {
   onDragEnd?: (e: DragEvent<HTMLElement>) => void;
   'data-testid'?: string;
   'data-guide-id'?: string;
+}
+
+function SettingsRowMeta({ meta }: { meta?: ReactNode }) {
+  if (!meta) return null;
+  if (typeof meta !== 'string') {
+    return <div className="mt-0.5 break-words text-xs text-cafe-secondary">{meta}</div>;
+  }
+
+  return (
+    <ExpandableProse
+      text={meta}
+      lines={2}
+      className="mt-0.5"
+      contentClassName="text-xs leading-5 text-cafe-secondary"
+    />
+  );
 }
 
 export function SettingsRow({
@@ -76,10 +93,10 @@ export function SettingsRow({
         {icon && <div className="shrink-0">{icon}</div>}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-compact font-bold text-cafe">{title}</span>
+            <CompactLabel label="设置标题" value={title} className="flex-1 text-compact font-bold text-cafe" />
             {badges}
           </div>
-          {meta && <div className="mt-0.5 truncate text-xs text-cafe-secondary">{meta}</div>}
+          <SettingsRowMeta meta={meta} />
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         {isExpandable && (
@@ -94,6 +111,7 @@ export function SettingsRow({
             aria-label={isExpanded ? '收起' : '展开'}
           >
             <svg
+              aria-hidden="true"
               className={`h-3.5 w-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
               fill="none"
               viewBox="0 0 24 24"

@@ -4,12 +4,14 @@ import { describe, it } from 'node:test';
 import { FrictionAggregator } from '../../dist/infrastructure/harness-eval/friction/friction-aggregator.js';
 import { FrictionClusterer } from '../../dist/infrastructure/harness-eval/friction/friction-clusterer.js';
 import { buildFrictionRollupInput } from '../../dist/infrastructure/harness-eval/friction/friction-rollup-input.js';
+import { extractPawFeelMarkers } from '../../dist/infrastructure/harness-eval/friction/paw-feel-marker.js';
 import {
   CORPUS_CHANNELS,
   corpusSignalsForChannel,
   DROPPED_SIGNAL_IDS,
   groupOfSignal,
 } from './__fixtures__/friction-cluster-corpus.js';
+import { PAW_FEEL_CORPUS } from './__fixtures__/paw-feel-corpus.js';
 
 // F245 Phase B Task 9 — 端到端集成 + 误聚合 corpus gate（AC-B1 + AC-B2）
 
@@ -39,6 +41,45 @@ function corpusAggregator(spy) {
 }
 
 describe('FrictionRollupInput integration (F245 Phase B Task 9)', () => {
+  it('F177 Phase I organic command and shared-state friction survive into rollup evidence', async () => {
+    const cases = PAW_FEEL_CORPUS.filter(({ caseId }) => caseId?.startsWith('f177-'));
+    assert.equal(cases.length, 2, 'F177 must keep both organic friction fixtures in the canonical corpus');
+
+    const base = { timestamp: '2026-07-10T12:00:00.000Z', severity: 'medium' };
+    const signals = cases.flatMap(({ caseId, text }) =>
+      extractPawFeelMarkers(text).map((marker, index) => ({
+        ...base,
+        id: `paw-feel:${caseId}#${index}`,
+        channel: 'paw-feel',
+        tool: marker.tool,
+        symptom: marker.symptom,
+        rawRef: `${caseId}#${index}`,
+      })),
+    );
+    const rollup = await buildFrictionRollupInput(
+      new FrictionAggregator([source('paw-feel', signals)]),
+      new FrictionClusterer(),
+      0,
+      9e12,
+    );
+
+    assert.deepEqual(
+      rollup.signals.map(({ id, rawRef }) => ({ id, rawRef })),
+      [
+        {
+          id: 'paw-feel:f177-formatting-command-drift#0',
+          rawRef: 'f177-formatting-command-drift#0',
+        },
+        {
+          id: 'paw-feel:f177-shared-state-upstream-carry-in#0',
+          rawRef: 'f177-shared-state-upstream-carry-in#0',
+        },
+      ],
+    );
+    const memberIds = rollup.clusters.flatMap((cluster) => cluster.members.map((member) => member.signalId));
+    assert.deepEqual(memberIds.sort(), rollup.signals.map((signal) => signal.id).sort());
+  });
+
   it('corpus gate (rule path): correct clusters + 误聚合率=0 + dropped meta filtered', async () => {
     const rollup = await buildFrictionRollupInput(corpusAggregator(), new FrictionClusterer(), 1000, 2000);
 

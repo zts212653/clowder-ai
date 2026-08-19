@@ -28,8 +28,8 @@
   <path d="M0,70 C420,10 760,95 1120,42 C1440,-4 1660,42 2100,16 L2100,0 L0,0 Z" fill="#f8efe0" opacity="0.8"/>
 
 
-  <text x="1200" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1200" dy="0" fill="#263238" font-weight="850" font-size="48">Cat Cafe 全局架构总图 2026-05</tspan></text>
-  <text x="1200" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#667085" font-weight="600" font-size="24">从 CVO 到猫、从产品面到队列、从记忆到治理：一张看全貌</tspan></text>
+  <text x="1200" y="70" text-anchor="middle" opacity="1" class="title"><tspan x="1200" dy="0" fill="#263238" font-weight="850" font-size="48">Clowder AI 全局架构总图 2026-05</tspan></text>
+  <text x="1200" y="112" text-anchor="middle" opacity="1" class=""><tspan x="1200" dy="0" fill="#667085" font-weight="600" font-size="24">从 operator 到猫、从产品面到队列、从记忆到治理：一张看全貌</tspan></text>
 
 
 
@@ -38,7 +38,7 @@
 
     <circle cx="152" cy="235" r="38" fill="white" stroke="#f97316" stroke-width="4"/>
     <text x="152" y="248" text-anchor="middle" font-size="36" font-weight="900" fill="#f97316">1</text>
-    <text x="208" y="198" font-size="30" font-weight="900" fill="#f97316">CVO / Human Direction Layer</text>
+    <text x="208" y="198" font-size="30" font-weight="900" fill="#f97316">operator / Human Direction Layer</text>
     <text x="220" y="242" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">愿景 · 拍板 · 纠偏 · Magic Words · 验收 · eval 信号</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">人不是逐步审批器，而是方向与判断力的来源</tspan></text>
 
 
@@ -59,7 +59,7 @@
     <circle cx="152" cy="625" r="38" fill="white" stroke="#0f766e" stroke-width="4"/>
     <text x="152" y="638" text-anchor="middle" font-size="36" font-weight="900" fill="#0f766e">3</text>
     <text x="208" y="588" font-size="30" font-weight="900" fill="#0f766e">Collaboration Semantics Layer</text>
-    <text x="220" y="632" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">猫猫身份：布偶/Claude · 缅因/GPT · 暹罗/Gemini（身份/引擎，不是岗位）</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">A2A：@ 行首路由 · targetCats · multi_mention · hold_ball · 接/退/升 · 跨族 review · CVO 终裁</tspan></text>
+    <text x="220" y="632" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">猫猫身份：布偶/Claude · 缅因/GPT · 暹罗/Gemini（身份/引擎，不是岗位）</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">A2A：@ 行首路由 · targetCats · multi_mention · hold_ball · 接/退/升 · 跨族 review · operator 终裁</tspan></text>
 
 
 
@@ -89,7 +89,7 @@
     <circle cx="152" cy="1210" r="38" fill="white" stroke="#2563eb" stroke-width="4"/>
     <text x="152" y="1223" text-anchor="middle" font-size="36" font-weight="900" fill="#2563eb">6</text>
     <text x="208" y="1173" font-size="30" font-weight="900" fill="#2563eb">Runtime / Tools / Storage Layer</text>
-    <text x="220" y="1217" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">Hub React + Zustand → API Fastify · Provider Adapters：Claude / GPT / Gemini / OpenCode</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">MCP Servers：core / collab / memory / signals / external · Tools：exec / browser / GitHub / image_gen / Pencil · Redis 6399 圣域 / 6398 隔离 / SQLite / git</tspan></text>
+    <text x="220" y="1217" text-anchor="start" opacity="1" class=""><tspan x="220" dy="0" fill="#263238" font-weight="760" font-size="23">Hub React + Zustand → API Fastify · Provider Adapters：Claude / GPT / Gemini / OpenCode</tspan><tspan x="220" dy="27.139999999999997" fill="#263238" font-weight="760" font-size="23">MCP Servers：core / collab / memory / signals / external · Tools：exec / browser / GitHub / image_gen / Pencil · Redis production Redis (sacred) / 6398 隔离 / SQLite / git</tspan></text>
 
 
 
@@ -108,7 +108,7 @@
     <rect x="110" y="1548" width="680" height="235" rx="28" fill="#fff7ed" stroke="#f97316" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
     <rect x="134" y="1526" width="140" height="44" rx="22" fill="#f97316" opacity="0.96"/><text x="152" y="1556" font-size="25" font-weight="800" fill="white">任务链</text>
 
-  <text x="185" y="1622" text-anchor="start" opacity="1" class=""><tspan x="185" dy="0" fill="#263238" font-weight="840" font-size="28">CVO 目标</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 球权</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 执行平面</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 工具运行</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 可见产出</tspan></text>
+  <text x="185" y="1622" text-anchor="start" opacity="1" class=""><tspan x="185" dy="0" fill="#263238" font-weight="840" font-size="28">operator 目标</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 球权</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 执行平面</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 工具运行</tspan><tspan x="185" dy="33.6" fill="#263238" font-weight="840" font-size="28">→ 可见产出</tspan></text>
 
     <rect x="860" y="1548" width="680" height="235" rx="28" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-dasharray="" opacity="1" filter="url(#shadow)"/>
     <rect x="884" y="1526" width="140" height="44" rx="22" fill="#16a34a" opacity="0.96"/><text x="902" y="1556" font-size="25" font-weight="800" fill="white">记忆链</text>

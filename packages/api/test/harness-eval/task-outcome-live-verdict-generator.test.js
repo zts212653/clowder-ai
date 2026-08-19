@@ -77,6 +77,9 @@ async function seedWindow(
     trigger: 'cat_initiated',
     threadId: 'thread-1',
     participants: ['gpt52'],
+    attribution: 'managed_attributed',
+    workId: 'wrk_private_1',
+    attemptId: 'wat_private_1',
   });
   store.appendSignal(completed.episodeId, {
     category: 'a1',
@@ -345,6 +348,14 @@ describe('eval:task-outcome live verdict generator', () => {
       ),
     );
     const rawBytes = readFileSync(rawPath);
+    const rawBundle = JSON.parse(rawBytes.toString('utf8'));
+    assert.equal(Object.hasOwn(rawBundle.episodes[0], 'workId'), false, 'bundle must redact private workId');
+    assert.equal(Object.hasOwn(rawBundle.episodes[0], 'attemptId'), false, 'bundle must redact private attemptId');
+    assert.equal(
+      sourceWindow.episodes.some((episode) => episode.workId === 'wrk_private_1'),
+      true,
+      'internal source window must retain work identity for verdict writeback',
+    );
     assert.equal(
       provenance.rawInputs[0].path,
       'docs/harness-feedback/bundles/2026-06-09-eval-task-outcome-live-verdict/raw/episodes.json',

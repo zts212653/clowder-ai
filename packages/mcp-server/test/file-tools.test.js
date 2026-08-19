@@ -63,6 +63,29 @@ describe('MCP file slice tools', () => {
     }
   });
 
+  test('handleReadFileSlice resolves repo-relative docs paths when cwd is sibling subdir but ALLOWED_WORKSPACE_DIRS points to workspace root', async () => {
+    const { handleReadFileSlice } = await import('../dist/tools/file-tools.js');
+    const originalCwd = process.cwd();
+    mkdirSync(join(tempDir, 'packages', 'api'), { recursive: true });
+    mkdirSync(join(tempDir, 'docs', 'features'), { recursive: true });
+    writeFileSync(join(tempDir, 'docs', 'features', 'F209.md'), ['alpha', 'beta', 'gamma'].join('\n'));
+
+    try {
+      process.chdir(join(tempDir, 'packages', 'api'));
+      const result = await handleReadFileSlice({
+        path: 'docs/features/F209.md',
+        startLine: 2,
+        endLine: 2,
+      });
+
+      assert.equal(result.isError, undefined, `expected success but got error: ${result.content?.[0]?.text ?? ''}`);
+      const text = result.content[0].text;
+      assert.ok(text.includes('2: beta'), `expected "2: beta" in: ${text}`);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   test('handleReadFileSlice rejects oversized ranges', async () => {
     const { handleReadFileSlice } = await import('../dist/tools/file-tools.js');
     const filePath = join(tempDir, 'source.md');

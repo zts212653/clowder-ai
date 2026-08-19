@@ -12,6 +12,7 @@ import {
   KeyRoundIcon,
   PackageXIcon,
   SettingsXIcon,
+  ShieldXIcon,
   TerminalIcon,
   TextQuoteIcon,
   UnknownReasonIcon,
@@ -87,6 +88,9 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // temporary throttling — NOT user quota. Same transient tier (retry 30-60s) but distinct
   // hourglass icon to differentiate from gauge (quota) at-a-glance.
   server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
+  cli_response_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
+  cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
+  active_writer_recovery: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
@@ -106,6 +110,19 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // (换猫 / 换 model / 直接跑 CLI). System tier (slate, calm) — reasonCode lives here so
   // the panel renders consistently even though the underlying CLI exit code is 0.
   silent_completion: { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon },
+  // F212 Phase H (Sol runtime forensics 2026-07-09): upstream provider policy engine
+  // rejected the prompt (e.g. Codex 0.98+ cyber-safety flag). Cognitive tier (violet,
+  // same family as invalid_thinking_signature / tool_call_parse_failed): the rejection
+  // is a content-level decision — user acts by rephrasing, same cognitive mode as
+  // addressing a decoder-drift or context-window issue. Shield-X icon signals
+  // "gated at upstream boundary" — visually distinct from key (auth) / gauge (quota).
+  upstream_policy_reject: { ...PALETTE_COGNITIVE, Icon: ShieldXIcon },
+  // clowder-ai#1324/#1325 (@codex-terra review): the harness's MANAGED argv drifted from the
+  // installed CLI version (flag removed / renamed / newly mutually exclusive). System tier
+  // (slate) on purpose — deliberately NOT PALETTE_USER_FIX: nothing in the user's config or
+  // credentials is wrong, so painting it as user-fixable would contradict the hint, which
+  // says exactly the opposite. Wrench = broken machinery on our side, awaiting a harness fix.
+  incompatible_cli_arguments: { ...PALETTE_SYSTEM, Icon: WrenchIcon },
 };
 
 const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };
@@ -204,6 +221,8 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
       diagnostics.excerptSource &&
       KNOWN_EXCERPT_SOURCES.has(diagnostics.excerptSource),
   );
+  // biome-ignore lint/suspicious/noPrototypeBuiltins: ES2017 target requires hasOwnProperty.call
+  const hasExitCode = Object.prototype.hasOwnProperty.call(diagnostics.debugRef, 'exitCode');
 
   return (
     <div data-testid="cli-diagnostics" className="flex flex-col gap-2.5">
@@ -285,10 +304,12 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           <span className="font-medium">command:</span>{' '}
           {truncateMiddle(sanitizePathLeaks(diagnostics.debugRef.command), 40)}
         </span>
-        <span>
-          <span className="font-medium">exit:</span>{' '}
-          {diagnostics.debugRef.exitCode == null ? 'null' : diagnostics.debugRef.exitCode}
-        </span>
+        {hasExitCode && (
+          <span>
+            <span className="font-medium">exit:</span>{' '}
+            {diagnostics.debugRef.exitCode == null ? 'null' : diagnostics.debugRef.exitCode}
+          </span>
+        )}
         {diagnostics.debugRef.signal != null && (
           <span>
             <span className="font-medium">signal:</span> {String(diagnostics.debugRef.signal)}

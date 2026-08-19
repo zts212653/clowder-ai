@@ -5,7 +5,7 @@
  *   cancel+reason → episode a2 signal
  *   magic_word_ref → projected as magic_word in episode read-side
  *   cancel burst (≥3 in 60s) → proxy signal
- *   A1 merge+success → auto-complete episode
+ *   A1 merge+success → evidence only; terminal state remains unchanged
  *   episode query returns all signals correctly grouped
  *
  * This is NOT a unit test — it wires real SQLite store, real route handlers,
@@ -176,11 +176,11 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
   });
 
   // =========================================================================
-  // Signal Chain 4: A1 merge+success → auto-complete episode
+  // Signal Chain 4: A1 merge+success → evidence only
   // =========================================================================
 
-  describe('Chain 4: A1 world truth merge+success → auto-complete', () => {
-    it('merge+success appends a1 signal and auto-completes episode', () => {
+  describe('Chain 4: A1 world truth merge+success → evidence only', () => {
+    it('merge+success appends a1 signal without terminalizing the episode', () => {
       const activeEpisode = store.getActiveEpisode(THREAD_ID);
       assert.ok(activeEpisode, 'should have active episode');
       assert.equal(activeEpisode.terminalState, 'in_progress');
@@ -192,9 +192,8 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
         threadId: THREAD_ID,
       });
 
-      // Episode should be auto-completed
       const episode = handleGetEpisode(store, result.episodeId);
-      assert.equal(episode.terminalState, 'completed');
+      assert.equal(episode.terminalState, 'in_progress');
 
       // a1 signal present
       assert.equal(episode.signals.a1WorldTruth.length, 1);
@@ -231,9 +230,8 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
   // =========================================================================
 
   describe('Chain 5: Full assembled episode — signals grouped by category', () => {
-    it('completed episode has all signal categories populated', () => {
-      // The THREAD_ID episode was completed by Chain 4.
-      // It should have: 2 permission_cancel a2, 1 magic_word a2, 1 cancel_burst proxy, 1 merge a1
+    it('in-progress episode has all signal categories populated', () => {
+      // Merge is present as evidence without deciding the Episode terminal state.
       const episodes = handleListEpisodes(store, THREAD_ID);
       assert.ok(episodes.length >= 1, 'should have at least 1 episode');
 
@@ -256,15 +254,14 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
       assert.equal(assembled.signals.a1WorldTruth[0].type, 'merge');
 
       // Episode metadata
-      assert.equal(assembled.terminalState, 'completed');
+      assert.equal(assembled.terminalState, 'in_progress');
       assert.equal(assembled.threadId, THREAD_ID);
     });
 
-    it('listNeedingVerdict returns completed episode without verdict', () => {
+    it('does not queue an in-progress episode for verdict', () => {
       const needing = store.listNeedingVerdict();
       const ours = needing.find((e) => e.threadId === THREAD_ID);
-      assert.ok(ours, 'completed episode should appear in listNeedingVerdict');
-      assert.equal(ours.verdict, null);
+      assert.equal(ours, undefined);
     });
   });
 
@@ -277,6 +274,8 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
       const episodes = handleListEpisodes(store, THREAD_ID);
       const episodeId = episodes[0].episodeId;
 
+      store.updateTerminalState(episodeId, 'completed');
+      assert.ok(store.listNeedingVerdict().some((episode) => episode.episodeId === episodeId));
       store.updateVerdict(episodeId, 'success');
 
       const episode = handleGetEpisode(store, episodeId);
@@ -288,4 +287,7 @@ describe('AC-G11 Task Outcome Signal Chain E2E', () => {
       assert.equal(ours, undefined, 'verdicted episode should not be in needingVerdict');
     });
   });
+
+  // Chain 7 (magic_word_ref idempotency) extracted to task-outcome-magic-word-dedup.test.js
+  // per 350-line hard limit.
 });

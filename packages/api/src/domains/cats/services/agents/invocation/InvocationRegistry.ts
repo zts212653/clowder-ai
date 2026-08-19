@@ -12,15 +12,22 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, ManagedWorkBinding } from '@cat-cafe/shared';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import type { ToolExecutionPolicy } from '../../types.js';
 import type { IAuthInvocationBackend } from './IAuthInvocationBackend.js';
 import { MemoryAuthInvocationBackend } from './MemoryAuthInvocationBackend.js';
+import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
+import { normalizeToolExecutionPolicy } from './tool-execution-policy.js';
 
 export interface InvocationRecord {
   invocationId: string;
   callbackToken: string;
   userId: string;
+  /** Authentication-grade provenance for the invocation owner; never inferred from userId. */
+  ownerAuthProvenance: OwnerAuthProvenance;
+  /** F275: server-resolved identity; never accepted from callback request payloads. */
+  readonly managedWorkBinding?: ManagedWorkBinding;
   catId: CatId;
   /** Thread this invocation belongs to (for WebSocket room scoping) */
   threadId: string;
@@ -28,7 +35,14 @@ export interface InvocationRecord {
   parentInvocationId?: string;
   /** F121: The A2A trigger message ID — the @mention message that caused this cat to be invoked */
   a2aTriggerMessageId?: string;
+  /**
+   * Exact persisted message that triggered this turn, including direct user invocations.
+   * Kept separate from a2aTriggerMessageId because direct turns must not acquire A2A replyTo semantics.
+   */
+  originTriggerMessageId?: string;
   traceContext?: CallerTraceContext;
+  /** ADR-042 callback authorization boundary, persisted across API restarts. */
+  toolExecutionPolicy?: ToolExecutionPolicy;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
   createdAt: number;
@@ -103,7 +117,19 @@ export class InvocationRegistry {
     threadId: string = 'default',
     parentInvocationId?: string,
     a2aTriggerMessageId?: string,
+    toolExecutionPolicy?: ToolExecutionPolicy,
+    originTriggerMessageId?: string,
+    ownerAuthProvenance: OwnerAuthProvenance = 'unknown',
+    managedWorkBinding?: ManagedWorkBinding,
   ): Promise<{ invocationId: string; callbackToken: string }> {
+    if (managedWorkBinding) {
+      if (ownerAuthProvenance !== 'strict') {
+        throw new Error('Managed-work invocation binding requires strict owner authentication');
+      }
+      if (managedWorkBinding.workId.trim().length === 0 || managedWorkBinding.attemptId.trim().length === 0) {
+        throw new Error('Managed-work invocation binding requires non-empty server identifiers');
+      }
+    }
     const invocationId = randomUUID();
     const callbackToken = randomUUID();
     const now = Date.now();
@@ -113,10 +139,14 @@ export class InvocationRegistry {
         invocationId,
         callbackToken,
         userId,
+        ownerAuthProvenance,
+        ...(managedWorkBinding ? { managedWorkBinding: Object.freeze({ ...managedWorkBinding }) } : {}),
         catId,
         threadId,
         ...(parentInvocationId ? { parentInvocationId } : {}),
         ...(a2aTriggerMessageId ? { a2aTriggerMessageId } : {}),
+        ...(originTriggerMessageId ? { originTriggerMessageId } : {}),
+        ...(toolExecutionPolicy ? { toolExecutionPolicy: normalizeToolExecutionPolicy(toolExecutionPolicy) } : {}),
         clientMessageIds: new Set<string>(),
         createdAt: now,
       },

@@ -1,10 +1,8 @@
+import { conventionGraphDomainsForPaths } from '../convention-graph-surfaces.js';
 import {
-  buildEvidenceScope,
   canonicalizePathForGlobs,
-  collectUsageCandidates,
   hasLivePreviewForOpportunity,
   matchesAny,
-  matchesScope,
 } from './eval-capability-wakeup-trials-support.js';
 import type {
   CapabilityInvocationTrace,
@@ -18,6 +16,14 @@ import type {
   ScenarioThenCapabilityPredicate,
   TextPatternThenCapabilityPredicate,
 } from './eval-capability-wakeup-types.js';
+import {
+  capabilityUsageEvidence,
+  firstMatchedChangeTimestamp,
+  firstMatchedChangeTimestampsByDomain,
+  latestTimestamp,
+} from './eval-capability-wakeup-usage-evidence.js';
+
+export { capabilityUsageEvidence } from './eval-capability-wakeup-usage-evidence.js';
 
 export function evaluateCapabilityWakeupTrace(
   trace: CapabilityTrace,
@@ -25,10 +31,12 @@ export function evaluateCapabilityWakeupTrace(
 ): CapabilityWakeupTrial[] {
   const trials: CapabilityWakeupTrial[] = [];
   for (let index = 0; index < trace.invocations.length; index += 1) {
-    const current = trace.invocations[index]!;
+    const previous = trace.invocations[index - 1];
+    const current = trace.invocations[index];
+    if (!current) continue;
     const next = trace.invocations[index + 1];
     for (const rule of rules) {
-      const trial = evaluateRule(trace, current, next, rule);
+      const trial = evaluateRule(trace, previous, current, next, rule);
       if (trial) trials.push(trial);
     }
   }
@@ -49,32 +57,6 @@ export function collectWindowText(
   return [...current.textEvents, ...(next?.textEvents ?? [])].map((event) => event.content);
 }
 
-export function capabilityUsageEvidence(
-  trace: CapabilityTrace,
-  current: CapabilityInvocationTrace,
-  next: CapabilityInvocationTrace | undefined,
-  capability: CapabilityName,
-  matchedPaths: string[] = [],
-): string[] {
-  const evidence: string[] = [];
-  const scope = buildEvidenceScope(trace, current, next);
-  for (const candidate of collectUsageCandidates(trace, current, next)) {
-    if (!matchesScope(candidate, scope)) {
-      continue;
-    }
-    if (candidate.capability !== capability || !candidate.successful) continue;
-    if (
-      capability === 'workspace-navigator' &&
-      !workspaceNavigationMatches(candidate, matchedPaths, trace.worktreeId)
-    ) {
-      continue;
-    }
-    evidence.push(`${candidate.source}:${candidate.sourceId}`);
-  }
-
-  return [...new Set(evidence)];
-}
-
 export function detectZeroFrictionDefault(
   capability: CapabilityName,
   current: CapabilityInvocationTrace,
@@ -92,25 +74,9 @@ export function detectZeroFrictionDefault(
   return combined.trim().length > 0;
 }
 
-function workspaceNavigationMatches(
-  candidate: { action?: string; path?: string; worktreeId?: string },
-  matchedPaths: string[],
-  worktreeId: string | undefined,
-): boolean {
-  const action = candidate.action;
-  if (typeof action === 'string' && action !== 'open' && action !== 'reveal') return false;
-  const path = candidate.path;
-  if (typeof path === 'string') {
-    if (!matchedPaths.includes(path)) return false;
-  } else if (matchedPaths.length > 0) {
-    return false;
-  }
-  if (worktreeId && candidate.worktreeId !== worktreeId) return false;
-  return true;
-}
-
 function evaluateRule(
   trace: CapabilityTrace,
+  previous: CapabilityInvocationTrace | undefined,
   current: CapabilityInvocationTrace,
   next: CapabilityInvocationTrace | undefined,
   rule: CapabilityWakeupRule,
@@ -119,6 +85,7 @@ function evaluateRule(
     case 'file_change_then_capability':
       return evaluateFileChangePredicate(
         trace,
+        previous,
         current,
         next,
         rule as CapabilityWakeupRule & { predicate: FileChangeThenCapabilityPredicate },
@@ -151,15 +118,15 @@ function evaluateRule(
 
 function evaluateFileChangePredicate(
   trace: CapabilityTrace,
+  previous: CapabilityInvocationTrace | undefined,
   current: CapabilityInvocationTrace,
   next: CapabilityInvocationTrace | undefined,
   rule: CapabilityWakeupRule & { predicate: FileChangeThenCapabilityPredicate },
 ): CapabilityWakeupTrial | null {
+  const excludeGlobs = rule.predicate.excludeGlobs ? [...rule.predicate.excludeGlobs] : [];
   const matchedFiles = current.changedFiles
-    .map((path) => canonicalizePathForGlobs(path, rule.predicate.includeGlobs, rule.predicate.excludeGlobs ?? []))
-    .filter(
-      (path) => matchesAny(path, rule.predicate.includeGlobs) && !matchesAny(path, rule.predicate.excludeGlobs ?? []),
-    );
+    .map((path) => canonicalizePathForGlobs(path, rule.predicate.includeGlobs, excludeGlobs))
+    .filter((path) => matchesAny(path, rule.predicate.includeGlobs) && !matchesAny(path, excludeGlobs));
   if (matchedFiles.length === 0) return null;
 
   const evidence = [`changed:${matchedFiles.join(',')}`];
@@ -170,7 +137,27 @@ function evaluateFileChangePredicate(
     return makeTrial(trace, current, next, rule, 'false_positive', evidence, ['preview_live_port=false']);
   }
 
-  const usedEvidence = capabilityUsageEvidence(trace, current, next, rule.capability, matchedFiles);
+  const requiredConventionDomains =
+    rule.capability === 'convention-graph-discovery' ? conventionGraphDomainsForPaths(matchedFiles) : [];
+  const beforeTimestampByConventionDomain =
+    rule.predicate.evidenceWindow === 'pre_change' && requiredConventionDomains.length > 0
+      ? firstMatchedChangeTimestampsByDomain(
+          current,
+          matchedFiles,
+          rule.predicate.includeGlobs,
+          excludeGlobs,
+          requiredConventionDomains,
+        )
+      : undefined;
+  const beforeTimestamp = beforeTimestampByConventionDomain
+    ? latestTimestamp(Object.values(beforeTimestampByConventionDomain))
+    : firstMatchedChangeTimestamp(current, matchedFiles, rule.predicate.includeGlobs, excludeGlobs);
+  const usedEvidence = capabilityUsageEvidence(trace, current, next, rule.capability, matchedFiles, {
+    previous,
+    evidenceWindow: rule.predicate.evidenceWindow,
+    beforeTimestamp,
+    beforeTimestampByConventionDomain,
+  });
   return makeTrial(trace, current, next, rule, usedEvidence.length > 0 ? 'negative' : 'miss', evidence, usedEvidence);
 }
 

@@ -1,6 +1,12 @@
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
 
+export {
+  inferOpenCodeProviderFromModelName,
+  parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
+} from '../../../../../config/opencode-model.js';
+
 const log = createModuleLogger('opencode-config');
 
 interface OpenCodeConfigOptions {
@@ -16,7 +22,7 @@ interface OpenCodeConfigOptions {
 
 type OpenCodeProviderConfig = {
   npm?: string;
-  models?: Record<string, { name: string }>;
+  models?: Record<string, { id?: string; name: string }>;
   options: {
     apiKey?: string;
     baseURL?: string;
@@ -81,6 +87,17 @@ export const OC_API_KEY_ENV = 'CAT_CAFE_OC_API_KEY';
 export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
 
 /**
+ * We deliberately emit no `limit` block at all.
+ *
+ * OpenCode requires `limit.output` whenever `limit` is present and resolves
+ * explicit config before its catalog and built-in fallback. Pinning only our
+ * invocation context window here therefore makes the config invalid; guessing
+ * an output would instead overwrite authoritative catalog output limits. This layer has no
+ * carrier-aware output authority, so it supplies neither field. Clowder AI still
+ * retains the invocation window for context health and session handoff.
+ */
+
+/**
  * OpenCode API type determines which AI SDK npm adapter to use.
  * - 'openai'           → @ai-sdk/openai-compatible  (chat/completions, default for custom providers)
  * - 'openai-responses'  → @ai-sdk/openai             (responses API, for official OpenAI endpoints)
@@ -114,6 +131,7 @@ export function deriveOpenCodeApiType(providerName: string | undefined): OpenCod
 export interface OpenCodeRuntimeConfigOptions {
   providerName: string;
   models: readonly string[];
+  modelAliases?: Readonly<Record<string, string>>;
   defaultModel?: string;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
@@ -157,21 +175,12 @@ export interface OpenCodeRuntimeConfigDebugSummary {
     {
       npm?: string;
       modelKeys: string[];
+      modelMappings: Record<string, string>;
       hasBaseUrl: boolean;
       apiKeySource: string;
       baseUrlSource?: string;
     }
   >;
-}
-
-export function parseOpenCodeModel(model: string): { providerName: string; modelName: string } | null {
-  const trimmed = model.trim();
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) return null;
-  return {
-    providerName: trimmed.slice(0, slashIndex),
-    modelName: trimmed.slice(slashIndex + 1),
-  };
 }
 
 function stripOwnProviderPrefix(modelName: string, providerName: string): string {
@@ -209,6 +218,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   const {
     providerName,
     models,
+    modelAliases,
     defaultModel,
     apiType = 'openai',
     hasBaseUrl = false,
@@ -225,11 +235,17 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const configName = safeProviderName(providerName);
 
-  const modelsMap: Record<string, { name: string }> = {};
+  const modelsMap: Record<string, { id?: string; name: string }> = {};
   const modelsToRegister = defaultModel ? [...models, defaultModel] : [...models];
   for (const rawModel of modelsToRegister) {
     const modelName = stripOwnProviderPrefix(rawModel, providerName);
-    modelsMap[modelName] = { name: modelName };
+    const configuredAlias =
+      modelAliases && Object.hasOwn(modelAliases, modelName) ? modelAliases[modelName] : undefined;
+    const upstreamId = typeof configuredAlias === 'string' ? configuredAlias.trim() : undefined;
+    modelsMap[modelName] = {
+      ...(upstreamId ? { id: upstreamId } : {}),
+      name: modelName,
+    };
   }
 
   let configDefaultModel = defaultModel;
@@ -305,6 +321,11 @@ export function summarizeOpenCodeRuntimeConfigForDebug(
         {
           npm: providerConfig.npm,
           modelKeys: Object.keys(providerConfig.models ?? {}).sort(),
+          modelMappings: Object.fromEntries(
+            Object.entries(providerConfig.models ?? {})
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([modelKey, modelConfig]) => [modelKey, modelConfig.id ?? modelKey]),
+          ),
           hasBaseUrl: Boolean(providerConfig.options.baseURL),
           apiKeySource: summarizeEnvPlaceholder(providerConfig.options.apiKey) ?? '(unset)',
           ...(providerConfig.options.baseURL

@@ -20,6 +20,10 @@ export interface LivenessWarningEvent {
   level: 'alive_but_silent' | 'suspected_stall';
   cpuTimeMs?: number;
   processAlive: boolean;
+  /** NDJSON lifecycle context, attached by spawnCli when the warning is emitted. */
+  firstEventAt?: number | null;
+  lastEventAt?: number | null;
+  lastEventType?: string | null;
 }
 
 export interface ProbeConfig {

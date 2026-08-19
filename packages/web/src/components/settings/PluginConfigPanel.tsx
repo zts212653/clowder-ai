@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { ExternalLinkIcon, StepBadge } from '../HubConfigIcons';
 import { ConfigFieldRenderer } from './primitives/ConfigFieldRenderer';
+import { WeChatVisibleReaderArmControl } from './WeChatVisibleReaderArmControl';
 
 function isSafeUrl(url: string): boolean {
   try {
@@ -30,6 +31,11 @@ function resourceBadgeKey(resource: PluginInfo['resources'][number], index: numb
 interface Props {
   plugin: PluginInfo;
   onUpdated: () => void;
+}
+
+function PluginSpecificControls({ plugin }: { plugin: PluginInfo }) {
+  if (plugin.id !== 'wechat-visible-reader') return null;
+  return <WeChatVisibleReaderArmControl pluginEnabled={plugin.status === 'enabled' || plugin.status === 'partial'} />;
 }
 
 export function PluginConfigPanel({ plugin, onUpdated }: Props) {
@@ -119,11 +125,13 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
         </div>
       )}
 
+      <PluginSpecificControls plugin={plugin} />
+
       {plugin.config.length > 0 && (
         <div className="space-y-2">
           {hasSteps && (
             <div className="flex items-center gap-1.5">
-              <StepBadge num={plugin.setupSteps!.length + 1} />
+              <StepBadge num={(plugin.setupSteps?.length ?? 0) + 1} />
               <span
                 className="font-medium"
                 style={{ fontSize: 'var(--console-font-compact)', lineHeight: '20px', color: 'var(--cafe-text)' }}

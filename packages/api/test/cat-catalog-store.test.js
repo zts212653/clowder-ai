@@ -11,7 +11,7 @@ const { bootstrapCatCatalog, resolveCatCatalogPath, writeCatCatalog } = await im
 const { createRuntimeCat, deleteRuntimeCat, readRuntimeCatCatalog, updateRuntimeCat } = await import(
   '../dist/config/runtime-cat-catalog.js'
 );
-const { getAcpConfig, loadResolvedCatConfig, toAllCatConfigs, _resetCachedConfig } = await import(
+const { getAcpConfig, getRoster, loadResolvedCatConfig, toAllCatConfigs, _resetCachedConfig } = await import(
   '../dist/config/cat-config-loader.js'
 );
 const { readCapabilitiesConfig, writeCapabilitiesConfig } = await import(
@@ -394,6 +394,74 @@ describe('cat-catalog-store', () => {
     assert.deepEqual(runtimeCatalog.coCreator, template.coCreator);
   });
 
+  it('backfills allowlisted glm52 dragon-li breed into a fresh runtime catalog', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-glm52-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    template.breeds.push({
+      id: 'dragon-li',
+      catId: 'glm52',
+      name: '狸花猫',
+      displayName: '狸花猫',
+      avatar: '/avatars/glm52.png',
+      color: { primary: '#D4A76A', secondary: '#F5EBD7' },
+      mentionPatterns: ['@glm52', '@小狸花'],
+      roleDescription: 'GLM-5.2',
+      defaultVariantId: 'glm52-default',
+      variants: [
+        {
+          id: 'glm52-default',
+          catId: 'glm52',
+          clientId: 'opencode',
+          provider: 'zhipu',
+          defaultModel: 'zhipu/glm-5.2',
+          mcpSupport: true,
+          cli: { command: 'opencode', outputFormat: 'ndjson' },
+        },
+      ],
+    });
+    template.roster.glm52 = {
+      family: 'dragon-li',
+      roles: ['chat'],
+      lead: true,
+      available: true,
+      evaluation: 'GLM-5.2',
+    };
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const runtimeCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+
+    assert.deepEqual(
+      runtimeCatalog.breeds.map((breed) => breed.id),
+      ['ragdoll', 'dragon-li'],
+      'fresh runtime catalog should keep the seed breed and the allowlisted glm52 breed',
+    );
+    assert.equal(runtimeCatalog.roster?.glm52?.family, 'dragon-li', 'glm52 roster entry should be persisted');
+  });
+
+  it('does not re-add deleted glm52 allowlisted breed during bootstrap or resolved reads', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-glm52-delete-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+    await deleteRuntimeCat(projectRoot, 'glm52');
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    assert.equal(
+      hydrated.breeds.some((breed) => breed.id === 'dragon-li'),
+      false,
+      'deleted glm52 template breed must stay tombstoned after bootstrap',
+    );
+    assert.equal(hydrated.roster?.glm52, undefined);
+
+    const all = toAllCatConfigs(loadResolvedCatConfig(templatePath));
+    assert.equal(all.glm52, undefined, 'resolved reads must not revive deleted glm52');
+  });
+
   it('creates catalog file at .cat-cafe/cat-catalog.json', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');
@@ -589,6 +657,56 @@ describe('cat-catalog-store', () => {
 
     const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
     assert.equal(hydrated.roster['agy-opus']?.available, false);
+  });
+
+  it('backfills allowlisted codex-sol maine-coon variant into an existing runtime catalog (F203 Case C)', () => {
+    // F203 Case C (F278 exact-source owner): codex-sol was previously runtime-only
+    // (present in routing/detection code but not in catRegistry). Now registered
+    // in cat-template.json + TEMPLATE_VARIANT_BACKFILL_ALLOWLIST — must backfill
+    // into stale runtime catalogs without touching other variants or breaking
+    // existing catalog roster entries. See PR #3329 review 4829735601.
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-codex-sol-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    // Real repo template already contains codex-sol variant (post-F203-Case-C)
+    const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    // Seed a stale runtime catalog that lacks codex-sol (simulates pre-F203 state)
+    const staleCatalog = JSON.parse(readFileSync(templatePath, 'utf-8'));
+    const staleMaine = staleCatalog.breeds.find((breed) => breed.id === 'maine-coon');
+    staleMaine.variants = staleMaine.variants.filter((v) => v.catId !== 'codex-sol');
+    delete staleCatalog.roster['codex-sol'];
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(resolveCatCatalogPath(projectRoot), JSON.stringify(staleCatalog, null, 2));
+
+    // Bootstrap must backfill codex-sol from template into the stale catalog
+    bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const maine = hydrated.breeds.find((breed) => breed.id === 'maine-coon');
+    assert.ok(
+      maine?.variants.some((variant) => variant.catId === 'codex-sol'),
+      'codex-sol must backfill into existing maine-coon runtime breed',
+    );
+    assert.equal(
+      hydrated.roster['codex-sol']?.family,
+      'maine-coon',
+      'bootstrap must persist the codex-sol roster entry for roster-driven surfaces',
+    );
+    assert.equal(hydrated.roster['codex-sol']?.available, true);
+
+    // Resolved reads must expose both codex-sol identity and roster membership.
+    const resolved = loadResolvedCatConfig(templatePath);
+    const solConfig = toAllCatConfigs(resolved)['codex-sol'];
+    assert.ok(solConfig, 'resolved reads must expose the F203 backfilled codex-sol variant');
+    assert.equal(solConfig?.breedId, 'maine-coon');
+    assert.equal(solConfig?.defaultModel, 'gpt-5.6-sol');
+    assert.equal(resolved.roster['codex-sol']?.family, 'maine-coon');
+    assert.equal(resolved.roster['codex-sol']?.available, true);
+    assert.equal(
+      getRoster(resolved)['codex-sol']?.roles.includes('peer-reviewer'),
+      true,
+      'roster-driven reviewer and Eval Hub surfaces must see codex-sol after upgrade',
+    );
   });
 
   for (const catId of ['agy-opus', 'antig-opus']) {
@@ -1066,6 +1184,94 @@ describe('cat-catalog-store', () => {
     const custom = rawCatalog.breeds.find((breed) => breed.id === 'custom-google').variants[0];
     assert.deepEqual(custom.cli, { command: 'gemini', outputFormat: 'stream-json', defaultArgs: ['--enterprise'] });
     assert.deepEqual(custom.acp, { command: 'gemini', startupArgs: ['--acp'] });
+  });
+
+  it('migrates existing gemini35 catalogs from Gemini 3.5 identity to Gemini 3.6', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-gemini36-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    const templateBreed = template.breeds.find((breed) => breed.id === 'siamese');
+    templateBreed.catId = 'gemini35';
+    templateBreed.name = '暹罗猫 Gemini 3.6 Flash';
+    templateBreed.mentionPatterns = [
+      '@gemini35',
+      '@gemini-35',
+      '@gemini3.5',
+      '@gemini36',
+      '@gemini-36',
+      '@gemini3.6',
+      '@flash',
+      '@暹罗flash',
+      '@暹罗gemini35',
+      '@暹罗gemini36',
+    ];
+    templateBreed.roleDescription = '暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问';
+    templateBreed.variants[0].clientId = 'google';
+    templateBreed.variants[0].variantLabel = 'Gemini 3.6 Flash';
+    templateBreed.variants[0].defaultModel = 'Gemini 3.6 Flash (High)';
+    templateBreed.variants[0].cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete templateBreed.variants[0].provider;
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyBreed = catalog.breeds.find((breed) => breed.id === 'siamese');
+    legacyBreed.catId = 'gemini35';
+    legacyBreed.name = '暹罗猫 Gemini 3.5 Flash';
+    legacyBreed.mentionPatterns = ['@gemini35', '@gemini-35', '@gemini3.5', '@暹罗gemini35'];
+    legacyBreed.roleDescription = '暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问';
+    const legacyVariant = legacyBreed.variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.variantLabel = 'Gemini 3.5 Flash';
+    legacyVariant.defaultModel = 'gemini-3.5-flash';
+    legacyVariant.cli = { command: 'gemini', outputFormat: 'stream-json', defaultArgs: [] };
+    legacyVariant.acp = { command: 'gemini', startupArgs: ['--acp'] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migratedBreed = rawCatalog.breeds.find((breed) => breed.id === 'siamese');
+    const migrated = migratedBreed.variants[0];
+    assert.equal(migratedBreed.name, '暹罗猫 Gemini 3.6 Flash');
+    assert.equal(migratedBreed.roleDescription, '暹罗猫 Gemini 3.6 Flash，视觉设计和创意顾问');
+    for (const alias of ['@gemini36', '@gemini-36', '@gemini3.6', '@暹罗gemini36']) {
+      assert.ok(migratedBreed.mentionPatterns.includes(alias), `existing catalog gains ${alias}`);
+    }
+    assert.equal(migratedBreed.mentionPatterns.includes('@flash'), false);
+    assert.equal(migratedBreed.mentionPatterns.includes('@暹罗flash'), false);
+    assert.equal(migrated.variantLabel, 'Gemini 3.6 Flash');
+    assert.equal(migrated.defaultModel, 'Gemini 3.6 Flash (High)');
+    assert.deepEqual(migrated.cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    assert.equal(migrated.acp, null);
+  });
+
+  it('migrates already-normalized gemini35 3.5 labels to the Gemini 3.6 selector', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-gemini36-label-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    const templateBreed = template.breeds.find((breed) => breed.id === 'siamese');
+    templateBreed.catId = 'gemini35';
+    templateBreed.variants[0].clientId = 'google';
+    templateBreed.variants[0].cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete templateBreed.variants[0].provider;
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyBreed = catalog.breeds.find((breed) => breed.id === 'siamese');
+    legacyBreed.catId = 'gemini35';
+    const legacyVariant = legacyBreed.variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.defaultModel = 'Gemini 3.5 Flash (High)';
+    legacyVariant.cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migrated = rawCatalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    assert.equal(migrated.defaultModel, 'Gemini 3.6 Flash (High)');
   });
 
   it('migrates persisted Gemini 2.5 ids to AGY selector labels when carrier is already AGY', () => {

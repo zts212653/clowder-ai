@@ -22,7 +22,7 @@ operator experience（2026-06-15）："社区小伙伴让猫猫整理完问题�
 
 Maine Coon（2026-06-15）实测确认：F222 的"确认提交"只写入本地 Redis FrustrationIssueStore（6 条 confirmed 记录在 `frustration-issue:{issueId}`），**没有任何外发到 GitHub/社区的路径**。用户点了"已提交"以为问题反馈出去了，实际只是本地存了一条 eval 信号——"已提交"这个文案本身就在误导用户。
 
-核心痛点：**本地反馈池和社区看板之间缺一座桥**。F222 是 producer（检测+采集+本地存储），F168 是 inbound engine（GitHub→Cat Café），但 outbound（Cat Café→GitHub）这个方向完全没有。
+核心痛点：**本地反馈池和社区看板之间缺一座桥**。F222 是 producer（检测+采集+本地存储），F168 是 inbound engine（GitHub→Clowder AI），但 outbound（Clowder AI→GitHub）这个方向完全没有。
 
 ## Current State / 现状基线
 
@@ -121,7 +121,7 @@ CommunityIssueStore / F168 projection  ← 幂等回写，防重复 triage
 | 风险 | 缓解 |
 |------|------|
 | 脱敏不完整，内部信息泄露到公开 issue | 白名单机制：只允许明确字段通过，其余全部剥离；preview 是人工确认门禁 |
-| GitHub API 权限：社区用户可能没有目标仓库写权限 | Phase A 先用 bot token（Cat Café 服务端发布）；Phase B 可选用户 OAuth |
+| GitHub API 权限：社区用户可能没有目标仓库写权限 | Phase A 先用 bot token（Clowder AI 服务端发布）；Phase B 可选用户 OAuth |
 | 发布后 issue 质量差（上下文不足或格式不对） | 使用社区 issue template 自动填充；猫猫整理上下文时遵循模板结构 |
 | 与 F168 inbound 产生循环（自己发的 issue 又被 F168 拾取） | 发布后写本地 board projection 做幂等；F168 polling reconcile 时识别已知 issue（by GitHub issue number）跳过重复 triage，但保留 comment/status reconcile |
 
@@ -130,7 +130,7 @@ CommunityIssueStore / F168 projection  ← 幂等回写，防重复 triage
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 独立 F 号，不放进 F222 | F222 是 producer（检测+本地存储），F235 是 publisher（外发+社区接入），安全语义完全不同（本地 vs 公开副作用），Maine Coon分析 + operator 同意 | 2026-06-15 |
-| KD-2 | Phase A 用 bot token，不用 OAuth | 社区用户未必有 clowder-ai 仓库写权限，OAuth 绑定/撤权是新复杂度。issue body 标明 "Reported via Cat Cafe"，不伪装用户。Phase B 可选加 OAuth | 2026-06-15 |
+| KD-2 | Phase A 用 bot token，不用 OAuth | 社区用户未必有 clowder-ai 仓库写权限，OAuth 绑定/撤权是新复杂度。issue body 标明 "Reported via Clowder AI"，不伪装用户。Phase B 可选加 OAuth | 2026-06-15 |
 | KD-3 | 目标仓库：配置式 default + allowlist，Phase A 单默认仓库 | 不硬编码 repo 名。Phase A 一个默认仓库 + allowlist 配置；Phase B 加 repo picker UI | 2026-06-15 |
 | KD-4 | 脱敏策略：白名单 + fail-closed + 服务端 re-sanitize | 可放：用户编辑后的描述/标题/复现步骤/公开错误摘要。不可放：threadId/userId/catId/invocationId/cardMessageId/Redis key/callback token/session id/完整 recentMessages/debugRef/绝对路径/API key。submit 时服务端必须重新 sanitize，不信前端预览 | 2026-06-15 |
 | KD-5 | Phase B 触发：用户主动请求优先，猫可主动建议但发布必须用户二次确认 | 猫可以弹 draft 卡，但不能自动外发。公开发布 = 不可逆外部副作用，必须 opt-in | 2026-06-15 |

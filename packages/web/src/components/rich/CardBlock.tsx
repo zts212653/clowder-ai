@@ -301,7 +301,7 @@ export function CardBlock({
               const prefix = m.isTarget ? '**→ ' : '  ';
               const sender = m.catId ? `🐱 ${resolveCatName(m.catId)}` : `👤 ${m.userId}`;
               const suffix = m.isTarget ? ' ←**' : '';
-              return `${prefix}${sender}: ${m.content?.slice(0, 200) ?? ''}${suffix}`;
+              return `${prefix}${sender}: ${m.content ?? ''}${suffix}`;
             })
             .join('\n\n');
 
@@ -538,7 +538,7 @@ export function CardBlock({
         </div>
       )}
       {block.actions && block.actions.length > 0 && (
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {block.actions.map((a, i) => {
             const restoredTriageStatus =
               a.action === 'concierge_triage_confirm' || a.action === 'concierge_triage_cancel'
@@ -577,7 +577,7 @@ export function CardBlock({
                 type="button"
                 disabled={disabled}
                 onClick={() => handleAction(a.action, a.payload)}
-                className="text-xs px-2 py-1 rounded bg-[var(--semantic-warning-surface)] hover:bg-[var(--semantic-warning-surface)] text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
+                className="max-w-full break-words text-left text-xs leading-5 px-2 py-1 rounded bg-[var(--semantic-warning-surface)] hover:bg-[var(--semantic-warning-surface)] text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
               >
                 {label}
               </button>

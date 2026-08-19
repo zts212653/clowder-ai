@@ -101,16 +101,26 @@ describe('Frontend timeout logic (source verification)', () => {
     );
   });
 
-  it('useAgentMessages.ts shows system_info on timeout', async () => {
+  it('useAgentMessages.ts projects timeout through identity-preserving system_info', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../web/src/hooks/useAgentMessages.ts', import.meta.url), 'utf8');
-
-    // Should add a system message with timeout content
-    assert.ok(source.includes('Response timed out'), 'Should show timeout message');
+    const reconciliationSource = await fs.readFile(
+      new URL('../../web/src/hooks/invocation-timeout-reconciliation.ts', import.meta.url),
+      'utf8',
+    );
 
     assert.ok(
-      source.includes("type: 'system'") && source.includes("variant: 'info'"),
-      'Should be a system info message',
+      source.includes('reconcileTimedOutInvocations(timeoutThreadId)'),
+      'Should reconcile canonical invocation truth when the client wait window ends',
+    );
+
+    assert.ok(
+      reconciliationSource.includes('`invocation-status-${candidate.invocationId}`') &&
+        reconciliationSource.includes('Client wait window ended') &&
+        reconciliationSource.includes("type: 'system'") &&
+        reconciliationSource.includes("let variant: ChatMessage['variant'] = 'info'") &&
+        reconciliationSource.includes('variant,'),
+      'Should preserve invocation identity in a system info reconciliation notice',
     );
   });
 });

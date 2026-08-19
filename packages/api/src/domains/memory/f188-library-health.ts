@@ -12,6 +12,10 @@ export interface LibraryHealthMetrics {
     observedSearches: number;
     zeroHitCount: number;
     lowHitCount: number;
+    /** Zero-hits from identifier probes (thread IDs, session UUIDs, git SHAs, message IDs)
+     *  that should use graph_resolve instead of free-text search. Tracked separately so
+     *  they don't inflate the content-miss zero-hit count. */
+    identifierProbeZeroHitCount: number;
     recentMisses: Array<{ query: string; resultCount: number; searchedAt: string }>;
   };
   replayDrift: { available: boolean; sampleCount: number; avgSimilarity: number | null };
@@ -88,12 +92,44 @@ function computeVerificationDebt(db: Database.Database) {
   }
 }
 
+/**
+ * Detect queries that are identifier probes — structural identifiers passed as free-text
+ * search instead of using graph_resolve or specific lookup endpoints.
+ *
+ * These produce zero-hits not because the content is missing, but because the caller
+ * used the wrong retrieval path. Counted separately to avoid inflating the content-miss
+ * zero-hit metric.
+ *
+ * Evidence: 2026-07-15 investigation found 100% of current-window zero-hits were identifier
+ * probes (thread IDs, session UUIDs). Historical data shows ~40% identifier probes, ~30% git
+ * metadata, ~20% CJK tokenization gaps, ~10% misrouted env/config strings.
+ */
+function isIdentifierProbe(query: string): boolean {
+  const q = query.trim();
+  // Thread IDs: thread_xxx
+  if (/^thread_[a-z0-9]{8,}$/i.test(q)) return true;
+  // Session UUIDs: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) return true;
+  // Message IDs: 0001784067144578 or 0001784067144578-000061-c5c6bc89
+  if (/^0{3}\d{13}(-\d{6}-[0-9a-f]{8})?$/i.test(q)) return true;
+  // Full git SHAs: 40-char hex
+  if (/^[0-9a-f]{40}$/i.test(q)) return true;
+  // Short git SHAs (9-12 char lowercase hex — minimum 9 to avoid false positives
+  // on English words like "deadbeef" (8) or "defaced" (7); case-sensitive because
+  // git always emits lowercase SHAs)
+  if (/^[0-9a-f]{9,12}$/.test(q)) return true;
+  return false;
+}
+
 function computeSearchQuality(db: Database.Database) {
   try {
     const rows = db
-      .prepare("SELECT payload, created_at FROM f163_logs WHERE log_type = 'search' ORDER BY created_at DESC LIMIT 200")
+      .prepare(
+        "SELECT payload, created_at FROM f163_logs WHERE log_type = 'search' AND (origin IS NULL OR origin = 'user') ORDER BY created_at DESC LIMIT 200",
+      )
       .all() as Array<{ payload: string; created_at: string }>;
     let zeroHitCount = 0;
+    let identifierProbeZeroHitCount = 0;
     let lowHitCount = 0;
     let observedSearches = 0;
     const recentMisses: Array<{ query: string; resultCount: number; searchedAt: string }> = [];
@@ -105,9 +141,21 @@ function computeSearchQuality(db: Database.Database) {
         const rc = p.resultCount;
         if (rc != null) observedSearches++;
         if (rc === 0) {
-          zeroHitCount++;
-          if (recentMisses.length < 10) {
-            recentMisses.push({ query: p.query ?? '', resultCount: rc, searchedAt: row.created_at });
+          const probe = isIdentifierProbe(p.query ?? '');
+          if (probe) {
+            identifierProbeZeroHitCount++;
+          } else {
+            zeroHitCount++;
+          }
+          // Only content misses enter recentMisses — probes are routing errors,
+          // not recall failures. Prevents probes from filling the 10-slot cap and
+          // hiding real content misses from diagnostics.
+          if (!probe && recentMisses.length < 10) {
+            recentMisses.push({
+              query: p.query ?? '',
+              resultCount: rc,
+              searchedAt: row.created_at,
+            });
           }
         } else if (rc != null && rc <= 2) {
           lowHitCount++;
@@ -116,16 +164,32 @@ function computeSearchQuality(db: Database.Database) {
         /* skip unparseable */
       }
     }
-    return { totalSearches: rows.length, observedSearches, zeroHitCount, lowHitCount, recentMisses };
+    return {
+      totalSearches: rows.length,
+      observedSearches,
+      zeroHitCount,
+      identifierProbeZeroHitCount,
+      lowHitCount,
+      recentMisses,
+    };
   } catch {
-    return { totalSearches: 0, observedSearches: 0, zeroHitCount: 0, lowHitCount: 0, recentMisses: [] };
+    return {
+      totalSearches: 0,
+      observedSearches: 0,
+      zeroHitCount: 0,
+      identifierProbeZeroHitCount: 0,
+      lowHitCount: 0,
+      recentMisses: [],
+    };
   }
 }
 
 function computeReplayDrift(db: Database.Database) {
   try {
     const rows = db
-      .prepare("SELECT payload FROM f163_logs WHERE log_type = 'search' ORDER BY created_at DESC LIMIT 500")
+      .prepare(
+        "SELECT payload FROM f163_logs WHERE log_type = 'search' AND (origin IS NULL OR origin = 'user') ORDER BY created_at DESC LIMIT 500",
+      )
       .all() as Array<{ payload: string }>;
     if (rows.length === 0) return { available: false, sampleCount: 0, avgSimilarity: null };
 

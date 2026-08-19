@@ -13,6 +13,7 @@
 import type { ApprovalItem, SettledApprovalItem, ThreadProposal } from '@cat-cafe/shared';
 import type { IProposalStore } from '../../cats/services/stores/ports/ProposalStore.js';
 import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 const F128_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -23,8 +24,8 @@ export class F128ApprovalAdapter implements IApprovalAdapter {
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
     const result = this.proposalStore.listPending(userId);
-    if (Array.isArray(result)) return result.map((p) => toItem(p));
-    return result.then((proposals) => proposals.map((p) => toItem(p)));
+    if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
+    return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
   }
 
   async listSettled(userId: string, opts?: ListSettledOpts): Promise<SettledApprovalItem[]> {
@@ -40,17 +41,21 @@ export class F128ApprovalAdapter implements IApprovalAdapter {
     return all
       .filter((p) => p.status === 'approved' || p.status === 'rejected')
       .map(toSettledItem)
+      .filter((item): item is SettledApprovalItem => item !== null)
       .sort((a, b) => b.decidedAt - a.decidedAt)
       .slice(0, limit);
   }
 }
 
-function toItem(p: ThreadProposal): ApprovalItem {
+function toItem(p: ThreadProposal): ApprovalItem | null {
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F128' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.createdBy,
     status: 'pending' as const,
@@ -64,21 +69,25 @@ function toItem(p: ThreadProposal): ApprovalItem {
       projectPath: p.projectPath,
       reportingMode: p.reportingMode,
     },
+    navigation,
     inlineApprovable: false,
     expiresAt: p.createdAt + F128_STALE_MS,
     createdAt: p.createdAt,
   };
 }
 
-function toSettledItem(p: ThreadProposal): SettledApprovalItem {
+function toSettledItem(p: ThreadProposal): SettledApprovalItem | null {
+  const navigation = projectApprovalNavigation(p, {
+    legacyThreadId: p.sourceThreadId,
+    legacyMessageId: p.cardMessageId,
+  });
+  if (!navigation) return null;
   // Map approved/rejected timestamps: prefer dedicated fields, fall back to createdBy
   const decidedAt = p.approvedAt ?? p.rejectedAt ?? p.createdAt;
   const decidedBy = p.approvedBy ?? p.rejectedBy ?? p.createdBy;
   return {
     proposalId: p.proposalId,
     sourceFeatureId: 'F128' as const,
-    sourceThreadId: p.sourceThreadId,
-    sourceMessageId: p.cardMessageId,
     requesterCatId: p.sourceCatId,
     ownerUserId: p.createdBy,
     status: p.status as 'approved' | 'rejected',
@@ -92,6 +101,7 @@ function toSettledItem(p: ThreadProposal): SettledApprovalItem {
       projectPath: p.projectPath,
       reportingMode: p.reportingMode,
     },
+    navigation,
     decidedAt,
     decidedBy: decidedBy ?? 'unknown',
     createdAt: p.createdAt,

@@ -24,15 +24,22 @@ describe('gh CLI child-process policy', () => {
       const sourceText = readFileSync(path, 'utf8');
       const source = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true);
 
+      function getOptionsArgument(node) {
+        if (node.arguments.length >= 3) return node.arguments[2];
+        if (node.arguments.length === 2 && !ts.isArrayLiteralExpression(node.arguments[1])) return node.arguments[1];
+        return undefined;
+      }
+
       function visit(node) {
-        if (ts.isCallExpression(node) && node.arguments.length >= 3) {
+        if (ts.isCallExpression(node)) {
           const command = node.arguments[0];
-          if (ts.isStringLiteral(command) && command.text === 'gh') {
-            const options = node.arguments[2].getText(source);
+          if (command && ts.isStringLiteral(command) && command.text === 'gh') {
+            const options = getOptionsArgument(node);
+            const optionsText = options?.getText(source) ?? '';
             const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
             ghCalls.push({
               location: `${relative(API_ROOT, path)}:${line}`,
-              hidden: options.includes('withHiddenGhCliWindow') || options.includes('getGitHubExecOptions'),
+              hidden: optionsText.includes('withHiddenGhCliWindow') || optionsText.includes('getGitHubExecOptions'),
             });
           }
         }

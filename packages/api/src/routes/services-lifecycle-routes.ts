@@ -15,6 +15,7 @@ import {
   runServiceScript,
   type ServiceLifecycleAction,
   type ServiceLifecycleRunner,
+  waitForPortBindable,
 } from '../domains/services/service-lifecycle.js';
 import {
   type FetchServiceHealth,
@@ -26,7 +27,9 @@ import {
   SERVICE_MANIFESTS,
   type ServiceConfig,
   type ServiceManifest,
+  serviceHealthIdentityMatches,
 } from '../domains/services/service-manifest.js';
+import { createProcessTerminator } from '../domains/services/service-process-termination.js';
 import {
   registerServiceLifecycleAuditRoutes,
   SERVICE_LIFECYCLE_AUDIT_TYPE,
@@ -69,6 +72,10 @@ export interface ServiceLifecycleRouteOptions {
   listProcesses?: () => Promise<ProcessSnapshot[]>;
   readProcessCommand?: (pid: number) => Promise<string | null>;
   killPid?: (pid: number, signal: NodeJS.Signals) => void;
+  isProcessAlive?: (pid: number) => boolean | Promise<boolean>;
+  shutdownGraceMs?: number;
+  shutdownKillGraceMs?: number;
+  shutdownPollMs?: number;
   serviceConfig?: Partial<{
     get(id: string): ServiceConfig | undefined;
     set(id: string, patch: Partial<ServiceConfig>): ServiceConfig;
@@ -126,16 +133,13 @@ async function waitForServiceReadiness(input: {
 
   const startedAt = Date.now();
   while (!stopped && Date.now() - startedAt < timeoutMs) {
-    const endpoint = resolveServiceEndpoint(input.service, input.env, input.getConfig(input.service.id));
-    if (endpoint) {
-      try {
-        const health = await input.fetchHealth(resolveServiceHealthUrl(input.service, endpoint), input.service);
-        if (health.ok) return true;
-      } catch {
-        // Readiness probes are internal while the service is starting. The UI
-        // should see `starting`, not a transient health-probe fetch failure.
-      }
-    }
+    const readiness = await probeServiceReadinessContract({
+      service: input.service,
+      env: input.env,
+      config: input.getConfig(input.service.id),
+      fetchHealth: input.fetchHealth,
+    });
+    if (readiness.ready) return true;
     if (input.stopIf && (await input.stopIf())) {
       stopped = true;
       break;
@@ -170,39 +174,67 @@ async function probeServiceReady(input: {
   }
 }
 
-/**
- * Deep health probe: verifies that a service can actually perform its core
- * function (e.g. TTS synthesis), not just respond to HTTP health endpoints.
- * Used by startService to detect zombie processes — HTTP alive but inference
- * pipeline broken (e.g. Broken pipe after prolonged uptime).
- *
- * Returns true if no deepHealthPath is configured (services without deep
- * health are assumed healthy when shallow health passes).
- */
-async function probeServiceDeepHealth(input: {
+type ServiceReadinessContract =
+  | { ready: true }
+  | { ready: false; stage: 'endpoint' | 'shallow' | 'identity' | 'deep'; reason?: string };
+
+async function probeServiceReadinessContract(input: {
   service: ServiceManifest;
   env: NodeJS.ProcessEnv;
   config: ServiceConfig | undefined;
   fetchHealth: FetchServiceHealth;
-}): Promise<boolean> {
-  if (!input.service.deepHealthPath) return true;
+}): Promise<ServiceReadinessContract> {
   const endpoint = resolveServiceEndpoint(input.service, input.env, input.config);
-  if (!endpoint) return false;
+  if (!endpoint) return { ready: false, stage: 'endpoint', reason: 'service endpoint is not configured' };
   try {
+    const health = await input.fetchHealth(resolveServiceHealthUrl(input.service, endpoint), input.service);
+    if (!health.ok) {
+      return { ready: false, stage: 'shallow', reason: health.error ?? `HTTP ${health.status ?? 'unknown'}` };
+    }
+    const identity = serviceHealthIdentityMatches(input.service, input.config, health);
+    if (!identity.matches) return { ready: false, stage: 'identity', reason: identity.reason };
+    if (!input.service.deepHealthPath) return { ready: true };
+
     const baseUrl = endpoint.replace(/\/+$/, '');
-    const deepUrl = `${baseUrl}${input.service.deepHealthPath}`;
-    // fetchHealth dispatches the correct timeout internally: deep-health
-    // paths get service.deepHealthTimeoutMs (default 20s) instead of the
-    // standard 1500ms shallow-probe timeout.  (Codex P1 — PR #2122)
-    const health = await input.fetchHealth(deepUrl, input.service);
-    return health.ok;
-  } catch {
-    return false;
+    const deep = await input.fetchHealth(`${baseUrl}${input.service.deepHealthPath}`, input.service);
+    if (!deep.ok) {
+      return { ready: false, stage: 'deep', reason: deep.error ?? `HTTP ${deep.status ?? 'unknown'}` };
+    }
+    const deepIdentity = serviceHealthIdentityMatches(input.service, input.config, deep);
+    if (!deepIdentity.matches) return { ready: false, stage: 'identity', reason: deepIdentity.reason };
+    return { ready: true };
+  } catch (error) {
+    return {
+      ready: false,
+      stage: 'shallow',
+      reason: error instanceof Error ? error.message : 'service readiness probe failed',
+    };
   }
 }
 
-function hasErrorCode(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
+function logOwnedServiceReadinessFailure(input: {
+  app: FastifyInstance;
+  service: ServiceManifest;
+  pids: number[];
+  readiness: ServiceReadinessContract;
+}): void {
+  if (input.readiness.ready || input.readiness.stage === 'shallow' || input.readiness.stage === 'endpoint') return;
+  if (input.readiness.stage === 'identity') {
+    input.app.log.warn(
+      { serviceId: input.service.id, pids: input.pids, reason: input.readiness.reason },
+      'service health identity does not match desired config — replacing stale listener',
+    );
+    appendServiceLog(
+      input.service.id,
+      `[start] stale identity: ${input.readiness.reason ?? 'unknown mismatch'} — restarting\n`,
+    );
+    return;
+  }
+  input.app.log.warn(
+    { serviceId: input.service.id, pids: input.pids, reason: input.readiness.reason },
+    'service shallow health OK but deep health failed — killing zombie process(es)',
+  );
+  appendServiceLog(input.service.id, `[start] zombie detected: shallow health OK, deep health FAILED — restarting\n`);
 }
 
 export async function registerServiceLifecycleRoutes(
@@ -221,13 +253,21 @@ export async function registerServiceLifecycleRoutes(
   const lookupPidsByPort = options.lifecycle?.findPidsByPort ?? findPidsByPort;
   const lookupProcesses = options.lifecycle?.listProcesses ?? listProcesses;
   const lookupProcessCommand = options.lifecycle?.readProcessCommand ?? readProcessCommand;
-  const terminatePid =
-    options.lifecycle?.killPid ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal));
+  const terminateOwnedPid = createProcessTerminator({
+    killPid: options.lifecycle?.killPid,
+    isProcessAlive: options.lifecycle?.isProcessAlive,
+    shutdownGraceMs: options.lifecycle?.shutdownGraceMs,
+    shutdownKillGraceMs: options.lifecycle?.shutdownKillGraceMs,
+    shutdownPollMs: options.lifecycle?.shutdownPollMs,
+  });
   const serviceConfigStore = {
     get: options.lifecycle?.serviceConfig?.get ?? getServiceConfig,
     set: options.lifecycle?.serviceConfig?.set ?? setServiceConfig,
   };
   const lifecycleEnv = options.env ?? process.env;
+  // Shared pattern for transient port contention errors — used by both
+  // inner startService retry and outer reconciler retry filter.
+  const PORT_CONTENTION_PATTERN = /address already in use|EADDRINUSE|Errno 48/i;
   const getEffectiveConfig = (service: ServiceManifest) => {
     return resolveEffectiveServiceConfig(service, serviceConfigStore.get(service.id), lifecycleEnv);
   };
@@ -238,6 +278,30 @@ export async function registerServiceLifecycleRoutes(
     lookupProcessCommand,
     log: app.log,
   });
+
+  async function terminateOwnedPids(
+    service: ServiceManifest,
+    pids: number[],
+    logContext: string,
+  ): Promise<{ stopped: number[]; failed: number[]; escalated: number[] }> {
+    const stopped: number[] = [];
+    const failed: number[] = [];
+    const escalated: number[] = [];
+    for (const pid of pids) {
+      const result = await terminateOwnedPid(pid);
+      if (result.escalated) escalated.push(pid);
+      if (result.ok) {
+        if (!result.initiallyAbsent) stopped.push(pid);
+      } else {
+        failed.push(pid);
+        app.log.warn(
+          { err: result.error, serviceId: service.id, pid, escalated: result.escalated },
+          `${logContext} failed`,
+        );
+      }
+    }
+    return { stopped, failed, escalated };
+  }
 
   /**
    * Detect non-runtime environments where sidecar lifecycle should be blocked.
@@ -390,25 +454,20 @@ export async function registerServiceLifecycleRoutes(
       return { ok: false, reason: portProbe.reason, statusCode: 503, stopped: [], failed: [] };
     }
 
-    const stopped: number[] = [];
-    const failed: number[] = [];
-    for (const pid of portProbe.owned) {
-      try {
-        terminatePid(pid, 'SIGTERM');
-        stopped.push(pid);
-      } catch (error) {
-        if (hasErrorCode(error, 'ESRCH')) continue;
-        failed.push(pid);
-        app.log.warn({ err: error, serviceId: service.id, pid }, 'service uninstall pre-stop terminate failed');
-      }
-    }
+    const { stopped, failed, escalated } = await terminateOwnedPids(
+      service,
+      portProbe.owned,
+      'service uninstall pre-stop termination',
+    );
     if (failed.length > 0) {
       appendServiceLog(service.id, `[uninstall] failed to stop owned process(es): ${failed.join(', ')}\n`);
       return { ok: false, reason: 'terminate-failed', statusCode: 502, stopped, failed };
     }
     if (stopped.length > 0) {
       appendServiceLog(service.id, `[uninstall] stopped owned process(es) before uninstall: ${stopped.join(', ')}\n`);
-      await delay(300);
+    }
+    if (escalated.length > 0) {
+      appendServiceLog(service.id, `[uninstall] escalated stubborn process(es) to SIGKILL: ${escalated.join(', ')}\n`);
     }
     if (portProbe.foreign.length > 0) {
       appendServiceLog(
@@ -767,85 +826,57 @@ export async function registerServiceLifecycleRoutes(
           return { error: `Service port ${startProbeService.port} is already owned by another process` };
         }
         if (portProbe.owned.length > 0) {
-          const healthy = await probeServiceReady({
+          const readiness = await probeServiceReadinessContract({
             service,
             env: lifecycleEnv,
             config: startEffectiveCfg,
             fetchHealth: healthProbe,
           });
-          if (healthy) {
-            // Deep health probe: detect zombie processes (HTTP alive but
-            // inference pipeline broken, e.g. Broken pipe after 11 days).
-            // If shallow health passes but deep health fails → kill and restart.
-            let deepHealthPassed = true;
-            if (service.deepHealthPath) {
-              deepHealthPassed = await probeServiceDeepHealth({
-                service,
-                env: lifecycleEnv,
-                config: startEffectiveCfg,
-                fetchHealth: healthProbe,
+          logOwnedServiceReadinessFailure({ app, service, pids: portProbe.owned, readiness });
+          if (readiness.ready) {
+            // Verify at least one owned process is the current start script,
+            // not a legacy additionalRuntimeScript (#863).
+            let hasPrimaryProcess = false;
+            for (const pid of portProbe.owned) {
+              const cmd = await lookupProcessCommand(pid);
+              if (cmd && isPrimaryServiceProcess(cmd, service)) {
+                hasPrimaryProcess = true;
+                break;
+              }
+            }
+            if (hasPrimaryProcess) {
+              serviceConfigStore.set(service.id, {
+                installed: true,
+                enabled: true,
+                ...(startEffectiveCfg?.selectedModel ? { selectedModel: startEffectiveCfg.selectedModel } : {}),
               });
-              if (!deepHealthPassed) {
-                app.log.warn(
-                  { serviceId: service.id, pids: portProbe.owned },
-                  'service shallow health OK but deep health failed — killing zombie process(es)',
-                );
-                appendServiceLog(
-                  service.id,
-                  `[start] zombie detected: shallow health OK, deep health FAILED — restarting\n`,
-                );
-              }
-            }
-
-            if (deepHealthPassed) {
-              // Verify at least one owned process is the current start
-              // script, not a legacy additionalRuntimeScript (#863).
-              // Legacy processes should be terminated and replaced.
-              let hasPrimaryProcess = false;
-              for (const pid of portProbe.owned) {
-                const cmd = await lookupProcessCommand(pid);
-                if (cmd && isPrimaryServiceProcess(cmd, service)) {
-                  hasPrimaryProcess = true;
-                  break;
-                }
-              }
-              if (hasPrimaryProcess) {
-                serviceConfigStore.set(service.id, { installed: true, enabled: true });
-                await audit({
-                  serviceId: service.id,
-                  action: 'start',
-                  operator,
-                  status: 'completed',
-                  reason: 'already-running',
-                });
-                const reconciliation = notifyServiceReady(service, operator, 'already-running');
-                return holdStartupGrace(
-                  { ok: true, message: `${service.name} is already running`, pids: portProbe.owned },
-                  startupReadinessTimeoutMs,
-                  reconciliation,
-                );
-              }
-              // Legacy-only listener: log and fall through to terminate
-              app.log.info(
-                { serviceId: service.id, pids: portProbe.owned },
-                'owned listener is legacy — terminating for current start script',
+              await audit({
+                serviceId: service.id,
+                action: 'start',
+                operator,
+                status: 'completed',
+                reason: 'already-running',
+              });
+              const reconciliation = notifyServiceReady(service, operator, 'already-running');
+              return holdStartupGrace(
+                { ok: true, message: `${service.name} is already running`, pids: portProbe.owned },
+                startupReadinessTimeoutMs,
+                reconciliation,
               );
-              appendServiceLog(service.id, `[start] legacy process on port — replacing with current start script\n`);
             }
+            // Legacy-only listener: log and fall through to terminate.
+            app.log.info(
+              { serviceId: service.id, pids: portProbe.owned },
+              'owned listener is legacy — terminating for current start script',
+            );
+            appendServiceLog(service.id, `[start] legacy process on port — replacing with current start script\n`);
           }
 
-          const stopped: number[] = [];
-          const failed: number[] = [];
-          for (const pid of portProbe.owned) {
-            try {
-              terminatePid(pid, 'SIGTERM');
-              stopped.push(pid);
-            } catch (error) {
-              if (hasErrorCode(error, 'ESRCH')) continue;
-              failed.push(pid);
-              app.log.warn({ err: error, serviceId: service.id, pid }, 'service start stale-listener terminate failed');
-            }
-          }
+          const { stopped, failed, escalated } = await terminateOwnedPids(
+            service,
+            portProbe.owned,
+            'service start stale-listener termination',
+          );
           if (failed.length > 0) {
             reply.status(502);
             await audit({
@@ -861,6 +892,12 @@ export async function registerServiceLifecycleRoutes(
               stopped,
               failed,
             };
+          }
+          if (escalated.length > 0) {
+            appendServiceLog(
+              service.id,
+              `[start] escalated stubborn stale listener(s) to SIGKILL: ${escalated.join(', ')}\n`,
+            );
           }
           if (stopped.length > 0) {
             appendServiceLog(service.id, `[start] stopped unhealthy owned listener(s): ${stopped.join(', ')}\n`);
@@ -882,6 +919,23 @@ export async function registerServiceLifecycleRoutes(
                 stopped,
                 remaining: clear.pids ?? [],
               };
+            }
+            // Port-bindability probe: lsof -sTCP:LISTEN may report "clear" while
+            // the port is still kernel-bound (hypothesized TIME_WAIT/CLOSE_WAIT)
+            // after process death. Attempt an actual bind() to confirm real
+            // availability before spawning the replacement process.
+            // (F195 startup-reconciler gap fix)
+            if (startProbeService.port) {
+              const bindCheck = await waitForPortBindable(startProbeService.port, {
+                timeoutMs: Math.min(startupReadinessTimeoutMs, 5_000),
+                intervalMs: Math.min(startupProbeIntervalMs, 500),
+              });
+              if (!bindCheck.ok) {
+                appendServiceLog(
+                  service.id,
+                  `[start] port ${startProbeService.port} not bindable after stale listener cleared (${bindCheck.lastError}); retrying spawn\n`,
+                );
+              }
             }
           }
         }
@@ -914,14 +968,54 @@ export async function registerServiceLifecycleRoutes(
           return { ok: false, error: `Invalid persisted service config: ${startEnvResult.error}` };
         }
         await audit({ serviceId: service.id, action: 'start', operator, status: 'started' });
-        const result = await runWithTimeout(runner, {
-          serviceId: service.id,
-          action: 'start',
-          scriptPath,
-          env: startEnvResult.env,
-          detached: true,
-          timeoutMs: lifecycleTimeoutMs,
-        });
+
+        // Bounded retry for transient port-contention (EADDRINUSE / Errno 48).
+        // After killing a stale process, the port may remain kernel-bound
+        // (hypothesized TIME_WAIT/CLOSE_WAIT) despite passing both lsof and
+        // bind-probe checks. Retry with backoff gives the kernel time to
+        // fully release the socket.
+        const PORT_CONTENTION_MAX_RETRIES = 3;
+        let portContentionRetries = 0;
+        let result;
+
+        for (;;) {
+          result = await runWithTimeout(runner, {
+            serviceId: service.id,
+            action: 'start',
+            scriptPath,
+            env: startEnvResult.env,
+            detached: true,
+            timeoutMs: lifecycleTimeoutMs,
+          });
+
+          // Not a fast-fail port contention → break out of retry loop
+          const isPortContention =
+            !result.timedOut &&
+            !result.runnerError &&
+            typeof result.code === 'number' &&
+            result.code !== 0 &&
+            PORT_CONTENTION_PATTERN.test(result.output ?? '');
+
+          if (!isPortContention || portContentionRetries >= PORT_CONTENTION_MAX_RETRIES) break;
+
+          portContentionRetries++;
+          const backoffMs = 1_000 * 2 ** (portContentionRetries - 1); // 1s, 2s, 4s
+          appendServiceLog(
+            service.id,
+            `[start] port contention detected (attempt ${portContentionRetries}/${PORT_CONTENTION_MAX_RETRIES}), retrying in ${backoffMs}ms\n`,
+          );
+
+          // Wait for port to become bindable before retrying
+          if (startProbeService.port) {
+            await waitForPortBindable(startProbeService.port, {
+              timeoutMs: backoffMs,
+              intervalMs: Math.min(startupProbeIntervalMs, 500),
+            });
+          } else {
+            await delay(backoffMs);
+          }
+        }
+
         if (result.timedOut) {
           reply.status(408);
           await audit({ serviceId: service.id, action: 'start', operator, status: 'timed_out' });
@@ -938,7 +1032,11 @@ export async function registerServiceLifecycleRoutes(
             operator,
             status: 'failed',
             code: result.code,
-            reason: result.runnerError ? 'runner-error' : undefined,
+            reason: result.runnerError
+              ? 'runner-error'
+              : portContentionRetries > 0
+                ? 'port-contention-exhausted'
+                : undefined,
           });
           return {
             ok: false,
@@ -988,7 +1086,11 @@ export async function registerServiceLifecycleRoutes(
             };
           }
         }
-        serviceConfigStore.set(service.id, { installed: true, enabled: true });
+        serviceConfigStore.set(service.id, {
+          installed: true,
+          enabled: true,
+          ...(cfg?.selectedModel ? { selectedModel: cfg.selectedModel } : {}),
+        });
         await audit({ serviceId: service.id, action: 'start', operator, status: 'completed', code: result.code });
         const success = { ok: true, message: `${service.name} start initiated`, pid: result.pid };
         const settlement = settleQuietly(result.settlement);
@@ -1071,22 +1173,21 @@ export async function registerServiceLifecycleRoutes(
         }
         if (portProbe.owned.length === 0) return { ok: true };
 
-        const stopped: number[] = [];
-        const failed: number[] = [];
-        for (const pid of portProbe.owned) {
-          try {
-            terminatePid(pid, 'SIGTERM');
-            stopped.push(pid);
-          } catch (error) {
-            if (hasErrorCode(error, 'ESRCH')) continue;
-            failed.push(pid);
-            app.log.warn({ err: error, serviceId: service.id, pid }, 'service startup reconciler terminate failed');
-          }
-        }
+        const { stopped, failed, escalated } = await terminateOwnedPids(
+          service,
+          portProbe.owned,
+          'service startup reconciler termination',
+        );
         if (stopped.length > 0) {
           appendServiceLog(
             service.id,
             `[startup-reconciler] stopped disabled orphan process(es): ${stopped.join(', ')}\n`,
+          );
+        }
+        if (escalated.length > 0) {
+          appendServiceLog(
+            service.id,
+            `[startup-reconciler] escalated stubborn orphan process(es) to SIGKILL: ${escalated.join(', ')}\n`,
           );
         }
         await audit({
@@ -1157,13 +1258,102 @@ export async function registerServiceLifecycleRoutes(
           return;
         }
         if (!(cfg?.enabled && cfg.installed !== false)) return;
-        const reply = createInternalReply();
-        const result = await startService(service, STARTUP_RECONCILER_OPERATOR, reply);
-        if ((reply.statusCode ?? 200) >= 400) {
-          app.log.warn(
-            { serviceId: service.id, statusCode: reply.statusCode, result },
-            'service startup reconciler failed',
-          );
+
+        // Bounded retry for transient port contention only. The reconciler
+        // retries at most RECONCILER_MAX_RETRIES times with exponential
+        // backoff, but ONLY when the failure is a transient port contention
+        // (EADDRINUSE / Errno 48). Permanent failures (invalid config,
+        // foreign port owner, etc.) are NOT retried.
+        const RECONCILER_MAX_RETRIES = 2;
+        const reconcilerCfg = getEffectiveConfig(service);
+        const reconcilerProbeService = { ...service, port: reconcilerCfg?.port ?? service.port };
+        for (let attempt = 0; attempt <= RECONCILER_MAX_RETRIES; attempt++) {
+          const reply = createInternalReply();
+          const result = await startService(service, STARTUP_RECONCILER_OPERATOR, reply);
+          const immediateFailure = (reply.statusCode ?? 200) >= 400;
+
+          if (!immediateFailure) {
+            // startService returned OK, but for detached processes readiness
+            // isn't confirmed yet. Wait for the readiness timeout to pass,
+            // then verify the service actually became reachable. This catches
+            // the "completed-before-readiness" gap: the runner starts OK
+            // (code: null), but the process dies with EADDRINUSE during the
+            // grace period (via settlement).
+            const postStartReady = await waitForServiceReadiness({
+              service: reconcilerProbeService,
+              env: lifecycleEnv,
+              getConfig: (id) => {
+                const target = getServiceManifest(id);
+                return target ? getEffectiveConfig(target) : serviceConfigStore.get(id);
+              },
+              fetchHealth: healthProbe,
+              timeoutMs: startupReadinessTimeoutMs,
+              intervalMs: startupProbeIntervalMs,
+            });
+            if (postStartReady) break; // truly ready — done
+
+            // Service started but never became ready — late failure.
+            // Check if the OWNED process is still alive (process table,
+            // not port listener). A slow-starting service may still be
+            // loading its model before binding the port — it's alive but
+            // invisible to lsof -sTCP:LISTEN. Using findOwnedServiceProcessPids
+            // (command-matching) instead of lookupPidsByPort avoids
+            // misclassifying pre-bind loading as "process died".
+            // If alive → slow start or config issue → don't retry (avoids double-spawn).
+            // If dead → late startup failure (e.g. EADDRINUSE crash) → retry.
+            appendServiceLog(
+              service.id,
+              `[reconciler] service reported started but never became ready within ${startupReadinessTimeoutMs}ms\n`,
+            );
+            let ownedPids: number[] = [];
+            try {
+              ownedPids = await findOwnedServiceProcessPids(service);
+            } catch (error) {
+              app.log.warn(
+                { err: error, serviceId: service.id },
+                'service startup reconciler: owned process probe failed — assuming alive',
+              );
+              break; // probe failed — conservative: assume process alive, don't double-spawn
+            }
+            if (ownedPids.length > 0) {
+              app.log.warn(
+                { serviceId: service.id, pids: ownedPids, attempt: attempt + 1 },
+                'service startup reconciler: owned process alive but not ready — not retrying',
+              );
+              break; // process alive (maybe loading model) — stop
+            }
+            app.log.warn(
+              { serviceId: service.id, attempt: attempt + 1 },
+              'service startup reconciler: process died during startup — retrying',
+            );
+          } else {
+            // Immediate failure — only retry transient port contention.
+            const isTransientPortContention =
+              result != null &&
+              typeof result === 'object' &&
+              'output' in result &&
+              PORT_CONTENTION_PATTERN.test(String((result as { output?: string }).output ?? ''));
+            if (!isTransientPortContention) {
+              app.log.warn(
+                { serviceId: service.id, statusCode: reply.statusCode, attempt: attempt + 1 },
+                'service startup reconciler: permanent failure — not retrying',
+              );
+              break; // non-transient — stop
+            }
+            app.log.warn(
+              { serviceId: service.id, statusCode: reply.statusCode, attempt: attempt + 1 },
+              'service startup reconciler: transient port contention',
+            );
+          }
+
+          if (attempt < RECONCILER_MAX_RETRIES) {
+            const backoffMs = 2_000 * 2 ** attempt; // 2s, 4s
+            appendServiceLog(
+              service.id,
+              `[reconciler] startup attempt ${attempt + 1} failed, retrying in ${backoffMs}ms\n`,
+            );
+            await delay(backoffMs, { ref: false });
+          }
         }
       }),
     );
@@ -1222,18 +1412,11 @@ export async function registerServiceLifecycleRoutes(
           });
           return { error: `Service port ${stopProbeService.port} is owned by another process` };
         }
-        const stopped: number[] = [];
-        const failed: number[] = [];
-        for (const pid of portProbe.owned) {
-          try {
-            terminatePid(pid, 'SIGTERM');
-            stopped.push(pid);
-          } catch (error) {
-            if (hasErrorCode(error, 'ESRCH')) continue;
-            failed.push(pid);
-            app.log.warn({ err: error, serviceId: service.id, pid }, 'service stop terminate failed');
-          }
-        }
+        const { stopped, failed, escalated } = await terminateOwnedPids(
+          service,
+          portProbe.owned,
+          'service stop termination',
+        );
         if (failed.length > 0) {
           reply.status(502);
           await audit({
@@ -1248,12 +1431,18 @@ export async function registerServiceLifecycleRoutes(
             error: `${service.name} stop failed for ${failed.length} process(es)`,
             stopped,
             failed,
+            ...(escalated.length > 0 ? { escalated } : {}),
           };
         }
         serviceConfigStore.set(service.id, { enabled: false });
         await audit({ serviceId: service.id, action: 'stop', operator, status: 'completed' });
         await notifyServiceUnavailable(service, operator, 'stop');
-        return { ok: true, message: `${service.name} stopped (${stopped.length} process(es))`, stopped };
+        return {
+          ok: true,
+          message: `${service.name} stopped (${stopped.length} process(es))`,
+          stopped,
+          ...(escalated.length > 0 ? { escalated } : {}),
+        };
       },
       { action: 'stop' },
     );

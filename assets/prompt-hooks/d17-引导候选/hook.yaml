@@ -21,5 +21,5 @@ safetyTier: readonly
 transparencyTier: opt-in-view
 governanceTier: human-gated
 
-# CVO-facing
+# operator-facing
 userExplanation: "当前可触发的引导流程候选"

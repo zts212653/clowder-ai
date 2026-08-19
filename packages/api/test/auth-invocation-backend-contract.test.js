@@ -55,6 +55,7 @@ function fixture(invocationId, callbackToken, threadId = 't-1', catId = 'opus') 
     invocationId,
     callbackToken,
     userId: 'u-1',
+    ownerAuthProvenance: 'strict',
     catId,
     threadId,
     clientMessageIds: new Set(),
@@ -72,6 +73,60 @@ for (const [name, factory] of backends) {
         assert.equal(result.ok, true);
         assert.equal(result.record.callbackToken, 'tok-1');
         assert.equal(result.record.userId, 'u-1');
+        assert.equal(result.record.ownerAuthProvenance, 'strict');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('F254 read-only tool policy survives backend round-trip', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-policy', 'tok-policy');
+        record.toolExecutionPolicy = {
+          mode: 'read_only',
+          replayDeniedToolNames: ['cat_cafe_hold_ball', 'cat_cafe_post_message'],
+        };
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-policy', 'tok-policy', 60_000);
+        assert.equal(verified.ok, true);
+        assert.deepEqual(verified.record.toolExecutionPolicy, record.toolExecutionPolicy);
+        const hydrated = await backend.getRecord('inv-policy');
+        assert.deepEqual(hydrated?.toolExecutionPolicy, record.toolExecutionPolicy);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('exact turn origin survives backend round-trip without becoming A2A reply provenance', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-origin', 'tok-origin');
+        record.originTriggerMessageId = 'msg-user-direct';
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-origin', 'tok-origin', 60_000);
+        assert.equal(verified.ok, true);
+        assert.equal(verified.record.originTriggerMessageId, 'msg-user-direct');
+        assert.equal(verified.record.a2aTriggerMessageId, undefined);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('private managed-work binding survives backend verify and hydrate paths', async () => {
+      const { backend, cleanup } = await factory();
+      try {
+        const record = fixture('inv-managed', 'tok-managed');
+        record.managedWorkBinding = { workId: 'wrk_private', attemptId: 'wat_private' };
+        await backend.create(record, 60_000);
+
+        const verified = await backend.verify('inv-managed', 'tok-managed', 60_000);
+        assert.equal(verified.ok, true);
+        assert.deepEqual(verified.record.managedWorkBinding, record.managedWorkBinding);
+        const hydrated = await backend.getRecord('inv-managed');
+        assert.deepEqual(hydrated?.managedWorkBinding, record.managedWorkBinding);
       } finally {
         await cleanup();
       }

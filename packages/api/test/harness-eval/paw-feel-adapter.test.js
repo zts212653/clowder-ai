@@ -141,10 +141,9 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
     assert.deepEqual(tools, ['tool0', 'tool1', 'tool2', 'tool3', 'tool4']);
   });
 
-  // P1-1 (gpt52 review): timeline zset score = deliveredAt ?? timestamp（markDelivered re-score）。
-  // 窗口判定/输出必须用 effective order time，否则 queued-message-created-before-window-but-
-  // delivered-in-window 被 raw timestamp 漏采，且 signal period 错位。
-  it('P1-1: queued 消息按 effective time(deliveredAt) 采集，不按 raw timestamp 漏采', async () => {
+  // Real-cat speech is published when authored. A later execution-custody delivery
+  // must not move an old friction report into the current eval window.
+  it('P1-1: queued cat speech stays in its authoring-time eval window after delivery', async () => {
     const created = T0 - 5000; // 窗口前（raw timestamp）
     const delivered = T0 + 1000; // 窗口内（effective time）
     const m = await store.append({
@@ -161,10 +160,7 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
     const adapter = new PawFeelAdapter(store);
     const signals = await adapter.pull(T0, T0 + 10000);
 
-    assert.equal(signals.length, 1, 'queued-delivered-in-window 应被采集（effective time 在窗口）');
-    assert.equal(signals[0].tool, 'rg');
-    // signal timestamp 用 effective time，与 period 归属一致
-    assert.equal(signals[0].timestamp, new Date(delivered).toISOString());
+    assert.equal(signals.length, 0, 'execution delivery must not republish old cat speech into this window');
   });
 
   // P1-2 (gpt52 review): 爪感差是猫的摩擦上报约定（L0 staging）。user-authored 消息引用 marker
@@ -197,10 +193,64 @@ describe('PawFeelAdapter — Redis-backed pull', { skip: redisIsolationSkipReaso
 });
 
 // cloud review R3 P2: in-memory MessageStore.getBefore 按 raw msg.timestamp 比较 cursor
-// （Redis 按 effective zset score）。adapter 翻页须 store-agnostic：seen-id 去重 + 无进展 break，
-// 否则 queued-delivered message（deliveredAt!==timestamp）在 in-memory 路径重复/死循环。
+// Adapter pagination stays store-agnostic: seen-id dedup + no-progress break.
 describe('PawFeelAdapter — in-memory store path (cloud R3 P2)', () => {
   const M0 = 1_700_000_000_000; // in-memory 无 prune，可用固定基准
+
+  it('cross-post marker becomes one routing-misuse signal instead of duplicating the source symptom', async () => {
+    const store = new MessageStore();
+    const source = store.append({
+      userId: 'u1',
+      catId: 'codex',
+      content: '[爪感差: rg 输出太吵]',
+      mentions: [],
+      timestamp: M0 + 1000,
+      threadId: 'thread-source',
+    });
+    const relay = store.append({
+      userId: 'u1',
+      catId: 'codex',
+      content: 'FYI [爪感差: rg 输出太吵] repeated [爪感差: rg 输出太吵]',
+      mentions: [],
+      timestamp: M0 + 2000,
+      threadId: 'thread-wrong-inbox',
+      extra: { crossPost: { sourceThreadId: 'thread-source', sourceInvocationId: 'inv-source' } },
+    });
+
+    const adapter = new PawFeelAdapter(store);
+    const signals = await adapter.pull(M0, M0 + 10000);
+
+    assert.equal(signals.length, 2, 'one incident signal + one relay-routing misuse signal');
+    const incidentSignals = signals.filter((signal) => signal.symptom === '输出太吵');
+    assert.equal(incidentSignals.length, 1, 'relay must not duplicate the original symptom');
+    assert.equal(incidentSignals[0].rawRef, `${source.id}#0`);
+
+    const routingMisuse = signals.find((signal) => signal.tool === 'cat_cafe_cross_post_message');
+    assert.ok(routingMisuse, 'relay misuse stays observable to eval:friction');
+    assert.equal(routingMisuse.id, `paw-feel:${relay.id}#cross-post-routing`);
+    assert.equal(routingMisuse.rawRef, `${relay.id}#cross-post-routing`);
+    assert.match(routingMisuse.symptom, /copied across threads|跨线程复制/i);
+  });
+
+  it('legacy self-referential crossPost metadata remains a local incident signal', async () => {
+    const store = new MessageStore();
+    const local = store.append({
+      userId: 'u1',
+      catId: 'codex',
+      content: '[爪感差: same-thread route guard misfired]',
+      mentions: [],
+      timestamp: M0 + 1000,
+      threadId: 'thread-same',
+      extra: { crossPost: { sourceThreadId: 'thread-same' } },
+    });
+
+    const adapter = new PawFeelAdapter(store);
+    const signals = await adapter.pull(M0, M0 + 10000);
+
+    assert.equal(signals.length, 1);
+    assert.equal(signals[0].rawRef, `${local.id}#0`);
+    assert.notEqual(signals[0].tool, 'cat_cafe_cross_post_message');
+  });
 
   it('queued-delivered message 不重复不死循环（pageSize=1）', { timeout: 8000 }, async () => {
     const store = new MessageStore();
@@ -231,9 +281,6 @@ describe('PawFeelAdapter — in-memory store path (cloud R3 P2)', () => {
     const ids = signals.map((s) => s.id);
     // R3 两个担忧已解决：无 duplicate（seen 去重）+ 不 loop forever（fresh===0 break；能跑到断言即非死循环）。
     assert.equal(new Set(ids).size, ids.length, '无重复 signal');
-    assert.ok(ids.length >= 1, 'graceful degrade 非全废');
-    // 注：in-memory getBefore 用 raw-timestamp cursor（≠ Redis effective zset score），queued-delivered
-    // message 翻页 degraded recall（可能漏采）。完整 recall 是 Redis-backed 契约（friction eval 后台任务的
-    // 数据源恒为生产 Redis；in-memory 仅 degraded/test mode，不运行 friction rollup）。见 adapter 类文档。
+    assert.equal(ids.length, 0, 'old cat speech remains outside the current publication window');
   });
 });

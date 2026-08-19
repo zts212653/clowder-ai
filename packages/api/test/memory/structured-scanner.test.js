@@ -45,6 +45,23 @@ describe('StructuredScanner', () => {
     assert.ok(result.item.keywords?.includes('federation'));
   });
 
+  it('normalizes external-knowledge roles and merges topics with legacy tags', () => {
+    writeFileSync(
+      join(tmpDir, 'study.md'),
+      '---\ndoc_kind: research-note\ncategory: study\ntopics: [Memory]\ntags: [memory, teardown]\n---\n# Study\n\nContent.',
+    );
+    const scanner = new StructuredScanner('test:docs');
+    const [result] = scanner.discover(tmpDir);
+    assert.equal(result.item.kind, 'research');
+    assert.ok(result.item.keywords?.includes('Memory'));
+    assert.ok(result.item.keywords?.includes('teardown'));
+    assert.equal(
+      result.item.keywords?.filter((keyword) => keyword.toLowerCase() === 'memory').length,
+      1,
+      'topics and tags should deduplicate case-insensitively',
+    );
+  });
+
   it('extracts anchor from frontmatter when present', () => {
     writeFileSync(join(tmpDir, 'anchored.md'), '---\nanchor: ADR-042\n---\n# ADR 42\n\nContent.');
     const scanner = new StructuredScanner('test:docs');
@@ -111,6 +128,9 @@ describe('StructuredScanner', () => {
       ['lesson', 'lesson'],
       ['discussion', 'discussion'],
       ['research', 'research'],
+      ['consult-response', 'research'],
+      ['source-ledger', 'research'],
+      ['teardown', 'research'],
       ['adr', 'decision'],
     ];
     for (const [docKind, expected] of kinds) {

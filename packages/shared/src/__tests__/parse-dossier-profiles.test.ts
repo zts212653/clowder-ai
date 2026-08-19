@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { DossierProfile } from '../dossier/parse-dossier-profiles.js';
 import { parseDossierProfiles } from '../dossier/parse-dossier-profiles.js';
 
 const SAMPLE_DOSSIER = `---
@@ -26,6 +25,8 @@ Some schema docs here...
 entityId: "cat:opus"
 oneLiner: "快枪手——出活快但爱糊弄"
 l0RosterSummary: "快速编码 + 系统设计，全链路推进"
+l0RoutingNote: "高风险实现可派；独立 review 不派"
+l0SelfDescription: "快速实现；动手前先核终态与验证边界"
 routingSignals:
   peakCapabilities:
     - "快速编码 + 系统设计一体"
@@ -104,6 +105,37 @@ describe('parseDossierProfiles', () => {
     expect(profiles.get('opus')?.l0RosterSummary).toBe('快速编码 + 系统设计，全链路推进');
     expect(profiles.get('codex')?.l0RosterSummary).toBe('Review、找 bug、coding 落地');
     expect(profiles.get('spark')?.l0RosterSummary).toBe('快速编码、精确点改');
+  });
+
+  it('parses l0RoutingNote as the compact L0 route contract', () => {
+    const profiles = parseDossierProfiles(SAMPLE_DOSSIER);
+    expect(profiles.get('opus')?.l0RoutingNote).toBe('高风险实现可派；独立 review 不派');
+    expect(profiles.get('codex')?.l0RoutingNote).toBeUndefined();
+  });
+
+  it('parses l0SelfDescription as the self-facing persona projection', () => {
+    const profiles = parseDossierProfiles(SAMPLE_DOSSIER);
+    expect(profiles.get('opus')?.l0SelfDescription).toBe('快速实现；动手前先核终态与验证边界');
+    expect(profiles.get('codex')?.l0SelfDescription).toBeUndefined();
+  });
+
+  it('rejects an engagement policy whose required fields are nested below the policy object', () => {
+    const md = `
+\`\`\`yaml
+# structured-profile: cat:fable-5
+entityId: "cat:fable-5"
+engagementPolicy:
+  accidentalWrapper:
+    quota: "weekly_subscription_scarce"
+    defaultMode: "one_shot_calibration"
+    highValueUses:
+      - "final architecture synthesis"
+    routineRepairReturn: "author_then_routine_reviewer_if_needed"
+    reentry: "only_for_new_architecture_or_decision_judgment_or_explicit_cvo_request"
+\`\`\`
+`;
+
+    expect(parseDossierProfiles(md).get('fable-5')?.engagementPolicy).toBeUndefined();
   });
 
   it('parses routingSignals when present', () => {

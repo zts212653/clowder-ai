@@ -2,8 +2,14 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from '../domain/eval-domain-registry.js';
-import { type EvalHubFrictionProjection, loadEvalHubFrictionProjection } from './eval-hub-friction-projection.js';
+import {
+  type EvalDomainRegistryEntry,
+  isEvalDomainRegistryYamlFile,
+  parseEvalDomainRegistryFile,
+  parseEvalMetricGlossary,
+} from '../domain/eval-domain-registry.js';
+import { loadEvalHubFrictionProjection } from './eval-hub-friction-projection.js';
+import { synthesizeEvalHubNextCheck, synthesizeEvalHubOperatorNarrative } from './eval-hub-operator-narrative.js';
 import {
   computeNextCronFire,
   computeStale,
@@ -18,120 +24,17 @@ import {
   requiredText,
   requiredVerdict,
 } from './eval-hub-read-model-helpers.js';
-
-type CountRecord = Record<string, number | null>;
-
-export interface LoadEvalHubSummaryInput {
-  harnessFeedbackRoot: string;
-  /**
-   * Wall-clock reference for staleness checks. Defaults to `new Date()`.
-   * Injectable so date-dependent regression tests don't drift over time.
-   * F192 P2: enables `lifecycle.stale` lifecycle calculation (previously hardcoded false).
-   */
-  now?: Date;
-}
-
-export interface EvalDomainSummary {
-  domainId: string;
-  displayName: string;
-  systemThreadId: string;
-  frequency: string;
-  evalCatId: string;
-  evalCatHandle: string;
-  /**
-   * Sunset state. `false` means the domain's yaml has `enabled: false` —
-   * scheduled cron silently skips it, and `nextCronFireAt` is omitted (because
-   * cron does NOT fire for sunset domains; showing a future fire time would be
-   * the operator-facing mirror of the silent-fire bug the sunset is meant to
-   * fix). Frontend renders a "Sunset" indicator instead of "下次评估".
-   * `true` (default) means the domain is active and the cron will fire as
-   * scheduled.
-   */
-  enabled: boolean;
-  hasVerdict: boolean;
-  latestVerdictId?: string;
-  latestVerdict?: EvalHubItem['verdict'];
-  /**
-   * Next scheduled cron fire time (computed from frequency, not verdict
-   * re-eval deadline). Omitted when `enabled === false` — sunset domains
-   * have no upcoming fire, and surfacing a future date would lie to operators.
-   */
-  nextCronFireAt?: string;
-}
-
-export interface EvalHubSummary {
-  generatedAt: string;
-  counts: {
-    total: number;
-    actionable: number;
-    keepObserve: number;
-    stale: number;
-    registeredDomains: number;
-  };
-  domains: EvalDomainSummary[];
-  items: EvalHubItem[];
-}
-
-export interface EvalHubItem {
-  id: string;
-  domainId: EvalDomainRegistryEntry['domainId'];
-  packetId: string;
-  feedbackType: 'live-verdict';
-  verdict: 'delete_sunset' | 'build' | 'fix' | 'keep_observe';
-  phenomenon: string;
-  ownerAsk: string;
-  harnessUnderEval: {
-    featureId: string;
-    componentId: string;
-    name: string;
-  };
-  reeval: {
-    nextEvalAt?: string;
-    status: 'observing' | 'pending_owner' | 'pending_reeval';
-    summary: string;
-  };
-  lifecycle: {
-    ownerResponseStatus: 'not_required' | 'not_started';
-    closureStatus: 'observing' | 'open';
-    stale: boolean;
-  };
-  evidence: {
-    snapshotRefs: string[];
-    attributionRefs: string[];
-    metricRefs: string[];
-    otherRefs: string[];
-  };
-  trend: {
-    generatedAt: string;
-    window: {
-      startMs?: number;
-      endMs?: number;
-      durationHours: number;
-    };
-    components: Array<{
-      componentId: string;
-      componentName: string;
-      confidence: string;
-      activationCounts: CountRecord;
-      frictionCounts: CountRecord;
-    }>;
-  };
-  systemWorkspace: {
-    kind: 'eval_domain';
-    id: EvalDomainRegistryEntry['domainId'];
-    label: string;
-    threadId: string;
-    stateSot: 'registry';
-  };
-  source: {
-    verdictPath: string;
-    bundleDir: string;
-  };
-  friction?: EvalHubFrictionProjection;
-}
+import type {
+  EvalDomainSummary,
+  EvalHubItem,
+  EvalHubSummary,
+  LoadEvalHubSummaryInput,
+} from './eval-hub-read-model-types.js';
+import { resolveEvalHubRepoWorktreeId } from './eval-hub-repo-worktree-id.js';
 
 export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSummary {
   const verdictsDir = join(input.harnessFeedbackRoot, 'verdicts');
+  const repoRoot = dirname(dirname(input.harnessFeedbackRoot));
   const domains = loadDomains(input.harnessFeedbackRoot);
   const now = input.now ?? new Date();
   const items = readdirSync(verdictsDir, { withFileTypes: true })
@@ -150,6 +53,13 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
   // historical overdue verdicts forever and never return to zero, defeating the
   // re-eval closure loop the Hub exists to surface (AC-E7 / AC-E9).
   markSupersededAsClosed(items);
+  for (const item of items) {
+    item.operatorNarrative.nextCheck = synthesizeEvalHubNextCheck(
+      item.verdict,
+      item.lifecycle.stale,
+      item.operatorNarrative.evidenceQuality,
+    );
+  }
 
   // F192 livefix OQ-16: Build domain summaries for ALL registered domains,
   // including those without verdicts (e.g. eval:memory before first eval run).
@@ -170,6 +80,11 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
       evalCatHandle: domain.evalCat.handle,
       enabled: isEnabled,
       hasVerdict: domainVerdicts.length > 0,
+      // F248 Phase A — conditional spread keeps the optional display field out
+      // of the summary when a domain omits it (exactOptional-safe), matching
+      // how nextCronFireAt / latestVerdict are handled below.
+      ...(domain.descriptionForHuman ? { descriptionForHuman: domain.descriptionForHuman } : {}),
+      ...(domain.metricGlossary ? { metricGlossary: domain.metricGlossary } : {}),
       ...(isEnabled ? { nextCronFireAt: computeNextCronFire(domain.frequency, now).toISOString() } : {}),
       ...(latest
         ? {
@@ -180,8 +95,15 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
     };
   });
 
+  // F248 Phase C: use the workspace worktree-list contract (including
+  // duplicate-basename suffixes) so summary consumers all get the same
+  // canonical worktree id, not just the API route wrapper.
+  const repoWorktreeId = resolveEvalHubRepoWorktreeId(repoRoot);
+
   return {
     generatedAt: new Date().toISOString(),
+    repoProjectPath: repoRoot,
+    repoWorktreeId,
     counts: {
       total: items.length,
       actionable: items.filter((item) => item.verdict !== 'keep_observe').length,
@@ -227,6 +149,7 @@ function buildEvalHubItem(
   const reevalSummary = requiredText(extractBullet(verdict.markdown, 'Re-eval'), 're-eval');
   const nextEvalAt = reevalSummary.match(/\d{4}-\d{2}-\d{2}T[0-9:.]+Z/)?.[0];
   const friction = loadEvalHubFrictionProjection(domainId, bundleDir, repoRoot);
+  const stale = computeStale(nextEvalAt, now);
 
   return {
     id: verdictId,
@@ -235,6 +158,15 @@ function buildEvalHubItem(
     feedbackType: 'live-verdict',
     verdict: verdictValue,
     phenomenon,
+    operatorNarrative: synthesizeEvalHubOperatorNarrative({
+      verdict: verdictValue,
+      domainDescription: domain.descriptionForHuman ?? domain.displayName,
+      featureId: harness.featureId,
+      snapshot: resolved.snapshot,
+      attribution: resolved.attributionReport,
+      ...(domain.metricGlossary ? { metricGlossary: domain.metricGlossary } : {}),
+      stale,
+    }),
     ownerAsk,
     harnessUnderEval: harness,
     reeval: {
@@ -242,14 +174,23 @@ function buildEvalHubItem(
       status: verdictValue === 'keep_observe' ? 'observing' : 'pending_owner',
       summary: reevalSummary,
     },
-    lifecycle: {
-      ownerResponseStatus: verdictValue === 'keep_observe' ? 'not_required' : 'not_started',
-      closureStatus: verdictValue === 'keep_observe' ? 'observing' : 'open',
-      // F192 P2: stale = past the verdict's own re-eval deadline (nextEvalAt).
-      // SLA reevalWithinHours is already absorbed into nextEvalAt at verdict-creation time,
-      // so adding extra grace here would double-discount. A missing nextEvalAt cannot expire.
-      stale: computeStale(nextEvalAt, now),
-    },
+    lifecycle:
+      verdictValue === 'keep_observe'
+        ? {
+            availability: 'not_required',
+            ownerResponseStatus: 'not_required',
+            closureStatus: 'observing',
+            reevalStatus: 'not_required',
+            stale,
+          }
+        : {
+            availability: 'unavailable',
+            ownerResponseStatus: 'unavailable',
+            closureStatus: 'unavailable',
+            reevalStatus: 'unavailable',
+            stale,
+            unavailableReason: 'canonical lifecycle event log unavailable',
+          },
     evidence,
     trend: {
       generatedAt: resolved.snapshot.generatedAt,
@@ -285,9 +226,13 @@ export function loadDomains(
   if (!existsSync(domainsDir)) return new Map();
   const domains = new Map<EvalDomainRegistryEntry['domainId'], EvalDomainRegistryEntry>();
   for (const entry of readdirSync(domainsDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.yaml')) continue;
+    if (!entry.isFile() || !isEvalDomainRegistryYamlFile(entry.name)) continue;
     const parsed = parseYaml(readFileSync(join(domainsDir, entry.name), 'utf8'));
     const domain = parseEvalDomainRegistryFile(parsed);
+    if (domain.metricGlossaryRef) {
+      const sidecar = parseYaml(readFileSync(join(domainsDir, domain.metricGlossaryRef), 'utf8'));
+      domain.metricGlossary = { ...parseEvalMetricGlossary(sidecar), ...domain.metricGlossary };
+    }
     domains.set(domain.domainId, domain);
   }
   return domains;

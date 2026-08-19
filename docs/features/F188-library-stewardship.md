@@ -8,7 +8,7 @@ created: 2026-05-06
 
 # F188: Library Stewardship — 图书馆管护与成长
 
-> **Status**: done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Temporal Debt Fix**: 2026-07-05 (PR #2755, merge `17edde5e`) | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -417,6 +417,7 @@ evaluator 在 status endpoint handler 里聚合**四类**输入 → 计算 warni
 | F200 consumption 自动等同 truth verification | F200 明确只评估 navigation utility，不评估文档真伪/authority | 如需让 usage signal 参与 verification，必须先在 F188/F200 之间定义人工/猫审确认边界 |
 | operator逐篇验证 unverified docs | 724 次点击不是可用 workflow，且违背 Phase E dogfood 结论 | 仅当猫猫批处理后剩下少量高风险/事实争议项，才上升给operator |
 | 无 dry-run 直接批量改 runtime evidence DB | edge/authority migration 都可能影响 recall/graph 结果，必须可解释可回滚 | 只允许在 dry-run report + 备份/副本验证后 apply |
+| M1 历史层退役/封存机制 | 当前无真实遗忘请求；S3 是合成审计，先登记不施工 | 首个真实遗忘请求触及 thread / message passage / provenance 历史层时升 P1；实现方向必须是 retire/seal + redaction，不是级联物理删除 |
 
 ## Dependencies
 

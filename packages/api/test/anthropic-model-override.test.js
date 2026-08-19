@@ -1,10 +1,10 @@
 /**
- * Bug fix: anthropic protocol cats should pass account.models to
- * CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE so ClaudeAgentService can remap
- * non-Anthropic model names via ANTHROPIC_DEFAULT_*_MODEL env vars.
+ * Regression coverage for anthropic protocol MODEL_OVERRIDE wiring.
+ * ClaudeAgentService uses the override to remap runtime model names via
+ * ANTHROPIC_DEFAULT_*_MODEL env vars.
  *
- * Root cause: invoke-single-cat.ts only set MODEL_OVERRIDE in the
- * opencode branch, not in the anthropic protocol branch.
+ * Regression (#1086): account.models is an allowed-model list, not an
+ * implicit default; models[0] must not override the cat defaultModel.
  */
 
 import './helpers/setup-cat-registry.js';
@@ -13,6 +13,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { before, describe, it } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 
 async function collect(iterable) {
   const msgs = [];
@@ -22,7 +23,7 @@ async function collect(iterable) {
 
 let invokeSingleCat;
 
-describe('anthropic protocol model override from account.models', () => {
+describe('anthropic protocol model override from cat defaultModel', () => {
   before(async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'anthro-model-audit-'));
     process.env.AUDIT_LOG_DIR = tempDir;
@@ -30,7 +31,7 @@ describe('anthropic protocol model override from account.models', () => {
     invokeSingleCat = mod.invokeSingleCat;
   });
 
-  it('sets CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE when account has models array', async () => {
+  it('uses cat defaultModel for MODEL_OVERRIDE instead of account.models[0]', async () => {
     const root = await mkdtemp(join(tmpdir(), 'anthro-model-override-'));
     const apiDir = join(root, 'packages', 'api');
     const catCafeDir = join(root, '.cat-cafe');
@@ -41,6 +42,17 @@ describe('anthropic protocol model override from account.models', () => {
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
     process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
     process.env.HOME = root;
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opus')?.config;
+    assert.ok(originalConfig, 'opus config should exist in registry');
+    const boundCatId = 'opus-clowder-1086-default-model';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      accountRef: 'claude',
+      defaultModel: 'claude-sonnet-5',
+    });
 
     // Canonical stores: accounts.json + credentials.json (not legacy cat-catalog.json.accounts)
     await writeFile(join(catCafeDir, 'cat-catalog.json'), JSON.stringify({ version: 2, breeds: [] }, null, 2), 'utf-8');
@@ -52,7 +64,7 @@ describe('anthropic protocol model override from account.models', () => {
             authType: 'api_key',
             baseUrl: 'https://dd999-proxy.example/v1',
             displayName: 'dd999-proxy',
-            models: ['gpt-5.4'],
+            models: ['claude-fable-5', 'claude-sonnet-5'],
           },
         },
         null,
@@ -97,7 +109,7 @@ describe('anthropic protocol model override from account.models', () => {
       process.chdir(apiDir);
       await collect(
         invokeSingleCat(deps, {
-          catId: 'opus',
+          catId: boundCatId,
           service,
           prompt: 'test model override',
           userId: 'user-model-override',
@@ -113,6 +125,10 @@ describe('anthropic protocol model override from account.models', () => {
       else process.env.HOME = previousHome;
       if (previousProxyEnabled === undefined) delete process.env.ANTHROPIC_PROXY_ENABLED;
       else process.env.ANTHROPIC_PROXY_ENABLED = previousProxyEnabled;
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
       await rm(root, { recursive: true, force: true });
     }
 
@@ -121,8 +137,8 @@ describe('anthropic protocol model override from account.models', () => {
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY, 'sk-test-dd999');
     assert.equal(
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE,
-      'gpt-5.4',
-      'anthropic protocol cats with account.models should set MODEL_OVERRIDE',
+      'claude-sonnet-5',
+      'anthropic api_key accounts must not treat account.models[0] as the default model',
     );
   });
 

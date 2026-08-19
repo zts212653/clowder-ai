@@ -18,8 +18,12 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
 
     const registry = new InvocationRegistry();
+    const invocationRecordStore = new InvocationRecordStore();
     const threadStore = new ThreadStore();
     const insertedTasks = [];
     const events = [];
@@ -78,6 +82,7 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
         },
         socketManager: { broadcastToRoom() {} },
         threadStore,
+        invocationRecordStore,
         ballCustody: {
           async record(event) {
             events.push(event);
@@ -87,7 +92,20 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     });
 
     const thread = await threadStore.create('user-f233-held', 'f233-held');
-    const { invocationId, callbackToken } = await registry.create('user-f233-held', 'codex', thread.id);
+    const parent = invocationRecordStore.create({
+      threadId: thread.id,
+      userId: 'user-f233-held',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'f280-phase-d-action-owner',
+      actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-f280-action', generation: 4 },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-f233-held',
+      'codex',
+      thread.id,
+      parent.invocationId,
+    );
 
     const response = await app.inject({
       method: 'POST',
@@ -99,8 +117,8 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
         wakeAfterMs: 60_000,
         waitSourceRef: {
           kind: 'github_issue',
-          value: 'test/ball-custody',
-          expectedSignal: 'CI pass',
+          value: 'test/ball-custody#12',
+          expectedSignal: 'ci_complete',
           slaUntilMs: 3_600_000,
         },
       },
@@ -112,6 +130,41 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     assert.equal(events[0].sourceEventId, `hold:${thread.id}:codex:${insertedTasks[0].trigger.fireAt}`);
     assert.equal(events[0].subjectKey, `ball:thread:${thread.id}`);
     assert.deepEqual(events[0].payload, { catId: 'codex', fireAt: insertedTasks[0].trigger.fireAt });
+    const awaitState = insertedTasks[0].params.holdLifecycle.await;
+    assert.ok(awaitState, 'timer hold must persist the unified wait shape');
+    assert.deepEqual(insertedTasks[0].params.holdLifecycle, {
+      mode: 'timer',
+      status: 'active',
+      waitSourceRef: {
+        kind: 'github_issue',
+        value: 'test/ball-custody#12',
+        expectedSignal: 'ci_complete',
+        slaUntilMs: 3_600_000,
+      },
+      subjectKey: 'test/ball-custody#12',
+      expectedSignalKey: 'ci_complete',
+      wakeAt: insertedTasks[0].trigger.fireAt,
+      createdBy: 'hold-ball:codex',
+      await: {
+        v: 1,
+        generation: 1,
+        subjectRef: `timer:${insertedTasks[0].id}`,
+        ownerFence: { kind: 'action_successor', leaseId: 'lease-f280-action', generation: 4 },
+        baseline: {
+          kind: 'timer',
+          capturedAt: awaitState.createdAt,
+          fireAt: insertedTasks[0].trigger.fireAt,
+        },
+        continuation: {
+          when: [{ kind: 'timer_elapsed' }],
+          // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+          then: 'check status',
+        },
+        expiresAt: insertedTasks[0].trigger.fireAt,
+        createdAt: awaitState.createdAt,
+        provenance: 'explicit_registration',
+      },
+    });
   });
 
   test('hold-ball reminder fire records ball.hold_expired at execution point', async () => {

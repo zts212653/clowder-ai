@@ -312,7 +312,7 @@ describe('community-state-machine', () => {
       assert.strictEqual(result.next, 'in_progress', 'external respondent (NONE) must wake owner');
     });
 
-    it('informational event with OWNER authorAssociation from awaiting_external stays awaiting_external (maintainer activity)', () => {
+    it('informational issue comment with OWNER authorAssociation restores in_progress', () => {
       const event = {
         sourceEventId: 'test-issue.commented-owner',
         subjectKey: 'issue:owner/repo#42',
@@ -323,7 +323,7 @@ describe('community-state-machine', () => {
       };
       const result = transition('awaiting_external', event, makeSnapshot());
       assert.strictEqual(result.ok, true);
-      assert.strictEqual(result.next, 'awaiting_external', 'maintainer activity must not wake owner');
+      assert.strictEqual(result.next, 'in_progress', 'association must not suppress real maintainer activity');
     });
   });
 });

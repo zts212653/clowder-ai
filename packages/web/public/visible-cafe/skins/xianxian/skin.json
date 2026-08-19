@@ -1,0 +1,43 @@
+{
+  "id": "xianxian-visible-cafe",
+  "displayName": "宪宪 — 看得见的猫咖",
+  "version": 1,
+  "format": "row-strips",
+  "cell": {
+    "width": 192,
+    "height": 208
+  },
+  "rows": {
+    "idle": {
+      "src": "idle-row.png",
+      "frames": 6,
+      "frameDurations": [1200, 400, 400, 500, 500, 800],
+      "anchorOffsetY": 0
+    },
+    "sleeping": {
+      "src": "sleeping-row.png",
+      "frames": 6,
+      "frameDurations": [700, 700, 700, 700, 700, 700],
+      "anchorOffsetY": 15
+    },
+    "working": {
+      "src": "working-row.png",
+      "frames": 8,
+      "frameDurations": [520, 560, 520, 640, 520, 560, 520, 640],
+      "anchorOffsetY": 28
+    },
+    "staged_thought": {
+      "src": "staged-thought-row.png",
+      "frames": 6,
+      "frameDurations": [1200, 500, 700, 900, 1200, 500],
+      "anchorOffsetY": 20
+    }
+  },
+  "provenance": {
+    "source": "video-extraction",
+    "pipeline": "operator-provided video → ffmpeg 4fps → floodfill alpha → 192×208 cells → row strips",
+    "idleSource": "Extracted from F229 atlas row 0 (independent copy, not runtime reference)",
+    "processedBy": "opus (claude-opus-4-6)",
+    "qaReport": "docs/features/assets/F258/skin-v2/qa/v2-qa-report.json"
+  }
+}

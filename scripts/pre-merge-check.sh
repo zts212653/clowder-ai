@@ -128,7 +128,9 @@ echo -e "${GREEN}✓ 工作区干净${NC}"
 # 向上解析到兄弟目录的 node_modules，造成 web build 假红。
 # 规则来源：cat-cafe-skills/worktree/SKILL.md "禁止在项目内部创建"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-MAIN_WORKTREE="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+# Do not truncate the producer with `head`: under `set -o pipefail`, repositories
+# with enough worktrees make git receive SIGPIPE and abort the gate with exit 141.
+MAIN_WORKTREE="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
 if [ "$REPO_ROOT" != "$MAIN_WORKTREE" ]; then
   # 当前是非主 worktree，检查是否在主仓库目录内部
   case "$REPO_ROOT" in

@@ -57,7 +57,7 @@ export interface CaptureInput {
    * Test seam — replaces the L0 fetcher (default `compileL0ViaSubprocess`).
    * Production callers leave this undefined.
    */
-  nativeL0Fetcher?: (catId: string) => Promise<string>;
+  nativeL0Fetcher?: (catId: string, userId: string) => Promise<string>;
 }
 
 export function capturePromptIfEnabled(input: CaptureInput): void {
@@ -78,7 +78,7 @@ async function runCapture(input: CaptureInput): Promise<void> {
   if (input.nativeL0Provider) {
     const fetcher = input.nativeL0Fetcher ?? defaultFetcher;
     try {
-      const l0 = await fetcher(input.catId);
+      const l0 = await fetcher(input.catId, input.userId);
       if (l0 && l0.trim().length > 0) {
         nativeSystemPrompt = l0;
         nativeSystemPromptSource = 'f203-l0';
@@ -132,8 +132,8 @@ async function runCapture(input: CaptureInput): Promise<void> {
 }
 
 /** Default L0 fetcher — module-level so tests can override via input.nativeL0Fetcher. */
-async function defaultFetcher(catId: string): Promise<string> {
-  return compileL0ViaSubprocess({ catId });
+async function defaultFetcher(catId: string, userId: string): Promise<string> {
+  return compileL0ViaSubprocess({ catId, userId });
 }
 
 export function getPromptCaptureStore(): PromptCaptureStore {

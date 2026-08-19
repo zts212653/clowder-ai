@@ -88,4 +88,38 @@ describe('MountRulesPanel', () => {
     expect(apiFetch).toHaveBeenCalledWith('/api/mount-rules?projectPath=%2Ftmp%2Fproject-b');
     expect(container.textContent).toContain('.claude/project-b');
   });
+
+  it('keeps the complete save error recoverable behind a technical-details control', async () => {
+    const tail = 'MOUNT_RULES_ERROR_TAIL_SENTINEL';
+    const responseBody = `${'validation detail '.repeat(20)}${tail}`;
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/mount-rules?')) {
+        return {
+          ok: true,
+          json: async () => ({ projectRoot: '/tmp/project-a', rules: rulesFor('project-a') }),
+        };
+      }
+      if (url === '/api/mount-rules' && init?.method === 'PUT') {
+        return { ok: false, status: 422, text: async () => responseBody };
+      }
+      throw new Error(`Unexpected apiFetch path: ${url}`);
+    });
+
+    act(() => {
+      root.render(<MountRulesPanel projectPath="/tmp/project-a" />);
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('button')?.click());
+    await flush();
+    await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+    await flush();
+
+    expect(container.textContent).toContain('保存 Mount Rules 失败');
+    expect(container.textContent).not.toContain(tail);
+    const details = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('查看技术详情'),
+    );
+    expect(details).toBeTruthy();
+    await act(async () => details?.click());
+    expect(container.textContent).toContain(tail);
+  });
 });

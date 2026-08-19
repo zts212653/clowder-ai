@@ -6,7 +6,7 @@
  * shared or used by the frontend directly.
  */
 
-import type { ApprovalFeatureId, ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalItem, ApprovalProducerId, SettledApprovalItem } from '@cat-cafe/shared';
 
 export interface ListSettledOpts {
   /** Maximum items to return. Defaults to 50. */
@@ -14,7 +14,7 @@ export interface ListSettledOpts {
 }
 
 export interface IApprovalAdapter {
-  readonly featureId: ApprovalFeatureId;
+  readonly featureId: ApprovalProducerId;
   /** Fetch pending proposals for this user from the canonical store and map to ApprovalItems. */
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]>;
   /**

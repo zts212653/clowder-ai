@@ -214,6 +214,126 @@ describe('downloadAsset', () => {
     );
   });
 
+  test('refreshes and resolves the default-session proxy without overriding it', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const calls = [];
+    const logs = [];
+    const session = {
+      async forceReloadProxyConfig() {
+        calls.push('reload');
+      },
+      async resolveProxy(url) {
+        calls.push(['resolve', url]);
+        return 'PROXY 127.0.0.1:7897';
+      },
+    };
+    const net = mockNet({ statusCode: 200, headers: {}, body: 'OK' });
+
+    await downloadAsset(
+      net,
+      {
+        name: 'app.dmg',
+        size: 2,
+        browser_download_url: 'https://github.com/zts212653/clowder-ai/releases/download/v1/app.dmg',
+      },
+      dest,
+      '0.10.0',
+      noop,
+      (line) => logs.push(line),
+      { session },
+    );
+
+    assert.deepEqual(calls, [
+      'reload',
+      ['resolve', 'https://github.com/zts212653/clowder-ai/releases/download/v1/app.dmg'],
+    ]);
+    assert.ok(logs.includes('Download proxy: PROXY 127.0.0.1:7897'));
+  });
+
+  test('proxy diagnostics are best-effort and do not block the default-session request', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const logs = [];
+    const session = {
+      async forceReloadProxyConfig() {
+        throw new Error('proxy refresh unavailable');
+      },
+      async resolveProxy() {
+        throw new Error('must not run after refresh failure');
+      },
+    };
+
+    await downloadAsset(
+      mockNet({ statusCode: 200, headers: {}, body: 'OK' }),
+      { name: 'app.dmg', size: 2 },
+      dest,
+      '0.10.0',
+      noop,
+      (line) => logs.push(line),
+      { session },
+    );
+
+    assert.equal(readFileSync(dest, 'utf8'), 'OK');
+    assert.ok(logs.some((line) => line.includes('Proxy diagnostics unavailable')));
+  });
+
+  test('follows redirects synchronously and logs only safe destination metadata', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const logs = [];
+    let followedSynchronously = false;
+    const signedRedirect =
+      'https://release-assets.githubusercontent.com/github-production-release-asset/123/app.dmg?sp=r&sig=TOP_SECRET';
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.abort = () => {};
+        req.followRedirect = () => {
+          followedSynchronously = true;
+        };
+        req.end = () => {
+          req.emit('redirect', 302, 'GET', signedRedirect, {});
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.headers = {};
+          res.destroy = () => {};
+          process.nextTick(() => {
+            req.emit('response', res);
+            res.emit('data', Buffer.from('OK'));
+            res.emit('end');
+          });
+        };
+        return req;
+      },
+    };
+
+    await downloadAsset(net, { name: 'app.dmg', size: 2 }, dest, '0.10.0', noop, (line) => logs.push(line));
+
+    const logText = logs.join('\n');
+    assert.equal(followedSynchronously, true, 'followRedirect must run inside the redirect event');
+    assert.match(logText, /Redirect 302 GET -> release-assets\.githubusercontent\.com/);
+    assert.doesNotMatch(logText, /TOP_SECRET|github-production-release-asset|sig=/);
+  });
+
+  test('request failure logs the transport phase and received byte count', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const logs = [];
+    const net = {
+      request() {
+        const req = new EventEmitter();
+        req.setHeader = () => {};
+        req.end = () => process.nextTick(() => req.emit('error', new Error('net::ERR_CONNECTION_CLOSED')));
+        return req;
+      },
+    };
+
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 100 }, dest, '0.10.0', noop, (line) => logs.push(line)),
+      /ERR_CONNECTION_CLOSED/,
+    );
+
+    assert.ok(logs.some((line) => line.includes('Download failed phase=request bytes=0: net::ERR_CONNECTION_CLOSED')));
+  });
+
   test('stalled request (no response, no error) times out', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     // Mock that never emits 'response' or 'error' — simulates connection stall

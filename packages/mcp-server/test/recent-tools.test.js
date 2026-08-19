@@ -214,6 +214,7 @@ describe('MCP List Recent Tool (AC-F2)', () => {
     assert.ok(description.includes('updatedAt'), 'description should explain timestamp semantics');
     assert.ok(description.includes('mtime'), 'description should say docs/memory timestamps use file mtime');
     assert.ok(description.includes('scope/kinds'), 'description should warn about scope/kinds intersection');
+    assert.ok(description.includes('architecture'), 'description should name architecture as a list_recent kind');
   });
 
   test('renders collection distribution footer when groups present (AC-H4)', async () => {
@@ -271,6 +272,11 @@ describe('MCP List Recent Tool (AC-F2)', () => {
     const result = await handleListRecent({});
     assert.equal(result.isError, true);
     assert.ok(result.content[0].text.includes('econnrefused'));
+    assert.ok(result.content[0].text.includes('<recall-meta>'), 'error output should include recall result metadata');
+    assert.ok(
+      result.content[0].text.includes('"resultStatus":"error"'),
+      'error output should declare resultStatus:error',
+    );
   });
 
   test('omits since param when not provided (server defaults to 7d)', async () => {

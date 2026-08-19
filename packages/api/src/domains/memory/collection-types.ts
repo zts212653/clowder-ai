@@ -26,6 +26,8 @@ export interface CollectionManifest {
   displayName: string;
   root: string;
   sensitivity: CollectionSensitivity;
+  /** Server-owned identity binding for private/restricted recall authorization. */
+  ownerUserId?: string;
   scannerLevel: 0 | 1 | 2 | 3 | 'auto';
   indexPolicy: {
     autoRebuild: boolean;

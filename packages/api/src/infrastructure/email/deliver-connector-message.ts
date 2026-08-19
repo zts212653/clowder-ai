@@ -14,6 +14,11 @@ export interface ConnectorDeliveryInput {
   readonly catId: string;
   readonly content: string;
   readonly source: ConnectorSource;
+  readonly extra?: NonNullable<
+    import('../../domains/cats/services/stores/ports/MessageStore.js').StoredMessage['extra']
+  >;
+  /** Stable MessageStore key for crash-safe connector delivery retries. */
+  readonly idempotencyKey?: string;
 }
 
 export interface ConnectorDeliveryResult {
@@ -33,6 +38,8 @@ export async function deliverConnectorMessage(
     source: input.source,
     mentions: [input.catId as CatId],
     timestamp: Date.now(),
+    ...(input.extra ? { extra: input.extra } : {}),
+    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
   });
 
   deps.socketManager?.broadcastToRoom(`thread:${input.threadId}`, 'connector_message', {

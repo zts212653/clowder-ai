@@ -16,7 +16,7 @@ updated: 2026-04-16
 
 ## Why
 
-2026-04-10 安全审计发现：Cat Cafe Hub 的 Socket.IO 实时通道存在 Cross-Site WebSocket Hijacking (CSWSH) 风险。Maine Coon(GPT-5.4) 实测验证：从 `Origin: https://evil.example` 发起 WebSocket-only 连接到 `127.0.0.1:3004`，**连接成功**。
+2026-04-10 安全审计发现：Clowder AI Hub 的 Socket.IO 实时通道存在 Cross-Site WebSocket Hijacking (CSWSH) 风险。Maine Coon(GPT-5.4) 实测验证：从 `Origin: https://evil.example` 发起 WebSocket-only 连接到 `127.0.0.1:3004`，**连接成功**。
 
 根因：Socket.IO v4 的 `cors` 配置仅对 HTTP long-polling 生效，**不校验 WebSocket upgrade 请求的 Origin 头**（Socket.IO 官方文档 2026-02-16 明确标注）。加上身份自报（`handshake.auth.userId`）、Room 无 ACL，攻击者可以：
 - 从任何恶意网页发现并连接本机 WebSocket
@@ -88,7 +88,7 @@ updated: 2026-04-16
 > **定位**：这不是把 F156 重新定义成“全站认证重构”。Phase E 只处理同一条本机信任边界里、会把浏览器/本地 API 安全面重新撕开的那批 **敏感身份入口**。
 
 **E-1: 反向审计清单落盘**
-1. 基于 relay-claw `issue #20` 的发现，整理 Cat Cafe 当前 sensitive route ledger
+1. 基于 relay-claw `issue #20` 的发现，整理 Clowder AI 当前 sensitive route ledger
 2. 明确区分三类身份语义：`session-only`、`trusted browser fallback`、`non-browser automation`
 3. 不再允许“同一个 `resolveUserId()` 默认同时承担交互式浏览器身份 + 自动化 header 身份 + fallbackUserId”而没有证据区分
 
@@ -103,7 +103,7 @@ updated: 2026-04-16
 3. 例外必须在 route ledger 里显式声明“为什么还能保留 header 身份”
 
 **E-4: 负向回归包**
-1. 新增负向测试，证明 header/query/body spoof 不能在 Cat Cafe 重现 relay-claw #20 那类攻击链
+1. 新增负向测试，证明 header/query/body spoof 不能在 Clowder AI 重现 relay-claw #20 那类攻击链
 2. 重点覆盖：authorization、terminal、配置写入口，以及所有保留 `X-Cat-Cafe-User` 的敏感 API
 
 ### ~~Phase C: OfficeClaw 修复~~ → 已拆出
@@ -176,7 +176,7 @@ updated: 2026-04-16
 - [ ] AC-E1: relay-claw 反向审计清单落盘到本 spec，明确 sensitive route ledger（session-only / trusted browser fallback / non-browser automation）
 - [ ] AC-E2: `/api/authorization/*` 不再把 `X-Cat-Cafe-User` / fallback 作为充分身份来源；敏感审批与规则写入必须走更窄的身份语义
 - [ ] AC-E3: terminal 非 WS 敏感 REST 入口完成复核并收口，不再留下“先伪造身份拿 session 列表/创建，再走别的入口扩大影响”的残余链
-- [ ] AC-E4: 新增负向回归测试，证明 header/query/body spoof 不能在 Cat Cafe 的 sensitive routes 上复现 relay-claw #20 同类问题
+- [ ] AC-E4: 新增负向回归测试，证明 header/query/body spoof 不能在 Clowder AI 的 sensitive routes 上复现 relay-claw #20 同类问题
 - [ ] AC-E5: 对仍保留 `X-Cat-Cafe-User` 的 automation-only route 建立显式 allowlist + 注释证据，不再靠隐式约定
 
 ### ~~Phase C（OfficeClaw）~~ → 已拆出为独立任务

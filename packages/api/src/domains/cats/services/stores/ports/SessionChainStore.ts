@@ -7,16 +7,22 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, SessionRecord } from '@cat-cafe/shared';
+import type { CatId, HybridProgress, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
+import type { StoreReadOptions } from './StoreReadOptions.js';
+import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
 export interface CreateSessionInput {
-  cliSessionId: string;
+  cliSessionId?: string;
   workingDirectory?: string;
   workspaceFingerprint?: string;
   threadId: string;
   catId: CatId;
   userId: string;
   reuseExistingCliSession?: boolean;
+  /** Internal atomic path used by the managed invocation boundary. */
+  reuseExistingActive?: boolean;
+  /** `null` when lifetime compression observation did not start with the session. */
+  compressionCount?: number | null;
   /**
    * F198 Bug #3: stable conversation anchor for bg carrier
    * (`bg:${threadId}:${catId}`). When set, the record is indexed by chainKey
@@ -34,31 +40,77 @@ export type SessionRecordPatch = Partial<
     | 'workspaceFingerprint'
     | 'status'
     | 'contextHealth'
+    | 'capacityPin'
     | 'lastUsage'
     | 'messageCount'
     | 'updatedAt'
-    | 'compressionCount'
     | 'continuityCapsule'
     | 'consecutiveRestoreFailures'
     | 'latestResumeSessionId'
     | 'catHandoffNote'
   >
 > & {
+  compressionCount?: number | null;
+  appliedPolicy?: SessionPolicySnapshot | null;
+  hybridProgress?: HybridProgress | null;
   sealReason?: SessionRecord['sealReason'] | null;
   sealedAt?: number | null;
 };
 
+export interface CompressionEventResult {
+  compressionCount: number | null;
+  hybridProgress: HybridProgress | null;
+  revisionMatched: boolean;
+}
+
+export interface RestoreActiveSessionInput {
+  targetSessionId: string;
+  expectedActiveSessionId: string | null;
+  displacedSealReason: string;
+}
+
+export type RestoreActiveSessionResult =
+  | { status: 'restored'; session: SessionRecord; displacedSessionId?: string }
+  | { status: 'already_active'; session: SessionRecord }
+  | { status: 'target_missing' }
+  | { status: 'target_not_restorable'; targetStatus: SessionRecord['status'] }
+  | { status: 'active_changed'; activeSessionId?: string };
+
 export interface ISessionChainStore {
   /** Create SessionRecord (seq auto-increments, status=active) */
   create(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
+  /** Atomically return the existing active record or create one logical unbound node. */
+  getOrCreateActive(input: CreateSessionInput): SessionRecord | Promise<SessionRecord>;
+  /** Bind a provider runtime ID to an existing logical node without creating a new node. */
+  bindCliSessionId(id: string, cliSessionId: string): SessionRecord | null | Promise<SessionRecord | null>;
+  /** Apply an invocation snapshot and reset hybrid progress only across policy revisions. */
+  applyPolicySnapshot(
+    id: string,
+    snapshot: SessionPolicySnapshot,
+  ): SessionRecord | null | Promise<SessionRecord | null>;
+  /** Record one trusted compression event against the applied policy revision. */
+  recordCompressionEvent(
+    id: string,
+    policyRevision: string,
+  ): CompressionEventResult | null | Promise<CompressionEventResult | null>;
+  /** Atomically transition active -> sealing, optionally guarded by the applied policy revision. */
+  transitionToSealing(
+    id: string,
+    reason: string,
+    expectedPolicyRevision?: string,
+  ): SessionRecord | null | Promise<SessionRecord | null>;
+  /** Atomically preserve the current record as sealing and reactivate one selected sealed record in place. */
+  restoreActiveSession(
+    input: RestoreActiveSessionInput,
+  ): RestoreActiveSessionResult | Promise<RestoreActiveSessionResult>;
   /** Get by internal ID */
   get(id: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Get active session for a cat in a thread */
-  getActive(catId: CatId, threadId: string): SessionRecord | null | Promise<SessionRecord | null>;
+  getActive(catId: CatId, threadId: string, userId?: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Get full session chain (sorted by seq) */
-  getChain(catId: CatId, threadId: string): SessionRecord[] | Promise<SessionRecord[]>;
+  getChain(catId: CatId, threadId: string, userId?: string): SessionRecord[] | Promise<SessionRecord[]>;
   /** Get all cats' sessions for a thread */
-  getChainByThread(threadId: string): SessionRecord[] | Promise<SessionRecord[]>;
+  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] | Promise<SessionRecord[]>;
   /** Update partial fields */
   update(id: string, patch: SessionRecordPatch): SessionRecord | null | Promise<SessionRecord | null>;
   /** Look up by CLI session ID */
@@ -87,6 +139,8 @@ export class SessionChainStore implements ISessionChainStore {
   private chains = new Map<string, string[]>();
   /** catId:threadId → active session ID */
   private activeIndex = new Map<string, string>();
+  /** userId:catId:threadId → active session ID (#1329 ownership boundary). */
+  private ownerActiveIndex = new Map<string, string>();
   /** cliSessionId → record ID */
   private cliIndex = new Map<string, string>();
   /** F198 Bug #3: chainKey (stable bg conversation anchor) → record ID */
@@ -97,8 +151,17 @@ export class SessionChainStore implements ISessionChainStore {
     return `${catId}:${threadId}`;
   }
 
+  private ownerCatThreadKey(userId: string, catId: string, threadId: string): string {
+    return `${userId}:${catId}:${threadId}`;
+  }
+
   create(input: CreateSessionInput): SessionRecord {
-    if (input.reuseExistingCliSession) {
+    if (input.reuseExistingActive) {
+      const active = this.getActive(input.catId, input.threadId, input.userId);
+      if (active) return active;
+    }
+
+    if (input.reuseExistingCliSession && input.cliSessionId) {
       const existingId = this.cliIndex.get(input.cliSessionId);
       if (existingId) {
         const existing = this.records.get(existingId);
@@ -110,14 +173,17 @@ export class SessionChainStore implements ISessionChainStore {
     const now = Date.now();
     const key = this.catThreadKey(input.catId, input.threadId);
 
-    // Compute next seq
+    // Sequence belongs to the logical ownership chain. The shared default
+    // thread may contain records for multiple users in the same physical map.
     const chain = this.chains.get(key) ?? [];
-    const seq = chain.length;
+    const seq = chain.reduce((count, recordId) => {
+      return this.records.get(recordId)?.userId === input.userId ? count + 1 : count;
+    }, 0);
 
     const id = randomUUID();
     const record: SessionRecord = {
       id,
-      cliSessionId: input.cliSessionId,
+      ...(input.cliSessionId ? { cliSessionId: input.cliSessionId } : {}),
       ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
       ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
       threadId: input.threadId,
@@ -126,6 +192,7 @@ export class SessionChainStore implements ISessionChainStore {
       seq,
       status: 'active',
       messageCount: 0,
+      compressionCount: input.compressionCount ?? null,
       createdAt: now,
       updatedAt: now,
       ...(input.chainKey ? { chainKey: input.chainKey } : {}),
@@ -135,7 +202,8 @@ export class SessionChainStore implements ISessionChainStore {
     chain.push(id);
     this.chains.set(key, chain);
     this.activeIndex.set(key, id);
-    this.cliIndex.set(input.cliSessionId, id);
+    this.ownerActiveIndex.set(this.ownerCatThreadKey(input.userId, input.catId, input.threadId), id);
+    if (input.cliSessionId) this.cliIndex.set(input.cliSessionId, id);
     if (input.chainKey) this.chainKeyIndex.set(input.chainKey, id);
 
     // Trim if over capacity — prefer evicting sealed/non-active records
@@ -154,33 +222,180 @@ export class SessionChainStore implements ISessionChainStore {
     return record;
   }
 
+  getOrCreateActive(input: CreateSessionInput): SessionRecord {
+    const active = this.getActive(input.catId, input.threadId, input.userId);
+    if (active) return active;
+    if (input.cliSessionId) {
+      const claimed = this.getByCliSessionId(input.cliSessionId);
+      if (
+        claimed?.status === 'active' &&
+        claimed.userId === input.userId &&
+        claimed.catId === input.catId &&
+        claimed.threadId === input.threadId
+      ) {
+        return claimed;
+      }
+      if (claimed) {
+        return this.create({ ...input, cliSessionId: undefined, reuseExistingActive: true });
+      }
+    }
+    return this.create({ ...input, reuseExistingActive: true });
+  }
+
+  bindCliSessionId(id: string, cliSessionId: string): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active') return null;
+    const claimedBy = this.cliIndex.get(cliSessionId);
+    if (claimedBy && claimedBy !== id) return null;
+    if (record.cliSessionId) this.cliIndex.delete(record.cliSessionId);
+    record.cliSessionId = cliSessionId;
+    this.cliIndex.set(cliSessionId, id);
+    record.updatedAt = Date.now();
+    return record;
+  }
+
+  applyPolicySnapshot(id: string, snapshot: SessionPolicySnapshot): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active') return null;
+    if (record.appliedPolicy?.revision !== snapshot.revision) {
+      record.hybridProgress =
+        snapshot.config.strategy === 'hybrid'
+          ? { policyRevision: snapshot.revision, observedCount: 0, startedAt: new Date().toISOString() }
+          : undefined;
+    }
+    record.appliedPolicy = snapshot;
+    record.updatedAt = Date.now();
+    return record;
+  }
+
+  recordCompressionEvent(id: string, policyRevision: string): CompressionEventResult | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active') return null;
+    if (record.compressionCount !== null) record.compressionCount += 1;
+
+    const revisionMatched = record.appliedPolicy?.revision === policyRevision;
+    if (
+      revisionMatched &&
+      record.appliedPolicy?.config.strategy === 'hybrid' &&
+      record.hybridProgress?.policyRevision === policyRevision
+    ) {
+      record.hybridProgress.observedCount += 1;
+    }
+    record.updatedAt = Date.now();
+    return {
+      compressionCount: record.compressionCount,
+      hybridProgress: record.hybridProgress ?? null,
+      revisionMatched,
+    };
+  }
+
+  transitionToSealing(id: string, reason: string, expectedPolicyRevision?: string): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record || record.status !== 'active') return null;
+    if (expectedPolicyRevision !== undefined && record.appliedPolicy?.revision !== expectedPolicyRevision) {
+      return null;
+    }
+
+    record.status = 'sealing';
+    record.sealReason = reason;
+    record.updatedAt = Date.now();
+    const key = this.catThreadKey(record.catId, record.threadId);
+    if (this.activeIndex.get(key) === id) this.activeIndex.delete(key);
+    const ownerKey = this.ownerCatThreadKey(record.userId, record.catId, record.threadId);
+    if (this.ownerActiveIndex.get(ownerKey) === id) this.ownerActiveIndex.delete(ownerKey);
+    return record;
+  }
+
+  restoreActiveSession(input: RestoreActiveSessionInput): RestoreActiveSessionResult {
+    const target = this.records.get(input.targetSessionId);
+    if (!target) return { status: 'target_missing' };
+
+    const key = this.catThreadKey(target.catId, target.threadId);
+    const ownerKey = this.ownerCatThreadKey(target.userId, target.catId, target.threadId);
+    const activeSessionId = this.ownerActiveIndex.get(ownerKey);
+    if (target.status === 'active' && activeSessionId === target.id) {
+      return { status: 'already_active', session: target };
+    }
+    if (target.status !== 'sealed') {
+      return { status: 'target_not_restorable', targetStatus: target.status };
+    }
+    if ((activeSessionId ?? null) !== input.expectedActiveSessionId) {
+      return { status: 'active_changed', ...(activeSessionId ? { activeSessionId } : {}) };
+    }
+
+    let displacedSessionId: string | undefined;
+    if (activeSessionId) {
+      const displaced = this.records.get(activeSessionId);
+      if (
+        !displaced ||
+        displaced.status !== 'active' ||
+        displaced.userId !== target.userId ||
+        displaced.catId !== target.catId ||
+        displaced.threadId !== target.threadId
+      ) {
+        return { status: 'active_changed', activeSessionId };
+      }
+      displaced.status = 'sealing';
+      displaced.sealReason = input.displacedSealReason;
+      displaced.updatedAt = Date.now();
+      displacedSessionId = displaced.id;
+    }
+
+    target.status = 'active';
+    delete target.sealReason;
+    delete target.sealedAt;
+    target.updatedAt = Date.now();
+    this.activeIndex.set(key, target.id);
+    this.ownerActiveIndex.set(ownerKey, target.id);
+
+    return {
+      status: 'restored',
+      session: target,
+      ...(displacedSessionId ? { displacedSessionId } : {}),
+    };
+  }
+
   get(id: string): SessionRecord | null {
     return this.records.get(id) ?? null;
   }
 
-  getActive(catId: CatId, threadId: string): SessionRecord | null {
-    const activeId = this.activeIndex.get(this.catThreadKey(catId, threadId));
+  getActive(catId: CatId, threadId: string, userId?: string): SessionRecord | null {
+    const key = this.catThreadKey(catId, threadId);
+    const ownerKey = userId ? this.ownerCatThreadKey(userId, catId, threadId) : undefined;
+    let activeId = ownerKey ? this.ownerActiveIndex.get(ownerKey) : this.activeIndex.get(key);
+    if (!activeId && ownerKey) {
+      const chain = this.chains.get(key) ?? [];
+      activeId = [...chain].reverse().find((id) => {
+        const record = this.records.get(id);
+        return record?.status === 'active' && record.userId === userId;
+      });
+      if (activeId) this.ownerActiveIndex.set(ownerKey, activeId);
+    }
     if (!activeId) return null;
     const record = this.records.get(activeId);
-    if (!record || record.status !== 'active') return null;
+    if (!record || record.status !== 'active' || (userId !== undefined && record.userId !== userId)) return null;
     return record;
   }
 
-  getChain(catId: CatId, threadId: string): SessionRecord[] {
+  getChain(catId: CatId, threadId: string, userId?: string): SessionRecord[] {
     const chain = this.chains.get(this.catThreadKey(catId, threadId)) ?? [];
     return chain
       .map((id) => this.records.get(id))
       .filter((r): r is SessionRecord => r != null)
+      .filter((record) => userId === undefined || record.userId === userId)
       .sort((a, b) => a.seq - b.seq);
   }
 
-  getChainByThread(threadId: string): SessionRecord[] {
+  getChainByThread(threadId: string, options?: StoreReadOptions): SessionRecord[] {
+    throwIfStoreReadAborted(options);
     const results: SessionRecord[] = [];
     for (const record of this.records.values()) {
+      throwIfStoreReadAborted(options);
       if (record.threadId === threadId) {
         results.push(record);
       }
     }
+    throwIfStoreReadAborted(options);
     return results.sort((a, b) => {
       if (a.catId !== b.catId) return a.catId.localeCompare(b.catId);
       return a.seq - b.seq;
@@ -193,7 +408,7 @@ export class SessionChainStore implements ISessionChainStore {
 
     if (patch.cliSessionId !== undefined) {
       // Update CLI index
-      this.cliIndex.delete(record.cliSessionId);
+      if (record.cliSessionId) this.cliIndex.delete(record.cliSessionId);
       record.cliSessionId = patch.cliSessionId;
       this.cliIndex.set(patch.cliSessionId, id);
     }
@@ -204,13 +419,17 @@ export class SessionChainStore implements ISessionChainStore {
       const key = this.catThreadKey(record.catId, record.threadId);
       if (patch.status === 'active') {
         this.activeIndex.set(key, id);
+        this.ownerActiveIndex.set(this.ownerCatThreadKey(record.userId, record.catId, record.threadId), id);
       } else {
         if (this.activeIndex.get(key) === id) {
           this.activeIndex.delete(key);
         }
+        const ownerKey = this.ownerCatThreadKey(record.userId, record.catId, record.threadId);
+        if (this.ownerActiveIndex.get(ownerKey) === id) this.ownerActiveIndex.delete(ownerKey);
       }
     }
     if (patch.contextHealth !== undefined) record.contextHealth = patch.contextHealth;
+    if (patch.capacityPin !== undefined) record.capacityPin = patch.capacityPin;
     if (patch.lastUsage !== undefined) record.lastUsage = patch.lastUsage;
     if (patch.messageCount !== undefined) record.messageCount = patch.messageCount;
     if ('sealReason' in patch) {
@@ -222,6 +441,14 @@ export class SessionChainStore implements ISessionChainStore {
       else if (patch.sealedAt !== undefined) record.sealedAt = patch.sealedAt;
     }
     if (patch.compressionCount !== undefined) record.compressionCount = patch.compressionCount;
+    if ('appliedPolicy' in patch) {
+      if (patch.appliedPolicy === null) delete record.appliedPolicy;
+      else if (patch.appliedPolicy !== undefined) record.appliedPolicy = patch.appliedPolicy;
+    }
+    if ('hybridProgress' in patch) {
+      if (patch.hybridProgress === null) delete record.hybridProgress;
+      else if (patch.hybridProgress !== undefined) record.hybridProgress = patch.hybridProgress;
+    }
     if (patch.continuityCapsule !== undefined) record.continuityCapsule = patch.continuityCapsule;
     if (patch.consecutiveRestoreFailures !== undefined)
       record.consecutiveRestoreFailures = patch.consecutiveRestoreFailures;
@@ -250,7 +477,8 @@ export class SessionChainStore implements ISessionChainStore {
     const record = this.records.get(id);
     if (!record) return null;
     if (record.status !== 'active') return null;
-    record.compressionCount = (record.compressionCount ?? 0) + 1;
+    if (record.compressionCount === null) return null;
+    record.compressionCount += 1;
     record.updatedAt = Date.now();
     return record.compressionCount;
   }
@@ -269,7 +497,10 @@ export class SessionChainStore implements ISessionChainStore {
    * Refuses to evict truly active sessions — returns false.
    */
   private evictOne(): boolean {
-    const currentActiveIds = new Set(this.activeIndex.values());
+    // The legacy cat/thread pointer names only the most recently created
+    // owner. On the shared default thread, every owner-scoped pointer is an
+    // equally live session and must participate in the eviction guard.
+    const currentActiveIds = new Set([...this.activeIndex.values(), ...this.ownerActiveIndex.values()]);
 
     // First pass: sealed records (safest to evict)
     let victim: string | null = null;
@@ -309,7 +540,7 @@ export class SessionChainStore implements ISessionChainStore {
     const record = this.records.get(id);
     if (!record) return;
 
-    this.cliIndex.delete(record.cliSessionId);
+    if (record.cliSessionId) this.cliIndex.delete(record.cliSessionId);
     // F198 Bug #3 (cloud review P1): only drop the chainKey index if it still
     // points at THIS record. After a sealed→fresh re-create, a newer active
     // record owns the same chainKey, so evicting the old sealed one must not
@@ -322,6 +553,8 @@ export class SessionChainStore implements ISessionChainStore {
     if (this.activeIndex.get(key) === id) {
       this.activeIndex.delete(key);
     }
+    const ownerKey = this.ownerCatThreadKey(record.userId, record.catId, record.threadId);
+    if (this.ownerActiveIndex.get(ownerKey) === id) this.ownerActiveIndex.delete(ownerKey);
 
     const chain = this.chains.get(key);
     if (chain) {

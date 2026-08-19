@@ -204,7 +204,7 @@ describe('buildBriefingMessage with artifacts (AC-H4)', () => {
     burst: { count: 5, timeRange: { from: 1000, to: 2000 } },
     omitted: { count: 10, participants: ['opus'], timeRange: { from: 500, to: 1000 } },
     anchorIds: [],
-    retrievalHints: [],
+    recallPointer: { candidateCount: 0 },
     threadMemory: null,
   };
 

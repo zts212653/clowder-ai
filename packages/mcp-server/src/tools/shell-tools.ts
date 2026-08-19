@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Shell Tools — read-only shell exec for Bengal (F061 Bug-F workaround)
  *
@@ -22,6 +24,11 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { getDefaultConfig, isPathAllowed } from '../utils/path-validator.js';
 import { errorResult, successResult, type ToolResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('shell-tools.ts', undefined, {
+  resourceFamily: 'runtime-control',
+  authority: 'local-runtime',
+});
 
 const execAsync = promisify(exec);
 
@@ -270,7 +277,7 @@ export async function handleShellExec(input: { commandLine: string; cwd?: string
 }
 
 export const shellTools = [
-  {
+  defineTool({
     name: 'cat_cafe_shell_exec',
     description:
       'Run a read-only shell command (pwd/ls/cat/git log|status|rev-parse|diff|show) and return stdout/stderr/exitCode. ' +
@@ -279,5 +286,12 @@ export const shellTools = [
       'Redis 6399 port is sanctum and refused. 30s timeout, 256KB output cap.',
     inputSchema: shellExecInputSchema,
     handler: handleShellExec,
-  },
+    governance: {
+      implementationExport: 'handleShellExec',
+      action: 'command',
+      risk: { level: 'destructive', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'profile-gated',
+    },
+  }),
 ] as const;

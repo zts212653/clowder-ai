@@ -16,6 +16,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { parseAgyStepErrorDetails } from './agy-trajectory-extractor.js';
 import { extractAntigravityCliConversationId } from './antigravity-cli-event-parser.js';
 
 export interface AgyProgressEvent {
@@ -25,6 +26,8 @@ export interface AgyProgressEvent {
   /** 中性进度文案（不解 step_type 语义）。 */
   readonly label: string;
   readonly payload?: Buffer;
+  /** AGY error_details 的 bounded user-facing summary；私有 stack trace 不外泄。 */
+  readonly error?: string;
 }
 
 export interface AgyPollResult {
@@ -81,10 +84,10 @@ function stepTypeLabel(stepType: number): string | null {
   }
 }
 
-function neutralLabel(idx: number, stepType: number, status: number): string {
+function neutralLabel(idx: number, stepType: number, status: number, failed = false): string {
   const semantic = stepTypeLabel(stepType);
   const suffix = semantic ? ` (${semantic})` : '';
-  return `AGY trajectory step #${idx}${suffix} ${statusWord(status)}`;
+  return `AGY trajectory step #${idx}${suffix} ${failed ? 'failed' : statusWord(status)}`;
 }
 
 const APP_DATA_DIR_RE = /appDataDir=(\S+)/;
@@ -144,6 +147,14 @@ export type AgyStepsPrefixFingerprintReadResult =
   | { readonly status: 'ok'; readonly fingerprint: AgyStepsPrefixFingerprint }
   | { readonly status: 'missing' }
   | { readonly status: 'unreadable' };
+
+interface AgyStepRow {
+  readonly idx: number;
+  readonly step_type: number;
+  readonly status: number;
+  readonly step_payload: Buffer | null;
+  readonly error_details: Buffer | null;
+}
 
 function stepPayloadSha256(payload: Buffer | null): string | null {
   if (payload === null) return null;
@@ -466,6 +477,8 @@ export class AgyTrajectoryObserver {
   private db: Database.Database | null = null;
   private readonly activeIdxs = new Set<number>();
   private readonly lastSeenStatus = new Map<number, number>();
+  private readonly lastSeenError = new Map<number, string | null>();
+  private hasErrorDetailsColumn = false;
   /**
    * Permanent fail-open ONLY when the steps table exists but is schema-incompatible.
    * Transient unavailability (DB file/table not created yet, lock) is RETRYABLE — AGY can write
@@ -504,12 +517,40 @@ export class AgyTrajectoryObserver {
         this.incompatible = true;
         return 'incompatible'; // table exists but schema mismatch → permanent fail-open
       }
+      this.hasErrorDetailsColumn = colNames.has('error_details');
       this.db = db;
       return 'ready';
     } catch {
       db.close();
       return 'retry'; // lock / transient read error → retry
     }
+  }
+
+  private observeRow(row: AgyStepRow): AgyProgressEvent | null {
+    const stepError = row.error_details ? parseAgyStepErrorDetails(row.error_details) : null;
+    const prevStatus = this.lastSeenStatus.get(row.idx);
+    const prevError = this.lastSeenError.get(row.idx);
+    const changed = prevStatus === undefined || row.status !== prevStatus || stepError !== prevError;
+    this.lastSeenStatus.set(row.idx, row.status);
+    this.lastSeenError.set(row.idx, stepError);
+
+    if (row.status === 3 || stepError !== null) {
+      this.activeIdxs.delete(row.idx);
+      this.lastSeenStatus.delete(row.idx);
+      this.lastSeenError.delete(row.idx);
+    } else {
+      this.activeIdxs.add(row.idx);
+    }
+    if (!changed) return null;
+
+    return {
+      idx: row.idx,
+      stepType: row.step_type,
+      status: row.status,
+      label: neutralLabel(row.idx, row.step_type, row.status, stepError !== null),
+      payload: row.step_payload ?? undefined,
+      error: stepError ?? undefined,
+    };
   }
 
   /** 增量读取 `idx > cursor` 的新 step，以及未完成步骤的状态更新。SQLite 不可用降级（enabled=false），不抛。 */
@@ -521,42 +562,19 @@ export class AgyTrajectoryObserver {
       const placeholders = Array.from(this.activeIdxs)
         .map(() => '?')
         .join(',');
-      const sql = `SELECT idx, step_type, status, step_payload FROM steps WHERE idx > ? ${
+      const errorDetailsSelect = this.hasErrorDetailsColumn ? 'error_details' : 'NULL';
+      const sql = `SELECT idx, step_type, status, step_payload, ${errorDetailsSelect} AS error_details FROM steps WHERE idx > ? ${
         this.activeIdxs.size > 0 ? `OR idx IN (${placeholders})` : ''
       } ORDER BY idx`;
 
       const stmt = this.db.prepare(sql);
       const params = this.activeIdxs.size > 0 ? [cursor, ...this.activeIdxs] : [cursor];
 
-      const rows = stmt.all(params) as Array<{
-        idx: number;
-        step_type: number;
-        status: number;
-        step_payload: Buffer | null;
-      }>;
-
-      const events: AgyProgressEvent[] = [];
-
-      for (const r of rows) {
-        const prevStatus = this.lastSeenStatus.get(r.idx);
-        if (prevStatus === undefined || r.status !== prevStatus) {
-          events.push({
-            idx: r.idx,
-            stepType: r.step_type,
-            status: r.status,
-            label: neutralLabel(r.idx, r.step_type, r.status),
-            payload: r.step_payload ?? undefined,
-          });
-          this.lastSeenStatus.set(r.idx, r.status);
-        }
-
-        if (r.status === 3) {
-          this.activeIdxs.delete(r.idx);
-          this.lastSeenStatus.delete(r.idx);
-        } else {
-          this.activeIdxs.add(r.idx);
-        }
-      }
+      const rows = stmt.all(params) as AgyStepRow[];
+      const events = rows.flatMap((row) => {
+        const event = this.observeRow(row);
+        return event ? [event] : [];
+      });
 
       const nextCursor = events.length > 0 ? Math.max(cursor, ...events.map((e) => e.idx)) : cursor;
       return { enabled: true, events, cursor: nextCursor };
@@ -575,6 +593,7 @@ export class AgyTrajectoryObserver {
         /* best-effort: 关闭失败不影响调用方。 */
       }
       this.db = null;
+      this.hasErrorDetailsColumn = false;
     }
   }
 }

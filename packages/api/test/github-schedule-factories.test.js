@@ -80,6 +80,7 @@ function makeGitHubDeps(overrides = {}) {
     fetchOpenIssues: async () => [],
     // F202 Phase 2D: issue-tracking deps
     issueCommentRouter: stubRouter,
+    waitLifecycle: { observe: async () => ({ kind: 'state_only', reason: 'test' }) },
     fetchIssueComments: async () => [],
     fetchIssueState: async () => 'open',
     isEchoIssueComment: () => false,
@@ -1459,7 +1460,28 @@ describe('F140 review-feedback factory preserves the registered thread', () => {
       updatedAt: Date.now(),
       userId: 'u-1',
       automationState: {
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 99 },
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+          completedReviewCount: 99,
+        },
+        await: {
+          v: 1,
+          generation: 1,
+          subjectRef: 'pr:owner/repo#42',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          baseline: { capturedAt: 1, headSha: 'head-42' },
+          continuation: {
+            when: [{ kind: 'pr_review_decision_changed' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: 'Continue the review.',
+          },
+          expiresAt: Date.now() + 60_000,
+          createdAt: 1,
+          provenance: 'explicit_registration',
+        },
       },
     };
 
@@ -1566,7 +1588,28 @@ describe('F140 review-feedback factory preserves the registered thread', () => {
       updatedAt: Date.now(),
       userId: 'u-1',
       automationState: {
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+        review: {
+          lastCommentCursor: 0,
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+          completedReviewCount: 1,
+        },
+        await: {
+          v: 1,
+          generation: 1,
+          subjectRef: 'pr:owner/repo#45',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          baseline: { capturedAt: 1, headSha: 'head-45' },
+          continuation: {
+            when: [{ kind: 'pr_review_decision_changed' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: 'Continue the review.',
+          },
+          expiresAt: Date.now() + 60_000,
+          createdAt: 1,
+          provenance: 'explicit_registration',
+        },
       },
     };
     const updateCalls = [];
@@ -1607,11 +1650,7 @@ describe('F140 review-feedback factory preserves the registered thread', () => {
     assert.equal(gateResult.run, true, 'gate should fire');
     await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#45', {});
 
-    assert.equal(
-      routeCalls[0].tracking.threadId,
-      'th-registered',
-      'factory path must deliver legacy tasks to source thread',
-    );
+    assert.equal(routeCalls[0].tracking.taskId, 'task-legacy');
     assert.deepEqual(routeCalls[0].signal.routingAudit, {
       kind: 'legacy-auto-rotated-repaired',
       previousThreadId: 'thread_rotated_1',

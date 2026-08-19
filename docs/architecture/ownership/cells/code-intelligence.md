@@ -59,7 +59,7 @@ conventions.
 - Do not replace TypeScript LSP or grep; this cell covers convention-layer
   associations those tools cannot represent directly.
 - Do not treat third-party tools such as codegraph or GitNexus as trusted
-  runtime dependencies for Cat Café without a separate integration decision.
+  runtime dependencies for Clowder AI without a separate integration decision.
 
 ## Static Scan Hints
 

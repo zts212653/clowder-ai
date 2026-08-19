@@ -31,6 +31,7 @@ const TRIGGER_PATH = '../dist/routes/callback-a2a-trigger.js';
 
 function agentEntryInput(overrides = {}) {
   return {
+    ownerAuthProvenance: 'unknown',
     threadId: 't1',
     userId: 'system',
     content: 'first handoff',
@@ -286,6 +287,77 @@ describe('enqueueA2ATargets coalesce/supersede (F-coalesce integration)', () => 
     // body.routed from enqueued; reporting it would falsely claim "已路由" for a merge).
     assert.deepEqual(result.enqueued, [], 'merge is not a new route — enqueued stays empty');
     assert.deepEqual(result.coalesced, ['antig-opus'], 'cat handled via coalesce, reported separately');
+  });
+
+  test('parallel selves with the same catId but different parent invocations stay independent', async () => {
+    const { enqueueA2ATargets } = await import(TRIGGER_PATH);
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const queue = new InvocationQueue();
+
+    queue.enqueue(
+      agentEntryInput({
+        callerCatId: 'codex-sol',
+        a2aParentInvocationId: 'invocation-from-thread-a',
+        content: 'old handoff from thread A',
+        messageId: 'm-old',
+      }),
+    );
+
+    const deps = await buildDeps(queue);
+    const result = await enqueueA2ATargets(deps, {
+      targetCats: ['antig-opus'],
+      content: 'independent handoff from thread B',
+      userId: 'system',
+      threadId: 't1',
+      triggerMessage: { id: 'm-new', mentions: ['antig-opus'], content: 'test' },
+      callerCatId: 'codex-sol',
+      parentInvocationId: 'invocation-from-thread-b',
+    });
+
+    const entries = queue
+      .list('t1', 'system')
+      .filter((entry) => entry.source === 'agent' && entry.targetCats.includes('antig-opus'));
+    assert.equal(entries.length, 2, 'parallel invocations must enqueue independent handoffs');
+    assert.equal(entries[0].content, 'old handoff from thread A', 'new content must not leak into the old invocation');
+    assert.equal(entries[1].content, 'independent handoff from thread B');
+    assert.equal(entries[1].a2aParentInvocationId, 'invocation-from-thread-b');
+    assert.deepEqual(result.enqueued, ['antig-opus']);
+    assert.deepEqual(result.coalesced, []);
+  });
+
+  test('repeated handoffs from the same parent invocation still coalesce', async () => {
+    const { enqueueA2ATargets } = await import(TRIGGER_PATH);
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const queue = new InvocationQueue();
+
+    queue.enqueue(
+      agentEntryInput({
+        callerCatId: 'codex-sol',
+        a2aParentInvocationId: 'same-parent-invocation',
+        content: 'first same-turn handoff',
+        messageId: 'm-first',
+      }),
+    );
+
+    const deps = await buildDeps(queue);
+    const result = await enqueueA2ATargets(deps, {
+      targetCats: ['antig-opus'],
+      content: 'second same-turn handoff',
+      userId: 'system',
+      threadId: 't1',
+      triggerMessage: { id: 'm-second', mentions: ['antig-opus'], content: 'test' },
+      callerCatId: 'codex-sol',
+      parentInvocationId: 'same-parent-invocation',
+    });
+
+    const entries = queue
+      .list('t1', 'system')
+      .filter((entry) => entry.source === 'agent' && entry.targetCats.includes('antig-opus'));
+    assert.equal(entries.length, 1, 'one parent invocation should keep same-turn coalescing');
+    assert.match(entries[0].content, /first same-turn handoff/);
+    assert.match(entries[0].content, /second same-turn handoff/);
+    assert.deepEqual(result.enqueued, []);
+    assert.deepEqual(result.coalesced, ['antig-opus']);
   });
 
   // 云端 codex R4 P2: coalesce mutates entry.content, which the web QueueEntryRow renders. The

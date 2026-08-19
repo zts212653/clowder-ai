@@ -1,6 +1,489 @@
 ---
 domainId: eval:a2a
 displayName: A2A Harness Eval
+descriptionForHuman: 猫和猫协作顺不顺——传球掉地上没、@ 被忽略没、跨 thread 断没
+metricGlossary:
+  turn_custody.projections_total:
+    label: 停球判定样本数
+    means: Phase T shadow 对 turn 收口条件作出结构化投影的总次数。
+    goodDirection: neutral
+    category: activation
+    component: turn-custody-stop-gate
+  turn_custody.covered_active_total:
+    label: 有活跃球的 turn
+    means: 投影发现当前 turn 仍有结构化 custody obligation、因此应继续的次数。
+    goodDirection: neutral
+    category: activation
+    component: turn-custody-stop-gate
+  turn_custody.covered_empty_total:
+    label: 可自然停止的 turn
+    means: 投影确认当前 turn 没有未完成结构化 obligation、可以自然停止的次数。
+    goodDirection: neutral
+    category: activation
+    component: turn-custody-stop-gate
+  turn_custody.unknown_legacy_total:
+    label: 未能结构化判定的旧 turn
+    means: 因旧式 provenance 不完整而无法由新 stop gate 判定的 turn 数量。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 切换前必须降到 0，否则新 guard 仍无法覆盖全部流量。
+  turn_custody.unknown_legacy_rate:
+    label: 旧 turn 未知率
+    means: unknown_legacy 占所有 stop-gate 投影的比例。
+    goodDirection: lower
+    category: derived
+    component: turn-custody-stop-gate
+  turn_custody.agree_allow_total:
+    label: 新旧共同放行
+    means: 旧 guard 与结构化 stop gate 都判断本 turn 可以停止的次数。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+  turn_custody.agree_block_total:
+    label: 新旧共同阻止停止
+    means: 旧 guard 与结构化 stop gate 都判断本 turn 仍须继续的次数。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+  turn_custody.agreements_total:
+    label: 新旧一致判定
+    means: agree_allow 与 agree_block 的合计，用于观察 shadow 与旧 guard 的一致面。
+    goodDirection: neutral
+    category: derived
+    component: turn-custody-stop-gate
+  turn_custody.disagreements_total:
+    label: 新旧分歧判定
+    means: old_only_block 与 new_only_block 的合计；每个分歧都应有样本可解释。
+    goodDirection: lower
+    category: derived
+    component: turn-custody-stop-gate
+  turn_custody.shadow_old_block_total:
+    label: 旧 guard 阻止次数
+    means: 同一 shadow 窗口内旧文本 guard 判断必须继续的次数。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+  turn_custody.shadow_new_block_total:
+    label: 新 stop gate 阻止次数
+    means: 同一 shadow 窗口内结构化 custody 投影判断必须继续的次数。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+  turn_custody.old_only_block_total:
+    label: 仅旧 guard 阻止
+    means: 已退役文本 guard 会要求继续、但结构化 custody 允许停止的次数；仅作行为差异观察。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+    ownerHint: 可用 redacted disagreement sample 解释旧层 over-block，但不得把 sample 当分母。
+  turn_custody.new_only_block_total:
+    label: 仅新 stop gate 阻止
+    means: 已退役文本 guard 会允许停止、但结构化 custody 发现 obligation 的完整 authoritative 分母。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+    ownerHint: 必须等于 justified + unjustified + unexplained；以分类结果判断 correctness。
+  turn_custody.projected_block_increase_total:
+    label: 预计新增阻止次数
+    means: 新 stop gate 阻止次数高于已退役文本 guard 的正差值；只作行为 delta 观察，不是等价或 correctness redline。
+    goodDirection: neutral
+    category: derived
+    component: turn-custody-stop-gate
+  turn_custody.new_only_classified_total:
+    label: 已分类的新 gate 独占阻止
+    means: new_only_block 中完成 authoritative justified / unjustified / unexplained 分类的总数。
+    goodDirection: neutral
+    category: context
+    component: turn-custody-stop-gate
+  turn_custody.new_only_justified_total:
+    label: 合理的新 gate 独占阻止
+    means: covered_active 且本 turn 没有结构化状态迁移，因此 stop gate 正确阻止的次数。
+    goodDirection: neutral
+    category: activation
+    component: turn-custody-stop-gate
+  turn_custody.new_only_unjustified_total:
+    label: 不合理的新 gate 独占阻止
+    means: authoritative projection 证明 stop gate 不应阻止却形成 new_only_block 的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0。
+  turn_custody.new_only_unexplained_total:
+    label: 无法解释的新 gate 独占阻止
+    means: unknown_legacy 等缺少 authoritative carrier truth、无法判定正当性的 new_only_block 次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0。
+  turn_custody.new_only_classification_gap_total:
+    label: 新 gate 独占阻止分类缺口
+    means: new_only_block 完整分母与三类 authoritative 分类总和之间的绝对差。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0；bounded sample 不得填补该缺口。
+  turn_custody.protocol_action_without_custody_total:
+    label: 无球协议动作
+    means: 发起结构化协议动作却没有取得对应 custody 的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0，否则动作与球权真相脱节。
+  turn_custody.user_nudge_required_total:
+    label: 需要operator催醒
+    means: 系统未能自行推进，最终需要operator人工 ping 才继续的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0，否则operator仍被迫充当路由器。
+  turn_custody.legacy_guard_without_active_custody_total:
+    label: 无活跃球仍被旧 guard 拦截
+    means: 结构化投影已确认没有 obligation，但旧文本 guard 仍要求继续的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+  turn_custody.same_subject_post_terminal_enqueue_total:
+    label: 终态后同 subject 再入队
+    means: subject 已终态后仍为同一 subject 创建 successor 工作的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0，否则终态围栏仍可被绕过。
+  turn_custody.lease_succeeded_subject_nonterminal_total:
+    label: Lease 成功但 subject 未终态
+    means: custody lease 已记成功，但独立 subject truth 尚未终态的次数。
+    goodDirection: lower
+    category: friction
+    component: turn-custody-stop-gate
+    badWhen: 必须为 0，否则 custody 成功早于真实任务完成。
+  c1.hold_zombie_count:
+    label: 真正卡住的持球
+    means: 已被替换或已满足，却仍未关闭的持球数量；大于 0 说明球权生命周期需要清理。
+    goodDirection: lower
+    category: friction
+    component: C1
+    badWhen: 大于 0 时，说明 hold lifecycle cleanup 有缺口。
+    source: docs/harness-feedback/bundles/*/snapshot.json
+    ownerHint: 优先检查 hold_ball 的关闭、替换和过期处理。
+  c1.zombie_hold_count:
+    label: 旧版卡住持球计数
+    means: 历史 verdict 使用的旧指标名，对应 c1.hold_zombie_count。
+    goodDirection: lower
+    category: friction
+    component: C1
+    source: docs/harness-feedback/verdicts/*.md
+  c1.hold_replacement_count:
+    label: 被替换的持球
+    means: 新持球创建后替换旧持球的次数；用于判断球权是否正常交接。
+    goodDirection: neutral
+    category: context
+    component: C1
+  c1.hold_cancel_count:
+    label: 取消的持球
+    means: 持球被取消的次数；持续升高时需要检查取消原因是否可解释。
+    goodDirection: neutral
+    category: context
+    component: C1
+  c2.void_hold_hint_emitted:
+    label: 虚空持球提示
+    means: 系统发现“说要接球但没有合法持球/路由”的提示次数。
+    goodDirection: lower
+    category: friction
+    component: C2
+    badWhen: 持续出现时，说明 handoff 或 @ 路由规则仍然让球掉地上。
+  c2.verdict_without_pass_count:
+    label: 有结论但没传球
+    means: 结论已给出，却没有把球交给下一棒或持球等待的次数。
+    goodDirection: lower
+    category: friction
+    component: C2
+    badWhen: 大于 0 时，说明 A2A 链路可能在结论后断开。
+  c2.verdict_without_pass_ratio:
+    label: 未传球结论占比
+    means: 有结论但没传球的次数占相关 verdict 的比例。
+    goodDirection: lower
+    category: derived
+    component: C2
+  inline_action.feedback_written:
+    label: 行内路由反馈
+    means: 系统为不合规的行内动作写入反馈的次数；用于观察路由提示是否仍在兜底。
+    goodDirection: lower
+    category: friction
+    component: route-serial
+  inline_action.hint_emitted:
+    label: 行内路由提示
+    means: 系统提示“需要行首 @ 或 hold_ball”的次数。
+    goodDirection: lower
+    category: friction
+    component: route-serial
+  inline_action.shadow_miss:
+    label: 行内路由漏检
+    means: 应该被路由守卫识别但没有及时识别的行内动作。
+    goodDirection: lower
+    category: friction
+    component: route-serial
+  inline_action.routed_set_skip:
+    label: 行内路由重复跳过
+    means: 行内 @mention 因已被行首路由识别而跳过的次数；这是正常的去重行为，说明行首路由优先级生效。
+    goodDirection: neutral
+    category: friction
+    component: route-serial
+  grounding.check_total:
+    label: 接球核验次数
+    means: 接球前执行真相核验的次数；用于观察高风险动作是否真的经过 grounding。
+    goodDirection: neutral
+    category: context
+    component: grounding
+  grounding.verdict_total:
+    label: 核验结论次数
+    means: grounding 流程产出 verified / mismatch / insufficient 等结论的次数；应与核验次数同向，用于看核验是否闭环。
+    goodDirection: neutral
+    category: context
+    component: grounding
+  grounding.sample_count:
+    label: 核验样本数
+    means: 进入 grounding 样本池的事件数量；用于判断 verdict 依据是否有足够样本。
+    goodDirection: neutral
+    category: context
+    component: grounding
+  grounding.mismatch_sample_count:
+    label: 核验不一致样本
+    means: 样本中发现 claim 与独立证据不一致的数量；升高时说明传球或授权叙述需要治理。
+    goodDirection: lower
+    category: friction
+    component: grounding
+  grounding.budget_exhausted_total:
+    label: 证据核验预算耗尽
+    means: 接球后做真相核验时，预算耗尽但仍未完成核验的次数。
+    goodDirection: lower
+    category: friction
+    component: grounding
+  event_wait.bypass_total:
+    label: 事件证据放行次数
+    means: 外部等待已有已验证、相关且覆盖当前 invocation 的结构化回调，因此跳过冗余 hold 的次数。
+    goodDirection: neutral
+    category: activation
+    component: event_wait
+  event_wait.rejected_total:
+    label: 事件等待拒绝总数
+    means: event-backed routing exit 候选未通过 fail-closed 校验的总次数；应结合分原因计数解释。
+    goodDirection: neutral
+    category: context
+    component: event_wait
+  event_wait.rejected_stale_total:
+    label: 过期事件等待拒绝
+    means: 候选任务已完成或不再 active，因证据过期而拒绝绕过 hold 的次数。
+    goodDirection: neutral
+    category: activation
+    component: event_wait
+  event_wait.rejected_unrelated_total:
+    label: 无关事件等待拒绝
+    means: 候选回调与当前 subject 或 action 不匹配，因关联性不足而拒绝的次数。
+    goodDirection: neutral
+    category: activation
+    component: event_wait
+  event_wait.rejected_uncovered_total:
+    label: 未覆盖事件等待拒绝
+    means: 回调存在但无法证明覆盖当前 invocation，因覆盖证据不足而拒绝的次数。
+    goodDirection: neutral
+    category: activation
+    component: event_wait
+  event_wait.rejected_query_failed_total:
+    label: 查询失败事件等待拒绝
+    means: 查询回调覆盖真相时发生错误，系统 fail closed 并拒绝绕过 hold 的次数。
+    goodDirection: lower
+    category: friction
+    component: event_wait
+    badWhen: 持续非零说明覆盖 resolver 或其依赖不稳定，需要追查查询失败来源。
+  event_wait.rejected_other_total:
+    label: 其他事件等待拒绝
+    means: 因缺少 invocation、没有候选或证明格式无效等其余原因被拒绝的次数。
+    goodDirection: lower
+    category: friction
+    component: event_wait
+  event_wait.redundant_hold_prevented_total:
+    label: 冗余持球已阻止
+    means: 结构化回调已覆盖等待条件，系统阻止再次注册 hold 定时器的次数。
+    goodDirection: neutral
+    category: activation
+    component: event_wait
+  event_wait.false_bypass_total:
+    label: 错误绕过持球
+    means: 系统错误地把未覆盖、无关或过期事件当成有效回调，从而跳过必要 hold 的次数；必须保持为 0。
+    goodDirection: lower
+    category: friction
+    component: event_wait
+    badWhen: 大于 0 表示 event-backed routing exit 的 fail-closed 不变量被破坏。
+  successor.unique_cats_invoked_total:
+    label: 动作实际召唤猫数
+    means: 已进入结构化 action lease 的 successor 猫总数；结合 actions_observed 判断单动作是否膨胀。
+    goodDirection: neutral
+    category: activation
+    component: action_successor
+  successor.actions_observed:
+    label: 已观察动作数
+    means: action successor single-flight 实际接纳的 lease generation 数量。
+    goodDirection: neutral
+    category: context
+    component: action_successor
+  successor.explicit_parallel_observations:
+    label: 显式并行动作数
+    means: 带 parallelIntent 的合法独立评审、#ideate 或 operator fan-out 数量；不是并发违规。
+    goodDirection: neutral
+    category: context
+    component: action_successor
+  successor.safe_wait:
+    label: 安全等待次数
+    means: 同一 subject/action/slot 已有 active successor 时，系统拒绝继续加猫的次数。
+    goodDirection: neutral
+    category: activation
+    component: action_successor
+  successor.replace:
+    label: 原子替补次数
+    means: 前手已有 failed、canceled 或 unavailable 证明后，系统以新 generation 原子替换 successor 的次数。
+    goodDirection: neutral
+    category: activation
+    component: action_successor
+  successor.concurrent_single_violations:
+    label: 单飞并发违规
+    means: mode=single 的 action lease 出现超过一个 concurrent successor 的观测数；必须保持为 0。
+    goodDirection: lower
+    category: friction
+    component: action_successor
+    badWhen: 大于 0 说明 single-flight admission 或 carrier 适配被绕过。
+  successor.concurrent_successors.gap:
+    label: 后继并发观测缺口
+    means: 本轮是否缺少 concurrent successor 持有数观测，导致无法证明 mode=single 始终只有一个后继；必须保持为 0。
+    goodDirection: lower
+    category: derived
+    component: action_successor
+    badWhen: 大于 0 说明并发持有数遥测缺失，当前结论不能证明 single-flight 不变量。
+  successor.concurrent_single_violations_known:
+    label: 单飞并发违规值已知
+    means: 本轮是否取得足够的并发持有数遥测来计算单飞并发违规；1 表示已知，0 表示无法判断。
+    goodDirection: higher
+    category: derived
+    component: action_successor
+    badWhen: 等于 0 说明违规值未知，不能把缺少证据误读为零违规。
+  successor.concurrent_single_violations_unknown:
+    label: 单飞并发违规值未知
+    means: 本轮并发持有数遥测不足（如 le=1 histogram bucket 缺失），无法计算单飞违规值的标记；1 表示未知，0 表示已知。
+    goodDirection: lower
+    category: derived
+    component: action_successor
+    badWhen: 等于 1 说明遥测缺口导致违规值无法确定，需要修复 histogram bucket 投影或补齐数据。
+  successor.responses_after_terminal_state:
+    label: 终态后晚到响应
+    means: PR 已 merged/closed 等外部终态后，仍到达提交边界并被抑制的 successor 响应数；必须保持为 0。
+    goodDirection: lower
+    category: friction
+    component: action_successor
+    badWhen: 大于 0 说明 invocation 运行期间 subject truth 变化，需检查 preflight 时机和取消延迟。
+  successor.single_target_multi_mention_rate:
+    label: 单目标多提及率
+    means: schema-valid multi_mention carrier 中仅指定单个目标猫的请求占比；高值说明旧式单猫路径仍在使用 multi_mention 载体，而非直接走单猫路由。
+    goodDirection: neutral
+    category: activation
+    component: action_successor
+  successor.unfenced_single_target_multi_mention:
+    label: 无围栏单目标多提及
+    means: 旧式单目标 multi_mention 请求中缺少 action successor 元数据（未经 successor fence 管理）的数量；非零说明存在绕过 fence 的遗留路径。
+    goodDirection: lower
+    category: friction
+    component: action_successor
+    badWhen: 大于 0 说明有 multi_mention 路径绕过了 successor 围栏，需检查 carrier 适配层。
+  successor.action_fence_unavailable:
+    label: 动作围栏不可用
+    means: 结构化 successor 请求因持久化 action fence 不可用而被拒绝的次数；非零说明 fence 基础设施有间歇故障。
+    goodDirection: lower
+    category: friction
+    component: action_successor
+    badWhen: 大于 0 说明 durable action fence 的存储或连接存在问题，需检查 Redis lease store 可用性。
+  successor.agent_key_action_rejected:
+    label: Agent Key 动作被拒
+    means: 使用 agent-key 凭证的结构化 successor 尝试因缺少 invocation provenance 而被拒绝的次数；这是预期的 fail-closed 行为（persistent-agent 无 invocation 证明），趋势上升可能代表调用方误用。
+    goodDirection: lower
+    category: friction
+    component: action_successor
+    badWhen: 持续上升说明有调用方在 agent-key 模式下错误地尝试结构化 successor 路径。
+  hold_lifecycle.expired_after_satisfied_total:
+    label: 已满足后仍过期
+    means: 外部条件已满足，但持球仍走到过期路径的次数。
+    goodDirection: lower
+    category: friction
+    component: hold_lifecycle
+  hold_lifecycle.stale_wake_suppressed_total:
+    label: 过期唤醒被抑制
+    means: 系统识别并抑制已经失效的旧唤醒次数；用于观察旧事件清理是否有效。
+    goodDirection: neutral
+    category: context
+    component: hold_lifecycle
+  hold_lifecycle.event_retired_total:
+    label: 事件正常退役
+    means: 持球生命周期事件被正常退役处理的次数；健康的激活指标，说明清理机制在正常工作。
+    goodDirection: neutral
+    category: activation
+    component: hold_lifecycle
+  action_rate:
+    label: 综合行动率
+    means: 需要实际行动的 verdict 占总 verdict 的比率；用于观察 A2A 整体健康趋势。
+    goodDirection: neutral
+    category: derived
+  components.covered:
+    label: 已覆盖组件数
+    means: 本次汇总里真正有数据的 A2A 组件数量；用于判断结论覆盖面，不能单独代表好坏。
+    goodDirection: neutral
+    category: context
+    component: rollup
+  telemetry_gaps:
+    label: 遥测缺口数
+    means: 应该有数据但本次没有采集到的组件或信号数量；越少越好，缺口会降低结论可信度。
+    goodDirection: lower
+    category: friction
+    component: rollup
+  counter_window.duration_hours:
+    label: 计数器实际覆盖时长
+    means: 进程内计数器实际积累了多少小时；短于所选窗口时，零值可能只是运行时间不够。
+    goodDirection: neutral
+    category: context
+    component: window
+  c2.checked:
+    label: C2 已检查样本数
+    means: C2 虚空持球规则实际检查了多少条样本；用于判断该规则是否真的有观察量。
+    goodDirection: neutral
+    category: context
+    component: C2
+  inline_action.checked:
+    label: 行内路由已检查样本数
+    means: 行内路由守卫实际检查了多少条消息；用于解释提示和漏检计数的样本规模。
+    goodDirection: neutral
+    category: context
+    component: route-serial
+  line_start.detected:
+    label: 行首路由识别次数
+    means: 系统识别到合法行首 @ 路由的次数；用于观察串行传球路径是否被正常使用。
+    goodDirection: neutral
+    category: activation
+    component: route-serial
+  legacyscheduledtaskids:
+    label: 遗留定时任务数
+    means: 仍挂在旧调度机制上的任务数量；应为 0，避免同一 eval 被重复触发。
+    goodDirection: lower
+    category: friction
+    component: scheduler
+  process.runtime_pid:
+    label: 运行时进程 PID
+    means: 当前 API 进程的系统 PID 和启动时间；用于判断进程是否在某个 commit 之后重启过，排除版本偏差。
+    goodDirection: neutral
+    category: context
+    component: runtime-provenance
+  commit.terminal_release_warmup:
+    label: 终端释放预热时间
+    means: 某 commit 中 terminal_release 相关代码的预热完成时间；和进程启动时间比较可判断当前进程是否跑在该 commit 之后的代码。
+    goodDirection: neutral
+    category: context
+    component: event-backed-routing-exit
 systemThreadId: thread_eval_a2a
 evalCat:
   catId: codex

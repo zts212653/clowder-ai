@@ -1,6 +1,7 @@
 // F102: SQLite implementation of IEvidenceStore
 
 import { basename, isAbsolute, relative, resolve } from 'node:path';
+import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { computeConsumptionPrior } from './consumption-prior.js';
 import { type EntityMentionPassageHit, EntityRegistryStore } from './EntityRegistry.js';
@@ -12,6 +13,7 @@ import { buildProgressiveFtsQueries } from './fts-query-builder.js';
 import type {
   Edge,
   EntityMatch,
+  EntityMutationContext,
   EntityRecord,
   EvidenceItem,
   EvidenceKind,
@@ -29,6 +31,7 @@ import {
 } from './lexical-backfill.js';
 import { applyMMR } from './mmr.js';
 import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
+import { applyPullOnlyDownrank } from './pull-only-ranking.js';
 import { computeRecencyDecay } from './recency-decay.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
@@ -38,6 +41,47 @@ import type { VectorStore } from './VectorStore.js';
 export const CJK_NN_WEIGHT = 1.5;
 export function hasCJKCharacters(text: string): boolean {
   return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(text);
+}
+
+const TEMPORAL_DEMOTION_STATUSES = new Set(['superseded', 'drifted', 'stale', 'historical', 'retired', 'invalidated']);
+const TEMPORAL_DEMOTION_STATUS_SQL = [...TEMPORAL_DEMOTION_STATUSES].map((status) => `'${status}'`).join(', ');
+
+function temporalPenaltySql(alias?: string): string {
+  const prefix = alias ? `${alias}.` : '';
+  return `(CASE WHEN ${prefix}authority = 'constitutional' THEN 0 WHEN ${prefix}superseded_by IS NOT NULL OR ${prefix}status IN (${TEMPORAL_DEMOTION_STATUS_SQL}) THEN 1 ELSE 0 END)`;
+}
+
+function hasTemporalPenalty(item: EvidenceItem): boolean {
+  if (item.authority === 'constitutional') return false;
+  return Boolean(item.supersededBy) || TEMPORAL_DEMOTION_STATUSES.has(item.status);
+}
+
+function applyTemporalStatusPenalty(results: EvidenceItem[]): void {
+  if (results.length < 2) return;
+  results.sort((a, b) => Number(hasTemporalPenalty(a)) - Number(hasTemporalPenalty(b)));
+}
+
+function throwIfSearchCancelled(options?: SearchOptions): void {
+  options?.signal?.throwIfAborted();
+  if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) {
+    throw new DOMException('Evidence search deadline exceeded', 'TimeoutError');
+  }
+}
+
+async function coverageSearchCheckpoint(options?: SearchOptions): Promise<void> {
+  if (!options?.signal && options?.deadlineAt == null) return;
+  throwIfSearchCancelled(options);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  throwIfSearchCancelled(options);
+}
+
+function rethrowIfSearchCancelled(options: SearchOptions | undefined, error: unknown): void {
+  if (options?.signal?.aborted) {
+    throw options.signal.reason ?? error;
+  }
+  if (options?.deadlineAt != null && Date.now() >= options.deadlineAt) {
+    throw error;
+  }
 }
 
 export interface PassageResult {
@@ -85,6 +129,35 @@ interface SearchFilterContext {
   excludePackKnowledge: boolean;
   threadAnchor?: string;
   suppressBackstop: boolean;
+  excludePullOnly: boolean;
+}
+
+type PassageVectorDeleteRow = {
+  docAnchor: string;
+  passageId: string;
+};
+
+function hasTable(db: Database.Database, tableName: string): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName));
+}
+
+function hasSqliteModule(db: Database.Database, moduleName: string): boolean {
+  try {
+    return Boolean(db.prepare('SELECT 1 FROM pragma_module_list WHERE name = ?').get(moduleName));
+  } catch {
+    return false;
+  }
+}
+
+function deletePassageVectors(db: Database.Database, rows: PassageVectorDeleteRow[]): void {
+  if (rows.length === 0) return;
+  if (!hasTable(db, 'passage_vectors')) return;
+  if (!hasSqliteModule(db, 'vec0')) return;
+
+  const deleteVector = db.prepare('DELETE FROM passage_vectors WHERE passage_key = ?');
+  for (const row of rows) {
+    deleteVector.run(passageVectorKey(row.docAnchor, row.passageId));
+  }
 }
 
 export class SqliteEvidenceStore implements IEvidenceStore {
@@ -125,17 +198,40 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     this.entityRegistry = new EntityRegistryStore(this.db);
   }
 
-  async upsertEntities(entities: EntityRecord[]): Promise<void> {
+  async upsertEntities(entities: EntityRecord[], context: EntityMutationContext = { source: 'system' }): Promise<void> {
     return this.writeQueue.enqueue(() => {
       this.ensureOpen();
-      const changed = this.entityRegistry?.upsert(entities) ?? false;
-      if (changed) this.entityRegistry?.refreshMentions();
+      const tx = this.db?.transaction(() => {
+        const changed = this.entityRegistry?.upsert(entities, context) ?? false;
+        if (changed) this.entityRegistry?.refreshMentions();
+      });
+      tx?.();
     });
   }
 
   async getEntity(entityId: string): Promise<EntityRecord | null> {
     this.ensureOpen();
     return this.entityRegistry?.get(entityId) ?? null;
+  }
+
+  async inspectEntityConflict(incoming: EntityRecord, viewerUserId?: string): Promise<EntityConflictContext | null> {
+    this.ensureOpen();
+    return this.entityRegistry?.inspectConflict(incoming, viewerUserId) ?? null;
+  }
+
+  async resolveEntityConflict(
+    incoming: EntityRecord,
+    resolution: EntityConflictResolutionRequest,
+    context: EntityMutationContext,
+  ): Promise<void> {
+    return this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      const tx = this.db?.transaction(() => {
+        const result = this.entityRegistry?.resolveConflict(incoming, resolution, context);
+        if (result?.changed) this.entityRegistry?.refreshMentionsForEntities(result.affectedEntityIds);
+      });
+      tx?.();
+    });
   }
 
   async resolveEntityAliases(query: string): Promise<QueryEntityMatch[]> {
@@ -154,6 +250,101 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return (await this.searchWithMeta(query, options)).items;
   }
 
+  private buildSearchFilters(options: SearchOptions | undefined, suppressBackstop = false): SearchFilterContext {
+    const effectiveKind =
+      options?.kind ??
+      (options?.scope === 'threads'
+        ? ('thread' as EvidenceKind)
+        : options?.scope === 'sessions'
+          ? ('session' as EvidenceKind)
+          : undefined);
+    return {
+      effectiveKind,
+      excludeSessionAndThread: options?.scope === 'docs' || options?.scope === 'memory',
+      excludePackKnowledge: effectiveKind !== 'pack-knowledge',
+      threadAnchor: options?.threadId ? `thread-${options.threadId}` : undefined,
+      suppressBackstop,
+      excludePullOnly: options?.includePullOnly !== true,
+    };
+  }
+
+  private appendEvidenceDocFilters(
+    sql: string,
+    params: unknown[],
+    options: SearchOptions | undefined,
+    filters: SearchFilterContext,
+    columnPrefix = '',
+  ): string {
+    const col = (name: string) => `${columnPrefix}${name}`;
+    if (filters.effectiveKind) {
+      sql += ` AND ${col('kind')} = ?`;
+      params.push(filters.effectiveKind);
+    }
+    if (filters.excludeSessionAndThread) {
+      sql += ` AND ${col('kind')} != 'session' AND ${col('kind')} != 'thread'`;
+    }
+    if (filters.excludePackKnowledge) {
+      sql += ` AND ${col('kind')} != 'pack-knowledge'`;
+    }
+    if (options?.status) {
+      sql += ` AND ${col('status')} = ?`;
+      params.push(options.status);
+    }
+    if (options?.keywords?.length) {
+      sql += ` AND (${options.keywords.map(() => `${col('keywords')} LIKE ?`).join(' OR ')})`;
+      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
+    }
+    if (filters.threadAnchor) {
+      sql += ` AND ${col('anchor')} = ?`;
+      params.push(filters.threadAnchor);
+    }
+    if (options?.dateFrom) {
+      sql += ` AND ${col('updated_at')} >= ?`;
+      params.push(options.dateFrom);
+    }
+    if (options?.dateTo) {
+      sql += ` AND ${col('updated_at')} <= ?`;
+      params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    if (options?.worldId) {
+      sql += ` AND ${col('world_id')} = ?`;
+      params.push(options.worldId);
+    }
+    if (options?.sceneId) {
+      sql += ` AND ${col('scene_id')} = ?`;
+      params.push(options.sceneId);
+    }
+    if (options?.provenanceTier) {
+      sql += ` AND ${col('provenance_tier')} = ?`;
+      params.push(options.provenanceTier);
+    }
+    if (filters.suppressBackstop) {
+      sql += ` AND ${col('activation')} != 'backstop'`;
+    }
+    if (filters.excludePullOnly) {
+      sql += ` AND ${col('activation')} != 'pull_only'`;
+    }
+    return sql;
+  }
+
+  private selectEvidenceDocRowsByAnchor(
+    anchors: string[],
+    options: SearchOptions | undefined,
+    filters: SearchFilterContext,
+  ): Map<string, RowShape> {
+    if (!this.db || anchors.length === 0) return new Map();
+    const placeholders = anchors.map(() => '?').join(',');
+    const params: unknown[] = [...anchors];
+    const sql = this.appendEvidenceDocFilters(
+      `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`,
+      params,
+      options,
+      filters,
+    );
+    const rows = this.db.prepare(sql).all(...params) as RowShape[];
+    return new Map(rows.map((row) => [row.anchor, row]));
+  }
+
   async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
     this.ensureOpen();
     const limit = options?.limit ?? 10;
@@ -161,6 +352,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
     const trimmed = query.trim();
     if (!trimmed) return { items: [], meta: { degraded: false } };
+    await coverageSearchCheckpoint(options);
     const lexicalBackfillWords = splitLexicalBackfillWords(trimmed);
     const queryEntityMatches = this.entityRegistry?.resolveQuery(trimmed) ?? [];
 
@@ -169,19 +361,6 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // scope='sessions' → kind='session'
     // scope='docs'/'memory' → exclude session/thread digests, keep doc-backed discussions
     // scope='all' → no filter
-    const effectiveKind =
-      options?.kind ??
-      (options?.scope === 'threads'
-        ? ('thread' as EvidenceKind)
-        : options?.scope === 'sessions'
-          ? ('session' as EvidenceKind)
-          : undefined);
-    const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
-    // F129 AC-A10: exclude pack-knowledge from global search unless explicitly requested
-    const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
-    // F148 Phase B (AC-B1): threadId filter — scope to a specific thread's evidence
-    // Anchor convention: thread-{threadId} (e.g. thread-thread_abc for threadId="thread_abc")
-    const threadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
     // F163 Phase B (AC-B3): suppress backstop docs when compression is active
     let suppressBackstop = false;
     if (!options?.includeBackstop) {
@@ -192,6 +371,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         // f163-types not available — no suppression
       }
     }
+    const filters = this.buildSearchFilters(options, suppressBackstop);
+    const { effectiveKind, excludeSessionAndThread, excludePackKnowledge, threadAnchor, excludePullOnly } = filters;
     // ── Exact-anchor bypass ──────────────────────────────────────────
     // FTS5 unicode61 tokenizer splits "F042" → "F"+"042" and "ADR-005" → "ADR"+"005".
     // For anchor-shaped queries, do a direct lookup so precision isn't lost.
@@ -230,6 +411,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (suppressBackstop) {
       anchorSql += " AND activation != 'backstop'";
     }
+    if (excludePullOnly) {
+      anchorSql += " AND activation != 'pull_only'";
+    }
     // F093 Phase A (KD-16): world scope filter
     if (options?.worldId) {
       anchorSql += ' AND world_id = ?';
@@ -244,6 +428,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       results.push(rowToItem(exactRow));
       seenAnchors.add(exactRow.anchor);
     }
+    await coverageSearchCheckpoint(options);
 
     // ── FTS5 full-text search ────────────────────────────────────────
     // HW-6: Progressive relaxation — try AND-all first, then relax to OR
@@ -252,7 +437,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     for (const ftsQuery of ftsQueries) {
       try {
         let sql = `
-				SELECT d.*, bm25(evidence_fts, 5.0, 1.0) AS rank
+					SELECT d.*, bm25(evidence_fts, 5.0, 1.0, 2.0) AS rank
 				FROM evidence_fts f
 				JOIN evidence_docs d ON d.rowid = f.rowid
 				WHERE evidence_fts MATCH ?
@@ -298,6 +483,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         if (suppressBackstop) {
           sql += " AND d.activation != 'backstop'";
         }
+        if (excludePullOnly) {
+          sql += " AND d.activation != 'pull_only'";
+        }
         // F093 Phase A (KD-16): world scope filter
         if (options?.worldId) {
           sql += ' AND d.world_id = ?';
@@ -309,8 +497,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
 
         // Superseded items sort last (KD-16), archive results deprioritized (P2 fix), authoritative first (F152 AC-A6, P1-2 NULL-safe)
-        sql +=
-          " ORDER BY (d.superseded_by IS NOT NULL), (d.source_path LIKE 'archive/%'), (CASE WHEN d.provenance_tier = 'authoritative' THEN 0 WHEN d.provenance_tier IS NOT NULL THEN 1 ELSE 2 END), rank";
+        sql += ` ORDER BY ${temporalPenaltySql('d')}, (d.source_path LIKE 'archive/%'), (CASE WHEN d.provenance_tier = 'authoritative' THEN 0 WHEN d.provenance_tier IS NOT NULL THEN 1 ELSE 2 END), rank`;
         sql += ' LIMIT ?';
         params.push(bm25Pool);
 
@@ -324,6 +511,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         // HW-6: if this relaxation level found results, stop trying looser levels
         if (rows.length > 0) break;
       } catch {}
+      await coverageSearchCheckpoint(options);
     }
 
     // ── Lexical contains backfill: recover substring hits that unicode61 FTS misses ──
@@ -382,6 +570,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       if (suppressBackstop) {
         containsSql += " AND activation != 'backstop'";
       }
+      if (excludePullOnly) {
+        containsSql += " AND activation != 'pull_only'";
+      }
       try {
         const containsRows = this.db?.prepare(containsSql).all(...containsParams) as RowShape[];
         const { rows: rankedRows, signals } = rankLexicalBackfillRows(containsRows, lexicalBackfillWords);
@@ -398,20 +589,16 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         // substring backfill failed — continue with existing results
       }
     }
+    await coverageSearchCheckpoint(options);
 
-    const entityMentionDocs = this.hydrateEntityMentionDocs(queryEntityMatches, options, bm25Pool, {
-      effectiveKind,
-      excludeSessionAndThread,
-      excludePackKnowledge,
-      threadAnchor,
-      suppressBackstop,
-    });
+    const entityMentionDocs = this.hydrateEntityMentionDocs(queryEntityMatches, options, bm25Pool, filters);
     for (const item of entityMentionDocs.items) {
       if (!seenAnchors.has(item.anchor)) {
         results.push(item);
         seenAnchors.add(item.anchor);
       }
     }
+    await coverageSearchCheckpoint(options);
 
     if (options?.depth === 'raw') {
       const rawResult = await this.rawPassageSearch(
@@ -419,6 +606,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         results,
         limit,
         options,
+        filters,
         queryEntityMatches,
         entityMentionDocs.matchesByAnchor,
       );
@@ -434,6 +622,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     } catch {
       // Kill-switch: boost failure → continue with original ranking
     }
+    applyTemporalStatusPenalty(results);
 
     // P2 R2 fix (砚砚): keep full BM25 candidate pool for hybrid RRF,
     // only slice to limit for lexical/fallback returns
@@ -457,7 +646,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
 
     if (searchMode === 'semantic') {
-      const embeddingAvailable = await this.isEmbeddingAvailable();
+      const embeddingAvailable = await this.isEmbeddingAvailable(options);
+      await coverageSearchCheckpoint(options);
       if (!embeddingAvailable) {
         return {
           items: this.enrichWithDrillDown(
@@ -483,7 +673,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           ),
           meta: { degraded: false },
         };
-      } catch {
+      } catch (error) {
+        rethrowIfSearchCancelled(options, error);
         return {
           items: this.enrichWithDrillDown(
             this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
@@ -497,7 +688,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
 
     if (searchMode === 'hybrid') {
-      const embeddingAvailable = await this.isEmbeddingAvailable();
+      const embeddingAvailable = await this.isEmbeddingAvailable(options);
+      await coverageSearchCheckpoint(options);
       if (!embeddingAvailable) {
         return {
           items: this.enrichWithDrillDown(
@@ -524,7 +716,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           ),
           meta: { degraded: false },
         };
-      } catch {
+      } catch (error) {
+        rethrowIfSearchCancelled(options, error);
         return {
           items: this.enrichWithDrillDown(
             this.attachEntityMatches(lexicalResults, entityMentionDocs.matchesByAnchor),
@@ -553,10 +746,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     baseResults: EvidenceItem[],
     limit: number,
     options: SearchOptions,
+    filters: SearchFilterContext,
     queryEntityMatches: QueryEntityMatch[],
     entityMatchesByAnchor: Map<string, EntityMatch[]>,
   ): Promise<EvidenceSearchExecution> {
-    if (options.scope && options.scope !== 'all' && options.scope !== 'threads') {
+    if (options.scope && !['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope)) {
       return {
         items: this.attachEntityMatches(this.rankRawResults(baseResults, limit), entityMatchesByAnchor),
         meta: { degraded: false },
@@ -571,7 +765,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     let passages: PassageResult[];
     let meta: SearchExecutionMeta = { degraded: false };
     if (mode === 'semantic') {
-      if (!(await this.isPassageEmbeddingAvailable())) {
+      if (!(await this.isPassageEmbeddingAvailable(options))) {
         passages = lexical();
         meta = {
           degraded: true,
@@ -581,7 +775,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       } else {
         try {
           passages = await this.semanticPassageNNSearch(query, pool, options);
-        } catch {
+        } catch (error) {
+          rethrowIfSearchCancelled(options, error);
           passages = lexical();
           meta = {
             degraded: true,
@@ -591,7 +786,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
     } else if (mode === 'hybrid') {
-      if (!(await this.isPassageEmbeddingAvailable())) {
+      if (!(await this.isPassageEmbeddingAvailable(options))) {
         passages = lexical();
         meta = {
           degraded: true,
@@ -601,7 +796,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       } else {
         try {
           passages = await this.hybridPassageRRFSearch(query, lexical(), pool, options);
-        } catch {
+        } catch (error) {
+          rethrowIfSearchCancelled(options, error);
           passages = lexical();
           meta = {
             degraded: true,
@@ -624,7 +820,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const mergedPassages = mergePassageResults(entityPassages, passages);
     return {
       items: this.attachEntityMatches(
-        this.hydratePassageResults(baseResults, mergedPassages, limit, options),
+        this.hydratePassageResults(baseResults, mergedPassages, limit, options, filters),
         mergedEntityMatches,
       ),
       meta,
@@ -704,6 +900,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     if (filters.suppressBackstop) {
       sql += " AND activation != 'backstop'";
     }
+    if (filters.excludePullOnly) {
+      sql += " AND activation != 'pull_only'";
+    }
 
     const rows = this.db.prepare(sql).all(...params) as RowShape[];
     const rowMap = new Map(rows.map((row) => [row.anchor, row]));
@@ -728,18 +927,19 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const out: EvidenceItem[] = [];
     const seen = new Set<string>();
     const entityCap = items.length > 0 ? Math.max(1, Math.ceil(limit / 2)) : limit;
-    for (const item of entityItems.slice(0, entityCap)) {
+    const rankedEntityItems = entityItems.slice();
+    applyTemporalStatusPenalty(rankedEntityItems);
+    for (const item of rankedEntityItems.slice(0, entityCap)) {
       if (seen.has(item.anchor)) continue;
       seen.add(item.anchor);
       out.push(item);
-      if (out.length >= limit) break;
     }
     for (const item of items) {
       if (seen.has(item.anchor)) continue;
       seen.add(item.anchor);
       out.push(item);
-      if (out.length >= limit) break;
     }
+    applyTemporalStatusPenalty(out);
     return out.slice(0, limit);
   }
 
@@ -755,23 +955,25 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     };
   }
 
-  private async isEmbeddingAvailable(): Promise<boolean> {
+  private async isEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
     const deps = this.embedDeps;
     if (!deps || deps.mode !== 'on') return false;
     try {
-      await deps.embedding.reprobeIfNeeded();
-    } catch {
+      await deps.embedding.reprobeIfNeeded(options?.signal);
+    } catch (error) {
+      rethrowIfSearchCancelled(options, error);
       return false;
     }
     return deps.embedding.isReady();
   }
 
-  private async isPassageEmbeddingAvailable(): Promise<boolean> {
+  private async isPassageEmbeddingAvailable(options?: SearchOptions): Promise<boolean> {
     const deps = this.embedDeps;
     if (!deps?.passageVectorStore || deps.mode !== 'on') return false;
     try {
-      await deps.embedding.reprobeIfNeeded();
-    } catch {
+      await deps.embedding.reprobeIfNeeded(options?.signal);
+    } catch (error) {
+      rethrowIfSearchCancelled(options, error);
       return false;
     }
     return deps.embedding.isReady();
@@ -782,8 +984,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     limit: number,
     options?: SearchOptions,
   ): Promise<PassageResult[]> {
-    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    await coverageSearchCheckpoint(options);
+    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.passageVectorStore!.search(queryVec[0], limit);
+    await coverageSearchCheckpoint(options);
     return this.hydratePassageVectorHits(nnResults, options);
   }
 
@@ -897,6 +1102,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     passages: PassageResult[],
     limit: number,
     options?: SearchOptions,
+    filters?: SearchFilterContext,
   ): EvidenceItem[] {
     const results = [...baseResults];
     const threadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
@@ -912,6 +1118,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       passagesByAnchor.set(passage.docAnchor, arr);
       if (!passageOrder.has(passage.docAnchor)) passageOrder.set(passage.docAnchor, index);
     }
+    const parentFilters = filters ?? this.buildSearchFilters(options, false);
+    const parentDocs = this.selectEvidenceDocRowsByAnchor([...passagesByAnchor.keys()], options, parentFilters);
 
     // BUG-UX-14 fix: when a scope filter is active (scope != 'all'), guard against
     // cross-post contamination from passage matches (both lexical AND semantic).
@@ -935,6 +1143,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     // When threadId is specified, passages already passed the threadAnchor filter
     // (line 887), so they belong to the explicitly requested thread — always allowed.
     const scopeActive = options?.scope && options.scope !== 'all';
+    const docsScope = options?.scope != null && ['docs', 'memory'].includes(options.scope);
     const hasExplicitThreadTarget = !!threadAnchor;
     const hasDocLevelResults = results.length > 0;
 
@@ -947,13 +1156,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         // found by lexical FTS). Cross-posts are found by lexical FTS because
         // they share literal query terms; pure NN discoveries only match via
         // embedding similarity (BUG-UX-14 R4, cloud P1 on hybrid cross-posts).
-        if (scopeActive && !hasExplicitThreadTarget && hasDocLevelResults) {
+        if (scopeActive && !docsScope && !hasExplicitThreadTarget && hasDocLevelResults) {
           const hasPurelySemanticDiscovery = pList.some((p) => p._semanticHit && !p._alsoLexical);
           if (!hasPurelySemanticDiscovery) continue;
         }
-        const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(anchor) as
-          | RowShape
-          | undefined;
+        const parentDoc = parentDocs.get(anchor);
         if (parentDoc) {
           // BUG-UX-14 R3 (cloud P1): verify parent doc kind matches scope filter.
           // Even when the lexical guard above is skipped (hasDocLevelResults=false),
@@ -1056,6 +1263,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       const aHas = a.passages?.length ? 1 : 0;
       const bHas = b.passages?.length ? 1 : 0;
       if (aHas !== bHas) return bHas - aHas;
+      const temporalDiff = Number(hasTemporalPenalty(a)) - Number(hasTemporalPenalty(b));
+      if (temporalDiff !== 0) return temporalDiff;
       if (aHas && bHas) {
         return (
           (passageOrder.get(a.anchor) ?? Number.MAX_SAFE_INTEGER) -
@@ -1085,9 +1294,12 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     } catch {
       // F200 kill-switch: rerank failure → continue with existing ranking
     }
+    if (options?.depth !== 'raw') applyTemporalStatusPenalty(results);
+    applyPullOnlyDownrank(results);
     if (targetLimit && results.length > targetLimit) results.length = targetLimit;
     annotateMatchReasons(results, query, options?.explain);
     for (const item of results) {
+      if (item.drillDown) continue;
       const primaryPassage = item.passages?.find((p) => p.threadId && p.messageId);
       if (primaryPassage?.threadId && primaryPassage.messageId) {
         item.drillDown = {
@@ -1113,6 +1325,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
           tool: 'cat_cafe_read_session_digest',
           params: { sessionId },
           hint: `查看 session 摘要：read_session_digest(sessionId="${sessionId}")`,
+        };
+      } else if (item.kind === 'diary' && item.anchor.startsWith('diary:')) {
+        const diaryId = item.anchor.slice('diary:'.length);
+        item.drillDown = {
+          tool: 'cat_cafe_read_diary',
+          params: { diaryId },
+          hint: '读取这篇第一人称日记原文与 provenance',
         };
       } else if (item.sourcePath) {
         const filePath = this.resolveSourcePathForDrillDown(item.sourcePath);
@@ -1156,71 +1375,30 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     suppressBackstop?: boolean,
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100); // 砚砚: generous pool, cap 100
-    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    await coverageSearchCheckpoint(options);
+    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+    await coverageSearchCheckpoint(options);
     if (nnResults.length === 0) return [];
 
-    // Hydrate from evidence_docs in one query (no N+1)
     const anchors = nnResults.map((r) => r.anchor);
-    const placeholders = anchors.map(() => '?').join(',');
-    let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
-    const params: unknown[] = [...anchors];
-
-    // Apply ALL SearchOptions filters (P1 fix: semantic must respect status/keywords too)
-    const effectiveKind =
-      options?.kind ??
-      (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
-    const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
-    const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
-    if (effectiveKind) {
-      sql += ' AND kind = ?';
-      params.push(effectiveKind);
-    }
-    if (excludeSessionAndThread) {
-      sql += " AND kind != 'session' AND kind != 'thread'";
-    }
-    if (excludePackKnowledge) {
-      sql += " AND kind != 'pack-knowledge'";
-    }
-    if (options?.status) {
-      sql += ' AND status = ?';
-      params.push(options.status);
-    }
-    if (options?.keywords?.length) {
-      sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
-      params.push(...options.keywords.map((kw) => `%"${kw}"%`));
-    }
-    // R2-P1 fix: threadId filter for semantic search
-    const semanticThreadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
-    if (semanticThreadAnchor) {
-      sql += ' AND anchor = ?';
-      params.push(semanticThreadAnchor);
-    }
-    if (options?.worldId) {
-      sql += ' AND world_id = ?';
-      params.push(options.worldId);
-    }
-    if (options?.sceneId) {
-      sql += ' AND scene_id = ?';
-      params.push(options.sceneId);
-    }
-    // P1-3 fix: provenanceTier filter for semantic search
-    if (options?.provenanceTier) {
-      sql += ' AND provenance_tier = ?';
-      params.push(options.provenanceTier);
-    }
-    if (suppressBackstop) {
-      sql += " AND activation != 'backstop'";
-    }
-
-    const rows = this.db?.prepare(sql).all(...params) as RowShape[];
-    const docMap = new Map(rows.map((r) => [r.anchor, rowToItem(r)]));
+    const rowsByAnchor = this.selectEvidenceDocRowsByAnchor(
+      anchors,
+      options,
+      this.buildSearchFilters(options, suppressBackstop),
+    );
+    const docMap = new Map([...rowsByAnchor].map(([anchor, row]) => [anchor, rowToItem(row)]));
 
     // Return in NN distance order, filtered by what passed scope/kind
-    return nnResults
+    const items = nnResults
       .filter((r) => docMap.has(r.anchor))
-      .map((r) => docMap.get(r.anchor)!)
-      .slice(0, limit);
+      .flatMap((r) => {
+        const item = docMap.get(r.anchor);
+        return item ? [item] : [];
+      });
+    applyTemporalStatusPenalty(items);
+    return items.slice(0, limit);
   }
 
   /**
@@ -1235,8 +1413,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     suppressBackstop?: boolean,
   ): Promise<EvidenceItem[]> {
     const pool = Math.min(Math.max(limit * 4, 20), 100);
-    const queryVec = await this.embedDeps!.embedding.embed([query]);
+    await coverageSearchCheckpoint(options);
+    const queryVec = await this.embedDeps!.embedding.embed([query], options?.signal);
+    await coverageSearchCheckpoint(options);
     const nnResults = this.embedDeps!.vectorStore.search(queryVec[0], pool);
+    await coverageSearchCheckpoint(options);
 
     // RRF fusion: score = Σ 1/(k + rank_i), k=60
     const RRF_K = 60;
@@ -1262,70 +1443,24 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     // P1 fix: hydrate missing NN anchors WITH filters (status/kind/keywords)
     const missingAnchors = allAnchors.filter((a) => !lexicalMap.has(a));
-    if (missingAnchors.length > 0 && this.db) {
-      const placeholders = missingAnchors.map(() => '?').join(',');
-      let sql = `SELECT * FROM evidence_docs WHERE anchor IN (${placeholders})`;
-      const params: unknown[] = [...missingAnchors];
-
-      // Apply SearchOptions filters (same as semanticNNSearch)
-      const effectiveKind =
-        options?.kind ??
-        (options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined);
-      const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
-      const excludePackKnowledge = effectiveKind !== 'pack-knowledge';
-      if (effectiveKind) {
-        sql += ' AND kind = ?';
-        params.push(effectiveKind);
-      }
-      if (excludeSessionAndThread) {
-        sql += " AND kind != 'session' AND kind != 'thread'";
-      }
-      if (excludePackKnowledge) {
-        sql += " AND kind != 'pack-knowledge'";
-      }
-      if (options?.status) {
-        sql += ' AND status = ?';
-        params.push(options.status);
-      }
-      if (options?.keywords?.length) {
-        sql += ` AND (${options.keywords.map(() => 'keywords LIKE ?').join(' OR ')})`;
-        params.push(...options.keywords.map((kw) => `%"${kw}"%`));
-      }
-      // R2-P1 fix: threadId filter for hybrid NN hydrate
-      const hybridThreadAnchor = options?.threadId ? `thread-${options.threadId}` : undefined;
-      if (hybridThreadAnchor) {
-        sql += ' AND anchor = ?';
-        params.push(hybridThreadAnchor);
-      }
-      if (options?.worldId) {
-        sql += ' AND world_id = ?';
-        params.push(options.worldId);
-      }
-      if (options?.sceneId) {
-        sql += ' AND scene_id = ?';
-        params.push(options.sceneId);
-      }
-      // P1-3 fix: provenanceTier filter for hybrid NN hydrate
-      if (options?.provenanceTier) {
-        sql += ' AND provenance_tier = ?';
-        params.push(options.provenanceTier);
-      }
-      if (suppressBackstop) {
-        sql += " AND activation != 'backstop'";
-      }
-
-      const rows = this.db.prepare(sql).all(...params) as RowShape[];
-      for (const row of rows) {
+    if (missingAnchors.length > 0) {
+      const rows = this.selectEvidenceDocRowsByAnchor(
+        missingAnchors,
+        options,
+        this.buildSearchFilters(options, suppressBackstop),
+      );
+      for (const row of rows.values()) {
         lexicalMap.set(row.anchor, rowToItem(row));
       }
     }
 
-    // Sort by RRF score descending, return top limit
-    return allAnchors
+    // Sort by RRF score descending, then apply temporal demotion before the final top-k cut.
+    const items = allAnchors
       .filter((a) => lexicalMap.has(a))
       .sort((a, b) => (scores.get(b) ?? 0) - (scores.get(a) ?? 0))
-      .map((a) => lexicalMap.get(a)!)
-      .slice(0, limit);
+      .map((a) => lexicalMap.get(a)!);
+    applyTemporalStatusPenalty(items);
+    return items.slice(0, limit);
   }
 
   async upsert(items: EvidenceItem[]): Promise<void> {
@@ -1374,22 +1509,49 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
 
+      // F152 Phase C fix: ON CONFLICT preserves user annotations (generalizable)
+      // and first_indexed_at through index rebuilds, instead of DELETE+INSERT.
       const stmt = db.prepare(`
-				INSERT OR REPLACE INTO evidence_docs
+				INSERT INTO evidence_docs
 				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
 				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source, generalizable,
 				 authority, activation, verified_at,
 				 source_ids, summary_of_anchor, compression_rationale,
 				 contradicts, invalid_at, review_cycle_days,
-				 world_id, scene_id, first_indexed_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 world_id, scene_id, first_indexed_at, drill_down_json)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(anchor) DO UPDATE SET
+				 kind = excluded.kind,
+				 status = excluded.status,
+				 title = excluded.title,
+				 summary = excluded.summary,
+				 keywords = excluded.keywords,
+				 source_path = excluded.source_path,
+				 source_hash = excluded.source_hash,
+				 superseded_by = excluded.superseded_by,
+				 materialized_from = excluded.materialized_from,
+				 updated_at = excluded.updated_at,
+				 pack_id = excluded.pack_id,
+				 provenance_tier = excluded.provenance_tier,
+				 provenance_source = excluded.provenance_source,
+				 generalizable = COALESCE(excluded.generalizable, evidence_docs.generalizable),
+				 authority = excluded.authority,
+				 activation = excluded.activation,
+				 verified_at = excluded.verified_at,
+				 source_ids = excluded.source_ids,
+				 summary_of_anchor = excluded.summary_of_anchor,
+				 compression_rationale = excluded.compression_rationale,
+				 contradicts = excluded.contradicts,
+				 invalid_at = excluded.invalid_at,
+				 review_cycle_days = excluded.review_cycle_days,
+				 world_id = excluded.world_id,
+				 scene_id = excluded.scene_id,
+				 first_indexed_at = evidence_docs.first_indexed_at,
+				 drill_down_json = excluded.drill_down_json
 			`);
-      const lookupFirstIndexed = db.prepare('SELECT first_indexed_at FROM evidence_docs WHERE anchor = ?');
 
       const tx = db.transaction((items: EvidenceItem[]) => {
         for (const item of items) {
-          const existing = lookupFirstIndexed.get(item.anchor) as { first_indexed_at: number } | undefined;
-          const firstIndexedAt = existing != null ? existing.first_indexed_at : Date.now();
           stmt.run(
             item.anchor,
             item.kind,
@@ -1417,7 +1579,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
             item.reviewCycleDays ?? null,
             item.worldId ?? null,
             item.sceneId ?? null,
-            firstIndexedAt,
+            Date.now(),
+            item.drillDown ? JSON.stringify(item.drillDown) : null,
           );
         }
       });
@@ -1430,7 +1593,18 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   async deleteByAnchor(anchor: string): Promise<void> {
     return this.writeQueue.enqueue(() => {
       this.ensureOpen();
-      this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+      const db = this.getDb();
+      if (!anchor.startsWith('thread-')) {
+        const passages = db
+          .prepare('SELECT passage_id AS passageId FROM evidence_passages WHERE doc_anchor = ?')
+          .all(anchor) as Array<{ passageId: string }>;
+        deletePassageVectors(
+          db,
+          passages.map((passage) => ({ docAnchor: anchor, passageId: passage.passageId })),
+        );
+        db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?').run(anchor);
+      }
+      db.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
     });
   }
 
@@ -1445,22 +1619,33 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   removeBySourcePrefix(prefix: string): number {
     this.ensureOpen();
+    const db = this.getDb();
     const escaped = prefix.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
     const likePattern = escaped + '%';
     const anchors = (
-      this.db?.prepare("SELECT anchor FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").all(likePattern) as
-        | Array<{ anchor: string }>
-        | undefined
-    )?.map((r) => r.anchor);
-    const result = this.db?.prepare("DELETE FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").run(likePattern);
-    if (anchors?.length) {
+      db.prepare("SELECT anchor FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").all(likePattern) as Array<{
+        anchor: string;
+      }>
+    ).map((r) => r.anchor);
+    const result = db.prepare("DELETE FROM evidence_docs WHERE source_path LIKE ? ESCAPE '\\'").run(likePattern);
+    if (anchors.length) {
       const CHUNK = 400;
       for (let i = 0; i < anchors.length; i += CHUNK) {
         const batch = anchors.slice(i, i + CHUNK);
         const ph = batch.map(() => '?').join(',');
-        this.db
-          ?.prepare(`DELETE FROM edges WHERE from_anchor IN (${ph}) OR to_anchor IN (${ph})`)
-          .run(...batch, ...batch);
+        db.prepare(`DELETE FROM edges WHERE from_anchor IN (${ph}) OR to_anchor IN (${ph})`).run(...batch, ...batch);
+        const passageRows = db
+          .prepare(
+            `SELECT doc_anchor AS docAnchor, passage_id AS passageId FROM evidence_passages WHERE doc_anchor IN (${ph})`,
+          )
+          .all(...batch) as Array<{ docAnchor: string; passageId: string }>;
+        deletePassageVectors(
+          db,
+          passageRows.filter((row) => !row.docAnchor.startsWith('thread-')),
+        );
+        db.prepare(`DELETE FROM evidence_passages WHERE doc_anchor IN (${ph}) AND doc_anchor NOT LIKE 'thread-%'`).run(
+          ...batch,
+        );
         try {
           this.db?.prepare(`DELETE FROM evidence_vectors WHERE anchor IN (${ph})`).run(...batch);
         } catch {
@@ -1468,7 +1653,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
     }
-    return result?.changes ?? 0;
+    return result.changes;
   }
 
   async getByAnchor(anchor: string): Promise<EvidenceItem | null> {
@@ -1876,6 +2061,7 @@ interface RowShape {
   collection_id: string | null;
   review_status: string | null;
   first_indexed_at: number | null;
+  drill_down_json: string | null;
 }
 
 function rowToItem(row: RowShape): EvidenceItem {
@@ -1913,6 +2099,7 @@ function rowToItem(row: RowShape): EvidenceItem {
   if (row.scene_id != null) item.sceneId = row.scene_id;
   if (row.review_status != null) item.reviewStatus = row.review_status as EvidenceItem['reviewStatus'];
   if (row.first_indexed_at != null) item.firstIndexedAt = row.first_indexed_at;
+  if (row.drill_down_json != null) item.drillDown = JSON.parse(row.drill_down_json) as EvidenceItem['drillDown'];
   return item;
 }
 

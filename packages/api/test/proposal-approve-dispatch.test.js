@@ -49,6 +49,7 @@ describe('F128 approve dispatch — initialMessage routing', () => {
       (
         await ctx.propose({
           userId: 'alice',
+          catId: 'codex-sol',
           threadId: source.id,
           body: { initialMessage: 'Kick this off', preferredCats: ['opus'] },
         })
@@ -87,10 +88,17 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     assert.ok(entries[0].content.startsWith('Kick this off'), 'enqueued content should start with user-typed content');
     assert.deepEqual(entries[0].targetCats, ['opus']);
     assert.equal(entries[0].intent, 'execute');
+    assert.equal(entries[0].ownerAuthProvenance, 'strict');
     assert.ok(entries[0].messageId);
     const stored = await ctx.messageStore.getById(entries[0].messageId);
     assert.equal(stored.deliveryStatus, 'queued');
     assert.deepEqual(stored.mentions, ['opus']);
+    const timeline = await ctx.messageStore.getByThread(body.threadId, 20, 'alice', {
+      includeQueuedCatMessages: true,
+    });
+    assert.equal(timeline.length, 1, 'the source-cat seed must be visible before the invited cat finishes');
+    assert.equal(timeline[0].id, stored.id);
+    assert.equal(timeline[0].catId, 'codex-sol', 'timeline projection must retain the source cat for avatar rendering');
   });
 
   test('approve falls back to preferredCats when initialMessage has no @-mention', async () => {

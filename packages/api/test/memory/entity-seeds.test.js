@@ -68,9 +68,10 @@ describe('F209 entity seeds', () => {
     );
 
     try {
+      const sqlitePath = join(root, 'evidence.sqlite');
       const services = await createMemoryServices({
         type: 'sqlite',
-        sqlitePath: join(root, 'evidence.sqlite'),
+        sqlitePath,
         docsRoot,
         markersDir,
         globalDbPath: join(root, 'global.sqlite'),
@@ -112,6 +113,15 @@ describe('F209 entity seeds', () => {
       assert.equal(opus47.aliases.includes('布偶猫'), false, 'breed display name should not become a variant alias');
       assert.equal(opus47.aliases.includes('Opus 4.7'), false, 'variant label should not become a cat alias');
       assert.ok(opus47.aliases.includes('布偶猫4.7'), 'explicit variant mention should remain searchable');
+
+      const { default: Database } = await import('better-sqlite3');
+      const auditDb = new Database(sqlitePath, { readonly: true });
+      try {
+        const sources = auditDb.prepare('SELECT DISTINCT source FROM entity_revision_events').all();
+        assert.deepEqual(sources, [{ source: 'seed-sync' }], 'startup seeds must cross the registry revision net');
+      } finally {
+        auditDb.close();
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -20,6 +20,26 @@ function createMockSocketManager() {
   };
 }
 
+function activePrWaitState() {
+  return {
+    await: {
+      v: 1,
+      generation: 1,
+      subjectRef: 'pr:owner/repo#7',
+      ownerFence: { kind: 'containing_task', generation: 1 },
+      baseline: { capturedAt: 100, headSha: 'aaaa1111' },
+      continuation: {
+        when: [{ kind: 'pr_head_changed' }],
+        // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+        then: 'Re-lock exact HEAD.',
+      },
+      expiresAt: Date.now() + 60_000,
+      createdAt: 100,
+      provenance: 'explicit_registration',
+    },
+  };
+}
+
 describe('Tasks Routes', () => {
   let taskStore;
   let socketManager;
@@ -30,11 +50,26 @@ describe('Tasks Routes', () => {
     socketManager = createMockSocketManager();
   });
 
-  async function createApp() {
+  async function createApp(overrides = {}) {
     const { tasksRoutes } = await import('../dist/routes/tasks.js');
     const app = Fastify();
-    await app.register(tasksRoutes, { taskStore, socketManager });
+    await app.register(tasksRoutes, { taskStore, socketManager, ...overrides });
     return app;
+  }
+
+  async function createWaitLifecycle() {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
+    const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
+    const messageStore = new MessageStore();
+    const eventLog = new MemoryWaitLifecycleEventLog();
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      eventLog,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    return { lifecycle, messageStore, eventLog };
   }
 
   // ---- POST /api/tasks ----
@@ -333,6 +368,89 @@ describe('Tasks Routes', () => {
     });
 
     assert.equal(response.statusCode, 400);
+  });
+
+  test('PATCH owner transfer silently terminalizes an active PR wait before changing custody', async () => {
+    const task = taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread-1',
+      title: 'PR tracking: owner/repo#7',
+      ownerCatId: 'opus',
+      why: 'wait for head',
+      createdBy: 'opus',
+      userId: 'user-1',
+      automationState: activePrWaitState(),
+    });
+    const { lifecycle, messageStore, eventLog } = await createWaitLifecycle();
+    const app = await createApp({ waitLifecycleHolder: { current: lifecycle } });
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${task.id}`,
+      payload: { ownerCatId: 'codex-sol' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().ownerCatId, 'codex-sol');
+    assert.equal(response.json().automationState.await, undefined);
+    assert.equal(response.json().automationState.waitOutcome.reason, 'owner_changed');
+    assert.equal(response.json().automationState.waitOutcome.delivery, 'not_applicable');
+    assert.equal(messageStore.getByThread('thread-1').length, 0);
+    assert.equal((await eventLog.read(task.id)).at(0).reason, 'owner_changed');
+  });
+
+  test('POST cancel-wait requires the owning user, an empty body, and emits a silent terminal event', async () => {
+    const task = taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread-1',
+      title: 'PR tracking: owner/repo#7',
+      ownerCatId: 'opus',
+      why: 'wait for head',
+      createdBy: 'opus',
+      userId: 'user-1',
+      automationState: activePrWaitState(),
+    });
+    const { lifecycle, messageStore, eventLog } = await createWaitLifecycle();
+    const app = await createApp({ waitLifecycleHolder: { current: lifecycle } });
+
+    const unauthenticated = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/cancel-wait`,
+      payload: {},
+    });
+    assert.equal(unauthenticated.statusCode, 401);
+
+    const wrongUser = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/cancel-wait`,
+      headers: { 'x-cat-cafe-user': 'user-2' },
+      payload: {},
+    });
+    assert.equal(wrongUser.statusCode, 403);
+
+    const nonEmpty = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/cancel-wait`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: { reason: 'caller prose is not policy' },
+    });
+    assert.equal(nonEmpty.statusCode, 400);
+
+    const cancelled = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/${task.id}/cancel-wait`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+      payload: {},
+    });
+    assert.equal(cancelled.statusCode, 200);
+    const stored = taskStore.get(task.id);
+    assert.equal(stored.automationState.await, undefined);
+    assert.equal(stored.automationState.waitOutcome.reason, 'user_cancel');
+    assert.deepEqual(stored.automationState.waitOutcome.actor, { kind: 'user', userId: 'user-1' });
+    assert.equal(messageStore.getByThread('thread-1').length, 0);
+    assert.equal((await eventLog.read(task.id)).at(0).reason, 'user_cancel');
   });
 
   // ---- DELETE /api/tasks/:id ----

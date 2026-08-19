@@ -1397,11 +1397,12 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
 
   it('shows node detail panel when a node is clicked (AC-J5)', async () => {
     const now = Date.now();
+    const longFeatureName = `Clickable Feature ${'keeps-fixed-node-geometry-'.repeat(12)}detail-tail`;
     backend.setItems([
       {
         id: 'click-1',
         userId: 'u',
-        title: '[F070] Clickable Feature',
+        title: `[F070] ${longFeatureName}`,
         summary: 'S',
         priority: 'p1',
         tags: ['feature:f070'],
@@ -1443,6 +1444,8 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     // Click the node
     const node = container.querySelector('[data-testid="mc-dep-node-F070"]') as HTMLElement;
     expect(node).not.toBeNull();
+    expect(node.querySelector('[data-overflow-measure="inline"]')).not.toBeNull();
+    expect(node.querySelector('[data-overflow-measure="block"]')).toBeNull();
     await act(async () => {
       node.click();
     });
@@ -1451,7 +1454,7 @@ describe('MissionControlPage — Tabs + Status bar + Dep graph', () => {
     const detail = container.querySelector('[data-testid="mc-dep-node-detail"]');
     expect(detail).not.toBeNull();
     expect(detail?.textContent).toContain('F070');
-    expect(detail?.textContent).toContain('Clickable Feature');
+    expect(detail?.textContent).toContain('detail-tail');
     expect(detail?.textContent).toContain('F049');
   });
 

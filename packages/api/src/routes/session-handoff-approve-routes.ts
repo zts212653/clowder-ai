@@ -13,9 +13,12 @@
  */
 
 import type { SealReason, SessionHandoffProposal } from '@cat-cafe/shared';
+import { validateHumanDispositionFeedbackForProducer } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import type { SessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import {
@@ -26,7 +29,11 @@ import {
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ISessionHandoffProposalStore } from '../domains/cats/services/stores/ports/SessionHandoffProposalStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
+import {
+  respondToSessionHandoffRejection,
+  type SessionHandoffRejectSignal,
+} from './session-handoff-reject-response.js';
 
 export interface SessionHandoffApproveRoutesOptions {
   handoffProposalStore: ISessionHandoffProposalStore;
@@ -42,17 +49,18 @@ export interface SessionHandoffApproveRoutesOptions {
    */
   approveStaleMs?: number;
   /** F192: Record proposal rejection as task outcome A2 signal. */
-  onProposalReject?: (input: { proposalId: string; catId: string; threadId: string; rejectionReason?: string }) => void;
+  onProposalReject?: SessionHandoffRejectSignal;
 }
 
 const paramsSchema = z.object({ proposalId: z.string().min(1).max(200) });
+const rejectBodySchema = z.object({ feedback: z.unknown().optional() }).strict();
 
 const HANDOFF_CONTINUATION_PROMPT =
   '〔session 接力续接〕你在上个 session 的干净断点主动发起了 handoff 并获批。这是 fresh context 的你——' +
   '上个 session 你亲手写的五件套交接留言已在上方 bootstrap 注入。请据此无缝接力，从 next_steps 继续。';
 
 type OwnedProposal =
-  | { ok: true; userId: string; proposal: SessionHandoffProposal }
+  | { ok: true; userId: string; ownerAuthProvenance: OwnerAuthProvenance; proposal: SessionHandoffProposal }
   | { ok: false; status: number; body: { error: string } };
 
 /** Shared param-parse + user-auth + ownership check for approve/reject (keeps each handler simple). */
@@ -71,7 +79,12 @@ async function resolveOwnedProposal(
   if (proposal.userId !== userId) {
     return { ok: false, status: 403, body: { error: 'Proposal does not belong to the current user' } };
   }
-  return { ok: true, userId, proposal };
+  return {
+    ok: true,
+    userId,
+    ownerAuthProvenance: resolveStrictUserId(request) === userId ? 'strict' : 'compatibility_fallback',
+    proposal,
+  };
 }
 
 export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffApproveRoutesOptions> = async (
@@ -92,7 +105,7 @@ export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffAppro
   // Shared deps for approveSessionHandoff + recoverStaleHandoffProposal. userId captured from the
   // request (= proposal.userId after ownership check) so the queued continuation lands in the same
   // per-(thread,user) scope; requestSeal/enqueueContinuation are infra adapters.
-  function buildTxnDeps(userId: string): SessionHandoffApproveDeps {
+  function buildTxnDeps(userId: string, ownerAuthProvenance: OwnerAuthProvenance): SessionHandoffApproveDeps {
     return {
       handoffProposalStore,
       sessionChainStore,
@@ -104,6 +117,7 @@ export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffAppro
         const enq = invocationQueue.enqueue({
           threadId: input.threadId,
           userId,
+          ownerAuthProvenance,
           content: HANDOFF_CONTINUATION_PROMPT,
           source: 'agent',
           sourceCategory: 'continuation',
@@ -208,8 +222,9 @@ export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffAppro
       reply.status(auth.status);
       return auth.body;
     }
-    const { userId, proposal } = auth;
-    const deps = buildTxnDeps(userId);
+    const { userId, ownerAuthProvenance, proposal } = auth;
+    await requireAnchoredPublication(handoffProposalStore, proposal.proposalId);
+    const deps = buildTxnDeps(userId, ownerAuthProvenance);
 
     switch (proposal.status) {
       case 'rejected':
@@ -256,38 +271,41 @@ export const sessionHandoffApproveRoutes: FastifyPluginAsync<SessionHandoffAppro
       return auth.body;
     }
     const { userId, proposal } = auth;
+    await requireAnchoredPublication(handoffProposalStore, proposal.proposalId);
+
+    const body = rejectBodySchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      reply.status(400);
+      return { error: 'Invalid rejection body' };
+    }
+    const validatedFeedback = validateHumanDispositionFeedbackForProducer('F225', body.data.feedback);
+    if (!validatedFeedback.success) {
+      reply.status(400);
+      return { error: 'Invalid human disposition feedback', reason: validatedFeedback.reason };
+    }
+    const feedback = validatedFeedback.data;
 
     if (proposal.status === 'approved') {
       reply.status(409);
       return { error: 'Proposal already approved (commit point passed)', status: proposal.status };
     }
-    if (proposal.status === 'rejected' || proposal.status === 'expired') {
-      return { proposalId: proposal.proposalId, status: proposal.status, deduped: true };
-    }
-
-    // CAS pending→rejected. null if status drifted to 'approving' (approve in flight / crashed
-    // mid-transaction) — reject must NOT race a possibly-committed seal.
-    const marked = await handoffProposalStore.markRejected(proposal.proposalId);
-    if (!marked) {
+    if (proposal.status === 'expired') {
       reply.status(409);
-      return { error: 'Proposal is being approved — cannot reject; retry once it settles' };
+      return { error: 'Proposal already expired', status: proposal.status };
     }
-    socketManager.emitToUser(userId, 'proposal_updated', marked);
-
-    // F192: Record session handoff rejection as task outcome eval signal
-    if (onProposalReject) {
-      try {
-        onProposalReject({
-          proposalId: proposal.proposalId,
-          catId: proposal.sourceCatId,
-          threadId: proposal.sourceThreadId,
-        });
-      } catch {
-        // Best-effort: don't fail the rejection response if signal recording fails
-      }
-    }
-
-    return { proposalId: marked.proposalId, status: marked.status };
+    const transition = await handoffProposalStore.markRejected(proposal.proposalId, {
+      decidedAt: Date.now(),
+      feedback,
+    });
+    return respondToSessionHandoffRejection({
+      transition,
+      proposal,
+      feedback,
+      userId,
+      reply,
+      socketManager,
+      onProposalReject,
+    });
   });
 };
 

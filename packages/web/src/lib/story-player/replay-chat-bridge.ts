@@ -42,6 +42,8 @@ export interface ReplayChatMessage {
   }>;
   /** Extended thinking content (for ThinkingContent rendering) */
   thinking?: string;
+  /** Stream-origin assistant stdout (for CliOutputBlock rendering) */
+  cliStdout?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +113,14 @@ export function bridgeReplayEvent(event: ReplayEvent): ReplayChatMessage {
         thinking: event.content,
       };
 
+    case 'cli_stdout':
+      return {
+        ...base,
+        type: 'assistant',
+        content: '',
+        cliStdout: event.content,
+      };
+
     case 'system':
       return {
         ...base,
@@ -139,6 +149,8 @@ function mergeAssistantEvent(message: ReplayChatMessage, event: ReplayEvent): vo
   message.content = appendText(message.content, next.content);
   const mergedThinking = appendText(message.thinking, next.thinking);
   message.thinking = mergedThinking === '' ? undefined : mergedThinking;
+  const mergedCliStdout = appendText(message.cliStdout, next.cliStdout);
+  message.cliStdout = mergedCliStdout === '' ? undefined : mergedCliStdout;
   if (next.toolEvents?.length) {
     const existingToolEvents = message.toolEvents === undefined ? [] : message.toolEvents;
     message.toolEvents = [...existingToolEvents, ...next.toolEvents];

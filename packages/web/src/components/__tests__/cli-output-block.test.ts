@@ -336,12 +336,14 @@ describe('CliOutputBlock', () => {
 
   // ── P1-1: per-tool collapse (AC-A2) ──
   it('tool rows are individually collapsible — click to show detail', () => {
+    const tail = 'TOOL_RESULT_TAIL_SENTINEL';
+    const fullDetail = `${'complete tool output '.repeat(40)}${tail}`;
     act(() => {
       root.render(
         React.createElement(CliOutputBlock, {
           events: [
             { id: 't1', kind: 'tool_use', timestamp: 1000, label: 'Read index.ts' },
-            { id: 'r1', kind: 'tool_result', timestamp: 1001, label: 'Read index.ts', detail: '200 lines read' },
+            { id: 'r1', kind: 'tool_result', timestamp: 1001, label: 'Read index.ts', detail: fullDetail },
           ],
           status: 'done',
           defaultExpanded: true,
@@ -355,7 +357,7 @@ describe('CliOutputBlock', () => {
     });
     // Tool label visible, but detail hidden by default (collapsed row)
     expect(container.textContent).toContain('Read index.ts');
-    expect(container.textContent).not.toContain('200 lines read');
+    expect(container.textContent).not.toContain(tail);
 
     // Click the tool row to expand it
     const toolRow = container.querySelector('[data-testid="tool-row-t1"]') as HTMLElement | null;
@@ -363,7 +365,7 @@ describe('CliOutputBlock', () => {
     act(() => {
       toolRow?.click();
     });
-    expect(container.textContent).toContain('200 lines read');
+    expect(container.textContent).toContain(tail);
   });
 
   // ── P1-2: auto-collapse on streaming→done (AC-A6) ──

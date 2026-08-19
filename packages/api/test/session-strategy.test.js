@@ -349,5 +349,58 @@ describe('session-strategy', () => {
     });
   });
 
+  // ── #1208 denominator fix: inputCeiling, not windowTokens ──
+
+  describe('#1208 denominator fix', () => {
+    function makeStrategy(overrides = {}) {
+      return {
+        strategy: 'handoff',
+        thresholds: { warn: 0.75, action: 0.85 },
+        turnBudget: 12_000,
+        safetyMargin: 4_000,
+        ...overrides,
+      };
+    }
+
+    test('inputCeiling-based remaining catches overflow that windowTokens would miss', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy();
+      // Scenario: 200K window, 16K output reserve → inputCeiling = 184K.
+      // usedTokens = 170K.
+      // With inputCeiling (correct): remaining = 184K - 170K = 14K < 16K → seal
+      // With windowTokens (wrong):   remaining = 200K - 170K = 30K > 16K → no seal → overflow!
+      const inputCeiling = 184_000; // 200K - 16K output reserve
+      const action = shouldTakeAction(0.92, inputCeiling, 170_000, 0, strategy);
+      assert.equal(action.type, 'seal', 'inputCeiling-based remaining should trigger seal');
+      assert.equal(action.reason, 'budget_exhausted');
+    });
+
+    test('fillRatio with inputCeiling triggers action threshold correctly', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy();
+      // 200K window, 16K reserve → inputCeiling = 184K.
+      // usedTokens = 160K.
+      // Correct fillRatio = 160K/184K ≈ 0.8696 → above 0.85 action threshold → seal
+      // Wrong fillRatio   = 160K/200K = 0.80   → below 0.85 → no action
+      const inputCeiling = 184_000;
+      const correctFillRatio = 160_000 / inputCeiling; // ~0.8696
+      const action = shouldTakeAction(correctFillRatio, inputCeiling, 160_000, 0, strategy);
+      assert.equal(action.type, 'seal', 'correct fillRatio should exceed action threshold');
+    });
+
+    test('hybrid strategy uses inputCeiling for remaining budget', async () => {
+      const { shouldTakeAction } = await loadModule();
+      const strategy = makeStrategy({ strategy: 'hybrid', hybrid: { maxCompressions: 2 } });
+      // inputCeiling=184K, used=170K → remaining=14K < 16K → budget exhausted
+      // compressionCount=0 < max 2 → allow_compress (not seal yet)
+      const action = shouldTakeAction(0.92, 184_000, 170_000, 0, strategy);
+      assert.equal(
+        action.type,
+        'allow_compress',
+        'hybrid with compressions remaining should allow compress on budget exhaust',
+      );
+    });
+  });
+
   // Phase 2 tests (backward compat + config override) → session-strategy-phase2.test.js
 });

@@ -15,12 +15,6 @@ vi.mock('next/link', () => ({
 vi.mock('@/components/ThreadCatPill', () => ({
   ThreadCatPill: () => null,
 }));
-vi.mock('@/components/ExportButton', () => ({
-  ExportButton: () => null,
-}));
-vi.mock('@/components/ChatVoiceFeatureControls', () => ({
-  ChatVoiceFeatureControls: () => null,
-}));
 vi.mock('@/components/VoiceCompanionButton', () => ({
   VoiceCompanionButton: () => null,
 }));
@@ -62,10 +56,8 @@ const defaultProps = {
   authPendingCount: 0,
   viewMode: 'single' as const,
   onToggleViewMode: vi.fn(),
-  onOpenMobileStatus: vi.fn(),
   statusPanelOpen: false,
   onToggleStatusPanel: vi.fn(),
-  defaultCatId: 'opus',
 };
 
 describe('ChatContainerHeader thread indicator', () => {
@@ -163,7 +155,7 @@ describe('ChatContainerHeader thread indicator', () => {
     const html = renderToStaticMarkup(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' }));
 
     expect(html).toMatch(/class="flex min-w-0[^"]*"/);
-    expect(html).toMatch(/<span class="truncate min-w-0[^"]*"[^>]*>A{120}<\/span>/);
+    expect(html).toMatch(/<button[^>]*class="truncate min-w-0[^"]*"[^>]*>A{120}<\/button>/);
     expect(html).toContain('flex-shrink-0');
     expect(html).toContain('· clowder-ai');
   });
@@ -194,7 +186,9 @@ describe('ChatContainerHeader thread indicator', () => {
 
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
     act(() => root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' })));
-    expect(() => act(() => (container.querySelector('[role="button"]') as HTMLElement | null)?.click())).not.toThrow();
+    expect(() =>
+      act(() => (container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null)?.click()),
+    ).not.toThrow();
 
     Object.defineProperty(navigator, 'clipboard', {
       value: {
@@ -204,7 +198,9 @@ describe('ChatContainerHeader thread indicator', () => {
       },
       configurable: true,
     });
-    expect(() => act(() => (container.querySelector('[role="button"]') as HTMLElement | null)?.click())).not.toThrow();
+    expect(() =>
+      act(() => (container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null)?.click()),
+    ).not.toThrow();
 
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: () => Promise.reject(new Error('denied')) },
@@ -212,7 +208,7 @@ describe('ChatContainerHeader thread indicator', () => {
     });
     await expect(
       act(async () => {
-        (container.querySelector('[role="button"]') as HTMLElement | null)?.click();
+        (container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null)?.click();
       }),
     ).resolves.toBeUndefined();
   });
@@ -230,9 +226,7 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' }));
       });
 
-      // The title span also has role="button" now (double-click to edit),
-      // so grab the project chip specifically via aria-label
-      const projectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
+      const projectChip = container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null;
       expect(projectChip?.getAttribute('title')).toBe('点击复制: /projects/cat-cafe');
 
       await act(async () => {
@@ -275,7 +269,7 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' }));
       });
 
-      const projectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
+      const projectChip = container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null;
       await act(async () => {
         projectChip?.click();
         await Promise.resolve();
@@ -287,7 +281,7 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_next' }));
       });
 
-      const nextProjectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
+      const nextProjectChip = container.querySelector('button[aria-label*="项目路径"]') as HTMLElement | null;
       expect(nextProjectChip?.textContent).toContain('next-app');
       expect(nextProjectChip?.textContent).not.toContain('copied!');
       expect(nextProjectChip?.getAttribute('title')).toBe('点击复制: /projects/next-app');

@@ -106,6 +106,37 @@ function nextFindingId(): string {
 // Friction → finding gate (F192 Phase D + 2026-05-29 denominator-robustness fix).
 const MIN_COUNT = 3;
 const RATIO_FLOOR = 0.05;
+const ZERO_TOLERANCE_FRICTION: ReadonlySet<string> = new Set([
+  'hold_lifecycle.expired_after_satisfied_total',
+  'event_wait.false_bypass_total',
+  'turn_custody.new_only_unjustified_total',
+  'turn_custody.new_only_unexplained_total',
+  'turn_custody.new_only_classification_gap_total',
+  'turn_custody.protocol_action_without_custody_total',
+  'turn_custody.user_nudge_required_total',
+  'turn_custody.same_subject_post_terminal_enqueue_total',
+  'turn_custody.lease_succeeded_subject_nonterminal_total',
+  'external_case.verdict_ready_without_delivery_total',
+  'external_case.noisy_wake_during_cloud_review_total',
+  'external_case.duplicate_reviewer_wake_per_head_total',
+  'external_case.user_nudge_required_total',
+]);
+
+const ZERO_TOLERANCE_INVARIANT_BY_METRIC: Readonly<Record<string, string>> = {
+  'hold_lifecycle.expired_after_satisfied_total': 'Phase Q hold lifecycle invariant',
+  'event_wait.false_bypass_total': 'F177 event-backed routing-exit invariant',
+  'turn_custody.new_only_unjustified_total': 'Phase T justified-block invariant',
+  'turn_custody.new_only_unexplained_total': 'Phase T explained-block invariant',
+  'turn_custody.new_only_classification_gap_total': 'Phase T authoritative-denominator invariant',
+  'turn_custody.protocol_action_without_custody_total': 'Phase T structured-custody invariant',
+  'turn_custody.user_nudge_required_total': 'Phase T no-user-router invariant',
+  'turn_custody.same_subject_post_terminal_enqueue_total': 'Phase T terminal-subject invariant',
+  'turn_custody.lease_succeeded_subject_nonterminal_total': 'Phase T independent-subject-truth invariant',
+  'external_case.verdict_ready_without_delivery_total': 'F168 verdict delivery invariant',
+  'external_case.noisy_wake_during_cloud_review_total': 'F168 silent cloud-review invariant',
+  'external_case.duplicate_reviewer_wake_per_head_total': 'F168 one-wake-per-head invariant',
+  'external_case.user_nudge_required_total': 'F168 no-user-dispatch invariant',
+};
 
 // Per-friction-metric activation denominators (most specific tier). C2 runs TWO
 // independent guards with separate counts — verdict-without-pass vs void-hold — so they
@@ -134,6 +165,13 @@ interface FrictionGrade {
   baseKey: string;
   baseline: number;
   ratioText: string;
+  zeroTolerance?: boolean;
+}
+
+function usesMetricTarget(grade: FrictionGrade): boolean {
+  if (grade.hasBaseline) return true;
+  if (grade.zeroTolerance === true) return true;
+  return false;
 }
 
 /**
@@ -154,6 +192,19 @@ function gradeFriction(
   value: number,
   activationCounts: Record<string, number | null>,
 ): FrictionGrade | null {
+  if (ZERO_TOLERANCE_FRICTION.has(metric)) {
+    if (value <= 0) return null;
+    return {
+      severity: 'high',
+      confidence: 0.95,
+      hasBaseline: true,
+      baseKey: 'zero_tolerance',
+      baseline: 0,
+      ratioText: 'nonzero',
+      zeroTolerance: true,
+    };
+  }
+
   if (value < MIN_COUNT) return null;
 
   const baseMetric = metric.replace(/\.(shadow_miss|failed|skip)$/, '');
@@ -190,14 +241,19 @@ function buildFrictionFinding(
   samples: ReadonlyArray<PerFireSample>,
 ): AttributionRecord {
   const isFailure = metric.includes('failed');
-  const measureNote = grade.hasBaseline
-    ? `baseline ${grade.baseKey}=${grade.baseline}, ratio=${grade.ratioText}`
-    : `denominator ${grade.baseKey} missing — ratio not computable; surfaced low-severity for visibility`;
-  const action = isFailure ? 'tool-fix' : grade.hasBaseline ? 'harness-tune' : 'add-counter';
-  const target = grade.hasBaseline ? `${componentId}/${metric}` : `${componentId}/${grade.baseKey}`;
-  const rationale = grade.hasBaseline
-    ? `${metric} ratio ${grade.ratioText} exceeds threshold`
-    : `${metric}=${value} but denominator ${grade.baseKey} missing — add activation counter to compute a real friction ratio`;
+  const measureNote = grade.zeroTolerance
+    ? 'zero-tolerance invariant: any nonzero count is a regression'
+    : grade.hasBaseline
+      ? `baseline ${grade.baseKey}=${grade.baseline}, ratio=${grade.ratioText}`
+      : `denominator ${grade.baseKey} missing — ratio not computable; surfaced low-severity for visibility`;
+  const metricTarget = usesMetricTarget(grade);
+  const action = isFailure ? 'tool-fix' : metricTarget ? 'harness-tune' : 'add-counter';
+  const target = metricTarget ? `${componentId}/${metric}` : `${componentId}/${grade.baseKey}`;
+  const rationale = grade.zeroTolerance
+    ? `${metric}=${value} violates the zero-tolerance ${ZERO_TOLERANCE_INVARIANT_BY_METRIC[metric] ?? 'harness invariant'}`
+    : grade.hasBaseline
+      ? `${metric} ratio ${grade.ratioText} exceeds threshold`
+      : `${metric}=${value} but denominator ${grade.baseKey} missing — add activation counter to compute a real friction ratio`;
 
   // F192 Phase D: per-fire sample evidence rows. Each sample becomes one row
   // alongside the headline counter row, carrying the full PerFireSample so
@@ -265,6 +321,7 @@ const SAMPLED_METRICS: ReadonlySet<string> = new Set([
   // actionable bucket (prior_overdue|prior_imminent) needs friction-finding
   // drilldown. Benign single-slot replacement churn moved to activationCounts.
   'c1.hold_zombie_count',
+  'hold_lifecycle.expired_after_satisfied_total',
 ]);
 
 function detectFrictionFromCounts(component: AttributionInput['snapshot']['components'][0]): AttributionRecord[] {
@@ -351,8 +408,8 @@ export function generateAttributionReport(input: AttributionInput): AttributionR
   const findings: AttributionRecord[] = [];
 
   for (const component of input.snapshot.components) {
-    findings.push(...detectFrictionFromCounts(component));
-    findings.push(...detectObservabilityGaps(component));
+    const componentFindings = [...detectFrictionFromCounts(component), ...detectObservabilityGaps(component)];
+    findings.push(...componentFindings.map((finding) => ({ ...finding, relatedFeature: input.featureId })));
   }
 
   const report: AttributionReport = {

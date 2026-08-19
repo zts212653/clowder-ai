@@ -5,9 +5,16 @@
  * Production data shapes:
  * - tool_use.label = "${catId} → ${toolName}" (e.g. "opus → search_evidence")
  * - tool_result.label = "${catId} ← result" (generic, no tool name)
- * - tool_result.detail = plain text from evidence-tools.ts, truncated by compactToolResultDetail
+ * - tool_result.detail = complete visible text from evidence-tools.ts, with recall metadata separated
  */
 
+import {
+  parseRecallMetaFromText,
+  type RecallMatchRank,
+  type RecallMatchType,
+  type RecallPreviewItem,
+  type RecallResultStatus,
+} from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import type { ToolEvent } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -15,10 +22,15 @@ import { apiFetch } from '@/utils/api-client';
 
 export interface RecallResultItem {
   title: string;
-  confidence?: string;
+  matchRank?: RecallMatchRank;
+  matchType?: RecallMatchType;
+  authority?: string;
+  updatedAt?: string;
   sourceType?: string;
   anchor?: string;
   snippet?: string;
+  /** F263 B.5: whether this specific candidate was consumed (used) by the cat */
+  consumed?: boolean;
 }
 
 export interface RecallEvent {
@@ -29,7 +41,16 @@ export interface RecallEvent {
   scope?: string;
   timestamp: number;
   resultCount?: number;
+  resultStatus?: RecallResultStatus;
   results?: RecallResultItem[];
+  /** F263 B.5: 'push' (system-injected) or 'pull' (cat-initiated search) */
+  source?: 'push' | 'pull';
+  /** F263 B.5: for push events, which pipeline (e.g. 'session_bootstrap', 'cold_context') */
+  pushSurface?: string;
+  /** F263 B.5: whether the cat inspected the results */
+  inspected?: boolean;
+  /** F263 B.5: 'used' or 'ignored' */
+  outcome?: 'used' | 'ignored';
 }
 
 /**
@@ -70,7 +91,20 @@ export function recallEventDisplayTitle(event: RecallEvent): string {
 
 export function recallEventResultLabel(event: RecallEvent): string | undefined {
   if (event.resultCount != null) return `${event.resultCount} 条命中`;
-  return event.results != null ? '命中数未记录' : undefined;
+  switch (event.resultStatus) {
+    case 'overflow':
+      return '结果已存档';
+    case 'parser_miss':
+    case 'result_unmerged':
+      return '统计待解析';
+    case 'legacy_unknown':
+      return '历史统计缺失';
+    case 'error':
+      return '召回失败';
+    case 'no_results':
+      return '0 条命中';
+  }
+  return event.results != null ? '统计待解析' : undefined;
 }
 
 /**
@@ -199,18 +233,51 @@ function applyResultToRecall(recall: RecallEvent, text: string, resultQuery?: Re
   if (recall.query === UNKNOWN_QUERY && resultQuery?.kind === 'exact') {
     recall.query = resultQuery.query;
   }
+  const meta = parseRecallMetaFromText(text);
+  const hasStructuredMeta = meta != null;
+  if (meta) {
+    recall.resultStatus = meta.resultStatus;
+    if (typeof meta.resultCount === 'number') {
+      recall.resultCount = meta.resultCount;
+    }
+  }
   const resultCount = parseResultCountFromText(text);
-  if (resultCount != null) {
+  if (!hasStructuredMeta && recall.resultCount == null && resultCount != null) {
     recall.resultCount = resultCount;
-  } else if (!isUnknownCountEvidenceFailure(text)) {
+  } else if (!hasStructuredMeta && recall.resultCount == null && !isUnknownCountEvidenceFailure(text)) {
     recall.resultCount = 0;
   }
-  recall.results = parseTextResults(text);
+  const textResults = parseTextResults(text);
+  recall.results = textResults.length > 0 ? textResults : recallPreviewItemsToResults(meta?.previewItems);
+  if (!recall.resultStatus) {
+    recall.resultStatus =
+      recall.resultCount === 0 ? 'no_results' : recall.resultCount != null ? 'counted' : 'legacy_unknown';
+  }
+}
+
+function recallPreviewItemsToResults(items: RecallPreviewItem[] | undefined): RecallResultItem[] {
+  if (!items) return [];
+  return items.flatMap((item) => {
+    if (!item.title) return [];
+    return [
+      {
+        title: item.title,
+        ...(item.matchRank ? { matchRank: item.matchRank } : {}),
+        ...(item.matchType ? { matchType: item.matchType } : {}),
+        ...(item.authority ? { authority: item.authority } : {}),
+        ...(item.updatedAt ? { updatedAt: item.updatedAt } : {}),
+        ...(item.anchor ? { anchor: item.anchor } : {}),
+        ...(item.snippet ? { snippet: item.snippet } : {}),
+      },
+    ];
+  });
 }
 
 /**
  * Pure: parse structured results from plain text output of evidence-tools.ts.
- * Format: "[confidence] title\n  anchor: ...\n  type: sourceType\n  > snippet"
+ * Ranked format: "[match:<rank> · authority:<tier> · updated:<timestamp>] title".
+ * Coverage format: "[matchType:<relation>] title". Historical bracket-only
+ * rank and coverage lines remain readable through separate, closed unions.
  * Exported for testing.
  */
 export function parseTextResults(text: string): RecallResultItem[] {
@@ -218,18 +285,18 @@ export function parseTextResults(text: string): RecallResultItem[] {
   const results: RecallResultItem[] = [];
   const lines = text.split('\n');
 
-  // Status banners like [DEGRADED] use the same bracket format as results — skip them
-  const STATUS_PREFIXES = new Set(['DEGRADED']);
-
   for (let i = 0; i < lines.length; i++) {
-    // Match lines like "[high] F102 Memory Adapter"
-    const match = lines[i].match(/^\[(\w+)\]\s+(.+)$/);
-    if (!match) continue;
-    if (STATUS_PREFIXES.has(match[1])) continue;
+    const current = lines[i].match(/^\[match:(high|mid|low) · authority:([^\]]+?) · updated:([^\]]+?)\]\s+(.+)$/);
+    const coverage = lines[i].match(/^\[matchType:(direct|alias|source-thread|convention)\]\s+(.+)$/);
+    const legacyRank = lines[i].match(/^\[(high|mid|low)\]\s+(.+)$/);
+    const legacyCoverage = lines[i].match(/^\[(direct|alias|source-thread|convention)\]\s+(.+)$/);
+    if (!current && !coverage && !legacyRank && !legacyCoverage) continue;
 
     const item: RecallResultItem = {
-      confidence: match[1],
-      title: match[2],
+      ...(current || legacyRank ? { matchRank: (current?.[1] ?? legacyRank?.[1]) as RecallMatchRank } : {}),
+      ...(coverage || legacyCoverage ? { matchType: (coverage?.[1] ?? legacyCoverage?.[1]) as RecallMatchType } : {}),
+      title: current?.[4] ?? coverage?.[2] ?? legacyRank?.[2] ?? legacyCoverage?.[2] ?? '',
+      ...(current ? { authority: current[2], updatedAt: current[3] } : {}),
     };
 
     // Look ahead for metadata on subsequent indented lines
@@ -289,13 +356,14 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
 
     if (evt.type === 'tool_result' && pendingSearches.length > 0) {
       const text = evt.detail ?? '';
-      if (isSearchEvidenceResultText(text)) {
-        const resultQuery = parseResultQueryFromText(text);
+      const resultText = evt.resultMeta ? `${text}\n${evt.resultMeta}` : text;
+      if (isSearchEvidenceResultText(resultText)) {
+        const resultQuery = parseResultQueryFromText(resultText);
         const pendingIndex = findPendingSearchIndex(pendingSearches, resultQuery);
         if (pendingIndex >= 0) {
           const pending = pendingSearches[pendingIndex];
           if (!pending) continue;
-          applyResultToRecall(pending, text, resultQuery);
+          applyResultToRecall(pending, resultText, resultQuery);
           pendingSearches.splice(pendingIndex, 1);
         }
       }
@@ -307,13 +375,37 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
 
 /**
  * Deduplicate recall events: live toolEvents take precedence (richer detail)
- * over API history events. Dedup key = timestamp + toolName + query.
+ * over API history events. When a live event matches a history event,
+ * merge consumption metadata (consumed, source, outcome) from history
+ * into the live event — live events don't have consumed_json from the
+ * correlation pipeline. Dedup key = timestamp + toolName + query.
  */
 export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEvent[]): RecallEvent[] {
   const eventKey = (e: RecallEvent) => `${e.timestamp}:${e.toolName ?? ''}:${e.query}`;
-  const seen = new Set(live.map(eventKey));
-  const unique = history.filter((e) => !seen.has(eventKey(e)));
-  return [...live, ...unique].sort((a, b) => a.timestamp - b.timestamp);
+  const historyByKey = new Map(history.map((e) => [eventKey(e), e]));
+
+  const merged = live.map((liveEvt) => {
+    const histEvt = historyByKey.get(eventKey(liveEvt));
+    if (!histEvt) return liveEvt;
+    // Merge consumption metadata from history into live event
+    const mergedResults = liveEvt.results?.map((r) => {
+      if (r.consumed != null) return r; // already has consumed info
+      const histResult = histEvt.results?.find((hr) => hr.anchor === r.anchor);
+      return histResult?.consumed != null ? { ...r, consumed: histResult.consumed } : r;
+    });
+    return {
+      ...liveEvt,
+      source: liveEvt.source ?? histEvt.source,
+      pushSurface: liveEvt.pushSurface ?? histEvt.pushSurface,
+      inspected: liveEvt.inspected ?? histEvt.inspected,
+      outcome: liveEvt.outcome ?? histEvt.outcome,
+      ...(mergedResults ? { results: mergedResults } : {}),
+    };
+  });
+
+  const liveKeys = new Set(live.map(eventKey));
+  const unique = history.filter((e) => !liveKeys.has(eventKey(e)));
+  return [...merged, ...unique].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 /**

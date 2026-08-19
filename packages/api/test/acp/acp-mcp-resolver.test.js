@@ -162,6 +162,44 @@ describe('resolveAcpMcpServers', () => {
     assert.equal(result[0].url, 'https://api.example.com/mcp');
     assert.deepStrictEqual(result[0].headers, [{ name: 'Authorization', value: 'Bearer tok' }]);
   });
+
+  it('filters retired GitHub MCP from raw capabilities before topology heal', async () => {
+    const root = makeTempRoot({
+      capabilities: toCapabilities({
+        github: {
+          transport: 'streamableHttp',
+          url: 'https://api.githubcopilot.com/mcp/',
+        },
+        'github-custom': {
+          command: 'node',
+          args: ['custom-github-mcp-adapter.js'],
+        },
+      }),
+    });
+
+    const result = await resolveAcpMcpServers(root, ['github', 'github-custom']);
+
+    assert.equal(
+      result.some((server) => server.name === 'github'),
+      false,
+    );
+    assert.ok(result.some((server) => server.name === 'github-custom'));
+  });
+
+  it('allows an explicit whitelist containing only retired GitHub MCP to resolve empty', async () => {
+    const root = makeTempRoot({
+      capabilities: toCapabilities({
+        github: {
+          transport: 'streamableHttp',
+          url: 'https://api.githubcopilot.com/mcp/',
+        },
+      }),
+    });
+
+    const result = await resolveAcpMcpServers(root, ['github']);
+
+    assert.deepStrictEqual(result, []);
+  });
 });
 
 describe('summarizeAcpMcpServers', () => {
@@ -380,6 +418,26 @@ describe('resolveAcpMcpServers — per-project MCP (F145 Phase E)', () => {
     assert.deepStrictEqual(docker.env, [{ name: 'DOCKER_HOST', value: 'unix:///var/run/docker.sock' }]);
   });
 
+  it('filters retired GitHub MCP while merging user project servers at session initialization', async () => {
+    const projectRoot = makeTempRoot();
+    const userRoot = makeTempRoot({
+      mcpJson: {
+        mcpServers: {
+          github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
+          'github-custom': { command: 'node', args: ['custom-github-mcp-adapter.js'] },
+        },
+      },
+    });
+
+    const result = await resolveAcpMcpServers(projectRoot, ['cat-cafe-collab'], userRoot);
+
+    assert.equal(
+      result.some((server) => server.name === 'github'),
+      false,
+    );
+    assert.ok(result.some((server) => server.name === 'github-custom'));
+  });
+
   // AC-E3: builtin cat-cafe-* takes priority over same-name user project server
   it('builtin cat-cafe-* takes priority over same-name user project server', async () => {
     const projectRoot = makeTempRoot();
@@ -548,6 +606,23 @@ describe('resolveUserProjectMcpServers — per-invoke helper (F145 Phase E)', ()
     assert.equal(result.length, 2);
     assert.ok(result.find((s) => s.name === 'my-db'));
     assert.ok(result.find((s) => s.name === 'my-docker'));
+  });
+
+  it('filters retired GitHub MCP during per-invoke user project resolution', () => {
+    const userRoot = makeTempRoot({
+      mcpServers: {
+        github: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' },
+        'github-custom': { command: 'node', args: ['custom-github-mcp-adapter.js'] },
+      },
+    });
+
+    const result = resolveUserProjectMcpServers(userRoot, new Set());
+
+    assert.equal(
+      result.some((server) => server.name === 'github'),
+      false,
+    );
+    assert.ok(result.some((server) => server.name === 'github-custom'));
   });
 
   it('excludes servers by name', () => {

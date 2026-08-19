@@ -169,6 +169,21 @@ describe('sync-skills.sh --user opt-in (F239 Phase A, ADR-025)', () => {
    * runs and works under any worktree fs state.
    */
   describe('project-level coverage (F239 AC-A1)', () => {
+    it('projects the shared refs coordinate inside the every-provider loop', async () => {
+      const content = await readFile(SCRIPT, 'utf-8');
+      const part1Match = content.match(/# ─── Part 1[\s\S]*?# ─── Part 2/);
+      assert.ok(part1Match, 'Part 1 worktree block must exist');
+      const providerLoop = part1Match[0].match(
+        /for\s+provider\s+in\s+claude\s+codex\s+gemini\s+kimi\s*;\s*do([\s\S]*?)\ndone/,
+      );
+      assert.ok(providerLoop, 'shared refs must be mounted from the every-provider worktree loop');
+      assert.match(
+        providerLoop[1],
+        /sync_shared_refs\s+"\$wt_skills"\s+"\.\.\/\.\.\/cat-cafe-skills\/refs"/,
+        'every provider mount must publish the stable shared refs coordinate beside per-skill symlinks',
+      );
+    });
+
     it('does not pipe git worktree list into early-exit consumers under pipefail', async () => {
       const content = await readFile(SCRIPT, 'utf-8');
       assert.doesNotMatch(

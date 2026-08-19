@@ -6,6 +6,7 @@ import { catDossierCoversStrengths, useDossierProfiles } from '@/hooks/useDossie
 import { apiFetch } from '@/utils/api-client';
 import { ConnectorPluginInstallButton } from '../ConnectorPluginInstallButton';
 import { CatOverviewTab, type ConfigData } from '../config-viewer-tabs';
+import { DesktopUpdateSettingsPanel } from '../DesktopUpdateSettingsPanel';
 import { HubAccountsTab } from '../HubAccountsTab';
 import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
@@ -16,6 +17,7 @@ import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
 import { CatDossierContent } from './CatDossierContent';
 import { ConciergeSettingsContent } from './ConciergeSettingsContent';
+import { HubSystemSettingsTab } from './HubSystemSettingsTab';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
@@ -204,7 +206,13 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
           </div>
         );
       case 'system':
-        return <HubEnvFilesTab excludeCategories={['connector']} />;
+        return (
+          <div className="space-y-6">
+            <DesktopUpdateSettingsPanel />
+            <HubSystemSettingsTab />
+            <HubEnvFilesTab excludeCategories={['connector']} />
+          </div>
+        );
       case 'notify':
         return <PushSettingsPanel />;
       case 'ops':

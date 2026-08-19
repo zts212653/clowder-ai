@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { deriveCallbackActor, resolveBoundThreadScope, resolveScopedThreadId } = await import(
-  '../dist/routes/callback-scope-helpers.js'
-);
+const { deriveCallbackActor, resolveBoundThreadScope, resolveCallbackActionLeaseRef, resolveScopedThreadId } =
+  await import('../dist/routes/callback-scope-helpers.js');
 const { DEFAULT_THREAD_ID } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
 describe('callback-scope-helpers', () => {
@@ -21,6 +20,38 @@ describe('callback-scope-helpers', () => {
       userId: 'user-1',
       catId: 'opus',
     });
+  });
+
+  test('resolves an exact lease fence only from the invocation-authenticated parent carrier', async () => {
+    const carrier = await resolveCallbackActionLeaseRef(
+      { ...record, parentInvocationId: 'parent-1' },
+      {
+        async get(id) {
+          assert.equal(id, 'parent-1');
+          return {
+            threadId: 'thread-a',
+            userId: 'user-1',
+            targetCats: ['opus'],
+            actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-returned', generation: 2 },
+          };
+        },
+      },
+    );
+    assert.deepEqual(carrier, { leaseId: 'lease-returned', generation: 2 });
+  });
+
+  test('fails closed when the persisted carrier principal does not match the callback', async () => {
+    const carrier = await resolveCallbackActionLeaseRef(record, {
+      async get() {
+        return {
+          threadId: 'thread-other',
+          userId: 'user-1',
+          targetCats: ['opus'],
+          actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-returned', generation: 2 },
+        };
+      },
+    });
+    assert.equal(carrier, undefined);
   });
 
   test('resolveBoundThreadScope allows same-thread writes', () => {
@@ -61,6 +92,33 @@ describe('callback-scope-helpers', () => {
       threadStore: {
         async get() {
           return { id: 'thread-b', createdBy: 'user-2' };
+        },
+      },
+      accessDeniedError: 'Thread access denied',
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      statusCode: 403,
+      error: 'Thread access denied',
+    });
+  });
+
+  test('resolveScopedThreadId allows scoped soft-deleted thread for read/write route policy to decide', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-b', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-b', createdBy: 'user-1', deletedAt: Date.now() };
+        },
+      },
+    });
+    assert.deepEqual(result, { ok: true, threadId: 'thread-b' });
+  });
+
+  test('resolveScopedThreadId does not reveal soft-deleted thread overrides owned by another user', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-b', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-b', createdBy: 'user-2', deletedAt: Date.now() };
         },
       },
       accessDeniedError: 'Thread access denied',

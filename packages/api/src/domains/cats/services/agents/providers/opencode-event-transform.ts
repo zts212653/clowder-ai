@@ -157,7 +157,7 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
       //
       // 砚砚 R1 P1: don't set provider/model here — the transformer can't see
       // variant.defaultModel, and a `model: ''` here would break OTel
-      // normalizeModel + getContextWindowFallback downstream. OpenCodeAgentService
+      // normalizeModel and the invocation-owned capacity binding downstream. OpenCodeAgentService
       // merges this `usage` onto its own `metadata: { provider, model: effectiveModel }`
       // when yielding (see merge logic in OpenCodeAgentService.ts), so we emit a
       // partial metadata that the service layer completes.
@@ -187,15 +187,9 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
       // nothing instead of an empty agent_loop marker.
       if (totalInputTokens == null && outputTokens == null && totalTokens == null) return null;
 
-      // clowder#915 R4 cloud P1 #2: opencode CLI never emits contextWindowSize.
-      // For models not in getContextWindowFallback's table (GLM-5.1, custom
-      // providers), windowSize would be undefined and F24 silently skips. Attach
-      // a conservative default so handoff is guaranteed to engage. The
-      // helper's `usage.contextWindowSize ?? getContextWindowFallback(...)`
-      // gating means a known-model lookup still takes precedence — this
-      // default only kicks in when fallback would have returned undefined.
-      // BUT: we ALSO set contextWindowSize unconditionally so unknown-model
-      // runs (the production case for #915) always have a window.
+      // OpenCode step_finish does not report a runtime context window. It contributes
+      // only the authoritative numerator; the invocation-owned capacity snapshot
+      // supplies the denominator from the member binding.
 
       // clowder#915 R4 cloud P1 #3 (defer seal): handled in invoke-single-cat
       // by ALWAYS deferring opencode agent_loop seals to the `done` event,
@@ -225,16 +219,8 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
             ...(cacheRead ? { cacheReadTokens: cacheRead } : {}),
             ...(cacheWrite ? { cacheCreationTokens: cacheWrite } : {}),
             ...(costUsd != null ? { costUsd } : {}),
-            // clowder#915 R5 cloud P2: do NOT attach a default contextWindowSize
-            // here. opencode-event-transform doesn't know whether the model is
-            // known to getContextWindowFallback's table (e.g. claude-opus-4-6 has
-            // a precise 200k entry). Unconditionally setting a default would
-            // override the table because invoke-single-cat uses
-            // `usage.contextWindowSize ?? getContextWindowFallback(model)` —
-            // wrongly capping claude-opus-4-6 (default opencode breed model)
-            // at the conservative default. The unknown-model fallback is now
-            // applied in invoke-single-cat as a LAST resort, only after the
-            // fallback table also returns undefined.
+            // Never attach a guessed contextWindowSize. Unknown bindings remain
+            // unresolved until the member resolver has trusted catalog/manual/runtime evidence.
           },
         },
       };

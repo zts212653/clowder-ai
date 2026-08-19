@@ -4,7 +4,8 @@ related_features: [F056, F063, F116, F183, F184, F195]
 topics: [console, settings, app-shell, community, inbound-pr, frontend, service-manifest]
 doc_kind: spec
 created: 2026-05-07
-community_pr: clowder-ai#645, clowder-ai#662, clowder-ai#669
+community_pr: clowder-ai#645, clowder-ai#662, clowder-ai#669, clowder-ai#674, clowder-ai#1083
+tips_exempt: ASR backend consolidation preserves the existing Services UI workflow and adds no new user action or discovery surface
 ---
 
 # F190: Console Settings/AppShell Skeleton — 社区 Console 重构的可控切片
@@ -55,11 +56,11 @@ Service Manifest、MCP install/manage 写接口、voice refAudio upload、IM con
 | Skill preview modal | clowder-ai#669 | 已合入 main via cat-cafe#1650 | read-only `SKILL.md` preview |
 | MCP install/manage write path hardening | clowder-ai#669 + home F146/F193 route | 已合入 main via cat-cafe#1651 | owner-gated secret write hardening；不接 Plugins UI 写回 |
 | Service Manifest read-only status | clowder-ai#669 | 已合入 main via cat-cafe#1652 | auth-gated manifest/status/endpoints；不接 lifecycle writes |
-| Service lifecycle writes | clowder-ai#669 | deferred | start/stop/install/uninstall 需要独立 runtime source + security review |
+| Service lifecycle writes | clowder-ai#674 | 已合入 main via cat-cafe#1904 | API/Console-owned install/start/stop/uninstall/reconfigure；owner/auth、lock、port 与 process safeguards 已独立 review |
 | refAudio upload | clowder-ai#669 + home F103/F195 boundary | 已合入 main via cat-cafe#1654 | auth-gated multipart upload + `/uploads` path resolver；不接 F195 meeting audio runtime |
 | IM connector write | clowder-ai#669 + home F132/F134/F136/F137 routes | 已合入 main via cat-cafe#1655 | harden existing credential writes；不新增 callback URL / provider endpoint 写面 |
 | Chat rendering / bubble behavior | clowder-ai#669 | not in F190 | F183/F184/F194 ownership；F190 不触碰 |
-| Service install pipeline + async lifecycle | clowder-ai#674 | **BLOCKED** — REQUEST_CHANGES | P1: F198 编号撞车（家里 F198 = Subscription Carrier）；需改号或折入 F190 sub-scope。111 files / 9k 行需 manual-port，不可 cherry-pick |
+| Service install pipeline + async lifecycle | clowder-ai#674 | 已合入 main via cat-cafe#1904 | F198 编号冲突已通过折入 F190 sub-scope 解决；122 files 以 manual-port 吸收并保留家里 runtime/port/owner invariants |
 
 Phase C complete: all four high-risk slices (MCP write / Service Manifest read-only / refAudio upload / IM connector write) merged to main. AC-A7 alpha walkthrough completed via Codex + Sonnet smoke on PR #1658.
 
@@ -93,7 +94,7 @@ Phase C complete: all four high-risk slices (MCP write / Service Manifest read-o
 ## Dependencies
 
 - **Evolved from**: [clowder-ai#645](https://github.com/zts212653/clowder-ai/pull/645)（Console Architecture Restructure prototype）
-- **Related**: F056（Cat Café design language）
+- **Related**: F056（Clowder AI design language）
 - **Related**: F063（Hub Workspace Explorer）
 - **Related**: F116（Open-Source Ops inbound/intake gate）
 - **Must preserve**: F183 / F184（Bubble pipeline + ChatMessage mount/rendering invariants）

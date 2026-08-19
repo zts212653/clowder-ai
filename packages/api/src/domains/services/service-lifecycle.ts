@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, realpathSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -389,6 +390,52 @@ export async function findPidsByPort(port: number, options: ProbeOptions = {}): 
   });
 }
 
+/**
+ * Probe whether a port is actually bindable by attempting a real bind().
+ *
+ * lsof -sTCP:LISTEN sees only LISTEN-state sockets. After a process is killed,
+ * the socket leaves LISTEN immediately but the port can remain kernel-bound in
+ * TIME_WAIT / CLOSE_WAIT / FIN_WAIT. This probe catches that gap by attempting
+ * an actual server bind — the only authoritative test of port availability.
+ *
+ * @returns `{bindable: true}` if bind succeeds, `{bindable: false, error}` otherwise.
+ */
+export async function probePortBindability(
+  port: number,
+  host = '0.0.0.0',
+): Promise<{ bindable: true } | { bindable: false; error: string }> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      resolve({ bindable: false, error: err.code ?? err.message });
+    });
+    server.listen(port, host, () => {
+      server.close(() => resolve({ bindable: true }));
+    });
+  });
+}
+
+/**
+ * Poll until a port becomes actually bindable (not just lsof-clear).
+ * Used after process termination to guard against TIME_WAIT/CLOSE_WAIT.
+ */
+export async function waitForPortBindable(
+  port: number,
+  options: { timeoutMs?: number; intervalMs?: number; host?: string } = {},
+): Promise<{ ok: true } | { ok: false; reason: 'bind-timeout'; lastError: string }> {
+  const timeoutMs = Math.max(500, options.timeoutMs ?? 5_000);
+  const intervalMs = Math.max(50, options.intervalMs ?? 500);
+  const host = options.host ?? '0.0.0.0';
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const probe = await probePortBindability(port, host);
+    if (probe.bindable) return { ok: true };
+    if (Date.now() >= deadline) return { ok: false, reason: 'bind-timeout', lastError: probe.error };
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 export async function listProcesses(options: ProbeOptions = {}): Promise<ProcessSnapshot[]> {
   const platform = options.platform ?? process.platform;
   const execFileImpl = options.execFile ?? (execFile as ExecFileLike);
@@ -415,11 +462,15 @@ function resolveLogDir(): string {
   return process.env.LOG_DIR ?? resolve(REPO_ROOT, 'data/logs/api');
 }
 
+function resolveServiceLogPath(serviceId: string): string {
+  const logDir = resolveLogDir();
+  mkdirSync(logDir, { recursive: true });
+  return resolve(logDir, `${serviceId}.log`);
+}
+
 export function appendServiceLog(serviceId: string, chunk: string): void {
   try {
-    const logDir = resolveLogDir();
-    mkdirSync(logDir, { recursive: true });
-    appendFileSync(resolve(logDir, `${serviceId}.log`), chunk);
+    appendFileSync(resolveServiceLogPath(serviceId), chunk);
   } catch {
     // best-effort logging only
   }
@@ -446,6 +497,25 @@ export function readServiceLogTail(serviceId: string, lines = 100): string[] {
   }
 }
 
+function readServiceLogSince(logPath: string, offset: number): string {
+  try {
+    const fd = openSync(logPath, 'r');
+    try {
+      const stat = fstatSync(fd);
+      const available = Math.max(0, stat.size - offset);
+      const readSize = Math.min(available, MAX_CAPTURED_OUTPUT);
+      if (readSize === 0) return '';
+      const buffer = Buffer.alloc(readSize);
+      readSync(fd, buffer, 0, readSize, stat.size - readSize);
+      return buffer.toString('utf8');
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return '';
+  }
+}
+
 export async function runServiceScript(input: ServiceLifecycleRunInput): Promise<ServiceLifecycleRunResult> {
   const command =
     process.platform === 'win32' && input.scriptPath.toLowerCase().endsWith('.ps1') ? 'powershell.exe' : 'bash';
@@ -460,31 +530,45 @@ export async function runServiceScript(input: ServiceLifecycleRunInput): Promise
 
   if (input.detached) {
     return new Promise((resolveRun, rejectRun) => {
-      let output = '';
       let resolvedEarly = false;
       let resolveSettlement: (result: ServiceLifecycleSettledRunResult) => void = () => {};
       const settlement = new Promise<ServiceLifecycleSettledRunResult>((resolve) => {
         resolveSettlement = resolve;
       });
-      const appendOutput = (chunk: Buffer) => {
-        const text = chunk.toString();
-        output += text;
-        if (output.length > MAX_CAPTURED_OUTPUT) output = output.slice(-MAX_CAPTURED_OUTPUT);
-        appendServiceLog(input.serviceId, text);
-      };
-      const child = spawn(command, args, {
-        detached: shouldDetachServiceRunner(),
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: input.env,
-        windowsHide: true,
-      });
+      let logFd: number;
+      let logPath: string;
+      let outputOffset = 0;
+      try {
+        logPath = resolveServiceLogPath(input.serviceId);
+        logFd = openSync(logPath, 'a');
+        outputOffset = fstatSync(logFd).size;
+      } catch (error) {
+        rejectRun(error);
+        return;
+      }
+      const capturedOutput = () => readServiceLogSince(logPath, outputOffset);
+      let child: ReturnType<typeof spawn>;
+      try {
+        child = spawn(command, args, {
+          detached: shouldDetachServiceRunner(),
+          // The child owns durable file descriptors directly. A long-lived
+          // sidecar never inherits an API-process pipe that disappears on
+          // restart, so logging survives controller death without PipeGuard.
+          stdio: ['ignore', logFd, logFd],
+          env: input.env,
+          windowsHide: true,
+        });
+      } catch (error) {
+        closeSync(logFd);
+        rejectRun(error);
+        return;
+      }
+      closeSync(logFd);
       appendServiceLog(input.serviceId, `[${input.action}] runner pid=${child.pid ?? 'unknown'}\n`);
-      child.stdout?.on('data', appendOutput);
-      child.stderr?.on('data', appendOutput);
       child.on('error', (error) => {
         if (resolvedEarly) {
           appendServiceLog(input.serviceId, `[${input.action}] runner error: ${error.message}\n`);
-          resolveSettlement({ code: null, output, pid: child.pid, runnerError: true });
+          resolveSettlement({ code: null, output: capturedOutput(), pid: child.pid, runnerError: true });
           return;
         }
         appendServiceLog(input.serviceId, `[${input.action}] runner spawn failed: ${error.message}\n`);
@@ -493,16 +577,7 @@ export async function runServiceScript(input: ServiceLifecycleRunInput): Promise
       const earlyExitTimer = setTimeout(() => {
         resolvedEarly = true;
         child.unref();
-        // Both pipe streams must also be unref'd. Without this, the
-        // parent Node process is held alive by the still-ref'd pipe
-        // handles until the detached child exits — which would block
-        // API server restart/shutdown on long-lived sidecars (砚砚 P1).
-        // Tests that need to `await settlement` should keep the event
-        // loop alive themselves with a test-scoped ref'd timer; do not
-        // bake that into production runner behavior.
-        (child.stdout as { unref?: () => void } | null)?.unref?.();
-        (child.stderr as { unref?: () => void } | null)?.unref?.();
-        resolveRun({ code: null, pid: child.pid, output, settlement });
+        resolveRun({ code: null, pid: child.pid, output: capturedOutput(), settlement });
       }, 2000);
       child.on('close', (code, signal) => {
         clearTimeout(earlyExitTimer);
@@ -511,7 +586,7 @@ export async function runServiceScript(input: ServiceLifecycleRunInput): Promise
         if (resolvedEarly && (code !== 0 || signal)) {
           appendServiceLog(input.serviceId, `[${input.action}] process exited with ${status}\n`);
         }
-        const result = { code, output, pid: child.pid };
+        const result = { code, output: capturedOutput(), pid: child.pid };
         resolveSettlement(result);
         if (!resolvedEarly) {
           resolvedEarly = true;

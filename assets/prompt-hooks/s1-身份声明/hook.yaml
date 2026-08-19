@@ -23,5 +23,5 @@ safetyTier: readonly
 transparencyTier: visible-by-default
 governanceTier: immutable
 
-# CVO-facing
+# operator-facing
 userExplanation: "猫的身份、角色和昵称"

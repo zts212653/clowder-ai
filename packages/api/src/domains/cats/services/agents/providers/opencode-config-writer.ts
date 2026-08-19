@@ -15,6 +15,7 @@ import {
   resolveServersForCat,
 } from '../../../../../config/capabilities/capability-orchestrator.js';
 import { toOpenCodeMcpEntry } from '../../../../../config/capabilities/mcp-config-adapters.js';
+import { isRetiredGithubMcpConfigEntry } from '../../../../../config/capabilities/retired-github-mcp.js';
 import {
   buildExternalDirectoryPermissions,
   generateOpenCodeRuntimeConfig,
@@ -155,6 +156,9 @@ export async function writeOpenCodeRuntimeConfig(
         const userConfig = JSON.parse(readFileSync(userConfigPath, 'utf-8')) as { mcp?: Record<string, unknown> };
         if (userConfig.mcp && typeof userConfig.mcp === 'object') {
           const userMcp = { ...userConfig.mcp };
+          for (const [name, entry] of Object.entries(userMcp)) {
+            if (isRetiredGithubMcpConfigEntry(name, entry)) delete userMcp[name];
+          }
           const managedMcpNames = expandManagedMcpNamesForUserMerge([
             ...resolveCapabilityMcpNamesSync(capabilitiesProjectRoot, options.catId ?? catId),
             ...Object.keys(config.mcp ?? {}),

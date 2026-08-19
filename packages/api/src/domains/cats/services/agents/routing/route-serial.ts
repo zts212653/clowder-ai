@@ -16,14 +16,18 @@ import {
   type CatId,
   catRegistry,
   createCatId,
+  type OutputCommitDecision,
+  type QueueTerminalConsumptionWitness,
   type RichBlock,
   resolveWorkflowSopSkill,
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import { context, trace } from '@opentelemetry/api';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getCatVoice } from '../../../../../config/cat-voices.js';
+import {
+  deriveHistoryContextTokenCeiling,
+  resolvePromptInputCeilingTokens,
+} from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   AGENT_ID,
@@ -31,6 +35,7 @@ import {
   ROUTE_HAS_A2A_HANDOFF,
   ROUTE_TOTAL_CATS_INVOKED,
   ROUTE_TOTAL_TOKENS,
+  ROUTING_EVENT_WAIT_REASON,
   THREAD_SYSTEM_KIND,
   TRIGGER,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
@@ -41,6 +46,8 @@ import {
   c2VerdictWithoutPassCount,
   c2VoidHoldChecked,
   c2VoidHoldHintEmitted,
+  conciergeVerifiedToolActions,
+  conciergeVerifiedToolTargetsPerReply,
   inlineActionChecked,
   inlineActionDetected,
   inlineActionFeedbackWriteFailed,
@@ -49,8 +56,39 @@ import {
   inlineActionHintEmitted,
   inlineActionRoutedSetSkip,
   inlineActionShadowMiss,
+  legacyGuardWithoutActiveCustodyTotal,
   lineStartDetected,
+  routingEventWaitBypassTotal,
+  routingEventWaitFalseBypassTotal,
+  routingEventWaitRedundantHoldPreventedTotal,
+  routingEventWaitRejectedTotal,
+  routingTerminalReleaseCleanStopTotal,
+  turnCustodyProjectionTotal,
+  turnCustodyShadowComparisonTotal,
+  turnCustodyShadowNewBlockTotal,
+  turnCustodyShadowOldBlockTotal,
 } from '../../../../../infrastructure/telemetry/instruments.js';
+import {
+  boundedTurnCustodySourceCategory,
+  boundedTurnCustodySourceSemantic,
+  classifyTurnCustodyNewOnlyBlock,
+  observesLegacyRoutingBlock,
+  TURN_CUSTODY_CLOSE_CHECKPOINT_ATTR,
+  TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR,
+  TURN_CUSTODY_METRIC_COMPARISON_ATTR,
+  TURN_CUSTODY_METRIC_STATE_ATTR,
+  TURN_CUSTODY_PROJECTION_REASON_ATTR,
+  TURN_CUSTODY_PROJECTION_STATE_ATTR,
+  TURN_CUSTODY_SHADOW_DISAGREEMENT_EVENT_NAME,
+  TURN_CUSTODY_SHADOW_SAMPLE_SPAN,
+  TURN_CUSTODY_SOURCE_CATEGORY_ATTR,
+  TURN_CUSTODY_SOURCE_SEMANTIC_ATTR,
+  TURN_CUSTODY_TRANSITION_OBSERVED_ATTR,
+  TURN_CUSTODY_UNKNOWN_AGREE_BLOCK_EVENT_NAME,
+  TURN_CUSTODY_WAKE_PROVENANCE_ATTR,
+  turnCustodyProjectionReason,
+  turnCustodySourceSemantic,
+} from '../../../../../infrastructure/telemetry/turn-custody-shadow-telemetry.js';
 import { detectUserMention } from '../../../../../routes/user-mention.js';
 import { estimateTokens } from '../../../../../utils/token-counter.js';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
@@ -61,6 +99,17 @@ import {
   buildInvocationStartedEvent,
   buildVoidPassEvent,
 } from '../../../../ball-custody/ball-custody-events.js';
+import { turnCustodyAdoptionRegistry } from '../../../../ball-custody/TurnCustodyAdoptionRegistry.js';
+import {
+  compareTurnCustodyShadow,
+  type TurnCustodyProjection,
+  type TurnCustodyWakeProvenance,
+} from '../../../../ball-custody/TurnCustodyProjectionService.js';
+import {
+  buildA2ADispatchTurnCustodyWake,
+  buildCrossThreadNoObligationWake,
+  turnCustodyWakeSourceCategory,
+} from '../../../../ball-custody/turn-custody-wake-provenance.js';
 import { conciergeContextForCat, prepareConciergeContext } from '../../../../concierge/ConciergeRoutingInterceptor.js';
 import {
   buildConciergeActions,
@@ -68,13 +117,23 @@ import {
   stripTriagePlanMarkers,
   type TriagePlanExtractionDeps,
 } from '../../../../concierge/concierge-reply-validator.js';
-import { buildConciergeSearchContext } from '../../../../concierge/concierge-search-context.js';
+import { buildConciergeSearchContext, type HandleEntry } from '../../../../concierge/concierge-search-context.js';
+import {
+  resolveVerifiedConciergeToolAnchor,
+  VerifiedConciergeToolTargetCollector,
+} from '../../../../concierge/concierge-verified-tool-target.js';
 import {
   ackGuideCompletion,
   guideContextForCat,
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
-import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import type { MemoryCueOpportunitySeed } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
+// F260 AC-B8: Entity nudge — scan human input for already-registered entity references.
+import { EntityNudgeService } from '../../../../memory/EntityNudgeService.js';
+import { sharedEventStore, sharedNudgeCooldown } from '../../../../memory/entity-nudge-state.js';
+import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
+import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
+import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
 import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
 // F237: Injection trace (v0 — fire-and-forget observability)
@@ -86,26 +145,45 @@ import {
   buildStaticIdentityPackOnly,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
+import { checkStreamOutputFreshness, type StreamFreshnessResult } from '../../freshness/checkStreamOutputFreshness.js';
+import { buildFreshnessReinvokePrompt } from '../../freshness/createFreshnessReinvokeCheck.js';
+import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
+import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
+import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
+import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import {
+  type AppendMessageInput,
   hydrateCrossThreadReplyHint,
   hydrateReplyPreview,
   type StoredToolEvent,
-  type StreamMetadataAugmentInput,
 } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
+import {
+  projectTurnExecutionMessage,
+  type TurnExecutionKind,
+  type TurnExecutionMessageProjection,
+} from '../../stores/ports/TurnExecutionStore.js';
+import { canViewMessage } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
 import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
+import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
+import {
+  applyActiveSessionCapacityPin,
+  resolveInvocationCapacitySnapshot,
+  sealBeforeInvocationIfNeeded,
+} from '../invocation/invocation-capacity-snapshot.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
@@ -117,22 +195,41 @@ import {
 } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { formatA2AHandoffContent } from './a2a-handoff-label.js';
+import {
+  buildCallbackFinalReplacementMetadataPatch,
+  CallbackFinalReplacementTracker,
+  type CallbackStreamDisposition,
+  hasCallbackFinalReplacementMetadata,
+  parseCallbackPostResult,
+  readCallbackStreamDisposition,
+} from './callback-final-replacement.js';
 import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
-import { buildRemedialPrompt, hasValidRoutingExit, shouldRemediateRouting } from './guards/routing-guard-remedial.js';
+import {
+  isEventBackedRoutingBypassProofValid,
+  resolveEventBackedRoutingExit,
+} from './guards/event-backed-routing-exit.js';
+import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
+import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
   assembleIncrementalContext,
+  collectExactPromptMessageIds,
+  computeContextBudget,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
   isUserFacingSystemInfoContent,
+  judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
-  shouldAppendExplicitCurrentMessage,
+  subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
@@ -143,24 +240,52 @@ import { evaluateVoidHold } from './void-hold-detect.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-serial');
+
+// F260 P1-2 R2 fix: Nudge singletons moved to entity-nudge-state.ts
+// (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
+
 const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
+export function buildTurnCustodyStopGateRemedialPrompt(wake: TurnCustodyWakeProvenance): string {
+  if (wake.kind === 'structured' && wake.protocol === 'hold') {
+    return (
+      '[F167 球权停止门] 当前 managed hold wake 尚未发生可验证状态迁移。\n' +
+      '若本次 wake 工作已经处理完成，只调用 cat_cafe_complete_managed_hold，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message 与 task，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  if (wake.kind === 'structured' && wake.protocol === 'dispatch') {
+    return (
+      '[F167 球权停止门] 当前普通 A2A dispatch 尚未发生可验证状态迁移。\n' +
+      '若本次 A2A 工作已经处理完成，只调用 cat_cafe_complete_a2a_dispatch，并选择 handled 或 completed；工具会从当前 invocation 自动绑定 source message、前手与当前 holder，不能手填 subject。\n' +
+      '若工作尚未结束，只使用与下一条件匹配的 hold_ball、已注册 eventWait 或结构化传球。不要用纯文本 @、礼貌 ACK、command exit、测试/merge truth 代替 disposition。'
+    );
+  }
+  return (
+    '[F167 球权停止门] 本次唤醒携带的协议球尚未发生可验证状态迁移。\n' +
+    '请只完成一次与当前协议球匹配的结构化动作，不要重做或改写刚才的工作：完成候选、结构化传球、returnToPredecessor、hold_ball 或已注册的 eventWait。\n' +
+    '必须调用现有结构化工具；不要用纯文本 @、口头“持球”或礼貌 ACK 代替状态迁移。'
+  );
+}
 
 /**
- * F233 Phase B (B2): fire-and-forget 旁路写 ball.handed（行首 @ 路由投递 → holder 变更，球继续）。
- * 紧贴现有 A2A_HANDOFF 审计旁路点调用；失败仅 log、不阻塞路由；无 messageId 则 skip
- * （best-effort observability，漏写由后续动作 / 简报 rebuild 兜底）。
+ * F233 Phase B (B2): persist ball.handed at the receiver boundary.
+ * Phase T opens a dispatch projection from this exact event, so the write must
+ * settle before its baseline is sampled. Failure stays fail-closed through an
+ * unknown projection rather than blocking the underlying route.
  */
-function emitBallHanded(
+async function recordBallHanded(
   ballCustody: IBallCustodyIngest | undefined,
   threadId: string,
-  fromCatId: string,
+  fromCatId: string | undefined,
   toCatId: string,
   messageId: string | undefined,
-): void {
+): Promise<void> {
   if (!ballCustody || !messageId) return;
-  ballCustody
-    .record(buildHandedEvent({ fromCatId, toCatId, threadId, messageId, at: Date.now() }))
-    .catch((err) => log.warn({ threadId, toCat: toCatId, err }, 'ball.handed ingest failed'));
+  try {
+    await ballCustody.record(buildHandedEvent({ fromCatId, toCatId, threadId, messageId, at: Date.now() }));
+  } catch (err) {
+    log.warn({ threadId, toCat: toCatId, err }, 'ball.handed ingest failed');
+  }
 }
 
 /**
@@ -184,9 +309,9 @@ function emitBallHandedCvo(
   threadId: string,
   fromCatId: string,
   messageId: string | undefined,
-): void {
-  if (!ballCustody || !messageId) return;
-  ballCustody
+): Promise<void> {
+  if (!ballCustody || !messageId) return Promise.resolve();
+  return ballCustody
     .record(buildHandedCvoEvent({ fromCatId, threadId, messageId, intent: 'handoff', at: Date.now() }))
     .catch((err) => log.warn({ threadId, fromCatId, err }, 'ball.handed_cvo ingest failed'));
 }
@@ -216,22 +341,6 @@ function emitBallInvocationHeartbeat(
     .catch((err) => log.warn({ threadId, invocationId, catId, err }, 'invocation.heartbeat ingest failed'));
 }
 const routeSerialTracer = trace.getTracer('cat-cafe-api', '0.1.0');
-const ROUTE_ONLY_REMEDIAL_TEXT_RE =
-  /^@[\p{L}\p{N}_.-]+(?:[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+)?$/u;
-
-function stripMarkdownRoutePrefix(line: string): string {
-  return line.replace(/^(?:[-*+]\s+|>\s*|\d+[.)]\s+)/, '').trim();
-}
-
-function normalizeRouteOnlyRemedialText(text: string): string | null {
-  const lines = text
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => stripMarkdownRoutePrefix(line))
-    .filter((line) => line.length > 0);
-  if (lines.length !== 1) return null;
-  return ROUTE_ONLY_REMEDIAL_TEXT_RE.test(lines[0]) ? lines[0] : null;
-}
 
 function collectStructuredTargetCatsFromInput(input: unknown): string[] {
   if (!input || typeof input !== 'object') return [];
@@ -289,6 +398,8 @@ export type CallbackContentRoutingState = {
 type CallbackContentRoutingExit = CallbackContentRoutingState & {
   toolName: string;
   toolUseId?: string;
+  targetCatIds: CatId[];
+  createsCustodyHandoff: boolean;
 };
 
 export function classifyCallbackContentRoutingState(
@@ -333,60 +444,16 @@ function collectCallbackContentRoutingExit(
   const content = readToolInputContent(toolInput);
   const state = classifyCallbackContentRoutingState(toolName, content, currentCatId);
   if (!state) return null;
-  return { toolName, ...(toolUseId ? { toolUseId } : {}), ...state };
-}
-
-type CallbackPostResult = {
-  confirmed: boolean;
-  messageId?: string;
-  threadId?: string;
-};
-
-function collectCallbackPostResultCandidates(content: string): string[] {
-  const candidates = new Set<string>();
-  const trimmed = content.trim();
-  if (trimmed) candidates.add(trimmed);
-  for (const line of trimmed.split(/\r?\n/)) {
-    const candidate = line.trim();
-    if (candidate.startsWith('{') && candidate.endsWith('}')) candidates.add(candidate);
-  }
-  const jsonStart = trimmed.indexOf('{');
-  if (jsonStart > 0) candidates.add(trimmed.slice(jsonStart));
-  return [...candidates];
-}
-
-function callbackPostResultFromPayload(parsed: {
-  status?: unknown;
-  messageId?: unknown;
-  threadId?: unknown;
-}): CallbackPostResult | null {
-  const confirmed = parsed.status === 'ok' || parsed.status === 'duplicate';
-  if (!confirmed && parsed.status === undefined) return null;
+  const targetCatIds = [
+    ...new Set([...collectStructuredTargetCatsFromInput(toolInput), ...state.guardLineStartMentions]),
+  ].map(createCatId);
+  const createsCustodyHandoff = state.scope === 'target' && buildCrossThreadNoObligationWake(toolInput) === undefined;
   return {
-    confirmed,
-    ...(typeof parsed.messageId === 'string' && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
-    ...(typeof parsed.threadId === 'string' && parsed.threadId.length > 0 ? { threadId: parsed.threadId } : {}),
-  };
-}
-
-function parseCallbackPostResult(content: string | undefined): {
-  confirmed: boolean;
-  messageId?: string;
-  threadId?: string;
-} {
-  if (!content) return { confirmed: false };
-  for (const candidate of collectCallbackPostResultCandidates(content)) {
-    try {
-      const parsed = JSON.parse(candidate) as { status?: unknown; messageId?: unknown; threadId?: unknown };
-      const result = callbackPostResultFromPayload(parsed);
-      if (result) return result;
-    } catch {
-      // Try the next candidate shape.
-    }
-  }
-
-  return {
-    confirmed: /"status"\s*:\s*"(ok|duplicate)"/.test(content),
+    toolName,
+    ...(toolUseId ? { toolUseId } : {}),
+    targetCatIds,
+    createsCustodyHandoff,
+    ...state,
   };
 }
 
@@ -411,6 +478,7 @@ function toolNamesMatch(a: string, b: string): boolean {
 type PendingToolResult = {
   toolName: string;
   toolUseId?: string;
+  streamDisposition?: CallbackStreamDisposition;
 };
 
 function consumePendingToolResult(
@@ -450,10 +518,9 @@ function consumePendingToolResult(
   return undefined;
 }
 
-function hasStreamMetadataPatch(patch: StreamMetadataAugmentInput): boolean {
-  return Boolean(
-    patch.thinking || patch.metadata || patch.toolEvents?.length || patch.replyTo || patch.mentionsUser || patch.extra,
-  );
+function isSubstantivePostDispositionProgress(msg: AgentMessage): boolean {
+  if (msg.type === 'text') return Boolean(msg.content?.trim());
+  return msg.type === 'tool_use' || msg.type === 'tool_result' || msg.type === 'a2a_handoff';
 }
 
 export async function* routeSerial(
@@ -477,15 +544,72 @@ export async function* routeSerial(
     modeSystemPrompt,
     modeSystemPromptByCat,
     queueHasQueuedMessages,
+    getQueuedFreshnessMessagesForCat,
     hasQueuedOrActiveAgentForCat,
     deferA2AEnqueue,
     freshnessReinvokeEnqueue,
   } = options;
+  const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
   const previousResponses: { catId: CatId; content: string }[] = [];
+  const sameRouteOutputMessageIds = new Set<string>();
   const thinkingMode = options.thinkingMode ?? 'play';
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
+  const isFreshnessSupplement = Boolean(options.freshnessSupplementId);
+
+  const enqueueFreshnessSupplement = async (
+    decision: Extract<OutputCommitDecision, { kind: 'published_with_unseen' }>,
+    catId: string,
+  ): Promise<void> => {
+    if (!deps.freshnessOutputCommitCoordinator) return;
+    const supplement = await deps.freshnessOutputCommitCoordinator.getSupplement(decision.offeredSupplementId);
+    if (!supplement || supplement.status !== 'pending') return;
+    if (!freshnessReinvokeEnqueue) {
+      await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'scheduler_unavailable');
+      return;
+    }
+    try {
+      const enqueueResult = freshnessReinvokeEnqueue({
+        threadId,
+        userId,
+        ownerAuthProvenance,
+        content: `[Freshness Supplement ${supplement.id}]`,
+        source: 'agent',
+        sourceCategory: 'freshness',
+        targetCats: [catId],
+        callerCatId: catId,
+        autoExecute: true,
+        priority: 'normal',
+        intent: 'execute',
+        idempotencyKey: supplement.id,
+        freshnessSupplementId: supplement.id,
+        freshnessSupplementLineageId: supplement.lineageId,
+        freshnessSupplementSeq: supplement.seq,
+        readOnlyToolPolicy: {
+          mode: 'read_only',
+          replayDeniedToolNames: supplement.replayUnsafeToolNames,
+        },
+        freshnessContext: {
+          sourceNoticeIds: [],
+          senders: [],
+          reason: 'published_with_unseen',
+        },
+      });
+      if (enqueueResult?.outcome === 'full') {
+        await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'queue_full');
+      }
+    } catch (err) {
+      try {
+        await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'scheduler_unavailable');
+      } catch (terminalErr) {
+        log.error(
+          { err, terminalErr, supplementId: supplement.id },
+          '[F254] supplement enqueue and terminal persistence both failed',
+        );
+      }
+    }
+  };
 
   // Worklist pattern: starts with targetCats, may grow via A2A mentions
   // F27: Register worklist so callback A2A can push targets here
@@ -501,6 +625,95 @@ export async function* routeSerial(
   // F27: Track how many worklist entries have had a2a_handoff emitted
   let handoffEmitted = targetCats.length; // Original targets don't get handoff events
   const activeTrackedA2ASlots = new Set<CatId>();
+  const claimOrDeferA2ATarget = async (
+    pendingCat: CatId,
+    fromCat: CatId,
+    fallbackContent?: string,
+    fallbackTriggerMessageId?: string,
+    onDurablyDeferred?: (targetCatId: CatId, triggerMessageId: string) => void,
+  ): Promise<boolean> => {
+    if (activeTrackedA2ASlots.has(pendingCat)) {
+      return true;
+    }
+    if (!options.invocationController || !options.trackA2ASlot) {
+      throw new Error('A2A slot admission unavailable: route bridge missing');
+    }
+
+    const claimed = options.trackA2ASlot(threadId, pendingCat, userId, options.invocationController);
+    if (claimed !== false) {
+      activeTrackedA2ASlots.add(pendingCat);
+      return true;
+    }
+
+    const triggerMessageId = fallbackTriggerMessageId ?? worklistEntry.a2aTriggerMessageId.get(pendingCat);
+    let content = fallbackContent;
+    if (content === undefined && triggerMessageId) {
+      try {
+        content = (await deps.messageStore.getById(triggerMessageId))?.content;
+      } catch (err) {
+        log.warn(
+          { threadId, fromCat, toCat: pendingCat, triggerMessageId, err },
+          'A2A occupied-slot trigger hydration failed',
+        );
+      }
+    }
+
+    if (!deferA2AEnqueue || content === undefined) {
+      log.error(
+        {
+          threadId,
+          fromCat,
+          toCat: pendingCat,
+          triggerMessageId,
+          hasDeferredQueue: Boolean(deferA2AEnqueue),
+          hasContent: content !== undefined,
+        },
+        'A2A target owned by another active route; inline invocation blocked without deferred custody',
+      );
+      throw new Error(
+        `durable A2A custody unavailable for ${pendingCat}: ${
+          deferA2AEnqueue ? 'trigger content missing' : 'InvocationQueue unavailable'
+        }`,
+      );
+    }
+
+    const enqueueResult = deferA2AEnqueue({
+      threadId,
+      userId,
+      ownerAuthProvenance,
+      content,
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: [pendingCat],
+      callerCatId: fromCat,
+      ...(triggerMessageId ? { messageId: triggerMessageId, a2aTriggerMessageId: triggerMessageId } : {}),
+      autoExecute: true,
+      priority: 'normal',
+      intent: 'execute',
+    });
+    if (enqueueResult?.outcome !== 'enqueued') {
+      log.error(
+        {
+          threadId,
+          fromCat,
+          toCat: pendingCat,
+          triggerMessageId,
+          enqueueOutcome: enqueueResult?.outcome ?? 'missing',
+        },
+        'A2A target owned by another active route; durable enqueue was not accepted',
+      );
+      throw new Error(
+        `durable A2A custody unavailable for ${pendingCat}: enqueue outcome ${enqueueResult?.outcome ?? 'missing'}`,
+      );
+    }
+
+    log.info(
+      { threadId, fromCat, toCat: pendingCat, triggerMessageId },
+      'A2A target owned by another active route; deferred to InvocationQueue',
+    );
+    if (triggerMessageId) onDurablyDeferred?.(pendingCat, triggerMessageId);
+    return false;
+  };
   // F042 Wave 3: Fetch thread participant activity once before loop (threadId doesn't change).
   let activeParticipants: { catId: CatId; lastMessageAt: number; messageCount: number }[] = [];
   if (deps.invocationDeps.threadStore) {
@@ -573,29 +786,142 @@ export async function* routeSerial(
   // F229: Concierge interceptor — load duty-cat 岗位 context for concierge threads
   const conciergeCtx = await prepareConciergeContext(routeThread, userId, deps.invocationDeps.conciergeConfigStore);
 
-  // F229 KD-17: Pre-fetch search context for concierge threads → HandleMap + prompt context
+  // F229 KD-23: Pre-fetch search context → per-invocation handle table + prompt context.
+  // Handle table flows from here to buildConciergeActions (same function scope).
+  // No shared storage — cross-turn overwrites impossible by construction.
   let conciergeSearchContextString = '';
-  if ('conciergeConfig' in conciergeCtx && deps.invocationDeps.conciergeHandleMapStore) {
+  let conciergeHandles: HandleEntry[] = [];
+  if ('conciergeConfig' in conciergeCtx) {
     try {
       const searchResult = await buildConciergeSearchContext({
         userMessage: message,
         threadId,
-        handleMapStore: deps.invocationDeps.conciergeHandleMapStore,
         evidenceStore: deps.evidenceStore,
       });
       conciergeSearchContextString = searchResult.contextString;
+      conciergeHandles = searchResult.handles;
     } catch {
       // Fail-open: search context failure → no context injection, no crash
     }
   }
 
+  // F260 AC-B8: Entity nudge — scan HUMAN input only.
+  // P1-1 R2 fix: Gate on frustrationAutoIssueEligible (typed user-origin flag plumbed
+  // through routeExecution). This excludes A2A, connector, callback multi-mention, and
+  // queue-replayed messages — not just those with a2aTriggerMessageId.
+  // P1-2 R2 fix: Use shared singletons from entity-nudge-state.ts (cross-strategy state).
+  const cueOccurredAt = Date.now();
+  const memoryCueOpportunitySeeds = [...(options.memoryCueOpportunitySeeds ?? [])];
+  const memoryCueLegacyFallbacks: Array<{
+    seed: MemoryCueOpportunitySeed;
+    promptContext: string;
+  }> = [];
+  let entityNudgePromptContext = '';
+  let preparedProactiveMemoryNudge: PreparedProactiveMemoryNudge | null = null;
+  if (deps.evidenceStore && options.frustrationAutoIssueEligible !== false) {
+    try {
+      const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
+      if (evidenceDb) {
+        const nudgeService = new EntityNudgeService(evidenceDb, sharedNudgeCooldown(), sharedEventStore(evidenceDb));
+        const nudgeResult = nudgeService.processInput({
+          text: message,
+          threadId,
+          ownerUserId: userId,
+        });
+        const subjectCueSeeds = deps.invocationDeps.memoryCuePromptService
+          ? subjectSeenCueSeeds({
+              result: nudgeResult,
+              sourceMessageId: currentUserMessageId,
+              occurredAt: cueOccurredAt,
+            })
+          : [];
+        memoryCueOpportunitySeeds.push(...subjectCueSeeds);
+        for (const seed of subjectCueSeeds) {
+          const nudge = nudgeResult.nudges.find(
+            (candidate) =>
+              candidate.entityId === seed.payload.entityId && candidate.matchedAlias === seed.payload.matchedAlias,
+          );
+          if (nudge) {
+            memoryCueLegacyFallbacks.push({
+              seed,
+              promptContext: EntityNudgeService.formatForPrompt({ ...nudgeResult, nudges: [nudge] }),
+            });
+          }
+        }
+        const cueEntityIds = new Set(subjectCueSeeds.map((seed) => seed.payload.entityId));
+        entityNudgePromptContext = EntityNudgeService.formatForPrompt({
+          ...nudgeResult,
+          nudges: nudgeResult.nudges.filter((nudge) => !nudge.entityId || !cueEntityIds.has(nudge.entityId)),
+        });
+      }
+    } catch (nudgeErr) {
+      log.warn({ err: nudgeErr, threadId }, '[F260] entity nudge hook failed — fail-open, no nudges this invocation');
+    }
+  }
+  if (deps.proactiveMemoryNudgeService && currentUserMessageId && options.frustrationAutoIssueEligible !== false) {
+    preparedProactiveMemoryNudge = await deps.proactiveMemoryNudgeService.prepare({
+      ownerUserId: userId,
+      currentUserMessageId,
+    });
+    entityNudgePromptContext += preparedProactiveMemoryNudge.context;
+  }
+  let humanDispositionFeedbackPromptContext = '';
+  if (
+    deps.humanDispositionFeedbackContextService &&
+    isDirectOwnerDispositionOrigin(options.humanDispositionInvocationOrigin)
+  ) {
+    try {
+      humanDispositionFeedbackPromptContext = await deps.humanDispositionFeedbackContextService.prepare({
+        ownerUserId: userId,
+        text: message,
+      });
+    } catch (feedbackErr) {
+      log.warn({ err: feedbackErr, threadId }, '[F281] exact-subject feedback context failed closed for serial route');
+    }
+  }
+  if (deps.invocationDeps.memoryCuePromptService) {
+    memoryCueOpportunitySeeds.push(
+      ...judgmentSurfaceCueSeeds({
+        sopStageHint,
+        promptTags: options.frustrationAutoIssueEligible !== false ? promptTags : undefined,
+        occurredAt: cueOccurredAt,
+      }),
+    );
+  }
+  const routeLevelNudgePromptContext = entityNudgePromptContext + humanDispositionFeedbackPromptContext;
+
   const completedCatInvocationIds: Array<[string, string]> = [];
+  const pushRecallPresentationsByInvocation = new Map<string, PushRecallPresentation[]>();
+  const pendingTurnCustodyTransitionWrites: Promise<void>[] = [];
+  const pendingTurnCustodyShadowCloses: Array<(checkpoint: 'next_turn_boundary' | 'route_settled') => Promise<void>> =
+    [];
+  let unregisterTurnCustodyAdoption: (() => Promise<void>) | undefined;
+  const releaseTurnCustodyAdoption = async (): Promise<void> => {
+    const unregister = unregisterTurnCustodyAdoption;
+    unregisterTurnCustodyAdoption = undefined;
+    await unregister?.();
+  };
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
+
+  const flushTurnCustodyShadowCloses = async (checkpoint: 'next_turn_boundary' | 'route_settled'): Promise<void> => {
+    const transitionWrites = pendingTurnCustodyTransitionWrites.splice(0);
+    if (transitionWrites.length > 0) await Promise.allSettled(transitionWrites);
+
+    const closes = pendingTurnCustodyShadowCloses.splice(0);
+    for (const close of closes) {
+      try {
+        await close(checkpoint);
+      } catch (err) {
+        log.warn({ threadId, err }, 'F167 Phase T turn-custody stop-gate close failed');
+      }
+    }
+  };
 
   try {
     while (index < worklist.length) {
       const catId = worklist[index]!;
-      let routingGuardAttempted = false;
-      let routingGuardRemediated = false;
+      let stopGateRemedialAttempted = false;
+      let structuredDispositionMissingCode: string | undefined;
       // F-parallel-cancel: per-cat signal — canceling one cat skips ONLY that cat, not the
       // whole worklist. force-reset/cancelAll aborts every cat's controller, so all entries
       // skip = equivalent to stopping. Using the shared primaryController.signal made
@@ -608,11 +934,15 @@ export async function* routeSerial(
       // F148 OQ-2: briefing→invocation link + context eval
       let briefingMessageId: string | undefined;
       let briefingCoverageMap: import('./context-transport.js').CoverageMap | undefined;
+      const currentPushRecallPresentations: PushRecallPresentation[] = [];
 
       // Only pass images/uploads for the first cat (user's original target)
       const isOriginalTarget = index < targetCats.length;
       const targetContentBlocks = isOriginalTarget ? routeContentBlocksForCat(catId, contentBlocks) : undefined;
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
+      const catConciergeContext = conciergeContextForCat(conciergeCtx, catId as string);
+      const conciergeSearchContextForCat =
+        conciergeSearchContextString && 'conciergeConfig' in catConciergeContext ? conciergeSearchContextString : '';
 
       let prompt = message;
       if (!incrementalMode && previousResponses.length > 0) {
@@ -620,11 +950,8 @@ export async function* routeSerial(
         prompt = `${message}\n\n${contextParts.join('\n')}`;
       }
 
-      // F229 KD-17: Inject search context into duty cat prompt
-      if (conciergeSearchContextString && conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig) {
-        prompt = `${prompt}\n${conciergeSearchContextString}`;
-      }
-
+      // F260 AC-B8 and F229 KD-24 inject their prompt additions only after
+      // incremental/legacy assembly reaches its final shape (see below).
       // Build identity: static goes in -p content (+ systemPrompt as defense-in-depth), dynamic in -p only
       const catConfig: CatConfig | undefined = catRegistry.tryGet(catId as string)?.config;
       const teammates = [...new Set(worklist.filter((id) => id !== catId))];
@@ -639,10 +966,26 @@ export async function* routeSerial(
             }
           : undefined;
       const queueTriggerReplyTo = isOriginalTarget ? a2aTriggerMessageId : undefined;
-      const streamReplyTo = worklistEntry.a2aTriggerMessageId.get(catId) ?? queueTriggerReplyTo;
+      const activeA2ATriggerMessageId = worklistEntry.a2aTriggerMessageId.get(catId);
+      const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
+      const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
+      const activeA2ATriggerMessage = activeA2ATriggerMessageId
+        ? await deps.messageStore.getById(activeA2ATriggerMessageId)
+        : null;
+      const activeA2ATriggerContent =
+        activeA2ATriggerMessage && !activeA2ATriggerMessage.deletedAt && !activeA2ATriggerMessage._tombstone
+          ? activeA2ATriggerMessage.content
+          : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, streamReplyTo, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
       // F193 AC-B2: structured cross-thread reply hint hydrated from trigger message.
       // Closes Codex review P1 (砚砚 2026-05-08): worklist `a2aTriggerMessageId` map
       // only has entries for downstream A2A targets — initial target via the modern
@@ -661,8 +1004,10 @@ export async function* routeSerial(
             senderCatId: createCatId(crossThreadReplyHintRaw.senderCatId),
             // F246 Phase B: carry effectClass to SystemPromptBuilder for behavior constraints
             ...(crossThreadReplyHintRaw.effectClass ? { effectClass: crossThreadReplyHintRaw.effectClass } : {}),
+            ...(crossThreadReplyHintRaw.coordination ? { coordination: crossThreadReplyHintRaw.coordination } : {}),
           }
         : undefined;
+      const hasTerminalCoordinationExit = crossThreadReplyHint?.coordination?.phase === 'terminal';
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -688,7 +1033,133 @@ export async function* routeSerial(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const service = getService(deps.services, catId);
-      const needsServerRoutingGuard = service.needsServerRoutingGuard?.() ?? false;
+      const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+        catId,
+        service,
+      });
+      let capacitySnapshot = resolvedCapacitySnapshot;
+      capacitySnapshot = await applyActiveSessionCapacityPin({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+      });
+      const sessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+        catId: catId as string,
+        evidence: {
+          capacitySnapshot,
+          // A carrier declaration is not this invocation's usage evidence.
+          authoritativeUsage: false,
+          sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+          continuityBootstrap: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.transcriptReader),
+        },
+      });
+      const sealedForCapacity = await sealBeforeInvocationIfNeeded({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+        sessionSealer: deps.invocationDeps.sessionSealer,
+        policySnapshot: sessionPolicySnapshot,
+        clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+      });
+      if (sealedForCapacity) capacitySnapshot = resolvedCapacitySnapshot;
+      const declaredTurnCustodyWake =
+        options.turnCustodyWakeForCat?.(catId) ??
+        options.turnCustodyWake ??
+        ({ kind: 'legacy', reason: 'source_missing' } as const);
+      const turnCustodyWake =
+        declaredTurnCustodyWake.kind === 'action_successor'
+          ? declaredTurnCustodyWake
+          : (buildCrossThreadNoObligationWake(crossThreadReplyHint) ??
+            (directMessageFrom
+              ? buildA2ADispatchTurnCustodyWake({
+                  threadId,
+                  targetCatId: catId as string,
+                  messageId: streamReplyTo,
+                  fromCatId: directMessageFrom,
+                })
+              : declaredTurnCustodyWake));
+      if (!isFreshnessSupplement && turnCustodyWake.kind !== 'non_obligation') {
+        const dispatchHandoff =
+          turnCustodyWake.kind === 'structured' && turnCustodyWake.protocol === 'dispatch'
+            ? turnCustodyWake.handoff
+            : undefined;
+        const handoffWrite = recordBallHanded(
+          deps.ballCustody,
+          threadId,
+          dispatchHandoff?.fromCatId ?? directMessageFrom,
+          catId as string,
+          dispatchHandoff?.messageId ?? streamReplyTo ?? currentUserMessageId,
+        );
+        if (deps.turnCustodyProjectionService && turnCustodyWake.kind === 'structured') {
+          await handoffWrite;
+        } else {
+          void handoffWrite;
+        }
+      }
+      // Settle the preceding turn at the earliest boundary that can contain its
+      // receiver-side handoff. Closing here prevents a later ping-pong turn by
+      // the same cat from being misattributed to the earlier projection.
+      await flushTurnCustodyShadowCloses('next_turn_boundary');
+      let turnCustodyProjection: TurnCustodyProjection | undefined;
+      if (deps.turnCustodyProjectionService) {
+        turnCustodyProjection = await deps.turnCustodyProjectionService.open(turnCustodyWake);
+      }
+      const adoptedTurnCustodyProjections: Array<{
+        wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured'; protocol: 'hold' }>;
+        projection: TurnCustodyProjection;
+      }> = [];
+      const structuredDispositionPrompt =
+        turnCustodyWake.kind === 'structured' &&
+        (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch') &&
+        turnCustodyProjection?.state !== 'covered_empty'
+          ? buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake)
+          : undefined;
+      let turnCustodyShadowRecorded = false;
+      const turnCustodyTerminalWitnesses: QueueTerminalConsumptionWitness[] = [];
+      const recordTurnCustodyTerminalWitness = (witness: QueueTerminalConsumptionWitness): void => {
+        const witnessKey =
+          witness.kind === 'terminal_silent'
+            ? witness.kind
+            : witness.kind === 'source_response'
+              ? `${witness.kind}:${witness.outputMessageIds.join(',')}`
+              : `${witness.kind}:${witness.sourceMessageId}`;
+        const duplicate = turnCustodyTerminalWitnesses.some((candidate) => {
+          const candidateKey =
+            candidate.kind === 'terminal_silent'
+              ? candidate.kind
+              : candidate.kind === 'source_response'
+                ? `${candidate.kind}:${candidate.outputMessageIds.join(',')}`
+                : `${candidate.kind}:${candidate.sourceMessageId}`;
+          return candidateKey === witnessKey;
+        });
+        if (!duplicate) turnCustodyTerminalWitnesses.push(witness);
+      };
+      const adoptTurnCustodyWakes = async (wakes: readonly TurnCustodyWakeProvenance[]): Promise<void> => {
+        if (!deps.turnCustodyProjectionService) return;
+        for (const wake of wakes) {
+          // Prompt/tool adoption currently applies only to command-backed hold
+          // receipts. Dispatch custody still requires its own routed child.
+          if (wake.kind !== 'structured' || wake.protocol !== 'hold') continue;
+          const duplicatesPrimary =
+            turnCustodyWake.kind === 'structured' &&
+            turnCustodyWake.protocol === 'hold' &&
+            turnCustodyWake.sourceMessageId === wake.sourceMessageId &&
+            turnCustodyWake.taskId === wake.taskId;
+          const alreadyAdopted = adoptedTurnCustodyProjections.some(
+            (candidate) =>
+              candidate.wake.sourceMessageId === wake.sourceMessageId && candidate.wake.taskId === wake.taskId,
+          );
+          if (duplicatesPrimary || alreadyAdopted) continue;
+          adoptedTurnCustodyProjections.push({
+            wake,
+            projection: await deps.turnCustodyProjectionService.open(wake),
+          });
+        }
+      };
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
@@ -775,31 +1246,48 @@ export async function* routeSerial(
 
       const invocationMode = worklist.length > 1 ? 'serial' : 'independent';
       const a2aEnabled = worklistEntry.a2aCount < maxDepth;
-      const invocationContext = buildInvocationContext({
-        catId,
-        mode: invocationMode,
-        chainIndex: index + 1,
-        chainTotal: worklist.length,
-        teammates,
-        mcpAvailable,
-        nativeL0Injected: hasNativeL0,
-        ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
-        a2aEnabled,
-        ...(directMessageFrom ? { directMessageFrom } : {}),
-        ...(pingPongWarning ? { pingPongWarning } : {}),
-        ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
-        ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
-        ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
-        ...(routingPolicy ? { routingPolicy } : {}),
-        ...(sopStageHint ? { sopStageHint } : {}),
-        ...(activeSignals ? { activeSignals } : {}),
-        ...(voiceMode ? { voiceMode } : {}),
-        ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
-        ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
-        ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
-        ...(worldContext ? { worldContext } : {}),
-        ...conciergeContextForCat(conciergeCtx, catId as string),
-      });
+      const personMemoryProposalStatusRequest =
+        activeA2ATriggerContent && activeA2ATriggerContent !== message
+          ? `${activeA2ATriggerContent}\n\n${message}`
+          : message;
+      const personMemoryProposalStatusContext = deps.personMemoryProposalStatusContextResolver
+        ? await deps.personMemoryProposalStatusContextResolver.resolve(
+            userId,
+            threadId,
+            personMemoryProposalStatusRequest,
+          )
+        : '';
+      const invocationContext = [
+        buildInvocationContext({
+          catId,
+          mode: invocationMode,
+          chainIndex: index + 1,
+          chainTotal: worklist.length,
+          teammates,
+          mcpAvailable,
+          nativeL0Injected: hasNativeL0,
+          ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
+          a2aEnabled,
+          ...(directMessageFrom ? { directMessageFrom } : {}),
+          ...(pingPongWarning ? { pingPongWarning } : {}),
+          ...(crossThreadReplyHint ? { crossThreadReplyHint } : {}),
+          ...(mentionRoutingFeedback ? { mentionRoutingFeedback } : {}),
+          ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
+          ...(routingPolicy ? { routingPolicy } : {}),
+          ...(sopStageHint ? { sopStageHint } : {}),
+          ...(activeSignals ? { activeSignals } : {}),
+          ...(voiceMode ? { voiceMode } : {}),
+          ...(bootcampState ? { bootcampState, bootcampMemberCount } : {}),
+          ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
+          ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
+          threadId,
+          ...(worldContext ? { worldContext } : {}),
+          ...catConciergeContext,
+        }),
+        personMemoryProposalStatusContext,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
       // F237: drain turn trace synchronously — no yield between build and drain.
       drainCapturedTraces();
       const continuityCapsule = buildCapsuleFromRouteState({
@@ -838,27 +1326,34 @@ export async function* routeSerial(
           '[routeSerial] #836: isRebornSession lookup failed pre-bootstrap, defaulting to non-reborn',
         );
       }
-      if (
-        !isSerialReborn &&
-        isSessionChainEnabled(catId) &&
-        deps.invocationDeps.sessionChainStore &&
-        deps.invocationDeps.transcriptReader
-      ) {
+      const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
+      const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const rebuildSessionBootstrap =
+        !isSerialReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
+          ? async () => {
+              const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
+              return buildSessionBootstrap(
+                {
+                  sessionChainStore: bootstrapSessionChainStore,
+                  transcriptReader: bootstrapTranscriptReader,
+                  ownerUserId: userId,
+                  ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
+                  ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
+                  ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                },
+                catId,
+                threadId,
+              );
+            }
+          : undefined;
+      if (rebuildSessionBootstrap) {
         try {
-          const bootstrapDepth = getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth;
-          const bootstrap = await buildSessionBootstrap(
-            {
-              sessionChainStore: deps.invocationDeps.sessionChainStore,
-              transcriptReader: deps.invocationDeps.transcriptReader,
-              ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
-              ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
-              ...(bootstrapDepth ? { bootstrapDepth } : {}),
-            },
-            catId,
-            threadId,
-          );
+          const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
             bootstrapContext = bootstrap.text;
+            if (bootstrap.pushRecallPresentations?.length) {
+              currentPushRecallPresentations.push(...bootstrap.pushRecallPresentations);
+            }
           }
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
@@ -896,24 +1391,31 @@ export async function* routeSerial(
       }
 
       let deliveryBoundaryId: string | undefined;
+      let incrementallyExposedMessageIds: string[] = [];
+      const invocationMessagePrompt = prompt;
+      let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
+      let explicitlyExposedMessageIds: string[] = [];
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
 
-        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
-        // Without this, context (up to maxContextTokens=160k) + system parts (~15-20k) can exceed maxPromptTokens.
+        // Deduct fixed prompt parts from the invocation-owned input ceiling.
         const catModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const incBudget = getCatContextBudget(catId as string);
-        const incSystemTokens = estimateTokens(
-          [staticIdentity, invocationContext, catModePromptForBudget, bootstrapContext, mcpInstructions]
-            .filter(Boolean)
-            .join('\n'),
-        );
-        const incMessageTokens = estimateTokens(message);
-        const effectiveContextBudget = Math.min(
-          Math.max(0, incBudget.maxPromptTokens - incSystemTokens - incMessageTokens - 200),
-          incBudget.maxContextTokens,
-        );
+        const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
+        const incSystemTokens =
+          estimateTokens(
+            [staticIdentity, invocationContext, catModePromptForBudget, mcpInstructions].filter(Boolean).join('\n'),
+          ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
+        const incMessageTokens = estimateTokens([message, conciergeSearchContextForCat].filter(Boolean).join('\n'));
+        // P1 R7 fix: use shared budget helper (serial/parallel × incremental/legacy unified)
+        const incNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
+        const effectiveContextBudget = computeContextBudget({
+          inputCeilingTokens,
+          historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
+          systemPartsTokens: incSystemTokens,
+          promptTokens: incMessageTokens,
+          nudgeTokens: incNudgeTokens,
+        });
 
         const inc = await assembleIncrementalContext(
           deps,
@@ -926,9 +1428,17 @@ export async function* routeSerial(
             effectiveMaxContextTokens: effectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            projectPath: routeThread?.projectPath,
+            cursorOverlay: options.cursorBoundaries?.get(catId as string),
+            sameRouteOutputMessageIds,
+            exactA2ATriggerMessageId: streamReplyTo,
           },
         );
         deliveryBoundaryId = inc.boundaryId;
+        incrementallyExposedMessageIds = inc.exposedMessageIds;
+        if (inc.pushRecallPresentations?.length) {
+          currentPushRecallPresentations.push(...inc.pushRecallPresentations);
+        }
 
         // F254 Phase A (AC-A3 seed): Initialize seenCursor from delivery boundary
         // so the freshness gate knows "messages delivered at invoke-start = already seen".
@@ -983,37 +1493,52 @@ export async function* routeSerial(
         /* @segment R1 — Mode System Prompt */
         /* @segment R2 — Mode System Prompt (per-cat) */
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
-        if (inc.contextText) parts.push(inc.contextText);
-        // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // Defensive guard: if the current message ID is already present anywhere in
-        // the assembled context text, do not append the raw message again.
-        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
-        prompt = parts.join('\n\n---\n\n');
+        // F35/F063: append only persisted Queue bodies without structural exposure ownership.
+        const explicitProjection = explicitPromptForIncrementalContext(
+          inc,
+          message,
+          currentUserMessageId,
+          persistedPromptMessagesForCat,
+        );
+        explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          const parts = [invocationContext, catModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+          if (inc.contextText) parts.push(inc.contextText);
+          if (explicitProjection.text) parts.push(explicitProjection.text);
+          return parts.join('\n\n---\n\n');
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapContext);
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits
         let catContextHistory = contextHistory; // fallback to legacy pre-assembled
         if (history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
+          const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapContext in system parts estimate (P2-1)
           const catModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-          const systemPartsTokens = estimateTokens(
-            [staticIdentity, invocationContext, catModePromptLegacyForBudget, bootstrapContext, mcpInstructions]
-              .filter(Boolean)
-              .join('\n'),
-          );
-          const promptTokens = estimateTokens(prompt);
-          const budgetForContext = Math.max(0, budget.maxPromptTokens - systemPartsTokens - promptTokens - 200);
+          const systemPartsTokens =
+            estimateTokens(
+              [staticIdentity, invocationContext, catModePromptLegacyForBudget, mcpInstructions]
+                .filter(Boolean)
+                .join('\n'),
+            ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapContext));
+          const promptTokens = estimateTokens([prompt, conciergeSearchContextForCat].filter(Boolean).join('\n'));
+          // P1 R7 fix: use shared budget helper (legacy path)
+          const legacyNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
+          const budgetForContext = computeContextBudget({
+            inputCeilingTokens,
+            historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
+            systemPartsTokens,
+            promptTokens,
+            nudgeTokens: legacyNudgeTokens,
+          });
           const { contextText, messageCount } = assembleContext(history, {
-            maxMessages: budget.maxMessages,
-            maxContentLength: budget.maxContentLengthPerMsg,
-            maxTotalTokens: Math.min(budgetForContext, budget.maxContextTokens),
+            maxTotalTokens: budgetForContext,
           });
           catContextHistory = contextText || undefined;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
-          const degradation = detectContextDegradation(history.length, messageCount, budget);
+          const degradation = detectContextDegradation(history.length, messageCount);
           if (degradation?.degraded) {
             yield {
               type: 'system_info' as AgentMessageType,
@@ -1025,14 +1550,63 @@ export async function* routeSerial(
         }
 
         const catModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrapContext) {
-          const parts = [invocationContext, catModePromptLegacy, bootstrapContext, mcpInstructions].filter(Boolean);
-          if (catContextHistory) parts.push(catContextHistory);
-          prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
-        } else if (catContextHistory) {
-          prompt = `${catContextHistory}\n\n---\n\n${prompt}`;
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          if (invocationContext || catModePromptLegacy || mcpInstructions || bootstrap) {
+            const parts = [invocationContext, catModePromptLegacy, bootstrap, mcpInstructions].filter(Boolean);
+            if (catContextHistory) parts.push(catContextHistory);
+            return `${parts.join('\n\n---\n\n')}\n\n---\n\n${invocationMessagePrompt}`;
+          }
+          return catContextHistory
+            ? `${catContextHistory}\n\n---\n\n${invocationMessagePrompt}`
+            : invocationMessagePrompt;
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapContext);
+      }
+
+      // F229 KD-24: append the table only after incremental/legacy assembly reaches
+      // its final shape. The same invocation-scoped handle table is used below to
+      // resolve actions, so prompt visibility and validator identity stay coupled.
+      if (conciergeSearchContextForCat) {
+        prompt = `${prompt}\n${conciergeSearchContextForCat}`;
+      }
+
+      // F260 AC-B8: Inject entity nudge context AFTER incremental/legacy prompt
+      // assembly so it survives `prompt = parts.join(...)` in incremental mode.
+      // Keep this after the concierge table so their cross-feature ordering is stable.
+      if (routeLevelNudgePromptContext) {
+        prompt = `${prompt}\n${routeLevelNudgePromptContext}`;
+        if (preparedProactiveMemoryNudge) {
+          deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
         }
       }
+      if (structuredDispositionPrompt) {
+        prompt = `${prompt}\n\n---\n\n${structuredDispositionPrompt}`;
+      }
+      const assemblePromptAfterSeal = rebuildPromptWithBootstrap;
+      const rebuildPromptAfterSessionSeal =
+        rebuildSessionBootstrap && assemblePromptAfterSeal
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (refreshed.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+              }
+              let rebuilt = assemblePromptAfterSeal(refreshed.text);
+              if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
+              if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
+              if (structuredDispositionPrompt) rebuilt = `${rebuilt}\n\n---\n\n${structuredDispositionPrompt}`;
+              return rebuilt;
+            }
+          : undefined;
+
+      const exactPromptMessageIds = collectExactPromptMessageIds(
+        incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
+        incrementalMode ? [] : [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
+        incrementallyExposedMessageIds,
+        explicitlyExposedMessageIds,
+        options.freshnessSupplementRequiredMessageIds ?? [],
+        options.freshnessClosureRequiredMessageIds ?? [],
+      );
 
       let textContent = '';
       const thinkingChunks: string[] = [];
@@ -1041,7 +1615,12 @@ export async function* routeSerial(
       let hadError = false;
       /** F155: tracks whether cat produced user-visible output (for guide completion ack). */
       let catProducedOutput = false;
+      let turnStoredMessageId: string | undefined;
       let sawUserFacingSystemInfo = false;
+      // Issue #1208 P2: collect user-facing system_info payloads so they can be
+      // persisted to messageStore even when the cat produces no text/tools/rich.
+      // Without this, warnings yielded in the live stream disappear on refresh.
+      const userFacingSystemInfoContents: string[] = [];
       // #267: track errors that happened BEFORE abort — only these are real provider failures
       let hadProviderError = false;
       // Collect error text separately for system-message persistence (F5 reload)
@@ -1053,22 +1632,202 @@ export async function* routeSerial(
       const collectedToolEvents: StoredToolEvent[] = [];
       // F148 OQ-2: Collect tool names for context eval signals
       const collectedToolNames: string[] = [];
-      // #573: Track confirmed cat_cafe_post_message callback persistence
-      let callbackPostConfirmed = false;
-      let callbackPostMessageId: string | undefined;
-      let awaitingCallbackResult = false;
       const pendingToolResults: PendingToolResult[] = [];
+      const recordPersistedOutputMessageId = (messageId: string): void => {
+        sameRouteOutputMessageIds.add(messageId);
+        const persistenceContext = options.persistenceContext;
+        if (!persistenceContext) return;
+        const existing = persistenceContext.persistedOutputMessageIds ?? [];
+        if (existing.includes(messageId)) return;
+        persistenceContext.persistedOutputMessageIds = [...existing, messageId];
+      };
+      // #573/#1332: Keep callback replacement state behind one focused boundary.
+      const callbackFinalReplacement = new CallbackFinalReplacementTracker(recordPersistedOutputMessageId);
+      let dispatchDispositionToolSettled = false;
+      let postDispatchDispositionProgress = false;
+      const observePostDispositionProgress = (msg: AgentMessage): void => {
+        if (dispatchDispositionToolSettled && isSubstantivePostDispositionProgress(msg)) {
+          postDispatchDispositionProgress = true;
+        }
+      };
+      const observeSettledTool = (tool: PendingToolResult | undefined): void => {
+        if (tool && normalizeMcpToolName(tool.toolName) === 'complete_a2a_dispatch') {
+          dispatchDispositionToolSettled = true;
+        }
+      };
+      const verifiedConciergeToolTargets = new VerifiedConciergeToolTargetCollector();
       const pendingCallbackRoutingExits: CallbackContentRoutingExit[] = [];
       const confirmedCallbackRoutingGuardMentions = new Set<CatId>();
       const confirmedLocalCallbackRoutingMentions = new Set<CatId>();
+      const confirmedLocalCallbackRoutedTargets = new Set<CatId>();
       let confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
       let confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
       const emittedBallHandedCvoMessageIds = new Set<string>();
+      const acceptedTurnCustodyHandoffs = new Map<string, { targetCatId: CatId; messageId: string }>();
+      const noteAcceptedTurnCustodyHandoff = (targetCatId: CatId, messageId: string): void => {
+        acceptedTurnCustodyHandoffs.set(`${messageId}:${targetCatId}`, { targetCatId, messageId });
+      };
+      const emitSingleAcceptedTurnCustodyHandoff = (): void => {
+        if (acceptedTurnCustodyHandoffs.size !== 1 || isFreshnessSupplement) return;
+        const accepted = [...acceptedTurnCustodyHandoffs.values()][0];
+        if (!accepted) return;
+        pendingTurnCustodyTransitionWrites.push(
+          recordBallHanded(
+            deps.ballCustody,
+            threadId,
+            catId as string,
+            accepted.targetCatId as string,
+            accepted.messageId,
+          ),
+        );
+      };
       const structuredTargetCats = new Set<string>();
       // F060: Collect rich blocks emitted inline via system_info (not MCP buffer)
       const streamRichBlocks: import('@cat-cafe/shared').RichBlock[] = [];
       // F22 R2 P1-1: Capture own invocationId from stream (not getLatestId)
       let ownInvocationId: string | undefined;
+      const initialExecutionKind: TurnExecutionKind = isFreshnessSupplement ? 'freshness_supplement' : 'ordinary';
+      const turnExecutionProjectionByInvocation = new Map<string, TurnExecutionMessageProjection>();
+      const rememberTurnExecutionProjection = (invocationId: string, executionKind: TurnExecutionKind): void => {
+        if (!deps.invocationDeps.turnExecutionStore) return;
+        turnExecutionProjectionByInvocation.set(invocationId, {
+          invocationId,
+          parentInvocationId: options.parentInvocationId ?? invocationId,
+          executionKind,
+        });
+      };
+      const collectAuxiliaryTurnExecutions = (
+        visibleInvocationId: string | undefined,
+        existing: readonly TurnExecutionMessageProjection[] = [],
+      ): TurnExecutionMessageProjection[] => {
+        const auxiliaryByInvocationId = new Map<string, TurnExecutionMessageProjection>();
+        for (const projection of existing) {
+          if (projection.invocationId !== visibleInvocationId) {
+            auxiliaryByInvocationId.set(projection.invocationId, projection);
+          }
+        }
+        for (const projection of turnExecutionProjectionByInvocation.values()) {
+          if (projection.invocationId !== visibleInvocationId) {
+            auxiliaryByInvocationId.set(projection.invocationId, projection);
+          }
+        }
+        return [...auxiliaryByInvocationId.values()];
+      };
+      const projectLiveTurnExecution = (event: AgentMessage): AgentMessage => {
+        if (!deps.invocationDeps.turnExecutionStore || !event.invocationId) return event;
+        const turnExecution = turnExecutionProjectionByInvocation.get(event.invocationId);
+        const auxiliaryTurnExecutions = collectAuxiliaryTurnExecutions(
+          event.invocationId,
+          event.extra?.auxiliaryTurnExecutions,
+        );
+        if (!turnExecution && auxiliaryTurnExecutions.length === 0) return event;
+        return {
+          ...event,
+          extra: {
+            ...event.extra,
+            ...(turnExecution ? { turnExecution } : {}),
+            ...(auxiliaryTurnExecutions.length > 0 ? { auxiliaryTurnExecutions } : {}),
+          },
+        };
+      };
+      const readTurnExecution = async (invocationId: string | undefined) => {
+        if (!invocationId || !deps.invocationDeps.turnExecutionStore) return undefined;
+        const emittedProjection = turnExecutionProjectionByInvocation.get(invocationId);
+        if (emittedProjection) return emittedProjection;
+        try {
+          const record = await deps.invocationDeps.turnExecutionStore.get(invocationId);
+          return record ? projectTurnExecutionMessage(record) : undefined;
+        } catch (error) {
+          log.warn(
+            { threadId, catId: catId as string, invocationId, err: error },
+            'Turn execution projection read failed; preserving visible output without badge metadata',
+          );
+          return undefined;
+        }
+      };
+      const readTurnExecutionProjections = async (visibleInvocationId: string | undefined) => {
+        const turnExecution = await readTurnExecution(visibleInvocationId);
+        const auxiliaryTurnExecutions = collectAuxiliaryTurnExecutions(visibleInvocationId);
+        if (
+          ownInvocationId &&
+          ownInvocationId !== visibleInvocationId &&
+          !auxiliaryTurnExecutions.some((projection) => projection.invocationId === ownInvocationId)
+        ) {
+          const ownExecution = await readTurnExecution(ownInvocationId);
+          if (ownExecution) auxiliaryTurnExecutions.push(ownExecution);
+        }
+        return {
+          ...(turnExecution ? { turnExecution } : {}),
+          ...(auxiliaryTurnExecutions.length > 0 ? { auxiliaryTurnExecutions } : {}),
+        };
+      };
+      const augmentFinalReplacementMessage = async (
+        messageId: string,
+        visibleTurnInvocationId: string | undefined,
+        richBlocks: readonly import('@cat-cafe/shared').RichBlock[],
+        replacementMentionsUser: boolean,
+      ): Promise<void> => {
+        const metadataPatch = buildCallbackFinalReplacementMetadataPatch({
+          thinkingChunks,
+          ...(firstMetadata ? { metadata: firstMetadata } : {}),
+          toolEvents: collectedToolEvents,
+          ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+          mentionsUser: replacementMentionsUser,
+          richBlocks,
+          ...(visibleTurnInvocationId ? { visibleTurnInvocationId } : {}),
+          ...((options.parentInvocationId ?? visibleTurnInvocationId)
+            ? { persistedInvocationId: options.parentInvocationId ?? visibleTurnInvocationId }
+            : {}),
+          ...(turnTriggerMessageId ? { turnTriggerMessageId } : {}),
+          ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+          executionProjections: await readTurnExecutionProjections(visibleTurnInvocationId),
+        });
+        if (!hasCallbackFinalReplacementMetadata(metadataPatch)) return;
+        try {
+          const augmented = await deps.messageStore.augmentStreamMetadata(messageId, metadataPatch);
+          if (!augmented) {
+            log.warn(
+              { threadId, catId: catId as string, callbackMessageId: messageId },
+              'Callback message metadata augment skipped: message not found',
+            );
+          }
+        } catch (augmentErr) {
+          log.warn(
+            { threadId, catId: catId as string, callbackMessageId: messageId, err: augmentErr },
+            'Callback message metadata augment failed; continuing without duplicate stream append',
+          );
+        }
+      };
+      let eventBackedRoutingExitPromise: ReturnType<typeof resolveEventBackedRoutingExit> | undefined;
+      let verifiedEventBackedRoutingExit = false;
+      const hasVerifiedEventBackedRoutingExit = async (): Promise<boolean> => {
+        eventBackedRoutingExitPromise ??= resolveEventBackedRoutingExit({
+          taskStore: deps.taskStore,
+          threadId,
+          catId: catId as string,
+          invocationId: ownInvocationId,
+        });
+        const resolution = await eventBackedRoutingExitPromise;
+        if (resolution.kind === 'reject') {
+          routingEventWaitRejectedTotal.add(1, { [ROUTING_EVENT_WAIT_REASON]: resolution.reason });
+          return false;
+        }
+        if (
+          !isEventBackedRoutingBypassProofValid(resolution, {
+            threadId,
+            catId: catId as string,
+            invocationId: ownInvocationId,
+          })
+        ) {
+          routingEventWaitFalseBypassTotal.add(1);
+          routingEventWaitRejectedTotal.add(1, { [ROUTING_EVENT_WAIT_REASON]: 'proof_invalid' });
+          return false;
+        }
+        routingEventWaitBypassTotal.add(1);
+        routingEventWaitRedundantHoldPreventedTotal.add(1);
+        verifiedEventBackedRoutingExit = true;
+        return true;
+      };
       let visibleContentInvocationIdOverride: string | undefined;
       // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
       let voiceChunker: StreamingTtsChunker | undefined;
@@ -1087,8 +1846,8 @@ export async function* routeSerial(
       // Stream events alone can't keep draft alive when tools execute silently for >300s.
       const KEEPALIVE_INTERVAL_MS = 60_000;
       let lastBallCustodyHeartbeatAt: number | null = null;
-      let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
       const emitThrottledBallInvocationHeartbeat = (draftUpdatedAt: number): void => {
+        if (isFreshnessSupplement) return;
         if (
           lastBallCustodyHeartbeatAt !== null &&
           draftUpdatedAt - lastBallCustodyHeartbeatAt < BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS
@@ -1109,10 +1868,6 @@ export async function* routeSerial(
       const invocationStartedAt = Date.now();
       // F215 AC-C3: flag set when invokeSingleCat emits malformed_toolcall_relay_46 signal
       let malformedRelayPending = false;
-      // F177-H: guard-enabled cats buffer first-pass text events until routing validation.
-      // This avoids a ghost invalid bubble if a remedial turn replaces the response; Codex exec is effectively
-      // batch-oriented today, but a future true-streaming provider should revisit this latency tradeoff.
-      const initialTextStreamEvents: AgentMessage[] = [];
       const createVoiceChunker = (invocationId: string): StreamingTtsChunker | undefined => {
         if (!voiceMode || !deps.socketManager) return undefined;
         const ttsRegistry = getStreamingTtsRegistry();
@@ -1168,6 +1923,13 @@ export async function* routeSerial(
         if (!confirmed || !exit) return undefined;
         for (const mention of exit.guardLineStartMentions) confirmedCallbackRoutingGuardMentions.add(mention);
         for (const mention of exit.localLineStartMentions) confirmedLocalCallbackRoutingMentions.add(mention);
+        if (exit.scope === 'local') {
+          // The callback already admitted this source/target through InvocationQueue or the
+          // legacy worklist. Never reinterpret the same persisted callback body as a fresh
+          // serial handoff after that carrier has already completed and disappeared from the
+          // live queue: that callback+text-scan fork caused the exact A→B duplicate dogfood.
+          for (const targetCatId of exit.targetCatIds) confirmedLocalCallbackRoutedTargets.add(targetCatId);
+        }
         if (exit.hasGuardCoCreatorLineStartMention) confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = true;
         if (exit.hasLocalCoCreatorLineStartMention) confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = true;
         return exit;
@@ -1175,9 +1937,10 @@ export async function* routeSerial(
       const getRoutingExitLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
         ...new Set<CatId>([...textMentions, ...confirmedCallbackRoutingGuardMentions]),
       ];
-      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] => [
-        ...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions]),
-      ];
+      const getLocalRoutingLineStartMentions = (textMentions: readonly CatId[] = []): CatId[] =>
+        [...new Set<CatId>([...textMentions, ...confirmedLocalCallbackRoutingMentions])].filter(
+          (targetCatId) => !confirmedLocalCallbackRoutedTargets.has(targetCatId),
+        );
       const hasRoutingExitCoCreatorLineStartMention = (content: string): boolean =>
         Boolean(
           (content ? detectUserMention(content) : false) || confirmedCallbackRoutingGuardHasCoCreatorLineStartMention,
@@ -1190,11 +1953,14 @@ export async function* routeSerial(
         messageId: string | undefined,
         eventThreadId: string | undefined = threadId,
       ): void => {
+        if (isFreshnessSupplement) return;
         if (!messageId || !eventThreadId) return;
         const eventKey = `${eventThreadId}:${messageId}`;
         if (emittedBallHandedCvoMessageIds.has(eventKey)) return;
         emittedBallHandedCvoMessageIds.add(eventKey);
-        emitBallHandedCvo(deps.ballCustody, eventThreadId, catId as string, messageId);
+        pendingTurnCustodyTransitionWrites.push(
+          emitBallHandedCvo(deps.ballCustody, eventThreadId, catId as string, messageId),
+        );
       };
       const emitConfirmedCallbackBallHandedCvo = (
         confirmed: boolean,
@@ -1210,18 +1976,6 @@ export async function* routeSerial(
           emitBallHandedCvoOnce(messageId, resultThreadId);
         }
       };
-      const flushDeferredVoice = async (): Promise<void> => {
-        if (!deferredVoiceInvocationId || deferredVoiceTextChunks.length === 0) {
-          resetDeferredVoice();
-          return;
-        }
-        const deferredChunker = createVoiceChunker(deferredVoiceInvocationId);
-        for (const chunk of deferredVoiceTextChunks) {
-          deferredChunker?.feed(chunk);
-        }
-        await flushVoiceChunker(deferredChunker, deferredVoiceInvocationId);
-        resetDeferredVoice();
-      };
       const toStreamEvent = (effectiveMsg: AgentMessage): AgentMessage | null => {
         if (effectiveMsg.type === 'text' && !effectiveMsg.content) return null;
         // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on yielded stream events
@@ -1234,48 +1988,63 @@ export async function* routeSerial(
             ? { ...effectiveMsg, invocationId: ownInvocationId }
             : effectiveMsg;
         // Tag CLI stdout text with origin: 'stream' (thinking/internal).
-        return ownStampedMsg.type === 'text'
+        const projectedMsg = projectLiveTurnExecution(ownStampedMsg);
+        return projectedMsg.type === 'text'
           ? {
-              ...ownStampedMsg,
+              ...projectedMsg,
               origin: 'stream' as const,
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
               ...(streamReplyPreview ? { replyPreview: streamReplyPreview } : {}),
             }
-          : ownStampedMsg;
+          : projectedMsg;
       };
-      // F233 P1 (云端 review): 球到此 cat 手上（接球时刻）→ ball.handed。统一覆盖 original routing
-      // (user→cat，directMessageFrom=undefined) 与 A2A (cat→cat，directMessageFrom=前手猫)。这是球真正
-      // 抵达持有者的时刻，取代原先只在 A2A handoff 发射点 emit（那里 `wi<targetCats.length` continue 会
-      // skip original targets，导致 initial routing 的 ball.handed 漏记，projection 空/stale 到后续 handoff）。
-      emitBallHanded(
-        deps.ballCustody,
-        threadId,
-        directMessageFrom ?? '',
-        catId as string,
-        streamReplyTo ?? currentUserMessageId,
-      );
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
+        capacitySnapshot,
+        sessionPolicySnapshot,
         prompt,
+        ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
+        ownerAuthProvenance,
         threadId,
+        invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        routeTopology: 'serial',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
+        ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
+        ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
+        ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+        executionKind: initialExecutionKind,
+        executionCausal: {
+          ...((streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
+            ? { triggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId }
+            : {}),
+          ...(options.freshnessSupplementId ? { freshnessSupplementId: options.freshnessSupplementId } : {}),
+        },
+        promptMessageIds: exactPromptMessageIds,
+        ...(options.onPromptMessagesExposed
+          ? {
+              onPromptMessagesExposed: async (input) => {
+                const adoptedWakes = await options.onPromptMessagesExposed!(input);
+                if (adoptedWakes) await adoptTurnCustodyWakes(adoptedWakes);
+                return adoptedWakes;
+              },
+            }
+          : {}),
         // F247 AC-B1c-3 PR-C: Plumb raw mention text + mentioning cat for cloud bridge dispatch.
         // - mentionContent: the raw user/cat message (NOT the orchestrated prompt with system context)
         // - mentioningCatId: A2A → the cat that @ mentioned; user-initiated → userId as fallback
         //   so the cloud cat knows "who called" (gpt52 R1 P1-2 contract: calledBy ≠ thread owner)
         mentionContent: message,
         mentioningCatId: (directMessageFrom ?? userId) as import('@cat-cafe/shared').CatId,
-        // F121: Pass A2A trigger message ID for auto-replyTo threading
-        ...(worklistEntry.a2aTriggerMessageId.get(catId)
-          ? { a2aTriggerMessageId: worklistEntry.a2aTriggerMessageId.get(catId) }
-          : {}),
+        // F121/F167: Keep stream threading and callback auth provenance on the same trigger.
+        ...(streamReplyTo ? { a2aTriggerMessageId: streamReplyTo } : {}),
         ...((mentionParentSpan.get(index) ?? options.routeSpan)
           ? { routeSpan: mentionParentSpan.get(index) ?? options.routeSpan }
           : {}),
@@ -1304,23 +2073,29 @@ export async function* routeSerial(
         }
 
         for (const effectiveMsg of effectiveMsgs) {
+          observePostDispositionProgress(effectiveMsg);
           // F22 R2 P1-1: Capture invocationId from the initial system_info.
           // Keep forwarding this boundary event so frontend can reset stale task progress.
           if (effectiveMsg.type === 'system_info' && effectiveMsg.content && !ownInvocationId) {
             try {
               const parsed = JSON.parse(effectiveMsg.content);
-              if (parsed.type === 'invocation_created') {
+              if (
+                parsed.type === 'invocation_created' &&
+                typeof parsed.invocationId === 'string' &&
+                parsed.invocationId.length > 0
+              ) {
                 ownInvocationId = parsed.invocationId;
-                emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
+                unregisterTurnCustodyAdoption = turnCustodyAdoptionRegistry.register(
+                  parsed.invocationId,
+                  adoptTurnCustodyWakes,
+                );
+                rememberTurnExecutionProjection(parsed.invocationId, initialExecutionKind);
+                if (!isFreshnessSupplement) {
+                  emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
+                }
                 // F111 Phase B: Start streaming TTS when we have an invocationId.
-                // F177-H guard-enabled turns defer first-pass voice text because it may
-                // be replaced by a remedial turn and must not be spoken early.
                 if (voiceMode) {
-                  if (needsServerRoutingGuard) {
-                    deferredVoiceInvocationId = ownInvocationId!;
-                  } else {
-                    voiceChunker = createVoiceChunker(ownInvocationId!);
-                  }
+                  voiceChunker = createVoiceChunker(ownInvocationId!);
                 }
                 // Issue #83: Start keepalive timer once we have an invocationId.
                 // This ensures draft TTL is renewed even during long silent tool calls.
@@ -1344,16 +2119,13 @@ export async function* routeSerial(
               effectiveMsg.content,
               (effectiveMsg as { textMode?: 'append' | 'replace' }).textMode,
             );
-            if (voiceMode && needsServerRoutingGuard) {
-              deferredVoiceTextChunks.push(effectiveMsg.content);
-            } else {
-              voiceChunker?.feed(effectiveMsg.content);
-            }
+            voiceChunker?.feed(effectiveMsg.content);
           }
           // F045: Accumulate thinking blocks for persistence (F5 recovery)
           if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
             if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
               sawUserFacingSystemInfo = true;
+              userFacingSystemInfoContents.push(effectiveMsg.content);
             }
             try {
               const parsed = JSON.parse(effectiveMsg.content);
@@ -1399,6 +2171,7 @@ export async function* routeSerial(
           if (toolEvt) {
             collectedToolEvents.push(toolEvt);
           }
+          verifiedConciergeToolTargets.observe(effectiveMsg);
 
           if (effectiveMsg.type === 'tool_use') {
             for (const target of collectStructuredTargetCatsFromInput(effectiveMsg.toolInput)) {
@@ -1412,6 +2185,9 @@ export async function* routeSerial(
             pendingToolResults.push({
               toolName: effectiveMsg.toolName,
               ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
+              ...(isPostMessageToolName(effectiveMsg.toolName)
+                ? { streamDisposition: readCallbackStreamDisposition(effectiveMsg.toolInput) }
+                : {}),
             });
             const callbackExit = collectCallbackContentRoutingExit(
               effectiveMsg.toolName,
@@ -1420,7 +2196,6 @@ export async function* routeSerial(
               effectiveMsg.toolUseId,
             );
             if (callbackExit) pendingCallbackRoutingExits.push(callbackExit);
-            if (isPostMessageToolName(effectiveMsg.toolName)) awaitingCallbackResult = true;
           }
           // #573: Confirm callback persistence via tool_result success
           if (effectiveMsg.type === 'tool_result') {
@@ -1431,15 +2206,12 @@ export async function* routeSerial(
               callbackResult.confirmed,
               Boolean(callbackResult.messageId && callbackResult.threadId),
             );
-            if (
-              awaitingCallbackResult &&
-              completedToolName &&
-              isPostMessageToolName(completedToolName.toolName) &&
-              callbackResult.confirmed
-            ) {
-              callbackPostConfirmed = true;
-              awaitingCallbackResult = false;
-              if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
+            observeSettledTool(completedToolName);
+            if (completedToolName && isPostMessageToolName(completedToolName.toolName) && callbackResult.confirmed) {
+              callbackFinalReplacement.recordConfirmedPost(
+                completedToolName.streamDisposition ?? 'independent',
+                callbackResult,
+              );
             }
             if (completedToolName) {
               const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
@@ -1449,6 +2221,15 @@ export async function* routeSerial(
                 callbackResult.messageId,
                 callbackResult.threadId,
               );
+              if (
+                callbackResult.confirmed &&
+                callbackResult.messageId &&
+                settledExit?.scope === 'target' &&
+                settledExit.createsCustodyHandoff &&
+                settledExit.targetCatIds.length === 1
+              ) {
+                noteAcceptedTurnCustodyHandoff(settledExit.targetCatIds[0]!, callbackResult.messageId);
+              }
             }
             // F188 Phase F AC-F10 (砚砚 六审 P1-B: also scope by catId for serial route consistency).
             // 砚砚 cloud-3 P1: also pass toolUseId for exact match when available;
@@ -1617,11 +2398,7 @@ export async function* routeSerial(
           } else {
             const streamEvent = toStreamEvent(effectiveMsg);
             if (!streamEvent) continue;
-            if (needsServerRoutingGuard && streamEvent.type === 'text') {
-              initialTextStreamEvents.push(streamEvent);
-            } else {
-              yield streamEvent;
-            }
+            yield streamEvent;
           }
         }
       }
@@ -1632,8 +2409,14 @@ export async function* routeSerial(
         keepaliveTimer = undefined;
       }
 
+      // F167 Phase S: this is the single route-side visibility barrier. The
+      // callback records the holder outcome with the durable CAS; nothing below
+      // may enqueue, persist, mutate thread state, synthesize visible output, or
+      // broadcast until it succeeds.
+      const actionOutputCommitAllowed = options.beforeOutputCommit ? await options.beforeOutputCommit(catId) : true;
+
       // F215 AC-C3: push opus-4.6 to worklist as relay when 48 炸毛 + fresh retry also failed
-      if (malformedRelayPending) {
+      if (actionOutputCommitAllowed && malformedRelayPending) {
         const relay46CatId = createCatId('opus');
         if (
           catId !== relay46CatId &&
@@ -1657,13 +2440,15 @@ export async function* routeSerial(
           );
         }
         malformedRelayPending = false;
+      } else if (malformedRelayPending) {
+        malformedRelayPending = false;
       }
 
       if (voiceChunker) {
         // F111 Phase B: Flush remaining buffered text and send voice_stream_end.
         // Guard-enabled turns do not create this first-pass chunker; their voice is flushed
         // only after routing validation below.
-        await flushVoiceChunker(voiceChunker, ownInvocationId);
+        if (actionOutputCommitAllowed) await flushVoiceChunker(voiceChunker, ownInvocationId);
         voiceChunker = undefined;
       }
 
@@ -1676,7 +2461,7 @@ export async function* routeSerial(
       // F061: Detect @co-creator mentions in agent response for browser notification
       let mentionsUser = false;
 
-      const appendRoutingGuardFailureNotice = async () => {
+      const appendStopGateFailureNotice = async () => {
         try {
           const failureSource = {
             connector: 'routing-guard-failure',
@@ -1688,7 +2473,8 @@ export async function* routeSerial(
             userId: 'system',
             catId: null,
             threadId,
-            content: '[路由守卫]: 补救失败，第二次回复仍没有合法的路由出口；已停止自动重试以避免重复调用。',
+            content:
+              '[F167 球权停止门]: 结构化补救后，当前协议球仍没有可验证状态迁移；已停止自动重试并保留原球权真相。',
             mentions: [],
             timestamp: Date.now(),
             source: failureSource,
@@ -1706,29 +2492,293 @@ export async function* routeSerial(
             });
           }
         } catch {
-          /* non-blocking guard failure notice */
+          /* non-blocking stop-gate failure notice */
         }
       };
 
-      const runRoutingGuardRemedial = async (
+      const observeLegacyRoutingBlock = (input: Parameters<typeof observesLegacyRoutingBlock>[0]): boolean => {
+        if (
+          hasTerminalCoordinationExit &&
+          observesLegacyRoutingBlock({ ...input, hasTerminalCoordinationExit: false })
+        ) {
+          routingTerminalReleaseCleanStopTotal.add(1);
+        }
+        return observesLegacyRoutingBlock({ ...input, hasTerminalCoordinationExit });
+      };
+
+      const scheduleTurnCustodyStopGate = async (legacyObservedBlock: boolean): Promise<void> => {
+        if (turnCustodyShadowRecorded || !turnCustodyProjection || !deps.turnCustodyProjectionService) return;
+        turnCustodyShadowRecorded = true;
+        const projection = turnCustodyProjection;
+        const sampleMessageId = turnTriggerMessageId ?? options.currentUserMessageId;
+        const wakeProvenance =
+          turnCustodyWake.kind === 'structured'
+            ? `structured:${turnCustodyWake.protocol}`
+            : turnCustodyWake.kind === 'unstructured'
+              ? `unstructured:${turnCustodyWake.source}`
+              : turnCustodyWake.kind === 'non_obligation'
+                ? `non_obligation:${turnCustodyWake.source}`
+                : turnCustodyWake.kind === 'legacy'
+                  ? `legacy:${turnCustodyWake.reason}`
+                  : 'action_successor';
+        const sourceSemantic = turnCustodySourceSemantic({
+          terminalCoordination: hasTerminalCoordinationExit,
+          ...(crossThreadReplyHint?.effectClass ? { effectClass: crossThreadReplyHint.effectClass } : {}),
+        });
+        pendingTurnCustodyShadowCloses.push(async (closeCheckpoint) => {
+          const verifiedEventWait =
+            projection.state === 'covered_active' ? await hasVerifiedEventBackedRoutingExit() : false;
+          const rawDecision = await deps.turnCustodyProjectionService!.close(projection);
+          const newDecision =
+            verifiedEventWait && rawDecision.state === 'covered_active'
+              ? {
+                  ...rawDecision,
+                  shouldBlock: false,
+                  transitionObserved: true,
+                  evidenceRefs: [...rawDecision.evidenceRefs, 'event_wait:verified'],
+                }
+              : rawDecision;
+          if (
+            turnCustodyWake.kind === 'structured' &&
+            turnCustodyWake.protocol === 'hold' &&
+            newDecision.transitionObserved &&
+            newDecision.structuredTransitionKind !== 'hold_dispositioned'
+          ) {
+            const transition = verifiedEventWait
+              ? 'event_wait'
+              : newDecision.structuredTransitionKind === 'held'
+                ? 'reheld'
+                : newDecision.structuredTransitionKind === 'handed'
+                  ? 'transferred'
+                  : undefined;
+            if (transition) {
+              recordTurnCustodyTerminalWitness({
+                kind: 'managed_hold_continued',
+                sourceMessageId: turnCustodyWake.sourceMessageId,
+                taskId: turnCustodyWake.taskId,
+                transition,
+              });
+            }
+          }
+          if (
+            turnCustodyWake.kind === 'structured' &&
+            turnCustodyWake.protocol === 'dispatch' &&
+            newDecision.transitionObserved &&
+            newDecision.structuredTransitionKind === 'dispatch_dispositioned' &&
+            newDecision.dispatchDisposition === 'handled' &&
+            dispatchDispositionToolSettled &&
+            !postDispatchDispositionProgress &&
+            newDecision.dispatchDispositionEventId &&
+            newDecision.dispatchDispositionAt !== undefined
+          ) {
+            recordTurnCustodyTerminalWitness({
+              kind: 'dispatch_handled_continuation',
+              sourceMessageId: turnCustodyWake.handoff.messageId,
+              dispositionEventId: newDecision.dispatchDispositionEventId,
+              dispositionAt: newDecision.dispatchDispositionAt,
+            });
+          }
+          if (
+            newDecision.state === 'covered_empty' &&
+            turnCustodyWake.kind === 'non_obligation' &&
+            turnCustodyWake.source === 'coordination_terminal'
+          ) {
+            recordTurnCustodyTerminalWitness({
+              kind: 'terminal_silent',
+              projectionState: 'covered_empty',
+              wake: 'coordination_terminal',
+            });
+          }
+          const comparison = compareTurnCustodyShadow(legacyObservedBlock, newDecision.shouldBlock);
+          const projectionReason = turnCustodyProjectionReason(newDecision.evidenceRefs);
+          const sourceCategory = boundedTurnCustodySourceCategory(turnCustodyWakeSourceCategory(turnCustodyWake));
+          const boundedSourceSemantic = boundedTurnCustodySourceSemantic(sourceSemantic);
+          const classification = classifyTurnCustodyNewOnlyBlock({
+            comparison,
+            state: newDecision.state,
+            projectionReason,
+            sourceCategory,
+            sourceSemantic: boundedSourceSemantic,
+            wakeProvenance,
+            closeCheckpoint,
+            transitionObserved: newDecision.transitionObserved,
+          });
+          turnCustodyProjectionTotal.add(1, { [TURN_CUSTODY_METRIC_STATE_ATTR]: newDecision.state });
+          turnCustodyShadowComparisonTotal.add(1, {
+            [TURN_CUSTODY_METRIC_COMPARISON_ATTR]: comparison,
+            [TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR]: classification,
+          });
+          if (legacyObservedBlock) turnCustodyShadowOldBlockTotal.add(1);
+          if (newDecision.shouldBlock) turnCustodyShadowNewBlockTotal.add(1);
+          if (legacyObservedBlock && newDecision.state === 'covered_empty') {
+            legacyGuardWithoutActiveCustodyTotal.add(1);
+          }
+          const traceEventName =
+            comparison === 'old_only_block' || comparison === 'new_only_block'
+              ? TURN_CUSTODY_SHADOW_DISAGREEMENT_EVENT_NAME
+              : comparison === 'agree_block' && newDecision.state === 'unknown_legacy'
+                ? TURN_CUSTODY_UNKNOWN_AGREE_BLOCK_EVENT_NAME
+                : undefined;
+          if (traceEventName && sampleMessageId) {
+            try {
+              const parentSpan = options.routeSpan ?? invocationSpanRef.current;
+              const parentCtx = parentSpan ? trace.setSpan(context.active(), parentSpan) : context.active();
+              const sampleSpan = trace
+                .getTracer('cat-cafe-api', '0.1.0')
+                .startSpan(TURN_CUSTODY_SHADOW_SAMPLE_SPAN, undefined, parentCtx);
+              sampleSpan.addEvent(traceEventName, {
+                messageId: sampleMessageId,
+                invocationId: ownInvocationId ?? 'unknown',
+                threadId,
+                [AGENT_ID]: catId as string,
+                [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+                [TRIGGER]: comparison,
+                [TURN_CUSTODY_PROJECTION_STATE_ATTR]: newDecision.state,
+                [TURN_CUSTODY_CLOSE_CHECKPOINT_ATTR]: closeCheckpoint,
+                [TURN_CUSTODY_WAKE_PROVENANCE_ATTR]: wakeProvenance,
+                [TURN_CUSTODY_TRANSITION_OBSERVED_ATTR]: String(newDecision.transitionObserved),
+                [TURN_CUSTODY_PROJECTION_REASON_ATTR]: projectionReason,
+                [TURN_CUSTODY_SOURCE_CATEGORY_ATTR]: sourceCategory,
+                [TURN_CUSTODY_SOURCE_SEMANTIC_ATTR]: boundedSourceSemantic,
+              });
+              sampleSpan.end();
+            } catch {
+              /* best-effort sample emission */
+            }
+          }
+          log.info(
+            {
+              threadId,
+              catId: catId as string,
+              state: newDecision.state,
+              comparison,
+              closeCheckpoint,
+              wakeProvenance,
+              transitionObserved: newDecision.transitionObserved,
+              projectionReason,
+              sourceCategory,
+              sourceSemantic: boundedSourceSemantic,
+              classification,
+              evidenceRefs: newDecision.evidenceRefs,
+            },
+            'F167 Phase T turn-custody stop-gate verdict',
+          );
+
+          let adoptedStructuredDispositionBlocked = false;
+          for (const adopted of adoptedTurnCustodyProjections) {
+            const adoptedDecision = await deps.turnCustodyProjectionService!.close(adopted.projection);
+            const transition =
+              adoptedDecision.structuredTransitionKind === 'held'
+                ? 'reheld'
+                : adoptedDecision.structuredTransitionKind === 'handed'
+                  ? 'transferred'
+                  : undefined;
+            if (adoptedDecision.transitionObserved && transition) {
+              recordTurnCustodyTerminalWitness({
+                kind: 'managed_hold_continued',
+                sourceMessageId: adopted.wake.sourceMessageId,
+                taskId: adopted.wake.taskId,
+                transition,
+              });
+            }
+            adoptedStructuredDispositionBlocked = adoptedDecision.shouldBlock || adoptedStructuredDispositionBlocked;
+            log.info(
+              {
+                threadId,
+                catId: catId as string,
+                sourceMessageId: adopted.wake.sourceMessageId,
+                taskId: adopted.wake.taskId,
+                state: adoptedDecision.state,
+                closeCheckpoint,
+                transitionObserved: adoptedDecision.transitionObserved,
+                evidenceRefs: adoptedDecision.evidenceRefs,
+              },
+              'F167 adopted managed-hold stop-gate verdict',
+            );
+          }
+
+          if (
+            (!newDecision.shouldBlock && !adoptedStructuredDispositionBlocked) ||
+            hadError ||
+            !actionOutputCommitAllowed ||
+            isFreshnessSupplement ||
+            stopGateRemedialAttempted
+          ) {
+            return;
+          }
+
+          // The exact F254 body exposure belongs to the invocation that just
+          // finished. A routing-guard child has different callback credentials,
+          // so omission must fail this attempt and restore the same Queue carrier
+          // instead of letting a second invocation impersonate its disposition.
+          if (
+            turnCustodyWake.kind === 'structured' &&
+            (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+          ) {
+            stopGateRemedialAttempted = true;
+            structuredDispositionMissingCode =
+              turnCustodyWake.protocol === 'hold'
+                ? 'managed_hold_disposition_missing'
+                : 'a2a_dispatch_disposition_missing';
+            await appendStopGateFailureNotice();
+            return;
+          }
+
+          if (adoptedStructuredDispositionBlocked) {
+            stopGateRemedialAttempted = true;
+            structuredDispositionMissingCode = 'managed_hold_disposition_missing';
+            await appendStopGateFailureNotice();
+            return;
+          }
+
+          const originalOwnInvocationId = ownInvocationId;
+          const originalDoneMsg = doneMsg;
+          const originalTextContent = textContent;
+          const originalFirstMetadata = firstMetadata;
+          try {
+            await runTurnCustodyStopGateRemedial('', [], []);
+            emitSingleAcceptedTurnCustodyHandoff();
+            const remedialTransitionWrites = pendingTurnCustodyTransitionWrites.splice(0);
+            if (remedialTransitionWrites.length > 0) {
+              await Promise.allSettled(remedialTransitionWrites);
+            }
+            const remediatedDecision = await deps.turnCustodyProjectionService!.close(projection);
+            if (remediatedDecision.shouldBlock) {
+              await appendStopGateFailureNotice();
+            }
+            if (turnStoredMessageId && deps.invocationDeps.turnExecutionStore) {
+              const projections = await readTurnExecutionProjections(originalOwnInvocationId);
+              if (Object.keys(projections).length > 0) {
+                await deps.messageStore.augmentStreamMetadata(turnStoredMessageId, { extra: projections });
+              }
+            }
+          } finally {
+            ownInvocationId = originalOwnInvocationId;
+            doneMsg = originalDoneMsg;
+            textContent = originalTextContent;
+            firstMetadata = originalFirstMetadata;
+          }
+        });
+      };
+
+      const runTurnCustodyStopGateRemedial = async (
         originalStoredContentBeforeRemedial: string,
         originalRichBlocksBeforeRemedial: RichBlock[],
         originalToolEventsBeforeRemedial: StoredToolEvent[],
       ): Promise<{
         storedContent: string;
+        routingContent: string;
         allRichBlocks: RichBlock[];
         a2aMentions: CatId[];
         hasCoCreatorLineStartMention: boolean;
         hasLocalCoCreatorLineStartMention: boolean;
         streamEvents: AgentMessage[];
       }> => {
-        routingGuardAttempted = true;
-        routingGuardRemediated = true;
-        const originalTextStreamEventsBeforeRemedial = [...initialTextStreamEvents];
+        stopGateRemedialAttempted = true;
         const originalVisibleInvocationIdBeforeRemedial = ownInvocationId;
         const originalDeferredVoiceInvocationIdBeforeRemedial = deferredVoiceInvocationId;
         const originalDeferredVoiceTextChunksBeforeRemedial = [...deferredVoiceTextChunks];
-        initialTextStreamEvents.splice(0, initialTextStreamEvents.length);
+        const originalToolNamesBeforeRemedial = [...collectedToolNames];
         resetDeferredVoice();
 
         if (deps.draftStore && ownInvocationId) {
@@ -1744,24 +2794,83 @@ export async function* routeSerial(
         structuredTargetCats.clear();
         streamRichBlocks.splice(0, streamRichBlocks.length);
         pendingToolResults.splice(0, pendingToolResults.length);
+        verifiedConciergeToolTargets.reset();
         pendingCallbackRoutingExits.splice(0, pendingCallbackRoutingExits.length);
         confirmedCallbackRoutingGuardMentions.clear();
         confirmedLocalCallbackRoutingMentions.clear();
         confirmedCallbackRoutingGuardHasCoCreatorLineStartMention = false;
         confirmedLocalCallbackRoutingHasCoCreatorLineStartMention = false;
-        callbackPostConfirmed = false;
-        callbackPostMessageId = undefined;
-        awaitingCallbackResult = false;
+        callbackFinalReplacement.reset();
         ownInvocationId = undefined;
 
         const remedialStreamEvents: AgentMessage[] = [];
         const remedialStripper = createLeakedToolCallStreamStripper();
+        const remedialService = getService(deps.services, catId);
+        const resolvedRemedialCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+          catId,
+          service: remedialService,
+        });
+        let remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
+        const turnCustodyRemedialPrompt = buildTurnCustodyStopGateRemedialPrompt(turnCustodyWake);
+        const rebuildRemedialPromptAfterSessionSeal = rebuildSessionBootstrap
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (refreshed.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+              }
+              return `${refreshed.text}\n\n---\n\n${turnCustodyRemedialPrompt}`;
+            }
+          : undefined;
+        let remedialPrompt = turnCustodyRemedialPrompt;
+        remedialCapacitySnapshot = await applyActiveSessionCapacityPin({
+          snapshot: remedialCapacitySnapshot,
+          catId,
+          threadId,
+          userId,
+          sessionChainStore: deps.invocationDeps.sessionChainStore,
+        });
+        const remedialSessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+          catId: catId as string,
+          evidence: {
+            capacitySnapshot: remedialCapacitySnapshot,
+            // Remedial invocations own a fresh evidence epoch too.
+            authoritativeUsage: false,
+            sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+            continuityBootstrap: Boolean(rebuildRemedialPromptAfterSessionSeal),
+          },
+        });
+        const sealed = await sealBeforeInvocationIfNeeded({
+          snapshot: remedialCapacitySnapshot,
+          catId,
+          threadId,
+          userId,
+          sessionChainStore: deps.invocationDeps.sessionChainStore,
+          sessionSealer: deps.invocationDeps.sessionSealer,
+          policySnapshot: remedialSessionPolicySnapshot,
+          clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+        });
+        if (sealed) {
+          remedialCapacitySnapshot = resolvedRemedialCapacitySnapshot;
+          if (!rebuildRemedialPromptAfterSessionSeal) {
+            throw new Error('pre_invocation_capacity_seal_requires_prompt_rebuild');
+          }
+          remedialPrompt = await rebuildRemedialPromptAfterSessionSeal();
+        }
         for await (const remedialMsg of invokeSingleCat(deps.invocationDeps, {
           catId,
-          service,
-          prompt: buildRemedialPrompt(),
+          service: remedialService,
+          capacitySnapshot: remedialCapacitySnapshot,
+          sessionPolicySnapshot: remedialSessionPolicySnapshot,
+          prompt: remedialPrompt,
+          ...(rebuildRemedialPromptAfterSessionSeal
+            ? { rebuildPromptAfterSessionSeal: rebuildRemedialPromptAfterSessionSeal }
+            : {}),
           userId,
+          ownerAuthProvenance,
           threadId,
+          invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+          routeTopology: 'serial',
           ...(catSignal ? { signal: catSignal } : {}),
           ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
@@ -1771,6 +2880,14 @@ export async function* routeSerial(
             ? { routeSpan: mentionParentSpan.get(index) ?? options.routeSpan }
             : {}),
           invocationSpanRef,
+          ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+          executionKind: 'routing_guard',
+          executionCausal: {
+            ...((streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
+              ? { triggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId }
+              : {}),
+            routingGuardReason: 'missing_routing_exit',
+          },
           isLastCat: false,
         })) {
           if (catSignal?.aborted) break;
@@ -1794,12 +2911,20 @@ export async function* routeSerial(
           }
 
           for (const effectiveMsg of remedialMsgs) {
+            observePostDispositionProgress(effectiveMsg);
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content && !ownInvocationId) {
               try {
                 const parsed = JSON.parse(effectiveMsg.content);
-                if (parsed.type === 'invocation_created') {
+                if (
+                  parsed.type === 'invocation_created' &&
+                  typeof parsed.invocationId === 'string' &&
+                  parsed.invocationId.length > 0
+                ) {
                   ownInvocationId = parsed.invocationId;
-                  emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
+                  rememberTurnExecutionProjection(parsed.invocationId, 'routing_guard');
+                  if (!isFreshnessSupplement) {
+                    emitBallInvocationStarted(deps.ballCustody, threadId, ownInvocationId, catId as string);
+                  }
                   if (voiceMode) {
                     deferredVoiceInvocationId = ownInvocationId;
                   }
@@ -1823,6 +2948,7 @@ export async function* routeSerial(
             if (effectiveMsg.type === 'system_info' && effectiveMsg.content) {
               if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
                 sawUserFacingSystemInfo = true;
+                userFacingSystemInfoContents.push(effectiveMsg.content);
               }
               try {
                 const parsed = JSON.parse(effectiveMsg.content);
@@ -1844,6 +2970,7 @@ export async function* routeSerial(
             if (toolEvt) {
               collectedToolEvents.push(toolEvt);
             }
+            verifiedConciergeToolTargets.observe(effectiveMsg);
 
             if (effectiveMsg.type === 'tool_use') {
               for (const target of collectStructuredTargetCatsFromInput(effectiveMsg.toolInput)) {
@@ -1855,6 +2982,9 @@ export async function* routeSerial(
               pendingToolResults.push({
                 toolName: effectiveMsg.toolName,
                 ...(effectiveMsg.toolUseId ? { toolUseId: effectiveMsg.toolUseId } : {}),
+                ...(isPostMessageToolName(effectiveMsg.toolName)
+                  ? { streamDisposition: readCallbackStreamDisposition(effectiveMsg.toolInput) }
+                  : {}),
               });
               const callbackExit = collectCallbackContentRoutingExit(
                 effectiveMsg.toolName,
@@ -1863,7 +2993,6 @@ export async function* routeSerial(
                 effectiveMsg.toolUseId,
               );
               if (callbackExit) pendingCallbackRoutingExits.push(callbackExit);
-              if (isPostMessageToolName(effectiveMsg.toolName)) awaitingCallbackResult = true;
             }
             if (effectiveMsg.type === 'tool_result') {
               const callbackResult = parseCallbackPostResult(effectiveMsg.content);
@@ -1873,15 +3002,12 @@ export async function* routeSerial(
                 callbackResult.confirmed,
                 Boolean(callbackResult.messageId && callbackResult.threadId),
               );
-              if (
-                awaitingCallbackResult &&
-                completedToolName &&
-                isPostMessageToolName(completedToolName.toolName) &&
-                callbackResult.confirmed
-              ) {
-                callbackPostConfirmed = true;
-                awaitingCallbackResult = false;
-                if (callbackResult.messageId) callbackPostMessageId = callbackResult.messageId;
+              observeSettledTool(completedToolName);
+              if (completedToolName && isPostMessageToolName(completedToolName.toolName) && callbackResult.confirmed) {
+                callbackFinalReplacement.recordConfirmedPost(
+                  completedToolName.streamDisposition ?? 'independent',
+                  callbackResult,
+                );
               }
               if (completedToolName) {
                 const settledExit = settleCallbackRoutingExit(completedToolName, callbackResult.confirmed);
@@ -1891,6 +3017,15 @@ export async function* routeSerial(
                   callbackResult.messageId,
                   callbackResult.threadId,
                 );
+                if (
+                  callbackResult.confirmed &&
+                  callbackResult.messageId &&
+                  settledExit?.scope === 'target' &&
+                  settledExit.createsCustodyHandoff &&
+                  settledExit.targetCatIds.length === 1
+                ) {
+                  noteAcceptedTurnCustodyHandoff(settledExit.targetCatIds[0]!, callbackResult.messageId);
+                }
               }
             }
 
@@ -1909,38 +3044,56 @@ export async function* routeSerial(
         const remedialSanitized = sanitizeInjectedContent(textContent);
         const remedialExtracted = extractRichFromText(remedialSanitized);
         const remedialCleanText = remedialExtracted.cleanText;
-        const remedialRouteOnlyContent = remedialCleanText ? normalizeRouteOnlyRemedialText(remedialCleanText) : null;
-        const remedialIsRouteOnly = remedialRouteOnlyContent !== null;
-        // Route-only remedial text (`@cat` / `@co-creator`) is an exit patch, not a replacement artifact.
-        // Use it for routing validation, but keep first-pass visible content so F5/history hydration
-        // does not replace generated work with a bare route outlet.
+        // The structured stop gate never treats remedial prose as custody truth or user-visible
+        // replacement content. Only confirmed tool results may close the projection.
         const preservesOriginalVisibleContent =
-          (!remedialCleanText || remedialIsRouteOnly) && originalStoredContentBeforeRemedial.length > 0;
+          originalStoredContentBeforeRemedial.length > 0 ||
+          originalToolEventsBeforeRemedial.length > 0 ||
+          originalRichBlocksBeforeRemedial.length > 0;
         visibleContentInvocationIdOverride = preservesOriginalVisibleContent
           ? originalVisibleInvocationIdBeforeRemedial
           : undefined;
         const remedialStoredContent = preservesOriginalVisibleContent
           ? originalStoredContentBeforeRemedial
           : remedialCleanText;
-        const remedialRoutingContent = remedialRouteOnlyContent ?? (remedialCleanText || remedialStoredContent);
-        const baseRichBlocks = !remedialCleanText || remedialIsRouteOnly ? originalRichBlocksBeforeRemedial : [];
-        let remedialAllRichBlocks = [...baseRichBlocks, ...remedialExtracted.blocks, ...streamRichBlocks];
+        const remedialRoutingContent = '';
+        const baseRichBlocks = preservesOriginalVisibleContent ? originalRichBlocksBeforeRemedial : [];
+        // When preserving first-pass content, drop ALL remedial-produced rich blocks.
+        // streamRichBlocks was cleared before remedial (line ~1875) and re-populated only
+        // from remedial streaming; remedialExtracted.blocks come from remedial text.
+        // Both are orphaned context from hidden remedial prose — the remedial turn is
+        // an exit patch, not a revised answer.
+        let remedialAllRichBlocks = preservesOriginalVisibleContent
+          ? [...baseRichBlocks]
+          : [...baseRichBlocks, ...remedialExtracted.blocks, ...streamRichBlocks];
         // Replacement text becomes a new persisted message and discards invalid first-pass evidence.
         // Exit-only remedials keep the original visible content, so preserve original tool evidence too.
         if (preservesOriginalVisibleContent && originalToolEventsBeforeRemedial.length > 0) {
           const remedialToolEvents = [...collectedToolEvents];
+          const remedialToolNames = [...collectedToolNames];
           collectedToolEvents.splice(
             0,
             collectedToolEvents.length,
             ...originalToolEventsBeforeRemedial,
             ...remedialToolEvents,
           );
+          collectedToolNames.splice(
+            0,
+            collectedToolNames.length,
+            ...originalToolNamesBeforeRemedial,
+            ...remedialToolNames,
+          );
         }
         textContent = remedialStoredContent;
-        if (preservesOriginalVisibleContent && originalDeferredVoiceTextChunksBeforeRemedial.length > 0) {
+        // When preserving first-pass content, always clear remedial voice chunks so
+        // hidden remedial prose (e.g. "好的，我来传球") is never spoken. Then restore
+        // original voice chunks if the first pass had any text to speak.
+        if (preservesOriginalVisibleContent) {
           resetDeferredVoice();
-          deferredVoiceInvocationId = originalDeferredVoiceInvocationIdBeforeRemedial;
-          deferredVoiceTextChunks.push(...originalDeferredVoiceTextChunksBeforeRemedial);
+          if (originalDeferredVoiceTextChunksBeforeRemedial.length > 0) {
+            deferredVoiceInvocationId = originalDeferredVoiceInvocationIdBeforeRemedial;
+            deferredVoiceTextChunks.push(...originalDeferredVoiceTextChunksBeforeRemedial);
+          }
         }
 
         if (!voiceMode) {
@@ -1949,17 +3102,14 @@ export async function* routeSerial(
             try {
               remedialAllRichBlocks = await voiceSynth.resolveVoiceBlocks(remedialAllRichBlocks, catId as string);
             } catch (err) {
-              log.error({ catId: catId as string, err }, 'Voice block synthesis failed for routing guard remedial');
+              log.error({ catId: catId as string, err }, 'Voice block synthesis failed for custody stop-gate remedial');
             }
           }
         }
 
-        const remedialA2aMentions = parseA2AMentions(remedialRoutingContent, catId);
-        if (remedialA2aMentions.length > 0) {
-          lineStartDetected.add(remedialA2aMentions.length, { 'agent.id': catId as string });
-        }
-        const remedialHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(remedialRoutingContent);
-        const remedialHasLocalCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(remedialRoutingContent);
+        const remedialA2aMentions: CatId[] = [];
+        const remedialHasCoCreatorLineStartMention = false;
+        const remedialHasLocalCoCreatorLineStartMention = false;
         const isRemedialLifecycleBoundary = (event: AgentMessage): boolean => {
           if (event.type !== 'system_info' || !event.content) return false;
           try {
@@ -1969,9 +3119,19 @@ export async function* routeSerial(
             return false;
           }
         };
-        const visibleRemedialSourceStreamEvents = remedialIsRouteOnly
-          ? remedialStreamEvents.filter((event) => event.type !== 'text')
-          : remedialStreamEvents;
+        // Structured remediation is hidden auxiliary execution. Its lifecycle/tool evidence remains
+        // inspectable, while prose and rich output never become a second visible answer.
+        const isRemedialRichBlockStreamEvent = (event: AgentMessage): boolean => {
+          if (event.type !== 'system_info' || !event.content) return false;
+          try {
+            return JSON.parse(event.content).type === 'rich_block';
+          } catch {
+            return false;
+          }
+        };
+        const visibleRemedialSourceStreamEvents = remedialStreamEvents.filter(
+          (event) => event.type !== 'text' && !isRemedialRichBlockStreamEvent(event),
+        );
         const visibleRemedialEvidenceStreamEvents: AgentMessage[] = [];
         const remedialLifecycleStreamEvents: AgentMessage[] = [];
         for (const event of visibleRemedialSourceStreamEvents) {
@@ -1989,80 +3149,154 @@ export async function* routeSerial(
               : event,
           );
         }
-        const originalVisibleStreamEventsForRemedialTurn = originalVisibleInvocationIdBeforeRemedial
-          ? originalTextStreamEventsBeforeRemedial.map((event) => ({
-              ...event,
-              invocationId: event.invocationId ?? originalVisibleInvocationIdBeforeRemedial,
-            }))
-          : originalTextStreamEventsBeforeRemedial;
+        // Stream replay for preserved content: use the STORED (post-extraction) content rather than
+        // raw buffered text events, so Route B cc_rich fences don't leak into the live stream.
+        // For tool-only or rich-only first passes where stored content is '', emit no text events.
+        const originalVisibleStreamEventsForRemedialTurn = preservesOriginalVisibleContent
+          ? originalStoredContentBeforeRemedial
+            ? [
+                {
+                  type: 'text' as AgentMessageType,
+                  catId,
+                  content: originalStoredContentBeforeRemedial,
+                  invocationId: originalVisibleInvocationIdBeforeRemedial ?? undefined,
+                  timestamp: Date.now(),
+                } as AgentMessage,
+              ]
+            : []
+          : [];
+
+        const streamEvents = preservesOriginalVisibleContent
+          ? [
+              ...originalVisibleStreamEventsForRemedialTurn,
+              ...visibleRemedialEvidenceStreamEvents,
+              ...remedialLifecycleStreamEvents,
+            ]
+          : remedialStreamEvents;
 
         return {
           storedContent: remedialStoredContent,
+          routingContent: remedialRoutingContent,
           allRichBlocks: remedialAllRichBlocks,
           a2aMentions: remedialA2aMentions,
           hasCoCreatorLineStartMention: remedialHasCoCreatorLineStartMention,
           hasLocalCoCreatorLineStartMention: remedialHasLocalCoCreatorLineStartMention,
           // Exit-only remedials validate preserved content instead of replacing it; replay the visible
           // text and routing-exit evidence before the remedial boundary can replace that turn.
-          streamEvents: preservesOriginalVisibleContent
-            ? [
-                ...originalVisibleStreamEventsForRemedialTurn,
-                ...visibleRemedialEvidenceStreamEvents,
-                ...remedialLifecycleStreamEvents,
-              ]
-            : remedialStreamEvents,
+          streamEvents: streamEvents.map(projectLiveTurnExecution),
         };
       };
 
-      let noTextBlocksOverride: RichBlock[] | undefined;
-
-      if (
-        !textContent &&
-        !hadError &&
-        shouldRemediateRouting({
-          needsGuard: needsServerRoutingGuard,
-          attempted: routingGuardAttempted,
-          lineStartMentions: getRoutingExitLineStartMentions(),
-          toolNames: collectedToolNames,
-          structuredTargetCats: [...structuredTargetCats],
-          hasCoCreatorLineStartMention: hasRoutingExitCoCreatorLineStartMention(''),
-        })
-      ) {
-        const result = await runRoutingGuardRemedial(
-          '',
-          [...bufferedBlocks, ...streamRichBlocks],
-          [...collectedToolEvents],
-        );
-        for (const event of result.streamEvents) yield event;
-        await flushDeferredVoice();
-        noTextBlocksOverride = result.allRichBlocks;
-        if (
-          !hasValidRoutingExit({
-            lineStartMentions: getRoutingExitLineStartMentions(result.a2aMentions),
+      const noTextLegacyObservedBlock = Boolean(
+        actionOutputCommitAllowed &&
+          !isFreshnessSupplement &&
+          !textContent &&
+          !hadError &&
+          observeLegacyRoutingBlock({
+            lineStartMentions: getRoutingExitLineStartMentions(),
             toolNames: collectedToolNames,
             structuredTargetCats: [...structuredTargetCats],
-            hasCoCreatorLineStartMention: result.hasCoCreatorLineStartMention,
-          })
-        ) {
-          await appendRoutingGuardFailureNotice();
-        }
-      }
+            hasCoCreatorLineStartMention: hasRoutingExitCoCreatorLineStartMention(''),
+          }),
+      );
+      if (!textContent) await scheduleTurnCustodyStopGate(noTextLegacyObservedBlock);
 
-      if (textContent) {
+      // F254 Phase D: declared at for-loop level so both textContent branch
+      // (stream store) and post-B3 forced re-invoke can access it
+      let streamFreshnessResult: StreamFreshnessResult | undefined;
+      let outputCommitDecision: OutputCommitDecision | undefined;
+      const evaluateCurrentStreamFreshness = async (
+        priorFrontierMessageId: string | null,
+      ): Promise<FreshnessEvaluation> => {
+        const freshness = await checkStreamOutputFreshness({
+          userId,
+          catId: catId as string,
+          threadId,
+          currentTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId,
+          parallelBatchId: options.parallelBatchId,
+          coveredMessageIds: exactPromptMessageIds,
+          throughMessageId: priorFrontierMessageId,
+          cursorStore: deps.deliveryCursorStore!,
+          messageStore: deps.messageStore,
+          messageFilter: (msg: Record<string, unknown>) => {
+            if (msg.userId === 'system') return false;
+            if (msg.origin === 'briefing') return false;
+            const viewer =
+              (thinkingMode ?? 'play') === 'play'
+                ? ({ type: 'cat' as const, catId } as const)
+                : { type: 'user' as const };
+            if (
+              !canViewMessage(
+                msg as unknown as Parameters<typeof canViewMessage>[0],
+                viewer as Parameters<typeof canViewMessage>[1],
+              )
+            )
+              return false;
+            return true;
+          },
+          queueChecker: getQueuedFreshnessMessagesForCat
+            ? {
+                getQueuedForThread: (tid, uid, targetCatId) =>
+                  getQueuedFreshnessMessagesForCat(tid, uid, targetCatId, options.parentInvocationId),
+              }
+            : undefined,
+          onEvent: deps.freshnessEventLog
+            ? (event) => {
+                deps
+                  .freshnessEventLog!.append({
+                    ...event,
+                    invocationId: ownInvocationId ?? 'unknown',
+                    catId: catId as string as import('@cat-cafe/shared').CatId,
+                  })
+                  .catch(() => {});
+              }
+            : undefined,
+        });
+        streamFreshnessResult = freshness;
+        if (freshness.stale) {
+          log.info(
+            {
+              catId: catId as string,
+              threadId,
+              invocationId: ownInvocationId,
+              unseenCount: freshness.unseenCount,
+              unseenSenders: freshness.unseenSenders,
+              reason: freshness.reason,
+            },
+            '[F254] output published with unseen input; offering an additive supplement check',
+          );
+        }
+        return { freshness, rawFrontierMessageId: priorFrontierMessageId };
+      };
+
+      if (!actionOutputCommitAllowed && textContent) await scheduleTurnCustodyStopGate(false);
+
+      if (!actionOutputCommitAllowed) {
+        catProducedOutput = Boolean(textContent || bufferedBlocks.length > 0 || collectedToolEvents.length > 0);
+        if (options.persistenceContext) {
+          options.persistenceContext.actionOutputCommitRejected = true;
+          if (callbackFinalReplacement.postMessageId) {
+            recordPersistedOutputMessageId(callbackFinalReplacement.postMessageId);
+          }
+        }
+        a2aMentions = [];
+      } else if (textContent) {
         catProducedOutput = true;
         const sanitized = sanitizeInjectedContent(textContent);
 
         // F22: Extract cc_rich blocks from text (Route B fallback for non-MCP cats)
-        const { cleanText, blocks: textBlocks } = extractRichFromText(sanitized);
+        const { cleanText, blocks: textBlocks } = isFreshnessSupplement
+          ? { cleanText: sanitized, blocks: [] }
+          : extractRichFromText(sanitized);
         let storedContent = cleanText;
-        let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
+        let allRichBlocks = isFreshnessSupplement ? [] : [...bufferedBlocks, ...textBlocks, ...streamRichBlocks];
 
         // F34-b: Resolve voice blocks (audio with text, no url) — Route B path.
         // Route A blocks were already resolved in the callback handler.
         // F111: When voiceMode is active, skip full synthesis so audio blocks
         // arrive at the frontend with text but no url — the frontend will use
         // /api/tts/stream for chunked streaming playback (<2s first-audio).
-        if (!voiceMode) {
+        if (!isFreshnessSupplement && !voiceMode) {
           const voiceSynth = getVoiceBlockSynthesizer();
           if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
             try {
@@ -2073,63 +3307,48 @@ export async function* routeSerial(
           }
         }
 
+        const conciergeActionSourceContent =
+          !isFreshnessSupplement &&
+          'conciergeConfig' in conciergeCtx &&
+          conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig &&
+          storedContent
+            ? storedContent
+            : undefined;
+        if (conciergeActionSourceContent) {
+          storedContent = stripTriagePlanMarkers(storedContent);
+        }
+
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = parseA2AMentions(storedContent, catId);
+        a2aMentions = isFreshnessSupplement ? [] : parseA2AMentions(storedContent, catId);
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
           lineStartDetected.add(a2aMentions.length, { 'agent.id': catId as string });
         }
 
-        let routingExitLineStartMentions = getRoutingExitLineStartMentions(a2aMentions);
-        let routingExitHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(storedContent);
-        let localCvoHasCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(storedContent);
+        const routingExitLineStartMentions = getRoutingExitLineStartMentions(a2aMentions);
+        const routingExitHasCoCreatorLineStartMention = hasRoutingExitCoCreatorLineStartMention(storedContent);
+        const localCvoHasCoCreatorLineStartMention = hasLocalCoCreatorLineStartMention(storedContent);
 
-        if (
-          shouldRemediateRouting({
-            needsGuard: needsServerRoutingGuard,
-            attempted: routingGuardAttempted,
-            lineStartMentions: routingExitLineStartMentions,
-            toolNames: collectedToolNames,
-            structuredTargetCats: [...structuredTargetCats],
-            hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
-          })
-        ) {
-          const result = await runRoutingGuardRemedial(storedContent, allRichBlocks, [...collectedToolEvents]);
-          for (const event of result.streamEvents) yield event;
-          await flushDeferredVoice();
-          storedContent = result.storedContent;
-          allRichBlocks = result.allRichBlocks;
-          a2aMentions = result.a2aMentions;
-          routingExitLineStartMentions = getRoutingExitLineStartMentions(a2aMentions);
-          routingExitHasCoCreatorLineStartMention = result.hasCoCreatorLineStartMention;
-          localCvoHasCoCreatorLineStartMention = result.hasLocalCoCreatorLineStartMention;
-
-          if (
-            !hasValidRoutingExit({
+        const textLegacyObservedBlock = Boolean(
+          !isFreshnessSupplement &&
+            !hadError &&
+            observeLegacyRoutingBlock({
               lineStartMentions: routingExitLineStartMentions,
               toolNames: collectedToolNames,
               structuredTargetCats: [...structuredTargetCats],
               hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
-            })
-          ) {
-            await appendRoutingGuardFailureNotice();
-          }
-        }
+            }),
+        );
+        await scheduleTurnCustodyStopGate(textLegacyObservedBlock);
         a2aMentions = getLocalRoutingLineStartMentions(a2aMentions);
 
-        // In play mode, CLI stream output (thinking) is hidden from other cats.
-        // Only share previousResponses in debug mode, after guard remediation
-        // finalizes storedContent for stream, persistence, and A2A prompts.
+        // Preserve independent first-pass reasoning inside one serial route.
+        // Only debug mode injects an earlier cat's in-flight response directly;
+        // later invocations still receive that response after it is persisted.
         if (!incrementalMode && thinkingMode === 'debug') {
           previousResponses.push({ catId, content: storedContent });
-        }
-
-        if (!routingGuardRemediated && initialTextStreamEvents.length > 0) {
-          for (const event of initialTextStreamEvents) yield event;
-          await flushDeferredVoice();
-          initialTextStreamEvents.splice(0, initialTextStreamEvents.length);
         }
 
         // F167 Phase H AC-H3/H5 (KD-24): final routing slot validator.
@@ -2150,7 +3369,7 @@ export async function* routeSerial(
           structuredTargetCats: [...structuredTargetCats],
           rosterHandles: phaseHRosterHandles,
         });
-        const phaseHHit = phaseHResult.kind === 'invalid_route_syntax';
+        const phaseHHit = !isFreshnessSupplement && phaseHResult.kind === 'invalid_route_syntax';
         if (phaseHHit && phaseHResult.kind === 'invalid_route_syntax') {
           try {
             const inlineList = phaseHResult.inlineMentions.map((h) => `@${h}`).join(' ');
@@ -2188,7 +3407,7 @@ export async function* routeSerial(
 
         // #417 / F064 AC-B3: Write-side feedback for inline action-like @mentions
         // clowder-ai#489: counters for detection, shadow, feedback, hint
-        if (deps.invocationDeps.threadStore) {
+        if (!isFreshnessSupplement && deps.invocationDeps.threadStore) {
           const {
             strictHits: inlineHits,
             shadowMisses,
@@ -2365,6 +3584,7 @@ export async function* routeSerial(
           lineStartMentions: routingExitLineStartMentions,
           structuredTargetCats: [...structuredTargetCats],
           hasCoCreatorLineStartMention: routingExitHasCoCreatorLineStartMention,
+          hasVerifiedEventBackedRoutingExit: verifiedEventBackedRoutingExit,
         });
         if (voidHoldEval.shouldEmit) {
           try {
@@ -2411,7 +3631,7 @@ export async function* routeSerial(
 
         // F079 Phase 2: Vote interception — extract [VOTE:xxx] from cat response
         const votedOption = extractVoteFromText(storedContent);
-        if (votedOption && deps.invocationDeps.threadStore) {
+        if (!isFreshnessSupplement && votedOption && deps.invocationDeps.threadStore) {
           try {
             const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
             if (voteState && voteState.status === 'active' && voteState.options.includes(votedOption)) {
@@ -2489,17 +3709,24 @@ export async function* routeSerial(
           }
         }
 
-        const storedTimestamp = invocationStartedAt;
+        // #1332: a proactive callback is already durable before a later independent
+        // final is committed. Timestamp that final at commit time so hydrated history
+        // preserves the same callback-before-final order users saw live.
+        const storedTimestamp =
+          callbackFinalReplacement.postConfirmed && !callbackFinalReplacement.finalReplacementConfirmed
+            ? Date.now()
+            : invocationStartedAt;
 
         // F061: Detect local @co-creator mentions for browser/unread notification.
         // Cross-post callbacks can satisfy the guard and emit target-thread operator, but must not
         // create a source-thread unread/user notification.
-        mentionsUser = Boolean(
-          (storedContent ? detectUserMention(storedContent) : false) || localCvoHasCoCreatorLineStartMention,
-        );
+        mentionsUser =
+          !isFreshnessSupplement &&
+          Boolean((storedContent ? detectUserMention(storedContent) : false) || localCvoHasCoCreatorLineStartMention);
 
-        // #573: skip stream store only when callback confirmed persistence (not just invocation)
-        const callbackAlreadyStored = callbackPostConfirmed;
+        // #573/#1332: callback success alone does not prove the final is a duplicate.
+        // Suppression is opt-in through streamDisposition="replace_final".
+        const callbackAlreadyStored = callbackFinalReplacement.finalReplacementConfirmed;
 
         // Store with actual mentions — degrade on failure to ensure done reaches frontend
         // (缅因猫 review P1-2: Redis failure must not block done yield)
@@ -2509,13 +3736,8 @@ export async function* routeSerial(
           // #573: persist with the OUTER cat-cafe parentInvocationId (set by QueueProcessor)
           const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
           const persistedInvocationId = options.parentInvocationId ?? visibleTurnInvocationId;
-          // F229 KD-17: Post-process concierge reply — inject CardBlock actions from HandleMap markers
-          if (
-            'conciergeConfig' in conciergeCtx &&
-            conciergeContextForCat(conciergeCtx, catId as string)?.conciergeConfig &&
-            deps.invocationDeps.conciergeHandleMapStore &&
-            storedContent
-          ) {
+          // F229 KD-23: Post-process concierge reply — resolve markers against per-invocation handle table
+          if (conciergeActionSourceContent) {
             try {
               // Phase B: pass triageDeps if TriagePlanStore is available
               const triageDeps: TriagePlanExtractionDeps | undefined = deps.invocationDeps.conciergeTriagePlanStore
@@ -2533,12 +3755,26 @@ export async function* routeSerial(
                       : {}),
                   }
                 : undefined;
-              const conciergeActions = await buildConciergeActions(
-                storedContent,
+              const verifiedToolAnchor = await resolveVerifiedConciergeToolAnchor(
+                verifiedConciergeToolTargets,
                 threadId,
-                deps.invocationDeps.conciergeHandleMapStore,
-                triageDeps,
+                deps.invocationDeps.threadStore,
               );
+              conciergeVerifiedToolTargetsPerReply.record(verifiedConciergeToolTargets.verifiedTargetCount());
+              const conciergeActions = await buildConciergeActions(
+                conciergeActionSourceContent,
+                conciergeHandles,
+                triageDeps,
+                verifiedToolAnchor,
+              );
+              if (
+                verifiedToolAnchor &&
+                conciergeActions.some(
+                  (action) => !action.handle && action.payload.threadId === verifiedToolAnchor.threadId,
+                )
+              ) {
+                conciergeVerifiedToolActions.add(1);
+              }
               triagePlanIdsToLink = extractTriagePlanIdsFromActions(conciergeActions);
               if (conciergeActions.length > 0) {
                 allRichBlocks = [
@@ -2551,19 +3787,17 @@ export async function* routeSerial(
                     actions: conciergeActions,
                   },
                 ];
-                // Strip <!-- triage-plan --> markers from stored content (cloud P2 fix).
-                // Users should not see raw HTML comment markers in the concierge panel.
-                if (triagePlanIdsToLink.length > 0) {
-                  storedContent = stripTriagePlanMarkers(storedContent);
-                }
               }
             } catch {
               // Fail-open: action extraction failure → no actions, no crash
             }
           }
 
+          const evaluateStreamFreshness = evaluateCurrentStreamFreshness;
+
           if (!callbackAlreadyStored) {
-            const storedMsg = await deps.messageStore.append({
+            const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+            const streamMessageInput: AppendMessageInput = {
               userId,
               catId,
               content: storedContent,
@@ -2593,12 +3827,53 @@ export async function* routeSerial(
                       },
                     }
                   : {}),
+                ...(turnTriggerMessageId
+                  ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                  : {}),
+                ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
               },
-            });
-            storedMsgId = storedMsg.id;
+            };
+            let storedMsg = null;
+            if (deps.freshnessOutputCommitCoordinator && deps.deliveryCursorStore && ownInvocationId) {
+              const decision = await deps.freshnessOutputCommitCoordinator.commit({
+                userId,
+                threadId,
+                catId: catId as string,
+                invocationId: options.parentInvocationId ?? ownInvocationId,
+                turnInvocationId: ownInvocationId,
+                originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
+                freshnessClosureId: options.freshnessClosureId,
+                freshnessSupplementId: options.freshnessSupplementId,
+                message: streamMessageInput,
+                replayUnsafeToolNames: findReplayUnsafeToolNames(collectedToolNames),
+                evaluateFreshness: evaluateStreamFreshness,
+              });
+              outputCommitDecision = decision;
+              if (options.persistenceContext) {
+                options.persistenceContext.outputCommitDecisions = {
+                  ...(options.persistenceContext.outputCommitDecisions ?? {}),
+                  [catId as string]: decision,
+                };
+              }
+              if (
+                decision.kind === 'committed_fresh' ||
+                decision.kind === 'committed_degraded_unknown' ||
+                decision.kind === 'published_with_unseen'
+              ) {
+                storedMsg = await deps.messageStore.getById(decision.messageId);
+                if (decision.kind === 'published_with_unseen') {
+                  await enqueueFreshnessSupplement(decision, catId as string);
+                }
+              }
+            } else {
+              storedMsg = await deps.messageStore.append(streamMessageInput);
+            }
+            storedMsgId = storedMsg?.id;
+            turnStoredMessageId = storedMsgId;
+            if (storedMsgId) recordPersistedOutputMessageId(storedMsgId);
             const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
-            if (triagePlanStore && triagePlanIdsToLink.length > 0) {
+            if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
               try {
                 await Promise.all(
                   triagePlanIdsToLink.map((planId) => triagePlanStore.setConfirmationMessageId(planId, storedMsg.id)),
@@ -2608,16 +3883,20 @@ export async function* routeSerial(
               }
             }
             // F088-P3: Stash rich blocks for outbound delivery
-            if (options.persistenceContext && allRichBlocks.length > 0) {
+            if (storedMsg && options.persistenceContext && allRichBlocks.length > 0) {
               options.persistenceContext.richBlocks = allRichBlocks;
             }
           } else {
             log.info(
-              { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
-              'Stream store skipped — cat_cafe_post_message callback already persisted',
+              {
+                threadId,
+                catId: catId as string,
+                callbackMessageId: callbackFinalReplacement.finalReplacementMessageId,
+              },
+              'Stream store skipped — cat_cafe_post_message explicitly replaced the final',
             );
             const callbackTriagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
-            const linkedCallbackMessageId = callbackPostMessageId;
+            const linkedCallbackMessageId = callbackFinalReplacement.finalReplacementMessageId;
             if (linkedCallbackMessageId && callbackTriagePlanStore && triagePlanIdsToLink.length > 0) {
               try {
                 await Promise.all(
@@ -2632,58 +3911,29 @@ export async function* routeSerial(
                 );
               }
             }
-            if (callbackPostMessageId) {
+            if (callbackFinalReplacement.finalReplacementMessageId) {
               // F192 Phase D: bind sample anchor in callback path so post-storage
               // emission uses the actual cat-stored message id (via callback).
-              storedMsgId = callbackPostMessageId;
-              const metadataPatch: StreamMetadataAugmentInput = {
-                ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
-                ...(firstMetadata ? { metadata: firstMetadata } : {}),
-                ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-                ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-                ...(mentionsUser ? { mentionsUser } : {}),
-              };
-              const extraParts = {
-                ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
-                // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
-                // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
-                // same-parent multi-turn-same-cat bubble merge).
-                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId.
-                // First-in-chain (ownInvocationId === parent) still gets explicit
-                // turn stamp so frontend bubble identity never falls back to parent
-                // (which would let multi-turn same-cat under same parent collapse).
-                ...(persistedInvocationId
-                  ? {
-                      stream: {
-                        invocationId: persistedInvocationId,
-                        turnInvocationId: visibleTurnInvocationId ?? persistedInvocationId,
-                      },
-                    }
-                  : {}),
-                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
-              };
-              if (Object.keys(extraParts).length > 0) metadataPatch.extra = extraParts;
-
-              if (hasStreamMetadataPatch(metadataPatch)) {
-                try {
-                  const augmented = await deps.messageStore.augmentStreamMetadata(callbackPostMessageId, metadataPatch);
-                  if (!augmented) {
-                    log.warn(
-                      { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId },
-                      'Callback message metadata augment skipped: message not found',
-                    );
-                  }
-                } catch (augmentErr) {
-                  log.warn(
-                    { threadId, catId: catId as string, callbackMessageId: callbackPostMessageId, err: augmentErr },
-                    'Callback message metadata augment failed; continuing without duplicate stream append',
-                  );
-                }
-              }
+              storedMsgId = callbackFinalReplacement.finalReplacementMessageId;
+              turnStoredMessageId = callbackFinalReplacement.finalReplacementMessageId;
+              recordPersistedOutputMessageId(callbackFinalReplacement.finalReplacementMessageId);
+              await augmentFinalReplacementMessage(
+                callbackFinalReplacement.finalReplacementMessageId,
+                visibleTurnInvocationId,
+                allRichBlocks,
+                mentionsUser,
+              );
             }
           }
-          // #80: Clean up draft after message is persisted (either via append or callback)
-          if (deps.draftStore && ownInvocationId) {
+          // #80/F254: Delete only after MessageStore or closure truth proves custody.
+          if (
+            deps.draftStore &&
+            ownInvocationId &&
+            mayDeleteDraft(
+              outputCommitDecision,
+              Boolean(storedMsgId || callbackFinalReplacement.finalReplacementMessageId),
+            )
+          ) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
           // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
@@ -2761,7 +4011,9 @@ export async function* routeSerial(
               /* best-effort sample emission */
             }
             // F233 Phase B (B2): 同一虚空传球旁路写 ball.void_pass（storedMsgId 此时已绑定）
-            emitBallVoidPass(deps.ballCustody, threadId, storedMsgId, pendingC2VoidHoldSampleTrigger);
+            if (!isFreshnessSupplement) {
+              emitBallVoidPass(deps.ballCustody, threadId, storedMsgId, pendingC2VoidHoldSampleTrigger);
+            }
           }
         } catch (err) {
           log.error({ catId: catId as string, err }, 'messageStore.append failed, degrading');
@@ -2807,10 +4059,14 @@ export async function* routeSerial(
 
         if (
           a2aMentions.length > 0 &&
+          !hadError &&
           worklistEntry.a2aCount < maxDepth &&
           !catSignal?.aborted &&
           !queuedMessagesPending
         ) {
+          // F212 cloud R3 P1: a failed partial turn must not launch downstream cats
+          // from incomplete content. The structured stop gate independently skips
+          // provider-error turns and does not revive this text-derived dispatch.
           // F153: mention_dispatch span — tracks the causal link between mentioner and dispatched targets
           let dispatchSpan: Span | undefined;
           const pendingTail = worklist.slice(index + 1);
@@ -2889,6 +4145,20 @@ export async function* routeSerial(
             }
 
             // decision.action === 'enqueue_worklist'
+            // The queue-only dedup hook above cannot see direct/user invocations. Claim the
+            // InvocationTracker slot before mutating the worklist; another live owner means this
+            // return must wait in the durable queue rather than start a same-session invocation.
+            const claimed = await claimOrDeferA2ATarget(
+              nextCat,
+              catId,
+              storedContent,
+              storedMsgId,
+              noteAcceptedTurnCustodyHandoff,
+            );
+            if (!claimed) {
+              worklistEntry.a2aCount++;
+              continue;
+            }
             // F153: lazily create mention_dispatch span on first actual push
             if (!dispatchSpan) {
               const mentionerSpan = catInvocationSpans.get(index);
@@ -2965,6 +4235,7 @@ export async function* routeSerial(
               deferA2AEnqueue({
                 threadId,
                 userId,
+                ownerAuthProvenance,
                 content: storedContent,
                 source: 'agent',
                 sourceCategory: 'a2a',
@@ -3084,9 +4355,10 @@ export async function* routeSerial(
                 };
               }
             }
-            deferA2AEnqueue({
+            const enqueueResult = deferA2AEnqueue({
               threadId,
               userId,
+              ownerAuthProvenance,
               content: storedContent,
               source: 'agent',
               sourceCategory: 'a2a',
@@ -3099,6 +4371,9 @@ export async function* routeSerial(
               intent: 'execute',
               ...(deferredDispatchCtx ? { callerTraceContext: deferredDispatchCtx } : {}),
             });
+            if (enqueueResult?.outcome === 'enqueued' && storedMsgId) {
+              noteAcceptedTurnCustodyHandoff(nextCat, storedMsgId);
+            }
             worklistEntry.a2aCount++;
             log.info(
               { threadId, catId: nextCat, fromCat: catId },
@@ -3112,6 +4387,19 @@ export async function* routeSerial(
         for (let wi = handoffEmitted; wi < worklist.length; wi++) {
           const pendingCat = worklist[wi]!;
           if (wi < targetCats.length) continue; // Skip original targets — not A2A
+
+          const claimed = await claimOrDeferA2ATarget(
+            pendingCat,
+            catId,
+            storedContent,
+            storedMsgId,
+            noteAcceptedTurnCustodyHandoff,
+          );
+          if (!claimed) {
+            worklist.splice(wi, 1);
+            wi--;
+            continue;
+          }
 
           // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
           const auditLog = getEventAuditLog();
@@ -3134,10 +4422,6 @@ export async function* routeSerial(
           // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
           // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
           const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
-          if (options.invocationController && options.trackA2ASlot && !activeTrackedA2ASlots.has(pendingCat)) {
-            options.trackA2ASlot(threadId, pendingCat, userId, options.invocationController);
-            activeTrackedA2ASlots.add(pendingCat);
-          }
           yield {
             type: 'a2a_handoff' as AgentMessageType,
             catId,
@@ -3152,18 +4436,21 @@ export async function* routeSerial(
         // No text content and no error.
         // Persist only when we have non-text payload (tool/thinking/rich).
         // Purely empty turns should not create blank chat bubbles.
-        if (!routingGuardRemediated && initialTextStreamEvents.length > 0) {
-          for (const event of initialTextStreamEvents) yield event;
-          initialTextStreamEvents.splice(0, initialTextStreamEvents.length);
-        }
-
-        const noTextBlocks = noTextBlocksOverride ?? [...bufferedBlocks, ...streamRichBlocks];
+        const noTextBlocks = [...bufferedBlocks, ...streamRichBlocks];
         const hasRichBlocks = noTextBlocks.length > 0;
-        const shouldPersistNoTextMessage =
+        const callbackAlreadyStored = callbackFinalReplacement.finalReplacementConfirmed;
+        const hasNoTextStreamPayload =
           hasRichBlocks ||
           collectedToolEvents.length > 0 ||
           Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
-        const shouldEmitSilentCompletion = collectedToolEvents.length > 0 && !hasRichBlocks && !sawUserFacingSystemInfo;
+        const shouldPersistNoTextMessage = !callbackAlreadyStored && hasNoTextStreamPayload;
+        const isFreshnessClosureSuccessor = Boolean(options.freshnessClosureRequiredMessageIds?.length);
+        const shouldEmitSilentCompletion =
+          !callbackAlreadyStored &&
+          collectedToolEvents.length > 0 &&
+          !hasRichBlocks &&
+          !sawUserFacingSystemInfo &&
+          !isFreshnessClosureSuccessor;
 
         log.debug(
           {
@@ -3191,48 +4478,135 @@ export async function* routeSerial(
             timestamp: Date.now(),
           } as AgentMessage;
         }
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldEmitSilentCompletion) {
+        if (
+          callbackAlreadyStored ||
+          shouldPersistNoTextMessage ||
+          sawUserFacingSystemInfo ||
+          shouldEmitSilentCompletion
+        ) {
           catProducedOutput = true;
         }
 
-        if (shouldPersistNoTextMessage) {
+        if (shouldPersistNoTextMessage || callbackAlreadyStored) {
           try {
-            await deps.messageStore.append({
-              userId,
-              catId,
-              content: '',
-              mentions: [],
-              origin: 'stream',
-              timestamp: invocationStartedAt,
-              threadId,
-              ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-              ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
-              ...(firstMetadata ? { metadata: firstMetadata } : {}),
-              ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
-              extra: {
-                ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
-                // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
-                // (= ownInvocationId, else parent fallback).
-                ...((options.parentInvocationId ?? ownInvocationId)
-                  ? {
-                      stream: {
-                        invocationId: (options.parentInvocationId ?? ownInvocationId) as string,
-                        turnInvocationId: (ownInvocationId ?? options.parentInvocationId) as string,
-                      },
-                    }
-                  : {}),
-                ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
-              },
-            });
+            const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
+            let storedNoText = null;
+            if (callbackAlreadyStored) {
+              log.info(
+                {
+                  threadId,
+                  catId: catId as string,
+                  callbackMessageId: callbackFinalReplacement.finalReplacementMessageId,
+                },
+                'No-text stream store skipped — cat_cafe_post_message explicitly replaced the final',
+              );
+              if (callbackFinalReplacement.finalReplacementMessageId) {
+                turnStoredMessageId = callbackFinalReplacement.finalReplacementMessageId;
+                recordPersistedOutputMessageId(callbackFinalReplacement.finalReplacementMessageId);
+                await augmentFinalReplacementMessage(
+                  callbackFinalReplacement.finalReplacementMessageId,
+                  visibleTurnInvocationId,
+                  noTextBlocks,
+                  !isFreshnessSupplement && hasLocalCoCreatorLineStartMention(''),
+                );
+              }
+            } else {
+              const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+              const noTextMessageInput: AppendMessageInput = {
+                userId,
+                catId,
+                content: '',
+                mentions: [],
+                origin: 'stream',
+                timestamp: invocationStartedAt,
+                threadId,
+                ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+                ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
+                ...(firstMetadata ? { metadata: firstMetadata } : {}),
+                ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
+                extra: {
+                  ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                  // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                  // (= ownInvocationId, else parent fallback).
+                  ...((options.parentInvocationId ?? visibleTurnInvocationId)
+                    ? {
+                        stream: {
+                          invocationId: (options.parentInvocationId ?? visibleTurnInvocationId) as string,
+                          turnInvocationId: (visibleTurnInvocationId ?? options.parentInvocationId) as string,
+                        },
+                      }
+                    : {}),
+                  ...(turnTriggerMessageId
+                    ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                    : {}),
+                  ...executionProjections,
+                  ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                },
+              };
+              const answerBearingNoText =
+                hasRichBlocks || Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
+              const replayUnsafeToolNames = findReplayUnsafeToolNames(collectedToolNames);
+              const requiresFreshnessGate = answerBearingNoText || replayUnsafeToolNames.length > 0;
+              if (
+                requiresFreshnessGate &&
+                deps.freshnessOutputCommitCoordinator &&
+                deps.deliveryCursorStore &&
+                ownInvocationId
+              ) {
+                const decision = await deps.freshnessOutputCommitCoordinator.commit({
+                  userId,
+                  threadId,
+                  catId: catId as string,
+                  invocationId: options.parentInvocationId ?? ownInvocationId,
+                  turnInvocationId: ownInvocationId,
+                  originTriggerMessageId: streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId ?? null,
+                  freshnessClosureId: options.freshnessClosureId,
+                  freshnessSupplementId: options.freshnessSupplementId,
+                  message: noTextMessageInput,
+                  replayUnsafeToolNames,
+                  evaluateFreshness: evaluateCurrentStreamFreshness,
+                });
+                outputCommitDecision = decision;
+                if (options.persistenceContext) {
+                  options.persistenceContext.outputCommitDecisions = {
+                    ...(options.persistenceContext.outputCommitDecisions ?? {}),
+                    [catId as string]: decision,
+                  };
+                }
+                if (
+                  decision.kind === 'committed_fresh' ||
+                  decision.kind === 'committed_degraded_unknown' ||
+                  decision.kind === 'published_with_unseen'
+                ) {
+                  storedNoText = await deps.messageStore.getById(decision.messageId);
+                  if (decision.kind === 'published_with_unseen') {
+                    await enqueueFreshnessSupplement(decision, catId as string);
+                  }
+                }
+              } else {
+                // Reviewed read-only tool-only records are audit output, not answer content.
+                // Unknown or mutating tools still enter the freshness gate above so a stale
+                // turn cannot hide a side effect and then blind-replay it.
+                storedNoText = await deps.messageStore.append(noTextMessageInput);
+              }
+            }
             // F088-P3: Stash rich blocks for outbound delivery (no-text branch)
-            if (options.persistenceContext && noTextBlocks.length > 0) {
+            if (storedNoText && options.persistenceContext && noTextBlocks.length > 0) {
               options.persistenceContext.richBlocks = [
                 ...(options.persistenceContext.richBlocks ?? []),
                 ...noTextBlocks,
               ];
             }
-            // #80: Clean up draft only after successful append
-            if (deps.draftStore && ownInvocationId) {
+            if (storedNoText) recordPersistedOutputMessageId(storedNoText.id);
+            // #80/F254: retained means DraftStore is still the only recoverable copy.
+            if (
+              deps.draftStore &&
+              ownInvocationId &&
+              mayDeleteDraft(
+                outputCommitDecision,
+                Boolean(storedNoText || callbackFinalReplacement.finalReplacementMessageId),
+              )
+            ) {
               deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
             }
             // Cloud Codex R4 P1 fix: Update activity in isolated try/catch to not affect append status
@@ -3258,60 +4632,84 @@ export async function* routeSerial(
               });
             }
           }
-        } else if (!sawUserFacingSystemInfo) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
-              toolCount: collectedToolEvents.length,
-              provider: firstMetadata?.provider,
-              model: firstMetadata?.model,
-              invocationId: ownInvocationId,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-          // No persisted message for fully silent turns.
+        }
+
+        if (!shouldPersistNoTextMessage && !callbackAlreadyStored) {
+          if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
+            yield {
+              type: 'system_info' as AgentMessageType,
+              catId,
+              content: JSON.stringify({
+                type: 'silent_completion',
+                detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
+                toolCount: collectedToolEvents.length,
+                provider: firstMetadata?.provider,
+                model: firstMetadata?.model,
+                invocationId: ownInvocationId,
+              }),
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+          // No persisted message for fully silent turns; clean up draft for turns whose
+          // only user-visible content was a system_info warning (persisted in the common path below).
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
           }
-        } else if (deps.draftStore && ownInvocationId) {
-          deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
         }
       } else if (collectedToolEvents.length > 0) {
         // hadError && textContent === '' but toolEvents exist — persist tool record so
         // refreshing the page still shows what the cat attempted before the error.
         try {
-          await deps.messageStore.append({
-            userId,
-            catId,
-            content: '',
-            mentions: [],
-            origin: 'stream',
-            timestamp: invocationStartedAt,
-            threadId,
-            ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-            ...(firstMetadata ? { metadata: firstMetadata } : {}),
-            toolEvents: collectedToolEvents,
-            ...((options.parentInvocationId ?? ownInvocationId) || doneMsg?.tracing
-              ? {
-                  extra: {
-                    // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
-                    // for error+toolEvents records too.
-                    ...((options.parentInvocationId ?? ownInvocationId)
-                      ? {
-                          stream: {
-                            invocationId: (options.parentInvocationId ?? ownInvocationId) as string,
-                            turnInvocationId: (ownInvocationId ?? options.parentInvocationId) as string,
-                          },
-                        }
-                      : {}),
-                    ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
-                  },
-                }
-              : {}),
-          });
+          const visibleTurnInvocationId = visibleContentInvocationIdOverride ?? ownInvocationId;
+          if (
+            callbackFinalReplacement.finalReplacementConfirmed &&
+            callbackFinalReplacement.finalReplacementMessageId
+          ) {
+            catProducedOutput = true;
+            turnStoredMessageId = callbackFinalReplacement.finalReplacementMessageId;
+            recordPersistedOutputMessageId(callbackFinalReplacement.finalReplacementMessageId);
+            await augmentFinalReplacementMessage(
+              callbackFinalReplacement.finalReplacementMessageId,
+              visibleTurnInvocationId,
+              [...bufferedBlocks, ...streamRichBlocks],
+              false,
+            );
+          } else {
+            const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+            await deps.messageStore.append({
+              userId,
+              catId,
+              content: '',
+              mentions: [],
+              origin: 'stream',
+              timestamp: invocationStartedAt,
+              threadId,
+              ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
+              ...(firstMetadata ? { metadata: firstMetadata } : {}),
+              toolEvents: collectedToolEvents,
+              ...((options.parentInvocationId ?? visibleTurnInvocationId) || doneMsg?.tracing
+                ? {
+                    extra: {
+                      // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
+                      // for error+toolEvents records too.
+                      ...((options.parentInvocationId ?? visibleTurnInvocationId)
+                        ? {
+                            stream: {
+                              invocationId: (options.parentInvocationId ?? visibleTurnInvocationId) as string,
+                              turnInvocationId: (visibleTurnInvocationId ?? options.parentInvocationId) as string,
+                            },
+                          }
+                        : {}),
+                      ...(turnTriggerMessageId
+                        ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                        : {}),
+                      ...executionProjections,
+                      ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
+                    },
+                  }
+                : {}),
+            });
+          }
           // #80: Clean up draft only after successful append
           if (deps.draftStore && ownInvocationId) {
             deps.draftStore.delete(userId, threadId, ownInvocationId)?.catch?.(noop);
@@ -3354,10 +4752,16 @@ export async function* routeSerial(
         }
       }
 
-      if (!routingGuardRemediated && initialTextStreamEvents.length > 0) {
-        for (const event of initialTextStreamEvents) yield event;
-        initialTextStreamEvents.splice(0, initialTextStreamEvents.length);
-      }
+      // Persist after all text/no-text/error branches so every live warning survives refresh.
+      // Do not broadcast again: the system_info stream already delivered the live event.
+      await persistUserFacingSystemInfoNotices({
+        messageStore: deps.messageStore,
+        threadId,
+        catId: catId as string,
+        contents: userFacingSystemInfoContents,
+        ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      });
+
       a2aMentions = getLocalRoutingLineStartMentions(a2aMentions);
 
       // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
@@ -3367,6 +4771,19 @@ export async function* routeSerial(
       for (let wi = handoffEmitted; wi < worklist.length; wi++) {
         const pendingCat = worklist[wi]!;
         if (wi < targetCats.length) continue; // Skip original targets — not A2A
+
+        const claimed = await claimOrDeferA2ATarget(
+          pendingCat,
+          catId,
+          undefined,
+          undefined,
+          noteAcceptedTurnCustodyHandoff,
+        );
+        if (!claimed) {
+          worklist.splice(wi, 1);
+          wi--;
+          continue;
+        }
 
         // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
         const auditLog = getEventAuditLog();
@@ -3389,10 +4806,6 @@ export async function* routeSerial(
         // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
         // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
         const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
-        if (options.invocationController && options.trackA2ASlot && !activeTrackedA2ASlots.has(pendingCat)) {
-          options.trackA2ASlot(threadId, pendingCat, userId, options.invocationController);
-          activeTrackedA2ASlots.add(pendingCat);
-        }
         yield {
           type: 'a2a_handoff' as AgentMessageType,
           catId,
@@ -3569,7 +4982,14 @@ export async function* routeSerial(
       // invocation's terminal hook decided shouldReinvoke=true. Checked AFTER A2A
       // detection (A2A has priority) and BEFORE done yield (enqueue happens while
       // the route is still live). Fail-open: errors never block the done signal.
-      if (freshnessReinvokeEnqueue && doneMsg?.metadata && !hadError) {
+      if (
+        freshnessReinvokeEnqueue &&
+        doneMsg?.metadata &&
+        !hadError &&
+        !streamFreshnessResult?.stale &&
+        !outputCommitDecision &&
+        !isFreshnessSupplement
+      ) {
         const reinvokeDecision = (doneMsg.metadata as unknown as Record<string, unknown>).freshnessReinvoke as
           | {
               shouldReinvoke: boolean;
@@ -3586,10 +5006,11 @@ export async function* routeSerial(
             // QueueProcessor strips freshnessContext, so content must carry the prompt.
             const reinvokeContent =
               reinvokeDecision.reinvokePrompt ||
-              `你上一轮 turn 中有来自 ${reinvokeDecision.senders.join(', ')} 的 ${reinvokeDecision.noticeIds.length} 条未读消息，请调 list_recent 查看并回应。`;
+              buildFreshnessReinvokePrompt(threadId, reinvokeDecision.senders, reinvokeDecision.noticeIds.length);
             freshnessReinvokeEnqueue({
               threadId,
               userId,
+              ownerAuthProvenance,
               content: reinvokeContent,
               source: 'agent',
               sourceCategory: 'freshness',
@@ -3636,14 +5057,31 @@ export async function* routeSerial(
       // Yield buffered done with correct isFinal (evaluated AFTER worklist may have grown)
       // MUST always reach here regardless of append success (缅因猫 review P1-2)
       // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on done if not already set.
+      emitSingleAcceptedTurnCustodyHandoff();
+      const isTerminalCoordinationWake =
+        turnCustodyWake.kind === 'non_obligation' && turnCustodyWake.source === 'coordination_terminal';
+      if (index === worklist.length - 1 || isTerminalCoordinationWake) {
+        await flushTurnCustodyShadowCloses(index === worklist.length - 1 ? 'route_settled' : 'next_turn_boundary');
+      }
+      await releaseTurnCustodyAdoption();
       if (doneMsg) {
         const isFinal = index === worklist.length - 1;
         const ownStampedDone =
           ownInvocationId && !doneMsg.invocationId ? { ...doneMsg, invocationId: ownInvocationId } : doneMsg;
-        yield { ...ownStampedDone, ...(mentionsUser ? { mentionsUser } : {}), isFinal };
+        yield projectLiveTurnExecution({
+          ...ownStampedDone,
+          ...(mentionsUser ? { mentionsUser } : {}),
+          ...(turnCustodyTerminalWitnesses[0] ? { turnCustodyTerminalWitness: turnCustodyTerminalWitnesses[0] } : {}),
+          ...(turnCustodyTerminalWitnesses.length > 0 ? { turnCustodyTerminalWitnesses } : {}),
+          ...(structuredDispositionMissingCode ? { errorCode: structuredDispositionMissingCode } : {}),
+          isFinal,
+        });
         activeTrackedA2ASlots.delete(catId);
         if (isFinal) yieldedFinalDone = true;
-        if (ownInvocationId) completedCatInvocationIds.push([catId, ownInvocationId]);
+        if (ownInvocationId) {
+          completedCatInvocationIds.push([catId, ownInvocationId]);
+          pushRecallPresentationsByInvocation.set(ownInvocationId, currentPushRecallPresentations);
+        }
       }
 
       // F27: Advance executedIndex so pushToWorklist knows which cats are done
@@ -3651,6 +5089,16 @@ export async function* routeSerial(
       index++;
     }
   } finally {
+    // Provider/route failure after system_info must revoke callback ownership
+    // before any adopted projections are closed or the route exits.
+    await releaseTurnCustodyAdoption();
+    if (keepaliveTimer) clearInterval(keepaliveTimer);
+
+    // Phase T stop gate is a turn-settled verdict: current output persistence,
+    // operator handoff writes, and inline child receiver-boundary handoffs must all
+    // have had a chance to establish machine evidence before the projection closes.
+    await flushTurnCustodyShadowCloses('route_settled');
+
     // F153: Set route aggregate attributes on the parent route span
     if (options.routeSpan) {
       options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, index);
@@ -3666,16 +5114,25 @@ export async function* routeSerial(
       options.completeA2ASlots(threadId, [...activeTrackedA2ASlots], options.invocationController);
     }
 
-    // F200 AC-A1: fire-and-forget recall correlation after all cats complete
+    // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
+    // TD 2026-08-12: bounded tail read — full-thread reads of large keys
+    // (observed 221MB) froze the API event loop every round-end.
     if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
       const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
       if (evidenceDb) {
         deps.toolEventLog
-          .readByThread(threadId)
+          .readRecentByThread(threadId, RECALL_CORRELATION_EVENT_WINDOW)
           .then((events) => {
             const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
             for (const [catId, invId] of completedCatInvocationIds) {
-              triggerRecallCorrelation(evidenceDb, raw, invId, catId).catch(() => {});
+              const withPush = mergePushRecallPresentations(
+                raw,
+                pushRecallPresentationsByInvocation.get(invId) ?? [],
+                invId,
+                catId,
+                threadId,
+              );
+              triggerRecallCorrelation(evidenceDb, withPush, invId, catId).catch(() => {});
             }
           })
           .catch(() => {});

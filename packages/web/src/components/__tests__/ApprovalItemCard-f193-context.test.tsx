@@ -5,9 +5,9 @@
  * 也没跳转按钮！看不懂！只能乱审批"
  *
  * Guards:
- * - F193 card must show sourceThreadId context
+ * - F193 card must show provenance origin-thread context
  * - F193 card must show targetThreadId context (from detail.targetThreadId)
- * - F193 card must have a jump button alongside approve/reject (not instead of)
+ * - F193 card must expose both approval-card and origin anchors alongside decisions
  * - F128/F225 cards remain unaffected (no regression)
  */
 
@@ -15,6 +15,7 @@ import type { ApprovalItem } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { anchoredApprovalNavigation } from '@/test-support/approval-navigation';
 
 const SOURCE_THREAD_ID = 'thread-source-alpha';
 const TARGET_THREAD_ID = 'thread-target-beta';
@@ -24,8 +25,7 @@ const TARGET_THREAD_TITLE = 'Beta 执行线';
 const F193_ITEM: ApprovalItem = {
   proposalId: 'ctx-f193-1',
   sourceFeatureId: 'F193',
-  sourceThreadId: SOURCE_THREAD_ID,
-  sourceMessageId: 'msg-ctx-1',
+  navigation: anchoredApprovalNavigation(SOURCE_THREAD_ID, { originMessageId: 'msg-ctx-1' }),
   requesterCatId: 'opus',
   ownerUserId: 'user-landy',
   status: 'pending',
@@ -43,7 +43,7 @@ const F193_ITEM: ApprovalItem = {
 const F193_ITEM_NO_THREAD_IN_STORE: ApprovalItem = {
   ...F193_ITEM,
   proposalId: 'ctx-f193-2',
-  sourceThreadId: 'thread-unknown-src',
+  navigation: anchoredApprovalNavigation('thread-unknown-src'),
   detail: {
     ...F193_ITEM.detail,
     targetThreadId: 'thread-unknown-tgt',
@@ -140,7 +140,7 @@ describe('F246 Bug 1: F193 card context + jump button', () => {
     expect(card!.textContent).toMatch(/thread-unknown-src|unknown-src/);
   });
 
-  it('F193 card has a jump-btn alongside approve/reject buttons', async () => {
+  it('F193 card has both provenance anchors alongside approve/reject buttons', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F193_ITEM }));
     });
@@ -148,22 +148,23 @@ describe('F246 Bug 1: F193 card context + jump button', () => {
     const card = container.querySelector('[data-testid="approval-item-ctx-f193-1"]');
     const approveBtn = card!.querySelector('[data-testid="approve-btn"]');
     const rejectBtn = card!.querySelector('[data-testid="reject-btn"]');
-    const jumpBtn = card!.querySelector('[data-testid="jump-btn"]');
+    const cardLink = card!.querySelector('[data-testid="approval-card-link"]');
+    const originLink = card!.querySelector('[data-testid="approval-origin-link"]');
 
-    // ALL THREE must be present
     expect(approveBtn).not.toBeNull();
     expect(rejectBtn).not.toBeNull();
-    expect(jumpBtn).not.toBeNull();
+    expect(cardLink).not.toBeNull();
+    expect(originLink).not.toBeNull();
   });
 
-  it('F193 card jump-btn exists even for non-inlineApprovable item (edge case)', async () => {
+  it('F193 provenance links exist even for non-inlineApprovable item', async () => {
     const nonInlineF193: ApprovalItem = { ...F193_ITEM, proposalId: 'ctx-f193-3', inlineApprovable: false };
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: nonInlineF193 }));
     });
 
     const card = container.querySelector('[data-testid="approval-item-ctx-f193-3"]');
-    const jumpBtn = card!.querySelector('[data-testid="jump-btn"]');
-    expect(jumpBtn).not.toBeNull();
+    expect(card!.querySelector('[data-testid="approval-card-link"]')).not.toBeNull();
+    expect(card!.querySelector('[data-testid="approval-origin-link"]')).not.toBeNull();
   });
 });

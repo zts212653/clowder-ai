@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addToastMock,
   clickBootcampButton,
@@ -6,7 +6,9 @@ import {
   createThreadSidebarHarness,
   defaultSidebarApiMock,
   installThreadSidebarGlobals,
+  jsonOk,
   mockApiFetch,
+  mockStore,
   openCreateDialog,
   resetThreadSidebarGlobals,
   resetThreadSidebarMocks,
@@ -57,5 +59,45 @@ describe('ThreadSidebar create error feedback', () => {
     await clickBootcampButton(harness.container, harness.flush);
     const modal = harness.container.querySelector('[data-testid="bootcamp-list-modal"]');
     expect(modal ?? harness.container.textContent).toBeTruthy();
+  });
+
+  it('publishes the created thread to the store before navigating to it', async () => {
+    const createdThread = {
+      id: 'thread-deepseek-harness',
+      title: 'DeepSeek harness',
+      projectPath: '/projects/cat-cafe',
+      createdBy: 'owner',
+      participants: ['owner'],
+      lastActiveAt: Date.now(),
+      createdAt: Date.now(),
+      pinned: false,
+      favorited: false,
+    };
+    const setThreads = vi.mocked(mockStore.setThreads as (threads: (typeof createdThread)[]) => void);
+    const pushState = vi.spyOn(window.history, 'pushState');
+
+    await harness.render();
+    setThreads.mockClear();
+    pushState.mockClear();
+    mockStore.threads = [];
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/threads' && init?.method === 'POST') return jsonOk(createdThread);
+      if (path === '/api/threads?view=sidebar') return new Promise(() => {});
+      return defaultSidebarApiMock(path);
+    });
+
+    await openCreateDialog(harness.container, harness.flush);
+    await createInLobby(harness.container, harness.flush);
+
+    expect(setThreads).toHaveBeenCalledWith([createdThread]);
+    expect(pushState).toHaveBeenCalledWith({}, '', '/thread/thread-deepseek-harness');
+    const storeWriteOrder = setThreads.mock.invocationCallOrder[0];
+    const navigationOrder = pushState.mock.invocationCallOrder[0];
+    expect(storeWriteOrder).toBeDefined();
+    expect(navigationOrder).toBeDefined();
+    if (storeWriteOrder === undefined || navigationOrder === undefined) {
+      throw new Error('Expected both the store write and navigation to occur');
+    }
+    expect(storeWriteOrder).toBeLessThan(navigationOrder);
   });
 });

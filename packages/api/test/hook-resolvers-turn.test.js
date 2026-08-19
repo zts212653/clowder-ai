@@ -134,6 +134,7 @@ describe('Turn resolvers D1-D10', () => {
 
   it('D4 fires with cross-thread hint', () => {
     const input = makeInput({
+      threadId: 'thread-target',
       crossThreadReplyHint: { sourceThreadId: 'thread-abc', senderCatId: 'codex', effectClass: 'fyi' },
     });
     const result = new mod.D4Resolver().resolve(input);
@@ -144,6 +145,22 @@ describe('Turn resolvers D1-D10', () => {
 
   it('D4 skips without cross-thread hint', () => {
     assert.equal(new mod.D4Resolver().resolve(makeInput()).status, 'skipped');
+  });
+
+  it('D4 skips cross-thread wording for same-thread coordination', () => {
+    const input = makeInput({
+      threadId: 'thread-same',
+      crossThreadReplyHint: {
+        sourceThreadId: 'thread-same',
+        senderCatId: 'codex',
+        coordination: { id: 'coord-same', phase: 'terminal', hop: 1 },
+      },
+    });
+
+    const result = new mod.D4Resolver().resolve(input);
+
+    assert.equal(result.status, 'skipped');
+    assert.equal(result.reasonCode, 'same_thread_coordination');
   });
 
   it('D5 fires with ping-pong warning', () => {

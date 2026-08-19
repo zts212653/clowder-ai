@@ -17,7 +17,7 @@
 
 ⚠️ Session hook 已更新为三入口提示（F200）。**按场景选入口**——精确 anchor 走 graph 比 search 命中率高得多；零先验扫一眼用 recent 比反复盲搜 query 高效。
 
-## Cat Café 7-tool memory family（cross-reference）
+## Clowder AI 7-tool memory family（cross-reference）
 
 每个工具的 MCP description 都互相 cross-reference 这 7 个：
 

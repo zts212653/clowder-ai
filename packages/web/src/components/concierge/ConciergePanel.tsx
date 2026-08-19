@@ -1,29 +1,9 @@
 'use client';
 
 /**
- * F229 PR-A3a: ConciergePanel — 漫画气泡（Layer 3）
- *
- * V4 (P1): 漫画气泡风格（圆角 + 尖角指向猫 + canvas bg）
- * V2 (P0): 全部颜色从 OKLCH token 来，零 Tailwind 原生色
- *
- * surfaceState='bubble' 时渲染，其他态返回 null（INV-3 variant）
- *
- * Esc 处理：bubble → toolbar（两级返回）
- * INV-7: 非 modal（role="dialog" aria-modal="false"）
- * INV-9: fetchThreadId lazy on first bubble open
- *
- * 对话集成（A3a）：
- *   - 消息流：useConciergeMessages (GET /api/messages) + 乐观插入
- *   - 发送：POST /api/messages { content, threadId }
- *   - 错误：草稿还原 + 错误提示
- *   - streaming token-by-token: Phase B2（需要 socket room join）
- *
- * Liveness (P0 fix):
- *   - Polls /api/threads/:threadId/queue for authoritative activeInvocations
- *   - Replaces 60s local safety valve with server-truth-driven status
- *   - Shows real "猫猫球处理中" / "似乎卡住了" / "未收到回复" status
- *
- * z-30: same layer as ball (below FloatingPresentationSurface z-[35])
+ * F229 ConciergePanel — non-modal conversation bubble (Layer 3).
+ * Owns orchestration and delegates chrome, conversation rendering, resizing,
+ * queue liveness, and message loading to focused modules.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -32,11 +12,11 @@ import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
-import { CafeIcon } from '../rich/CafeIcons';
-import { RichBlocks } from '../rich/RichBlocks';
-import { ConciergeMessageContent } from './ConciergeMessageContent';
+import { ConciergePanelHeader, ConciergePanelResizeHandles } from './ConciergePanelChrome';
+import { ConciergePanelConversation } from './ConciergePanelConversation';
 import { useConciergeConfirmations } from './useConciergeConfirmations';
 import { useConciergeMessages } from './useConciergeMessages';
+import { useConciergePanelLiveness } from './useConciergePanelLiveness';
 import { useConciergeQueue } from './useConciergeQueue';
 import { usePanelWidth } from './usePanelWidth';
 
@@ -51,8 +31,6 @@ export function ConciergePanel() {
   const invocationStatus = useConciergeStore((s) => s.invocationStatus);
   const muted = useConciergeStore((s) => s.muted);
   const setMuted = useConciergeStore((s) => s.setMuted);
-  const behaviorEnabled = useConciergeStore((s) => s.behaviorEnabled);
-  const setBehaviorEnabled = useConciergeStore((s) => s.setBehaviorEnabled);
   const notifyMessage = useConciergeStore((s) => s.notifyMessage);
   const threadId = useConciergeStore((s) => s.threadId);
   // A3a P2 fix: pre-filled prompt from toolbar ability buttons (找找看/新功能/传话)
@@ -85,12 +63,17 @@ export function ConciergePanel() {
   const {
     panelWidth,
     panelHeight,
+    isExpanded,
+    toggleExpanded,
     handleResizePointerDown,
     handleResizePointerMove,
     handleResizePointerUp,
     handleHeightResizePointerDown,
     handleHeightResizePointerMove,
     handleHeightResizePointerUp,
+    handleCornerResizePointerDown,
+    handleCornerResizePointerMove,
+    handleCornerResizePointerUp,
   } = usePanelWidth();
 
   const { messages, isLoading, addOptimistic, removeOptimistic, refresh } = useConciergeMessages(threadId);
@@ -125,96 +108,28 @@ export function ConciergePanel() {
     return () => document.removeEventListener('keydown', handler);
   }, [surfaceState, setSurfaceState]);
 
-  // Auto-scroll to latest message when messages change (guard for JSDOM/no-op envs)
-  useEffect(() => {
-    const el = messagesEndRef.current;
-    if (el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
-  // A3a P2 R4 fix: reply detection — cat reply arrived → return to idle immediately
-  useEffect(() => {
-    if (invocationStatus !== 'in_progress') return;
-    const catCount = messages.filter((m) => !m.isUser).length;
-    if (catCount > catMsgCountAtSendRef.current) {
-      setInvocationStatus('idle');
-    }
-  }, [messages, invocationStatus, setInvocationStatus]);
-
-  // E4 cloud-fix R2-2: notify store when new cat messages arrive (AC-E4-3 消息惊起 trigger).
-  // Tracks non-user message count; any increase → notifyMessage() → lastMessageTimestamp update.
-  // Three-phase initialization to avoid treating loaded history as new messages:
-  //   Phase 1 (sentinel -1): very first render (messages=[]) — record baseline, don't trigger
-  //   Phase 2 (!historySettled): first messages change after mount — history load, update baseline
-  //   Phase 3 (steady): real-time tracking — notify on count increase
-  const prevCatMsgCountRef = useRef(-1);
-  const historySettledRef = useRef(false);
-  useEffect(() => {
-    const catCount = messages.filter((m) => !m.isUser).length;
-    if (prevCatMsgCountRef.current === -1) {
-      // Phase 1: very first render — set initial baseline
-      prevCatMsgCountRef.current = catCount;
-      return;
-    }
-    if (!historySettledRef.current) {
-      // Phase 2: first change after mount — treat as history load settling
-      historySettledRef.current = true;
-      prevCatMsgCountRef.current = catCount;
-      return;
-    }
-    // Phase 3: steady state — real-time tracking
-    if (catCount > prevCatMsgCountRef.current) {
-      notifyMessage();
-    }
-    prevCatMsgCountRef.current = catCount;
-  }, [messages, notifyMessage]);
-
-  // Continued polling every 5 s while in_progress (bridges initial burst for slow replies)
-  useEffect(() => {
-    if (invocationStatus !== 'in_progress') return;
-    const id = setInterval(() => refresh(), 5000);
-    return () => clearInterval(id);
-  }, [invocationStatus, refresh]);
-
-  // P0 liveness fix: server-truth-driven idle transition.
-  // When queue says no active invocation, give 3s grace for the reply message
-  // to arrive via refresh, then settle to idle. Replaces the blind 60s safety valve.
-  // P1 fix (gpt52 review): don't treat isRunning=false as authoritative until first
-  // poll succeeds — otherwise a slow/failed first fetch triggers premature idle.
-  useEffect(() => {
-    if (invocationStatus !== 'in_progress') return;
-    if (queueStatus.isRunning || !queueStatus.loaded) return; // still running OR not loaded yet
-    // Server says invocation finished; grace period for reply message to arrive
-    let settleId: ReturnType<typeof setTimeout> | undefined;
-    const graceId = setTimeout(() => {
-      refresh();
-      // After refresh, the reply-detection effect (catCount comparison) will
-      // set idle if a cat reply arrived. If not, force idle after another 1s.
-      settleId = setTimeout(() => {
-        // Reading from store directly avoids stale closure
-        const current = useConciergeStore.getState().invocationStatus;
-        if (current === 'in_progress') {
-          setInvocationStatus('idle');
-        }
-      }, 1000);
-    }, 2000);
-    return () => {
-      clearTimeout(graceId);
-      if (settleId !== undefined) clearTimeout(settleId);
-    };
-  }, [invocationStatus, queueStatus.isRunning, queueStatus.loaded, refresh, setInvocationStatus]);
+  useConciergePanelLiveness({
+    messages,
+    invocationStatus,
+    queueStatus,
+    refresh,
+    setInvocationStatus,
+    notifyMessage,
+    catMsgCountAtSendRef,
+    messagesEndRef,
+  });
 
   const handleInputFocus = useCallback(() => setInputFocused(true), [setInputFocused]);
   const handleInputBlur = useCallback(() => setInputFocused(false), [setInputFocused]);
   const handleClose = useCallback(() => setSurfaceState('toolbar'), [setSurfaceState]);
-  // AC-A6: muted toggle — accessible from panel
-  const handleMuteToggle = useCallback(() => void setMuted(!muted), [muted, setMuted]);
-  // AC-E4-7: behavior toggle — disable autonomous animations
-  const handleBehaviorToggle = useCallback(
-    () => void setBehaviorEnabled(!behaviorEnabled),
-    [behaviorEnabled, setBehaviorEnabled],
-  );
+  const handleVisibilityToggle = useCallback(() => {
+    if (muted) {
+      void setMuted(false);
+      return;
+    }
+    void setMuted(true);
+    setSurfaceState('collapsed');
+  }, [muted, setMuted, setSurfaceState]);
 
   // F229 UX: cancel/stop in-progress invocation via scoped per-cat cancel (F122B AC-B9).
   // Uses /cancel/:catId (scoped to the duty cat) instead of /force-reset (whole-thread nuclear).
@@ -271,8 +186,10 @@ export function ConciergePanel() {
       // in_progress: message delivered, waiting for cat reply (reply detection effect handles idle)
       setInvocationStatus('in_progress');
       // P1 gpt52 fix: initial burst of refreshes — 800ms catches fast replies, 2500/5000ms slower ones.
-      // Continued polling and idle transition handled by the three effects below (cloud R4 fix).
-      [800, 2500, 5000].forEach((delay) => setTimeout(() => refresh(), delay));
+      // Continued polling and idle transition are handled by useConciergePanelLiveness.
+      [800, 2500, 5000].forEach((delay) => {
+        setTimeout(() => refresh(), delay);
+      });
     } catch {
       // Network error: restore draft
       removeOptimistic(optId);
@@ -337,25 +254,25 @@ export function ConciergePanel() {
         'animate-[concierge-bubble-pop_200ms_cubic-bezier(0.34,1.56,0.64,1)_both]',
       ].join(' ')}
     >
-      {/* BUG-UX-3: Left-edge resize handle — drag to widen/narrow panel */}
-      <div
-        aria-label="拖拽调整面板宽度"
-        role="separator"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerUp}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 hover:bg-[var(--cafe-accent)] hover:opacity-30 rounded-l-2xl transition-colors"
-      />
-
-      {/* BUG-UX-3: Top-edge resize handle — drag up to make taller, down to shrink */}
-      <div
-        aria-label="拖拽调整面板高度"
-        role="separator"
-        onPointerDown={handleHeightResizePointerDown}
-        onPointerMove={handleHeightResizePointerMove}
-        onPointerUp={handleHeightResizePointerUp}
-        className="absolute left-0 right-0 top-0 h-1.5 cursor-ns-resize z-10 hover:bg-[var(--cafe-accent)] hover:opacity-30 rounded-t-2xl transition-colors"
-      />
+      {!isExpanded && (
+        <ConciergePanelResizeHandles
+          width={{
+            onPointerDown: handleResizePointerDown,
+            onPointerMove: handleResizePointerMove,
+            onPointerUp: handleResizePointerUp,
+          }}
+          height={{
+            onPointerDown: handleHeightResizePointerDown,
+            onPointerMove: handleHeightResizePointerMove,
+            onPointerUp: handleHeightResizePointerUp,
+          }}
+          corner={{
+            onPointerDown: handleCornerResizePointerDown,
+            onPointerMove: handleCornerResizePointerMove,
+            onPointerUp: handleCornerResizePointerUp,
+          }}
+        />
+      )}
 
       {/* Speech bubble tail (CSS triangle pointing toward cat) */}
       {/* R7 fix: tail sits outside the inner overflow-hidden wrapper so it is never clipped */}
@@ -381,260 +298,43 @@ export function ConciergePanel() {
       {/* R7 fix: inner content wrapper clips header/messages/input at rounded corners */}
       {/* overflow-hidden here + rounded-2xl preserves the bubble shape for content */}
       <div data-testid="concierge-inner-content" className="flex flex-col overflow-hidden rounded-2xl flex-1 min-h-0">
-        {/* Header */}
-        <div
-          style={{ borderBottomColor: 'var(--cafe-border-subtle)' }}
-          className="flex items-center gap-2 px-4 py-3 border-b"
-        >
-          <span style={{ color: 'var(--cafe-text)' }} className="text-sm font-semibold flex-1">
-            {/* FIX-4 KD-16 R2: show duty cat's display name (not raw catId) so user
-                sees "猫猫球 · 值班：烁烁" instead of "猫猫球 · 值班：gemini25" */}
-            {dutyCatProfileId ? `${displayName} · 值班：${dutyCatDisplayName ?? dutyCatProfileId}` : displayName}
-          </span>
-          {invocationStatus === 'error' && (
-            <span style={{ color: 'var(--semantic-critical)' }} className="text-xs" role="status">
-              连接失败
-            </span>
-          )}
-          {/* AC-A6: muted toggle */}
-          <button
-            type="button"
-            aria-label={muted ? '取消静音' : '静音'}
-            onClick={handleMuteToggle}
-            title={muted ? '取消静音，召回猫猫球' : '静音，隐藏猫猫球'}
-            style={{
-              color: muted ? 'var(--semantic-warning)' : 'var(--cafe-text-muted)',
-            }}
-            className={[
-              'p-1 rounded',
-              'transition-colors duration-150',
-              'hover:opacity-80',
-              'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
-            ].join(' ')}
-          >
-            <CafeIcon name={muted ? 'bell' : 'bell-off'} className="w-4 h-4" />
-          </button>
-          {/* AC-E4-7: behavior toggle — disable/enable autonomous cat animations */}
-          <button
-            type="button"
-            aria-label={behaviorEnabled ? '关闭自主行为' : '开启自主行为'}
-            onClick={handleBehaviorToggle}
-            title={behaviorEnabled ? '关闭猫猫自主活动' : '开启猫猫自主活动'}
-            style={{
-              color: behaviorEnabled ? 'var(--cafe-text-muted)' : 'var(--semantic-warning)',
-            }}
-            className={[
-              'p-1 rounded',
-              'transition-colors duration-150',
-              'hover:opacity-80',
-              'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
-            ].join(' ')}
-          >
-            <CafeIcon name="paw" className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="关闭面板"
-            onClick={handleClose}
-            style={{ color: 'var(--cafe-text-muted)' }}
-            className={[
-              'p-1 rounded',
-              'transition-colors duration-150',
-              'hover:opacity-80',
-              'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
-            ].join(' ')}
-          >
-            <CafeIcon name="cross" className="w-4 h-4" />
-          </button>
-        </div>
+        <ConciergePanelHeader
+          title={dutyCatProfileId ? `${displayName} · 值班：${dutyCatDisplayName ?? dutyCatProfileId}` : displayName}
+          invocationStatus={invocationStatus}
+          muted={muted}
+          isExpanded={isExpanded}
+          onVisibilityToggle={handleVisibilityToggle}
+          onToggleExpanded={toggleExpanded}
+          onClose={handleClose}
+        />
 
-        {/* Message area — A3a: concierge thread message stream */}
-        <div
-          role="region"
-          className="flex-1 overflow-y-auto px-3 py-3 min-h-[120px]"
-          aria-live="polite"
-          aria-label="对话内容"
-        >
-          {invocationStatus === 'error' ? (
-            <p style={{ color: 'var(--cafe-text-secondary)' }} className="text-sm text-center mt-4">
-              无法加载对话，请重试
-            </p>
-          ) : isLoading && messages.length === 0 ? (
-            <p style={{ color: 'var(--cafe-text-muted)' }} className="text-sm text-center mt-4">
-              加载中…
-            </p>
-          ) : messages.length === 0 ? (
-            <p style={{ color: 'var(--cafe-text-secondary)' }} className="text-sm text-center mt-4">
-              你好！我是猫猫球，有什么可以帮你？
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    style={
-                      msg.isUser
-                        ? {
-                            backgroundColor: 'var(--cafe-accent)',
-                            color: 'var(--cafe-surface-canvas)',
-                          }
-                        : {
-                            backgroundColor: 'var(--cafe-surface-elevated)',
-                            color: 'var(--cafe-text)',
-                            // FIX-1: canvas vs elevated 差 0.005 OKLCH 肉眼不可分辨，
-                            // 加 border 确保气泡可见（operator 首验 Q3）
-                            borderWidth: '1px',
-                            borderStyle: 'solid',
-                            borderColor: 'var(--cafe-border-subtle)',
-                          }
-                    }
-                    className={`max-w-[85%] px-3 py-1.5 rounded-xl text-sm leading-snug break-words overflow-hidden [overflow-wrap:anywhere] ${msg.isUser ? 'whitespace-pre-wrap' : ''}`}
-                  >
-                    {/* Bug2 method A: inline marker buttons for duty cat replies.
-                         User messages render as plain text (no markers to parse). */}
-                    {msg.isUser ? (
-                      msg.content
-                    ) : (
-                      <ConciergeMessageContent
-                        content={msg.content}
-                        actions={
-                          msg.richBlocks
-                            ?.flatMap((b) => ('actions' in b && Array.isArray(b.actions) ? b.actions : []))
-                            .filter(
-                              (
-                                a,
-                              ): a is {
-                                action: string;
-                                label: string;
-                                handle?: string;
-                                verb?: string;
-                                payload: { threadId: string; messageId?: string };
-                              } => typeof a.action === 'string' && typeof a.label === 'string',
-                            ) ?? []
-                        }
-                        messageId={msg.id}
-                      />
-                    )}
-                    {/* R-review R4 P1 fix: render rich blocks (interaction cards) in bubble.
-                         Card actions still render below as KD-19 fallback (AC-6). */}
-                    {!msg.isUser && msg.richBlocks && msg.richBlocks.length > 0 && (
-                      <div className="mt-2">
-                        <RichBlocks
-                          blocks={msg.richBlocks}
-                          messageId={msg.id}
-                          confirmations={confirmations.get(msg.id)}
-                          sendContext="concierge"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* P0 liveness status — shows real invocation state from server */}
-          {invocationStatus === 'pending' && (
-            <div
-              style={{ color: 'var(--cafe-text-muted)' }}
-              className="text-xs text-center mt-2 animate-pulse"
-              role="status"
-            >
-              发送中…
-            </div>
-          )}
-          {invocationStatus === 'in_progress' && (
-            <div className="flex items-center justify-center gap-2 mt-2" role="status">
-              <span style={{ color: 'var(--cafe-text-secondary)' }} className="text-xs animate-pulse">
-                {queueStatus.isRunning ? '猫猫球处理中…' : '确认回复中…'}
-              </span>
-              <button
-                type="button"
-                aria-label="停止回复"
-                disabled={cancelLoading || !queueStatus.dutyCatId}
-                onClick={() => void handleCancel()}
-                style={{
-                  color: 'var(--cafe-text-muted)',
-                  borderColor: 'var(--cafe-border-subtle)',
-                }}
-                className={[
-                  'px-2 py-0.5 rounded text-xs',
-                  'border',
-                  'transition-opacity duration-150',
-                  'hover:opacity-70',
-                  'disabled:opacity-40 disabled:cursor-not-allowed',
-                  'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
-                ].join(' ')}
-              >
-                {cancelLoading ? '停止中…' : '停止'}
-              </button>
-            </div>
-          )}
-          {/* Error display */}
-          {sendError && (
-            <p style={{ color: 'var(--semantic-critical)' }} className="text-xs text-center mt-2">
-              {sendError}
-            </p>
-          )}
-          {/* Scroll anchor */}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input area */}
-        <div style={{ borderTopColor: 'var(--cafe-border-subtle)' }} className="border-t px-3 py-2">
-          <textarea
-            ref={inputRef}
-            rows={2}
-            value={inputValue}
-            onChange={(e) => {
-              setInputValue(e.target.value);
-              if (sendError) setSendError(null);
-            }}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={ime.onCompositionStart}
-            onCompositionEnd={ime.onCompositionEnd}
-            placeholder="发消息给猫猫球…"
-            aria-label="消息输入框"
-            style={{
-              backgroundColor: 'var(--cafe-surface-elevated)',
-              color: 'var(--cafe-text)',
-              borderColor: 'transparent',
-            }}
-            className={[
-              'w-full resize-none text-sm',
-              'rounded-lg px-3 py-2',
-              'placeholder-[color:var(--cafe-text-muted)]',
-              'focus:outline-none',
-              'border',
-              'transition-colors duration-150',
-            ].join(' ')}
-            onFocus={handleInputFocus}
-            onBlur={handleInputBlur}
-          />
-
-          <div className="flex gap-2 mt-1.5">
-            <button
-              type="button"
-              aria-label="发送"
-              disabled={
-                !inputValue.trim() || invocationStatus === 'pending' || invocationStatus === 'in_progress' || isLoading
-              }
-              onClick={() => void handleSend()}
-              style={{
-                backgroundColor: 'var(--cafe-accent)',
-                color: 'var(--cafe-surface-canvas)',
-              }}
-              className={[
-                'ml-auto px-3 py-1 rounded-lg text-xs font-medium',
-                'transition-opacity duration-150',
-                'disabled:opacity-40 disabled:cursor-not-allowed',
-                'hover:opacity-90',
-                'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
-              ].join(' ')}
-            >
-              发送
-            </button>
-          </div>
-        </div>
+        <ConciergePanelConversation
+          invocationStatus={invocationStatus}
+          isLoading={isLoading}
+          messages={messages}
+          confirmations={confirmations}
+          queueStatus={queueStatus}
+          cancelLoading={cancelLoading}
+          sendError={sendError}
+          inputValue={inputValue}
+          inputRef={inputRef}
+          messagesEndRef={messagesEndRef}
+          onStarter={() => {
+            setInputValue('你能帮我什么？');
+            inputRef.current?.focus();
+          }}
+          onCancel={() => void handleCancel()}
+          onInputChange={(value) => {
+            setInputValue(value);
+            if (sendError) setSendError(null);
+          }}
+          onInputFocus={handleInputFocus}
+          onInputBlur={handleInputBlur}
+          onKeyDown={handleKeyDown}
+          onCompositionStart={ime.onCompositionStart}
+          onCompositionEnd={ime.onCompositionEnd}
+          onSend={() => void handleSend()}
+        />
       </div>
     </div>
   );

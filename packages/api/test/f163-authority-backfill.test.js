@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { authorityToConfidence, pathToAuthority } from '../dist/domains/memory/f163-types.js';
+import { pathToAuthority } from '../dist/domains/memory/f163-types.js';
 import { INDEXING_VERSION } from '../dist/domains/memory/IndexBuilder.js';
 
 describe('pathToAuthority', () => {
@@ -19,6 +19,10 @@ describe('pathToAuthority', () => {
 
   it('maps features/ to validated', () => {
     assert.equal(pathToAuthority('docs/features/F163-memory-entropy-reduction.md'), 'validated');
+  });
+
+  it('maps architecture/ to validated', () => {
+    assert.equal(pathToAuthority('docs/architecture/memory-system-overview.md'), 'validated');
   });
 
   it('maps SOP to constitutional', () => {
@@ -46,12 +50,14 @@ describe('pathToAuthority', () => {
     assert.equal(pathToAuthority('lessons-learned.md'), 'constitutional');
     assert.equal(pathToAuthority('decisions/009-foo.md'), 'validated');
     assert.equal(pathToAuthority('features/F042-info-arch.md'), 'validated');
+    assert.equal(pathToAuthority('architecture/retrieval-pipeline-deep-dive.md'), 'validated');
   });
 
   it('handles anchor-format doc: prefix (P2 fix)', () => {
     assert.equal(pathToAuthority('doc:lessons-learned.md'), 'constitutional');
     assert.equal(pathToAuthority('doc:decisions/009-foo.md'), 'validated');
     assert.equal(pathToAuthority('doc:features/F163-memory-entropy-reduction.md'), 'validated');
+    assert.equal(pathToAuthority('doc:architecture/memory-philosophy.md'), 'validated');
     assert.equal(pathToAuthority('doc:discussions/2026-04-15-harness-engineering'), 'candidate');
     assert.equal(pathToAuthority('doc:SOP.md'), 'constitutional');
   });
@@ -64,26 +70,11 @@ describe('INDEXING_VERSION bump (P1 fix)', () => {
       'INDEXING_VERSION must stay at or above 4 so existing docs get authority and entity mentions backfilled',
     );
   });
-});
 
-describe('authorityToConfidence', () => {
-  it('maps constitutional to high', () => {
-    assert.equal(authorityToConfidence('constitutional'), 'high');
-  });
-
-  it('maps validated to high', () => {
-    assert.equal(authorityToConfidence('validated'), 'high');
-  });
-
-  it('maps candidate to mid', () => {
-    assert.equal(authorityToConfidence('candidate'), 'mid');
-  });
-
-  it('maps observed to low', () => {
-    assert.equal(authorityToConfidence('observed'), 'low');
-  });
-
-  it('defaults to mid for undefined', () => {
-    assert.equal(authorityToConfidence(undefined), 'mid');
+  it('stays at or above 7 to force architecture doc kind/authority/decay backfill', () => {
+    assert.ok(
+      INDEXING_VERSION >= 7,
+      'INDEXING_VERSION must stay at or above 7 so existing architecture docs stop ranking as plan/observed records',
+    );
   });
 });

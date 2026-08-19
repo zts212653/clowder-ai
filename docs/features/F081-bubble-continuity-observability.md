@@ -22,7 +22,7 @@ operator连续报了同一类痛点，但它们表面上长得像不同 bug：
 4. 有时最后又显示 `CLI 响应超时 (1800s)`，把“UI 丢气泡”和“后端真的静默超时”混成一团
 5. 更离奇的是，Ragdoll在较早时刻就应已产出回复，但主区直到operator后续再发一句提示词后，上一条 assistant 气泡才“闪现回来”，呈现出明显的错位回放 / 迟到补写
 6. 同一条 assistant 气泡并非“补回来就稳定了”，而是切到别的 thread 再切回来后还能再次消失，呈现出反复出现 / 反复消失的非单调可见性
-7. 当operator绕过 Cat Café，直接在 Claude CLI 里 `resume/continue` 同一 session 时，session 会自行消费 `[对话历史增量 - 未发送过 N 条]` 并在外部推进状态；随后主区气泡可能出现迟到、错位或与前端当前可见状态不一致
+7. 当operator绕过 Clowder AI，直接在 Claude CLI 里 `resume/continue` 同一 session 时，session 会自行消费 `[对话历史增量 - 未发送过 N 条]` 并在外部推进状态；随后主区气泡可能出现迟到、错位或与前端当前可见状态不一致
 8. 现在已经证明 `Codex app` 的 thread id 也可以手动 bind 进猫猫咖啡，但 bind 成功后，先前已经存在于 app 里的聊天历史并没有回灌到主区；换句话说，我们能把猫绑进来，却没把它已经说过的话带进来
 9. `F081` 第一刀之后，主区又暴露出另一种瞬时“双影”：有时会短暂看到两条自己的消息，或者两条同样的 assistant 回复；但 `F5` 之后又只剩一条，说明服务器真相源通常只有一条，重复更像前端本地 reconcile 留下的临时 duplicate
 10. 进一步追查后发现，这类残余“双影”并不都来自 hydration；前台在 `thinking / rich_block / tool` 这类系统占位路径里，一旦 `activeRefs` 先丢了，却又没有先认领 store 里现存的 streaming bubble，就会重新起一个新的 assistant placeholder，形成短暂重复
@@ -103,7 +103,7 @@ operator experience可以概括成一句：
 - [~] AC8: 右侧 task_progress 和主区 assistant bubble 可用同一 `invocationId + catId` 做关联 *(部分完成：invocationId 已打通，无显式 UI 关联 → TD)*
 - [x] AC9: 已产出的 assistant 文本不能直到后续用户再发一句消息后才迟到出现；若发生补回，debug 证据必须能解释触发源（history refresh / draft merge / socket replay / local reconcile）*(PR #288 non-destructive merge)*
 - [x] AC10: 同一条历史 assistant 气泡在一次会话中不能出现”补回后又因切 thread 再次消失”的抖动；若发生，debug 时间线必须显示是哪次 replace / rehydrate / reconcile 改写了它 *(PRs #288 + #337)*
-- [ ] AC11: debug 证据必须能区分”Cat Café 驱动的 invocation”与”外部 CLI 直接 resume/continue 导致的 session 越界推进”，避免把 out-of-band session 变化误判为主区渲染链路唯一根因 *(未做 → TD)*
+- [ ] AC11: debug 证据必须能区分”Clowder AI 驱动的 invocation”与”外部 CLI 直接 resume/continue 导致的 session 越界推进”，避免把 out-of-band session 变化误判为主区渲染链路唯一根因 *(未做 → TD)*
 - [x] AC12: 写路径清点完成：所有能写 `messages`/`catStatuses`/`unreadCount`/`hasActiveInvocation` 的入口均已列出，标注真相源 vs 派生 *(F081-write-path-audit.md)*
 - [x] AC13: 状态矩阵完成：`active/background/refresh/switch-away/stream/callback/done/error/timeout` 全场景的四字段预期状态已列出 *(F081-write-path-audit.md)*
 
@@ -121,7 +121,7 @@ operator experience可以概括成一句：
 | R8 | plan/bubble 可关联到同一 invocation | AC8 | test | [~] TD |
 | R9 | 禁止”后续提示词触发历史气泡闪现” | AC9 | test + 现场证据 | [x] |
 | R10 | 历史气泡可见性单调，不允许反复显隐 | AC10 | test + 现场证据 | [x] |
-| R11 | 区分 Cat Café 内部驱动与外部 CLI 越界推进 | AC11 | debug dump + 现场证据 | [ ] TD |
+| R11 | 区分 Clowder AI 内部驱动与外部 CLI 越界推进 | AC11 | debug dump + 现场证据 | [ ] TD |
 | R12 | 写路径清点 | AC12 | audit 文档 | [x] |
 | R13 | 状态矩阵 | AC13 | audit 文档 | [x] |
 
@@ -175,7 +175,7 @@ operator experience可以概括成一句：
 ### 2026-03-07 Maine Coon侦探现场
 
 - 两条看似不同的Ragdoll session：`7ef0ef90-ac7c-4672-85f1-e1dd8d9ee444` 与 `bfe74a71-e28f-456d-83e4-ae8c5c4bce14`
-- 一条由 Cat Café runtime 驱动，一条由外部 Claude Code `resume` 直接驱动
+- 一条由 Clowder AI runtime 驱动，一条由外部 Claude Code `resume` 直接驱动
 - 进程树向下追到最深处后，两条最终都落在同一个具体 test worker：`test/antigravity-smoke.test.js`
 - 这个 smoke test 不在单独的 opt-in 命令里，而是直接包含在 `packages/api` 默认 `pnpm test` 的 `node --test test/*.test.js` 套件中；只要机器上 `<local-browser-automation-endpoint>` 有 Antigravity 在监听，它就会自动参战
 - `antigravity-smoke.test.js` 自己声明的单测超时是 `90_000`，内部 `pollResponse()` 也只等 `60_000`，见 `packages/api/test/antigravity-smoke.test.js`

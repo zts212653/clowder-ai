@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { CompactLabel, CriticalText, ExpandableProse } from '../content-overflow';
 
 import type { GlobalControlState, RunLedgerRow, ScheduleTask } from './schedule-helpers';
 import {
@@ -220,7 +221,9 @@ export function SchedulePanel() {
             {globalControl.enabled ? 'Scheduler active' : 'Scheduler paused'}
           </span>
           {!globalControl.enabled && globalControl.reason && (
-            <span className="text-micro text-conn-red-text truncate max-w-[160px]">{globalControl.reason}</span>
+            <div data-testid="schedule-global-reason" className="min-w-0 flex-1">
+              <CriticalText summary="Scheduler paused" details={globalControl.reason} tone="warning" />
+            </div>
           )}
         </div>
       )}
@@ -243,6 +246,7 @@ export function SchedulePanel() {
               const category = task.display?.category ?? fallbackCategory(task.id);
               const label = task.display?.label ?? humanizeId(task.id);
               const preview = task.subjectPreview ?? task.display?.description ?? null;
+              const subjectKey = task.lastRun?.subject_key ?? null;
               // Status dot: green=healthy, red=last run failed, gray=never run
               const statusDot = !task.lastRun
                 ? 'bg-conn-gray-text'
@@ -255,9 +259,15 @@ export function SchedulePanel() {
                   <div
                     className="px-4 py-3 hover:bg-cafe-surface-elevated/50 transition-colors cursor-pointer"
                     onClick={() => handleToggleExpand(task.id)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleToggleExpand(task.id)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      handleToggleExpand(task.id);
+                    }}
                     role="button"
                     tabIndex={0}
+                    aria-expanded={isExpanded}
+                    aria-controls={`schedule-task-detail-${task.id}`}
                   >
                     <div className="flex items-center gap-2">
                       <span
@@ -286,15 +296,13 @@ export function SchedulePanel() {
                           </span>
                           <span className="text-micro text-cafe-muted">{timeAgo(task.lastRun.started_at)}</span>
                           {task.lastRun.outcome === 'RUN_FAILED' && task.lastRun.error_summary && (
-                            <span
-                              className="text-micro text-conn-red-text truncate max-w-[160px]"
-                              title={task.lastRun.error_summary}
-                            >
-                              {task.lastRun.error_summary}
-                            </span>
-                          )}
-                          {preview && task.lastRun.outcome !== 'RUN_FAILED' && (
-                            <span className="text-micro text-cafe-secondary truncate max-w-[140px]">{preview}</span>
+                            <div data-testid={`schedule-latest-error-${task.id}`} className="min-w-0 flex-1">
+                              <CriticalText
+                                summary="最近运行失败"
+                                details={task.lastRun.error_summary}
+                                tone="critical"
+                              />
+                            </div>
                           )}
                         </>
                       ) : (
@@ -310,9 +318,39 @@ export function SchedulePanel() {
                       )}
                     </div>
                   </div>
+                  {preview &&
+                    task.lastRun?.outcome !== 'RUN_FAILED' &&
+                    (task.subjectPreview ? (
+                      <div
+                        data-testid={`schedule-subject-preview-${task.id}`}
+                        className="ml-[104px] max-w-[320px] pb-2 text-micro leading-4 text-cafe-secondary"
+                      >
+                        {preview}
+                      </div>
+                    ) : (
+                      <ExpandableProse
+                        text={preview}
+                        lines={2}
+                        className="ml-[104px] max-w-[320px] pb-2"
+                        contentClassName="text-micro leading-4 text-cafe-secondary"
+                      />
+                    ))}
                   {/* AC-F4: expandable detail panel with run history */}
                   {isExpanded && (
-                    <div className="px-4 pb-3 ml-[52px] space-y-2">
+                    <div id={`schedule-task-detail-${task.id}`} className="px-4 pb-3 ml-[52px] space-y-2">
+                      {subjectKey && (
+                        <div
+                          data-testid={`schedule-subject-key-${task.id}`}
+                          className="flex min-w-0 items-center gap-2"
+                        >
+                          <span className="shrink-0 text-micro font-medium text-cafe-muted">Canonical subject:</span>
+                          <CompactLabel
+                            label="调度目标"
+                            value={subjectKey}
+                            className="min-w-0 flex-1 text-micro text-cafe-secondary"
+                          />
+                        </div>
+                      )}
                       {/* AC-H4: Controls for all tasks — pause/resume universal, delete for dynamic only */}
                       <div className="flex items-center gap-2">
                         <button
@@ -345,12 +383,14 @@ export function SchedulePanel() {
                       ) : (
                         <div className="space-y-1">
                           {runHistory.map((r, i) => (
-                            <div key={i} className="flex items-center gap-2 text-micro">
+                            <div key={i} className="flex items-start gap-2 text-micro">
                               <span className={outcomeColor(r.outcome)}>{outcomeIcon(r.outcome)}</span>
                               <span className="text-cafe-muted">{timeAgo(r.started_at)}</span>
                               <span className="text-cafe-muted">{r.duration_ms}ms</span>
                               {r.error_summary && (
-                                <span className="text-conn-red-text truncate max-w-[200px]">{r.error_summary}</span>
+                                <div data-testid={`schedule-history-error-${task.id}-${i}`} className="min-w-0 flex-1">
+                                  <CriticalText summary="运行失败详情" details={r.error_summary} tone="critical" />
+                                </div>
                               )}
                             </div>
                           ))}

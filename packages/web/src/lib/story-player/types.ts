@@ -14,7 +14,8 @@ export type ReplayEventType =
   | 'message' // text/assistant/user/system → unified message
   | 'tool_call' // tool_use + matched tool_result
   | 'system' // session_init, done, error, etc.
-  | 'thinking'; // thinking/reasoning content
+  | 'thinking' // thinking/reasoning content
+  | 'cli_stdout'; // stream-origin assistant stdout rendered as CLI output
 
 export interface ReplayEvent {
   /** Monotonic index within the replay sequence */
@@ -45,6 +46,8 @@ export interface ReplayEvent {
   idleSkipMs?: number;
   /** Whether this is a pass-ball event — @mention / cross_post (AC-B1) */
   isPassBall?: boolean;
+  /** Whether this pass-ball should trigger bullet-time; false keeps chapter/visual signal without slowdown */
+  triggersBulletTime?: boolean;
   /** Source thread ID — preserved from raw event for multi-thread partitioning (AC-E5) */
   sourceThreadId?: string;
 }
@@ -105,7 +108,7 @@ export interface ReplayEngineState {
 export interface GuestCardState {
   /** Target thread ID (outside current feature) */
   targetThreadId: string;
-  /** Truncated content preview */
+  /** Full cross-feature content; GuestCard owns compact display + source recovery. */
   contentSnippet: string;
   /** Cat that initiated the cross-feature interaction */
   catId: string | undefined;
@@ -121,7 +124,7 @@ export interface RawTranscriptEvent {
   v: number;
   t: number;
   threadId: string;
-  catId: string;
+  catId?: string;
   sessionId: string;
   cliSessionId: string;
   invocationId?: string;

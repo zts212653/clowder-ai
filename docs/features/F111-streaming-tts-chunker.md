@@ -1,6 +1,6 @@
 ---
 feature_ids: [F111]
-related_features: [F066, F034, F021]
+related_features: [F066, F034, F021, F279]
 topics: [voice, tts, streaming, chunker, latency]
 doc_kind: spec
 created: 2026-03-12
@@ -124,7 +124,7 @@ AIRI 项目的 `tts-chunker.ts` 已验证了这种管线在 TypeScript 中的可
 **关键结论**：
 
 1. **F111 Plan C（分句合成）方向验证通过** — TTS 合成部分只占 2-3s，主要延迟来自 LLM 思考和 CLI 启动
-2. **CLI 冷启动 28s 是最大瓶颈** — opencode 框架开销，非 Cat Café 可优化范围
+2. **CLI 冷启动 28s 是最大瓶颈** — opencode 框架开销，非 Clowder AI 可优化范围
 3. **"边吐字边转语音"（Plan A 真流式）可进一步优化** — 理论上把 10s 压缩到 3-5s，因为 LLM 思考时间被 TTS 并行利用
 4. **当前实现满足 AC-A1 的精神**（TTS 合成部分 < 2s），但完整端到端还受 LLM 思考时间影响
 

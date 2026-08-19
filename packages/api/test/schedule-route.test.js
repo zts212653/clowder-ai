@@ -8,12 +8,48 @@ import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 
+async function registerScheduleRoutesForTest(app, scheduleRoutes, db, options, ownerUserId = 'user-1') {
+  const { ScheduleMutationProposalStore } = await import(
+    '../dist/infrastructure/scheduler/ScheduleMutationProposalStore.js'
+  );
+  const scheduleMutationProposalStore = new ScheduleMutationProposalStore(db);
+  app.decorateRequest('sessionUserId', undefined);
+  app.addHook('preHandler', async (request) => {
+    request.sessionUserId = ownerUserId;
+  });
+  const approvalIngress = {
+    async publish(draft, store) {
+      const envelope = {
+        canonicalProposalId: draft.canonicalProposalId,
+        sourceFeatureId: draft.producerId,
+        ownerUserId: draft.ownerUserId,
+        requesterCatId: draft.requesterCatId,
+        originRef: draft.originRef,
+        approvalCardRef: { threadId: draft.cardThreadId, messageId: `card-${draft.canonicalProposalId}` },
+        createdAt: draft.createdAt,
+      };
+      store.commitEnvelope(draft.canonicalProposalId, envelope);
+      return envelope;
+    },
+  };
+  await app.register(scheduleRoutes, {
+    ...options,
+    ownerUserId,
+    scheduleMutationProposalStore,
+    approvalIngress,
+  });
+  return scheduleMutationProposalStore;
+}
+
 describe('Schedule Routes', () => {
   let app, db, ledger, runner, taskStore;
+  let previousOwnerUserId;
   const noop = () => {};
   const silentLogger = { info: noop, error: noop };
 
   beforeEach(async () => {
+    previousOwnerUserId = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'user-1';
     db = new Database(':memory:');
     const { applyMigrations } = await import('../dist/domains/memory/schema.js');
     const { RunLedger } = await import('../dist/infrastructure/scheduler/RunLedger.js');
@@ -65,13 +101,15 @@ describe('Schedule Routes', () => {
     await runner.triggerNow('cicd-check');
 
     app = Fastify({ logger: false });
-    await app.register(scheduleRoutes, { taskRunner: runner, taskStore });
+    await registerScheduleRoutesForTest(app, scheduleRoutes, db, { taskRunner: runner, taskStore });
     await app.ready();
   });
 
   afterEach(async () => {
     runner.stop();
     await app.close();
+    if (previousOwnerUserId === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwnerUserId;
   });
 
   describe('GET /api/schedule/tasks', () => {
@@ -392,7 +430,12 @@ describe('Schedule Routes', () => {
       const store = new DynamicTaskStore(db);
       registry = new InvocationRegistry();
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+      });
       await appDyn.ready();
     });
 
@@ -491,6 +534,60 @@ describe('Schedule Routes', () => {
       assert.equal(body.error, 'callback_auth_failed', 'preHandler rejects invalid creds before route handler');
       assert.ok(['invalid_token', 'unknown_invocation', 'expired'].includes(body.reason));
     });
+
+    it('P2: agent-key preview draft mirrors the default wake target used by registration', async () => {
+      const agentKeyRegistry = {
+        verify: async (secret) =>
+          secret === 'gemini35-secret'
+            ? {
+                ok: true,
+                record: {
+                  agentKeyId: 'ak-gemini35',
+                  catId: 'gemini35',
+                  userId: 'user-1',
+                  secretHash: 'hash',
+                  salt: 'salt',
+                  scope: 'user-bound',
+                  issuedAt: Date.now(),
+                  expiresAt: Date.now() + 86_400_000,
+                },
+              }
+            : { ok: false, reason: 'agent_key_unknown' },
+      };
+      await appDyn.close();
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+      const threadStore = new ThreadStore();
+      appDyn = Fastify({ logger: false });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        templateRegistry,
+        registry,
+        agentKeyRegistry,
+        threadStore,
+      });
+      await appDyn.ready();
+
+      const deliveryThread = await threadStore.create('user-1', 'AGY preview thread');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          deliveryThreadId: deliveryThread.id,
+          params: { message: 'agent-key-preview' },
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      const body = res.json();
+      assert.equal(body.draft.params.triggerUserId, 'user-1');
+      assert.equal(body.draft.params.targetCatId, 'gemini35');
+      assert.equal(body.draft.deliveryThreadId, deliveryThread.id);
+    });
   });
 
   describe('POST /api/schedule/tasks — targetCatId flows through to reminder execute', () => {
@@ -503,7 +600,11 @@ describe('Schedule Routes', () => {
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
       store = new DynamicTaskStore(db);
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+      });
       await appDyn.ready();
     });
 
@@ -589,6 +690,186 @@ describe('Schedule Routes', () => {
       assert.ok(stored, 'task should be persisted');
       assert.equal(stored.params.targetCatId, 'codex', 'must store canonical catId not @mention alias');
     });
+
+    it('rolls back a direct delete when its durable audit row cannot be persisted', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'atomic-delete-audit' },
+        },
+      });
+      assert.equal(createRes.statusCode, 200, createRes.body);
+      const taskId = createRes.json().task.id;
+      assert.ok(store.getById(taskId));
+      assert.ok(runner.getRegisteredTasks().includes(taskId));
+
+      db.exec(`
+        CREATE TRIGGER fail_schedule_delete_audit
+        BEFORE INSERT ON schedule_mutation_audit
+        WHEN NEW.action = 'delete'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced schedule delete audit failure');
+        END;
+      `);
+
+      const deleteRes = await appDyn.inject({
+        method: 'DELETE',
+        url: `/api/schedule/tasks/${taskId}`,
+      });
+      assert.equal(deleteRes.statusCode, 500);
+      assert.ok(store.getById(taskId), 'task deletion must roll back when audit persistence fails');
+      assert.ok(runner.getRegisteredTasks().includes(taskId), 'runtime task must remain registered after rollback');
+      const deleteAuditCount = db
+        .prepare("SELECT COUNT(*) AS count FROM schedule_mutation_audit WHERE action = 'delete' AND task_id = ?")
+        .get(taskId).count;
+      assert.equal(deleteAuditCount, 0);
+    });
+  });
+
+  describe('GET /api/schedule/tasks — paused dynamic tasks', () => {
+    let appDyn, store;
+
+    beforeEach(async () => {
+      const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      store = new DynamicTaskStore(db);
+      appDyn = Fastify({ logger: false });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+      });
+      await appDyn.ready();
+    });
+
+    afterEach(async () => {
+      runner.stop();
+      await appDyn.close();
+    });
+
+    it('keeps paused dynamic tasks visible so users can resume them', async () => {
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'interval', ms: 60000 },
+          params: { message: 'paused visibility' },
+          display: { label: 'Paused visibility', category: 'system', description: 'visibility regression' },
+        },
+      });
+      assert.equal(createRes.statusCode, 200);
+      const id = createRes.json().task.id;
+
+      const pauseRes = await appDyn.inject({
+        method: 'PATCH',
+        url: `/api/schedule/tasks/${id}`,
+        payload: { enabled: false },
+      });
+      assert.equal(pauseRes.statusCode, 200);
+
+      const listRes = await appDyn.inject({ method: 'GET', url: '/api/schedule/tasks' });
+      assert.equal(listRes.statusCode, 200);
+      const paused = listRes.json().tasks.find((task) => task.id === id);
+      assert.ok(paused, 'paused dynamic task must remain in list');
+      assert.equal(paused.source, 'dynamic');
+      assert.equal(paused.dynamicTaskId, id);
+      assert.equal(paused.enabled, false);
+      assert.equal(paused.effectiveEnabled, false);
+      assert.equal(paused.registered, false);
+      assert.equal(paused.display.label, 'Paused visibility');
+    });
+
+    it('lists disabled persisted dynamic tasks after restart hydration skips runtime registration', async () => {
+      store.insert({
+        id: 'dyn-disabled-visible',
+        templateId: 'reminder',
+        trigger: { type: 'cron', expression: '0 9 * * *' },
+        params: { message: 'visible after restart' },
+        display: { label: 'Visible after restart', category: 'system', description: 'paused persistent task' },
+        deliveryThreadId: 'thread-paused',
+        enabled: false,
+        createdBy: 'codex',
+        createdAt: '2026-07-07T07:00:00.000Z',
+      });
+
+      const listRes = await appDyn.inject({ method: 'GET', url: '/api/schedule/tasks' });
+      assert.equal(listRes.statusCode, 200);
+      const paused = listRes.json().tasks.find((task) => task.id === 'dyn-disabled-visible');
+      assert.ok(paused, 'disabled persisted task must be visible even when not registered');
+      assert.equal(paused.source, 'dynamic');
+      assert.equal(paused.dynamicTaskId, 'dyn-disabled-visible');
+      assert.equal(paused.enabled, false);
+      assert.equal(paused.effectiveEnabled, false);
+      assert.equal(paused.registered, false);
+      assert.deepEqual(paused.trigger, { type: 'cron', expression: '0 9 * * *' });
+    });
+
+    it('keeps disabled dynamic tasks in the matching thread-scoped list before any run exists', async () => {
+      const { applyMigrations } = await import('../dist/domains/memory/schema.js');
+      const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
+      const { RunLedger } = await import('../dist/infrastructure/scheduler/RunLedger.js');
+      const { TaskRunnerV2 } = await import('../dist/infrastructure/scheduler/TaskRunnerV2.js');
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
+
+      const scopedDb = new Database(':memory:');
+      applyMigrations(scopedDb);
+      const scopedRunner = new TaskRunnerV2({ logger: silentLogger, ledger: new RunLedger(scopedDb) });
+      const scopedStore = new DynamicTaskStore(scopedDb);
+      const scopedApp = Fastify({ logger: false });
+
+      try {
+        await registerScheduleRoutesForTest(scopedApp, sr, scopedDb, {
+          taskRunner: scopedRunner,
+          dynamicTaskStore: scopedStore,
+          templateRegistry,
+          taskStore: new TaskStore(),
+        });
+        await scopedApp.ready();
+
+        scopedStore.insert({
+          id: 'dyn-disabled-thread-scoped',
+          templateId: 'reminder',
+          trigger: { type: 'cron', expression: '0 9 * * *' },
+          params: { message: 'visible in scoped thread' },
+          display: { label: 'Thread scoped paused task', category: 'thread', description: 'paused before first run' },
+          deliveryThreadId: 'thread-paused-scope',
+          enabled: false,
+          createdBy: 'codex',
+          createdAt: '2026-07-07T07:00:00.000Z',
+        });
+
+        const matchingRes = await scopedApp.inject({
+          method: 'GET',
+          url: '/api/schedule/tasks?threadId=thread-paused-scope',
+        });
+        assert.equal(matchingRes.statusCode, 200);
+        const matching = matchingRes.json().tasks.find((task) => task.id === 'dyn-disabled-thread-scoped');
+        assert.ok(matching, 'paused dynamic task should be visible in its delivery thread scope');
+        assert.equal(matching.registered, false);
+        assert.equal(matching.deliveryThreadId, 'thread-paused-scope');
+
+        const otherRes = await scopedApp.inject({
+          method: 'GET',
+          url: '/api/schedule/tasks?threadId=other-thread',
+        });
+        assert.equal(otherRes.statusCode, 200);
+        assert.ok(
+          !otherRes.json().tasks.some((task) => task.id === 'dyn-disabled-thread-scoped'),
+          'paused dynamic task should not leak into unrelated thread scopes',
+        );
+      } finally {
+        scopedRunner.stop();
+        await scopedApp.close();
+        scopedDb.close();
+      }
+    });
   });
 
   describe('POST /api/schedule/tasks — triggerUserId security boundary', () => {
@@ -600,7 +881,11 @@ describe('Schedule Routes', () => {
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
       store = new DynamicTaskStore(db);
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+      });
       await appDyn.ready();
     });
 
@@ -609,7 +894,7 @@ describe('Schedule Routes', () => {
       await appDyn.close();
     });
 
-    it('P1: route unconditionally overwrites forged triggerUserId with server identity', async () => {
+    it('P1: route ignores forged identity headers and uses the authenticated session principal', async () => {
       const createRes = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -624,10 +909,10 @@ describe('Schedule Routes', () => {
 
       const stored = store.getAll().find((d) => d.params?.message === 'forge-test');
       assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.params.triggerUserId, 'real-user-123', 'route must overwrite forged triggerUserId');
+      assert.equal(stored.params.triggerUserId, 'user-1', 'route must use the authenticated session user');
     });
 
-    it('P1: request without identity header defaults triggerUserId to default-user', async () => {
+    it('P1: authenticated session supplies triggerUserId without an identity header', async () => {
       const createRes = await appDyn.inject({
         method: 'POST',
         url: '/api/schedule/tasks',
@@ -641,7 +926,7 @@ describe('Schedule Routes', () => {
 
       const stored = store.getAll().find((d) => d.params?.message === 'query-forge-test');
       assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.params.triggerUserId, 'default-user', 'must default to default-user without header');
+      assert.equal(stored.params.triggerUserId, 'user-1', 'must use the authenticated session user');
     });
 
     it('P1: rejects non-object params with 400 (not 500)', async () => {
@@ -660,7 +945,7 @@ describe('Schedule Routes', () => {
   });
 
   describe('POST /api/schedule/tasks — callback auth infers deliveryThreadId', () => {
-    let appDyn, store, registry;
+    let appDyn, store, registry, threadStore, proposalStore;
 
     beforeEach(async () => {
       const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
@@ -669,10 +954,18 @@ describe('Schedule Routes', () => {
       const { InvocationRegistry } = await import(
         '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
       );
+      const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
       store = new DynamicTaskStore(db);
       registry = new InvocationRegistry();
+      threadStore = new ThreadStore();
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry, registry });
+      proposalStore = await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+        threadStore,
+      });
       await appDyn.ready();
     });
 
@@ -693,11 +986,12 @@ describe('Schedule Routes', () => {
           params: { message: 'body-auth-thread' },
         },
       });
-      assert.equal(res.statusCode, 200);
-
-      const stored = store.getAll().find((d) => d.params?.message === 'body-auth-thread');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-body-auth');
+      assert.equal(res.statusCode, 202);
+      const proposal = proposalStore.getById(res.json().proposalId);
+      assert.ok(proposal, 'cat request should create an approval proposal');
+      assert.equal(proposal.mutation.kind, 'create');
+      assert.equal(proposal.mutation.task.deliveryThreadId, 'thread-body-auth');
+      assert.equal(store.getAll().length, 0, 'cat request must not persist a task before approval');
     });
 
     it('P1: callback-authenticated writes derive actor from verified invocation, not client body/header', async () => {
@@ -717,12 +1011,258 @@ describe('Schedule Routes', () => {
           params: { message: 'callback-actor-auth', triggerUserId: 'evil-body-user' },
         },
       });
-      assert.equal(res.statusCode, 200);
+      assert.equal(res.statusCode, 202);
+      const proposal = proposalStore.getById(res.json().proposalId);
+      assert.ok(proposal, 'cat request should create an approval proposal');
+      assert.equal(proposal.mutation.kind, 'create');
+      assert.equal(proposal.mutation.task.createdBy, 'opus', 'createdBy must come from callbackAuth.catId');
+      assert.equal(
+        proposal.mutation.task.params.triggerUserId,
+        'user-1',
+        'triggerUserId must come from callbackAuth.userId',
+      );
+      assert.equal(store.getAll().length, 0, 'cat request must not persist a task before approval');
+    });
 
-      const stored = store.getAll().find((d) => d.params?.message === 'callback-actor-auth');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.createdBy, 'opus', 'createdBy must come from callbackAuth.catId');
-      assert.equal(stored.params.triggerUserId, 'user-1', 'triggerUserId must come from callbackAuth.userId');
+    it('P1: agent-key schedule writes derive actor and default target from selected cat principal', async () => {
+      const agentKeyRegistry = {
+        verify: async (secret) =>
+          secret === 'gemini35-secret'
+            ? {
+                ok: true,
+                record: {
+                  agentKeyId: 'ak-gemini35',
+                  catId: 'gemini35',
+                  userId: 'user-1',
+                  secretHash: 'hash',
+                  salt: 'salt',
+                  scope: 'user-bound',
+                  issuedAt: Date.now(),
+                  expiresAt: Date.now() + 86_400_000,
+                },
+              }
+            : { ok: false, reason: 'agent_key_unknown' },
+      };
+      await appDyn.close();
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      appDyn = Fastify({ logger: false });
+      proposalStore = await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+        agentKeyRegistry,
+        threadStore,
+      });
+      await appDyn.ready();
+
+      const deliveryThread = await threadStore.create('user-1', 'AGY reminder thread');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          deliveryThreadId: deliveryThread.id,
+          createdBy: 'evil-body-cat',
+          params: { message: 'agent-key-reminder', triggerUserId: 'evil-body-user' },
+        },
+      });
+      assert.equal(res.statusCode, 202, res.body);
+      const proposal = proposalStore.getById(res.json().proposalId);
+      assert.ok(proposal, 'agent-key request should create an approval proposal');
+      assert.equal(proposal.mutation.kind, 'create');
+      assert.equal(
+        proposal.mutation.task.createdBy,
+        'gemini35',
+        'createdBy must come from the verified agent-key principal',
+      );
+      assert.equal(
+        proposal.mutation.task.params.triggerUserId,
+        'user-1',
+        'triggerUserId must come from the agent-key principal',
+      );
+      assert.equal(
+        proposal.mutation.task.params.targetCatId,
+        'gemini35',
+        'agent-key reminder should wake the selected cat by default',
+      );
+      assert.equal(proposal.mutation.task.deliveryThreadId, deliveryThread.id);
+      assert.equal(store.getAll().length, 0, 'agent-key request must not persist a task before approval');
+    });
+
+    it('P1: agent-key schedule writes cannot target another user thread', async () => {
+      const agentKeyRegistry = {
+        verify: async (secret) =>
+          secret === 'gemini35-secret'
+            ? {
+                ok: true,
+                record: {
+                  agentKeyId: 'ak-gemini35',
+                  catId: 'gemini35',
+                  userId: 'user-1',
+                  secretHash: 'hash',
+                  salt: 'salt',
+                  scope: 'user-bound',
+                  issuedAt: Date.now(),
+                  expiresAt: Date.now() + 86_400_000,
+                },
+              }
+            : { ok: false, reason: 'agent_key_unknown' },
+      };
+      await appDyn.close();
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      appDyn = Fastify({ logger: false });
+      proposalStore = await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+        agentKeyRegistry,
+        threadStore,
+      });
+      await appDyn.ready();
+
+      const foreignThread = await threadStore.create('user-2', 'Foreign thread');
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          deliveryThreadId: foreignThread.id,
+          params: { message: 'agent-key-foreign-thread' },
+        },
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.match(res.body, /deliveryThreadId/);
+      const stored = store.getAll().find((d) => d.params?.message === 'agent-key-foreign-thread');
+      assert.equal(stored, undefined);
+    });
+
+    it('P2: agent-key schedule writes cannot target a soft-deleted delivery thread', async () => {
+      const agentKeyRegistry = {
+        verify: async (secret) =>
+          secret === 'gemini35-secret'
+            ? {
+                ok: true,
+                record: {
+                  agentKeyId: 'ak-gemini35',
+                  catId: 'gemini35',
+                  userId: 'user-1',
+                  secretHash: 'hash',
+                  salt: 'salt',
+                  scope: 'user-bound',
+                  issuedAt: Date.now(),
+                  expiresAt: Date.now() + 86_400_000,
+                },
+              }
+            : { ok: false, reason: 'agent_key_unknown' },
+      };
+      await appDyn.close();
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      appDyn = Fastify({ logger: false });
+      proposalStore = await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+        agentKeyRegistry,
+        threadStore,
+      });
+      await appDyn.ready();
+
+      const deletedThread = await threadStore.create('user-1', 'Deleted AGY schedule target');
+      assert.equal(await threadStore.softDelete(deletedThread.id), true);
+
+      const previewRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/preview',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          deliveryThreadId: deletedThread.id,
+          params: { message: 'agent-key-deleted-thread-preview' },
+        },
+      });
+
+      assert.equal(previewRes.statusCode, 410, previewRes.body);
+      assert.match(previewRes.body, /Thread is deleted/);
+      assert.equal(previewRes.json().code, 'THREAD_DELETED');
+
+      const createRes = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          deliveryThreadId: deletedThread.id,
+          params: { message: 'agent-key-deleted-thread-register' },
+        },
+      });
+
+      assert.equal(createRes.statusCode, 410, createRes.body);
+      assert.match(createRes.body, /Thread is deleted/);
+      assert.equal(createRes.json().code, 'THREAD_DELETED');
+      const stored = store.getAll().find((d) => d.params?.message === 'agent-key-deleted-thread-register');
+      assert.equal(stored, undefined);
+    });
+
+    it('P1: agent-key schedule writes without deliveryThreadId are rejected', async () => {
+      const agentKeyRegistry = {
+        verify: async (secret) =>
+          secret === 'gemini35-secret'
+            ? {
+                ok: true,
+                record: {
+                  agentKeyId: 'ak-gemini35',
+                  userId: 'user-1',
+                  catId: 'gemini35',
+                  secretHash: 'hash',
+                  salt: 'salt',
+                  scope: 'user-bound',
+                  issuedAt: Date.now(),
+                  expiresAt: Date.now() + 86_400_000,
+                },
+              }
+            : { ok: false, reason: 'agent_key_unknown' },
+      };
+      await appDyn.close();
+      const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      appDyn = Fastify({ logger: false });
+      proposalStore = await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        registry,
+        agentKeyRegistry,
+      });
+      await appDyn.ready();
+
+      const res = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks',
+        headers: { 'x-agent-key-secret': 'gemini35-secret' },
+        payload: {
+          templateId: 'reminder',
+          trigger: { type: 'once', delayMs: 1000 },
+          params: { message: 'agent-key-no-thread' },
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.match(res.body, /deliveryThreadId/);
+      const stored = store.getAll().find((d) => d.params?.message === 'agent-key-no-thread');
+      assert.equal(stored, undefined);
     });
 
     it('falls back to callback-auth headers when body credentials are absent', async () => {
@@ -740,11 +1280,12 @@ describe('Schedule Routes', () => {
           params: { message: 'header-auth-thread' },
         },
       });
-      assert.equal(res.statusCode, 200);
-
-      const stored = store.getAll().find((d) => d.params?.message === 'header-auth-thread');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-header-auth');
+      assert.equal(res.statusCode, 202);
+      const proposal = proposalStore.getById(res.json().proposalId);
+      assert.ok(proposal, 'cat request should create an approval proposal');
+      assert.equal(proposal.mutation.kind, 'create');
+      assert.equal(proposal.mutation.task.deliveryThreadId, 'thread-header-auth');
+      assert.equal(store.getAll().length, 0, 'cat request must not persist a task before approval');
     });
 
     it('prefers explicit deliveryThreadId over callback-auth inferred thread', async () => {
@@ -760,11 +1301,12 @@ describe('Schedule Routes', () => {
           deliveryThreadId: 'thread-explicit',
         },
       });
-      assert.equal(res.statusCode, 200);
-
-      const stored = store.getAll().find((d) => d.params?.message === 'explicit-thread-wins');
-      assert.ok(stored, 'task should be persisted');
-      assert.equal(stored.deliveryThreadId, 'thread-explicit');
+      assert.equal(res.statusCode, 202);
+      const proposal = proposalStore.getById(res.json().proposalId);
+      assert.ok(proposal, 'cat request should create an approval proposal');
+      assert.equal(proposal.mutation.kind, 'create');
+      assert.equal(proposal.mutation.task.deliveryThreadId, 'thread-explicit');
+      assert.equal(store.getAll().length, 0, 'cat request must not persist a task before approval');
     });
 
     it('returns 409 stale invocation error and does not persist for stale callback auth invocation', async () => {
@@ -824,7 +1366,11 @@ describe('Schedule Routes', () => {
       const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
       store = new DynamicTaskStore(db);
       appDyn = Fastify({ logger: false });
-      await appDyn.register(sr, { taskRunner: runner, dynamicTaskStore: store, templateRegistry });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+      });
       await appDyn.ready();
 
       // Create a dynamic task
@@ -857,11 +1403,14 @@ describe('Schedule Routes', () => {
       });
       assert.equal(patchRes.statusCode, 200);
 
-      // Verify runtime no longer has it
+      // Verify runtime no longer has it while the management list keeps it visible.
+      assert.ok(!runner.getRegisteredTasks().includes(dynTask.dynamicTaskId), 'paused task should leave runtime');
       const listRes2 = await appDyn.inject({ method: 'GET', url: '/api/schedule/tasks' });
       const tasks = JSON.parse(listRes2.payload).tasks;
       const found = tasks.find((t) => t.dynamicTaskId === dynTask.dynamicTaskId);
-      assert.ok(!found, 'paused task should be unregistered from runtime');
+      assert.ok(found, 'paused task should remain visible for resume');
+      assert.equal(found.registered, false);
+      assert.equal(found.enabled, false);
     });
 
     it('PATCH enabled=true re-registers task in runtime', async () => {
@@ -886,6 +1435,126 @@ describe('Schedule Routes', () => {
       const tasks = JSON.parse(listRes2.payload).tasks;
       const found = tasks.find((t) => t.dynamicTaskId === dynTask.dynamicTaskId);
       assert.ok(found, 'resumed task should be re-registered in runtime');
+      assert.equal(found.registered, true);
+    });
+  });
+
+  describe('F255 managed Present Loop boundary', () => {
+    let appDyn, store, presentLoopTemplate;
+    const delegatedTemplateId = 'pack:unsafe:present-loop';
+
+    beforeEach(async () => {
+      const { DynamicTaskStore } = await import('../dist/infrastructure/scheduler/DynamicTaskStore.js');
+      const { scheduleRoutes: sr } = await import('../dist/routes/schedule.js');
+      store = new DynamicTaskStore(db);
+      presentLoopTemplate = {
+        templateId: 'present-loop',
+        label: '猫的私人时间',
+        category: 'system',
+        description: 'managed by F255',
+        subjectKind: 'thread',
+        defaultTrigger: { type: 'interval', ms: 3_600_000 },
+        paramSchema: {},
+        createSpec: (id, params) => ({
+          id,
+          profile: 'awareness',
+          trigger: params.trigger,
+          admission: { gate: async () => ({ run: false, reason: 'test' }) },
+          run: { overlap: 'skip', timeoutMs: 1_000, execute: async () => {} },
+          state: { runLedger: 'sqlite' },
+          outcome: { whenNoSignal: 'record' },
+          enabled: () => true,
+          display: { label: '猫的私人时间', category: 'system' },
+        }),
+      };
+      const templateRegistry = {
+        get: (id) =>
+          id === 'present-loop'
+            ? presentLoopTemplate
+            : id === delegatedTemplateId
+              ? { ...presentLoopTemplate, templateId: delegatedTemplateId }
+              : null,
+        list: () => [presentLoopTemplate, { ...presentLoopTemplate, templateId: delegatedTemplateId }],
+      };
+      const packTemplateStore = {
+        get: (id) => (id === delegatedTemplateId ? { builtinTemplateRef: 'present-loop' } : null),
+      };
+      appDyn = Fastify({ logger: false });
+      await registerScheduleRoutesForTest(appDyn, sr, db, {
+        taskRunner: runner,
+        dynamicTaskStore: store,
+        templateRegistry,
+        packTemplateStore,
+      });
+      await appDyn.ready();
+    });
+
+    afterEach(async () => {
+      await appDyn.close();
+    });
+
+    it('removes Present Loop from generic creation catalog and rejects direct preview/create', async () => {
+      const templates = await appDyn.inject({ method: 'GET', url: '/api/schedule/templates' });
+      assert.deepEqual(templates.json().templates, []);
+
+      for (const templateId of ['present-loop', delegatedTemplateId]) {
+        for (const url of ['/api/schedule/tasks/preview', '/api/schedule/tasks']) {
+          const response = await appDyn.inject({
+            method: 'POST',
+            url,
+            payload: {
+              templateId,
+              params: { targetCatId: 'codex-sol', triggerUserId: 'owner-a' },
+              deliveryThreadId: 'thread-forged-bedroom',
+            },
+          });
+          assert.equal(response.statusCode, 409);
+          assert.equal(response.json().code, 'F255_CONFIG_REQUIRED');
+        }
+      }
+      assert.equal(store.getAll().length, 0);
+    });
+
+    it('keeps managed projections visible but rejects generic pause, trigger, and delete mutations', async () => {
+      store.insert({
+        id: 'f255-present-loop-stable',
+        templateId: 'present-loop',
+        trigger: { type: 'cron', expression: '30 22 * * 1,3,5', timezone: 'America/Los_Angeles' },
+        params: { targetCatId: 'codex-sol', triggerUserId: 'owner-a', managedBy: 'f255-cat-life' },
+        display: { label: '私人时间', category: 'system' },
+        deliveryThreadId: 'thread-bedroom',
+        enabled: true,
+        createdBy: 'f255-cat-life',
+        createdAt: '2026-07-19T00:00:00.000Z',
+      });
+      const managedDef = store.getById('f255-present-loop-stable');
+      const managedSpec = presentLoopTemplate.createSpec(managedDef.id, {
+        trigger: managedDef.trigger,
+        params: managedDef.params,
+        deliveryThreadId: managedDef.deliveryThreadId,
+      });
+      runner.registerDynamic(managedSpec, managedDef.id);
+
+      const paused = await appDyn.inject({
+        method: 'PATCH',
+        url: '/api/schedule/tasks/f255-present-loop-stable',
+        payload: { enabled: false },
+      });
+      const triggered = await appDyn.inject({
+        method: 'POST',
+        url: '/api/schedule/tasks/f255-present-loop-stable/trigger',
+      });
+      const deleted = await appDyn.inject({
+        method: 'DELETE',
+        url: '/api/schedule/tasks/f255-present-loop-stable',
+      });
+      assert.equal(paused.statusCode, 409);
+      assert.equal(paused.json().code, 'F255_MANAGED_TASK');
+      assert.equal(triggered.statusCode, 409);
+      assert.equal(triggered.json().code, 'F255_MANAGED_TASK');
+      assert.equal(deleted.statusCode, 409);
+      assert.equal(deleted.json().code, 'F255_MANAGED_TASK');
+      assert.equal(store.getById('f255-present-loop-stable').enabled, true);
     });
   });
 });

@@ -124,6 +124,22 @@ describe('computeConsumptionPrior', () => {
     assert.ok(result.prior >= 0);
   });
 
+  it('architecture docKind avoids cold-start without constitutional pinning', () => {
+    const result = computeConsumptionPrior(
+      {
+        consumedCount30d: 0,
+        exposureCount30d: 2,
+        daysSinceLastConsumed: 60,
+        docKind: 'architecture',
+        authority: 'validated',
+        firstIndexedAt: Date.now() - 5 * 86_400_000,
+      },
+      { architecture: 0.3 },
+    );
+    assert.notEqual(result.branch, 'constitutional');
+    assert.ok(result.prior >= 0);
+  });
+
   it('validated + feature docKind is NOT constitutional (P1-1 fix)', () => {
     const result = computeConsumptionPrior(
       {

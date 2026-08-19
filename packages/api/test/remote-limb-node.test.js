@@ -22,12 +22,23 @@ describe('RemoteLimbNode', () => {
       },
     });
 
-    const result = await node.invoke('exec.run', { script: 'dotnet build' });
+    const result = await node.invoke(
+      'exec.run',
+      { script: 'dotnet build' },
+      {
+        catId: 'opus',
+        invocationId: 'inv-123',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        userMessageId: 'msg-1',
+      },
+    );
     assert.equal(result.success, true);
     assert.equal(result.data, 'build output');
     assert.equal(capturedUrl, 'http://192.168.1.100:8080/invoke');
     assert.equal(capturedBody.command, 'exec.run');
     assert.deepEqual(capturedBody.params, { script: 'dotnet build' });
+    assert.deepEqual(Object.keys(capturedBody).sort(), ['command', 'params']);
   });
 
   it('invoke returns error on network failure', async () => {

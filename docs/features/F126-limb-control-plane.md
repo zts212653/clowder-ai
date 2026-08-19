@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-03-16
 ---
 
-# F126: 四肢控制面 — Cat Café Limb Control Plane
+# F126: 四肢控制面 — Clowder AI Limb Control Plane
 
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 
@@ -18,7 +18,7 @@ operator 2026-03-16 在三猫 OpenClaw Node 研讨中指出：
 
 > "你们这一群猫猫，类似于一个大脑，每只猫都是一个灵魂议会的议员！虽然有自己不同的看法，但是都住在猫咖这个大脑里。"
 
-**核心模型**：Cat Café = 一个大脑（灵魂议会，多猫议员）→ 需要管理 M 个四肢（外部设备/节点）。这是 OpenClaw `1 brain → N limbs` 的升级版：`1 brain (N cats) → M limbs`。
+**核心模型**：Clowder AI = 一个大脑（灵魂议会，多猫议员）→ 需要管理 M 个四肢（外部设备/节点）。这是 OpenClaw `1 brain → N limbs` 的升级版：`1 brain (N cats) → M limbs`。
 
 **猫猫是议员，不是 Node。** F126 聚焦**四肢侧**的抽象与管理，不重构现有猫 Provider 内部实现。
 
@@ -38,7 +38,7 @@ operator 2026-03-16 在三猫 OpenClaw Node 研讨中指出：
 ### 正确模型（operator定义）
 
 ```
-Cat Café（大脑 / 灵魂议会）
+Clowder AI（大脑 / 灵魂议会）
 ├── Ragdoll（议员：架构）
 ├── Maine Coon（议员：安全审查）
 ├── Siamese（议员：设计）
@@ -56,9 +56,9 @@ Cat Café（大脑 / 灵魂议会）
 
 **与 OpenClaw 的区别**：OpenClaw 是 1 agent × N nodes（简单，无竞争）。我们是 1 brain (N cats) × M limbs（多猫共享四肢，需要调度和仲裁）。N×M 编排是行业未解问题（OpenClaw/LangGraph/CrewAI/A2A 都未完整解决），我们做了会是独特贡献。
 
-### 三协议定位与 Cat Café 选型（KD-8/9 基线）
+### 三协议定位与 Clowder AI 选型（KD-8/9 基线）
 
-| 协议 | 全称 | 发起方 | 解决什么 | 类比 | Cat Café 需要？ |
+| 协议 | 全称 | 发起方 | 解决什么 | 类比 | Clowder AI 需要？ |
 |------|------|--------|---------|------|----------------|
 | **MCP** | Model Context Protocol | Anthropic (2024.11) | Agent ↔ 工具/数据 | USB-C | ✅ **已在用**（猫猫的工具全是 MCP） |
 | **A2A** | Agent-to-Agent Protocol | Google (2025.04) | Agent ↔ Agent | HTTP | ✅ **Phase C 必须**（猫猫指挥远程 Agent） |
@@ -135,7 +135,7 @@ Cat Café（大脑 / 灵魂议会）
 
 ### Phase C: 跨平台 Node 管理
 
-**目标**：Mac 上的 Cat Café 能管理远程 Windows/Linux/移动设备节点。
+**目标**：Mac 上的 Clowder AI 能管理远程 Windows/Linux/移动设备节点。
 
 1. **Remote Node Transport**
    - MCP over HTTP / WebSocket — 复用 MCP 标准协议（不造新轮子）
@@ -163,7 +163,7 @@ Cat Café（大脑 / 灵魂议会）
 
 | # | 共识 |
 |---|------|
-| C1 | Cat Café = 一个大脑（灵魂议会），四肢是外部设备/节点，猫是议员不是 Node |
+| C1 | Clowder AI = 一个大脑（灵魂议会），四肢是外部设备/节点，猫是议员不是 Node |
 | C2 | 不抄 OpenClaw 自定义 WebSocket 协议，用 MCP 标准 |
 | C3 | Capability-based 能力声明和发现值得学 |
 | C4 | Memory lifecycle 补"pre-seal 自动写入"属于 F102 范围 |
@@ -248,7 +248,7 @@ Cat Café（大脑 / 灵魂议会）
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 猫猫是议员不是 Node——Cat Café 是一个大脑（灵魂议会），四肢是外部设备 | operator定义，多猫协作是核心价值 | 2026-03-16 |
+| KD-1 | 猫猫是议员不是 Node——Clowder AI 是一个大脑（灵魂议会），四肢是外部设备 | operator定义，多猫协作是核心价值 | 2026-03-16 |
 | KD-2 | 用 MCP 标准协议做设备接入，不抄 OpenClaw 的自定义 WebSocket 协议 | MCP 已成行业标准（Linux Foundation），不造新轮子 | 2026-03-16 |
 | KD-3 | F126 聚焦四肢侧抽象（ILimbNode），不重构猫 Provider（AgentService） | Maine Coon审阅纠偏：猫是议员不是四肢，scope 分离 | 2026-03-16 |
 | KD-4 | Phase 顺序：A（抽象+Registry+Presence）→ B（调度+权限+审计）→ C（跨平台）→ D（F124） | Maine Coon提议 + 三猫共识：每步终态基座 | 2026-03-16 |

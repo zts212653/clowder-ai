@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
+const http = require('node:http');
+const net = require('node:net');
 const { existsSync, mkdirSync, rmSync, writeFileSync } = fs;
 const { mkdtemp } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
@@ -23,6 +26,68 @@ function seedMirrorSource(root, name, probeFile = '.keep') {
   mkdirSync(path.dirname(path.join(dir, probeFile)), { recursive: true });
   writeFileSync(path.join(dir, probeFile), `${name}\n`, 'utf-8');
 }
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+}
+
+function close(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
+
+test('declares the packaged Web frontend ready only after an HTTP response', async () => {
+  const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-http-ready-'));
+  const manager = new ServiceManager(installRoot, { frontendPort: 3003, apiPort: 3004 });
+  const tcpOnly = net.createServer((socket) => socket.destroy());
+  const web = http.createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'text/html' });
+    response.end('<!doctype html><title>Clowder AI</title>');
+  });
+
+  try {
+    const tcpPort = await listen(tcpOnly);
+    assert.equal(await manager._isHttpReady(tcpPort), false, 'a bare TCP accept is not a rendered Web document');
+    await close(tcpOnly);
+
+    const webPort = await listen(web);
+    assert.equal(await manager._isHttpReady(webPort), true);
+
+    const source = fs.readFileSync(path.join(__dirname, 'service-manager.js'), 'utf8');
+    assert.match(source, /await this\._waitForHttpReady\(this\.frontendPort, 'Web'\)/);
+  } finally {
+    if (tcpOnly.listening) await close(tcpOnly);
+    if (web.listening) await close(web);
+    rmSync(installRoot, { recursive: true, force: true });
+  }
+});
+
+test('settles the packaged Web readiness probe when the HTTP response stalls', async () => {
+  const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-http-stall-'));
+  const manager = new ServiceManager(installRoot, { frontendPort: 3003, apiPort: 3004 });
+  const originalGet = http.get;
+  const stalledRequest = new EventEmitter();
+  stalledRequest.setTimeout = (_timeout, onTimeout) => {
+    setImmediate(onTimeout);
+    return stalledRequest;
+  };
+  stalledRequest.destroy = () => setImmediate(() => stalledRequest.emit('close'));
+  http.get = () => stalledRequest;
+
+  try {
+    const result = await Promise.race([
+      manager._isHttpReady(3003),
+      new Promise((resolve) => setTimeout(() => resolve('still-pending'), 100)),
+    ]);
+
+    assert.equal(result, false, 'a timeout followed only by close must release the outer startup deadline');
+  } finally {
+    http.get = originalGet;
+    rmSync(installRoot, { recursive: true, force: true });
+  }
+});
 
 test('mirrors bundled plugins into the writable API project root', async () => {
   const installRoot = await mkdtemp(path.join(tmpdir(), 'service-manager-install-'));

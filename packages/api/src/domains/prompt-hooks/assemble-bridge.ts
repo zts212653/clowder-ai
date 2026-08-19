@@ -177,6 +177,7 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
           sourceThreadId: context.crossThreadReplyHint.sourceThreadId,
           senderCatId: context.crossThreadReplyHint.senderCatId as string,
           effectClass: context.crossThreadReplyHint.effectClass,
+          coordination: context.crossThreadReplyHint.coordination,
         }
       : null,
     pingPongWarning: context.pingPongWarning

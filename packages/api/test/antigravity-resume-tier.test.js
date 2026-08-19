@@ -311,6 +311,11 @@ describe('F201 Antigravity resume tier classifier', () => {
         operation: 'write',
         target: 'docs/features/F201-antigravity-reliability-contract.md',
       }),
+      entry({
+        effectType: 'code',
+        operation: 'write',
+        target: 'docs/architecture/memory-philosophy.md',
+      }),
       entry({ effectType: 'shell', operation: 'run_command', target: 'gh pr comment 1741 --body ready' }),
       entry({ effectType: 'mcp', operation: 'mcp_tool', target: 'cat_cafe_cross_post_message' }),
     ];
@@ -324,8 +329,10 @@ describe('F201 Antigravity resume tier classifier', () => {
 
     const probedManualTargets = [
       ['docs/features/F201-antigravity-reliability-contract.md', { effectType: 'code', operation: 'write' }],
+      ['docs/architecture/memory-system-overview.md', { effectType: 'code', operation: 'write' }],
       ['docs/lessons-learned.md', { effectType: 'code', operation: 'write' }],
       ['touch docs/features/F201-command-path.md', {}],
+      ['touch docs/architecture/retrieval-pipeline-deep-dive.md', {}],
       ['cp /tmp/output packages/api/src/CatRouter.ts', {}],
       ['git -C /tmp/cat-cafe-antigravity-owned push origin main', {}],
       ['bash -lc "git merge main"', {}],

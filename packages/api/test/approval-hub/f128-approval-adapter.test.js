@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import { anchorApproval } from './helpers.js';
 
 describe('F128ApprovalAdapter', () => {
   let InMemoryProposalStore;
@@ -10,8 +11,8 @@ describe('F128ApprovalAdapter', () => {
     ({ F128ApprovalAdapter } = await import('../../dist/domains/approval-hub/adapters/F128ApprovalAdapter.js'));
   });
 
-  const createProposal = (store, overrides = {}) =>
-    store.create({
+  const createProposal = (store, overrides = {}) => {
+    const proposal = store.create({
       sourceThreadId: 't-1',
       sourceInvocationId: 'inv-1',
       sourceCatId: 'opus',
@@ -23,6 +24,16 @@ describe('F128ApprovalAdapter', () => {
       createdBy: 'user-1',
       ...overrides,
     });
+    anchorApproval(store, {
+      proposalId: proposal.proposalId,
+      sourceFeatureId: 'F128',
+      ownerUserId: proposal.createdBy,
+      requesterCatId: proposal.sourceCatId,
+      threadId: proposal.sourceThreadId,
+      createdAt: proposal.createdAt,
+    });
+    return proposal;
+  };
 
   it('maps pending ThreadProposals to ApprovalItems', () => {
     const proposalStore = new InMemoryProposalStore();
@@ -42,6 +53,18 @@ describe('F128ApprovalAdapter', () => {
     assert.equal(items[0].detail.parentThreadId, 't-parent');
     assert.deepEqual(items[0].detail.preferredCats, ['opus']);
     assert.equal(items[0].detail.projectPath, '/p');
+    assert.deepEqual(items[0].navigation, {
+      state: 'anchored',
+      originRef: {
+        kind: 'message',
+        threadId: 't-1',
+        messageId: `origin-${items[0].proposalId}`,
+      },
+      approvalCardRef: {
+        threadId: 't-1',
+        messageId: `card-${items[0].proposalId}`,
+      },
+    });
   });
 
   it('returns empty for user with no pending proposals', () => {

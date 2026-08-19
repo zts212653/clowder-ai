@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { CriticalText } from './content-overflow';
 
 interface AgentSessionSnapshot {
   daemonShortId: string;
@@ -114,7 +115,11 @@ export function HubAgentSessionsTab() {
                   </button>
                 </div>
               </div>
-              {s.detail && <div className="text-xs text-cafe-muted truncate">{s.detail}</div>}
+              {s.detail && (
+                <div data-testid={`agent-session-detail-${s.daemonShortId}`} className="min-w-0">
+                  <CriticalText summary="Daemon 诊断" details={s.detail} tone="warning" />
+                </div>
+              )}
               {s.cwd && <div className="text-xs text-cafe-muted truncate font-mono">{s.cwd}</div>}
               <div className="flex gap-4 text-micro text-cafe-muted">
                 {s.createdAt && <span>创建 {formatTs(s.createdAt)}</span>}

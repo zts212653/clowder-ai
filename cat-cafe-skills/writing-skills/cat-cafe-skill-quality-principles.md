@@ -1,6 +1,6 @@
-# Cat Café Skill Quality Principles
+# Clowder AI Skill Quality Principles
 
-**Load this reference when:** writing or reviewing a Cat Café skill and the question is whether the skill is valuable, overbroad, too tutorial-like, or should be a hook/MCP description/reference instead.
+**Load this reference when:** writing or reviewing a Clowder AI skill and the question is whether the skill is valuable, overbroad, too tutorial-like, or should be a hook/MCP description/reference instead.
 
 ## Thesis
 
@@ -17,7 +17,7 @@ Before writing a skill, answer this table. If every answer is "no", do not write
 | Question | Good answer |
 |----------|-------------|
 | Does it contain project/industry/vendor know-how the model is unlikely to know reliably? | Yes: write a skill or reference with source paths. |
-| Does it encode a real Cat Café failure mode or operator correction? | Yes: include the exact trap and countermeasure. |
+| Does it encode a real Clowder AI failure mode or operator correction? | Yes: include the exact trap and countermeasure. |
 | Does it define an evidence standard for completion or escalation? | Yes: turn vague quality into checkable proof. |
 | Does it stop a behavior the model knows is wrong but rationalizes under pressure? | Yes: write a discipline skill and pressure-test it. |
 | Does it make an important tool or truth source discoverable at the right moment? | Yes: write a routing skill or MCP description. |
@@ -35,7 +35,7 @@ Use for knowledge not safely recoverable from general training:
 - product vocabulary
 - version-sensitive workflows, with "verify official source" instructions
 
-Do not copy broad tutorials. A React skill that teaches component composition is weak. A Cat Café Console skill that explains our settings migration gates and known visual regressions is strong.
+Do not copy broad tutorials. A React skill that teaches component composition is weak. A Clowder AI Console skill that explains our settings migration gates and known visual regressions is strong.
 
 ### 2. Historical Trap
 

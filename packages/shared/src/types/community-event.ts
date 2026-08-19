@@ -31,6 +31,15 @@ export type CommunityEventKind =
   | 'case.waived'
   | 'case.declined'
   | 'case.awaiting_external' // owner declares waiting for external actor (payload: { reason, declaredBy })
+  | 'case.fix_evidence_recorded'
+  // External review lifecycle events (F168 Phase F-Step3)
+  | 'case.external_review_assigned'
+  | 'case.head_observed'
+  | 'case.ci_observed'
+  | 'case.cloud_review_observed'
+  | 'case.review_ready'
+  | 'case.reviewer_wake_delivered'
+  | 'case.review_verdict_recorded'
   // Route validation events (F168 Phase F: target cat accepts/rejects routed issue)
   | 'case.route_validated'
   | 'case.route_rejected'
@@ -45,8 +54,8 @@ export type CommunityEventKind =
 
 /**
  * GitHub-native author_association values.
- * Used by the delivery policy to distinguish maintainer vs external activity
- * without coupling the engine to any specific repo identity.
+ * Preserved as event context. Association is never sufficient to suppress
+ * delivery because OWNER/MEMBER may be the external repository maintainers.
  */
 export type GitHubAuthorAssociation =
   | 'OWNER'
@@ -118,6 +127,111 @@ export interface CommunityClosureWaiver {
   evidence: string;
 }
 
+/** Structured proof required before an issue "fixed" claim becomes re-review ready. */
+export type IssueFixEvidence =
+  | {
+      readonly kind: 'pull_request';
+      readonly url: string;
+      readonly number: number;
+    }
+  | {
+      readonly kind: 'commit';
+      readonly sha: string;
+      readonly url?: string;
+    }
+  | {
+      readonly kind: 'release';
+      readonly tag: string;
+      readonly url: string;
+    }
+  | {
+      readonly kind: 'reproduction';
+      readonly evidence: string;
+    };
+
+/** Exact, correlated reasons allowed to keep an issue comment state-only. */
+export type IssueCommentSuppressionReason = 'exact_self_echo' | 'exact_setup_noise';
+
+// ---------------------------------------------------------------------------
+// F168 Phase F-Step3: external review aggregate
+// ---------------------------------------------------------------------------
+
+export type ExternalReviewMode = 'observe_only' | 'maintainer_review';
+
+export type CloudReviewPolicy = 'optional' | 'required';
+
+export type ExternalReviewLifecycle =
+  | 'assigned'
+  | 'awaiting_author'
+  | 'awaiting_ci'
+  | 'awaiting_cloud_review'
+  | 'rereview_required'
+  | 'pending_delivery'
+  | 'delivered'
+  | 'terminal';
+
+export type ExternalCiStatus = 'pending' | 'pass' | 'fail';
+
+export type ExternalCloudReviewStatus = 'not_requested' | 'running' | 'blocking' | 'clean' | 'failed_or_timeout';
+
+export type ReviewDeliveryOutcome =
+  | {
+      readonly kind: 'delivered';
+      readonly headSha: string;
+      readonly githubUrl: string;
+      readonly deliveredAt: number;
+    }
+  | {
+      readonly kind: 'pending_delivery';
+      readonly headSha: string;
+      readonly ownerCatId: string;
+      readonly reason: string;
+      readonly createdAt: number;
+    };
+
+export interface ExternalReviewAggregate {
+  readonly mode: ExternalReviewMode;
+  readonly cloudPolicy: CloudReviewPolicy;
+  readonly lifecycle: ExternalReviewLifecycle;
+  readonly currentHeadSha: string | null;
+  /** Monotonic lifecycle generation. The same SHA may reappear after a force-push/revert. */
+  readonly headGeneration: number;
+  readonly currentHeadObservedAt: number | null;
+  readonly lastReviewedHeadSha: string | null;
+  readonly lastReviewedHeadGeneration: number | null;
+  readonly lastDeliveredHeadSha: string | null;
+  readonly lastDeliveredHeadGeneration: number | null;
+  readonly ci: {
+    readonly headSha: string;
+    readonly headGeneration: number;
+    readonly status: ExternalCiStatus;
+    readonly observedAt: number;
+  } | null;
+  readonly cloud: {
+    readonly headSha: string;
+    readonly headGeneration: number;
+    readonly status: ExternalCloudReviewStatus;
+    readonly triggerCommentId?: number;
+    readonly reviewId?: number;
+    readonly observedAt: number;
+  } | null;
+  readonly wake: {
+    readonly headSha: string;
+    readonly headGeneration: number;
+    readonly status: 'pending' | 'delivered';
+    readonly requestedAt: number;
+    readonly messageId?: string;
+    readonly deliveredAt?: number;
+  } | null;
+  readonly delivery: ReviewDeliveryOutcome | null;
+  readonly reviewerCatId: string | null;
+  readonly reviewerThreadId: string | null;
+  readonly actionLeaseRef: {
+    readonly leaseId: string;
+    readonly generation: number;
+  } | null;
+}
+
 // ---------------------------------------------------------------------------
 // Projection (rebuildable read model)
 // ---------------------------------------------------------------------------
@@ -136,6 +250,10 @@ export interface CommunityObjectProjection {
   linkedIssues: number[];
   linkedPrs: number[];
   closureWaiver: CommunityClosureWaiver | null;
+  /** Latest validated issue fix proof; prose-only claims never populate this field. */
+  issueFixEvidence: IssueFixEvidence | null;
+  /** F168 Phase F-Step3 external review lifecycle; absent for ordinary community objects. */
+  externalReview: ExternalReviewAggregate | null;
   /**
    * Count of events consumed to build this projection.
    * Used for rebuild consistency verification.

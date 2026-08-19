@@ -11,13 +11,14 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVICES_DIR = __dirname;
+const SYNC_MANIFEST = join(SERVICES_DIR, '../../sync-manifest.yaml');
 
 // ---------------------------------------------------------------------------
 // Helper: extract the PRODUCTION dispatch logic from whisper-install.sh and
@@ -38,12 +39,14 @@ function getInstallDispatch(model) {
     `eval "$(sed -n '/^MODEL_ENV_VAR=/,/^MODEL_LOADER_OTHER=/p' '${installPath}')"`,
     'echo "label=$SERVICE_LABEL"',
     'echo "deps=$PIP_DEPS_ARM64"',
+    'echo "loader=${MODEL_LOADER_ARM64:-snapshot}"',
   ].join('\n');
   const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
   const lines = out.split('\n');
   return {
     label: lines.find((l) => l.startsWith('label='))?.split('=')[1],
     deps: lines.find((l) => l.startsWith('deps='))?.split('=')[1],
+    loader: lines.find((l) => l.startsWith('loader='))?.split('=')[1],
   };
 }
 
@@ -96,12 +99,51 @@ describe('whisper-dispatch — static guard (script content)', () => {
     );
   });
 
-  test('whisper-api.py contains all ASR backends', () => {
+  test('unified ASR implementation contains all backends', () => {
     const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
+    const qwenSrc = readFileSync(join(SERVICES_DIR, 'qwen_asr_backend.py'), 'utf8');
     assert.match(src, /Qwen3-ASR/, 'must detect Qwen3-ASR model name');
-    assert.match(src, /mlx_audio/, 'must support mlx-audio backend');
+    assert.match(qwenSrc, /mlx_audio/, 'must support mlx-audio backend');
     assert.match(src, /mlx_whisper/, 'must support mlx-whisper backend');
     assert.match(src, /faster_whisper/, 'must support faster-whisper backend');
+  });
+
+  test(
+    'sync manifest exports the unified ASR runtime closure',
+    { skip: !existsSync(SYNC_MANIFEST) && 'sync manifest is home-repo-only' },
+    () => {
+      const manifest = readFileSync(SYNC_MANIFEST, 'utf8');
+      assert.match(manifest, /scripts\/services\/whisper-api\.py/);
+      assert.match(manifest, /scripts\/services\/dedicated_model_worker\.py/);
+      assert.match(manifest, /scripts\/services\/qwen_asr_backend\.py/);
+      assert.match(manifest, /scripts\/services\/test_whisper_worker\.py/);
+    },
+  );
+
+  test('canonical whisper dispatch check runs the Python worker regressions', () => {
+    const packageJson = JSON.parse(readFileSync(join(SERVICES_DIR, '../../package.json'), 'utf8'));
+    assert.match(
+      packageJson.scripts['check:whisper-dispatch'],
+      /python3 -m unittest scripts\/services\/test_whisper_worker\.py/,
+      'check:whisper-dispatch must execute the dedicated-worker behavioral suite',
+    );
+  });
+
+  test('whisper-api.py dispatches each configured model identity to exactly one backend', () => {
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
+    assert.match(src, /_is_mlx_whisper_model/, 'must distinguish MLX Whisper identities from faster-whisper');
+    assert.doesNotMatch(
+      src,
+      /elif not _try_mlx\(\):\s*if not _try_faster_whisper\(\):/s,
+      'MLX load failure must fail closed instead of silently changing model/backend identity',
+    );
+  });
+
+  test('whisper-api.py exposes inference-backed deep health', () => {
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
+    assert.match(src, /@app\.get\("\/health\/deep"\)/, 'must expose the lifecycle deep-health endpoint');
+    assert.match(src, /_run_deep_health_probe/, 'deep health must execute the selected backend');
+    assert.match(src, /status_code=503/, 'inference failures must fail closed');
   });
 
   test('whisper-server.sh launches whisper-api.py (no shell dispatch)', () => {
@@ -217,9 +259,16 @@ describe('whisper-dispatch — install backend selection', () => {
     assert.equal(primaryDep(r.deps), 'mlx-whisper');
   });
 
-  test('empty model -> mlx-whisper (fallback)', () => {
-    const r = getInstallDispatch('');
-    assert.equal(primaryDep(r.deps), 'mlx-whisper');
+  test('short faster-whisper model -> faster-whisper deps and loader on arm64', () => {
+    const r = getInstallDispatch('large-v3-turbo');
+    assert.equal(primaryDep(r.deps), 'faster-whisper');
+    assert.equal(r.loader, 'faster_whisper');
+  });
+
+  test('custom CTranslate2 model -> faster-whisper', () => {
+    const r = getInstallDispatch('Systran/faster-whisper-large-v3');
+    assert.equal(primaryDep(r.deps), 'faster-whisper');
+    assert.equal(r.loader, 'faster_whisper');
   });
 });
 
@@ -864,7 +913,7 @@ function getServerVenvCheck(resolvedArch, venvArch, model = 'large-v3-turbo', av
 
 describe('whisper-server — startup path venv compat (#1061)', () => {
   test('resolved=arm64 + venv=x86_64 -> rebuild (stale Rosetta venv)', () => {
-    // The critical production path: user fixes Rosetta, restarts Cat Cafe,
+    // The critical production path: user fixes Rosetta, restarts Clowder AI,
     // startup reconciler calls whisper-server.sh directly (not installer).
     // Server must detect stale x86_64 venv and trigger reinstall.
     assert.equal(getServerVenvCheck('arm64', 'x86_64'), 'rebuild');
@@ -986,13 +1035,16 @@ describe('whisper-server — backend dependency check (#863)', () => {
     assert.equal(getServerBackendCheck('mlx-community/whisper-large-v3-turbo', ['mlx_whisper']), 'keep');
   });
 
+  test('MLX Whisper model + venv has faster_whisper only -> rebuild', () => {
+    assert.equal(getServerBackendCheck('mlx-community/whisper-large-v3-turbo', ['faster_whisper']), 'rebuild');
+  });
+
   test('non-MLX model + venv has faster_whisper -> keep', () => {
     assert.equal(getServerBackendCheck('large-v3-turbo', ['faster_whisper']), 'keep');
   });
 
-  test('non-MLX model + venv has mlx_whisper -> keep (fallback chain)', () => {
-    // whisper-api.py tries mlx_whisper first for non-Qwen models
-    assert.equal(getServerBackendCheck('large-v3-turbo', ['mlx_whisper']), 'keep');
+  test('non-MLX model + venv has mlx_whisper only -> rebuild', () => {
+    assert.equal(getServerBackendCheck('large-v3-turbo', ['mlx_whisper']), 'rebuild');
   });
 });
 

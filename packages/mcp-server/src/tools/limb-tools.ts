@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * Limb MCP Tools — F126 四肢控制面
  *
@@ -11,6 +13,8 @@
 import { callbackPost, getCallbackConfig, NO_CONFIG_ERROR } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('limb-tools.ts', undefined, { authority: 'callback-limb' });
 
 // ─── Input Schemas ───────────────────────────────────────────
 
@@ -161,10 +165,48 @@ export async function handleLimbPairApprove(args: { requestId: string; agentKeyC
   );
 }
 
+// ─── F285: Physical embodiment binding ───────────────────────
+
+export const limbBindEmbodimentInputSchema = {
+  type: 'object' as const,
+  properties: {
+    nodeId: { type: 'string', description: '已审批且在线的物理 limb nodeId' },
+    expressionRef: { type: 'string', description: '当前猫已登记的表情映射引用' },
+    voiceProfileRef: { type: 'string', description: '当前猫已登记的声线映射引用' },
+    volumePercent: { type: 'number', minimum: 0, maximum: 100, description: '扬声器音量百分比' },
+    agentKeyCatId: {
+      type: 'string',
+      description: '共享 Antigravity MCP 时必填你自己的 catId，用于选择正确的 sidecar agent key。',
+    },
+  },
+  required: ['nodeId', 'expressionRef', 'voiceProfileRef', 'volumePercent'],
+};
+
+export async function handleLimbBindEmbodiment(args: {
+  nodeId: string;
+  expressionRef: string;
+  voiceProfileRef: string;
+  volumePercent: number;
+  agentKeyCatId?: string;
+}): Promise<ToolResult> {
+  const config = getCallbackConfig({ agentKeyCatId: args.agentKeyCatId });
+  if (!config) return errorResult(NO_CONFIG_ERROR);
+  return callbackPost(
+    '/api/callback/limb/embodiment/bind',
+    {
+      nodeId: args.nodeId,
+      expressionRef: args.expressionRef,
+      voiceProfileRef: args.voiceProfileRef,
+      volumePercent: args.volumePercent,
+    },
+    { agentKeyCatId: args.agentKeyCatId },
+  );
+}
+
 // ─── Tool Definitions ────────────────────────────────────────
 
 export const limbTools = [
-  {
+  defineTool({
     name: 'limb_list_available',
     description:
       'Discover available limb nodes and their tool names. Returns nodeId, platform, capabilities (with command names), and status. ' +
@@ -174,8 +216,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbListAvailableInputSchema,
     handler: handleLimbListAvailable,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbListAvailable',
+      resourceFamily: 'limb-capability',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_list_tools',
     description:
       'Get detailed tool schemas for a specific limb node. Returns parameter descriptions, types, required flags, and defaults. ' +
@@ -186,8 +236,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbListToolsInputSchema,
     handler: handleLimbListTools,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbListTools',
+      resourceFamily: 'limb-capability',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_invoke_tool',
     description:
       'Invoke a tool on a specific limb node. Requires nodeId and command (tool name). ' +
@@ -197,8 +255,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbInvokeToolInputSchema,
     handler: handleLimbInvokeTool,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbInvokeTool',
+      resourceFamily: 'limb-capability',
+      action: 'create',
+      risk: { level: 'destructive', openWorld: true },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'profile-gated',
+    },
+  }),
+  defineTool({
     name: 'limb_pair_list',
     description:
       'List pending limb pairing requests. Remote devices must be approved by co-creator before cats can use them. ' +
@@ -206,8 +272,16 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairListInputSchema,
     handler: handleLimbPairList,
-  },
-  {
+    governance: {
+      implementationExport: 'handleLimbPairList',
+      resourceFamily: 'limb-pairing',
+      action: 'command',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'limb_pair_approve',
     description:
       'Approve a limb pairing request. After approval, the remote device is automatically registered in the Registry ' +
@@ -216,5 +290,30 @@ export const limbTools = [
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairApproveInputSchema,
     handler: handleLimbPairApprove,
-  },
+    governance: {
+      implementationExport: 'handleLimbPairApprove',
+      resourceFamily: 'limb-pairing',
+      action: 'create',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
+    name: 'limb_bind_embodiment',
+    description:
+      'Bind one approved, online physical limb body to the current user, thread, and cat. ' +
+      'The server derives identity from callback credentials; callers cannot provide userId/threadId/catId. ' +
+      'GOTCHA: Only run after the owner explicitly asks to embody the current cat on that node.',
+    inputSchema: limbBindEmbodimentInputSchema,
+    handler: handleLimbBindEmbodiment,
+    governance: {
+      implementationExport: 'handleLimbBindEmbodiment',
+      resourceFamily: 'limb-embodiment',
+      action: 'update',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

@@ -55,6 +55,18 @@ describe('Verdict Handoff Packet contract', () => {
     assert.equal(assertCanCrossThreadHandoff(packet).ok, true);
   });
 
+  it('accepts an explicit stable finding key without requiring legacy packets to invent one', () => {
+    const legacy = parseVerdictHandoffPacket(basePacket);
+    const lineageAware = parseVerdictHandoffPacket({ ...basePacket, findingKey: 'rich-messaging' });
+
+    assert.equal(legacy.findingKey, undefined);
+    assert.equal(lineageAware.findingKey, 'rich-messaging');
+    assert.throws(
+      () => parseVerdictHandoffPacket({ ...basePacket, findingKey: 'Rich Messaging / weekly 2026-08-01' }),
+      /findingKey/,
+    );
+  });
+
   it('accepts an eval:friction verdict packet (F245 Phase C)', () => {
     const packet = parseVerdictHandoffPacket({ ...basePacket, domainId: 'eval:friction' });
     assert.equal(packet.domainId, 'eval:friction');

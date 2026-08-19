@@ -7,12 +7,21 @@ import { PreviewGateway } from '../../../dist/domains/preview/preview-gateway.js
 function createFakeDevServer() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
+      if (req.url === '/style.css') {
+        res.writeHead(200, { 'Content-Type': 'text/css' });
+        res.end('body { color: rgb(1, 2, 3); }');
+        return;
+      }
       res.writeHead(200, {
         'Content-Type': 'text/html',
         'X-Frame-Options': 'DENY',
         'Content-Security-Policy': "frame-ancestors 'none'; default-src 'self'",
       });
-      res.end(`<h1>Hello from dev server</h1><p>path=${req.url}</p>`);
+      res.end(`<link rel="stylesheet" href="/style.css"><h1>Hello from dev server</h1><p>path=${req.url}</p>`);
+    });
+    server.on('upgrade', (_req, socket) => {
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+      socket.end();
     });
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
@@ -25,6 +34,21 @@ function httpGet(url) {
   return new Promise((resolve, reject) => {
     http
       .get(url, (res) => {
+        let body = '';
+        res.on('data', (chunk) => (body += chunk));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      })
+      .on('error', reject);
+  });
+}
+
+/** HTTP GET routed to the gateway with an explicit preview hostname. */
+function httpGetWithHost(gatewayPort, previewHostname, path = '/', origin) {
+  return new Promise((resolve, reject) => {
+    const headers = { Host: `${previewHostname}:${gatewayPort}` };
+    if (origin) headers.Origin = origin;
+    http
+      .get({ hostname: '127.0.0.1', port: gatewayPort, path, headers }, (res) => {
         let body = '';
         res.on('data', (chunk) => (body += chunk));
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
@@ -73,7 +97,7 @@ function wsUpgradeWithOrigin(gatewayPort, targetPort, origin) {
       res.on('data', (chunk) => (body += chunk));
       res.on('end', () => resolve({ status: res.statusCode, body }));
     });
-    req.on('upgrade', (res, socket) => {
+    req.on('upgrade', (_res, socket) => {
       socket.destroy();
       resolve({ status: 101 });
     });
@@ -82,12 +106,42 @@ function wsUpgradeWithOrigin(gatewayPort, targetPort, origin) {
   });
 }
 
+function wsUpgradeWithHost(gatewayPort, previewHostname, origin) {
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: gatewayPort,
+      path: '/__vite_hmr',
+      headers: {
+        Host: `${previewHostname}:${gatewayPort}`,
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        Origin: origin,
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      },
+    });
+    req.on('response', (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode }));
+    });
+    req.on('upgrade', (res, socket) => {
+      socket.destroy();
+      resolve({ status: res.statusCode });
+    });
+    req.on('error', (err) => resolve({ status: 0, error: err.message }));
+    req.end();
+  });
+}
+
 describe('PreviewGateway', () => {
   let fakeDevServer;
+  let otherFakeDevServer;
   let gateway;
 
   before(async () => {
     fakeDevServer = await createFakeDevServer();
+    otherFakeDevServer = await createFakeDevServer();
     gateway = new PreviewGateway({ port: 0 }); // random port
     await gateway.start();
   });
@@ -95,6 +149,7 @@ describe('PreviewGateway', () => {
   after(async () => {
     await gateway.stop();
     await new Promise((resolve) => fakeDevServer.server.close(() => resolve()));
+    await new Promise((resolve) => otherFakeDevServer.server.close(() => resolve()));
   });
 
   it('proxies request to target dev server', async () => {
@@ -102,6 +157,78 @@ describe('PreviewGateway', () => {
     const res = await httpGet(url);
     assert.equal(res.status, 200);
     assert.ok(res.body.includes('Hello from dev server'));
+  });
+
+  it('keeps the target identity for root-relative subresources', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const document = await httpGetWithHost(gateway.actualPort, previewHostname, '/');
+    assert.equal(document.status, 200);
+    assert.ok(document.body.includes('href="/style.css"'));
+
+    // Browsers do not copy the document query string onto /style.css. The
+    // preview origin itself must therefore carry the target identity.
+    const stylesheet = await httpGetWithHost(gateway.actualPort, previewHostname, '/style.css');
+    assert.equal(stylesheet.status, 200);
+    assert.match(stylesheet.body, /rgb\(1, 2, 3\)/);
+  });
+
+  it('fails closed when hostname and legacy query identify different targets', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const res = await httpGetWithHost(
+      gateway.actualPort,
+      previewHostname,
+      `/?__preview_port=${otherFakeDevServer.port}`,
+    );
+    assert.equal(res.status, 400);
+  });
+
+  it('fails closed when a preview hostname carries a malformed legacy identity', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const res = await httpGetWithHost(gateway.actualPort, previewHostname, '/?__preview_port=not-a-port');
+    assert.equal(res.status, 400);
+  });
+
+  it('fails closed when reserved legacy identity parameters are duplicated', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const duplicatePort = await httpGetWithHost(
+      gateway.actualPort,
+      previewHostname,
+      `/?__preview_port=${fakeDevServer.port}&__preview_port=${fakeDevServer.port}`,
+    );
+    assert.equal(duplicatePort.status, 400);
+
+    const duplicateHost = await httpGetWithHost(
+      gateway.actualPort,
+      previewHostname,
+      '/?__preview_host=localhost&__preview_host=127.0.0.1',
+    );
+    assert.equal(duplicateHost.status, 400);
+  });
+
+  it('applies excluded-port validation to hostname identities', async () => {
+    const res = await httpGetWithHost(gateway.actualPort, 'preview-6399.localhost');
+    assert.equal(res.status, 403);
+  });
+
+  it('allows same-preview-origin browser requests', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const origin = `http://${previewHostname}:${gateway.actualPort}`;
+    const res = await httpGetWithHost(gateway.actualPort, previewHostname, '/style.css', origin);
+    assert.equal(res.status, 200);
+  });
+
+  it('rejects browser requests whose preview Origin names a different target', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const otherOrigin = `http://preview-${otherFakeDevServer.port}.localhost:${gateway.actualPort}`;
+    const res = await httpGetWithHost(gateway.actualPort, previewHostname, '/style.css', otherOrigin);
+    assert.equal(res.status, 403);
+  });
+
+  it('routes WebSocket upgrades through the preview hostname without a query', async () => {
+    const previewHostname = `preview-${fakeDevServer.port}.localhost`;
+    const origin = `http://${previewHostname}:${gateway.actualPort}`;
+    const result = await wsUpgradeWithHost(gateway.actualPort, previewHostname, origin);
+    assert.equal(result.status, 101);
   });
 
   it('strips X-Frame-Options from proxied response', async () => {
@@ -220,8 +347,7 @@ describe('PreviewGateway', () => {
 
   it('allows WS upgrade with valid Origin', async () => {
     const result = await wsUpgradeWithOrigin(gateway.actualPort, fakeDevServer.port, 'http://localhost:3003');
-    // Should get through to the dev server (101 or connection established)
-    assert.notEqual(result.status, 403);
+    assert.equal(result.status, 101);
   });
 
   it('rejects start when configured port is already in use', async () => {

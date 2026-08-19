@@ -25,7 +25,9 @@ import { createInterface } from 'node:readline';
 
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
+import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import {
   type AcpCapacitySignal,
   type AcpClientConfig,
@@ -102,7 +104,7 @@ export class AcpHttpStreamClient {
     const doSpawn = this.config.spawnFn ?? nodeSpawn;
     let command = resolveCliCommandOrBare(this.config.command);
     let args = [...this.config.args];
-    const childEnv = { ...process.env, ...this.config.env };
+    const childEnv = buildChildEnv(this.config.env);
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
@@ -129,6 +131,18 @@ export class AcpHttpStreamClient {
       if (spawnPlan.shell !== undefined) spawnOpts.shell = spawnPlan.shell;
     }
 
+    const providerCommand = command;
+    const providerArgs = args;
+    if (!IS_WINDOWS && !this.config.spawnFn) {
+      const supervised = buildUnixSupervisedSpawnPlan(command, args, {
+        env: childEnv,
+        killGraceMs: Math.max(250, KILL_GRACE_MS - 1_000),
+      });
+      command = supervised.command;
+      args = supervised.args;
+      spawnOpts.env = supervised.env;
+    }
+
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     // Stderr: capacity detection (shared with stdio client)
@@ -153,7 +167,13 @@ export class AcpHttpStreamClient {
     });
 
     log.info(
-      buildAcpSpawnLogFields({ command, args, cwd: this.config.cwd, pid: this.child.pid, env: this.config.env }),
+      buildAcpSpawnLogFields({
+        command: providerCommand,
+        args: providerArgs,
+        cwd: this.config.cwd,
+        pid: this.child.pid,
+        env: this.config.env,
+      }),
       'ACP HTTP: process spawned, discovering port from stdout',
     );
 

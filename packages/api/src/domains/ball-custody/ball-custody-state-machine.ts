@@ -5,7 +5,7 @@
  * （TRANSITION_TABLE 而非 if-chain，降单函数 cognitive complexity）。
  * 调用方（projector）负责持久化 + 字段 effect（heldUntil/blockedSinceAt/lastWakeAt）。
  *
- * INV-10（完整性）：全 8 state × 17 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
+ * INV-10（完整性）：全 8 state × 18 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
  * 复杂守卫拆成独立 resolver：
  *   - ball.handed_cvo：payload.intent 三态（handoff→parked / done_notify→resolved / fyi→不变）
  *   - ball.hold_expired：需 payload.fireAt 匹配 snapshot.heldUntil，防旧 reminder 误杀新 hold
@@ -43,6 +43,8 @@ export const ALL_BALL_EVENT_KINDS: BallCustodyEvent['kind'][] = [
   'task.done',
   'ball.wake_sent',
   'ball.wake_condition_met',
+  'ball.hold_dispositioned',
+  'ball.dispatch_dispositioned',
   // ─── Phase C 安乐死 (KD-C1/C2) ───
   'ball.frozen',
   'ball.degraded',
@@ -54,7 +56,7 @@ export type BallTransitionReject = 'invalid_transition' | 'bad_payload';
 export type BallTransitionResult = { ok: true; next: BallState } | { ok: false; reason: BallTransitionReject };
 
 /** transition 守卫只需 projection 的这几字段（窄输入，好测）。 */
-export type BallTransitionSnapshot = Pick<BallCustodyProjection, 'heldUntil' | 'lastStateChangeAt'>;
+export type BallTransitionSnapshot = Pick<BallCustodyProjection, 'holder' | 'heldUntil' | 'lastStateChangeAt'>;
 
 const ok = (next: BallState): BallTransitionResult => ({ ok: true, next });
 const reject = (reason: BallTransitionReject): BallTransitionResult => ({ ok: false, reason });
@@ -99,6 +101,24 @@ function resolveHeartbeat(
   return reject('invalid_transition');
 }
 
+function resolveDisposition(
+  event: BallCustodyEvent,
+  snapshot: BallTransitionSnapshot,
+  current: BallState,
+): BallTransitionResult {
+  if (!set('active', 'blocked').has(current)) return reject('invalid_transition');
+  const catId = event.payload.catId;
+  if (typeof catId !== 'string') return reject('bad_payload');
+  if (snapshot.holder !== catId) return reject('invalid_transition');
+  // clowder-ai#1366: `ball.hold_dispositioned` carries per-wake identity
+  // (sourceMessageId + taskId + invocationId) but historically always drove the
+  // whole subject to `resolved`. Those are two different planes. A retired wake
+  // records its own terminal without touching subject custody, so a newer hold
+  // held by the same cat survives.
+  if (event.payload.retired === true) return ok(current);
+  return ok('resolved');
+}
+
 // ─── 转移表（静态 from→to）+ resolver 出口（动态）────────────────────────
 
 type StaticRule = { from: Set<BallState> | '*'; to: BallState };
@@ -109,7 +129,9 @@ type DynamicRule = {
 const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.handed': { from: '*', to: 'active' }, // 任意（含 resolved=reopen）→ active
   'ball.void_pass': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
-  'ball.held': { from: set('new', 'active'), to: 'active' }, // heldUntil 由 projector 设
+  // A fresh structured hold is a new custody acquisition on the thread subject.
+  // It must reopen a prior terminal disposition just as a new A2A handoff does.
+  'ball.held': { from: set('new', 'active', 'resolved'), to: 'active' }, // heldUntil 由 projector 设
   'invocation.started': { from: set('active', 'blocked'), to: 'active' },
   'invocation.died': { from: set('active', 'blocked'), to: 'dead' }, // lastScanAt 由 projector 设
   'task.blocked': { from: set('new', 'active', 'void', 'zombie', 'parked'), to: 'blocked' }, // 不落 active（P1-3）
@@ -133,6 +155,10 @@ const DYNAMIC_TABLE: Partial<Record<BallCustodyEvent['kind'], DynamicRule>> = {
   'ball.handed_cvo': { resolve: (e, _s, c) => resolveHandedCvo(e, c) },
   'ball.hold_expired': { resolve: resolveHoldExpired },
   'invocation.heartbeat': { resolve: resolveHeartbeat },
+  // The event-log sequence fence protects the check-to-append window. This
+  // holder guard is the projector/rebuild backstop for every event producer.
+  'ball.hold_dispositioned': { resolve: resolveDisposition },
+  'ball.dispatch_dispositioned': { resolve: resolveDisposition },
 };
 
 /**

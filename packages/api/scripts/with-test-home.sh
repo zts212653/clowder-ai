@@ -20,6 +20,11 @@ export CAT_CAFE_TEST_REAL_HOME="${CAT_CAFE_TEST_REAL_HOME:-$real_home}"
 # Telemetry redaction tests rely on test-mode defaults instead of production secrets.
 export NODE_ENV="test"
 
+# F279: tests that start the API must not inherit production listen-state or
+# audio-cache paths. HOME already points at the per-run test sandbox.
+unset CAT_CAFE_DATA_DIR
+unset TTS_CACHE_DIR
+unset LISTEN_MODE_DB
 # Runtime-only envs leak from invocation env (set by the running cat-cafe-runtime
 # process when launching a cat). resolveBinaryRoot()/orchestrator code treats
 # CAT_CAFE_RUNTIME_ROOT as the highest-priority binary root override, which makes
@@ -29,6 +34,12 @@ export NODE_ENV="test"
 unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
+
+# Runtime shells may select persistent transports for live agent invocations.
+# Tests rely on each provider's default carrier so spawn seams remain the only
+# process boundary; inheriting these overrides could launch a real provider CLI.
+unset CAT_CAFE_CODEX_CARRIER
+unset CAT_CAFE_CLAUDE_CARRIER
 
 # API_SERVER_HOST is a runtime binding choice. LAN/dev invocations commonly set
 # it to 0.0.0.0, but capability write tests expect localhost-only defaults unless

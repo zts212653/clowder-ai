@@ -359,8 +359,8 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // #1153: Explicit issue tracking delivers all non-echo comments, including
-  // OWNER/MEMBER activity. Repository role is not an echo signal.
+  // F168 AC-F12 / #1153: explicit tracking delivers every non-echo comment.
+  // OWNER/MEMBER association is context, never a suppression identity.
   // ─────────────────────────────────────────────────────────────────────────
 
   it('explicit issue tracking routes OWNER comments unless they are echoes', async () => {
@@ -377,6 +377,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
         createdAt: '2026-01-01T00:00:00Z',
         authorAssociation: 'NONE',
       },
+      // Repo owner — a real maintainer reply must also be delivered.
       {
         id: 52,
         author: 'repo-owner',
@@ -394,11 +395,13 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     assert.ok(collected.includes(51), 'external comment must be collected in event log');
     assert.ok(collected.includes(52), 'OWNER comment must also be collected');
 
+    // Delivery includes both comments. Exact echo/setup-noise filters are separate.
     assert.strictEqual(gate.run, true, 'gate should run — there is deliverable content');
     const workItemCommentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
     assert.ok(workItemCommentIds.includes(51), 'external comment (id=51) must be in work items for delivery');
     assert.ok(workItemCommentIds.includes(52), 'OWNER comment (id=52) must be delivered by explicit tracking');
 
+    // After execute: router receives both comments.
     await runExecute(spec, gate);
     const routedCommentIds = router.calls.flatMap((call) => call.signal.newComments.map((c) => c.id));
     assert.ok(routedCommentIds.includes(51), 'router must receive external comment');
@@ -473,6 +476,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
 
     const gate = await runGate(spec);
 
+    // Comment must be in event log and remains eligible for delivery.
     const inLog = eventLog.events.some((e) => e.payload.commentId === 81);
     assert.ok(inLog, 'OWNER comment must be appended to event log');
     const workItemCommentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
@@ -530,18 +534,19 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Echo-only batches advance the delivery cursor without claiming that an
-  // owner notification was accepted.
+  // Cloud P2: exact echo-only batches advance the delivery cursor without
+  // claiming that an owner notification was accepted.
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('delivery cursor advances past echo-only batches without setting lastNotifiedAt', async () => {
+  it('delivery cursor advances past exact echo-only batches without setting lastNotifiedAt', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-silent-churn', subjectKey: 'issue:owner/repo#42' }));
     const router = makeIssueCommentRouter({ failRoute: false });
     const eventLog = makeEventLog();
 
-    const echoComments = [
+    // Exact authenticated self echoes are silent; OWNER association alone is not.
+    const silentComments = [
       {
         id: 1001,
         author: 'repo-owner',
@@ -560,15 +565,26 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     const { spec } = makeBaseSpec({
       taskStore,
       router,
-      comments: echoComments,
-      extra: { eventLog, isEchoComment: () => true },
+      comments: silentComments,
+      extra: { eventLog, isEchoComment: (comment) => comment.author === 'repo-owner' },
     });
 
     const gate = await runGate(spec);
     const workItemCommentIds = (gate.workItems ?? []).flatMap((wi) => wi.signal.newComments.map((c) => c.id));
-    assert.ok(!workItemCommentIds.includes(1001), 'echo comment must NOT be delivered');
-    assert.ok(!workItemCommentIds.includes(1002), 'echo comment must NOT be delivered');
+    assert.ok(!workItemCommentIds.includes(1001), 'exact echo must NOT be delivered');
+    assert.ok(!workItemCommentIds.includes(1002), 'exact echo must NOT be delivered');
+    const echoEvents = eventLog.events.filter(
+      (event) => event.payload?.commentId === 1001 || event.payload?.commentId === 1002,
+    );
+    assert.equal(echoEvents.length, 2, 'exact echoes remain collected');
+    assert.ok(
+      echoEvents.every((event) => event.payload.suppressionReason === 'exact_self_echo'),
+      'collected exact echoes carry replay-safe suppression provenance',
+    );
 
+    // Delivery cursor MUST advance to 1002 — even though nothing was delivered.
+    // Without this, the next poll re-fetches the same exact echoes forever.
+    // Find the patch with value=1002 (not the one-time seed patch with value=0).
     const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 1002);
     assert.ok(deliveryPatch, 'delivery cursor must advance to 1002 — the max echo comment ID');
     assert.strictEqual(
@@ -737,7 +753,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     assert.strictEqual(call301.kind, 'issue.commented', 'projector event must have kind=issue.commented');
 
     const call302 = projectorApplyCalls.find((e) => e.payload.commentId === 302);
-    assert.ok(call302, 'projector.apply must be called for comment 302 (OWNER, silent-logged for delivery)');
+    assert.ok(call302, 'projector.apply must be called for comment 302 (OWNER association)');
     assert.strictEqual(call302.payload.authorAssociation, 'OWNER');
   });
 
@@ -830,10 +846,10 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     assert.ok(!deliveredIds.includes(102), 'comment 102 (unreached after break) must NOT be delivered');
   });
 
-  it('echo-batch delivery cursor does not advance past failed collection boundary (Cloud R4 P1-2 variant)', async () => {
-    // All collected comments are echoes but collection fails midway.
+  it('echo-only delivery cursor does not advance past failed collection boundary (Cloud R4 P1-2 variant)', async () => {
+    // All collected comments are exact echoes but collection fails midway.
     // Comments: c10 (echo, ok), c11 (throws), c12 (echo, unreached)
-    // Expected: delivery cursor advances to 10 (max successful echo), NOT 12.
+    // Expected: delivery cursor advances to 10 (max successful silent), NOT 12.
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask({ id: 'task-silent-truncation', subjectKey: 'issue:owner/repo#42' }));
@@ -865,7 +881,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
       taskStore,
       router,
       comments,
-      extra: { eventLog: failingAt11EventLog, isEchoComment: () => true },
+      extra: { eventLog: failingAt11EventLog, isEchoComment: (comment) => comment.author === 'owner' },
     });
 
     await runGate(spec);

@@ -13,7 +13,7 @@ created: 2026-03-07
 
 ## Why
 
-Cat Café Hub 当前 3001 端口零认证裸跑，同 WiFi 下任何人可直接访问所有 thread、以operator身份操作猫猫、浏览项目文件。operator想让朋友也能用 Hub 与猫猫协作，但需要独立身份、私有空间隔离、传输安全。
+Clowder AI Hub 当前 3001 端口零认证裸跑，同 WiFi 下任何人可直接访问所有 thread、以operator身份操作猫猫、浏览项目文件。operator想让朋友也能用 Hub 与猫猫协作，但需要独立身份、私有空间隔离、传输安全。
 
 **operator experience**："我朋友喊你们搞的哈哈哈哈 我们的 3001 没做任何防护 直接同个 wifi 就能访问到 好像很危险？能让他们以其他operator的身份接入吗？而不是 landy 以及我的这些 thread 能不让他们看见吗？他们只能看见共享区的 thread"
 

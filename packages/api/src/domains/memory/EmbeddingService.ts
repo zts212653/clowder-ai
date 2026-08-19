@@ -13,7 +13,7 @@ interface EmbeddingServiceConfig {
   embedModel: string;
   embedDim: number;
   embedTimeoutMs: number;
-  maxModelMemMb: number; // kept for interface compat, not used by HTTP client
+  maxModelMemMb: number;
 }
 
 interface EmbedApiResponse {
@@ -61,7 +61,7 @@ export class EmbeddingService implements IEmbeddingService {
     return normalizeLoopbackUrl(resolved ?? 'http://127.0.0.1:9880');
   }
 
-  async load(): Promise<void> {
+  async load(parentSignal?: AbortSignal): Promise<void> {
     if (this.loader) {
       await this.loader();
       return;
@@ -69,8 +69,9 @@ export class EmbeddingService implements IEmbeddingService {
 
     // Probe the external embed-api server via /health
     try {
+      const timeoutSignal = AbortSignal.timeout(5000);
       const res = await fetch(`${this.resolveBaseUrl()}/health`, {
-        signal: AbortSignal.timeout(5000),
+        signal: parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal,
       });
       if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
       const health = (await res.json()) as HealthResponse;
@@ -78,9 +79,10 @@ export class EmbeddingService implements IEmbeddingService {
         this.ready = true;
         this.modelId = health.model || this.config.embedModel;
       }
-    } catch {
+    } catch (error) {
       // fail-open: server not running → isReady()=false → lexical-only degradation
       this.ready = false;
+      if (parentSignal?.aborted) throw parentSignal.reason ?? error;
     }
   }
 
@@ -93,12 +95,12 @@ export class EmbeddingService implements IEmbeddingService {
     if (modelId) this.modelId = modelId;
   }
 
-  async reprobeIfNeeded(): Promise<void> {
+  async reprobeIfNeeded(signal?: AbortSignal): Promise<void> {
     if (this.ready) return;
     const now = Date.now();
     if (now - this.lastProbeAt < EmbeddingService.REPROBE_COOLDOWN_MS) return;
     this.lastProbeAt = now;
-    await this.load();
+    await this.load(signal);
   }
 
   getModelInfo(): EmbedModelInfo {
@@ -109,28 +111,38 @@ export class EmbeddingService implements IEmbeddingService {
     };
   }
 
-  async embed(texts: string[]): Promise<Float32Array[]> {
+  async embed(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
     if (!this.ready) throw new Error('EmbeddingService not ready — embed-api server not available');
     if (texts.length === 0) return [];
 
     const results: Float32Array[] = new Array(texts.length);
     for (let offset = 0; offset < texts.length; offset += EMBED_BATCH_SIZE) {
+      signal?.throwIfAborted();
       const batch = texts.slice(offset, offset + EMBED_BATCH_SIZE);
-      const vectors = await this.embedBatch(batch);
+      const vectors = await this.embedBatch(batch, signal);
       for (let i = 0; i < vectors.length; i++) {
-        results[offset + i] = vectors[i]!;
+        const vector = vectors[i];
+        if (!vector) throw new Error(`Embed API omitted vector ${i} from batch`);
+        results[offset + i] = vector;
       }
     }
     return results;
   }
 
-  private async embedBatch(texts: string[]): Promise<Float32Array[]> {
+  private async embedBatch(texts: string[], parentSignal?: AbortSignal): Promise<Float32Array[]> {
     const timeoutMs = this.config.embedTimeoutMs;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
+    const deadlineMs = Date.now() + timeoutMs;
     const res = await fetch(`${this.resolveBaseUrl()}/v1/embeddings`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input: texts }),
-      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({
+        input: texts,
+        deadline_ms: deadlineMs,
+        max_model_mem_mb: this.config.maxModelMemMb,
+      }),
+      signal,
     });
 
     if (!res.ok) {
@@ -146,7 +158,8 @@ export class EmbeddingService implements IEmbeddingService {
         const emb = d.embedding;
         const arr = new Float32Array(targetDim);
         for (let i = 0; i < Math.min(emb.length, targetDim); i++) {
-          arr[i] = emb[i]!;
+          const value = emb[i];
+          if (value !== undefined) arr[i] = value;
         }
         return arr;
       });
@@ -159,7 +172,7 @@ export class EmbeddingService implements IEmbeddingService {
   // ── Test hooks (not part of IEmbeddingService interface) ──────────
 
   /** @internal test-only: mark as ready with mock */
-  _setPipelineForTest(fn: unknown): void {
+  _setPipelineForTest(_fn: unknown): void {
     // Compat with existing tests — just mark as ready
     this.ready = true;
     this.modelId = 'test-mock';

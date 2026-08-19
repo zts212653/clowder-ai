@@ -12,7 +12,7 @@ created: 2026-04-16
 
 ## Why
 
-Cat Café 对operator好用，是因为他是共创者——harness 就是他思维的外化。新用户缺的不是功能，是这个共创过程。
+Clowder AI 对operator好用，是因为他是共创者——harness 就是他思维的外化。新用户缺的不是功能，是这个共创过程。
 
 三猫 + operator在 Harness Engineering 讨论 Round 2-3 中达成共识：
 

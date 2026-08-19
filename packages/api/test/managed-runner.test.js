@@ -8,9 +8,12 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { test } from 'node:test';
+import { promisify } from 'node:util';
 
 const { ManagedRunner, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } = await import('../dist/infrastructure/managed-runner.js');
+const execFileAsync = promisify(execFile);
 
 // ─── T1: Command exits normally → exitCode + output ───────────────────────
 
@@ -58,6 +61,56 @@ test('T2b: command with stderr → tailOutput captures stderr too', async () => 
   assert.strictEqual(result.exitCode, 1);
   assert.ok(result.tailOutput.includes('stdout-line'), 'should capture stdout');
   assert.ok(result.tailOutput.includes('stderr-line'), 'should capture stderr');
+});
+
+test('T2c: bundled rg remains available when daemon PATH omits interactive tools', async () => {
+  const originalPath = process.env.PATH;
+  process.env.PATH = '/usr/bin:/bin';
+
+  try {
+    const runner = new ManagedRunner();
+    const result = await runner.launch('printf "real-terminal-outcome\\n" | rg "^real-terminal-outcome$"');
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.strictEqual(result.timedOut, false);
+    assert.ok(
+      result.tailOutput.includes('real-terminal-outcome'),
+      `expected primary command evidence, got: ${result.tailOutput}`,
+    );
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+  }
+});
+
+test('T2d: unresolved bundled rg preserves an absent daemon PATH for shell fallback', async () => {
+  const childEnv = { ...process.env };
+  delete childEnv.PATH;
+  childEnv.npm_config_arch = 'review-unsupported';
+
+  const managedRunnerUrl = new URL('../dist/infrastructure/managed-runner.js', import.meta.url).href;
+  const script = `
+    const { ManagedRunner } = await import(${JSON.stringify(managedRunnerUrl)});
+    const result = await new ManagedRunner().launch('cat /dev/null && printf "fallback-shell-path-ok\\n"');
+    process.stdout.write('RESULT=' + JSON.stringify(result) + '\\n');
+  `;
+
+  const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', script], {
+    env: childEnv,
+  });
+  const resultLine = stdout.split('\n').find((line) => line.startsWith('RESULT='));
+  assert.ok(resultLine, `expected child result, got: ${stdout}`);
+
+  const result = JSON.parse(resultLine.slice('RESULT='.length));
+  assert.strictEqual(result.exitCode, 0);
+  assert.strictEqual(result.timedOut, false);
+  assert.ok(
+    result.tailOutput.includes('fallback-shell-path-ok'),
+    `expected fallback shell evidence, got: ${result.tailOutput}`,
+  );
 });
 
 // ─── T3: Timeout → process killed, timedOut=true ──────────────────────────

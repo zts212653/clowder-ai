@@ -123,5 +123,5 @@ pnpm gate                              # ✓ pre-merge-check.sh 全套
 - **附原始需求摘录（≤5 行）**，否则 reviewer 不审
 - **附 Architecture Ownership 三字段**，否则 reviewer 不审
 - 自检报告必须附上（从 quality-gate skill 输出）
-- 前端功能附截图证据
+- 前端功能由 author 自跑 preview，附 URL / 关键交互 / 结果；截图、录屏或浏览器测试输出是可选证据载体，不得要求 operator 代采
 - 前端 review 需要起 dev 时，**必须附 review 沙盒 Path + Start Command + 实际端口**

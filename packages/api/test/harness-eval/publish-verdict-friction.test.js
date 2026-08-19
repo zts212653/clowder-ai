@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
+import { buildFrictionRollupReport } from '../../dist/infrastructure/harness-eval/friction/friction-rollup-report.js';
 import { createFrictionGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/friction-generator-adapter.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket } from './publish-verdict-fixtures.js';
+import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
 
 /**
  * F245 Phase C PR1b — publish_verdict eval:friction end-to-end test (L4).
@@ -120,9 +121,26 @@ const SELECTOR = {
   windowEndMs: 1_780_600_000_000,
 };
 
+function buildMeasurementCapture(options = {}) {
+  const rollupInput = buildRollupInput(options);
+  const capturedAt = '2026-06-20T00:00:00.000Z';
+  return {
+    capturedAt,
+    expectedCancelIds: [],
+    channelCaptures: {
+      'paw-feel': { status: 'ok', emittedIds: rollupInput.signals.map((item) => item.id) },
+      cancel: { status: 'ok', emittedIds: [] },
+      'user-feedback': { status: 'ok', emittedIds: [] },
+      'eval-domain': { status: 'ok', emittedIds: [] },
+    },
+    rollupInput,
+    rollupReport: buildFrictionRollupReport(rollupInput, capturedAt),
+  };
+}
+
 describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
   it('happy path: handler dispatches to friction adapter, returns verdict path + commit/PR', async () => {
-    const provider = { resolve: async () => buildRollupInput({ clusters: 2 }) };
+    const provider = { resolve: async () => buildMeasurementCapture({ clusters: 2 }) };
     const generator = createFrictionGeneratorAdapter(provider);
 
     let isoStub;
@@ -132,6 +150,7 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
         rmSync(isoStub, { recursive: true, force: true });
         mkdirSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(join(isoStub, 'docs', 'harness-feedback', 'eval-domains', 'eval-friction.yaml'), FRICTION_YAML);
+        seedCanonicalMeasurementCensusState(isoStub);
         await opts.stage(isoStub);
         return { commitSha: 'friction-sha-1234', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9200' };
       },
@@ -157,6 +176,10 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
     assert.ok(existsSync(join(isoBundle, 'attribution.json')), 'attribution.json must be written');
     assert.ok(existsSync(join(isoBundle, 'provenance.json')), 'provenance.json must be written');
     assert.ok(existsSync(join(isoBundle, 'raw', 'rollup-report.json')), 'raw rollup report must be written');
+    assert.ok(
+      existsSync(join(isoBundle, 'raw', 'measurement-validity.json')),
+      'measurement validity must accompany every friction verdict',
+    );
 
     const snapshot = JSON.parse(readFileSync(join(isoBundle, 'snapshot.json'), 'utf8'));
     assert.equal(snapshot.featureId, 'F245');
@@ -164,7 +187,8 @@ describe('handlePublishVerdict end-to-end with eval:friction generator', () => {
 
     const provenance = JSON.parse(readFileSync(join(isoBundle, 'provenance.json'), 'utf8'));
     assert.equal(provenance.generator.name, 'eval-friction-live-verdict');
-    assert.match(provenance.rawInputs[0].sha256, /^[0-9a-f]{64}$/);
+    assert.equal(provenance.rawInputs.length, 2);
+    for (const rawInput of provenance.rawInputs) assert.match(rawInput.sha256, /^[0-9a-f]{64}$/);
 
     const isoVerdict = join(isoStub, 'docs', 'harness-feedback', 'verdicts', 'vhp-friction-e2e-test.md');
     const md = readFileSync(isoVerdict, 'utf8');

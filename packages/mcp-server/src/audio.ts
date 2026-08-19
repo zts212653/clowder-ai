@@ -15,6 +15,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
 import { registerAudioToolset } from './server-toolsets.js';
+import { shutdownActiveAudioCapture } from './tools/audio-tools.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 function createBaseServer(name: string): McpServer {
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
   console.error('[cat-cafe-audio] MCP Server running on stdio');
 
   const refreshLoop = startRefreshLoop();
-  installShutdownHandlers(refreshLoop);
+  installShutdownHandlers(refreshLoop, process, shutdownActiveAudioCapture);
 }
 
 const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);

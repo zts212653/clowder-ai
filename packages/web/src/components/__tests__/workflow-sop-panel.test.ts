@@ -183,7 +183,7 @@ describe('WorkflowSopPanel', () => {
     await renderPanel('b-1');
     const nextSkill = container.querySelector('[data-testid="sop-next-skill"]');
     expect(nextSkill?.textContent).toContain('定义建议');
-    expect(nextSkill?.textContent).toContain('writing-plans');
+    expect(nextSkill?.textContent).toContain('worktree');
   });
 
   it('shows stale-data state when SOP stage cannot resolve a skill', async () => {

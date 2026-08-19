@@ -2,8 +2,12 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CatId, StudyArtifact } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../infrastructure/logger.js';
+import { PerCatTerminalDispositionCollector } from '../../cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import type { QueueProcessor } from '../../cats/services/agents/invocation/QueueProcessor.js';
+import { requireInvocationRecordUpdate } from '../../cats/services/agents/invocation/require-invocation-record-update.js';
 import { ClaudeAgentService } from '../../cats/services/agents/providers/ClaudeAgentService.js';
 import type { AgentRouter } from '../../cats/services/agents/routing/AgentRouter.js';
+import { createA2ASlotTrackingBridge } from '../../cats/services/agents/routing/route-helpers.js';
 import type { InvocationTracker } from '../../cats/services/index.js';
 import type { AnyMessageStore } from '../../cats/services/stores/factories/MessageStoreFactory.js';
 import type { IInvocationRecordStore } from '../../cats/services/stores/ports/InvocationRecordStore.js';
@@ -31,6 +35,9 @@ export interface ThreadInvokeDeps {
   readonly router: AgentRouter;
   readonly invocationRecordStore: IInvocationRecordStore;
   readonly invocationTracker: InvocationTracker;
+  readonly queueProcessor?: Pick<QueueProcessor, 'markPromptMessagesSeen'> & {
+    enqueueRaw?: QueueProcessor['enqueueRaw'];
+  };
 }
 
 export interface PodcastRequest {
@@ -159,6 +166,7 @@ export async function generateScriptViaThread(
     targetCats,
     intent: 'execute',
     idempotencyKey: `podcast-${request.articleId}-${Date.now()}`,
+    actionLeaseCarrier: { kind: 'none' },
   });
 
   // ②b Backfill userMessageId so retry endpoint can find the trigger message
@@ -168,14 +176,25 @@ export async function generateScriptViaThread(
 
   // ③ Track invocation
   const primaryCat = targetCats[0] ?? 'opus';
-  const controller = deps.invocationTracker.start(threadId, primaryCat, request.requestedBy, targetCats);
+  const controller = deps.invocationTracker.start(
+    threadId,
+    primaryCat,
+    request.requestedBy,
+    targetCats,
+    createResult.invocationId,
+  );
 
   // ④ Route execution and collect text response
   const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
   let fullText = '';
+  const terminalDispositions = new PerCatTerminalDispositionCollector({
+    targetCatIds: targetCats,
+    isCanceled: (catId) => deps.invocationTracker.getSlotState?.(threadId, catId) === 'canceled',
+  });
 
   try {
     await deps.invocationRecordStore.update(createResult.invocationId, { status: 'running' });
+    const enqueueA2A = deps.queueProcessor?.enqueueRaw?.bind(deps.queueProcessor);
 
     for await (const msg of deps.router.routeExecution(
       request.requestedBy,
@@ -185,20 +204,39 @@ export async function generateScriptViaThread(
       targetCats,
       intent,
       {
+        ownerAuthProvenance: 'unknown',
+        humanDispositionInvocationOrigin: 'system',
         signal: controller.signal,
+        ...createA2ASlotTrackingBridge(deps.invocationTracker, controller, createResult.invocationId),
+        ...(enqueueA2A
+          ? { deferA2AEnqueue: (entry: Parameters<QueueProcessor['enqueueRaw']>[0]) => enqueueA2A(entry) }
+          : {}),
         parentInvocationId: createResult.invocationId,
+        onPromptMessagesExposed: (input) => deps.queueProcessor?.markPromptMessagesSeen(input) ?? Promise.resolve(),
         // F222 P1: System-internal podcast generation is not user-origin
         frustrationAutoIssueEligible: false,
         // #949 P2-1: No ball-pass expectation in system-internal podcast generation
         verdictPassWarningEnabled: false,
       },
     )) {
+      terminalDispositions.observe(msg);
+      if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+        deps.invocationTracker.completeSlot?.(threadId, msg.catId, controller);
+      }
       if (msg.type === 'text' && msg.content) {
         fullText += msg.content;
       }
     }
 
-    await deps.invocationRecordStore.update(createResult.invocationId, { status: 'succeeded' });
+    await requireInvocationRecordUpdate({
+      store: deps.invocationRecordStore,
+      invocationId: createResult.invocationId,
+      update: {
+        status: 'succeeded',
+        successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
+      },
+      writer: 'podcast generator',
+    });
   } catch (err) {
     await deps.invocationRecordStore.update(createResult.invocationId, {
       status: 'failed',

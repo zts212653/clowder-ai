@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "featureId": "F286",
+  "targetRepository": "zts212653/cat-cafe",
+  "targetRef": "origin/main",
+  "bootstrapFrom": "265f7b998f7b8cae81d26d88db58351cf02b030d",
+  "cvoAuthorizationRef": "message:0001785600399637-001062-9b03f289",
+  "adrAuthorizationRef": "adr:44",
+  "expectedAbsentBaselinePath": "packages/mcp-server/governance/mcp-surface-baseline.json",
+  "owner": "architecture-cell:mcp-surface-governance",
+  "attestationSourceDigest": "sha256:67ca45135accd5b030f197debbe62dc4a847c410258abce7f069e5de8a572a26"
+}

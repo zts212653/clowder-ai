@@ -36,6 +36,7 @@ export function buildCapabilityWakeupVerdictHandoff(input: {
   const packet = parseVerdictHandoffPacket({
     id: `vhp_eval_capability_wakeup_${slug(createdAt)}_${slug(input.capability)}`,
     domainId: domain.domainId,
+    findingKey: input.capability,
     createdAt,
     phenomenon: `${input.capability} miss rate ${(missRate * 100).toFixed(0)}% (${misses.length}/${denominator})`,
     harnessUnderEval: {

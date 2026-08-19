@@ -210,7 +210,7 @@ workflow:
 
 **四猫共识**：
 - 吸收 Resume Capsule、Baton+ack、attested vs verified、manifest 导航
-- 不吸收强制状态机——与 Cat Café 知识驱动协作哲学矛盾
+- 不吸收强制状态机——与 Clowder AI 知识驱动协作哲学矛盾
 - Phase 顺序：告示牌 → 接力 → 门禁 → 加速器
 
 **operator定调**：

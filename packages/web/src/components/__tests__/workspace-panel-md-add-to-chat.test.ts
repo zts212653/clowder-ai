@@ -64,6 +64,12 @@ function makeFile(overrides: Record<string, unknown> = {}) {
 
 let setPendingChatInsert: ReturnType<typeof vi.fn>;
 
+function setTextareaValue(textarea: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function setupMocks(fileOverrides: Record<string, unknown> = {}) {
   const file = makeFile(fileOverrides);
   setPendingChatInsert = vi.fn();
@@ -114,6 +120,14 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
+      workspaceMode: 'dev',
+      setWorkspaceMode: vi.fn(),
+      restoreWorkspaceMode: vi.fn(),
+      workspaceSurface: 'files',
+      setWorkspaceSurface: vi.fn(),
+      restoreWorkspaceSurface: vi.fn(),
+      workspacePreview: { port: 3000, path: '/' },
+      setWorkspacePreview: vi.fn(),
     };
     return sel(store);
   });
@@ -126,12 +140,36 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
  * Uses a mock Selection object since jsdom's Selection API is limited.
  */
 function simulateSelection(anchorNode: Node | null, focusNode: Node | null, text: string) {
+  const anchorElement = anchorNode instanceof Element ? anchorNode : anchorNode?.parentElement;
+  const selectionContainer = anchorElement?.parentElement;
+  if (selectionContainer) {
+    vi.spyOn(selectionContainer, 'getBoundingClientRect').mockReturnValue({
+      top: 0,
+      right: 600,
+      bottom: 500,
+      left: 0,
+      width: 600,
+      height: 500,
+    } as DOMRect);
+  }
+  const selectionRect = {
+    top: 100,
+    right: 240,
+    bottom: 120,
+    left: 120,
+    width: 120,
+    height: 20,
+  } as DOMRect;
   const mockSelection = {
     isCollapsed: !text,
     anchorNode,
     focusNode,
     toString: () => text,
     rangeCount: text ? 1 : 0,
+    getRangeAt: () => ({
+      getClientRects: () => [selectionRect],
+      getBoundingClientRect: () => selectionRect,
+    }),
   };
   vi.spyOn(window, 'getSelection').mockReturnValue(mockSelection as unknown as Selection);
   document.dispatchEvent(new Event('selectionchange'));
@@ -215,7 +253,7 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
     expect(btn).toBeNull();
   });
 
-  it('Add to Chat inserts correctly formatted reference', async () => {
+  it('Add to Chat pairs the rendered Markdown selection with a user comment', async () => {
     setupMocks();
     await renderPanel();
 
@@ -230,10 +268,75 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
     await act(async () => {
       btn.click();
     });
+    expect(setPendingChatInsert).not.toHaveBeenCalled();
+
+    const comment = container.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]');
+    expect(document.activeElement).toBe(comment);
+    await act(async () => {
+      if (!comment) throw new Error('annotation comment editor missing');
+      setTextareaValue(comment, 'why this Markdown matters');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')?.click();
+    });
 
     expect(setPendingChatInsert).toHaveBeenCalledWith({
       threadId: 'thread-1',
-      text: '`docs/test.md` (🌿 main)\n```markdown\nselected text\n```',
+      text: '',
+      contextAttachments: [
+        expect.objectContaining({
+          v: 1,
+          kind: 'quote',
+          text: 'selected text',
+          comment: 'why this Markdown matters',
+          source: {
+            kind: 'workspace_file',
+            path: 'docs/test.md',
+            worktreeId: 'main',
+            branch: 'main',
+            language: 'markdown',
+          },
+        }),
+      ],
+    });
+  });
+
+  it('keeps the rendered Markdown editor bound to the clicked selection after focus collapses it', async () => {
+    setupMocks();
+    await renderPanel();
+
+    const mdContent = container.querySelector('[data-testid="markdown-content"]');
+    await act(async () => {
+      simulateSelection(mdContent, mdContent, 'snapshot Markdown text');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[title="引用到聊天"]')?.click();
+    });
+    await act(async () => {
+      clearSelection();
+    });
+
+    const editor = container.querySelector<HTMLElement>('[data-testid="context-annotation-editor"]');
+    expect(editor?.textContent).toContain('snapshot Markdown text');
+    const comment = container.querySelector<HTMLTextAreaElement>('[data-testid="context-annotation-comment"]');
+    await act(async () => {
+      if (!comment) throw new Error('Markdown annotation editor missing after selection collapse');
+      setTextareaValue(comment, 'comment keeps the clicked Markdown target');
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="context-annotation-save"]')?.click();
+    });
+
+    expect(setPendingChatInsert).toHaveBeenCalledWith({
+      threadId: 'thread-1',
+      text: '',
+      contextAttachments: [
+        expect.objectContaining({
+          kind: 'quote',
+          text: 'snapshot Markdown text',
+          comment: 'comment keeps the clicked Markdown target',
+        }),
+      ],
     });
   });
 
@@ -275,6 +378,14 @@ describe('WorkspacePanel Markdown Add to Chat', () => {
         clearPendingPreviewAutoOpen: vi.fn(),
         restoreWorkspaceTabs: vi.fn(),
         _workspaceFileSetAt: { ts: 0, threadId: null },
+        workspaceMode: 'dev',
+        setWorkspaceMode: vi.fn(),
+        restoreWorkspaceMode: vi.fn(),
+        workspaceSurface: 'files',
+        setWorkspaceSurface: vi.fn(),
+        restoreWorkspaceSurface: vi.fn(),
+        workspacePreview: { port: 3000, path: '/' },
+        setWorkspacePreview: vi.fn(),
       };
       return sel(store);
     });

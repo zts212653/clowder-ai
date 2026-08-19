@@ -9,7 +9,11 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, '..');
-const repoRoot = process.argv[2] ? resolve(process.argv[2]) : defaultRepoRoot;
+const invocationArgs = process.argv.slice(2);
+const scopeArg = invocationArgs.find((arg) => arg.startsWith('--scope='));
+const checkScope = scopeArg?.slice('--scope='.length) ?? 'source-tree';
+const repoRootArg = invocationArgs.find((arg) => !arg.startsWith('--'));
+const repoRoot = repoRootArg ? resolve(repoRootArg) : defaultRepoRoot;
 
 const backlogPath = join(repoRoot, 'docs', 'BACKLOG.md');
 const roadmapPath = join(repoRoot, 'docs', 'ROADMAP.md');
@@ -367,6 +371,40 @@ function checkDocStatusDrift(repoRoot, generatedFeatures, errors) {
   return scanned;
 }
 
+function checkChangedAllAcceptanceCriteriaStatus(repoRoot, generatedFeatures, errors) {
+  const canonicalPaths = new Set(
+    generatedFeatures
+      .filter((feature) => typeof feature?.file === 'string')
+      .map((feature) => 'docs/features/' + feature.file),
+  );
+  const changedCanonicalDocs = getChangedFeatureDocs(repoRoot).filter((path) => canonicalPaths.has(path));
+
+  for (const relPath of changedCanonicalDocs) {
+    const filePath = join(repoRoot, relPath);
+    if (!existsSync(filePath)) continue;
+
+    const content = readFileSync(filePath, 'utf-8');
+    const status = parseStatusLine(content);
+    if (!status) continue;
+    if (isDoneStatus(status.rawStatus)) continue;
+
+    const criteria = [...content.matchAll(/^- \[([ xX])\]\s+AC-[A-Z0-9.]+:/gm)];
+    if (criteria.length === 0) continue;
+
+    if (criteria.every((criterion) => criterion[1].toLowerCase() === 'x')) {
+      const featureMatch = relPath.match(/F(\d+)/);
+      const featureId = featureMatch ? 'F' + featureMatch[1] : relPath;
+      errors.push(
+        '[all-ac-status-drift] ' +
+          featureId +
+          ': every declared AC is checked but Status="' +
+          status.rawStatus +
+          '". Mark the feature done/closed, or leave the genuinely suspended AC unchecked with its current blocker.',
+      );
+    }
+  }
+}
+
 function generateFreshIndex(outputPath) {
   if (!existsSync(generatorPath)) {
     throw new Error(`Missing generator script: ${generatorPath}`);
@@ -380,6 +418,9 @@ function generateFreshIndex(outputPath) {
 }
 
 function main() {
+  if (checkScope !== 'source-tree' && checkScope !== 'exported-tree') {
+    throw new Error(`Unsupported --scope=${checkScope}; expected source-tree or exported-tree`);
+  }
   const errors = [];
   const tempDir = mkdtempSync(join(tmpdir(), 'cc-feature-truth-'));
   const generatedIndexPath = join(tempDir, 'index.json');
@@ -420,7 +461,15 @@ function main() {
     }
 
     const featureDocsScanned = checkDocStatusDrift(repoRoot, generatedFeatures, errors);
-    const journeyDocsChecked = checkUserJourneyReadiness(repoRoot, generatedFeatures, errors);
+    // Branch/change discovery is meaningful only in the source repository. An
+    // exported tree may be non-git or overlaid into clowder-ai, where origin/main
+    // names a different history. Export scope intentionally runs only whole-tree
+    // structural truth checks instead of silently validating the wrong refs.
+    const journeyDocsChecked =
+      checkScope === 'source-tree' ? checkUserJourneyReadiness(repoRoot, generatedFeatures, errors) : 0;
+    if (checkScope === 'source-tree') {
+      checkChangedAllAcceptanceCriteriaStatus(repoRoot, generatedFeatures, errors);
+    }
 
     if (errors.length > 0) {
       console.error(`FAIL check-feature-truth: ${errors.length} issue(s) found`);
@@ -431,7 +480,7 @@ function main() {
     }
 
     console.log(
-      `PASS check-feature-truth: features=${generatedFeatures.length} ${truthDoc.label.toLowerCase()}_active=${backlogIds.size} feature_docs_scanned=${featureDocsScanned} journey_docs_checked=${journeyDocsChecked}`,
+      `PASS check-feature-truth: scope=${checkScope} features=${generatedFeatures.length} ${truthDoc.label.toLowerCase()}_active=${backlogIds.size} feature_docs_scanned=${featureDocsScanned} journey_docs_checked=${journeyDocsChecked}`,
     );
   } finally {
     rmSync(tempDir, { recursive: true, force: true });

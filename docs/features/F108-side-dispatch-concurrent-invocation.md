@@ -1,6 +1,7 @@
 ---
 feature_ids: [F108]
-related_features: [F086, F039, F048, F052]
+related_features: [F086, F039, F048, F052, F254, F117]
+related_decisions: [040]
 topics: [runtime, invocation, concurrency, orchestration]
 doc_kind: spec
 created: 2026-03-12
@@ -179,3 +180,20 @@ operator发消息有两种模式：
   operator → 直接发消息（不需要锁头）→ 按正常流程路由
   ✅ 和现在行为一样，向后兼容
 ```
+
+---
+
+## Follow-up: Independent Fan-Out Context Cutoff (ADR-040)
+
+> Added 2026-07-01 | Source: F254 D1.2 dogfood + 斑斑/Maine Coon consensus
+
+F254 实测发现多猫独立思考模式下，晚启动的猫会被早启动猫的输出锚定，破坏独立性。ADR-040 将 context 隔离策略归入 F108（并发执行层）。
+
+**F108 新增职责**（follow-up phase，未排期）：
+
+- [ ] 独立 fan-out context cutoff：多猫独立思考模式下，late-starting 猫不被 early-starting 猫的输出锚定
+- [ ] routing mode metadata（independent vs collaborative）驱动 context 隔离策略
+- [ ] context snapshot 时间戳：每个 target 收到的 context 截止到多目标消息发出时刻，不含其他 target 的后续输出
+
+**参考**：
+- ADR-040: `040-per-target-queued-message-state-model.md`

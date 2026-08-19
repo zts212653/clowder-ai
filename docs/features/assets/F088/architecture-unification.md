@@ -33,7 +33,7 @@ ConnectorRouter 收到飞书消息后在 ThreadStore 创建 thread，但用 `def
 
 ### 三层架构（设计共识）
 
-> 核心结论：**统一的是 Cat Café thread/message core，不是 GitHub transport**。GitHub 也是 connector。
+> 核心结论：**统一的是 Clowder AI thread/message core，不是 GitHub transport**。GitHub 也是 connector。
 
 1. **Principal Link**: `connector + externalSenderId → internalUserId`（解决"IM 用户是谁"）
 2. **Session Binding**: `connector + externalChatId → activeThreadId` + recent threads（解决"当前指向哪个 thread"）

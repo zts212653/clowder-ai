@@ -37,6 +37,8 @@ export interface CloudInvokeDispatchParams {
    * builder, not by the caller).
    */
   readonly intent: string;
+  /** Persisted source message ID used as the host append idempotency key. */
+  readonly idempotencyKey?: string;
 }
 
 /**
@@ -85,15 +87,31 @@ export interface IPinchTabBridgeAdapter {
  * Bridge dispatch outcome — observable for tests + logging.
  */
 export type BridgeDispatchOutcome =
-  | { readonly kind: 'sent'; readonly capturedUrl: string }
-  | { readonly kind: 'fallback'; readonly reason: BridgeFallbackReason }
-  | { readonly kind: 'error'; readonly message: string };
+  | {
+      readonly kind: 'sent';
+      readonly capturedUrl: string;
+      readonly transport?: 'host' | 'legacy-pinchtab';
+      readonly hostMessageId?: string;
+    }
+  | { readonly kind: 'fallback'; readonly reason: BridgeFallbackReason; readonly detail?: string }
+  | {
+      readonly kind: 'error';
+      readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'inject-failed'>;
+      readonly message: string;
+      readonly detail?: string;
+    };
 
-export type BridgeFallbackReason = 'adapter-not-ready' | 'no-adapter' | 'invalid-captured-url' | 'inject-failed';
+export type BridgeFallbackReason =
+  | 'adapter-not-ready'
+  | 'no-adapter'
+  | 'invalid-captured-url'
+  | 'inject-failed'
+  | 'host-append-failed'
+  | 'missing-idempotency-key';
 
 /**
- * The cloud invoke bridge — invoked fire-and-forget from `invokeSingleCat`
- * when KD-17 guard fires. Implementation is responsible for:
+ * The cloud invoke bridge — awaited by `invokeSingleCat` only until a bounded
+ * transport receipt/failure is known. Implementation is responsible for:
  *
  *  1. Building the 5-field delta payload (AC-B1c-12) with JSON.stringify
  *     safety (AC-B1c-10).
@@ -103,9 +121,11 @@ export type BridgeFallbackReason = 'adapter-not-ready' | 'no-adapter' | 'invalid
  *  5. Emitting a `system_info` fallback notification to the local thread
  *     when adapter is unreachable / errors (AC-B1c-4).
  *
- * The interface returns `void` because `invokeSingleCat` MUST NOT block on
- * bridge dispatch — fire-and-forget per AC-B1c-2.
+ * The interface returns the bounded transport outcome. The local invocation
+ * waits only for this receipt/failure boundary — never for the cloud cat's
+ * eventual MCP response — so it can publish one truthful status and settle
+ * the exact source carrier.
  */
 export interface ICloudInvokeBridge {
-  dispatch(params: CloudInvokeDispatchParams): Promise<void>;
+  dispatch(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome>;
 }

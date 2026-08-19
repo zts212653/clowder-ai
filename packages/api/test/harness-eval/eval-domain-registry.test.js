@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { describe, it } from 'node:test';
 import { parse } from 'yaml';
 import {
+  isEvalDomainRegistryYamlFile,
   parseEvalDomainRegistryEntry,
   parseEvalDomainRegistryFile,
 } from '../../dist/infrastructure/harness-eval/domain/eval-domain-registry.js';
@@ -10,6 +11,7 @@ import {
 const validEntry = {
   domainId: 'eval:a2a',
   displayName: 'A2A Harness Eval',
+  descriptionForHuman: '猫和猫协作顺不顺——传球掉地上没、@ 被忽略没、跨 thread 断没',
   systemThreadId: 'thread_eval_a2a',
   evalCat: {
     catId: 'codex',
@@ -109,6 +111,29 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.handoffTargetResolver.featureId, 'F245');
   });
 
+  it('loads the docs-backed eval:freshness registry fixture (F254 post-D1.2)', async () => {
+    const raw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-freshness.yaml', import.meta.url),
+      'utf8',
+    );
+    const entry = parseEvalDomainRegistryFile(parse(raw));
+
+    assert.equal(entry.domainId, 'eval:freshness');
+    assert.equal(entry.sourceAdapter, 'f254-freshness-replay');
+    assert.equal(entry.sourceRefsKind, 'freshness-closure-replay');
+    assert.equal(entry.frequency, 'weekly');
+    assert.equal(
+      entry.enabled,
+      true,
+      'freshness eval is scheduled now that the replay selector and generator are wired',
+    );
+    assert.equal(entry.metricGlossary?.['freshness.queued_seen']?.source, 'cat_cafe.freshness.queued_seen');
+    assert.equal(entry.metricGlossary?.['freshness.queued_handled']?.source, 'cat_cafe.freshness.queued_handled');
+    assert.equal(entry.metricGlossary?.['freshness.replay.failed_samples']?.source, 'derived:freshness-closure-replay');
+    assert.equal(entry.fixtures.length, 8);
+    assert.equal(entry.handoffTargetResolver.featureId, 'F254');
+  });
+
   it('rejects domain thread as the state source of truth', () => {
     assert.throws(
       () =>
@@ -144,6 +169,7 @@ describe('Eval Domain Registry v0', () => {
     const memoryEntry = {
       domainId: 'eval:memory',
       displayName: 'Memory Recall & Library Health Eval',
+      descriptionForHuman: '记忆系统好不好使——recall 找得到吗、library 健康吗',
       systemThreadId: 'thread_eval_memory',
       evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
       frequency: 'daily',
@@ -257,6 +283,7 @@ describe('Eval Domain Registry v0', () => {
     const sopEntry = {
       domainId: 'eval:sop',
       displayName: 'SOP Compliance Eval',
+      descriptionForHuman: '猫有没有按规矩办事——SOP 步骤跳了没、skill 该加载没加载',
       systemThreadId: 'thread_eval_sop',
       evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
       frequency: 'weekly',
@@ -331,10 +358,36 @@ describe('Eval Domain Registry v0', () => {
     assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, enabled: 1 }));
   });
 
+  // --- descriptionForHuman (F248 Phase A human readability) ---
+
+  it('accepts a valid descriptionForHuman string', () => {
+    const entry = parseEvalDomainRegistryEntry({
+      ...validEntry,
+      descriptionForHuman: '猫和猫协作顺不顺——传球掉地上没、@ 被忽略没、跨 thread 断没',
+    });
+    assert.equal(entry.descriptionForHuman, '猫和猫协作顺不顺——传球掉地上没、@ 被忽略没、跨 thread 断没');
+  });
+
+  it('accepts a missing descriptionForHuman (optional — display field, not functional constraint)', () => {
+    // F248 design: descriptionForHuman is OPTIONAL at the schema level so that
+    // description-irrelevant registry fixtures aren't coupled to it. Production
+    // completeness is enforced by the production-guard test below, not here.
+    const { descriptionForHuman: _omitted, ...missing } = validEntry;
+    const entry = parseEvalDomainRegistryEntry(missing);
+    assert.equal(entry.descriptionForHuman, undefined);
+  });
+
+  it('rejects an empty descriptionForHuman string when the field IS provided', () => {
+    // Optional, but not empty-when-present: `.min(1).optional()` means absent is
+    // fine, but a provided empty string is a mistake worth catching.
+    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, descriptionForHuman: '' }));
+  });
+
   it('validates a valid eval:capability-wakeup registry entry', () => {
     const capabilityEntry = {
       domainId: 'eval:capability-wakeup',
       displayName: 'Capability Wakeup Eval',
+      descriptionForHuman: '猫该用的能力用上没——该发图没发、该开浏览器没开',
       systemThreadId: 'thread_eval_capability_wakeup',
       evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
       frequency: 'weekly',
@@ -377,6 +430,13 @@ describe('Eval Domain Registry v0', () => {
         skill: 'source-audit',
         signal: 'high-risk external claim without provenance',
       },
+      {
+        id: 'external-pr-review-route-classifier',
+        featureId: 'F168',
+        path: 'docs/harness-feedback/fixtures/external-pr-review-route-classifier.md',
+        skill: 'cross-cat-handoff',
+        signal: 'exact-head-external-pr-review-or-tracking-entry',
+      },
     ]);
   });
 
@@ -395,12 +455,37 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.sourceAdapter, 'capability-tips-usage');
     assert.equal(entry.sourceRefsKind, 'capability-tips-usage-window');
     assert.equal(entry.frequency, 'weekly');
+    assert.deepEqual(entry.evalCat, {
+      catId: 'codex-sol',
+      handle: '@codex-sol',
+      model: 'gpt-5.6-sol',
+    });
     assert.equal(entry.handoffTargetResolver.featureId, 'F244');
-    assert.equal(entry.handoffTargetResolver.ownerCatId, 'opus');
+    assert.equal(entry.handoffTargetResolver.ownerCatId, 'codex-sol');
     assert.equal(entry.sla.acknowledgeHours, 72);
     assert.equal(entry.sla.reevalWithinHours, 336);
-    // Disabled until web→API telemetry pipeline is built
-    assert.equal(entry.enabled, false, 'eval:capability-tips must be disabled until trace producer is wired');
+    // Ownership can move independently; evidence gates still keep evaluation disabled.
+    assert.equal(entry.enabled, false, 'eval:capability-tips must remain disabled until certificate and replay pass');
     assert.deepEqual(entry.fixtures, []);
+  });
+
+  // --- F248 Phase A: production completeness guard (ADR-031 hard layer) ---
+  // descriptionForHuman is OPTIONAL in the schema (so unrelated test fixtures
+  // aren't coupled to it), but EVERY shipped production eval domain MUST carry a
+  // non-empty human description — that's the whole point of F248. This guard
+  // enforces production completeness without failing description-irrelevant unit
+  // fixtures.
+  it('every shipped eval-domains/*.yaml has a non-empty descriptionForHuman (F248 production guard)', async () => {
+    const dir = new URL('../../../../docs/harness-feedback/eval-domains/', import.meta.url);
+    const files = (await readdir(dir)).filter(isEvalDomainRegistryYamlFile);
+    assert.ok(files.length >= 7, `expected >= 7 production eval domains, found ${files.length}`);
+    for (const file of files) {
+      const raw = await readFile(new URL(file, dir), 'utf8');
+      const entry = parseEvalDomainRegistryFile(parse(raw));
+      assert.ok(
+        typeof entry.descriptionForHuman === 'string' && entry.descriptionForHuman.length > 0,
+        `${file} (${entry.domainId}) must have a non-empty descriptionForHuman for F248 Eval Hub readability`,
+      );
+    }
   });
 });

@@ -22,7 +22,7 @@ Thread `[thread-id]`: opus47 was dragged off-task by a startup hook's hygiene wa
 
 ### Problem
 
-Cat Cafe's 52 prompt injection segments are invisible infrastructure — scattered across 7 source files (`SystemPromptBuilder.ts`, `route-serial.ts`, `route-helpers.ts`, shell hooks, etc.) with no unified inventory or Console visibility. Operators can't:
+Clowder AI's 52 prompt injection segments are invisible infrastructure — scattered across 7 source files (`SystemPromptBuilder.ts`, `route-serial.ts`, `route-helpers.ts`, shell hooks, etc.) with no unified inventory or Console visibility. Operators can't:
 1. See what's being injected into agent prompts
 2. Audit why a cat behaved a certain way
 3. Customize the segments designed for customization
@@ -143,9 +143,9 @@ Phase 1 delivered visibility — operators can see what's injected. Phase 2 make
 - **M1-M2** (transport-layer): deliberately outside content pipeline to preserve the produced-vs-delivered boundary
 
 **Out of Phase 2/3 scope:**
-- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline — tracked separately as **F237-H** (to be filed as issue; dependency: Phase 2 delivers trace infrastructure that H1-H3 observability can reuse)
+- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Clowder AI's content pipeline — tracked separately as **F237-H** (to be filed as issue; dependency: Phase 2 delivers trace infrastructure that H1-H3 observability can reuse)
 
-> **Scope note:** The original motivating incident (opus47 dragged off-task by startup hook) may involve H1 (SessionStart hook). Phase 2 addresses Cat Cafe content pipeline visibility (49/52 segments). If the incident trigger was an H1-H3 hook, full closure requires F237-H delivery. Phase 2's trace schema and persistence layer are designed to be reusable by F237-H
+> **Scope note:** The original motivating incident (opus47 dragged off-task by startup hook) may involve H1 (SessionStart hook). Phase 2 addresses Clowder AI content pipeline visibility (49/52 segments). If the incident trigger was an H1-H3 hook, full closure requires F237-H delivery. Phase 2's trace schema and persistence layer are designed to be reusable by F237-H
 
 ### Why Hook Pipeline
 
@@ -173,7 +173,7 @@ This pattern has served well for 52 segments, but makes several operations hard:
 
 **Why this makes Build-to-Delete easier, not harder**: The maintainer's concern was that metadata turns deletion into deprecation. The opposite is true — currently, deleting a segment requires finding all code paths (condition, variable setup, render call, push), verifying no side effects, removing the template, updating the manifest display entry, and testing. With hooks: set `enabled: false`, the segment stops firing immediately. The code and template can be deleted at leisure in a cleanup pass, or left dormant with zero runtime cost. Build-to-Delete becomes a config toggle followed by optional cleanup.
 
-**Why this is the foundation for "injections grow from trajectories"**: The maintainer wants injections to grow organically from per-user taste, cross-thread repetition signal, and CVO correction. For that, the system needs to:
+**Why this is the foundation for "injections grow from trajectories"**: The maintainer wants injections to grow organically from per-user taste, cross-thread repetition signal, and operator correction. For that, the system needs to:
 1. **Trace** which segments fired per turn and what content they produced
 2. **Correlate** segment combinations with turn outcomes
 3. **Iterate** — try new versions, compare, promote or demote
@@ -292,7 +292,7 @@ safetyTier: limited-edit                   # readonly | limited-edit | editable 
 transparencyTier: visible-by-default
 governanceTier: human-gated                # immutable | human-gated | auto-evolve — gates version override
 
-# CVO-facing
+# operator-facing
 userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 ```
 
@@ -696,7 +696,7 @@ The resolver receives the active version and renders the corresponding template.
 
 ### What Phase 2 Does NOT Include
 
-- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Cat Cafe's content pipeline. Tracked as **F237-H** (separate issue to be filed). Dependency: F237-H can reuse Phase 2's trace schema and persistence layer
+- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Clowder AI's content pipeline. Tracked as **F237-H** (separate issue to be filed). Dependency: F237-H can reuse Phase 2's trace schema and persistence layer
 - **Eval feedback loop** — automated analysis of trace data to score/iterate segments. This is Phase 3, consuming Phase 2's trace + override infrastructure
 - **Context mutation** — hooks producing side effects beyond PromptPatch (e.g., modifying session state). Future capability tier
 - **Custom user hooks** — operators can't register their own hooks yet. This requires security model design beyond Phase 2's scope
@@ -794,18 +794,3 @@ Separately accepted upstream. Not blocked by Phase 2 — can land independently 
 - **Related**: F153 (tracing — future observability integration)
 - **Related**: F180 (hook health/sync)
 - **Related**: F190/F199/F206 (Console settings infrastructure)
-
-## Timeline
-
-| Date | Event |
-|------|-------|
-| 2026-06-02 | Kickoff: motivating incident analysis + CVO direction |
-| 2026-06-02 | Issue #839 created, maintainer triage |
-| 2026-06-03 | CVO approved Phase 1, worktree created |
-| 2026-06-04-10 | Implementation: 6 rounds of codex local review |
-| 2026-06-11 | Gate passed (build + tsc + test + lint), PR #859 opened |
-| 2026-06-11-12 | Cloud review: 34 findings processed (1 fixed, 33 pushback) |
-| 2026-06-15 | Scope discussion with maintainer on #839 |
-| 2026-06-16 | PR #859 merged, Phase 1 complete |
-| 2026-06-24 | Phase 2 design: hook pipeline + injection trace spec |
-| 2026-06-25 | Phase 2 design review passed (codex R1: 3 P1 + 1 P2 fixed) |

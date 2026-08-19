@@ -82,6 +82,7 @@ describe('F194 getThreadLiveInvocations — decision table', () => {
     assert.equal(result.zombies.length, 0);
     assert.deepEqual(result.active[0], {
       catId: 'opus',
+      executionId: 'inv-tracker',
       invocationId: 'inv-tracker',
       startedAt: slot.startedAt,
       source: 'record+tracker',
@@ -323,6 +324,7 @@ describe('F194 getThreadLiveInvocations — R1 P1-1: record-missing recovery via
     assert.equal(result.zombies.length, 0);
     assert.deepEqual(result.active[0], {
       catId: 'opus',
+      executionId: 'inv-recovery',
       invocationId: 'inv-recovery',
       startedAt: slot.startedAt,
       source: 'tracker+draft',

@@ -13,7 +13,7 @@ status: done
 
 ## Why
 
-Terminal 有历史补全能力（输入前缀 + Tab -> 补全历史输入），Cat Cafe Hub 没有。operator经常重复输入类似内容（如"笨蛋猫猫"），需要 terminal 风格的输入效率提升。
+Terminal 有历史补全能力（输入前缀 + Tab -> 补全历史输入），Clowder AI Hub 没有。operator经常重复输入类似内容（如"笨蛋猫猫"），需要 terminal 风格的输入效率提升。
 
 ## What
 

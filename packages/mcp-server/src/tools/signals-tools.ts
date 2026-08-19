@@ -1,6 +1,13 @@
 import { z } from 'zod';
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('signals-tools.ts', undefined, {
+  resourceFamily: 'signal-article',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 const SIGNAL_USER = process.env['CAT_CAFE_SIGNAL_USER']?.trim() || 'codex';
@@ -229,7 +236,7 @@ export async function handleSignalSummarize(input: {
 }
 
 export const signalsTools = [
-  {
+  defineTool({
     name: 'signal_list_inbox',
     description:
       'List recent signal articles from inbox. Use when co-creator asks to check signals, or when you need to browse unread articles. ' +
@@ -238,8 +245,15 @@ export const signalsTools = [
       'Returns article IDs needed for other signal tools (get_article, mark_read, start_study).',
     inputSchema: signalListInboxInputSchema,
     handler: handleSignalListInbox,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalListInbox',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_get_article',
     description:
       'Get full signal article detail by id or URL. Returns title, content, source, tier, timestamps, and metadata. ' +
@@ -247,8 +261,15 @@ export const signalsTools = [
       'PARAM GUIDE: Use id (from list_inbox/search results) OR url (if co-creator shared a link) — not both.',
     inputSchema: signalGetArticleInputSchema,
     handler: handleSignalGetArticle,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalGetArticle',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_search',
     description:
       'Search signal articles by keyword with optional filters (status, source, tier, date range). ' +
@@ -256,16 +277,30 @@ export const signalsTools = [
       'TIP: Combine with dateFrom/dateTo for time-bounded searches (ISO date format).',
     inputSchema: signalSearchInputSchema,
     handler: handleSignalSearch,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalSearch',
+      action: 'read',
+      risk: { level: 'read', openWorld: true },
+      runtimeProfiles: ['full', 'readonly'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_mark_read',
     description:
       'Mark a signal article as read. Use after you or co-creator have reviewed an article. ' +
       'This removes it from the inbox view.',
     inputSchema: signalMarkReadInputSchema,
     handler: handleSignalMarkRead,
-  },
-  {
+    governance: {
+      implementationExport: 'handleSignalMarkRead',
+      action: 'command',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
+  defineTool({
     name: 'signal_summarize',
     description:
       'Generate a concise summary for a signal article and persist it to article frontmatter. ' +
@@ -273,5 +308,12 @@ export const signalsTools = [
       'Default maxLength is 280 chars (tweet-length). Increase for more detailed summaries (max 1200).',
     inputSchema: signalSummarizeInputSchema,
     handler: handleSignalSummarize,
-  },
+    governance: {
+      implementationExport: 'handleSignalSummarize',
+      action: 'derive',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+    },
+  }),
 ] as const;

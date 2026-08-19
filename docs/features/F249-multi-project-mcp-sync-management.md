@@ -4,12 +4,12 @@ related_features: [F041, F043, F145, F178, F213, F228, F240]
 topics: [mcp, capability-dashboard, multi-project, sync, drift-detection, single-source, plugin]
 doc_kind: spec
 created: 2026-06-25
-tips_exempt: design-phase spec - capability tips added when feature reaches implementation
+tips_exempt: close-audit pending - this sync only records already-merged implementation truth
 ---
 
 # F249: Multi-Project MCP Sync Management — 多项目 MCP 配置同步管理
 
-> **Status**: in-progress | **Owner**: community @mindfn + cat-cafe maintainers | **Priority**: P1 | **Created**: 2026-06-25
+> **Status**: in-progress (implementation-backed ACs synced 2026-07-08; close-audit pending) | **Owner**: community @mindfn + cat-cafe maintainers | **Priority**: P1 | **Created**: 2026-06-25
 
 ## Provenance
 
@@ -476,13 +476,13 @@ MCP 默认对所有猫可见。只记录"谁不能用"：
 
 ```json
 {
-  "id": "github-mcp",
+  "id": "example-mcp",
   "transport": "stdio",
   "command": "npx",
-  "args": ["-y", "@mcp/github"],
+  "args": ["-y", "@example/mcp-server"],
   "env": [
-    { "key": "GITHUB_TOKEN", "value": "${MY_GITHUB_TOKEN}", "sensitive": true },
-    { "key": "REPO", "value": "clowder-ai/cat-cafe", "sensitive": false }
+    { "key": "EXAMPLE_API_TOKEN", "value": "${MY_EXAMPLE_API_TOKEN}", "sensitive": true },
+    { "key": "SCOPE", "value": "demo", "sensitive": false }
   ],
   "syncAll": true,
   "projectPath": null
@@ -862,31 +862,45 @@ MCP 侧 banner / 弹窗 / 同步流程与 skill 侧**除展示信息外完全一
 
 ## Acceptance Criteria
 
+### Implementation Truth Sync（2026-07-08）
+
+本节记录 #713 intake 与后续 F249 相关吸收 PR 合入后的当前实现状态；它是 feature-truth 同步，不是 close report。正式 close 仍需 CloseGateReport、用户可见性验收与跨猫愿景守护。
+
+| 面向 | 当前证据 |
+|---|---|
+| #713 intake 主体 | cat-cafe#2658 merged，单源 MCP / invoke-time provider 注入 / F249 多项目同步主体已入 main |
+| Owner gate hardening | cat-cafe#2661 merged，`POST /api/capabilities/mcp/discover` 使用 owner write guard |
+| 后续 F249 吸收 | cat-cafe#2722 merged（capabilities lifecycle fixes）；cat-cafe#2735 merged（Codex MCP hotfix restore） |
+| 后端同步 / 漂移 | `packages/api/src/mcp/mcp-sync-engine.ts`、`mcp-sync-all.ts`、`mcp-drift-detector.ts`、`mcp-drift-resolver.ts`；`packages/api/test/mcp-drift-sync.test.js` 覆盖 global-new / project-orphan / config-mismatch / sync / override skip |
+| API | `packages/api/src/routes/mcp-drift.ts`、`routes/drift.ts`、`routes/capabilities.ts`、`routes/capabilities-mcp-write.ts`；route tests 覆盖 global resolve、`scope=project` blockedCats、lazy tools、project override redaction |
+| 前端 | `McpManageContent` 复用 `ProjectSelector`、`AllProjectsSyncBanner`、`DriftBanner(type="mcp")`；`McpConfigModal` 支持敏感值 eye toggle、redacted no-op save、tools lazy probe、restore global |
+| close-audit 留待核验 | 新增同名校验拦截当前未见明确实现/测试；plugin MCP 统一级联有通用 sync 支撑与只读/禁止 override 证据，但缺 dedicated plugin cascade proof |
+
 ### Phase A（数据模型 + 同步引擎）
 - [x] `globalEnabled` 在所有 capability entries 上统一使用，旧 `enabled` init 时一次性迁移
 - [x] `blockedCats` 按项目按猫控制 MCP
 - [x] `resolveServersForCat(config, catId)` 两参数形式，单一项目配置，无 global+project 合并
-- [ ] `syncMcpProject` / `syncMcpAll` 工作正常
-- [ ] 有 override 的项目被级联跳过
+- [x] `syncMcpProject` / `syncMcpAll` 工作正常
+- [x] 有 override 的项目被级联跳过
 
 ### Phase B（漂移检测 + API）
-- [ ] 3 种 issue type 正确检测
-- [ ] `drift-check` / `drift-resolve` / `sync-all` 接口工作
-- [ ] `PATCH scope=project` 正确写 blockedCats
-- [ ] `GET /api/mcp/:id/tools` 延迟加载工作
+- [x] 3 种 issue type 正确检测
+- [x] `drift-check` / `drift-resolve` / `sync-all` 接口工作
+- [x] `PATCH scope=project` 正确写 blockedCats
+- [x] `GET /api/mcp/:id/tools` 延迟加载工作
 
 ### Phase C（前端 UI）
-- [ ] 双 tab + ProjectSelector 切换正常
-- [ ] McpDriftBanner / AllProjectsSyncBanner 显示正确
-- [ ] env sensitive 掩码 toggle 正常
-- [ ] 项目覆盖编辑 + 恢复全局配置正常
+- [x] 双 tab + ProjectSelector 切换正常
+- [x] McpDriftBanner（实现为 `DriftBanner(type="mcp")`）/ AllProjectsSyncBanner 显示正确
+- [x] env sensitive 掩码 toggle 正常
+- [x] 项目覆盖编辑 + 恢复全局配置正常
 - [ ] 新增同名校验拦截
-- [ ] MCP 列表加载不触发工具探测
-- [ ] 弹窗内工具延迟加载
+- [x] MCP 列表加载不触发工具探测
+- [x] 弹窗内工具延迟加载
 
 ### Phase D（插件 + 固化）
 - [ ] 插件 MCP 走统一接口，级联正常
-- [ ] 插件 MCP 禁止项目 override
+- [x] 插件 MCP 禁止项目 override
 
 ## Dependencies
 

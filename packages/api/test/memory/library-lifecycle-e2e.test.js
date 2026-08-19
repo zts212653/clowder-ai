@@ -24,6 +24,7 @@ describe('AC-I9: collection lifecycle E2E — register → catalog → archive �
       stores: new Map(),
       dataDir: vaultBase,
       managedVaultBase: vaultBase,
+      privateOwnerUserId: 'owner-1',
     });
     await app.ready();
 
@@ -44,6 +45,7 @@ describe('AC-I9: collection lifecycle E2E — register → catalog → archive �
     assert.equal(created.manifest.id, 'domain:finance');
     assert.equal(created.manifest.status, 'registered');
     assert.equal(created.manifest.sensitivity, 'private');
+    assert.equal(created.manifest.ownerUserId, 'owner-1');
     assert.ok(
       created.manifest.root.includes('domain-finance'),
       `root should contain safe id: ${created.manifest.root}`,
@@ -60,7 +62,8 @@ describe('AC-I9: collection lifecycle E2E — register → catalog → archive �
     assert.equal(financeEntry.manifest.sensitivity, 'private');
 
     // Step 3: getRoutable includes the non-archived collection
-    const routable = catalog.getRoutable('collection', ['domain:finance']);
+    assert.equal(catalog.getRoutable('collection', ['domain:finance']).length, 0);
+    const routable = catalog.getRoutable('collection', ['domain:finance'], ['domain:finance']);
     assert.equal(routable.length, 1, 'registered collection should be routable');
     assert.equal(routable[0].id, 'domain:finance');
 
@@ -74,7 +77,7 @@ describe('AC-I9: collection lifecycle E2E — register → catalog → archive �
     assert.equal(archived.manifest.status, 'archived');
 
     // Step 5: Archived collection excluded from routable
-    const routableAfterArchive = catalog.getRoutable('collection', ['domain:finance']);
+    const routableAfterArchive = catalog.getRoutable('collection', ['domain:finance'], ['domain:finance']);
     assert.equal(routableAfterArchive.length, 0, 'archived collection should not be routable');
 
     // Step 6: Catalog still lists it (with archived status)
@@ -94,7 +97,7 @@ describe('AC-I9: collection lifecycle E2E — register → catalog → archive �
     assert.equal(unarchived.manifest.status, 'registered');
 
     // Step 8: Routable again after unarchive
-    const routableAfterUnarchive = catalog.getRoutable('collection', ['domain:finance']);
+    const routableAfterUnarchive = catalog.getRoutable('collection', ['domain:finance'], ['domain:finance']);
     assert.equal(routableAfterUnarchive.length, 1, 'unarchived collection should be routable again');
   });
 

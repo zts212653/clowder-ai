@@ -289,12 +289,7 @@ export async function poll(
   if (!resultUrl && resp.fallbackResultUrl) {
     const fallback = extractString(json, resp.fallbackResultUrl);
     if (fallback) {
-      try {
-        const parsed = JSON.parse(fallback);
-        resultUrl = typeof parsed === 'string' ? parsed : (parsed?.url ?? parsed?.video_url);
-      } catch {
-        resultUrl = fallback;
-      }
+      resultUrl = parseFallbackResultUrl(fallback);
     }
   }
 
@@ -307,6 +302,23 @@ export async function poll(
     coverUrl: coverUrl ? scrubSecrets(coverUrl, secrets) : undefined,
     error: error ? scrubSecrets(error, secrets) : undefined,
   };
+}
+
+function parseFallbackResultUrl(fallback: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fallback);
+  } catch {
+    return fallback;
+  }
+  if (typeof parsed === 'string') return parsed;
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.url === 'string') return record.url;
+  if (typeof record.video_url === 'string') return record.video_url;
+  const imageUrls = record.image_urls;
+  return Array.isArray(imageUrls) && typeof imageUrls[0] === 'string' ? imageUrls[0] : undefined;
 }
 
 export async function execute(

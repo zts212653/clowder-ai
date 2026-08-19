@@ -1,6 +1,32 @@
 // F200: Memory Recall Eval — types + experiment flags
 
-export type RecallToolName = 'search_evidence' | 'graph_resolve' | 'list_recent';
+import type { ExpansionFunnelMeta, RecallResultStatus } from '@cat-cafe/shared';
+
+export type RecallToolName = 'search_evidence' | 'graph_resolve' | 'list_recent' | 'session_bootstrap' | 'cold_context';
+
+export type RecallSource = 'pull' | 'push';
+export type PushRecallSurface = 'session_bootstrap' | 'cold_context';
+
+/**
+ * F296 AC-A1: how a push-recall surface actually presented its candidates.
+ * `pointer` = only a content-free retrieval entry reached the model;
+ * `body` = candidate titles/snippets were injected as prompt content.
+ */
+export type PushRecallPresentationKind = 'pointer' | 'body';
+
+export interface PushRecallPresentation {
+  surface: PushRecallSurface;
+  presentationKind: PushRecallPresentationKind;
+  query: string;
+  scope: string;
+  timestamp: number;
+  candidates: Array<{
+    anchor: string;
+    rank: number;
+    sourcePath?: string;
+    docKind?: string;
+  }>;
+}
 
 export type TargetRef =
   | { kind: 'doc'; sourcePath: string; anchor?: string }
@@ -46,12 +72,22 @@ export interface RecallEvent {
   catId: string;
   invocationId: string;
   toolName: RecallToolName;
+  source: RecallSource;
+  pushSurface?: PushRecallSurface;
+  /** F296 AC-A1: only a candidate body counts as presented; a content-free
+   * pointer is traced with presented=false plus presentationKind='pointer'. */
+  presentationKind?: PushRecallPresentationKind;
+  presented: boolean;
+  inspected: boolean;
+  outcome: 'used' | 'ignored';
   query: string;
   mode?: string;
   scope?: string;
   candidates: RecallCandidate[];
   /** Reported search hit count from tool_result text, distinct from parsed candidates. */
   resultCount?: number;
+  /** Structured producer/search outcome; distinguishes true zero from telemetry unknown. */
+  resultStatus?: RecallResultStatus;
   consumed: ConsumedEntry[];
   reformulated: boolean;
   fellBackToGrep: boolean;
@@ -66,8 +102,13 @@ export interface RecallEvent {
   /** F200 HW-4 根因③: 'clean' = unique single-search attribution;
    * 'ambiguous' = overlapping bundle candidate pool (not per-search truth). */
   attributionClarity?: 'clean' | 'ambiguous';
+  /** F263 P1: stable source event identity for retry idempotency.
+   * Preferred: _toolUseId from provider. Fallback: invocationId:turnIndex. */
+  sourceEventId?: string;
   /** F102 bugfix: thread association for RecallFeed history persistence. */
   threadId?: string;
+  /** F256 Wave 1b: query-time health stages plus correlated downstream outcomes. */
+  expansionFunnel?: ExpansionFunnelMeta & { followed: number; used: number };
 }
 
 export interface TaskTrajectory {

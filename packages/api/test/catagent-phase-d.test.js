@@ -378,6 +378,11 @@ describe('D2: agentic loop', () => {
     const done = msgs.find((m) => m.type === 'done');
     assert.ok(done.metadata.usage.inputTokens >= 70, `accumulated input tokens: ${done.metadata.usage.inputTokens}`);
     assert.ok(done.metadata.usage.outputTokens >= 25, `accumulated output tokens: ${done.metadata.usage.outputTokens}`);
+    assert.equal(
+      done.metadata.usage.lastTurnInputTokens,
+      50,
+      'authoritative context usage must come from the final API request, not the 70-token aggregate',
+    );
 
     // tool_result should have truncated content
     const toolResult = msgs.find((m) => m.type === 'tool_result');
@@ -410,6 +415,32 @@ describe('D2: agentic loop', () => {
     assert.ok(toolUse.metadata, 'tool_use has metadata');
     assert.equal(toolUse.metadata.provider, 'catagent');
     assert.ok(toolUse.metadata.sessionId, 'tool_use has sessionId');
+  });
+
+  test('final API turn without input usage clears the prior authoritative context measurement', async () => {
+    globalThis.fetch = mockAnthropicApi([
+      {
+        id: 'msg1',
+        model: 'claude-sonnet-4-5-20250929',
+        stop_reason: 'tool_use',
+        content: [{ type: 'tool_use', id: 'tu1', name: 'read_file', input: { path: 'hello.txt' } }],
+        usage: { input_tokens: 20, output_tokens: 5 },
+      },
+      {
+        id: 'msg2',
+        model: 'claude-sonnet-4-5-20250929',
+        stop_reason: 'end_turn',
+        content: [{ type: 'text', text: 'done' }],
+        usage: { output_tokens: 5 },
+      },
+    ]);
+
+    const svc = new CatAgentService({ catId: 'opus', projectRoot: tmpDir, catConfig: { accountRef: 'test-ant' } });
+    const msgs = await collect(svc.invoke('read hello.txt', { workingDirectory: tmpDir }));
+    const done = msgs.find((m) => m.type === 'done');
+
+    assert.equal(done.metadata.usage.inputTokens, 20, 'aggregate usage remains available');
+    assert.equal(done.metadata.usage.lastTurnInputTokens, undefined, 'prior turn must not leak into final context');
   });
 
   test('unknown tool name returns error in tool_result', async () => {

@@ -21,6 +21,7 @@ const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
+const mockPatchMessage = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -36,6 +37,7 @@ const storeState = {
     content: string;
     isStreaming?: boolean;
     timestamp: number;
+    extra?: Record<string, unknown>;
   }>,
   addMessage: mockAddMessage,
   appendToMessage: mockAppendToMessage,
@@ -53,6 +55,7 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
+  patchMessage: mockPatchMessage,
 
   addMessageToThread: mockAddMessageToThread,
   // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
@@ -106,6 +109,7 @@ describe('useAgentMessages system_info web_search', () => {
       storeState.messages = [...storeState.messages, message];
     });
     mockAppendToolEvent.mockClear();
+    mockPatchMessage.mockClear();
     mockClearAllActiveInvocations.mockClear();
   });
 
@@ -158,5 +162,44 @@ describe('useAgentMessages system_info web_search', () => {
       (call) => call[0]?.type === 'system' && String(call[0]?.content).includes('"web_search"'),
     );
     expect(systemJsonCalls).toHaveLength(0);
+  });
+
+  it('does not patch a newer same-cat bubble when an older supplement original is not loaded', () => {
+    storeState.messages = [
+      {
+        id: 'msg-newer',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'newer unrelated answer',
+        timestamp: 300,
+      },
+    ];
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex',
+        content: JSON.stringify({
+          type: 'freshness_supplement',
+          supplementId: 'f254-supplement:msg-older:1',
+          lineageId: 'msg-older',
+          originalMessageId: 'msg-older',
+          threadId: 'thread-1',
+          catId: 'codex',
+          seq: 1,
+          status: 'running',
+          requiredCount: 1,
+          updatedAt: 400,
+        }),
+      });
+    });
+
+    expect(mockPatchMessage).not.toHaveBeenCalled();
+    expect(mockAddMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'system', content: expect.stringContaining('freshness_supplement') }),
+    );
   });
 });

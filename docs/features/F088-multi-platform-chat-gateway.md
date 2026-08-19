@@ -29,13 +29,13 @@ created: 2026-03-09
 
 ## Why
 
-Cat Café 目前只能通过 Web UI 和猫猫对话。operator和未来用户希望在**已有的工作聊天工具**中直接与猫猫交互，不用切换窗口。
+Clowder AI 目前只能通过 Web UI 和猫猫对话。operator和未来用户希望在**已有的工作聊天工具**中直接与猫猫交互，不用切换窗口。
 
 MVP 选型：**飞书**（国内企业）+ **Telegram**（海外开发者）。选型细节见 [平台选型参考](assets/F088/platform-selection.md)。
 
 ## What
 
-在 Cat Café 现有 Connector 体系上增加双向聊天能力：
+在 Clowder AI 现有 Connector 体系上增加双向聊天能力：
 
 ```
 ┌─ 平台无关公共层 ─────────────────────────────────────┐
@@ -267,7 +267,7 @@ MVP 选型：**飞书**（国内企业）+ **Telegram**（海外开发者）。�
 - **ISSUE-14**: 飞书 post 内嵌图片下载 400 — PR #637 的 `case 'post':` handler 正确解析了 `image_key`，但 `feishuDownloadFn` 统一用 `/im/v1/messages/{msgId}/resources/{key}` 端点下载，该端点对 post 内嵌图片返回 400。post 内嵌图片需用 `/im/v1/images/{key}` 端点。**✅ PR #640 修复**：新增 `source: 'post-embedded'` 标记全链路穿透（FeishuAdapter → ConnectorRouter → ConnectorMediaService → feishuDownloadFn），按 source 分流 API 端点。
 - **ISSUE-16**: 外部 IM 创建线程后 spawn 的猫 cwd 错误 — **✅ PR #849 修复**：ConnectorRouter 创建 thread 时传 `findMonorepoRoot()` 作为 `projectPath`（会话 thread + Hub thread），并增加 lazy heal 回填存量 thread。新增 `updateProjectPath()` 到 ThreadStore 接口。3 个回归测试。
 - **ISSUE-17**: Telegram streaming final duplicate + reliability split — **✅ Phase K1/K2/K3 已完成 (PR #1572/#1574/#1575) + race fix (PR #1594)**。社区 issue [clowder-ai#524](https://github.com/zts212653/clowder-ai/issues/524) 与 draft PR [#641](https://github.com/zts212653/clowder-ai/pull/641) / [#642](https://github.com/zts212653/clowder-ai/pull/642) 暴露 Telegram streaming final delivery ownership 不清。K1 修 duplicate；K2 实现 inline final 原地编辑；K3 覆盖 HTML parse fallback、editMessage failure fallback、长文本分段、FIFO 队列健壮性。PR #1594 修 StreamingOutboundHook 竞态：early chunks 缓存至 placeholder 建好后 replay、end-before-start 场景 tombstone 机制防止迟到 placeholder 触发第二条消息。
-- **ISSUE-15**: Cat Café web 发消息 → 猫回复不推送到飞书 — `messages.ts` 的 immediate 路径（`router.routeExecution()`）消费完 agent 事件流后，只做 WebSocket 广播，**没有调用 `OutboundDeliveryHook.deliver()`**。**✅ PR #671 修复**：在 `messages.ts` 注入 `outboundHook` + `streamingHook`，routeExecution 消费循环中收集 turn text + richBlocks，成功时 fire-and-forget 调用 `deliverOutboundFromWeb()`；失败/取消时 `cleanupStreamingOnFailure()` 清理占位卡片。统一 `STREAM_START_TIMEOUT_MS`（5s）常量。18 个回归测试覆盖投递、流式、清理、超时对齐。
+- **ISSUE-15**: Clowder AI web 发消息 → 猫回复不推送到飞书 — `messages.ts` 的 immediate 路径（`router.routeExecution()`）消费完 agent 事件流后，只做 WebSocket 广播，**没有调用 `OutboundDeliveryHook.deliver()`**。**✅ PR #671 修复**：在 `messages.ts` 注入 `outboundHook` + `streamingHook`，routeExecution 消费循环中收集 turn text + richBlocks，成功时 fire-and-forget 调用 `deliverOutboundFromWeb()`；失败/取消时 `cleanupStreamingOnFailure()` 清理占位卡片。统一 `STREAM_START_TIMEOUT_MS`（5s）常量。18 个回归测试覆盖投递、流式、清理、超时对齐。
 
 ## Phase G+ Follow-up（8A 增量改进）
 

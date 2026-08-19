@@ -47,6 +47,36 @@ describe('reminderTemplate', () => {
     assert.equal(arg.extra.scheduler.hiddenTrigger, true);
   });
 
+  it('adds late cron timing to the scheduler trigger prompt', async () => {
+    const deliverMock = mock.fn(async () => 'msg-late');
+    const triggerMock = { trigger: mock.fn() };
+    const spec = reminderTemplate.createSpec('rem-late', {
+      trigger: { type: 'cron', expression: '42 * * * *', timezone: 'UTC' },
+      params: { message: '小本本' },
+      deliveryThreadId: 'th-late',
+    });
+    await spec.run.execute('小本本', 'thread-th-late', {
+      assignedCatId: 'codex',
+      deliver: deliverMock,
+      invokeTrigger: triggerMock,
+      schedule: {
+        triggerKind: 'cron',
+        scheduledAt: '2026-07-07T18:42:00.000Z',
+        firedAt: '2026-07-07T19:13:00.000Z',
+        latenessMs: 31 * 60 * 1000,
+        missedSlots: 0,
+        late: true,
+        misfirePolicy: 'merge_late_one',
+      },
+    });
+
+    const content = deliverMock.mock.calls[0].arguments[0].content;
+    assert.match(content, /本次是 2026-07-07T18:42:00\.000Z 预定任务的补拍/);
+    assert.match(content, /实际 2026-07-07T19:13:00\.000Z 触发/);
+    assert.match(content, /迟到 31 分钟/);
+    assert.match(content, /小本本/);
+  });
+
   it('deliver payload stays cat-agnostic when assignedCatId is null', async () => {
     const deliverMock = mock.fn(async () => 'msg-2');
     const spec = reminderTemplate.createSpec('rem-4', {

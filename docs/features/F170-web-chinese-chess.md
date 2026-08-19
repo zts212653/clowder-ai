@@ -12,7 +12,7 @@ created: 2026-04-20
 
 ## Why
 
-operator要求做一个端到端可运行的网页象棋游戏，用于**演示 feat lifecycle 全流程**（立项 → 设计 → 开发 → review → 合入 → 愿景守护）。同时验证 Cat Café 多猫协作在独立前端项目上的执行效率。
+operator要求做一个端到端可运行的网页象棋游戏，用于**演示 feat lifecycle 全流程**（立项 → 设计 → 开发 → review → 合入 → 愿景守护）。同时验证 Clowder AI 多猫协作在独立前端项目上的执行效率。
 
 ## What
 

@@ -9,17 +9,14 @@
  */
 
 import { DEFAULT_SKIP_DISPLAY_MS } from './adaptive-pacing';
-import { BULLET_TIME_TOTAL_MS, bulletTimeSpeedFactor } from './bullet-time';
+import { advanceBulletTime, isAdaptiveMarker, landOnAdaptiveMarker, shouldTriggerBulletTime } from './bullet-time-cues';
 import type { BulletTimeState, ReplayEngineState, ReplayEvent, SpeedMultiplier } from './types';
 
 // ---------------------------------------------------------------------------
 // Constants (AC-B1)
 // ---------------------------------------------------------------------------
 
-/**
- * @deprecated Replaced by bullet time smooth easing (AC-E4).
- * Kept for backward compatibility — no longer used in tick().
- */
+/** @deprecated Replaced by bullet time smooth easing (AC-E4). */
 export const PASS_BALL_SLOWDOWN_FACTOR = 5;
 
 // ---------------------------------------------------------------------------
@@ -170,20 +167,11 @@ export function tick(state: ReplayEngineState, deltaMs: number): ReplayEngineSta
 
   if (state.speed === 'max') return tickMax(state, events);
 
-  // AC-E4: Bullet time easing — smooth decel/hold/accel at pass-ball events
-  // If already in bullet time from previous tick, advance progress and apply easing
-  let bulletTimeNext: BulletTimeState | null = state.bulletTime;
-  let speedFactor = 1.0;
-
-  if (bulletTimeNext && state.adaptivePacing) {
-    bulletTimeNext = { ...bulletTimeNext, progressMs: bulletTimeNext.progressMs + deltaMs };
-    speedFactor = bulletTimeSpeedFactor(bulletTimeNext.progressMs);
-    // Exit bullet time after total duration
-    if (bulletTimeNext.progressMs >= BULLET_TIME_TOTAL_MS) {
-      bulletTimeNext = null;
-      speedFactor = 1.0;
-    }
-  }
+  const { bulletTime: bulletTimeNext, speedFactor } = advanceBulletTime(
+    state.bulletTime,
+    state.adaptivePacing,
+    deltaMs,
+  );
 
   const effectiveSpeed = state.speed * speedFactor;
   const newElapsed = state.elapsedMs + deltaMs * effectiveSpeed;
@@ -196,19 +184,11 @@ export function tick(state: ReplayEngineState, deltaMs: number): ReplayEngineSta
   let newIndex = state.currentIndex;
   for (let i = state.currentIndex + 1; i < events.length; i++) {
     const offset = effOffset(state, events, i);
-    if (offset <= newElapsed) {
-      newIndex = i;
-      // Stop at adaptive markers — clamp elapsed to marker offset so next tick
-      // starts HERE (with slowdown/banner), rather than already past it
-      if (state.adaptivePacing && (events[i].isPassBall || events[i].idleSkipMs != null)) {
-        // Enter bullet time when landing on a pass-ball marker
-        if (events[i].isPassBall && (!bulletTimeNext || bulletTimeNext.triggerIndex !== i)) {
-          bulletTimeNext = { triggerIndex: i, progressMs: 0 };
-        }
-        return { ...state, currentIndex: newIndex, elapsedMs: offset, bulletTime: bulletTimeNext };
-      }
-    } else {
-      break;
+    if (offset > newElapsed) break;
+    newIndex = i;
+    // Clamp marker events so slowdown/banner can render before fast playback skips past.
+    if (state.adaptivePacing && isAdaptiveMarker(events[i])) {
+      return landOnAdaptiveMarker(state, events[i], i, offset, bulletTimeNext);
     }
   }
 
@@ -240,7 +220,7 @@ export function seek(state: ReplayEngineState, targetIndex: number): ReplayEngin
   let bulletTime: BulletTimeState | null = null;
   if (state.bulletTime && state.bulletTime.triggerIndex === clamped) {
     bulletTime = state.bulletTime;
-  } else if (newState === 'playing' && state.adaptivePacing && events[clamped]?.isPassBall) {
+  } else if (newState === 'playing' && state.adaptivePacing && shouldTriggerBulletTime(events[clamped])) {
     bulletTime = { triggerIndex: clamped, progressMs: 0 };
   }
 

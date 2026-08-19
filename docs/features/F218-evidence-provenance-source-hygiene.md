@@ -4,6 +4,7 @@ related_features: [F086, F192, F203, F200, F152, F163]
 topics: [harness-engineering, meta-cognition, source-audit, evidence-quality, search-reliability]
 doc_kind: spec
 created: 2026-05-31
+tips_exempt: historical gate-truth correction only; no new user action or capability surface
 ---
 
 # F218: Evidence Provenance & Source Hygiene — 外部证据溯源与信源卫生
@@ -121,7 +122,7 @@ Why: source-audit skill + eval fixture 挂到 F192 已有的 eval control plane
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 新建独立 `source-audit` skill，不塞进 `deep-research` | 分级清晰：deep-research 是重流程，source-audit 是中档闸，日常引用需要中间档 | 2026-05-31 |
-| KD-2 | 不上 classifier 自动判别"营销 vs 学术" | 违反 KD-8（不用 regex/小模型替猫判断 intent），Cat Cafe meta-aesthetics 反认知脚手架 | 2026-05-31 |
+| KD-2 | 不上 classifier 自动判别"营销 vs 学术" | 违反 KD-8（不用 regex/小模型替猫判断 intent），Clowder AI meta-aesthetics 反认知脚手架 | 2026-05-31 |
 | KD-3 | L0 只放触发反射（≤150 tokens），细则进 skill | L0 token 预算稀缺，加噪音稀释关键信号 | 2026-05-31 |
 | KD-4 | 开新 feature 不塞 F203 | scope 横跨 L0/skill/模板/eval/污染清理，塞 F203 会 scope 混乱 | 2026-05-31 |
 | KD-5 | Provenance 格式分级：聊天纯文本/docs 表格/Hub rich block 暂缓 | Maine Coon提议，避免 friction 过高 | 2026-05-31 |
@@ -133,7 +134,7 @@ Why: source-audit skill + eval fixture 挂到 F192 已有的 eval control plane
 
 | Surface | 用户能做什么（达成态） | 用户实际能做什么（close 时） | 缺失/退化 | 处置 |
 |---------|--------------------|--------------------------|----------|------|
-| 猫日常 research / docs / ADR / PPT | 高风险外部 claim 触发信源审计并带 provenance | Shared skill + L0 trigger + deep-research refs + `check:source-hygiene` 已接入 | 无直接 UI | met |
+| 猫日常 research / docs / ADR / PPT | 高风险外部 claim 触发信源审计并带 provenance | Shared skill + L0 trigger + deep-research refs + F192 fixture；2026-07-16 truth correction：旧 `check:source-hygiene` alias / runner 已 sunset，不再声称由当前 `pnpm check` 覆盖 | 无直接 UI | met（dedicated alias sunset） |
 | Harness / skill / SOP / L0 设计 | 不只写软规则，同时说明硬门禁和 eval 怎么接 | L0 §2 + `feat-lifecycle` Eval Contract 教学 + hard check + F192 fixture | 无 | met |
 | Eval Hub weekly packet | MemU fixture 进入 capability-wakeup eval context | Registry schema 保留 `fixtures`，`buildEvalCatInvocation().context.fixtures` 带入 eval-cat packet | 无 | met |
 | Hub provenance rich block visualization | 可视化 provenance rich block | 未交付 | Phase A 不含该 UI surface | KD-5 明确聊天纯文本 / docs 表格先行；不作为 close AC |
@@ -144,7 +145,7 @@ Opus 4.7（非作者、非本地 reviewer）独立复核后 APPROVE close：
 
 - Zero per-family divergence：`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` 零触碰。
 - AC-A1..A7 均有代码 / 文档 / 测试锚点。
-- `check:source-hygiene` 已进入 `package.json` 和 `scripts/run-checks.mjs`，非空挂。
+- close 当时的 `check:source-hygiene` / `scripts/run-checks.mjs` 证据是历史快照；intake #2391 后 dedicated alias 已 sunset。当前自动保护来自 shared skill manifest/surface checks 与 F192 eval registry/tests，不再把 dead runner 当 gate coverage。
 - 云端 R1 的 eval fixture 断链已修：`evalDomainFixtureSchema` + `fixtures` parser default + invocation context carry-through。
 - P1 blocker 数：0。
 
@@ -185,7 +186,7 @@ close_gate_report:
           description: "source-audit shared skill with five-question checklist, four verdicts, claim ledger, and provenance format"
         - kind: test
           ref: "scripts/f218-source-hygiene.test.mjs"
-          description: "source-audit skill structure and manifest wiring verified by check:source-hygiene"
+          description: "source-audit skill structure and manifest wiring verified by current skill-surface and F192 eval tests"
       resolution: null
     - ac_id: AC-A2
       status: met

@@ -21,7 +21,7 @@ operator experience（2026-04-14）：
 > "meeting/table 才够打"
 > "周四晚上 WXG 面试直接 show 给他们看"
 
-Cat Café 已通过 F088/F132 实现了企微的**消息收发**（Transport Plane），但企业 IM 的真正价值不在聊天，在于**把聊天变成可追踪的工作流程**——文档、表格、待办、会议。
+Clowder AI 已通过 F088/F132 实现了企微的**消息收发**（Transport Plane），但企业 IM 的真正价值不在聊天，在于**把聊天变成可追踪的工作流程**——文档、表格、待办、会议。
 
 2026 Q1 企微发布官方 CLI（`wecom-cli`）并附带 Agent Skills，让 AI Agent 直接编排企业操作成为可能。我们利用 ADR-029 定义的 `ActionService + CliExecutor` 模式，用企微打样验证这条路。
 

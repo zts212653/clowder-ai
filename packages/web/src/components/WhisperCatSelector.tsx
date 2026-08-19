@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ExpandableProse } from '@/components/content-overflow';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { catColorVar } from '@/lib/cat-slug';
+import { isRowPrimaryActionTarget } from '@/utils/row-primary-action';
 
 interface WhisperCatSelectorProps {
   cats: CatData[];
@@ -106,50 +108,66 @@ function CatRow({
   );
 
   return (
-    <button
-      type="button"
-      onMouseDown={handleClick}
-      disabled={isActive}
-      className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${
+    // biome-ignore lint/a11y: the nested native button owns keyboard/screen-reader semantics; the wrapper restores the surrounding pointer hit area
+    <div
+      onMouseDown={(event) => {
+        if (isRowPrimaryActionTarget(event.target, event.currentTarget)) handleClick(event);
+      }}
+      className={`w-full px-4 py-2.5 transition-colors ${
         isActive
-          ? 'opacity-40 cursor-not-allowed'
+          ? 'cursor-not-allowed opacity-40'
           : isSelected
-            ? 'bg-cafe-surface-elevated'
-            : 'hover:bg-cafe-surface-elevated'
+            ? 'cursor-pointer bg-cafe-surface-elevated'
+            : 'cursor-pointer hover:bg-cafe-surface-elevated'
       }`}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={cat.avatar}
-        alt={formatCatName(cat)}
-        className="w-7 h-7 rounded-full shrink-0"
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      <div className="min-w-0 flex-1">
-        <div
-          className="text-sm font-semibold flex items-center gap-1.5"
-          style={{ color: catColorVar(cat.id, 'primary') }}
-        >
-          {formatCatName(cat)}
-          {isSelected && (
-            <svg className="w-3.5 h-3.5 text-semantic-warning shrink-0" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
-          )}
+      <button
+        type="button"
+        onMouseDown={handleClick}
+        disabled={isActive}
+        className={`flex w-full items-center gap-3 text-left ${isActive ? 'cursor-not-allowed' : ''} ${
+          isSelected ? 'bg-cafe-surface-elevated' : ''
+        }`}
+        aria-pressed={isSelected}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={cat.avatar}
+          alt={formatCatName(cat)}
+          className="w-7 h-7 rounded-full shrink-0"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+        <div className="min-w-0 flex-1">
+          <div
+            className="text-sm font-semibold flex items-center gap-1.5"
+            style={{ color: catColorVar(cat.id, 'primary') }}
+          >
+            {formatCatName(cat)}
+            {isSelected && (
+              <svg className="w-3.5 h-3.5 text-semantic-warning shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
         </div>
-        <div className="text-xs text-cafe-muted truncate">{cat.roleDescription}</div>
-      </div>
-      {isActive && (
-        <span className="text-micro px-1.5 py-0.5 rounded bg-cafe-surface-elevated text-cafe-muted shrink-0">
-          执行中
-        </span>
-      )}
-    </button>
+        {isActive && (
+          <span className="text-micro px-1.5 py-0.5 rounded bg-cafe-surface-elevated text-cafe-muted shrink-0">
+            执行中
+          </span>
+        )}
+      </button>
+      <ExpandableProse
+        text={cat.roleDescription}
+        lines={2}
+        className="ml-10 mt-0.5"
+        contentClassName="text-xs leading-4 text-cafe-muted"
+      />
+    </div>
   );
 }

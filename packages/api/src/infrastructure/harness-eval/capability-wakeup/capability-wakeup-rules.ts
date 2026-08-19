@@ -32,6 +32,16 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
       minStructuredSignals: 3,
     },
   },
+  textRule(
+    'code-as-harness-confirmed-repeat-autonomous-card',
+    'rich-messaging',
+    '重复已确认.{0,32}(无需 operator 决策|不需要再次确认|已有明确授权|可自治)',
+  ),
+  textRule(
+    'code-as-harness-confirmed-repeat-cvo-interactive',
+    'rich-messaging',
+    '重复已确认.{0,32}(仍需 operator 决策|仍需.{0,16}(价值|授权).{0,8}判断|(?<!不)需要.{0,16}(operator|拍板))',
+  ),
 
   // workspace-navigator — text patterns where cat should open files/dirs to show co-creator
   // 砚砚 R1 P1 PR-2 review: `text_pattern_then_capability` evaluator uses
@@ -64,6 +74,21 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
     'image-generation',
     '需要图|生成图片|生图|配图|架构图|视觉 mock|visual asset|generate (an )?image',
   ),
+  {
+    id: 'convention-graph-before-convention-surface-edit',
+    capability: 'convention-graph-discovery',
+    predicate: {
+      type: 'file_change_then_capability',
+      capability: 'convention-graph-discovery',
+      evidenceWindow: 'pre_change',
+      includeGlobs: [
+        'packages/mcp-server/src/tools/*.ts',
+        'packages/mcp-server/src/server-toolsets.ts',
+        'cat-cafe-skills/*/SKILL.md',
+      ],
+      excludeGlobs: ['**/*.test.ts', '**/*.test.js'],
+    },
+  },
   textRule(
     'pencil-design-ui-design-request',
     'pencil-design',

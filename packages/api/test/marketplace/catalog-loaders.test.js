@@ -82,6 +82,23 @@ describe('catalog-loaders', () => {
   });
 
   describe('cross-ecosystem search scenario', () => {
+    it('does not expose the retired GitHub MCP in any install catalog', async () => {
+      const [claude, codex, openclaw, antigravity] = await Promise.all([
+        loadClaudeCatalog(),
+        loadCodexCatalog(),
+        loadOpenClawCatalog(),
+        loadAntigravityCatalog(),
+      ]);
+      const retired = [...claude, ...codex, ...openclaw, ...antigravity].filter((entry) => {
+        const args = Array.isArray(entry.args) ? entry.args : [];
+        return (
+          ['claude-github', 'codex-github', 'github-mcp', 'github-mcp-server'].includes(entry.id) ||
+          args.some((arg) => typeof arg === 'string' && arg.includes('mcp-server-github'))
+        );
+      });
+      assert.deepEqual(retired, [], 'GitHub operations use canonical gh; GitHub MCP must stay retired');
+    });
+
     it('figma appears in at least one catalog', async () => {
       const [claude, codex, openclaw, antigravity] = await Promise.all([
         loadClaudeCatalog(),

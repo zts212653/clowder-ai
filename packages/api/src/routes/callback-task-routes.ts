@@ -14,7 +14,7 @@ import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event
 import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.js';
 import { anchorTaskWhy } from './callback-anchor-helpers.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
-import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
+import { deriveCallbackActor, getDeletedCallbackThreadGuard, resolveScopedThreadId } from './callback-scope-helpers.js';
 
 // F193-E1: shared refine — single source for status-dependent dispatch gate validation.
 // dispatched → require both dispatchedThreadId AND dispatchedMessageId (trace IDs).
@@ -118,6 +118,12 @@ export function registerCallbackTaskRoutes(
     if (!record) return;
     const actor = deriveCallbackActor(record);
 
+    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, actor.threadId);
+    if (deletedThreadGuard) {
+      reply.status(deletedThreadGuard.statusCode);
+      return deletedThreadGuard.body;
+    }
+
     const parsed = updateTaskSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
@@ -161,6 +167,12 @@ export function registerCallbackTaskRoutes(
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
     const actor = deriveCallbackActor(record);
+
+    const deletedThreadGuard = await getDeletedCallbackThreadGuard(threadStore, actor.threadId);
+    if (deletedThreadGuard) {
+      reply.status(deletedThreadGuard.statusCode);
+      return deletedThreadGuard.body;
+    }
 
     const parsed = createTaskSchema.safeParse(request.body);
     if (!parsed.success) {

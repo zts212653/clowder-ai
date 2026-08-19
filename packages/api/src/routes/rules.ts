@@ -270,7 +270,7 @@ async function findSkillPath(root: string, name: string, projectPath?: string): 
     if (existsSync(candidate)) return candidate;
   }
   // Fallback: check plugin skill source directories from capabilities config.
-  // Plugin skillsSource is relative to the Cat Café instance root (where plugin
+  // Plugin skillsSource is relative to the Clowder AI instance root (where plugin
   // code lives). For preview, try instance root first, then project root as
   // fallback (for project-local plugins in non-startup projects).
   try {

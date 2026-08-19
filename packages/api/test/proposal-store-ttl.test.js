@@ -216,3 +216,36 @@ describe('RedisProposalStore — reportingMode persistence (F128 Phase Y)', () =
     }
   });
 });
+
+describe('RedisProposalStore — formal external PR context persistence', () => {
+  it('round-trips canonical context and ignores malformed legacy data', async () => {
+    const redis = createStoreMockRedis();
+    const store = new RedisProposalStore(/** @type {any} */ (redis));
+    const context = {
+      repoFullName: 'zts212653/clowder-ai',
+      prNumber: 1210,
+      mode: 'formal_review',
+    };
+    const created = await store.create(baseInput({ communityPrContext: context }));
+    const hash = redis.hashes.get(`proposal:${created.proposalId}`);
+    assert.deepEqual(JSON.parse(hash?.communityPrContext ?? '{}'), context);
+    assert.deepEqual((await store.get(created.proposalId))?.communityPrContext, context);
+
+    redis.hashes.set('proposal:malformed-context', {
+      proposalId: 'proposal:malformed-context',
+      status: 'pending',
+      sourceThreadId: 'thread_src',
+      sourceInvocationId: 'inv_0',
+      sourceCatId: 'opus',
+      title: 'legacy',
+      reason: 'malformed context',
+      parentThreadId: 'thread_src',
+      preferredCats: '[]',
+      projectPath: '/tmp',
+      createdBy: 'alice',
+      createdAt: '1700000000000',
+      communityPrContext: '{"repoFullName":"other/repo","prNumber":0,"mode":"formal_review"}',
+    });
+    assert.equal((await store.get('proposal:malformed-context'))?.communityPrContext, undefined);
+  });
+});

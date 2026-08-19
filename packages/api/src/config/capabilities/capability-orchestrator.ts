@@ -6,7 +6,7 @@
  * 生成三猫 CLI 的 MCP 配置文件。
  *
  * 首次运行时自动从现有 CLI 配置中发现外部 MCP 服务器，
- * 连同 Cat Café 自有 MCP 一起写入 capabilities.json。
+ * 连同 Clowder AI 自有 MCP 一起写入 capabilities.json。
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -30,6 +30,11 @@ import {
   writeGeminiMcpConfig,
 } from './mcp-config-adapters.js';
 import { CAT_CAFE_SPLIT_ENTRYPOINTS } from './mcp-constants.js';
+import {
+  isRetiredGithubMcpCapability,
+  isRetiredGithubMcpDescriptor,
+  retireGithubMcpCapabilities,
+} from './retired-github-mcp.js';
 
 // #712: Re-export shared MCP constants from mcp-constants.ts (single source of truth).
 // Consumers import from this file for backwards compatibility.
@@ -831,6 +836,7 @@ export async function discoverExternalMcpServersTagged(paths: DiscoveryPaths): P
   // Deduplicate using the same enabled-preference logic as deduplicateDiscoveredMcpServers.
   const byName = new Map<string, TaggedMcpServer>();
   for (const tagged of all) {
+    if (isRetiredGithubMcpDescriptor(tagged.server)) continue;
     const existing = byName.get(tagged.server.name);
     if (!existing || shouldReplaceDiscoveredMcpServer(existing.server, tagged.server)) {
       byName.set(tagged.server.name, tagged);
@@ -840,7 +846,7 @@ export async function discoverExternalMcpServersTagged(paths: DiscoveryPaths): P
 }
 
 /**
- * Build the Cat Café own MCP server descriptor.
+ * Build the Clowder AI own MCP server descriptor.
  * Uses the same resolution logic as ClaudeAgentService.
  */
 export function buildCatCafeMcpDescriptor(projectRoot: string): McpServerDescriptor {
@@ -874,7 +880,7 @@ const CAT_CAFE_SUPPLEMENTAL_SPLIT_SERVERS = [
 ] as const;
 
 /**
- * Resolve the runtime binary root (where Cat Café MCP server code lives).
+ * Resolve the runtime binary root (where Clowder AI MCP server code lives).
  * codex peer review (PR #1414): explicit `opts.catCafeRepoRoot` from the
  * production route is auto-detected via `resolveMainRepoPath()` (first git
  * worktree line), which returns the canonical main repo even when API is
@@ -1244,7 +1250,7 @@ export function ensureCatCafeMainServer(
 }
 
 /**
- * Rewrite managed Cat Café MCP command paths to a stable repo root.
+ * Rewrite managed Clowder AI MCP command paths to a stable repo root.
  * This prevents global provider configs from pinning deleted feature worktrees.
  */
 export function realignManagedCatCafeServerPaths(
@@ -1346,7 +1352,7 @@ export async function bootstrapCapabilities(
 }
 
 /**
- * #1049: Ensure all managed Cat Café split MCP servers exist in capabilities.json.
+ * #1049: Ensure all managed Clowder AI split MCP servers exist in capabilities.json.
  *
  * Catches the gap where capabilities.json exists but managed MCPs are partially
  * or entirely missing (e.g., manual deletion, corrupt bootstrap, or migration
@@ -1515,7 +1521,8 @@ export function healCatCafeMcpTopology(
   config: CapabilitiesConfig,
   opts?: { catCafeRepoRoot?: string; projectRoot?: string },
 ): { migrated: boolean; config: CapabilitiesConfig } {
-  const a = migrateLegacyCatCafeCapability(config, opts);
+  const retired = retireGithubMcpCapabilities(config);
+  const a = migrateLegacyCatCafeCapability(retired.config, opts);
   // #1049: ensure managed splits AFTER legacy migration (codex review PR #13 P1).
   // Legacy migration converts overrides→blockedCats; running ensureCoreManagedMcps
   // first would skip that conversion, silently re-enabling blocked cats.
@@ -1524,7 +1531,7 @@ export function healCatCafeMcpTopology(
   const c = ensureCatCafeMainServer(b.config, opts);
   const d = realignManagedCatCafeServerPaths(c.config, opts);
   return {
-    migrated: a.migrated || z.migrated || b.migrated || c.migrated || d.migrated,
+    migrated: retired.migrated || a.migrated || z.migrated || b.migrated || c.migrated || d.migrated,
     config: d.config,
   };
 }
@@ -1597,6 +1604,7 @@ export function resolveServersForCat(
 
   for (const cap of config.capabilities) {
     if (cap.type !== 'mcp') continue;
+    if (isRetiredGithubMcpCapability(cap)) continue;
 
     // Priority: mcpServerOverride > mcpServer
     const mcpServer = cap.mcpServerOverride ?? cap.mcpServer;
@@ -1631,10 +1639,15 @@ export function resolveServersForCat(
 
     const desc: McpServerDescriptor = {
       name,
+      capabilityId: cap.id,
       command: mcpServer.command,
       args: mcpServer.args ?? [],
       enabled,
-      source: cap.source,
+      // Plugin MCPs are stored as source=cat-cafe + pluginId so capability
+      // governance can distinguish them from user-owned externals. Runtime
+      // descriptors must expose their actual ownership so writers neither
+      // grant built-in-only privileges nor miss plugin name migrations.
+      source: cap.pluginId ? 'plugin' : cap.source,
     };
     if (mcpServer.transport) desc.transport = mcpServer.transport;
     if (mcpServer.resolver) desc.resolver = mcpServer.resolver;

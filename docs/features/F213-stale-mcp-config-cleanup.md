@@ -4,11 +4,20 @@ related_features: [F193, F212, F209]
 topics: [mcp, codex, deprecation, startup, cleanup, config, legacy, multi-harness]
 doc_kind: spec
 created: 2026-05-26
+tips_exempt: lifecycle truth sync for persistent MCP writers; no new user-facing capability or workflow
 ---
 
 # F213: Stale MCP Config Cleanup at Startup — 过期 MCP 配置启动清理
 
 > **Status**: done | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1 | **Completed**: 2026-05-26 (Phase A merged PR #1901 + Phase B merged PR #1903 + 跨族愿景守护 antig-opus APPROVE)
+
+> **Lifecycle update (2026-07-19, F205 intake):** Claude and Codex no longer
+> receive persistent MCP config writes at startup; both use invoke-time CLI
+> injection. Their former writers and writer-only tests were therefore removed
+> as dead code. F213 cleanup remains active for persistent-file providers
+> (Gemini, Kimi, Antigravity, and OpenCode), while Codex keeps the L4 disabled
+> override safety net. The Claude/Codex writer ACs below are historical delivery
+> evidence, not current exported APIs.
 
 ## Why
 
@@ -88,10 +97,11 @@ operator指出一个**架构盲点**：cat-cafe 团队 deprecate 了一个 mcp s
    - 提供 helper `isOurOwnedDeprecatedEntry(serverName, entryRecord)` → boolean
      (defensive: null/non-object/missing-args/non-string-args[0] → false)
 
-2. **L5 cleanup logic in writers**:
-   - `mcp-config-adapters.ts` `writeCodexMcpConfig` (Phase A) +
-     `writeGeminiMcpConfig` / `writeClaudeMcpConfig` / `writeAntigravityMcpConfig` /
-     `writeKimiMcpConfig` (Phase B)
+2. **L5 cleanup logic in persistent writers**:
+   - Current: `writeGeminiMcpConfig` / `writeAntigravityMcpConfig` /
+     `writeKimiMcpConfig` / `writeOpenCodeMcpConfig`
+   - Historical: `writeCodexMcpConfig` (Phase A) and `writeClaudeMcpConfig`
+     (Phase B), removed once those providers moved fully to invoke-time injection
    - 写入前先扫 `existingMcp`：对 registry 里每个 deprecated server name，
      看 existing entry 是否匹配 known marker
    - 命中 marker → 从 `existingMcp` 删除 + `log.warn`
@@ -163,7 +173,7 @@ trace 所有 mcp config writer：
   - args 字段缺失 / non-array / non-string args[0] / null entry → false (defensive)
   - Unregistered serverName → false
   - Registry sanity: only echoLegacyShim marker remains
-- [x] AC-A3: `writeCodexMcpConfig` 加 cleanup logic + 单测覆盖 4 case:
+- [x] AC-A3 (historical, superseded): `writeCodexMcpConfig` 加 cleanup logic + 单测覆盖 4 case；该 writer 后随 Codex invoke-time injection 完成而删除：
   - existing config 有 echoLegacyShim 形态 → 删除 + warn
   - existing config 有 fork-like cat-cafe → **保留** (regression guard for Maine Coon P1)
   - existing config 有第三方 cat-cafe → 保留 + warn
@@ -174,10 +184,10 @@ trace 所有 mcp config writer：
 ### Phase B（All-Harness Coverage）
 
 - [x] AC-B1: `writeGeminiMcpConfig` 加同 cleanup logic + 单测覆盖（4 case: echoLegacyShim 删 / fork-like 保留 / 第三方保留 / no-op）
-- [x] AC-B2: `writeClaudeMcpConfig` (`.mcp.json`) 加同 cleanup logic + 单测覆盖（4 case）
+- [x] AC-B2 (historical, superseded): `writeClaudeMcpConfig` (`.mcp.json`) 加同 cleanup logic + 单测覆盖（4 case）；该 writer 后随 Claude invoke-time injection 完成而删除
 - [x] AC-B3: `writeAntigravityMcpConfig` 加同 cleanup logic + 单测覆盖（4 case）
 - [x] AC-B4: `writeKimiMcpConfig` (`.kimi/mcp.json`) 加同 cleanup logic + 单测覆盖（4 case）；未来 harness 走同 shared helper 自动 cover
-- [x] AC-B5: cross-harness shared cleanup helper `applyDeprecatedManagedCleanup(existingServers, contextLabel)` 抽出 + Codex writer refactor 用它（5 个 writer 共享同一逻辑）
+- [x] AC-B5: cross-harness shared cleanup helper `applyDeprecatedManagedCleanup(existingServers, contextLabel)` 抽出；当前由所有 persistent-file writers 共享
 
 ### Phase C（Documentation + ADR Sync）
 

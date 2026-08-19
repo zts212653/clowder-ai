@@ -6,7 +6,7 @@
  * limits, and always write generated output to tmpdir.
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, before, describe, it } from 'node:test';
@@ -153,26 +153,26 @@ describe('createWeixinMpHandlers path security', () => {
     assert.match(result.error, /path escapes allowed roots/);
   });
 
-  it('R2 P1: rejects files under server cwd (exfiltration path)', async () => {
-    // Simulate a sensitive file under the API process cwd.
-    // Since cwd is intentionally excluded from read roots, any path
-    // under cwd (that isn't also under tmpdir) must be rejected.
-    const cwdFile = join(process.cwd(), 'package.json');
+  it('R2 P1: rejects non-temp local files through convert_markdown', async () => {
+    // The public validate checkout itself lives under tmpdir, so process.cwd()
+    // is intentionally allowed there. Bind the contract to a stable non-temp
+    // local path instead of assuming cwd is always outside tmpdir.
     const adapter = makeSecureAdapter();
 
     const result = await adapter.invoke('weixin_mp.convert_markdown', {
-      markdownFilePath: cwdFile,
+      markdownFilePath: '/etc/passwd',
     });
     assert.equal(result.success, false);
     assert.match(result.error, /path escapes allowed roots/);
   });
 
-  it('R2 P1: rejects .env-style files under cwd via upload_image', async () => {
-    // A caller with limb_invoke_tool could try fileLocation: '.env'
-    // which resolves to cwd/.env — must be blocked.
+  it('R2 P1: rejects non-temp local paths through upload_image before reading', async () => {
+    // A valid image suffix ensures the path boundary, not extension parsing,
+    // is the first rejection. The file need not exist because validation
+    // resolves its existing parent before enforcing the tmpdir-only root.
     const adapter = makeSecureAdapter();
     const result = await adapter.invoke('weixin_mp.upload_image', {
-      fileLocation: join(process.cwd(), '.env.example'),
+      fileLocation: '/etc/cat-cafe-secret.png',
     });
     assert.equal(result.success, false);
     assert.match(result.error, /path escapes allowed roots/);

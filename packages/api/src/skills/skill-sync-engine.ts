@@ -19,7 +19,10 @@ import { pathsEqual } from '../utils/project-path.js';
 import {
   buildSkillMountTargets,
   createSkillSymlink,
+  ensureSharedSkillRefsMount,
   isManagedDirectoryLevelSkillsSymlink,
+  removeSharedSkillRefsMount,
+  SHARED_SKILL_REFS_ALIAS,
 } from '../utils/skill-mount.js';
 import { computeSourceManifestHash, listSourceSkillNames } from '../utils/skill-source.js';
 import { updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
@@ -143,7 +146,7 @@ export interface SyncProjectOptions {
    *  the main project root — not the target project root). */
   globalCustomSourceSkills?: ReadonlyMap<string, { skillsSource: string; pluginId?: string }>;
   /** Main project root for resolving relative skillsSource paths in project
-   *  config entries. Plugin skillsSource paths are relative to the Cat Café
+   *  config entries. Plugin skillsSource paths are relative to the Clowder AI
    *  instance root, not the target project being synced. When syncing external
    *  projects, this MUST be set so custom-source skills resolve correctly.
    *  Defaults to projectRoot (correct only when syncing the main project). */
@@ -175,14 +178,16 @@ async function syncProjectUnlocked(
   const allCatCafeCaps = config.capabilities.filter(
     (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && isValidSkillName(cap.id),
   );
-  // pluginId is an identity label, not a filter criterion. All cat-cafe
-  // skills are managed uniformly — source resolution uses skillsSource
-  // (custom) or the default source dir (built-in).
-  const managedCaps = allCatCafeCaps;
+  const firstPartySkillIds = new Set(
+    allCatCafeCaps.filter((cap) => !cap.pluginId && !cap.skillsSource).map((cap) => cap.id),
+  );
+  const managedCaps = allCatCafeCaps.filter(
+    (cap) => (!cap.pluginId && !cap.skillsSource) || (!!cap.skillsSource && !firstPartySkillIds.has(cap.id)),
+  );
   const previousNames = managedCaps.map((cap) => cap.id);
 
   // Per-skill effective source: resolve(instanceRoot, cap.skillsSource ?? defaultSkillsDir).
-  // skillsSource paths in capability entries are relative to the Cat Café
+  // skillsSource paths in capability entries are relative to the Clowder AI
   // INSTANCE root, not the target project being synced.
   const instanceRoot = opts.mainProjectRoot ?? projectRoot;
   const effectiveSourceMap = new Map<string, string>();
@@ -378,6 +383,14 @@ async function syncProjectUnlocked(
         /* ENOENT — will be created below */
       }
       await mkdir(skillsDir, { recursive: true });
+      const sharedRefsStatus = await ensureSharedSkillRefsMount(skillsDir, skillsSource);
+      if (sharedRefsStatus === 'conflict' || sharedRefsStatus === 'source-missing') {
+        result.conflicts.push({
+          skillName: SHARED_SKILL_REFS_ALIAS,
+          mountPointId: target.id,
+          path: join(skillsDir, SHARED_SKILL_REFS_ALIAS),
+        });
+      }
 
       for (const skillName of targetEnabled) {
         validateSkillName(skillName);
@@ -423,9 +436,11 @@ async function syncProjectUnlocked(
       continue;
     }
     const isDisabledMount = !activeDirSet.has(skillsDir);
+    if (isDisabledMount) await removeSharedSkillRefsMount(skillsDir, skillsSource);
     const entries = await readdir(skillsDir).catch(() => [] as string[]);
     const dirCleanup = new Set(cleanupNames);
     for (const entry of entries) {
+      if (entry === SHARED_SKILL_REFS_ALIAS) continue;
       if (!isDisabledMount && !dirCleanup.has(entry) && allSkillSet.has(entry)) continue;
       dirCleanup.add(entry);
     }
@@ -452,6 +467,7 @@ async function syncProjectUnlocked(
       } catch {
         /* */
       }
+      await removeSharedSkillRefsMount(oldDir, skillsSource);
       // Guard: if oldDir is a symlink to a non-matching source, skip readdir
       // to avoid following the symlink and deleting content from the target.
       try {

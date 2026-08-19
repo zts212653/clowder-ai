@@ -52,6 +52,7 @@ export interface NormalizedCapabilityUsageCandidate {
   source: 'tool' | 'audit';
   sourceId: string;
   capability: CapabilityName;
+  invocationId?: string;
   threadId?: string;
   catId?: string;
   sessionId?: string;
@@ -59,6 +60,9 @@ export interface NormalizedCapabilityUsageCandidate {
   timestamp: number;
   action?: string;
   path?: string;
+  conventionGraphDomain?: string;
+  conventionGraphCoverageKeys?: string[];
+  conventionGraphTargetPaths?: string[];
   successful: boolean;
 }
 
@@ -129,6 +133,7 @@ export interface FileChangeThenCapabilityPredicate {
   capability: CapabilityName;
   includeGlobs: string[];
   excludeGlobs?: string[];
+  evidenceWindow?: 'current_next' | 'pre_change';
   requirePathMention?: boolean;
   requireLivePreview?: boolean;
 }

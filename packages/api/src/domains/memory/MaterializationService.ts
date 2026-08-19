@@ -14,9 +14,10 @@ import type {
 } from './interfaces.js';
 import { EVIDENCE_KINDS } from './interfaces.js';
 
-const KIND_TO_DIR: Record<EvidenceKind, string> = {
+const KIND_TO_DIR: Omit<Record<EvidenceKind, string>, 'diary'> = {
   feature: 'features',
   decision: 'decisions',
+  architecture: 'architecture',
   plan: 'plans',
   session: 'evidence',
   lesson: 'lessons',
@@ -25,6 +26,16 @@ const KIND_TO_DIR: Record<EvidenceKind, string> = {
   research: 'research',
   'pack-knowledge': 'pack-knowledge',
 };
+
+function resolveMaterializationKind(value: unknown): Exclude<EvidenceKind, 'diary'> {
+  if (typeof value !== 'string' || !EVIDENCE_KINDS.includes(value as EvidenceKind)) {
+    throw new Error(`Invalid targetKind: ${String(value)}`);
+  }
+  if (value === 'diary') {
+    throw new Error('Diary evidence comes from the private product store and cannot be materialized into docs');
+  }
+  return value as Exclude<EvidenceKind, 'diary'>;
+}
 
 export class MaterializationService implements IMaterializationService {
   constructor(
@@ -48,10 +59,7 @@ export class MaterializationService implements IMaterializationService {
     }
 
     // Validate and determine output path based on targetKind
-    const kind = marker.targetKind ?? 'lesson';
-    if (!EVIDENCE_KINDS.includes(kind)) {
-      throw new Error(`Invalid targetKind: ${kind}`);
-    }
+    const kind = resolveMaterializationKind(marker.targetKind ?? 'lesson');
     const anchor = `${kind}-${markerId}`;
     const subDir = KIND_TO_DIR[kind];
     const root = options?.targetRoot ?? this.docsRoot;

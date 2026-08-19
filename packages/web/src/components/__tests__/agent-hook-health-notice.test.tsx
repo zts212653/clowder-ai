@@ -34,6 +34,39 @@ const missingHealth: AgentHookStatusResponse = {
   ],
 };
 
+const partialSyncHealth: AgentHookStatusResponse = {
+  status: 'stale',
+  targets: [
+    {
+      name: 'hooks/session-start',
+      status: 'configured',
+      drifted: false,
+      reason: 'configured',
+      targetPath: '/home/user/.claude/hooks/session-start-recall.sh',
+    },
+    {
+      name: 'skills',
+      status: 'stale',
+      drifted: true,
+      reason: '1 stale, 196 conflicts',
+      targetPath: '',
+    },
+    {
+      name: 'mcp',
+      status: 'stale',
+      drifted: true,
+      reason: '6 drift issues',
+      targetPath: '',
+    },
+  ],
+};
+
+const uninitialisedHealth: AgentHookStatusResponse = {
+  status: 'unsupported',
+  targets: [],
+  uninitialised: true,
+};
+
 describe('AgentHookHealthNotice', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -101,6 +134,40 @@ describe('AgentHookHealthNotice', () => {
     expect(html).toContain('MCP：未知');
     expect(html).not.toContain('Claude：正常');
     expect(html).not.toContain('Codex：正常');
+    expect(html).toContain('border-conn-red-ring');
+    expect(html).toContain('一键同步');
+  });
+
+  it('renders standalone uninitialised projects as neutral guidance without diagnostic controls', () => {
+    const html = renderToStaticMarkup(<AgentHookHealthNotice health={uninitialisedHealth} onSync={() => {}} />);
+
+    expect(html).toContain('该项目尚未初始化');
+    expect(html).toContain('这个项目还没完成 Clowder AI 初始化，因此暂不检查或同步运行环境配置。');
+    expect(html).toContain('border-conn-slate-ring');
+    expect(html).not.toContain('Agent 运行环境检测失败');
+    expect(html).not.toContain('一键同步');
+    expect(html).not.toContain('Claude：未知');
+    expect(html).not.toContain('预览将修复的改动');
+  });
+
+  it('uses setup-card guidance for uninitialised projects in the initialization context', () => {
+    const html = renderToStaticMarkup(
+      <AgentHookHealthNotice health={uninitialisedHealth} placement="project-setup" onSync={() => {}} />,
+    );
+
+    expect(html).toContain('先选择下方方式完成项目初始化；完成后再检查 Hook、Skills 和 MCP 配置。');
+    expect(html).not.toContain('这个项目还没完成 Clowder AI 初始化');
+  });
+
+  it('shows visible feedback when sync ran but capability drift remains', () => {
+    const html = renderToStaticMarkup(
+      <AgentHookHealthNotice health={partialSyncHealth} syncAttempted onSync={() => {}} />,
+    );
+
+    expect(html).toContain('Agent 运行环境部分同步');
+    expect(html).toContain('同步已执行');
+    expect(html).toContain('Skills：1 stale, 196 conflicts');
+    expect(html).toContain('MCP：6 drift issues');
   });
 });
 
@@ -121,5 +188,22 @@ describe('ProjectSetupCard agent hook entry', () => {
     expect(html).toContain('发现了一片新大陆');
     expect(html).toContain('Agent 运行环境需要同步');
     expect(html).toContain('初始化全新项目');
+  });
+
+  it('uses the setup-context copy for an uninitialised project', () => {
+    const html = renderToStaticMarkup(
+      <ProjectSetupCard
+        projectPath="/tmp/api"
+        isEmptyDir={false}
+        isGitRepo={false}
+        gitAvailable
+        onComplete={() => {}}
+        agentHookHealth={uninitialisedHealth}
+        onSyncAgentHooks={() => {}}
+      />,
+    );
+
+    expect(html).toContain('先选择下方方式完成项目初始化；完成后再检查 Hook、Skills 和 MCP 配置。');
+    expect(html).not.toContain('这个项目还没完成 Clowder AI 初始化');
   });
 });

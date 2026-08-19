@@ -636,6 +636,9 @@ describe('SkillsContent', () => {
   });
 
   it('refreshes selected project data when switching from "全部 Skill" to "项目 Skill"', async () => {
+    const projectPath = '/home/user/cat-cafe';
+    mockGetProjectPaths.mockReturnValue([projectPath]);
+
     await render(React.createElement(SkillsContent));
     await flushEffects();
 
@@ -652,7 +655,6 @@ describe('SkillsContent', () => {
     });
     await flushEffects();
 
-    const projectPath = '/home/user/cat-cafe';
     const urls = mockFetch.mock.calls.map((call: unknown[]) => String(call[0]));
     expect(urls).toContain(`/api/skills?projectPath=${encodeURIComponent(projectPath)}`);
     expect(urls).toContain(`/api/capabilities?projectPath=${encodeURIComponent(projectPath)}`);

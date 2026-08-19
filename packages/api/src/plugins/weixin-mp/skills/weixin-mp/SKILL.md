@@ -72,17 +72,24 @@ triggers:
 
 发布一篇 Markdown 文章的标准步骤：
 
-1. `convert_markdown` — Markdown → 微信 HTML（返回 filePath）
-2. 正文中的外部图片 → 逐个 `upload_image` → 替换为微信 CDN URL
-3. `upload_material` — 上传封面图 → 得到 `thumbMediaId`
-4. `create_draft` — 创建草稿（传入 contentFilePath + thumbMediaId）
-5. 可选：`submit_publish` — 发布草稿
+1. **冻结编辑真相源** — 从原稿提取并逐项保留：主标题、显式副标题/deck、系列名与序号、作者、摘要定位、既有封面风格。已有原稿的发布转换不能静默改题、丢副标题或抹掉系列身份。
+   - 微信没有独立副标题字段：若“主标题 + 副标题”不超过标题上限，可完整写入标题；否则主标题进入 `title`，副标题必须作为正文第一屏的显式 heading/deck 保留。
+   - 封面先对照同系列既有样张，再围绕本文唯一核心冲突生成。正文信息图、其他文章封面或仅仅“主题沾边”的素材不能作为静默 fallback。
+2. `convert_markdown` — Markdown → 微信 HTML（返回 filePath）
+3. 正文中的外部图片 → 逐个 `upload_image` → 替换为微信 CDN URL
+4. `upload_material` — 上传封面图 → 得到 `thumbMediaId`
+5. `create_draft` / `update_draft` — 新文章创建草稿；已有草稿原位更新，避免制造重复稿
+6. `list_drafts` 回读 — 核对 media_id、完整标题、作者、摘要和封面 media_id；正文另检查系列标识与副标题仍在第一屏
+7. 可选：`submit_publish` — 仅在用户明确授权正式发表时发布草稿
 
 ## 常见错误
 
 - 忘记先调 `convert_markdown` 就直接传 Markdown 给 `create_draft`
 - 文章正文中使用外部图片链接（必须先 `upload_image` 到微信 CDN）
 - 混淆草稿 media_id 和发布 publishId
+- 把频道转换误当成重新命题，擅自缩短原题、丢副标题或系列序号
+- 生图失败后拿无关正文信息图充封面，导致封面既不聚焦本文主题、也脱离既有系列视觉
+- 已有草稿仍调用 `create_draft`，留下两个近似版本；应使用 `update_draft`
 - 使用旧工具名 `limb_invoke`（已更名为 `limb_invoke_tool`，需配合 `limb_list_tools` 查 schema）
 
 ## 限制

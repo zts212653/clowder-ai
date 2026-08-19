@@ -21,7 +21,10 @@ const HANDOFF_PATTERNS = [
   'handoff-proposal:*',
   'handoff-proposals:session:*',
   'handoff-proposals:catthread:*',
+  'handoff-proposals:user:*',
+  'handoff-proposals:settled:*',
   'handoff-proposal-dedup:*',
+  'human-disposition:*',
 ];
 
 describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
@@ -29,6 +32,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
   let createRedisClient;
   let redis;
   let store;
+  let HumanDispositionLedger;
   let connected = false;
 
   before(async () => {
@@ -36,6 +40,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
 
     const storeModule = await import('../dist/domains/cats/services/stores/redis/RedisSessionHandoffProposalStore.js');
     RedisSessionHandoffProposalStore = storeModule.RedisSessionHandoffProposalStore;
+    ({ HumanDispositionLedger } = await import('../dist/domains/human-disposition/HumanDispositionLedger.js'));
     const redisModule = await import('@cat-cafe/shared/utils');
     createRedisClient = redisModule.createRedisClient;
 
@@ -67,6 +72,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
     sourceThreadId: 'thread_1',
     sourceSessionId: 'sess_1',
     sourceCatId: 'opus-45',
+    sourceMessageId: 'msg-origin-1',
     userId: 'user_1',
     note: { done: 'wrote types', nextSteps: 'write store' },
     ...over,
@@ -79,6 +85,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
     assert.ok(p.proposalId);
     assert.equal(p.note.proposalId, p.proposalId);
     assert.equal(p.note.sourceSessionId, 'sess_1');
+    assert.equal(p.sourceMessageId, 'msg-origin-1');
     assert.ok(p.note.persistedAt > 0);
 
     // Redis 往返：get 回读与 create 返回一致（serialize/hydrate 不丢字段）
@@ -165,10 +172,57 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
 
   it('markRejected: CAS pending→rejected (null if already claimed)', async () => {
     const p = await store.create(baseInput());
-    assert.equal((await store.markRejected(p.proposalId)).status, 'rejected');
+    const rejected = await store.markRejected(p.proposalId, { decidedAt: 100 });
+    assert.equal(rejected.outcome, 'applied');
+    assert.equal(rejected.proposal.status, 'rejected');
+    assert.equal(rejected.proposal.humanDispositionLedgerEntry.envelope, undefined);
     const p2 = await store.create(baseInput());
     await store.claimForApproval(p2.proposalId);
-    assert.equal(await store.markRejected(p2.proposalId), null, 'cannot reject approving');
+    assert.equal((await store.markRejected(p2.proposalId, { decidedAt: 101 })).outcome, 'not_available');
+  });
+
+  it('markRejected atomically persists exact feedback across a fresh store instance', async () => {
+    const p = await store.create(baseInput());
+    const result = await store.markRejected(p.proposalId, {
+      decidedAt: 200,
+      feedback: {
+        reasonCode: 'other',
+        detail: '  Redis 证据不对  ',
+      },
+    });
+    assert.equal(result.outcome, 'applied');
+    const rejected = result.proposal;
+    assert.equal(rejected.status, 'rejected');
+    assert.deepEqual(rejected.latestHumanDisposition, {
+      reasonCode: 'other',
+      detail: 'Redis 证据不对',
+    });
+
+    const freshStore = new RedisSessionHandoffProposalStore(redis);
+    const reloaded = await freshStore.get(p.proposalId);
+    assert.deepEqual(reloaded.latestHumanDisposition, rejected.latestHumanDisposition);
+    assert.equal(
+      (await freshStore.markRejected(p.proposalId, { decidedAt: 201, feedback: { reasonCode: 'wrong' } })).outcome,
+      'conflict',
+    );
+    assert.equal(
+      (
+        await freshStore.markRejected(p.proposalId, {
+          decidedAt: 999,
+          feedback: { reasonCode: 'other', detail: 'Redis 证据不对' },
+        })
+      ).outcome,
+      'replayed',
+    );
+    assert.deepEqual((await freshStore.get(p.proposalId)).latestHumanDisposition, rejected.latestHumanDisposition);
+
+    const ledger = new HumanDispositionLedger(redis, {
+      loadEntry: (input) => freshStore.loadHumanDispositionEntry(input),
+    });
+    assert.deepEqual(
+      await ledger.get('user_1', rejected.humanDispositionLedgerEntry.episode.sourceRef),
+      rejected.humanDispositionLedgerEntry,
+    );
   });
 
   it('markExpired: pending|approving→expired, terminal stays', async () => {
@@ -178,7 +232,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
     await store.claimForApproval(p2.proposalId);
     assert.equal((await store.markExpired(p2.proposalId)).status, 'expired', 'approving can expire');
     const p3 = await store.create(baseInput());
-    await store.markRejected(p3.proposalId);
+    await store.markRejected(p3.proposalId, { decidedAt: 300 });
     assert.equal(await store.markExpired(p3.proposalId), null, 'cannot expire rejected (terminal)');
   });
 
@@ -195,7 +249,7 @@ describe('RedisSessionHandoffProposalStore', { skip: redisIsolationSkipReason(RE
 
   it('getMostRecentByCatThread: latest per-(user,cat,thread), monotonic same-ms deterministic (砚砚 P1-3/P2)', async () => {
     const p1 = await store.create(baseInput());
-    await store.markRejected(p1.proposalId);
+    await store.markRejected(p1.proposalId, { decidedAt: 301 });
     const p2 = await store.create(baseInput());
     // P1-3: monotonic createdAt → deterministic newest even when created in the same wall-clock ms
     assert.ok(p2.createdAt > p1.createdAt, 'monotonic: p2.createdAt strictly greater (no same-ms Redis tie)');

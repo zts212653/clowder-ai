@@ -7,7 +7,15 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext: assembleIncrementalContextWithoutCapacity } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
+
+function assembleIncrementalContext(deps, userId, threadId, catId) {
+  return assembleIncrementalContextWithoutCapacity(deps, userId, threadId, catId, undefined, undefined, {
+    effectiveMaxContextTokens: 500_000,
+  });
+}
 
 function mockMsg(overrides) {
   return {
@@ -64,6 +72,19 @@ describe('F052: crossPost self-filter exemption', () => {
 
     assert.ok(!result.contextText.includes('My own regular message'), 'regular self message should still be excluded');
     assert.ok(result.contextText.includes('[导航]'), 'KD-7: navigation header present even on empty delta');
+  });
+
+  test('legacy self-referential crossPost metadata does not exempt a same-cat message', async () => {
+    const selfMsg = mockMsg({
+      catId: 'opus',
+      content: 'My own message with polluted provenance',
+      extra: { crossPost: { sourceThreadId: 'thread-1' } },
+    });
+    const deps = makeDeps([selfMsg]);
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+
+    assert.ok(!result.contextText.includes('polluted provenance'));
   });
 
   test('whisper not intended for this cat is excluded from baton candidates (P1-R2)', async () => {

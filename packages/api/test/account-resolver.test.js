@@ -79,6 +79,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
         authType: 'api_key',
         baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
         models: ['glm-5'],
+        modelAliases: { 'glm-5': 'upstream-glm-5' },
         displayName: 'My GLM',
       },
     });
@@ -94,6 +95,7 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     assert.equal(profile.baseUrl, 'https://open.bigmodel.cn/api/paas/v4');
     assert.equal(profile.apiKey, 'glm-xxx');
     assert.deepEqual(profile.models, ['glm-5']);
+    assert.deepEqual(profile.modelAliases, { 'glm-5': 'upstream-glm-5' });
   });
 
   it('resolveByAccountRef returns builtin-style profile for oauth accounts', async () => {

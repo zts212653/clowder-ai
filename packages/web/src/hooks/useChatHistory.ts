@@ -8,29 +8,53 @@ import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
 import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { crossesUserTurnBoundary } from '@/stores/turn-boundary';
 import { apiFetch } from '@/utils/api-client';
-import { resolveCrossPostScrollTarget } from '@/utils/crosspost-scroll-target';
+import {
+  findCrossPostTargetMessageId,
+  peekPendingCrossPostScroll,
+  resolveCrossPostScrollTarget,
+} from '@/utils/crosspost-scroll-target';
 import {
   loadThreadMessages as loadCachedMessages,
   loadThreadActiveState,
   saveThreadMessages as saveMessagesSnapshot,
   saveThreadActiveState,
 } from '@/utils/offline-store';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import {
+  captureMessageScrollAnchor,
+  captureMessageScrollAnchorForMessage,
+  MESSAGE_VIEWPORT_MOUNTED_EVENT,
+  type MessageScrollAnchor,
+  restoreMessageScrollAnchor,
+  scrollToMessage,
+} from '@/utils/scrollToMessage';
 import {
   peekPendingTeleport,
   resolvePendingTeleport,
   shouldLoadOlderForTeleport,
   TELEPORT_RESOLVE_EVENT,
 } from '@/utils/teleport';
+import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
+import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 
-type SavedScrollState = {
-  top: number;
-  anchor: 'bottom' | 'offset';
+type SavedScrollState =
+  | { top: number; anchor: 'bottom' }
+  | { top: number; anchor: 'offset'; messageAnchor?: MessageScrollAnchor };
+type RestoreFrameKind = 'restore' | 'navigation' | 'correction';
+type NavigationSettleSample = { top: number; messageAnchor: MessageScrollAnchor };
+type NavigationSettleState = {
+  framesRemaining: number;
+  stableFrames: number;
+  previousSample?: NavigationSettleSample;
 };
+type NavigationSettleResult =
+  | { kind: 'retry' }
+  | { kind: 'settled'; sample: NavigationSettleSample }
+  | { kind: 'expired' };
 
 // clowder-ai#27: route navigation remounts the page, so scroll memory must live
 // outside React refs to survive /thread/A → /thread/B → /thread/A.
@@ -38,6 +62,7 @@ const scrollPositionsByThread = new Map<string, SavedScrollState>();
 const taskCacheByThread = new Map<string, TaskItem[]>();
 const SCROLL_BOTTOM_THRESHOLD_PX = 24;
 const MAX_RESTORE_FRAMES = 90;
+const NAVIGATION_STABLE_FRAMES = 2;
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
 export function __resetTaskCacheForTest() {
@@ -59,15 +84,87 @@ export function deriveQueueHydrationTargetCats({
   return activeCatIds;
 }
 
-function isNearBottom(el: HTMLElement): boolean {
+function isNearBottom(el: { scrollTop: number; scrollHeight: number; clientHeight: number }): boolean {
   return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
-function rememberScrollState(threadId: string, el: HTMLElement) {
+/**
+ * Decide the bottom-follow anchor from a scroll observation. Geometry alone cannot distinguish
+ * user scrolling from smooth-follow or layout corrections, so leaving bottom follow requires an
+ * explicit upward-input signal. Intentional message jumps set the saved anchor to offset directly.
+ *
+ * Exported for unit testing — see __tests__/resolveScrollAnchor.test.ts.
+ */
+export function resolveScrollAnchor(
+  el: { scrollTop: number; scrollHeight: number; clientHeight: number },
+  prev: SavedScrollState | null,
+  userScrolledUp = false,
+): SavedScrollState['anchor'] {
+  if (isNearBottom(el)) return 'bottom';
+  if (prev?.anchor !== 'bottom') return 'offset';
+  return userScrolledUp && el.scrollTop < prev.top ? 'offset' : 'bottom';
+}
+
+function rememberScrollState(threadId: string, el: HTMLElement, userScrolledUp = false, preserveOffsetAnchor = false) {
+  const previous = scrollPositionsByThread.get(threadId) ?? null;
+  const anchor = resolveScrollAnchor(el, previous, userScrolledUp);
+  if (anchor === 'bottom') {
+    scrollPositionsByThread.set(threadId, { top: el.scrollTop, anchor });
+    return;
+  }
+
   scrollPositionsByThread.set(threadId, {
     top: el.scrollTop,
-    anchor: isNearBottom(el) ? 'bottom' : 'offset',
+    anchor,
+    messageAnchor:
+      preserveOffsetAnchor && previous?.anchor === 'offset'
+        ? (previous.messageAnchor ?? captureMessageScrollAnchor(el))
+        : captureMessageScrollAnchor(el),
   });
+}
+
+function tryRestoreSavedScrollState(el: HTMLElement, saved: SavedScrollState): boolean {
+  const messageAnchorRestored =
+    saved.anchor === 'offset' && saved.messageAnchor ? restoreMessageScrollAnchor(el, saved.messageAnchor) : false;
+  if (messageAnchorRestored) return true;
+
+  const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
+  el.scrollTop = targetTop;
+  const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
+  return canSettle && Math.abs(el.scrollTop - targetTop) <= 1;
+}
+
+function captureNavigationSettleSample(el: HTMLElement, messageId: string): NavigationSettleSample | undefined {
+  const messageAnchor = captureMessageScrollAnchorForMessage(el, messageId);
+  return messageAnchor ? { top: el.scrollTop, messageAnchor } : undefined;
+}
+
+function isStableNavigationSample(previous: NavigationSettleSample, current: NavigationSettleSample): boolean {
+  return (
+    Math.abs(current.top - previous.top) <= 1 &&
+    Math.abs(current.messageAnchor.viewportOffsetPx - previous.messageAnchor.viewportOffsetPx) <= 1
+  );
+}
+
+function advanceNavigationSettle(
+  state: NavigationSettleState,
+  el: HTMLElement | null,
+  messageId: string,
+  stale: boolean,
+): NavigationSettleResult {
+  if (stale) return { kind: 'expired' };
+
+  state.framesRemaining -= 1;
+  const sample = el ? captureNavigationSettleSample(el, messageId) : undefined;
+  if (!sample) return state.framesRemaining > 0 ? { kind: 'retry' } : { kind: 'expired' };
+
+  state.stableFrames =
+    state.previousSample && isStableNavigationSample(state.previousSample, sample) ? state.stableFrames + 1 : 0;
+  state.previousSample = sample;
+  return state.stableFrames >= NAVIGATION_STABLE_FRAMES || state.framesRemaining <= 0
+    ? { kind: 'settled', sample }
+    : { kind: 'retry' };
 }
 
 const HISTORY_PAGE_SIZE = 50;
@@ -93,6 +190,10 @@ type ReplaceHydrationMergeResult = {
 type MessageExtra = NonNullable<ChatMessageData['extra']>;
 type MessageRichPayload = MessageExtra['rich'];
 type MessageToolEvent = NonNullable<ChatMessageData['toolEvents']>[number];
+
+function invocationReconciliationMessages(messages: readonly ChatMessageData[]): ChatMessageData[] {
+  return messages.filter((message) => message.extra?.invocationReconciliation !== undefined);
+}
 
 function getHistoryInvocationId(msg: ChatMessageData): string | undefined {
   if (msg.extra?.isExplicitPost) return undefined;
@@ -163,54 +264,69 @@ function mergeRichPayload(
   return { v: 1 as const, blocks };
 }
 
+type RequiredMessageExtraFields = {
+  [Key in Exclude<keyof MessageExtra, 'rich'>]-?: MessageExtra[Key] | undefined;
+};
+
+function pickMessageExtraField<Key extends keyof MessageExtra>(
+  preferred: ChatMessageData['extra'],
+  fallback: ChatMessageData['extra'],
+  key: Key,
+): MessageExtra[Key] | undefined {
+  return preferred?.[key] ?? fallback?.[key];
+}
+
 function mergeMessageExtra(
   preferred: ChatMessageData['extra'],
   fallback: ChatMessageData['extra'],
 ): ChatMessageData['extra'] | undefined {
   const rich = mergeRichPayload(preferred?.rich, fallback?.rich);
-  const crossPost = preferred?.crossPost ?? fallback?.crossPost;
-  const stream = preferred?.stream ?? fallback?.stream;
-  const targetCats = preferred?.targetCats ?? fallback?.targetCats;
-  const scheduler = preferred?.scheduler ?? fallback?.scheduler;
-  const timeoutDiagnostics = preferred?.timeoutDiagnostics ?? fallback?.timeoutDiagnostics;
-  // F212 Phase B: preserve cliDiagnostics when merging history (mirrors timeoutDiagnostics —
-  // diagnostics outlive a single live event and must survive hydration after F5 / re-fetch).
-  const cliDiagnostics = preferred?.cliDiagnostics ?? fallback?.cliDiagnostics;
-  const governanceBlocked = preferred?.governanceBlocked ?? fallback?.governanceBlocked;
-  const systemKind = preferred?.systemKind ?? fallback?.systemKind;
-  // #814 P2: preserve isExplicitPost so F5/thread-switch doesn't lose the
-  // "don't merge by invocation" semantic for explicit post_message callbacks.
-  const isExplicitPost = preferred?.isExplicitPost ?? fallback?.isExplicitPost;
-  if (
-    !rich &&
-    !crossPost &&
-    !stream &&
-    !targetCats &&
-    !scheduler &&
-    !timeoutDiagnostics &&
-    !cliDiagnostics &&
-    !governanceBlocked &&
-    !systemKind &&
-    !isExplicitPost
-  ) {
-    return undefined;
-  }
+  const pick = <Key extends keyof MessageExtra>(key: Key) => pickMessageExtraField(preferred, fallback, key);
+  // This object is intentionally exhaustive and fail-closed: adding a typed
+  // ChatMessage.extra carrier makes TypeScript require an explicit merge rule,
+  // while unknown runtime properties are still discarded. Most carriers are
+  // immutable/additive projections, so the selected message wins and the other
+  // side only fills a missing field. `rich` remains the sole structural merge.
+  const fields: RequiredMessageExtraFields = {
+    crossPost: pick('crossPost'),
+    stream: pick('stream'),
+    turnExecution: pick('turnExecution'),
+    auxiliaryTurnExecutions: pick('auxiliaryTurnExecutions'),
+    targetCats: pick('targetCats'),
+    messageBundle: pick('messageBundle'),
+    isExplicitPost: pick('isExplicitPost'),
+    scheduler: pick('scheduler'),
+    timeoutDiagnostics: pick('timeoutDiagnostics'),
+    // F212 Phase B: diagnostics outlive one live event and must survive hydration.
+    cliDiagnostics: pick('cliDiagnostics'),
+    governanceBlocked: pick('governanceBlocked'),
+    freshnessClosure: pick('freshnessClosure'),
+    freshness: pick('freshness'),
+    supplement: pick('supplement'),
+    freshnessSupplement: pick('freshnessSupplement'),
+    queueReceipt: pick('queueReceipt'),
+    recall: pick('recall'),
+    systemKind: pick('systemKind'),
+    a2aRouting: pick('a2aRouting'),
+    recovery: pick('recovery'),
+    systemInfo: pick('systemInfo'),
+    invocationReconciliation: pick('invocationReconciliation'),
+    providerRecovery: pick('providerRecovery'),
+  };
+  const definedFields = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Omit<
+    MessageExtra,
+    'rich'
+  >;
+  if (!rich && Object.keys(definedFields).length === 0) return undefined;
+
   return {
     ...(rich ? { rich } : {}),
-    ...(crossPost ? { crossPost } : {}),
-    ...(stream ? { stream } : {}),
-    ...(targetCats ? { targetCats } : {}),
-    ...(scheduler ? { scheduler } : {}),
-    ...(timeoutDiagnostics ? { timeoutDiagnostics } : {}),
-    ...(cliDiagnostics ? { cliDiagnostics } : {}),
-    ...(governanceBlocked ? { governanceBlocked } : {}),
-    ...(systemKind ? { systemKind } : {}),
-    ...(isExplicitPost ? { isExplicitPost: true as const } : {}),
+    ...definedFields,
   };
 }
 
 function getMessageOrderTimestamp(msg: ChatMessageData): number {
-  return msg.deliveredAt ?? msg.timestamp;
+  return getMessageTimelineOrderTime(msg);
 }
 
 function getMessageActivityTimestamp(msg: ChatMessageData): number {
@@ -456,7 +572,7 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     (thinking && thinking === fallback.thinking ? fallbackThinkingChunks : undefined);
   const extra = mergeMessageExtra(preferred.extra, fallback.extra);
 
-  return {
+  const merged: ChatMessageData = {
     ...fallback,
     ...preferred,
     content: preferred.content || fallback.content,
@@ -480,6 +596,9 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...((preferred.deliveredAt ?? fallback.deliveredAt)
       ? { deliveredAt: preferred.deliveredAt ?? fallback.deliveredAt }
       : {}),
+    ...((preferred.timelineOrderAt ?? fallback.timelineOrderAt) !== undefined
+      ? { timelineOrderAt: preferred.timelineOrderAt ?? fallback.timelineOrderAt }
+      : {}),
     ...((preferred.replyTo ?? fallback.replyTo) ? { replyTo: preferred.replyTo ?? fallback.replyTo } : {}),
     ...((preferred.replyPreview ?? fallback.replyPreview)
       ? { replyPreview: preferred.replyPreview ?? fallback.replyPreview }
@@ -487,6 +606,14 @@ function mergeSameIdHydrationMessage(history: ChatMessageData, current: ChatMess
     ...(preferred.mentionsUser || fallback.mentionsUser ? { mentionsUser: true } : {}),
     ...(preferred.isStreaming !== undefined ? { isStreaming: preferred.isStreaming } : {}),
   };
+  if (extra) return merged;
+
+  // The top-level spreads above may contain a runtime-only `extra`. When the
+  // typed fail-closed merge accepted no carrier, remove that raw object instead
+  // of accidentally preserving it through the preferred message.
+  const withoutExtra = { ...merged };
+  delete withoutExtra.extra;
+  return withoutExtra;
 }
 
 // F183 Phase B1 AC-B2: 简化到 ≤ 2 种匹配策略。
@@ -550,9 +677,13 @@ export function mergeReplaceHydrationMessages(
   let reconciledToHistoryCount = 0;
   let replacedHistoryCount = 0;
 
-  for (const msg of currentMsgs) {
-    // F183 Phase D AC-D2 (砚砚 R1 P1 fix): IDB-origin messages NEVER participate
-    // in the merge — server history is authoritative. Skip BEFORE id/streamKey
+  for (const currentMsg of currentMsgs) {
+    let msg = currentMsg;
+    // F183 Phase D AC-D2 (砚砚 R1 P1 fix): ordinary IDB-origin messages never
+    // participate in the merge — server history is authoritative. The sole
+    // exception is an invocation-reconciliation projection: terminal receipts
+    // are immutable, while `/queue` + InvocationRecord immediately revalidate
+    // unresolved receipts after hydration. Skip BEFORE id/streamKey
     // matching so cached IDB never enters mergeSameIdHydrationMessage (which
     // could spread cachedFrom into a "richer-current preferred" outcome) nor
     // the streamKey replacement branch (which would write the cached msg
@@ -560,9 +691,11 @@ export function mergeReplaceHydrationMessages(
     // as-is; for unmatched, the cached copy is dropped. F164 AC-A3 instant
     // render still works: IDB hydrates first paint, API hydration replaces
     // cleanly without cache leakage.
-    if (msg.cachedFrom === 'idb') {
+    const isInvocationReconciliationProjection = msg.extra?.invocationReconciliation !== undefined;
+    if (msg.cachedFrom === 'idb' && !isInvocationReconciliationProjection) {
       continue;
     }
+    if (msg.cachedFrom === 'idb') msg = { ...msg, cachedFrom: undefined };
 
     // Strategy: stable-identity lookup. id 优先于 streamKey（id 命中走 same-id 合并）。
     const idHit = historyIndexByStableId.get(msg.id);
@@ -654,8 +787,8 @@ export function mergeReplaceHydrationMessages(
 
   return {
     messages: mergedMsgs.sort((a, b) => {
-      const ta = a.deliveredAt ?? a.timestamp;
-      const tb = b.deliveredAt ?? b.timestamp;
+      const ta = getMessageTimelineOrderTime(a);
+      const tb = getMessageTimelineOrderTime(b);
       if (ta !== tb) return ta - tb;
       return a.id.localeCompare(b.id);
     }),
@@ -678,11 +811,9 @@ export function useChatHistory(threadId: string) {
     messages,
     isLoadingHistory,
     hasMore,
-    prependHistory,
-    replaceMessages,
+    replaceThreadMessages,
     hydrateThread,
-    setLoadingHistory,
-    clearMessages,
+    setThreadLoadingHistory,
     setCatInvocation,
     replaceThreadTargetCats,
     updateThreadCatStatus,
@@ -694,11 +825,9 @@ export function useChatHistory(threadId: string) {
       messages: s.messages,
       isLoadingHistory: s.isLoadingHistory,
       hasMore: s.hasMore,
-      prependHistory: s.prependHistory,
-      replaceMessages: s.replaceMessages,
+      replaceThreadMessages: s.replaceThreadMessages,
       hydrateThread: s.hydrateThread,
-      setLoadingHistory: s.setLoadingHistory,
-      clearMessages: s.clearMessages,
+      setThreadLoadingHistory: s.setThreadLoadingHistory,
       setCatInvocation: s.setCatInvocation,
       replaceThreadTargetCats: s.replaceThreadTargetCats,
       updateThreadCatStatus: s.updateThreadCatStatus,
@@ -717,6 +846,9 @@ export function useChatHistory(threadId: string) {
   const prevCountRef = useRef(0);
   const scrollSnapshotRef = useRef<number | null>(null);
   const restoreFrameRef = useRef<number | null>(null);
+  const restoreFrameKindRef = useRef<RestoreFrameKind | null>(null);
+  const userScrollUpRef = useRef(false);
+  const userScrollIntentRef = useRef(false);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -727,7 +859,12 @@ export function useChatHistory(threadId: string) {
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
 
+  const isStaleThreadRequest = useCallback((controller: AbortController, capturedThreadId: string) => {
+    return controller.signal.aborted || abortRef.current !== controller || threadIdRef.current !== capturedThreadId;
+  }, []);
+
   const cancelPendingRestore = useCallback(() => {
+    restoreFrameKindRef.current = null;
     if (restoreFrameRef.current !== null) {
       cancelAnimationFrame(restoreFrameRef.current);
       restoreFrameRef.current = null;
@@ -752,6 +889,7 @@ export function useChatHistory(threadId: string) {
   const scheduleRestore = useCallback(
     (saved: SavedScrollState) => {
       cancelPendingRestore();
+      restoreFrameKindRef.current = 'restore';
       let framesRemaining = MAX_RESTORE_FRAMES;
       // Capture threadId at schedule time so a stale callback can't mutate
       // the next thread's scroll state if it fires before effect cleanup.
@@ -761,25 +899,21 @@ export function useChatHistory(threadId: string) {
         // Stale guard: if thread switched before cleanup cancelled us, no-op.
         if (threadIdRef.current !== scheduledForThread) {
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           return;
         }
 
         const el = scrollContainerRef.current;
         if (!el) {
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           return;
         }
 
-        const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-        const targetTop = saved.anchor === 'bottom' ? maxTop : Math.min(saved.top, maxTop);
-        el.scrollTop = targetTop;
-
-        const canSettle = saved.anchor === 'bottom' ? maxTop > 0 : maxTop >= saved.top;
-        const reachedTarget = Math.abs(el.scrollTop - targetTop) <= 1;
-
-        if ((canSettle && reachedTarget) || framesRemaining <= 0) {
-          rememberScrollState(scheduledForThread, el);
+        if (tryRestoreSavedScrollState(el, saved) || framesRemaining <= 0) {
+          scrollPositionsByThread.set(scheduledForThread, { ...saved, top: el.scrollTop });
           restoreFrameRef.current = null;
+          restoreFrameKindRef.current = null;
           window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
           return;
         }
@@ -793,6 +927,31 @@ export function useChatHistory(threadId: string) {
     [cancelPendingRestore],
   );
 
+  const scheduleCurrentAnchorCorrection = useCallback(() => {
+    if (restoreFrameKindRef.current === 'restore' || restoreFrameKindRef.current === 'navigation') return;
+    cancelPendingRestore();
+    const scheduledForThread = threadIdRef.current;
+    const saved = scrollPositionsByThread.get(scheduledForThread);
+    if (!saved) return;
+
+    restoreFrameKindRef.current = 'correction';
+    restoreFrameRef.current = requestAnimationFrame(() => {
+      restoreFrameRef.current = null;
+      restoreFrameKindRef.current = null;
+      if (threadIdRef.current !== scheduledForThread) return;
+
+      const el = scrollContainerRef.current;
+      if (!el || useChatStore.getState().currentThreadId !== scheduledForThread) return;
+      if (saved.anchor === 'bottom') {
+        followBottomAnchor('auto');
+        return;
+      }
+      if (saved.messageAnchor && restoreMessageScrollAnchor(el, saved.messageAnchor)) {
+        scrollPositionsByThread.set(scheduledForThread, { ...saved, top: el.scrollTop });
+      }
+    });
+  }, [cancelPendingRestore, followBottomAnchor]);
+
   // F052: after a cross-post jump, retry scrolling to the source bubble until the message
   // DOM has rendered (thread switch remounts + paginates async). Gives up after
   // MAX_RESTORE_FRAMES so a paged-out source can't spin forever — the caller already fell
@@ -802,16 +961,60 @@ export function useChatHistory(threadId: string) {
       // A cross-post jump preempts the default scroll-restore so the two raf loops don't fight
       // over scrollTop (restore pulls to cached offset, this pulls to the target bubble).
       cancelPendingRestore();
+      restoreFrameKindRef.current = 'navigation';
       const scheduledForThread = threadIdRef.current;
       let framesRemaining = MAX_RESTORE_FRAMES;
-      const tick = () => {
-        if (threadIdRef.current !== scheduledForThread) return;
-        if (scrollToMessage(messageId)) return;
-        framesRemaining -= 1;
-        if (framesRemaining <= 0) return;
-        requestAnimationFrame(tick);
+      const finishNavigation = () => {
+        restoreFrameKindRef.current = null;
+        restoreFrameRef.current = null;
       };
-      requestAnimationFrame(tick);
+      const tick = () => {
+        if (threadIdRef.current !== scheduledForThread) {
+          finishNavigation();
+          return;
+        }
+        if (scrollToMessage(messageId)) {
+          const el = scrollContainerRef.current;
+          if (!el) {
+            finishNavigation();
+            return;
+          }
+
+          const settleState: NavigationSettleState = {
+            framesRemaining,
+            stableFrames: 0,
+          };
+          const settle = () => {
+            const result = advanceNavigationSettle(
+              settleState,
+              scrollContainerRef.current,
+              messageId,
+              threadIdRef.current !== scheduledForThread,
+            );
+            if (result.kind === 'retry') {
+              restoreFrameRef.current = requestAnimationFrame(settle);
+              return;
+            }
+            if (result.kind === 'settled') {
+              scrollPositionsByThread.set(scheduledForThread, {
+                top: result.sample.top,
+                anchor: 'offset',
+                messageAnchor: result.sample.messageAnchor,
+              });
+            }
+            finishNavigation();
+          };
+          restoreFrameRef.current = requestAnimationFrame(settle);
+          return;
+        }
+        framesRemaining -= 1;
+        if (framesRemaining <= 0) {
+          finishNavigation();
+          return;
+        }
+        restoreFrameRef.current = requestAnimationFrame(tick);
+      };
+      restoreFrameRef.current = requestAnimationFrame(tick);
     },
     [cancelPendingRestore],
   );
@@ -829,9 +1032,12 @@ export function useChatHistory(threadId: string) {
       const isCurrentThread = store.currentThreadId === forThread;
       const threadState = store.threadStates[forThread];
       const alreadyActive = isCurrentThread ? store.hasActiveInvocation : threadState?.hasActiveInvocation === true;
+      // A draft is a causally newer active edge even when the coarse bit is
+      // already true. Re-enter the proof-aware writer so a terminal-correlated
+      // cached slot cannot suppress this invocationless evidence.
+      store.setThreadHasActiveInvocation(forThread, true);
       if (alreadyActive) return;
 
-      store.setThreadHasActiveInvocation(forThread, true);
       for (const catId of draftCatIds) {
         const syntheticId = `hydrated-${forThread}-${catId}`;
         if (isCurrentThread) {
@@ -851,10 +1057,10 @@ export function useChatHistory(threadId: string) {
       if (loadingRef.current) return;
       const controller = abortRef.current;
       if (!controller) return;
+      const fetchForThread = threadId; // capture at call time
 
       loadingRef.current = true;
-      setLoadingHistory(true);
-      const fetchForThread = threadId; // capture at call time
+      setThreadLoadingHistory(fetchForThread, true);
       try {
         const isExport =
           typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
@@ -866,9 +1072,10 @@ export function useChatHistory(threadId: string) {
           signal: controller.signal,
         });
         if (!res.ok) return;
-        // Stale check: discard if thread changed during fetch
-        if (threadIdRef.current !== fetchForThread) return;
+        // Stale check: discard if the request was superseded while the response body was in flight.
+        if (isStaleThreadRequest(controller, fetchForThread)) return;
         const data = await res.json();
+        if (isStaleThreadRequest(controller, fetchForThread)) return false;
         const historyMsgs = (data.messages ?? []).map(
           (m: {
             id: string;
@@ -891,6 +1098,8 @@ export function useChatHistory(threadId: string) {
               rich?: { v: number; blocks: unknown[] };
               crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
               stream?: { invocationId?: string };
+              turnExecution?: NonNullable<ChatMessageData['extra']>['turnExecution'];
+              auxiliaryTurnExecutions?: NonNullable<ChatMessageData['extra']>['auxiliaryTurnExecutions'];
               scheduler?: SchedulerMessageExtra['scheduler'];
               systemKind?: 'a2a_routing' | 'context_briefing';
               /** #814: explicit post_message bypass — survives hydration so F5/thread-switch
@@ -901,6 +1110,12 @@ export function useChatHistory(threadId: string) {
               /** F212 Phase B: history-loader path may already carry cliDiagnostics under
                *  extra (when client wrote it via active-path) — prefer it over metadata copy. */
               cliDiagnostics?: CliDiagnostics;
+              recovery?: NonNullable<ChatMessageData['extra']>['recovery'];
+              freshness?: NonNullable<ChatMessageData['extra']>['freshness'];
+              supplement?: NonNullable<ChatMessageData['extra']>['supplement'];
+              freshnessSupplement?: NonNullable<ChatMessageData['extra']>['freshnessSupplement'];
+              queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
+              messageBundle?: NonNullable<ChatMessageData['extra']>['messageBundle'];
             };
             timestamp: number;
             summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
@@ -911,6 +1126,7 @@ export function useChatHistory(threadId: string) {
             source?: { connector: string; label: string; icon: string; url?: string };
             mentionsUser?: boolean;
             deliveredAt?: number;
+            timelineOrderAt?: number;
             replyTo?: string;
             replyPreview?: ReplyPreview;
           }) =>
@@ -945,10 +1161,18 @@ export function useChatHistory(threadId: string) {
                   m.extra?.rich ||
                   m.extra?.crossPost ||
                   m.extra?.stream ||
+                  m.extra?.turnExecution ||
+                  m.extra?.auxiliaryTurnExecutions ||
                   m.extra?.scheduler ||
                   m.extra?.systemKind ||
                   m.extra?.isExplicitPost ||
                   m.extra?.targetCats ||
+                  m.extra?.recovery ||
+                  m.extra?.freshness ||
+                  m.extra?.supplement ||
+                  m.extra?.freshnessSupplement ||
+                  m.extra?.queueReceipt ||
+                  m.extra?.messageBundle ||
                   cliDiag;
                 if (!hasExtraField) return {};
                 return {
@@ -956,10 +1180,20 @@ export function useChatHistory(threadId: string) {
                     ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
                     ...(m.extra?.crossPost ? { crossPost: m.extra.crossPost } : {}),
                     ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
+                    ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
+                    ...(m.extra?.auxiliaryTurnExecutions
+                      ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions }
+                      : {}),
                     ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
                     ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
                     ...(m.extra?.isExplicitPost ? { isExplicitPost: true as const } : {}),
                     ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                    ...(m.extra?.recovery ? { recovery: m.extra.recovery } : {}),
+                    ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
+                    ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
+                    ...(m.extra?.freshnessSupplement ? { freshnessSupplement: m.extra.freshnessSupplement } : {}),
+                    ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
+                    ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                     ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
                   },
                 };
@@ -969,6 +1203,7 @@ export function useChatHistory(threadId: string) {
               ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
               ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
               ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+              ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
               ...(m.source ? { source: m.source } : {}),
               ...(m.mentionsUser ? { mentionsUser: true } : {}),
               ...(m.replyTo ? { replyTo: m.replyTo } : {}),
@@ -979,17 +1214,16 @@ export function useChatHistory(threadId: string) {
             }) as ChatMessageData,
         );
         if (options?.replace) {
-          // Replace mode now does a non-destructive merge first, then resets the thread
-          // snapshot to the merged result in one step. The clear is no longer "drop
-          // everything and trust history", it is "replace the stale cache with the
-          // merged timeline we just computed". By the time this async callback runs,
-          // setCurrentThread has already executed, so clearMessages targets the
-          // correct thread.
+          // Merge only against the captured Thread's projection, then replace that
+          // projection atomically. The flat compatibility view may already point at
+          // another Thread by the time this async callback commits.
           const currentState = useChatStore.getState();
+          const targetProjection =
+            currentState.currentThreadId === fetchForThread ? currentState : currentState.threadStates[fetchForThread];
           const mergeResult = mergeReplaceHydrationMessages(
             historyMsgs,
-            currentState.messages,
-            currentState.catInvocations,
+            targetProjection?.messages ?? [],
+            targetProjection?.catInvocations ?? {},
           );
           const mergedMsgs = mergeResult.messages;
           recordDebugEvent({
@@ -1004,7 +1238,7 @@ export function useChatHistory(threadId: string) {
             queueLength: mergedMsgs.length,
             reason: [
               `history=${historyMsgs.length}`,
-              `current=${currentState.messages.length}`,
+              `targetLocal=${targetProjection?.messages.length ?? 0}`,
               `preservedLocal=${mergeResult.stats.preservedLocalCount}`,
               `reconciledToHistory=${mergeResult.stats.reconciledToHistoryCount}`,
               `replacedHistory=${mergeResult.stats.replacedHistoryCount}`,
@@ -1022,19 +1256,24 @@ export function useChatHistory(threadId: string) {
           const projectedMerged = projectCanonicalBubbles({ records: mergedMsgs }).messages;
           hydrateThread(fetchForThread, projectedMerged, data.hasMore ?? false);
           restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
+          resumeInvocationReconciliationAfterHydration(fetchForThread);
           return true;
         }
         // F194 Phase Z8 AC-Z22 + R2 P2 (砚砚): page-boundary projection — project
         // (new historyMsgs ∪ existing store messages) so cross-page same-(catId, invocationId)
         // raw records collapse into one canonical bubble. Plain prependHistory only dedupes
         // by id, leaving canonical siblings split across page boundary.
-        const beforePrepend = useChatStore.getState().messages;
+        const currentState = useChatStore.getState();
+        const beforePrepend =
+          currentState.currentThreadId === fetchForThread
+            ? currentState.messages
+            : (currentState.threadStates[fetchForThread]?.messages ?? []);
         const unionProjected = projectCanonicalBubbles({
           records: [...historyMsgs, ...beforePrepend],
         }).messages;
         // Replace store with projected union (cleaner than prepend + post-merge).
         // hasMore propagates older-history pagination state.
-        replaceMessages(unionProjected, data.hasMore ?? false);
+        replaceThreadMessages(fetchForThread, unionProjected, data.hasMore ?? false);
         restoreActiveFromDrafts(fetchForThread, data.messages ?? []);
         // F164: Snapshot fetched messages to IndexedDB (fire-and-forget)
         const snapshotState = useChatStore.getState();
@@ -1050,11 +1289,18 @@ export function useChatHistory(threadId: string) {
         // Do not let stale/aborted request clear loading state for a newer thread request.
         if (abortRef.current === controller && threadIdRef.current === fetchForThread) {
           loadingRef.current = false;
-          setLoadingHistory(false);
+          setThreadLoadingHistory(fetchForThread, false);
         }
       }
     },
-    [setLoadingHistory, prependHistory, replaceMessages, hydrateThread, restoreActiveFromDrafts, threadId],
+    [
+      setThreadLoadingHistory,
+      replaceThreadMessages,
+      hydrateThread,
+      restoreActiveFromDrafts,
+      isStaleThreadRequest,
+      threadId,
+    ],
   );
 
   const fetchTasks = useCallback(async () => {
@@ -1169,7 +1415,7 @@ export function useChatHistory(threadId: string) {
         queue: QueueEntry[];
         paused: boolean;
         pauseReason?: 'canceled' | 'failed';
-        activeInvocations?: Array<{ catId: string; startedAt: number }>;
+        activeInvocations?: QueueActiveInvocationSlot[];
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
@@ -1183,6 +1429,7 @@ export function useChatHistory(threadId: string) {
       const activeStateSnapshot: Record<string, { catId: string; mode: string; startedAt?: number }> = {};
       if (data.activeInvocations && data.activeInvocations.length > 0) {
         const activeCatIds = data.activeInvocations.map((s) => s.catId);
+        const activeByCatId = new Map(data.activeInvocations.map((slot) => [slot.catId, slot]));
         const livenessSnapshot =
           fetchForThread === store.currentThreadId
             ? { intentMode: store.intentMode, targetCats: store.targetCats, catStatuses: store.catStatuses }
@@ -1193,30 +1440,18 @@ export function useChatHistory(threadId: string) {
           activeCatIds,
         });
         const previousStatuses = livenessSnapshot?.catStatuses ?? {};
-        replaceThreadTargetCats(fetchForThread, hydratedTargetCats);
+        Object.assign(
+          activeStateSnapshot,
+          hydrateQueueActiveInvocationSlots({
+            threadId: fetchForThread,
+            slots: data.activeInvocations,
+            targetCatIds: hydratedTargetCats,
+          }),
+        );
         for (const catId of hydratedTargetCats) {
-          if (!activeCatIds.includes(catId) && previousStatuses[catId]) {
+          if (!activeByCatId.has(catId) && previousStatuses[catId]) {
             updateThreadCatStatus(fetchForThread, catId, previousStatuses[catId]);
           }
-        }
-        for (const catId of activeCatIds) {
-          updateThreadCatStatus(fetchForThread, catId, 'streaming');
-        }
-        // F108B P1-2: Clear stale activeInvocations before hydrating from server truth.
-        // Without this, snapshot-restored slots (e.g. codex) persist alongside
-        // server-reported slots (e.g. opus), causing ghost entries in ThreadExecutionBar.
-        store.clearThreadActiveInvocation(fetchForThread);
-        store.setThreadHasActiveInvocation(fetchForThread, true);
-        // Hydrate activeInvocations record so ThreadExecutionBar renders.
-        // Server now returns {catId, startedAt} — use server startedAt to preserve elapsed time.
-        for (const slot of data.activeInvocations) {
-          const syntheticId = `hydrated-${fetchForThread}-${slot.catId}`;
-          if (fetchForThread === store.currentThreadId) {
-            store.addActiveInvocation(syntheticId, slot.catId, 'execute', slot.startedAt);
-          } else {
-            store.addThreadActiveInvocation(fetchForThread, syntheticId, slot.catId, 'execute', slot.startedAt);
-          }
-          activeStateSnapshot[syntheticId] = { catId: slot.catId, mode: 'execute', startedAt: slot.startedAt };
         }
         // F194 Phase Z10 AC-Z28: persist for next F5.
         void saveThreadActiveState(fetchForThread, {
@@ -1284,12 +1519,25 @@ export function useChatHistory(threadId: string) {
     // switching away and back shows stale cached messages (no streaming draft).
     const hasActiveInvocation = cached?.hasActiveInvocation === true;
     const hasUnstableBubbleIdentity = cached ? shouldForceReplaceHydrationForCachedMessages(cached.messages) : false;
+    const pendingTeleport = peekPendingTeleport(threadId);
+    const pendingCrossPost = peekPendingCrossPostScroll(threadId);
+    const hasMissingTeleportTarget = Boolean(
+      cached && pendingTeleport && !cached.messages.some((message) => message.id === pendingTeleport.messageId),
+    );
+    const hasMissingCrossPostTarget = Boolean(
+      cached &&
+        pendingCrossPost &&
+        !findCrossPostTargetMessageId(
+          cached.messages,
+          pendingCrossPost.sourceInvocationId,
+          pendingCrossPost.senderCatId,
+        ),
+    );
     let secondaryHydrationStarted = false;
     const hydrateSecondaryPanels = () => {
       if (secondaryHydrationStarted) return;
       secondaryHydrationStarted = true;
-      if (abortRef.current !== controller || threadIdRef.current !== threadId) return;
-      if (controller.signal.aborted) return;
+      if (isStaleThreadRequest(controller, threadId)) return;
       void fetchTasks();
       void fetchTaskProgress();
       void fetchQueue();
@@ -1297,7 +1545,9 @@ export function useChatHistory(threadId: string) {
 
     // F164: Reset offline badge on every thread switch so stale state from
     // a previous thread's aborted fetch never leaks to the new thread.
-    useChatStore.getState().setOfflineSnapshot(false);
+    if (useChatStore.getState().currentThreadId === threadId) {
+      useChatStore.getState().setOfflineSnapshot(false);
+    }
 
     // F194 Phase Z10 AC-Z28 (R14): restore IDB active state snapshot for F5
     // first paint so UI doesn't show fake "idle" gap while fetchQueue is
@@ -1308,7 +1558,7 @@ export function useChatHistory(threadId: string) {
     void (async () => {
       try {
         const snapshot = await loadThreadActiveState(threadId);
-        if (abortRef.current !== controller || threadIdRef.current !== threadId) return;
+        if (isStaleThreadRequest(controller, threadId)) return;
         if (!snapshot) return;
         // F194 Phase Z10 (砚砚 R1 P1): if fetchQueue already wrote server truth
         // (active OR idle), IDB restore must NOT overwrite. The previous
@@ -1334,23 +1584,47 @@ export function useChatHistory(threadId: string) {
         let restoredFromIdb = false;
         try {
           const idbSnapshot = await loadCachedMessages(threadId);
+          if (isStaleThreadRequest(controller, threadId)) return;
           if (idbSnapshot && idbSnapshot.messages.length > 0) {
-            replaceMessages(idbSnapshot.messages, idbSnapshot.hasMore);
-            useChatStore.getState().setOfflineSnapshot(true);
+            replaceThreadMessages(threadId, idbSnapshot.messages, idbSnapshot.hasMore);
+            if (useChatStore.getState().currentThreadId === threadId) {
+              useChatStore.getState().setOfflineSnapshot(true);
+            }
             restoredFromIdb = true;
           } else if (isThreadSynced) {
-            clearMessages();
+            // Timeout projections are absent from server message history by
+            // design. Preserve their receipt; `/queue` + InvocationRecord
+            // revalidate unresolved phases instead of losing identity on F5.
+            replaceThreadMessages(
+              threadId,
+              invocationReconciliationMessages(useChatStore.getState().getThreadState(threadId).messages),
+              true,
+            );
           }
         } catch {
-          if (isThreadSynced) clearMessages();
+          if (isStaleThreadRequest(controller, threadId)) return;
+          if (isThreadSynced) {
+            replaceThreadMessages(
+              threadId,
+              invocationReconciliationMessages(useChatStore.getState().getThreadState(threadId).messages),
+              true,
+            );
+          }
         }
+        if (isStaleThreadRequest(controller, threadId)) return;
         // Always fetch fresh data from API (replace snapshot)
         const fetchOk = await fetchHistory(undefined, { replace: true });
         // F164: Clear offline badge only after successful API fetch
-        if (restoredFromIdb && fetchOk) {
+        if (restoredFromIdb && fetchOk && useChatStore.getState().currentThreadId === threadId) {
           useChatStore.getState().setOfflineSnapshot(false);
         }
-      } else if (hasActiveInvocation || (cached && cached.unreadCount > 0) || hasUnstableBubbleIdentity) {
+      } else if (
+        hasActiveInvocation ||
+        (cached && cached.unreadCount > 0) ||
+        hasUnstableBubbleIdentity ||
+        hasMissingTeleportTarget ||
+        hasMissingCrossPostTarget
+      ) {
         // #80 fix-A P1: Force-refresh with replace mode — the async response handler
         // will clear stale cache after setCurrentThread has run, then set fresh data
         // including DraftStore drafts in correct timestamp order.
@@ -1376,7 +1650,17 @@ export function useChatHistory(threadId: string) {
       cancelPendingRestore();
       abortRef.current?.abort();
     };
-  }, [threadId, cancelPendingRestore, clearMessages, fetchHistory, fetchQueue, fetchTaskProgress, fetchTasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    threadId,
+    cancelPendingRestore,
+    fetchHistory,
+    fetchQueue,
+    fetchTaskProgress,
+    fetchTasks,
+    isStaleThreadRequest,
+    queueFetchedControllers,
+    replaceThreadMessages,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bug C safety net: when useAgentMessages detects done(isFinal) with no
   // streaming bubble, or processThreadSeq detects gap/epoch-change, it bumps
@@ -1510,7 +1794,7 @@ export function useChatHistory(threadId: string) {
       const heightDelta = el.scrollHeight - scrollSnapshotRef.current;
       el.scrollTop += heightDelta;
       scrollSnapshotRef.current = null;
-      rememberScrollState(threadId, el);
+      rememberScrollState(threadId, el, false, true);
       return;
     }
 
@@ -1537,9 +1821,11 @@ export function useChatHistory(threadId: string) {
   useEffect(() => {
     if (messages.length === 0) return;
     if (useChatStore.getState().currentThreadId !== threadId) return;
-    const targetId = resolveCrossPostScrollTarget(threadId, messages, { authoritative: !isOfflineSnapshot });
+    const targetId = resolveCrossPostScrollTarget(threadId, messages, {
+      authoritative: !isOfflineSnapshot && !isLoadingHistory && !loadingRef.current,
+    });
     if (targetId) scheduleScrollToMessage(targetId);
-  }, [messages, threadId, isOfflineSnapshot, scheduleScrollToMessage]);
+  }, [messages, threadId, isOfflineSnapshot, isLoadingHistory, scheduleScrollToMessage]);
 
   // F227: resolve a pending teleport (from cat_cafe_teleport → Event Memory) the
   // same way as cross-post — across the tentative IDB snapshot + the authoritative
@@ -1552,6 +1838,7 @@ export function useChatHistory(threadId: string) {
   const resolveTeleport = useCallback(() => {
     if (messages.length === 0) return;
     if (useChatStore.getState().currentThreadId !== threadId) return;
+    if (loadingRef.current) return;
     const targetId = resolvePendingTeleport(
       threadId,
       messages.map((m) => m.id),
@@ -1571,7 +1858,7 @@ export function useChatHistory(threadId: string) {
       })
     ) {
       const oldest = messages.find((m) => !m.id.startsWith('draft-'));
-      if (oldest) void fetchHistory(`${oldest.deliveredAt ?? oldest.timestamp}:${oldest.id}`);
+      if (oldest) void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
     }
   }, [messages, threadId, isOfflineSnapshot, hasMore, isLoadingHistory, scheduleScrollToMessage, fetchHistory]);
 
@@ -1588,21 +1875,93 @@ export function useChatHistory(threadId: string) {
   }, [resolveTeleport]);
 
   useEffect(() => {
-    let rafId: number | null = null;
-    const handler = () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        followBottomAnchor('auto');
-      });
+    const handler = () => scheduleCurrentAnchorCorrection();
+    window.addEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+    window.addEventListener(MESSAGE_VIEWPORT_MOUNTED_EVENT, handler);
+    return () => {
+      window.removeEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+      window.removeEventListener(MESSAGE_VIEWPORT_MOUNTED_EVENT, handler);
+    };
+  }, [scheduleCurrentAnchorCorrection]);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    let touchY: number | null = null;
+    let pointerY: number | null = null;
+    const markScrollIntent = (upward: boolean) => {
+      userScrollIntentRef.current = true;
+      if (upward) userScrollUpRef.current = true;
+      cancelPendingRestore();
+    };
+    const handleWheel = (event: WheelEvent) => {
+      markScrollIntent(event.deltaY < 0);
+    };
+    const handleTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? null;
+    };
+    const handleTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? null;
+      if (touchY !== null && nextY !== null && nextY !== touchY) markScrollIntent(nextY > touchY);
+      touchY = nextY;
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      markScrollIntent(false);
+      pointerY = event.clientY;
+    };
+    const handlePointerMove = (event: PointerEvent) => {
+      if (pointerY !== null && event.clientY !== pointerY) markScrollIntent(event.clientY < pointerY);
+      pointerY = event.clientY;
+    };
+    const clearPointer = () => {
+      pointerY = null;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || target.matches('input, textarea, select, [role="textbox"]')))
+      ) {
+        return;
+      }
+      const upward =
+        event.key === 'ArrowUp' ||
+        event.key === 'PageUp' ||
+        event.key === 'Home' ||
+        (event.key === ' ' && event.shiftKey);
+      const downward =
+        event.key === 'ArrowDown' ||
+        event.key === 'PageDown' ||
+        event.key === 'End' ||
+        (event.key === ' ' && !event.shiftKey);
+      if (upward || downward) {
+        markScrollIntent(upward);
+      }
     };
 
-    window.addEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+    el.addEventListener('wheel', handleWheel, { passive: true });
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: true });
+    el.addEventListener('touchend', clearPointer, { passive: true });
+    el.addEventListener('pointerdown', handlePointerDown, { passive: true });
+    el.addEventListener('pointermove', handlePointerMove, { passive: true });
+    el.addEventListener('pointerup', clearPointer, { passive: true });
+    el.addEventListener('pointercancel', clearPointer, { passive: true });
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      window.removeEventListener(CHAT_LAYOUT_CHANGED_EVENT, handler);
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', clearPointer);
+      el.removeEventListener('pointerdown', handlePointerDown);
+      el.removeEventListener('pointermove', handlePointerMove);
+      el.removeEventListener('pointerup', clearPointer);
+      el.removeEventListener('pointercancel', clearPointer);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [followBottomAnchor]);
+  }, [cancelPendingRestore]);
 
   // Load more when scrolled to top + clowder-ai#27 continuous scroll save
   const handleScroll = useCallback(() => {
@@ -1613,7 +1972,9 @@ export function useChatHistory(threadId: string) {
     // Guard: don't save during store swap (DOM content may not match threadId,
     // and browser may fire scroll events with scrollTop=0 during content swap).
     if (useChatStore.getState().currentThreadId === threadIdRef.current) {
-      rememberScrollState(threadIdRef.current, el);
+      rememberScrollState(threadIdRef.current, el, userScrollUpRef.current, !userScrollIntentRef.current);
+      userScrollUpRef.current = false;
+      userScrollIntentRef.current = false;
     }
 
     if (!hasMore || isLoadingHistory) return;
@@ -1621,7 +1982,7 @@ export function useChatHistory(threadId: string) {
       // #80 cloud R8 P2: skip draft rows — their synthetic IDs break cursor semantics
       const oldest = messages.find((m) => !m.id.startsWith('draft-'));
       if (oldest) {
-        void fetchHistory(`${oldest.deliveredAt ?? oldest.timestamp}:${oldest.id}`);
+        void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
       }
     }
   }, [hasMore, isLoadingHistory, messages, fetchHistory]);

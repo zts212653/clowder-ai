@@ -1,9 +1,11 @@
 // F148: Hierarchical Context Transport — pure functions for smart window assembly.
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
+import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
 import { formatPromptTimeRange } from '../../format-time.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
+import type { ThreadMemorySourceRef } from '../../stores/ports/ThreadStore.js';
 
 // --- Phase D: Coverage Map (AC-D2) ---
 
@@ -15,10 +17,22 @@ export interface CoverageMap {
     available: boolean;
     sessionsIncorporated: number;
     decisions?: string[];
-    openQuestions?: string[];
+    decisionRefs?: ThreadMemorySourceRef[];
+    /**
+     * F296 AC-A2: `openQuestions` is deliberately absent. The regex/summary
+     * producer has no canonical lifecycle state and no invalidator, so a closed
+     * question keeps claiming "still open". Only a canonical owner supplying
+     * `asOf + unresolved state + invalidator` may re-enter this contract.
+     */
   } | null;
-  retrievalHints: string[];
+  /**
+   * F296 AC-A1: heuristic recall may only be represented by a content-free
+   * pointer. Candidate titles/snippets are never carried here, so no downstream
+   * surface (prompt, briefing card, eval) can resurrect them as authority.
+   */
+  recallPointer: { candidateCount: number };
   searchSuggestions?: string[];
+  semanticSearchTerms?: string[];
 }
 
 export interface CoverageMapInput {
@@ -29,10 +43,17 @@ export interface CoverageMapInput {
     available: boolean;
     sessionsIncorporated: number;
     decisions?: string[];
-    openQuestions?: string[];
+    decisionRefs?: ThreadMemorySourceRef[];
+    /**
+     * F296 AC-A2: `openQuestions` is deliberately absent. The regex/summary
+     * producer has no canonical lifecycle state and no invalidator, so a closed
+     * question keeps claiming "still open". Only a canonical owner supplying
+     * `asOf + unresolved state + invalidator` may re-enter this contract.
+     */
   } | null;
-  retrievalHints: string[];
+  recallPointer: { candidateCount: number };
   searchSuggestions?: string[];
+  semanticSearchTerms?: string[];
 }
 
 export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
@@ -48,8 +69,9 @@ export function buildCoverageMap(input: CoverageMapInput): CoverageMap {
     },
     anchorIds: input.anchorIds,
     threadMemory: input.threadMemory,
-    retrievalHints: input.retrievalHints,
+    recallPointer: input.recallPointer,
     ...(input.searchSuggestions?.length ? { searchSuggestions: input.searchSuggestions } : {}),
+    ...(input.semanticSearchTerms?.length ? { semanticSearchTerms: input.semanticSearchTerms } : {}),
   };
 }
 
@@ -428,7 +450,86 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
 
 /** Minimal interface for evidence store search — matches IEvidenceStore.search signature */
 interface EvidenceSearchable {
-  search(query: string, options?: Record<string, unknown>): Promise<Array<{ title: string; summary?: string }>>;
+  search(
+    query: string,
+    options?: Record<string, unknown>,
+  ): Promise<
+    Array<{
+      title: string;
+      summary?: string;
+      anchor: string;
+      sourcePath?: string;
+      kind?: string;
+    }>
+  >;
+}
+
+export type RecalledEvidenceCandidate = PushRecallPresentation['candidates'][number];
+
+export interface RecallEvidenceResult {
+  query: string;
+  /**
+   * F296 AC-A1: content-free coordinates only (anchor / rank / sourcePath /
+   * docKind). Titles and summaries are dropped at the producer so no consumer
+   * can inject heuristic candidate bodies into a model-facing prompt.
+   */
+  candidates: RecalledEvidenceCandidate[];
+}
+
+/**
+ * F296 AC-A1: the only model-facing rendering of a heuristic recall hit.
+ * Content-free: it states that history exists and how to drill it, never what
+ * the candidates say.
+ */
+export function formatRecallPointer(input: { label: string; candidateCount: number }): string {
+  return [
+    `[${input.label} — pointer only]`,
+    `${input.candidateCount} 条启发式候选未展开正文（未经当前适用性校验，不构成真相源）。`,
+    '需要时自行检索：cat_cafe_search_evidence(mode="hybrid") 或 cat_cafe_graph_resolve(anchor)。',
+    `[/${input.label}]`,
+  ].join('\n');
+}
+
+/**
+ * F263: Strip structural envelope blocks that carry no semantic signal for
+ * evidence search queries. Without this, raw `.slice(0, 300)` on messages
+ * with long L0/navigation/history prefixes captures only metadata,
+ * causing push-recall to miss decision-bearing content in the tail.
+ *
+ * Stripping targets (well-delimited, stable across format revisions):
+ *   - `[导航]...[/导航]` navigation blocks
+ *   - `[对话历史...[/对话历史]` conversation history blocks
+ *   - A leading `> L0 Staging Layer` block through its typed separator
+ *   - Single-line metadata (`Identity:`, `📨`, `---`, `[System: ...]`)
+ */
+export function stripStructuralEnvelope(raw: string): string {
+  const withoutL0Staging = stripTypedL0Staging(raw);
+  const stripped = withoutL0Staging
+    // Block-delimited sections (navigation, conversation history)
+    .replace(/\[导航\][\s\S]*?\[\/导航\]/g, '')
+    .replace(/\[对话历史[^\]]*\][\s\S]*?\[\/对话历史\]/g, '')
+    // Single-line typed metadata patterns. Generic blockquotes are user semantics.
+    .replace(/^\[System:.*\]$/gm, '')
+    .replace(/^Identity:.*$/gm, '')
+    .replace(/^📨.*$/gm, '')
+    .replace(/^---+$/gm, '');
+  if (stripped === raw) return raw;
+  return stripped.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function stripTypedL0Staging(raw: string): string {
+  const lines = raw.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().length > 0);
+  if (start < 0 || !/^>\s*L0 Staging Layer\b/.test(lines[start] ?? '')) return raw;
+
+  const typedSeparator = lines.findIndex((line, index) => index > start && /^---+$/.test(line.trim()));
+  if (typedSeparator >= 0) {
+    return [...lines.slice(0, start), ...lines.slice(typedSeparator + 1)].join('\n');
+  }
+
+  let end = start;
+  while (end + 1 < lines.length && /^>/.test(lines[end + 1] ?? '')) end += 1;
+  return [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
 }
 
 /**
@@ -436,28 +537,30 @@ interface EvidenceSearchable {
  * Composite query from thread title + current message + recent messages.
  * Configurable timeout, fail-open (returns [] on any error).
  */
-export async function recallEvidence(
+export async function recallEvidenceWithProvenance(
   evidenceStore: EvidenceSearchable | undefined,
   threadTitle: string,
   currentUserMessage: string,
   recentMessages: readonly StoredMessage[],
   config: HierarchicalContextConfig,
-): Promise<string[]> {
-  if (!evidenceStore) return [];
+): Promise<RecallEvidenceResult> {
+  if (!evidenceStore) return { query: '', candidates: [] };
 
   try {
-    // Build composite query from thread title + current message + recent non-system msgs
+    // Build composite query from thread title + current message + recent non-system msgs.
+    // F263: strip structural envelope (navigation/history/staging blocks) before slicing
+    // to ensure semantic content is captured even when the message starts with long metadata.
     const recentContent = recentMessages
       .filter((m) => m.content.length > 0)
       .slice(-2)
-      .map((m) => m.content.slice(0, 200))
+      .map((m) => stripStructuralEnvelope(m.content).slice(0, 200))
       .join(' ');
-    const compositeQuery = [threadTitle, currentUserMessage.slice(0, 300), recentContent]
+    const compositeQuery = [threadTitle, stripStructuralEnvelope(currentUserMessage).slice(0, 300), recentContent]
       .filter(Boolean)
       .join(' ')
       .trim();
 
-    if (!compositeQuery) return [];
+    if (!compositeQuery) return { query: '', candidates: [] };
 
     // Race with timeout
     const searchPromise = evidenceStore.search(compositeQuery, { mode: 'hybrid' });
@@ -466,9 +569,18 @@ export async function recallEvidence(
     );
 
     const hits = await Promise.race([searchPromise, timeoutPromise]);
-    return hits.slice(0, config.maxEvidenceHits).map((hit) => `[Evidence: ${hit.title}] ${hit.summary ?? ''}`.trim());
+    return {
+      query: compositeQuery,
+      // F296 AC-A1: hit.title / hit.summary are deliberately dropped here.
+      candidates: hits.slice(0, config.maxEvidenceHits).map((hit, rank) => ({
+        anchor: hit.anchor,
+        rank,
+        ...(hit.sourcePath ? { sourcePath: hit.sourcePath } : {}),
+        ...(hit.kind ? { docKind: hit.kind } : {}),
+      })),
+    };
   } catch {
     // Fail-open: timeout or any error → return empty
-    return [];
+    return { query: '', candidates: [] };
   }
 }

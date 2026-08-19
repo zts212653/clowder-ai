@@ -127,6 +127,7 @@ export interface DistillationCheckpointDeps {
 export class DistillationCheckpoint {
   private readonly store: IOpportunityStore;
   private readonly log: Logger;
+  private readonly featPhaseCloseInFlight = new Map<string, Promise<CheckpointResult>>();
 
   constructor(deps: DistillationCheckpointDeps) {
     this.store = deps.opportunityStore;
@@ -139,7 +140,21 @@ export class DistillationCheckpoint {
    */
   async onFeatPhaseClose(ctx: FeatPhaseCloseContext): Promise<CheckpointResult> {
     const sourceId = `feat-phase-close:${ctx.featureId}:${ctx.phaseLabel}`;
+    const inFlight = this.featPhaseCloseInFlight.get(sourceId);
+    if (inFlight) return inFlight;
 
+    const operation = this.recordFeatPhaseClose(ctx, sourceId);
+    this.featPhaseCloseInFlight.set(sourceId, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.featPhaseCloseInFlight.get(sourceId) === operation) {
+        this.featPhaseCloseInFlight.delete(sourceId);
+      }
+    }
+  }
+
+  private async recordFeatPhaseClose(ctx: FeatPhaseCloseContext, sourceId: string): Promise<CheckpointResult> {
     const existing = await this.store.getBySourceId(sourceId);
     if (existing) {
       this.log.info(`[distillation-checkpoint] feat-phase-close already recorded: ${sourceId}`);

@@ -1,3 +1,5 @@
+import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+
 /**
  * List Recent Tool — F188 Phase F (AC-F2)
  *
@@ -9,9 +11,15 @@
  * (future); v1 only sees public/internal collections.
  */
 
+import { formatRecallMeta } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+
+const defineTool = defineMcpMigrationFactory('recent-tools.ts', undefined, {
+  resourceFamily: 'evidence-navigation',
+  authority: 'local-runtime',
+});
 
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 
@@ -28,7 +36,7 @@ export const listRecentInputSchema = {
     .array(z.string())
     .optional()
     .describe(
-      'Filter by document kinds (feature / decision / lesson / plan / phase / discussion / research). Omit = all.',
+      'Filter by document kinds (feature / decision / architecture / lesson / plan / phase / discussion / research). Omit = all.',
     ),
 };
 
@@ -79,13 +87,32 @@ export async function handleListRecent(input: {
     const response = await fetch(url);
     if (!response.ok) {
       const text = await response.text();
-      return errorResult(`list_recent failed (${response.status}): ${text}`);
+      return recallErrorResult(
+        `list_recent failed (${response.status}): ${text}`,
+        'list_recent failed before recent items were returned. Check the API error and retry.',
+      );
     }
     const data = (await response.json()) as RecentResponse;
     return successResult(formatRecent(data, input.since ?? '7d'));
   } catch (err) {
-    return errorResult(`list_recent error: ${err instanceof Error ? err.message : String(err)}`);
+    return recallErrorResult(
+      `list_recent error: ${err instanceof Error ? err.message : String(err)}`,
+      'list_recent request failed before recent items were returned. Check API connectivity and retry.',
+    );
   }
+}
+
+function recallErrorResult(message: string, readNextHint: string): ToolResult {
+  return errorResult(
+    [
+      message,
+      formatRecallMeta({
+        resultStatus: 'error',
+        resultCount: null,
+        readNextHint,
+      }),
+    ].join('\n'),
+  );
 }
 
 function formatRecent(data: RecentResponse, since: string): string {
@@ -132,6 +159,22 @@ function formatRecent(data: RecentResponse, since: string): string {
   }
   lines.push('');
   lines.push(crossReferenceFooter());
+  lines.push(
+    formatRecallMeta({
+      resultStatus: data.items.length === 0 ? 'no_results' : 'counted',
+      resultCount: data.items.length,
+      previewItems: data.items.slice(0, 3).map((item) => ({
+        title: item.title,
+        anchor: item.anchor,
+        confidence: item.kind,
+        snippet: `${item.updatedAt.slice(0, 10)} | ${item.source}`,
+      })),
+      readNextHint:
+        data.items.length === 0
+          ? 'No recent items were returned for this window. Broaden since/scope or switch to search_evidence.'
+          : 'Use graph_resolve for a precise anchor, or read the listed source when you need source detail.',
+    }),
+  );
   return lines.join('\n');
 }
 
@@ -146,10 +189,10 @@ function crossReferenceFooter(): string {
 }
 
 export const recentTools = [
-  {
+  defineTool({
     name: 'cat_cafe_list_recent',
     description: [
-      'Browse recent docs/threads by time window. NO query needed — designed for cold-start "我记得最近讨论过什么" / "压缩后扫一眼" scenarios.',
+      'Browse recent docs/threads by time window, including architecture maps. NO query needed — designed for cold-start "我记得最近讨论过什么" / "压缩后扫一眼" scenarios.',
       'Use when: zero prior knowledge of what to search for; want to scan latest activity.',
       'Not for: precise anchor lookup → graph_resolve. Semantic search → search_evidence.',
       'Timestamp semantics: for docs/memory entries, updatedAt is the source file mtime (content activity), not index rebuild time; trajectories use task trajectory updatedAt.',
@@ -159,5 +202,11 @@ export const recentTools = [
     ].join('\n'),
     inputSchema: listRecentInputSchema,
     handler: handleListRecent,
-  },
+    governance: {
+      implementationExport: 'handleListRecent',
+      action: 'read',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
 ] as const;

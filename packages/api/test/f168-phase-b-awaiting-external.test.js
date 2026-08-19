@@ -6,7 +6,7 @@
  * Covers:
  *  - State machine: case.awaiting_external in_progress→awaiting_external
  *  - State machine: external activity auto-restores awaiting_external→in_progress
- *  - Delivery policy: complete rule table (OWNER/MEMBER silent, labeled silent, etc.)
+ *  - Delivery policy: association is context; only exact noise/metadata may be silent
  */
 
 import assert from 'node:assert/strict';
@@ -111,23 +111,37 @@ describe('state machine: awaiting_external auto-restore', () => {
     assert.strictEqual(result.next, 'in_progress');
   });
 
-  it('issue.commented from OWNER stays in awaiting_external (silent)', () => {
+  it('issue.commented from OWNER restores awaiting_external → in_progress', () => {
     assert.ok(transition);
     const event = makeEvent('issue.commented', {
       classification: 'informational',
       payload: { commentId: 2, authorLogin: 'maintainer', authorAssociation: 'OWNER' },
     });
     const result = transition('awaiting_external', event, EMPTY_SNAPSHOT);
-    // OWNER/MEMBER activity does not restore — stays in awaiting_external
     assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.next, 'awaiting_external');
+    assert.strictEqual(result.next, 'in_progress');
   });
 
-  it('issue.commented from MEMBER stays in awaiting_external (silent)', () => {
+  it('issue.commented from MEMBER restores awaiting_external → in_progress', () => {
     assert.ok(transition);
     const event = makeEvent('issue.commented', {
       classification: 'informational',
       payload: { commentId: 3, authorLogin: 'teammember', authorAssociation: 'MEMBER' },
+    });
+    const result = transition('awaiting_external', event, EMPTY_SNAPSHOT);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.next, 'in_progress');
+  });
+
+  it('exact known noise stays awaiting_external', () => {
+    const event = makeEvent('issue.commented', {
+      classification: 'informational',
+      payload: {
+        commentId: 4,
+        authorLogin: 'self',
+        authorAssociation: 'OWNER',
+        suppressionReason: 'exact_self_echo',
+      },
     });
     const result = transition('awaiting_external', event, EMPTY_SNAPSHOT);
     assert.strictEqual(result.ok, true);
@@ -139,7 +153,7 @@ describe('state machine: awaiting_external auto-restore', () => {
     assert.ok(transition);
     const event = makeEvent('issue.commented', {
       classification: 'informational',
-      payload: { commentId: 4, authorLogin: 'user', authorAssociation: 'CONTRIBUTOR' },
+      payload: { commentId: 5, authorLogin: 'user', authorAssociation: 'CONTRIBUTOR' },
     });
     const result = transition('in_progress', event, EMPTY_SNAPSHOT);
     // informational events are rejected (no transition) from non-awaiting_external
@@ -152,21 +166,21 @@ describe('state machine: awaiting_external auto-restore', () => {
 // ---------------------------------------------------------------------------
 
 describe('decideDelivery: complete rule table', () => {
-  it('OWNER comment → silent-log regardless of state', () => {
+  it('OWNER comment → wake-owner (association is context, not suppression identity)', () => {
     assert.ok(decideDelivery, 'module must be importable');
     const result = decideDelivery({
       state: 'in_progress',
       eventKind: 'issue.commented',
       authorAssociation: 'OWNER',
     });
-    assert.strictEqual(result, 'silent-log');
+    assert.strictEqual(result, 'wake-owner');
   });
 
-  it('MEMBER comment → silent-log regardless of state', () => {
+  it('MEMBER comment → wake-owner (real maintainer replies must not be swallowed)', () => {
     assert.ok(decideDelivery);
     assert.strictEqual(
       decideDelivery({ state: 'in_progress', eventKind: 'issue.commented', authorAssociation: 'MEMBER' }),
-      'silent-log',
+      'wake-owner',
     );
   });
 

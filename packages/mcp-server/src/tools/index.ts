@@ -17,6 +17,15 @@ export {
   handleAudioReadTranscript,
 } from './audio-tools.js';
 export {
+  autoDreamTools,
+  handleListDiaries,
+  handleReadDiary,
+  handleSettlePresentLoop,
+  listDiariesToolInputSchema,
+  readDiaryToolInputSchema,
+  settlePresentLoopToolInputSchema,
+} from './auto-dream-tools.js';
+export {
   callbackEvidenceSearchInputSchema,
   callbackMemoryTools,
   callbackReflectInputSchema,
@@ -36,7 +45,10 @@ export {
   getThreadContextInputSchema,
   handleAckMentions,
   handleCheckPermissionStatus,
+  handleCompleteA2ADispatch,
+  handleCompleteManagedHold,
   handleCrossPostMessage,
+  handleDrillMemoryCue,
   handleFeatIndex,
   handleGetPendingMentions,
   handleGetThreadCats,
@@ -44,6 +56,7 @@ export {
   handleListTasks,
   handleListThreads,
   handlePostMessage,
+  handleRecordMemoryCueOutcome,
   handleRegisterPrTracking,
   handleRequestPermission,
   handleUpdateTask,
@@ -54,7 +67,11 @@ export {
   requestPermissionInputSchema,
   updateTaskInputSchema,
 } from './callback-tools.js';
-
+export {
+  communityRouteAcceptanceInputSchema,
+  communityRouteAcceptanceTools,
+  handleCommunityRouteAcceptance,
+} from './community-route-acceptance-tool.js';
 export {
   distillationTools,
   handleMarkGeneralizable,
@@ -64,6 +81,11 @@ export {
   nominateForGlobalInputSchema,
   reviewDistillationInputSchema,
 } from './distillation-tools.js';
+export {
+  evalLifecycleTools,
+  handleRecordEvalLifecycle,
+  recordEvalLifecycleInputSchema,
+} from './eval-lifecycle-tools.js';
 export {
   backfillEventsInputSchema,
   eventMemoryTools,
@@ -78,6 +100,11 @@ export {
   handleSearchEvidence,
   searchEvidenceInputSchema,
 } from './evidence-tools.js';
+export {
+  externalReviewVerdictInputSchema,
+  externalReviewVerdictTools,
+  handleExternalReviewVerdict,
+} from './external-review-verdict-tool.js';
 export {
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
@@ -141,6 +168,25 @@ export {
   limbListToolsInputSchema,
   limbTools,
 } from './limb-tools.js';
+export {
+  handleLocalReviewVerdict,
+  handleRecoverLocalReviewVerdict,
+  localReviewRecoveryInputSchema,
+  localReviewVerdictInputSchema,
+  localReviewVerdictTools,
+} from './local-review-verdict-tool.js';
+export {
+  createMemoryCueTools,
+  drillMemoryCueInputSchema,
+  recordMemoryCueOutcomeInputSchema,
+} from './memory-cue-tools.js';
+export {
+  handleListPawFeelInbox,
+  handleTriagePawFeel,
+  listPawFeelInboxInputSchema,
+  pawFeelDispositionTools,
+  triagePawFeelInputSchema,
+} from './paw-feel-disposition-tools.js';
 export {
   handleRunPerspective,
   perspectiveTools,

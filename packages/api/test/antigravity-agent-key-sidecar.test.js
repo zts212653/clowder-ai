@@ -37,7 +37,7 @@ describe('ensureAntigravityAgentKeySidecar', () => {
     }
   });
 
-  test('issues separate variant-scoped sidecar keys for Antigravity Gemini and Claude variants', async () => {
+  test('issues separate variant-scoped sidecar keys for Antigravity and AGY-carried cats', async () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ensureAntigravityAgentKeySidecar } = await import(
       '../dist/domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
@@ -51,18 +51,53 @@ describe('ensureAntigravityAgentKeySidecar', () => {
       const result = await ensureAntigravityAgentKeySidecar(registry, { filePath, env });
       const files = JSON.parse(env.CAT_CAFE_AGENT_KEY_FILES);
 
+      const expectedCatIds = ['antigravity', 'antig-opus', 'agy-opus', 'gemini', 'gemini25', 'gemini35'];
+      assert.deepEqual(result.catIds, expectedCatIds);
       assert.equal(result.agentKeyFiles.antigravity, filePath);
       assert.equal(files.antigravity, filePath);
-      assert.ok(files['antig-opus'], 'Claude Antigravity variant needs its own sidecar key file');
-      assert.notEqual(files['antig-opus'], filePath);
 
-      const antigOpusSecret = (await readFile(files['antig-opus'], 'utf-8')).trim();
-      const verify = await registry.verify(antigOpusSecret);
-      assert.equal(verify.ok, true);
-      if (verify.ok) {
-        assert.equal(verify.record.catId, 'antig-opus');
-        assert.equal(verify.record.userId, 'default-user');
+      for (const catId of expectedCatIds) {
+        assert.ok(files[catId], `${catId} needs its own sidecar key file`);
+        if (catId !== 'antigravity') assert.notEqual(files[catId], filePath);
+
+        const secret = (await readFile(files[catId], 'utf-8')).trim();
+        const verify = await registry.verify(secret);
+        assert.equal(verify.ok, true, `${catId} key should verify`);
+        if (verify.ok) {
+          assert.equal(verify.record.catId, catId);
+          assert.equal(verify.record.userId, 'default-user');
+        }
       }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('reuses valid sidecars instead of invalidating shared MCP processes on every API restart', async () => {
+    const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
+    const { ensureAntigravityAgentKeySidecar } = await import(
+      '../dist/domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
+    );
+
+    const dir = join(tmpdir(), `cat-cafe-agent-key-restart-${Date.now()}`);
+    const filePath = join(dir, 'antigravity.secret');
+    const registry = new AgentKeyRegistry();
+    try {
+      const first = await ensureAntigravityAgentKeySidecar(registry, {
+        filePath,
+        catIds: ['antigravity'],
+        env: {},
+      });
+      const firstSecret = await readFile(filePath, 'utf8');
+      const second = await ensureAntigravityAgentKeySidecar(registry, {
+        filePath,
+        catIds: ['antigravity'],
+        env: {},
+      });
+
+      assert.equal(second.agentKeyIds.antigravity, first.agentKeyIds.antigravity);
+      assert.equal(await readFile(filePath, 'utf8'), firstSecret);
+      assert.equal((await registry.list({ catId: 'antigravity', userId: 'default-user' })).length, 1);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

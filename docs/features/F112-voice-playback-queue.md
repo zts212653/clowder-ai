@@ -1,6 +1,6 @@
 ---
 feature_ids: [F112]
-related_features: [F066, F034, F021, F111]
+related_features: [F066, F034, F021, F111, F279]
 topics: [voice, tts, playback, queue, podcast, unification]
 doc_kind: spec
 created: 2026-03-12

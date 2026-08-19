@@ -14,6 +14,53 @@ git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 
 WARNINGS=""
 
+refresh_upstream_ref() {
+  local upstream_ref="$1"
+  local remote="${upstream_ref%%/*}"
+  local upstream_branch="${upstream_ref#*/}"
+  local timeout_seconds="${CAT_CAFE_HOOK_FETCH_TIMEOUT_SECONDS:-5}"
+  local fetch_pid
+  local elapsed=0
+
+  if [ -z "$remote" ]; then
+    return 1
+  fi
+  if [ "$remote" = "$upstream_ref" ]; then
+    return 1
+  fi
+  if [ "$remote" = "." ]; then
+    return 0
+  fi
+  case "$timeout_seconds" in
+    ''|*[!0-9]*) timeout_seconds=5 ;;
+  esac
+  if [ "$timeout_seconds" -le 0 ]; then
+    return 1
+  fi
+
+  (
+    export GIT_TERMINAL_PROMPT=0
+    if [ -z "${GIT_SSH_COMMAND:-}" ]; then
+      export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=2"
+    fi
+    git fetch --quiet --no-tags --prune --recurse-submodules=no \
+      "$remote" "+refs/heads/${upstream_branch}:refs/remotes/${remote}/${upstream_branch}"
+  ) &
+  fetch_pid=$!
+
+  while kill -0 "$fetch_pid" 2>/dev/null; do
+    if [ "$elapsed" -ge "$timeout_seconds" ]; then
+      kill "$fetch_pid" 2>/dev/null
+      wait "$fetch_pid" 2>/dev/null
+      return 1
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "$fetch_pid"
+}
+
 # 1. 检查未提交的共享文档改动
 DIRTY_DOCS=$(git diff --name-only -- docs/ cat-cafe-skills/ assets/system-prompts/ 2>/dev/null | head -10)
 if [ -n "$DIRTY_DOCS" ]; then
@@ -34,13 +81,24 @@ ${UNPUSHED}
 "
 fi
 
-# 2b. 检查是否 behind origin（其他猫 push 了但本地没 pull）
-BEHIND=$(git rev-list --count HEAD..@{u} 2>/dev/null)
-if [ -n "$BEHIND" ] && [ "$BEHIND" -gt 0 ]; then
-  WARNINGS="${WARNINGS}
+# 2b. 检查是否 behind origin（只在 upstream ref 刷新成功后告警）
+UPSTREAM_REF=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+BEHIND_CANDIDATE=""
+if [ -n "$UPSTREAM_REF" ]; then
+  BEHIND_CANDIDATE=$(git rev-list --count "HEAD..${UPSTREAM_REF}" 2>/dev/null)
+fi
+if [ -n "$BEHIND_CANDIDATE" ] && [ "$BEHIND_CANDIDATE" -gt 0 ]; then
+  HEAD_BEFORE_REFRESH=$(git rev-parse HEAD 2>/dev/null)
+  if refresh_upstream_ref "$UPSTREAM_REF"; then
+    HEAD_AFTER_REFRESH=$(git rev-parse HEAD 2>/dev/null)
+    BEHIND=$(git rev-list --count "HEAD..${UPSTREAM_REF}" 2>/dev/null)
+    if [ "$HEAD_BEFORE_REFRESH" = "$HEAD_AFTER_REFRESH" ] && [ -n "$BEHIND" ] && [ "$BEHIND" -gt 0 ]; then
+      WARNINGS="${WARNINGS}
 ⚠️ 本地落后 origin ${BEHIND} 个 commit
 → 建议先 git pull 再开工
 "
+    fi
+  fi
 fi
 
 # 3. 检查是否在非 main 分支（主仓库不应该 checkout 到其他分支）
@@ -73,7 +131,7 @@ if [ -n "$ROOT_IMAGES" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 根目录有图片文件（截图应放 assets/screenshots/，设计稿放 designs/）：
 ${ROOT_IMAGES}
-→ 向co-creator汇报，商量移走还是删除
+→ 首个发现者直接处置，不等 owner、不跨线程协调、不问 operator：截图 → mv assets/screenshots/（gitignored，本体不 commit）；明显设计稿 → designs/；未知文件不删。FYI 仅在零成本定位来源时事后发一行
 "
 fi
 

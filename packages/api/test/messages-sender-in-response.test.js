@@ -47,7 +47,7 @@ function buildDeps(overrides = {}) {
       completeAll: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
-      cancelAll: mock.fn(() => ['opus']),
+      cancelAll: mock.fn(() => ({ catIds: ['opus'], executionIds: [] })),
       cancelInvocation: mock.fn(() => ['opus']),
       isDeleting: mock.fn(() => false),
     },

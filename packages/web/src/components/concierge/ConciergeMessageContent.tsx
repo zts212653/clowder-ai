@@ -45,7 +45,10 @@ export interface ConciergeMessageContentProps {
 // Marker pattern — same as API validator
 // ---------------------------------------------------------------------------
 
-const MARKER_PATTERN = /\[(跳过去|原地看)\s+(R\d+)\]/g;
+// New messages carry a title + anchor-digest binding (`Rn｜title｜digest`) that
+// the API has already validated. The suffix stays optional here so historical
+// stored bare markers continue to render with their already-persisted actions.
+const MARKER_PATTERN = /\[(跳过去|原地看)\s+([Rr]\d+)(?:\s*[|｜]\s*([^\]\r\n]+))?\]/g;
 
 // ---------------------------------------------------------------------------
 // BUG-UX-4: Strip internal cat signatures and @-mentions from user-visible text.
@@ -88,7 +91,7 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
   const actionMap = new Map<string, InlineAction>();
   for (const a of actions) {
     if (a.handle && a.verb) {
-      actionMap.set(`${a.verb}:${a.handle}`, a);
+      actionMap.set(`${a.verb}:${a.handle.toUpperCase()}`, a);
     }
   }
 
@@ -140,7 +143,7 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
         }
 
         const verb = match[1];
-        const handle = match[2];
+        const handle = match[2].toUpperCase();
         const action = actionMap.get(`${verb}:${handle}`);
 
         if (action) {

@@ -6,72 +6,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
-import Fastify from 'fastify';
+import { describe, it } from 'node:test';
+import { ACTIVE, buildCtx, createHandoffStore, createMessageStore } from './propose-session-handoff-route-fixtures.js';
 
 describe('propose-session-handoff route (F225 ②a)', () => {
-  let InvocationRegistry;
-  let MessageStore;
-  let InMemorySessionHandoffProposalStore;
-  let callbacksRoutes;
-
-  beforeEach(async () => {
-    ({ InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'));
-    ({ MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js'));
-    ({ InMemorySessionHandoffProposalStore } = await import(
-      '../dist/domains/cats/services/stores/ports/SessionHandoffProposalStore.js'
-    ));
-    ({ callbacksRoutes } = await import('../dist/routes/index.js'));
-  });
-
-  const ACTIVE = { id: 'sess_active', status: 'active', catId: 'opus', threadId: 'thread_1', userId: 'user_1' };
-
-  async function buildCtx({ messageStoreOverride, sessionChainStoreOverride, handoffStoreOverride } = {}) {
-    const registry = new InvocationRegistry();
-    const messageStore = messageStoreOverride ?? new MessageStore();
-    const handoffStore = handoffStoreOverride ?? new InMemorySessionHandoffProposalStore();
-    const sessionChainStore = sessionChainStoreOverride ?? {
-      getActive: async (catId, threadId) => (catId === ACTIVE.catId && threadId === ACTIVE.threadId ? ACTIVE : null),
-    };
-    const socketEvents = [];
-    const socketManager = {
-      emitToUser(userId, event, data) {
-        socketEvents.push({ kind: 'user', userId, event, data });
-      },
-      broadcastToRoom(room, event, data) {
-        socketEvents.push({ kind: 'room', room, event, data });
-      },
-    };
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      handoffProposalStore: handoffStore,
-      sessionChainStore,
-      evidenceStore: {
-        ingestRaw() {},
-        search() {
-          return [];
-        },
-      },
-      markerQueue: { enqueue() {} },
-      reflectionService: { reflect() {} },
-    });
-
-    async function propose({ userId = 'user_1', catId = 'opus', threadId = 'thread_1', body } = {}) {
-      const { invocationId, callbackToken } = await registry.create(userId, catId, threadId);
-      return app.inject({
-        method: 'POST',
-        url: '/api/callbacks/propose-session-handoff',
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-        payload: body ?? { done: 'wrote A1 store', nextSteps: 'wire route' },
-      });
-    }
-
-    return { app, registry, messageStore, handoffStore, socketEvents, propose };
-  }
-
   it('happy path: creates pending proposal + appends card + records cardMessageId + broadcasts', async () => {
     const ctx = await buildCtx();
     const res = await ctx.propose();
@@ -94,6 +32,34 @@ describe('propose-session-handoff route (F225 ②a)', () => {
       ctx.socketEvents.some((e) => e.kind === 'room' && e.room === 'thread:thread_1'),
       'broadcast to thread room',
     );
+  });
+
+  it('direct user invocation anchors the handoff to its exact prompt origin without an A2A trigger', async () => {
+    const ctx = await buildCtx();
+    const origin = await ctx.messageStore.append({
+      userId: 'user_1',
+      catId: null,
+      content: 'Please hand off this session directly',
+      mentions: ['opus'],
+      timestamp: Date.now(),
+      threadId: 'thread_1',
+    });
+    const auth = await ctx.registry.create('user_1', 'opus', 'thread_1', undefined, undefined, undefined, origin.id);
+
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-session-handoff',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { done: 'finished work', nextSteps: 'continue fresh' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const stored = await ctx.handoffStore.get(res.json().proposalId);
+    assert.deepEqual(stored.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: 'thread_1',
+      messageId: origin.id,
+    });
   });
 
   it('no active session → gate rejected (200, not seal, not error)', async () => {
@@ -172,33 +138,64 @@ describe('propose-session-handoff route (F225 ②a)', () => {
     assert.ok(retry.json().proposalId);
   });
 
-  it('砚砚 P2-B: card appended but marker-write fails → retry self-heals to deduped (not 503)', async () => {
-    // recordCheckpoint(cardMessageId) throws → proposal stays WITHOUT cardMessageId, but the card IS
-    // appended + visible. A retry must scan the thread, find the card, and return deduped success.
-    const handoffStore = new InMemorySessionHandoffProposalStore();
-    const origRecordCheckpoint = handoffStore.recordCheckpoint.bind(handoffStore);
-    handoffStore.recordCheckpoint = (id, patch) => {
-      if (patch.cardMessageId) throw new Error('marker write blip');
-      return origRecordCheckpoint(id, patch);
+  it('envelope commit failure leaves staged card recoverable by an idempotent retry', async () => {
+    const handoffStore = await createHandoffStore();
+    const commitEnvelope = handoffStore.commitEnvelope.bind(handoffStore);
+    let failCommit = true;
+    handoffStore.commitEnvelope = (id, envelope) => {
+      if (failCommit) {
+        failCommit = false;
+        throw new Error('envelope commit blip');
+      }
+      return commitEnvelope(id, envelope);
     };
     const ctx = await buildCtx({ handoffStoreOverride: handoffStore });
     const body = { done: 'a', nextSteps: 'b', clientRequestId: 'marker-key' };
-    const first = await ctx.propose({ body });
-    assert.equal(first.statusCode, 200, 'card appended despite marker-write failure (degraded to warning)');
-    const firstMsgId = first.json().messageId;
-    const pid = first.json().proposalId;
-    assert.equal((await handoffStore.get(pid)).cardMessageId, undefined, 'marker not set (write failed)');
+    const invoke = async (content) => {
+      const origin = await ctx.messageStore.append({
+        userId: 'user_1',
+        catId: null,
+        content,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread_1',
+      });
+      const auth = await ctx.registry.create('user_1', 'opus', 'thread_1', undefined, undefined, undefined, origin.id);
+      const response = await ctx.app.inject({
+        method: 'POST',
+        url: '/api/callbacks/propose-session-handoff',
+        headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+        payload: body,
+      });
+      return { origin, response };
+    };
+    const first = await invoke('Original handoff trigger');
+    assert.equal(first.response.statusCode, 500, 'proposal is not approvable before the envelope commit point');
+    const [staged] = await handoffStore.listPendingByUser('user_1');
+    assert.equal(staged.publication.state, 'staged');
 
-    const retry = await ctx.propose({ body });
-    assert.equal(retry.statusCode, 200, 'retry self-heals from the visible card instead of 503');
-    assert.equal(retry.json().deduped, true, 'deduped success, not a misleading in-flight 503');
-    assert.equal(retry.json().messageId, firstMsgId, 'recovered the original visible card messageId');
+    const retry = await invoke('Later callback reusing the handoff key');
+    assert.equal(retry.response.statusCode, 200, 'retry self-heals from the visible card instead of 503');
+    assert.equal(retry.response.json().deduped, true, 'deduped success, not a misleading in-flight 503');
+    const healed = await handoffStore.get(staged.proposalId);
+    assert.equal(healed.publication.state, 'anchored');
+    assert.deepEqual(healed.publication.envelope.originRef, {
+      kind: 'message',
+      threadId: 'thread_1',
+      messageId: first.origin.id,
+    });
+    const cards = (await ctx.messageStore.getByThread('thread_1', 50)).filter((message) =>
+      (message.extra?.rich?.blocks ?? []).some((block) => block.id === `handoff-${staged.proposalId}`),
+    );
+    assert.equal(cards.length, 1, 'retry reuses the persisted card instead of duplicating it');
   });
 
   it('card-append failure → phantom proposal deleted (frees A4 slot, not pinned)', async () => {
-    const failingMessageStore = new MessageStore();
-    failingMessageStore.append = async () => {
-      throw new Error('append boom');
+    const failingMessageStore = await createMessageStore();
+    const append = failingMessageStore.append.bind(failingMessageStore);
+    failingMessageStore.append = async (input) => {
+      if (input.idempotencyKey) throw new Error('append boom');
+      return append(input);
     };
     const ctx = await buildCtx({ messageStoreOverride: failingMessageStore });
     const res = await ctx.propose();

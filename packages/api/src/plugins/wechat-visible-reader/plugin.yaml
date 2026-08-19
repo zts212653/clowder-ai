@@ -1,0 +1,17 @@
+id: wechat-visible-reader
+name: 微信当前会话读取
+version: "1.0.0"
+description: 在本机短时授权后，只读识别 Mac 微信当前选中会话的可见正文；不保存截图，不操控微信。
+icon: eye
+iconBg: "#07c160"
+
+setupSteps:
+  - 启用插件后，在 Mac 微信中选中需要猫查看的会话
+  - 展开插件并阅读隐私披露，再授权读取 10 分钟
+  - 回到目标 Clowder AI thread，对猫说“看一下微信”
+
+config: []
+
+resources:
+  - type: limb
+    path: limbs/wechat-visible-reader.yml

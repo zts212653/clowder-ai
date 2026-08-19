@@ -7,113 +7,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
-import Fastify from 'fastify';
+import { describe, it } from 'node:test';
+import {
+  approveSessionHandoff as approve,
+  buildSessionHandoffApp as buildApp,
+  buildSessionHandoffDeps as buildDeps,
+  rejectSessionHandoff as reject,
+  seedSessionHandoffProposal as seedProposal,
+} from './helpers/session-handoff-route-fixture.js';
 
 describe('session-handoff approve/reject route (F225 ②b)', () => {
-  let InMemorySessionHandoffProposalStore;
-  let sessionHandoffApproveRoutes;
-
-  beforeEach(async () => {
-    ({ InMemorySessionHandoffProposalStore } = await import(
-      '../dist/domains/cats/services/stores/ports/SessionHandoffProposalStore.js'
-    ));
-    ({ sessionHandoffApproveRoutes } = await import('../dist/routes/session-handoff-approve-routes.js'));
-  });
-
-  function buildDeps({ sealAccepted = true, sessionActive = true } = {}) {
-    const store = new InMemorySessionHandoffProposalStore();
-    const session = {
-      id: 'sess_1',
-      status: 'active',
-      catId: 'opus',
-      threadId: 'thread_1',
-      userId: 'user_1',
-    };
-    const sessionChainStore = {
-      get: async (id) => (id === session.id ? session : null),
-      getActive: async (catId, threadId) =>
-        sessionActive && catId === session.catId && threadId === session.threadId ? session : null,
-      update: async (id, patch) => {
-        if (id === session.id) Object.assign(session, patch);
-        return session;
-      },
-    };
-    const sealCalls = [];
-    const finalizeCalls = [];
-    const sessionSealer = {
-      requestSeal: async ({ sessionId, reason }) => {
-        sealCalls.push({ sessionId, reason });
-        return { accepted: sealAccepted, status: sealAccepted ? 'sealing' : 'sealed' };
-      },
-      finalize: async ({ sessionId }) => {
-        finalizeCalls.push({ sessionId });
-      },
-    };
-    const enqueueCalls = [];
-    const invocationQueue = {
-      enqueue: (input) => {
-        enqueueCalls.push(input);
-        return { outcome: 'enqueued', entry: { id: `entry_${enqueueCalls.length}` } };
-      },
-    };
-    const processNextCalls = [];
-    const queueProcessor = {
-      processNext: async (threadId, userId) => {
-        processNextCalls.push({ threadId, userId });
-        return { started: true };
-      },
-    };
-    return {
-      store,
-      session,
-      sessionChainStore,
-      sessionSealer,
-      invocationQueue,
-      queueProcessor,
-      sealCalls,
-      finalizeCalls,
-      enqueueCalls,
-      processNextCalls,
-    };
-  }
-
-  async function buildApp(deps, routeOpts = {}) {
-    const app = Fastify();
-    await app.register(sessionHandoffApproveRoutes, {
-      handoffProposalStore: deps.store,
-      sessionChainStore: deps.sessionChainStore,
-      sessionSealer: deps.sessionSealer,
-      invocationQueue: deps.invocationQueue,
-      queueProcessor: deps.queueProcessor,
-      socketManager: { emitToUser() {}, broadcastToRoom() {} },
-      ...routeOpts,
-    });
-    return app;
-  }
-
-  const seedProposal = (deps) =>
-    deps.store.create({
-      sourceThreadId: 'thread_1',
-      sourceSessionId: 'sess_1',
-      sourceCatId: 'opus',
-      userId: 'user_1',
-      note: { done: 'wired ②a', nextSteps: 'wire ②b' },
-    });
-
-  const approve = (app, proposalId, userId = 'user_1') =>
-    app.inject({
-      method: 'POST',
-      url: `/api/session-handoff/${proposalId}/approve`,
-      headers: { 'x-cat-cafe-user': userId },
-    });
-  const reject = (app, proposalId, userId = 'user_1') =>
-    app.inject({
-      method: 'POST',
-      url: `/api/session-handoff/${proposalId}/reject`,
-      headers: { 'x-cat-cafe-user': userId },
-    });
-
   it('approve happy path: seal(cat_initiated_handoff) + enqueue continuation + finalize + processNext', async () => {
     const deps = buildDeps();
     const p = seedProposal(deps);
@@ -129,6 +32,7 @@ describe('session-handoff approve/reject route (F225 ②b)', () => {
     assert.equal(deps.sealCalls[0].reason, 'cat_initiated_handoff', 'sealed with handoff reason');
     assert.equal(deps.enqueueCalls.length, 1);
     assert.equal(deps.enqueueCalls[0].source, 'agent');
+    assert.equal(deps.enqueueCalls[0].ownerAuthProvenance, 'strict');
     assert.equal(deps.enqueueCalls[0].sourceCategory, 'continuation', 'system-pinned continuation');
     assert.equal(deps.enqueueCalls[0].idempotencyKey, p.proposalId, 'idempotency keyed by proposalId (B5)');
     assert.deepEqual(deps.enqueueCalls[0].targetCats, ['opus'], 'same catId continuation');
@@ -136,6 +40,21 @@ describe('session-handoff approve/reject route (F225 ②b)', () => {
     assert.ok(deps.session.catHandoffNote, 'note persisted to session before seal');
     assert.equal(deps.finalizeCalls.length, 1, 'session finalized — not left in sealing for the reaper (砚砚 P1-1)');
     assert.equal(deps.finalizeCalls[0].sessionId, 'sess_1', 'finalized the sealed session');
+  });
+
+  it('trusted-browser compatibility approval preserves compatibility_fallback on the continuation', async () => {
+    const deps = buildDeps();
+    deps.session.userId = 'default-user';
+    const p = seedProposal(deps, { userId: 'default-user' });
+    const app = await buildApp(deps);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/session-handoff/${p.proposalId}/approve`,
+      headers: { origin: 'http://localhost:3003' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deps.enqueueCalls[0].ownerAuthProvenance, 'compatibility_fallback');
   });
 
   it('seal rejected → 409 seal_rejected, no continuation enqueued', async () => {
@@ -183,11 +102,105 @@ describe('session-handoff approve/reject route (F225 ②b)', () => {
   it('reject pending → rejected, never seals', async () => {
     const deps = buildDeps();
     const p = seedProposal(deps);
-    const app = await buildApp(deps);
+    const signals = [];
+    const app = await buildApp(deps, { onProposalReject: (signal) => signals.push(signal) });
     const res = await reject(app, p.proposalId);
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().status, 'rejected');
+    assert.equal(deps.store.get(p.proposalId).humanDispositionLedgerEntry.episode.decision, 'rejected');
+    assert.equal(deps.store.get(p.proposalId).humanDispositionLedgerEntry.envelope, undefined);
+    assert.equal(signals.length, 1, 'F192 signal remains downstream of the durable F281 transition');
     assert.equal(deps.sealCalls.length, 0);
+  });
+
+  it('strictly captures every F225 reason and rejects client-supplied identity', async () => {
+    const reasons = ['not_important', 'wrong_lane', 'bad_evidence', 'not_now', 'wrong'];
+    for (const reasonCode of reasons) {
+      const deps = buildDeps();
+      const p = seedProposal(deps);
+      const app = await buildApp(deps);
+      const res = await reject(app, p.proposalId, 'user_1', { feedback: { reasonCode } });
+      assert.equal(res.statusCode, 200, reasonCode);
+      assert.deepEqual(deps.store.get(p.proposalId).latestHumanDisposition, { reasonCode });
+    }
+
+    const deps = buildDeps();
+    const other = seedProposal(deps);
+    const spoofed = seedProposal(deps);
+    const app = await buildApp(deps);
+    assert.equal(
+      (await reject(app, other.proposalId, 'user_1', { feedback: { reasonCode: 'other', detail: '  更合适的原因  ' } }))
+        .statusCode,
+      200,
+    );
+    assert.deepEqual(deps.store.get(other.proposalId).latestHumanDisposition, {
+      reasonCode: 'other',
+      detail: '更合适的原因',
+    });
+
+    const spoof = await reject(app, spoofed.proposalId, 'user_1', {
+      feedback: { reasonCode: 'wrong', ownerUserId: 'attacker' },
+    });
+    assert.equal(spoof.statusCode, 400);
+    assert.equal(deps.store.get(spoofed.proposalId).status, 'pending');
+    assert.equal(deps.store.get(spoofed.proposalId).latestHumanDisposition, undefined);
+  });
+
+  it('dedupes exact reject replay but rejects changed feedback', async () => {
+    const deps = buildDeps();
+    const p = seedProposal(deps);
+    const app = await buildApp(deps);
+    const feedback = { feedback: { reasonCode: 'wrong_lane' } };
+
+    assert.equal((await reject(app, p.proposalId, 'user_1', feedback)).statusCode, 200);
+    const replay = await reject(app, p.proposalId, 'user_1', feedback);
+    assert.equal(replay.statusCode, 200);
+    assert.equal(replay.json().deduped, true);
+
+    const conflict = await reject(app, p.proposalId, 'user_1', {
+      feedback: { reasonCode: 'bad_evidence' },
+    });
+    assert.equal(conflict.statusCode, 409);
+    assert.deepEqual(deps.store.get(p.proposalId).latestHumanDisposition, { reasonCode: 'wrong_lane' });
+  });
+
+  it('fails closed for legacy rejected rows and never treats expired as rejected', async () => {
+    const deps = buildDeps();
+    const legacy = seedProposal(deps);
+    const expired = seedProposal(deps);
+    deps.store.markExpired(expired.proposalId);
+    const canonicalGet = deps.store.get.bind(deps.store);
+    const legacySnapshot = { ...canonicalGet(legacy.proposalId), status: 'rejected', updatedAt: 1 };
+    deps.store.get = (proposalId) => (proposalId === legacy.proposalId ? legacySnapshot : canonicalGet(proposalId));
+    const canonicalReject = deps.store.markRejected.bind(deps.store);
+    deps.store.markRejected = (proposalId, input) =>
+      proposalId === legacy.proposalId
+        ? { outcome: 'legacy_unmigrated', proposal: legacySnapshot }
+        : canonicalReject(proposalId, input);
+    const app = await buildApp(deps);
+
+    const legacyReplay = await reject(app, legacy.proposalId);
+    assert.equal(legacyReplay.statusCode, 409);
+    assert.equal(legacyReplay.json().reason, 'legacy_disposition_unmigrated');
+
+    const late = await reject(app, expired.proposalId, 'user_1', { feedback: { reasonCode: 'wrong' } });
+    assert.equal(late.statusCode, 409);
+    assert.equal(deps.store.get(expired.proposalId).status, 'expired');
+    assert.equal(deps.store.get(expired.proposalId).latestHumanDisposition, undefined);
+  });
+
+  it('staged publication blocks approve and reject before any handoff effect', async () => {
+    const deps = buildDeps();
+    const approveProposal = seedProposal(deps, { anchored: false });
+    const rejectProposal = seedProposal(deps, { anchored: false });
+    const app = await buildApp(deps);
+
+    assert.equal((await approve(app, approveProposal.proposalId)).statusCode, 409);
+    assert.equal((await reject(app, rejectProposal.proposalId)).statusCode, 409);
+    assert.equal(deps.store.get(approveProposal.proposalId).status, 'pending');
+    assert.equal(deps.store.get(rejectProposal.proposalId).status, 'pending');
+    assert.equal(deps.sealCalls.length, 0);
+    assert.equal(deps.enqueueCalls.length, 0);
   });
 
   it('approve by non-owner → 403', async () => {
@@ -245,7 +258,7 @@ describe('session-handoff approve/reject route (F225 ②b)', () => {
   it('GET /api/session-handoff/:id returns durable status + ownership 403 (云端 P2)', async () => {
     const deps = buildDeps();
     const p = seedProposal(deps);
-    deps.store.markRejected(p.proposalId); // settled
+    deps.store.markRejected(p.proposalId, { decidedAt: 400 }); // settled
     const app = await buildApp(deps);
     const ok = await app.inject({
       method: 'GET',

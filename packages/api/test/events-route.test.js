@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 import { EventMemoryStore } from '../dist/domains/memory/EventMemoryStore.js';
 import { eventsRoutes } from '../dist/routes/events.js';
+
+const hasSourceStagingContent = existsSync(
+  new URL('../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url),
+);
 
 /**
  * F227 PR-1 Task 3 — GET /api/memory/events route.
@@ -388,7 +393,7 @@ describe('POST /api/memory/events/backfill (F227 PR-2 Task 7)', () => {
 });
 
 describe('GET /api/memory/magic-words (F227 PR-2 AC-A5)', () => {
-  it('returns magic-word meanings sourced from L0 (no hardcoded table)', async () => {
+  it('returns magic-word meanings sourced from injected governance (no hardcoded table)', async () => {
     const store = new EventMemoryStore(':memory:');
     await store.initialize();
     const app = Fastify();
@@ -405,6 +410,13 @@ describe('GET /api/memory/magic-words (F227 PR-2 AC-A5)', () => {
     const scaffold = body.magicWords.find((m) => m.word === '脚手架');
     assert.ok(scaffold, '脚手架 meaning present');
     assert.ok(scaffold.meaning.length > 0 && scaffold.action.length > 0);
+    const quadrants = body.magicWords.find((m) => m.word === '四象限');
+    if (hasSourceStagingContent) {
+      assert.ok(quadrants, 'staging 四象限 meaning present');
+      assert.match(quadrants.action, /KK\/KU\/UK\/UU/);
+    } else {
+      assert.equal(quadrants, undefined, 'private staging meaning must stay absent from public exports');
+    }
     await app.close();
   });
 

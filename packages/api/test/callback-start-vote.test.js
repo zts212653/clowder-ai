@@ -271,6 +271,72 @@ describe('POST /api/callbacks/start-vote', () => {
     assert.equal(body.code, 'THREAD_NOT_FOUND');
   });
 
+  test('rejects soft-deleted thread before vote notification or voter wakeups', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+
+    const invocationRecords = [];
+    const invocationQueue = new InvocationQueue();
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      threadStore,
+      router: {
+        routeExecution: async function* () {
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+      invocationRecordStore: {
+        create: async (opts) => {
+          invocationRecords.push(opts);
+          return { outcome: 'created', invocationId: `inv-${Date.now()}` };
+        },
+        update: async () => {},
+      },
+      invocationTracker: {
+        start: () => new AbortController(),
+        startAll: () => new AbortController(),
+        tryStartThreadAll: () => new AbortController(),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+        getActiveSlots: () => [],
+      },
+      invocationQueue,
+      queueProcessor: {
+        onInvocationComplete: async () => {},
+        tryAutoExecute: async () => {},
+        registerEntryCompleteHook: () => {},
+        unregisterEntryCompleteHook: () => {},
+      },
+    });
+    const thread = threadStore.create('user-1', 'Deleted vote target');
+    assert.equal(threadStore.softDelete(thread.id), true);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/start-vote',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        question: 'Q?',
+        options: ['A', 'B'],
+        voters: ['codex'],
+      },
+    });
+
+    assert.equal(res.statusCode, 410);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, 'THREAD_DELETED');
+    assert.equal(persistedMessages.length, 0, 'deleted thread must not receive a vote notification message');
+    assert.equal(broadcasts.length, 0, 'deleted thread must not receive vote_started broadcast');
+    assert.equal(agentMessages.length, 0, 'deleted thread must not broadcast agent messages');
+    assert.deepEqual(invocationRecords, [], 'deleted thread must not create fallback voter invocations');
+    assert.equal(invocationQueue.listAutoExecute?.(thread.id).length ?? 0, 0, 'deleted thread must not enqueue voters');
+  });
+
   test('defaults to non-anonymous and 120s timeout', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
@@ -437,6 +503,7 @@ describe('POST /api/callbacks/start-vote', () => {
 
     // Pre-enqueue an entry for 'codex' from caller 'opus' — second handoff will coalesce.
     invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: '', // placeholder — will be set by the real thread below
       userId: 'user-1',
       content: 'pre-existing task for codex',
@@ -487,6 +554,7 @@ describe('POST /api/callbacks/start-vote', () => {
 
     // Now enqueue with the real threadId so coalesce can find it
     invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
       threadId: thread.id,
       userId: 'user-1',
       content: 'pre-existing task for codex',

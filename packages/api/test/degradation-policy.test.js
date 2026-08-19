@@ -5,61 +5,27 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  checkContextBudget,
   checkExtractionBudget,
   formatDegradationMessage,
   isAtBoundary,
 } from '../dist/domains/cats/services/orchestration/DegradationPolicy.js';
 
-const mockBudget = {
-  maxPromptTokens: 100000,
-  maxContextTokens: 30000,
-  maxMessages: 40,
-  maxContentLengthPerMsg: 2000,
-};
-
-describe('checkContextBudget', () => {
-  it('returns full strategy when within budget', () => {
-    const result = checkContextBudget(20, mockBudget);
-    assert.equal(result.degraded, false);
-    assert.equal(result.strategy, 'full');
-  });
-
-  it('returns truncated when over budget', () => {
-    const result = checkContextBudget(60, mockBudget);
-    assert.equal(result.degraded, true);
-    assert.equal(result.strategy, 'truncated');
-    assert.ok(result.reason?.includes('截断'));
-  });
-
-  it('returns truncated with adjusted maxMessages', () => {
-    const result = checkContextBudget(80, mockBudget);
-    assert.equal(result.adjustedMaxMessages, 40);
-  });
-
-  it('handles exact boundary', () => {
-    const result = checkContextBudget(40, mockBudget);
-    assert.equal(result.degraded, false);
-    assert.equal(result.strategy, 'full');
-  });
-});
-
 describe('checkExtractionBudget', () => {
   it('returns full strategy when within budget', () => {
-    const result = checkExtractionBudget(50000, mockBudget);
+    const result = checkExtractionBudget(50000, 100000);
     assert.equal(result.degraded, false);
     assert.equal(result.strategy, 'full');
   });
 
   it('returns pattern_only when over 80% of budget', () => {
-    const result = checkExtractionBudget(90000, mockBudget);
+    const result = checkExtractionBudget(90000, 100000);
     assert.equal(result.degraded, true);
     assert.equal(result.strategy, 'pattern_only');
     assert.ok(result.reason?.includes('模式匹配'));
   });
 
   it('returns abort when way over budget', () => {
-    const result = checkExtractionBudget(250000, mockBudget);
+    const result = checkExtractionBudget(250000, 100000);
     assert.equal(result.degraded, true);
     assert.equal(result.strategy, 'abort');
     assert.ok(result.reason?.includes('无法处理'));
@@ -110,7 +76,7 @@ describe('formatDegradationMessage', () => {
 
 describe('F8: token-based labels', () => {
   it('checkExtractionBudget reason mentions tokens not chars', () => {
-    const result = checkExtractionBudget(90000, mockBudget);
+    const result = checkExtractionBudget(90000, 100000);
     assert.ok(result.reason?.includes('tokens'), `expected "tokens" in reason: ${result.reason}`);
     assert.ok(!result.reason?.includes('chars'), `should not mention "chars": ${result.reason}`);
   });

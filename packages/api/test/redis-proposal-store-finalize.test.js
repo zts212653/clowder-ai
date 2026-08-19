@@ -38,6 +38,7 @@ describe(
         sourceThreadId: 'thread_src',
         sourceInvocationId: 'inv_1',
         sourceCatId: 'opus',
+        sourceMessageId: 'msg-origin-1',
         title: 'rehome',
         reason: 'F128 projectPath finalize',
         parentThreadId: 'thread_src',
@@ -97,6 +98,7 @@ describe(
       // projectPath this returns the stale '/projects/orig'.
       const fresh = await store.get(created.proposalId);
       assert.ok(fresh);
+      assert.equal(fresh.sourceMessageId, 'msg-origin-1');
       assert.equal(fresh.projectPath, '/projects/rehomed', 'persisted hash must carry the re-homed ownership');
       assert.equal(fresh.status, 'approved');
     });

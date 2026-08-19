@@ -100,6 +100,12 @@ export function adaptIncomingToBubbleEvent(
   // #814: Propagate isExplicitPost so chatStore findAssistantDuplicate can
   // skip merge for live socket events (not just hydration).
   if (msg.extra?.isExplicitPost) payload.isExplicitPost = true;
+  if (msg.extra?.turnExecution || msg.extra?.auxiliaryTurnExecutions) {
+    payload.extra = {
+      ...(msg.extra.turnExecution ? { turnExecution: msg.extra.turnExecution } : {}),
+      ...(msg.extra.auxiliaryTurnExecutions ? { auxiliaryTurnExecutions: msg.extra.auxiliaryTurnExecutions } : {}),
+    };
+  }
 
   // F194 Phase Z3 (砚砚 R2 P1-1): bubble identity SoT = per-cat-turn id (msg.turnInvocationId);
   // chain/parent id (msg.invocationId) lives alongside as `chainInvocationId` for liveness/queue/cancel.

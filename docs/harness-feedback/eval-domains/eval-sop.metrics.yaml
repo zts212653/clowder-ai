@@ -1,0 +1,24 @@
+sop_violations_blocker:
+  label: SOP 阻断违规数
+  means: 评估窗口内被判定为阻断级（必须修复）的 SOP 违规数量；越低越好，大于零触发 fix verdict。
+  goodDirection: lower
+  category: friction
+  component: sop
+sop_violations_warn:
+  label: SOP 警告违规数
+  means: 评估窗口内被判定为警告级（建议修复）的 SOP 违规数量；越低越好，单独出现不触发 fix verdict。
+  goodDirection: lower
+  category: friction
+  component: sop
+sop_rules_passed:
+  label: SOP 通过规则数
+  means: 评估窗口内通过验证的 SOP 规则数量；数值本身作为分母参照，不直接判定好坏。
+  goodDirection: neutral
+  category: context
+  component: sop
+sop_rules_skipped:
+  label: SOP 跳过规则数
+  means: 评估窗口内因前置条件不满足或不适用而跳过的 SOP 规则数量；正常值取决于 trace 覆盖范围。
+  goodDirection: neutral
+  category: context
+  component: sop

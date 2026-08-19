@@ -59,9 +59,13 @@ export function loadExplicitEntitySeeds(seedPath: string): EntityRecord[] {
   return seedFile.entities.map((entity, index) => validateEntitySeed(entity, resolvedPath, index));
 }
 
+// F260 Phase A T4: filter out dev/test cats that pollute the entity registry.
+// Pattern matches catId strings that look like test fixtures or auto-generated dev entries.
+const DEV_TEST_CAT_PATTERN = /[-_](test|dev|staging|sandbox)\b|^cat-[a-z0-9]{6,8}$/i;
+
 export function buildRosterEntitySeeds(config: CatCafeConfig): EntityRecord[] {
   const cats = toAllCatConfigs(config);
-  const entries = Object.entries(cats);
+  const entries = Object.entries(cats).filter(([catId]) => !DEV_TEST_CAT_PATTERN.test(catId));
   const sharedNicknames = findSharedNicknameNorms(entries);
   return entries.map(([catId, cat]) => ({
     entityId: `cat:${catId}`,
@@ -110,6 +114,11 @@ function validateEntitySeed(entity: EntityRecord, seedPath: string, index: numbe
     aliases: uniqueNonEmpty(entity.aliases),
     provenance: entity.provenance.map((p, pIndex) => validateProvenance(p, seedPath, index, pIndex)),
     ...(entity.createdAt ? { createdAt: entity.createdAt } : {}),
+    // F260: preserve optional fields so explicit non-default seeds are not silently dropped
+    // (codex review R2 P2: validateEntitySeed was stripping stance/visibilityScope/status).
+    ...(entity.stance ? { stance: entity.stance } : {}),
+    ...(entity.visibilityScope ? { visibilityScope: entity.visibilityScope } : {}),
+    ...(entity.status ? { status: entity.status } : {}),
     updatedAt: entity.updatedAt,
   };
 }
@@ -182,6 +191,18 @@ function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
     out.push(trimmed);
   }
   return out;
+}
+
+/**
+ * F260 Phase A INV-5: Check if an entity has proposal provenance.
+ *
+ * Entities created via the propose_entity approval flow carry
+ * provenance with source='proposal'. These must be skipped during
+ * seed reload to prevent approved proposals from being overwritten
+ * by default seed data on server restart.
+ */
+export function shouldSkipProposalEntity(entity: EntityRecord): boolean {
+  return entity.provenance.some((p) => p.source === 'proposal');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
+import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
@@ -15,6 +16,7 @@ interface ChatInputActionButtonProps {
   /** F39: Force-mode send (cancel running + execute immediately) */
   onForceSend?: () => void;
   onStop?: () => void;
+  stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
@@ -48,6 +50,7 @@ export function ChatInputActionButton({
   onQueueSend,
   onForceSend,
   onStop,
+  stopState,
   disabled,
   sendDisabled,
   hasActiveInvocation,
@@ -55,6 +58,15 @@ export function ChatInputActionButton({
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
   const isSendDisabled = Boolean(disabled || sendDisabled);
+  const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
+  const showStop = Boolean(hasActiveInvocation && resolvedStopState !== 'hidden');
+  const stopDisabled = resolvedStopState !== 'available' || !onStop;
+  const stopTitle =
+    resolvedStopState === 'pending'
+      ? '正在停止'
+      : resolvedStopState === 'unavailable'
+        ? '正在确认可停止的运行状态'
+        : '停止生成';
 
   useEffect(() => {
     if (voice.transcript) onTranscript(voice.transcript);
@@ -86,9 +98,12 @@ export function ChatInputActionButton({
       {voice.state === 'recording' && (
         <div className="absolute top-0 right-4 -mt-6 flex items-center gap-2">
           {voice.partialTranscript && (
-            <div className="px-2 py-0.5 bg-cafe-surface-sunken text-cafe text-xs rounded-lg max-w-[240px] truncate opacity-80">
-              {voice.partialTranscript}
-            </div>
+            <ExpandableProse
+              text={voice.partialTranscript}
+              lines={2}
+              className="max-w-[240px] rounded-lg bg-cafe-surface-sunken px-2 py-0.5 opacity-80"
+              contentClassName="text-xs leading-4 text-cafe"
+            />
           )}
           <div className="px-2 py-0.5 bg-conn-red-text text-[var(--cafe-accent-foreground)] text-xs rounded-full animate-pulse whitespace-nowrap">
             REC {Math.floor(voice.duration / 60)}:{String(voice.duration % 60).padStart(2, '0')}
@@ -102,11 +117,13 @@ export function ChatInputActionButton({
       )}
 
       {/* Stop button: visible alongside queue send (primary stop covers disabled state) */}
-      {hasActiveInvocation && !disabled && onStop && (
+      {showStop && !disabled && (
         <button
-          onClick={() => onStop()}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
-          title="停止生成"
+          type="button"
+          onClick={() => onStop?.()}
+          disabled={stopDisabled}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40 disabled:cursor-wait disabled:opacity-50"
+          title={stopTitle}
           aria-label="Stop generation"
         >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -116,12 +133,14 @@ export function ChatInputActionButton({
       )}
 
       {/* Primary action button priority chain */}
-      {disabled && onStop && hasActiveInvocation ? (
+      {disabled && showStop ? (
         /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
-          onClick={() => onStop()}
-          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors"
-          title="停止生成"
+          type="button"
+          onClick={() => onStop?.()}
+          disabled={stopDisabled}
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors disabled:cursor-wait disabled:opacity-50"
+          title={stopTitle}
           aria-label="Stop generation"
         >
           <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">

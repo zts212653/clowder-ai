@@ -1,6 +1,6 @@
 ---
 feature_ids: [F091]
-related_features: [F021, F034, F066, F086]
+related_features: [F021, F034, F066, F086, F279]
 topics: [signal, study, learning, podcast, voice]
 doc_kind: spec
 created: 2026-03-10

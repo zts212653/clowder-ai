@@ -84,6 +84,7 @@ describe('StreamingOutboundHook', () => {
       log,
       updateIntervalMs: opts.updateIntervalMs ?? 0,
       minDeltaChars: opts.minDeltaChars ?? 0,
+      receiptOnlyUntilCommit: opts.receiptOnlyUntilCommit ?? false,
     });
     return { hook, adapter };
   }
@@ -160,6 +161,49 @@ describe('StreamingOutboundHook', () => {
     await hook.onStreamChunk('thread-1', 'Hello world this is content');
     assert.equal(adapter._calls.editMessage.length, 1);
     assert.ok(adapter._calls.editMessage[0].text.includes('Hello world'));
+  });
+
+  it('F254 Phase E keeps connector placeholders receipt-only until final commit', async () => {
+    const { hook, adapter } = createHook({
+      receiptOnlyUntilCommit: true,
+      noDelete: true,
+      noFinalize: true,
+    });
+    await hook.onStreamStart('thread-1');
+    await hook.onStreamChunk('thread-1', 'known-stale draft bytes');
+    assert.equal(adapter._calls.editMessage.length, 0);
+    await hook.onStreamEnd('thread-1', 'fresh committed final');
+    assert.equal(adapter._calls.editMessage.length, 1);
+    assert.equal(adapter._calls.editMessage[0].text, 'fresh committed final');
+  });
+
+  it('F254 Phase E turns a blocked closure placeholder into a terminal recovery instruction', async () => {
+    const { hook, adapter } = createHook({ receiptOnlyUntilCommit: true });
+    await hook.onStreamStart('thread-1', 'opus', 'inv-blocked');
+
+    await hook.onClosureBlocked(
+      'thread-1',
+      'opus',
+      'attempt_budget_exhausted',
+      'inv-blocked',
+      'https://cafe.example/?thread=thread-1',
+    );
+
+    assert.equal(adapter._calls.editMessage.length, 1);
+    assert.match(adapter._calls.editMessage[0].text, /未能完成最新消息重读/);
+    assert.match(adapter._calls.editMessage[0].text, /attempt_budget_exhausted/);
+    assert.match(adapter._calls.editMessage[0].text, /https:\/\/cafe\.example/);
+  });
+
+  it('F254 Phase E reuses one catching-up placeholder for the successor final', async () => {
+    const { hook, adapter } = createHook({ receiptOnlyUntilCommit: true, noDelete: true, noFinalize: true });
+    await hook.onStreamStart('thread-1', 'opus', 'inv-stale');
+    await hook.onClosureCatchingUp('thread-1', 'opus', 'inv-stale');
+    await hook.onStreamStart('thread-1', 'opus', 'inv-successor');
+    await hook.onStreamEnd('thread-1', 'fresh replacement', 'inv-successor');
+
+    assert.equal(adapter._calls.sendPlaceholder.length, 1, 'successor must reuse the existing catch placeholder');
+    assert.equal(adapter._calls.editMessage.at(-1).text, 'fresh replacement');
   });
 
   it('onStreamChunk respects rate limit', async () => {

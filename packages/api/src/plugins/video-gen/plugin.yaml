@@ -44,14 +44,23 @@ config:
     label: API Key
     sensitive: true
     required: false
+    requiredWhen:
+      envName: VIDEO_GEN_AUTH_TYPE
+      value: apikey
   - envName: VIDEO_GEN_ACCESS_KEY
     label: Access Key
     sensitive: true
     required: false
+    requiredWhen:
+      envName: VIDEO_GEN_AUTH_TYPE
+      value: [jwt-hs256, hmac-sha256-v4]
   - envName: VIDEO_GEN_SECRET_KEY
     label: Secret Key
     sensitive: true
     required: false
+    requiredWhen:
+      envName: VIDEO_GEN_AUTH_TYPE
+      value: [jwt-hs256, hmac-sha256-v4]
   - envName: VIDEO_GEN_BASE_URL
     label: Base URL
     sensitive: false

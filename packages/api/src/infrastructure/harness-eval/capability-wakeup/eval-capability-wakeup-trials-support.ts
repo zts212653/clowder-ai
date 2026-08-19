@@ -5,6 +5,12 @@ import type {
   NormalizedCapabilityUsageCandidate,
 } from './eval-capability-wakeup-types.js';
 
+export interface UsageWindowOptions {
+  previous?: CapabilityInvocationTrace;
+  evidenceWindow?: 'current_next' | 'pre_change';
+  beforeTimestamp?: number;
+}
+
 export function hasLivePreviewForOpportunity(
   trace: CapabilityTrace,
   current: CapabilityInvocationTrace,
@@ -35,6 +41,41 @@ export function collectUsageCandidates(
     .filter((invocation) => invocationIds.has(invocation.invocationId))
     .flatMap((invocation) => invocation.normalizedUsageCandidates);
   return [...normalizedTools, ...trace.normalizedAuditCandidates];
+}
+
+export function collectUsageWindow(
+  trace: CapabilityTrace,
+  current: CapabilityInvocationTrace,
+  next: CapabilityInvocationTrace | undefined,
+  options: UsageWindowOptions,
+): { candidates: NormalizedCapabilityUsageCandidate[]; scope: EvidenceScope } {
+  if (options.evidenceWindow !== 'pre_change') {
+    return {
+      candidates: collectUsageCandidates(trace, current, next),
+      scope: buildEvidenceScope(trace, current, next),
+    };
+  }
+  const windowEndMs = options.beforeTimestamp ?? current.startTime;
+  const invocations = trace.invocations.filter(
+    (invocation) => invocation.invocationIndex <= current.invocationIndex && invocation.startTime <= windowEndMs,
+  );
+  const invocationIds = new Set(invocations.map((invocation) => invocation.invocationId));
+  return {
+    candidates: [
+      ...trace.invocations
+        .filter((invocation) => invocationIds.has(invocation.invocationId))
+        .flatMap((invocation) => invocation.normalizedUsageCandidates),
+      ...trace.normalizedAuditCandidates,
+    ],
+    scope: {
+      threadId: trace.threadId,
+      catId: trace.catId,
+      sessionIds: [trace.sessionId, ...invocationIds],
+      ...(trace.worktreeId ? { worktreeId: trace.worktreeId } : {}),
+      windowStartMs: invocations[0]?.startTime ?? current.startTime,
+      windowEndMs,
+    },
+  };
 }
 
 export function buildEvidenceScope(

@@ -15,11 +15,39 @@
  *  - case.reported side-effect: sets lastPublicCommentAt to event.at.
  */
 
-import type { CommunityEvent, CommunityObjectProjection, CommunityObjectState } from '@cat-cafe/shared';
+import type {
+  CommunityEvent,
+  CommunityObjectProjection,
+  CommunityObjectState,
+  IssueFixEvidence,
+} from '@cat-cafe/shared';
+import { canonicalizeCommunitySubjectKey } from '@cat-cafe/shared';
 import type { ICommunityEventLog } from './CommunityEventLog.js';
 import type { ICommunityObjectStore } from './CommunityObjectStore.js';
 import { parseLinkedIssues } from './community-link-parser.js';
-import { transition } from './community-state-machine.js';
+import { isExactSuppressedCommunityEvent, transition } from './community-state-machine.js';
+import {
+  applyExternalReviewProjectionEvent,
+  isExternalReviewEventKind,
+  isExternalReviewTerminalEventKind,
+} from './external-review/external-review-projector.js';
+import { selectIssueFixReadiness } from './issue-analysis/issue-fix-evidence.js';
+
+function issueFixEvidenceFromEvent(event: CommunityEvent): IssueFixEvidence | null {
+  if (event.kind === 'issue.commented' || event.kind === 'case.fix_evidence_recorded') {
+    const decision = selectIssueFixReadiness({ events: [event] });
+    return decision.kind === 'ready' ? decision.evidence : null;
+  }
+  if (event.kind !== 'pr.merged' || typeof event.payload.linkedPr !== 'string') return null;
+  const linked = /^pr:(.+)#(\d+)$/.exec(event.payload.linkedPr);
+  if (!linked) return null;
+  const number = Number(linked[2]);
+  return {
+    kind: 'pull_request',
+    url: `https://github.com/${linked[1]}/pull/${number}`,
+    number,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Parse subjectKey → repo/type/number
@@ -64,6 +92,8 @@ function createProjection(
     linkedIssues: [],
     linkedPrs: [],
     closureWaiver: null,
+    issueFixEvidence: null,
+    externalReview: null,
     appliedEventCount: 0,
     lastRejectedEvent: null,
     deliveryCursor: null,
@@ -77,6 +107,9 @@ function createProjection(
 // ---------------------------------------------------------------------------
 
 export class CommunityProjector {
+  private readonly rebuildInFlight = new Map<string, Promise<void>>();
+  private readonly subjectOperations = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly eventLog: ICommunityEventLog,
     private readonly objectStore: ICommunityObjectStore,
@@ -87,9 +120,31 @@ export class CommunityProjector {
    * The event MUST already be in the event log (append first).
    */
   async apply(event: CommunityEvent): Promise<void> {
+    const followUps = await this.runSubjectOperation(event.subjectKey, () => this.applySubject(event));
+    await this.runFollowUps(followUps);
+  }
+
+  private async applySubject(event: CommunityEvent): Promise<Array<() => Promise<void>>> {
+    const followUps: Array<() => Promise<void>> = [];
     const now = event.at;
     const existing = await this.objectStore.get(event.subjectKey);
     const proj: CommunityObjectProjection = existing ?? createProjection(event.subjectKey, 'new', now);
+
+    // F168 Phase F-Step3: external review lifecycle is an orthogonal aggregate
+    // on the same rebuildable projection. It does not mutate the generic case
+    // state and never executes wake/GitHub side effects during replay.
+    if (isExternalReviewEventKind(event.kind)) {
+      const result = applyExternalReviewProjectionEvent(proj.externalReview, event);
+      if (!result.ok) return followUps;
+      await this.objectStore.save({
+        ...proj,
+        externalReview: result.value,
+        appliedEventCount: proj.appliedEventCount + 1,
+        lastRejectedEvent: null,
+        updatedAt: now,
+      });
+      return followUps;
+    }
 
     const snapshot = {
       lastPublicCommentAt: proj.lastPublicCommentAt,
@@ -97,13 +152,14 @@ export class CommunityProjector {
     };
 
     const result = transition(proj.state, event, snapshot);
+    const exactSuppressed = event.classification === 'informational' && isExactSuppressedCommunityEvent(event);
 
     if (!result.ok) {
       if (event.classification === 'informational') {
         // Internal calibration events (eval records) are not external activity —
         // skip projection entirely so rebuild() doesn't corrupt lastExternalActivityAt.
-        if (event.kind === 'case.route_decision_eval') {
-          return;
+        if (event.kind === 'case.route_decision_eval' || exactSuppressed) {
+          return followUps;
         }
         // Cloud R2 P2b: informational activity events (issue.commented, issue.labeled,
         // pr.review_submitted) have no state-machine transition. Do NOT set lastRejectedEvent
@@ -112,10 +168,11 @@ export class CommunityProjector {
         const updated: CommunityObjectProjection = {
           ...proj,
           lastExternalActivityAt: event.at,
+          issueFixEvidence: issueFixEvidenceFromEvent(event) ?? proj.issueFixEvidence,
           updatedAt: now,
         };
         await this.objectStore.save(updated);
-        return;
+        return followUps;
       }
       // State-changing event rejected — record for observability, do not change state
       const updated: CommunityObjectProjection = {
@@ -124,7 +181,7 @@ export class CommunityProjector {
         updatedAt: now,
       };
       await this.objectStore.save(updated);
-      return;
+      return followUps;
     }
 
     // Accepted — apply side effects then update state
@@ -135,11 +192,18 @@ export class CommunityProjector {
       lastRejectedEvent: null,
       updatedAt: now,
     };
+    if (proj.externalReview && isExternalReviewTerminalEventKind(event.kind)) {
+      const externalReviewResult = applyExternalReviewProjectionEvent(proj.externalReview, event);
+      if (externalReviewResult.ok) updated.externalReview = externalReviewResult.value;
+    }
+    if (!exactSuppressed) {
+      updated.issueFixEvidence = issueFixEvidenceFromEvent(event) ?? updated.issueFixEvidence;
+    }
 
     // Side-effect: informational events (issue.commented, pr.review_submitted, etc.)
     // always update lastExternalActivityAt, even when they cause a state transition
     // (e.g. awaiting_external → in_progress restore on external actor comment).
-    if (event.classification === 'informational') {
+    if (event.classification === 'informational' && !exactSuppressed) {
       updated.lastExternalActivityAt = event.at;
     }
 
@@ -166,10 +230,9 @@ export class CommunityProjector {
       if (Array.isArray(rawLinkedPrs) && rawLinkedPrs.length > 0) {
         const prNums: number[] = rawLinkedPrs.filter((n): n is number => typeof n === 'number');
         updated.linkedPrs = [...new Set([...updated.linkedPrs, ...prNums])];
-        // Cross-populate: each linked PR projection gets this issue's number in linkedIssues.
-        // NOTE: during apply() this happens inline; rebuildAll() re-runs this in a second pass
-        // (after all subjects are rebuilt) to ensure order-independence.
-        await this.applyBootstrapCrossPopulate(event, prNums, now);
+        // Cross-populate after releasing this subject's fence. The target PR then
+        // enters its own fence, avoiding reciprocal issue↔PR lock ordering.
+        followUps.push(() => this.applyBootstrapCrossPopulate(event, prNums, now));
       }
     }
 
@@ -219,35 +282,9 @@ export class CommunityProjector {
     // F168 Phase A: cascade pr.merged → linked issues → fixed
     // linkedIssues contains issue NUMBERS (same repo as PR). Cascade only on fresh apply.
     if (event.kind === 'pr.merged' && updated.linkedIssues.length > 0) {
-      let prRepo: string | null = null;
-      try {
-        prRepo = parseSubjectKey(event.subjectKey).repo;
-      } catch {
-        /* ignore */
-      }
-      if (prRepo) {
-        for (const issueNumber of updated.linkedIssues) {
-          try {
-            const linkedIssueKey = `issue:${prRepo}#${issueNumber}`;
-            const cascadeEvent: CommunityEvent = {
-              sourceEventId: `${event.sourceEventId}:cascade:${linkedIssueKey}`,
-              subjectKey: linkedIssueKey,
-              kind: 'pr.merged',
-              classification: 'state-changing',
-              payload: { linkedPr: event.subjectKey, title: (event.payload as Record<string, unknown>).title ?? '' },
-              at: event.at,
-            };
-            const { appended } = await this.eventLog.append(cascadeEvent);
-            if (appended) {
-              // Recursive apply for the linked issue — safe since issues don't cascade further
-              await this.apply(cascadeEvent);
-            }
-          } catch {
-            // Best-effort — cascade failure does not affect PR projection
-          }
-        }
-      }
+      followUps.push(() => this.cascadeMergedPr(event, updated.linkedIssues));
     }
+    return followUps;
   }
 
   /**
@@ -261,19 +298,69 @@ export class CommunityProjector {
     for (const prNum of prNums) {
       try {
         const prSubjectKey = `pr:${issueRepo}#${prNum}`;
-        const existingPrProj = await this.objectStore.get(prSubjectKey);
-        const prProj = existingPrProj ?? createProjection(prSubjectKey, 'new', now);
-        if (!prProj.linkedIssues.includes(issueNum)) {
-          // Do NOT override updatedAt — cross-populate is metadata, not a state change.
-          // The PR's own events already set updatedAt correctly. Overriding with
-          // the (older) bootstrap event time would regress updatedAt after rebuildAll.
-          await this.objectStore.save({
-            ...prProj,
-            linkedIssues: [...prProj.linkedIssues, issueNum],
-          });
-        }
+        await this.runSubjectOperation(prSubjectKey, async () => {
+          const existingPrProj = await this.objectStore.get(prSubjectKey);
+          const prProj = existingPrProj ?? createProjection(prSubjectKey, 'new', now);
+          if (!prProj.linkedIssues.includes(issueNum)) {
+            // Do NOT override updatedAt — cross-populate is metadata, not a state change.
+            // The PR's own events already set updatedAt correctly. Overriding with
+            // the (older) bootstrap event time would regress updatedAt after rebuildAll.
+            await this.objectStore.save({
+              ...prProj,
+              linkedIssues: [...prProj.linkedIssues, issueNum],
+            });
+          }
+        });
       } catch {
         // Best-effort — cross-populate failure does not affect issue projection
+      }
+    }
+  }
+
+  private async cascadeMergedPr(event: CommunityEvent, linkedIssues: number[]): Promise<void> {
+    let prRepo: string | null = null;
+    try {
+      prRepo = parseSubjectKey(event.subjectKey).repo;
+    } catch {
+      return;
+    }
+    for (const issueNumber of linkedIssues) {
+      try {
+        const linkedIssueKey = `issue:${prRepo}#${issueNumber}`;
+        const cascadeEvent: CommunityEvent = {
+          sourceEventId: `${event.sourceEventId}:cascade:${linkedIssueKey}`,
+          subjectKey: linkedIssueKey,
+          kind: 'pr.merged',
+          classification: 'state-changing',
+          payload: { linkedPr: event.subjectKey, title: (event.payload as Record<string, unknown>).title ?? '' },
+          at: event.at,
+        };
+        const { appended } = await this.eventLog.append(cascadeEvent);
+        if (appended) await this.apply(cascadeEvent);
+      } catch {
+        // Best-effort — cascade failure does not affect PR projection
+      }
+    }
+  }
+
+  private async runFollowUps(followUps: Array<() => Promise<void>>): Promise<void> {
+    for (const followUp of followUps) await followUp();
+  }
+
+  private async runSubjectOperation<T>(subjectKey: string, operation: () => Promise<T>): Promise<T> {
+    const canonicalSubjectKey = canonicalizeCommunitySubjectKey(subjectKey);
+    const predecessor = this.subjectOperations.get(canonicalSubjectKey);
+    const predecessorSettled = Promise.resolve(predecessor).then(
+      () => undefined,
+      () => undefined,
+    );
+    const current = predecessorSettled.then(operation);
+    this.subjectOperations.set(canonicalSubjectKey, current);
+    try {
+      return await current;
+    } finally {
+      if (this.subjectOperations.get(canonicalSubjectKey) === current) {
+        this.subjectOperations.delete(canonicalSubjectKey);
       }
     }
   }
@@ -283,19 +370,38 @@ export class CommunityProjector {
    * Deletes existing projection first, then replays all events.
    */
   async rebuild(subjectKey: string): Promise<void> {
-    await this.objectStore.delete(subjectKey);
-    const events = await this.eventLog.read(subjectKey);
-    for (const event of events) {
-      await this.apply(event);
+    const canonicalSubjectKey = canonicalizeCommunitySubjectKey(subjectKey);
+    const inFlight = this.rebuildInFlight.get(canonicalSubjectKey);
+    if (inFlight) return inFlight;
+
+    const operation = this.rebuildSubject(subjectKey);
+    this.rebuildInFlight.set(canonicalSubjectKey, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.rebuildInFlight.get(canonicalSubjectKey) === operation) {
+        this.rebuildInFlight.delete(canonicalSubjectKey);
+      }
     }
+  }
+
+  private async rebuildSubject(subjectKey: string): Promise<void> {
+    const followUps = await this.runSubjectOperation(subjectKey, async () => {
+      await this.objectStore.delete(subjectKey);
+      const events = await this.eventLog.read(subjectKey);
+      const pending: Array<() => Promise<void>> = [];
+      for (const event of events) pending.push(...(await this.applySubject(event)));
+      return pending;
+    });
+    await this.runFollowUps(followUps);
   }
 
   /**
    * Rebuild projections for all known subjects.
    *
    * Two-pass strategy to ensure order-independence for cross-subject side effects:
-   * - Pass 1: rebuild every subject from its own events. This includes inline
-   *   cross-population during apply(), but since subjects are rebuilt in arbitrary
+   * - Pass 1: rebuild every subject from its own events. This includes deferred
+   *   cross-population after each subject, but since subjects are rebuilt in arbitrary
    *   order, the cross-populated data on a PR may be overwritten when that PR is
    *   later rebuilt.
    * - Pass 2: re-apply all case.bootstrap cross-population AFTER all subjects are

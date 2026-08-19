@@ -60,7 +60,7 @@ export class KnowledgeResolver implements IKnowledgeResolver {
     limit: number,
     dimension: 'library' | 'collection',
   ): Promise<KnowledgeResult> {
-    const manifests = this.catalog!.getRoutable(dimension, options?.collections);
+    const manifests = this.catalog!.getRoutable(dimension, options?.collections, options?.authorizedCollections);
     const groups: CollectionGroup[] = [];
 
     const metas: SearchExecutionMeta[] = [];

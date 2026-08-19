@@ -148,13 +148,20 @@ describe('DirectoryPickerModal', () => {
     });
   }
 
+  function findProjectOption(text: string) {
+    const row = Array.from(container.querySelectorAll<HTMLElement>('[data-project-option]')).find((option) =>
+      option.textContent?.includes(text),
+    );
+    return row?.querySelector<HTMLButtonElement>('button[data-project-path]');
+  }
+
   // ── Quick pick selection (two-step: select then confirm) ──
 
   it('calls onSelect with cwd path when recommended quick pick is selected and confirmed', async () => {
     setupCwdSuccess();
     const fns = render();
     await flush();
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
+    const cwdBtn = findProjectOption('推荐');
     expect(cwdBtn).toBeTruthy();
     act(() => {
       cwdBtn?.click();
@@ -169,7 +176,7 @@ describe('DirectoryPickerModal', () => {
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();
-    const projectBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('other'));
+    const projectBtn = findProjectOption('other');
     expect(projectBtn).toBeTruthy();
     act(() => {
       projectBtn?.click();
@@ -537,6 +544,13 @@ describe('DirectoryPickerModal', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(fns.onSelect).not.toHaveBeenCalled(); // not yet
+    const selectedOption = Array.from(container.querySelectorAll<HTMLElement>('[data-project-option]')).find((option) =>
+      option.textContent?.includes(canonicalPath),
+    );
+    expect(selectedOption).toBeTruthy();
+    expect(
+      Array.from(selectedOption?.querySelectorAll('span') ?? []).some((span) => span.textContent?.trim() === '已选'),
+    ).toBe(false);
     clickConfirm();
     expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: canonicalPath }));
   });
@@ -595,7 +609,7 @@ describe('DirectoryPickerModal', () => {
     act(() => {
       catChip?.click();
     });
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
+    const cwdBtn = findProjectOption('推荐');
     act(() => {
       cwdBtn?.click();
     });
@@ -642,7 +656,7 @@ describe('DirectoryPickerModal', () => {
       titleInput.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await flush();
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
+    const cwdBtn = findProjectOption('推荐');
     act(() => {
       cwdBtn?.click();
     });
@@ -659,7 +673,7 @@ describe('DirectoryPickerModal', () => {
       checkbox.click();
     });
     await flush();
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
+    const cwdBtn = findProjectOption('推荐');
     act(() => {
       cwdBtn?.click();
     });
@@ -688,7 +702,7 @@ describe('DirectoryPickerModal', () => {
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await flush();
-    const cwdBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('推荐'));
+    const cwdBtn = findProjectOption('推荐');
     act(() => {
       cwdBtn?.click();
     });

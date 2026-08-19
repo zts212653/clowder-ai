@@ -343,6 +343,8 @@ export function WorkspaceTree({
   hasFile,
   basisPct,
   callbacks,
+  emptyTitle = '还没有文件',
+  emptyDescription = '可以新建文件，或切换到另一个工作区',
 }: {
   tree: TreeNode[];
   loading: boolean;
@@ -354,6 +356,8 @@ export function WorkspaceTree({
   hasFile: boolean;
   basisPct?: number;
   callbacks?: TreeCallbacks;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -459,8 +463,8 @@ export function WorkspaceTree({
             <ellipse cx="12" cy="10" rx="3" ry="3.5" />
             <ellipse cx="18" cy="11.5" rx="2.5" ry="3" />
           </svg>
-          <p className="text-xs text-cafe-interactive/50">还没有文件树</p>
-          <p className="text-micro text-cafe-interactive/30 mt-1">选择一个 worktree 开始浏览</p>
+          <p className="text-xs text-cafe-interactive/50">{emptyTitle}</p>
+          <p className="mt-1 text-micro text-cafe-interactive/30">{emptyDescription}</p>
         </div>
       ) : (
         tree.map((node) => (

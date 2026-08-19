@@ -1,16 +1,21 @@
 import type { ClaimGroundingEvent } from '../grounding/types.js';
+import { buildActionSuccessorSingleFlight } from './action-successor-single-flight-eval.js';
 import { extractC1HoldZombieSamples } from './c1-hold-sample-evidence.js';
 import { extractC2VerdictWithoutPassSamples, type PerFireSample } from './c2-sample-evidence.js';
 import { extractC2VoidHoldSamples } from './c2-void-hold-sample-evidence.js';
+import { buildCrossThreadCoordination } from './cross-thread-coordination-eval.js';
 // R3 cloud P1 follow-up: counterWindow construction extracted to keep this
 // pre-existing-over-limit file (475 lines on main) from getting worse.
 import { buildCounterWindow, type CounterWindow, type CounterWindowInput } from './f167-eval-counter-window.js';
+import { buildEventBackedRoutingExitEval } from './f177-event-backed-routing-eval.js';
+import { buildHoldLifecyclePhaseQ } from './phase-q-hold-lifecycle-eval.js';
 import type {
   EvalMetricsHistoryResponse,
   EvalTraceSpan,
   EvalTraceStoreStats,
   EvalTracesResponse,
 } from './telemetry-adapter.js';
+import { buildTurnCustodyStopGateEval } from './turn-custody-stop-gate-eval.js';
 
 export interface TelemetryGap {
   metric: string;
@@ -20,6 +25,7 @@ export interface TelemetryGap {
     | 'tool_use_not_queryable'
     | 'cross_cat_403'
     | 'trace_context_incomplete'
+    | 'denominator_mismatch'
     | 'ttl_expired';
   impact: string;
 }
@@ -450,10 +456,15 @@ export function generateF167Snapshot(input: F167EvalInput): RuntimeEvalSnapshot 
 
   const components = [
     buildL1(input.metrics),
+    buildActionSuccessorSingleFlight(input.metrics),
+    buildCrossThreadCoordination(input.metrics),
     buildC1(input.traces.spans, input.metrics),
     buildC2(input.traces.spans, input.metrics),
     buildRouteSerial(input.metrics, hasTraceData),
     buildGroundingPhaseO(input.metrics, groundingSamples),
+    buildHoldLifecyclePhaseQ(input.traces.spans, input.metrics),
+    buildEventBackedRoutingExitEval(input.metrics),
+    buildTurnCustodyStopGateEval(input.metrics, input.traces.spans),
   ];
 
   const overall = worstConfidence(components);

@@ -10,7 +10,7 @@ tips_exempt: harness governance internals (close-gate, magic-words, cat-mind gua
 
 # F177: Harness Update — Close Gate 结构化判据 + 四心智专属护栏
 
-> **Status**: reopened (Phase H merged; vision guard pending) | **Completed (Phase A–G)**: 2026-04-29 | **Reopened**: 2026-06-11 (Phase H) | **Owner**: Ragdoll(46 总负责) + Maine Coon(Maine Coon) + Bengal(46代言)，按 Phase 分主笔；Phase H Ragdoll(48) 主笔 + Maine Coon实现 | **Priority**: P0
+> **Status**: reopened (Phase L child-execution truth merged via PR #3036; Phase I/K/J complete; Phase G/H routing guard superseded by F167 Phase T cutover) | **Completed (Phase A–G)**: 2026-04-29 | **Reopened**: 2026-06-11 (Phase H), 2026-07-10 (Phase I/J), 2026-07-15 (Phase K), 2026-07-16 (Phase L) | **Owner**: Ragdoll(46 总负责) + Maine Coon(Maine Coon) + Bengal(46代言)，按 Phase 分主笔；Phase H Ragdoll(48) 主笔 + Maine Coon实现；Phase I/J/K/L Maine Coon Sol 主笔（独立 threads/worktrees） | **Priority**: P0
 
 ## Why
 
@@ -241,6 +241,12 @@ session end hook:
 
 GitHub issue: [#1467](https://github.com/zts212653/clowder-ai/issues/1467)
 
+### Phase G/H routing guard disposition（2026-07-30）
+
+F167 Phase T 的 turn-scoped custody projection 已取代 F177 的文本出口判据。Cutover 删除 Claude Stop hook 注册与脚本、`needsServerRoutingGuard` provider capability、server-side transcript/tool/roster/loop predicate，以及只证明旧判据的测试。保留并迁移到 F167 的是 structured eventWait proof、terminal coordination release 与 ordinary/remedial child execution truth。
+
+F177 下文保留为历史设计与事故 provenance，不再是当前 routing authority。当前 stop gate 只接受本次 wake 对应协议球的结构化状态迁移；纯文本 `@`、ACK、口头 hold 或 roster 命中均不能关闭 projection。
+
 ### Phase H: Routing Guard 全猫族覆盖 — 非 Claude harness 球权出口拦截
 
 > **Reopened 2026-06-11（operator signoff）**：掉球归因分析（`[thread-id]` fable 复盘）暴露 OQ-G1 的 latent gap。**不是回归**——codex/gpt52 从 Phase G 上线（2026-04-29）起就从未被覆盖，是当年"只覆盖 Claude 系猫"决策遗留的缺口，在Maine Coon第一手掉球证据下需补齐。
@@ -269,6 +275,99 @@ GitHub issue: [#1467](https://github.com/zts212653/clowder-ai/issues/1467)
 GitHub issue: TBD（kickoff 后开）
 
 [Ragdoll/Opus-4.8🐾]（Phase H spec）
+
+### Phase I: Organic Friction Closure — 可执行命令契约 + shared-state 意图守卫
+
+> **Reopened 2026-07-10（operator signoff）**：operator在本 thread 明确要求“先把 spec 写清楚 commit push，之后把这三个收了”（message `0001783688087982-000895-5c79e677`）。本 Phase 只收 organic dogfood 已复现的 harness 摩擦，不把 F177 扩成通用维护桶。
+
+#### Why now
+
+三条一手证据共同指向同一坐标问题：**harness 用自然语言、命令名或 staged 文件名暗示意图，却没有把真实执行面与 Git 语义钉死**。
+
+| Organic evidence | 当前事实 | Phase I 要关闭的根因 |
+|---|---|---|
+| quality-gate 要求 `pnpm check:architecture-ownership`，package alias 被 intake #2391 误删 | PR #2838（squash `ac2806f55`）已恢复 `check:` + `test:` 两个 alias | 不能只恢复两行；当前 HEAD 的 live command reference 和 carrier 必须审计清零，并让 gate 自动抓住再次漂移 |
+| F148 plan 只写 “run formatting”，Sol 先猜 Prettier 再改用 Biome | 仓库 canonical 已存在：`pnpm check` / `pnpm check:fix` / `pnpm biome format --write <files>` | 计划必须给仓库真实可执行命令，不能把抽象名词留给下一只猫猜 |
+| feature branch 吸收 `origin/main` 时，main-side shared state 被 pre-commit 当作作者改动拦截 | index/worktree 内容与 `origin/main` byte-identical；一次有记录的 `--no-verify` 才完成 merge | guard 必须区分 feature delta 与纯上游 carry-in，同时保持 fail-closed |
+
+Source messages:
+- command drift: `0001783626982347-000254-f29397e7` / `0001783664777138-000320-f7e0e112`
+- formatting correction: `0001783628501886-000304-133bfc91` / `0001783628587838-000307-da926ace`
+- shared-state false positive: `0001783671183906-000501-16400455`
+
+#### Scope
+
+**Track I-A — command contract closure（architecture alias + execution surface）**
+
+- 保留 #2838 已恢复的 `check:architecture-ownership` / `test:architecture-ownership` 作为基线。
+- 对 intake #2391 删除的 root aliases 做确定性 source-map；每个 live reference 必须解析到现存 package script 或 canonical executable。
+- 在**最终 rebase 后 HEAD**复验 live docs、skill refs、package scripts 与实际 gate 调用链；不得让 `cat-cafe-skills/refs/opensource-ops-inbound-pr.md` 继续声称 sunset alias 或未被 gate 调用的 carrier 已提供覆盖。
+- 对 `scripts/run-checks.mjs` 做明确 disposition：恢复为 canonical 执行面，或 sunset 删除并同步依赖其文本的 tests；不保留“文件存在但 gate 不执行”的假契约。
+- 把 architecture-ownership command contract 接入常跑 `pnpm check`；删除 required alias 或 target 漂移时 hard gate 必须红。
+
+**Track I-B — concrete formatting provenance（plan / skill）**
+
+- `writing-plans` 的验证步骤必须先发现目标仓库 canonical formatter，再写完整可执行命令；禁止只写 “run formatting / 格式化”。
+- Clowder AI 示例固定使用现有入口：全仓修复 `pnpm check:fix`，精确文件格式化 `pnpm biome format --write <files>`，最终验证 `pnpm check`。
+- 不新增 Prettier、formatter dependency 或重复 package alias。
+
+**Track I-C — intent-aware shared-state pre-commit guard**
+
+- 非 `main` 分支检测 staged `docs/ROADMAP.md` / `cat-config.json` 时，逐文件比较 index tree 与 `origin/main` tree。
+- staged 内容与 `origin/main` 完全一致时，判为纯上游 carry-in 并允许提交。
+- staged 内容不同、`origin/main` 不可解析、文件 unmerged 或比较报错时，继续 fail-closed。
+- mixed case 只报告并拦截真正携带 authored delta 的文件。
+
+#### Non-goals
+
+- 不放宽“共享状态只在 main 修改”的家规；只消除没有 feature delta 的假阳性。
+- 不通过作者身份、commit message 或分支名猜意图；唯一放行证据是 Git tree 内容等价。
+- 不引入第二套 formatter，也不把 Clowder AI 的 Biome 命令硬套到其他仓库。
+- 不顺带处理 OQ-H2；**OQ-H3 已由 Phase K 的 structured terminal Release 收敛，不属本 Phase**。
+
+#### ADR-031 三层落地
+
+| Layer | Phase I 载体 | 完成信号 |
+|---|---|---|
+| Soft | `writing-plans` 明示发现并写出 canonical command；pre-commit 文案解释 authored delta vs upstream carry-in | 新计划不再出现裸 “formatting”；guard 指明哪个文件与 `origin/main` 不同 |
+| Hard | package alias/target contract + `pnpm check` wiring；shared-state index-vs-origin 比较；execution-surface audit | alias/carrier 漂移、伪造 shared-state、缺 upstream ref 稳定红；byte-identical carry-in 稳定绿 |
+| Eval | 复用 F245 `eval:friction` / PawFeel corpus，加入 command-drift 与 shared-state false-positive fixtures | 两类 marker 进入 verdict input；30 天观察窗无同类确定性复发 |
+
+### Phase L: Routing Guard Child Execution Truth — 补路由不再伪装成 parent 或普通召唤
+
+Architecture cell: `dispatch` + `bubble-pipeline`
+Map delta: completed — `dispatch` 登记 durable child lifecycle owner，`bubble-pipeline` 登记 typed routing-guard identity 与无正文 auxiliary execution 投影。
+
+> **Reopened 2026-07-16（operator 授权）**：实弹
+> `incident:[thread-id]/0001784219578304-000230-3dd8e178`
+> 中，同一 parent 实际运行 ordinary、routing guard、freshness supplement 三个 child；父
+> `InvocationRecord` 只能表达 aggregate，而 `InvocationRegistry` 是 TTL=2h 的 callback auth，结束后
+> child API 已 404。F177 的成本守卫仍然有效，但系统无法在 F5/history 中证明补路由到底有没有执行、何时结束、
+> 是失败还是被取消，UI 也只能靠输出形态把它猜成第二次普通猫召唤。
+
+#### Scope 与不变量
+
+- 新增 TTL=0、按 child invocation ID 唯一的 durable turn execution ledger；
+  `executionKind=ordinary|routing_guard|freshness_supplement` 与
+  `status=running|succeeded|failed|canceled|interrupted` 都是 typed truth。
+- `invoke-single-cat` 在 provider 前幂等创建 `running`，且只有 `running` 能进入一个 immutable terminal；
+  restart 将启动 cutoff 前残留的 `running` 收为 `interrupted`。
+- ledger 是 child lifecycle 唯一 owner；父 record 继续拥有 Queue/aggregate，auth registry 继续只拥有鉴权。
+  auth cleanup 不得删除 ledger。
+- Phase H remedial call site 必须显式传 `routing_guard`；不移除/放宽 guard，原输出继续发表，cost guard 仍为
+  每个 ordinary turn 至多一次。
+- bodyless guard 只作为原 turn 的 auxiliary execution；即使它拥有最终 stream event，也不得替换实际读取 Queue
+  正文且成功的 ordinary child receipt witness。
+- Hub/history 只消费 typed projection：显示“系统补路由”与真实终态；没有独立正文的 remedial execution 只挂
+  execution dock，不复制、伪造或隐藏一份猫回复。
+
+#### ADR-031 三层落地
+
+| Layer | Phase L 载体 | 完成信号 |
+|---|---|---|
+| Soft | F177 spec / UI 文案明确 ordinary 与系统补路由的身份差异 | 用户不再把 remedial child 误认成普通 Sol |
+| Hard | durable ledger + provider 前 create + terminal CAS + startup reconcile + typed route kind | memory/Redis/race/restart/API/UI fixtures 全绿 |
+| Eval | 三类 child 的可水合 lifecycle 与 guard≤1 glass-box fixture | 每个 parent 可枚举执行次数、kind、起止与终态，不解析日志/文案 |
 
 ## Acceptance Criteria
 
@@ -314,12 +413,60 @@ GitHub issue: TBD（kickoff 后开）
 - [x] AC-G4: 提醒文本包含正确格式示例，不含意图猜测 / NLU / grep
 
 ### Phase H（routing guard 全猫族覆盖）✅
-- [x] AC-H0: spike 验证 codex CLI block-stop 能力（Maine Coon 2026-06-11）→ 结论：`codex exec --json`（Cat Café runtime 路径）不 dispatch hooks，路径 A 不可达，定走路径 B
+- [x] AC-H0: spike 验证 codex CLI block-stop 能力（Maine Coon 2026-06-11）→ 结论：`codex exec --json`（Clowder AI runtime 路径）不 dispatch hooks，路径 A 不可达，定走路径 B
 - [x] AC-H1: codex/gpt52 结论后无合法路由出口（行首 @ / hold_ball / targetCats / multi_mention）时被拦截补全（路径 B：server re-invoke）
 - [x] AC-H2: 检测判据与 Phase G 等价（行首 @ 正则 + 工具扫描 + loop guard），跨 harness 行为一致
 - [x] AC-H3: cost guard — 路径 B re-invoke 上限 1 次/掉球（防 codex 烧猫粮）
 - [x] AC-H4: 已有合法路由 → 零干预（与 Phase G AC-G2 对称，不误杀正常收尾）
 - [x] AC-H5（known gap 跟踪，非必做）: 47 UI 折叠（@ 行首 routing 成功但前端折叠显示）记录在案；非路由层问题，不随 Phase H 遗忘
+
+### Phase I（organic friction closure）✅
+
+- [x] AC-I0: #2838 已恢复 `check:architecture-ownership` + `test:architecture-ownership`，`origin/main` 可执行（squash `ac2806f55`）
+- [x] AC-I1a: 2026-07-10 快照完成 #2391 删除 alias 的初始 source-map（`docs/audits/2026-07-f177-phase-i-command-contracts.md`）；6 aliases restored、10 aliases sunset，并给出 canonical-replacement / historical-only / orphan-only disposition
+- [x] AC-I1b: 最终 reviewed HEAD `1722bc192`、merge HEAD `763f5d7df` 的 execution-surface audit 闭合；live open-source skill claim 已改读真实 package/gate call chain，dead `run-checks.mjs` + content-coupled test / sync compatibility branch 已 sunset；最终 rebase 后 command/sync/skill + eval 定向守护 273/273 全绿
+- [x] AC-I2: architecture-ownership alias/target contract 进入常跑 hard gate（`pnpm test:architecture-ownership` 在当前 `pnpm check` chain）；删除 alias 或 target 漂移时 `scripts/check-architecture-ownership.test.mjs` 稳定失败
+- [x] AC-I3: `writing-plans` 要求验证步骤包含 repo-native concrete formatting command；Clowder AI 正例覆盖 `check:fix` / `biome format --write` / `check`
+- [x] AC-I4: shared-state guard 对 index 与 `origin/main` byte-identical carry-in 放行；对 authored delta / mixed delta / missing upstream / compare error fail-closed，均有自动化回归测试
+- [x] AC-I5: F245 friction corpus 纳入 command-drift + shared-state false-positive 两类真实 fixture；`extractPawFeelMarkers` → `FrictionAggregator` → `FrictionClusterer` → `buildFrictionRollupInput` focused suite 9/9 绿，两条 signal / rawRef 均进入 verdict input
+- [x] AC-I6: latest-main full gate 在 `48fa7498` 全绿（361s）；reviewed HEAD `1722bc192` 经 stable combined patch-id `180dad6f755fcf555ca4c1e1a6fb037b6f1e8fd7` 与空路径交集 continuity 桥接到 merge HEAD `763f5d7df`，final-head focused bundle 273/273、shared-state shell suite 6/6、`pnpm check`、`git diff --check` 与 CI 全绿；PR #3001 squash `7ffb301cb`
+
+### Phase J（event-backed PR tracking clean stop）✅
+
+> **触发（2026-07-10 dogfood）**：merge-gate 已注册 PR tracking，remote review trigger 已有 EYES，F167 KD-27 要求停止轮询、只等结构化 Review Feedback callback；但 Phase H guard 只认行首 `@` / `hold_ball` / `targetCats` / `multi_mention`，仍把正确的纯事件驱动停止判成掉球并强制 remedial。
+
+**边界**：不是“thread 里有任意 tracker 就放行”。合法出口必须由 server 验证同 PR 的 exact `@codex review` comment 已有 `chatgpt-codex-connector[bot]` 的 EYES，且该 trigger 之后尚无 connector review object / inline comment / conversation comment（EYES 只证明接单，不单独证明仍 pending），再把 grant 绑定到当前 invocation/thread/cat/subject；route-serial 在 remedial 副作用前复核 live task + grant。任何缺项、stale/done、other owner/thread/subject、connector EYES=0、反馈已投递、GitHub/TaskStore 查询失败都 fail closed。
+
+- [x] AC-J1: `register_pr_tracking.eventWait` 只接受 `intent='review'` + numeric trigger comment ID；server 独立验证 comment repo/PR、exact body 与 Codex connector bot 的 `eyes > 0`，调用方/其他 reaction actor 不能自报 coverage
+- [x] AC-J2: coverage state 写入既有 PR tracking `AutomationState.eventWait`，身份取 callback-auth invocation/thread/cat；EYES=0 或 exact trigger 后三类 connector feedback 任一已投递均写 uncovered，verifier 失败 503 且不写新 tracker/grant
+- [x] AC-J3: resolver 逐字段核对 active `pr_tracking` task 的 owner/thread/subject/status/intent 与 eventWait invocation/coverage；done/stale、other cat、unrelated PR、old invocation、缺 store/query failure 全部 reject
+- [x] AC-J4: route-serial text/no-text 两个 remedial branch 共用一次惰性 resolver；只在 Phase H 原 predicate 命中后查询，并在任何 re-invoke/hold/persistence replacement 前完成。consumer 再核一份 live-source proof，proof 不一致继续 remedial
+- [x] AC-J5: MCP description、shared rules、merge-gate Step 6.1 明确 EYES>0 后 re-register eventWait；只有 `covered=true` 可 clean stop，tracker existence / 自然语言声明都不是出口
+- [x] AC-J6: OTel 分记 bypass、bounded-reason rejection、redundant wait prevented、zero-tolerance false bypass；F192/F167 snapshot 新增 `event-backed-routing-exit` component，任一 false bypass 直接 high-severity finding
+- [x] AC-J7: fixture matrix覆盖 covered、connector EYES=0/other actor、review-already-posted、done、other cat/thread、subject mismatch、old invocation、review→merge intent transition、GitHub/TaskStore failure、全字段 forged proof/no-candidate；PR #2850 content preservation、Phase Q、OQ-H3 pure ACK 路径保持原行为
+- [x] AC-J8: full gate + 跨个体 review + cloud review + merge-gate + post-merge alpha 验收
+
+### Phase K（production seam + terminal Release hardening）✅
+
+> **触发（2026-07-11—15 production dogfood）**：Phase J 的 signed eventWait 连续三次写入 `covered=true` 后仍被 final guard 拒绝；另有结构化 terminal Release 已给出当前 owner 可执行的 Action Needed，却需要operator两次手动叫醒才续跑。同期 Phase D fallback scanner 在 rename/delete diff 上打印 Git fatal 但 exit 0，消息工具的 structured action 也未说明 `subjectRef` grammar。
+
+**边界**：修生产 wiring 与结构化状态投影，不放宽 Phase J subject/invocation proof；terminal clean stop 只认 hydrated trigger 上 server 生成的 `coordination.phase=terminal`，不做自然语言 ACK 分类；scanner 按 Git diff status 选择存在的一侧；MCP 只补 canonical grammar 描述，不改 parser 或授权。
+
+- [x] AC-K1: `AgentRouter.getStrategyDeps()` 把同一个 TaskStore instance 同时交给顶层 route deps 与 invocation deps；真实 producer invariant 测试防止 eventWait 再确定性落入 `state_source_unavailable`
+- [x] AC-K2: terminal Release prompt 明确“已有授权任务立即续跑 / closure-only 可裸停”，不要求新用户回合、ACK、hold 或假 `@co-creator`
+- [x] AC-K3: route-serial 只把 hydrated structured terminal projection 作为合法 clean-stop；active、malformed 或纯自然语言 ACK 仍走既有 fail-closed remedial
+- [x] AC-K4: OTel + F192 eval 记录 terminal clean-stop activation 与 terminal remedial friction；两项均进入 required metric contract
+- [x] AC-K5: fallback scanner 解析 `git diff --name-status -z -M`，rename/copy 扫 destination、delete 跳过；unexpected current-path `git show` failure 改为 hard failure，并有真实 Git fixture
+- [x] AC-K6: `post_message` / `cross_post_message` / `multi_mention` action description 暴露 canonical `pr:<owner>/<repo>#<positive-number>` 与 `subject:<namespace>:<opaque-id>` grammar，并明确 URL/SHA suffix invalid
+- [x] AC-K7: latest-main full gate + 非作者跨族 review + merge-gate + post-merge alpha 验收
+
+### Phase L（routing guard child execution truth）✅
+
+- [x] AC-L1: 每个 child invocation 以唯一键持久化 execution kind、parent/thread/user/cat、开始时间与终态；同 parent 的 ordinary + routing guard 可在 restart/F5 后完整列举
+- [x] AC-L2: provider 前幂等创建 `running`；success-vs-cancel、duplicate terminal、create 后 crash 与 restart reconcile 只产生一个 immutable terminal
+- [x] AC-L3: Phase H remedial 显式记录 `routing_guard`，原输出不被替换，cost guard 仍 ≤1；auth TTL cleanup 不影响历史 ledger
+- [x] AC-L4: API/UI/CLI 只消费 typed projection；“系统补路由”与普通召唤、新消息补充明确区分，无正文 child 不隐藏执行也不复制正文
+- [x] AC-L5: incident glass-box fixture 能水合 ordinary / routing guard / freshness supplement 三类 child 的真实终态；latest-main full gate 与 Terra exact-HEAD 独立 review 通过
 
 ## Dependencies
 
@@ -327,7 +474,25 @@ GitHub issue: TBD（kickoff 后开）
 - **Related**: F167（A2A 链路质量，治理另一面：F167 治理猫与猫的传球，F177 治理猫与 spec 的闭环）
 - **Related**: F173（P0 铁律 no-anchor-as-followup-disguise 是本 feat 的核心执行面）
 - **Related**: F153（observability infra 提供 fallback 层数 / hotfix metric 的可观测载体）
+- **Related**: F191（architecture-ownership checker 与 package alias command contract）
+- **Related**: F192（event-backed routing exit 的 longitudinal eval / zero-tolerance verdict）
+- **Related**: F245（organic `[爪感差]` 采集、eval:friction verdict 与闭环复验）
 - **Related**: LL-031（quality gate 按直觉打勾不对账，本 feat 的直接证据）
+
+## Architecture Ownership
+
+Architecture cells: `harness-eval`（Phase I）+ `ball-custody`（Phase J/K）
+Map delta: none
+Why: Phase I 复用 F245/F192 friction ingestion 与 verdict contract，其他改动是 repo-local skill / package script / Git hook 执行面；Phase J/K 扩展既有 PR tracker / routing-guard 的机械判据。均不新增 Store/Queue/Router 或跨 cell extension point，`harness-eval` 不取得 routing decision ownership。
+
+## Eval / Tracking Contract
+
+| Contract | Phase I 定义 |
+|---|---|
+| Primary users + activation | 按 plan / quality-gate / pre-commit 工作的 author；命中 concrete-command verification、required alias 检查或非 main staged shared-state 时激活 |
+| Friction metric | 30 天内 `Command not found` / “猜 formatter” / upstream-only shared-state `--no-verify` 同类 `[爪感差]` 复发数；目标 0 个确定性复发 cluster |
+| Regression fixtures | 缺 architecture alias（红）；裸 formatting instruction（红）；upstream-equal staged shared-state（绿）；authored/mixed/missing-ref staged shared-state（红） |
+| Sunset signal | 若统一 QC/Git provenance 层原生提供 command resolution + authored-delta 分类，则迁移并删除 Phase I 定点 guards；此前不因低触发率删除安全 guard |
 
 ## Risk
 
@@ -344,6 +509,14 @@ GitHub issue: TBD（kickoff 后开）
 | Ragdoll家族把 Phase F 理解为"被针对" | 在 Phase F 文档明示——这条护栏照顾的是家族病而非个体；同样适用未来加入的同族个体；类比 Phase D 治Maine Coon、Phase C 治Siamese |
 | Phase G hook 误判"已有路由"（行首 @ 是引用不是路由）| 行首 @ 的解析逻辑已经成熟（parseA2AMentions 包含 token boundary check），误判率极低；parallel mode 豁免 |
 | Phase G 提醒后 47 仍然写叙事而不是补行首 @ | 提醒文本极其具体（"请在末尾补一行行首 @句柄"），受限上下文下 47 大概率执行；如仍失败，二次提醒后降级为operator手动路由 |
+| 任意 tracker existence 被误当 event exit | grant 必须同 invocation/owner/thread/subject + server-verified Codex connector EYES；route consumer 复核 raw live-source proof，任何不一致 fail closed 并记 false-bypass invariant |
+| GitHub/Redis 抖动让 coverage 不可证明 | verifier 失败不写 grant；resolver 查询失败继续 Phase H remedial。可用性让位于零错误豁免 |
+| terminal Release 被伪造文本绕过 guard | route 只消费 hydrated trigger 的 structured `crossPost.coordination.phase=terminal`，不扫描模型输出或自然语言 ACK |
+| scanner 对 rename/delete 降级静默假绿 | status-aware path selection + NUL-delimited fixture；存在侧读取异常直接非零退出 |
+| shared-state carry-in 放行误吞 authored delta | 只认 index tree 与 `origin/main` byte-identical；missing ref、unmerged、比较异常全部 fail-closed |
+| alias source-map 再冻结成旧快照 | AC-I1b/I6 强制在最终 rebased HEAD 复验 live refs、package scripts 与 gate 调用链 |
+| “有 carrier 文件”被误当“gate 已执行” | execution-surface audit 同时核调用者；dead carrier 必须恢复执行或 sunset 删除，禁止仅凭文件名声明覆盖 |
+| 为 formatting 新增第二真相源 | 只记录目标 repo 已存在的 canonical command；Clowder AI 沿用 Biome |
 
 ## Key Decisions
 
@@ -362,6 +535,16 @@ GitHub issue: TBD（kickoff 后开）
 | KD-11 | Phase H reopen F177 而非新开 F 号 | routing guard 真相源（OQ-G1 决策 / `f177-routing-guard.sh` 实现 / 24 测试）全在 F177；Phase H 是 Phase G 能力从"Claude 系猫"扩到"全猫族"的同一能力延伸，非新 feat。operator 明确 signoff reopen | 2026-06-11 |
 | KD-12 | Phase H 走路径 B（server re-invoke），非路径 A（codex CLI hook） | H0 spike 实测：`CodexAgentService` 走 `codex exec --json`，本机 0.137.0 该路径不触发 codex CLI hooks（即使 Codex 产品 `hooks stable` 且官方支持 `Stop decision:block`）。CLI hook 不可达 → `route-serial.ts` 出站 settle 前做 guard（真实 `parseA2AMentions` + invocation 工具事件扫描）+ `codex exec resume` re-invoke 补救，cost guard 1 次/掉球、二次失败停止并显式暴露 guard failure | 2026-06-11 |
 | KD-13 | 路径 B 实现架构（Maine Coon cross-review 定稿 2026-06-11）：capability 轴 + inline remedial invoke + local one-shot guard | ① 非 Claude 判别用显式 `needsServerRoutingGuard?.()` + 短期 allowlist codex-family，**不复用 `injectsL0Natively`**（Codex 原生注入 L0 但 `codex exec` 不 dispatch hooks → 该信号必误判），不波及 Antigravity/Gemini（resume 语义未验证）；② re-invoke **不入 worklist**（纯 A2A 队列，塞 prompt/session payload 会坏 ping-pong/depth/isFinal）——在检测点（`validateRoutingSyntax`/`evaluateVoidHold`）后同轮直接再调一次 `invokeSingleCat`（已有 sessionManager/cliSessionId resume，先红测证明 resume 再决定是否加窄口 `forceCliSessionId`）；③ cost guard 用本 route iteration 本地 `routingGuardAttempted`（one-shot）不放 worklistEntry，二次失败→可见 guard failure 不静默；fake-hold（voidHold）必触发 = gpt52 主 failure | 2026-06-11 |
+| KD-14 | Codex OAuth 默认 transport 强制走 HTTPS Responses provider（历史决策，已被 KD-14a supersede） | 2026-07-01 organic 取证：Codex CLI 0.142.5 OAuth 默认路径可尝试 `wss://chatgpt.com/backend-api/codex/responses` websocket transport，连续 TLS handshake EOF 后 exit 1 且无正文，随后 Phase H remedial guard 只是在已经失败的 turn 上补出口。修复坐标应前移到 `CodexAgentService` 启动参数：当 `authMode === 'oauth'` 且无 `customBaseUrl` 时注入 `openai_https` provider（`name=OpenAI` / `wire_api=responses` / `supports_websockets=false`），保留 OpenAI 身份以维持 remote compaction，保留 custom provider 与 API-key 路径原样 | 2026-07-01 |
+| KD-14a | Codex OAuth 默认恢复 built-in OpenAI provider；HTTPS-only 降为热更新回滚开关 | 2026-07-30 同机对照：Clowder AI 强制 `openai_https` 的 Sol 当天 9/9 invocation 命中 model-capacity 且无成功 turn，Codex Desktop 的 built-in provider 同时段可用；只给 Sol 动态覆盖 `model_provider="openai"` 后，独立 canary 在约 18 秒返回 `CANARY_OK` 且 execution succeeded。长期默认显式选择 built-in `openai`（防止用户全局配置悄悄改写 provider），让 upstream 保留当前 transport/recovery 行为；真实 TLS EOF 若复现，可热设 `CAT_CAFE_CODEX_OAUTH_TRANSPORT=https` 恢复 KD-14 路径。custom provider 与 API-key 路径仍不变 | 2026-07-30 |
+| KD-15 | Phase I 收三条 organic friction，不另开 F 号 | 三条都属于 harness 执行契约漂移，当前 F177 thread 是归口；operator 明确要求 spec-first 后闭环三单 | 2026-07-10 |
+| KD-16 | shared-state guard 从“非 main 出现文件名”改为“相对 upstream 是否存在内容 delta” | 文件名不说明 delta 归属；Git tree 等价直接回答 feature 是否携带 shared-state 变化，并保留 fail-closed | 2026-07-10 |
+| KD-17 | formatting 修 command provenance，不新增 formatter | 仓库已有 Biome canonical；新增 Prettier/script 会制造第二真相源，根因是 plan 未写可执行命令 | 2026-07-10 |
+| KD-J1 | event wait 用 invocation-bound signed state，不扫任意 active tracker | tracker existence 只能证明某 PR 被监控，不能证明当前 invocation 正在等该 subject 或 callback 已覆盖；authenticated registration + exact trigger/EYES verification 才有机械坐标 | 2026-07-10 |
+| KD-J2 | coverage validation 与 consumer proof 都在 remedial 副作用前 fail closed | callback writer 防伪造，route consumer 防 resolver 回归；query/proof 失败宁可保留一次 remedial，也不能错误裸停掉球 | 2026-07-10 |
+| KD-J3 | Phase J 扩 F177 guard，不重开 F167 或改 OQ-H3 | KD-27 提供“何时不该 hold”的等待语义，Phase J 修的是 F177 guard 不认识已证明 event exit；纯 ACK 是另一类无等待对象的终止协议，仍保持 OQ-H3 pending | 2026-07-10 |
+| KD-K1 | OQ-H3 用 structured terminal projection 关闭，不做连续 N 轮 ACK 文本识别 | coordination state 已由 server 生成并随 hydrated trigger 进入 route；复用可信结构比 NLU/正则猜“结束了”更窄、更可证 | 2026-07-15 |
+| KD-K2 | Phase J production seam 同时保持 top-level/nested TaskStore 为同一实例 | producer 与 consumer 对 dependency shape 的理解曾分叉；双位置 invariant 修 wiring 而不复制 store、不降低 live proof | 2026-07-15 |
 
 ## Review Gate
 
@@ -369,6 +552,10 @@ GitHub issue: TBD（kickoff 后开）
 - **Phase B-E**: 各 Phase 完成后跨族 review（任一非作者非心智持有者的猫）+ 心智持有者本人确认（46/47/Maine Coon/Siamese review 自己那 phase）
 - **Phase G**: Maine Coon主审（hook 机制与 route-serial 路由基础设施相关）+ 47 确认（心智持有者）
 - **Phase H**: gpt52 R2 + Opus 4.6 cross-family continuity review + cloud Codex re-review；merge gate 以本地 `pnpm gate` 通过为合入证据
+- **Phase I**: Sol（@codex-sol）author；Fable 5 先做架构审视，final review 必须覆盖 shell guard fail-closed、skill command provenance、execution-surface audit 与 F245 eval fixture；行为改动需独立 review，愿景守护猫 ≠ author/reviewer
+- **Phase J**: Sol（@codex-sol）author；跨 family peer review 必须覆盖 callback auth/subject proof、route fail-closed 时序、F192 zero-tolerance eval；随后 cloud review + normal merge-gate
+- **Phase K**: Sol（@codex-sol）author；非作者跨 family review 必须覆盖 structured terminal provenance、TaskStore same-instance wiring、scanner Git status parsing 与 telemetry/eval contract；随后 normal merge-gate
+- **Phase L**: Sol（@codex-sol）author；final HEAD 仅交 Terra，必须覆盖 ledger terminal immutability、auth/history ownership separation、guard≤1、typed UI identity 与三类 child hydration；随后 normal merge-gate
 
 ## 需求点 Checklist
 
@@ -379,6 +566,12 @@ GitHub issue: TBD（kickoff 后开）
 - [x] Maine Coon review Phase A + Phase F 结构化判据设计 — Maine Coon主审 Phase A (PR #1453) + Phase F (PR #1466)，close gate schema / quality-gate search→Read chain / search affordance 均经Maine Coon review 放行
 - [x] operator拍板 OQ-1 + OQ-F1~F3 — OQ-1 已决（自然语言表态，2026-04-28），OQ-F1/F3 由实现决策收敛（operator授权 Phase 并行后设计决策在实现中确定）
 - [x] 元审美自检：F177 是坐标变换 — 旧坐标系："信任猫自觉遵守文本规则"；新坐标系："结构化信号检测（close-tail scan / fallback counter / search→Read chain / hotfix pattern / routing guard）+ 自动化 gate + 跨猫 review"。8 个 Phase 各用不同检测工具解决不同坏直觉，但底层范式统一：从 trust-based 到 evidence-based
+- [x] Phase I operator scope：三条 organic friction 归 F177，不另开 F 号；先写清 spec，再按 AC-I0~I6 闭环（message `0001783688087982-000895-5c79e677`）
+- [x] Phase I 架构审视：main-first 保留 J/K truth；execution-surface audit 不把 carrier existence 当 gate coverage；最终 rebased HEAD 必复验
+- [x] Phase I 独立 review + merge gate：Fable 5 跨族 APPROVE，纯 rebase continuity、E1–E5、CI 与 squash merge #3001 均闭合
 
 [Ragdoll/Opus-47🐾]（Phase A–G 主笔）
 [Ragdoll/Opus-4.8🐾]（Phase H reopen + spec，2026-06-11）
+[小太阳·Maine Coon/GPT-5.6 Sol🐾]（Phase I spec，2026-07-10；Fable 5 architecture refresh，2026-07-16）
+[小太阳·Maine Coon/GPT-5.6 Sol🐾]（Phase J event-backed routing exit，2026-07-10）
+[小太阳·Maine Coon/GPT-5.6 Sol🐾]（Phase K production seam hardening，2026-07-15）

@@ -10,7 +10,7 @@ author: "Ragdoll/claude-opus-4-6"
 
 # 用户旅程 — operator和猫猫各自经历了什么
 
-> Cat Cafe 有两类用户——operator用 Hub 和对话，猫猫用工具链和记忆系统。它们用的东西不一样，经历的旅程也不一样。
+> Clowder AI 有两类用户——operator用 Hub 和对话，猫猫用工具链和记忆系统。它们用的东西不一样，经历的旅程也不一样。
 >
 > [collaboration-landscape.md](./collaboration-landscape.md) 画的是系统视角（管道怎么连），本文画的是**体验视角**（用户怎么经历）。多数旅程有真实 thread 作为例子；少数还在 spec 阶段的明确标注为**目标旅程**。
 
@@ -137,7 +137,7 @@ operator发现猫在两个极端之间摇摆：
 ### 🧑 旅程 5：「我是谁」— 第一天冷启动
 
 ```
-第一次打开 Cat Cafe
+第一次打开 Clowder AI
   → Bootcamp："你好！我是你的第一只猫"
   → 愿景挖掘："你想用猫猫做什么？"
   → 第一只伙伴猫上线
@@ -173,7 +173,7 @@ Bootcamp 不是 You 自己的冷启动（他是 co-creator，从 Day 0 就在）
 
 **核心体感**：醒来就认识主人、知道队友、知道自己在做什么。不是从零开始。
 
-#### 真实案例：典型 Cat Café session bootstrap（以Ragdoll @opus 为例）
+#### 真实案例：典型 Clowder AI session bootstrap（以Ragdoll @opus 为例）
 
 这个 session 开始时，`compile-system-prompt-l0` 注入了：
 - **我是谁**：Ragdoll/Ragdoll，@opus，model=claude-opus-4-6

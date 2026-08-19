@@ -27,6 +27,9 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       events.push({ type: 'room', room, event, data });
     },
+    emitToUser(userId, event, data) {
+      events.push({ type: 'user', userId, event, data });
+    },
     getEvents() {
       return events;
     },

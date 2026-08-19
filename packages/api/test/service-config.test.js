@@ -8,7 +8,9 @@ const originalCatCafeHome = process.env.CAT_CAFE_HOME;
 const originalServicesConfig = process.env.CAT_CAFE_SERVICES_CONFIG;
 
 const { getServiceConfig, setServiceConfig } = await import('../dist/domains/services/service-config.js');
-const { deriveLegacyServiceConfig, SERVICE_MANIFESTS } = await import('../dist/domains/services/service-manifest.js');
+const { deriveLegacyServiceConfig, resolveEffectiveServiceConfig, SERVICE_MANIFESTS } = await import(
+  '../dist/domains/services/service-manifest.js'
+);
 
 afterEach(() => {
   if (originalCatCafeHome === undefined) delete process.env.CAT_CAFE_HOME;
@@ -174,5 +176,19 @@ describe('legacy env bridge fallback (#863)', () => {
       'mlx-community/Qwen3-ASR-1.7B-8bit',
       'should use Qwen default, not whisper manifest default',
     );
+  });
+
+  it('lets an explicit Qwen legacy activation repair stale persisted Whisper identity', () => {
+    const persisted = {
+      installed: true,
+      enabled: true,
+      selectedModel: 'mlx-community/whisper-large-v3-turbo',
+    };
+    const effective = resolveEffectiveServiceConfig(whisperManifest, persisted, {
+      QWEN3_ASR_ENABLED: '1',
+      QWEN3_ASR_MODEL: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+    });
+
+    assert.equal(effective?.selectedModel, 'mlx-community/Qwen3-ASR-1.7B-8bit');
   });
 });

@@ -10,17 +10,6 @@
     "versionRef": "0.6.2"
   },
   {
-    "id": "claude-github",
-    "name": "GitHub",
-    "description": "Interact with GitHub repositories, issues, pull requests, and code search via the GitHub API",
-    "command": "npx",
-    "args": ["-y", "@anthropic-ai/mcp-server-github"],
-    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "" },
-    "trustLevel": "official",
-    "publisher": "Anthropic",
-    "versionRef": "0.6.2"
-  },
-  {
     "id": "claude-fetch",
     "name": "Fetch",
     "description": "Fetch and extract content from web pages and URLs, converting HTML to readable markdown",

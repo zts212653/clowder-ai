@@ -123,6 +123,23 @@ describe('session-strategy Phase 2', () => {
       assert.equal(result.compress.trackPostCompression, true);
     });
 
+    test('#1329 explicit member strategy takes precedence over breed strategy', async () => {
+      const { getConfigSessionStrategy } = await loadConfigModule();
+      const config = mockConfig({
+        strategy: 'handoff',
+        thresholds: { warn: 0.75, action: 0.85 },
+      });
+      config.breeds[0].variants[1].sessionChain = false;
+      config.breeds[0].variants[1].sessionStrategy = {
+        strategy: 'hybrid',
+        hybrid: { maxCompressions: 3 },
+      };
+
+      const result = getConfigSessionStrategy('test-alt', config);
+      assert.equal(result.strategy, 'hybrid');
+      assert.equal(result.hybrid.maxCompressions, 3);
+    });
+
     test('returns undefined for unknown catId', async () => {
       const { getConfigSessionStrategy } = await loadConfigModule();
       const config = mockConfig({ strategy: 'handoff' });

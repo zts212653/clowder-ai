@@ -1,11 +1,13 @@
 'use client';
 
+import type { ExternalReviewAggregate } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommunityPanelFilters, TIME_RANGES } from '@/components/CommunityPanelFilters';
 import { ClosureChecklistCard } from '@/components/community/ClosureChecklistCard';
 import { UserAssignIcon } from '@/components/community/community-icons';
 import { DecisionQueuePanel } from '@/components/community/DecisionQueuePanel';
 import type { CommunityDecisionQueueItemModel } from '@/components/community/decision-queue-types';
+import { ExternalReviewStatus } from '@/components/community/ExternalReviewStatus';
 import { ReconciliationFindingCard } from '@/components/community/ReconciliationFindingCard';
 import { PR_ICON, TYPE_ICONS } from '@/components/community-panel-icons';
 import { DirectionCard, type DirectionCardProps } from '@/components/DirectionCard';
@@ -53,6 +55,7 @@ interface PrBoardItem {
   author?: string;
   replyState?: string;
   updatedAt: number;
+  externalReview?: ExternalReviewAggregate | null;
 }
 
 interface BoardData {
@@ -287,24 +290,27 @@ function PrRow({
     <div
       data-testid={`pr-row-${item.taskId}`}
       onClick={handleClick}
-      className={`flex items-center gap-2 px-3 py-1.5 hover:bg-cafe-surface-elevated/30 text-xs ${item.threadId ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
+      className={`hover:bg-cafe-surface-elevated/30 text-xs ${item.threadId ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
     >
-      <span className={color}>{PR_ICON}</span>
-      {item.prNumber != null && (
-        <a
-          href={`https://github.com/${repo}/pull/${item.prNumber}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-cafe-muted text-micro hover:text-cafe-accent hover:underline"
-        >
-          #{item.prNumber}
-        </a>
-      )}
-      <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
-      {item.author && <span className="text-micro text-cafe-muted">@{item.author}</span>}
-      {item.ownerCatId && <span className="text-micro text-cafe-accent/60">{resolveCatName(item.ownerCatId)}</span>}
-      <span className="text-micro text-cafe-muted">{relativeTime(item.updatedAt)}</span>
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <span className={color}>{PR_ICON}</span>
+        {item.prNumber != null && (
+          <a
+            href={`https://github.com/${repo}/pull/${item.prNumber}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-cafe-muted text-micro hover:text-cafe-accent hover:underline"
+          >
+            #{item.prNumber}
+          </a>
+        )}
+        <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
+        {item.author && <span className="text-micro text-cafe-muted">@{item.author}</span>}
+        {item.ownerCatId && <span className="text-micro text-cafe-accent/60">{resolveCatName(item.ownerCatId)}</span>}
+        <span className="text-micro text-cafe-muted">{relativeTime(item.updatedAt)}</span>
+      </div>
+      <ExternalReviewStatus aggregate={item.externalReview} />
     </div>
   );
 }

@@ -209,4 +209,20 @@ describe('config-field-parser', () => {
     assert.equal(field.type, 'input');
     assert.deepEqual(field.requiredWhen, { envName: 'MODE', value: 'webhook' });
   });
+
+  it('parses requiredWhen with multiple accepted values', () => {
+    const field = parseConfigField({
+      type: 'input',
+      envName: 'SECRET',
+      label: 'Secret',
+      sensitive: true,
+      required: false,
+      requiredWhen: { envName: 'AUTH_TYPE', value: ['jwt-hs256', 'hmac-sha256-v4'] },
+    });
+    assert.equal(field.type, 'input');
+    assert.deepEqual(field.requiredWhen, {
+      envName: 'AUTH_TYPE',
+      value: ['jwt-hs256', 'hmac-sha256-v4'],
+    });
+  });
 });

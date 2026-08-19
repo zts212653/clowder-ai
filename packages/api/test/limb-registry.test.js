@@ -169,19 +169,27 @@ describe('LimbRegistry', () => {
   it('invoke delegates to node.invoke for online node', async () => {
     const invokeArgs = [];
     const node = mockNode({
-      invoke: async (cmd, params) => {
-        invokeArgs.push({ cmd, params });
+      invoke: async (cmd, params, context) => {
+        invokeArgs.push({ cmd, params, context });
         return { success: true, data: 'photo.jpg' };
       },
     });
     await registry.register(node);
 
-    const result = await registry.invoke('iphone-1', 'camera.snap', { quality: 'high' });
+    const context = {
+      catId: 'opus',
+      invocationId: 'inv-123',
+      userId: 'user-1',
+      threadId: 'thread-1',
+      userMessageId: 'msg-1',
+    };
+    const result = await registry.invoke('iphone-1', 'camera.snap', { quality: 'high' }, context);
     assert.equal(result.success, true);
     assert.equal(result.data, 'photo.jpg');
     assert.equal(invokeArgs.length, 1);
     assert.equal(invokeArgs[0].cmd, 'camera.snap');
     assert.deepEqual(invokeArgs[0].params, { quality: 'high' });
+    assert.deepEqual(invokeArgs[0].context, context);
   });
 
   it('invoke returns error for unknown node', async () => {

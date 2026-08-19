@@ -212,6 +212,7 @@ describe('Integration: dedup does not trigger tracker abort', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(first.outcome, 'created');
     const controller = tracker.start('thread-1', 'opus', 'user-1');
@@ -224,6 +225,7 @@ describe('Integration: dedup does not trigger tracker abort', () => {
       targetCats: ['opus'],
       intent: 'execute',
       idempotencyKey: 'same-key',
+      actionLeaseCarrier: { kind: 'none' },
     });
     assert.equal(second.outcome, 'duplicate');
 

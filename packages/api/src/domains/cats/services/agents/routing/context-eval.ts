@@ -59,6 +59,6 @@ export function extractContextEvalSignals(input: ContextEvalInput): ContextEvalS
     omittedCount: coverageMap.omitted.count,
     anchorCount: coverageMap.anchorIds.length,
     hadThreadMemory: coverageMap.threadMemory?.available ?? false,
-    retrievalHintCount: coverageMap.retrievalHints.length,
+    retrievalHintCount: coverageMap.recallPointer.candidateCount,
   };
 }

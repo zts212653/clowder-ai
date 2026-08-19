@@ -6,13 +6,28 @@ const DEFAULT_CONFIG_PATH = resolve(
   fileURLToPath(new URL('..', import.meta.url)),
   'config/public-test-exclusions.json',
 );
+export const DEFAULT_POLICY_TIMEZONE = 'America/Los_Angeles';
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+export function formatLocalIsoDate(
+  date = new Date(),
+  timeZone = process.env.CAT_CAFE_POLICY_TIMEZONE ?? DEFAULT_POLICY_TIMEZONE,
+) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    ...(timeZone ? { timeZone } : {}),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function isoToday() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalIsoDate();
 }
 
 async function listTestFiles(rootDir, relDir = '') {
@@ -156,14 +171,42 @@ export async function resolvePublicTestFiles(options = {}) {
   };
 }
 
+export function selectFocusedPublicTestFiles(result, rawFocus = '') {
+  if (!isNonEmptyString(rawFocus)) return result.selectedFiles;
+
+  const requested = rawFocus
+    .split(',')
+    .map((file) => file.trim())
+    .filter(Boolean);
+  if (requested.length === 0) {
+    throw new Error('CAT_CAFE_PUBLIC_TEST_FOCUS must name at least one comma-separated test file');
+  }
+  if (new Set(requested).size !== requested.length) {
+    throw new Error('CAT_CAFE_PUBLIC_TEST_FOCUS contains duplicate test files');
+  }
+
+  const selected = new Set(result.selectedFiles);
+  const excluded = new Set(result.excludedFiles);
+  for (const file of requested) {
+    if (excluded.has(file)) {
+      throw new Error(`focused public test is excluded by registry: ${file}`);
+    }
+    if (!selected.has(file)) {
+      throw new Error(`focused public test does not exist in the selected public suite: ${file}`);
+    }
+  }
+  return requested;
+}
+
 async function main() {
   const format = process.argv.includes('--json') ? 'json' : 'plain';
   const result = await resolvePublicTestFiles();
+  const selectedFiles = selectFocusedPublicTestFiles(result, process.env.CAT_CAFE_PUBLIC_TEST_FOCUS);
   if (format === 'json') {
-    process.stdout.write(JSON.stringify(result, null, 2));
+    process.stdout.write(JSON.stringify({ ...result, selectedFiles }, null, 2));
     return;
   }
-  process.stdout.write(result.selectedFiles.join('\n'));
+  process.stdout.write(selectedFiles.join('\n'));
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';

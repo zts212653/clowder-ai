@@ -217,6 +217,7 @@ describe('#780 KimiAgentService raw archive', () => {
     const service = new KimiAgentService({
       spawnFn,
       model: 'kimi-test',
+      l0CompilerFn: buildFakeL0Compiler(),
       rawArchive,
     });
 
@@ -240,6 +241,7 @@ describe('#780 KimiAgentService raw archive', () => {
     const service = new KimiAgentService({
       spawnFn,
       model: 'kimi-test',
+      l0CompilerFn: buildFakeL0Compiler(),
       rawArchive,
     });
 
@@ -259,6 +261,7 @@ describe('#780 KimiAgentService raw archive', () => {
     const service = new KimiAgentService({
       spawnFn,
       model: 'kimi-test',
+      l0CompilerFn: buildFakeL0Compiler(),
       rawArchive,
     });
 

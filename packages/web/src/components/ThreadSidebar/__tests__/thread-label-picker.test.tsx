@@ -39,9 +39,13 @@ vi.mock('@/hooks/useIMEGuard', () => ({
   }),
 }));
 
-import { ThreadLabelPicker } from '../ThreadLabelPicker';
+import { ThreadLabelSettingsContent } from '../ThreadLabelPicker';
 
-const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+const nativeInputValueSetter = (() => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('missing native input value setter');
+  return setter;
+})();
 
 let container: HTMLDivElement;
 let root: Root;
@@ -52,10 +56,10 @@ async function flush() {
   });
 }
 
-function render(props: Partial<React.ComponentProps<typeof ThreadLabelPicker>> = {}) {
+function render(props: Partial<React.ComponentProps<typeof ThreadLabelSettingsContent>> = {}) {
   act(() => {
     root.render(
-      React.createElement(ThreadLabelPicker, {
+      React.createElement(ThreadLabelSettingsContent, {
         threadId: 't1',
         currentLabels: [],
         onSave: vi.fn(),
@@ -66,13 +70,14 @@ function render(props: Partial<React.ComponentProps<typeof ThreadLabelPicker>> =
 }
 
 async function openPicker() {
-  const btn = container.querySelector('button[title="标签管理"]') as HTMLButtonElement;
-  await act(async () => btn.click());
   await flush();
 }
 
 async function openCreateForm() {
-  const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('新建标签'))!;
+  const btn = Array.from(container.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes('新建标签'),
+  );
+  if (!btn) throw new Error('missing create-label button');
   await act(async () => btn.click());
   await flush();
 }
@@ -116,7 +121,27 @@ afterEach(() => {
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
 });
 
-describe('ThreadLabelPicker', () => {
+describe('ThreadLabelSettingsContent', () => {
+  it('restores the saved labels when persistence fails', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('save failed'));
+    render({ onSave });
+    await openPicker();
+
+    const featCheckbox = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).find(
+      (checkbox) => checkbox.closest('label')?.textContent?.includes('feat'),
+    );
+    await act(async () => featCheckbox?.click());
+    const saveButton = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => saveButton?.click());
+    await flush();
+
+    expect(onSave).toHaveBeenCalledWith('t1', ['l1']);
+    expect(featCheckbox?.checked).toBe(false);
+    expect(container.textContent).toContain('保存失败，请重试');
+  });
+
   describe('IME composition guard', () => {
     it('should NOT create label when Enter is pressed during IME composition', async () => {
       hoistedMocks.mockIMEComposing = true;

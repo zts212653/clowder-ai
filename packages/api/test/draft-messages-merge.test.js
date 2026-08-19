@@ -32,7 +32,11 @@ function makeStubRouter() {
 
 // Minimal mock dependencies
 function makeStubRegistry() {
-  return { getLatestId: () => null, register: () => {} };
+  // getRecord 必须存在且返回 null（生产语义：child registry 权威表示"无此 turn 记录"，
+  // 对未知 id 从不 throw）。旧 stub 缺这个方法，wrapper 调用直接 TypeError——一直被
+  // resolveDraftToTurn 的 catch 吞着才没炸；cloud R5 P1-A 删掉吞错后（throw = 未知必须
+  // 传播，null = 权威 skip），stub 的缺口立刻暴露。吞错掩盖缺陷的又一个标本。
+  return { getLatestId: () => null, getRecord: async () => null, register: () => {} };
 }
 
 function makeStubSocketManager() {
@@ -40,6 +44,15 @@ function makeStubSocketManager() {
     broadcastToRoom: () => {},
     broadcastAgentMessage: () => {},
     getIO: () => ({}),
+  };
+}
+
+function makeTurnExecutionStore(records = {}) {
+  const byId = new Map(Object.entries(records));
+  return {
+    get: async (invocationId) => byId.get(invocationId) ?? null,
+    listByParent: async (parentInvocationId) =>
+      [...byId.values()].filter((record) => record.parentInvocationId === parentInvocationId),
   };
 }
 
@@ -97,6 +110,19 @@ describe('GET /api/messages — draft merge (#80)', () => {
       socketManager: makeStubSocketManager(),
       router: makeStubRouter(),
       draftStore,
+    });
+    return app;
+  }
+
+  async function buildAppWithTurnExecutions(records) {
+    const app = Fastify({ logger: false });
+    await app.register(messagesRoutes, {
+      registry: makeStubRegistry(),
+      messageStore,
+      socketManager: makeStubSocketManager(),
+      router: makeStubRouter(),
+      draftStore,
+      turnExecutionStore: makeTurnExecutionStore(records),
     });
     return app;
   }
@@ -182,6 +208,88 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.isDraft, true, 'Draft should have isDraft flag');
     assert.equal(draft.content, 'Draft content...');
     assert.equal(draft.catId, 'opus');
+  });
+
+  it('hydrates only exposed recall tombstones and never returns their body', async () => {
+    const custody = (entryId, exposure) => ({
+      version: 1,
+      entryId,
+      revision: 1,
+      intent: 'user_message',
+      status: 'queued',
+      allTargetCats: ['opus'],
+      pendingTargetCats: ['opus'],
+      notifiedByCatIds: [],
+      seenByCatIds: exposure ? ['opus'] : [],
+      seenInvocationIdByCatId: exposure ? { opus: exposure.invocationId } : {},
+      ...(exposure ? { bodyExposures: [exposure] } : {}),
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    const hidden = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'zero exposure secret',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-hidden'),
+    });
+    const exposure = { targetCatId: 'opus', invocationId: 'child-read', seenAt: 1_500 };
+    const exposed = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'exposed secret',
+      mentions: ['opus'],
+      timestamp: 1_100,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-exposed', exposure),
+    });
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(hidden.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 2_000,
+      }).kind,
+      'recalled',
+    );
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(exposed.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 1,
+        merge: 'replace',
+        recalledAt: 2_100,
+      }).kind,
+      'recalled',
+    );
+
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const messages = response.json().messages;
+    assert.equal(
+      messages.some((message) => message.id === hidden.id),
+      false,
+    );
+    const tombstone = messages.find((message) => message.id === exposed.id);
+    assert.ok(tombstone);
+    assert.equal(tombstone.content, '');
+    assert.equal(tombstone.extra.recall.exposure, 'seen');
+    assert.deepEqual(tombstone.extra.recall.exposures, [exposure]);
+    assert.doesNotMatch(JSON.stringify(tombstone), /exposed secret/);
   });
 
   it('excludes drafts on paginated request (with before cursor)', async () => {
@@ -806,14 +914,62 @@ describe('GET /api/messages — draft merge (#80)', () => {
 
     // Bug B: stream identity must be included for frontend reconciliation
     assert.equal(draft.origin, 'stream', 'Draft should have origin: stream');
-    // F194 Phase Z9 AC-Z25 (KD-28): draft now stamps both invocationId (parent
-    // chain) and turnInvocationId (per-visible-cat-turn). Draft has only one
-    // identity (its own invocationId) so both fields = invocationId.
+    // Legacy draft without a TurnExecution record has no parent association;
+    // preserve the prior child-only identity as a bounded compatibility path.
     assert.deepEqual(
       draft.extra?.stream,
       { invocationId: 'inv-contract', turnInvocationId: 'inv-contract' },
       'Draft should have extra.stream.invocationId + turnInvocationId (Z9 unconditional stamp)',
     );
+  });
+
+  it('projects the real parent + child identity onto an executing ACP draft', async () => {
+    const ts = Date.now();
+    const parentInvocationId = 'eefcfc03-e188-4f8c-ac6d-435e76fc8b6f';
+    const turnInvocationId = 'd2abf34d-47fb-42a6-80e2-fae40e1d18cf';
+
+    draftStore.upsert({
+      userId: 'user-1',
+      threadId: 'thread-1',
+      invocationId: turnInvocationId,
+      catId: 'kimi',
+      content: '',
+      thinking: 'Check the current git state.',
+      toolEvents: [{ id: 'tool-1', type: 'tool_use', label: 'kimi → Bash', timestamp: ts }],
+      updatedAt: ts,
+    });
+
+    const app = await buildAppWithTurnExecutions({
+      [turnInvocationId]: {
+        invocationId: turnInvocationId,
+        parentInvocationId,
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'kimi',
+        executionKind: 'ordinary',
+        status: 'running',
+        startedAt: ts - 100,
+      },
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const draft = body.messages.find((message) => message.id === `draft-${turnInvocationId}`);
+    assert(draft, 'executing ACP draft should be visible');
+    assert.deepEqual(draft.extra?.stream, {
+      invocationId: parentInvocationId,
+      turnInvocationId,
+    });
+    assert.deepEqual(draft.extra?.turnExecution, {
+      invocationId: turnInvocationId,
+      parentInvocationId,
+      executionKind: 'ordinary',
+    });
   });
 
   it('multiple concurrent drafts sorted by updatedAt', async () => {

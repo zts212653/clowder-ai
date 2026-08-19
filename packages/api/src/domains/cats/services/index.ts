@@ -59,6 +59,9 @@ export { createSessionChainStore } from './stores/factories/SessionChainStoreFac
 export { createSummaryStore } from './stores/factories/SummaryStoreFactory.js';
 export { createTaskStore } from './stores/factories/TaskStoreFactory.js';
 export { createThreadStore } from './stores/factories/ThreadStoreFactory.js';
+export type { AnyTurnExecutionStore } from './stores/factories/TurnExecutionStoreFactory.js';
+export { createTurnExecutionStore } from './stores/factories/TurnExecutionStoreFactory.js';
+export { InMemoryTurnExecutionStore } from './stores/memory/InMemoryTurnExecutionStore.js';
 export { DeliveryCursorStore } from './stores/ports/DeliveryCursorStore.js';
 export type { DraftRecord, IDraftStore } from './stores/ports/DraftStore.js';
 export { DraftStore } from './stores/ports/DraftStore.js';
@@ -67,6 +70,7 @@ export type {
   CreateInvocationInput,
   CreateResult,
   IInvocationRecordStore,
+  InvocationActionLeaseCarrier,
   InvocationRecord,
   InvocationStatus,
   UpdateInvocationInput,
@@ -99,6 +103,16 @@ export type { ITaskStore } from './stores/ports/TaskStore.js';
 export { TaskStore } from './stores/ports/TaskStore.js';
 export type { IThreadStore, Thread } from './stores/ports/ThreadStore.js';
 export { DEFAULT_THREAD_ID, ThreadStore } from './stores/ports/ThreadStore.js';
+export type {
+  CreateTurnExecutionInput,
+  ITurnExecutionStore,
+  TurnExecutionCausalRefs,
+  TurnExecutionKind,
+  TurnExecutionMessageProjection,
+  TurnExecutionRecord,
+  TurnExecutionStatus,
+} from './stores/ports/TurnExecutionStore.js';
+export { projectTurnExecutionMessage } from './stores/ports/TurnExecutionStore.js';
 export { RedisAuthorizationAuditStore } from './stores/redis/RedisAuthorizationAuditStore.js';
 export { RedisAuthorizationRuleStore } from './stores/redis/RedisAuthorizationRuleStore.js';
 export { RedisDraftStore } from './stores/redis/RedisDraftStore.js';

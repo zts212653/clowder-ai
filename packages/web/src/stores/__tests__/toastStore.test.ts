@@ -40,6 +40,20 @@ describe('toastStore', () => {
     expect(useToastStore.getState().toasts[0].exiting).toBe(true);
   });
 
+  it('permanently disables auto-dismiss after the reader is opened', () => {
+    const id = useToastStore.getState().addToast({
+      type: 'info',
+      title: 'Long result',
+      message: 'Complete result text',
+      threadId: 'thread-123',
+      duration: 3000,
+    });
+
+    useToastStore.getState().disableAutoDismiss(id);
+
+    expect(useToastStore.getState().toasts[0].manualDismissOnly).toBe(true);
+  });
+
   it('keeps max 10 toasts', () => {
     for (let i = 0; i < 15; i++) {
       useToastStore.getState().addToast({
@@ -52,6 +66,47 @@ describe('toastStore', () => {
     expect(useToastStore.getState().toasts).toHaveLength(10);
     // Latest toast should be the last added
     expect(useToastStore.getState().toasts[9].title).toBe('Toast 14');
+  });
+
+  it('never evicts a toast whose reader requires explicit dismissal', () => {
+    const retainedId = useToastStore.getState().addToast({
+      type: 'info',
+      title: 'Long result',
+      message: 'The user opened this complete result',
+      duration: 3000,
+    });
+    useToastStore.getState().disableAutoDismiss(retainedId);
+
+    for (let i = 0; i < 12; i++) {
+      useToastStore.getState().addToast({
+        type: 'info',
+        title: `Transient ${i}`,
+        message: `Message ${i}`,
+        duration: 3000,
+      });
+    }
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((toast) => toast.id === retainedId)).toBe(true);
+    expect(toasts.filter((toast) => !toast.manualDismissOnly)).toHaveLength(10);
+  });
+
+  it('cancels an in-progress exit when the reader requires explicit dismissal', () => {
+    const id = useToastStore.getState().addToast({
+      type: 'error',
+      title: 'Failed',
+      message: 'Complete diagnostic detail',
+      duration: 3000,
+    });
+    useToastStore.getState().markExiting(id);
+
+    useToastStore.getState().disableAutoDismiss(id);
+
+    expect(useToastStore.getState().toasts[0]).toMatchObject({
+      id,
+      exiting: false,
+      manualDismissOnly: true,
+    });
   });
 
   it('preserves threadId on toast', () => {

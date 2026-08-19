@@ -78,6 +78,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     // Set userMessageId (as callback-a2a-trigger.ts does)
     invocationRecordStore.update(createResult.invocationId, {
@@ -155,6 +156,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,
@@ -232,6 +234,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex:p3`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,
@@ -282,6 +285,7 @@ describe('auto-replyTo for A2A invocations', () => {
       targetCats: ['codex'],
       intent: 'execute',
       idempotencyKey: `a2a:${triggerMsg.id}:codex`,
+      actionLeaseCarrier: { kind: 'none' },
     });
     invocationRecordStore.update(createResult.invocationId, {
       userMessageId: triggerMsg.id,

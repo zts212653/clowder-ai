@@ -80,4 +80,29 @@ describe('CardBlock actions', () => {
     expect(writeText).toHaveBeenCalledWith('diagnostic summary text');
     expect(container.textContent).toContain('已复制');
   });
+
+  it('wraps long action labels instead of squeezing them into vertical columns', async () => {
+    const manyActionsBlock: RichCardBlock = {
+      ...block,
+      id: 'many-concierge-actions',
+      actions: Array.from({ length: 8 }, (_, index) => ({
+        label: `跳过去：这是第 ${index + 1} 个很长的中文 thread 标题`,
+        action: 'concierge_teleport',
+        payload: { threadId: `thread_${index + 1}` },
+      })),
+    };
+
+    await act(async () => {
+      root.render(React.createElement(CardBlock, { block: manyActionsBlock, messageId: 'msg-many' }));
+    });
+
+    const buttons = Array.from(container.querySelectorAll('button'));
+    expect(buttons).toHaveLength(8);
+    expect(buttons[0].parentElement?.classList.contains('flex-wrap')).toBe(true);
+    for (const button of buttons) {
+      expect(button.classList.contains('max-w-full')).toBe(true);
+      expect(button.classList.contains('text-left')).toBe(true);
+      expect(button.classList.contains('break-words')).toBe(true);
+    }
+  });
 });

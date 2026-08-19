@@ -292,6 +292,38 @@ describe('convert_markdown / create_draft with file path params', () => {
     assert.ok(htmlContent.includes('Hello'), 'HTML file should contain heading text');
   });
 
+  it('uses distinct output files when conversions share the same millisecond', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'cat-cafe-md-race-'));
+    const firstMdPath = join(tmpDir, 'first.md');
+    const secondMdPath = join(tmpDir, 'second.md');
+    await Promise.all([
+      writeFile(firstMdPath, '# First\n\nOne', 'utf-8'),
+      writeFile(secondMdPath, '# Second\n\nTwo', 'utf-8'),
+    ]);
+
+    const { adapter } = makeContentAdapter({});
+    const realNow = Date.now;
+    Date.now = () => 1_789_000_000_000;
+    try {
+      const [first, second] = await Promise.all([
+        adapter.invoke('weixin_mp.convert_markdown', { markdownFilePath: firstMdPath }),
+        adapter.invoke('weixin_mp.convert_markdown', { markdownFilePath: secondMdPath }),
+      ]);
+
+      assert.equal(first.success, true, first.error);
+      assert.equal(second.success, true, second.error);
+      assert.notEqual(first.data.filePath, second.data.filePath, 'same-ms conversions must not collide');
+      const [firstHtml, secondHtml] = await Promise.all([
+        readFile(first.data.filePath, 'utf-8'),
+        readFile(second.data.filePath, 'utf-8'),
+      ]);
+      assert.ok(firstHtml.includes('First'), 'first output should keep first heading');
+      assert.ok(secondHtml.includes('Second'), 'second output should keep second heading');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   it('returns error when neither markdown nor markdownFilePath provided', async () => {
     const { adapter } = makeContentAdapter({});
     const result = await adapter.invoke('weixin_mp.convert_markdown', {});

@@ -11,10 +11,12 @@
 
 import { createAllowListAttributesProcessor, type ViewOptions } from '@opentelemetry/sdk-metrics';
 import {
+  ACTION_SUCCESSOR_MODE,
   AGENT_ID,
   ANCHOR_TOOL,
   CALLBACK_REASON,
   CALLBACK_TOOL,
+  FRESHNESS_RELEVANCE_REASON,
   GENAI_MODEL,
   GENAI_SYSTEM,
   GROUNDING_ACTION_FAMILY,
@@ -22,6 +24,7 @@ import {
   GROUNDING_SOURCE_TIER,
   GROUNDING_VERDICT,
   OPERATION_NAME,
+  ROUTING_EVENT_WAIT_REASON,
   SEAL_REASON,
   SIGNAL_KIND,
   STATUS,
@@ -29,6 +32,11 @@ import {
   THREAD_SYSTEM_KIND,
   TRIGGER,
 } from './genai-semconv.js';
+import {
+  TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR,
+  TURN_CUSTODY_METRIC_COMPARISON_ATTR,
+  TURN_CUSTODY_METRIC_STATE_ATTR,
+} from './turn-custody-shadow-telemetry.js';
 
 /** The ONLY attributes allowed on metric instruments. */
 export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
@@ -36,12 +44,15 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   GENAI_SYSTEM,
   GENAI_MODEL,
   OPERATION_NAME,
+  ACTION_SUCCESSOR_MODE,
+  ROUTING_EVENT_WAIT_REASON,
   STATUS,
   STREAM_ERROR_PATH,
   TRIGGER,
   THREAD_SYSTEM_KIND,
   CALLBACK_TOOL,
   CALLBACK_REASON,
+  FRESHNESS_RELEVANCE_REASON,
   SIGNAL_KIND,
   SEAL_REASON,
   // F236 Track-1: anchor-first telemetry per-tool breakdown.
@@ -52,6 +63,10 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   GROUNDING_VERDICT,
   GROUNDING_ACTION_FAMILY,
   GROUNDING_SOURCE_TIER,
+  // F167 Phase T: bounded projection(3) and comparison(4) dimensions.
+  TURN_CUSTODY_METRIC_STATE_ATTR,
+  TURN_CUSTODY_METRIC_COMPARISON_ATTR,
+  TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR,
 ]);
 
 const allowedKeys = [...ALLOWED_METRIC_ATTRIBUTES];

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F200]
-related_features: [F102, F153, F163, F188, F192]
+related_features: [F102, F153, F163, F188, F192, F263]
 topics: [memory, eval, observability, IR]
 doc_kind: spec
 created: 2026-05-14
@@ -15,7 +15,7 @@ tips_exempt: Internal eval/observability — no user-facing capability or workfl
 
 ### 问题
 
-Cat Cafe 的记忆系统（F102 存储基座 + F163 治理层 + F188 管护工具链）已经能"记住"和"治理"知识，但**不知道猫用得好不好**。现有 telemetry（F188 三入口分布 + nudge follow + grep fallback rate）已有 adoption/friction 信号，但缺少 **search result → read/use/verify 的正向 consumption 信号**。我们无法回答：
+Clowder AI 的记忆系统（F102 存储基座 + F163 治理层 + F188 管护工具链）已经能"记住"和"治理"知识，但**不知道猫用得好不好**。现有 telemetry（F188 三入口分布 + nudge follow + grep fallback rate）已有 adoption/friction 信号，但缺少 **search result → read/use/verify 的正向 consumption 信号**。我们无法回答：
 
 - 搜索结果排第几的被猫真正读了？
 - 猫搜了几轮才找到想要的东西？
@@ -57,6 +57,29 @@ F192 是 harness 层面的社会技术评估框架（共创机制 + harness-feed
 user_journey_exempt: Internal eval/observability feature — no user-perceivable UI surface; all outputs are developer-facing metrics and dashboards consumed only by cats and operator.
 
 ## What
+
+## User Journey
+
+### Primary Journey: 猫完成一次记忆召回
+- **Scope unit**: `memory tool call -> recall event -> same invocation`。
+- **Actor**: 猫猫，使用 `search_evidence` / `graph_resolve` / `list_recent` 找证据并决定是否继续钻取。
+- **Entry**: 猫收到需要旧 thread / docs / trajectory 证据的任务，调用 memory tool。
+- **Flow**:
+  1. Producer 返回结果时同时给人读预览和机器读 outcome（命中数、结果状态、下一步提示）。
+  2. 猫先看 top results / preview 判断方向；如果需要原文，再用 `Read` / drill-down 工具打开候选。
+  3. `RecallEvent` 持久化这次召回的 query、候选、结果状态和后续 consumption 信号，供指标和排序反馈使用。
+  4. 结果为 0、解析失败、tool_result 未合并、历史旧行、错误等状态在数据层区分；猫和 Hub 不再把它们都读成一个 nullable count。
+  5. 对过长/存档结果，完整工具文本必须给 preview + explicit next step；Hub 的 artifact 展示属于后续 Phase，不影响本次召回状态可信度。
+- **Success evidence**: 同一次召回在工具文本、`recall_events`、Hub RecallFeed 中显示一致 outcome；`no_results` 明确等于权威 0，`parser_miss` / `result_unmerged` / `legacy_unknown` 不再伪装成 0。
+- **Non-goals**: 不评价文档真伪或 authority；不让 consumption 变成 correctness；不在本 PR 完成 artifact 存档 UI。
+
+### Secondary Journey: operator/猫回看 RecallFeed
+- **Scope unit**: thread / invocation 的召回流。
+- **Actor**: operator和猫猫。
+- **Flow**:
+  1. 打开记忆流，看到每次工具调用的 query、候选和结果状态。
+  2. 对旧数据看到"历史统计缺失"，知道它不等于没搜到。
+  3. 对 producer 已结构化的新数据，直接看到权威命中数或明确的 failure mode，能判断是搜索问题、parser 问题还是链路未合并问题。
 
 ### Phase A: Search Session Telemetry（打地基）
 
@@ -353,6 +376,7 @@ outputVerified = signal_or(
 | HW-5 | ✅ **F209 fixture recall@k wrapper** | F209 D.0 已用 F209-owned 四项 observability 完成 Phase D unblock；但 F200 仍应把 `docs/eval/f209-phase-{a,b,c}-*.md` 纳入一键 recall@k cross-validation，输出每个 fixture 的 query、expected anchor、top-k hit、mode/depth、degraded/effectiveMode 摘要。任务：`[F200/F209] Add fixture recall@k wrapper for F209 eval docs`。 | ✅ **Merged PR #1886** (`9c0a3ca3f`, 2026-05-25) — F209FixtureParser + RecallFixtureRunner + 10 tests（3 recall / 5 drilldown 分类）；不改 runtime ranking |
 | HW-6 | ✅ **FTS Progressive Relaxation（召回崩盘修复）** | `SqliteEvidenceStore.ts:235-239` 把所有 token 用 `"word"` 包裹再空格连接（FTS5 隐式 AND），猫猫查询越来越长（14+ 词中英文混合是常态），AND-all 几乎必然返回 0。实测：14 词 → 0 结果，2 词 → 550，1 词 → 958。**修法**：AND 空 → minimum-match(≥50% token) → OR + strong-token boost（Feature号/ADR号/PR号保留 exact-match 加权）→ 最后 entity/semantic fallback。保留 `bm25()` 排序优先级。**7 天空结果率 75.3%**（search_evidence scope 全面恶化：docs 70.9%、threads 65.3%、all 97.4%），是 consumedAt3 下跌的第一根因。 | ✅ **Merged PR #2426** (`ce3c6fafa`, 2026-06-19) — FTS 三级渐进放松 AND-all→strong-AND+weak-OR→OR-all。原 P0：75% 空结果率是 rerank 信号稀疏的上游根因 |
 | HW-7 | ✅ **Telemetry 三态校准 + Eval Correctness（shadow baseline + adapter 归因）** | 三件事合一 PR：(1) **Telemetry 三态校准**：`recall_events.result_count` 957/1068 条为 NULL（列是后加的），`candidates_json=[]` 混合了真空结果和 telemetry 管道没写入，必须区分 true-zero / not-written / candidate-parser-miss；(2) **Shadow baseline 恒等 bug**（opus-48 发现 + opus-47 T1 验证）：`applyConsumptionRerank` 在 `on` 模式存 reranked 顺序为 shadow（`SqliteEvidenceStore.ts:2036-2048`），shadow≡live by construction，`shadowConsumedMRR / liveOnShadowSubsetMRR` 永远≈1。修法：rerank 前存原始 BM25 顺序为 shadow；(3) **Adapter 归因层**（opus-48 发现 + opus-47 T1 验证）：`eval-memory-adapter.recallMetricRefs()` 没把 zero-hit-rate 列为 recall 层首要信号，verdict 盯 consumedAt3 报 "fix ranking" 但真正根因是召回空。修法：adapter 加 `search_zero_hit_rate` 优先级 + `result_count=NULL` 不算 zero-hit。 | ✅ **Merged PR #2427** (`13ccd8e16`, 2026-06-19) — telemetry 三态校准 + shadow baseline 用真实 BM25 + adapter zero-hit 归因。原 P1：消除 eval:memory 结构假绿 verdict |
+| HW-8 | ✅ **Recall Result Outcome Contract（producer-side result status）** | operator challenge 成立且必须治 producer：`result_count=NULL` 和 UI 的"命中数未记录"把权威 0、parser miss、tool_result 未合并、legacy unknown 和 error 坍缩。修复范围：producer append 机器可解析 `<recall-meta>` sidecar；shared 状态机校验；`recall_events.result_status` 持久化；history/live 两条路径优先读 outcome，旧文本仅 fallback；web live 用 `ToolEvent.resultMeta` 旁路避免 compact 截断切掉 sidecar。`overflow` contract/UI/parser 先就绪，真实 artifact producer + Hub 存档展示留 Phase 2。 | ✅ **Merged PR #2678** (`2663cd0f0`, 2026-06-30) — shared recall outcome parser + V27 `result_status` persistence + producer sidecars for evidence/graph/recent + live/history RecallFeed status handling + tool preview sidecar stripping |
 
 #### HW-1 + F242 设计灵感（2026-06-19 Ragdoll brainstorm，operator提议交叉）
 

@@ -12,6 +12,12 @@ import { markdownToWxHtml } from './markdown-to-wx-html.js';
 const TIMEOUT_MS = 30_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_TEXT_READ_BYTES = 2 * 1024 * 1024; // 2 MB text read limit
+let wxConvertedOutputSequence = 0;
+
+function createWxConvertedOutputPath(): string {
+  wxConvertedOutputSequence = (wxConvertedOutputSequence + 1) % 1_000_000;
+  return join(tmpdir(), `wx-converted-${Date.now()}${process.hrtime.bigint()}${wxConvertedOutputSequence}.html`);
+}
 
 /**
  * Validate that a file path resolves to an allowed directory.
@@ -235,7 +241,7 @@ export function createWeixinMpHandlers(deps: WeixinMpHandlerDeps = {}): Record<s
     if (!markdown) return { success: false, error: 'markdown or markdownFilePath is required' };
     const html = markdownToWxHtml(markdown);
     // Always write to controlled temp directory — never derive output from input path
-    const outputPath = join(tmpdir(), `wx-converted-${Date.now()}.html`);
+    const outputPath = createWxConvertedOutputPath();
     await resolvedDeps.writeLocalFile(outputPath, html);
     return { success: true, data: { filePath: outputPath } };
   };

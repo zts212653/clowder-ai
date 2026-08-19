@@ -21,4 +21,8 @@ describe('chat route markers', () => {
     expect(resolveLayoutThreadId('thread-stale', 'default')).toBe('default');
     expect(resolveLayoutThreadId('thread-stale', 'thread-current')).toBe('thread-current');
   });
+
+  it('keeps the current address-bar thread when the browser route store is one navigation behind', () => {
+    expect(resolveLayoutThreadId('thread-B', 'thread-A', 'thread-B')).toBe('thread-B');
+  });
 });
