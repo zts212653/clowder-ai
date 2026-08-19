@@ -45,7 +45,7 @@ related_docs:
 3. 所有正常 dispatch 经过一个事件驱动的 per-thread drain；
 4. 稳定状态下不可能出现“Queue 非空、没有 Active Run、也没有 drain owner”；
 5. 每次被接受的运行先有固定响应气泡，成功、失败、取消、重启都原位终局；
-6. Steer、Append 与 Cancel 是用户对具体 entry/run 的显式操作，不是正常调度的补救机制；
+6. Steer、Append、Cancel queued 与 Stop running 是用户对具体 entry/run 的显式操作，不是正常调度的补救机制；
 7. 复用现有未读 cursor 与上下文投影，不再发明第二套 coverage 或 receipt 账本；
 8. 外部 gate 在进入普通 Queue 前被分流；真正的 A2A/action/wait successor 则携带现有 owner 的 opaque custody ref，直到 exact terminal 被 fenced consume。
 
@@ -57,7 +57,7 @@ related_docs:
 - per-target attempt history、递归任务树、DAG 或 `all_of` / `any_of`；
 - 将多条消息拼成一条正文、覆盖消息边界，或绕过 Queue 顺序的 batching；
 - Queue entry 的 `queued / processing / handled / failed` 状态机；
-- priority、parked head、thread-wide pause 或无对象的 Continue；
+- priority、parked head、Queue 级 paused/resume 或无对象的 Continue；若未来增加 Queue pause，它必须是独立 Queue 控制，不能成为 Stop running 的隐式副作用；
 - hold ball、PR/CI wait 与人工审批 owner 内部的完整协议；本文只定义 ingress 分流、opaque ref 传递与 terminal consume 边界；
 - 每种 provider 的具体 append、steer、cancel RPC。
 
@@ -79,7 +79,7 @@ client adapter 是执行边界，不是第四本账。Scheduler 只是驱动器�
 flowchart LR
     E["Public conversation<br/>用户 · Connector · 定时任务 · 公开通知"] --> Q["Durable Queue<br/>inline payload + targetIds"]
     G["External gate event<br/>CI · review · approval · wait callback"] --> W["Existing action / event-wait owner<br/>fenced consume"]
-    P["Agent post_message"] --> H["Chat History<br/>固定 messageId + orderKey"]
+    P["Agent final / post_message"] --> H["Chat History<br/>固定 messageId + orderKey"]
     H -->|"需要成员处理"| Q2["Queue history_message ref<br/>targetIds + opaque custody refs"]
     Q --> D["Per-thread Drain<br/>事件驱动 single owner"]
     Q2 --> D
@@ -87,6 +87,10 @@ flowchart LR
     D -->|"admit"| B["Processing Response Bubble<br/>固定位置"]
     D --> A["Active Run<br/>内存态"]
     A --> C["Client Adapter"]
+    S1["Stop 指定 Agent"] --> X["快照所选 exact Active Runs"]
+    S2["Stop thread 全部活动 Agent"] --> X
+    X -->|"原位 canceled；Queue 不变"| T
+    X -->|"cancel exact client handles"| C
     C -->|"stream"| B
     C -->|"completed / failed / canceled"| T["原位终局 + fenced source consume"]
     T --> H
@@ -691,7 +695,7 @@ Agent 可以在 UI/上下文摘要中知道“成员正在处理”，但持久 
 
 这项覆盖是 Queue wake 的已满足判定，不是把消息正文合并，也不允许后面的 pending input 绕过队首进入本轮。source ref 缺失/替换的 wake 不能作为 covered wake 删除；它留在原位，轮到 exact head/selected action 时走 §6.1。禁止“只删 wake、不附 input/source refs”的半结算；否则后续 terminal 无法知道哪些 Agent 来源必须被 fenced settle 或收到失败通知。
 
-## 8. Append、Steer 与 Cancel
+## 8. Append、Steer、Cancel queued 与 Stop running
 
 | 用户动作 | Queue 操作 | Active Run / client 结果 |
 |---|---|---|
@@ -699,9 +703,14 @@ Agent 可以在 UI/上下文摘要中知道“成员正在处理”，但持久 
 | Append | coordinator 取出选中的 public entry | 追加给 exact target set 的现有 Active Runs，不新建 run |
 | Steer / Immediate | coordinator 取出选中的 public entry | 取消 exact target set 中仍 live 的旧 runs；若 entry 是 live producer invocation 产生的 Agent wake，也精确取消该 source run；随后为完整 target set admission 新 runs |
 | Cancel queued | coordinator 删除选中 entry | 不影响任何 Active Run |
-| Cancel running | Queue 不参与 | exact run 气泡终局为 canceled，释放 run，触发 drain |
+| Stop 指定 Agent | Queue 不参与，也不改变自动 drain | 只选择该 Agent 在操作边界仍 live 的 exact run，气泡原位 canceled，释放 run |
+| Stop thread 全部活动 Agent | Queue 不参与，也不改变自动 drain | 对操作边界的全部 live runs 做 exact snapshot，逐一原位 canceled 并释放 |
 
 所有用户可见的 `pending_input/history_message` Queue rows 都可以提供 Immediate/Steer 与 Append；`private_notice` 不对用户显示，只走正常 drain。显式操作先赢得 Queue entry 的 exact take，再产生 client 副作用；不能先 cancel/steer，随后才发现 entry 已被正常 drain 取走。
+
+Stop running 是 execution control，不是 Queue control。指定 Agent 的 Stop 只选择该 target 当前的 exact invocation；thread 级 Stop 则在同一个 per-thread coordinator 临界区快照当前全部 Active Runs。两者都把 snapshot 中仍为 processing 的 response bubbles 按 §6.4 fenced terminal transaction 原位更新为 `canceled`，只删除仍匹配 exact invocation 的 Active Runs，再对这些 exact client handles 发 best-effort cancel。批量 Stop 复用 §6.4 的单 run terminal transaction，但把其中的逐 run `requestDrain` 延后到整个 snapshot 处理完；已终局的 stale run 是 no-op，操作边界之后新启动的 invocation 不得被旧 Stop 误杀。
+
+所有选中 runs 处理完后只调用一次 `requestDrain(threadId)`。Stop 不删除、不重排、不 take Queue entry，也不写 `paused`；因此 Queue 会按原物理顺序继续出队。下一条 entry 即使仍以刚停止的 Agent 为 target，也会创建新的 response bubble 与 invocation，这是新的工作，不表示旧 Stop 失败。若未来增加“暂停队列”，它必须拥有独立的 Queue 级显式操作、持久策略与 Resume 语义，并重新证明 startup/drain liveness；不在本文范围内。
 
 显式操作也保持“一条 multi-target message 是一个 entry”的边界：
 
@@ -889,7 +898,8 @@ delivery failure result    → admission 前已确定无法投递，没有伪造
 - target/default/source custody 在 admission 前失效时，Queue row 消失，输入（若尚未入 History）与 `DeliveryFailureResult` 在一个事务中可见；不会出现假 member bubble；
 - 已经发布的 Agent/post_message 保持原 History 位置，Queue row 只是它的待 dispatch 引用；
 - response bubble 在运行开始时出现，stream 与 final 使用同一 id；
-- Active Runs 提供 Cancel/Append/Steer 的 exact 操作目标；
+- Queue rows 提供 Cancel queued/Append/Steer 的 exact 操作目标；
+- Stop 可以选择一个 Agent 的 exact Active Run，或快照 thread 当前全部 Active Runs；它不改变 Queue 顺序与自动 drain；
 - 拖动 Queue row 是显式改变 FIFO，不存在隐藏 priority；
 - 不展示 receipt processing、attempt aggregate、thread-wide paused 或无对象 Continue。
 
@@ -914,7 +924,7 @@ API 启动时必须先完成 §9.2 的 interrupted/source-custody 收敛，才�
 | Active Runs | `packages/api/src/domains/cats/services/agents/invocation/InvocationTracker.ts` | 只保存 exact run + responseMessageId + inputEntryIds/inputMessageIds/privateInputEntryIds + bubble 投影的 opaque source refs |
 | Agent wake | `packages/api/src/routes/callback-a2a-trigger.ts` | 每条 post_message 独立写 History；需要成员处理时建立 history ref entry，并从认证 action/TurnExecution/wait envelope 传递 opaque refs |
 | Source custody owners | existing `TurnExecution`、action-successor、event-wait stores/services | 解析 opaque token；admission CAS reserve exact entry/target/invocation/generation；terminal fenced consume/return；owner namespace 互不覆盖 |
-| Queue 控制 | `packages/api/src/routes/queue.ts` | Append/Steer/Cancel 进入同一个 per-thread coordinator，先 exact take 后 client effect |
+| Queue / execution 控制 | `packages/api/src/routes/queue.ts` + existing invocation cancellation route | Append/Steer/Cancel queued 与 Stop running 进入同一个 per-thread coordinator；Queue action 先 exact take 后 client effect，Stop 只 terminalize 操作边界的 exact run snapshot |
 | Provider | `packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts` 及 adapters | 明确 accepted/failure；使用 exact invocation 与 durable callback principal |
 | UI | `packages/web/src/components/QueuePanel.tsx` 及消息气泡 | Queue row 直接渲染 pending payload 或 history preview；聊天面板只渲染 History；stream/final 同一气泡 |
 
@@ -931,7 +941,7 @@ API 启动时必须先完成 §9.2 的 interrupted/source-custody 收敛，才�
 7. 把所有调度触发收敛到 `requestDrain`，删除 timer 型正确性兜底；
 8. 接通现有未读 cursor 的 processing barrier 与 exact input；
 9. 统一 stream/final 原位更新、source custody consume 及 failed/canceled/interrupted 终局；
-10. 接入显式 Append/Steer/Cancel，并验证先 take 后 side effect；
+10. 接入显式 Append/Steer/Cancel queued/Stop running；验证 Queue action 先 take 后 side effect，并验证 Stop 不暂停、不删除 Queue；
 11. 删除本生命周期中的 receipt/attempt/pause/reconciliation fallback；
 12. 在隔离环境跑完整验收矩阵后一次切换，不并行运行两套 lifecycle。
 
@@ -982,7 +992,7 @@ API 启动时必须先完成 §9.2 的 interrupted/source-custody 收敛，才�
 | A22 | provider launch 抛错 | processing bubble 原位 failed；run 删除；requestDrain |
 | A23 | provider 执行失败且没有正文 | processing bubble 原位 failed；不能永久留空 |
 | A24 | provider 成功但没有额外文本 | bubble 原位 completed，并显示可理解的完成说明 |
-| A25 | 用户 Cancel run | exact bubble 原位 canceled；删除 exact run；requestDrain |
+| A25 | 用户 Stop 指定 Agent | 只把该 Agent 在操作边界仍 live 的 exact bubble 原位 canceled；删除 exact run；其他 Agent runs 不变；requestDrain |
 | A26 | 用户 Cancel pending queued entry | exact entry 删除；不创建 History input；不调用 provider |
 | A27 | 用户 Steer 与正常 drain 竞争同一 entry | exact persistent cutover 同时 take、materialize input、cancel target 旧 bubbles、创建新 bubbles；只有 winner 调 clients |
 | A28 | 用户 Steer 一条 live A invocation 产生的 `A→B` wake | 原子 cutover 后取消 B 的 exact old run 与消息记录的 exact A source run；不按 author 猜测较新的 A run |
@@ -1017,6 +1027,8 @@ API 启动时必须先完成 §9.2 的 interrupted/source-custody 收敛，才�
 | A57 | public targetless input 到队首，最近 completed member 与 default 都不可用 | 一个事务 materialize 原输入，再紧邻写 `DeliveryFailureResult(no_available_target)` 并移除 exact entry；没有假 invocation/bubble |
 | A58 | Agent history ref 的显式 target 在队首前失效 | 原 Agent message 保持原位；terminal transaction 追加 `DeliveryFailureResult(invalid_explicit_target)` 与 exact private notice，并移除 entry；绝不 fallback |
 | A59 | admission 已 reserve source refs 并写 processing bubble，进程在 terminal 前退出 | startup 从 bubble 恢复同一 refs，fenced terminalize exact source 为 interrupted；不从 thread holder 猜 source，不追加第二份结果 |
+| A60 | A/B 同时 active，用户 Stop thread 全部活动 Agent | coordinator 快照 A/B 的 exact invocations；两条 bubbles 分别原位 canceled、两条 runs 释放；Queue entry 不删除、不重排 |
+| A61 | Stop 后 Queue 仍有下一条 `M→A` | Stop 完成后 requestDrain；M 按物理队首创建新的 A bubble/invocation；不得把 Queue 隐式设为 paused，也不得把新 invocation 当作旧 run 误杀 |
 
 ## 15. 必须保持不可能的状态
 
@@ -1043,6 +1055,7 @@ API 启动时必须先完成 §9.2 的 interrupted/source-custody 收敛，才�
 - provider launch/execution 失败但 response bubble 永久 processing；
 - failed bubble 已终局，但 exact Agent author 的必要 private notice 因半提交永久缺失；
 - run 已释放却没有触发下一轮 drain；
+- Stop running 删除、重排或 take 了 Queue entry，隐式把 Queue/drain 设为 paused，或按 target 误杀操作快照之后的新 invocation；
 - Steer 先取消 client，随后才竞争 Queue take；
 - Append 自动取消旧 run，或 Steer 按 author 猜测并取消不是消息 exact `producerInvocationId` 的 source run；
 - multi-target entry 被显式操作拆成未持久化的 per-target Queue 残片；
