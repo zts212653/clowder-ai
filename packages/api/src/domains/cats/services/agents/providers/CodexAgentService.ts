@@ -54,6 +54,7 @@ import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildActiveWriterRecoveryDiagnostic, buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
   isCliError,
@@ -194,6 +195,8 @@ function withoutFrozenInvocationCredentials(
 ): Record<string, string> | undefined {
   if (!env) return undefined;
   const safe = { ...env };
+  delete safe[CLI_EXECUTION_ID_ENV];
+  delete safe[CLI_EXECUTION_OWNER_BINDING_ENV];
   delete safe.CAT_CAFE_INVOCATION_ID;
   delete safe.CAT_CAFE_CALLBACK_TOKEN;
   return safe;
@@ -202,6 +205,8 @@ function withoutFrozenInvocationCredentials(
 function withoutSessionScopedHostEnv(env: Record<string, string | null>): Record<string, string | null> {
   const safe = { ...env };
   for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) delete safe[key];
+  delete safe[CLI_EXECUTION_ID_ENV];
+  delete safe[CLI_EXECUTION_OWNER_BINDING_ENV];
   return safe;
 }
 

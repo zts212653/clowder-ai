@@ -191,6 +191,18 @@ export interface IInvocationRecordStore {
    * crash-safe, no post-Lua best-effort window).
    */
   listRunningByThread(threadId: string, userId: string): InvocationRecord[] | Promise<InvocationRecord[]>;
+
+  /**
+   * F297 OQ-1: user-scoped sparse candidate index — 哪些 thread 现在有 running record。
+   *
+   * 用于 Sidebar 列表规模的 presence 组合：先拿到 O(A) 个候选 thread，再交给 canonical
+   * classifier 定性；不逐 thread 跑四路对账。
+   *
+   * **索引不拥有 lifecycle**：它是 owner truth（records）的派生投影，必须可由 records 重建/校验。
+   * 允许短暂多报（stale candidate），classifier 会把它判成非 active；**不允许漏报**，
+   * 漏报会让真实 working 的 thread 被终态回落误显示成 done/error。
+   */
+  listRunningThreadIds(userId: string): string[] | Promise<string[]>;
 }
 
 /** Max records in memory store */
@@ -328,6 +340,15 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       if (r.status === 'running' && r.threadId === threadId && r.userId === userId) out.push(r);
     }
     return out;
+  }
+
+  /** F297 OQ-1: 派生自 records（owner truth），天然与之一致。 */
+  listRunningThreadIds(userId: string): string[] {
+    const threadIds = new Set<string>();
+    for (const r of this.records.values()) {
+      if (r.status === 'running' && r.userId === userId) threadIds.add(r.threadId);
+    }
+    return [...threadIds];
   }
 
   /** Current record count (for testing) */

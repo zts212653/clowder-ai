@@ -391,6 +391,63 @@ describe('prepareOpenCodeAcpSpawnConfig', () => {
   });
 });
 
+// ── OpenCode limit block: we emit none ─────────────────────────────────────
+// #1208 began writing `limit: { context }` with no `output`. OpenCode requires
+// `output` whenever `limit` exists, so every affected cat died at config-parse.
+// Supplying a guessed `output` is not a fix either: OpenCode merges
+// `config ?? catalog ?? 0`, so our value would overwrite an authoritative,
+// sometimes smaller catalog output limit. With no authoritative per-carrier
+// output source at this layer, we emit neither field.
+describe('generateOpenCodeRuntimeConfig — no limit block', () => {
+  test('never writes a limit block, so the catalog stays authoritative', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'zhipu',
+      models: ['glm-5.2'],
+      defaultModel: 'glm-5.2',
+      hasBaseUrl: true,
+    });
+
+    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], { name: 'glm-5.2' });
+  });
+
+  test('a catalog-backed sub-32K model keeps its own output limit', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'openrouter',
+      models: ['openai/gpt-4o'],
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.provider.openrouter.models['openai/gpt-4o'].limit, undefined);
+  });
+
+  test('model aliases still survive without a limit block', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'zhipu',
+      models: ['glm-5.2'],
+      modelAliases: { 'glm-5.2': 'glm-5.2-0714' },
+      hasBaseUrl: true,
+    });
+
+    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], {
+      id: 'glm-5.2-0714',
+      name: 'glm-5.2',
+    });
+  });
+
+  test('every context-window catalog entry still emits a limit-free entry', () => {
+    for (const model of Object.keys(CONTEXT_WINDOW_SIZES)) {
+      const resolved = resolveEffectiveOpenCodeModel(undefined, model);
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: resolved.providerName,
+        models: [model],
+        hasBaseUrl: true,
+      });
+      const providerKey = Object.keys(config.provider)[0];
+      assert.equal(config.provider[providerKey].models[model].limit, undefined, `${model} must stay limit-free`);
+    }
+  });
+});
+
 describe('generateOpenCodeRuntimeConfig', () => {
   test('generates custom provider config with env placeholders and stripped model keys', () => {
     const config = generateOpenCodeRuntimeConfig({
@@ -1065,71 +1122,6 @@ describe('writeOpenCodeRuntimeConfig', () => {
       rmSync(configRoot, { recursive: true, force: true });
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
-    }
-  });
-});
-
-// ── OpenCode limit block: we emit none ─────────────────────────────────────
-// #1208 began writing `limit: { context }` with no `output`. OpenCode requires
-// `output` whenever `limit` exists, so every affected cat died at config-parse:
-//   $ OPENCODE_CONFIG=<ctx-only>.json opencode models
-//   Error: Configuration is invalid
-//   ↳ Missing key provider.zhipu.models.glm-5.2.limit.output
-// Supplying a guessed `output` is not a fix either: OpenCode merges
-// `config ?? catalog ?? 0`, so our value would overwrite the authoritative
-// smaller output of any catalog-backed model (mistral/codestral-latest 4_096,
-// openrouter/openai/gpt-4o 16_384, +18 more under `openai`). With no
-// authoritative per-carrier output source at this layer, we emit neither field.
-describe('generateOpenCodeRuntimeConfig — no limit block', () => {
-  test('never writes a limit block, so the catalog stays authoritative', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'zhipu',
-      models: ['glm-5.2'],
-      defaultModel: 'glm-5.2',
-      hasBaseUrl: true,
-    });
-
-    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], { name: 'glm-5.2' });
-  });
-
-  test('a catalog-backed sub-32K model keeps its own output limit', () => {
-    // openrouter/openai/gpt-4o publishes limit.output = 16_384. Emitting any
-    // limit here would win the merge and raise its request cap to 32_000.
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'openrouter',
-      models: ['openai/gpt-4o'],
-      hasBaseUrl: true,
-    });
-
-    assert.equal(config.provider.openrouter.models['openai/gpt-4o'].limit, undefined);
-  });
-
-  test('model aliases still survive without a limit block', () => {
-    const config = generateOpenCodeRuntimeConfig({
-      providerName: 'zhipu',
-      models: ['glm-5.2'],
-      modelAliases: { 'glm-5.2': 'glm-5.2-0714' },
-      hasBaseUrl: true,
-    });
-
-    assert.deepEqual(config.provider.zhipu.models['glm-5.2'], {
-      id: 'glm-5.2-0714',
-      name: 'glm-5.2',
-    });
-  });
-
-  test('every context-window catalog entry still emits a limit-free entry', () => {
-    // Narrow by design: pins that no catalog entry can reintroduce a `limit`
-    // block through the capacity path. It asserts nothing about window accuracy.
-    for (const model of Object.keys(CONTEXT_WINDOW_SIZES)) {
-      const resolved = resolveEffectiveOpenCodeModel(undefined, model);
-      const config = generateOpenCodeRuntimeConfig({
-        providerName: resolved.providerName,
-        models: [model],
-        hasBaseUrl: true,
-      });
-      const providerKey = Object.keys(config.provider)[0];
-      assert.equal(config.provider[providerKey].models[model].limit, undefined, `${model} must stay limit-free`);
     }
   });
 });

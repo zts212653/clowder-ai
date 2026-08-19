@@ -19,8 +19,23 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     const storedMessages = [];
     const broadcasts = [];
     const managedCancelCalls = [];
+    const audits = [];
+    const dynamicTaskStore = {
+      insert() {},
+      getById(id) {
+        return tasks.find((t) => t.id === id && !removed.includes(t.id)) ?? null;
+      },
+      getAll() {
+        return tasks.filter((t) => !removed.includes(t.id));
+      },
+      remove(id) {
+        removed.push(id);
+        return true;
+      },
+    };
     return {
       registry,
+      ownerUserId: 'test-user',
       taskRunner: {
         registerDynamic() {},
         unregister(id) {
@@ -38,16 +53,11 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
             : undefined;
         },
       },
-      dynamicTaskStore: {
-        insert() {},
-        getById(id) {
-          return tasks.find((t) => t.id === id && !removed.includes(t.id)) ?? null;
-        },
-        getAll() {
-          return tasks.filter((t) => !removed.includes(t.id));
-        },
-        remove(id) {
-          removed.push(id);
+      dynamicTaskStore,
+      scheduleMutationAuditStore: {
+        deleteTaskWithAudit(taskId, audit) {
+          if (!dynamicTaskStore.remove(taskId)) return false;
+          audits.push(audit);
           return true;
         },
       },
@@ -66,7 +76,12 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       threadStore: {
         get(threadId) {
           const owner = threadOwners[threadId];
-          return owner ? { createdBy: owner } : null;
+          return owner ? { id: threadId, createdBy: owner, participants: [] } : null;
+        },
+        list(userId) {
+          return Object.entries(threadOwners)
+            .filter(([threadId, owner]) => owner === userId || threadId === 'default')
+            .map(([threadId, owner]) => ({ id: threadId, createdBy: owner, participants: [] }));
         },
       },
       cancelManagedWakeIfTaskMatches(taskId, threadId, catId) {
@@ -78,6 +93,7 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
       _storedMessages: storedMessages,
       _broadcasts: broadcasts,
       _managedCancelCalls: managedCancelCalls,
+      _audits: audits,
     };
   }
 
@@ -150,12 +166,17 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     assert.equal(body.status, 'ok');
     assert.equal(body.cancelled, true);
     assert.equal(body.taskId, 'hold-ball-123-abc');
+    assert.deepEqual(body.actor, { kind: 'operator', id: 'test-user', role: 'operator' });
 
     assert.deepEqual(deps._unregistered, ['hold-ball-123-abc']);
     assert.deepEqual(deps._removed, ['hold-ball-123-abc']);
     assert.deepEqual(deps._managedCancelCalls, [
       { taskId: 'hold-ball-123-abc', threadId: 'thread-del1', catId: 'codex' },
     ]);
+    assert.equal(deps._audits.length, 1);
+    assert.equal(deps._audits[0].actorKind, 'cvo');
+    assert.equal(deps._audits[0].actorId, 'test-user');
+    assert.equal(deps._audits[0].detail.accessRole, 'operator');
 
     assert.equal(deps._storedMessages.length, 1, 'AC-J3: should emit cancel confirmation');
     assert.match(deps._storedMessages[0].content, /持球已取消/);
@@ -345,7 +366,7 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     assert.equal(deps._removed.length, 0);
   });
 
-  test('200 on system/default thread — any authenticated user can cancel', async () => {
+  test('200 on shared default thread — configured operator with canonical visibility can cancel', async () => {
     const task = makeHoldTask('hold-ball-sys-ok', 'default', 'codex');
     const deps = makeStubDeps([task], { default: 'system' });
     const app = await createApp(deps);
@@ -353,10 +374,10 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/api/callbacks/hold-ball/hold-ball-sys-ok',
-      headers: { 'x-cat-cafe-user': 'any-user' },
+      headers: { 'x-cat-cafe-user': 'test-user' },
     });
 
-    assert.equal(res.statusCode, 200, 'system thread should be accessible to any authenticated user');
+    assert.equal(res.statusCode, 200, 'configured operator should retain rescue access to the shared default thread');
     assert.deepEqual(deps._unregistered, ['hold-ball-sys-ok']);
     assert.deepEqual(deps._removed, ['hold-ball-sys-ok']);
   });

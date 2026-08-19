@@ -39,6 +39,8 @@ export interface SchedulerMessageExtra {
     hiddenTrigger?: boolean;
     toast?: SchedulerToastPayload;
   };
+  /** F276: server-written, content-free carrier for one deferred write-opportunity re-entry. */
+  writeOpportunityReentry?: import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1;
 }
 
 export type ReplyPreviewKind = 'scheduler_trigger';

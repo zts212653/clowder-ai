@@ -1,41 +1,35 @@
+import { cleanCliToolLabel, projectCliToolUseLabel } from '@cat-cafe/shared';
 import type { CliEvent, ToolEvent } from '@/stores/chat-types';
 
-/** Strip "catId → " prefix from tool_use labels → clean tool name.
- *  e.g. "opus → Read" → "Read", "opus → Bash" → "Bash" */
-function cleanToolLabel(label: string): string {
-  const arrowIdx = label.indexOf(' → ');
-  return arrowIdx >= 0 ? label.slice(arrowIdx + 3) : label;
+interface ToolProjectionState {
+  events: CliEvent[];
+  skipNextResult: boolean;
 }
 
-function truncateArg(val: string, max = 60): string {
-  return val.length > max ? `${val.slice(0, max - 3)}...` : val;
-}
-
-/** Regex patterns for extracting args from legacy persisted details that may contain truncated JSON. */
-const ARG_KEYS = ['file_path', 'command', 'pattern', 'url', 'query', 'prompt'] as const;
-
-/** Extract primary argument from JSON tool input detail for inline display.
- *  Handles both current valid JSON and legacy truncated JSON. */
-function extractPrimaryArg(detail?: string): string | undefined {
-  if (!detail) return undefined;
-  try {
-    const obj = JSON.parse(detail) as Record<string, unknown>;
-    for (const key of ARG_KEYS) {
-      const val = obj[key];
-      if (typeof val === 'string' && val.length > 0) return truncateArg(val);
-    }
-    for (const val of Object.values(obj)) {
-      if (typeof val === 'string' && val.length > 0 && val.length <= 80) return truncateArg(val);
-    }
-  } catch {
-    // Truncated JSON — use regex to extract known arg values
-    for (const key of ARG_KEYS) {
-      const re = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`);
-      const m = detail.match(re);
-      if (m?.[1]) return truncateArg(m[1]);
-    }
+function appendToolEvent(event: ToolEvent, state: ToolProjectionState): void {
+  if (event.type === 'tool_use') {
+    state.skipNextResult = cleanCliToolLabel(event.label) === 'unknown';
+    if (state.skipNextResult) return;
+    state.events.push({
+      id: event.id,
+      kind: event.type,
+      timestamp: event.timestamp,
+      label: projectCliToolUseLabel(event.label, event.detail),
+      detail: event.detail,
+    });
+    return;
   }
-  return undefined;
+  if (state.skipNextResult) {
+    state.skipNextResult = false;
+    return;
+  }
+  state.events.push({
+    id: event.id,
+    kind: event.type,
+    timestamp: event.timestamp,
+    label: event.label,
+    detail: event.detail,
+  });
 }
 
 /** F097: Adapt existing ToolEvent[] + stream content → CliEvent[] unified timeline.
@@ -47,37 +41,9 @@ export function toCliEvents(toolEvents: ToolEvent[] | undefined, streamContent: 
     // F148: collect IDs of "unknown" tool_use events so we can also skip their paired tool_result.
     // CliOutputBlock pairs toolUses[i] with toolResults[i] by position, so skipping a use
     // without its result would mis-pair all subsequent rows.
-    let skipNextResult = false;
+    const state: ToolProjectionState = { events, skipNextResult: false };
     for (const te of toolEvents) {
-      if (te.type === 'tool_use') {
-        const toolName = cleanToolLabel(te.label);
-        if (toolName === 'unknown') {
-          skipNextResult = true;
-          continue;
-        }
-        skipNextResult = false;
-        const primaryArg = extractPrimaryArg(te.detail);
-        events.push({
-          id: te.id,
-          kind: te.type,
-          timestamp: te.timestamp,
-          label: primaryArg ? `${toolName} ${primaryArg}` : toolName,
-          detail: te.detail,
-        });
-      } else {
-        // tool_result: skip if its preceding tool_use was "unknown"
-        if (skipNextResult) {
-          skipNextResult = false;
-          continue;
-        }
-        events.push({
-          id: te.id,
-          kind: te.type,
-          timestamp: te.timestamp,
-          label: te.label,
-          detail: te.detail,
-        });
-      }
+      appendToolEvent(te, state);
     }
   }
 

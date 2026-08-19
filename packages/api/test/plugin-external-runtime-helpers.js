@@ -70,6 +70,7 @@ export async function createExternalRuntimeHarness({
   manifest = externalManifest(),
   methods = [],
   packageDigest = EXTERNAL_PACKAGE_DIGEST,
+  activeLeaseTtlMs,
 } = {}) {
   if (!rootDir) throw new TypeError('rootDir is required');
   await mkdir(join(rootDir, 'dist'), { recursive: true });
@@ -115,6 +116,7 @@ export async function createExternalRuntimeHarness({
     createSessionId: () => 'bs_external',
     createRuntimeLeaseId: () => 'lease_external',
     createBindingNonce: () => 'nonce_external',
+    ...(activeLeaseTtlMs === undefined ? {} : { activeLeaseTtlMs }),
   });
 
   return { inventory, brokerStore, broker, manifest, rootDir };

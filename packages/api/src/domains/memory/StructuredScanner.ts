@@ -7,24 +7,9 @@ import {
   extractFrontmatter,
   extractSupersededBy,
 } from './CatCafeScanner.js';
+import { extractFrontmatterKeywords, resolveFrontmatterEvidenceKind } from './CatCafeScannerParsing.js';
 import { FlatScanner } from './FlatScanner.js';
-import type { EvidenceKind, ScannedEvidence } from './interfaces.js';
-
-const FRONTMATTER_KIND_MAP: Record<string, EvidenceKind> = {
-  feature: 'feature',
-  spec: 'feature',
-  decision: 'decision',
-  adr: 'decision',
-  architecture: 'architecture',
-  'architecture-snapshot': 'architecture',
-  plan: 'plan',
-  design: 'plan',
-  lesson: 'lesson',
-  postmortem: 'lesson',
-  reflection: 'lesson',
-  discussion: 'discussion',
-  research: 'research',
-};
+import type { ScannedEvidence } from './interfaces.js';
 
 export class StructuredScanner extends FlatScanner {
   protected override parseFile(filePath: string, root: string): ScannedEvidence | null {
@@ -48,16 +33,13 @@ export class StructuredScanner extends FlatScanner {
     const fmAnchor = extractAnchor(frontmatter, base.item.sourcePath);
     if (fmAnchor) base.item.anchor = `${this.collectionId}:${fmAnchor}`;
 
-    const docKind = frontmatter.doc_kind;
-    if (typeof docKind === 'string' && FRONTMATTER_KIND_MAP[docKind]) {
-      base.item.kind = FRONTMATTER_KIND_MAP[docKind]!;
-    }
+    const resolvedKind = resolveFrontmatterEvidenceKind(frontmatter);
+    if (resolvedKind) base.item.kind = resolvedKind;
     base.item.status = extractEvidenceStatus(frontmatter);
     const supersededBy = extractSupersededBy(frontmatter);
     if (supersededBy) base.item.supersededBy = supersededBy;
 
-    const topics = frontmatter.topics;
-    const topicStrs = Array.isArray(topics) ? topics.filter((t): t is string => typeof t === 'string') : [];
+    const topicStrs = extractFrontmatterKeywords(frontmatter);
     const featureIdKw = extractFeatureIdKeywords(frontmatter, base.item.sourcePath ?? '');
     const sectionKw = base.item.keywords ?? [];
     const seen = new Set(topicStrs.map((t) => t.toLowerCase()));

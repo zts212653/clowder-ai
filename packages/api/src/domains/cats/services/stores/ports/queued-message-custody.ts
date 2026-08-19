@@ -31,6 +31,19 @@ export interface QueueTargetCarrierState {
   processingStartedAt?: number;
 }
 
+/**
+ * Durable exact-group fence written before pre-start supersession begins.
+ * A surviving member is sufficient to keep the complete group non-dispatchable
+ * after process restart while idempotent retirement finishes.
+ */
+export interface QueuePrestartRetirementIntent {
+  id: string;
+  primaryEntryId: string;
+  entryIds: string[];
+  targetCatId: string;
+  startedAt: number;
+}
+
 export interface QueuedMessageCustody {
   version: 1;
   entryId: string;
@@ -74,6 +87,8 @@ export interface QueuedMessageCustody {
   steeredInvocationIdByCatId?: Record<string, string>;
   /** F264: Steer was accepted but the replacement invocation has not bound its id yet. */
   steerRequestedByCatIds?: CatId[];
+  /** Exact pre-start group currently being durably retired. */
+  prestartRetirement?: QueuePrestartRetirementIntent;
   /** F264: append-only per-message reminder attempts, terminalized by the exact invocation. */
   reminderAttempts?: QueueReminderAttempt[];
   priority: 'urgent' | 'normal';
@@ -190,6 +205,21 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
   }
   if (custody.position !== undefined && !Number.isFinite(custody.position)) {
     throw new Error('queue custody position must be a finite number');
+  }
+  if (custody.prestartRetirement) {
+    const retirement = custody.prestartRetirement;
+    if (
+      !retirement.id ||
+      !retirement.primaryEntryId ||
+      !retirement.targetCatId ||
+      retirement.entryIds.length === 0 ||
+      retirement.entryIds.some((entryId) => !entryId) ||
+      new Set(retirement.entryIds).size !== retirement.entryIds.length ||
+      !retirement.entryIds.includes(retirement.primaryEntryId)
+    ) {
+      throw new Error('invalid pre-start retirement group identity');
+    }
+    assertFiniteNonNegative(retirement.startedAt, 'prestartRetirement.startedAt');
   }
 }
 
@@ -780,6 +810,12 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   if (JSON.stringify(input.next.carrierByTargetCatId) !== JSON.stringify(current.carrierByTargetCatId)) {
     throw new Error('queue custody per-target carrier bindings are immutable');
   }
+  if (
+    current.prestartRetirement !== undefined &&
+    JSON.stringify(input.next.prestartRetirement) !== JSON.stringify(current.prestartRetirement)
+  ) {
+    throw new Error('queue custody pre-start retirement identity is immutable once assigned');
+  }
   assertTargetOutcomeMonotonicity(current, input.next);
   assertBodyExposureMonotonicity(current, input.next);
   assertAuthorIntentMonotonicity(current, input.next);
@@ -837,6 +873,14 @@ export function cloneQueuedMessageCustody(custody: QueuedMessageCustody): Queued
       ? { steeredInvocationIdByCatId: { ...custody.steeredInvocationIdByCatId } }
       : {}),
     ...(custody.steerRequestedByCatIds ? { steerRequestedByCatIds: [...custody.steerRequestedByCatIds] } : {}),
+    ...(custody.prestartRetirement
+      ? {
+          prestartRetirement: {
+            ...custody.prestartRetirement,
+            entryIds: [...custody.prestartRetirement.entryIds],
+          },
+        }
+      : {}),
     ...(custody.reminderAttempts
       ? { reminderAttempts: custody.reminderAttempts.map((attempt) => ({ ...attempt })) }
       : {}),

@@ -3,6 +3,7 @@ import type { InvocationQueue } from '../cats/services/agents/invocation/Invocat
 import { createInitialQueuedMessageCustody } from '../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../cats/services/agents/invocation/QueueProcessor.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import { buildAsrPersonMemoryDynamicScenes } from './AsrPersonMemorySceneBuilder.js';
 import type { MeetingArtifact, MeetingArtifactDispatcher } from './MeetingIntakeActionService.js';
 import type { MeetingThreadStore } from './ThreadDestinationAuthority.js';
 import { parsePrivateThreadHandle } from './ThreadDestinationAuthority.js';
@@ -66,6 +67,14 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
       throw Object.assign(new Error('meeting destination has no cat workflow'), { code: 'ROUTE_UNAVAILABLE' });
 
     const content = buildMeetingArtifactPrompt(input.intake, input.artifact);
+    const queuedAt = this.now();
+    const dynamicSceneEntries = buildAsrPersonMemoryDynamicScenes({
+      intake: input.intake,
+      artifact: input.artifact,
+      threadId,
+      consumerCatId: catId,
+      now: queuedAt,
+    });
     const idempotencyKey = `meeting-artifact:${input.intake.intakeId}`;
     const enqueue = this.options.invocationQueue.enqueue({
       threadId,
@@ -87,7 +96,7 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
           catId: null,
           content,
           mentions: [catId],
-          timestamp: this.now(),
+          timestamp: queuedAt,
           threadId,
           idempotencyKey,
           deliveryStatus: 'queued',
@@ -100,6 +109,7 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
               trust: input.artifact.provenance.trust,
               instructionPolicy: input.artifact.provenance.instructionPolicy,
             },
+            dynamicSceneEntries,
           },
         });
         this.options.invocationQueue.backfillMessageId(threadId, input.intake.ownerId, enqueue.entry.id, stored.id);

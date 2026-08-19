@@ -2,7 +2,9 @@ import type {
   CatId,
   DeferredPersonMemoryReceipt,
   DeferredPersonMemoryResolvedSource,
+  DeferredWriteOpportunityReceiptV1,
   PersonMemorySourceRef,
+  WriteOpportunityLineageV1,
 } from '@cat-cafe/shared';
 
 export interface StageDeferredPersonMemoryReceiptInput {
@@ -19,6 +21,12 @@ export interface StageDeferredPersonMemoryReceiptInput {
   dedupeHash: string;
   ready: boolean;
   createdAt: number;
+  /**
+   * Wave 2 bridge: content-free identity of the Standing Reflex write opportunity whose bounded
+   * judgment produced this defer. Optional, so the ordinary F276 defer path is unchanged.
+   */
+  writeOpportunityLineage?: WriteOpportunityLineageV1;
+  writeOpportunityReceipt?: DeferredWriteOpportunityReceiptV1;
 }
 
 export type StageDeferredPersonMemoryReceiptResult =
@@ -29,6 +37,11 @@ export type StageDeferredPersonMemoryReceiptResult =
 export type ClaimDeferredPersonMemoryReceiptResult =
   | { outcome: 'claimed'; receipt: DeferredPersonMemoryReceipt }
   | { outcome: 'claimed_elsewhere' | 'not_available' };
+
+export type RearmDeferredPersonMemoryReceiptResult =
+  | { outcome: 'rearmed'; receipt: DeferredPersonMemoryReceipt }
+  | { outcome: 'conflict' }
+  | { outcome: 'not_available' };
 
 export type WithdrawDeferredPersonMemoryReceiptResult =
   | { outcome: 'withdrawn' | 'replayed'; receipt: DeferredPersonMemoryReceipt }
@@ -50,6 +63,16 @@ export interface DeferredPersonMemoryReceiptStore {
     leaseMs: number;
   }): Promise<ClaimDeferredPersonMemoryReceiptResult>;
   release(ownerUserId: string, receiptId: string, claimId: string, now: number): Promise<boolean>;
+  rearmWriteOpportunity(input: {
+    ownerUserId: string;
+    receiptId: string;
+    claimId: string;
+    requesterCatId: CatId;
+    dedupeHash: string;
+    writeOpportunityLineage: WriteOpportunityLineageV1;
+    writeOpportunityReceipt: DeferredWriteOpportunityReceiptV1;
+    now: number;
+  }): Promise<RearmDeferredPersonMemoryReceiptResult>;
   withdraw(
     ownerUserId: string,
     receiptId: string,

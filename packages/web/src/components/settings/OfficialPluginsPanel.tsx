@@ -12,6 +12,12 @@ interface MutationRequest {
   readonly init: RequestInit;
 }
 
+interface OfficialPluginCatalogStatus {
+  readonly status: 'bootstrap' | 'fresh' | 'degraded';
+  readonly checkedAt: number | null;
+  readonly errorCode?: string;
+}
+
 function actionConfirmed(plugin: OfficialPluginInfo, action: OfficialPluginAction): boolean {
   if (action === 'enable') return window.confirm('确认启用飞书会议纪要同步？启用后会连接本机 lark-cli。');
   if (action === 'update') {
@@ -24,14 +30,34 @@ function actionConfirmed(plugin: OfficialPluginInfo, action: OfficialPluginActio
 }
 
 function mutationRequest(plugin: OfficialPluginInfo, action: OfficialPluginAction): MutationRequest | undefined {
-  if (action === 'install') return { target: plugin.catalogId, init: { method: 'POST' } };
+  if (action === 'install') {
+    return {
+      target: plugin.catalogId,
+      init: {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedCatalogVersion: plugin.availableVersion,
+          expectedPackageDigest: plugin.packageDigest,
+        }),
+      },
+    };
+  }
   if (!plugin.instance) return undefined;
+  const body =
+    action === 'update'
+      ? {
+          expectedRevision: plugin.instance.lifecycleRevision,
+          expectedCatalogVersion: plugin.availableVersion,
+          expectedPackageDigest: plugin.packageDigest,
+        }
+      : { expectedRevision: plugin.instance.lifecycleRevision };
   return {
     target: plugin.instance.pluginInstanceId,
     init: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedRevision: plugin.instance.lifecycleRevision }),
+      body: JSON.stringify(body),
     },
   };
 }
@@ -41,13 +67,18 @@ export function OfficialPluginsPanel() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<OfficialPluginCatalogStatus | null>(null);
 
   const load = useCallback(async (clearError = true) => {
     try {
       const response = await apiFetch('/api/plugins/official');
       if (!response.ok) throw new Error(`官方插件读取失败 (${response.status})`);
-      const body = (await response.json()) as { plugins?: OfficialPluginInfo[] };
+      const body = (await response.json()) as {
+        plugins?: OfficialPluginInfo[];
+        catalog?: OfficialPluginCatalogStatus;
+      };
       setPlugins(Array.isArray(body.plugins) ? body.plugins : []);
+      setCatalog(body.catalog ?? null);
       if (clearError) setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '官方插件读取失败');
@@ -77,8 +108,12 @@ export function OfficialPluginsPanel() {
         };
         if (response.ok) {
           setPlugins((current) => current.map((item) => (item.catalogId === plugin.catalogId ? body : item)));
-        } else if (body.code === 'STALE_REVISION') {
-          setError('插件状态已变化，已刷新到最新状态，请重试。');
+        } else if (body.code === 'STALE_REVISION' || body.code === 'STALE_CATALOG') {
+          setError(
+            body.code === 'STALE_CATALOG'
+              ? '可用版本已变化，已刷新到最新版本，请再次确认。'
+              : '插件状态已变化，已刷新到最新状态，请重试。',
+          );
           await load(false);
         } else {
           setError(body.error ?? `官方插件操作失败 (${response.status})`);
@@ -98,6 +133,16 @@ export function OfficialPluginsPanel() {
   return (
     <section className="contents" data-testid="official-plugins-panel">
       {error && <div className="rounded-md bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{error}</div>}
+      {catalog?.status === 'degraded' && (
+        <div className="rounded-md bg-conn-amber-bg px-3 py-2 text-sm text-conn-amber-text">
+          版本目录暂时无法刷新；当前显示最近一次可信版本，已安装插件不受影响。
+        </div>
+      )}
+      {catalog?.status === 'bootstrap' && (
+        <div className="rounded-md bg-cafe-card px-3 py-2 text-sm text-cafe-muted">
+          当前显示 Host 内置的可信版本；联网后会自动检查官方更新。
+        </div>
+      )}
       {plugins.map((plugin) => (
         <OfficialPluginCard
           key={plugin.catalogId}

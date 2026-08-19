@@ -390,6 +390,7 @@ describe('SessionBootstrap', () => {
         assert.match(result.text, /Project Knowledge Recall/);
         assert.deepEqual(result.pushRecallPresentations?.[0], {
           surface: 'session_bootstrap',
+          presentationKind: 'pointer',
           query: 'Memory lifecycle telemetry',
           scope: 'docs',
           timestamp: result.pushRecallPresentations[0].timestamp,

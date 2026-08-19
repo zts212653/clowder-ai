@@ -6,7 +6,13 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
+const ENV_KEYS = [
+  'NEXT_PUBLIC_API_URL',
+  'API_SERVER_PORT',
+  'FRONTEND_PORT',
+  'CAT_CAFE_WEB_BUILD_REVISION',
+  'CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED',
+];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -85,6 +91,19 @@ describe('next.config rewrites', () => {
     await withEnv({ FRONTEND_PORT: '5000' }, async (config) => {
       const rewrites = await config.rewrites();
       assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
+    });
+  });
+
+  it('embeds the exact Web bundle revision into client code', () => {
+    const revision = 'a'.repeat(40);
+    withEnv({ CAT_CAFE_WEB_BUILD_REVISION: revision }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION, revision);
+    });
+  });
+
+  it('can require document/server revision verification in the browser regression harness', () => {
+    withEnv({ CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: '1' }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED, '1');
     });
   });
 

@@ -1,6 +1,15 @@
 const withPWA = require('@ducanh2912/next-pwa').default;
+const { resolveWebBuildRevision } = require('./scripts/build-revision.cjs');
 
 const enablePwaInDev = process.env.ENABLE_PWA_IN_DEV === '1';
+
+// Resolved through the shared helper so the revision embedded in the browser
+// bundle and the one scripts/write-build-stamp.cjs records on disk can never
+// drift apart — F294's guard fails closed on a mismatch just as it does on a
+// missing stamp.
+const webBuildRevision = resolveWebBuildRevision();
+const deploymentRevisionRequired =
+  process.env.CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED === '1' || process.env.NODE_ENV === 'production';
 
 function resolveApiBaseUrl() {
   // Prefer explicit local port over NEXT_PUBLIC_API_URL: SSR rewrites should
@@ -40,6 +49,10 @@ function buildContentSecurityPolicy() {
 const nextConfig = {
   reactStrictMode: true,
   experimental: { proxyTimeout: 120_000 },
+  env: {
+    NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION: webBuildRevision ?? '',
+    NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: deploymentRevisionRequired ? '1' : '0',
+  },
   // 允许 Tailscale 网段设备访问 dev server 的 /_next/* 资源
   allowedDevOrigins: ['100.0.0.0/8'],
   async headers() {

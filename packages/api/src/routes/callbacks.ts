@@ -186,6 +186,7 @@ import { registerCallbackProposeSessionHandoffRoutes } from './callback-propose-
 import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackReadProfileRoutes } from './callback-read-profile-routes.js';
+import { registerCallbackRecordProactiveMemoryAbstentionRoutes } from './callback-record-proactive-memory-abstention-routes.js';
 import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
 import {
   deriveCallbackActor,
@@ -693,6 +694,8 @@ export interface CallbackRoutesOptions {
   personMemoryStore?: import('../domains/memory/people/PersonMemoryStore.js').PersonMemoryStore;
   /** F276: content-free known-person delta receipts. */
   deferredPersonMemoryReceiptStore?: import('../domains/memory/DeferredPersonMemoryReceiptStore.js').DeferredPersonMemoryReceiptStore;
+  writeOpportunityDeliveryStore?: import('../domains/memory/people/WriteOpportunityDeliveryStore.js').WriteOpportunityDeliveryStore;
+  writeOpportunityTerminalLedger?: import('../domains/memory/people/WriteOpportunityTerminalLedger.js').WriteOpportunityTerminalLedger;
   /** F276/F282: exact workspace/private person registry convergence. */
   proactiveCandidateRegistryResolver?: import('../domains/memory/ProactiveCandidateRegistryResolver.js').ProactiveCandidateRegistryResolver;
   /** F276 KD-12: read-only workspace person identity root resolver. */
@@ -5334,10 +5337,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager,
       ...(opts.approvalIngress ? { approvalIngress: opts.approvalIngress } : {}),
       ...(opts.deferredPersonMemoryReceiptStore ? { deferredReceiptStore: opts.deferredPersonMemoryReceiptStore } : {}),
+      ...(opts.writeOpportunityDeliveryStore
+        ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+        : {}),
+      ...(opts.writeOpportunityTerminalLedger
+        ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+        : {}),
     });
     registerCallbackPersonMemoryRoutes(app, {
       store: opts.personMemoryStore,
       workspacePersonResolver: opts.workspacePersonResolver,
+      ...(opts.writeOpportunityDeliveryStore
+        ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+        : {}),
+      ...(opts.writeOpportunityTerminalLedger
+        ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+        : {}),
     });
     if (opts.deferredPersonMemoryReceiptStore && opts.proactiveCandidateRegistryResolver) {
       registerCallbackDeferPersonMemoryRoutes(app, {
@@ -5345,9 +5360,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         messageStore: opts.messageStore,
         receiptStore: opts.deferredPersonMemoryReceiptStore,
         registryResolver: opts.proactiveCandidateRegistryResolver,
+        ...(opts.writeOpportunityDeliveryStore
+          ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+          : {}),
+        ...(opts.writeOpportunityTerminalLedger
+          ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+          : {}),
       });
     }
   }
+
+  registerCallbackRecordProactiveMemoryAbstentionRoutes(app, {
+    registry,
+    ...(opts.writeOpportunityDeliveryStore
+      ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+      : {}),
+    ...(opts.writeOpportunityTerminalLedger
+      ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+      : {}),
+  });
 
   if (opts.memoryCueDeps) {
     registerCallbackMemoryCueRoutes(app, opts.memoryCueDeps);

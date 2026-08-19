@@ -30,6 +30,8 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   let afterStage;
   let beforeCommitEnvelope;
   let deferredReceipt;
+  let deliveredWriteOpportunities;
+  let writeOpportunityTerminals;
   let connected = false;
 
   before(async () => {
@@ -111,6 +113,33 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
           artifactResolutions.get(`${ownerUserId}:${artifactLocator}`) ?? null,
       },
       deferredReceiptStore: receiptStore,
+      writeOpportunityDeliveryStore: {
+        async get(ownerUserId, opportunityId) {
+          return (
+            deliveredWriteOpportunities.find(
+              (record) => record.ownerUserId === ownerUserId && record.opportunityId === opportunityId,
+            ) ?? null
+          );
+        },
+        async recordDelivered() {},
+        async listInvocationOpportunityIds(ownerUserId, invocationId) {
+          return deliveredWriteOpportunities
+            .filter((record) => record.ownerUserId === ownerUserId && record.invocationId === invocationId)
+            .map((record) => record.opportunityId);
+        },
+        async purgeLineage() {
+          return 0;
+        },
+      },
+      writeOpportunityTerminalLedger: {
+        async recordTerminal(input) {
+          writeOpportunityTerminals.push(input);
+        },
+        async recordInvalidated() {},
+        async readLineageStates() {
+          return new Map();
+        },
+      },
     });
     await app.ready();
   });
@@ -136,6 +165,8 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     workspaceResolutions = new Map();
     artifactResolutions = new Map();
     deferredReceipt = undefined;
+    deliveredWriteOpportunities = [];
+    writeOpportunityTerminals = [];
   });
 
   async function propose(body, originContent = '黄挺是终端用户计算开发部 21 级') {
@@ -151,7 +182,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     return { response, origin };
   }
 
-  async function proposeFromOrigin(body, origin) {
+  async function proposeFromOrigin(body, origin, onAuth) {
     const auth = await registry.create(
       'owner-1',
       'codex-sol',
@@ -161,6 +192,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       undefined,
       origin.id,
     );
+    onAuth?.(auth);
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/propose-person-memory',
@@ -191,6 +223,94 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     ],
     clientRequestId: 'f276-route-1',
   };
+
+  const writeOpportunityRef = {
+    opportunityId: `write_opp_${'c'.repeat(32)}`,
+    dedupeLineage: `write_lineage_${'a'.repeat(32)}`,
+    generation: 1,
+  };
+
+  function deliveredWriteOpportunity(invocationId) {
+    return {
+      v: 1,
+      ...writeOpportunityRef,
+      reflexId: 'asr-person-memory',
+      reflexVersion: 1,
+      ownerUserId: 'owner-1',
+      threadId: 'thread_people',
+      consumerCatId: 'codex-sol',
+      invocationId,
+      eligibleAt: 1,
+      expiresAt: Date.now() + 86_400_000,
+      rearmPredicate: 'next_eligible_owner_context_after_defer',
+      destinationProposalContract: 'F276.CaptureCandidate.v1',
+      sourceRefs: [
+        {
+          artifactId: 'meeting-intake-1',
+          sourceRevision: `sha256:${'b'.repeat(64)}`,
+          attributionRevision: `sha256:${'d'.repeat(64)}`,
+          segmentStart: 0,
+          segmentEnd: 128,
+        },
+      ],
+      presentedAt: 2,
+      generationId: `sha256:${'e'.repeat(64)}`,
+      evidenceRef: `context-delivery:x:sha256:${'e'.repeat(64)}`,
+      continuityDispositionRef: 'continuity:x',
+    };
+  }
+
+  it('binds an ASR proposal to delivered evidence and closes that generation', async () => {
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺是终端用户计算开发部 21 级',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const response = await proposeFromOrigin({ ...proposalBody, writeOpportunityRef }, origin, (auth) =>
+      deliveredWriteOpportunities.push(deliveredWriteOpportunity(auth.invocationId)),
+    );
+
+    assert.equal(response.statusCode, 200, response.body);
+    const candidateId = response.json().candidateId;
+    assert.deepEqual(writeOpportunityTerminals, [
+      {
+        ownerUserId: 'owner-1',
+        dedupeLineage: writeOpportunityRef.dedupeLineage,
+        generation: 1,
+        outcome: 'propose',
+        recordedAt: writeOpportunityTerminals[0].recordedAt,
+      },
+    ]);
+    const candidate = await store.getCandidateForOwner('owner-1', candidateId);
+    assert.equal(candidate.publication.state, 'anchored');
+    assert.deepEqual(candidate.writeOpportunityLineage, {
+      reflexId: 'asr-person-memory',
+      reflexVersion: 1,
+      ...writeOpportunityRef,
+    });
+  });
+
+  it('rejects an unattributed proposal when this invocation received an opportunity', async () => {
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺是终端用户计算开发部 21 级',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const response = await proposeFromOrigin(proposalBody, origin, (auth) =>
+      deliveredWriteOpportunities.push(deliveredWriteOpportunity(auth.invocationId)),
+    );
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().reason, 'write_opportunity_ref_required');
+    assert.equal(stageCalls, 0);
+    assert.deepEqual(writeOpportunityTerminals, []);
+  });
 
   it('derives ownership and origin, persists the rich card, then anchors one candidate', async () => {
     const { response, origin } = await propose(proposalBody);

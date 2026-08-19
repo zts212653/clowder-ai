@@ -10,10 +10,18 @@
  */
 
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 const { buildThreadMemory } = await import('../dist/domains/cats/services/session/buildThreadMemory.js');
-const { rankArtifactSources } = await import('../dist/domains/cats/services/agents/routing/source-ranking.js');
+const { rankArtifactSources, selectDirectiveSources } = await import(
+  '../dist/domains/cats/services/agents/routing/source-ranking.js'
+);
+const { resolveReachableArtifactRefs } = await import(
+  '../dist/domains/cats/services/agents/routing/source-reachability.js'
+);
 const { mergeLedger } = await import('../dist/domains/cats/services/agents/routing/artifact-tracking.js');
 
 // --- G1: Thread-level artifact ledger ---
@@ -399,11 +407,15 @@ describe('G3: best-next-source from ranked list', () => {
         updatedBy: 'opus',
       },
     ];
-    const ranked = rankArtifactSources(ledger, [], { canonicalFeatureId: 'F148' });
+    const ranked = rankArtifactSources(ledger, [], {
+      canonicalFeatureId: 'F148',
+      reachableArtifactRefs: new Set(['docs/features/F148-hierarchical-context-transport.md']),
+    });
+    const directiveSources = selectDirectiveSources(ranked);
 
-    assert.ok(ranked.length >= 1, 'should have at least one ranked source');
-    assert.equal(ranked[0].type, 'feature-doc');
-    assert.ok(ranked[0].ref.includes('F148'), 'top source should reference the feature');
+    assert.equal(directiveSources.length, 1, 'should have exactly one directive-eligible source');
+    assert.equal(directiveSources[0].type, 'feature-doc');
+    assert.ok(directiveSources[0].ref.includes('F148'), 'top source should reference the feature');
   });
 });
 
@@ -451,6 +463,81 @@ describe('G4: provenance-based fail-closed', () => {
   it('empty ledger → empty result (fail-closed: nothing to show)', () => {
     const result = rankArtifactSources([], [], { canonicalFeatureId: 'F148' });
     assert.deepEqual(result, []);
+  });
+
+  it('F296 AC-A3: stale #1108 plus current typed #1128 selects only the current subject', () => {
+    const ledger = [
+      { type: 'file', ref: '.env.local', label: '.env.local', updatedAt: now, updatedBy: 'opus', ops: ['edit'] },
+      { type: 'pr', ref: 'org/repo#1108', label: 'PR #1108', updatedAt: now - 100, updatedBy: 'opus' },
+      { type: 'pr', ref: 'org/repo#1128', label: 'PR #1128', updatedAt: now - 200, updatedBy: 'codex' },
+    ];
+    const activeTasks = [{ kind: 'pr_tracking', subjectKey: 'pr:org/repo#1128', title: 'PR #1128', status: 'doing' }];
+
+    const directiveSources = selectDirectiveSources(rankArtifactSources(ledger, activeTasks, {}));
+
+    assert.deepEqual(
+      directiveSources.map((source) => source.ref),
+      ['org/repo#1128'],
+    );
+    assert.equal(directiveSources[0].provenance, 'canonical');
+  });
+
+  it('F296 AC-A3: deleted temporary review file cannot outrank a current typed PR', () => {
+    const deletedRef = '.codex-tmp-pr1359-review.md';
+    const currentPrRef = 'org/repo#1359';
+    const ledger = [
+      { type: 'file', ref: deletedRef, label: deletedRef, updatedAt: now, updatedBy: 'fable5', ops: ['create'] },
+      { type: 'pr', ref: currentPrRef, label: 'PR #1359', updatedAt: now - 100, updatedBy: 'codex' },
+    ];
+    const activeTasks = [
+      { kind: 'pr_tracking', subjectKey: `pr:${currentPrRef}`, title: 'Review PR #1359', status: 'doing' },
+    ];
+
+    const directiveSources = selectDirectiveSources(rankArtifactSources(ledger, activeTasks, {}));
+
+    assert.deepEqual(
+      directiveSources.map((source) => source.ref),
+      [currentPrRef],
+    );
+  });
+
+  it('F296 AC-A3: canonical feature doc needs an explicit reachability proof', () => {
+    const ref = 'docs/features/F296-continuity-aware-context-injection.md';
+    const ledger = [{ type: 'feature-doc', ref, label: 'F296 spec', updatedAt: now, updatedBy: 'codex' }];
+
+    const unverified = rankArtifactSources(ledger, [], { canonicalFeatureId: 'F296' });
+    const verified = rankArtifactSources(ledger, [], {
+      canonicalFeatureId: 'F296',
+      reachableArtifactRefs: new Set([ref]),
+    });
+
+    assert.deepEqual(selectDirectiveSources(unverified), []);
+    assert.deepEqual(
+      selectDirectiveSources(verified).map((source) => source.ref),
+      [ref],
+    );
+  });
+});
+
+describe('F296 AC-A3: local artifact reachability', () => {
+  it('returns only files that currently exist inside the thread workspace', async (t) => {
+    const projectPath = await mkdtemp(join(tmpdir(), 'f296-source-reachability-'));
+    t.after(() => rm(projectPath, { recursive: true, force: true }));
+    await writeFile(join(projectPath, 'current.md'), 'current');
+
+    const reachable = await resolveReachableArtifactRefs(projectPath, [
+      { type: 'file', ref: 'current.md', label: 'current.md', updatedAt: 2, updatedBy: 'codex', ops: ['edit'] },
+      {
+        type: 'file',
+        ref: '.codex-tmp-pr1359-review.md',
+        label: '.codex-tmp-pr1359-review.md',
+        updatedAt: 1,
+        updatedBy: 'fable5',
+        ops: ['create'],
+      },
+    ]);
+
+    assert.deepEqual([...reachable], ['current.md']);
   });
 });
 
@@ -523,15 +610,27 @@ describe('G5: briefing with full ledger', () => {
     burst: { count: 5, timeRange: { from: 1000, to: 2000 } },
     omitted: { count: 10, participants: ['opus'], timeRange: { from: 500, to: 1000 } },
     anchorIds: [],
-    retrievalHints: [],
+    recallPointer: { candidateCount: 0 },
     threadMemory: null,
   };
 
   it('shows ranked sources with provenance in briefing body', () => {
     const msg = buildBriefingMessage(baseCoverage, 'thread-1', {
       rankedSources: [
-        { type: 'feature-doc', ref: 'docs/features/F148-foo.md', label: 'F148 spec', provenance: 'canonical' },
-        { type: 'pr', ref: 'org/repo#1297', label: 'PR #1297', provenance: 'canonical' },
+        {
+          type: 'feature-doc',
+          ref: 'docs/features/F148-foo.md',
+          label: 'F148 spec',
+          provenance: 'canonical',
+          directiveEligible: true,
+        },
+        {
+          type: 'pr',
+          ref: 'org/repo#1297',
+          label: 'PR #1297',
+          provenance: 'canonical',
+          directiveEligible: true,
+        },
       ],
     });
     const body = msg.extra?.rich?.blocks?.[0]?.bodyMarkdown ?? '';
@@ -540,14 +639,20 @@ describe('G5: briefing with full ledger', () => {
     assert.ok(body.includes('PR #1297'), 'should include second source');
   });
 
-  it('shows (推断) tag for regex provenance sources', () => {
+  it('F296 AC-A3: regex provenance cannot become briefing truth source or next step', () => {
     const msg = buildBriefingMessage(baseCoverage, 'thread-1', {
       rankedSources: [
         { type: 'feature-doc', ref: 'docs/features/F148-foo.md', label: 'F148 spec', provenance: 'regex' },
       ],
     });
-    const body = msg.extra?.rich?.blocks?.[0]?.bodyMarkdown ?? '';
-    assert.ok(body.includes('推断'), 'regex provenance should show (推断)');
+    const card = msg.extra?.rich?.blocks?.[0];
+    const body = card?.bodyMarkdown ?? '';
+    const truthField = card?.fields?.find((field) => field.label === '真相源')?.value ?? '';
+    const nextField = card?.fields?.find((field) => field.label === '下一步')?.value ?? '';
+
+    assert.ok(truthField.includes('未定位'), 'regex source must fail closed in the truth field');
+    assert.ok(!nextField.includes('F148 spec'), 'regex source must not produce a command-like next step');
+    assert.ok(!body.includes('F148 spec'), 'briefing body must not reintroduce the heuristic candidate');
   });
 
   it('omits ranked sources section when not provided (backward compat)', () => {

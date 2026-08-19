@@ -182,9 +182,20 @@ describe('F287 D2 billing-only golden journey', () => {
     assert.match(resolution.promptSegment, /Drill: evidence mch1\./);
     const cueId = resolution.promptSegment.match(/cue-id="([^"]+)"/)?.[1];
     assert.ok(cueId);
+    assert.equal(resolution.deliveryReceipts.length, 1);
+    assert.deepEqual(
+      episodeStore.listByCue('owner-1', cueId).map((event) => event.consumptionOutcome),
+      [],
+      'rendering a cue must not claim that the provider received it',
+    );
+    await service.recordPresented(resolution.deliveryReceipts, {
+      generationId: 'sha256:final-provider-prompt',
+      evidenceRef: 'context-delivery:invocation-1:sha256:final-provider-prompt',
+    });
     assert.deepEqual(
       episodeStore.listByCue('owner-1', cueId).map((event) => event.consumptionOutcome),
       ['presented'],
+      'the receipt becomes durable only after an explicit provider-delivery confirmation',
     );
     for (let sample = 1; sample < 64; sample += 1) {
       const randomizedHandleResolution = await service.resolve(promptInput);

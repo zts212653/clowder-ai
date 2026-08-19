@@ -89,6 +89,23 @@ function isTerminalTargetAttempt(attempt: QueueTargetAttempt): boolean {
   return attempt.state === 'failed' || attempt.state === 'cancelled' || attempt.state === 'handled';
 }
 
+function targetReplayTerminalTruth(
+  custody: QueuedMessageCustody,
+  targetCatId: string,
+): { terminalized: boolean; invocationId?: string } {
+  const target = targetCatId as CatId;
+  const outcome = custody.targetOutcomeByCatId?.[targetCatId];
+  const terminalized =
+    Boolean(outcome) ||
+    custody.handledByCatIds.includes(target) ||
+    custody.withdrawnByCatIds?.includes(target) === true ||
+    (custody.status === 'terminal' && !custody.pendingTargetCats.includes(target));
+  return {
+    terminalized,
+    ...(outcome?.invocationId ? { invocationId: outcome.invocationId } : {}),
+  };
+}
+
 function initialTargetAttempt(
   entryId: string,
   targetCatId: string,
@@ -504,6 +521,14 @@ export function createInitialQueuedMessageCustody(entry: QueueEntry): QueuedMess
     failedByCatIds: catIds(entry.queuedFailedByCatIds),
     handledByCatIds: catIds(entry.queuedHandledByCatIds),
     ...(entry.steerRequestedByCatIds?.length ? { steerRequestedByCatIds: catIds(entry.steerRequestedByCatIds) } : {}),
+    ...(entry.prestartRetirement
+      ? {
+          prestartRetirement: {
+            ...entry.prestartRetirement,
+            entryIds: [...entry.prestartRetirement.entryIds],
+          },
+        }
+      : {}),
     ...(entry.steeredInvocationIdByCatId && Object.keys(entry.steeredInvocationIdByCatId).length > 0
       ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
       : {}),
@@ -682,6 +707,14 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
       handledByCatIds: mergeTargetSet(current.handledByCatIds, entry.queuedHandledByCatIds),
       ...(steerRequestedByCatIds.length > 0 ? { steerRequestedByCatIds } : {}),
       ...(Object.keys(steeredInvocationIdByCatId).length > 0 ? { steeredInvocationIdByCatId } : {}),
+      ...(entry.prestartRetirement
+        ? {
+            prestartRetirement: {
+              ...entry.prestartRetirement,
+              entryIds: [...entry.prestartRetirement.entryIds],
+            },
+          }
+        : {}),
       updatedAt: now,
     };
   }
@@ -719,6 +752,14 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
     ...(entry.steerRequestedByCatIds?.length ? { steerRequestedByCatIds: catIds(entry.steerRequestedByCatIds) } : {}),
     ...(entry.steeredInvocationIdByCatId && Object.keys(entry.steeredInvocationIdByCatId).length > 0
       ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
+      : {}),
+    ...(entry.prestartRetirement
+      ? {
+          prestartRetirement: {
+            ...entry.prestartRetirement,
+            entryIds: [...entry.prestartRetirement.entryIds],
+          },
+        }
       : {}),
     priority: entry.priority,
     ...(entry.position !== undefined ? { position: entry.position } : {}),
@@ -1043,6 +1084,76 @@ export class QueuedMessageCustodyCoordinator {
       );
       if (!witnessed) throw new Error(`queued_prompt_exposure_rejected:${messageId}`);
     }
+  }
+
+  /**
+   * Mechanical no-reentry fence for an exact Queue target.
+   *
+   * A carrier can be restored after a multi-message success settlement failed
+   * midway. If any exact source already contains durable terminal target truth,
+   * the provider has crossed the side-effect boundary and the carrier may only
+   * be terminalized/reconciled — never executed again.
+   */
+  async inspectTargetReplayFence(input: {
+    entry: QueueEntry;
+    targetCatId: string;
+  }): Promise<
+    | { disposition: 'dispatchable'; sourceMessageIds: string[] }
+    | { disposition: 'terminalized'; invocationId?: string; sourceMessageIds: string[] }
+  > {
+    const sourceMessageIds = this.messageIds(input.entry);
+    for (const messageId of sourceMessageIds) {
+      const message = await this.messageStore.getById(messageId);
+      const custody = message?.queueCustody;
+      // Missing and legacy-unbound custody are canonical attempt-classifier
+      // states, not process-reader failures. The downstream classifier owns
+      // their dispatchability; only an actual store read exception is unknown.
+      if (!custody) continue;
+      const carrier = custody.carrierByTargetCatId?.[input.targetCatId];
+      if (carrier && carrier.entryId !== input.entry.id) {
+        return { disposition: 'terminalized', sourceMessageIds };
+      }
+      if (!carrier && custody.entryId !== input.entry.id) {
+        throw new Error(`Queue replay fence entry mismatch for ${messageId}`);
+      }
+      const terminal = targetReplayTerminalTruth(custody, input.targetCatId);
+      if (terminal.terminalized) {
+        return {
+          disposition: 'terminalized',
+          ...(terminal.invocationId ? { invocationId: terminal.invocationId } : {}),
+          sourceMessageIds,
+        };
+      }
+    }
+    return { disposition: 'dispatchable', sourceMessageIds };
+  }
+
+  /**
+   * Carrier-independent retirement fence.
+   *
+   * Pre-start retirement is a Queue lifecycle transition rather than an A2A
+   * property. It cancels every durable source and then clears custody, so an
+   * old coroutine must stop before provider creation regardless of carrier
+   * category. A partially retired batch stays fail-closed for reconciliation;
+   * it must not withdraw live siblings or replay the canceled source.
+   */
+  async inspectCarrierRetirementFence(input: {
+    entries: readonly QueueEntry[];
+  }): Promise<
+    | { disposition: 'dispatchable'; sourceMessageIds: string[] }
+    | { disposition: 'terminalized'; sourceMessageIds: string[] }
+  > {
+    const sourceMessageIds = [...new Set(input.entries.flatMap((entry) => this.messageIds(entry)))];
+    let retiredSources = 0;
+    for (const messageId of sourceMessageIds) {
+      const message = await this.messageStore.getById(messageId);
+      if (!message?.queueCustody && message?.deliveryStatus === 'canceled') retiredSources += 1;
+    }
+    if (retiredSources === 0) return { disposition: 'dispatchable', sourceMessageIds };
+    if (retiredSources !== sourceMessageIds.length) {
+      throw new Error('Queue carrier retirement is only partially terminalized');
+    }
+    return { disposition: 'terminalized', sourceMessageIds };
   }
 
   /**

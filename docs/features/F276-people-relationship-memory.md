@@ -78,7 +78,9 @@ Why: F209/F260 拥有 workspace person identity root / locator，F231 只拥有 
 destructive risk 不同；将它们并入 proposal 或一个混合 action union 会污染审批写入与 destructive
 annotation，违反 ADR-044 的 authority/risk boundary。既有 `cat_cafe_propose_person_memory` 仅新增
 daily-clerk 的 fenced `deferredReceipt` lineage，因此提升为 canonical 的同资源 lifecycle contract，
-不新增第二个 proposal 名称。
+不新增第二个 proposal 名称。既有 `cat_cafe_record_proactive_memory_abstention` 同样提升为 canonical：
+它只在原有 abstention write boundary 内增加 content-free `writeOpportunityRef`，让服务端把明确的
+`abstain` 绑定到实际送达的 generation；没有新增 top-level 工具、action、authority 或 risk boundary。
 
 ## Why
 

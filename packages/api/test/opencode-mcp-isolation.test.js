@@ -69,6 +69,24 @@ exit 1
   return file;
 }
 
+function createExecutionOwnerRejectingOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-non-owner-opencode-probe-'));
+  const file = join(dir, 'opencode');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ -n "$CAT_CAFE_PROCESS_EXECUTION_OWNER" ] || [ -n "$CAT_CAFE_EXECUTION_ID" ]; then
+  echo "probe inherited execution ownership" >&2
+  exit 42
+fi
+echo "opencode run [message..]"
+echo "      --auto"
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
 async function invokeOpenCode(invokeOptions = {}, serviceOptions = {}) {
   const proc = createMockProcess();
   const spawnFn = mock.fn(() => proc);
@@ -341,6 +359,21 @@ describe('OpenCode headless permission mode', () => {
     const result = await probeOpenCodeAutoApproveSupport(command);
 
     assert.equal(result.approvalFlag, '--dangerously-skip-permissions');
+  });
+
+  test('opencode auto-approval probe never becomes an invocation execution owner', async () => {
+    const command = createExecutionOwnerRejectingOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command, undefined, {
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_EXECUTION_ID: 'parent-execution-first-probe',
+      CAT_CAFE_INVOCATION_ID: 'turn-first-probe',
+      CAT_CAFE_THREAD_ID: 'thread-first-probe',
+      CAT_CAFE_CAT_ID: 'opencode',
+      CAT_CAFE_USER_ID: 'scheduler',
+    });
+
+    assert.equal(result.approvalFlag, '--auto');
   });
 
   test('opencode auto-approval probe does not infer hidden aliases when --help masks unknown flags', async () => {

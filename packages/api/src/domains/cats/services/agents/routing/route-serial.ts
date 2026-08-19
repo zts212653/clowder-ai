@@ -174,6 +174,7 @@ import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/Streamin
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
 import {
   applyActiveSessionCapacityPin,
   resolveInvocationCapacitySnapshot,
@@ -1427,6 +1428,7 @@ export async function* routeSerial(
             effectiveMaxContextTokens: effectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            projectPath: routeThread?.projectPath,
             cursorOverlay: options.cursorBoundaries?.get(catId as string),
             sameRouteOutputMessageIds,
             exactA2ATriggerMessageId: streamReplyTo,
@@ -2006,6 +2008,8 @@ export async function* routeSerial(
         userId,
         ownerAuthProvenance,
         threadId,
+        invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        routeTopology: 'serial',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
@@ -2013,6 +2017,7 @@ export async function* routeSerial(
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: initialExecutionKind,
@@ -2864,6 +2869,8 @@ export async function* routeSerial(
           userId,
           ownerAuthProvenance,
           threadId,
+          invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+          routeTopology: 'serial',
           ...(catSignal ? { signal: catSignal } : {}),
           ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
           ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),

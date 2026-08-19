@@ -11,6 +11,7 @@ import {
   personIdentityDraftSchema,
   personIdSchema,
   personMemorySourceBundleInputSchema,
+  writeOpportunityRefV1Schema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -38,6 +39,7 @@ export const proposePersonMemorySchema = z
       .strict()
       .optional(),
     sourceMessageId: z.string().trim().min(1).max(240).optional(),
+    writeOpportunityRef: writeOpportunityRefV1Schema.optional(),
     clientRequestId: z.string().trim().min(1).max(200).optional(),
   })
   .strict()

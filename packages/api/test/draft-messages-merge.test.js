@@ -32,7 +32,11 @@ function makeStubRouter() {
 
 // Minimal mock dependencies
 function makeStubRegistry() {
-  return { getLatestId: () => null, register: () => {} };
+  // getRecord 必须存在且返回 null（生产语义：child registry 权威表示"无此 turn 记录"，
+  // 对未知 id 从不 throw）。旧 stub 缺这个方法，wrapper 调用直接 TypeError——一直被
+  // resolveDraftToTurn 的 catch 吞着才没炸；cloud R5 P1-A 删掉吞错后（throw = 未知必须
+  // 传播，null = 权威 skip），stub 的缺口立刻暴露。吞错掩盖缺陷的又一个标本。
+  return { getLatestId: () => null, getRecord: async () => null, register: () => {} };
 }
 
 function makeStubSocketManager() {

@@ -15,7 +15,7 @@ import type { QueueAuthorIntent, QueueTargetAttemptTerminalReason, WaitContinuat
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionService.js';
-import type { QueueBodyExposure } from '../../stores/ports/queued-message-custody.js';
+import type { QueueBodyExposure, QueuePrestartRetirementIntent } from '../../stores/ports/queued-message-custody.js';
 import type { ToolExecutionPolicy } from '../../types.js';
 import type { OwnerAuthProvenance } from './owner-auth-provenance.js';
 
@@ -72,6 +72,8 @@ export interface QueueEntry {
    * absorb an unselected adjacent entry between reservation and replacement start.
    */
   exactSteerBatch?: ExactSteerBatchReservation;
+  /** Restart-stable exact group fence while pre-start supersession terminalizes durable carriers. */
+  prestartRetirement?: QueuePrestartRetirementIntent;
   intent: string;
   status: 'queued' | 'processing';
   createdAt: number;
@@ -134,6 +136,15 @@ export type ExactUserBatchReservationResult =
       reason: 'invalid_entry_ids' | 'entry_not_found' | 'entry_ineligible' | 'entries_incompatible';
     };
 
+export type ExactUserEntryReservationResult =
+  | ({ outcome: 'reserved' } & ExactSteerBatchReservation)
+  | { outcome: 'rejected'; reason: 'state_changed' };
+
+export interface ActivatedExactSteerReservation {
+  reservationId: string;
+  entry: QueueEntry;
+}
+
 export interface QueuedHandledResult {
   entryId: string;
   threadId: string;
@@ -175,7 +186,14 @@ export class InvocationQueue {
   /** Rollback snapshots for the short reservation→preempt→dequeue window. */
   private exactSteerReservations = new Map<
     string,
-    { threadId: string; userId: string; entries: Map<string, QueueEntry> }
+    {
+      threadId: string;
+      userId: string;
+      primaryEntryId: string;
+      targetCatId: string;
+      entries: Map<string, QueueEntry>;
+      phase: 'reserved' | 'preempting' | 'activated';
+    }
   >();
 
   private scopeKey(threadId: string, userId: string): string {
@@ -1104,6 +1122,14 @@ export class InvocationQueue {
             },
           }
         : {}),
+      ...(entry.prestartRetirement
+        ? {
+            prestartRetirement: {
+              ...entry.prestartRetirement,
+              entryIds: [...entry.prestartRetirement.entryIds],
+            },
+          }
+        : {}),
       ...(entry.senderMeta ? { senderMeta: { ...entry.senderMeta } } : {}),
       ...(entry.callerTraceContext ? { callerTraceContext: { ...entry.callerTraceContext } } : {}),
     };
@@ -1229,13 +1255,55 @@ export class InvocationQueue {
       return { outcome: 'rejected', reason: 'entries_incompatible' };
     }
 
+    return { outcome: 'reserved', ...this.commitExactSteerReservation(threadId, userId, entries, targetCatId) };
+  }
+
+  /**
+   * Reserve one exact queued entry before single-message Steer crosses an await.
+   * The durable steer marker records intent; this process-local identity is the
+   * exclusive dequeue fence and cannot be claimed through ordinary queue APIs.
+   */
+  reserveExactUserEntry(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    targetCatId: string,
+  ): ExactUserEntryReservationResult {
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.status !== 'queued' ||
+      !entry.targetCats.includes(targetCatId) ||
+      entry.exactSteerBatch ||
+      entry.steerRequestedByCatIds?.includes(targetCatId) ||
+      isSystemPinnedQueueEntry(entry)
+    ) {
+      return { outcome: 'rejected', reason: 'state_changed' };
+    }
+    return {
+      outcome: 'reserved',
+      ...this.commitExactSteerReservation(threadId, userId, [entry], targetCatId),
+    };
+  }
+
+  private commitExactSteerReservation(
+    threadId: string,
+    userId: string,
+    entries: readonly QueueEntry[],
+    targetCatId: string,
+  ): ExactSteerBatchReservation {
+    const primary = entries[0]!;
+    const entryIds = entries.map((entry) => entry.id);
+
     const reservation: ExactSteerBatchReservation = {
       reservationId: randomUUID(),
       primaryEntryId: primary.id,
-      entryIds: [...distinctIds],
+      entryIds,
       targetCatId,
     };
     const snapshots = new Map(entries.map((entry) => [entry.id, InvocationQueue.cloneEntry(entry)]));
+
+    const q = this.queues.get(this.scopeKey(threadId, userId))!;
 
     const minPos = q.reduce((min, entry) => {
       if (entry.status === 'queued' && entry.position !== undefined && entry.position < min) return entry.position;
@@ -1248,8 +1316,132 @@ export class InvocationQueue {
       entry.steerRequestedByCatIds = [...requested];
     }
     primary.position = minPos - 1;
-    this.exactSteerReservations.set(reservation.reservationId, { threadId, userId, entries: snapshots });
-    return { outcome: 'reserved', ...reservation };
+    this.exactSteerReservations.set(reservation.reservationId, {
+      threadId,
+      userId,
+      primaryEntryId: primary.id,
+      targetCatId,
+      entries: snapshots,
+      phase: 'reserved',
+    });
+    return reservation;
+  }
+
+  /** Cross the durable boundary immediately before preemption gains side effects. */
+  beginExactSteerPreemption(threadId: string, userId: string, reservationId: string): boolean {
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (
+      !reservation ||
+      reservation.phase !== 'reserved' ||
+      reservation.threadId !== threadId ||
+      reservation.userId !== userId
+    ) {
+      return false;
+    }
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (
+      !q ||
+      [...reservation.entries.keys()].some((entryId) => {
+        const entry = q.find((candidate) => candidate.id === entryId);
+        return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
+      })
+    ) {
+      return false;
+    }
+    reservation.phase = 'preempting';
+    return true;
+  }
+
+  /** Make one successfully preempted reservation eligible for its exact owner claim. */
+  activateExactSteerReservation(threadId: string, userId: string, reservationId: string): boolean {
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (
+      !reservation ||
+      reservation.phase !== 'preempting' ||
+      reservation.threadId !== threadId ||
+      reservation.userId !== userId
+    ) {
+      return false;
+    }
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (
+      !q ||
+      [...reservation.entries.keys()].some((entryId) => {
+        const entry = q.find((candidate) => candidate.id === entryId);
+        return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
+      })
+    ) {
+      return false;
+    }
+    reservation.phase = 'activated';
+    return true;
+  }
+
+  /** A reserved/preempting entry still has an in-flight route and cannot be withdrawn safely. */
+  hasUnsettledExactSteerReservation(threadId: string, userId: string, entryId?: string): boolean {
+    return [...this.exactSteerReservations.values()].some(
+      (reservation) =>
+        reservation.threadId === threadId &&
+        reservation.userId === userId &&
+        reservation.phase !== 'activated' &&
+        (entryId === undefined || reservation.entries.has(entryId)),
+    );
+  }
+
+  /** Peek a preempted exact reservation without granting ordinary dequeue its identity. */
+  peekActivatedExactSteerReservation(
+    threadId: string,
+    userId?: string,
+    skipCatIds: ReadonlySet<string> = new Set(),
+    onlyTargetCat?: string,
+  ): ActivatedExactSteerReservation | null {
+    let best: ActivatedExactSteerReservation | null = null;
+    for (const [reservationId, reservation] of this.exactSteerReservations) {
+      if (reservation.phase !== 'activated' || reservation.threadId !== threadId) continue;
+      if (userId !== undefined && reservation.userId !== userId) continue;
+      if (skipCatIds.has(reservation.targetCatId)) continue;
+      if (onlyTargetCat !== undefined && reservation.targetCatId !== onlyTargetCat) continue;
+      const queue = this.queues.get(this.scopeKey(threadId, reservation.userId));
+      if (
+        !queue ||
+        [...reservation.entries.keys()].some((entryId) => {
+          const entry = queue.find((candidate) => candidate.id === entryId);
+          return entry?.status !== 'queued' || entry.exactSteerBatch?.reservationId !== reservationId;
+        })
+      ) {
+        continue;
+      }
+      const current = queue.find((entry) => entry.id === reservation.primaryEntryId);
+      if (!current || current.exactSteerBatch?.primaryEntryId !== current.id) {
+        continue;
+      }
+      if (!best || InvocationQueue.compareEntries(current, best.entry) < 0) {
+        best = { reservationId, entry: InvocationQueue.cloneEntry(current) };
+      }
+    }
+    return best;
+  }
+
+  /** Atomically claim only the exact entry set owned by this activated identity. */
+  claimExactSteerReservation(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    reservationId: string,
+  ): QueueEntry | null {
+    const reservation = this.exactSteerReservations.get(reservationId);
+    if (reservation?.phase !== 'activated' || reservation.threadId !== threadId || reservation.userId !== userId) {
+      return null;
+    }
+    const entry = this.findEntry(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.exactSteerBatch?.reservationId !== reservationId ||
+      entry.exactSteerBatch.primaryEntryId !== entryId
+    ) {
+      return null;
+    }
+    return this.markEntryProcessing(entry, reservationId);
   }
 
   /** Release an unstarted reservation and restore every selected entry snapshot. */
@@ -1366,16 +1558,23 @@ export class InvocationQueue {
   }
 
   /** Mark a primary plus its frozen exact allowlist in one synchronous mutation. */
-  private markEntryProcessing(entry: QueueEntry): QueueEntry | null {
+  private markEntryProcessing(entry: QueueEntry, exactReservationId?: string): QueueEntry | null {
     const batch = entry.exactSteerBatch;
     if (!batch) {
       entry.status = 'processing';
       entry.processingStartedAt = Date.now();
       return InvocationQueue.cloneEntry(entry);
     }
+    if (exactReservationId !== batch.reservationId) return null;
     if (batch.primaryEntryId !== entry.id) return null;
     const reservation = this.exactSteerReservations.get(batch.reservationId);
-    if (!reservation || reservation.threadId !== entry.threadId || reservation.userId !== entry.userId) return null;
+    if (
+      reservation?.phase !== 'activated' ||
+      reservation.threadId !== entry.threadId ||
+      reservation.userId !== entry.userId
+    ) {
+      return null;
+    }
     const q = this.queues.get(this.scopeKey(entry.threadId, entry.userId));
     if (!q) return null;
     const byId = new Map(q.map((candidate) => [candidate.id, candidate]));
@@ -1402,7 +1601,7 @@ export class InvocationQueue {
   markProcessing(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const queued = q.filter((e) => e.status === 'queued');
+    const queued = q.filter((e) => e.status === 'queued' && !e.exactSteerBatch);
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
     const best = queued[0]!;
@@ -1413,7 +1612,7 @@ export class InvocationQueue {
   peekNextQueued(threadId: string, userId: string): QueueEntry | null {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q) return null;
-    const queued = q.filter((e) => e.status === 'queued');
+    const queued = q.filter((e) => e.status === 'queued' && !e.exactSteerBatch);
     if (queued.length === 0) return null;
     queued.sort(InvocationQueue.compareEntries);
     return { ...queued[0]! };
@@ -1452,7 +1651,7 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.status !== 'queued') continue;
+        if (e.status !== 'queued' || e.exactSteerBatch) continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
           best = e;
         }
@@ -1469,7 +1668,7 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.status !== 'queued') continue;
+        if (e.status !== 'queued' || e.exactSteerBatch) continue;
         if (onlyCatId !== undefined && (e.targetCats[0] ?? '') !== onlyCatId) continue;
         if (skipCatIds?.has(e.targetCats[0] ?? '')) continue;
         if (!best || InvocationQueue.compareEntries(e, best) < 0) {
@@ -1493,6 +1692,100 @@ export class InvocationQueue {
       }
     }
     return null;
+  }
+
+  private resolveProcessingGroupAcrossUsers(
+    threadId: string,
+    entryId: string,
+  ): { queue: QueueEntry[]; members: Array<{ candidate: QueueEntry; index: number }>; reservationId?: string } | null {
+    for (const queue of this.queues.values()) {
+      if (!this.queueMatchesThread(queue, threadId)) continue;
+      const entry = queue.find((candidate) => candidate.status === 'processing' && candidate.id === entryId);
+      if (!entry) continue;
+      const batch = entry.exactSteerBatch;
+      if (!batch && entry.prestartRetirement) {
+        const intent = entry.prestartRetirement;
+        const members = queue
+          .map((candidate, index) => ({ candidate, index }))
+          .filter(
+            ({ candidate }) =>
+              candidate.status === 'processing' &&
+              candidate.prestartRetirement?.id === intent.id &&
+              intent.entryIds.includes(candidate.id),
+          );
+        if (members.length === 0) return null;
+        if (
+          members.some(
+            ({ candidate }) =>
+              candidate.threadId !== entry.threadId ||
+              candidate.userId !== entry.userId ||
+              JSON.stringify(candidate.prestartRetirement) !== JSON.stringify(intent),
+          )
+        ) {
+          return null;
+        }
+        return { queue, members };
+      }
+      if (!batch) return { queue, members: [{ candidate: entry, index: queue.indexOf(entry) }] };
+
+      const reservation = this.exactSteerReservations.get(batch.reservationId);
+      if (
+        !reservation ||
+        reservation.threadId !== threadId ||
+        reservation.userId !== entry.userId ||
+        reservation.primaryEntryId !== batch.primaryEntryId ||
+        reservation.entries.size !== batch.entryIds.length ||
+        batch.entryIds.some((memberId) => !reservation.entries.has(memberId))
+      ) {
+        return null;
+      }
+
+      const byId = new Map(queue.map((candidate, index) => [candidate.id, { candidate, index }]));
+      const members: Array<{ candidate: QueueEntry; index: number }> = [];
+      for (const memberId of batch.entryIds) {
+        const member = byId.get(memberId);
+        if (
+          !member ||
+          member.candidate.status !== 'processing' ||
+          member.candidate.exactSteerBatch?.reservationId !== batch.reservationId
+        ) {
+          return null;
+        }
+        members.push(member);
+      }
+      return { queue, members, reservationId: batch.reservationId };
+    }
+    return null;
+  }
+
+  /** Fail-closed preflight for synchronous external replacement of a processing group. */
+  canRemoveProcessingGroupAcrossUsers(threadId: string, entryId: string): boolean {
+    return this.resolveProcessingGroupAcrossUsers(threadId, entryId) !== null;
+  }
+
+  /** Snapshot a complete processing group without making it invisible. */
+  getProcessingGroupAcrossUsers(threadId: string, entryId: string): QueueEntry[] | null {
+    const group = this.resolveProcessingGroupAcrossUsers(threadId, entryId);
+    if (!group) return null;
+    return group.members.map((member) => InvocationQueue.cloneEntry(member.candidate));
+  }
+
+  /**
+   * Atomically tombstone one processing carrier and every member of its exact
+   * Steer reservation. Supersession paths use this instead of treating the
+   * primary row as the whole reservation. Ordinary attempt settlement remains
+   * per-entry and must keep using removeProcessedAcrossUsers.
+   */
+  removeProcessingGroupAcrossUsers(threadId: string, entryId: string): QueueEntry[] | null {
+    const group = this.resolveProcessingGroupAcrossUsers(threadId, entryId);
+    if (!group) return null;
+    const removed = group.members.map((member) => member.candidate);
+    for (const member of [...group.members].sort((left, right) => right.index - left.index)) {
+      const removedEntry = group.queue.splice(member.index, 1)[0];
+      if (removedEntry) this.originalContents.delete(removedEntry.id);
+    }
+    if (group.reservationId) this.exactSteerReservations.delete(group.reservationId);
+    return removed;
   }
 
   /**
@@ -1822,7 +2115,7 @@ export class InvocationQueue {
   markProcessingById(threadId: string, entryId: string): boolean {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
-      const entry = q.find((e) => e.id === entryId && e.status === 'queued');
+      const entry = q.find((e) => e.id === entryId && e.status === 'queued' && !e.exactSteerBatch);
       if (entry) {
         return this.markEntryProcessing(entry) !== null;
       }

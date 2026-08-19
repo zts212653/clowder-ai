@@ -186,7 +186,7 @@ function buildExportedRootScripts(sourceScripts) {
   scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
   scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
   scripts['check:pre-merge-gate'] =
-    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
   if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }

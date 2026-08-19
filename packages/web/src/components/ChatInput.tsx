@@ -9,12 +9,13 @@ import {
 } from '@cat-cafe/shared';
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
-import { createExplicitStopIntent, type ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
@@ -75,7 +76,6 @@ interface ChatInputProps {
     messageDisposition?: MessageWorkDisposition,
     contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onStop?: (intent: ExplicitStopIntent) => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
   uploadStatus?: UploadStatus;
@@ -88,7 +88,6 @@ const ACCEPTED_TYPES =
 export function ChatInput({
   threadId,
   onSend,
-  onStop,
   disabled,
   hasActiveInvocation: unscopedHasActiveInvocation,
   uploadStatus = 'idle',
@@ -123,27 +122,39 @@ export function ChatInput({
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const {
-    hasActive: scopedHasActiveInvocation,
     activeInvocations,
     catInvocations,
     targetCats: storeTargetCats,
   } = useThreadLiveness(threadId ?? currentThreadId);
-  // Production callers provide threadId, so every liveness decision below
-  // consumes the terminal-aware thread projection. Keep the prop only for
-  // isolated/unscoped consumers that have no thread identity to select.
-  const hasActiveInvocation = threadId ? scopedHasActiveInvocation : unscopedHasActiveInvocation;
+  const effectiveThreadId = threadId ?? currentThreadId;
+  const {
+    executions: canonicalExecutions,
+    state: projectedCancelState,
+    cancelAll: handleProjectedStop,
+  } = useLiveExecutionCancelControl(effectiveThreadId);
+  // Shared with ThreadExecutionBar: both surfaces must answer "can we verify this
+  // thread's run state?" identically, or their independent fail-closed choices can
+  // combine into a state with no cancel AND no recovery exit.
+  const { canonicalProjectionStale, hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(
+    threadId,
+    unscopedHasActiveInvocation,
+  );
+  const hasActiveInvocation = canonicalExecutions.length > 0 || hasUnverifiedLegacyExecution;
+  const stopState: 'available' | 'pending' | 'unavailable' | 'hidden' =
+    canonicalExecutions.length === 0 ? (hasUnverifiedLegacyExecution ? 'unavailable' : 'hidden') : projectedCancelState;
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const inv of Object.values(activeInvocations ?? {})) {
-      ids.add(inv.catId);
+    for (const execution of canonicalExecutions) {
+      ids.add(execution.catId);
     }
-    // Defensive fallback: legacy paths set hasActiveInvocation=true without
-    // populating activeInvocations slots. Use targetCats as degraded source.
-    if (ids.size === 0 && hasActiveInvocation && storeTargetCats?.length) {
-      for (const catId of storeTargetCats) ids.add(catId);
+    if (ids.size === 0 && hasUnverifiedLegacyExecution) {
+      for (const inv of Object.values(activeInvocations ?? {})) ids.add(inv.catId);
+      if (ids.size === 0 && storeTargetCats?.length) {
+        for (const catId of storeTargetCats) ids.add(catId);
+      }
     }
     return ids;
-  }, [activeInvocations, hasActiveInvocation, storeTargetCats]);
+  }, [activeInvocations, canonicalExecutions, hasUnverifiedLegacyExecution, storeTargetCats]);
 
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
@@ -798,18 +809,28 @@ export function ChatInput({
       {hasActiveInvocation && (
         <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
-          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">猫猫正在回复中...</span>
+          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">
+            {canonicalExecutions.length > 0
+              ? canonicalProjectionStale
+                ? '猫猫正在回复中 · 状态暂不可核对'
+                : '猫猫正在回复中...'
+              : canonicalProjectionStale
+                ? '运行状态暂不可核对'
+                : '正在确认运行状态...'}
+          </span>
           <span className="text-xs text-cafe-muted flex-1">
             {displayedDisposition === 'continue_current' ? '当前轮可在安全断点读取' : '继续输入，消息会成为下一件工作'}
           </span>
-          {onStop && (
+          {stopState !== 'hidden' && (
             <button
               type="button"
               data-testid="banner-cancel-btn"
-              onClick={(event) => onStop(createExplicitStopIntent(event, 'chat_input_banner'))}
-              className="text-xs text-cafe-muted hover:text-cafe-primary transition-colors px-2 py-0.5 rounded-md hover:bg-cafe-surface-elevated flex-shrink-0"
+              onClick={() => void handleProjectedStop()}
+              disabled={stopState !== 'available'}
+              className="text-xs text-cafe-muted hover:text-cafe-primary transition-colors px-2 py-0.5 rounded-md hover:bg-cafe-surface-elevated flex-shrink-0 disabled:cursor-wait disabled:opacity-50"
+              aria-label="Stop generation"
             >
-              取消
+              {stopState === 'pending' ? '正在停止' : stopState === 'available' ? '取消' : '暂不可取消'}
             </button>
           )}
         </div>
@@ -1005,7 +1026,8 @@ export function ChatInput({
         <ChatInputActionButton
           onTranscript={handleTranscript}
           onSend={handleSend}
-          onStop={onStop}
+          onStop={() => void handleProjectedStop()}
+          stopState={stopState}
           onQueueSend={handleQueueSend}
           onForceSend={handleForceSend}
           disabled={disabled}

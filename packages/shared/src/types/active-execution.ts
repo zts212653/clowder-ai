@@ -16,7 +16,12 @@ export interface ManagedCommandCancelTarget {
 
 export type ActiveExecutionCancelTarget = LiveInvocationCancelTarget | ManagedCommandCancelTarget;
 
-export type ActiveExecutionNonCancelableReason = 'control_plane_unavailable' | 'cancellation_pending' | 'terminalizing';
+export type ActiveExecutionNonCancelableReason =
+  | 'control_plane_unavailable'
+  | 'cancellation_pending'
+  | 'terminalizing'
+  /** Visible as occupancy, but started by another principal (e.g. the scheduler). */
+  | 'foreign_principal';
 
 export type ActiveExecutionCancelability =
   | { readonly state: 'cancelable'; readonly target: ActiveExecutionCancelTarget }

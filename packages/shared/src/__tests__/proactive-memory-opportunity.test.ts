@@ -28,7 +28,7 @@ describe('F282 proactive-memory opportunity contract', () => {
     }
   });
 
-  it('keeps abstention input enum-only and caller-ref-free', () => {
+  it('keeps abstention input content-free with an optional write-opportunity identity triple', () => {
     expect(PROACTIVE_MEMORY_ABSTENTION_REASON_CODES).toEqual([
       'not_continuity_valued',
       'insufficient_owner_evidence',
@@ -41,9 +41,31 @@ describe('F282 proactive-memory opportunity contract', () => {
       reasonCode: 'insufficient_owner_evidence',
     });
     expect(
+      proactiveMemoryAbstentionInputSchema.parse({
+        reasonCode: 'insufficient_owner_evidence',
+        writeOpportunityRef: {
+          opportunityId: `write_opp_${'a'.repeat(32)}`,
+          dedupeLineage: `write_lineage_${'b'.repeat(32)}`,
+          generation: 1,
+        },
+      }),
+    ).toEqual({
+      reasonCode: 'insufficient_owner_evidence',
+      writeOpportunityRef: {
+        opportunityId: `write_opp_${'a'.repeat(32)}`,
+        dedupeLineage: `write_lineage_${'b'.repeat(32)}`,
+        generation: 1,
+      },
+    });
+    expect(
       proactiveMemoryAbstentionInputSchema.safeParse({
         reasonCode: 'insufficient_owner_evidence',
-        opportunityRef: `opp_${'a'.repeat(32)}`,
+        writeOpportunityRef: {
+          opportunityId: `write_opp_${'a'.repeat(32)}`,
+          dedupeLineage: `write_lineage_${'b'.repeat(32)}`,
+          generation: 1,
+          transcript: 'private body',
+        },
       }).success,
     ).toBe(false);
     expect(

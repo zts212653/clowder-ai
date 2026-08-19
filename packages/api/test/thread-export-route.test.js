@@ -56,6 +56,11 @@ function createMessageStore(messages = [makeMessage()]) {
     async getById(messageId) {
       return messages.find((message) => message.id === messageId) ?? null;
     },
+    // Whole-message selection resolves the canonical bubble group, so the store must expose the
+    // same timeline the browser projected from.
+    async getByThreadAfter(threadId) {
+      return messages.filter((message) => message.threadId === threadId);
+    },
   };
 }
 

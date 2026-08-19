@@ -101,6 +101,36 @@ function buildDeps(messageStore, deliveryCursorStore, options = {}) {
 }
 
 describe('F148: assembleIncrementalContext — smart window integration', () => {
+  test('F296 AC-A3: stale artifact alone cannot become command-like truth source', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    seedMessages(messageStore, 1);
+
+    const staleRef = '.codex-tmp-pr1359-review.md';
+    const threadStore = mockThreadStore('PR #1359 review', {
+      v: 1,
+      summary: 'Earlier review session',
+      sessionsIncorporated: 1,
+      updatedAt: Date.now(),
+      recentArtifacts: [
+        {
+          type: 'file',
+          ref: staleRef,
+          label: staleRef,
+          updatedAt: Date.now(),
+          updatedBy: 'fable5',
+          ops: ['create'],
+        },
+      ],
+    });
+    const deps = buildDeps(messageStore, deliveryCursorStore, { threadStore });
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+
+    assert.ok(result.navigationHeader?.includes('真相源: 未定位'), 'stale-only ledger must fail closed');
+    assert.ok(!result.navigationHeader?.includes(staleRef), 'stale artifact must not become 真相源 or 下一步');
+  });
+
   test('AC-A6: warm path (≤15 msgs) produces unchanged output format', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -839,7 +869,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     assert.ok(result.briefingContext.anchorSummaries?.length > 0, 'anchorSummaries should have entries');
   });
 
-  test('VG-1: coverageMap.retrievalHints === 2 when evidence recall returns 2 hits', async () => {
+  test('VG-1 + F296 AC-A1: coverageMap counts 2 recall candidates without carrying their titles', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
@@ -857,23 +887,27 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
     assert.ok(result_is_smart_window(result), 'should use smart window');
     assert.ok(result.coverageMap, 'coverageMap should exist');
-    // VG-1: exactly 2 — only evidence titles, no tombstone search hints
+    // VG-1: exactly 2 — only evidence recall candidates, no tombstone search hints
     assert.strictEqual(
-      result.coverageMap.retrievalHints.length,
+      result.coverageMap.recallPointer.candidateCount,
       2,
-      `retrievalHints should be exactly 2 (evidence titles only), got ${result.coverageMap.retrievalHints.length}`,
+      `recall pointer should count exactly 2 candidates, got ${result.coverageMap.recallPointer.candidateCount}`,
     );
-    assert.ok(result.coverageMap.retrievalHints[0].includes('ADR-005'), 'first hint should be evidence title');
+    // F296 AC-A1: the titles themselves must not survive anywhere in the map.
+    assert.ok(
+      !JSON.stringify(result.coverageMap).includes('ADR-005'),
+      'coverage map must not carry heuristic candidate titles',
+    );
   });
 
-  test('VG-1: coverageMap.retrievalHints === 0 when no evidence store', async () => {
+  test('VG-1: recall pointer counts 0 when no evidence store', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
       messageStore.append(mockMsg({ content: `msg ${i}`, timestamp: baseTs + i * 60_000 }));
     }
-    // No evidence store — retrievalHints must be exactly 0
+    // No evidence store — recall pointer count must be exactly 0
     const deps = buildDeps(messageStore, deliveryCursorStore, {
       threadStore: mockThreadStore('Test Thread'),
     });
@@ -881,9 +915,9 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     assert.ok(result_is_smart_window(result), 'should use smart window');
     assert.ok(result.coverageMap, 'coverageMap should exist');
     assert.strictEqual(
-      result.coverageMap.retrievalHints.length,
+      result.coverageMap.recallPointer.candidateCount,
       0,
-      `retrievalHints should be 0 without evidence store, got ${result.coverageMap.retrievalHints.length}`,
+      `recall pointer should be 0 without evidence store, got ${result.coverageMap.recallPointer.candidateCount}`,
     );
   });
 
@@ -1190,10 +1224,12 @@ describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
       ['选择了方案B', '确定用 redis 6398'],
       'decisions should be passed through to coverageMap',
     );
-    assert.deepStrictEqual(
+    // F296 AC-A2: openQuestions have no lifecycle state / invalidator, so they
+    // must NOT be passed through — the store keeps them, the projection does not.
+    assert.equal(
       result.coverageMap.threadMemory.openQuestions,
-      ['阈值待定'],
-      'openQuestions should be passed through to coverageMap',
+      undefined,
+      'openQuestions must not be projected into the coverageMap',
     );
   });
 });

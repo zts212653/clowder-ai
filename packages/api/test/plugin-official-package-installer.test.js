@@ -1,115 +1,30 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { promisify } from 'node:util';
 
 import {
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
-  OfficialPluginInstallError,
   OfficialPluginPackageInstaller,
   packageDirectoryName,
 } from '../dist/domains/plugin/index.js';
-
-const execFileAsync = promisify(execFile);
-
-function manifest(overrides = {}) {
-  return {
-    pluginId: 'official.test-source',
-    version: '0.1.0-alpha.1',
-    contractVersion: '0.1.0',
-    name: 'Official Test Source',
-    features: [
-      {
-        id: 'source',
-        name: 'Source',
-        resources: [],
-        capabilities: ['events.publish'],
-      },
-    ],
-    signals: {
-      provides: [
-        {
-          type: 'official.test.v1',
-          schemaRef: 'schemas/official.test.v1.schema.json',
-          epistemicStatus: 'observation',
-          privacyClass: 'content-adjacent',
-          sourceClass: 'remote-service',
-        },
-      ],
-    },
-    runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
-    ...overrides,
-  };
-}
-
-async function packageArchive({ packageManifest = manifest(), includeSchema = true } = {}) {
-  const sourceRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f292-official-package-'));
-  const packageRoot = join(sourceRoot, 'package');
-  await mkdir(join(packageRoot, 'dist'), { recursive: true });
-  await mkdir(join(packageRoot, 'schemas'), { recursive: true });
-  await writeFile(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest)}\n`, 'utf8');
-  await writeFile(join(packageRoot, 'dist/entrypoint.js'), '// official fixture\n', 'utf8');
-  if (includeSchema) {
-    await writeFile(
-      join(packageRoot, 'schemas/official.test.v1.schema.json'),
-      `${JSON.stringify({
-        type: 'object',
-        properties: { payload: { type: 'object' }, source: { type: 'object' } },
-        required: ['payload', 'source'],
-      })}\n`,
-      'utf8',
-    );
-  }
-  const archivePath = join(sourceRoot, 'package.tgz');
-  await execFileAsync('tar', ['czf', archivePath, '-C', sourceRoot, 'package']);
-  const bytes = await readFile(archivePath);
-  const integrity = `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
-  return { bytes, integrity };
-}
-
-function catalogEntry(integrity, overrides = {}) {
-  return {
-    catalogId: 'feishu-meeting-intake',
-    packageName: '@clowder-ai/official-test-source',
-    version: '0.1.0-alpha.1',
-    pluginId: 'official.test-source',
-    archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.1.tgz',
-    packageDigest: integrity,
-    effectiveGrants: ['events.publish'],
-    ...overrides,
-  };
-}
-
-async function harness(archive, entry = catalogEntry(archive.integrity)) {
-  const packagesRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f292-official-cache-'));
-  const store = new MemoryPluginInventoryStore();
-  const inventory = new HostInventoryControlPlane(store, {
-    createInstanceId: () => 'pi_official',
-    now: () => 10_000,
-  });
-  const installer = new OfficialPluginPackageInstaller({
-    inventory,
-    packagesRoot,
-    catalog: [entry],
-    fetchArchive: async () => archive.bytes,
-  });
-  return { packagesRoot, store, inventory, installer };
-}
-
-function isInstallError(code) {
-  return (error) => error instanceof OfficialPluginInstallError && error.code === code;
-}
+import {
+  catalogEntry,
+  harness,
+  isInstallError,
+  manifest,
+  packageArchive,
+  releaseFence,
+} from './plugin-official-package-installer.fixture.js';
 
 test('installs only the exact catalog artifact and admits schemas from those bytes', async () => {
   const archive = await packageArchive();
   const { packagesRoot, store, installer } = await harness(archive);
 
-  const installed = await installer.install('feishu-meeting-intake');
+  const installed = await installer.install('feishu-meeting-intake', releaseFence(catalogEntry(archive.integrity)));
 
   assert.deepEqual(installed, {
     pluginInstanceId: 'pi_official',
@@ -139,8 +54,9 @@ test('same exact catalog install is idempotent and does not mint a second instan
   const archive = await packageArchive();
   const { store, installer } = await harness(archive);
 
-  const first = await installer.install('feishu-meeting-intake');
-  const second = await installer.install('feishu-meeting-intake');
+  const expectedRelease = releaseFence(catalogEntry(archive.integrity));
+  const first = await installer.install('feishu-meeting-intake', expectedRelease);
+  const second = await installer.install('feishu-meeting-intake', expectedRelease);
 
   assert.deepEqual(second, first);
   assert.equal((await store.snapshot()).instances.length, 1);
@@ -162,7 +78,7 @@ test('explicit update replaces a stopped older package in place and remains disa
     catalog: [catalogEntry(oldArchive.integrity)],
     fetchArchive: async () => oldArchive.bytes,
   });
-  await oldInstaller.install('feishu-meeting-intake');
+  await oldInstaller.install('feishu-meeting-intake', releaseFence(catalogEntry(oldArchive.integrity)));
   await store.transaction((transaction) => {
     const current = transaction.instances.get('pi_official');
     transaction.instances.put({
@@ -183,7 +99,10 @@ test('explicit update replaces a stopped older package in place and remains disa
     fetchArchive: async () => nextArchive.bytes,
   });
 
-  const updated = await installer.update('feishu-meeting-intake', 'pi_official', 1);
+  const updated = await installer.update('feishu-meeting-intake', 'pi_official', 1, {
+    version: nextEntry.version,
+    packageDigest: nextEntry.packageDigest,
+  });
 
   assert.deepEqual(updated, {
     pluginInstanceId: 'pi_official',
@@ -208,7 +127,7 @@ test('explicit update rejects stale or running instances before downloading the 
   const nextManifest = manifest({ version: '0.1.0-alpha.2' });
   const nextArchive = await packageArchive({ packageManifest: nextManifest });
   const { packagesRoot, store, inventory, installer: oldInstaller } = await harness(oldArchive);
-  await oldInstaller.install('feishu-meeting-intake');
+  await oldInstaller.install('feishu-meeting-intake', releaseFence(catalogEntry(oldArchive.integrity)));
   let fetches = 0;
   const installer = new OfficialPluginPackageInstaller({
     inventory,
@@ -220,13 +139,17 @@ test('explicit update rejects stale or running instances before downloading the 
     },
   });
 
-  await assert.rejects(installer.update('feishu-meeting-intake', 'pi_official', 2), isInstallError('STALE_REVISION'));
+  const expectedRelease = { version: nextManifest.version, packageDigest: nextArchive.integrity };
+  await assert.rejects(
+    installer.update('feishu-meeting-intake', 'pi_official', 2, expectedRelease),
+    isInstallError('STALE_REVISION'),
+  );
   await store.transaction((transaction) => {
     const current = transaction.instances.get('pi_official');
     transaction.instances.put({ ...current, activationState: 'enabled', runtimeState: 'healthy' });
   });
   await assert.rejects(
-    installer.update('feishu-meeting-intake', 'pi_official', 1),
+    installer.update('feishu-meeting-intake', 'pi_official', 1, expectedRelease),
     isInstallError('UPDATE_REQUIRES_STOPPED'),
   );
   assert.equal(fetches, 0);
@@ -237,7 +160,10 @@ test('digest mismatch fails before an archive or inventory mutation is published
   const wrongDigest = `sha512-${createHash('sha512').update('different').digest('base64')}`;
   const { packagesRoot, store, installer } = await harness(archive, catalogEntry(wrongDigest));
 
-  await assert.rejects(installer.install('feishu-meeting-intake'), isInstallError('PACKAGE_DIGEST_MISMATCH'));
+  await assert.rejects(
+    installer.install('feishu-meeting-intake', releaseFence(catalogEntry(wrongDigest))),
+    isInstallError('PACKAGE_DIGEST_MISMATCH'),
+  );
   assert.equal((await store.snapshot()).instances.length, 0);
   await assert.rejects(access(join(packagesRoot, packageDirectoryName(wrongDigest), 'package.tgz')));
 });
@@ -252,7 +178,7 @@ for (const [label, packageManifest, expectedCode] of [
     const entry = catalogEntry(archive.integrity);
     const { store, installer } = await harness(archive, entry);
 
-    await assert.rejects(installer.install('feishu-meeting-intake'), isInstallError(expectedCode));
+    await assert.rejects(installer.install('feishu-meeting-intake', releaseFence(entry)), isInstallError(expectedCode));
     assert.equal((await store.snapshot()).instances.length, 0);
   });
 }
@@ -261,7 +187,10 @@ test('missing package-local declared schema fails closed with no inventory mutat
   const archive = await packageArchive({ includeSchema: false });
   const { store, installer } = await harness(archive);
 
-  await assert.rejects(installer.install('feishu-meeting-intake'), isInstallError('INVALID_PACKAGE_SCHEMA'));
+  await assert.rejects(
+    installer.install('feishu-meeting-intake', releaseFence(catalogEntry(archive.integrity))),
+    isInstallError('INVALID_PACKAGE_SCHEMA'),
+  );
   assert.equal((await store.snapshot()).instances.length, 0);
 });
 
@@ -279,6 +208,9 @@ test('unknown catalog identifiers never reach the archive fetcher', async () => 
     },
   });
 
-  await assert.rejects(installer.install('https://attacker.invalid/package.tgz'), isInstallError('UNKNOWN_CATALOG_ID'));
+  await assert.rejects(
+    installer.install('https://attacker.invalid/package.tgz', releaseFence(catalogEntry(archive.integrity))),
+    isInstallError('UNKNOWN_CATALOG_ID'),
+  );
   assert.equal(fetches, 0);
 });

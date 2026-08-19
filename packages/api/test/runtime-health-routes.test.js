@@ -14,4 +14,9 @@ describe('runtime health routes', () => {
     assert.match(src, /app\.get\('\/ready',\s*readyHandler\)/);
     assert.match(src, /app\.get\('\/api\/ready',\s*readyHandler\)/);
   });
+
+  it('publishes the common API/Web deployment revision for stale-page detection', () => {
+    assert.match(src, /resolveRuntimeDeploymentRevision/);
+    assert.match(src, /deploymentRevision:\s*runtimeDeploymentRevision/);
+  });
 });

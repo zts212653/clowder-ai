@@ -17,6 +17,36 @@ const VALID_EVIDENCE_STATUSES = new Set<EvidenceStatus>([
 ]);
 const EMPTY_FRONTMATTER_REFS = new Set(['null', '~', '[]']);
 
+const DIRECT_FRONTMATTER_KIND_MAP: Readonly<Record<string, EvidenceKind>> = {
+  feature: 'feature',
+  spec: 'feature',
+  decision: 'decision',
+  adr: 'decision',
+  architecture: 'architecture',
+  'architecture-snapshot': 'architecture',
+  plan: 'plan',
+  design: 'plan',
+  lesson: 'lesson',
+  postmortem: 'lesson',
+  reflection: 'lesson',
+  'harness-feedback': 'lesson',
+  discussion: 'discussion',
+  research: 'research',
+};
+
+const EXTERNAL_KNOWLEDGE_DOC_KINDS = new Set([
+  'comparison',
+  'consult',
+  'competitive-analysis',
+  'open-source-teardown',
+  'reading-notes',
+  'revisit',
+  'source-audit',
+  'source-ledger',
+  'study',
+  'teardown',
+]);
+
 interface ParsedFrontmatterEntry {
   key: string;
   value: unknown;
@@ -340,30 +370,37 @@ function isYamlInlineCommentStart(char: string | undefined, previous: string, qu
 }
 
 export function inferKind(fm: Record<string, unknown>, filePath: string): EvidenceKind {
-  const docKind = fm.doc_kind;
-  if (docKind === 'harness-feedback') return 'lesson';
-  if (docKind === 'architecture' || docKind === 'architecture-snapshot') return 'architecture';
-  if (filePath.includes('/architecture/')) return 'architecture';
-  if (docKind === 'decision' || filePath.includes('/decisions/')) return 'decision';
-  if (
-    docKind === 'plan' ||
-    filePath.includes('/plans/') ||
-    filePath.includes('/phases/') ||
-    filePath.includes('/guides/')
-  )
-    return 'plan';
-  if (
-    docKind === 'lesson' ||
-    filePath.includes('/lessons/') ||
-    filePath.includes('/reflections/') ||
-    filePath.includes('/postmortems/') ||
-    filePath.includes('/stories/')
-  )
-    return 'lesson';
-  if (docKind === 'discussion' || filePath.includes('/discussions/')) return 'discussion';
-  if (docKind === 'research' || filePath.includes('/research/')) return 'research';
-  if (docKind === 'spec' || filePath.includes('/features/')) return 'feature';
-  return 'plan';
+  return resolveFrontmatterEvidenceKind(fm) ?? inferKindFromPath(filePath);
+}
+
+/**
+ * Project fine-grained artifact roles onto the intentionally coarse runtime
+ * EvidenceKind partition. A recognized doc_kind is authoritative; category is
+ * a read-compatibility bridge for the legacy study dialect only.
+ */
+export function resolveFrontmatterEvidenceKind(fm: Record<string, unknown>): EvidenceKind | null {
+  const docKind = normalizeTaxonomyValue(fm.doc_kind);
+  if (docKind) {
+    const direct = DIRECT_FRONTMATTER_KIND_MAP[docKind];
+    if (direct) return direct;
+    if (
+      EXTERNAL_KNOWLEDGE_DOC_KINDS.has(docKind) ||
+      docKind.startsWith('consult-') ||
+      docKind.startsWith('consult_') ||
+      docKind.startsWith('research-') ||
+      docKind.startsWith('research_') ||
+      docKind.startsWith('study-') ||
+      docKind.startsWith('study_')
+    ) {
+      return 'research';
+    }
+  }
+
+  return normalizeTaxonomyValue(fm.category) === 'study' ? 'research' : null;
+}
+
+function normalizeTaxonomyValue(value: unknown): string | null {
+  return typeof value === 'string' ? value.trim().toLowerCase() || null : null;
 }
 
 /** F287 AC-B1: only canonical public vignette files are eligible for Taste materialization. */
@@ -442,4 +479,13 @@ export function mergeKeywords(primary: string[], secondary: string[]): string[] 
     merged.push(value);
   }
   return merged;
+}
+
+/** Canonical topics plus the legacy study/taste tags dialect. */
+export function extractFrontmatterKeywords(fm: Record<string, unknown> | null | undefined): string[] {
+  return mergeKeywords(extractStringList(fm?.topics), extractStringList(fm?.tags));
+}
+
+function extractStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }

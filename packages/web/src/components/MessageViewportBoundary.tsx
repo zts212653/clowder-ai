@@ -13,9 +13,13 @@ import { flushSync } from 'react-dom';
 import { MESSAGE_VIEWPORT_MOUNTED_EVENT, MOUNT_DEFERRED_MESSAGE_EVENT } from '@/utils/scrollToMessage';
 
 const OFFSCREEN_MESSAGE_STYLE: CSSProperties = {
-  contentVisibility: 'auto',
   containIntrinsicSize: 'auto 240px',
 };
+
+// `content-visibility: auto` also paint-contains descendants. The message toolbar floats above
+// its row, so lift that containment only while the real row is interactive.
+const CONTENT_VISIBILITY_CLASS =
+  '[content-visibility:auto] hover:[content-visibility:visible] focus-within:[content-visibility:visible]';
 
 /**
  * Keep the message DOM available for anchors/search while letting Chromium skip
@@ -93,6 +97,7 @@ export function MessageViewportBoundary({
       ref={boundaryRef}
       data-message-viewport-boundary
       data-message-viewport-id={messageId}
+      className={CONTENT_VISIBILITY_CLASS}
       {...(!mounted && messageId ? { 'data-deferred-message-id': messageId } : {})}
       style={mounted ? OFFSCREEN_MESSAGE_STYLE : { ...OFFSCREEN_MESSAGE_STYLE, minHeight: '240px' }}
     >

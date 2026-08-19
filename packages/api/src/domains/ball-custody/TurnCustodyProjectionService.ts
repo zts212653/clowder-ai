@@ -1,108 +1,37 @@
-import type { BallCustodyEvent, WaitContinuationCarrierV1 } from '@cat-cafe/shared';
+import type { BallCustodyEvent } from '@cat-cafe/shared';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
-import { handedEventSourceId } from './ball-custody-events.js';
+import {
+  exactStructuredWakeIndex,
+  findWakeTerminal,
+  releasedStructuredWake,
+  supersededBeforeAdoption,
+} from './managed-hold-supersession.js';
 
-export type TurnCustodyWakeProvenance =
-  | {
-      readonly kind: 'unstructured';
-      readonly source: 'user_chat' | 'roam' | 'cron' | 'brainstorm' | 'protocol_decline';
-    }
-  | {
-      readonly kind: 'non_obligation';
-      readonly source: 'cross_thread_fyi' | 'cross_thread_coordinate' | 'coordination_terminal';
-    }
-  | {
-      readonly kind: 'action_successor';
-      readonly leaseId: string;
-      readonly generation: number;
-      readonly holderCatId: string;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'event_wait';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-      readonly waitContinuationCarrier: WaitContinuationCarrierV1;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'assign_work' | 'coordination' | 'callback';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'hold';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-      readonly sourceMessageId: string;
-      readonly taskId: string;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'dispatch';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-      readonly handoff: {
-        readonly sourceEventId: string;
-        readonly messageId: string;
-        readonly fromCatId: string;
-      };
-    }
-  | {
-      readonly kind: 'legacy';
-      readonly reason: 'text_mention' | 'source_missing' | 'carrier_missing' | 'query_failed';
-      readonly sourceCategory?: string;
-    };
-
-export type TurnCustodyProjectionState = 'covered_active' | 'covered_empty' | 'unknown_legacy';
-
-interface ActionTransitionBaseline {
-  readonly kind: 'action_successor';
-  readonly leaseId: string;
-  readonly generation: number;
-  readonly holderCatId: string;
-  readonly fingerprint: string;
-}
-
-interface StructuredTransitionBaseline {
-  readonly kind: 'structured';
-  readonly subjectKey: string;
-  readonly holderCatId: string;
-  readonly fromSequence: number;
-  readonly protocol: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>['protocol'];
-  readonly sourceMessageId?: string;
-  readonly taskId?: string;
-  readonly dispatchSourceMessageId?: string;
-  readonly dispatchFromCatId?: string;
-}
-
-export interface TurnCustodyProjection {
-  readonly state: TurnCustodyProjectionState;
-  readonly evidenceRefs: readonly string[];
-  readonly baseline?: ActionTransitionBaseline | StructuredTransitionBaseline;
-}
-
-export interface TurnCustodyStopDecision {
-  readonly state: TurnCustodyProjectionState;
-  readonly shouldBlock: boolean;
-  readonly transitionObserved: boolean;
-  readonly structuredTransitionKind?: 'hold_dispositioned' | 'dispatch_dispositioned' | 'held' | 'handed';
-  readonly dispatchDisposition?: 'handled' | 'completed';
-  readonly dispatchDispositionEventId?: string;
-  readonly dispatchDispositionAt?: number;
-  readonly evidenceRefs: string[];
-}
-
-type StructuredTransitionObservation = Pick<
+// Public vocabulary re-exported so the seven existing importers stay untouched.
+export type {
+  ActionTransitionBaseline,
+  StructuredTransitionBaseline,
+  StructuredTransitionObservation,
+  TurnCustodyProjection,
+  TurnCustodyProjectionState,
+  TurnCustodyShadowComparison,
   TurnCustodyStopDecision,
-  'structuredTransitionKind' | 'dispatchDisposition' | 'dispatchDispositionEventId' | 'dispatchDispositionAt'
->;
+  TurnCustodyWakeProvenance,
+} from './turn-custody-projection-types.js';
 
-export type TurnCustodyShadowComparison = 'agree_allow' | 'agree_block' | 'old_only_block' | 'new_only_block';
+// Only what this file's body actually references.
+import type {
+  ActionTransitionBaseline,
+  StructuredTransitionBaseline,
+  StructuredTransitionObservation,
+  TurnCustodyProjection,
+  TurnCustodyShadowComparison,
+  TurnCustodyStopDecision,
+  TurnCustodyWakeProvenance,
+} from './turn-custody-projection-types.js';
 
 interface TurnCustodyProjectionDeps {
   readonly actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
@@ -242,16 +171,52 @@ export class TurnCustodyProjectionService {
       this.deps.ballCustodyProjectionStore.get(wake.subjectKey),
       this.deps.ballCustodyEventLog.read(wake.subjectKey),
     ]);
+    // Sol R3 P1: a non-retired terminal drives the subject to `resolved`. If the
+    // F264 receipt then fails and Queue re-exposes the same wake, the successor
+    // route would bail to unknown_legacy here and write
+    // `managed_hold_disposition_missing` even though the wake is already settled.
+    // Per-wake terminal truth is checked before subject-level state.
+    if (wake.protocol === 'hold') {
+      const settled = findWakeTerminal(events, {
+        catId: wake.holderCatId,
+        sourceMessageId: wake.sourceMessageId,
+        taskId: wake.taskId,
+      });
+      if (settled) {
+        return {
+          state: 'covered_empty',
+          evidenceRefs: [`${wake.protocol}:${wake.subjectKey}`, `settled:${settled.sourceEventId}`],
+        };
+      }
+    }
     if (projection?.state !== 'active' && projection?.state !== 'blocked') {
       return unknown('structured_projection_missing');
     }
-    const exactWakeIndex = this.exactStructuredWakeIndex(wake, events);
+    const exactWakeIndex = exactStructuredWakeIndex(wake, events);
     if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
       return unknown('dispatch_handoff_missing');
     }
     if (projection.holder !== wake.holderCatId) {
-      return this.releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
+      return releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
     }
+    // clowder-ai#1366: a wake superseded before this turn adopted it is not a
+    // live obligation; treating it as one blocked unrelated healthy turns.
+    if (wake.protocol === 'hold') {
+      const superseded = supersededBeforeAdoption(
+        events,
+        { catId: wake.holderCatId, sourceMessageId: wake.sourceMessageId, taskId: wake.taskId },
+        wake.subjectKey,
+      );
+      if (superseded) return { state: 'covered_empty', evidenceRefs: [...superseded] };
+    }
+    return this.coveredActiveProjection(wake, events);
+  }
+
+  /** Live obligation plus the exact baseline `close()` will diff its transition against. */
+  private coveredActiveProjection(
+    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
+    events: readonly BallCustodyEvent[],
+  ): TurnCustodyProjection {
     return {
       state: 'covered_active',
       evidenceRefs: [
@@ -278,75 +243,6 @@ export class TurnCustodyProjectionService {
           : {}),
       },
     };
-  }
-
-  private releasedStructuredWake(
-    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
-    events: readonly BallCustodyEvent[],
-    exactWakeIndex: number,
-  ): TurnCustodyProjection | undefined {
-    if (exactWakeIndex === -1) return undefined;
-    const release = this.findRelease(events, exactWakeIndex, wake.holderCatId);
-    if (!release) return undefined;
-    const exactWakeEvidence =
-      wake.protocol === 'dispatch'
-        ? wake.handoff.sourceEventId
-        : wake.protocol === 'hold'
-          ? handedEventSourceId(wake.sourceMessageId, wake.holderCatId)
-          : undefined;
-    return {
-      state: 'covered_empty',
-      evidenceRefs: [
-        `${wake.protocol}:${wake.subjectKey}`,
-        ...(exactWakeEvidence ? [exactWakeEvidence] : []),
-        `released:${release.sourceEventId}`,
-      ],
-    };
-  }
-
-  private exactStructuredWakeIndex(
-    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
-    events: readonly BallCustodyEvent[],
-  ): number {
-    if (wake.protocol === 'dispatch') {
-      return events.findIndex(
-        (event) =>
-          event.kind === 'ball.handed' &&
-          event.sourceEventId === wake.handoff.sourceEventId &&
-          event.payload.fromCatId === wake.handoff.fromCatId &&
-          event.payload.toCatId === wake.holderCatId,
-      );
-    }
-    if (wake.protocol !== 'hold') return -1;
-    const wakeConditionIndex = events.findIndex(
-      (event) =>
-        event.kind === 'ball.wake_condition_met' &&
-        event.payload.taskId === wake.taskId &&
-        event.payload.catId === wake.holderCatId,
-    );
-    if (wakeConditionIndex === -1) return -1;
-    return events.findIndex(
-      (event, index) =>
-        index > wakeConditionIndex &&
-        event.kind === 'ball.handed' &&
-        event.sourceEventId === handedEventSourceId(wake.sourceMessageId, wake.holderCatId) &&
-        event.payload.toCatId === wake.holderCatId,
-    );
-  }
-
-  private findRelease(
-    events: readonly BallCustodyEvent[],
-    exactWakeIndex: number,
-    holderCatId: string,
-  ): BallCustodyEvent | undefined {
-    return events.slice(exactWakeIndex + 1).find((event) => {
-      if (event.kind === 'ball.handed') return event.payload.fromCatId === holderCatId;
-      return (
-        event.kind === 'ball.handed_cvo' &&
-        event.payload.fromCatId === holderCatId &&
-        (event.payload.intent === 'handoff' || event.payload.intent === 'done_notify')
-      );
-    });
   }
 
   private async actionTransitionObserved(baseline: ActionTransitionBaseline): Promise<boolean> {

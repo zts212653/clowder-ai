@@ -128,6 +128,10 @@ class EventsPublishBrokerHandler implements BrokerMethodHandler<EventsPublishInp
     return { code: error.code, message: error.message };
   }
 
+  canRetrySettledErrorAfterAuthorityChange(error: BrokerCallError): boolean {
+    return error.code === 'ROUTE_UNAVAILABLE';
+  }
+
   restoreSettledError(error: BrokerCallError): Error {
     if (!isSignalAdmissionErrorCode(error.code)) {
       return new HostBrokerError('BROKER_INVARIANT', `events.publish stored unsupported error ${error.code}`);

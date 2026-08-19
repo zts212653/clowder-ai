@@ -13,6 +13,8 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
+import { formatEventsHandoff, type HandoffInvocationSummary } from './TranscriptFormatter.js';
+
 export interface TranscriptEvent {
   v: number;
   t: number;
@@ -34,6 +36,12 @@ export interface TranscriptIndex {
 
 export interface ReadEventsResult {
   events: TranscriptEvent[];
+  nextCursor?: { eventNo: number };
+  total: number;
+}
+
+export interface ReadEventsHandoffResult {
+  invocations: HandoffInvocationSummary[];
   nextCursor?: { eventNo: number };
   total: number;
 }
@@ -126,6 +134,91 @@ export class TranscriptReader {
       events,
       ...(hasMore ? { nextCursor: { eventNo: lastEventNo + 1 } } : {}),
       total,
+    };
+  }
+
+  /**
+   * Read events in handoff view with invocation-level pagination.
+   *
+   * Unlike readEvents() which paginates raw events, this method:
+   * 1. Reads ALL events from the sealed session
+   * 2. Groups them into complete invocation summaries
+   * 3. Paginates by raw-event budget, accumulating complete invocations
+   *
+   * The cursor and total use raw eventNo units — same as raw/chat views —
+   * so the external API contract (nextCursor.eventNo) is preserved.
+   * Each invocation appears exactly once with complete tool calls,
+   * error counts, and key messages.
+   *
+   * If a single invocation exceeds the limit, the page overflows to
+   * include it (at least one complete summary per page).
+   */
+  async readEventsHandoff(
+    sessionId: string,
+    threadId: string,
+    catId: string,
+    cursor?: { eventNo: number },
+    limit = 50,
+  ): Promise<ReadEventsHandoffResult> {
+    const allEvents = await this.readAllEvents(sessionId, threadId, catId);
+    if (allEvents.length === 0) {
+      return { invocations: [], total: 0 };
+    }
+
+    // Group events by invocationId, preserving insertion order
+    const groups = new Map<string, TranscriptEvent[]>();
+    for (const evt of allEvents) {
+      const key = evt.invocationId ?? '_unknown';
+      let group = groups.get(key);
+      if (!group) {
+        group = [];
+        groups.set(key, group);
+      }
+      group.push(evt);
+    }
+
+    // Build ordered invocation metadata with first/last eventNo
+    const invocationMeta: Array<{ firstEventNo: number; lastEventNo: number; eventCount: number }> = [];
+    for (const [, events] of groups) {
+      invocationMeta.push({
+        firstEventNo: events[0].eventNo,
+        lastEventNo: events[events.length - 1].eventNo,
+        eventCount: events.length,
+      });
+    }
+
+    // Format all events into summaries (same insertion order as groups)
+    const allSummaries = formatEventsHandoff(allEvents);
+
+    // Find starting invocation: first whose lastEventNo >= cursor.
+    // This correctly hits the invocation *containing* cursor.eventNo
+    // (e.g. cursor=55 inside inv-A spanning 0-59 → returns inv-A).
+    let startIdx = 0;
+    if (cursor) {
+      startIdx = invocationMeta.findIndex((m) => m.lastEventNo >= cursor.eventNo);
+      if (startIdx === -1) {
+        return { invocations: [], total: allEvents.length };
+      }
+    }
+
+    // Accumulate complete invocations by raw-event budget.
+    // Always include at least one invocation even if it exceeds the limit.
+    let eventBudget = 0;
+    let endIdx = startIdx;
+    while (endIdx < invocationMeta.length) {
+      const invEventCount = invocationMeta[endIdx].eventCount;
+      if (eventBudget > 0 && eventBudget + invEventCount > limit) break;
+      eventBudget += invEventCount;
+      endIdx++;
+    }
+
+    const pageSummaries = allSummaries.slice(startIdx, endIdx);
+    const hasMore = endIdx < invocationMeta.length;
+
+    return {
+      invocations: pageSummaries,
+      ...(hasMore ? { nextCursor: { eventNo: invocationMeta[endIdx].firstEventNo } } : {}),
+      total: allEvents.length,
     };
   }
 

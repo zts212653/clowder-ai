@@ -280,6 +280,7 @@ export class KimiAgentService implements AgentService {
     const args: string[] = isLegacy
       ? ['--print', '--output-format', 'stream-json']
       : ['--output-format', 'stream-json'];
+    const managedArgvFlags: string[] = [];
     if (effectiveResumeSessionId) {
       args.push('--session', effectiveResumeSessionId);
       metadata.sessionId = effectiveResumeSessionId;
@@ -308,6 +309,7 @@ export class KimiAgentService implements AgentService {
     }
     if (l0AgentFilePath) {
       args.push('--agent-file', l0AgentFilePath);
+      managedArgvFlags.push('--agent-file');
     }
     if (isLegacy) {
       args.push('--prompt', effectivePrompt);
@@ -350,6 +352,7 @@ export class KimiAgentService implements AgentService {
       const cliOpts = {
         command: kimiCommand,
         args,
+        ...(managedArgvFlags.length > 0 ? { managedArgvFlags } : {}),
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         // env is always present: KIMI_MODEL_THINKING_EFFORT carries the resolved
         // member/thread effort for tier-capable models. For boolean-thinking

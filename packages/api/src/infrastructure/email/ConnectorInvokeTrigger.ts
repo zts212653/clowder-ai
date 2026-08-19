@@ -52,6 +52,7 @@ import type { IMessageStore, StoredMessage } from '../../domains/cats/services/s
 import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { MemoryCueOpportunitySeed } from '../../domains/memory/cue/MemoryCueInvocationPromptService.js';
 import { readTrustedConnectorMemoryCueSeeds } from '../../domains/memory/cue/MemoryCueTrustedConnector.js';
+import { bindAsrPersonMemoryReentryFromSchedulerMessage } from '../../domains/memory/people/AsrPersonMemoryReentryCarrier.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
@@ -824,6 +825,7 @@ export class ConnectorInvokeTrigger {
       }
 
       let memoryCueOpportunitySeeds: MemoryCueOpportunitySeed[] = [];
+      let asrPersonMemoryScenes: Awaited<ReturnType<typeof bindAsrPersonMemoryReentryFromSchedulerMessage>> = [];
       if (this.opts.messageStore) {
         try {
           memoryCueOpportunitySeeds = await readTrustedConnectorMemoryCueSeeds({
@@ -836,6 +838,19 @@ export class ConnectorInvokeTrigger {
         } catch (err) {
           log.warn({ err, threadId, messageId }, '[F287] direct connector Cue carrier read failed closed');
         }
+        try {
+          const triggerMessage = await this.opts.messageStore.getById(messageId);
+          if (triggerMessage) {
+            asrPersonMemoryScenes = await bindAsrPersonMemoryReentryFromSchedulerMessage({
+              triggerMessage,
+              ownerUserId: userId,
+              threadId,
+              messageStore: this.opts.messageStore,
+            });
+          }
+        } catch (err) {
+          log.warn({ err, threadId, messageId }, '[F276] direct connector re-entry carrier read failed closed');
+        }
       }
 
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
@@ -844,6 +859,7 @@ export class ConnectorInvokeTrigger {
         turnCustodyWake,
         turnCustodyWakeForCat: (catId) => retargetTurnCustodyWake(turnCustodyWake, catId),
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
         ...(contentBlocks ? { contentBlocks } : {}),
         ...(controller?.signal ? { signal: controller.signal } : {}),
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedNonAgentForThread(tid),

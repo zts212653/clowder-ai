@@ -3,6 +3,8 @@ import type { RecentArtifact } from './artifact-tracking.js';
 export interface ThreadMeta {
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Local artifact refs whose current existence was verified against the thread workspace. */
+  reachableArtifactRefs?: ReadonlySet<string>;
 }
 
 export interface RankedSource {
@@ -10,6 +12,8 @@ export interface RankedSource {
   ref: string;
   label: string;
   provenance: 'canonical' | 'regex' | 'recency';
+  /** Only exact current subjects may drive command-like 真相源 / 下一步 UI. */
+  directiveEligible: boolean;
 }
 
 interface ActiveTask {
@@ -70,11 +74,22 @@ export function rankArtifactSources(
   const tier3: { source: RankedSource; updatedAt: number }[] = [];
 
   for (const a of ledger) {
-    const entry: RankedSource = { type: a.type, ref: a.ref, label: a.label, provenance };
+    const entry: RankedSource = {
+      type: a.type,
+      ref: a.ref,
+      label: a.label,
+      provenance,
+      directiveEligible: false,
+    };
 
     if (matchedFeatureId && a.type === 'feature-doc' && extractFeatureIdFromRef(a.ref) === matchedFeatureId) {
+      entry.directiveEligible = provenance === 'canonical' && Boolean(threadMeta.reachableArtifactRefs?.has(a.ref));
       tier1.push(entry);
     } else if (a.type === 'pr' && activePrRefs.has(a.ref)) {
+      // An exact, unfinished pr_tracking subject is typed current state. It must not
+      // inherit regex/recency provenance from the surrounding thread metadata.
+      entry.provenance = 'canonical';
+      entry.directiveEligible = true;
       tier2.push(entry);
     } else {
       entry.provenance = 'recency';
@@ -84,4 +99,9 @@ export function rankArtifactSources(
 
   tier3.sort((a, b) => b.updatedAt - a.updatedAt);
   return [...tier1, ...tier2, ...tier3.map((t) => t.source)];
+}
+
+/** Keep ranking useful for history while fail-closing command-like navigation. */
+export function selectDirectiveSources(sources: readonly RankedSource[]): RankedSource[] {
+  return sources.filter((source) => source.directiveEligible);
 }

@@ -9,12 +9,13 @@ community_issue: "clowder-ai-plugins#23"
 description: "飞书生成会议文字稿后，官方 input-source 插件把它变成可恢复的 Meeting Intake；人只补说话人、背景与去向，猫带着家里记忆产出纪要、决定、Roadmap 或任务。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-11T14:10:00Z
+description_updated_at: 2026-08-17T04:42:00Z
+tips_exempt: "Internal Host startup-budget repair; it adds no new owner action or discoverable capability."
 ---
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: implementation / Phase C, K-2D, the alpha.3 official catalog, and explicit safe package update are on main; runtime restart, owner update/enable, alpha activation verification, and real-meeting dogfood remain open
+> **Status**: implementation / alpha.6 is published and the owner-driven historical Minutes import plus idle-runtime heartbeat are on Host main; alpha.5 remains enabled+healthy with connected owner auth, and the next gate is alpha.6 adoption plus historical dogfood
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
@@ -101,9 +102,9 @@ Anker recorder
 
 | Evidence | Already true | Not yet true |
 |---|---|---|
-| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials; `@clowder-ai/feishu-meeting-intake@0.1.0-alpha.3` is public with a raw-unpack runnable dependency closure, bounded two-source readiness, typed event-bus conflict diagnostics, and `runtime.transport: "stdio"` | Real dogfood waits for the running Host to load the merged alpha.3 catalog, explicitly update/enable the installed instance, and receive one generated meeting artifact; owner auth is completed from the plugin card rather than a copied terminal command |
-| Plugin repository | PR #24 merged C-2 + official plugin source; PR #26/#29 completed the first release chain; PR #30 added the reviewed stdio entrypoint; PR #31 fixed the immutable runtime closure; PR #33 fenced readiness across both event sources and published alpha.3. Contract `0.1.0-beta.9`, SDK `0.1.0-beta.5`, and Feishu `0.1.0-alpha.3` are registry-visible with exact integrity and provenance | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement; explicit dist-tag cleanup must not be reintroduced as an F292 token gate |
-| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; PR #3555 merged a contract-native K-2B session/ledger plus typed `events.publish` adapter; PR #3558 merged the digest-derived package locator and supervised stdio runtime at `ae23934d5`; PR #3581 merged owner-only lifecycle controls and truthful Settings health at `57ac9d04d`; PR #3698 added bounded durable runtime diagnostics and explicit retry UI at `130220886d`; PR #3704 adopted alpha.3 and added truthful installed-versus-available projection plus revision-fenced explicit update at `fae109e987` | The running Host must be explicitly restarted, then the existing alpha.2 instance must be explicitly updated and enabled before alpha activation verification and one real-meeting dogfood journey |
+| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials. The latest real owner Minute (`AI创新项目招人及运营规划`, 2026-08-14) was read through that authorization and yielded a 73,137-byte / 1,229-line transcript without manual TXT download; the owner import endpoint is now on Host main | The source read and Host route are complete, but alpha.6 still has to create exactly one durable intake and prove duplicate replay behavior in alpha |
+| Plugin repository | PR #24 merged C-2 + official plugin source; PR #26/#29 completed the first release chain; PR #30 added the reviewed stdio entrypoint; PR #31 fixed the immutable runtime closure; PR #33 fenced source readiness; PR #34 published alpha.4; PR #35 published the shared-CLI conflict fallback; PR #36 published alpha.6 with explicit historical URL/token inspection and a 10-minute search-consistency watermark. Contract `0.1.0-beta.9`, SDK `0.1.0-beta.5`, and Feishu `0.1.0-alpha.6` are registry-visible with exact integrity and provenance | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement; explicit dist-tag cleanup must not be reintroduced as an F292 token gate |
+| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; PR #3555 merged the contract-native Broker; PR #3558 merged supervised stdio runtime; PR #3581 merged owner lifecycle controls; PR #3698 added bounded diagnostics; PR #3704 added version projection/update; PR #3717 merged hot release discovery; PR #3741 aligned Broker and supervisor pre-active budgets; PR #3742 merged owner-only historical Minutes import through the active `events.publish` ledger plus Host-to-child heartbeat lease renewal. Alpha.5 activation completed in 33.13 seconds and remains `enabled + healthy` | Alpha must adopt the exact alpha.6 artifact, import the latest historical Minute, and prove one durable intake plus duplicate replay truth |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
 | Needs Me / F290 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F290 is still at Experience Design Gate; F292 honestly rejects Channel destinations |
 
@@ -121,6 +122,12 @@ missed events and pre-plugin meetings, not the primary journey.
   from the catalog's available version. An owner update verifies the exact internal-archive/SRI and both
   lifecycle and grant revisions, preserves the same instance/config, and leaves it disabled/stopped;
   it never smuggles activation into an upgrade.
+- **Release discovery is hot; authority is not.** The Host keeps plugin identity, grants, owner-auth
+  runner/domains, and release channel as static policy. It may refresh only a newer exact version,
+  npm tarball, SHA512 SRI, and provenance from the fixed `next` endpoint. A bounded single-flight
+  cache retains last-known-good metadata on registry failure and rejects rollback/equivocation.
+  Settings polls this projection, but an owner must still confirm the displayed version+digest;
+  a catalog change between confirmation and mutation fails with `STALE_CATALOG`.
 - **OAuth stays user-scoped and outside Host secrets.** The Host child environment remains the four
   non-secret K-2D claims. The package resolves its bundled `@larksuite/cli` entrypoint and uses the OS
   home directory for the existing user login; Clowder AI neither stores nor passes a Feishu token.
@@ -137,6 +144,13 @@ missed events and pre-plugin meetings, not the primary journey.
 - **Delivery stays inside Host authority.** A one-shot source grant resolves the transcript, the cat
   receives it as `untrusted_external` / data-only content with provenance, and the resulting request
   is queued idempotently in the chosen owner-scoped private thread. F290 Channels remain unavailable.
+- **Historical recovery is an owner action, not cursor manipulation.** The owner may paste one bounded
+  Feishu/Lark Minutes URL or token. Host checks the exact healthy official instance and lifecycle
+  revision before and after the user-authorized read, normalizes through the published plugin package,
+  and admits the signal through the same active-session grant and durable `events.publish` ledger.
+- **Idle runtime health is leased, not assumed.** Host pings the exact child before the active lease
+  expires and renews only the same live authority. A missed or malformed heartbeat closes the runtime
+  and projects a crash instead of leaving a falsely healthy instance that rejects the next intake.
 
 ## User Journey
 
@@ -333,7 +347,9 @@ missed events and pre-plugin meetings, not the primary journey.
   manual recovery, and plugin upgrade drills retain one durable intake and expose correct health,
   retry, and redacted diagnostics.
 - [ ] AC-D3: Install/update/repair/uninstall and permission guidance is user-visible; a capability tip
-  opens the meeting-intake action and links to the released plugin/feature truth.
+  opens the meeting-intake action and links to the released plugin/feature truth. A newer reviewed
+  official release becomes visible without a Host code change or restart, while package update and
+  runtime enable remain separate explicit owner actions.
 - [ ] AC-D4: Exact contract/plugin/core versions plus conformance and dogfood evidence are recorded;
   a synthetic second input source reuses C-2/K-3a without a new domain-specific Host route, while the
   existing GitHub integration remains untouched.
@@ -348,11 +364,12 @@ missed events and pre-plugin meetings, not the primary journey.
 ## Dependencies
 
 - **Evolved from**: F202 + F240（plugin lifecycle and IM connector boundary）.
-- **Remaining Phase D gate**: restart the running Host onto #3704, explicitly update the existing
-  instance to alpha.3 and enable it, confirm user-scoped Lark authorization, then perform one
-  real-meeting dogfood journey. K-2D #3558 is merged and F289's paused one-shot migration is
-  explicitly not a dependency. Official package publication, package-side stdio runtime, K-2A
-  inventory/update, K-2B transport, and K-2D supervision are complete.
+- **Remaining Phase D gate**: update alpha to the exact alpha.6 artifact, then import the latest real
+  historical Minute and verify one
+  durable intake plus duplicate replay before continuing the full real-meeting journey. K-2D #3558,
+  hot release discovery, the readiness-budget repair, package publication, package-side stdio runtime,
+  K-2A inventory/update, K-2B transport, and K-2D supervision are complete. F289's paused one-shot
+  migration remains explicitly outside this dependency chain.
 - **Related**: F141 + F168（GitHub long-lived-source behavior and durable operations oracle; no
   migration requirement）.
 - **Related**: F195（live meeting copilot; F292 owns post-meeting Feishu artifact intake only）.
@@ -374,6 +391,7 @@ missed events and pre-plugin meetings, not the primary journey.
 | Future F290 concepts leak into present truth | Host-owned abstract destination; Channel unavailable until F290 contract exists |
 | Prompt injection in transcript influences routing/authority | Transcript is untrusted content; authority/routing resolved before model admission and tested separately |
 | Existing lark-cli login state makes the plugin de facto secret owner | Phase A freezes long-lived credential custody, scoped/brokered authority, expiry/revocation, redaction, and recovery before implementation |
+| A mutable release channel silently changes policy, downgrades code, or installs/updates a package after different owner confirmation | Keep identity/grants/auth/channel in static Host policy; admit only a newer exact npm version/tarball/SHA512 with provenance; retain monotonic last-known-good metadata; require a version+digest fence on every explicit install/update; never auto-install or auto-start |
 
 ## Open Questions / Design Gate
 
@@ -398,6 +416,7 @@ missed events and pre-plugin meetings, not the primary journey.
 | KD-7 | GitHub is a behavior oracle, not a migration target | It proves the need while keeping F292 bounded and reversible | 2026-08-08 |
 | KD-8 | No automatic Feishu writeback in F292 | It is a separate bidirectional authority/grant surface, not required to remove the routing bottleneck | 2026-08-08 |
 | KD-9 | The `plugin` cell owns only the C-2 contract surface; K-3a route, durable intake, and Needs Me projection require explicit Host-side ownership | Extension lifecycle and durable observation/workflow truth have different invariants; `github-signals` is the symmetry check | 2026-08-08 |
+| KD-10 | Official release coordinates hot-refresh inside a fixed Host policy, but update and enable remain explicit separate actions | Future reviewed prereleases should not require a Host code change/restart; identity, authority, rollback resistance, owner confirmation, and activation cannot be delegated to mutable registry metadata | 2026-08-15 |
 
 ## Review Gate
 

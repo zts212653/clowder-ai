@@ -2,48 +2,35 @@ import type { CatId } from '@cat-cafe/shared';
 import type { DynamicTaskDef } from '../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import {
+  isPlainRecord,
+  type ManagedCommandTerminalResult,
+  type ManagedCommandWakeCarrierTerminalReason,
+  type ManagedCommandWakeProjection,
+  readManagedCommandWakeProjection,
+} from './managed-command-wake-task-projection.js';
 
-export type ManagedCommandWakeState =
-  | 'command_running'
-  | 'condition_met'
-  | 'message_written'
-  | 'dispatch_pending'
-  | 'dispatched'
-  | 'enqueued'
-  | 'cancelled'
-  | 'consumed';
-
-export type ManagedCommandWakeCarrierTerminalReason = 'withdrawn' | 'canceled' | 'terminal' | 'force_reset';
-
-export interface ManagedCommandTerminalResult {
-  readonly exitCode: number | null;
-  readonly timedOut: boolean;
-  readonly cancelled?: boolean;
-  readonly durationMs: number;
-  readonly tailOutput?: string;
-}
-
-export interface ManagedCommandWakeProjection {
-  readonly state: ManagedCommandWakeState;
-  readonly command: string;
-  readonly startedAt: number;
-  readonly conditionMetAt?: number;
-  readonly wakeContent?: string;
-  readonly wakeSource?: 'command_completion' | 'fallback_timer';
-  readonly result?: ManagedCommandTerminalResult;
-  readonly messageClaimGeneration?: number;
-  readonly messageClaimedAt?: number;
-  readonly pendingCompletionContent?: string;
-  readonly messageId?: string;
-  readonly messageWrittenAt?: number;
-  readonly dispatchAttemptCount?: number;
-  readonly lastDispatchAt?: number;
-  readonly lastDispatchOutcome?: 'dispatched' | 'enqueued' | 'full' | 'failed' | 'unavailable';
-  readonly invocationId?: string;
-  readonly carrierTerminalReason?: ManagedCommandWakeCarrierTerminalReason;
-  readonly consumedAt?: number;
-  readonly slaBreachObservedAt?: number;
-}
+/**
+ * R6 P1-1: task 判别 / read-model 已拆到 `managed-command-wake-task-projection.ts`
+ * （本文件基线 323 行，被 F297 的判别收口推到 403，跨过 350 硬线）。
+ * 此处 re-export 保持既有 import 路径不变；判别仍然只有一份实现。
+ */
+export {
+  createInitialManagedCommandWakeProjection,
+  HOLD_BALL_TASK_ID_PREFIX,
+  isHoldBallWakeTask,
+  isPendingHoldBallWakeTask,
+  isRetiredWakeWithRunningManagedCommand,
+  type ManagedCommandTerminalResult,
+  type ManagedCommandWakeCarrierTerminalReason,
+  type ManagedCommandWakeProjection,
+  type ManagedCommandWakeState,
+  type ParsedManagedCommandWakeTask,
+  parseManagedCommandWakeTask,
+  parseRetiredManagedCommandWakeTask,
+  readHoldLifecycleProjection,
+  readManagedCommandWakeProjection,
+} from './managed-command-wake-task-projection.js';
 
 export interface ManagedCommandWakeRecoveryStats {
   readonly scanned: number;
@@ -58,7 +45,6 @@ export type ManagedCommandWakeEventCarrier =
   | { state: 'handled'; invocationId?: string }
   | { state: 'terminal'; reason: ManagedCommandWakeCarrierTerminalReason };
 
-/** Project the existing F264 receipt; this is a read model, not another lifecycle owner. */
 export function resolveManagedCommandWakeEventCarrier(
   message: StoredMessage | null | undefined,
   expected: { threadId: string; catId: string; activeQueueEntryId?: string | null },
@@ -140,72 +126,6 @@ export interface RecordManagedCommandCompletionInput {
 export type ManagedCommandWakeRecoveryResult = 'missing' | 'pending' | 'recovered';
 
 export type ManagedCommandCompletionEvidenceWrite = 'missing' | 'active' | 'terminal' | 'contended';
-
-export interface ParsedManagedCommandWakeTask {
-  readonly task: DynamicTaskDef;
-  readonly lifecycle: Record<string, unknown>;
-  readonly command: ManagedCommandWakeProjection;
-  readonly threadId: string;
-  readonly catId: string;
-  readonly userId: string;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isManagedCommandWakeState(value: unknown): value is ManagedCommandWakeState {
-  return (
-    value === 'command_running' ||
-    value === 'condition_met' ||
-    value === 'message_written' ||
-    value === 'dispatch_pending' ||
-    value === 'dispatched' ||
-    value === 'enqueued' ||
-    value === 'cancelled' ||
-    value === 'consumed'
-  );
-}
-
-export function readManagedCommandWakeProjection(task: DynamicTaskDef): ManagedCommandWakeProjection | null {
-  const lifecycle = task.params.holdLifecycle;
-  if (!isPlainRecord(lifecycle) || lifecycle.mode !== 'wake_when') return null;
-  const command = lifecycle.managedCommand;
-  if (!isPlainRecord(command) || !isManagedCommandWakeState(command.state)) return null;
-  if (typeof command.command !== 'string' || command.command.length === 0) return null;
-  if (typeof command.startedAt !== 'number') return null;
-  return command as unknown as ManagedCommandWakeProjection;
-}
-
-export function parseManagedCommandWakeTask(task: DynamicTaskDef | null): ParsedManagedCommandWakeTask | null {
-  if (!task || !task.enabled || task.deliveryThreadId === null) return null;
-  const lifecycle = task.params.holdLifecycle;
-  const command = readManagedCommandWakeProjection(task);
-  if (!isPlainRecord(lifecycle) || lifecycle.status !== 'active' || !command) return null;
-  const catId = task.createdBy.startsWith('hold-ball:') ? task.createdBy.slice('hold-ball:'.length) : '';
-  const userId = task.params.triggerUserId;
-  if (!catId || typeof userId !== 'string' || !userId) return null;
-  return { task, lifecycle, command, threadId: task.deliveryThreadId, catId, userId };
-}
-
-/** Parse the disabled tombstone left when user activity retires only the wake carrier. */
-export function parseRetiredManagedCommandWakeTask(task: DynamicTaskDef | null): ParsedManagedCommandWakeTask | null {
-  if (!task || task.enabled || task.deliveryThreadId === null) return null;
-  const lifecycle = task.params.holdLifecycle;
-  const command = readManagedCommandWakeProjection(task);
-  if (!isPlainRecord(lifecycle) || lifecycle.status !== 'cancelled_by_user' || !command) return null;
-  const catId = task.createdBy.startsWith('hold-ball:') ? task.createdBy.slice('hold-ball:'.length) : '';
-  const userId = task.params.triggerUserId;
-  if (!catId || typeof userId !== 'string' || !userId) return null;
-  return { task, lifecycle, command, threadId: task.deliveryThreadId, catId, userId };
-}
-
-export function createInitialManagedCommandWakeProjection(
-  command: string,
-  startedAt: number,
-): ManagedCommandWakeProjection {
-  return { state: 'command_running', command, startedAt };
-}
 
 export function buildCancelledManagedCommandCompletionParams(
   task: DynamicTaskDef | null,

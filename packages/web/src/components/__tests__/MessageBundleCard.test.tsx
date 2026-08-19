@@ -21,7 +21,7 @@ vi.mock('@/utils/teleport', () => ({
 
 const { MessageBundleCard } = await import('../MessageBundleCard');
 
-function response(items: unknown[]) {
+function response(items: unknown[], extra: Record<string, unknown> = {}) {
   return {
     messageBundleId: 'bundle-1',
     targetThreadId: 'target-thread',
@@ -29,6 +29,7 @@ function response(items: unknown[]) {
     createdAt: 200,
     sourceThread: { id: 'source-thread', title: 'Source Thread' },
     items,
+    ...extra,
   };
 }
 
@@ -37,6 +38,7 @@ describe('MessageBundleCard', () => {
   let root: Root;
 
   beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     mocks.apiFetch.mockReset();
     mocks.pushThread.mockReset();
     mocks.planTeleport.mockReset();
@@ -117,6 +119,77 @@ describe('MessageBundleCard', () => {
 
     expect(container.textContent).toContain('one whole source message');
     expect(container.querySelector('button[aria-expanded]')).toBeNull();
+  });
+
+  it('keeps the bundle note distinct from an item-level comment', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify(
+          response(
+            [
+              {
+                status: 'available',
+                kind: 'quote',
+                messageId: 'source-1',
+                sourceThreadId: 'source-thread',
+                author: { kind: 'cat', catId: 'opus' },
+                timestamp: 100,
+                readableContent: 'source',
+                comment: 'why this exact quote matters',
+              },
+            ],
+            { note: 'overall forwarding context' },
+          ),
+        ),
+        { status: 200 },
+      ),
+    );
+
+    await renderCard();
+
+    expect(container.querySelector('[data-message-bundle-note]')?.textContent).toContain('You 的留言');
+    expect(container.querySelector('[data-message-bundle-note]')?.textContent).toContain('overall forwarding context');
+    expect(container.querySelector('[data-message-bundle-note]')?.textContent).not.toContain(
+      'why this exact quote matters',
+    );
+    expect(container.textContent).toContain('You 的点评');
+  });
+
+  it('renders the one selected Rich Block as an inert forwarded artifact', async () => {
+    mocks.apiFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify(
+          response([
+            {
+              status: 'available',
+              kind: 'rich_block',
+              messageId: 'source-1',
+              sourceThreadId: 'source-thread',
+              author: { kind: 'cat', catId: 'opus' },
+              timestamp: 100,
+              readableContent: 'Approval\nApprove now',
+              richBlock: {
+                id: 'block-1',
+                kind: 'card',
+                v: 1,
+                title: 'Approval',
+                bodyMarkdown: 'Evidence only',
+                actions: [{ label: 'Approve now', action: 'approve' }],
+              },
+            },
+          ]),
+        ),
+        { status: 200 },
+      ),
+    );
+
+    await renderCard();
+
+    expect(container.querySelector('[data-forwarded-rich-block="block-1"]')).not.toBeNull();
+    expect(container.textContent).toContain('Evidence only');
+    expect(
+      Array.from(container.querySelectorAll('button')).some((button) => button.textContent === 'Approve now'),
+    ).toBe(false);
   });
 
   it('folds multiple messages, summarizes participants, and expands a shared tombstone state', async () => {

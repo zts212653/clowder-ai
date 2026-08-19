@@ -43,7 +43,7 @@ export function pathToAuthority(sourcePath: string): F163Authority {
   const p = sourcePath.replace(/^doc:/, '').replace(/^docs\//, '');
   if (/^(lessons-learned|SOP)\.md$/i.test(p) || /shared-rules\.md$/i.test(p)) return 'constitutional';
   if (/^(decisions|features|architecture)\//i.test(p)) return 'validated';
-  if (/^(discussions|plans|research|reflections)\//i.test(p)) return 'candidate';
+  if (/^(catalogs|competitor-research|discussions|plans|research|reflections|study)\//i.test(p)) return 'candidate';
   return 'observed';
 }
 

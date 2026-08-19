@@ -75,6 +75,7 @@ describe('ChatMessageRow render isolation', () => {
         selectionEligible
         onEnterSelection={onEnterSelection}
         onToggleSelection={onToggleSelection}
+        forwardingDisabled={false}
       />
     );
 
