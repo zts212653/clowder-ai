@@ -77,27 +77,38 @@ client adapter 是执行边界，不是第四本账。Scheduler 只是驱动器�
 
 ```mermaid
 flowchart LR
-    E["Public conversation<br/>用户 · Connector · 定时任务 · 公开通知"] --> Q["Durable Queue<br/>inline payload + targetIds"]
+    E["Public conversation<br/>用户 · Connector · 定时任务 · 公开通知"] --> Q["Queue pending_input<br/>inline payload + targetIds"]
     G["External gate event<br/>CI · review · approval · wait callback"] --> W["Existing action / event-wait owner<br/>fenced consume"]
-    P["Agent final / post_message"] --> H["Chat History<br/>固定 messageId + orderKey"]
-    H -->|"需要成员处理"| Q2["Queue history_message ref<br/>targetIds + opaque custody refs"]
+    P["Agent final / post_message"] --> AH["Chat History Agent message<br/>固定 messageId + orderKey"]
+    AH -->|"需要成员处理：只创建引用"| Q2["Queue history_message ref<br/>targetIds + opaque custody refs"]
     Q --> D["Per-thread Drain<br/>事件驱动 single owner"]
     Q2 --> D
-    D -->|"admit: materialize public input"| H
-    D -->|"admit"| B["Processing Response Bubble<br/>固定位置"]
-    D --> A["Active Run<br/>内存态"]
+    D --> M["Admission transaction<br/>take exact Queue entry"]
+    M --> K{"Queue payload kind"}
+    K -->|"pending_input：写入"| IH["Chat History public input<br/>此刻生成 messageId + orderKey"]
+    K -->|"history_message：复用已有 messageId，不重写"| RH["Referenced Agent History input"]
+    K -->|"private_notice：不写 History"| B["Chat History processing bubble<br/>固定 responseMessageId + orderKey"]
+    IH -->|"同一 admission transaction"| B
+    RH -->|"同一 admission transaction"| B
+    B -->|"commit 后"| A["Active Run<br/>内存态"]
     A --> C["Client Adapter"]
     S1["Stop 指定 Agent"] --> X["快照所选 exact Active Runs"]
     S2["Stop thread 全部活动 Agent"] --> X
     X -->|"原位 canceled；Queue 不变"| T
     X -->|"cancel exact client handles"| C
-    C -->|"stream"| B
-    C -->|"completed / failed / canceled"| T["原位终局 + fenced source consume"]
-    T --> H
+    C -->|"stream：更新同一气泡"| B
+    C -->|"completed / failed / canceled"| T["同一响应气泡原位终局<br/>+ fenced source consume"]
     T -->|"Agent input failed"| N["Queue private_notice<br/>不进 History"]
     N --> D
     T -->|"release run + requestDrain"| D
 ```
+
+图中的两条输入路径只在 Drain 的 admission transaction 汇合：
+
+- public `pending_input` 是 `Queue → take → 写 History input → 创建 processing bubble → Active Run → client`；
+- Agent `history_message` 是 `Agent message 已在 History → Queue 只保存引用 → take → 复用原 messageId → 创建 processing bubble → Active Run → client`。
+
+因此 `pending_input` 写入 History 后不会再次进入 Queue。图中唯一的 `History → Queue` 边只属于 Agent final / `post_message` 在需要唤起成员时创建的 `history_message` 引用；响应气泡的 stream 与 terminal 也只原位更新同一个 History message。
 
 三条真相规则：
 
