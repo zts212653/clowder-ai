@@ -1850,7 +1850,12 @@ export class InvocationQueue {
     for (const q of this.queues.values()) {
       if (!this.queueMatchesThread(q, threadId)) continue;
       for (const e of q) {
-        if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) {
+        if (
+          e.source === 'agent' &&
+          e.status === 'queued' &&
+          e.targetCats.includes(catId) &&
+          !InvocationQueue.entryFailedForCat(e, catId)
+        ) {
           return true;
         }
       }
@@ -1989,6 +1994,17 @@ export class InvocationQueue {
   static readonly STALE_QUEUED_THRESHOLD_MS = 60_000;
   static readonly STALE_PROCESSING_THRESHOLD_MS = 600_000; // 10 minutes
 
+  /**
+   * F167 fan-out deadlock guard: a queued entry whose invocation for THIS cat
+   * already failed terminally is retry staging, not live pending work. Treating
+   * it as active let a permanently-failing entry (stop-gate misjudgment /
+   * custody CAS exhaustion) block every fresh mention of that cat through the
+   * dedup path while the queue head stayed wedged (thread_mrqb0yfauece1tmm).
+   */
+  private static entryFailedForCat(entry: QueueEntry, catId: string): boolean {
+    return entry.queuedFailedByCatIds?.includes(catId) === true;
+  }
+
   hasActiveOrQueuedAgentForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean {
     const now = Date.now();
     for (const q of this.queues.values()) {
@@ -2037,6 +2053,7 @@ export class InvocationQueue {
         }
 
         if (e.status === 'queued') {
+          if (InvocationQueue.entryFailedForCat(e, catId)) continue;
           this.log?.info(
             {
               threadId,
@@ -2083,6 +2100,7 @@ export class InvocationQueue {
         if (opts?.continuationKey !== undefined && e.continuationKey !== opts.continuationKey) continue;
 
         if (e.status === 'queued') {
+          if (InvocationQueue.entryFailedForCat(e, catId)) continue;
           return true;
         }
 
@@ -2168,6 +2186,7 @@ export class InvocationQueue {
       for (const e of q) {
         if (!e.targetCats.includes(catId)) continue;
         if (e.status === 'queued') {
+          if (InvocationQueue.entryFailedForCat(e, catId)) continue;
           return true;
         }
         if (e.status === 'processing') {

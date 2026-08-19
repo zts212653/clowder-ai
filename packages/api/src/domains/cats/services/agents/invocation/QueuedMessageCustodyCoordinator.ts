@@ -29,6 +29,18 @@ import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 interface CoordinatorDeps {
   messageStore: IMessageStore;
   now?: () => number;
+  /** Injectable for tests; production uses a real setTimeout-based delay. */
+  delay?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Exponential backoff with full jitter for queue-custody CAS conflicts.
+ * Base 25ms, cap 400ms: 8 attempts worst-case wall clock stays well under 2s
+ * while giving concurrent fan-out siblings room to finish their transitions.
+ */
+export function casBackoffDelayMs(attempt: number): number {
+  const capped = Math.min(25 * 2 ** attempt, 400);
+  return Math.floor(Math.random() * capped);
 }
 
 function isManagedHoldWakeMessage(message: StoredMessage): boolean {
@@ -1019,9 +1031,12 @@ export class QueuedMessageCustodyCoordinator {
   private readonly now: () => number;
   private readonly entryLocks = new Map<string, Promise<void>>();
 
+  private readonly sleep: (ms: number) => Promise<void>;
+
   constructor(deps: CoordinatorDeps) {
     this.messageStore = deps.messageStore;
     this.now = deps.now ?? Date.now;
+    this.sleep = deps.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   }
 
   async persistEntry(entry: QueueEntry): Promise<string[]> {
@@ -1520,7 +1535,14 @@ export class QueuedMessageCustodyCoordinator {
     deliveredAt?: number,
     allowTerminalCurrent = false,
   ): Promise<{ managed: boolean; changed: boolean }> {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Fan-out entries share one messageId's custody, so N concurrent
+    // invocations CAS the same revision counter. A tight retry loop loses to
+    // siblings deterministically under load (thread_mrqb0yfauece1tmm:
+    // "queue custody CAS retries exhausted" flipped healthy invocations to
+    // failed and rolled their entries back). Back off exponentially with
+    // jitter and allow enough rounds for the contention window to drain.
+    const CAS_ATTEMPTS = 8;
+    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
       const message = await this.messageStore.getById(messageId);
       const current = message?.queueCustody;
       if (!current || (current.status === 'terminal' && !allowTerminalCurrent)) {
@@ -1537,6 +1559,9 @@ export class QueuedMessageCustodyCoordinator {
       });
       if (result.kind === 'updated') return { managed: true, changed: true };
       if (result.kind === 'not_found') return { managed: false, changed: false };
+      if (attempt < CAS_ATTEMPTS - 1) {
+        await this.sleep(casBackoffDelayMs(attempt));
+      }
     }
     throw new Error(`queue custody CAS retries exhausted for message ${messageId}`);
   }

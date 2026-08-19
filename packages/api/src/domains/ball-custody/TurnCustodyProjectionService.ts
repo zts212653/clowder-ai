@@ -7,6 +7,7 @@ import {
   exactStructuredWakeIndex,
   findWakeTerminal,
   releasedStructuredWake,
+  siblingHandedForMessage,
   supersededBeforeAdoption,
 } from './managed-hold-supersession.js';
 
@@ -195,6 +196,25 @@ export class TurnCustodyProjectionService {
     const exactWakeIndex = exactStructuredWakeIndex(wake, events);
     if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
       return unknown('dispatch_handoff_missing');
+    }
+    // F167 fan-out: sibling handed events for the same trigger message mean the
+    // ball was broadcast, not transferred. No single-holder dispatch obligation
+    // exists for this wake — not for the non-final targets (holder mismatch),
+    // and not for the final target either (its disposition would be
+    // indistinguishable from a single-chain handoff that never happened).
+    // Fan-out accountability lives in queue entry settlement, not the ball.
+    if (wake.protocol === 'dispatch') {
+      const sibling = siblingHandedForMessage(events, wake.handoff.messageId, wake.holderCatId);
+      if (sibling) {
+        return {
+          state: 'covered_empty',
+          evidenceRefs: [
+            `${wake.protocol}:${wake.subjectKey}`,
+            wake.handoff.sourceEventId,
+            `fanout:${sibling.sourceEventId}`,
+          ],
+        };
+      }
     }
     if (projection.holder !== wake.holderCatId) {
       return releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
