@@ -23,6 +23,7 @@ export const SOP_COMPONENT_ID = 'sop-compliance';
 
 /** Weekly eval window = 336 hours (14 days). */
 const WEEKLY_WINDOW_HOURS = 336;
+const WEEKLY_WINDOW_MS = WEEKLY_WINDOW_HOURS * 60 * 60 * 1000;
 
 export interface BuildSopSnapshotInput {
   verdictId: string;
@@ -43,7 +44,7 @@ export function buildSopSnapshot(input: BuildSopSnapshotInput) {
     evalSnapshotId: input.evalSnapshotId,
     featureId: input.featureId,
     generatedAt: input.generatedAt,
-    window: { durationHours: WEEKLY_WINDOW_HOURS },
+    window: buildWeeklyWindow(input.generatedAt),
     // Bundle schema requires components.length >= 1 — model SOP compliance as
     // a single component with rule-pass/violation/skipped counters.
     components: [
@@ -67,6 +68,18 @@ export function buildSopSnapshot(input: BuildSopSnapshotInput) {
     sopDefinitionId: input.trace.sopDefinitionId,
     observedStage: input.trace.observedStage,
     sessionId: input.trace.sessionId,
+  };
+}
+
+function buildWeeklyWindow(generatedAt: string) {
+  const endMs = Date.parse(generatedAt);
+  if (!Number.isSafeInteger(endMs)) {
+    throw new Error(`eval_sop_snapshot_invalid_generated_at: ${generatedAt}`);
+  }
+  return {
+    startMs: endMs - WEEKLY_WINDOW_MS,
+    endMs,
+    durationHours: WEEKLY_WINDOW_HOURS,
   };
 }
 

@@ -1,4 +1,5 @@
 export * from '../plugin/host-inventory/index.js';
+export * from './AsrPersonMemorySceneBuilder.js';
 export * from './DestinationAuthority.js';
 export * from './errors.js';
 export * from './IngressTrace.js';

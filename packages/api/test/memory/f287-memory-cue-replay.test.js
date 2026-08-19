@@ -4,7 +4,7 @@ import { runF287MemoryCueReplay } from '../../dist/scripts/f287-memory-cue-repla
 
 const EXPECTED_FAMILIES = ['person_entity', 'operational_precedent', 'taste'];
 const EXPECTED_BUDGET_CANDIDATE_TOKENS = {
-  person_entity: 736,
+  person_entity: 754,
   operational_precedent: 737,
   taste: 745,
 };

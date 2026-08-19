@@ -103,4 +103,27 @@ describe('F295 activeExecutionStore', () => {
     expect(useChatStore.getState().threadStates['thread-b']?.unreadCount).toBe(3);
     expect(useChatStore.getState().threadStates['thread-b']?.hasUserMention).toBe(true);
   });
+
+  it('fences one exact cancellation until a canonical snapshot retires it', () => {
+    const execution = live('inv-cancel', 100);
+    const initial = useActiveExecutionStore.getState().beginHydration('thread-a');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', initial, response([execution]));
+
+    expect(useActiveExecutionStore.getState().beginCancellation(execution)).toBe(true);
+    expect(useActiveExecutionStore.getState().beginCancellation(execution)).toBe(false);
+
+    useActiveExecutionStore.getState().settleCancellation(execution);
+    const key = activeExecutionKey(execution);
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toBeUndefined();
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    const terminalizing = useActiveExecutionStore.getState().beginHydration('thread-a');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminalizing, response([execution]));
+    expect(useActiveExecutionStore.getState().executionsByKey[key]).toEqual(execution);
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBe(true);
+
+    const terminal = useActiveExecutionStore.getState().beginHydration('thread-a');
+    useActiveExecutionStore.getState().applySnapshot('thread-a', terminal, response([]));
+    expect(useActiveExecutionStore.getState().cancelPendingByKey[key]).toBeUndefined();
+  });
 });

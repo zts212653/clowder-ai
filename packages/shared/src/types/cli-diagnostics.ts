@@ -43,7 +43,14 @@ export type CliErrorReasonCode =
    *  followed by `turn.failed` + exit 1. NOT a Clowder AI bug — upstream policy engine decision.
    *  Users get humanized rephrase guidance instead of generic "unknown CLI error". Excluded
    *  from F222 FrustrationDetector auto-issue triggering (not user-actionable within our scope). */
-  | 'upstream_policy_reject';
+  | 'upstream_policy_reject'
+  /** clowder-ai#1324 (refs #848): the CLI's own argument parser rejected the argv the
+   *  harness built — the installed CLI version and our call shape have drifted apart
+   *  (flag removed / renamed / newly mutually-exclusive). Deterministic by construction:
+   *  the same argv is rejected identically every time, so this reasonCode also switches
+   *  OFF the transient-exit retry in invoke-helpers.isTransientCliExitCode1. Distinct from
+   *  invalid_config (a config *file* is malformed) and spawn_failed (binary missing). */
+  | 'incompatible_cli_arguments';
 
 export type CliActiveWriterRecoveryState = 'owner_busy' | 'retiring' | 'external_or_unknown';
 

@@ -1,6 +1,6 @@
 ---
 feature_ids: [F293]
-related_features: [F051, F083, F127, F153, F154, F167, F190, F192, F203, F208, F216, F220, F233, F246, F248, F254, F264, F280, F284]
+related_features: [F051, F083, F127, F153, F154, F167, F190, F192, F203, F208, F216, F220, F233, F246, F248, F254, F264, F280, F284, F298, F299, F300]
 topics: [routing, availability, quota, provider-health, capability-profile, custody, cancellation, approval, workspace, settings, l0, freshness]
 tips_exempt: "Phase A 仅交付 Architecture + Experience Design Gate，尚无可使用的产品 surface；AC-E4 要求实现验收时移除本豁免并贡献真实 Workspace 操作 tip。"
 doc_kind: spec
@@ -80,6 +80,14 @@ Why: 现有 `dispatch` cell 负责交付/排队，`identity-session` cell 负责
 - preflight success 只允许尝试发送，不等于 responsibility transfer；handoff 后的接责、terminal evidence 与 predecessor recovery 分别复用 F167/F233/F220。
 - Cancel 不自动等于 You 接责或 subject 完成；共同确认必须绑定同一 `subjectRef + revision/freshnessKey + generation`，approval truth 复用 F246。
 - Workspace「猫猫团队」是唯一日常 editor；Settings「成员与运行时」只管结构配置，Settings/Ops「路由账本」是同一 read model 的只读深挖。
+
+### 与事实基础设施的关系
+
+[F298](F298-runtime-promise-durability.md) / [F300](F300-self-sensing-home-state-awareness.md) / [F299](F299-workspace-invocation-trajectory.md) 是跨域的纵向事实运输链：保证事实与承诺活着、把事实送到猫的判断点、再让人能下钻看见；F293 是横向的 routing 业务域，拥有 route truth 与 `allowed / warned / rejected` 判定，并把其他 owner 的事实组合成选猫、发送、接责、回弹与确认旅程。
+
+- **F300 只供给感知，不替 F293 判定**：F300 M1 在动作点投影目标的一手状态，并让 route 项指回 F293 canonical snapshot；F293 dispatch preflight 才拥有逐目标 gate、alternatives 与 degradation 语义。
+- **F299 记录视野，不改写路由**：F293 决策时看见的 snapshot/preflight refs 进入 F299 P3 durable request envelope，供异常确诊“供给 gap vs 猫的判断 bug”；inspector 不重放或覆盖 route decision。
+- **F298/ADR-045 约束新状态的出生方式**：F293 新增的 signal、preference、receipt/recovery 等持久状态必须满足“持久性 ≥ 所服务过程生命周期、TTL 只做 GC”；按法设计的新状态不登记进 F298 存量违反项家族表。
 
 ## User Journey
 

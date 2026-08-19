@@ -1,103 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import Fastify from 'fastify';
+import { entry, harness, installPayload, readHeaders, writeHeaders } from './plugin-official-routes.fixture.js';
 
-import {
-  ExternalPluginLifecycleService,
-  HostInventoryControlPlane,
-  MemoryPluginInventoryStore,
-  OFFICIAL_PLUGIN_CATALOG,
-} from '../dist/domains/plugin/index.js';
-import { registerOfficialPluginRoutes } from '../dist/routes/plugin-official-routes.js';
-
-const entry = OFFICIAL_PLUGIN_CATALOG[0];
-
-function manifest(overrides = {}) {
-  return {
-    pluginId: entry.pluginId,
-    version: entry.version,
-    contractVersion: '0.1.0',
-    name: 'Feishu Meeting Intake',
-    features: [{ id: 'source', name: 'Source', resources: [], capabilities: ['events.publish'] }],
-    runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
-    ...overrides,
-  };
-}
-
-async function harness(options = {}) {
-  let now = 1_000;
-  const store = new MemoryPluginInventoryStore();
-  const inventory = new HostInventoryControlPlane(store, {
-    createInstanceId: () => 'pi_official',
-    now: () => now++,
-  });
-  const installedVersion = options.installedVersion ?? entry.version;
-  const installedDigest = options.installedDigest ?? entry.packageDigest;
-  const installed = await inventory.installPackage({
-    manifest: manifest({ version: installedVersion }),
-    computedPackageDigest: installedDigest,
-    expectedPackageDigest: installedDigest,
-    packagePluginId: entry.pluginId,
-    effectiveGrants: ['events.publish'],
-  });
-  const processCalls = [];
-  const lifecycle = new ExternalPluginLifecycleService({
-    store,
-    now: () => now++,
-    supervisor: {
-      start: async (instanceId) => processCalls.push(`start:${instanceId}`),
-      stop: async (instanceId) => processCalls.push(`stop:${instanceId}`),
-    },
-  });
-  const app = Fastify();
-  const updateCalls = [];
-  app.addHook('preHandler', async (request) => {
-    const raw = request.headers['x-test-session-user'];
-    if (typeof raw === 'string' && raw.trim()) request.sessionUserId = raw.trim();
-  });
-  registerOfficialPluginRoutes(app, {
-    catalog: options.catalog ?? OFFICIAL_PLUGIN_CATALOG,
-    inventory: store,
-    lifecycle,
-    installer: {
-      install: async () => installed,
-      update: async (catalogId, instanceId, expectedRevision) => {
-        updateCalls.push({ catalogId, instanceId, expectedRevision });
-        return inventory.upgradePackage({
-          pluginInstanceId: instanceId,
-          expectedLifecycleRevision: expectedRevision,
-          expectedGrantRevision: 1,
-          manifest: manifest(),
-          computedPackageDigest: entry.packageDigest,
-          expectedPackageDigest: entry.packageDigest,
-          packagePluginId: entry.pluginId,
-          effectiveGrants: ['events.publish'],
-        });
-      },
-    },
-    ...(options.auth === undefined ? {} : { auth: options.auth }),
-  });
-  await app.ready();
-  return { app, store, processCalls, updateCalls };
-}
-
-const ownerUserId = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
-const readHeaders = { 'x-test-session-user': ownerUserId };
-const writeHeaders = {
-  host: 'localhost:3004',
-  origin: 'http://localhost:5173',
-  'x-test-session-user': ownerUserId,
-};
-
-test('pins the runnable alpha.3 artifact and activates its package-owned owner auth contract', () => {
-  assert.equal(entry.version, '0.1.0-alpha.3');
+test('pins the runnable alpha.4 artifact and activates its package-owned owner auth contract', () => {
+  assert.equal(entry.version, '0.1.0-alpha.4');
   assert.equal(
     entry.archiveUrl,
-    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.3.tgz',
+    'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.4.tgz',
   );
   assert.equal(
     entry.packageDigest,
-    'sha512-cIrmZGup33W/L0XP9Q6b/OxgNR2oC5lCs1EAc3FcXhfQSJLDw3e/9di1vOGQZwN1Fm19Q0gMXKCxT1rg6WDNBg==',
+    'sha512-LCGMvCt7RR7gvlpJazEo3nwM9BY55Ibl3HCd34Jmcphe1LNBnFVY6DCDpkrrD+xh45c3xA9Sc4C3U6jtRrfLyw==',
   );
   assert.deepEqual(entry.ownerAuth, {
     kind: 'lark-cli-device',
@@ -126,13 +39,13 @@ test('projects exact official catalog and durable installed state only to authen
     assert.equal(response.statusCode, 200, response.payload);
     const body = response.json();
     assert.equal(body.plugins[0].catalogId, 'feishu-meeting-intake');
-    assert.equal(body.plugins[0].version, '0.1.0-alpha.3');
-    assert.equal(body.plugins[0].availableVersion, '0.1.0-alpha.3');
+    assert.equal(body.plugins[0].version, '0.1.0-alpha.4');
+    assert.equal(body.plugins[0].availableVersion, '0.1.0-alpha.4');
     assert.equal(body.plugins[0].packageDigest, entry.packageDigest);
     assert.equal(body.plugins[0].updateAvailable, false);
     assert.equal(body.plugins[0].ownerAuthAvailable, true);
     assert.equal(body.plugins[0].instance.lifecycleRevision, 1);
-    assert.equal(body.plugins[0].instance.installedVersion, '0.1.0-alpha.3');
+    assert.equal(body.plugins[0].instance.installedVersion, '0.1.0-alpha.4');
     assert.equal(body.plugins[0].instance.packageDigest, entry.packageDigest);
     assert.equal(body.plugins[0].instance.runtimeState, 'stopped');
     assert.deepEqual(body.plugins[0].instance.lastRuntimeError, {
@@ -155,7 +68,7 @@ test('projects installed versus available truth and explicitly updates without s
   try {
     const before = await app.inject({ method: 'GET', url: '/api/plugins/official', headers: readHeaders });
     assert.equal(before.statusCode, 200, before.payload);
-    assert.equal(before.json().plugins[0].availableVersion, '0.1.0-alpha.3');
+    assert.equal(before.json().plugins[0].availableVersion, '0.1.0-alpha.4');
     assert.equal(before.json().plugins[0].updateAvailable, true);
     assert.equal(before.json().plugins[0].instance.installedVersion, '0.1.0-alpha.2');
     assert.equal(before.json().plugins[0].instance.packageDigest, oldDigest);
@@ -165,14 +78,23 @@ test('projects installed versus available truth and explicitly updates without s
       url: '/api/plugins/official/pi_official/update',
       headers: writeHeaders,
       remoteAddress: '127.0.0.1',
-      payload: { expectedRevision: 1 },
+      payload: {
+        expectedRevision: 1,
+        expectedCatalogVersion: entry.version,
+        expectedPackageDigest: entry.packageDigest,
+      },
     });
     assert.equal(updated.statusCode, 200, updated.payload);
     assert.deepEqual(updateCalls, [
-      { catalogId: 'feishu-meeting-intake', instanceId: 'pi_official', expectedRevision: 1 },
+      {
+        catalogId: 'feishu-meeting-intake',
+        instanceId: 'pi_official',
+        expectedRevision: 1,
+        expectedRelease: { version: entry.version, packageDigest: entry.packageDigest },
+      },
     ]);
     assert.equal(updated.json().updateAvailable, false);
-    assert.equal(updated.json().instance.installedVersion, '0.1.0-alpha.3');
+    assert.equal(updated.json().instance.installedVersion, '0.1.0-alpha.4');
     assert.equal(updated.json().instance.packageDigest, entry.packageDigest);
     assert.equal(updated.json().instance.activationState, 'disabled');
     assert.equal(updated.json().instance.runtimeState, 'stopped');
@@ -238,6 +160,7 @@ test('official plugin auth action is owner-only and gates enable until user OAut
       url: '/api/plugins/official/feishu-meeting-intake/install',
       headers: writeHeaders,
       remoteAddress: '127.0.0.1',
+      payload: installPayload,
     });
     assert.equal(installed.statusCode, 200, installed.payload);
 
@@ -268,7 +191,7 @@ test('official plugin auth action is owner-only and gates enable until user OAut
 });
 
 test('install prepares but does not start; only explicit fenced enable starts the runtime', async () => {
-  const { app, processCalls } = await harness({
+  const { app, processCalls, installCalls } = await harness({
     auth: {
       status: async () => ({ status: 'connected' }),
       start: async () => {
@@ -282,10 +205,17 @@ test('install prepares but does not start; only explicit fenced enable starts th
       url: '/api/plugins/official/feishu-meeting-intake/install',
       headers: writeHeaders,
       remoteAddress: '127.0.0.1',
+      payload: installPayload,
     });
     assert.equal(installed.statusCode, 200, installed.payload);
     assert.equal(installed.json().instance.configReadiness, 'ready');
     assert.equal(installed.json().instance.activationState, 'disabled');
+    assert.deepEqual(installCalls, [
+      {
+        catalogId: entry.catalogId,
+        expectedRelease: { version: entry.version, packageDigest: entry.packageDigest },
+      },
+    ]);
     assert.deepEqual(processCalls, []);
 
     const enabled = await app.inject({

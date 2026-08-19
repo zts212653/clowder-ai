@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
@@ -7,12 +10,18 @@ import {
 } from '../dist/domains/cats/services/agents/providers/CodexUnixWebSocketSession.js';
 import {
   buildUnixProcessSnapshotArgs,
+  cliExecutionOwnerRefFromEnvironment,
+  createCliExecutionOwnerService,
   decodeLinuxProcEnvironment,
   findOwnedUnixProcesses,
   isValidatedCodexSocketDirectory,
+  listLiveCliExecutionOwners,
   parseCliProcessOwnerManifest,
+  readUnixProcessSnapshot,
+  readUnixProcessSnapshotSync,
   sameUnixProcess,
   signalOwnedUnixProcesses,
+  terminateCliExecutionOwner,
 } from '../dist/utils/cli-process-ownership.js';
 
 const OWNER_ID = '12345678-1234-4234-8234-123456789abc';
@@ -42,6 +51,18 @@ test('Linux ownership snapshots leave environment discovery to procfs', () => {
     '-o',
     'pid=,ppid=,pgid=,lstart=,command=',
   ]);
+});
+
+test('production process snapshots distinguish an empty exact PID set from a reader failure', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Unix process snapshots are unavailable on Windows');
+    return;
+  }
+  const definitelyDeadPid = spawnSync('/usr/bin/true').pid;
+  assert.ok(Number.isSafeInteger(definitelyDeadPid));
+
+  assert.deepEqual(readUnixProcessSnapshotSync({ pids: [definitelyDeadPid] }), new Map());
+  assert.deepEqual(await readUnixProcessSnapshot({ pids: [definitelyDeadPid] }), new Map());
 });
 
 test('Linux procfs environment decoding preserves exact token boundaries', () => {
@@ -122,5 +143,273 @@ test('manifest parsing and socket cleanup paths fail closed', async () => {
     assert.equal(parseCliProcessOwnerManifest({ ...valid, ownerId: '../escape' }), null);
   } finally {
     await removeCodexSocketDirectory(socketDirectory);
+  }
+});
+
+test('owner manifest carries the non-secret parent execution coordinates used after tracker loss', () => {
+  const execution = {
+    executionId: 'parent-execution-1',
+    invocationId: 'turn-invocation-1',
+    threadId: 'thread-1',
+    catId: 'codex-sol',
+    userId: 'scheduler',
+  };
+  const parsed = parseCliProcessOwnerManifest({
+    v: 1,
+    ownerId: OWNER_ID,
+    createdAt: 1_000,
+    supervisor: identity(10, 1, 10),
+    execution,
+  });
+
+  assert.deepEqual(parsed?.execution, execution);
+  assert.equal(parseCliProcessOwnerManifest({ ...parsed, execution: { ...execution, threadId: '' } }), null);
+  assert.equal(parseCliProcessOwnerManifest({ ...parsed, execution: { ...execution, callbackToken: 'secret' } }), null);
+  assert.deepEqual(
+    cliExecutionOwnerRefFromEnvironment({
+      CAT_CAFE_EXECUTION_ID: execution.executionId,
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_INVOCATION_ID: execution.invocationId,
+      CAT_CAFE_THREAD_ID: execution.threadId,
+      CAT_CAFE_CAT_ID: execution.catId,
+      CAT_CAFE_USER_ID: execution.userId,
+      CAT_CAFE_CALLBACK_TOKEN: 'must-not-enter-manifest',
+    }),
+    execution,
+  );
+  assert.equal(
+    cliExecutionOwnerRefFromEnvironment({
+      CAT_CAFE_EXECUTION_ID: execution.executionId,
+      CAT_CAFE_INVOCATION_ID: execution.invocationId,
+      CAT_CAFE_THREAD_ID: execution.threadId,
+      CAT_CAFE_CAT_ID: execution.catId,
+      CAT_CAFE_USER_ID: execution.userId,
+    }),
+    undefined,
+    'persistent carrier hosts must not be bound to their first invocation',
+  );
+});
+
+test('tracker-less owner projection and cancellation bind exact execution and process start identity', () => {
+  const execution = {
+    executionId: 'parent-execution-1',
+    invocationId: 'turn-invocation-1',
+    threadId: 'thread-1',
+    catId: 'codex-sol',
+    userId: 'scheduler',
+  };
+  const liveRecord = {
+    path: '/tmp/live-owner.json',
+    manifest: {
+      v: 1,
+      ownerId: OWNER_ID,
+      createdAt: 1_000,
+      supervisor: identity(10, 1, 10),
+      execution,
+    },
+  };
+  const reusedRecord = {
+    path: '/tmp/reused-owner.json',
+    manifest: {
+      ...liveRecord.manifest,
+      ownerId: '22345678-1234-4234-8234-123456789abc',
+      supervisor: identity(20, 1, 20),
+    },
+  };
+  const siblingRecord = {
+    path: '/tmp/sibling-owner.json',
+    manifest: {
+      ...liveRecord.manifest,
+      ownerId: '32345678-1234-4234-8234-123456789abc',
+      supervisor: identity(30, 1, 30),
+      execution: { ...execution, invocationId: 'turn-invocation-2' },
+    },
+  };
+  const snapshot = new Map([
+    [10, identity(10, 1, 10)],
+    [20, identity(20, 1, 20, 'Wed Aug 13 01:00:01 2026')],
+    [30, identity(30, 1, 30)],
+  ]);
+
+  assert.deepEqual(listLiveCliExecutionOwners([liveRecord, reusedRecord, siblingRecord], snapshot), [
+    { ...execution, startedAt: 1_000 },
+    { ...siblingRecord.manifest.execution, startedAt: 1_000 },
+  ]);
+
+  const signals = [];
+  assert.deepEqual(
+    terminateCliExecutionOwner(execution, [liveRecord, reusedRecord, siblingRecord], snapshot, (pid, signal) =>
+      signals.push({ pid, signal }),
+    ),
+    { matched: 2, signaled: 2, missing: 0, failed: 0 },
+  );
+  assert.deepEqual(signals, [
+    { pid: 10, signal: 'SIGTERM' },
+    { pid: 30, signal: 'SIGTERM' },
+  ]);
+
+  signals.length = 0;
+  assert.deepEqual(
+    terminateCliExecutionOwner({ ...execution, catId: 'other-cat' }, [liveRecord], snapshot, (pid, signal) =>
+      signals.push({ pid, signal }),
+    ),
+    { matched: 0, signaled: 0, missing: 0, failed: 0 },
+  );
+  assert.deepEqual(signals, []);
+
+  assert.deepEqual(
+    terminateCliExecutionOwner(execution, [liveRecord], snapshot, () => {
+      throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+    }),
+    { matched: 1, signaled: 0, missing: 1, failed: 0 },
+  );
+  assert.deepEqual(
+    terminateCliExecutionOwner(execution, [liveRecord], snapshot, () => {
+      throw Object.assign(new Error('denied'), { code: 'EPERM' });
+    }),
+    { matched: 1, signaled: 0, missing: 0, failed: 1 },
+  );
+});
+
+test('execution owner service preserves process-table degradation for projection and exact cancel', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-execution-owner-degraded-'));
+  const ownerDirectory = join(dataDir, 'cli-process-owners');
+  const execution = {
+    executionId: 'parent-execution-degraded',
+    invocationId: 'turn-invocation-degraded',
+    threadId: 'thread-degraded',
+    catId: 'codex-sol',
+    userId: 'scheduler',
+  };
+  try {
+    await mkdir(ownerDirectory, { recursive: true });
+    await writeFile(
+      join(ownerDirectory, `${OWNER_ID}.json`),
+      JSON.stringify({
+        v: 1,
+        ownerId: OWNER_ID,
+        createdAt: 1_000,
+        supervisor: identity(10, 1, 10),
+        execution,
+      }),
+    );
+    const service = createCliExecutionOwnerService({
+      dataDir,
+      readProcessSnapshot: async () => null,
+    });
+
+    assert.deepEqual(await service.listLive(), { owners: [], complete: false });
+    assert.deepEqual(await service.terminateExact(execution), {
+      matched: 0,
+      signaled: 0,
+      complete: false,
+    });
+
+    await writeFile(join(ownerDirectory, 'invalid.json'), '{not-json');
+    const signals = [];
+    const warnings = [];
+    const recoveredService = createCliExecutionOwnerService({
+      dataDir,
+      readProcessSnapshot: async () => new Map([[10, identity(10, 1, 10)]]),
+      kill: (pid, signal) => signals.push({ pid, signal }),
+      log: { warn: (bindings, message) => warnings.push({ bindings, message }) },
+    });
+    assert.deepEqual(await recoveredService.listLive(), {
+      owners: [{ ...execution, startedAt: 1_000 }],
+      complete: true,
+    });
+    assert.deepEqual(await recoveredService.terminateExact(execution), {
+      matched: 1,
+      signaled: 1,
+      complete: true,
+    });
+    assert.deepEqual(signals, [{ pid: 10, signal: 'SIGTERM' }]);
+    assert.deepEqual(await readdir(ownerDirectory), [`${OWNER_ID}.json`]);
+    assert.equal((await readdir(join(dataDir, 'cli-process-owner-quarantine'))).length, 1);
+    assert.equal(warnings.length, 1, 'quarantining malformed control truth must emit an operator-visible warning');
+
+    const deniedService = createCliExecutionOwnerService({
+      dataDir,
+      readProcessSnapshot: async () => new Map([[10, identity(10, 1, 10)]]),
+      kill: () => {
+        throw Object.assign(new Error('denied'), { code: 'EPERM' });
+      },
+    });
+    assert.deepEqual(await deniedService.terminateExact(execution), {
+      matched: 1,
+      signaled: 0,
+      complete: false,
+    });
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('owner service keeps valid rows non-destructive when malformed manifest quarantine is unavailable', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-execution-owner-quarantine-failure-'));
+  const ownerDirectory = join(dataDir, 'cli-process-owners');
+  const execution = {
+    executionId: 'parent-execution-quarantine-failure',
+    invocationId: 'turn-invocation-quarantine-failure',
+    threadId: 'thread-quarantine-failure',
+    catId: 'codex-sol',
+    userId: 'scheduler',
+  };
+  try {
+    await mkdir(ownerDirectory, { recursive: true });
+    await writeFile(
+      join(ownerDirectory, `${OWNER_ID}.json`),
+      JSON.stringify({
+        v: 1,
+        ownerId: OWNER_ID,
+        createdAt: 1_000,
+        supervisor: identity(10, 1, 10),
+        execution,
+      }),
+    );
+    await writeFile(join(ownerDirectory, 'invalid.json'), '{not-json');
+    await writeFile(join(dataDir, 'cli-process-owner-quarantine'), 'not-a-directory');
+    const signals = [];
+    const service = createCliExecutionOwnerService({
+      dataDir,
+      readProcessSnapshot: async () => new Map([[10, identity(10, 1, 10)]]),
+      kill: (pid, signal) => signals.push({ pid, signal }),
+    });
+
+    assert.deepEqual(await service.listLive(), {
+      owners: [{ ...execution, startedAt: 1_000 }],
+      complete: false,
+    });
+    assert.deepEqual(await service.terminateExact(execution), { matched: 0, signaled: 0, complete: false });
+    assert.deepEqual(signals, []);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('owner service converts non-ENOENT manifest directory failures into control-plane degradation', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-execution-owner-read-failure-'));
+  try {
+    await writeFile(join(dataDir, 'cli-process-owners'), 'not-a-directory');
+    const warnings = [];
+    const service = createCliExecutionOwnerService({
+      dataDir,
+      log: { warn: (bindings, message) => warnings.push({ bindings, message }) },
+    });
+
+    assert.deepEqual(await service.listLive(), { owners: [], complete: false });
+    assert.deepEqual(
+      await service.terminateExact({
+        executionId: 'unavailable',
+        invocationId: 'unavailable',
+        threadId: 'thread-unavailable',
+        catId: 'codex-sol',
+        userId: 'scheduler',
+      }),
+      { matched: 0, signaled: 0, complete: false },
+    );
+    assert.equal(warnings.length, 2);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
   }
 });

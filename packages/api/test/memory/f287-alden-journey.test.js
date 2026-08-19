@@ -148,6 +148,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
             summary: 'Relationship and interaction memory are available.',
             anchor: 'person-memory:person-alden',
             revision: 'sha256:alden-v1',
+            asOf: 1_785_600_000_000,
             visibility: 'owner_private',
             drillFamily: 'person_memory',
           };

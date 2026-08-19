@@ -28,6 +28,19 @@ export interface MemoryCueResolution {
   cues: CueEnvelopeV1[];
   promptSegment: string;
   estimatedTokens: number;
+  deliveryReceipts: MemoryCueDeliveryReceipt[];
+}
+
+/** Content-free proof candidate. It becomes durable only after provider delivery is confirmed. */
+export interface MemoryCueDeliveryReceipt {
+  readonly cueId: string;
+  readonly projectionMarker: string;
+  readonly event: Omit<Extract<MemoryCueEventInput, { axis: 'consumption' }>, 'eventId' | 'idempotencyKey'>;
+}
+
+export interface MemoryCueDeliveryConfirmation {
+  readonly generationId: string;
+  readonly evidenceRef: string;
 }
 
 export interface ResolveMemoryCueInput {
@@ -42,6 +55,7 @@ const ZERO_RESULT: Omit<MemoryCueResolution, 'status'> = Object.freeze({
   cues: [],
   promptSegment: '',
   estimatedTokens: 0,
+  deliveryReceipts: [],
 });
 
 function sameScope(left: RecallScopeV1, right: RecallScopeV1): boolean {
@@ -74,13 +88,41 @@ export class MemoryCuePlaneService {
 
     const candidates = await this.collectCandidates(opportunity, entry, expiresAt, input);
     const formatted = formatMemoryCues(candidates, { maxTokens: entry.maxPromptTokens });
-    for (const cue of formatted.cues) this.appendPresented(opportunity.occurredAt, cue);
     return {
       status: 'admitted',
       cues: formatted.cues,
       promptSegment: formatted.text,
       estimatedTokens: formatted.estimatedTokens,
+      deliveryReceipts: formatted.cues.map((cue) => this.createDeliveryReceipt(opportunity.occurredAt, cue)),
     };
+  }
+
+  async recordPresented(
+    receipts: readonly MemoryCueDeliveryReceipt[],
+    confirmation: MemoryCueDeliveryConfirmation,
+  ): Promise<void> {
+    if (!this.episodeStore) return;
+    for (const receipt of receipts) {
+      const digest = createHash('sha256')
+        .update(
+          [
+            'presented',
+            receipt.cueId,
+            receipt.event.scope.invocationId,
+            confirmation.generationId,
+            confirmation.evidenceRef,
+          ].join('\0'),
+        )
+        .digest('hex')
+        .slice(0, 40);
+      await Promise.resolve(
+        this.episodeStore.append({
+          ...receipt.event,
+          eventId: `memory-cue-presented-${digest}`,
+          idempotencyKey: `memory-cue-presented-${digest}`,
+        }),
+      );
+    }
   }
 
   private async collectCandidates(
@@ -137,26 +179,23 @@ export class MemoryCuePlaneService {
     );
   }
 
-  private appendPresented(opportunityOccurredAt: number, cue: CueEnvelopeV1): void {
-    if (!this.episodeStore) return;
-    const digest = createHash('sha256')
-      .update(['presented', cue.cueId, cue.scope.invocationId].join('\0'))
-      .digest('hex')
-      .slice(0, 40);
-    this.episodeStore.append({
-      eventId: `memory-cue-presented-${digest}`,
-      idempotencyKey: `memory-cue-presented-${digest}`,
+  private createDeliveryReceipt(opportunityOccurredAt: number, cue: CueEnvelopeV1): MemoryCueDeliveryReceipt {
+    return {
       cueId: cue.cueId,
-      opportunityId: cue.opportunityId,
-      scope: cue.scope,
-      resolverFamily: cue.resolverFamily,
-      sourceAnchor: cue.source.anchor,
-      sourceRevision: cue.source.revision,
-      axis: 'consumption',
-      consumptionOutcome: 'presented',
-      catalogVersion: cue.catalogVersion,
-      resolverVersion: cue.resolverVersion,
-      occurredAt: opportunityOccurredAt,
-    });
+      projectionMarker: `cue-id="${cue.cueId}"`,
+      event: {
+        cueId: cue.cueId,
+        opportunityId: cue.opportunityId,
+        scope: cue.scope,
+        resolverFamily: cue.resolverFamily,
+        sourceAnchor: cue.source.anchor,
+        sourceRevision: cue.source.revision,
+        axis: 'consumption',
+        consumptionOutcome: 'presented',
+        catalogVersion: cue.catalogVersion,
+        resolverVersion: cue.resolverVersion,
+        occurredAt: opportunityOccurredAt,
+      },
+    };
   }
 }

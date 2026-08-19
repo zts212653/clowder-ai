@@ -50,6 +50,11 @@ import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import {
+  composeSidebarPresence,
+  type SidebarPresence,
+  type SidebarPresenceSource,
+} from './sidebar-presence-projection.js';
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
@@ -172,6 +177,13 @@ interface ThreadIndexBuilder {
 
 export interface ThreadsRoutesOptions {
   threadStore: IThreadStore;
+  /**
+   * F297 Phase B: batched active-execution presence for the Sidebar snapshot (C10).
+   *
+   * **必填**：生产上不接线就等于 Sidebar 永远报不出 working（PR #3748 P1-1）。
+   * 类型上强制，让 TS 生产调用点无法漏接；JS 测试不涉及运行态时可省略，运行时按无 active 处理。
+   */
+  presenceSource: SidebarPresenceSource;
   /** Optional: cascade delete messages when thread is deleted */
   messageStore?: IMessageStore;
   /** Optional: cascade delete tasks when thread is deleted */
@@ -376,10 +388,14 @@ export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thre
   return sanitized as Thread;
 }
 
-function projectThreadForListView(thread: Thread, view: 'sidebar' | undefined): Thread | Omit<Thread, 'threadMemory'> {
+function projectThreadForListView(
+  thread: Thread,
+  view: 'sidebar' | undefined,
+  presence?: SidebarPresence,
+): Thread | (Omit<Thread, 'threadMemory'> & { presence: SidebarPresence }) {
   if (view !== 'sidebar') return thread;
   const { threadMemory: _threadMemory, ...summary } = thread;
-  return summary;
+  return { ...summary, presence: presence ?? { status: 'idle' } };
 }
 
 async function migrateRuntimeProjectPath(thread: Thread, threadStore: IThreadStore): Promise<Thread> {
@@ -708,7 +724,16 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       });
     }
 
-    return { threads: threads.map((thread) => projectThreadForListView(thread, view)) };
+    // F297 Phase B (AC-B4): Sidebar snapshot 必须自带 C10 presence，
+    // 否则浏览器只能自己 fold runtime 事件——那正是 F5 才恢复真相的根因。
+    const presenceByThread =
+      view === 'sidebar' && threads.length > 0
+        ? await composeSidebarPresence(threads, userId, threadStore, opts.presenceSource)
+        : undefined;
+
+    return {
+      threads: threads.map((thread) => projectThreadForListView(thread, view, presenceByThread?.get(thread.id))),
+    };
   });
 
   // GET /api/threads/:id - 获取对话详情
@@ -1390,3 +1415,6 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
   });
 };
+
+/** Re-export：presence 投影已抽到 `sidebar-presence-projection.ts`（cloud R9 P1）。 */
+export type { SidebarPresence, SidebarPresenceSource };

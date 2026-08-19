@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { createGunzip, createInflate } from 'node:zlib';
+import { parsePreviewGatewayHostname } from '@cat-cafe/shared';
 import httpProxy from 'http-proxy';
 import { isOriginAllowed, resolveFrontendCorsOrigins } from '../../config/frontend-origin.js';
 import { BRIDGE_SCRIPT } from './bridge-script.js';
@@ -20,8 +21,13 @@ export interface PreviewGatewayOptions {
  * Preview Gateway — 独立端口的反向代理。
  * iframe 永远只打开 gateway URL，不直接连 localhost:xxxx。
  *
- * 请求：GET http://gateway:PORT/path?__preview_port=3847
+ * 请求：GET http://preview-3847.localhost:GATEWAY_PORT/path
  *   → proxy to http://localhost:3847/path
+ *
+ * `?__preview_port=3847` remains a compatibility path for older callers, but
+ * new browser surfaces encode the target in the origin. Unlike a document
+ * query string, the origin is inherited by root-relative assets, navigation,
+ * fetch, dynamic imports, and WebSocket upgrades.
  *
  * 安全：loopback-only + 端口白名单 + 剥离 X-Frame-Options/CSP frame-ancestors
  * WebSocket upgrade 代理（HMR）
@@ -49,8 +55,7 @@ export class PreviewGateway {
     });
 
     // Prevent unhandled proxy errors from crashing the process
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.proxy.on('error', (err: Error, _req: any, res: any) => {
+    this.proxy.on('error', (err, _req, res) => {
       // res may be a ServerResponse (HTTP) or a Socket (WS upgrade)
       if (res && 'writeHead' in res && !res.headersSent) {
         (res as http.ServerResponse).writeHead(502, { 'Content-Type': 'application/json' });
@@ -61,8 +66,7 @@ export class PreviewGateway {
     });
 
     // Handle proxied responses: strip iframe headers + inject bridge + WS patch scripts into HTML
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.proxy.on('proxyRes', (proxyRes: any, _req: any, res: any) => {
+    this.proxy.on('proxyRes', (proxyRes, _req, res) => {
       const clientRes = res as http.ServerResponse;
       // Strip iframe-blocking headers
       delete proxyRes.headers['x-frame-options'];
@@ -112,7 +116,7 @@ export class PreviewGateway {
       stream.on('end', () => {
         let html = Buffer.concat(chunks).toString('utf-8');
         // Build injection payload: bridge script + WS port patch for HMR
-        const targetPort = (_req as Record<string, unknown>).__catCafeTargetPort as number | undefined;
+        const targetPort = (_req as unknown as Record<string, unknown>).__catCafeTargetPort as number | undefined;
         const wsPatch = targetPort ? buildWsPatchScript(targetPort) : '';
         const injection = wsPatch + BRIDGE_SCRIPT;
         // Inject before </head> or before </body> or at end
@@ -146,7 +150,7 @@ export class PreviewGateway {
       const parsed = this.parseTarget(req);
       if (!parsed) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing __preview_port query parameter' }));
+        res.end(JSON.stringify({ error: 'Missing, invalid, or conflicting preview target identity' }));
         return;
       }
 
@@ -165,14 +169,13 @@ export class PreviewGateway {
       (req as unknown as Record<string, unknown>).__catCafeTargetPort = parsed.port;
 
       // Strip preview params from forwarded URL
-      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
       url.searchParams.delete('__preview_port');
       url.searchParams.delete('__preview_host');
       req.url = url.pathname + (url.search === '?' ? '' : url.search);
 
       const target = `http://${parsed.host}:${parsed.port}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.proxy.web(req, res, { target }, (err: any) => {
+      this.proxy.web(req, res, { target }, (err) => {
         if (!res.headersSent) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Proxy error', message: err.message }));
@@ -184,7 +187,7 @@ export class PreviewGateway {
     this.server.on('upgrade', (req, socket, head) => {
       // F156 D-5: Origin validation on WS upgrade
       const origin = req.headers.origin as string | undefined;
-      if (origin && !isOriginAllowed(origin, this.allowedOrigins)) {
+      if (origin && !isOriginAllowed(origin, this.allowedOrigins) && !this.isSamePreviewOrigin(req, origin)) {
         // Send HTTP 403 before destroying (so test can read status)
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
@@ -216,6 +219,7 @@ export class PreviewGateway {
     const origin = req.headers.origin as string | undefined;
     if (!origin) return true; // non-browser (curl, server-to-server)
     if (isOriginAllowed(origin, this.allowedOrigins)) return true;
+    if (this.isSamePreviewOrigin(req, origin)) return true;
     if (res) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Origin not allowed' }));
@@ -223,14 +227,52 @@ export class PreviewGateway {
     return false;
   }
 
+  /**
+   * Requests made by a previewed app use the per-target preview origin, which
+   * is intentionally not part of the Hub frontend allowlist. Accept only an
+   * exact Host/Origin match for a valid preview hostname; cross-target origins
+   * remain rejected by the browser boundary and by this check.
+   */
+  private isSamePreviewOrigin(req: http.IncomingMessage, origin: string): boolean {
+    const host = req.headers.host;
+    if (!host) return false;
+    try {
+      const requestOrigin = new URL(`http://${host}`);
+      if (parsePreviewGatewayHostname(requestOrigin.hostname) === null) return false;
+      return new URL(origin).origin === requestOrigin.origin;
+    } catch {
+      return false;
+    }
+  }
+
   private parseTarget(req: http.IncomingMessage): { port: number; host: string } | null {
-    const url = new URL(req.url!, `http://${req.headers.host}`);
-    const portStr = url.searchParams.get('__preview_port');
-    if (!portStr) return null;
-    const port = Number.parseInt(portStr, 10);
-    if (Number.isNaN(port)) return null;
-    const host = url.searchParams.get('__preview_host') ?? 'localhost';
-    return { port, host };
+    const requestHost = req.headers.host;
+    if (!requestHost || !req.url?.startsWith('/')) return null;
+    let url: URL;
+    try {
+      url = new URL(req.url, `http://${requestHost}`);
+    } catch {
+      return null;
+    }
+    const hostnamePort = parsePreviewGatewayHostname(url.hostname);
+    const portParams = url.searchParams.getAll('__preview_port');
+    if (portParams.length > 1) return null;
+    const hostParams = url.searchParams.getAll('__preview_host');
+    if (hostParams.length > 1) return null;
+    const portStr = portParams[0] ?? null;
+    const queryPort = portStr && /^\d+$/.test(portStr) ? Number(portStr) : null;
+    if (portStr !== null && queryPort === null) return null;
+
+    if (hostnamePort !== null) {
+      if (queryPort !== null && queryPort !== hostnamePort) return null;
+      const queryHost = hostParams[0] ?? null;
+      if (queryHost && queryHost !== 'localhost') return null;
+      return { port: hostnamePort, host: 'localhost' };
+    }
+
+    if (queryPort === null) return null;
+    const host = hostParams[0] ?? 'localhost';
+    return { port: queryPort, host };
   }
 
   async start(): Promise<void> {

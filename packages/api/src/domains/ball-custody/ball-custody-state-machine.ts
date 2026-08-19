@@ -110,6 +110,12 @@ function resolveDisposition(
   const catId = event.payload.catId;
   if (typeof catId !== 'string') return reject('bad_payload');
   if (snapshot.holder !== catId) return reject('invalid_transition');
+  // clowder-ai#1366: `ball.hold_dispositioned` carries per-wake identity
+  // (sourceMessageId + taskId + invocationId) but historically always drove the
+  // whole subject to `resolved`. Those are two different planes. A retired wake
+  // records its own terminal without touching subject custody, so a newer hold
+  // held by the same cat survives.
+  if (event.payload.retired === true) return ok(current);
   return ok('resolved');
 }
 

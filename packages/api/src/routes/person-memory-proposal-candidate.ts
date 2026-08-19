@@ -187,6 +187,20 @@ async function targetPersonIsActive(
   return target?.status === 'active';
 }
 
+function sameWriteOpportunityLineage(
+  left: StagePersonMemoryCandidateInput['writeOpportunityLineage'],
+  right: StagePersonMemoryCandidateInput['writeOpportunityLineage'],
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.reflexId === right.reflexId &&
+    left.reflexVersion === right.reflexVersion &&
+    left.opportunityId === right.opportunityId &&
+    left.dedupeLineage === right.dedupeLineage &&
+    left.generation === right.generation
+  );
+}
+
 function validateExistingCandidate(
   prior: StoredPersonMemoryCandidate | null,
   input: StagePersonMemoryCandidateInput,
@@ -199,6 +213,9 @@ function validateExistingCandidate(
   }
   if (prior.deferredReceiptId !== input.deferredReceiptId) {
     return { status: 'error', statusCode: 409, error: 'deferred_receipt_conflict' };
+  }
+  if (!sameWriteOpportunityLineage(prior.writeOpportunityLineage, input.writeOpportunityLineage)) {
+    return { status: 'error', statusCode: 409, error: 'write_opportunity_lineage_conflict' };
   }
   if (prior.deltaFingerprint !== input.deltaFingerprint) {
     return { status: 'error', statusCode: 409, error: 'delta_lineage_conflict' };

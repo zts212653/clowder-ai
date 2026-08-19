@@ -9,14 +9,48 @@ import Fastify from 'fastify';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
+async function terminalizeFixtureCarrier(deps, queueProcessor, carrier, userId, threadId) {
+  if ((await queueProcessor.finalizeRemovedEntry(carrier, 'user_cancel')) === false) return false;
+  for (const messageId of [carrier.messageId, ...carrier.mergedMessageIds].filter(Boolean)) {
+    try {
+      const canceled = await deps.messageStore.markCanceled(messageId);
+      if (canceled?.deliveryTransitioned === true) {
+        deps.socketManager.emitToUser(userId, 'message_deleted', { messageId, threadId, deletedBy: userId });
+      }
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await deps.queueCustodyCoordinator.withdrawEntry(carrier);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Build deps with stubs */
 function buildDeps(overrides = {}) {
   const invocationQueue = new InvocationQueue();
+  let deps;
+  const queueProcessor = {
+    canReleaseSlotForUser: mock.fn(() => true),
+    processNext: mock.fn(async () => ({ started: false })),
+    isPaused: mock.fn(() => false),
+    getPauseReason: mock.fn(() => undefined),
+    clearPause: mock.fn(() => {}),
+    releaseSlot: mock.fn(() => {}),
+    releaseThread: mock.fn(() => {}),
+    finalizeRemovedEntry: mock.fn(async () => true),
+  };
+  queueProcessor.processExactSteerReservation = mock.fn(async (threadId, userId) =>
+    queueProcessor.processNext(threadId, userId),
+  );
   const managedCommandWakeRecovery = {
     retireCarrier: mock.fn(async () => 0),
     retireThread: mock.fn(async () => ({ retired: 0, messageIds: [] })),
   };
-  return {
+  deps = {
     threadStore: {
       get: mock.fn(async (id) => ({
         id,
@@ -25,15 +59,7 @@ function buildDeps(overrides = {}) {
       })),
     },
     invocationQueue,
-    queueProcessor: {
-      canReleaseSlotForUser: mock.fn(() => true),
-      processNext: mock.fn(async () => ({ started: false })),
-      isPaused: mock.fn(() => false),
-      getPauseReason: mock.fn(() => undefined),
-      clearPause: mock.fn(() => {}),
-      releaseSlot: mock.fn(() => {}),
-      releaseThread: mock.fn(() => {}),
-    },
+    queueProcessor,
     invocationTracker: {
       has: mock.fn(() => false),
       getUserId: mock.fn(() => null),
@@ -68,6 +94,19 @@ function buildDeps(overrides = {}) {
     getManagedCommandWakeRecovery: () => managedCommandWakeRecovery,
     ...overrides,
   };
+  queueProcessor.retirePrestartProcessingGroup = mock.fn(async (threadId, _catId, userId) => {
+    const inflight = invocationQueue.findProcessingByCat(threadId, _catId);
+    if (!inflight || inflight.userId !== userId) return 'state_changed';
+    const carriers = invocationQueue.getProcessingGroupAcrossUsers(threadId, inflight.id);
+    if (!carriers) return 'state_changed';
+    for (const carrier of carriers) {
+      if (!(await terminalizeFixtureCarrier(deps, queueProcessor, carrier, userId, threadId))) {
+        return 'terminalization_failed';
+      }
+    }
+    return invocationQueue.removeProcessingGroupAcrossUsers(threadId, inflight.id) ? 'retired' : 'state_changed';
+  });
+  return deps;
 }
 
 /** Enqueue a test entry */
@@ -82,6 +121,18 @@ function enqueueEntry(queue, overrides = {}) {
     intent: 'execute',
     ...overrides,
   });
+}
+
+function asyncGate() {
+  let enter;
+  let release;
+  const entered = new Promise((resolve) => {
+    enter = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  return { entered, blocked, enter, release };
 }
 
 describe('Queue Management API', () => {
@@ -854,6 +905,201 @@ describe('Queue Management API', () => {
     assert.ok(projected.json().queue.every((entry) => !Object.hasOwn(entry, 'exactSteerBatch')));
   });
 
+  it('POST /queue/steer does not preempt when the reservation CAS loses', async () => {
+    // Single-entry steer used to preempt first and reserve second, so a losing
+    // CAS returned STEER_STATE_CHANGED *after* the running turn was already
+    // cancelled: the user lost the work, did not get the steer, and was told to
+    // retry. steer-batch already reserved before cancelling; this makes the
+    // single path agree.
+    const target = enqueueEntry(deps.invocationQueue, { content: 'steer me', ownerAuthProvenance: 'strict' }).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'], executionIds: ['inv-a'] }));
+    // The entry moves out from under the request between lookup and reservation.
+    deps.invocationQueue.reserveExactUserEntry = mock.fn(() => ({ outcome: 'rejected', reason: 'state_changed' }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'STEER_STATE_CHANGED');
+    assert.equal(
+      deps.invocationTracker.cancel.mock.calls.length,
+      0,
+      'a refused steer must not have cancelled the running turn',
+    );
+  });
+
+  it('POST /queue/:entryId/steer does not preempt when reservation persistence fails', async () => {
+    // Reserving only in memory just moved the split transaction: a rejected
+    // durable write would still have landed after the running turn was killed.
+    // steer-batch persists its reservation before preempting; this must match.
+    const target = enqueueEntry(deps.invocationQueue, { content: 'steer me', ownerAuthProvenance: 'strict' }).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: true, catIds: ['opus'], executionIds: ['inv-a'] }));
+    deps.queueCustodyCoordinator.persistEntry = mock.fn(async () => {
+      throw new Error('durable reservation rejected');
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().code, 'STEER_RESERVATION_PERSIST_FAILED');
+    assert.equal(
+      deps.invocationTracker.cancel.mock.calls.length,
+      0,
+      'an unpersistable reservation must not have cancelled the running turn',
+    );
+    const after = deps.invocationQueue.list('t1', 'user-a').find((entry) => entry.id === target.id);
+    assert.equal(after.steerRequestedByCatIds, undefined, 'the local reservation marker must be rolled back');
+  });
+
+  it('POST /queue/:entryId/steer fences ordinary dequeue while its durable reservation is persisting', async () => {
+    const target = enqueueEntry(deps.invocationQueue, {
+      content: 'steer me',
+      ownerAuthProvenance: 'strict',
+    }).entry;
+    const persistGate = asyncGate();
+    let firstPersist = true;
+    deps.queueCustodyCoordinator.persistEntry = mock.fn(async () => {
+      if (!firstPersist) return;
+      firstPersist = false;
+      persistGate.enter();
+      await persistGate.blocked;
+    });
+    deps.invocationTracker.has = mock.fn(() => true);
+    deps.invocationTracker.getUserId = mock.fn(() => 'user-a');
+    deps.invocationTracker.cancel = mock.fn(() => ({
+      cancelled: true,
+      catIds: ['opus'],
+      executionIds: ['inv-active'],
+    }));
+    deps.queueProcessor.processNext = mock.fn(async () => ({ started: true, entry: target }));
+
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+    await persistGate.entered;
+
+    assert.equal(
+      deps.invocationQueue.markProcessing('t1', 'user-a'),
+      null,
+      'ordinary dequeue must not claim the entry while Steer awaits durable persistence',
+    );
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0, 'preemption has not begun before persistence');
+
+    const [withdraw, clear] = await Promise.all([
+      app.inject({
+        method: 'DELETE',
+        url: `/api/threads/t1/queue/${target.id}`,
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      }),
+      app.inject({
+        method: 'DELETE',
+        url: '/api/threads/t1/queue',
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      }),
+    ]);
+    assert.equal(withdraw.statusCode, 409);
+    assert.equal(withdraw.json().code, 'ENTRY_STEERING');
+    assert.equal(clear.statusCode, 409);
+    assert.equal(clear.json().code, 'ENTRY_STEERING');
+
+    persistGate.release();
+    const res = await responsePromise;
+    assert.equal(res.statusCode, 200);
+    const processExactArgs = deps.queueProcessor.processExactSteerReservation.mock.calls[0].arguments;
+    assert.deepEqual(processExactArgs.slice(0, 3), ['t1', 'user-a', target.id]);
+    assert.equal(
+      processExactArgs[3],
+      deps.invocationQueue.getEntrySnapshot('t1', 'user-a', target.id).exactSteerBatch.reservationId,
+      'the route must pass the same exact reservation identity across the persistence await',
+    );
+  });
+
+  it('POST /queue/:entryId/steer retains exact ownership across the preemption await', async () => {
+    const inflight = enqueueEntry(deps.invocationQueue, {
+      content: 'inflight',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+    }).entry;
+    deps.invocationQueue.markProcessing('t1', 'user-a');
+    const target = enqueueEntry(deps.invocationQueue, {
+      content: 'steer after preemption',
+      ownerAuthProvenance: 'strict',
+      targetCats: ['opus'],
+    }).entry;
+    const preemptionGate = asyncGate();
+    deps.invocationTracker.has = mock.fn(() => false);
+    deps.queueProcessor.finalizeRemovedEntry = mock.fn(async (removed) => {
+      assert.equal(removed.id, inflight.id);
+      preemptionGate.enter();
+      await preemptionGate.blocked;
+      return true;
+    });
+    deps.queueProcessor.processExactSteerReservation = mock.fn(async (threadId, userId, entryId, reservationId) => ({
+      started: Boolean(deps.invocationQueue.claimExactSteerReservation(threadId, userId, entryId, reservationId)),
+      entry: deps.invocationQueue.getEntrySnapshot(threadId, userId, entryId),
+    }));
+
+    const responsePromise = app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+    await preemptionGate.entered;
+
+    assert.equal(deps.invocationQueue.markProcessing('t1', 'user-a'), null);
+    assert.equal(deps.invocationQueue.markProcessingById('t1', target.id), false);
+    preemptionGate.release();
+
+    const res = await responsePromise;
+    assert.equal(res.statusCode, 200);
+    const reserved = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', target.id);
+    const reservationId = reserved.exactSteerBatch.reservationId;
+    assert.equal(deps.invocationQueue.claimExactSteerReservation('t1', 'user-a', target.id, 'wrong'), null);
+    assert.equal(reserved.status, 'processing');
+    assert.equal(deps.queueProcessor.processExactSteerReservation.mock.calls[0].arguments[3], reservationId);
+  });
+
+  it('POST /queue/:entryId/steer durably clears the reservation when preemption is refused', async () => {
+    const target = enqueueEntry(deps.invocationQueue, { content: 'steer me', ownerAuthProvenance: 'strict' }).entry;
+    deps.invocationTracker.has = mock.fn(() => true);
+    // Another user owns the running turn, so preemption is refused after the
+    // reservation has already been persisted.
+    deps.invocationTracker.getUserId = mock.fn(() => 'someone-else');
+    deps.invocationTracker.cancel = mock.fn(() => ({ cancelled: false, catIds: [] }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${target.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: {},
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    const after = deps.invocationQueue.list('t1', 'user-a').find((entry) => entry.id === target.id);
+    assert.equal(after.steerRequestedByCatIds, undefined, 'a refused steer must not leave the entry reserved');
+    // The release itself must be durable, not only in memory.
+    const persistCalls = deps.queueCustodyCoordinator.persistEntry.mock.calls.length;
+    assert.ok(persistCalls >= 2, `reservation and its release must both persist (saw ${persistCalls})`);
+  });
+
   it('POST /queue/steer-batch rejects an ineligible member atomically before cancel', async () => {
     const a = enqueueEntry(deps.invocationQueue, { content: 'a', ownerAuthProvenance: 'strict' }).entry;
     const freshness = enqueueEntry(deps.invocationQueue, {
@@ -1052,6 +1298,7 @@ describe('Queue Management API', () => {
     const b = enqueueEntry(deps.invocationQueue, { content: 'steered', targetCats: ['opus'] });
 
     deps.invocationTracker.has = mock.fn(() => false); // pre-start: tracker not yet registered
+    deps.queueProcessor.processExactSteerReservation = mock.fn(async () => ({ started: true, entry: b.entry }));
     // Precondition: A holds the opus slot (in-flight).
     assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id, a.entry.id);
 
@@ -1062,12 +1309,10 @@ describe('Queue Management API', () => {
       payload: { mode: 'immediate' },
     });
 
-    // Deferred response (not QUEUE_BUSY, not synchronous start) — B runs via tryAutoExecute after
-    // A's executeEntry self-aborts.
-    assert.equal(res.statusCode, 202);
+    // Durable retirement finishes before B becomes the exact replacement owner.
+    assert.equal(res.statusCode, 200);
     const body = res.json();
-    assert.equal(body.deferred, true);
-    assert.equal(body.code, 'PREEMPT_PENDING_PRESTART');
+    assert.equal(body.started, true);
 
     // A was tombstoned (removed) so executeEntry self-aborts at its post-startAll guard.
     assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus'), null, 'in-flight A must be tombstoned');
@@ -1121,6 +1366,7 @@ describe('Queue Management API', () => {
     const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
 
     deps.invocationTracker.has = mock.fn(() => false);
+    deps.queueProcessor.processExactSteerReservation = mock.fn(async () => ({ started: true, entry: steered.entry }));
 
     const res = await app.inject({
       method: 'POST',
@@ -1129,9 +1375,8 @@ describe('Queue Management API', () => {
       payload: { mode: 'immediate' },
     });
 
-    // Sound: tombstone + 202-deferred, regardless of entry age. NO force-release (double-start risk).
-    assert.equal(res.statusCode, 202);
-    assert.equal(res.json().code, 'PREEMPT_PENDING_PRESTART');
+    // Sound: durable retire + exact start, regardless of entry age. NO force-release (double-start risk).
+    assert.equal(res.statusCode, 200);
     assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0, 'must NEVER force-release by age');
   });
 
@@ -1146,6 +1391,7 @@ describe('Queue Management API', () => {
     const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
 
     deps.invocationTracker.has = mock.fn(() => false);
+    deps.queueProcessor.processExactSteerReservation = mock.fn(async () => ({ started: true, entry: steered.entry }));
 
     const res = await app.inject({
       method: 'POST',
@@ -1154,7 +1400,7 @@ describe('Queue Management API', () => {
       payload: { mode: 'immediate' },
     });
 
-    assert.equal(res.statusCode, 202);
+    assert.equal(res.statusCode, 200);
     assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'tombstoned message must be marked canceled');
     assert.equal(deps.messageStore.markCanceled.mock.calls[0].arguments[0], 'msg-inflight');
     const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
@@ -1173,6 +1419,7 @@ describe('Queue Management API', () => {
     const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
 
     deps.invocationTracker.has = mock.fn(() => false);
+    deps.queueProcessor.processExactSteerReservation = mock.fn(async () => ({ started: true, entry: steered.entry }));
     deps.messageStore.markCanceled = mock.fn(async () => ({
       deliveryStatus: 'delivered',
       deliveryTransitioned: false,
@@ -1185,7 +1432,7 @@ describe('Queue Management API', () => {
       payload: { mode: 'immediate' },
     });
 
-    assert.equal(res.statusCode, 202);
+    assert.equal(res.statusCode, 200);
     assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'markCanceled must be called');
     const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
     assert.equal(del, undefined, 'message_deleted must NOT be emitted when cancel is a no-op');

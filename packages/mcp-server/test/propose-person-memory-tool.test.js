@@ -36,6 +36,11 @@ describe('cat_cafe_propose_person_memory MCP tool', () => {
       };
     };
 
+    const writeOpportunityRef = {
+      opportunityId: `write_opp_${'a'.repeat(32)}`,
+      dedupeLineage: `write_lineage_${'b'.repeat(32)}`,
+      generation: 1,
+    };
     const result = await handleProposePersonMemory({
       person: { displayName: '黄挺', privateAliases: ['黄挺'] },
       replacesProposalId: 'person_candidate_stale',
@@ -70,6 +75,7 @@ describe('cat_cafe_propose_person_memory MCP tool', () => {
         ],
       },
       sourceMessageId: 'msg_people',
+      writeOpportunityRef,
     });
 
     assert.equal(result.isError, undefined);
@@ -80,6 +86,7 @@ describe('cat_cafe_propose_person_memory MCP tool', () => {
     assert.equal(body.sourceBundle.sources[0].kind, 'message_text');
     assert.equal(body.sourceBundle.assertionBindings[0].role, 'reported_fact');
     assert.equal(body.replacesProposalId, 'person_candidate_stale');
+    assert.deepEqual(body.writeOpportunityRef, writeOpportunityRef);
     assert.equal(typeof body.clientRequestId, 'string');
     assert.equal(body.invocationId, undefined);
     assert.equal(body.callbackToken, undefined);
@@ -90,6 +97,9 @@ describe('cat_cafe_propose_person_memory MCP tool', () => {
     const tool = callbackTools.find((entry) => entry.name === 'cat_cafe_propose_person_memory');
     assert.ok(tool);
     assert.equal('ownerUserId' in tool.inputSchema, false);
+    assert.ok('writeOpportunityRef' in tool.inputSchema);
+    const refObject = tool.inputSchema.writeOpportunityRef._def.innerType;
+    assert.deepEqual(Object.keys(refObject._def.shape()).sort(), ['dedupeLineage', 'generation', 'opportunityId']);
     assert.equal(typeof tool.handler, 'function');
   });
 

@@ -228,4 +228,37 @@ describe('POST /api/callbacks/complete-a2a-dispatch', () => {
     assert.equal(stale.statusCode, 409);
     assert.equal(JSON.parse(stale.body).code, 'a2a_dispatch_disposition_stale_invocation');
   });
+
+  test('returns a verified replacement pointer when a disposition carrier was superseded', async () => {
+    const { A2ADispatchDispositionError } = await import(
+      '../dist/domains/ball-custody/A2ADispatchDispositionService.js'
+    );
+    const replacement = {
+      kind: 'handed',
+      sourceEventId: 'route:message-successor:codex-sol',
+      sourceMessageId: 'message-successor',
+      fromCatId: 'opus',
+      toCatId: 'codex-sol',
+      coordination: { id: 'coord-successor', phase: 'active', hop: 1 },
+    };
+    const app = await createApp({
+      async complete() {
+        throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced', replacement);
+      },
+    });
+    const auth = await credentials();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/complete-a2a-dispatch',
+      headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
+      payload: { disposition: 'handled' },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(JSON.parse(response.body), {
+      error: 'A2A dispatch disposition rejected',
+      code: 'a2a_dispatch_disposition_replaced',
+      replacement,
+    });
+  });
 });

@@ -6,13 +6,13 @@ import type { IBallCustodyFencedIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
 import {
   buildHoldDispositionEvent,
-  handedEventSourceId,
   holdDispositionEventSourceId,
   type ManagedHoldDisposition,
 } from './ball-custody-events.js';
 import { ManagedHoldReceiptError, type ManagedHoldReceiptService } from './ManagedHoldReceiptService.js';
 import type { ManagedCommandWakeDynamicTaskStore } from './managed-command-wake-lifecycle.js';
 import { parseManagedCommandWakeTask } from './managed-command-wake-lifecycle.js';
+import { classifyManagedHoldWake, findWakeTerminal } from './managed-hold-supersession.js';
 
 export interface ManagedHoldDispositionResult {
   readonly outcome: 'applied' | 'replayed';
@@ -20,6 +20,8 @@ export interface ManagedHoldDispositionResult {
   readonly invocationId: string;
   readonly sourceMessageId: string;
   readonly taskId: string;
+  /** The wake reached a terminal but was no longer the subject's live wake. */
+  readonly retired: boolean;
 }
 
 export class ManagedHoldDispositionError extends Error {
@@ -64,27 +66,71 @@ export class ManagedHoldDispositionService {
   ): Promise<ManagedHoldDispositionResult> {
     await this.assertLatestInvocation(auth.invocationId);
     const { sourceMessageId, taskId } = await this.resolveSource(auth);
-    this.assertTask(auth, sourceMessageId, taskId);
+    // Identity stays fail-closed exactly as before; the command state no longer
+    // routes anything, so this is now a pure assertion.
+    this.assertCarrierIdentity(auth, sourceMessageId, taskId);
 
     const subjectKey = `ball:thread:${auth.threadId}`;
     const events = await this.deps.ballCustodyEventLog.read(subjectKey);
+    // The written event keeps its invocation-scoped audit identity...
     const eventSourceId = holdDispositionEventSourceId({
       invocationId: auth.invocationId,
       sourceMessageId,
       taskId,
     });
-    const prior = events.find((event) => event.sourceEventId === eventSourceId);
+    // ...but a wake's identity is (catId, sourceMessageId, taskId), NOT the
+    // invocation that happened to settle it. Sol R2 P1: production writes the
+    // custody event before settling the F264 receipt, so a receipt failure makes
+    // Queue re-expose the same wake to a successor invocation. Looking the prior
+    // up by the invocation-scoped sourceEventId made that successor blind to the
+    // existing terminal — it either could not settle the carrier at all, or wrote
+    // a second terminal for one wake.
+    const prior = findWakeTerminal(events, { catId: auth.catId, sourceMessageId, taskId });
     if (prior) {
-      this.assertMatchingDispositionEvent(prior, auth, sourceMessageId, taskId, disposition);
+      const canonical = this.assertReplayableTerminal(prior, auth, sourceMessageId, taskId, disposition);
       await this.repairProjectionIfNeeded(subjectKey, events, prior);
       await this.completeReceipt(auth, sourceMessageId, taskId);
-      return { outcome: 'replayed', disposition, invocationId: auth.invocationId, sourceMessageId, taskId };
+      return {
+        outcome: 'replayed',
+        disposition: canonical,
+        invocationId: auth.invocationId,
+        sourceMessageId,
+        taskId,
+        retired: prior.payload.retired === true,
+      };
     }
 
-    await this.assertCurrentHolder(subjectKey, auth.catId);
-    this.assertWakeNotReplaced(events, auth.catId, sourceMessageId, taskId);
+    // clowder-ai#1366: a late or superseded wake still needs a deterministic
+    // terminal. Refusing it (the old behaviour) left no `ball.hold_dispositioned`
+    // for the stop gate to recognize, so the same wake was reinjected forever.
+    const supersession = classifyManagedHoldWake(events, {
+      catId: auth.catId,
+      sourceMessageId,
+      taskId,
+    });
+    if (supersession.kind === 'wake_missing') {
+      throw new ManagedHoldDispositionError('managed_hold_disposition_wake_missing');
+    }
+    // `retired` is derived ONLY from custody supersession — never from the command
+    // carrier. A terminal carrier explains why a callback arrived late; it does not
+    // mean something else took the ball. Sol REQUEST_CHANGES P1: deriving it from
+    // the carrier made a still-live wake write a subject-inert terminal, so the
+    // Queue receipt closed while `ball:thread:X` leaked in `active` forever.
+    const retired = supersession.kind === 'superseded';
+    // Retired terminals are inert on the subject plane, so they need not own the
+    // ball. Any disposition that DOES advance the subject still must.
+    if (!retired) await this.assertCurrentHolder(subjectKey, auth.catId);
 
-    await this.recordDisposition(auth, sourceMessageId, taskId, disposition, subjectKey, eventSourceId, events.length);
+    await this.recordDisposition(
+      auth,
+      sourceMessageId,
+      taskId,
+      disposition,
+      subjectKey,
+      eventSourceId,
+      events.length,
+      retired,
+    );
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
     );
@@ -93,7 +139,7 @@ export class ManagedHoldDispositionService {
     // receipt write fails, replay repairs it from the exact event; the inverse
     // ordering could delete the only Queue carrier before any terminal event exists.
     await this.completeReceipt(auth, sourceMessageId, taskId);
-    return { outcome: 'applied', disposition, invocationId: auth.invocationId, sourceMessageId, taskId };
+    return { outcome: 'applied', disposition, invocationId: auth.invocationId, sourceMessageId, taskId, retired };
   }
 
   private async assertLatestInvocation(invocationId: string): Promise<void> {
@@ -123,16 +169,27 @@ export class ManagedHoldDispositionService {
     return { sourceMessageId, taskId };
   }
 
-  private assertTask(auth: ManagedHoldDispositionAuth, sourceMessageId: string, taskId: string): void {
+  /**
+   * Identity is fail-closed exactly as before.
+   *
+   * What changed for clowder-ai#1366 is only that the command *state* no longer
+   * hard-rejects: a task that already left the active delivery states (or whose
+   * row is gone) is a late callback, not a forged one, so it may still reach a
+   * terminal. Whether that terminal advances the subject is decided solely by
+   * custody supersession — never here.
+   */
+  private assertCarrierIdentity(auth: ManagedHoldDispositionAuth, sourceMessageId: string, taskId: string): void {
     const parsed = parseManagedCommandWakeTask(this.deps.dynamicTaskStore.getById(taskId));
+    // The message-side identity (connector, wakeWhen, taskId, thread, cat) was
+    // already verified in resolveSource, so a missing row is a late callback,
+    // not an unverified caller.
+    if (!parsed) return;
     if (
-      !parsed ||
       parsed.task.id !== taskId ||
       parsed.threadId !== auth.threadId ||
       parsed.catId !== auth.catId ||
       parsed.userId !== auth.userId ||
-      parsed.command.messageId !== sourceMessageId ||
-      (parsed.command.state !== 'enqueued' && parsed.command.state !== 'dispatched')
+      parsed.command.messageId !== sourceMessageId
     ) {
       throw new ManagedHoldDispositionError('managed_hold_disposition_task_mismatch');
     }
@@ -145,30 +202,41 @@ export class ManagedHoldDispositionService {
     }
   }
 
-  private assertWakeNotReplaced(
-    events: readonly BallCustodyEvent[],
-    catId: string,
+  /**
+   * Validate an existing terminal for this exact wake and return its canonical
+   * disposition.
+   *
+   * Sol R4 P1: `handled` vs `completed` is the model's free choice each turn, and
+   * a successor invocation cannot know what its predecessor picked. Demanding the
+   * same value made the current F264 exposure permanently unsettleable, so the
+   * carrier kept recovering — the exact opposite of "already-dispositioned is
+   * idempotent".
+   *
+   * The recorded terminal stays authoritative: it is never rewritten and no second
+   * event is appended. Within ONE invocation a conflicting value is still a caller
+   * bug, so that case keeps failing closed and preserves concurrent linearization.
+   */
+  private assertReplayableTerminal(
+    prior: BallCustodyEvent,
+    auth: ManagedHoldDispositionAuth,
     sourceMessageId: string,
     taskId: string,
-  ): void {
-    const exactWakeIndex = events.findIndex(
-      (event) =>
-        event.kind === 'ball.wake_condition_met' && event.payload.taskId === taskId && event.payload.catId === catId,
-    );
-    if (exactWakeIndex === -1) throw new ManagedHoldDispositionError('managed_hold_disposition_wake_missing');
-
-    const ownReceiverHandoffSourceId = handedEventSourceId(sourceMessageId, catId);
-    const wasReplaced = events
-      .slice(exactWakeIndex + 1)
-      .some(
-        (event) =>
-          (event.kind === 'ball.held' && event.payload.catId === catId) ||
-          (event.kind === 'ball.handed' &&
-            event.sourceEventId !== ownReceiverHandoffSourceId &&
-            (event.payload.fromCatId === catId || event.payload.toCatId === catId)) ||
-          (event.kind === 'ball.handed_cvo' && event.payload.fromCatId === catId),
-      );
-    if (wasReplaced) throw new ManagedHoldDispositionError('managed_hold_disposition_replaced');
+    requested: ManagedHoldDisposition,
+  ): ManagedHoldDisposition {
+    const recorded = prior.payload.disposition;
+    if (
+      prior.kind !== 'ball.hold_dispositioned' ||
+      prior.payload.catId !== auth.catId ||
+      prior.payload.sourceMessageId !== sourceMessageId ||
+      prior.payload.taskId !== taskId ||
+      (recorded !== 'handled' && recorded !== 'completed')
+    ) {
+      throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
+    }
+    if (prior.payload.invocationId === auth.invocationId && recorded !== requested) {
+      throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
+    }
+    return recorded;
   }
 
   private assertMatchingDispositionEvent(
@@ -198,6 +266,7 @@ export class ManagedHoldDispositionService {
     subjectKey: string,
     eventSourceId: string,
     expectedSequence: number,
+    retired: boolean,
   ): Promise<void> {
     try {
       const result = await this.deps.ballCustody.recordFenced(
@@ -208,6 +277,7 @@ export class ManagedHoldDispositionService {
           sourceMessageId,
           taskId,
           disposition,
+          retired,
           at: this.now(),
         }),
         expectedSequence,

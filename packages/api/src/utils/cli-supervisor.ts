@@ -12,6 +12,7 @@ import {
   CLI_PROCESS_OWNER_ENV,
   CLI_SUPERVISOR_SOCKET_DIR_ENV,
   type CliProcessOwnerHandle,
+  cliExecutionOwnerRefFromEnvironment,
   completeCliProcessOwnerCleanup,
   createCliProcessOwnerManifest,
   findOwnedUnixProcesses,
@@ -79,6 +80,7 @@ async function main(): Promise<void> {
       owner = createCliProcessOwnerManifest({
         dataDir: process.env.CAT_CAFE_DATA_DIR,
         socketDirectory: process.env[CLI_SUPERVISOR_SOCKET_DIR_ENV],
+        execution: cliExecutionOwnerRefFromEnvironment(process.env),
       });
     } catch (error) {
       console.error(`[cat-cafe-cli-supervisor] owner manifest failed: ${String(error)}`);

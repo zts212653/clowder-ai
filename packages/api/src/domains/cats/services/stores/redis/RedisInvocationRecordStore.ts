@@ -24,6 +24,15 @@ import {
   type UpdateInvocationInput,
 } from '../ports/InvocationRecordStore.js';
 import { InvocationKeys } from '../redis-keys/invocation-keys.js';
+import { decodeInvocationHash } from './invocation-record-redis-codec.js';
+
+/**
+ * SCAN MATCH `invoc:*` 命中记录 hash 之外，还命中两类 running 索引 SET——对它们发 HGETALL
+ * 会 WRONGTYPE。backfill 与 scanAll 共用同一份排除清单：判据只写一遍（第一份漏掉
+ * `running-threads` 的教训被静默吞错掩盖了三轮 review 才暴露）。
+ */
+const RUNNING_SET_PREFIXES = ['invoc:running:', 'invoc:running-threads:'] as const;
+const DETAIL_KEY_PREFIX = InvocationKeys.detail('');
 
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 const IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
@@ -148,13 +157,21 @@ if newStatus == 'running' and current ~= 'running' then
   redis.call('HDEL', KEYS[1], 'executionStartedAt')
 end
 
--- F194 Phase B: maintain running index inside the same atomic op
+-- F194 Phase B: maintain running index inside the same atomic op.
+-- F297 (cloud R7 P2): KEYS[3] is the per-user running-thread index. It MUST be written in
+-- the same atomic op as KEYS[2] — a fire-and-forget write could drop a thread and produce a
+-- false terminal (a running row rendered as done/error), which F297 forbids outright.
 if newStatus ~= '' and newStatus ~= current then
   local invocId = redis.call('HGET', KEYS[1], 'id')
   if newStatus == 'running' then
     redis.call('SADD', KEYS[2], invocId)
+    redis.call('SADD', KEYS[3], currentThreadId)
   elseif current == 'running' then
     redis.call('SREM', KEYS[2], invocId)
+    -- 只有该 thread 再无 running invocation 时才退出候选索引
+    if redis.call('SCARD', KEYS[2]) == 0 then
+      redis.call('SREM', KEYS[3], currentThreadId)
+    end
   end
 end
 
@@ -168,12 +185,18 @@ return 1
  * AFTER the HSET so concurrent terminal transitions are observed correctly — terminal
  * records skip Set migration (they belong in no running set).
  *
+ * F297 (cloud R7 P2): the per-user candidate index migrates with ownership too, in the
+ * same atomic op — otherwise the new owner's sidebar would miss a running thread (漏报).
+ *
  * KEYS[1] = invocation record hash key
  * KEYS[2] = old running set key (running:{threadId}:{oldUserId})
  * KEYS[3] = new running set key (running:{threadId}:{nextUserId})
+ * KEYS[4] = old owner candidate index (invoc:running-threads:{oldUserId})
+ * KEYS[5] = new owner candidate index (invoc:running-threads:{nextUserId})
  * ARGV[1] = nextUserId
  * ARGV[2] = nowMs (string)
  * ARGV[3] = invocationId
+ * ARGV[4] = threadId
  *
  * Returns:
  *   1  = success (migration applied or skipped per current status)
@@ -191,6 +214,12 @@ local status = redis.call('HGET', KEYS[1], 'status')
 if status == 'running' then
   redis.call('SREM', KEYS[2], ARGV[3])
   redis.call('SADD', KEYS[3], ARGV[3])
+  -- F297 (cloud R7 P2): per-user running-thread index follows ownership.
+  -- KEYS[4]=old owner index, KEYS[5]=new owner index, ARGV[4]=threadId
+  redis.call('SADD', KEYS[5], ARGV[4])
+  if redis.call('SCARD', KEYS[2]) == 0 then
+    redis.call('SREM', KEYS[4], ARGV[4])
+  end
 end
 
 return 1
@@ -201,8 +230,10 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   // F194 Phase B (cloud R13 P1): per-process lazy backfill flag for the running index Set.
   // Records that existed in `running` BEFORE this build deployed (or written via paths that
   // bypass update()'s ATOMIC_UPDATE_LUA) won't be in `invoc:running:{tid}:{uid}`. On first
-  // listRunningByThread call, scan all invoc:* hashes once, populate the Set, then flip the
-  // flag. SADDs are idempotent so multi-process startup races at worst do duplicate work.
+  // first call of EITHER read API (listRunningByThread / listRunningThreadIds), scan all
+  // invoc:* hashes once, populate both the per-thread Set and the per-user candidate index
+  // (F297 cloud R7 P2), then flip the flag. SADDs are idempotent so multi-process startup
+  // races at worst do duplicate work.
   private runningIndexBackfilled = false;
   private runningIndexBackfillPromise: Promise<void> | null = null;
 
@@ -256,8 +287,10 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
   async get(id: string): Promise<InvocationRecord | null> {
     const key = InvocationKeys.detail(id);
     const data = await this.redis.hgetall(key);
-    if (!data || !data.id) return null;
-    return this.hydrateRecord(data);
+    // R12 P1：单条读同样走 domain codec。损坏 hash 以前被 `!data.id` 降级成 null（false
+    // absent = false terminal 方向），现在是未知 ⇒ 抛出。
+    const decoded = decodeInvocationHash([null, data], id, `invocation record ${id}`);
+    return decoded.kind === 'absent' ? null : decoded.record;
   }
 
   async update(id: string, input: UpdateInvocationInput): Promise<InvocationRecord | null> {
@@ -274,15 +307,17 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       const before = await this.get(id);
       if (!before) return null;
       const setKey = InvocationKeys.runningByThread(before.threadId, before.userId);
+      const userThreadsKey = InvocationKeys.runningThreadsByUser(before.userId);
       const successfulCatIds = normalizeSuccessfulCatIds(before.targetCats, input);
 
       const pairs = await this.buildUpdatePairs(key, input, successfulCatIds);
 
       const result = (await this.redis.eval(
         ATOMIC_UPDATE_LUA,
-        2,
+        3,
         key,
         setKey,
+        userThreadsKey,
         input.expectedStatus ?? '',
         input.status ?? '',
         before.threadId,
@@ -380,6 +415,63 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
    * transitions; defensive HGETALL filter masks race-window stale members and best-effort SREM
    * cleans them up in-line.
    */
+  /**
+   * F297 OQ-1: user-scoped sparse candidate index。
+   *
+   * 由 per-user 候选索引 `invoc:running-threads:{userId}` 直接寻址（cloud R7 P2）。
+   * R2 原本刻意不建这份索引、改用 `SCAN MATCH invoc:running:*:{userId}`，理由是避免
+   * 回填/对账；但 Redis 的 SCAN **仍遍历整个 keyspace**（MATCH 只过滤返回值），实测
+   * dbsize 200k 时 201ms，而 sidebar 每次挂载/重连都会走这里，也违反 F297 spec 的
+   * 「常数 pipeline stage」。有了成本数据后该取舍被推翻，回填复用既有
+   * `ensureRunningIndexBackfilled` 一趟完成。
+   *
+   * **漂移方向刻意落在安全侧**：索引 SADD 与 per-thread running set 在同一原子 Lua 内写入，
+   * 所以不会漏报；写侧终态 SREM + 读侧 SCARD 校验消除多报。允许短暂多报（candidate 只是
+   * "要问 classifier 的对象"），但绝不能漏报——漏报会让真实 working 的 thread 被终态回落
+   * 误显示成 done/error（PR #3748 R2 P1-1）。
+   *
+   * 同理，SCARD 读故障**不算**空集合：未知不得当成"没在跑"（local R8 P1）。
+   */
+  async listRunningThreadIds(userId: string): Promise<string[]> {
+    await this.ensureRunningIndexBackfilled();
+    // F297 (cloud R7 P2): 直接寻址，1 次 SMEMBERS + 1 次 pipeline —— 成本随「在跑的 thread 数」
+    // 增长，而不是随整个 keyspace。旧实现用 SCAN MATCH，而 Redis 的 SCAN 仍会遍历整个
+    // keyspace（MATCH 只过滤返回值），把 sidebar 挂载/重连变成 O(所有持久化键)。
+    const indexKey = InvocationKeys.runningThreadsByUser(userId);
+    const candidates = await this.redis.smembers(indexKey);
+    if (candidates.length === 0) return [];
+
+    // 索引是候选加速器，真相仍是 per-thread running set：SCARD 校验消除多报。
+    // 方向性：SADD 与 running set 同原子写 ⇒ 不会漏报；残留只会多报，而多报由此处过滤。
+    const pipeline = this.redis.pipeline();
+    for (const threadId of candidates) pipeline.scard(InvocationKeys.runningByThread(threadId, userId));
+    const results = (await pipeline.exec()) ?? [];
+
+    const live: string[] = [];
+    const stale: string[] = [];
+    for (const [index, threadId] of candidates.entries()) {
+      const entry = results[index];
+      // **只有权威的空集合才算 stale**（error == null && size === 0）。
+      //
+      // 读故障绝不能被当成"没在跑"：那会让真实候选当次消失，方法却仍正常 resolve，
+      // 于是调用方把这一源记成成功、discovery 标 complete、Sidebar 直接走终态回落
+      // = false terminal；紧接着的 SREM 还会把一次瞬时读故障**固化成持久漏报**
+      // （本进程 backfill flag 已置位，不会自行修复）。
+      // 抛出去，让 `resolveWorkingPresence` / `buildSnapshot` 的 completeness 记账封成 idle。
+      if (!entry) throw new Error(`SCARD reply missing for running-thread candidate ${threadId}`);
+      const [error, size] = entry;
+      if (error) throw error;
+      if (typeof size !== 'number') {
+        throw new Error(`SCARD returned a non-numeric reply for running-thread candidate ${threadId}`);
+      }
+      if (size > 0) live.push(threadId);
+      else stale.push(threadId);
+    }
+    // 与既有 listRunningByThread 的 stale 清理同模式：观测路径不阻塞，清理 fire-and-forget。
+    if (stale.length > 0) this.redis.srem(indexKey, ...stale).catch(() => {});
+    return live;
+  }
+
   async listRunningByThread(threadId: string, userId: string): Promise<InvocationRecord[]> {
     await this.ensureRunningIndexBackfilled();
     const setKey = InvocationKeys.runningByThread(threadId, userId);
@@ -393,14 +485,26 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const out: InvocationRecord[] = [];
     const staleIds: string[] = [];
     for (let i = 0; i < ids.length; i++) {
-      const [err, data] = results?.[i] ?? [null, null];
-      if (err || !data || typeof data !== 'object') continue;
-      const d = data as Record<string, string>;
-      if (!d.id || d.status !== 'running' || d.threadId !== threadId || d.userId !== userId) {
-        staleIds.push(ids[i]!);
+      // audit（cloud R9 P1 同类）：本方法喂给 `resolveActiveInvocationsStrict`。若在 store 层
+      // 静默吞掉读错误，strict 路径永远拿不到异常，整条 fail-closed 链就是假的 ——
+      // 少报 running record 会让 live 面报空却仍标 complete，进而 false terminal。
+      const id = ids[i]!;
+      // R12 P1：判据整体收口到 domain codec —— transport validity ≠ record validity。
+      // envelope 未知与 record 未知（缺 owner 字段 / 非法 status / 坏 targetCats / NaN 时间戳）
+      // 一律抛出，禁止降成 stale（stale 会连带 SREM，把一次异常固化成持久漏报）。
+      const decoded = decodeInvocationHash(results?.[i], id, `invocation record ${id}`);
+      // 权威空：记录已删 ⇒ 索引里的 stale 成员。
+      if (decoded.kind === 'absent') {
+        staleIds.push(id);
         continue;
       }
-      out.push(this.hydrateRecord(d));
+      // 完整合法记录才有资格被判定：权威非 running / scope 不符 = 可证明非 live ⇒ stale。
+      const record = decoded.record;
+      if (decoded.kind === 'not_running' || record.threadId !== threadId || record.userId !== userId) {
+        staleIds.push(id);
+        continue;
+      }
+      out.push(record);
     }
     if (staleIds.length > 0) {
       this.redis.srem(setKey, ...staleIds).catch(() => {}); // fire-and-forget cleanup
@@ -443,7 +547,6 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     // (caught by our defensive filter), but the round-trips still cost. Pre-filter the
     // scan results to exclude running-set keys before pipelining HGETALL.
     const matchPattern = `${this.keyPrefix}${InvocationKeys.detail('*')}`;
-    const runningSetPrefix = 'invoc:running:';
     let cursor = '0';
     do {
       const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
@@ -453,7 +556,10 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       // Filter out running-index set keys (invoc:running:{tid}:{uid}) — they match the
       // SCAN pattern but are sets, not record hashes. HGETALL on a set wastes a round-trip
       // and returns WRONGTYPE.
-      const recordKeys = keys.filter((key) => !this.stripPrefix(key).startsWith(runningSetPrefix));
+      const recordKeys = keys.filter((key) => {
+        const bare = this.stripPrefix(key);
+        return !RUNNING_SET_PREFIXES.some((prefix) => bare.startsWith(prefix));
+      });
       if (recordKeys.length === 0) continue;
 
       const hgetalls = this.redis.pipeline();
@@ -462,14 +568,22 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
 
       const sadds = this.redis.pipeline();
       let count = 0;
-      for (const entry of results ?? []) {
-        const [err, data] = entry ?? [null, null];
-        if (err || !data || typeof data !== 'object') continue;
-        const d = data as Record<string, string>;
-        if (d.id && d.status === 'running' && d.threadId && d.userId) {
-          sadds.sadd(InvocationKeys.runningByThread(d.threadId, d.userId), d.id);
-          count++;
-        }
+      for (let index = 0; index < recordKeys.length; index += 1) {
+        // cloud R12 P1 + local R12 P1：backfill 以前手写 `if (err || !data ...) continue`，
+        // 后来又手写 `if (d.id && d.status === 'running' && ...)` —— record-invalid 的 hash
+        // （status=banana / 缺 owner 字段）被静默 skip 后 flag 仍置位，pre-deploy running
+        // thread 被**永久**漏报。收口到 domain codec：未知抛出 → abort 本轮 → flag 不置位
+        // → 下次读 API 自动重试；只有权威 running 才 seed 索引。
+        const bareKey = this.stripPrefix(recordKeys[index]!);
+        const expectedId = bareKey.slice(DETAIL_KEY_PREFIX.length);
+        const decoded = decodeInvocationHash(results?.[index], expectedId, `running index backfill ${bareKey}`);
+        if (decoded.kind !== 'running') continue; // absent（已删）/ 权威非 running：不 seed
+        const record = decoded.record;
+        sadds.sadd(InvocationKeys.runningByThread(record.threadId, record.userId), record.id);
+        // F297 (cloud R7 P2): seed the per-user candidate index in the same backfill pass,
+        // otherwise pre-deploy running records would be invisible to the sidebar (漏报).
+        sadds.sadd(InvocationKeys.runningThreadsByUser(record.userId), record.threadId);
+        count++;
       }
       if (count > 0) await sadds.exec();
     } while (cursor !== '0');
@@ -486,17 +600,26 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     do {
       const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
       cursor = nextCursor;
-      if (keys.length > 0) {
+      // R12 P1（同类审视）：scanAll 以前手写 `if (!err && data.id)` —— 静默吞掉 WRONGTYPE
+      // （SCAN 命中 running 索引 SET）**和**损坏记录。它喂 zombie recovery 与 duty briefing
+      // 的 liveness 判断，静默 omit = zombie 永不恢复。收口到同一 codec + 同一 SET 排除清单；
+      // 上层（Reaper 周期重试 / briefing safeCollect 降级）已能承接抛出。
+      const recordKeys = keys.filter((key) => {
+        const bare = this.stripPrefix(key);
+        return !RUNNING_SET_PREFIXES.some((prefix) => bare.startsWith(prefix));
+      });
+      if (recordKeys.length > 0) {
         const pipeline = this.redis.pipeline();
-        for (const key of keys) {
+        for (const key of recordKeys) {
           pipeline.hgetall(this.stripPrefix(key));
         }
         const results = await pipeline.exec();
-        for (const entry of results ?? []) {
-          const [err, data] = entry!;
-          if (!err && data && typeof data === 'object' && (data as Record<string, string>).id) {
-            records.push(this.hydrateRecord(data as Record<string, string>));
-          }
+        for (let index = 0; index < recordKeys.length; index += 1) {
+          const bareKey = this.stripPrefix(recordKeys[index]!);
+          const expectedId = bareKey.slice(DETAIL_KEY_PREFIX.length);
+          const decoded = decodeInvocationHash(results?.[index], expectedId, `invocation scan ${bareKey}`);
+          if (decoded.kind === 'absent') continue; // scan 与删除并发：key 已消失
+          records.push(decoded.record);
         }
       }
     } while (cursor !== '0');
@@ -519,7 +642,21 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const recordKey = InvocationKeys.detail(id);
     const oldSetKey = InvocationKeys.runningByThread(record.threadId, record.userId);
     const newSetKey = InvocationKeys.runningByThread(record.threadId, nextUserId);
-    await this.redis.eval(REASSIGN_USERID_LUA, 3, recordKey, oldSetKey, newSetKey, nextUserId, String(Date.now()), id);
+    const oldUserThreadsKey = InvocationKeys.runningThreadsByUser(record.userId);
+    const newUserThreadsKey = InvocationKeys.runningThreadsByUser(nextUserId);
+    await this.redis.eval(
+      REASSIGN_USERID_LUA,
+      5,
+      recordKey,
+      oldSetKey,
+      newSetKey,
+      oldUserThreadsKey,
+      newUserThreadsKey,
+      nextUserId,
+      String(Date.now()),
+      id,
+      record.threadId,
+    );
 
     // Idempotency key migration: separate from Set migration (not on liveness hot path)
     const oldIdempKey = InvocationKeys.idempotency(record.threadId, record.userId, record.idempotencyKey);
@@ -538,136 +675,5 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     }
 
     return this.get(id);
-  }
-
-  private hydrateRecord(data: Record<string, string>): InvocationRecord {
-    const errorValue = data.error;
-    const hasError = errorValue !== undefined && errorValue !== '';
-    const usageByCat = safeParseObject(data.usageByCat);
-    const successfulCatIds = data.successfulCatIds
-      ? Object.freeze(safeParseArray(data.successfulCatIds) as CatId[])
-      : undefined;
-    const actionLeaseCarrier = parseActionLeaseCarrier(data.actionLeaseCarrier, data.actionLeaseRef);
-    const waitContinuationCarrier = parseStoredWaitContinuationCarrier(data.waitContinuationCarrier);
-    return {
-      id: data.id!,
-      threadId: data.threadId!,
-      userId: data.userId!,
-      userMessageId: data.userMessageId === '' ? null : data.userMessageId!,
-      targetCats: safeParseArray(data.targetCats) as CatId[],
-      intent: (data.intent as 'execute' | 'ideate') ?? 'execute',
-      status: (data.status as InvocationStatus) ?? 'queued',
-      ...(successfulCatIds !== undefined ? { successfulCatIds } : {}),
-      idempotencyKey: data.idempotencyKey!,
-      ...(hasError ? { error: errorValue } : {}),
-      ...(data.executionStartedAt ? { executionStartedAt: parseInt(data.executionStartedAt, 10) } : {}),
-      ...(usageByCat ? { usageByCat } : {}),
-      ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
-      ...(data.freshnessClosureId ? { freshnessClosureId: data.freshnessClosureId } : {}),
-      ...(data.freshnessInputFrontierMessageId
-        ? { freshnessInputFrontierMessageId: data.freshnessInputFrontierMessageId }
-        : {}),
-      ...(data.freshnessClosureStatus
-        ? { freshnessClosureStatus: data.freshnessClosureStatus as InvocationRecord['freshnessClosureStatus'] }
-        : {}),
-      actionLeaseCarrier,
-      ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
-      createdAt: parseInt(data.createdAt!, 10),
-      updatedAt: parseInt(data.updatedAt!, 10),
-    };
-  }
-}
-
-function parseStoredWaitContinuationCarrier(value: string | undefined): InvocationRecord['waitContinuationCarrier'] {
-  if (!value) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error('Stored InvocationRecord has malformed wait continuation carrier JSON');
-  }
-  return requireInvocationWaitContinuationCarrier(parsed);
-}
-
-function parseActionLeaseCarrier(
-  value: string | undefined,
-  legacyActionLeaseRef: string | undefined,
-): InvocationRecord['actionLeaseCarrier'] {
-  if (!value) {
-    if (!legacyActionLeaseRef) return Object.freeze({ kind: 'none' });
-    const legacyRef = parseActionLeaseRef(legacyActionLeaseRef);
-    return Object.freeze({ kind: 'action_successor', ...legacyRef });
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error('Invalid persisted InvocationRecord.actionLeaseCarrier JSON');
-  }
-  if (typeof parsed === 'object' && parsed !== null && 'kind' in parsed && parsed.kind === 'none') {
-    return Object.freeze({ kind: 'none' });
-  }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('kind' in parsed) ||
-    parsed.kind !== 'action_successor' ||
-    !('leaseId' in parsed) ||
-    typeof parsed.leaseId !== 'string' ||
-    parsed.leaseId.length === 0 ||
-    !('generation' in parsed) ||
-    !Number.isInteger(parsed.generation) ||
-    (parsed.generation as number) <= 0
-  ) {
-    throw new Error('Invalid persisted InvocationRecord.actionLeaseCarrier');
-  }
-  return Object.freeze({
-    kind: 'action_successor',
-    leaseId: parsed.leaseId,
-    generation: parsed.generation as number,
-  });
-}
-
-function parseActionLeaseRef(value: string): InvocationActionLeaseRef {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    throw new Error('Invalid persisted InvocationRecord.actionLeaseRef JSON');
-  }
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('leaseId' in parsed) ||
-    typeof parsed.leaseId !== 'string' ||
-    parsed.leaseId.length === 0 ||
-    !('generation' in parsed) ||
-    !Number.isInteger(parsed.generation) ||
-    (parsed.generation as number) <= 0
-  ) {
-    throw new Error('Invalid persisted InvocationRecord.actionLeaseRef');
-  }
-  return Object.freeze({ leaseId: parsed.leaseId, generation: parsed.generation as number });
-}
-
-function safeParseArray(value: string | undefined): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function safeParseObject(value: string | undefined): Record<string, TokenUsage> | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, TokenUsage>)
-      : null;
-  } catch {
-    return null;
   }
 }

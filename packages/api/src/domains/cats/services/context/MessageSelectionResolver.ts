@@ -1,269 +1,242 @@
-import { createHash } from 'node:crypto';
 import {
+  findGeneratedTextConstructs,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
-  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
+  MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V3,
+  MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION,
   MESSAGE_BUNDLE_VERSION,
-  type MessageBundleCarrierV1,
   MessageBundleCarrierV1Schema,
   type MessageBundleItemV1,
+  type MessageBundleSelectionCliQuoteItem,
   type MessageBundleSelectionItem,
+  type MessageBundleSelectionQuoteItem,
+  type MessageBundleSelectionRichBlockItem,
   MessageBundleSelectionSchema,
-  type MessageContent,
-  type RichBlock,
 } from '@cat-cafe/shared';
-import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
-import type { IThreadStore, Thread } from '../stores/ports/ThreadStore.js';
-import { canViewMessage, getTimelineOrderTime, isTimelinePublished } from '../stores/visibility.js';
+import type { IMessageStore } from '../stores/ports/MessageStore.js';
+import type { IThreadStore } from '../stores/ports/ThreadStore.js';
+import { getTimelineOrderTime } from '../stores/visibility.js';
+import { resolveMessageBundleCarrier } from './MessageBundleCarrierResolver.js';
+import {
+  digestMessageBundleCliQuoteProjection,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
+  digestMessageBundleQuoteProjectionV3,
+  digestMessageBundleRichBlockProjection,
+} from './MessageBundleProjectionDigest.js';
+import {
+  type BubbleGroupResolver,
+  createCanonicalSourceResolvers,
+  type SourceRecordResolver,
+} from './MessageBundleSourceGroup.js';
+import {
+  canAccessSourceThread,
+  projectCliSegment,
+  projectMessageBundleGroupQuoteSourceV3,
+  projectMessageBundleGroupReadableContent,
+  projectMessageBundleQuoteSourceV1,
+  projectMessageBundleQuoteSourceV2,
+  projectMessageBundleReadableContent,
+  readRichBlockFallback,
+  richBlockFromRecords,
+  sanitizeRichBlock,
+} from './MessageBundleSourceProjection.js';
+import { resolveExactQuoteAnchor, resolveReadableQuoteAnchor } from './message-bundle-quote-matching.js';
+import { projectedItem } from './message-selection-results.js';
+import type {
+  AdmissionCandidate,
+  MessageSelectionAdmissionResult,
+  MessageSelectionAuth,
+  MessageSelectionInvalidReason,
+  MessageSelectionReadResult,
+} from './message-selection-types.js';
 
-export { MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN };
-
-export interface MessageSelectionAuth {
-  userId: string;
-}
-
-export type MessageSelectionInvalidReason =
-  | 'invalid_selection'
-  | 'not_authorized'
-  | 'source_unavailable'
-  | 'quote_mismatch'
-  | 'ambiguous_quote';
-
-export type MessageSelectionTombstoneReason = 'source_unavailable' | 'source_changed';
-
-export type MessageSelectionAuthor = { kind: 'user'; userId: string } | { kind: 'cat'; catId: string };
-
-export interface ResolvedMessageSelectionItem {
-  status: 'available';
-  kind: 'message' | 'quote';
-  messageId: string;
-  sourceThreadId: string;
-  author: MessageSelectionAuthor;
-  timestamp: number;
-  readableContent: string;
-  comment?: string;
-}
-
-export interface MessageSelectionTombstone {
-  status: 'tombstone';
-  messageId: string;
-  reason: MessageSelectionTombstoneReason;
-}
-
-export type MessageSelectionProjectedItem = ResolvedMessageSelectionItem | MessageSelectionTombstone;
-
-export type MessageSelectionAdmissionResult =
-  | {
-      status: 'resolved';
-      sourceThread: Pick<Thread, 'id' | 'title'>;
-      carrier: MessageBundleCarrierV1;
-      items: ResolvedMessageSelectionItem[];
-    }
-  | { status: 'invalid'; reason: MessageSelectionInvalidReason; messageId?: string };
-
-export type MessageSelectionReadResult =
-  | {
-      status: 'resolved';
-      sourceThread: Pick<Thread, 'id' | 'title'> | null;
-      items: MessageSelectionProjectedItem[];
-    }
-  | { status: 'invalid'; reason: 'invalid_carrier' };
+export {
+  digestMessageBundleCliQuoteProjection,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV2,
+  digestMessageBundleQuoteProjectionV3,
+  digestMessageBundleRichBlockProjection,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
+  MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
+  projectMessageBundleQuoteSourceV1,
+  projectMessageBundleQuoteSourceV2,
+  projectMessageBundleReadableContent,
+};
+export type {
+  MessageSelectionAdmissionResult,
+  MessageSelectionAuth,
+  MessageSelectionAuthor,
+  MessageSelectionInvalidReason,
+  MessageSelectionProjectedItem,
+  MessageSelectionReadResult,
+  MessageSelectionTombstone,
+  MessageSelectionTombstoneReason,
+  ResolvedMessageSelectionItem,
+} from './message-selection-types.js';
 
 interface MessageSelectionResolverDeps {
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById' | 'getByThreadAfter'>;
   threadStore: Pick<IThreadStore, 'get'>;
 }
 
-interface AdmissionCandidate {
-  message: StoredMessage;
-  carrierItem: MessageBundleItemV1;
-  projectedItem: ResolvedMessageSelectionItem;
-}
+type AdmissionFailure = Extract<MessageSelectionAdmissionResult, { status: 'invalid' }>;
 
-export function digestMessageBundleQuoteProjection(projection: string): string {
-  return createHash('sha256')
-    .update(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN, 'utf8')
-    .update(projection, 'utf8')
-    .digest('hex');
-}
-
-function readContentBlockFallback(block: MessageContent): string | null {
-  switch (block.type) {
-    case 'text':
-      return block.text;
-    case 'image':
-      return block.alt?.trim() ? `[图片: ${block.alt.trim()}]` : '[图片]';
-    case 'file':
-      return `[文件: ${block.fileName}]`;
-    case 'code': {
-      const heading = block.filename?.trim() ? `[代码: ${block.filename.trim()}]` : '[代码]';
-      return `${heading}\n${block.code}`;
-    }
-    case 'context_attachment': {
-      const attachment = block.attachment;
-      if (attachment.kind === 'quote') return `[引用]\n${attachment.text}`;
-      if (attachment.kind === 'thread') return `[对话: ${attachment.title}]`;
-      return `[文件: ${attachment.path}]`;
-    }
-    case 'tool_call':
-    case 'tool_result':
-      return null;
-  }
-}
-
-function readRichBlockFallback(block: RichBlock): string | null {
-  switch (block.kind) {
-    case 'card': {
-      const lines = [`[卡片: ${block.title}]`];
-      if (block.bodyMarkdown?.trim()) lines.push(block.bodyMarkdown.trim());
-      for (const field of block.fields ?? []) lines.push(`${field.label}: ${field.value}`);
-      return lines.join('\n');
-    }
-    case 'diff':
-      return `[Diff: ${block.filePath}]\n${block.diff}`;
-    case 'checklist': {
-      const lines = [`[清单${block.title?.trim() ? `: ${block.title.trim()}` : ''}]`];
-      lines.push(...block.items.map((item) => `${item.checked ? '[x]' : '[ ]'} ${item.text}`));
-      return lines.join('\n');
-    }
-    case 'media_gallery': {
-      const lines = [`[图片集${block.title?.trim() ? `: ${block.title.trim()}` : ''}]`];
-      lines.push(...block.items.map((item) => item.caption?.trim() || item.alt?.trim() || '[图片]'));
-      return lines.join('\n');
-    }
-    case 'audio': {
-      const label = `[音频${block.title?.trim() ? `: ${block.title.trim()}` : ''}]`;
-      return block.text?.trim() ? `${label}\n${block.text.trim()}` : label;
-    }
-    case 'interactive': {
-      const lines = [`[交互选项${block.title?.trim() ? `: ${block.title.trim()}` : ''}]`];
-      if (block.description?.trim()) lines.push(block.description.trim());
-      lines.push(...block.options.map((option) => `- ${option.label}`));
-      return lines.join('\n');
-    }
-    case 'html_widget':
-      return `[交互内容${block.title?.trim() ? `: ${block.title.trim()}` : ''}]`;
-    case 'file':
-      return `[文件: ${block.fileName}]`;
-  }
-}
-
-export function projectMessageBundleReadableContent(
-  message: Pick<StoredMessage, 'content' | 'contentBlocks' | 'extra'>,
-): string {
-  const parts: string[] = [];
-  if (message.content.trim()) parts.push(message.content);
-
-  for (const block of message.contentBlocks ?? []) {
-    const fallback = readContentBlockFallback(block);
-    if (!fallback?.trim()) continue;
-    if (block.type === 'text' && message.content.trim()) continue;
-    parts.push(fallback);
-  }
-
-  for (const block of message.extra?.rich?.blocks ?? []) {
-    const fallback = readRichBlockFallback(block);
-    if (fallback?.trim()) parts.push(fallback);
-  }
-
-  return parts.join('\n');
-}
-
-export function projectMessageBundleQuoteSourceV1(
-  message: Pick<StoredMessage, 'content' | 'contentBlocks' | 'extra'>,
-): string {
-  return projectMessageBundleReadableContent(message);
-}
-
-function authorFor(message: StoredMessage): MessageSelectionAuthor {
-  return message.catId === null ? { kind: 'user', userId: message.userId } : { kind: 'cat', catId: message.catId };
-}
-
-function invalid(reason: MessageSelectionInvalidReason, messageId?: string): MessageSelectionAdmissionResult {
+function invalid(reason: MessageSelectionInvalidReason, messageId?: string): AdmissionFailure {
   return messageId ? { status: 'invalid', reason, messageId } : { status: 'invalid', reason };
 }
 
-function tombstone(messageId: string, reason: MessageSelectionTombstoneReason): MessageSelectionTombstone {
-  return { status: 'tombstone', messageId, reason };
-}
-
-function canAccessSourceThread(thread: Thread | null, auth: MessageSelectionAuth): thread is Thread {
-  return Boolean(thread && !thread.deletedAt && (thread.createdBy === auth.userId || thread.createdBy === 'system'));
-}
-
-function isSelectableMessage(
-  message: StoredMessage | null,
-  sourceThreadId: string,
-  auth: MessageSelectionAuth,
-): message is StoredMessage {
-  return Boolean(
-    message &&
-      message.threadId === sourceThreadId &&
-      message.userId === auth.userId &&
-      message.userId !== 'system' &&
-      message.userId !== 'scheduler' &&
-      message.catId !== 'system' &&
-      message.source === undefined &&
-      message.origin !== 'briefing' &&
-      message.deletedAt === undefined &&
-      message._tombstone !== true &&
-      message.recall === undefined &&
-      message.deliveryStatus !== 'canceled' &&
-      isTimelinePublished(message) &&
-      canViewMessage(message, { type: 'user' }) &&
-      projectMessageBundleReadableContent(message).trim().length > 0,
-  );
-}
-
-function findExactMatches(text: string, evidence: string): number[] {
-  const matches: number[] = [];
-  let cursor = 0;
-  while (cursor <= text.length - evidence.length) {
-    const index = text.indexOf(evidence, cursor);
-    if (index === -1) break;
-    matches.push(index);
-    cursor = index + 1;
-  }
-  return matches;
-}
-
-function quoteOffsets(
-  item: Extract<MessageBundleSelectionItem, { kind: 'quote' }>,
-  projection: string,
-): { selectionStart: number; selectionEnd: number } | 'quote_mismatch' | 'ambiguous_quote' {
-  if (
-    item.selectionStart !== undefined &&
-    item.selectionEnd !== undefined &&
-    projection.slice(item.selectionStart, item.selectionEnd) === item.text
-  ) {
-    return { selectionStart: item.selectionStart, selectionEnd: item.selectionEnd };
-  }
-
-  const matches = findExactMatches(projection, item.text);
-  if (matches.length === 0) return 'quote_mismatch';
-  if (matches.length > 1) return 'ambiguous_quote';
-  const selectionStart = matches[0]!;
-  return { selectionStart, selectionEnd: selectionStart + item.text.length };
-}
-
-function projectedItem(
-  message: StoredMessage,
-  item: { kind: 'message' | 'quote'; comment?: string },
-  readableContent: string,
-): ResolvedMessageSelectionItem {
-  return {
-    status: 'available',
-    kind: item.kind,
-    messageId: message.id,
-    sourceThreadId: message.threadId,
-    author: authorFor(message),
-    timestamp: message.timestamp,
-    readableContent,
-    ...(item.comment ? { comment: item.comment } : {}),
-  };
-}
+type MessageSelectionMessageItem = Extract<MessageBundleSelectionItem, { kind: 'message' }>;
+type AdmissionCandidateResult = AdmissionCandidate | AdmissionFailure;
 
 export class MessageSelectionResolver {
   constructor(private readonly deps: MessageSelectionResolverDeps) {}
+
+  private async resolveMessageCandidate(
+    item: MessageSelectionMessageItem,
+    sourceThreadId: string,
+    auth: MessageSelectionAuth,
+    resolveBubbleGroup: BubbleGroupResolver,
+  ): Promise<AdmissionCandidateResult> {
+    // A chat bubble is a projection over several stored rows, and the human selected the bubble.
+    // Resolving only the anchor row would silently drop the siblings' prose from what gets
+    // exported or forwarded, so the whole canonical group is always resolved — not just when the
+    // anchor happens to look unreadable on its own.
+    const group = await resolveBubbleGroup(item.messageId, sourceThreadId, auth);
+    if (group.status !== 'resolved') return invalid('source_unavailable', item.messageId);
+    const readableContent = projectMessageBundleGroupReadableContent(group.records);
+    if (!readableContent.trim()) return invalid('source_unavailable', item.messageId);
+    return {
+      message: group.anchor,
+      carrierItem: item,
+      projectedItem: projectedItem(group.anchor, item, readableContent),
+    };
+  }
+
+  private async resolveQuoteCandidate(
+    item: MessageBundleSelectionQuoteItem,
+    sourceThreadId: string,
+    auth: MessageSelectionAuth,
+    resolveBubbleGroup: BubbleGroupResolver,
+  ): Promise<AdmissionCandidateResult> {
+    // The human highlighted text inside one browser bubble. A visible range can cross storage-row
+    // boundaries, so new carriers use a bubble projection instead of guessing which row owns it.
+    // Historical v1/v2 row carriers remain readable in MessageBundleCarrierResolver.
+    const group = await resolveBubbleGroup(item.messageId, sourceThreadId, auth);
+    if (group.status !== 'resolved') return invalid('source_unavailable', item.messageId);
+    // Only the browser can see the rendered plane. The renderer puts characters on screen with
+    // no source counterpart — footnote labels, KaTeX glyphs, component loading states — so a
+    // server-side projection can never prove that the human's selection was unique on screen.
+    // The selecting browser therefore asserts that count, and admission requires it to be 1.
+    if (item.renderedOccurrences !== 1) {
+      return invalid('ambiguous_quote', item.messageId);
+    }
+    // Defence in depth for the constructs we can name from the source alone.
+    if (findGeneratedTextConstructs(projectMessageBundleGroupReadableContent(group.records)).length > 0) {
+      return invalid('unsupported_source', item.messageId);
+    }
+
+    const projection = projectMessageBundleGroupQuoteSourceV3(group.records);
+    const offsets = resolveReadableQuoteAnchor(item, projection);
+    if (typeof offsets === 'string') return invalid(offsets, item.messageId);
+
+    const carrierItem: MessageBundleItemV1 = {
+      kind: 'quote',
+      messageId: group.anchor.id,
+      ...offsets,
+      sourceProjectionVersion: MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION_V3,
+      sourceProjectionSha256: digestMessageBundleQuoteProjectionV3(projection),
+      ...(item.comment ? { comment: item.comment } : {}),
+    };
+    return {
+      message: group.anchor,
+      carrierItem,
+      projectedItem: projectedItem(group.anchor, item, projection.slice(offsets.selectionStart, offsets.selectionEnd)),
+    };
+  }
+
+  private async resolveCliQuoteCandidate(
+    item: MessageBundleSelectionCliQuoteItem,
+    sourceThreadId: string,
+    auth: MessageSelectionAuth,
+    resolveSourceRecords: SourceRecordResolver,
+  ): Promise<AdmissionCandidateResult> {
+    const source = await resolveSourceRecords(item.sourceMessageIds, item.messageId, sourceThreadId, auth);
+    if (source.status !== 'resolved') return invalid('source_unavailable', item.messageId);
+    const projection = projectCliSegment(source.records, item.segmentId);
+    if (projection === null) return invalid('source_unavailable', item.messageId);
+    const offsets = resolveExactQuoteAnchor(item, projection);
+    if (typeof offsets === 'string') return invalid(offsets, item.messageId);
+
+    const carrierItem: MessageBundleItemV1 = {
+      kind: 'cli_quote',
+      messageId: item.messageId,
+      sourceMessageIds: source.records.map((record) => record.id),
+      segmentId: item.segmentId,
+      ...offsets,
+      sourceProjectionVersion: MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
+      sourceProjectionSha256: digestMessageBundleCliQuoteProjection(projection),
+      ...(item.comment ? { comment: item.comment } : {}),
+    };
+    return {
+      message: source.anchor,
+      carrierItem,
+      projectedItem: projectedItem(source.anchor, item, projection.slice(offsets.selectionStart, offsets.selectionEnd)),
+    };
+  }
+
+  private async resolveRichBlockCandidate(
+    item: MessageBundleSelectionRichBlockItem,
+    sourceThreadId: string,
+    auth: MessageSelectionAuth,
+    resolveSourceRecords: SourceRecordResolver,
+  ): Promise<AdmissionCandidateResult> {
+    const source = await resolveSourceRecords(item.sourceMessageIds, item.messageId, sourceThreadId, auth);
+    if (source.status !== 'resolved') return invalid('source_unavailable', item.messageId);
+    const sourceBlock = richBlockFromRecords(source.records, item.blockId);
+    if (!sourceBlock) return invalid('source_unavailable', item.messageId);
+    const readableContent = readRichBlockFallback(sourceBlock);
+    if (!readableContent?.trim()) return invalid('source_unavailable', item.messageId);
+
+    return {
+      message: source.anchor,
+      carrierItem: {
+        kind: 'rich_block',
+        messageId: item.messageId,
+        sourceMessageIds: source.records.map((record) => record.id),
+        blockId: item.blockId,
+        sourceProjectionVersion: MESSAGE_BUNDLE_RICH_BLOCK_PROJECTION_VERSION,
+        sourceProjectionSha256: digestMessageBundleRichBlockProjection(sourceBlock),
+      },
+      projectedItem: projectedItem(source.anchor, item, readableContent, sanitizeRichBlock(sourceBlock)),
+    };
+  }
+
+  private resolveCandidate(
+    item: MessageBundleSelectionItem,
+    sourceThreadId: string,
+    auth: MessageSelectionAuth,
+    resolveSourceRecords: SourceRecordResolver,
+    resolveBubbleGroup: BubbleGroupResolver,
+  ): Promise<AdmissionCandidateResult> {
+    switch (item.kind) {
+      case 'message':
+        return this.resolveMessageCandidate(item, sourceThreadId, auth, resolveBubbleGroup);
+      case 'quote':
+        return this.resolveQuoteCandidate(item, sourceThreadId, auth, resolveBubbleGroup);
+      case 'cli_quote':
+        return this.resolveCliQuoteCandidate(item, sourceThreadId, auth, resolveSourceRecords);
+      case 'rich_block':
+        return this.resolveRichBlockCandidate(item, sourceThreadId, auth, resolveSourceRecords);
+    }
+  }
 
   async resolveForAdmission(input: unknown, auth: MessageSelectionAuth): Promise<MessageSelectionAdmissionResult> {
     const parsed = MessageBundleSelectionSchema.safeParse(input);
@@ -272,40 +245,18 @@ export class MessageSelectionResolver {
     const sourceThread = await this.deps.threadStore.get(parsed.data.sourceThreadId);
     if (!canAccessSourceThread(sourceThread, auth)) return invalid('not_authorized');
 
+    const { resolveSourceRecords, resolveBubbleGroup } = createCanonicalSourceResolvers(this.deps.messageStore);
     const candidates: AdmissionCandidate[] = [];
     for (const item of parsed.data.items) {
-      const message = await this.deps.messageStore.getById(item.messageId);
-      if (!isSelectableMessage(message, parsed.data.sourceThreadId, auth)) {
-        return invalid('source_unavailable', item.messageId);
-      }
-
-      if (item.kind === 'message') {
-        const readableContent = projectMessageBundleReadableContent(message);
-        candidates.push({
-          message,
-          carrierItem: item,
-          projectedItem: projectedItem(message, item, readableContent),
-        });
-        continue;
-      }
-
-      const projection = projectMessageBundleQuoteSourceV1(message);
-      const offsets = quoteOffsets(item, projection);
-      if (typeof offsets === 'string') return invalid(offsets, item.messageId);
-
-      const carrierItem: MessageBundleItemV1 = {
-        kind: 'quote',
-        messageId: item.messageId,
-        ...offsets,
-        sourceProjectionVersion: MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION,
-        sourceProjectionSha256: digestMessageBundleQuoteProjection(projection),
-        ...(item.comment ? { comment: item.comment } : {}),
-      };
-      candidates.push({
-        message,
-        carrierItem,
-        projectedItem: projectedItem(message, item, projection.slice(offsets.selectionStart, offsets.selectionEnd)),
-      });
+      const result = await this.resolveCandidate(
+        item,
+        parsed.data.sourceThreadId,
+        auth,
+        resolveSourceRecords,
+        resolveBubbleGroup,
+      );
+      if ('status' in result) return result;
+      candidates.push(result);
     }
 
     candidates.sort((left, right) => {
@@ -316,6 +267,7 @@ export class MessageSelectionResolver {
     const carrier = MessageBundleCarrierV1Schema.parse({
       v: MESSAGE_BUNDLE_VERSION,
       sourceThreadId: parsed.data.sourceThreadId,
+      ...(parsed.data.note ? { note: parsed.data.note } : {}),
       items: candidates.map((candidate) => candidate.carrierItem),
     });
     return {
@@ -327,50 +279,13 @@ export class MessageSelectionResolver {
   }
 
   async resolveCarrier(input: unknown, auth: MessageSelectionAuth): Promise<MessageSelectionReadResult> {
-    const parsed = MessageBundleCarrierV1Schema.safeParse(input);
-    if (!parsed.success) return { status: 'invalid', reason: 'invalid_carrier' };
-
-    const sourceThread = await this.deps.threadStore.get(parsed.data.sourceThreadId);
-    if (!canAccessSourceThread(sourceThread, auth)) {
-      return {
-        status: 'resolved',
-        sourceThread: null,
-        items: parsed.data.items.map((item) => tombstone(item.messageId, 'source_unavailable')),
-      };
-    }
-
-    const items: MessageSelectionProjectedItem[] = [];
-    for (const item of parsed.data.items) {
-      const message = await this.deps.messageStore.getById(item.messageId);
-      if (!isSelectableMessage(message, parsed.data.sourceThreadId, auth)) {
-        items.push(tombstone(item.messageId, 'source_unavailable'));
-        continue;
-      }
-
-      if (item.kind === 'message') {
-        items.push(projectedItem(message, item, projectMessageBundleReadableContent(message)));
-        continue;
-      }
-
-      const projection = projectMessageBundleQuoteSourceV1(message);
-      const digestMatches =
-        item.sourceProjectionVersion === MESSAGE_BUNDLE_QUOTE_PROJECTION_VERSION &&
-        digestMessageBundleQuoteProjection(projection) === item.sourceProjectionSha256;
-      if (!digestMatches) {
-        items.push(tombstone(item.messageId, 'source_changed'));
-        continue;
-      }
-      if (item.selectionEnd > projection.length) {
-        items.push(tombstone(item.messageId, 'source_changed'));
-        continue;
-      }
-      items.push(projectedItem(message, item, projection.slice(item.selectionStart, item.selectionEnd)));
-    }
-
-    return {
-      status: 'resolved',
-      sourceThread: { id: sourceThread.id, title: sourceThread.title },
-      items,
-    };
+    const { resolveSourceRecords, resolveBubbleGroup } = createCanonicalSourceResolvers(this.deps.messageStore);
+    return resolveMessageBundleCarrier({
+      input,
+      auth,
+      ...this.deps,
+      resolveSourceRecords,
+      resolveBubbleGroup,
+    });
   }
 }

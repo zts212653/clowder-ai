@@ -8,6 +8,7 @@ import type {
   ClaimDeferredPersonMemoryReceiptResult,
   DeferredPersonMemoryReceiptStore,
   HardForgetDeferredPersonMemoryReceiptResult,
+  RearmDeferredPersonMemoryReceiptResult,
   StageDeferredPersonMemoryReceiptInput,
   StageDeferredPersonMemoryReceiptResult,
   WithdrawDeferredPersonMemoryReceiptResult,
@@ -15,11 +16,13 @@ import type {
 import {
   DEFERRED_RECEIPT_CLAIM_LUA,
   DEFERRED_RECEIPT_FORGET_LUA,
+  DEFERRED_RECEIPT_REARM_LUA,
   DEFERRED_RECEIPT_RELEASE_LUA,
   DEFERRED_RECEIPT_STAGE_LUA,
   DEFERRED_RECEIPT_WITHDRAW_LUA,
   DeferredPersonMemoryReceiptKeys,
 } from './deferred-person-memory-redis-contract.js';
+import { sameDeferredWriteOpportunityBinding } from './deferred-write-opportunity-binding.js';
 import {
   deferredReceiptLineageMarker,
   parsePersonMemoryDeltaLineageMarker,
@@ -50,6 +53,8 @@ function actionableReceipt(input: StageDeferredPersonMemoryReceiptInput): Deferr
     sourceCoordinates: input.sourceCoordinates,
     sourceBundleDigest: input.sourceBundleDigest,
     dedupeHash: input.dedupeHash,
+    ...(input.writeOpportunityLineage ? { writeOpportunityLineage: input.writeOpportunityLineage } : {}),
+    ...(input.writeOpportunityReceipt ? { writeOpportunityReceipt: input.writeOpportunityReceipt } : {}),
     state: input.ready ? 'deferred' : 'awaiting_confirmation',
     retention: 'owner_controlled_no_ttl',
     createdAt: input.createdAt,
@@ -68,6 +73,10 @@ function terminalReceipt(
     ownerUserId: receipt.ownerUserId,
     requesterCatId: receipt.requesterCatId,
     dedupeHash: receipt.dedupeHash,
+    // Survivor field, deliberately carried across the terminal payload purge: retaining the lineage
+    // after the receipt reaches proposed/withdrawn is exactly what proves a deferred opportunity
+    // landed on the same F276 destination (SR:126-127, SR:174-176). It is IDs only.
+    ...(receipt.writeOpportunityLineage ? { writeOpportunityLineage: receipt.writeOpportunityLineage } : {}),
     state,
     ...(proposalId ? { proposalId } : {}),
     retention: receipt.retention,
@@ -104,7 +113,11 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
     if (result === 'CREATED') return { outcome: 'created', receipt };
     if (result === 'EXISTS') {
       const existing = await this.get(input.ownerUserId, input.receiptId);
-      if (existing?.dedupeHash === input.dedupeHash && existing.invocationId === input.invocationId) {
+      if (
+        existing?.dedupeHash === input.dedupeHash &&
+        existing.invocationId === input.invocationId &&
+        sameDeferredWriteOpportunityBinding(existing, receipt)
+      ) {
         return { outcome: 'replayed', receipt: existing };
       }
       return { outcome: 'conflict' };
@@ -115,7 +128,9 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
       if (marker?.kind === 'proposal') return { outcome: 'already_proposed', proposalId: marker.id };
       const duplicateId = marker?.kind === 'receipt' ? marker.id : rawMarker;
       const duplicate = await this.get(input.ownerUserId, duplicateId);
-      return duplicate ? { outcome: 'deduped', receipt: duplicate } : { outcome: 'conflict' };
+      return duplicate && sameDeferredWriteOpportunityBinding(duplicate, receipt)
+        ? { outcome: 'deduped', receipt: duplicate }
+        : { outcome: 'conflict' };
     }
     return { outcome: 'conflict' };
   }
@@ -189,6 +204,51 @@ export class RedisDeferredPersonMemoryReceiptStore implements DeferredPersonMemo
         ),
       ) === 1
     );
+  }
+
+  async rearmWriteOpportunity(input: {
+    ownerUserId: string;
+    receiptId: string;
+    claimId: string;
+    requesterCatId: string;
+    dedupeHash: string;
+    writeOpportunityLineage: NonNullable<DeferredPersonMemoryReceipt['writeOpportunityLineage']>;
+    writeOpportunityReceipt: NonNullable<DeferredPersonMemoryReceipt['writeOpportunityReceipt']>;
+    now: number;
+  }): Promise<RearmDeferredPersonMemoryReceiptResult> {
+    const current = await this.get(input.ownerUserId, input.receiptId);
+    if (!current) return { outcome: 'not_available' };
+    if (
+      current.state !== 'claimed' ||
+      current.claimId !== input.claimId ||
+      current.claimUntil === undefined ||
+      current.claimUntil <= input.now ||
+      current.requesterCatId !== input.requesterCatId ||
+      current.dedupeHash !== input.dedupeHash ||
+      current.writeOpportunityLineage?.dedupeLineage !== input.writeOpportunityLineage.dedupeLineage ||
+      current.writeOpportunityLineage.generation + 1 !== input.writeOpportunityLineage.generation
+    ) {
+      return { outcome: 'conflict' };
+    }
+    const { claimId: _claimId, claimUntil: _claimUntil, ...base } = current;
+    const rearmed = deferredPersonMemoryReceiptSchema.parse({
+      ...base,
+      state: 'deferred',
+      writeOpportunityLineage: input.writeOpportunityLineage,
+      writeOpportunityReceipt: input.writeOpportunityReceipt,
+      updatedAt: input.now,
+    });
+    const result = Number(
+      await this.redis.eval(
+        DEFERRED_RECEIPT_REARM_LUA,
+        1,
+        this.keys.receipt(input.ownerUserId, input.receiptId),
+        JSON.stringify(rearmed),
+        input.claimId,
+        input.now,
+      ),
+    );
+    return result === 1 ? { outcome: 'rearmed', receipt: rearmed } : { outcome: 'conflict' };
   }
 
   async withdraw(

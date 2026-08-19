@@ -68,7 +68,7 @@ describe('F292 Redis signal intake', { skip: redisIsolationSkipReason(REDIS_URL)
     assert.deepEqual(await Promise.all(unprefixed.map((key) => redis.ttl(key))), [-1, -1, -1, -1]);
   });
 
-  it('persists Host route truth without expiry and reads it exactly', async () => {
+  it('creates Host route truth atomically without expiry or later bootstrap overwrite', async () => {
     const routes = new RedisSignalRouteStore(redis);
     const route = {
       routeId: 'route-redis',
@@ -81,7 +81,18 @@ describe('F292 Redis signal intake', { skip: redisIsolationSkipReason(REDIS_URL)
       initialUnresolved: ['destination'],
       updatedAt: 12_000,
     };
-    await routes.put(route);
+    assert.equal(await routes.putIfAbsent(route), true);
+    assert.equal(
+      await routes.putIfAbsent({
+        ...route,
+        routeId: 'startup-overwrite',
+        ownerId: 'new-default-user',
+        generation: 1,
+        state: 'active',
+        updatedAt: 99_000,
+      }),
+      false,
+    );
     assert.deepEqual(await routes.get(route.pluginId, route.signalType), route);
     const keys = await redis.keys(`${KEY_PREFIX}${SignalIntakeKeys.route('*')}`);
     assert.equal(keys.length, 1);

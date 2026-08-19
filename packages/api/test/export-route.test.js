@@ -252,6 +252,9 @@ describe('Export Route (endpoint)', () => {
       }),
       getRecent: () => [],
       getByThread: async () => messages,
+      // Whole-message selection resolves the canonical bubble group, so the store must expose the
+      // same timeline the browser projected from.
+      getByThreadAfter: async (threadId) => messages.filter((message) => message.threadId === threadId),
       getById: async (id) => messages.find((message) => message.id === id) ?? null,
       getPendingMentions: async () => [],
     };
@@ -446,6 +449,7 @@ describe('Export Route (endpoint)', () => {
             kind: 'quote',
             messageId: 'message-quote',
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 6,
             selectionEnd: 10,
             comment: '重点看这里',

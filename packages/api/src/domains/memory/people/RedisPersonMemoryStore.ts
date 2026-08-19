@@ -1,6 +1,7 @@
 import {
   type ApprovalEnvelope,
   type ApprovalPublication,
+  captureCandidateIdSchema,
   type InteractionEvent,
   type PersonClaimVersion,
   type PersonIdentity,
@@ -127,6 +128,17 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
 
   async getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null> {
     return parseStoredCandidate(await this.redis.get(PersonMemoryKeys.candidate(ownerUserId, candidateId)));
+  }
+
+  async listCandidateIdsForPerson(ownerUserId: string, personId: string) {
+    const [materializedIds, targetedIds] = await Promise.all([
+      this.redis.smembers(PersonMemoryKeys.personCandidates(ownerUserId, personId)),
+      this.redis.smembers(PersonMemoryKeys.targetCandidates(ownerUserId, personId)),
+    ]);
+    return [...new Set([...materializedIds, ...targetedIds])].flatMap((candidateId) => {
+      const parsed = captureCandidateIdSchema.safeParse(candidateId);
+      return parsed.success ? [parsed.data] : [];
+    });
   }
 
   async listPending(ownerUserId: string, limit = 100): Promise<StoredPersonMemoryCandidate[]> {

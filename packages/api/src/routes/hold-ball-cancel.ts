@@ -8,14 +8,18 @@
 
 import type { SchedulerAwaitStateV1 } from '@cat-cafe/shared';
 import { readManagedCommandWakeProjection } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
+import {
+  isHoldBallWakeTask,
+  isPendingHoldBallWakeTask,
+  isRetiredWakeWithRunningManagedCommand as isRetiredWakeWithRunningManagedCommandTask,
+  readHoldLifecycleProjection,
+} from '../domains/ball-custody/managed-command-wake-lifecycle.js';
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import {
   c1HoldCancelCount,
   holdEventRetiredTotal,
   userPingBeforeHolderTerminalTotal,
 } from '../infrastructure/telemetry/instruments.js';
-
-const HOLD_BALL_TASK_ID_PREFIX = 'hold-ball-';
 
 export type HoldExpectedSignalKey =
   | 'assignment'
@@ -76,35 +80,19 @@ const STRUCTURED_SIGNAL_KEYS = new Set<HoldExpectedSignalKey>([
   'user_message',
 ]);
 
-export function isHoldBallTask(task: DynamicTaskDef): boolean {
-  return (
-    task.id.startsWith(HOLD_BALL_TASK_ID_PREFIX) &&
-    task.templateId === 'reminder' &&
-    typeof task.createdBy === 'string' &&
-    task.createdBy.startsWith('hold-ball:')
-  );
-}
+/** 判别 owner 在 ball-custody domain（R4 P2-1）；此处只保留既有 import 路径。 */
+export const isHoldBallTask = isHoldBallWakeTask;
 
-export function isPendingHoldBallTask(task: DynamicTaskDef): boolean {
-  if (!isHoldBallTask(task) || !task.enabled) return false;
-  if (!Object.hasOwn(task.params, 'holdLifecycle')) return true;
-  const lifecycle = readHoldLifecycle(task);
-  return lifecycle?.status === 'active';
-}
+/** 判别 owner 在 ball-custody domain（R5 P1-1）；此处只保留既有 import 路径。 */
+export const isPendingHoldBallTask = isPendingHoldBallWakeTask;
 
 /**
  * An ordinary user message retires the obsolete wake carrier, not the
  * independently running managed command. Keep that execution discoverable and
  * explicitly cancelable until its exact runner reaches terminal.
  */
-export function isRetiredWakeWithRunningManagedCommand(task: DynamicTaskDef): boolean {
-  if (!isHoldBallTask(task) || task.enabled) return false;
-  const lifecycle = readHoldLifecycle(task);
-  const command = readManagedCommandWakeProjection(task);
-  return (
-    lifecycle?.mode === 'wake_when' && lifecycle.status === 'cancelled_by_user' && command?.state === 'command_running'
-  );
-}
+/** 判别 owner 在 ball-custody domain（R4 P2-1）；此处只保留既有 import 路径。 */
+export const isRetiredWakeWithRunningManagedCommand = isRetiredWakeWithRunningManagedCommandTask;
 
 export function isCancelableHoldBallTask(task: DynamicTaskDef): boolean {
   return isPendingHoldBallTask(task) || isRetiredWakeWithRunningManagedCommand(task);
@@ -153,20 +141,9 @@ export function deriveHoldSubjectKeyFromWaitSourceRef(waitSourceRef: unknown): s
   return normalizeHoldSubjectKey(waitSourceRef.value);
 }
 
+/** 判读 owner 在 ball-custody domain（R5 P1-1）；此处只做类型收窄。 */
 export function readHoldLifecycle(task: DynamicTaskDef): HoldLifecycleProjection | null {
-  const lifecycle = task.params.holdLifecycle;
-  if (!isPlainRecord(lifecycle)) return null;
-  if (lifecycle.mode !== 'timer' && lifecycle.mode !== 'wake_when') return null;
-  if (
-    lifecycle.status !== 'active' &&
-    lifecycle.status !== 'retired_by_event' &&
-    lifecycle.status !== 'cancelled_by_user' &&
-    lifecycle.status !== 'fired'
-  ) {
-    return null;
-  }
-  if (typeof lifecycle.createdBy !== 'string') return null;
-  return lifecycle as unknown as HoldLifecycleProjection;
+  return readHoldLifecycleProjection(task) as HoldLifecycleProjection | null;
 }
 
 function matchesSatisfiedWait(task: DynamicTaskDef, event: SatisfiedWaitEvent): boolean {

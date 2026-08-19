@@ -1,16 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 
 function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(input ?? {})) {
-    if (value === null) delete env[key];
-    else env[key] = value;
-  }
-  return env;
+  return buildChildEnv(input);
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {

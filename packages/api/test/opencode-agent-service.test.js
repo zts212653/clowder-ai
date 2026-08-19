@@ -1400,7 +1400,7 @@ describe('OpenCodeAgentService', () => {
           state: {
             status: 'completed',
             output:
-              'token=sk-review-secret-123 path=C:\\Users\\Alice\\secrets\\config.json also /Users/alice/.ssh/id_rsa',
+              'token=sk-review-secret-123 path=C:\\Users\\Alice\\secrets\\config.json also /home/user/.ssh/id_rsa',
           },
         },
       },

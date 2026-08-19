@@ -116,7 +116,6 @@ describe('SplitPaneView input routing (P1-1)', () => {
       root.render(
         React.createElement(SplitPaneView, {
           onSend: mockOnSend,
-          onStop: vi.fn(),
           onZoomToThread: vi.fn(),
         }),
       );

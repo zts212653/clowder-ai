@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -16,9 +16,12 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { debuglog } from 'node:util';
 
 export const CLI_PROCESS_OWNER_ENV = 'CAT_CAFE_PROCESS_OWNER_ID';
+export const CLI_EXECUTION_ID_ENV = 'CAT_CAFE_EXECUTION_ID';
+export const CLI_EXECUTION_OWNER_BINDING_ENV = 'CAT_CAFE_PROCESS_EXECUTION_OWNER';
 export const CLI_PROCESS_SNAPSHOT_TIMEOUT_MS = 2_000;
 export const CLI_SUPERVISOR_SOCKET_DIR_ENV = 'CAT_CAFE_SUPERVISOR_SOCKET_DIR';
 const OWNER_DIRECTORY = 'cli-process-owners';
+const OWNER_QUARANTINE_DIRECTORY = 'cli-process-owner-quarantine';
 const SOCKET_DIRECTORY_PREFIX = 'cat-cafe-codex-host-';
 const OWNER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const processDebug = debuglog('cat-cafe-cli-supervisor');
@@ -41,6 +44,38 @@ export interface CliProcessOwnerManifest {
   supervisor: UnixProcessIdentity;
   root?: UnixProcessIdentity;
   socketDirectory?: string;
+  execution?: CliExecutionOwnerRef;
+}
+
+/** Non-secret join key from the provider tree back to its durable execution. */
+export interface CliExecutionOwnerRef {
+  /** Parent/control-plane execution id used by Queue and active-execution cancel. */
+  executionId: string;
+  /** Exact child/turn id exposed to callback tools. */
+  invocationId: string;
+  threadId: string;
+  catId: string;
+  userId: string;
+}
+
+export interface LiveCliExecutionOwner extends CliExecutionOwnerRef {
+  startedAt: number;
+}
+
+export interface CliExecutionOwnerSnapshot {
+  owners: LiveCliExecutionOwner[];
+  complete: boolean;
+}
+
+export interface CliExecutionOwnerTermination {
+  matched: number;
+  signaled: number;
+  complete: boolean;
+}
+
+export interface CliExecutionOwnerService {
+  listLive(): Promise<CliExecutionOwnerSnapshot>;
+  terminateExact(execution: CliExecutionOwnerRef): Promise<CliExecutionOwnerTermination>;
 }
 
 export interface CliProcessOwnerRecord {
@@ -57,10 +92,23 @@ export interface ReadOwnerRecordsResult {
   invalidPaths: string[];
 }
 
-interface ProcessSnapshotOptions {
+export interface QuarantineInvalidOwnerManifestsResult {
+  quarantinedPaths: string[];
+  failedPaths: string[];
+}
+
+interface CliExecutionOwnerLog {
+  warn(bindings: Record<string, unknown>, message: string): void;
+}
+
+export interface ProcessSnapshotOptions {
   includeEnvironment?: boolean;
   pids?: readonly number[];
 }
+
+export type ReadProcessSnapshot = (
+  options?: ProcessSnapshotOptions,
+) => Promise<Map<number, UnixProcessSnapshotEntry> | null>;
 
 export function buildUnixProcessSnapshotArgs(
   includeEnvironment: boolean,
@@ -159,6 +207,53 @@ function parseProcessIdentity(value: unknown): UnixProcessIdentity | null {
   };
 }
 
+function isSafeCoordinate(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 256) return false;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint < 0x20 || codePoint === 0x7f)) return false;
+  }
+  return true;
+}
+
+export function parseCliExecutionOwnerRef(value: unknown): CliExecutionOwnerRef | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const allowed = new Set(['executionId', 'invocationId', 'threadId', 'catId', 'userId']);
+  if (Object.keys(record).some((key) => !allowed.has(key))) return null;
+  if (
+    !isSafeCoordinate(record.executionId) ||
+    !isSafeCoordinate(record.invocationId) ||
+    !isSafeCoordinate(record.threadId) ||
+    !isSafeCoordinate(record.catId) ||
+    !isSafeCoordinate(record.userId)
+  ) {
+    return null;
+  }
+  return {
+    executionId: record.executionId,
+    invocationId: record.invocationId,
+    threadId: record.threadId,
+    catId: record.catId,
+    userId: record.userId,
+  };
+}
+
+export function cliExecutionOwnerRefFromEnvironment(env: NodeJS.ProcessEnv): CliExecutionOwnerRef | undefined {
+  // Persistent carrier hosts (for example pooled Codex app-server sessions)
+  // outlive an invocation and must never be pinned to their first turn. Only
+  // spawnCli's per-invocation supervisor opts into this binding.
+  if (env[CLI_EXECUTION_OWNER_BINDING_ENV] !== '1') return undefined;
+  const parsed = parseCliExecutionOwnerRef({
+    executionId: env[CLI_EXECUTION_ID_ENV] ?? env.CAT_CAFE_INVOCATION_ID,
+    invocationId: env.CAT_CAFE_INVOCATION_ID,
+    threadId: env.CAT_CAFE_THREAD_ID,
+    catId: env.CAT_CAFE_CAT_ID,
+    userId: env.CAT_CAFE_USER_ID,
+  });
+  return parsed ?? undefined;
+}
+
 export function isValidatedCodexSocketDirectory(path: string): boolean {
   if (!isAbsolute(path)) return false;
   const resolved = resolve(path);
@@ -174,6 +269,26 @@ export function isValidatedCodexSocketDirectory(path: string): boolean {
   return realParent === realTemporaryRoot && name.startsWith(SOCKET_DIRECTORY_PREFIX) && name.length > 24;
 }
 
+function parseOptionalManifestOwnership(record: Record<string, unknown>): {
+  root?: UnixProcessIdentity;
+  socketDirectory?: string;
+  execution?: CliExecutionOwnerRef;
+} | null {
+  const root = record.root === undefined ? undefined : parseProcessIdentity(record.root);
+  if (record.root !== undefined && !root) return null;
+  const socketDirectory = record.socketDirectory;
+  if (socketDirectory !== undefined) {
+    if (typeof socketDirectory !== 'string' || !isValidatedCodexSocketDirectory(socketDirectory)) return null;
+  }
+  const execution = record.execution === undefined ? undefined : parseCliExecutionOwnerRef(record.execution);
+  if (record.execution !== undefined && !execution) return null;
+  return {
+    ...(root ? { root } : {}),
+    ...(typeof socketDirectory === 'string' ? { socketDirectory: resolve(socketDirectory) } : {}),
+    ...(execution ? { execution } : {}),
+  };
+}
+
 export function parseCliProcessOwnerManifest(value: unknown): CliProcessOwnerManifest | null {
   const record = asRecord(value);
   if (!record || record.v !== 1 || typeof record.ownerId !== 'string' || !OWNER_ID_RE.test(record.ownerId)) {
@@ -182,19 +297,14 @@ export function parseCliProcessOwnerManifest(value: unknown): CliProcessOwnerMan
   if (!isPositiveSafeInteger(record.createdAt)) return null;
   const supervisor = parseProcessIdentity(record.supervisor);
   if (!supervisor) return null;
-  const root = record.root === undefined ? undefined : parseProcessIdentity(record.root);
-  if (record.root !== undefined && !root) return null;
-  const socketDirectory = record.socketDirectory;
-  if (socketDirectory !== undefined) {
-    if (typeof socketDirectory !== 'string' || !isValidatedCodexSocketDirectory(socketDirectory)) return null;
-  }
+  const optional = parseOptionalManifestOwnership(record);
+  if (!optional) return null;
   return {
     v: 1,
     ownerId: record.ownerId,
     createdAt: record.createdAt,
     supervisor,
-    ...(root ? { root } : {}),
-    ...(typeof socketDirectory === 'string' ? { socketDirectory: resolve(socketDirectory) } : {}),
+    ...optional,
   };
 }
 
@@ -207,6 +317,23 @@ function atomicWriteManifest(path: string, manifest: CliProcessOwnerManifest): v
     rmSync(temporaryPath, { force: true });
     throw error;
   }
+}
+
+function isKnownEmptyExactPidSnapshot(input: {
+  pids: readonly number[] | undefined;
+  exitCode: string | number | null | undefined;
+  signal: NodeJS.Signals | null | undefined;
+  stdout: string;
+  stderr: string | Buffer | undefined;
+}): boolean {
+  return (
+    input.pids !== undefined &&
+    input.exitCode === 1 &&
+    (input.signal === null || input.signal === undefined) &&
+    input.stdout.trim() === '' &&
+    typeof input.stderr === 'string' &&
+    input.stderr.trim() === ''
+  );
 }
 
 export function readUnixProcessSnapshotSync(
@@ -222,7 +349,21 @@ export function readUnixProcessSnapshotSync(
     timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
     maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
   });
-  if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return null;
+  if (typeof result.stdout !== 'string') return null;
+  if (result.error || result.status !== 0) {
+    if (
+      isKnownEmptyExactPidSnapshot({
+        pids,
+        exitCode: result.status,
+        signal: result.signal,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      })
+    ) {
+      return new Map();
+    }
+    return null;
+  }
 
   const snapshot = new Map<number, UnixProcessSnapshotEntry>();
   for (const line of result.stdout.split('\n')) {
@@ -232,6 +373,50 @@ export function readUnixProcessSnapshotSync(
     snapshot.set(entry.pid, entry);
   }
   return snapshot;
+}
+
+/** Non-blocking process-table read for request paths. Reapers keep the sync form. */
+export function readUnixProcessSnapshot(
+  options: ProcessSnapshotOptions = {},
+): Promise<Map<number, UnixProcessSnapshotEntry> | null> {
+  if (process.platform === 'win32') return Promise.resolve(null);
+  const pids = options.pids?.filter(isPositiveSafeInteger);
+  if (pids && pids.length === 0) return Promise.resolve(new Map());
+  const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
+  if (options.includeEnvironment) processDebug('ownership-process-table-scan');
+  return new Promise((resolveSnapshot) => {
+    execFile(
+      '/bin/ps',
+      args,
+      {
+        encoding: 'utf8',
+        timeout: CLI_PROCESS_SNAPSHOT_TIMEOUT_MS,
+        maxBuffer: options.includeEnvironment ? 32 * 1024 * 1024 : 4 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (typeof stdout !== 'string') {
+          resolveSnapshot(null);
+          return;
+        }
+        if (error) {
+          if (isKnownEmptyExactPidSnapshot({ pids, exitCode: error.code, signal: error.signal, stdout, stderr })) {
+            resolveSnapshot(new Map());
+            return;
+          }
+          resolveSnapshot(null);
+          return;
+        }
+        const snapshot = new Map<number, UnixProcessSnapshotEntry>();
+        for (const line of stdout.split('\n')) {
+          const entry = parseSnapshotLine(line, options.includeEnvironment === true);
+          if (!entry) continue;
+          attachLinuxProcEnvironment(entry, options.includeEnvironment === true);
+          snapshot.set(entry.pid, entry);
+        }
+        resolveSnapshot(snapshot);
+      },
+    );
+  });
 }
 
 export function sameUnixProcess(expected: UnixProcessIdentity, actual: UnixProcessIdentity | undefined): boolean {
@@ -312,6 +497,7 @@ export function signalOwnedUnixProcesses(
 export function createCliProcessOwnerManifest(options: {
   dataDir?: string;
   socketDirectory?: string;
+  execution?: CliExecutionOwnerRef;
 }): CliProcessOwnerHandle {
   const supervisor = readUnixProcessSnapshotSync({ pids: [process.pid] })?.get(process.pid);
   if (!supervisor) throw new Error('cannot capture supervisor process identity');
@@ -328,10 +514,124 @@ export function createCliProcessOwnerManifest(options: {
     createdAt: Date.now(),
     supervisor,
     ...(options.socketDirectory ? { socketDirectory: resolve(options.socketDirectory) } : {}),
+    ...(options.execution ? { execution: options.execution } : {}),
   };
   const path = join(directory, `${ownerId}.json`);
   atomicWriteManifest(path, manifest);
   return { directory, path, manifest };
+}
+
+function sameCliExecutionScope(left: CliExecutionOwnerRef, right: CliExecutionOwnerRef): boolean {
+  return (
+    left.executionId === right.executionId &&
+    left.threadId === right.threadId &&
+    left.catId === right.catId &&
+    left.userId === right.userId
+  );
+}
+
+export function listLiveCliExecutionOwners(
+  records: readonly CliProcessOwnerRecord[],
+  snapshot: ReadonlyMap<number, UnixProcessSnapshotEntry>,
+): LiveCliExecutionOwner[] {
+  const live: LiveCliExecutionOwner[] = [];
+  for (const { manifest } of records) {
+    if (!manifest.execution || !sameUnixProcess(manifest.supervisor, snapshot.get(manifest.supervisor.pid))) continue;
+    live.push({ ...manifest.execution, startedAt: manifest.createdAt });
+  }
+  return live;
+}
+
+export function terminateCliExecutionOwner(
+  execution: CliExecutionOwnerRef,
+  records: readonly CliProcessOwnerRecord[],
+  snapshot: ReadonlyMap<number, UnixProcessSnapshotEntry>,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+): { matched: number; signaled: number; missing: number; failed: number } {
+  let matched = 0;
+  let signaled = 0;
+  let missing = 0;
+  let failed = 0;
+  for (const { manifest } of records) {
+    // One parent execution may have multiple child/turn supervisors for the
+    // same cat. The UI control handle is the parent id, so an exact cancel must
+    // terminate every child in that scope rather than hiding a sibling ghost.
+    if (!manifest.execution || !sameCliExecutionScope(manifest.execution, execution)) continue;
+    if (!sameUnixProcess(manifest.supervisor, snapshot.get(manifest.supervisor.pid))) continue;
+    matched += 1;
+    try {
+      kill(manifest.supervisor.pid, 'SIGTERM');
+      signaled += 1;
+    } catch (error) {
+      // ESRCH is the one safe idempotent race: the exact PID disappeared after
+      // the snapshot. Permission and other signal failures leave control truth
+      // unknown and must never be reported as a successful cancellation.
+      if ((error as NodeJS.ErrnoException)?.code === 'ESRCH') missing += 1;
+      else failed += 1;
+    }
+  }
+  return { matched, signaled, missing, failed };
+}
+
+async function ownerIdentitySnapshot(
+  records: readonly CliProcessOwnerRecord[],
+  readProcessSnapshot: ReadProcessSnapshot,
+): Promise<Map<number, UnixProcessSnapshotEntry> | null> {
+  const pids = [...new Set(records.map(({ manifest }) => manifest.supervisor.pid))];
+  return readProcessSnapshot({ pids });
+}
+
+export function createCliExecutionOwnerService(
+  options: {
+    dataDir?: string;
+    kill?: (pid: number, signal: NodeJS.Signals) => void;
+    readProcessSnapshot?: ReadProcessSnapshot;
+    log?: CliExecutionOwnerLog;
+  } = {},
+): CliExecutionOwnerService {
+  const processSnapshotReader = options.readProcessSnapshot ?? readUnixProcessSnapshot;
+  const readRecoverableRecords = (): { records: CliProcessOwnerRecord[]; complete: boolean } => {
+    let discovered: ReadOwnerRecordsResult;
+    try {
+      discovered = readCliProcessOwnerRecords(options.dataDir);
+    } catch (error) {
+      options.log?.warn({ error }, 'CLI execution owner manifests are unreadable; control is unavailable');
+      return { records: [], complete: false };
+    }
+    if (discovered.invalidPaths.length === 0) return { records: discovered.records, complete: true };
+    const quarantine = quarantineInvalidCliProcessOwnerManifests(discovered.invalidPaths, options.dataDir);
+    options.log?.warn(
+      {
+        quarantinedPaths: quarantine.quarantinedPaths,
+        failedPaths: quarantine.failedPaths,
+      },
+      quarantine.failedPaths.length === 0
+        ? 'Quarantined malformed CLI execution owner manifests'
+        : 'Some malformed CLI execution owner manifests could not be quarantined; control is unavailable',
+    );
+    return { records: discovered.records, complete: quarantine.failedPaths.length === 0 };
+  };
+  return {
+    async listLive() {
+      const { records, complete } = readRecoverableRecords();
+      const snapshot = await ownerIdentitySnapshot(records, processSnapshotReader);
+      if (!snapshot) return { owners: [], complete: false };
+      return {
+        owners: listLiveCliExecutionOwners(records, snapshot),
+        complete,
+      };
+    },
+    async terminateExact(execution) {
+      const { records, complete } = readRecoverableRecords();
+      const snapshot = await ownerIdentitySnapshot(records, processSnapshotReader);
+      if (!snapshot) return { matched: 0, signaled: 0, complete: false };
+      // An unreadable manifest may belong to the same execution scope. Do not
+      // perform a partial destructive cancel while exact ownership is unknown.
+      if (!complete) return { matched: 0, signaled: 0, complete: false };
+      const result = terminateCliExecutionOwner(execution, records, snapshot, options.kill ?? process.kill);
+      return { matched: result.matched, signaled: result.signaled, complete: result.failed === 0 };
+    },
+  };
 }
 
 export function recordCliProcessOwnerRoot(handle: CliProcessOwnerHandle, pid: number): void {
@@ -366,6 +666,32 @@ export function readCliProcessOwnerRecords(dataDir?: string): ReadOwnerRecordsRe
     }
   }
   return { records, invalidPaths };
+}
+
+export function quarantineInvalidCliProcessOwnerManifests(
+  invalidPaths: readonly string[],
+  dataDir?: string,
+): QuarantineInvalidOwnerManifestsResult {
+  const ownerDirectory = resolveCliProcessOwnerDirectory(dataDir);
+  const quarantineDirectory = join(resolveCatCafeDataRoot(dataDir), OWNER_QUARANTINE_DIRECTORY);
+  const result: QuarantineInvalidOwnerManifestsResult = { quarantinedPaths: [], failedPaths: [] };
+  for (const invalidPath of invalidPaths) {
+    const resolvedPath = resolve(invalidPath);
+    if (dirname(resolvedPath) !== ownerDirectory || !basename(resolvedPath).endsWith('.json')) {
+      result.failedPaths.push(invalidPath);
+      continue;
+    }
+    try {
+      mkdirSync(quarantineDirectory, { recursive: true, mode: 0o700 });
+      chmodSync(quarantineDirectory, 0o700);
+      const destination = join(quarantineDirectory, `${basename(resolvedPath)}.${Date.now()}.${randomUUID()}.invalid`);
+      renameSync(resolvedPath, destination);
+      result.quarantinedPaths.push(destination);
+    } catch {
+      result.failedPaths.push(invalidPath);
+    }
+  }
+  return result;
 }
 
 export function completeCliProcessOwnerCleanup(record: CliProcessOwnerRecord): void {

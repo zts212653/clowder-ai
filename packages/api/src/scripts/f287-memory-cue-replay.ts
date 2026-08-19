@@ -148,6 +148,7 @@ function sourceProjection(state: FixtureSourceState) {
     summary: 'The canonical source can be drilled without preselecting a conclusion.',
     anchor: 'person-memory:person-alden',
     revision: 'person-revision-v1',
+    asOf: 10_000,
     visibility: 'owner_private' as const,
     drillFamily: 'person_memory' as const,
   };
@@ -267,12 +268,12 @@ function createPersonLifecycleHarness(): LifecycleHarness {
   const recall = {
     async recallByWorkspaceEntityRef(ownerUserId: string, entityRef: string) {
       return available && ownerUserId === OWNER_SCOPE.ownerUserId && entityRef === 'person:alden'
-        ? { status: 'resolved' as const, card }
+        ? { status: 'resolved' as const, card, asOf: 10_000 }
         : { status: 'not_available' as const };
     },
     async recallByPersonId(ownerUserId: string, personId: string) {
       return available && ownerUserId === OWNER_SCOPE.ownerUserId && personId === card.personId
-        ? { status: 'resolved' as const, card }
+        ? { status: 'resolved' as const, card, asOf: 10_000 }
         : { status: 'not_available' as const };
     },
   };

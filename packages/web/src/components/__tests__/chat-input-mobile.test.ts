@@ -165,9 +165,13 @@ describe('ChatInput composer layout', () => {
   });
 
   it('keeps the active invocation stop affordance visible while preserving hover and keyboard focus styling', () => {
-    render({ hasActiveInvocation: true, onStop: vi.fn() });
+    render({ hasActiveInvocation: true });
 
-    const stopButton = container.querySelector('button[aria-label="Stop generation"]');
+    const stopButton = Array.from(container.querySelectorAll('button[aria-label="Stop generation"]')).find((button) =>
+      button.className.includes('bg-conn-red-text'),
+    ) as HTMLButtonElement | undefined;
+    expect(stopButton).toBeTruthy();
+    expect(stopButton?.disabled).toBe(true);
     expect(stopButton?.className).not.toContain('opacity-0');
     expect(stopButton?.className).toContain('bg-conn-red-text');
     expect(stopButton?.className).toContain('hover:bg-conn-red-hover');

@@ -55,9 +55,14 @@ Step 2: 调用 typed MCP
     threadId: "当前 threadId（有就传）"
   })
 
-Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
-  → 如果没反应，检查 Step 1 是否真的返回了 200
+Step 3: 读返回的 deliveryStatus，再决定怎么报告
+  → applied     = Hub 前端真实接收并应用了（面板已打开）——只有这时才能说"已打开"
+  → queued      = 目标 thread 不在前台，已写入其 ThreadState；切到该 thread 自动揭示
+  → blocked     = presentation lock 等阻止了展示（看 deliveryReason）
+  → unconfirmed = 没有任何 Hub 客户端确认送达（没连接 / 无匹配 client）——必须如实说"未能确认打开"
 ```
+
+> **admission ≠ visible**：`allowed: true` 只证明服务端受理了请求。报告"已打开"之前必须看到 `deliveryStatus: "applied"`。
 
 #### 工具参数
 
@@ -65,7 +70,8 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 |------|------|------|
 | `port` | **是** | dev server 端口号 |
 | `path` | 否 | 页面路径，默认 `/` |
-| `worktreeId` | **建议传** | 传了保证精确送达；不传也能工作（走 global broadcast），但多 tab 场景可能误触其他 session |
+| `threadId` | invocation 免传 / agent-key **必传** | invocation 调用由服务端从 invocation 记录推导；持久 agent-key 必须显式传，缺失直接报错。传了保证精确送达到该 thread |
+| `worktreeId` | 建议传 | 精确到 worktree；不传走 user-scope 送达，同用户其他 tab 会按 thread 归属 queue |
 
 > **怎么获取 worktreeId**：就是你当前工作的 worktree 目录名。例如你在 `cat-cafe-f120-fix` 目录里工作，worktreeId 就是 `cat-cafe-f120-fix`。如果你在主仓库 `cat-cafe` 里，就不需要传。
 
@@ -73,7 +79,7 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 
 | 现象 | 原因 | 修法 |
 |------|------|------|
-| 右侧无反应 | 目标服务器没在跑 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再看工具返回错误 |
+| 右侧无反应 | 目标服务器没在跑 / 未认证或 thread 归属不对 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再读工具返回的 `deliveryStatus` / 错误（401=未认证，400/403=thread scope） |
 | `{"error":"Proxy error","message":"socket hang up"}` | 目标服务器已退出 | 重启服务器，再刷新 Browser panel |
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
@@ -101,8 +107,8 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 | **审计** | 每次 open/close/navigate 都有审计日志 |
 | **Console 面板** | bridge script 注入到 iframe，捕获 console.log/warn/error，在面板展示 |
 | **一键截图** | SVG foreignObject + canvas 截图，上传后端，toast 展示 |
-| **多 Tab** | 同时预览多个 localhost 页面，Tab 切换独立状态 |
-| **Socket room 隔离** | preview 事件按 worktree room 定向发送，不会全局广播 |
+| **送达契约** | 认证 + exact-thread：anonymous → 401；invocation 推导 thread；agent-key 必传 threadId 且校验归属。事件只发射一次到 caller 的 user room（tenant scope，无 preview:global/worktree 广播），回执同房间收集 |
+| **多 Tab** | 同时预览多个 localhost 页面，Tab 切换独立状态；同一事件多 tab 各自回执，服务端聚合取最优（applied > blocked > queued，skipped 不参评） |
 
 ## 什么时候主动用
 

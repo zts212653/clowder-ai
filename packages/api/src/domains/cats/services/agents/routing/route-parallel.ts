@@ -76,6 +76,7 @@ import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.j
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
 import {
   applyActiveSessionCapacityPin,
   resolveInvocationCapacitySnapshot,
@@ -755,6 +756,7 @@ export async function* routeParallel(
             effectiveMaxContextTokens: parEffectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            projectPath: routeThread?.projectPath,
             cursorOverlay: options.cursorBoundaries?.get(catId as string),
           },
         );
@@ -947,6 +949,8 @@ export async function* routeParallel(
         userId,
         ownerAuthProvenance,
         threadId,
+        invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        routeTopology: 'parallel',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
@@ -967,6 +971,7 @@ export async function* routeParallel(
         ...(options.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: turnExecutionKind,

@@ -96,7 +96,7 @@
     "check:skills:manifest": "node scripts/check-skills-manifest.mjs",
     "check:skills:references": "node --test scripts/check-skill-reference-integrity.test.mjs && node scripts/check-skill-reference-integrity.mjs",
     "check:skills:surfaces": "node --test scripts/check-skill-first-party-surfaces.test.mjs && node scripts/check-skill-first-party-surfaces.mjs",
-    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs",
+    "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs",
     "check:eval-metric-glossary": "pnpm --filter @cat-cafe/api build && node --test packages/api/test/harness-eval/eval-hub-metric-glossary-coverage.test.js",
     "mcp:doctor": "node scripts/mcp-doctor.mjs",
     "convention-graph": "pnpm --filter @cat-cafe/convention-graph convention-graph",

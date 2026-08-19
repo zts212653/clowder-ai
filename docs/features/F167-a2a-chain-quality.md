@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-14
+updated: 2026-08-15
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -69,6 +69,19 @@ cross-thread carrier may disposition only when the stored trigger has canonical 
 source cat, target holder, target thread, and current invocation. Same-thread self mentions and missing
 or same-thread provenance remain fail-closed. Here “cross-thread attempt” means an auth/source thread
 mismatch, not a valid server-authored cross-post carrier stored in its target thread.
+
+2026-08-15 replacement-provenance clarification: an ordinary A2A Queue row is only a carrier for its
+exact persisted `ball.handed`. Queue admission reuses the disposition service's source/event fence and
+retires a carrier before provider start when a later state-changing event involving the target cat has
+already replaced that handoff. If replacement races after provider start, the disposition rejection
+includes the latest verified successor event plus same-thread `sourceMessageId` and coordination when
+available. Message metadata is exposed only after the event-derived message resolves back to the same
+thread, sender, and target; forged or foreign-thread metadata remains hidden. Durable Queue custody must
+terminalize before the stale row is consumed; failure retains the row and does not start an invocation.
+A coalesced Queue row carries multiple source messages and may retire only when every carried handoff is
+replaced; one live successor keeps the combined body executable. Successor message lookup is optional
+enrichment: store failure removes only the pointer/coordination fields and cannot erase the event-derived
+replacement verdict or reopen a stale provider invocation.
 
 This is a bounded F167/F254/F264 repair, not a new Feature or lifecycle owner. Managed holds write the existing F264 target receipt and both wake kinds write the F167 BallCustody event log. The repair does not add another Queue, receipt ledger, projection, or state machine.
 
@@ -717,6 +730,16 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **授权范围混同 + 安全默认过度升级**：没有按 effect 拆开“可自决 merge”与“需授权 restart”，把后一步的权限边界倒灌到前一步；复刻了 Case E3 中“下一状态迁移交回operator”的同型错误。 |
 | 纠正轮次 | 本次 1 次（operator：`0001786543204352-000306-879d3a6a`，“合入不需要问我吧”）；与 Case E3 跨任务同型，因此按重复理解偏差记录。纠正后 PR #3604 已 squash merge 为 `4f59356f0`，runtime 保持未激活。 |
 | 元心智哪条没执行 | Q1 角色确认：当时是证据闭合后的 merge owner，不是权限申请者；Q3 坐标变换：没有把一个“交付动作”拆成 merge 与 activation 两个独立 effect 分别判权。 |
+
+### Case E9: 把“随原动作 hover”替换成“迁移到 thread 头部”（2026-08-18，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator说 F294 每条消息静止时孤立的“多选消息”入口应该隐藏，是要移除消息级入口，再提供一个默认可见的 thread 级入口兼顾可发现性。 |
+| 实际要求 | 新增的“多选消息”应留在原消息操作组里，与回复、删除、更多完全共用既有交互：桌面静止时整组隐藏且不占位，hover/focus 时整组出现；触屏仍保持可达。 |
+| 偏差根因 | **锚定偏差 + 任务替换**：锚定在既有 KD-10“默认可发现”抽象约束上，没有先按截图中的具体 referent 核对“这里这个”指的是原消息动作组，擅自把局部显隐调整替换成了入口层级重设计。 |
+| 纠正轮次 | 同一任务 2 次（`0001787047894247-000105-cfa68d95`、`0001787047966930-000108-4ffc8e66`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
+| 元心智哪条没执行 | Q2 信息验证：没有先用截图和现有 DOM 行为确认代词 referent；Q3 坐标变换：把“同一控件的显隐状态”错误换成了“控件所属层级”的产品架构问题。 |
 
 ## Review Gate
 

@@ -172,14 +172,17 @@ test(
         command: process.execPath,
         args: [
           '-e',
-          'console.log(JSON.stringify({ type: "env", parentPid: process.env.CAT_CAFE_SUPERVISOR_PARENT_PID ?? null }))',
+          'console.log(JSON.stringify({ type: "env", parentPid: process.env.CAT_CAFE_SUPERVISOR_PARENT_PID ?? null, executionOwnerBinding: process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER ?? null, executionId: process.env.CAT_CAFE_EXECUTION_ID ?? null }))',
         ],
+        env: { CAT_CAFE_EXECUTION_ID: 'parent-execution-spawn-contract' },
         timeoutMs: 5_000,
       }),
     );
 
     const event = results.find((item) => item?.type === 'env');
     assert.equal(event?.parentPid, String(process.pid));
+    assert.equal(event?.executionOwnerBinding, '1', 'the production supervised spawn must opt into owner manifests');
+    assert.equal(event?.executionId, 'parent-execution-spawn-contract');
   },
 );
 
@@ -784,24 +787,36 @@ test('spawnCli removes inherited env vars when override is null', async () => {
 test('buildChildEnv never forwards runtime-only lifecycle capabilities to agent shells', () => {
   const previousConnectorAutostart = process.env.CONNECTOR_GATEWAY_AUTOSTART;
   const previousGlobalSidecarOwner = process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR;
+  const previousExecutionOwnerBinding = process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER;
+  const previousExecutionId = process.env.CAT_CAFE_EXECUTION_ID;
   try {
     process.env.CONNECTOR_GATEWAY_AUTOSTART = '1';
     process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = '1';
+    process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER = '1';
+    process.env.CAT_CAFE_EXECUTION_ID = 'outer-execution';
 
     const childEnv = buildChildEnv({
       CONNECTOR_GATEWAY_AUTOSTART: '1',
       CAT_CAFE_PROVISION_GLOBAL_SIDECAR: '1',
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_EXECUTION_ID: 'outer-execution',
       KEEP_ME: '1',
     });
 
     assert.equal(childEnv.CONNECTOR_GATEWAY_AUTOSTART, undefined);
     assert.equal(childEnv.CAT_CAFE_PROVISION_GLOBAL_SIDECAR, undefined);
+    assert.equal(childEnv.CAT_CAFE_PROCESS_EXECUTION_OWNER, undefined);
+    assert.equal(childEnv.CAT_CAFE_EXECUTION_ID, undefined);
     assert.equal(childEnv.KEEP_ME, '1');
   } finally {
     if (previousConnectorAutostart === undefined) delete process.env.CONNECTOR_GATEWAY_AUTOSTART;
     else process.env.CONNECTOR_GATEWAY_AUTOSTART = previousConnectorAutostart;
     if (previousGlobalSidecarOwner === undefined) delete process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR;
     else process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = previousGlobalSidecarOwner;
+    if (previousExecutionOwnerBinding === undefined) delete process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER;
+    else process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER = previousExecutionOwnerBinding;
+    if (previousExecutionId === undefined) delete process.env.CAT_CAFE_EXECUTION_ID;
+    else process.env.CAT_CAFE_EXECUTION_ID = previousExecutionId;
   }
 });
 
@@ -1887,6 +1902,29 @@ test('F212 AC-A1: __cliError includes cliDiagnostics with reasonCode for known s
   assert.equal(err.cliDiagnostics.debugRef.command, 'codex');
   assert.equal(err.cliDiagnostics.debugRef.exitCode, 1);
   assert.equal(err.cliDiagnostics.debugRef.invocationId, 'inv-A1');
+});
+
+test('#1325: spawnCli forwards managed argv provenance and fails closed without it', async () => {
+  const run = async (options) => {
+    const proc = createMockProcess({ exitOnKill: false });
+    const spawnFn = createMockSpawnFn(proc);
+    const promise = collect(spawnCli(options, { spawnFn }));
+    proc.stderr.write("error: unknown option '--agent-file'\n");
+    proc.stdout.end();
+    proc._emitter.emit('exit', 1, null);
+    const results = await promise;
+    return results.find((result) => result?.__cliError)?.cliDiagnostics;
+  };
+
+  const managed = await run({
+    command: '/usr/local/bin/kimi',
+    args: ['--agent-file', '/tmp/agent.md'],
+    managedArgvFlags: ['--agent-file'],
+  });
+  assert.equal(managed?.reasonCode, 'incompatible_cli_arguments');
+
+  const operatorOwned = await run({ command: 'gemini', args: ['--agent-file', '/tmp/operator.md'] });
+  assert.notEqual(operatorOwned?.reasonCode, 'incompatible_cli_arguments');
 });
 
 test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with sanitized safeExcerpt (#857)', async () => {

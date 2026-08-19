@@ -113,6 +113,16 @@ export async function handlePreviewOpen(input: {
   catId?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
+  // F120 × F284 review P1: mirror workspace-navigate auth scope — persistent
+  // agent-key callers must name the target thread; the API resolves and
+  // validates the exact thread for every principal (anonymous → 401).
+  if (resolveWorkspaceNavigateAuthMode(input.agentKeyCatId) === 'agent-key' && !input.threadId) {
+    return errorResult(
+      'threadId is required for agent-key preview open. ' +
+        'Persistent agent-key MCP has no invocation thread, so the API cannot verify the target thread scope implicitly.',
+    );
+  }
+
   return callbackPost(
     '/api/preview/auto-open',
     {
@@ -152,6 +162,10 @@ export const hubActionTools = [
       'Open a localhost app in the Hub Browser Preview panel. ' +
       'Use after starting or discovering a dev server, or when the user asks to see frontend changes. ' +
       'Result: the Hub Browser panel auto-opens the localhost target through the preview gateway. ' +
+      'Output: the accepted request plus deliveryStatus=applied|queued|blocked|unconfirmed. ' +
+      'GOTCHA: allowed:true only means admission; only deliveryStatus=applied proves a connected Hub client ' +
+      'applied the preview — never report "已打开" on unconfirmed/queued/blocked. ' +
+      'threadId is required for agent-key auth and may be omitted for invocation auth. ' +
       'GOTCHA: validate the target dev server first; shared persistent MCP callers pass agentKeyCatId; do not handwrite curl to /api/preview/auto-open.',
     inputSchema: previewOpenInputSchema,
     handler: handlePreviewOpen,

@@ -11,6 +11,9 @@ code_anchors:
   - packages/api/src/domains/signal-intake/SignalAdmissionService.ts
   - packages/api/src/domains/signal-intake/RedisMeetingIntakeStore.ts
   - packages/api/src/domains/signal-intake/SourceAccessLeaseService.ts
+  - packages/api/src/domains/signal-intake/AsrPersonMemorySceneBuilder.ts
+  - packages/api/src/domains/signal-intake/AsrPersonMemoryQueueCarrier.ts
+  - packages/shared/src/types/memory-write-opportunity.ts
   - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/routes/meeting-intake-routes.ts
 doc_anchors:
@@ -20,6 +23,7 @@ static_scan_hints: [SignalAdmissionService, SignalRouteStore, MeetingIntakeStore
 cited_by:
   - {feature: F292, date: 2026-08-08, delta: "new Host-side cell separates durable external-signal truth from plugin lifecycle and source-specific collectors"}
   - {feature: F292, date: 2026-08-10, delta: "K-2B typed events.publish adapter consumes Host Broker identity while preserving signal-intake settlement authority"}
+  - {feature: F276, date: 2026-08-15, delta: "confirmed meeting artifacts may emit one bounded mechanical WriteOpportunity scene and exact owner-message carrier; memory retains all judgment and destination authority"}
 ---
 
 # External Signal Intake
@@ -81,6 +85,10 @@ recover ambiguous Broker dispatch without creating a second intake.
   `MeetingIntake` record or decides that a source signal was valid.
 - `ball-custody` owns actual cat wake/wait custody after a Host route has selected authorized work.
 - `human-disposition-feedback` may learn from explicit user choices but cannot mutate intake truth.
+- `memory` owns the shared WriteOpportunity lifecycle, cat disposition, deferred lineage, and F276
+  destination. This cell may emit only bounded mechanical observations from confirmed meeting
+  artifacts and an exact live-owner-message visibility witness; it cannot decide intent,
+  importance, transcript truth, or person-memory truth.
 
 ## Do NOT Unify With
 

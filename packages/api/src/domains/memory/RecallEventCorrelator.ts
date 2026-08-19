@@ -114,6 +114,13 @@ export class RecallEventCorrelator {
       const abandoned = consumed.length === 0 && !reformulated;
       const nextGraphResolveAfterRead = this.hasGraphAfterRead(sameCatWindow);
       const pushSurface = asPushRecallSurface(event.summary._f263PushSurface);
+      // F296 AC-A1: a pointer-only push surface presented no candidate body.
+      const presentationKind =
+        event.summary._f296PresentationKind === 'pointer'
+          ? ('pointer' as const)
+          : event.summary._f296PresentationKind === 'body'
+            ? ('body' as const)
+            : undefined;
       const source = pushSurface ? 'push' : 'pull';
       const expansionMeta = parseExpansionFunnelMeta(event.summary.expansionFunnel);
       const expansionCandidates = expansionMeta
@@ -165,7 +172,8 @@ export class RecallEventCorrelator {
         toolName: event.toolName as RecallEvent['toolName'],
         source,
         ...(pushSurface ? { pushSurface } : {}),
-        presented: true,
+        ...(presentationKind ? { presentationKind } : {}),
+        presented: presentationKind !== 'pointer',
         inspected: consumed.length > 0,
         outcome: consumed.length > 0 ? 'used' : 'ignored',
         query: this.extractQuery(event),

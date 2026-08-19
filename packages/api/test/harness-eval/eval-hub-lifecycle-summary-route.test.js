@@ -46,12 +46,14 @@ async function stableCaseReplay() {
 }
 
 describe('Eval Hub lifecycle summary route', () => {
-  it('marks actionable lifecycle data unavailable when Redis/event reading is absent', async () => {
+  // PR #3722: latest workspace-navigator verdict is now keep_observe (no-data),
+  // so the no-event-log fallback returns not_required instead of unavailable.
+  it('marks lifecycle not_required when latest verdict is keep_observe and event log absent', async () => {
     const app = await buildApp();
     const item = await workspaceNavigatorItem(app);
 
-    assert.equal(item.lifecycle.availability, 'unavailable');
-    assert.equal(item.lifecycle.ownerResponseStatus, 'unavailable');
+    assert.equal(item.lifecycle.availability, 'not_required');
+    assert.equal(item.lifecycle.ownerResponseStatus, 'not_required');
     await app.close();
   });
 
@@ -75,6 +77,7 @@ describe('Eval Hub lifecycle summary route', () => {
       '2026-07-12-capability-wakeup-workspace-navigator-cognitive-fix',
       '2026-07-19-capability-wakeup-workspace-navigator-fix-recheck-v2',
       '2026-07-26-capability-wakeup-workspace-navigator-insufficient-fix-v2',
+      '2026-08-16-capability-wakeup-workspace-navigator-no-data-observe',
     ]);
     assert.equal(item.lifecycle.targetOwnerCatId, 'opus-47');
     await app.close();

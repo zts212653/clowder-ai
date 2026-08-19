@@ -293,6 +293,29 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
     assert.ok(!errMsg.error.includes('authentication failed'), 'stderr should be sanitized');
   });
 
+  test('#1325: operator --agent-file reaches Gemini argv without harness-drift attribution', async () => {
+    const proc = createMockProcess();
+    proc.kill = mock.fn(() => true);
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'gemini-cli',
+      model: 'gemini-test-model',
+    });
+
+    const promise = collect(service.invoke('operator collision', { cliConfigArgs: ['--agent-file /tmp/operator.md'] }));
+    proc.stderr.write("error: unknown option '--agent-file'\n");
+    proc.stdout.end();
+    emitProcessExit(proc, 1, null);
+
+    const msgs = await promise;
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--agent-file'), 'Gemini must preserve operator cliConfigArgs');
+    const errMsg = msgs.find((message) => message.type === 'error');
+    assert.ok(errMsg, 'operator flag rejection should remain visible as an error');
+    assert.notEqual(errMsg.metadata?.cliDiagnostics?.reasonCode, 'incompatible_cli_arguments');
+  });
+
   test('does not emit duplicate errors when result/error is followed by non-zero exit', async () => {
     const proc = createMockProcess();
     proc.kill = mock.fn(() => true);

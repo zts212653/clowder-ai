@@ -34,12 +34,21 @@ interface ResolveMessageBundlePromptInput {
   bundleMessageId: string;
   forwarderUserId: string;
   carrier: MessageBundleCarrierV1;
-  messageStore: Pick<IMessageStore, 'getById'>;
+  messageStore: Pick<IMessageStore, 'getById' | 'getByThreadAfter'>;
   threadStore: Pick<IThreadStore, 'get'>;
 }
 
 function formatAuthor(item: ResolvedMessageSelectionItem): string {
   return item.author.kind === 'cat' ? `cat:@${item.author.catId}` : `user:${item.author.userId}`;
+}
+
+function formatExactRef(item: MessageBundleCarrierV1['items'][number]): string {
+  if (item.kind === 'cli_quote') {
+    return `${item.messageId}#cli:${item.segmentId}:${item.selectionStart}-${item.selectionEnd}`;
+  }
+  if (item.kind === 'rich_block') return `${item.messageId}#rich:${item.blockId}`;
+  if (item.kind === 'quote') return `${item.messageId}#quote:${item.selectionStart}-${item.selectionEnd}`;
+  return item.messageId;
 }
 
 function formatItem(item: MessageSelectionProjectedItem, index: number, forwarderUserId: string): string {
@@ -88,8 +97,9 @@ export async function resolveMessageBundlePrompt(
     '[Message Bundle]',
     `Bundle ID: ${input.bundleMessageId}`,
     `Source thread: ${sourceLabel}`,
-    `Exact refs: ${input.carrier.items.map((item) => item.messageId).join(', ')}`,
+    `Exact refs: ${input.carrier.items.map(formatExactRef).join(', ')}`,
     '',
+    ...(resolved.note ? [`Bundle note by user:${input.forwarderUserId}:`, resolved.note, ''] : []),
     ...resolved.items.flatMap((item, index) => [formatItem(item, index, input.forwarderUserId), '']),
     '[/Message Bundle]',
   ].join('\n');

@@ -17,18 +17,28 @@ import { useTransferTargetPickerLifecycle } from './useTransferTargetPickerLifec
 
 interface TransferTargetPickerProps {
   open: boolean;
+  /** Fail-closed admission decided by the owning browser document. */
+  admissionBlocked: boolean;
   sourceThreadId: string;
   items: readonly MessageBundleSelectionItem[];
   onClose: () => void;
   onSuccess: (result: { targetThreadId: string; messageBundleId: string }) => void;
 }
 
-export function TransferTargetPicker({ open, sourceThreadId, items, onClose, onSuccess }: TransferTargetPickerProps) {
+export function TransferTargetPicker({
+  open,
+  admissionBlocked,
+  sourceThreadId,
+  items,
+  onClose,
+  onSuccess,
+}: TransferTargetPickerProps) {
   const isDesktop = useIsDesktop();
   const threads = useChatStore((state) => state.threads);
   const { cats } = useCatData();
   const [targetThreadId, setTargetThreadId] = useState<string | null>(null);
   const [targetCats, setTargetCats] = useState<Set<string>>(() => new Set());
+  const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -46,11 +56,12 @@ export function TransferTargetPicker({ open, sourceThreadId, items, onClose, onS
   }, []);
   const resetPicker = useCallback(() => {
     backToThreads();
+    setNote('');
     setSubmitting(false);
     retryKeyRef.current = null;
   }, [backToThreads]);
   const { close, restoreFocus } = useTransferTargetPickerLifecycle({
-    open,
+    open: open && !admissionBlocked,
     atCatStep: targetThreadId !== null,
     panelRef,
     resetPicker,
@@ -67,19 +78,23 @@ export function TransferTargetPicker({ open, sourceThreadId, items, onClose, onS
   }, []);
 
   const submit = useCallback(async () => {
-    if (!targetThreadId || targetCats.size === 0 || submitting) return;
+    if (admissionBlocked || !targetThreadId || targetCats.size === 0 || submitting) return;
     const selectedCats = [...targetCats].sort();
-    const fingerprint = forwardPayloadFingerprint({ sourceThreadId, targetThreadId, targetCats: selectedCats, items });
+    const payload = {
+      sourceThreadId,
+      targetThreadId,
+      targetCats: selectedCats,
+      ...(note.trim() ? { note: note.trim() } : {}),
+      items,
+    };
+    const fingerprint = forwardPayloadFingerprint(payload);
     const idempotencyKey =
       retryKeyRef.current?.fingerprint === fingerprint ? retryKeyRef.current.key : createForwardIdempotencyKey();
     retryKeyRef.current = { fingerprint, key: idempotencyKey };
     setSubmitting(true);
     setError(null);
     try {
-      const messageBundleId = await submitMessageBundleForward(
-        { sourceThreadId, targetThreadId, targetCats: selectedCats, items },
-        idempotencyKey,
-      );
+      const messageBundleId = await submitMessageBundleForward(payload, idempotencyKey);
       useToastStore.getState().addToast({
         type: 'success',
         title: `已转发到「${targetThread?.title ?? '未命名对话'}」`,
@@ -94,9 +109,20 @@ export function TransferTargetPicker({ open, sourceThreadId, items, onClose, onS
     } finally {
       setSubmitting(false);
     }
-  }, [items, onSuccess, restoreFocus, sourceThreadId, submitting, targetCats, targetThread, targetThreadId]);
+  }, [
+    admissionBlocked,
+    items,
+    note,
+    onSuccess,
+    restoreFocus,
+    sourceThreadId,
+    submitting,
+    targetCats,
+    targetThread,
+    targetThreadId,
+  ]);
 
-  if (!open || typeof document === 'undefined') return null;
+  if (!open || admissionBlocked || typeof document === 'undefined') return null;
   return createPortal(
     <TransferTargetPickerView
       isDesktop={isDesktop}
@@ -106,14 +132,22 @@ export function TransferTargetPicker({ open, sourceThreadId, items, onClose, onS
       availableThreads={availableThreads}
       cats={cats}
       targetCats={targetCats}
+      note={note}
       error={error}
       submitting={submitting}
       itemCount={items.length}
-      quoteOnly={items.length === 1 && items[0]?.kind === 'quote'}
+      singleItemLabel={
+        items.length === 1 && (items[0]?.kind === 'quote' || items[0]?.kind === 'cli_quote')
+          ? '1 段引用'
+          : items.length === 1 && items[0]?.kind === 'rich_block'
+            ? '1 个富块'
+            : undefined
+      }
       onClose={close}
       onBack={backToThreads}
       onSelectThread={setTargetThreadId}
       onToggleCat={toggleCat}
+      onNoteChange={setNote}
       onSubmit={() => void submit()}
     />,
     document.body,

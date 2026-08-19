@@ -495,7 +495,7 @@
     {
       "id": "F081",
       "name": "Appendix — Bubble/Thread State Write-Path Audit",
-      "status": "done | **Owner**: Ragdoll",
+      "status": "done — superseded by [F297](F297-sidebar-projection-convergence.md) | **Owner**: Ragdoll",
       "file": "F081-write-path-audit.md"
     },
     {
@@ -1401,7 +1401,7 @@
     {
       "id": "F233",
       "name": "Ball Custody Observability — 球权保管链可观测（值班简报 + 轨迹下钻）",
-      "status": "in-progress（Phase A ✅ + Phase B ✅ 2026-06-18 收口 · Phase C **轨迹全链 ✅** 2026-06-21：C1a ✅ + C2a ✅ + **C2b/C2c/C3 ✅** merged · C1b C1c pending — 安乐死 MCP/UI surface 留待下个迭代）| **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1",
+      "status": "**failed-close (partial-value-preserved) 2026-08-17** — Phase A ✅ 简报 sunset（65 天 operator 无消费）+ Phase B ✅ 球权事件账本**保留**（移交新 Self-Sensing feat 作 canonical 事实源）· Phase C **方向标记失败 2026-08-17**：C1a ✅ + C2a/C2b/C2c/C3 AC ✅ 但 operator 从未消费，属 **\"无账本对象拼轨迹\"** 结构性失败（详 LL-099）；C1b/C1c 撤销；代码 rm 决策交新 invocation trajectory feat（注意 F252 已依赖 `TrajectoryPanel`，不能直接 rm）· 传承给两个新 feat：\"猫的视野快照\" 处交汇 | **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1（close 后进入 archived 状态，不再驱动开发）",
       "file": "F233-ball-custody-observability.md"
     },
     {
@@ -1713,7 +1713,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / Phase C, K-2D, the alpha.3 official catalog, and explicit safe package update are on main; runtime restart, owner update/enable, alpha activation verification, and real-meeting dogfood remain open",
+      "status": "implementation / alpha.6 is published and the owner-driven historical Minutes import plus idle-runtime heartbeat are on Host main; alpha.5 remains enabled+healthy with connected owner auth, and the next gate is alpha.6 adoption plus historical dogfood",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
@@ -1725,7 +1725,7 @@
     {
       "id": "F294",
       "name": "Selective Message Bundles — 消息多选、选择性导出与跨 Thread 富文本转发",
-      "status": "in-progress / Phase A merged (PR #3599); Phase B implementation merged (PR #3603), Redis hydration repaired (PR #3628), and Alpha UX follow-up verified (PR #3650); Phase B cold-load auth UAT and Phase C pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "in-progress / Phase A and Phase B implementation are merged, including PR #3720's bundle note, exact Rich Block, and exact CLI quote increment; AC-B1–B11 remain pending Alpha UAT, and Phase C remains | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F294-selective-message-bundles.md"
     },
     {
@@ -1737,8 +1737,32 @@
     {
       "id": "F296",
       "name": "Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量",
-      "status": "spec / Wave 1 contract frozen-v1 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "in progress / Phase A complete；Phase B foundations B0–B2 landed + live；B3/B4 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F296-continuity-aware-context-injection.md"
+    },
+    {
+      "id": "F297",
+      "name": "Sidebar Projection Convergence — 服务端权威快照，前端单一写入",
+      "status": "in progress / Phase A done + Phase B server slice **merged** (PR #3748 @ `9d19ce085`, 2026-08-18) — Phase B server slice 全部 AC 闭合（AC-B2 规模 fixture + AC-D3 重复读取审计 2026-08-18 收口）；next: **Phase C 前端 authority boundary（用户可见 bug 仍未修复）** | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Phase B 实现**: Ragdoll (@fable5) | **Reviewer**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F297-sidebar-projection-convergence.md"
+    },
+    {
+      "id": "F298",
+      "name": "Runtime Promise Durability（运行态承诺持久性收敛）",
+      "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F298-runtime-promise-durability.md"
+    },
+    {
+      "id": "F299",
+      "name": "Workspace Invocation Trajectory — 猫这轮干了什么，亲眼可见",
+      "status": "in-progress | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F299-workspace-invocation-trajectory.md"
+    },
+    {
+      "id": "F300",
+      "name": "Self-Sensing 首切片 — 家况可感知（Home-State Awareness）",
+      "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "file": "F300-self-sensing-home-state-awareness.md"
     }
   ]
 }

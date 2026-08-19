@@ -5,16 +5,20 @@
  */
 
 import type {
+  AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
   ConnectorSource,
   CrossThreadCoordination,
   MessageContent,
   RichMessageExtra,
+  WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
+  asrPersonMemoryDynamicSceneEntryV1Schema,
   deliveryDecisionCueCarrierV1Schema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
@@ -228,6 +232,29 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const meetingArtifact = parseMeetingArtifactCarrier(parsed.meetingArtifact);
     if (meetingArtifact) {
       result.meetingArtifact = meetingArtifact;
+      hasField = true;
+    }
+
+    if (Array.isArray(parsed.dynamicSceneEntries)) {
+      const scenes: AsrPersonMemoryDynamicSceneEntryV1[] = [];
+      let valid = parsed.dynamicSceneEntries.length > 0;
+      for (const candidate of parsed.dynamicSceneEntries as unknown[]) {
+        const scene = asrPersonMemoryDynamicSceneEntryV1Schema.safeParse(candidate);
+        if (!scene.success) {
+          valid = false;
+          break;
+        }
+        scenes.push(scene.data);
+      }
+      if (valid) {
+        result.dynamicSceneEntries = scenes;
+        hasField = true;
+      }
+    }
+
+    const writeOpportunityReentry = writeOpportunityReentryCarrierV1Schema.safeParse(parsed.writeOpportunityReentry);
+    if (writeOpportunityReentry.success) {
+      result.writeOpportunityReentry = writeOpportunityReentry.data as WriteOpportunityReentryCarrierV1;
       hasField = true;
     }
 

@@ -1,20 +1,19 @@
 /**
  * Red tests: Cancel invariant for invocation stall scenarios.
  *
- * Bug: "猫猫正在回复中" displayed for 30+ minutes with no cancel button.
+ * Historical bug: "猫猫正在回复中" displayed for 30+ minutes with no cancel button.
+ * This file keeps the ThinkingIndicator half of that invariant; ChatInput now
+ * consumes the canonical execution projection and is covered separately.
  *
- * Root cause (frontend):
- * 1. ChatInput shows "猫猫正在回复中" based on hasActiveInvocation alone
- *    but has no cancel entry point in that banner.
- * 2. ThinkingIndicator's alive_but_silent state (2min+) shows warning
+ * Remaining historical root cause:
+ * 1. ThinkingIndicator's alive_but_silent state (2min+) showed warning
  *    but has no cancel button — only suspected_stall (5min+) has cancel.
- * 3. showThinkingIndicator has extra gates (intentMode / activeInvocationCount)
+ * 2. showThinkingIndicator has extra gates (intentMode / activeInvocationCount)
  *    that can prevent it from rendering even when hasActiveInvocation=true,
  *    creating a UX dead zone where the user sees "replying" but has no control.
  *
  * Invariant to lock:
  * - alive_but_silent MUST have a cancel button
- * - ChatInput "猫猫正在回复中" banner MUST include cancel affordance
  */
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
@@ -181,56 +180,5 @@ describe('Invocation stall cancel invariant', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ catId: 'codex' }),
     });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────
-// ChatInput "猫猫正在回复中" banner cancel invariant (structural contract)
-//
-// P1-1 from review: ChatInput banner shows "猫猫正在回复中" but had no
-// cancel affordance. ChatInput is too complex to render in isolation (many
-// hooks), so we verify the contract structurally: when hasActiveInvocation
-// renders the banner, it MUST contain a cancel/stop button.
-// ─────────────────────────────────────────────────────────────────────────
-describe('ChatInput active invocation banner cancel invariant (structural)', () => {
-  it('banner block contains a cancel button gated on onStop', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(join(import.meta.dirname, '..', 'ChatInput.tsx'), 'utf-8');
-
-    // Find the hasActiveInvocation banner block
-    const bannerIdx = source.indexOf('hasActiveInvocation && (');
-    expect(bannerIdx).toBeGreaterThan(-1);
-
-    // Extract through the banner's cancel button. The click handler itself may contain `)}`.
-    const afterBanner = source.slice(bannerIdx);
-    const closingIdx = afterBanner.indexOf('</button>');
-    expect(closingIdx).toBeGreaterThan(-1);
-    const bannerBlock = afterBanner.slice(0, closingIdx + '</button>'.length);
-
-    // INVARIANT: banner MUST have a testid for identification
-    expect(bannerBlock).toContain('data-testid="active-invocation-banner"');
-
-    // INVARIANT: banner MUST contain a cancel button gated on onStop
-    expect(bannerBlock).toContain('data-testid="banner-cancel-btn"');
-    expect(bannerBlock).toContain('onStop');
-    expect(bannerBlock).toContain("createExplicitStopIntent(event, 'chat_input_banner')");
-    expect(bannerBlock).toContain('取消');
-  });
-
-  it('banner cancel button is gated on onStop (not always visible)', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(join(import.meta.dirname, '..', 'ChatInput.tsx'), 'utf-8');
-
-    // Find the cancel button inside the banner
-    const bannerIdx = source.indexOf('hasActiveInvocation && (');
-    const afterBanner = source.slice(bannerIdx);
-    const cancelIdx = afterBanner.indexOf('banner-cancel-btn');
-    expect(cancelIdx).toBeGreaterThan(-1);
-
-    // The cancel button must be gated — look for {onStop && before it
-    const beforeCancel = afterBanner.slice(0, cancelIdx);
-    expect(beforeCancel).toContain('{onStop && (');
   });
 });

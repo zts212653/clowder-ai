@@ -5,7 +5,13 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { applySalienceRerank, computeVariantId, freezeFlags, salience } from '../../dist/domains/memory/f163-types.js';
+import {
+  applySalienceRerank,
+  computeVariantId,
+  freezeFlags,
+  pathToAuthority,
+  salience,
+} from '../../dist/domains/memory/f163-types.js';
 
 describe('F163 types', () => {
   it('freezeFlags returns all 7 flags with default off', () => {
@@ -72,6 +78,14 @@ describe('F163 types', () => {
     } finally {
       delete process.env.F163_AUTHORITY_BOOST;
     }
+  });
+});
+
+describe('pathToAuthority()', () => {
+  it('treats external-knowledge source roots as candidate knowledge', () => {
+    assert.equal(pathToAuthority('study/memory-systems.md'), 'candidate');
+    assert.equal(pathToAuthority('docs/competitor-research/project/README.md'), 'candidate');
+    assert.equal(pathToAuthority('docs/catalogs/external-projects.md'), 'candidate');
   });
 });
 

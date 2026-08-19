@@ -41,12 +41,14 @@ test(
   async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cat-cafe-direct-tree-'));
     const pidPath = join(directory, 'descendant.pid');
+    const ownershipPath = join(directory, 'ownership.json');
     const script = [
       'const fs=require("node:fs");',
       'const {spawn}=require("node:child_process");',
       `const child=spawn(process.execPath,["-e",${JSON.stringify(DESCENDANT_SCRIPT)}],{detached:true,stdio:"ignore"});`,
       'child.unref();',
       `fs.writeFileSync(${JSON.stringify(pidPath)},String(child.pid));`,
+      `fs.writeFileSync(${JSON.stringify(ownershipPath)},JSON.stringify({binding:process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER??null,executionId:process.env.CAT_CAFE_EXECUTION_ID??null}));`,
       'setInterval(()=>{},60000);',
     ].join('');
 
@@ -55,11 +57,17 @@ test(
       command: process.execPath,
       args: ['-e', script],
       cwd: directory,
-      env: { CAT_CAFE_DATA_DIR: directory },
+      env: {
+        CAT_CAFE_DATA_DIR: directory,
+        CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+        CAT_CAFE_EXECUTION_ID: 'outer-execution-direct',
+      },
       invocationId: 'direct-process-tree-test',
     });
     try {
       descendantPid = await readReadyPid(pidPath);
+      assert.equal(await waitUntil(() => existsSync(ownershipPath)), true);
+      assert.deepEqual(JSON.parse(await readFile(ownershipPath, 'utf8')), { binding: null, executionId: null });
       await session.terminate();
       assert.equal(await waitUntil(() => !isProcessAlive(descendantPid)), true);
     } finally {
@@ -78,16 +86,18 @@ test(
     const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-codex-owner-data-'));
     const socketPath = join(directory, 'app.sock');
     const pidPath = join(directory, 'descendant.pid');
+    const ownershipPath = join(directory, 'ownership.json');
     const script = [
       'const fs=require("node:fs");',
       'const net=require("node:net");',
       'const {spawn}=require("node:child_process");',
       'const socketPath=process.argv[1];',
       'const pidPath=process.argv[2];',
+      'const ownershipPath=process.argv[3];',
       `const child=spawn(process.execPath,["-e",${JSON.stringify(DESCENDANT_SCRIPT)}],{detached:true,stdio:"ignore"});`,
       'child.unref();',
       'const server=net.createServer(()=>{});',
-      'server.listen(socketPath,()=>fs.writeFileSync(pidPath,String(child.pid)));',
+      'server.listen(socketPath,()=>{fs.writeFileSync(pidPath,String(child.pid));fs.writeFileSync(ownershipPath,JSON.stringify({binding:process.env.CAT_CAFE_PROCESS_EXECUTION_OWNER??null,executionId:process.env.CAT_CAFE_EXECUTION_ID??null}));});',
       'process.on("SIGTERM",()=>server.close(()=>process.exit(0)));',
       'setInterval(()=>{},60000);',
     ].join('');
@@ -97,13 +107,19 @@ test(
     try {
       host = await spawnCodexAppServerHost({
         command: process.execPath,
-        args: ['-e', script, socketPath, pidPath],
+        args: ['-e', script, socketPath, pidPath, ownershipPath],
         cwd: directory,
-        env: { CAT_CAFE_DATA_DIR: dataDir },
+        env: {
+          CAT_CAFE_DATA_DIR: dataDir,
+          CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+          CAT_CAFE_EXECUTION_ID: 'outer-execution-pooled',
+        },
         socketDirectory: directory,
         socketPath,
       });
       descendantPid = await readReadyPid(pidPath);
+      assert.equal(await waitUntil(() => existsSync(ownershipPath)), true);
+      assert.deepEqual(JSON.parse(await readFile(ownershipPath, 'utf8')), { binding: null, executionId: null });
       await host.close();
       assert.equal(await waitUntil(() => !isProcessAlive(descendantPid)), true);
     } finally {
