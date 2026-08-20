@@ -184,14 +184,25 @@ describe('F264 author message disposition selector', () => {
     expect(trigger.textContent).toContain('接着当前工作');
   });
 
-  it('keeps Steer as a distinct primary-trigger action without author disposition', async () => {
+  it('confirms that draft Steer stops the target reply before sending', async () => {
     const onSend = vi.fn(async () => true);
     await renderThreadInput({ threadId: 'thread-3', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     act(() => setTextarea(textarea, '现在就换轨'));
     await act(async () => {
-      (container.querySelector('[aria-label="强制发送"]') as HTMLButtonElement).click();
+      (container.querySelector('[aria-label="强制停止并发送此消息"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('停止目标当前回复');
+    expect(container.textContent).toContain('立即发送当前输入的消息');
+    expect(container.textContent).toContain('这不是“追加到当前回复”');
+
+    await act(async () => {
+      (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
       await Promise.resolve();
       await Promise.resolve();
     });

@@ -119,6 +119,39 @@ describe('F24: mid-invocation message injection', () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  it('confirms that draft Steer stops the target reply before sending', () => {
+    const onForceSend = vi.fn();
+
+    act(() => {
+      root.render(
+        React.createElement(ChatInputActionButton, {
+          onTranscript: vi.fn(),
+          onSend: vi.fn(),
+          onQueueSend: vi.fn(),
+          onForceSend,
+          onStop: vi.fn(),
+          disabled: false,
+          hasActiveInvocation: true,
+          hasText: true,
+        }),
+      );
+    });
+
+    const steerBtn = container.querySelector('[aria-label="强制停止并发送此消息"]') as HTMLButtonElement;
+    expect(steerBtn).toBeTruthy();
+    act(() => steerBtn.click());
+
+    expect(onForceSend).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('停止目标当前回复');
+    expect(container.textContent).toContain('立即发送当前输入的消息');
+    expect(container.textContent).toContain('这不是“追加到当前回复”');
+
+    act(() => {
+      (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
+    });
+    expect(onForceSend).toHaveBeenCalledTimes(1);
+  });
+
   it('only shows full-size Stop when disabled=true (loading state)', () => {
     act(() => {
       root.render(

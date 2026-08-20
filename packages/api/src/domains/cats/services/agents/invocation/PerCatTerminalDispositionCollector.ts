@@ -19,6 +19,17 @@ export interface PerCatTerminalDispositionCollectorOptions {
   isCanceled?: (catId: string) => boolean;
 }
 
+/**
+ * Whether an event releases the exact InvocationTracker slot.
+ *
+ * Provider diagnostics may use `type: 'error'` while explicitly declaring
+ * themselves transient. Those frames must remain visible without surrendering
+ * the controller that powers exact Stop.
+ */
+export function isTerminalDispositionEvent(event: TerminalDispositionEvent): boolean {
+  return event.type === 'done' || (event.type === 'error' && event.errorDisposition !== 'transient');
+}
+
 export class PerCatTerminalDispositionCollector {
   private readonly disqualifiedCatIds = new Set<string>();
   private readonly successfulCatIds = new Set<string>();

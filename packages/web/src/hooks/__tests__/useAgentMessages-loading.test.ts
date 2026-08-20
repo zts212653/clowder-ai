@@ -852,7 +852,7 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(mockSetThreadMessageStreaming).not.toHaveBeenCalled();
   });
 
-  it('stopping a background thread derives catId from the TARGET thread slots', () => {
+  it('composer Stop remains whole-thread even when the target thread has one active cat', () => {
     const cancelInvocation = vi.fn(() => true);
     const stopIntent = {
       sourceControl: 'chat_input_action' as const,
@@ -902,7 +902,7 @@ describe('useAgentMessages loading lifecycle', () => {
       captured?.handleStop(cancelInvocation, 'thread-2', stopIntent);
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus', stopIntent);
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined, stopIntent);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
   });
 

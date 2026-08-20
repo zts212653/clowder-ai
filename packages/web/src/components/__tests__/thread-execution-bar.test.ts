@@ -206,50 +206,15 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(text).toContain('缅因猫');
   });
 
-  it('fences rapid repeated Stop All clicks before the first REST cancels settle', async () => {
-    let releaseCancel: ((response: Response) => void) | undefined;
-    const cancelResponse = new Promise<Response>((resolve) => {
-      releaseCancel = resolve;
-    });
-    const mockedApiFetch = vi.mocked(apiFetch);
-    mockedApiFetch.mockImplementation((url: string) => {
-      if (url === '/api/cats') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ cats: [] }),
-        }) as Promise<Response>;
-      }
-      if (url.includes('/cancel')) return cancelResponse;
-      return Promise.resolve(
-        new Response(JSON.stringify({ projectPath: '/project/cafe', executions: [] }), { status: 200 }),
-      );
-    });
+  it('keeps exact member controls without adding a second whole-thread Stop', async () => {
     seedExecutions([
       liveExecution({ executionId: 'inv-1', catId: 'opus' }),
       liveExecution({ executionId: 'inv-2', catId: 'codex' }),
     ]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    const stopAll = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('全部停止'),
-    );
-    expect(stopAll).toBeTruthy();
-
-    await act(async () => {
-      stopAll?.click();
-      stopAll?.click();
-      await Promise.resolve();
-    });
-
-    const cancelCalls = mockedApiFetch.mock.calls.filter(([url]) => String(url).includes('/cancel'));
-    expect(cancelCalls).toHaveLength(2);
-    expect((stopAll as HTMLButtonElement).disabled).toBe(true);
-
-    releaseCancel?.(new Response('{}', { status: 200 }));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    expect(container.querySelectorAll('[aria-label^="Stop "]')).toHaveLength(2);
+    expect(container.textContent).not.toContain('全部停止');
   });
 
   it('uses dynamic cat color from cat-config (not hardcoded)', async () => {
