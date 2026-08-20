@@ -481,7 +481,11 @@ export class InvocationTracker {
    */
   classifyExecutionId(threadId: string, catId: string, executionId: string): ExecutionOwnerMatch {
     const inv = this.active.get(this.slotKey(threadId, catId));
-    if (!inv) return 'absent';
+    // #1313: a canceled tombstone is terminal — its ownership is over and only
+    // the manual-seal guard and resolveFinalStatus() still observe it. Report
+    // 'absent' so late terminal cleanup and force replacement neither inherit
+    // the dead execution nor delete its pending-teardown fence.
+    if (!inv || inv.state === 'canceled') return 'absent';
     return inv.executionId === executionId ? 'matching' : 'replacement';
   }
 

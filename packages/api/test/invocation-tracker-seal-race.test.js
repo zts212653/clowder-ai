@@ -288,6 +288,21 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
     assert.deepEqual(tracker.getActiveSlots('t1'), []);
   });
 
+  it('classifyExecutionId reports canceled tombstones as absent (ownership is over)', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex'], 'user1', 'inv-late');
+    assert.equal(tracker.classifyExecutionId('t1', 'codex', 'inv-late'), 'matching');
+
+    tracker.cancelAll('t1');
+
+    // Force replacement / late terminal cleanup must not inherit the dead
+    // execution, and completeByExecutionId must not delete the teardown fence.
+    assert.equal(tracker.classifyExecutionId('t1', 'codex', 'inv-late'), 'absent');
+    assert.equal(tracker.completeByExecutionId('t1', 'codex', 'inv-late'), 'absent');
+    const guard = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(guard.acquired, false, 'teardown fence must survive execution-id cleanup');
+  });
+
   it('startAll replaces cancelAll tombstones and runs normally', () => {
     const tracker = new InvocationTracker();
     tracker.startAll('t1', ['opus'], 'user1');
