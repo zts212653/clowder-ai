@@ -23,7 +23,13 @@ describe('Session Chain Routes', () => {
   let SessionChainStore;
   let sessionChainRoutes;
 
-  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride, invocationTrackerOverride) {
+  async function setup(
+    threadStoreOverride,
+    sealerOverride,
+    runtimeSessionStoreOverride,
+    isSessionSwitchBusy,
+    invocationTrackerOverride,
+  ) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
     SessionChainStore = storeMod.SessionChainStore;
@@ -59,6 +65,7 @@ describe('Session Chain Routes', () => {
       threadStore,
       sessionSealer: mockSealer,
       ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
+      ...(isSessionSwitchBusy ? { isSessionSwitchBusy } : {}),
       ...(invocationTrackerOverride ? { invocationTracker: invocationTrackerOverride } : {}),
     });
     await app.ready();
@@ -440,7 +447,7 @@ describe('Session Chain Routes', () => {
     const invocationTracker = {
       has: (threadId, catId) => threadId === 'thread-1' && catId === 'opus',
     };
-    const store = await setup(undefined, undefined, undefined, invocationTracker);
+    const store = await setup(undefined, undefined, undefined, undefined, invocationTracker);
     const active = store.create({ cliSessionId: 'cli-running', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
 
     const res = await app.inject({
@@ -462,7 +469,7 @@ describe('Session Chain Routes', () => {
       // A2A and scheduled turns are not initiated with the browser caller's identity.
       getUserId: () => 'unknown',
     };
-    const store = await setup(undefined, undefined, undefined, invocationTracker);
+    const store = await setup(undefined, undefined, undefined, undefined, invocationTracker);
     const active = store.create({
       cliSessionId: 'cli-running-a2a',
       threadId: 'thread-1',
@@ -522,7 +529,7 @@ describe('Session Chain Routes', () => {
     const sealer = {
       requestSeal: async ({ sessionId, reason }) => {
         blockedDuringClaim = tracker.start('thread-1', 'opus', 'user-1', ['opus']);
-        const claimed = store.claimSeal(sessionId, { sealReason: reason, updatedAt: Date.now() });
+        const claimed = store.transitionToSealing(sessionId, reason);
         return claimed ? { accepted: true, status: 'sealing', sessionId } : { accepted: false, status: 'sealed' };
       },
       finalize: async ({ sessionId }) => {
@@ -532,7 +539,7 @@ describe('Session Chain Routes', () => {
         return { sealed: true, clean: true };
       },
     };
-    store = await setup(undefined, sealer, undefined, tracker);
+    store = await setup(undefined, sealer, undefined, undefined, tracker);
     const active = store.create({
       cliSessionId: 'cli-slot-guard',
       threadId: 'thread-1',
@@ -555,7 +562,7 @@ describe('Session Chain Routes', () => {
     let store;
     const partialSealer = {
       requestSeal: async ({ sessionId, reason }) => {
-        const claimed = store.claimSeal(sessionId, { sealReason: reason, updatedAt: Date.now() });
+        const claimed = store.transitionToSealing(sessionId, reason);
         return claimed ? { accepted: true, status: 'sealing', sessionId } : { accepted: false, status: 'sealed' };
       },
       finalize: async ({ sessionId }) => {
@@ -647,7 +654,14 @@ describe('Session Chain Routes', () => {
   });
 
   it('POST /api/sessions/:sessionId/unseal restores over an explicitly confirmed empty active session', async () => {
-    const store = await setup();
+    // Displaced finalize is async fire-and-forget in prod. Pin a no-op sealer so
+    // the displaced record stays observable in its intermediate 'sealing' state.
+    const store = await setup(undefined, {
+      requestSeal: async () => ({ accepted: true }),
+      finalize: async () => ({ sealed: false, clean: false }),
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    });
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
     // Empty active session is preserved as a separate sealing record.
@@ -740,7 +754,14 @@ describe('Session Chain Routes', () => {
   });
 
   it('POST /api/sessions/:sessionId/unseal explicitly switches to the selected record without deleting active work', async () => {
-    const store = await setup();
+    // Displaced finalize is async fire-and-forget in prod. Pin a no-op sealer so
+    // the displaced record stays observable in its intermediate 'sealing' state.
+    const store = await setup(undefined, {
+      requestSeal: async () => ({ accepted: true }),
+      finalize: async () => ({ sealed: false, clean: false }),
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    });
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
     // Non-empty active work must be preserved while it is safely sealed.

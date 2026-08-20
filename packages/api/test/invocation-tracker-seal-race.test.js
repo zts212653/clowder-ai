@@ -117,7 +117,7 @@ describe('InvocationTracker: Stop→Seal race (#1313)', () => {
     assert.equal(tracker.getSlotState('t1', 'opus'), 'active');
   });
 
-  it('expired tombstone does not block seal', () => {
+  it('expired tombstone still blocks seal; the reaper sees it instead (F118 post-close)', () => {
     const tracker = new InvocationTracker({ maxSlotTtlMs: 1 });
     tracker.start('t1', 'opus', 'user1', ['opus']);
     tracker.cancel('t1', 'opus');
@@ -128,9 +128,14 @@ describe('InvocationTracker: Stop→Seal race (#1313)', () => {
       /* wait for expiry */
     }
 
+    // Age alone never clears a pending teardown on the read path.
     const guard = tracker.guardSessionSeal('t1', 'opus');
-    assert.equal(guard.acquired, true, 'expired tombstone must not block seal');
-    guard.release();
+    assert.equal(guard.acquired, false, 'age alone must not clear a pending teardown');
+
+    // The stuck tombstone stays visible to the explicit liveness reaper.
+    const stale = tracker.listStaleSlots();
+    assert.equal(stale.length, 1);
+    assert.equal(stale[0].state, 'canceled');
   });
 
   it('complete with wrong controller does not mark teardown as done', () => {
@@ -255,7 +260,7 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
     assert.equal(status, 'canceled_by_user');
   });
 
-  it('expired cancelAll tombstone does not block seal', () => {
+  it('expired cancelAll tombstone still blocks seal; the reaper sees it instead (F118 post-close)', () => {
     const tracker = new InvocationTracker({ maxSlotTtlMs: 1 });
     tracker.start('t1', 'opus', 'user1', ['opus']);
     tracker.cancelAll('t1');
@@ -265,9 +270,14 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
       /* wait for expiry */
     }
 
+    // Age alone never clears a pending teardown on the read path.
     const guard = tracker.guardSessionSeal('t1', 'opus');
-    assert.equal(guard.acquired, true, 'expired cancelAll tombstone must not block seal');
-    guard.release();
+    assert.equal(guard.acquired, false, 'age alone must not clear a pending teardown');
+
+    // The stuck tombstone stays visible to the explicit liveness reaper.
+    const stale = tracker.listStaleSlots();
+    assert.equal(stale.length, 1);
+    assert.equal(stale[0].state, 'canceled');
   });
 
   it('getActiveSlots returns empty after cancelAll (tombstones excluded)', () => {

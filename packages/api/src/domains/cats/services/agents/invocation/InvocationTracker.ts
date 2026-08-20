@@ -228,14 +228,15 @@ export class InvocationTracker {
   /**
    * #1313: Whether a slot has a canceled tombstone whose provider teardown hasn't
    * completed yet. Teardown is marked done when complete()/completeSlot()/completeAll()
-   * is called for the canceled slot; expired tombstones are not pending.
+   * is called for the canceled slot. F118 post-close: age alone never clears the
+   * pending state on this read path — stuck tombstones surface via listStaleSlots()
+   * and the explicit liveness reaper.
    */
   private hasPendingTeardown(threadId: string, catId: string): boolean {
     const key = this.slotKey(threadId, catId);
     const inv = this.active.get(key);
     if (!inv) return false;
     if (inv.state !== 'canceled') return false;
-    if (this.isExpired(key, inv)) return false;
     return !inv.teardownComplete;
   }
 

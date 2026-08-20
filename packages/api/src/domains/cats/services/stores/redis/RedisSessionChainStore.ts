@@ -226,19 +226,6 @@ redis.call('HSET', KEYS[1], 'updatedAt', ARGV[1])
 return newCount
 `;
 
-/**
- * Atomic active → sealing claim. The status transition and active-pointer
- * removal must share one Redis operation: a read followed by update lets two
- * seal callers both believe they won and fire duplicate terminal work.
- */
-const CLAIM_SEAL_LUA = `
-if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
-if redis.call('HGET', KEYS[1], 'status') ~= 'active' then return 0 end
-redis.call('HSET', KEYS[1], 'status', 'sealing', 'sealReason', ARGV[1], 'updatedAt', ARGV[2])
-if redis.call('GET', KEYS[2]) == ARGV[3] then redis.call('DEL', KEYS[2]) end
-return 1
-`;
-
 export class RedisSessionChainStore implements ISessionChainStore {
   private readonly redis: RedisClient;
   private threadIndexReady = false;
@@ -717,26 +704,6 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (deleteFields.length > 0) {
       await this.redis.hdel(detailKey, ...deleteFields);
     }
-    return this.get(id);
-  }
-
-  async claimSeal(
-    id: string,
-    patch: Pick<SessionRecordPatch, 'sealReason' | 'updatedAt'>,
-  ): Promise<SessionRecord | null> {
-    const detailKey = SessionChainKeys.detail(id);
-    const [catId, threadId] = await this.redis.hmget(detailKey, 'catId', 'threadId');
-    if (!catId || !threadId) return null;
-    const claimed = await this.redis.eval(
-      CLAIM_SEAL_LUA,
-      2,
-      detailKey,
-      SessionChainKeys.active(catId, threadId),
-      patch.sealReason ?? '',
-      String(patch.updatedAt ?? Date.now()),
-      id,
-    );
-    if (Number(claimed) !== 1) return null;
     return this.get(id);
   }
 
