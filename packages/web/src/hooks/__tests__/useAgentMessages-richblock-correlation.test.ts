@@ -53,7 +53,11 @@ const storeState = {
     content: string;
     isStreaming?: boolean;
     origin?: string;
-    extra?: { rich?: { v: 1; blocks: Array<{ id: string }> }; stream?: { invocationId?: string } };
+    extra?: {
+      rich?: { v: 1; blocks: Array<{ id: string }> };
+      stream?: { invocationId?: string; turnInvocationId?: string };
+      isExplicitPost?: boolean;
+    };
     timestamp: number;
   }>,
   addMessage: mockAddMessage,
@@ -89,7 +93,7 @@ const storeState = {
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
   getThreadState: mockGetThreadState,
   currentThreadId: 'thread-1',
-  catInvocations: {} as Record<string, { invocationId?: string }>,
+  catInvocations: {} as Record<string, { invocationId?: string; turnInvocationId?: string }>,
   activeInvocations: {} as Record<string, { catId?: string }>,
 };
 
@@ -198,6 +202,59 @@ describe('useAgentMessages rich_block correlation (Bug A)', () => {
     expect(block.id).toBe('block-1');
     // Should NOT be attached to the streaming message
     expect(targetId).not.toBe(streamMsgId);
+  });
+
+  it('keeps an identity-bound rich_block on the current stream when an independent callback was posted first', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    const parentInvocationId = 'parent-independent';
+    const turnInvocationId = 'turn-independent';
+    const streamMsgId = 'msg-stream-independent';
+    const callbackMsgId = 'msg-callback-independent';
+    storeState.messages.push(
+      {
+        id: streamMsgId,
+        type: 'assistant',
+        catId: 'opus',
+        content: 'current provider response',
+        isStreaming: true,
+        origin: 'stream',
+        extra: { stream: { invocationId: parentInvocationId, turnInvocationId } },
+        timestamp: Date.now() - 1000,
+      },
+      {
+        id: callbackMsgId,
+        type: 'assistant',
+        catId: 'opus',
+        content: 'independent proactive update',
+        origin: 'callback',
+        extra: {
+          isExplicitPost: true,
+          stream: { invocationId: parentInvocationId, turnInvocationId },
+        },
+        timestamp: Date.now(),
+      },
+    );
+    storeState.catInvocations = {
+      opus: { invocationId: parentInvocationId, turnInvocationId },
+    };
+
+    const block = { id: 'block-independent', kind: 'card', v: 1, title: 'current final' };
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'rich_block', block }),
+        invocationId: parentInvocationId,
+        turnInvocationId,
+      });
+    });
+
+    expect(mockAppendRichBlock).toHaveBeenCalledTimes(1);
+    expect(mockAppendRichBlock).toHaveBeenCalledWith(streamMsgId, block);
+    expect(mockAppendRichBlock).not.toHaveBeenCalledWith(callbackMsgId, block);
   });
 
   it('replaces an overlapping stream bubble with callback text from the same invocation', () => {

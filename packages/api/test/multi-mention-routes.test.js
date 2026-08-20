@@ -16,10 +16,17 @@ import { resetMultiMentionOrchestrator } from '../dist/routes/callback-multi-men
 function createMockRegistry() {
   const records = new Map();
   return {
-    register(catId, threadId, userId) {
+    register(catId, threadId, userId, parentInvocationId) {
       const id = `inv-${records.size}`;
       const token = `tok-${records.size}`;
-      records.set(id, { catId, threadId, userId, invocationId: id, callbackToken: token });
+      records.set(id, {
+        catId,
+        threadId,
+        userId,
+        invocationId: id,
+        callbackToken: token,
+        ...(parentInvocationId ? { parentInvocationId } : {}),
+      });
       return { invocationId: id, callbackToken: token };
     },
     async verify(invocationId, callbackToken) {
@@ -324,6 +331,132 @@ describe('Multi-Mention Routes', () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).status, 'running');
+    await freshnessApp.close();
+  });
+
+  test('holds multi-mention on unread visible other-cat stream-origin speech in play mode', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const causalMessageStore = createMockMessageStore();
+    const baseline = causalMessageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'baseline already seen',
+      mentions: ['opus'],
+      threadId: 'thread-1',
+      timestamp: 1,
+    });
+    causalMessageStore.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'unread persisted cat answer',
+      mentions: [],
+      origin: 'stream',
+      threadId: 'thread-1',
+      timestamp: 2,
+    });
+    causalMessageStore.getByThreadAfter = async (_threadId, afterId, limit = 20) =>
+      causalMessageStore
+        .getMessages()
+        .filter((message) => message.id > afterId)
+        .slice(0, limit);
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: causalMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      deliveryCursorStore: {
+        async getSeenCursor() {
+          return baseline.id;
+        },
+      },
+      threadStore: {
+        async get() {
+          return { id: 'thread-1', thinkingMode: 'play' };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
+      payload: { targets: ['codex'], question: 'must read first', callbackTo: 'opus' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'held');
+    assert.equal(JSON.parse(res.body).reason, 'newer_messages_available');
+    await freshnessApp.close();
+  });
+
+  test('checks queued continue-current work against the callback outer parent', async () => {
+    const freshnessApp = Fastify({ logger: false });
+    registerCallbackAuthHook(freshnessApp, mockRegistry);
+    const parentInvocationId = 'parent-multi-freshness';
+    const parentCreds = mockRegistry.register('opus', 'thread-multi-parent', 'user-1', parentInvocationId);
+    const queueMessageStore = createMockMessageStore();
+    queueMessageStore.getByThreadAfter = async () => [];
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = new InvocationQueue();
+    invocationQueue.enqueue({
+      ownerAuthProvenance: 'strict',
+      threadId: 'thread-multi-parent',
+      userId: 'user-1',
+      content: 'read before starting a multi-mention',
+      source: 'user',
+      targetCats: ['opus'],
+      authorIntentByCatId: {
+        opus: { requested: 'continue_current', boundParentInvocationId: parentInvocationId },
+      },
+      intent: 'execute',
+    });
+    const { registerMultiMentionRoutes } = await import('../dist/routes/callback-multi-mention-routes.js');
+    registerMultiMentionRoutes(freshnessApp, {
+      messageStore: queueMessageStore,
+      socketManager: mockSocket,
+      router: mockRouter,
+      invocationRecordStore: mockInvocationRecordStore,
+      invocationTracker: mockInvocationTracker,
+      invocationQueue,
+      deliveryCursorStore: { getSeenCursor: async () => 'seen-cursor' },
+      turnExecutionStore: {
+        async get(invocationId) {
+          return {
+            invocationId,
+            parentInvocationId,
+            threadId: 'thread-multi-parent',
+            userId: 'user-1',
+            catId: 'opus',
+            executionKind: 'ordinary',
+            status: 'running',
+            startedAt: 1,
+          };
+        },
+      },
+    });
+    await freshnessApp.ready();
+
+    const res = await freshnessApp.inject({
+      method: 'POST',
+      url: '/api/callbacks/multi-mention',
+      headers: {
+        'x-invocation-id': parentCreds.invocationId,
+        'x-callback-token': parentCreds.callbackToken,
+      },
+      payload: {
+        targets: ['codex'],
+        question: 'Do not start before reading current work',
+        callbackTo: 'opus',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'held');
+    assert.equal(JSON.parse(res.body).reason, 'newer_messages_available');
     await freshnessApp.close();
   });
 

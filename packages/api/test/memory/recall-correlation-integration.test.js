@@ -375,4 +375,112 @@ describe('F200 recall correlation integration', () => {
     );
     assert.equal(JSON.parse(rows[0].consumed_json)[0].anchor, 'F263');
   });
+
+  it('oversized real F200 summary survives the ToolEventLog storage boundary (PR #3613 R1 gpt52)', async () => {
+    // R1 blocking finding: sanitizeToolEventSummary must not convert structural
+    // arrays (_f200Candidates) into marker strings — recall-correlation-hook
+    // consumes them with .map(), so a marker string throws TypeError and the
+    // fire-and-forget .catch(() => {}) silently kills the whole batch.
+    // This test pushes a realistic MAX-size summary through the REAL storage
+    // path (ToolEventLog.updateSummary → readByThread) into the REAL consumer
+    // (triggerRecallCorrelation) and asserts the RecallEvent still lands.
+    const { ToolEventLog } = await import('../../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const { triggerRecallCorrelation } = await import(
+      `../../dist/domains/memory/recall-correlation-hook.js?v3613=${Date.now()}`
+    );
+
+    // Minimal fake redis — only the ops ToolEventLog uses.
+    const lists = new Map();
+    const getList = (k) => {
+      if (!lists.has(k)) lists.set(k, []);
+      return lists.get(k);
+    };
+    const fakeRedis = {
+      async zadd(key, score, member) {
+        const list = getList(key);
+        if (list.some((e) => e[1] === member)) return 0;
+        list.push([score, member]);
+        list.sort((a, b) => a[0] - b[0]);
+        return 1;
+      },
+      async zrange(key, start, stop, withScores) {
+        const list = getList(key);
+        const end = stop === -1 ? list.length : stop + 1;
+        const slice = list.slice(start, end);
+        return withScores === 'WITHSCORES' ? slice.flatMap(([s, m]) => [m, String(s)]) : slice.map(([, m]) => m);
+      },
+      async zrem(key, member) {
+        const list = getList(key);
+        const idx = list.findIndex((e) => e[1] === member);
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          return 1;
+        }
+        return 0;
+      },
+      async zremrangebyrank(key, start, stop) {
+        const list = getList(key);
+        const len = list.length;
+        const s = Math.max(0, start < 0 ? len + start : start);
+        const e = Math.min(len - 1, stop < 0 ? len + stop : stop);
+        if (s > e) return 0;
+        return list.splice(s, e - s + 1).length;
+      },
+      async expire() {},
+    };
+
+    const eventLog = new ToolEventLog(fakeRedis);
+    const now = Date.now();
+
+    // tool_use append (raw toolInput summary, like route-serial wires it)
+    await eventLog.append({
+      invocationId: 'inv-r1',
+      sessionId: 'inv-r1',
+      threadId: 'th-r1',
+      catId: 'opus',
+      toolName: 'search_evidence',
+      timestamp: now - 5000,
+      turnIndex: 0,
+      status: 'success',
+      summary: { query: 'memory adapter coverage', _toolUseId: 'tu-r1' },
+    });
+
+    // Result-side patch: realistic MAX-size F200 payload — 20 candidates
+    // (COVERAGE_MAX_LIMIT), the shape deriveResultSummary emits (~2.4KB).
+    const cands = Array.from({ length: 20 }, (_, i) => ({
+      anchor: i === 0 ? 'F102' : `docs/features/F${100 + i}-some-longer-feature-name.md`,
+      rank: i,
+      docKind: 'feature',
+      sourcePath: `docs/features/F${100 + i}-some-longer-feature-name.md`,
+    }));
+    const merged = await eventLog.updateSummary(
+      'th-r1',
+      { toolUseId: 'tu-r1' },
+      { resultCount: 20, resultStatus: 'hit', _f200Candidates: cands },
+    );
+    assert.equal(merged, true, 'result patch must merge');
+
+    // Real storage roundtrip → real consumer.
+    const storedEvents = await eventLog.readByThread('th-r1');
+    assert.ok(Array.isArray(storedEvents[0].summary._f200Candidates), 'stored _f200Candidates must remain an array');
+    assert.equal(storedEvents[0].summary._f200Candidates.length, 20, 'all 20 candidates survive storage');
+
+    const events = [
+      ...storedEvents,
+      {
+        threadId: 'th-r1',
+        catId: 'opus',
+        invocationId: 'inv-r1',
+        toolName: 'Read',
+        summary: { file_path: '/path/cat-cafe/docs/features/F102-memory-adapter.md' },
+        timestamp: now - 3000,
+      },
+    ];
+    await triggerRecallCorrelation(db, events, 'inv-r1', 'opus');
+
+    const rows = db.prepare('SELECT * FROM recall_events').all();
+    assert.equal(rows.length, 1, 'RecallEvent persisted — correlation not poisoned by sanitize');
+    const consumed = JSON.parse(rows[0].consumed_json);
+    assert.equal(consumed[0].anchor, 'F102', 'consumed anchor extracted from intact candidate array');
+  });
 });

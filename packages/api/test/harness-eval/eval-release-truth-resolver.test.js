@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   createEvalReleaseTruthResolver,
@@ -21,6 +24,29 @@ function fakeGit({ refs, ancestors }) {
 }
 
 describe('F266 release truth resolver', () => {
+  it('keeps packaged startup alive while unavailable Git truth remains fail-closed', () => {
+    const packagedRoot = mkdtempSync(join(tmpdir(), 'clowder-packaged-runtime-'));
+    try {
+      const resolver = createEvalReleaseTruthResolver({ repoRoot: packagedRoot });
+
+      assert.equal(resolver.loadedRuntimeHead, undefined);
+      assert.throws(
+        () => resolver.verifyMainLanded(sha('a')),
+        (error) => error instanceof EvalReleaseTruthError && error.code === 'commit_unavailable',
+      );
+      assert.throws(
+        () => resolver.verifyLiveActive(sha('a')),
+        (error) => error instanceof EvalReleaseTruthError && error.code === 'commit_unavailable',
+      );
+      assert.throws(
+        () => resolver.verifyLiveActive('--all'),
+        (error) => error instanceof EvalReleaseTruthError && error.code === 'invalid_commit',
+      );
+    } finally {
+      rmSync(packagedRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps main_landed and live_active as separate server-owned facts', () => {
     const landed = sha('a');
     const mainHead = sha('b');

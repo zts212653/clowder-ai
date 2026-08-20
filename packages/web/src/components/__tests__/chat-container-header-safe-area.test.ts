@@ -10,12 +10,6 @@ vi.mock('next/link', () => ({
 vi.mock('@/components/ThreadCatPill', () => ({
   ThreadCatPill: () => null,
 }));
-vi.mock('@/components/ExportButton', () => ({
-  ExportButton: () => null,
-}));
-vi.mock('@/components/ChatVoiceFeatureControls', () => ({
-  ChatVoiceFeatureControls: () => null,
-}));
 vi.mock('@/components/VoiceCompanionButton', () => ({
   VoiceCompanionButton: () => null,
 }));
@@ -44,10 +38,8 @@ describe('ChatContainerHeader safe-area', () => {
         authPendingCount: 0,
         viewMode: 'single',
         onToggleViewMode: vi.fn(),
-        onOpenMobileStatus: vi.fn(),
         statusPanelOpen: true,
         onToggleStatusPanel: vi.fn(),
-        defaultCatId: 'opus',
       }),
     );
 

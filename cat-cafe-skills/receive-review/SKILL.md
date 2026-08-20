@@ -1,11 +1,7 @@
 ---
 name: receive-review
 tips_exempt: harness-internal review re-entry convention; no distinct end-user capability surface
-description: >
-  处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
-  Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
-  Not for: 发 review 请求（用 request-review）、自检（用 quality-gate）。
-  Output: 逐项修复确认 + reviewer 放行。
+description: "处理 reviewer 反馈：Red→Green 修复 + 按 engagement mode 收口。Use when: 收到 review 结果或 P1/P2。Not for: 发 review 请求、自检。Output: 按 iterative / one-shot 契约闭环。"
 triggers:
   - "review 结果"
   - "review 意见"
@@ -41,7 +37,7 @@ triggers:
 4. `COMMENTED` → 判断是否需要代码修改，需要则进入 Red→Green 流程
 5. 处理完成后通知operator结果（KD-13: 事后通知）
 
-详见 `refs/pr-signals.md` Phase B 自动响应行为。
+详见 `../.cat-cafe-shared-refs/pr-signals.md` Phase B 自动响应行为。
 
 ## 核心知识
 
@@ -123,7 +119,7 @@ WHEN 收到 review 反馈:
 4. VERIFY — reviewer 说的问题真的存在吗？（见下方三道门）
 5. AUDIT — failure-mode sweep（见下方 §16e 判别）
 6. FIX — 通过验证的问题 + audit 发现的同类问题 Red→Green 修复
-7. CONFIRM — 修完回给 reviewer 确认，不能自判"改对了"
+7. CLOSE — 按 engagement mode 收口：iterative 回原 source；one-shot 用测试闭环，必要时转日常 reviewer
 ```
 
 ### VERIFY 三道门（少一道不准照改）
@@ -188,19 +184,27 @@ VERIFY 完所有 findings 之后、动手修之前，做一次 failure-mode 判�
 
 **例外**：如果无法稳定自动化复现，提供最小手工复现步骤 + 说明原因，但不能跳过验证结论。
 
-## 修复后确认（硬规则）
+## 修复后确认（按 engagement mode）
 
-**修复完成 ≠ 可以合入。必须回到原 feedback source 确认。**
+**修复完成 ≠ 自动可以合入；但闭环也不等于必须召回同一只猫。** 先读取原 review packet 的
+`Engagement`：普通 `iterative` review 回本轮可验证的 feedback source；稀缺判断席位的
+`one_shot_calibration` / `final_seal` 按一次性契约退出，作者用 Red→Green + 风险匹配 gate 消费普通 finding，
+仍需独立确认时**转日常 reviewer**。只有新的架构/决策判断、无法机械验收的原 finding，或 operator 明确要求，才复入原稀缺 reviewer。
+
+对需要复入的本地 `iterative` review，权威来源是 **direct review carrier**（直接承载 review 请求、由 lease
+`predecessorThreadId` 绑定的 thread），不是任务祖先 thread，也不是第一次误投 verdict 的落点。若二者冲突，
+停止沿错路级联并回 direct review carrier。
 
 ### 本地 reviewer 复入载体（terminal 之后的新工作）
 
-P1/P2 修复产生的新 exact HEAD 是一轮新的、可执行的 review work，不是对上一轮 terminal verdict 的礼貌 ACK。向本地 reviewer 发修复确认前，必须重新加载 `request-review`，并用结构化 successor 载体：同 thread 用 `post_message(action.mode=single)`，跨 thread 用对应 cross-thread action；两者都带 `coordination.phase=active`、`reviewReentry`（reason + durable evidenceRef）、显式 `clientMessageId` 与唯一 reviewer `targetCats`。
+只有 mode 判定确实需要复入时，P1/P2 修复产生的新 exact HEAD 才是一轮新的 review work。向本地 reviewer 发修复确认前，必须重新加载 `request-review`，并用结构化 successor 载体：同 thread 用 `post_message(action.mode=single)`，跨 thread 用对应 cross-thread action；两者都带 `coordination.phase=active`、`reviewReentry`（reason + durable evidenceRef）、显式 `clientMessageId` 与唯一 reviewer `targetCats`。exact-HEAD 变化本身不能越过稀缺席位的 one-shot 退出条件。
 
 只用普通行首 `@reviewer`、`replyTo` 或裸 `targetCats` 回 terminal verdict，服务端会按 ACK 正确抑制；不得把正文看起来“像正式复审”当机器可判 provenance，也不得靠反复重发碰运气。最终 verdict 仍按 `request-review` 用 terminal coordination 返回。
 
 | Feedback source | 修复后动作 |
 |-----------------|------------|
-| 本地猫 reviewer | `@reviewer` 发送修复确认请求；等 reviewer 明确放行当前 SHA |
+| 本地 `iterative` reviewer | 在 direct review carrier 向 `@reviewer` 发送结构化修复确认请求；等 reviewer 明确放行当前 SHA |
+| 稀缺 `one_shot_calibration` / `final_seal` reviewer | 作者修复 + 测试/gate；仍需独立确认则转日常 reviewer，不因普通 finding 或 SHA 变化召回原猫 |
 | cloud / GitHub review | 在 GitHub 回复或标注修复证据，push 新 SHA 后**只重新触发 cloud review**，等 PR tracking / review feedback；不要 @ 本地旧 reviewer |
 | CI / PR check | 修复后 rerun/check gate；若只是外部 check gate，不需要本地 reviewer 续签 |
 | operator / 愿景级 feedback | 回读原始需求；需要价值取舍时带 Decision Packet 给operator |
@@ -224,12 +228,12 @@ P1/P2 修复产生的新 exact HEAD 是一轮新的、可执行的 review work�
 Commit: {sha} — {message}
 Fresh-Context Delta: {N} FC:covered, {M} FC:new, {K} FC:N/A <!-- 仅 review request 含 FC 节时 -->
 
-请确认修复，确认后执行合入。
+后续：按原 Engagement 决定回原 source 或转日常 reviewer。
 ```
 
 修复完成后（F160 Phase C）：
 - 每个 P1/P2 修复任务 → `cat_cafe_update_task` 状态改为 `done`
-- 回到原 feedback source 确认（硬规则不变）
+- 按上述 Engagement 闭环；只有 `iterative` 本地 review 回 direct review carrier
 
 **remote review 修了 P1/P2 → 必须 re-trigger remote review，不能自判通过直接合入，也不能把 cloud gate 投射成本地旧 reviewer。**
 

@@ -62,7 +62,7 @@ const INIT_RESULT = {
  * Create a pool backed by a mock spawn function that auto-responds to ACP protocol.
  * Returns { pool, captured } where captured is the list of sent JSON-RPC messages.
  */
-function createPoolWithAutoRespond() {
+function createPoolWithAutoRespond({ usageUpdate = false } = {}) {
   const { child, clientStdin, agentStdout, ee } = createMockChild();
   const captured = [];
 
@@ -116,6 +116,18 @@ function createPoolWithAutoRespond() {
         );
       } else if (msg.method === 'session/prompt') {
         setImmediate(() => {
+          if (usageUpdate) {
+            agentStdout.write(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'session/update',
+                params: {
+                  sessionId: msg.params.sessionId,
+                  update: { sessionUpdate: 'usage_update', used: 85_000, size: 100_000 },
+                },
+              }) + '\n',
+            );
+          }
           agentStdout.write(
             JSON.stringify({
               jsonrpc: '2.0',
@@ -164,6 +176,25 @@ describe('GeminiAcpAdapter', () => {
       await pool.closeAll();
       pool = null;
     }
+  });
+
+  it('keeps lifecycle support conditional until a usable usage_update is observed', async () => {
+    const result = createPoolWithAutoRespond({ usageUpdate: true });
+    pool = result.pool;
+    const adapter = new GeminiAcpAdapter({
+      catId: 'generic-acp',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      providerName: 'acp',
+      modelName: 'unknown-agent',
+    });
+
+    assert.equal(adapter.contextCapability().usageTelemetry, 'conditional');
+    const messages = [];
+    for await (const message of adapter.invoke('hello')) messages.push(message);
+    assert.ok(messages.some((message) => message.metadata?.usage?.contextUsedTokens === 85_000));
+    assert.equal(adapter.contextCapability().usageTelemetry, 'available');
   });
 
   it('invoke yields session_init + text + done', async () => {

@@ -3,6 +3,7 @@
  * 消息相关的类型定义
  */
 
+import type { ContextAttachmentContent } from './context-attachment.js';
 import type { CatId, MessageId, ThreadId, UserId } from './ids.js';
 import { generateMessageId } from './ids.js';
 
@@ -28,6 +29,20 @@ export interface ImageContent {
   readonly type: 'image';
   readonly url: string;
   readonly alt?: string;
+}
+
+/**
+ * Generic file content — non-image file attachments.
+ * Images use ImageContent (keeps preview + lightbox path).
+ * FileContent carries enough metadata to render a file card with download
+ * without re-fetching or parsing the file.
+ */
+export interface FileContent {
+  readonly type: 'file';
+  readonly url: string;
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly fileSize: number;
 }
 
 /**
@@ -63,7 +78,14 @@ export interface ToolResultContent {
 /**
  * Message content - union of all content types
  */
-export type MessageContent = TextContent | ImageContent | CodeContent | ToolCallContent | ToolResultContent;
+export type MessageContent =
+  | TextContent
+  | ImageContent
+  | FileContent
+  | CodeContent
+  | ToolCallContent
+  | ToolResultContent
+  | ContextAttachmentContent;
 
 /**
  * Message status

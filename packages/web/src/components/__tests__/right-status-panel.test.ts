@@ -46,7 +46,7 @@ function render(props: RightStatusPanelProps): string {
 }
 
 describe('RightStatusPanel', () => {
-  it('renders status title, mode, and active cats', () => {
+  it('lets the workspace chrome own the status title while rendering mode and active cats', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus', 'codex'],
@@ -65,11 +65,14 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('状态栏');
+    expect(html).not.toContain('状态栏');
     expect(html).toContain('当前模式');
     expect(html).toContain('执行');
     expect(html).toContain('猫猫状态');
     expect(html).toContain('消息统计');
+    expect(html).toContain('Session Chain');
+    expect(html).toContain('Thread:');
+    expect(html).toContain('test-thread');
     expect(html).toContain('布偶猫');
     expect(html).toContain('缅因猫');
     expect(html).toContain('12');
@@ -77,7 +80,7 @@ describe('RightStatusPanel', () => {
 
   it('AC-Z15 R7: ideate mode preserves targetCats UNION across all panels (cloud Codex P2)', () => {
     // co-creator alpha catch + cloud Codex round-3 P2: ideate 多猫场景下 ParallelStatusBar
-    // 用 UNION 显示，但 RightStatusPanel/MobileStatusSheet 用 slot-first，cat 完成清 slot 后
+    // 用 UNION 显示，但状态面板若用 slot-first，cat 完成清 slot 后
     // 卡片消失 → 跨 panel state coherence regression（顶部双卡，侧边/移动端单卡）。
     // 修法：所有 panel 都把 intentMode 传给 deriveActiveCats，UNION 全程一致。
     const html = render({

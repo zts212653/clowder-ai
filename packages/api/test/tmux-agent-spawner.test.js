@@ -401,6 +401,9 @@ describe('spawnCliInTmux', () => {
         invocationId: 'test-inv-plaintext-no-newline',
         cwd: '/tmp',
         timeoutMs: 1500,
+        // Full-gate load can delay pane startup independently of the idle
+        // contract under test. Once stdout starts, the 1.5s idle budget applies.
+        firstEventTimeoutMs: 8000,
       },
       { tmuxGateway: gateway },
     );
@@ -414,6 +417,34 @@ describe('spawnCliInTmux', () => {
     const plain = events.find((e) => e.__cliPlainText);
     assert.ok(plain, 'should yield raw plain-text stdout result');
     assert.equal(plain.stdout, 'part1part2done');
+    assert.equal(plain.exitCode, 0);
+  });
+
+  it('plainText mode does not time out after stdout reaches EOF while the exit sentinel is pending', async () => {
+    const events = [];
+    const gen = spawnCliInTmux(
+      {
+        command: '/bin/sh',
+        args: ['-c', 'printf done; exec 1>&-; sleep 0.5'],
+        outputMode: 'plainText',
+        worktreeId: WORKTREE,
+        invocationId: 'test-inv-plaintext-eof-before-exit-sentinel',
+        cwd: '/tmp',
+        timeoutMs: 100,
+        firstEventTimeoutMs: 8000,
+      },
+      { tmuxGateway: gateway },
+    );
+
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    const timeout = events.find((e) => e.__cliTimeout);
+    assert.equal(timeout, undefined, 'completed stdout must retire the idle timer before exit-code polling');
+    const plain = events.find((e) => e.__cliPlainText);
+    assert.ok(plain, 'should yield raw plain-text stdout result');
+    assert.equal(plain.stdout, 'done');
     assert.equal(plain.exitCode, 0);
   });
 

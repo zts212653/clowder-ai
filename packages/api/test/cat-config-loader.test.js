@@ -72,22 +72,24 @@ describe('cat-config-loader', () => {
       assert.equal(config.breeds[0].id, 'ragdoll');
     });
 
-    it('rejects an orphan or oversized auto-compact threshold on reload', () => {
+    it('tolerates obsolete CLI window fields as inert catalog input', () => {
       for (const cli of [
         { command: 'codex', outputFormat: 'json', autoCompactTokenLimit: 90000 },
-        {
-          command: 'codex',
-          outputFormat: 'json',
-          contextWindow: 100000,
-          autoCompactTokenLimit: 100001,
-        },
+        { command: 'codex', outputFormat: 'json', contextWindow: -1, autoCompactTokenLimit: 100001 },
+        { command: 'codex', outputFormat: 'json', contextWindow: 100000, autoCompactTokenLimit: 100001 },
       ]) {
         const config = validConfig();
         config.breeds[0].variants[0].clientId = 'openai';
         config.breeds[0].variants[0].defaultModel = 'gpt-5.6-sol';
         config.breeds[0].variants[0].cli = cli;
 
-        assert.throws(() => loadCatConfig(writeTempConfig(config)), /autoCompactTokenLimit.*contextWindow/i);
+        const loadedCli = loadCatConfig(writeTempConfig(config)).breeds[0].variants[0].cli;
+        assert.equal(loadedCli.autoCompactTokenLimit, undefined, 'obsolete compact limit must be stripped');
+        assert.equal(
+          loadedCli.contextWindow,
+          cli.contextWindow === 100000 ? 100000 : undefined,
+          'only a valid legacy contextWindow remains available for top-level migration',
+        );
       }
     });
 
@@ -1188,13 +1190,39 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all['gpt-pro']); // F247: cloud pro cat added
     assert.ok(all.gemini);
     assert.ok(all.gemini25);
-    assert.ok(all.gemini35); // Gemini 3.5 Flash standalone breed
+    assert.ok(all.gemini35); // Gemini Flash standalone breed (current 3.6)
     assert.ok(all.glm52); // GLM 5.2 cat (Dragon Li)
     assert.ok(all.kimi); // Kimi CLI cat (moonshot)
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
     assert.ok(all['antig-opus']); // F061: Bengal cat Claude variant
     assert.ok(all['agy-opus']); // F210: Bengal cat AGY CLI Claude Opus variant
     assert.ok(all.opencode); // F105: OpenCode external agent
+  });
+
+  it('registers gemini35 as Gemini 3.6 Flash with backward-compatible routing aliases', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const config = loadCatConfig(templatePath);
+    const all = toAllCatConfigs(config);
+    const gemini35 = all.gemini35;
+
+    assert.ok(gemini35, 'gemini35 cat config exists');
+    assert.equal(gemini35.name, '暹罗猫 Gemini 3.6 Flash');
+    assert.equal(gemini35.variantLabel, 'Gemini 3.6 Flash');
+    assert.equal(gemini35.defaultModel, 'Gemini 3.6 Flash (High)');
+    for (const alias of [
+      '@gemini36',
+      '@gemini-36',
+      '@gemini3.6',
+      '@暹罗gemini36',
+      '@gemini35',
+      '@gemini-35',
+      '@gemini3.5',
+    ]) {
+      assert.ok(gemini35.mentionPatterns.includes(alias), `gemini35 mentionPatterns include ${alias}`);
+    }
+    for (const alias of ['@gemini36', '@gemini-36', '@gemini3.6', '@暹罗gemini36']) {
+      assert.equal(findBreedByMention(config, `${alias} ping`)?.catId, 'gemini35', `${alias} routes to gemini35`);
+    }
   });
 
   it('registers GLM 5.2 as a Dragon Li cat in project config', () => {

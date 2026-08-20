@@ -2,6 +2,7 @@ import {
   PAW_FEEL_NO_ACTION_REASONS,
   type PawFeelDispositionActor,
   type PawFeelDispositionEvent,
+  type PawFeelSignatureAction,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -64,6 +65,24 @@ export const PawFeelDispositionCommandSchema = z.discriminatedUnion('type', [
       leaseId: nonEmptyString,
     })
     .strict(),
+  commandBase
+    .extend({
+      type: z.literal('request_signature'),
+      action: z.discriminatedUnion('type', [
+        z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
+        z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
+        z.object({ type: z.literal('fix'), leaseId: nonEmptyString }).strict(),
+      ]),
+      preferredSignerCatId: nonEmptyString.optional(),
+    })
+    .strict(),
+  commandBase
+    .extend({
+      type: z.literal('mark_blocked'),
+      blockerCode: nonEmptyString,
+      blockerRef: nonEmptyString,
+    })
+    .strict(),
 ]);
 
 export type PawFeelDispositionCommand = z.infer<typeof PawFeelDispositionCommandSchema>;
@@ -80,10 +99,28 @@ export const PawFeelCatPrincipalSchema = PawFeelPrincipalSchema.refine(
   'cat principal required',
 );
 
-export const PawFeelBundleActionSchema = z.discriminatedUnion('type', [
+export const PawFeelTerminalActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('duplicate'), duplicateOf: nonEmptyString }).strict(),
   z.object({ type: z.literal('no_action'), reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS) }).strict(),
   z.object({ type: z.literal('fix'), leaseId: nonEmptyString }).strict(),
+]);
+
+export const PawFeelBundleActionSchema = z.discriminatedUnion('type', [
+  ...PawFeelTerminalActionSchema.options,
+  z
+    .object({
+      type: z.literal('request_signature'),
+      action: PawFeelTerminalActionSchema,
+      preferredSignerCatId: nonEmptyString.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('block'),
+      blockerCode: nonEmptyString,
+      blockerRef: nonEmptyString,
+    })
+    .strict(),
 ]);
 
 const PawFeelBundleMemberSchema = z
@@ -96,6 +133,7 @@ const PawFeelBundleMemberSchema = z
 export const PawFeelBundleCommandSchema = z
   .object({
     bundleKey: nonEmptyString,
+    membershipToken: nonEmptyString,
     eventIdPrefix: nonEmptyString,
     members: z.array(PawFeelBundleMemberSchema).min(1).max(50),
     action: PawFeelBundleActionSchema,
@@ -127,6 +165,7 @@ export interface PawFeelResolvedFix {
 export interface PawFeelResolvedCommandContext {
   ownerCatId?: string;
   fix?: PawFeelResolvedFix;
+  signatureAction?: PawFeelSignatureAction;
 }
 
 export function pawFeelCommandToEvent(
@@ -180,6 +219,21 @@ export function pawFeelCommandToEvent(
         leaseId: context.fix.leaseId,
         leaseGeneration: context.fix.leaseGeneration,
         custodyEvidenceRef: context.fix.custodyEvidenceRef,
+      };
+    case 'request_signature':
+      if (!context.signatureAction) throw new Error('signature request requires a resolved action');
+      return {
+        ...base,
+        type: 'signature_requested',
+        action: context.signatureAction,
+        ...(command.preferredSignerCatId ? { preferredSignerCatId: command.preferredSignerCatId } : {}),
+      };
+    case 'mark_blocked':
+      return {
+        ...base,
+        type: 'blocked',
+        blockerCode: command.blockerCode,
+        blockerRef: command.blockerRef,
       };
   }
 }

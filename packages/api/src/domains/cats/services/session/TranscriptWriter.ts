@@ -10,7 +10,7 @@
  *     digest.extractive.json — rule-based extractive digest
  *
  * events.jsonl envelope:
- *   { v:1, t:number, threadId, catId, sessionId, cliSessionId, invocationId?, eventNo, event }
+ *   { v:1, t:number, threadId, catId, sessionId, cliSessionId?, invocationId?, eventNo, event }
  */
 
 import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -25,7 +25,8 @@ export interface TranscriptSessionInfo {
   sessionId: string;
   threadId: string;
   catId: string;
-  cliSessionId: string;
+  /** Provider runtime ID, absent for a logical session that has not been late-bound. */
+  cliSessionId?: string;
   seq: number;
 }
 
@@ -169,7 +170,7 @@ export class TranscriptWriter {
           threadId: session.threadId,
           catId: session.catId,
           sessionId: session.sessionId,
-          cliSessionId: session.cliSessionId,
+          ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
           invocationId: entry.invocationId,
           eventNo: entry.eventNo,
           event: entry.event,
@@ -306,7 +307,7 @@ export class TranscriptWriter {
         threadId: session.threadId,
         catId: session.catId,
         sessionId: session.sessionId,
-        cliSessionId: session.cliSessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
         invocationId: entry.invocationId,
         eventNo: entry.eventNo,
         event: entry.event,

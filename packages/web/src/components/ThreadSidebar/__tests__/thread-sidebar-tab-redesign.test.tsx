@@ -277,7 +277,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
     expect(visibleThreadIds(harness.container)).toEqual(['default', 'system']);
   });
 
-  it('opens the project tab when the active regular thread is outside the recent limit', async () => {
+  it('opens the recent tab when the active regular thread is beyond the old 8-item limit (clowder-ai#1305)', async () => {
     Object.assign(mockStore, {
       currentThreadId: 'regular-9',
       threads: [
@@ -295,7 +295,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
 
     await harness.render();
 
-    expect(harness.container.querySelector('[data-testid="sidebar-tab-project"]')?.getAttribute('aria-selected')).toBe(
+    expect(harness.container.querySelector('[data-testid="sidebar-tab-recent"]')?.getAttribute('aria-selected')).toBe(
       'true',
     );
     expect(visibleThreadIds(harness.container)).toContain('regular-9');
@@ -323,7 +323,7 @@ describe('ThreadSidebar v9 tab redesign', () => {
     Object.assign(mockStore, { currentThreadId: 'regular-9' });
     await harness.render({ routeThreadId: 'regular-9' });
 
-    expect(harness.container.querySelector('[data-testid="sidebar-tab-project"]')?.getAttribute('aria-selected')).toBe(
+    expect(harness.container.querySelector('[data-testid="sidebar-tab-recent"]')?.getAttribute('aria-selected')).toBe(
       'true',
     );
     expect(visibleThreadIds(harness.container)).toContain('regular-9');

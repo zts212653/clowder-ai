@@ -32,6 +32,7 @@ describe('Callback routes: agent-key auth path', () => {
   const TEST_CAT = 'bengal';
 
   beforeEach(async () => {
+    process.env.DEFAULT_OWNER_USER_ID = TEST_USER;
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
@@ -71,6 +72,66 @@ describe('Callback routes: agent-key auth path', () => {
   async function issueKey() {
     return agentKeyRegistry.issue(TEST_CAT, TEST_USER);
   }
+
+  async function issueGptProKey(userId = TEST_USER) {
+    return agentKeyRegistry.issue('gpt-pro', userId);
+  }
+
+  // ---- GET /api/callbacks/auth-probe ----
+
+  test('auth-probe verifies an agent-key principal without reading thread data', async () => {
+    const app = await createApp();
+    const { secret } = await issueGptProKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { ok: true });
+  });
+
+  test('auth-probe rejects a valid agent key for another cat', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+  });
+
+  test('auth-probe rejects a gpt-pro key for another user', async () => {
+    const app = await createApp();
+    const { secret } = await issueGptProKey('other-user');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': secret },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.json(), { ok: false, reason: 'gpt_pro_principal_required' });
+  });
+
+  test('auth-probe rejects an unknown sidecar secret', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/auth-probe',
+      headers: { 'x-agent-key-secret': 'stale-sidecar-secret' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.json().reason, 'agent_key_unknown');
+  });
 
   // ---- POST /api/callbacks/post-message ----
 
@@ -475,6 +536,7 @@ describe('Callback routes: agent-key auth path', () => {
       timestamp: Date.now(),
       threadId: ownedThreadId,
       deliveryStatus: 'queued',
+      extra: { isExplicitPost: true },
     });
 
     const res = await app.inject({

@@ -90,6 +90,7 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_response_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
+  active_writer_recovery: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
@@ -116,6 +117,12 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // addressing a decoder-drift or context-window issue. Shield-X icon signals
   // "gated at upstream boundary" — visually distinct from key (auth) / gauge (quota).
   upstream_policy_reject: { ...PALETTE_COGNITIVE, Icon: ShieldXIcon },
+  // clowder-ai#1324/#1325 (@codex-terra review): the harness's MANAGED argv drifted from the
+  // installed CLI version (flag removed / renamed / newly mutually exclusive). System tier
+  // (slate) on purpose — deliberately NOT PALETTE_USER_FIX: nothing in the user's config or
+  // credentials is wrong, so painting it as user-fixable would contradict the hint, which
+  // says exactly the opposite. Wrench = broken machinery on our side, awaiting a harness fix.
+  incompatible_cli_arguments: { ...PALETTE_SYSTEM, Icon: WrenchIcon },
 };
 
 const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };

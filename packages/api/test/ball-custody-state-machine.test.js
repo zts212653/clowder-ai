@@ -22,7 +22,7 @@ function ev(kind, { payload = {}, at = 10_000, classification } = {}) {
   };
 }
 function snap(over = {}) {
-  return { heldUntil: null, lastStateChangeAt: 0, ...over };
+  return { holder: 'codex-sol', heldUntil: null, lastStateChangeAt: 0, ...over };
 }
 
 describe('ball-custody transition — 球流转', () => {
@@ -67,6 +67,15 @@ describe('ball-custody transition — hold 守卫', () => {
   it('ball.held 从 active → active（heldUntil 由 projector 设）', () => {
     assert.deepStrictEqual(
       transition('active', ev('ball.held', { payload: { catId: 'opus', fireAt: 99_999 } }), snap()),
+      {
+        ok: true,
+        next: 'active',
+      },
+    );
+  });
+  it('ball.held 从 resolved 重新开球，覆盖前一轮 managed/A2A disposition', () => {
+    assert.deepStrictEqual(
+      transition('resolved', ev('ball.held', { payload: { catId: 'opus', fireAt: 199_999 } }), snap()),
       {
         ok: true,
         next: 'active',
@@ -210,12 +219,76 @@ describe('ball-custody transition — 虚空 + 唤醒', () => {
     assert.strictEqual(transition('active', ev('ball.wake_sent'), snap()).ok, false);
     assert.strictEqual(transition('resolved', ev('ball.wake_sent'), snap()).ok, false);
   });
+  it('ball.hold_dispositioned 只从 live hold 终结原球，resolved replay 不复活', () => {
+    for (const from of ['active', 'blocked']) {
+      assert.deepStrictEqual(
+        transition(
+          from,
+          ev('ball.hold_dispositioned', {
+            payload: {
+              catId: 'codex-sol',
+              invocationId: 'inv-1',
+              sourceMessageId: 'message-1',
+              taskId: 'task-1',
+              disposition: 'completed',
+            },
+          }),
+          snap(),
+        ),
+        { ok: true, next: 'resolved' },
+      );
+    }
+    assert.deepStrictEqual(transition('resolved', ev('ball.hold_dispositioned'), snap()), {
+      ok: false,
+      reason: 'invalid_transition',
+    });
+    assert.deepStrictEqual(
+      transition(
+        'active',
+        ev('ball.hold_dispositioned', { payload: { catId: 'codex-sol' } }),
+        snap({ holder: 'opus' }),
+      ),
+      { ok: false, reason: 'invalid_transition' },
+    );
+  });
+  it('ball.dispatch_dispositioned 只从 live A2A dispatch 终结原球，resolved replay 不复活', () => {
+    for (const from of ['active', 'blocked']) {
+      assert.deepStrictEqual(
+        transition(
+          from,
+          ev('ball.dispatch_dispositioned', {
+            payload: {
+              catId: 'codex-sol',
+              fromCatId: 'fable5',
+              invocationId: 'inv-1',
+              sourceMessageId: 'message-1',
+              disposition: 'completed',
+            },
+          }),
+          snap(),
+        ),
+        { ok: true, next: 'resolved' },
+      );
+    }
+    assert.deepStrictEqual(transition('resolved', ev('ball.dispatch_dispositioned'), snap()), {
+      ok: false,
+      reason: 'invalid_transition',
+    });
+    assert.deepStrictEqual(
+      transition(
+        'active',
+        ev('ball.dispatch_dispositioned', { payload: { catId: 'codex-sol' } }),
+        snap({ holder: 'opus' }),
+      ),
+      { ok: false, reason: 'invalid_transition' },
+    );
+  });
 });
 
 describe('INV-10 完整性穷举：全 state × event 无未定义', () => {
   it('每个 (state, event) transition 返回 well-formed result，不 throw', () => {
     assert.strictEqual(ALL_BALL_STATES.length, 8); // new + 7
-    assert.strictEqual(ALL_BALL_EVENT_KINDS.length, 17); // Phase B 13 + Phase C 3 安乐死 + Phase P 1 wakeWhen
+    assert.strictEqual(ALL_BALL_EVENT_KINDS.length, 19); // + exact managed-hold and ordinary A2A dispositions
     for (const state of ALL_BALL_STATES) {
       for (const kind of ALL_BALL_EVENT_KINDS) {
         const r = transition(

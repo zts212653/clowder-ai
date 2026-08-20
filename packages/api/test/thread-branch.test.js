@@ -557,9 +557,7 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     await app.close();
   });
 
-  it('preserves origin field when copying messages to branch (play-mode isolation)', async () => {
-    // Regression (砚砚 R10): branch copy dropped origin, making stream messages
-    // appear as legacy untagged in the new thread — bypassing play-mode isolation.
+  it('preserves transport origin field when copying messages to branch', async () => {
     const messageStore = new MessageStore();
     const threadStore = createMockThreadStore();
 
@@ -578,11 +576,11 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
       timestamp: 1000,
       threadId: 'thread-origin-test',
     });
-    // Opus stream message (origin: 'stream' — should be hidden in play mode)
+    // Opus stream-origin persisted message
     messageStore.append({
       userId: 'user-1',
       catId: 'opus',
-      content: 'thinking...',
+      content: 'persisted answer',
       mentions: [],
       origin: 'stream',
       timestamp: 1001,
@@ -615,7 +613,7 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     assert.equal(copied.length, 3, 'all 3 messages should be copied');
 
     // Verify origin is preserved
-    const copiedStream = copied.find((m) => m.content === 'thinking...');
+    const copiedStream = copied.find((m) => m.content === 'persisted answer');
     assert.equal(copiedStream.origin, 'stream', 'stream origin must be preserved in branch');
 
     const copiedCallback = copied.find((m) => m.content === 'result');

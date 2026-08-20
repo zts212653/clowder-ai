@@ -76,6 +76,7 @@ describe('F278 MCP paw-feel tools', () => {
   it('sends one common bundle action plus explicit exceptions without actor identity', async () => {
     const input = {
       bundleKey: 'turn:turn-1',
+      membershipToken: 'signed-list-snapshot',
       eventIdPrefix: 'bundle-event-1',
       members: [
         { signalId: 'signal-1', expectedSequence: 1 },
@@ -98,5 +99,19 @@ describe('F278 MCP paw-feel tools', () => {
     assert.deepEqual(body, input);
     assert.equal(JSON.stringify(body).includes('actor'), false);
     assert.equal(JSON.stringify(body).includes('targetThreadId'), false);
+    const tool = pawFeelDispositionTools.find((candidate) => candidate.name === 'cat_cafe_triage_paw_feel');
+    assert.equal(
+      tool.inputSchema.action.safeParse({
+        type: 'request_signature',
+        action: { type: 'no_action', reasonCode: 'not_actionable' },
+        preferredSignerCatId: 'opus5',
+      }).success,
+      true,
+    );
+    assert.equal(
+      tool.inputSchema.action.safeParse({ type: 'block', blockerCode: 'external_wait', blockerRef: 'case:123' })
+        .success,
+      true,
+    );
   });
 });

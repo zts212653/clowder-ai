@@ -6,7 +6,9 @@ import {
   lifecycleRefText,
   lifecycleStatusLabel,
   ownerResponseLabel,
+  reevalDebtLabel,
   reevalStatusLabel,
+  repairDebtLabel,
 } from './eval-lifecycle-display';
 import type { EvalHubLifecycleView, EvalLifecycleRef } from './HubEvalTypes';
 
@@ -93,8 +95,31 @@ function AvailableLifecycleDetails({
           />
         ) : null}
         <LifecycleTerm label="接单状态" value={ownerResponseLabel(lifecycle.ownerResponseStatus)} />
+        {lifecycle.repairDebtStatus ? (
+          <LifecycleTerm label="修复债务" value={repairDebtLabel(lifecycle.repairDebtStatus)} />
+        ) : null}
+        {lifecycle.reevalDebtStatus ? (
+          <LifecycleTerm label="节奏 / 复评债务" value={reevalDebtLabel(lifecycle.reevalDebtStatus)} />
+        ) : null}
+        {lifecycle.reevalTaskId ? <LifecycleTerm label="复评任务" value={lifecycle.reevalTaskId} /> : null}
+        {lifecycle.reevalLeaseId ? (
+          <LifecycleTerm
+            label="复评租约"
+            value={`${lifecycle.reevalLeaseId}${lifecycle.reevalLeaseGeneration ? ` · generation ${lifecycle.reevalLeaseGeneration}` : ''}`}
+          />
+        ) : null}
         <LifecycleTerm label="复评状态" value={formatReevalStatus(lifecycle)} />
       </dl>
+      {lifecycle.responsibilityBlocker ? (
+        <div className="mt-3 rounded-md border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs text-conn-amber-text">
+          <div className="font-medium">责任路由待恢复 · {lifecycle.responsibilityBlocker.featureId}</div>
+          <p className="mt-1 leading-relaxed">
+            {lifecycle.responsibilityBlocker.reasonCode === 'feature_thread_not_found'
+              ? '尚未找到唯一归属 thread；系统会在路由真相补齐后原位重试。'
+              : `发现多个归属 thread（${lifecycle.responsibilityBlocker.candidateThreadIds.join('、')}）；明确唯一归属后系统会原位重试。`}
+          </p>
+        </div>
+      ) : null}
       {lifecycle.escalation ? (
         <div className="mt-3 rounded-md border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
           <span className="font-medium">{escalationLabel(lifecycle.escalation)}</span>
@@ -164,7 +189,12 @@ function ReferenceList({
       {refs.map((ref, index) => (
         <li key={`${ref.kind}-${lifecycleRefText(ref)}-${index}`} className="break-all text-xs text-cafe-secondary">
           {ref.availability === 'available' && /^https?:\/\//.test(ref.value) ? (
-            <a href={ref.value} className="underline decoration-cafe-muted underline-offset-2 hover:text-cafe">
+            <a
+              href={ref.value}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-cafe-muted underline-offset-2 hover:text-cafe"
+            >
               {ref.value}
             </a>
           ) : ref.availability === 'available' && ref.value.startsWith('docs/') && openWorkspaceFile ? (

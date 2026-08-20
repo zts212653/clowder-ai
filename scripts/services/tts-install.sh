@@ -14,11 +14,21 @@ SERVICE_LABEL="TTS"
 VENV_NAME="tts-venv"
 DISK_REQUIRED_GB=2
 MODEL_ENV_VAR="TTS_MODEL"
-PIP_DEPS_ARM64="mlx-audio misaki[zh] fastapi uvicorn httpx[socks] num2words spacy phonemizer huggingface_hub[hf_xet]"
+PIP_DEPS_ARM64="mlx-audio>=0.4.7 misaki[zh] fastapi uvicorn httpx[socks] num2words spacy phonemizer huggingface_hub[hf_xet]"
 PIP_DEPS_OTHER="edge-tts fastapi uvicorn httpx[socks] huggingface_hub[hf_xet]"
 MODEL_LOADER_OTHER="skip"
 POST_INSTALL_HOOK_ARM64="tts_install_arm64_warmup"
 POST_INSTALL_HOOK_OTHER="tts_install_non_arm64_extras"
+QWEN3_CLONE_DEFAULT_MODEL="mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16"
+
+# `qwen3-clone` is a provider alias accepted by tts-server.sh, not a
+# HuggingFace repository.  The generic install template pre-downloads
+# MODEL_ENV_VAR before our warmup hook, so resolve the alias to the same
+# concrete model used by Qwen3CloneAdapter first.
+if [ "${TTS_MODEL:-}" = "qwen3-clone" ]; then
+  TTS_MODEL="$QWEN3_CLONE_DEFAULT_MODEL"
+  export TTS_MODEL
+fi
 
 tts_install_arm64_warmup() {
   case "${TTS_MODEL:-}" in

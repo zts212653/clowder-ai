@@ -199,7 +199,6 @@ function AvailabilityToggle({
 }
 
 function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig }) {
-  const sessionChainEnabled = cat.sessionChain !== false;
   return (
     <>
       <span>
@@ -224,9 +223,7 @@ function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig })
       </span>
       <span className="mt-0.5 flex flex-wrap items-center gap-2">
         <SettingsText tone="purple">{formatMentionPreview(cat.mentionPatterns)}</SettingsText>
-        <SettingsBadge tone={sessionChainEnabled ? 'emerald' : 'slate'}>
-          {sessionChainEnabled ? 'Session Chain 已开启' : 'Session Chain 未开启'}
-        </SettingsBadge>
+        <SettingsBadge tone="emerald">Session Chain 始终可见</SettingsBadge>
       </span>
     </>
   );

@@ -9,7 +9,19 @@
 
 set -euo pipefail
 
-MAIN_REPO="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+MAIN_REPO=""
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      MAIN_REPO="${line#worktree }"
+      break
+      ;;
+  esac
+done < <(git worktree list --porcelain)
+if [ -z "$MAIN_REPO" ]; then
+  printf "ERROR: failed to resolve main worktree from git worktree list\n" >&2
+  exit 1
+fi
 WORKTREE_REPO="$(git rev-parse --show-toplevel)"
 SKILLS_SRC="$WORKTREE_REPO/cat-cafe-skills"
 [ -f "$SKILLS_SRC/manifest.yaml" ] || SKILLS_SRC="$MAIN_REPO/cat-cafe-skills"
@@ -34,6 +46,9 @@ total=0
 missing=0
 reg_warnings=0
 manifest_failures=0
+reference_failures=0
+shared_refs_missing=0
+SHARED_REFS_ALIAS=".cat-cafe-shared-refs"
 
 canon_path() {
   python3 - "$1" <<'PY'
@@ -76,6 +91,30 @@ is_skill_mounted_for_provider() {
       return 0
     fi
     if [ -n "$fallback_root" ] && is_correct_symlink "$base_dir/$skill_name" "$fallback_root/$skill_name"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+is_shared_refs_mounted_for_provider() {
+  local expected_root="$1"
+  local fallback_root="$2"
+  shift 2
+
+  local base_dir
+  for base_dir in "$@"; do
+    [ -n "$base_dir" ] || continue
+    if is_correct_symlink "$base_dir" "$expected_root"; then
+      return 0
+    fi
+    if [ -n "$fallback_root" ] && is_correct_symlink "$base_dir" "$fallback_root"; then
+      return 0
+    fi
+    if is_correct_symlink "$base_dir/$SHARED_REFS_ALIAS" "$expected_root/refs"; then
+      return 0
+    fi
+    if [ -n "$fallback_root" ] && is_correct_symlink "$base_dir/$SHARED_REFS_ALIAS" "$fallback_root/refs"; then
       return 0
     fi
   done
@@ -138,6 +177,23 @@ else
   printf "${RED}%d 处缺失/异常${NC}\n" "$missing"
 fi
 
+printf "\n${BOLD}共享 refs 坐标${NC}: "
+for provider in claude codex gemini kimi; do
+  case "$provider" in
+    claude) provider_dirs=("$PROJECT_CLAUDE_SKILLS" "$CLAUDE_SKILLS") ;;
+    codex) provider_dirs=("$PROJECT_CODEX_SKILLS" "$CODEX_SKILLS") ;;
+    gemini) provider_dirs=("$PROJECT_GEMINI_SKILLS" "$GEMINI_SKILLS") ;;
+    kimi) provider_dirs=("$PROJECT_KIMI_SKILLS" "$KIMI_SKILLS") ;;
+  esac
+  if is_shared_refs_mounted_for_provider "$SKILLS_SRC" "$FALLBACK_SKILLS_SRC" "${provider_dirs[@]}"; then
+    printf "${GREEN}%s ✓${NC} " "$provider"
+  else
+    printf "${RED}%s ✗${NC} " "$provider"
+    shared_refs_missing=$((shared_refs_missing + 1))
+  fi
+done
+printf "\n"
+
 # ─── Part 2: BOOTSTRAP.md Registration Check (advisory, not blocking) ───
 
 printf "\n${BOLD}注册检查（BOOTSTRAP.md ↔ 源目录）${NC}\n\n"
@@ -188,17 +244,28 @@ else
   manifest_failures=$((manifest_failures + 1))
 fi
 
+# ─── Part 4: Shared Reference Graph Check (blocking) ───
+
+printf "\n${BOLD}Shared skill 引用图校验（阻塞）${NC}\n\n"
+if node "$WORKTREE_REPO/scripts/check-skill-reference-integrity.mjs" "$WORKTREE_REPO"; then
+  :
+else
+  reference_failures=$((reference_failures + 1))
+fi
+
 # ─── Summary ───
 # Exit code: mount failures + manifest failures are blocking; registration warnings are advisory.
 
 printf "\n${BOLD}总结${NC}: %d skills, " "$total"
-if [ "$missing" -eq 0 ] && [ "$reg_warnings" -eq 0 ] && [ "$manifest_failures" -eq 0 ]; then
-  printf "${GREEN}全部正确（挂载 + 注册 + manifest）${NC}\n\n"
+if [ "$missing" -eq 0 ] && [ "$shared_refs_missing" -eq 0 ] && [ "$reg_warnings" -eq 0 ] && [ "$manifest_failures" -eq 0 ] && [ "$reference_failures" -eq 0 ]; then
+  printf "${GREEN}全部正确（挂载 + shared refs + 注册 + manifest + 引用图）${NC}\n\n"
   exit 0
 else
   [ "$missing" -gt 0 ] && printf "${RED}%d 挂载异常${NC} " "$missing"
+  [ "$shared_refs_missing" -gt 0 ] && printf "${RED}%d shared refs 坐标异常${NC} " "$shared_refs_missing"
   [ "$reg_warnings" -gt 0 ] && printf "${YELLOW}%d 注册警告${NC} " "$reg_warnings"
   [ "$manifest_failures" -gt 0 ] && printf "${RED}%d manifest 失败${NC} " "$manifest_failures"
+  [ "$reference_failures" -gt 0 ] && printf "${RED}%d 引用图失败${NC} " "$reference_failures"
   printf "\n\n"
   if [ "$missing" -gt 0 ]; then
     printf "修复挂载:\n"
@@ -217,7 +284,7 @@ else
     printf "修复注册: 编辑 cat-cafe-skills/BOOTSTRAP.md 添加/移除对应条目\n\n"
   fi
   # Mount failures and manifest failures are blocking.
-  if [ "$missing" -gt 0 ] || [ "$manifest_failures" -gt 0 ]; then
+  if [ "$missing" -gt 0 ] || [ "$shared_refs_missing" -gt 0 ] || [ "$manifest_failures" -gt 0 ] || [ "$reference_failures" -gt 0 ]; then
     exit 1
   fi
   exit 0

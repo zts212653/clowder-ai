@@ -6,6 +6,20 @@ export function normalizeFeatId(value: string): string {
   return value.trim().toUpperCase();
 }
 
+export type FeatureThreadResolutionErrorCode = 'feature_thread_not_found' | 'feature_thread_ambiguous';
+
+export class FeatureThreadResolutionError extends Error {
+  override readonly name = 'FeatureThreadResolutionError';
+
+  constructor(
+    readonly code: FeatureThreadResolutionErrorCode,
+    readonly featureId: string,
+    readonly candidateThreadIds: readonly string[],
+  ) {
+    super(`${code}:${featureId}${candidateThreadIds.length > 0 ? `:${candidateThreadIds.join(',')}` : ''}`);
+  }
+}
+
 export async function buildThreadIdsByFeatId(
   threadStore: IThreadStore | undefined,
   backlogStore: IBacklogStore | undefined,
@@ -47,7 +61,7 @@ export async function resolveUniqueFeatureThreadId(
 ): Promise<string> {
   const normalized = normalizeFeatId(featureId);
   const candidates = (await buildThreadIdsByFeatId(threadStore, backlogStore, userId, logger)).get(normalized) ?? [];
-  if (candidates.length === 0) throw new Error(`feature_thread_not_found:${normalized}`);
-  if (candidates.length > 1) throw new Error(`feature_thread_ambiguous:${normalized}:${candidates.join(',')}`);
+  if (candidates.length === 0) throw new FeatureThreadResolutionError('feature_thread_not_found', normalized, []);
+  if (candidates.length > 1) throw new FeatureThreadResolutionError('feature_thread_ambiguous', normalized, candidates);
   return candidates[0];
 }

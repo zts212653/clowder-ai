@@ -117,6 +117,16 @@ describe('DynamicTaskStore', () => {
     assert.equal(store.getById('dyn-001').enabled, true);
   });
 
+  test('updateParamsIfCurrent allows one lifecycle transition and rejects a stale replay', () => {
+    store.insert(SAMPLE_DEF);
+    const observed = store.getById('dyn-001').params;
+    const next = { ...observed, terminalFence: { state: 'dispatch_pending', generation: 1 } };
+
+    assert.equal(store.updateParamsIfCurrent('dyn-001', observed, next), true);
+    assert.equal(store.updateParamsIfCurrent('dyn-001', observed, { message: 'stale replay' }), false);
+    assert.deepEqual(store.getById('dyn-001').params, next);
+  });
+
   test('insert rejects duplicate id', () => {
     store.insert(SAMPLE_DEF);
     assert.throws(() => store.insert(SAMPLE_DEF), /UNIQUE|constraint/i);

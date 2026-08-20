@@ -11,8 +11,13 @@
  * reminder scheduler; that is intentionally deferred.
  */
 
+import type { SchedulerAwaitStateV1, WaitOwnerFence } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import {
+  A2ADispatchDispositionError,
+  type A2ADispatchDispositionService,
+} from '../domains/ball-custody/A2ADispatchDispositionService.js';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { buildHeldEvent, buildWakeConditionMetEvent } from '../domains/ball-custody/ball-custody-events.js';
 import {
@@ -20,9 +25,17 @@ import {
   ManagedCommandWakeRecoverySweep,
   type RecordManagedCommandCompletionInput,
 } from '../domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
-import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import {
+  ManagedHoldDispositionError,
+  type ManagedHoldDispositionService,
+} from '../domains/ball-custody/ManagedHoldDispositionService.js';
+import type {
+  InvocationRecord as CallbackInvocationRecord,
+  InvocationRegistry,
+} from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
@@ -43,8 +56,10 @@ import {
   deriveHoldSubjectKeyFromWaitSourceRef,
   isPendingHoldBallTask,
   normalizeHoldExpectedSignalKey,
+  readHoldLifecycle,
 } from './hold-ball-cancel.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
+import { resolveManagedHoldTriggerUserId } from './managed-hold-trigger-user.js';
 
 const log = createModuleLogger('routes/callback-hold-ball');
 
@@ -298,22 +313,10 @@ export interface HoldBallRouteDeps {
   dynamicTaskStore: DynamicTaskStore;
   messageStore: IMessageStore;
   socketManager: SocketManager;
-  threadStore: {
-    get(threadId: string):
-      | {
-          createdBy: string;
-          deletedAt?: number | null;
-          systemKind?: 'connector_hub' | 'eval_domain' | 'cat_bedroom';
-          /** F167: gate-keeping thread marker used by checkGateKeepingGuard. */
-          threadKind?: 'concierge' | 'gate-keeping';
-        }
-      | null
-      | Promise<{
-          createdBy: string;
-          deletedAt?: number | null;
-          systemKind?: 'connector_hub' | 'eval_domain' | 'cat_bedroom';
-          threadKind?: 'concierge' | 'gate-keeping';
-        } | null>;
+  threadStore: Pick<IThreadStore, 'get' | 'list'>;
+  ownerUserId: string;
+  scheduleMutationAuditStore: {
+    deleteTaskWithAudit(taskId: string, audit: import('@cat-cafe/shared').ScheduleMutationAuditEntry): boolean;
   };
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
@@ -330,7 +333,7 @@ export interface HoldBallRouteDeps {
   taskStore?: CrossStoreTaskStore;
   invocationRecordStore: IInvocationRecordStore;
   managedCommandWakeRecovery?: Pick<ManagedCommandWakeRecoverySweep, 'recordCompletion'> &
-    Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion'>>;
+    Partial<Pick<ManagedCommandWakeRecoverySweep, 'recordCancelledCompletion' | 'recordRetiredCompletion'>>;
   /**
    * F167 Phase P: invocation trigger for wakeWhen command completion.
    * When provided, wakeWhen command results are delivered via invokeTrigger.
@@ -344,9 +347,37 @@ export interface HoldBallRouteDeps {
       message: string,
       messageId: string,
       contentBlocks?: undefined,
-      policy?: { sourceCategory?: string },
+      policy?: { sourceCategory?: string; forceQueue?: boolean },
     ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
+  /** F167×F254: exact current-wake terminal producer. */
+  managedHoldDispositionService?: Pick<ManagedHoldDispositionService, 'complete'>;
+  /** F167: exact ordinary A2A dispatch terminal producer. */
+  a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'complete'>;
+}
+
+export async function resolveHoldWaitOwnerFence(
+  record: Pick<CallbackInvocationRecord, 'invocationId' | 'parentInvocationId' | 'threadId' | 'userId' | 'catId'>,
+  invocationRecordStore: Pick<IInvocationRecordStore, 'get'>,
+): Promise<WaitOwnerFence> {
+  const containingTaskFence = Object.freeze({ kind: 'containing_task' as const, generation: 1 });
+  if (!record.parentInvocationId) return containingTaskFence;
+
+  const stored = await invocationRecordStore.get(record.parentInvocationId);
+  if (
+    !stored ||
+    stored.threadId !== record.threadId ||
+    stored.userId !== record.userId ||
+    !stored.targetCats.includes(record.catId)
+  ) {
+    throw new Error('callback parent invocation is outside the authenticated hold owner scope');
+  }
+  if (stored.actionLeaseCarrier.kind === 'none') return containingTaskFence;
+  return Object.freeze({
+    kind: 'action_successor',
+    leaseId: stored.actionLeaseCarrier.leaseId,
+    generation: stored.actionLeaseCarrier.generation,
+  });
 }
 
 /**
@@ -411,6 +442,26 @@ function launchWakeWhenRunner(opts: {
           getInvokeTrigger: () => deps.invokeTrigger,
         });
 
+      // F295: an ordinary user message can retire the wake carrier, but it is
+      // not an execution-scoped cancellation request. Let the independent
+      // command finish, retain its exact terminal evidence, and suppress the
+      // now-obsolete wake delivery.
+      const retiredTask = deps.dynamicTaskStore.getById(taskId);
+      const lifecycle = retiredTask ? readHoldLifecycle(retiredTask) : null;
+      if (lifecycle?.status === 'cancelled_by_user') {
+        const recoveryResult = recovery.recordRetiredCompletion
+          ? await recovery.recordRetiredCompletion(completion)
+          : recovery.recordCancelledCompletion
+            ? await recovery.recordCancelledCompletion(completion)
+            : 'missing';
+        if (activeRunners.get(registryKey) === activeEntry) activeRunners.delete(registryKey);
+        log.info(
+          { threadId, catId, command: wakeWhen.command, taskId, recoveryResult },
+          'F295: retired wakeWhen carrier retained terminal evidence without duplicate invocation dispatch',
+        );
+        return;
+      }
+
       // P1-1 staleness check: if this runner was replaced or cancelled while running,
       // the registry will have a different runner (or none). Don't deliver stale wake,
       // but retain the terminal result when a user message preserved a cancellation tombstone.
@@ -433,6 +484,7 @@ function launchWakeWhenRunner(opts: {
           buildWakeConditionMetEvent({
             threadId,
             catId,
+            taskId,
             command: wakeWhen.command,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
@@ -523,6 +575,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const wakeAfterMs = parsed.data.wakeAfterMs ?? wakeWhen?.timeoutMs ?? 600_000;
     const { threadId, catId, userId } = actor;
     const catIdStr = catId as string;
+    const triggerUserId = await resolveManagedHoldTriggerUserId({
+      actorUserId: userId,
+      threadId,
+      threadStore: deps.threadStore,
+    });
 
     // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
     // Fire-and-forget: don't await, don't let failures affect the hold_ball flow.
@@ -607,12 +664,13 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         (t) => isPendingHoldBallTask(t) && t.createdBy === pendingHoldCreatedBy && t.deliveryThreadId === threadId,
       );
 
-    const taskId = `hold-ball-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const createdAt = Date.now();
+    const taskId = `hold-ball-${createdAt}-${Math.random().toString(36).slice(2, 8)}`;
     // P2-2 cloud review fix: for wakeWhen, the fallback reminder must fire AFTER the
     // runner's timeout + grace period, not at the same time. Otherwise both the runner
     // timeout wake and the fallback reminder can fire simultaneously (race → double wake).
     const fallbackBuffer = wakeWhen ? KILL_GRACE_MS + 10_000 : 0;
-    const fireAt = Date.now() + wakeAfterMs + fallbackBuffer;
+    const fireAt = createdAt + wakeAfterMs + fallbackBuffer;
     // F167 Phase M (M-2): de-frozen wake copy — guide re-evaluation instead of
     // commanding execution of a possibly-stale reason. The wake fires later (or after
     // defer), by which time the awaited condition may have changed; so prompt the cat
@@ -622,18 +680,65 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       `若条件已满足，继续：${nextStep}；若仍未满足，可再持一次或升级（禁止无限持球）。`;
     const holdSubjectKey = deriveHoldSubjectKeyFromWaitSourceRef(parsed.data.waitSourceRef);
     const holdExpectedSignalKey = normalizeHoldExpectedSignalKey(parsed.data.waitSourceRef?.expectedSignal);
+    let ownerFence: WaitOwnerFence;
+    try {
+      ownerFence = await resolveHoldWaitOwnerFence(record, deps.invocationRecordStore);
+    } catch (err) {
+      log.error(
+        { err, invocationId: record.invocationId, parentInvocationId: record.parentInvocationId },
+        'F280 Phase D: canonical hold owner fence is unavailable',
+      );
+      reply.status(503);
+      return { error: 'Canonical hold owner fence is unavailable', code: 'HOLD_OWNER_FENCE_UNAVAILABLE' };
+    }
+    const schedulerAwait: SchedulerAwaitStateV1 = wakeWhen
+      ? {
+          v: 1,
+          generation: 1,
+          subjectRef: `command:${taskId}`,
+          ownerFence,
+          baseline: {
+            kind: 'managed_command',
+            capturedAt: createdAt,
+            deadlineAt: createdAt + wakeAfterMs,
+          },
+          continuation: {
+            when: [{ kind: 'managed_command_completed' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: nextStep,
+          },
+          expiresAt: fireAt,
+          createdAt,
+          provenance: 'explicit_registration',
+        }
+      : {
+          v: 1,
+          generation: 1,
+          subjectRef: `timer:${taskId}`,
+          ownerFence,
+          baseline: { kind: 'timer', capturedAt: createdAt, fireAt },
+          continuation: {
+            when: [{ kind: 'timer_elapsed' }],
+            // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
+            then: nextStep,
+          },
+          expiresAt: fireAt,
+          createdAt,
+          provenance: 'explicit_registration',
+        };
     const holdLifecycle =
       parsed.data.waitSourceRef || wakeWhen
         ? {
             mode: wakeWhen ? ('wake_when' as const) : ('timer' as const),
             status: 'active' as const,
+            await: schedulerAwait,
             waitSourceRef: parsed.data.waitSourceRef,
             ...(holdSubjectKey ? { subjectKey: holdSubjectKey } : {}),
             ...(holdExpectedSignalKey ? { expectedSignalKey: holdExpectedSignalKey } : {}),
             wakeAt: fireAt,
             createdBy: `hold-ball:${catIdStr}`,
             ...(wakeWhen
-              ? { managedCommand: createInitialManagedCommandWakeProjection(wakeWhen.command, Date.now()) }
+              ? { managedCommand: createInitialManagedCommandWakeProjection(wakeWhen.command, createdAt) }
               : {}),
           }
         : undefined;
@@ -643,7 +748,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       params: {
         message: wakeMessage,
         targetCatId: catIdStr,
-        triggerUserId: userId,
+        triggerUserId,
         // F167 Phase M (M-1 activation): pre-fire defer. If this cat's thread is busy
         // when the wake fires, the scheduler re-arms instead of delivering a stale wake.
         // Mechanism is scheduler-generic (firePolicy); hold_ball opts in here.
@@ -816,6 +921,62 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       wakeAt: new Date(fireAt).toISOString(),
       ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
     };
+  });
+
+  app.post('/api/callbacks/complete-managed-hold', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    if (!deps.managedHoldDispositionService) {
+      reply.status(503);
+      return { error: 'Managed hold disposition unavailable', code: 'MANAGED_HOLD_DISPOSITION_UNAVAILABLE' };
+    }
+    const parsed = z
+      .object({ disposition: z.enum(['handled', 'completed']) })
+      .strict()
+      .safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    try {
+      return await deps.managedHoldDispositionService.complete(record, parsed.data.disposition);
+    } catch (error) {
+      if (error instanceof ManagedHoldDispositionError) {
+        reply.status(409);
+        return { error: 'Managed hold disposition rejected', code: error.code };
+      }
+      throw error;
+    }
+  });
+
+  app.post('/api/callbacks/complete-a2a-dispatch', async (request, reply) => {
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+    if (!deps.a2aDispatchDispositionService) {
+      reply.status(503);
+      return { error: 'A2A dispatch disposition unavailable', code: 'A2A_DISPATCH_DISPOSITION_UNAVAILABLE' };
+    }
+    const parsed = z
+      .object({ disposition: z.enum(['handled', 'completed']) })
+      .strict()
+      .safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+    try {
+      return await deps.a2aDispatchDispositionService.complete(record, parsed.data.disposition);
+    } catch (error) {
+      if (error instanceof A2ADispatchDispositionError) {
+        reply.status(409);
+        return {
+          error: 'A2A dispatch disposition rejected',
+          code: error.code,
+          ...(error.replacement ? { replacement: error.replacement } : {}),
+        };
+      }
+      throw error;
+    }
   });
 
   registerHoldBallCancelRoutes(app, deps);

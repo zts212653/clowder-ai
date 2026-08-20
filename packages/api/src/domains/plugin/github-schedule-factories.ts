@@ -55,6 +55,7 @@ import type { IssueCommentClassification } from '../community/issue-analysis/iss
 import type { GitHubSnapshot } from '../community/reconciliation/CommunityReconciler.js';
 import { createCommunityReconcilerTaskSpec } from '../community/reconciliation/CommunityReconcilerTaskSpec.js';
 import type { CommunityReconciliationFindingStore } from '../community/reconciliation/CommunityReconciliationFindingStore.js';
+import type { GitHubWaitLifecycleService } from '../github-signals/GitHubWaitLifecycleService.js';
 import type { ScheduleFactory, ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
 
 /** Minimal projector interface for optional DI in factories — avoids importing concrete class. */
@@ -88,7 +89,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;
   isNoiseComment: (c: PrFeedbackComment) => boolean;
-  externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud'>;
+  externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCloud' | 'shouldContinueTracking'>;
   /** Self-merge filter: returns true if the given GitHub login is our own authenticated identity. */
   isSelfMerge?: (mergedByLogin: string) => boolean;
   // repo-scan deps — optional, not available when redis is not configured
@@ -106,6 +107,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   fetchOpenIssues?: (repo: string) => Promise<GhIssueItem[]>;
   // F202 Phase 2D: issue comment tracking deps
   issueCommentRouter?: IssueCommentRouter;
+  waitLifecycle?: GitHubWaitLifecycleService;
   fetchIssueComments?: (repoFullName: string, issueNumber: number, sinceId?: number) => Promise<IssueComment[]>;
   fetchIssueState?: (repoFullName: string, issueNumber: number) => Promise<'open' | 'closed'>;
   fetchIssueMetadata?: (repoFullName: string, issueNumber: number) => Promise<IssueTrackingMetadata>;
@@ -180,6 +182,9 @@ const cicdCheckFactory: ScheduleFactory = {
       invokeTrigger: d.invokeTrigger,
       isSelfMerge: d.isSelfMerge,
       log: d.log,
+      ...(d.externalReviewCoordinator
+        ? { continueDoneTracking: d.externalReviewCoordinator.shouldContinueTracking.bind(d.externalReviewCoordinator) }
+        : {}),
     }) as TaskSpec_P1;
   },
 };
@@ -282,10 +287,14 @@ const issueTrackingFactory: ScheduleFactory = {
     if (!d.fetchIssueComments || !d.fetchIssueState) {
       throw new Error('[F202-2] github.issue-tracking requires fetchIssueComments and fetchIssueState in deps');
     }
+    if (!d.waitLifecycle) {
+      throw new Error('[F280] github.issue-tracking requires waitLifecycle in deps');
+    }
     return createIssueCommentTaskSpec({
       id: instanceId,
       taskStore: d.taskStore,
       issueCommentRouter: d.issueCommentRouter,
+      waitLifecycle: d.waitLifecycle,
       fetchComments: d.fetchIssueComments,
       fetchIssueState: d.fetchIssueState,
       fetchIssueMetadata: d.fetchIssueMetadata,

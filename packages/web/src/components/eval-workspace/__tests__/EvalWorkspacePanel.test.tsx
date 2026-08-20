@@ -191,6 +191,32 @@ describe('EvalWorkspacePanel', () => {
     expect(container.textContent).toContain('越低越好');
   });
 
+  it('routes external lifecycle references through the guarded popup path', async () => {
+    const href = 'https://example.com/f273/workspace-evidence';
+    mocks.apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () =>
+        buildSummary([
+          {
+            ...baseItem,
+            lifecycle: {
+              ...baseItem.lifecycle,
+              actionRefs: [{ kind: 'other', availability: 'available', value: href }],
+            },
+          },
+        ]),
+    });
+
+    await act(async () => {
+      root.render(<EvalWorkspacePanel />);
+    });
+    await act(async () => {});
+
+    const link = container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toBe('noopener noreferrer');
+  });
+
   it('renders operator language instead of machine fields for an insufficient window', async () => {
     const insufficientItem = {
       ...baseItem,

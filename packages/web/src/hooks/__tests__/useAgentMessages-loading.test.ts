@@ -1,7 +1,15 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  collectInvocationTimeoutCandidates,
+  INVOCATION_RECONCILIATION_POLL_MS,
+  reconcileTimedOutInvocations,
+  terminalizeInvocationReconciliation,
+} from '@/hooks/invocation-timeout-reconciliation';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
+
+const { mockApiFetch } = vi.hoisted(() => ({ mockApiFetch: vi.fn() }));
 
 const mockAddMessage = vi.fn();
 const mockAppendToMessage = vi.fn();
@@ -9,6 +17,7 @@ const mockAppendToolEvent = vi.fn();
 const mockSetStreaming = vi.fn();
 const mockSetLoading = vi.fn();
 const mockSetHasActiveInvocation = vi.fn();
+const mockRemoveActiveInvocation = vi.fn();
 const mockClearAllActiveInvocations = vi.fn(() => {
   mockSetHasActiveInvocation(false);
 });
@@ -18,12 +27,16 @@ const mockClearCatStatuses = vi.fn();
 const mockSetCatInvocation = vi.fn();
 const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
-const mockGetStoreState = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
+const mockRemoveThreadActiveInvocation = vi.fn();
+const mockPatchThreadMessage = vi.fn();
+const mockSetThreadCatInvocation = vi.fn();
+const mockSetThreadLoading = vi.fn();
+const mockUpdateThreadCatStatus = vi.fn();
 const mockGetThreadState: ReturnType<
   typeof vi.fn<
     (tid?: string) => {
@@ -36,6 +49,7 @@ const mockGetThreadState: ReturnType<
         timestamp: number;
       }>;
       activeInvocations?: Record<string, { catId: string; mode: string }>;
+      catInvocations?: Record<string, { invocationId?: string; turnInvocationId?: string }>;
     }
   >
 > = vi.fn(() => ({
@@ -64,6 +78,7 @@ const storeState = {
   setStreaming: mockSetStreaming,
   setLoading: mockSetLoading,
   setHasActiveInvocation: mockSetHasActiveInvocation,
+  removeActiveInvocation: mockRemoveActiveInvocation,
   clearAllActiveInvocations: mockClearAllActiveInvocations,
   setIntentMode: mockSetIntentMode,
   setCatStatus: mockSetCatStatus,
@@ -71,6 +86,7 @@ const storeState = {
   setCatInvocation: mockSetCatInvocation,
   setMessageUsage: mockSetMessageUsage,
   requestStreamCatchUp: mockRequestStreamCatchUp,
+  catInvocations: {} as Record<string, { invocationId?: string; turnInvocationId?: string }>,
 
   addMessageToThread: mockAddMessageToThread,
   // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
@@ -81,6 +97,11 @@ const storeState = {
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
+  removeThreadActiveInvocation: mockRemoveThreadActiveInvocation,
+  patchThreadMessage: mockPatchThreadMessage,
+  setThreadCatInvocation: mockSetThreadCatInvocation,
+  setThreadLoading: mockSetThreadLoading,
+  updateThreadCatStatus: mockUpdateThreadCatStatus,
   getThreadState: mockGetThreadState,
   activeInvocations: {} as Record<string, { catId: string; mode: string }>,
   currentThreadId: 'thread-1',
@@ -89,11 +110,13 @@ const storeState = {
 let captured: ReturnType<typeof useAgentMessages> | undefined;
 
 vi.mock('@/stores/chatStore', () => {
-  const useChatStoreMock = Object.assign(() => storeState, { getState: () => mockGetStoreState() });
+  const useChatStoreMock = Object.assign(() => storeState, { getState: () => storeState });
   return {
     useChatStore: useChatStoreMock,
   };
 });
+
+vi.mock('@/utils/api-client', () => ({ apiFetch: mockApiFetch }));
 
 function Harness() {
   captured = useAgentMessages();
@@ -126,22 +149,28 @@ describe('useAgentMessages loading lifecycle', () => {
     mockSetStreaming.mockClear();
     mockSetLoading.mockClear();
     mockSetHasActiveInvocation.mockClear();
+    mockRemoveActiveInvocation.mockClear();
     mockClearAllActiveInvocations.mockClear();
     mockSetIntentMode.mockClear();
     mockSetCatStatus.mockClear();
     mockClearCatStatuses.mockClear();
     mockSetCatInvocation.mockClear();
     mockSetMessageUsage.mockClear();
-    mockGetStoreState.mockReset();
-    mockGetStoreState.mockReturnValue(storeState);
 
     mockAddMessageToThread.mockClear();
     mockClearThreadActiveInvocation.mockClear();
     mockResetThreadInvocationState.mockClear();
     mockSetThreadMessageStreaming.mockClear();
+    mockRemoveThreadActiveInvocation.mockClear();
+    mockPatchThreadMessage.mockClear();
+    mockSetThreadCatInvocation.mockClear();
+    mockSetThreadLoading.mockClear();
+    mockUpdateThreadCatStatus.mockClear();
+    mockApiFetch.mockReset();
     mockGetThreadState.mockClear();
     mockGetThreadState.mockImplementation(() => ({ messages: [] }));
     storeState.activeInvocations = {};
+    storeState.catInvocations = {};
     storeState.currentThreadId = 'thread-1';
   });
 
@@ -250,9 +279,45 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(captured?.handleAgentMessage).toBe(firstHandler);
   });
 
-  it('routes timeout to original thread after switching active thread', () => {
+  it('prefers the fresh active slot over a stale cat invocation mapping', () => {
+    expect(
+      collectInvocationTimeoutCandidates(
+        { 'inv-fresh': { catId: 'codex', mode: 'execute' } },
+        { codex: { invocationId: 'inv-stale', turnInvocationId: 'turn-stale' } },
+      ),
+    ).toEqual([
+      {
+        invocationId: 'inv-fresh',
+        slotKeys: ['inv-fresh'],
+        catIds: ['codex'],
+        turnInvocationIds: [],
+      },
+    ]);
+  });
+
+  it('reconciles the original invocation without dropping identity after switching threads', async () => {
     vi.useFakeTimers();
     try {
+      storeState.activeInvocations = {
+        'inv-1261': { catId: 'codex', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-1261', turnInvocationId: 'turn-1261' },
+      };
+      mockGetThreadState.mockImplementation((threadId?: string) => {
+        const activeInvocations: Record<string, { catId: string; mode: string }> =
+          threadId === 'thread-1' ? { 'inv-1261': { catId: 'codex', mode: 'execute' } } : {};
+        const catInvocations: Record<string, { invocationId?: string; turnInvocationId?: string }> =
+          threadId === 'thread-1' ? { codex: { invocationId: 'inv-1261', turnInvocationId: 'turn-1261' } } : {};
+        return { messages: [], activeInvocations, catInvocations };
+      });
+      mockApiFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({ id: 'inv-1261', threadId: 'thread-1', status: 'running', updatedAt: Date.now() }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
       act(() => {
         root.render(React.createElement(Harness));
       });
@@ -268,8 +333,10 @@ describe('useAgentMessages loading lifecycle', () => {
       // Simulate user switching from thread-1 to thread-2 while old invocation is still active.
       storeState.currentThreadId = 'thread-2';
 
-      act(() => {
+      await act(async () => {
         vi.advanceTimersByTime(5 * 60 * 1000);
+        await Promise.resolve();
+        await Promise.resolve();
       });
 
       expect(mockAddMessage).not.toHaveBeenCalledWith(
@@ -280,19 +347,433 @@ describe('useAgentMessages loading lifecycle', () => {
       expect(mockAddMessageToThread).toHaveBeenCalledWith(
         'thread-1',
         expect.objectContaining({
+          id: 'invocation-status-inv-1261',
           type: 'system',
           variant: 'info',
-          content: '⏱ Response timed out. The operation may still be running in the background.',
+          content: expect.stringContaining('inv-1261'),
+          extra: expect.objectContaining({
+            invocationReconciliation: expect.objectContaining({
+              invocationId: 'inv-1261',
+              turnInvocationIds: ['turn-1261'],
+              phase: 'running',
+            }),
+          }),
         }),
       );
-      expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-1');
+      expect(mockApiFetch).toHaveBeenCalledWith('/api/invocations/inv-1261');
+      expect(mockResetThreadInvocationState).not.toHaveBeenCalled();
+      expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('terminalizes only the failed invocation discovered by timeout reconciliation', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.activeInvocations = {
+        'inv-failed': { catId: 'codex', mode: 'execute' },
+        'inv-running-opus': { catId: 'opus', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-failed', turnInvocationId: 'turn-failed' },
+        opus: { invocationId: 'inv-running', turnInvocationId: 'turn-running' },
+      };
+      mockGetThreadState.mockImplementation(() => ({
+        messages: [],
+        activeInvocations: storeState.activeInvocations,
+        catInvocations: storeState.catInvocations,
+      }));
+      mockApiFetch.mockImplementation(async (path: string) => {
+        const payload = path.endsWith('/inv-failed')
+          ? {
+              id: 'inv-failed',
+              threadId: 'thread-1',
+              status: 'failed',
+              error: 'provider rejected the configured model',
+              updatedAt: Date.now(),
+            }
+          : { id: 'inv-running', threadId: 'thread-1', status: 'running', updatedAt: Date.now() };
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+
+      act(() => {
+        root.render(React.createElement(Harness));
+      });
+      act(() => {
+        captured?.handleAgentMessage({ type: 'text', catId: 'codex', content: 'partial' });
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
+      expect(mockRemoveThreadActiveInvocation).toHaveBeenCalledWith('thread-1', 'inv-failed');
+      expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalledWith('thread-1', 'inv-running-opus');
+      expect(mockSetCatInvocation).toHaveBeenCalledWith('codex', {
+        invocationId: undefined,
+        turnInvocationId: undefined,
+      });
+      expect(mockAddMessageToThread).toHaveBeenCalledWith(
+        'thread-1',
+        expect.objectContaining({
+          id: 'invocation-status-inv-failed',
+          variant: 'error',
+          content: expect.stringContaining('provider rejected the configured model'),
+        }),
+      );
+      expect(mockAddMessageToThread).toHaveBeenCalledWith(
+        'thread-1',
+        expect.objectContaining({
+          id: 'invocation-status-inv-running',
+          variant: 'info',
+          content: expect.stringContaining('inv-running'),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('patches the same running timeout notice when socket done wins before the next HTTP poll', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.activeInvocations = {
+        'inv-socket-terminal': { catId: 'codex', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-socket-terminal', turnInvocationId: 'turn-socket-terminal' },
+      };
+      mockGetThreadState.mockImplementation(() => ({
+        messages: storeState.messages,
+        activeInvocations: storeState.activeInvocations,
+        catInvocations: storeState.catInvocations,
+      }));
+      mockApiFetch.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: 'inv-socket-terminal',
+            threadId: 'thread-1',
+            status: 'running',
+            updatedAt: Date.now(),
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+      act(() => root.render(React.createElement(Harness)));
+      act(() => captured?.handleAgentMessage({ type: 'text', catId: 'codex', content: 'partial' }));
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const runningNotice = mockAddMessageToThread.mock.calls.find(
+        ([threadId, message]) => threadId === 'thread-1' && message.id === 'invocation-status-inv-socket-terminal',
+      )?.[1];
+      expect(runningNotice).toBeTruthy();
+      storeState.messages = [runningNotice];
+
+      act(() => {
+        captured?.handleAgentMessage({
+          type: 'done',
+          catId: 'codex',
+          invocationId: 'inv-socket-terminal',
+          turnInvocationId: 'turn-socket-terminal',
+          isFinal: true,
+        });
+      });
+
+      expect(mockPatchThreadMessage).toHaveBeenCalledWith(
+        'thread-1',
+        'invocation-status-inv-socket-terminal',
+        expect.objectContaining({
+          content: expect.stringContaining('completed'),
+          extra: expect.objectContaining({
+            invocationReconciliation: expect.objectContaining({ phase: 'succeeded' }),
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not clear a newer child identity when a late terminal shares the same parent', () => {
+    mockGetThreadState.mockImplementation(() => ({
+      messages: [],
+      activeInvocations: { 'parent-shared': { catId: 'codex', mode: 'execute' } },
+      catInvocations: {
+        codex: { invocationId: 'parent-shared', turnInvocationId: 'turn-new' },
+      },
+    }));
+
+    terminalizeInvocationReconciliation({
+      threadId: 'thread-1',
+      invocationId: 'parent-shared',
+      phase: 'succeeded',
+      catId: 'codex',
+      turnInvocationId: 'turn-old',
+      projectNotice: false,
+    });
+
+    expect(mockSetThreadCatInvocation).not.toHaveBeenCalled();
+    expect(mockSetCatInvocation).not.toHaveBeenCalled();
+  });
+
+  it('does not end a newer parent status or bubble when an old parent HTTP terminal reconciles', () => {
+    mockGetThreadState.mockImplementation(() => ({
+      messages: [
+        {
+          id: 'bubble-parent-new',
+          type: 'assistant',
+          catId: 'codex',
+          content: 'new invocation still streaming',
+          isStreaming: true,
+          timestamp: Date.now(),
+        },
+      ],
+      activeInvocations: {
+        'parent-old': { catId: 'codex', mode: 'execute' },
+        'parent-new': { catId: 'codex', mode: 'execute' },
+      },
+      catInvocations: {
+        codex: { invocationId: 'parent-new', turnInvocationId: 'turn-new' },
+      },
+    }));
+
+    terminalizeInvocationReconciliation({
+      threadId: 'thread-1',
+      invocationId: 'parent-old',
+      phase: 'succeeded',
+      candidate: {
+        invocationId: 'parent-old',
+        slotKeys: ['parent-old'],
+        catIds: ['codex'],
+        turnInvocationIds: ['turn-old'],
+      },
+      removeActiveSlots: true,
+    });
+
+    expect(mockRemoveThreadActiveInvocation).toHaveBeenCalledWith('thread-1', 'parent-old');
+    expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalledWith('thread-1', 'parent-new');
+    expect(mockUpdateThreadCatStatus).not.toHaveBeenCalledWith('thread-1', 'codex', 'done');
+    expect(mockSetThreadMessageStreaming).not.toHaveBeenCalledWith('thread-1', 'bubble-parent-new', false);
+  });
+
+  it('keeps the first terminal timeout projection when a late terminal disagrees', () => {
+    const terminalNotice = {
+      id: 'invocation-status-inv-terminal-once',
+      type: 'system',
+      variant: 'info',
+      content: 'Execution completed.',
+      timestamp: Date.now(),
+      extra: {
+        invocationReconciliation: {
+          v: 1 as const,
+          invocationId: 'inv-terminal-once',
+          catIds: ['codex'],
+          turnInvocationIds: ['turn-terminal-once'],
+          phase: 'succeeded' as const,
+          updatedAt: Date.now(),
+        },
+      },
+    };
+    mockGetThreadState.mockImplementation(() => ({
+      messages: [terminalNotice],
+      activeInvocations: {},
+      catInvocations: {},
+    }));
+
+    terminalizeInvocationReconciliation({
+      threadId: 'thread-1',
+      invocationId: 'inv-terminal-once',
+      phase: 'failed',
+      catId: 'codex',
+      turnInvocationId: 'turn-terminal-once',
+      error: 'late failure',
+    });
+
+    expect(mockPatchThreadMessage).not.toHaveBeenCalled();
+  });
+
+  it('retains an unknown-running slot when the canonical record cannot be read', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.activeInvocations = {
+        'inv-unknown': { catId: 'codex', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-unknown', turnInvocationId: 'turn-unknown' },
+      };
+      mockGetThreadState.mockImplementation(() => ({
+        messages: [],
+        activeInvocations: storeState.activeInvocations,
+        catInvocations: storeState.catInvocations,
+      }));
+      mockApiFetch.mockResolvedValue(
+        new Response(JSON.stringify({ code: 'INVOCATION_NOT_FOUND' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+      act(() => root.render(React.createElement(Harness)));
+      act(() => captured?.handleAgentMessage({ type: 'text', catId: 'codex', content: 'partial' }));
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalled();
+      expect(mockAddMessageToThread).toHaveBeenCalledWith(
+        'thread-1',
+        expect.objectContaining({
+          id: 'invocation-status-inv-unknown',
+          extra: expect.objectContaining({
+            invocationReconciliation: expect.objectContaining({
+              phase: 'unknown_running',
+              reason: 'record_not_found',
+            }),
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps reconciling canonical truth until a running invocation terminalizes exactly once', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.activeInvocations = {
+        'inv-continuous': { catId: 'codex', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-continuous', turnInvocationId: 'turn-continuous' },
+      };
+      mockGetThreadState.mockImplementation(() => ({
+        messages: [],
+        activeInvocations: storeState.activeInvocations,
+        catInvocations: storeState.catInvocations,
+      }));
+      mockApiFetch
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: 'inv-continuous',
+              threadId: 'thread-1',
+              status: 'running',
+              updatedAt: Date.now(),
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: 'inv-continuous',
+              threadId: 'thread-1',
+              status: 'succeeded',
+              updatedAt: Date.now() + INVOCATION_RECONCILIATION_POLL_MS,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+
+      await reconcileTimedOutInvocations('thread-1');
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+      expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(INVOCATION_RECONCILIATION_POLL_MS);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockApiFetch).toHaveBeenCalledTimes(2);
+      expect(mockRemoveThreadActiveInvocation).toHaveBeenCalledTimes(1);
+      expect(mockRemoveThreadActiveInvocation).toHaveBeenCalledWith('thread-1', 'inv-continuous');
+      expect(mockAddMessageToThread).toHaveBeenLastCalledWith(
+        'thread-1',
+        expect.objectContaining({
+          id: 'invocation-status-inv-continuous',
+          extra: expect.objectContaining({
+            invocationReconciliation: expect.objectContaining({ phase: 'succeeded' }),
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resurrect a timeout result after a terminal event wins the query race', async () => {
+    vi.useFakeTimers();
+    try {
+      storeState.activeInvocations = {
+        'inv-race': { catId: 'codex', mode: 'execute' },
+      };
+      storeState.catInvocations = {
+        codex: { invocationId: 'inv-race', turnInvocationId: 'turn-race' },
+      };
+      mockGetThreadState.mockImplementation(() => ({
+        messages: [],
+        activeInvocations: storeState.activeInvocations,
+        catInvocations: storeState.catInvocations,
+      }));
+      let resolveRecord: ((response: Response) => void) | undefined;
+      mockApiFetch.mockReturnValue(
+        new Promise<Response>((resolve) => {
+          resolveRecord = resolve;
+        }),
+      );
+
+      act(() => root.render(React.createElement(Harness)));
+      act(() => captured?.handleAgentMessage({ type: 'text', catId: 'codex', content: 'partial' }));
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        await Promise.resolve();
+      });
+
+      // Model the socket terminal handler winning while the canonical query is in flight.
+      storeState.activeInvocations = {};
+      await act(async () => {
+        resolveRecord?.(
+          new Response(
+            JSON.stringify({ id: 'inv-race', threadId: 'thread-1', status: 'failed', updatedAt: Date.now() }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mockAddMessageToThread).not.toHaveBeenCalledWith(
+        'thread-1',
+        expect.objectContaining({ id: 'invocation-status-inv-race' }),
+      );
+      expect(mockRemoveThreadActiveInvocation).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('stopping a background thread does not clear active thread invocation state', () => {
-    const cancelInvocation = vi.fn();
+    const cancelInvocation = vi.fn(() => true);
+    const stopIntent = {
+      sourceControl: 'chat_input_action' as const,
+      gesture: 'pointer' as const,
+      trustedGesture: true,
+    };
     mockGetThreadState.mockImplementation((tid?: string) => {
       if (tid === 'thread-2') {
         return {
@@ -325,10 +806,10 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     act(() => {
-      captured?.handleStop(cancelInvocation, 'thread-2');
+      captured?.handleStop(cancelInvocation, 'thread-2', stopIntent);
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined);
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined, stopIntent);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
     expect(mockSetThreadMessageStreaming).toHaveBeenCalledWith('thread-2', 'bg-stream-1', false);
 
@@ -340,70 +821,44 @@ describe('useAgentMessages loading lifecycle', () => {
     expect(mockSetStreaming).not.toHaveBeenCalled();
   });
 
-  it('keeps local running state when whole-thread Stop is rejected', async () => {
-    const cancelInvocation = vi.fn(async () => false);
-    mockGetThreadState.mockReturnValue({
+  it('keeps local invocation state when the cancel packet is not sent', () => {
+    const cancelInvocation = vi.fn(() => false);
+    mockGetThreadState.mockImplementation(() => ({
       messages: [
         {
-          id: 'still-running',
+          id: 'still-streaming',
           type: 'assistant',
           catId: 'opus',
-          content: 'running',
+          content: 'still running',
           isStreaming: true,
           timestamp: Date.now(),
         },
       ],
-    });
+    }));
 
     act(() => {
       root.render(React.createElement(Harness));
     });
-    await act(async () => {
-      await captured?.handleStop(cancelInvocation, 'thread-1');
-    });
-
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-1', undefined);
-    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
-    expect(mockSetLoading).not.toHaveBeenCalledWith(false);
-    expect(mockSetStreaming).not.toHaveBeenCalledWith('still-running', false);
-  });
-
-  it('keeps a newly active thread running when an earlier Stop resolves after navigation', async () => {
-    let resolveCancel: ((accepted: boolean) => void) | undefined;
-    const cancelInvocation = vi.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveCancel = resolve;
-        }),
-    );
-    mockGetThreadState.mockReturnValue({ messages: [] });
-
     act(() => {
-      root.render(React.createElement(Harness));
+      captured?.handleStop(cancelInvocation, 'thread-2', {
+        sourceControl: 'chat_input_action',
+        gesture: 'pointer',
+        trustedGesture: false,
+      });
     });
 
-    let stopping: ReturnType<NonNullable<typeof captured>['handleStop']> | undefined;
-    const stoppingThreadSnapshot = { ...storeState, currentThreadId: 'thread-1' };
-    const newlyActiveThreadSnapshot = { ...storeState, currentThreadId: 'thread-2' };
-    mockGetStoreState.mockReset();
-    mockGetStoreState.mockReturnValue(stoppingThreadSnapshot);
-    await act(async () => {
-      stopping = captured?.handleStop(cancelInvocation, 'thread-1');
-      // The user navigates to another Thread while force-reset is in flight;
-      // Zustand publishes a fresh state snapshot for that new active Thread.
-      mockGetStoreState.mockReturnValue(newlyActiveThreadSnapshot);
-      resolveCancel?.(true);
-      await stopping;
-    });
-
-    expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-1');
-    expect(mockClearAllActiveInvocations).not.toHaveBeenCalled();
-    expect(mockSetLoading).not.toHaveBeenCalledWith(false);
-    expect(mockClearCatStatuses).not.toHaveBeenCalled();
+    expect(cancelInvocation).toHaveBeenCalledOnce();
+    expect(mockResetThreadInvocationState).not.toHaveBeenCalled();
+    expect(mockSetThreadMessageStreaming).not.toHaveBeenCalled();
   });
 
-  it('stopping a background thread stops the full target-thread run rather than deriving one cat slot', () => {
-    const cancelInvocation = vi.fn();
+  it('stopping a background thread derives catId from the TARGET thread slots', () => {
+    const cancelInvocation = vi.fn(() => true);
+    const stopIntent = {
+      sourceControl: 'chat_input_action' as const,
+      gesture: 'pointer' as const,
+      trustedGesture: true,
+    };
     storeState.activeInvocations = {
       'inv-active': { catId: 'codex', mode: 'execute' },
     };
@@ -444,17 +899,17 @@ describe('useAgentMessages loading lifecycle', () => {
     });
 
     act(() => {
-      captured?.handleStop(cancelInvocation, 'thread-2');
+      captured?.handleStop(cancelInvocation, 'thread-2', stopIntent);
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', undefined);
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus', stopIntent);
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
   });
 
   it('stopping a background thread clears its pending timeout guard', () => {
     vi.useFakeTimers();
     try {
-      const cancelInvocation = vi.fn();
+      const cancelInvocation = vi.fn(() => true);
 
       act(() => {
         root.render(React.createElement(Harness));
@@ -472,7 +927,11 @@ describe('useAgentMessages loading lifecycle', () => {
       // Switch active thread, then stop the old thread from split-pane context.
       storeState.currentThreadId = 'thread-2';
       act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
+        captured?.handleStop(cancelInvocation, 'thread-1', {
+          sourceControl: 'chat_input_action',
+          gesture: 'pointer',
+          trustedGesture: true,
+        });
       });
 
       act(() => {
@@ -490,10 +949,10 @@ describe('useAgentMessages loading lifecycle', () => {
     }
   });
 
-  it('stopping another thread does not clear active thread timeout guard', () => {
+  it('stopping another thread does not clear the current thread timeout guard', () => {
     vi.useFakeTimers();
     try {
-      const cancelInvocation = vi.fn();
+      const cancelInvocation = vi.fn(() => true);
 
       act(() => {
         root.render(React.createElement(Harness));
@@ -520,18 +979,19 @@ describe('useAgentMessages loading lifecycle', () => {
 
       // Stop old thread-1 from split-pane context.
       act(() => {
-        captured?.handleStop(cancelInvocation, 'thread-1');
+        captured?.handleStop(cancelInvocation, 'thread-1', {
+          sourceControl: 'chat_input_action',
+          gesture: 'pointer',
+          trustedGesture: true,
+        });
       });
 
       act(() => {
         vi.advanceTimersByTime(5 * 60 * 1000);
       });
 
-      expect(mockAddMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          content: '⏱ Response timed out. The operation may still be running in the background.',
-        }),
-      );
+      expect(mockResetThreadInvocationState).not.toHaveBeenCalledWith('thread-2');
+      expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-2');
     } finally {
       vi.useRealTimers();
     }

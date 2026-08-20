@@ -1,10 +1,13 @@
 import type {
+  AutomationState,
+  IssueWaitAutomationState,
   PrAutomationState,
   TaskItem,
   WaitOutcomeV1,
   WaitTerminationActor,
   WaitTerminationEventV1,
 } from '@cat-cafe/shared';
+import { createWaitContinuationCarrier, parseWaitOwnerFence } from '@cat-cafe/shared';
 import type {
   ConnectorDeliveryDeps,
   ConnectorDeliveryInput,
@@ -13,6 +16,7 @@ import { deliverConnectorMessage } from '../../infrastructure/email/deliver-conn
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
 import {
   markWaitOutcomeDelivered,
+  markWaitOutcomeLegacyUnfenced,
   transitionWaitState,
   type WaitTransitionEvent,
 } from '../ball-custody/wait-state-machine.js';
@@ -24,6 +28,7 @@ export interface GitHubCollectorPatch {
   readonly review?: NonNullable<PrAutomationState['review']>;
   readonly ci?: NonNullable<PrAutomationState['ci']>;
   readonly conflict?: NonNullable<PrAutomationState['conflict']>;
+  readonly issue?: NonNullable<IssueWaitAutomationState['issue']>;
 }
 
 export interface GitHubWaitObservation {
@@ -59,16 +64,27 @@ export interface GitHubWaitLifecycleServiceOptions {
 }
 
 function mergeCollectorState(
-  state: PrAutomationState | undefined,
+  taskKind: TaskItem['kind'],
+  state: AutomationState | undefined,
   patch: GitHubCollectorPatch | undefined,
-): PrAutomationState {
+): AutomationState {
+  if (taskKind === 'issue_tracking') {
+    const issueState = state as IssueWaitAutomationState | undefined;
+    return {
+      ...(issueState?.issue || patch?.issue ? { issue: { ...issueState?.issue, ...patch?.issue } } : {}),
+      ...(issueState?.closedAt !== undefined ? { closedAt: issueState.closedAt } : {}),
+      ...(issueState?.await ? { await: issueState.await } : {}),
+      ...(issueState?.waitOutcome ? { waitOutcome: issueState.waitOutcome } : {}),
+    };
+  }
+  const prState = state as PrAutomationState | undefined;
   return {
-    ...(state?.review || patch?.review ? { review: { ...state?.review, ...patch?.review } } : {}),
-    ...(state?.ci || patch?.ci ? { ci: { ...state?.ci, ...patch?.ci } } : {}),
-    ...(state?.conflict || patch?.conflict ? { conflict: { ...state?.conflict, ...patch?.conflict } } : {}),
-    ...(state?.closedAt !== undefined ? { closedAt: state.closedAt } : {}),
-    ...(state?.await ? { await: state.await } : {}),
-    ...(state?.waitOutcome ? { waitOutcome: state.waitOutcome } : {}),
+    ...(prState?.review || patch?.review ? { review: { ...prState?.review, ...patch?.review } } : {}),
+    ...(prState?.ci || patch?.ci ? { ci: { ...prState?.ci, ...patch?.ci } } : {}),
+    ...(prState?.conflict || patch?.conflict ? { conflict: { ...prState?.conflict, ...patch?.conflict } } : {}),
+    ...(prState?.closedAt !== undefined ? { closedAt: prState.closedAt } : {}),
+    ...(prState?.await ? { await: prState.await } : {}),
+    ...(prState?.waitOutcome ? { waitOutcome: prState.waitOutcome } : {}),
   };
 }
 
@@ -81,7 +97,7 @@ function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTermination
     eventId: outcome.outcomeId,
     kind: 'wait.terminated',
     waitId: task.id,
-    waitKind: 'github_pr',
+    waitKind: task.kind === 'issue_tracking' ? 'github_issue' : 'github_pr',
     subjectRef: outcome.subjectRef,
     threadId: task.threadId,
     ownerUserId: task.userId,
@@ -108,18 +124,30 @@ export class GitHubWaitLifecycleService {
   async observe(input: GitHubWaitObservation): Promise<GitHubWaitLifecycleResult> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const task = await this.opts.taskStore.get(input.taskId);
-      if (!task || task.kind !== 'pr_tracking') {
-        return { kind: 'not_tracked', reason: `No PR wait task ${input.taskId}` };
+      if (!task || (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking')) {
+        return { kind: 'not_tracked', reason: `No GitHub wait task ${input.taskId}` };
       }
 
       const existingPending = pendingOutcome(task);
       if (existingPending) return this.publishPending(task, existingPending, input.deliveryExtra);
 
-      const state = task.automationState as PrAutomationState | undefined;
+      const state = task.automationState;
       const active = state?.await;
-      const collectorState = mergeCollectorState(state, input.collectorPatch);
+      const collectorState = mergeCollectorState(task.kind, state, input.collectorPatch);
       if (!active) {
-        if (input.collectorPatch) await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch);
+        if (input.subjectState) {
+          const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
+            expectedGeneration: null,
+            expectedUpdatedAt: task.updatedAt,
+            automationState: collectorState,
+            status: 'done',
+          });
+          if (!installed) continue;
+          return { kind: 'state_only', reason: 'subject_terminal_without_active_wait' };
+        }
+        if (input.collectorPatch) {
+          await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch as Partial<AutomationState>);
+        }
         return { kind: 'state_only', reason: 'no_active_wait' };
       }
 
@@ -135,7 +163,9 @@ export class GitHubWaitLifecycleService {
       } else {
         const matched = matchGitHubWaitPredicates(active.continuation.when, active.baseline, input.facts);
         if (matched.length === 0 && at < active.expiresAt) {
-          if (input.collectorPatch) await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch);
+          if (input.collectorPatch) {
+            await this.opts.taskStore.patchAutomationState(task.id, input.collectorPatch as Partial<AutomationState>);
+          }
           return { kind: 'state_only', reason: 'predicates_not_matched' };
         }
         transition = {
@@ -150,7 +180,7 @@ export class GitHubWaitLifecycleService {
       if (!transitioned.applied) {
         return { kind: 'deduped', reason: transitioned.reason };
       }
-      const replacement = transitioned.state as PrAutomationState;
+      const replacement = transitioned.state as AutomationState;
       const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
         expectedGeneration: active.generation,
         expectedUpdatedAt: task.updatedAt,
@@ -192,7 +222,9 @@ export class GitHubWaitLifecycleService {
 
   async recoverOutcome(taskId: string): Promise<GitHubWaitLifecycleResult> {
     const task = await this.opts.taskStore.get(taskId);
-    if (!task || task.kind !== 'pr_tracking') return { kind: 'not_tracked', reason: 'task_missing' };
+    if (!task || (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking')) {
+      return { kind: 'not_tracked', reason: 'task_missing' };
+    }
     const outcome = task.automationState?.waitOutcome;
     if (!outcome) return { kind: 'state_only', reason: 'nothing_to_recover' };
     await this.appendLifecycleEvent(task, outcome);
@@ -210,8 +242,10 @@ export class GitHubWaitLifecycleService {
   ): Promise<GitHubWaitLifecycleResult> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const task = await this.opts.taskStore.get(taskId);
-      if (!task || task.kind !== 'pr_tracking') return { kind: 'not_tracked', reason: 'task_missing' };
-      const state = task.automationState as PrAutomationState | undefined;
+      if (!task || (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking')) {
+        return { kind: 'not_tracked', reason: 'task_missing' };
+      }
+      const state = task.automationState;
       const active = state?.await;
       if (!active) return { kind: 'deduped', reason: 'no_active_wait' };
       const event = { ...template, generation: active.generation } as WaitTransitionEvent;
@@ -220,7 +254,7 @@ export class GitHubWaitLifecycleService {
       const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
         expectedGeneration: active.generation,
         expectedUpdatedAt: task.updatedAt,
-        automationState: transitioned.state as PrAutomationState,
+        automationState: transitioned.state as AutomationState,
         status: 'done',
       });
       if (!installed) continue;
@@ -246,7 +280,11 @@ export class GitHubWaitLifecycleService {
     outcome: WaitOutcomeV1,
     deliveryExtra?: ConnectorDeliveryInput['extra'],
   ): Promise<GitHubWaitLifecycleResult> {
+    if (!parseWaitOwnerFence(outcome.ownerFence)) {
+      return this.quarantineLegacyUnfencedOutcome(task, outcome);
+    }
     const content = renderGitHubWaitOutcome(outcome);
+    const waitContinuationCarrier = createWaitContinuationCarrier(task.id, outcome);
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
       threadId: task.threadId,
       userId: task.userId ?? '',
@@ -257,22 +295,60 @@ export class GitHubWaitLifecycleService {
         connector: 'github-wait',
         label: 'GitHub Wait',
         icon: 'github',
-        url: `https://github.com/${outcome.subjectRef.slice('pr:'.length).replace('#', '/pull/')}`,
+        url: outcome.subjectRef.startsWith('pr:')
+          ? `https://github.com/${outcome.subjectRef.slice('pr:'.length).replace('#', '/pull/')}`
+          : `https://github.com/${outcome.subjectRef.slice('issue:'.length).replace('#', '/issues/')}`,
+        meta: { waitContinuationCarrier },
       },
       ...(deliveryExtra ? { extra: deliveryExtra } : {}),
     });
 
     const current = await this.opts.taskStore.get(task.id);
     if (current?.automationState?.waitOutcome?.outcomeId === outcome.outcomeId) {
-      const marked = markWaitOutcomeDelivered(current.automationState as PrAutomationState, outcome.outcomeId);
+      const marked = markWaitOutcomeDelivered(current.automationState ?? {}, outcome.outcomeId);
       await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
+        expectedGeneration: outcome.generation,
+        expectedUpdatedAt: current.updatedAt,
+        automationState: marked as AutomationState,
+        status: 'done',
+      });
+    }
+    this.opts.log.info(
+      { taskId: task.id, outcomeId: outcome.outcomeId },
+      '[F280] delivered compact GitHub wait outcome',
+    );
+    return { kind: 'notified', task, outcome, messageId: result.messageId, content };
+  }
+
+  private async quarantineLegacyUnfencedOutcome(
+    task: TaskItem,
+    outcome: WaitOutcomeV1,
+  ): Promise<GitHubWaitLifecycleResult> {
+    this.opts.log.warn(
+      { taskId: task.id, outcomeId: outcome.outcomeId },
+      `[F280] quarantined legacy unfenced wait outcome ${task.id}; no continuation was published`,
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = attempt === 0 ? task : await this.opts.taskStore.get(task.id);
+      const currentOutcome = current?.automationState?.waitOutcome;
+      if (!current || currentOutcome?.outcomeId !== outcome.outcomeId) {
+        return { kind: 'deduped', reason: 'outcome_changed_concurrently' };
+      }
+      if (currentOutcome.delivery !== 'pending') {
+        return { kind: 'state_only', reason: currentOutcome.reason };
+      }
+      if (parseWaitOwnerFence(currentOutcome.ownerFence)) {
+        return this.publishPending(current, currentOutcome);
+      }
+      const marked = markWaitOutcomeLegacyUnfenced(current.automationState as PrAutomationState, outcome.outcomeId);
+      const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
         expectedGeneration: outcome.generation,
         expectedUpdatedAt: current.updatedAt,
         automationState: marked as PrAutomationState,
         status: 'done',
       });
+      if (installed) return { kind: 'state_only', reason: 'legacy_unfenced' };
     }
-    this.opts.log.info({ taskId: task.id, outcomeId: outcome.outcomeId }, '[F280] delivered compact PR wait outcome');
-    return { kind: 'notified', task, outcome, messageId: result.messageId, content };
+    return { kind: 'deduped', reason: 'generation_changed_concurrently' };
   }
 }

@@ -8,7 +8,6 @@ import type {
   CliConfig,
   ClientId,
   CoCreatorConfig,
-  ContextBudget,
   VoiceConfig,
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
@@ -45,7 +44,8 @@ export interface RuntimeCatInput {
   cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  contextBudget?: ContextBudget;
+  /** clowder-ai#1208: explicit context window cap (tokens). undefined = Auto. */
+  contextWindow?: number;
   voiceConfig?: VoiceConfig;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
@@ -75,7 +75,8 @@ export interface RuntimeCatUpdate {
   cli?: CliConfig | null;
   commandArgs?: string[];
   cliConfigArgs?: string[];
-  contextBudget?: ContextBudget | null;
+  /** clowder-ai#1208: explicit context window cap. null to remove, undefined to skip. */
+  contextWindow?: number | null;
   voiceConfig?: VoiceConfig | null;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string | null;
@@ -275,7 +276,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
-        ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
+        ...(input.contextWindow != null ? { contextWindow: input.contextWindow } : {}),
         ...(input.voiceConfig !== undefined ? { voiceConfig: input.voiceConfig } : {}),
         ...(input.personality != null && input.personality.trim().length > 0 ? { personality: input.personality } : {}),
         ...(input.teamStrengths != null && input.teamStrengths.trim().length > 0
@@ -482,11 +483,11 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.cli = patch.cli;
     }
   }
-  if (patch.contextBudget !== undefined) {
-    if (patch.contextBudget) {
-      variant.contextBudget = patch.contextBudget;
+  if (patch.contextWindow !== undefined) {
+    if (patch.contextWindow != null) {
+      variant.contextWindow = patch.contextWindow;
     } else {
-      delete variant.contextBudget;
+      delete variant.contextWindow;
     }
   }
   if (patch.voiceConfig !== undefined) {

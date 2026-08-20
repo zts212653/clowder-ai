@@ -53,6 +53,22 @@ export interface ExternalRuntimeSessionListItem {
   lifecycle: ExternalRuntimeSessionLifecycle;
   binding: ExternalRuntimeSessionBinding;
   provenance?: Record<string, unknown>;
+  sessionState?: {
+    seq: number;
+    status: string;
+    compressionCount: number | null;
+    hybridProgress?: { policyRevision: string; observedCount: number; startedAt: string } | null;
+  };
+  sessionPolicy?: {
+    config: { strategy: 'handoff' | 'compress' | 'hybrid' } & Record<string, unknown>;
+    source: string;
+    revision: string;
+    changedAt: number;
+    execution: {
+      status: 'active' | 'degraded' | 'unavailable';
+      missingCapabilities: string[];
+    };
+  };
   drilldown: ExternalRuntimeSessionDrilldown;
 }
 

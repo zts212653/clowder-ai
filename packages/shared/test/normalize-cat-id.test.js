@@ -51,13 +51,24 @@ const TEST_CAT_FIXTURES = {
   gemini35: {
     id: createCatId('gemini35'),
     name: '暹罗猫',
-    displayName: '暹罗猫 Gemini 3.5',
+    displayName: '暹罗猫 Gemini 3.6',
     nickname: '烁烁',
     avatar: '/avatars/gemini35.png',
     color: { primary: '#42A5F5', secondary: '#BBDEFB' },
-    mentionPatterns: ['@gemini35', '@gemini-35', '@gemini3.5', '@flash', '@暹罗flash', '@暹罗gemini35'],
+    mentionPatterns: [
+      '@gemini35',
+      '@gemini-35',
+      '@gemini3.5',
+      '@gemini36',
+      '@gemini-36',
+      '@gemini3.6',
+      '@flash',
+      '@暹罗flash',
+      '@暹罗gemini35',
+      '@暹罗gemini36',
+    ],
     clientId: 'google',
-    defaultModel: 'Gemini 3.5 Flash (High)',
+    defaultModel: 'Gemini 3.6 Flash (High)',
     mcpSupport: true,
     roleDescription: 'Creative visual designer',
     personality: 'energetic',
@@ -122,7 +133,7 @@ describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
     assert.equal(r.catId, 'codex');
   });
 
-  // --- Gemini 3.5 alias tests ---
+  // --- Gemini Flash alias tests ---
   it('gemini35 alias resolves to standalone gemini35 breed (not gemini25)', () => {
     const r1 = normalizeCatId('@gemini35');
     assert.equal(r1.ok, true);
@@ -134,6 +145,28 @@ describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
 
     // Legacy alias preserved: @暹罗gemini35 was on gemini25, now belongs to gemini35
     const r3 = normalizeCatId('@暹罗gemini35');
+    assert.equal(r3.ok, true);
+    assert.equal(r3.catId, 'gemini35');
+
+    const r4 = normalizeCatId('@暹罗gemini36');
+    assert.equal(r4.ok, true);
+    assert.equal(r4.catId, 'gemini35');
+
+    const r5 = normalizeCatId('@gemini25');
+    assert.equal(r5.ok, true);
+    assert.equal(r5.catId, 'gemini25');
+  });
+
+  it('gemini36 alias resolves to standalone gemini35 breed', () => {
+    const r1 = normalizeCatId('@gemini36');
+    assert.equal(r1.ok, true);
+    assert.equal(r1.catId, 'gemini35');
+
+    const r2 = normalizeCatId('gemini-36');
+    assert.equal(r2.ok, true);
+    assert.equal(r2.catId, 'gemini35');
+
+    const r3 = normalizeCatId('@gemini3.6');
     assert.equal(r3.ok, true);
     assert.equal(r3.catId, 'gemini35');
 

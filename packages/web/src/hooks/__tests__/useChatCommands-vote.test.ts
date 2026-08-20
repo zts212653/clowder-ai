@@ -11,9 +11,12 @@ const mocks = vi.hoisted(() => {
   const mockAddMessage = vi.fn();
   const mockApiFetch = vi.fn();
   const mockSetShowVoteModal = vi.fn();
-  const useChatStoreMock = Object.assign(() => ({ addMessage: mockAddMessage }), {
-    getState: () => ({ currentThreadId: 'thread-1', setShowVoteModal: mockSetShowVoteModal }),
-  });
+  const useChatStoreMock = Object.assign(
+    () => ({ addMessageToThread: (_threadId: string, message: Record<string, unknown>) => mockAddMessage(message) }),
+    {
+      getState: () => ({ currentThreadId: 'thread-1', setShowVoteModal: mockSetShowVoteModal }),
+    },
+  );
 
   return { mockAddMessage, mockApiFetch, mockSetShowVoteModal, useChatStoreMock };
 });

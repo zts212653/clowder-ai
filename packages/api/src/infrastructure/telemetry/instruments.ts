@@ -912,6 +912,40 @@ export const codexAppServerHostEviction = lazy(() =>
   }),
 );
 
+export const codexAppServerHostMigration = lazy(() =>
+  meter().createCounter('cat_cafe.codex_app_server.host.migration', {
+    description: 'Native-session host migration lifecycle, partitioned by bounded reason and status',
+  }),
+);
+
+export const codexAppServerHostMigrationDuration = lazy(() =>
+  meter().createHistogram('cat_cafe.codex_app_server.host.migration_duration', {
+    description: 'Time spent waiting for and retiring a source host before native-session migration',
+    unit: 's',
+  }),
+);
+
+/** Durable visibility mutation could not resolve a raw cursor to canonical position. */
+export const visibilityCursorUnresolvedMutation = lazy(() =>
+  meter().createCounter('cat_cafe.visibility_cursor.unresolved_mutation', {
+    description: 'Durable cursor mutations rejected because a raw cursor had no canonical visibility position',
+  }),
+);
+
+/** Newly accepted canonical evidence replaced an exact unresolvable durable value. */
+export const visibilityCursorUnresolvedRepair = lazy(() =>
+  meter().createCounter('cat_cafe.visibility_cursor.unresolved_repair', {
+    description: 'Unresolvable durable cursor values repaired by later accepted canonical evidence',
+  }),
+);
+
+/** A producer declined to put a non-canonical value into the deferred ACK slot. */
+export const visibilityCursorDeferredBoundaryRejected = lazy(() =>
+  meter().createCounter('cat_cafe.visibility_cursor.deferred_boundary_rejected', {
+    description: 'Non-canonical context boundaries omitted before deferred delivery aggregation',
+  }),
+);
+
 /** Gate held: post_message/cross_post blocked because thread has unseen messages. */
 export const freshnessGateHeld = lazy(() =>
   meter().createCounter('cat_cafe.freshness.gate_held', {
@@ -1251,6 +1285,7 @@ export function warmupCounters(): void {
   codexAppServerHostLive.add(0);
   codexAppServerLeaseActive.add(0);
   codexAppServerHostEviction.add(0);
+  codexAppServerHostMigration.add(0);
   freshnessGateHeld.add(0);
   freshnessGateForward.add(0);
   freshnessRelevanceSuppressed.add(0);

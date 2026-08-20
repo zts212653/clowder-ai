@@ -1,46 +1,62 @@
 'use client';
 
-import type { FreshnessCarrierCapability, MessageWorkDisposition } from '@cat-cafe/shared';
+import {
+  CONTEXT_ATTACHMENT_MAX_COUNT,
+  type ContextAttachment,
+  ContextAttachmentSchema,
+  type FreshnessCarrierCapability,
+  type MessageWorkDisposition,
+} from '@cat-cafe/shared';
 import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPreference';
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import type { DeliveryMode } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { apiFetch } from '@/utils/api-client';
 import { compressImage } from '@/utils/compressImage';
+import { AttachmentPreview } from './AttachmentPreview';
+import { ChatContextPicker } from './ChatContextPicker';
 import { ChatInputActionButton } from './ChatInputActionButton';
+import { ChatInputAddMenu } from './ChatInputAddMenu';
 import { ChatInputMenus } from './ChatInputMenus';
+import { ContextAttachmentList } from './ContextAttachmentView';
+import { type ContextPickerMode, detectContextShortcut } from './chat-context-reference';
 import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF_MODES } from './chat-input-options';
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
 import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
-import { ImagePreview } from './ImagePreview';
-import { AttachIcon } from './icons/AttachIcon';
 import { MessageDispositionSelector } from './MessageDispositionSelector';
-import { MobileInputToolbar } from './MobileInputToolbar';
 import { classifyFreshnessCarrierSupport } from './message-disposition-presentation';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import {
   hasPendingThreadDraft,
+  syncContextAttachmentDraftToStorage,
   syncDraftToStorage,
   syncReplyDraftToStorage,
+  threadContextAttachmentDrafts,
   threadDrafts,
   threadImageDrafts,
   threadReplyDrafts,
 } from './thread-drafts';
+import { useDurableComposerDraft } from './useDurableComposerDraft';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
 export {
+  syncContextAttachmentDraftToStorage,
   syncDraftToStorage,
   syncReplyDraftToStorage,
+  threadContextAttachmentDrafts,
   threadDrafts,
   threadImageDrafts,
   threadReplyDrafts,
@@ -58,22 +74,22 @@ interface ChatInputProps {
     deliveryMode?: DeliveryMode,
     replyToId?: string,
     messageDisposition?: MessageWorkDisposition,
+    contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onStop?: () => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
 }
 
-const ACCEPTED_TYPES = 'image/png,image/jpeg,image/gif,image/webp';
+const ACCEPTED_TYPES =
+  'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,application/zip,application/gzip,application/x-tar,application/octet-stream,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm';
 
 export function ChatInput({
   threadId,
   onSend,
-  onStop,
   disabled,
-  hasActiveInvocation,
+  hasActiveInvocation: unscopedHasActiveInvocation,
   uploadStatus = 'idle',
   uploadError = null,
 }: ChatInputProps) {
@@ -104,21 +120,41 @@ export function ChatInput({
   }, [threadId, rawReplyToMessage, setReplyToStore]);
 
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
-  const activeInvocations = useChatStore((s) => s.activeInvocations);
-  const catInvocations = useChatStore((s) => s.catInvocations);
-  const storeTargetCats = useChatStore((s) => s.targetCats);
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
+  const {
+    activeInvocations,
+    catInvocations,
+    targetCats: storeTargetCats,
+  } = useThreadLiveness(threadId ?? currentThreadId);
+  const effectiveThreadId = threadId ?? currentThreadId;
+  const {
+    executions: canonicalExecutions,
+    state: projectedCancelState,
+    cancelAll: handleProjectedStop,
+  } = useLiveExecutionCancelControl(effectiveThreadId);
+  // Shared with ThreadExecutionBar: both surfaces must answer "can we verify this
+  // thread's run state?" identically, or their independent fail-closed choices can
+  // combine into a state with no cancel AND no recovery exit.
+  const { canonicalProjectionStale, hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(
+    threadId,
+    unscopedHasActiveInvocation,
+  );
+  const hasActiveInvocation = canonicalExecutions.length > 0 || hasUnverifiedLegacyExecution;
+  const stopState: 'available' | 'pending' | 'unavailable' | 'hidden' =
+    canonicalExecutions.length === 0 ? (hasUnverifiedLegacyExecution ? 'unavailable' : 'hidden') : projectedCancelState;
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const inv of Object.values(activeInvocations ?? {})) {
-      ids.add(inv.catId);
+    for (const execution of canonicalExecutions) {
+      ids.add(execution.catId);
     }
-    // Defensive fallback: legacy paths set hasActiveInvocation=true without
-    // populating activeInvocations slots. Use targetCats as degraded source.
-    if (ids.size === 0 && hasActiveInvocation && storeTargetCats?.length) {
-      for (const catId of storeTargetCats) ids.add(catId);
+    if (ids.size === 0 && hasUnverifiedLegacyExecution) {
+      for (const inv of Object.values(activeInvocations ?? {})) ids.add(inv.catId);
+      if (ids.size === 0 && storeTargetCats?.length) {
+        for (const catId of storeTargetCats) ids.add(catId);
+      }
     }
     return ids;
-  }, [activeInvocations, hasActiveInvocation, storeTargetCats]);
+  }, [activeInvocations, canonicalExecutions, hasUnverifiedLegacyExecution, storeTargetCats]);
 
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
@@ -128,6 +164,9 @@ export function ChatInput({
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
+  const [contextAttachments, setContextAttachments] = useState<ContextAttachment[]>(() =>
+    threadId ? (threadContextAttachmentDrafts.get(threadId) ?? []) : [],
+  );
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
@@ -155,87 +194,40 @@ export function ChatInput({
       ? 'next_work'
       : messageDisposition.effective;
 
-  const [mobileToolbar, setMobileToolbar] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [contextPickerMode, setContextPickerMode] = useState<ContextPickerMode | null>(null);
+  const [contextShortcutRange, setContextShortcutRange] = useState<{ start: number; end: number } | null>(null);
   const [ghostSuggestion, setGhostSuggestion] = useState<string | null>(null);
   const ghostRef = useRef<string | null>(null);
   const [showHistorySearch, setShowHistorySearch] = useState(false);
   const [lobbyMode, setLobbyMode] = useState<'player' | 'god-view' | 'detective' | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const gameBtnRef = useRef<HTMLButtonElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const threads = useChatStore((s) => s.threads);
+  const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
+  const workspaceOpenFilePath = useChatStore((s) => s.workspaceOpenFilePath);
+  const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
-  // F63-AC15: consume pendingChatInsert (ComposerDraftInsert) from workspace (thread-guarded)
-  // #706: restores text, image attachments, and quote state from recall-edit
-  // Phase 2 (#833 merged): replyToId → setReplyTo() restores ReplyPreviewBar
-  const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
-  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
-  const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
-  useEffect(() => {
-    if (!pendingChatInsert) return;
-    if (pendingChatInsert.threadId !== threadId) return;
-    setInput((prev) => {
-      const separator = prev && !prev.endsWith('\n') ? '\n' : '';
-      return prev + separator + pendingChatInsert.text;
-    });
-    // #706: Restore images from recalled queue message.
-    // Writes to threadImageDrafts directly so files survive unmount if the user
-    // switches threads while fetches are in-flight.
-    if (pendingChatInsert.imageUrls?.length) {
-      const urls = pendingChatInsert.imageUrls;
-      const targetThreadId = pendingChatInsert.threadId;
-      void (async () => {
-        setIsPreparingImages(true);
-        try {
-          const restored: File[] = [];
-          for (const url of urls) {
-            if (restored.length >= 5) break;
-            try {
-              const res = await apiFetch(url);
-              if (!res.ok) continue; // Skip images that return non-2xx (stale/cleaned-up uploads)
-              const blob = await res.blob();
-              const ext = url.split('.').pop() ?? 'png';
-              const name = `recalled-${Date.now()}-${restored.length}.${ext}`;
-              restored.push(new File([blob], name, { type: blob.type || `image/${ext}` }));
-            } catch {
-              // Best-effort: skip images that fail to fetch
-            }
-          }
-          if (restored.length > 0) {
-            // Persist to module-level draft so data survives component unmount
-            const existing = threadImageDrafts.get(targetThreadId) ?? [];
-            const merged = [...existing, ...restored].slice(0, 5);
-            threadImageDrafts.set(targetThreadId, merged);
-            setThreadHasDraft(targetThreadId, true);
-            // Also update local state if still mounted on the same thread
-            setImages((prev) => [...prev, ...restored].slice(0, 5));
-          }
-        } finally {
-          setIsPreparingImages(false);
-        }
-      })();
-    }
-    // #706 Phase 2: Restore quote composing state from recall-edit.
-    // Always calls setReplyTo when replyToId is present so the re-sent
-    // message preserves its quote relationship. If the parent message
-    // isn't loaded in the client store (e.g. after a page reload with
-    // partial history), falls back to a placeholder — the replyTo ID
-    // is still sent to the server on submit.
-    if (pendingChatInsert.replyToId) {
-      const { messages: storeMessages, setReplyTo } = useChatStore.getState();
-      const parentMsg = storeMessages.find((m) => m.id === pendingChatInsert.replyToId);
-      setReplyTo({
-        id: pendingChatInsert.replyToId,
-        content: parentMsg?.content ?? '(原消息未加载)',
-        senderCatId: parentMsg?.catId ?? null,
-        threadId,
-      });
-    }
-    setPendingChatInsert(null);
-    textareaRef.current?.focus();
-  }, [pendingChatInsert, setPendingChatInsert, setThreadHasDraft, threadId]);
+  const {
+    beginAdmission: beginComposerDraftAdmission,
+    markOptimisticallyCleared: markComposerDraftOptimisticallyCleared,
+    removeImage: removeComposerDraftImage,
+  } = useDurableComposerDraft({
+    threadId,
+    input,
+    setInput,
+    images,
+    setImages,
+    contextAttachments,
+    setContextAttachments,
+    replyToMessage,
+    textareaRef,
+    setIsPreparingImages,
+  });
 
   const handleTranscript = useCallback((text: string) => {
     setInput((prev) => {
@@ -270,8 +262,14 @@ export function ChatInput({
       if (sendTemporarilyDisabled) return;
       if (whisperMode && whisperTargets.size === 0) return;
       const trimmed = input.trim();
-      if (trimmed && !disabled) {
-        addHistoryEntry(trimmed);
+      if ((trimmed || contextAttachments.length > 0) && !disabled) {
+        const draftSnapshot = {
+          text: input,
+          images: [...images],
+          contextAttachments: [...contextAttachments],
+          replyTo: replyToMessage,
+        };
+        if (trimmed) addHistoryEntry(trimmed);
         const whisper =
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
@@ -284,27 +282,51 @@ export function ChatInput({
               ? (messageDisposition.oneShot ?? undefined)
               : 'next_work'
             : undefined;
-        const admission = onSend(
-          trimmed,
-          images.length > 0 ? images : undefined,
-          whisper,
-          deliveryMode,
-          replyToMessage?.id,
-          declaredDisposition,
+        const settleAdmission = beginComposerDraftAdmission(draftSnapshot);
+        let admission: ReturnType<ChatInputProps['onSend']>;
+        try {
+          admission =
+            contextAttachments.length > 0
+              ? onSend(
+                  trimmed,
+                  images.length > 0 ? images : undefined,
+                  whisper,
+                  deliveryMode,
+                  replyToMessage?.id,
+                  declaredDisposition,
+                  contextAttachments,
+                )
+              : onSend(
+                  trimmed,
+                  images.length > 0 ? images : undefined,
+                  whisper,
+                  deliveryMode,
+                  replyToMessage?.id,
+                  declaredDisposition,
+                );
+        } catch {
+          settleAdmission(false);
+          return;
+        }
+        void Promise.resolve(admission).then(
+          (accepted) => settleAdmission(accepted === false ? false : undefined),
+          () => settleAdmission(false),
         );
         if (declaredDisposition && messageDisposition.oneShot !== null) {
           void Promise.resolve(admission).then((accepted) => {
             if (accepted !== false) messageDisposition.clearOneShot();
           });
         }
+        markComposerDraftOptimisticallyCleared();
         setInput('');
         ghostRef.current = null;
         setGhostSuggestion(null);
         setImages([]);
+        setContextAttachments([]);
         setShowMentions(false);
         setShowGameMenu(false);
-        // Only clear reply if it belongs to this thread (preserve other thread's reply in split-pane)
-        if (replyToMessage) clearReplyTo();
+        // Only clear the reply snapshot that was actually sent.
+        if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
       }
     },
     [
@@ -312,6 +334,7 @@ export function ChatInput({
       disabled,
       onSend,
       images,
+      contextAttachments,
       sendTemporarilyDisabled,
       whisperMode,
       whisperTargets,
@@ -321,6 +344,8 @@ export function ChatInput({
       dispositionIsMeaningful,
       messageDisposition,
       dispositionCarrierSupport,
+      beginComposerDraftAdmission,
+      markComposerDraftOptimisticallyCleared,
     ],
   );
 
@@ -333,12 +358,46 @@ export function ChatInput({
     setShowGameMenu(false);
   }, []);
 
+  const closeContextPicker = useCallback(() => {
+    setContextPickerMode(null);
+    setContextShortcutRange(null);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, []);
+
+  const openContextPicker = useCallback(
+    (mode: ContextPickerMode, shortcutRange: { start: number; end: number } | null = null) => {
+      closeMenus();
+      setAddMenuOpen(false);
+      setContextPickerMode(mode);
+      setContextShortcutRange(shortcutRange);
+    },
+    [closeMenus],
+  );
+
+  const addContextAttachment = useCallback(
+    (attachment: ContextAttachment) => {
+      const parsed = ContextAttachmentSchema.safeParse(attachment);
+      if (!parsed.success) return;
+      setContextAttachments((previous) =>
+        [...previous, parsed.data as ContextAttachment].slice(0, CONTEXT_ATTACHMENT_MAX_COUNT),
+      );
+      if (contextShortcutRange) {
+        setInput(
+          (previous) => `${previous.slice(0, contextShortcutRange.start)}${previous.slice(contextShortcutRange.end)}`,
+        );
+      }
+      closeContextPicker();
+    },
+    [closeContextPicker, contextShortcutRange],
+  );
+
   const [gameStarting, setGameStarting] = useState(false);
 
   const startGame = useCallback(
     async (payload: GameStartPayload) => {
       closeMenus();
       if (disabled || sendTemporarilyDisabled || gameStarting) return;
+      const targetThreadId = threadId ?? useChatStore.getState().currentThreadId;
       setGameStarting(true);
       try {
         const res = await apiFetch('/api/game/start', {
@@ -348,7 +407,7 @@ export function ChatInput({
         });
         const data = await res.json();
         if (!res.ok) {
-          useChatStore.getState().addMessage({
+          useChatStore.getState().addMessageToThread(targetThreadId, {
             id: `game-err-${Date.now()}`,
             type: 'system',
             variant: 'error',
@@ -365,7 +424,7 @@ export function ChatInput({
         // Hydrate game state immediately (socket reconnect won't fire for same connection)
         reconnectGame(data.gameThreadId).catch(() => {});
       } catch (err) {
-        useChatStore.getState().addMessage({
+        useChatStore.getState().addMessageToThread(targetThreadId, {
           id: `game-err-${Date.now()}`,
           type: 'system',
           variant: 'error',
@@ -378,7 +437,7 @@ export function ChatInput({
         setGameStarting(false);
       }
     },
-    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting],
+    [closeMenus, disabled, sendTemporarilyDisabled, gameStarting, threadId],
   );
 
   const insertMention = useCallback(
@@ -397,6 +456,16 @@ export function ChatInput({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
       setInput(val);
+      const contextShortcut = detectContextShortcut(val);
+      if (contextShortcut) {
+        openContextPicker(contextShortcut.mode, {
+          start: contextShortcut.start,
+          end: contextShortcut.end,
+        });
+        return;
+      }
+      setContextPickerMode(null);
+      setContextShortcutRange(null);
       const trigger = detectMenuTrigger(val, e.target.selectionStart);
       if (trigger?.type === 'game') {
         setShowGameMenu(true);
@@ -425,7 +494,7 @@ export function ChatInput({
         setMentionFilter('');
       }
     },
-    [closeMenus, catOptions],
+    [closeMenus, catOptions, openContextPicker],
   );
 
   const handleHistorySelect = useCallback(
@@ -443,6 +512,16 @@ export function ChatInput({
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (ime.isComposing()) return;
+
+    if (contextPickerMode) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeContextPicker();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+      }
+      return;
+    }
 
     // F080: Ctrl+R opens history search (clear any active menus first)
     if (e.ctrlKey && e.key === 'r') {
@@ -567,7 +646,12 @@ export function ChatInput({
       try {
         const toAdd: File[] = [];
         for (let i = 0; i < files.length && images.length + toAdd.length < 5; i++) {
-          toAdd.push(await compressImage(files[i]));
+          const f = files[i];
+          if (f.type.startsWith('image/')) {
+            toAdd.push(await compressImage(f));
+          } else {
+            toAdd.push(f);
+          }
         }
         setImages((prev) => [...prev, ...toAdd].slice(0, 5));
       } finally {
@@ -606,9 +690,7 @@ export function ChatInput({
     [images],
   );
 
-  const handleRemoveImage = useCallback((index: number) => {
-    setImages((prev) => prev.filter((_, i) => i !== index));
-  }, []);
+  const handleRemoveImage = removeComposerDraftImage;
 
   const toggleWhisperTarget = useCallback((catId: string) => {
     setWhisperTargets((prev) => {
@@ -638,12 +720,14 @@ export function ChatInput({
   }, [whisperCats, whisperMode, activeCatIds]);
 
   const handleGameClick = useCallback(() => {
+    setAddMenuOpen(false);
+    closeContextPicker();
     setShowMentions(false);
     setMentionStart(-1);
     setShowGameMenu((prev) => !prev);
     setGameStep('list');
     setSelectedIdx(0);
-  }, []);
+  }, [closeContextPicker]);
 
   const handleWhisperToggle = useCallback(() => {
     setWhisperMode((prev) => {
@@ -655,16 +739,17 @@ export function ChatInput({
     });
   }, []);
 
-  // Sync input text + images + reply context to module-level draft maps (covers all sources: typing, voice, mentions)
+  // Sync text, images, context attachments, and reply context to thread-scoped draft stores.
   // useLayoutEffect runs synchronously before browser paint and before unmount,
   // ensuring the draft is written to the Map before the component is destroyed
   // on thread switch (key={threadId}). useEffect would lose the final keystroke.
   useLayoutEffect(() => {
     if (!threadId) return;
-    const hasDraft = input.trim().length > 0 || images.length > 0;
+    const hasDraft = input.trim().length > 0 || images.length > 0 || contextAttachments.length > 0;
     const firstPersistenceForThread = replyPersistenceThreadRef.current !== threadId;
     const replyDraft = replyToMessage ?? (firstPersistenceForThread ? (threadReplyDrafts.get(threadId) ?? null) : null);
     syncDraftToStorage(threadId, input || undefined);
+    syncContextAttachmentDraftToStorage(threadId, contextAttachments);
     // #934: Persist reply context alongside text/image drafts
     syncReplyDraftToStorage(threadId, replyDraft);
     if (images.length > 0) {
@@ -683,7 +768,7 @@ export function ChatInput({
     }
     setThreadHasDraft(threadId, hasDraft || Boolean(replyDraft));
     replyPersistenceThreadRef.current = threadId;
-  }, [input, images, threadId, setThreadHasDraft, replyToMessage]);
+  }, [input, images, contextAttachments, threadId, setThreadHasDraft, replyToMessage]);
 
   // F080: recalculate ghost suggestion whenever input changes (covers all setInput paths)
   useEffect(() => {
@@ -710,7 +795,7 @@ export function ChatInput({
       // detaching the original target (e.g. layer 1 unmounts when drilling
       // into layer 2). A detached target is not a genuine outside click.
       if (!target.isConnected) return;
-      if (menuRef.current && !menuRef.current.contains(target) && !gameBtnRef.current?.contains(target)) {
+      if (menuRef.current && !menuRef.current.contains(target)) {
         closeMenus();
       }
     };
@@ -724,18 +809,28 @@ export function ChatInput({
       {hasActiveInvocation && (
         <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
-          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">猫猫正在回复中...</span>
+          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">
+            {canonicalExecutions.length > 0
+              ? canonicalProjectionStale
+                ? '猫猫正在回复中 · 状态暂不可核对'
+                : '猫猫正在回复中...'
+              : canonicalProjectionStale
+                ? '运行状态暂不可核对'
+                : '正在确认运行状态...'}
+          </span>
           <span className="text-xs text-cafe-muted flex-1">
             {displayedDisposition === 'continue_current' ? '当前轮可在安全断点读取' : '继续输入，消息会成为下一件工作'}
           </span>
-          {onStop && (
+          {stopState !== 'hidden' && (
             <button
               type="button"
               data-testid="banner-cancel-btn"
-              onClick={onStop}
-              className="text-xs text-cafe-muted hover:text-cafe-primary transition-colors px-2 py-0.5 rounded-md hover:bg-cafe-surface-elevated flex-shrink-0"
+              onClick={() => void handleProjectedStop()}
+              disabled={stopState !== 'available'}
+              className="text-xs text-cafe-muted hover:text-cafe-primary transition-colors px-2 py-0.5 rounded-md hover:bg-cafe-surface-elevated flex-shrink-0 disabled:cursor-wait disabled:opacity-50"
+              aria-label="Stop generation"
             >
-              停止
+              {stopState === 'pending' ? '正在停止' : stopState === 'available' ? '取消' : '暂不可取消'}
             </button>
           )}
         </div>
@@ -749,7 +844,19 @@ export function ChatInput({
         />
       )}
 
-      {pathCompletion.isOpen && !activeMenu && (
+      {contextPickerMode && (
+        <ChatContextPicker
+          mode={contextPickerMode}
+          threads={threads}
+          currentThreadId={threadId}
+          currentFilePath={workspaceOpenFilePath}
+          worktreeId={workspaceWorktreeId}
+          onChoose={addContextAttachment}
+          onClose={closeContextPicker}
+        />
+      )}
+
+      {pathCompletion.isOpen && !activeMenu && !contextPickerMode && (
         <PathCompletionMenu
           entries={pathCompletion.entries}
           selectedIdx={pathCompletion.selectedIdx}
@@ -795,17 +902,17 @@ export function ChatInput({
 
       {imageLifecycleStatus === 'preparing' && (
         <div className="px-4 pt-2 text-xs text-cafe-secondary" role="status">
-          图片处理中，完成后可发送
+          附件处理中，完成后可发送
         </div>
       )}
       {imageLifecycleStatus === 'uploading' && (
         <div className="px-4 pt-2 text-xs text-[var(--semantic-info)]" role="status">
-          图片上传中，请稍候...
+          附件上传中，请稍候...
         </div>
       )}
       {imageLifecycleStatus === 'failed' && uploadError && (
         <div className="px-4 pt-2 text-xs text-conn-red-text" role="alert">
-          图片发送失败：{uploadError}
+          附件发送失败：{uploadError}
         </div>
       )}
 
@@ -813,7 +920,13 @@ export function ChatInput({
         <WhisperTargetChips cats={whisperCats} selected={whisperTargets} onToggle={toggleWhisperTarget} />
       )}
 
-      <ImagePreview files={images} onRemove={handleRemoveImage} />
+      <AttachmentPreview files={images} onRemove={handleRemoveImage} />
+
+      <ContextAttachmentList
+        attachments={contextAttachments}
+        compact
+        onRemove={(id) => setContextAttachments((previous) => previous.filter((attachment) => attachment.id !== id))}
+      />
 
       {/* #699: Reply preview bar — matches ReplyPill styling with sender theme color */}
       {replyToMessage && <ReplyPreviewBar replyToMessage={replyToMessage} cats={cats} onClear={clearReplyTo} />}
@@ -827,13 +940,14 @@ export function ChatInput({
         onChange={handleFileSelect}
       />
 
-      {/* Mobile expanded toolbar (above input row) */}
-      {mobileToolbar && (
-        <MobileInputToolbar
+      {addMenuOpen && (
+        <ChatInputAddMenu
           onAttach={() => fileInputRef.current?.click()}
+          onAddContext={() => openContextPicker('all')}
           onWhisperToggle={handleWhisperToggle}
           onGameClick={handleGameClick}
-          onClose={() => setMobileToolbar(false)}
+          onClose={() => setAddMenuOpen(false)}
+          triggerRef={addButtonRef}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           maxImages={images.length >= 5}
@@ -842,65 +956,32 @@ export function ChatInput({
       )}
 
       <div className="flex gap-2 items-center p-4 pt-2" data-testid="chat-input-composer-row">
-        {/* Mobile: + toggle button */}
+        {/* F284: one stable add entry; context, upload and modes disclose on demand. */}
         <button
-          onClick={() => setMobileToolbar((v) => !v)}
-          className={`p-3 rounded-xl transition-all md:hidden ${
-            mobileToolbar
+          ref={addButtonRef}
+          type="button"
+          onClick={() => {
+            closeContextPicker();
+            closeMenus();
+            setAddMenuOpen((open) => !open);
+          }}
+          disabled={disabled || sendTemporarilyDisabled}
+          className={`p-3 rounded-xl transition-all disabled:cursor-not-allowed disabled:opacity-30 ${
+            addMenuOpen
               ? 'text-cafe-accent bg-cafe-surface-sunken rotate-45'
               : 'text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface'
           }`}
-          aria-label="展开工具栏"
+          aria-label="添加"
+          aria-expanded={addMenuOpen}
+          aria-controls="composer-add-menu"
+          title="添加上下文、上传或打开更多模式"
         >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
             <path
               fillRule="evenodd"
               d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
               clipRule="evenodd"
             />
-          </svg>
-        </button>
-
-        {/* Desktop: tool buttons always visible */}
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={disabled || sendTemporarilyDisabled || images.length >= 5}
-          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          aria-label="Attach images"
-        >
-          <AttachIcon className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={handleWhisperToggle}
-          disabled={disabled || sendTemporarilyDisabled}
-          className={`hidden md:block p-3 rounded-xl transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-            whisperMode
-              ? 'text-cafe-accent bg-accent-50'
-              : 'text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface'
-          }`}
-          aria-label="Whisper mode"
-          title="悄悄话模式"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </button>
-
-        <button
-          ref={gameBtnRef}
-          onClick={handleGameClick}
-          disabled={disabled || sendTemporarilyDisabled}
-          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          aria-label="Game mode"
-          title="游戏模式"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
           </svg>
         </button>
 
@@ -920,7 +1001,7 @@ export function ChatInput({
                   ? displayedDisposition === 'continue_current'
                     ? '接着当前工作补充...'
                     : '继续输入，成为下一件工作...'
-                  : '输入消息... (@ 召唤猫猫)'
+                  : '输入消息... (@ 召唤猫猫 · /thread 引用对话)'
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
               whisperMode
@@ -930,7 +1011,7 @@ export function ChatInput({
             rows={1}
             disabled={disabled}
           />
-          {ghostSuggestion && !pathCompletion.isOpen && (
+          {ghostSuggestion && !pathCompletion.isOpen && !contextPickerMode && (
             <div
               data-testid="ghost-suggestion"
               className="absolute inset-0 pointer-events-none p-3 text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl"
@@ -945,13 +1026,14 @@ export function ChatInput({
         <ChatInputActionButton
           onTranscript={handleTranscript}
           onSend={handleSend}
-          onStop={onStop}
+          onStop={() => void handleProjectedStop()}
+          stopState={stopState}
           onQueueSend={handleQueueSend}
           onForceSend={handleForceSend}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
-          hasText={!!input.trim()}
+          hasText={Boolean(input.trim() || contextAttachments.length > 0)}
         />
       </div>
 

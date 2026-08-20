@@ -9,7 +9,7 @@ import type {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 50;
 export const PAW_FEEL_OVERDUE_MS = 72 * 3_600_000;
-const TERMINAL_STATES = new Set<PawFeelDispositionState>(['routed', 'closed', 'duplicate', 'no_action', 'fix']);
+const TERMINAL_STATES = new Set<PawFeelDispositionState>(['closed', 'duplicate', 'no_action', 'fix']);
 
 interface SortKey {
   sort: PawFeelInboxSort;
@@ -40,8 +40,14 @@ export function countPawFeelProjections(
   for (const projection of projections) {
     counts.total += 1;
     if (projection.state === 'new') counts.unseen += 1;
-    else if (projection.state === 'seen') counts.inProgress += 1;
-    else if (projection.state === 'route_pending') counts.routePending += 1;
+    else if (
+      projection.state === 'seen' ||
+      projection.state === 'routed' ||
+      projection.state === 'signature_waiting' ||
+      projection.state === 'blocked'
+    ) {
+      counts.inProgress += 1;
+    } else if (projection.state === 'route_pending') counts.routePending += 1;
     else counts.disposed += 1;
     if (!isTerminalPawFeelState(projection.state) && pawFeelAge(projection, nowMs) >= PAW_FEEL_OVERDUE_MS) {
       counts.overdue += 1;

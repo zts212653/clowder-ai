@@ -39,7 +39,7 @@ export async function backfillBoundSessionHistory(
   }
 
   try {
-    const chain = await sessionChainStore.getChain(catId, threadId);
+    const chain = await sessionChainStore.getChain(catId, threadId, userId);
     const sealedSessions = chain.filter((session) => session.status === 'sealed');
     const countMessages = async (): Promise<number> => (await messageStore.getByThread(threadId, 10000)).length;
 

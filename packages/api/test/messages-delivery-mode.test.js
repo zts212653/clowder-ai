@@ -35,6 +35,12 @@ function buildDeps(overrides = {}) {
       append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
       getByThread: mock.fn(async () => []),
       getByThreadBefore: mock.fn(async () => []),
+      // Whole-message selection resolves the canonical bubble group, so the timeline this double
+      // exposes must contain whatever source record the individual test stubbed via getById.
+      getByThreadAfter: mock.fn(async function getByThreadAfter(threadId) {
+        const source = await this.getById?.('source-message-1');
+        return source && source.threadId === threadId ? [source] : [];
+      }),
     },
     socketManager: {
       broadcastAgentMessage: mock.fn(),
@@ -46,6 +52,7 @@ function buildDeps(overrides = {}) {
         targetCats: ['opus'],
         intent: { intent: 'execute' },
       })),
+      resolveExplicitTargets: mock.fn(async (targetCats) => targetCats),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),
@@ -216,6 +223,418 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1, 'replay should not add a new queue row');
     assert.equal(replayBody.entryId, firstBody.entryId, 'replay should point to existing queue entry');
     assert.equal(replayBody.userMessageId, firstBody.userMessageId, 'replay should reuse original user message');
+  });
+
+  it('F294 admits one refs-only Bundle message and routes only the explicit cats', async () => {
+    const sourceBody = 'private source body must never enter the durable target summary';
+    deps.messageStore.getById = mock.fn(async (messageId) =>
+      messageId === 'source-message-1'
+        ? {
+            id: messageId,
+            threadId: 'source-thread',
+            userId: 'user-1',
+            catId: 'opus',
+            content: sourceBody,
+            mentions: [],
+            timestamp: 1000,
+          }
+        : null,
+    );
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: threadId === 'source-thread' ? 'Source Thread' : 'Target Thread',
+      createdBy: 'user-1',
+      participants: [],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '',
+        threadId: 'thread-1',
+        deliveryMode: 'immediate',
+        idempotencyKey: '22222222-2222-4222-8222-222222222222',
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          note: 'please focus on the source decision',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: ['opus'],
+        },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(deps.router.resolveTargetsAndIntent.mock.calls.length, 0, 'Bundle prose must not drive routing');
+    assert.deepEqual(deps.router.resolveExplicitTargets.mock.calls[0].arguments[0], ['opus']);
+    const initialAppend = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.deepEqual(initialAppend.mentions, ['opus']);
+    assert.deepEqual(initialAppend.extra.messageBundle, {
+      v: 1,
+      sourceThreadId: 'source-thread',
+      note: 'please focus on the source decision',
+      items: [{ kind: 'message', messageId: 'source-message-1' }],
+    });
+    assert.equal(initialAppend.content.includes(sourceBody), false, 'durable summary must not copy source bodies');
+    assert.match(initialAppend.content, /Source Thread/);
+    const prompt = deps.router.routeExecution.mock.calls[0].arguments[1];
+    assert.notEqual(prompt, initialAppend.content);
+    assert.match(prompt, /\[Message Bundle\]/);
+    assert.match(prompt, /Bundle ID: /);
+    assert.match(prompt, /Source thread: "Source Thread" \(source-thread\)/);
+    assert.match(prompt, /Source author: cat:@opus/);
+    assert.match(prompt, /Source message ref: source-message-1/);
+    assert.match(prompt, /Bundle note by user:user-1:\nplease focus on the source decision/);
+    assert.match(prompt, /private source body must never enter the durable target summary/);
+    const routeOptions = deps.router.routeExecution.mock.calls[0].arguments[6];
+    assert.deepEqual(routeOptions.persistedPromptMessageIds, [initialAppend.id ?? JSON.parse(res.body).userMessageId]);
+    assert.equal(routeOptions.persistedPromptMessages[0].messageId, JSON.parse(res.body).userMessageId);
+    assert.equal(routeOptions.persistedPromptMessages[0].forceExplicitProjection, true);
+    assert.deepEqual(deps.router.routeExecution.mock.calls[0].arguments[4], ['opus']);
+  });
+
+  it('F294 immediate replay reuses one Bundle identity without a second append or wake', async () => {
+    deps.messageStore.getById = mock.fn(async () => ({
+      id: 'source-message-1',
+      threadId: 'source-thread',
+      userId: 'user-1',
+      catId: null,
+      content: 'source body',
+      mentions: [],
+      timestamp: 1000,
+    }));
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: threadId === 'source-thread' ? 'Source Thread' : 'Target Thread',
+      createdBy: 'user-1',
+      participants: [],
+    }));
+
+    let createCount = 0;
+    let storedUserMessageId;
+    deps.invocationRecordStore.create = mock.fn(async () => ({
+      outcome: createCount++ === 0 ? 'created' : 'duplicate',
+      invocationId: 'inv-f294-replay',
+    }));
+    deps.invocationRecordStore.update = mock.fn(async (_invocationId, patch) => {
+      if (patch.userMessageId) storedUserMessageId = patch.userMessageId;
+    });
+    deps.invocationRecordStore.get = mock.fn(async () => ({
+      invocationId: 'inv-f294-replay',
+      userMessageId: storedUserMessageId,
+    }));
+
+    const payload = {
+      content: '',
+      threadId: 'thread-1',
+      deliveryMode: 'immediate',
+      idempotencyKey: '44444444-4444-4444-8444-444444444444',
+      messageBundle: {
+        sourceThreadId: 'source-thread',
+        items: [{ kind: 'message', messageId: 'source-message-1' }],
+        targetCats: ['opus'],
+      },
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(replay.statusCode, 200, replay.body);
+    assert.equal(JSON.parse(replay.body).status, 'duplicate');
+    assert.equal(JSON.parse(replay.body).messageBundleId, JSON.parse(first.body).messageBundleId);
+    assert.equal(deps.messageStore.append.mock.calls.length, 1, 'replay must not append a second Bundle card');
+    assert.equal(deps.router.routeExecution.mock.calls.length, 1, 'replay must not wake the target cat twice');
+    assert.equal(
+      deps.socketManager.emitToUser.mock.calls.filter((call) => call.arguments[1] === 'thread_updated').length,
+      1,
+      'replay must not republish participant mutation',
+    );
+  });
+
+  it('F294 queue replay keeps one Bundle identity and persists the carrier in the initial append', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+    deps.messageStore.getById = mock.fn(async () => ({
+      id: 'source-message-1',
+      threadId: 'source-thread',
+      userId: 'user-1',
+      catId: null,
+      content: 'source body',
+      mentions: [],
+      timestamp: 1000,
+    }));
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: threadId === 'source-thread' ? 'Source Thread' : 'Target Thread',
+      createdBy: 'user-1',
+      participants: [],
+    }));
+    const payload = {
+      content: '',
+      threadId: 'thread-1',
+      deliveryMode: 'queue',
+      idempotencyKey: '33333333-3333-4333-8333-333333333333',
+      messageBundle: {
+        sourceThreadId: 'source-thread',
+        items: [{ kind: 'message', messageId: 'source-message-1' }],
+        targetCats: ['opus'],
+      },
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload,
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    assert.equal(replay.statusCode, 202, replay.body);
+    assert.equal(deps.messageStore.append.mock.calls.length, 1);
+    const initialAppend = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.equal(initialAppend.deliveryStatus, 'queued');
+    assert.deepEqual(initialAppend.extra.messageBundle.items, [{ kind: 'message', messageId: 'source-message-1' }]);
+    assert.equal(initialAppend.content.includes('source body'), false);
+    assert.equal(JSON.parse(replay.body).userMessageId, JSON.parse(first.body).userMessageId);
+  });
+
+  it('F294 rejects mixed carriers and unauthorized targets before any append, queue, or invocation', async () => {
+    deps.messageStore.getById = mock.fn(async () => ({
+      id: 'source-message-1',
+      threadId: 'source-thread',
+      userId: 'user-1',
+      catId: null,
+      content: 'source body',
+      mentions: [],
+      timestamp: 1000,
+    }));
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: 'Foreign Target',
+      createdBy: threadId === 'thread-1' ? 'another-user' : 'user-1',
+      participants: [],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: 'client-authored body is forbidden for a Bundle target message',
+        threadId: 'thread-1',
+        replyTo: 'reply-parent',
+        visibility: 'whisper',
+        whisperTo: ['opus'],
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: ['opus'],
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 400, res.body);
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
+    assert.equal(deps.router.resolveTargetsAndIntent.mock.calls.length, 0);
+  });
+
+  it('F294 rejects an over-limit explicit target set before routing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '',
+        threadId: 'thread-1',
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: Array.from({ length: 11 }, (_, index) => `cat-${index}`),
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 400, res.body);
+    assert.equal(deps.router.resolveExplicitTargets.mock.calls.length, 0);
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+  });
+
+  it('F294 rejects an unauthorized target before reading sources or creating side effects', async () => {
+    deps.messageStore.getById = mock.fn(async () => {
+      throw new Error('source resolution must not run before target authorization');
+    });
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: 'Foreign Target',
+      createdBy: threadId === 'thread-1' ? 'another-user' : 'user-1',
+      participants: [],
+    }));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '',
+        threadId: 'thread-1',
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: ['opus'],
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 403, res.body);
+    assert.equal(deps.messageStore.getById.mock.calls.length, 0);
+    assert.equal(deps.router.resolveExplicitTargets.mock.calls.length, 0);
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+  });
+
+  it('F294 rejects an unavailable explicit cat set without fallback or side effects', async () => {
+    deps.messageStore.getById = mock.fn(async () => ({
+      id: 'source-message-1',
+      threadId: 'source-thread',
+      userId: 'user-1',
+      catId: null,
+      content: 'source body',
+      mentions: [],
+      timestamp: 1000,
+    }));
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: threadId === 'source-thread' ? 'Source Thread' : 'Target Thread',
+      createdBy: 'user-1',
+      participants: [],
+    }));
+    deps.router.resolveExplicitTargets.mock.mockImplementation(async () => []);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '',
+        threadId: 'thread-1',
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: ['missing-cat'],
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 400, res.body);
+    assert.equal(deps.router.resolveTargetsAndIntent.mock.calls.length, 0);
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+  });
+
+  it('F294 rejects a Bundle when the queue is full without creating a ghost card or invocation', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+    deps.threadStore.addParticipants = mock.fn(async () => {});
+    deps.messageStore.getById = mock.fn(async () => ({
+      id: 'source-message-1',
+      threadId: 'source-thread',
+      userId: 'user-1',
+      catId: null,
+      content: 'source body',
+      mentions: [],
+      timestamp: 1000,
+    }));
+    deps.threadStore.get = mock.fn(async (threadId) => ({
+      id: threadId,
+      title: threadId === 'source-thread' ? 'Source Thread' : 'Target Thread',
+      createdBy: 'user-1',
+      participants: [],
+    }));
+    for (let i = 0; i < 5; i++) {
+      deps.invocationQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        content: `existing ${i}`,
+        source: 'user',
+        targetCats: [`cat${i}`],
+        intent: 'execute',
+      });
+    }
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: {
+        content: '',
+        threadId: 'thread-1',
+        deliveryMode: 'queue',
+        messageBundle: {
+          sourceThreadId: 'source-thread',
+          items: [{ kind: 'message', messageId: 'source-message-1' }],
+          targetCats: ['opus'],
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 429, res.body);
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 5);
+    assert.equal(deps.threadStore.addParticipants.mock.calls.length, 0);
+    assert.equal(
+      deps.socketManager.emitToUser.mock.calls.some((call) => call.arguments[1] === 'thread_updated'),
+      false,
+    );
+  });
+
+  it('F294 forbids Message Bundle submission through multipart instead of silently sending ordinary content', async () => {
+    const boundary = '----cat-cafe-f294-boundary';
+    const payload = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\nshould not send\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="threadId"\r\n\r\nthread-1\r\n`),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="messageBundle"\r\n\r\n${JSON.stringify({ sourceThreadId: 'source-thread', items: [{ kind: 'message', messageId: 'source-message-1' }], targetCats: ['opus'] })}\r\n`,
+      ),
+      Buffer.from(`--${boundary}--\r\n`),
+    ]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: {
+        'x-cat-cafe-user': 'user-1',
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+      },
+      payload,
+    });
+
+    assert.equal(res.statusCode, 400, res.body);
+    assert.deepEqual(JSON.parse(res.body), { error: 'Message Bundle does not support multipart uploads' });
+    assert.equal(deps.messageStore.append.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
   });
 
   it('queue mode → same-user consecutive messages are independent entries (F175: no merge)', async () => {
@@ -635,6 +1054,70 @@ describe('POST /api/messages deliveryMode', () => {
       (c) => c.arguments[0] === 'thread-1' && c.arguments[1] === 'opus' && c.arguments[2] === 'failed',
     );
     assert.ok(completion, 'watchdog should notify queue processor so queued work is not stuck');
+  });
+
+  it('queue completion watchdog fires when terminal bookkeeping never settles', async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    await app.close();
+    const stuckCommit = deferred();
+    deps = buildDeps({
+      queueCompletionWatchdogMs: 50,
+      sessionContinuationCoordinator: {
+        prepareInvocationContext: mock.fn(async ({ content }) => ({ content, sessionPolicy: 'resume' })),
+        commitInvocationOutcome: mock.fn(() => stuckCommit.promise),
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    for (
+      let i = 0;
+      i < 10 && deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length === 0;
+      i++
+    ) {
+      await Promise.resolve();
+    }
+    assert.equal(
+      deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length,
+      1,
+      'test must reach the real post-completeAll bookkeeping window',
+    );
+    assert.equal(deps.queueProcessor.onInvocationComplete.mock.calls.length, 0);
+
+    t.mock.timers.tick(51);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(
+      deps.queueProcessor.onInvocationComplete.mock.calls.length,
+      1,
+      'a stuck terminal write/continuation commit must not permanently suppress queue drain notification',
+    );
+    assert.deepEqual(deps.queueProcessor.onInvocationComplete.mock.calls[0].arguments.slice(0, 4), [
+      'thread-1',
+      'opus',
+      'succeeded',
+      'inv-stub',
+    ]);
+
+    stuckCommit.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(
+      deps.queueProcessor.onInvocationComplete.mock.calls.length,
+      1,
+      'normal finally must replay the same completion idempotently after the watchdog wins',
+    );
   });
 
   it('default broadcast with queued leftovers but no active invocation → executes immediately', async () => {

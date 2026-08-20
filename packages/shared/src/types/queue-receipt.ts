@@ -8,7 +8,7 @@ export type QueueReceiptTargetState =
   | 'withdrawn'
   | 'handled';
 
-export type QueueHandledDisposition = 'responded' | 'completed_with_turn';
+export type QueueHandledDisposition = 'responded' | 'completed_with_turn' | 'managed_hold_disposition';
 
 export type MessageWorkDisposition = 'continue_current' | 'next_work';
 
@@ -79,9 +79,30 @@ export interface QueueSourceResponseConsumptionWitness {
   outputMessageIds: string[];
 }
 
+/** Existing structured tools consumed one managed wake by establishing its successor condition. */
+export interface QueueManagedHoldContinuationWitness {
+  kind: 'managed_hold_continued';
+  sourceMessageId: string;
+  taskId: string;
+  transition: 'reheld' | 'event_wait' | 'transferred';
+}
+
+/**
+ * Durable proof that an exact A2A carrier was terminally handled while the
+ * provider ended before independently grounded owner work could continue.
+ */
+export interface QueueDispatchHandledContinuationWitness {
+  kind: 'dispatch_handled_continuation';
+  sourceMessageId: string;
+  dispositionEventId: string;
+  dispositionAt: number;
+}
+
 export type QueueTerminalConsumptionWitness =
   | QueueTerminalSilentConsumptionWitness
-  | QueueSourceResponseConsumptionWitness;
+  | QueueSourceResponseConsumptionWitness
+  | QueueManagedHoldContinuationWitness
+  | QueueDispatchHandledContinuationWitness;
 
 export interface QueueTargetOutcome {
   invocationId: string;
@@ -106,6 +127,27 @@ export interface QueueReminderAttempt {
   missedReason?: QueueReminderMissedReason;
 }
 
+/**
+ * One immutable delivery attempt for one target of an authored Queue message.
+ * A retry always appends a new attempt; it never rewrites the failed one or
+ * creates a second user message.
+ */
+export type QueueTargetAttemptState = 'queued' | 'starting' | 'appended' | 'failed' | 'cancelled' | 'handled';
+export type QueueTargetAttemptTerminalReason = 'invocation_failed' | 'invocation_cancelled' | 'source_withdrawn';
+
+export interface QueueTargetAttempt {
+  id: string;
+  targetCatId: string;
+  sequence: number;
+  state: QueueTargetAttemptState;
+  createdAt: number;
+  updatedAt: number;
+  invocationId?: string;
+  /** Exact prompt-body exposure time when this attempt reached a reply. */
+  seenAt?: number;
+  terminalReason?: QueueTargetAttemptTerminalReason;
+}
+
 export interface QueueReceiptTarget {
   catId: string;
   state: QueueReceiptTargetState;
@@ -118,6 +160,10 @@ export interface QueueReceiptTarget {
   /** Exact time the author removed this target from actionable Queue custody. */
   withdrawnAt?: number;
   outcome?: QueueTargetOutcome;
+  /** Append-only target-local delivery history. Missing only on legacy receipts. */
+  attempts?: QueueTargetAttempt[];
+  /** False when cross-thread dispatch never created a durable carrier to retry. */
+  retryable?: boolean;
 }
 
 export interface QueueMessageReceipt {
@@ -127,4 +173,10 @@ export interface QueueMessageReceipt {
   scope?: 'primary_trigger' | 'cross_thread_delivery';
   targets: QueueReceiptTarget[];
   reminderAttempts: QueueReminderAttempt[];
+}
+
+/** Message-bound receipt delta for live Queue publication after its actionable row disappears. */
+export interface QueueMessageReceiptProjection {
+  messageId: string;
+  queueReceipt: QueueMessageReceipt;
 }

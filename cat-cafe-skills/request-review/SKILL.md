@@ -30,6 +30,17 @@ triggers:
 
 **选择边界**：只有新增了需要第二只猫判断的实质内容，或风险面明确要求独立验证时才进入本 skill；“有 diff”“SHA 变了”“开了 PR”都不是独立触发器。机械登记、已审内容转录、低风险 direct-main docs 与可证明 continuity 可以 `skip/reuse`。一旦选择 review，同一个体不能 review 自己，证据须覆盖最终实质内容（exact SHA 或 continuityProof）。
 
+### 稀缺判断席位（dossier-driven）
+
+当队友 dossier / L0 把 reviewer 标为周额度稀缺的高杠杆判断猫（当前为 Fable）时，不能沿用普通迭代 reviewer 的默认回路。请求必须写明
+`engagementMode=one_shot_calibration|final_seal`、本轮唯一判断问题、停止条件和修后去向：
+
+- `one_shot_calibration`：用于重要 plan、架构/failure-mode 校准。reviewer 一次性交付判断和 findings 后退出；作者负责修复与测试，仍需独立验证时转日常 reviewer。
+- `final_seal`：用于其他猫已经完成多轮审查、分歧和证据已整理后的最终封版讨论。只有 scope 已稳定、预期不再进入实现陪练时才选。
+- **普通修复不复入原稀缺 reviewer**。P1/P2 的严重度不自动等于需要同一只高杠杆猫再次判断；只有修复引入新的架构/决策问题、原 finding 无法机械验收，或 operator 明确要求时才可复入。
+
+稀缺指的是可用判断席位，不是单 token 价格。省下来的额度应留给“判断错的代价高、验证器弱”的节点；routine fix、exact-HEAD 续签、礼貌确认都不占这个席位。
+
 ## 发请求前
 
 | 证据 | 何时必需 | 缺失动作 |
@@ -61,12 +72,13 @@ Review target: <branch@HEAD>
 Scope: <changed files / one-line intent>
 Risk: <最高风险面，或 none + 理由>
 Evidence: <真实命令 / preview 结果>
+Engagement: <iterative|one_shot_calibration|final_seal> + <stop condition / repair return>
 Ask: checked=<请 reviewer 指认最高风险面> verdict=approve|block
 ```
 
 ### 完整 packet
 
-跨组件、状态对象、架构或高风险 change 使用 [`refs/review-request-template.md`](../refs/review-request-template.md)。只有需要跨 session 持久交接时才存 `review-notes/YYYY-MM-DD-{topic}-review-request.md`；PR/thread 已足够追溯时不另造归档。
+跨组件、状态对象、架构或高风险 change 使用 [`../.cat-cafe-shared-refs/review-request-template.md`](../.cat-cafe-shared-refs/review-request-template.md)。只有需要跨 session 持久交接时才存 `review-notes/YYYY-MM-DD-{topic}-review-request.md`；PR/thread 已足够追溯时不另造归档。
 
 完整 packet 额外包含：
 
@@ -116,7 +128,7 @@ instructions 中的 no-comment 禁令必须在新 HEAD 复审前清除。
 正式结论前按 **author/custody/handoff source** 分类，repo 名和 GitHub login 不参与分类：
 
 - 外部作者或 external PR / Issue custody：verdict 必须写回同一 GitHub subject，并绑定精确 PR HEAD / Issue body digest；没有 review/comment URL 就还没完成。
-- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回原 route。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
+- 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。结构化 action 失败后的普通消息降级必须留在该 carrier，并显式带 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`；不得裸继承旧链。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
 
 两条完成证据不能互相代偿。本地 review 只有在 **merge-gate、repository rule 或 operator** 明确要求时才额外写 GitHub；额外 artifact 不取代回作者猫的 custody。
 
@@ -135,7 +147,8 @@ terminal verdict 是这条 direct review coordination 的最后一次必达投�
 
 ## Feedback 循环
 
-- P1/P2 修复后，只让**提出该 finding 的活跃 review source**覆盖新 HEAD。
+- 普通 `iterative` review 的 P1/P2 修复后，只让**提出该 finding 的活跃 review source**覆盖新 HEAD。
+- 稀缺席位的 `one_shot_calibration` / `final_seal` findings 交回 author；普通修复不复入原稀缺 reviewer，仍需独立确认时选日常 reviewer 覆盖真实 delta 或 final HEAD。
 - cloud finding 修复回 cloud；local finding 修复回 local。不要把二者叠成常驻双门。
 - R2+ 同型 finding 再出现时，author 给出 Failure-Mode Sweep（pattern / scanned / fixed / N/A），避免 reviewer 逐点补锅。
 

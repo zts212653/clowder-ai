@@ -646,6 +646,57 @@ describe('consumeBackgroundSystemInfo rich_block placeholder', () => {
     expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'target-msg', block);
   });
 
+  it('keeps an identity-bound rich block on the current background stream after an independent callback', () => {
+    const parentInvocationId = 'parent-independent';
+    const turnInvocationId = 'turn-independent';
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [
+          {
+            id: 'stream-independent',
+            type: 'assistant',
+            catId: 'opus',
+            origin: 'stream',
+            isStreaming: true,
+            content: 'current provider response',
+            extra: { stream: { invocationId: parentInvocationId, turnInvocationId } },
+          },
+          {
+            id: 'callback-independent',
+            type: 'assistant',
+            catId: 'opus',
+            origin: 'callback',
+            content: 'independent proactive update',
+            extra: {
+              isExplicitPost: true,
+              stream: { invocationId: parentInvocationId, turnInvocationId },
+            },
+          },
+        ],
+        catStatuses: {},
+        catInvocations: {
+          opus: { invocationId: parentInvocationId, turnInvocationId },
+        },
+      })),
+    });
+    const block = { id: 'rb-independent', kind: 'card', v: 1, title: 'current final' };
+    const msg = {
+      type: 'system_info',
+      catId: 'opus',
+      threadId: 'thread-1',
+      content: JSON.stringify({ type: 'rich_block', block }),
+      invocationId: parentInvocationId,
+      turnInvocationId,
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'stream-independent', block);
+    expect(options.store.appendRichBlockToThread).not.toHaveBeenCalledWith('thread-1', 'callback-independent', block);
+  });
+
   it('AC-Z17: reuses finalized background stream bubble for late rich_block instead of creating bg-rich placeholder', () => {
     const options = createMockOptions({
       getThreadState: vi.fn(() => ({
@@ -954,6 +1005,58 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
 });
 
 describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
+  it('patches a background reconnect notice to recovered with the same identity', () => {
+    const initial = {
+      id: 'provider-recovery:codex-sol:turn-bg',
+      type: 'system',
+      variant: 'info',
+      catId: 'codex-sol',
+      content: 'Reconnecting to codex (attempt 1)…',
+      timestamp: 100,
+    };
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({ messages: [initial], catStatuses: {}, catInvocations: {} })),
+    });
+
+    const result = consumeBackgroundSystemInfo(
+      {
+        type: 'system_info',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'parent-bg',
+        turnInvocationId: 'turn-bg',
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'recovered',
+          invocationId: 'turn-bg',
+          attempts: ['Reconnecting... 1/5'],
+          evidence: 'turn.completed',
+        }),
+        timestamp: 200,
+      },
+      undefined,
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+    expect(options.store.patchThreadMessage).toHaveBeenCalledWith(
+      'thread-bg',
+      'provider-recovery:codex-sol:turn-bg',
+      expect.objectContaining({
+        content: 'Connection recovered.',
+        extra: expect.objectContaining({
+          providerRecovery: expect.objectContaining({
+            phase: 'recovered',
+            invocationId: 'turn-bg',
+            parentInvocationId: 'parent-bg',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('converts warning JSON to readable text (not raw JSON bubble)', () => {
     const options = createMockOptions();
 

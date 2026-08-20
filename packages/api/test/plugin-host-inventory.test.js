@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import {
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
+  PLUGIN_CONTRACT_PACKAGE_VERSION,
   PLUGIN_CONTRACT_VERSION,
 } from '../dist/domains/plugin/host-inventory/index.js';
 
@@ -58,9 +59,10 @@ function harness() {
 }
 
 describe('K-2A contract-native inventory', () => {
-  it('pins the API and runtime boundary to plugin-contract beta.7', () => {
-    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.7');
-    assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0-beta.7');
+  it('pins the API and runtime boundary to plugin-contract beta.9', () => {
+    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.9');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.9');
+    assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
   });
 
   it('installs package, instance, and grants atomically with orthogonal initial state', async () => {
@@ -80,6 +82,7 @@ describe('K-2A contract-native inventory', () => {
       configReadiness: 'incomplete',
       activationState: 'disabled',
       runtimeState: 'stopped',
+      lifecycleRevision: 1,
       installedAt: 1_000,
       updatedAt: 1_000,
     });
@@ -107,6 +110,7 @@ describe('K-2A contract-native inventory', () => {
     });
     const upgraded = await controlPlane.upgradePackage({
       pluginInstanceId: installed.pluginInstanceId,
+      expectedLifecycleRevision: 1,
       expectedGrantRevision: 1,
       ...candidate({
         archive: 'echo-v2',

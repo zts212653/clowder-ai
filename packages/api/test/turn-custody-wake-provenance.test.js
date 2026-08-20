@@ -33,14 +33,87 @@ describe('F167 Phase T queue wake provenance', () => {
 
     assert.deepEqual(
       await resolveQueueTurnCustodyWake(entry({ sourceCategory: 'scheduled' }), {
-        getById: async () => ({ source: { connector: 'hold-ball' } }),
+        getById: async () => ({
+          id: 'message-1',
+          source: {
+            connector: 'hold-ball',
+            meta: { taskId: 'task-hold-1', threadId: 'thread-1', catId: 'codex-sol', wakeWhen: true },
+          },
+        }),
       }),
       {
         kind: 'structured',
         protocol: 'hold',
         subjectKey: 'ball:thread:thread-1',
         holderCatId: 'codex-sol',
+        sourceMessageId: 'message-1',
+        taskId: 'task-hold-1',
       },
+    );
+  });
+
+  it('binds Queue wake-up to the exact stored event-wait carrier', async () => {
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const messageStore = {
+      getById: async () => ({
+        id: 'message-1',
+        source: {
+          connector: 'github-wait',
+          meta: { waitContinuationCarrier },
+        },
+      }),
+    };
+
+    assert.deepEqual(await resolveQueueTurnCustodyWake(entry({ waitContinuationCarrier }), messageStore), {
+      kind: 'structured',
+      protocol: 'event_wait',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      waitContinuationCarrier,
+    });
+  });
+
+  it('fails closed when Queue and stored event-wait carriers diverge or overlap an action carrier', async () => {
+    const storedCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'containing_task', generation: 4 },
+    };
+    const messageStore = {
+      getById: async () => ({
+        id: 'message-1',
+        source: { connector: 'github-wait', meta: { waitContinuationCarrier: storedCarrier } },
+      }),
+    };
+    const failClosed = { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'review' };
+
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          waitContinuationCarrier: {
+            ...storedCarrier,
+            outcomeId: 'wait:pr:owner/repo#7:g5:matched',
+          },
+        }),
+        messageStore,
+      ),
+      failClosed,
+    );
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          waitContinuationCarrier: storedCarrier,
+          actionSuccessorFence: { leaseId: 'lease-unrelated', generation: 4 },
+        }),
+        messageStore,
+      ),
+      failClosed,
     );
   });
 

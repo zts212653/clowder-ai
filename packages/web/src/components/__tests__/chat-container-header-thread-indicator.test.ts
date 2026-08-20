@@ -15,12 +15,6 @@ vi.mock('next/link', () => ({
 vi.mock('@/components/ThreadCatPill', () => ({
   ThreadCatPill: () => null,
 }));
-vi.mock('@/components/ExportButton', () => ({
-  ExportButton: () => null,
-}));
-vi.mock('@/components/ChatVoiceFeatureControls', () => ({
-  ChatVoiceFeatureControls: () => null,
-}));
 vi.mock('@/components/VoiceCompanionButton', () => ({
   VoiceCompanionButton: () => null,
 }));
@@ -62,10 +56,8 @@ const defaultProps = {
   authPendingCount: 0,
   viewMode: 'single' as const,
   onToggleViewMode: vi.fn(),
-  onOpenMobileStatus: vi.fn(),
   statusPanelOpen: false,
   onToggleStatusPanel: vi.fn(),
-  defaultCatId: 'opus',
 };
 
 describe('ChatContainerHeader thread indicator', () => {

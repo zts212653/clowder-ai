@@ -65,6 +65,37 @@ printf 'ok'
   }
 });
 
+test('node runtime guard reads a bare major when FORCE_COLOR is set', () => {
+  const result = runBash(
+    `
+set -e
+source scripts/lib/node-runtime-guard.sh
+node_runtime_major "${process.execPath}"
+`,
+    { FORCE_COLOR: '3' },
+  );
+
+  assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  assert.match(result.stdout.trim(), /^\d+$/, `expected a bare major, got ${JSON.stringify(result.stdout)}`);
+});
+
+test('node runtime guard verdict is unchanged by FORCE_COLOR', () => {
+  const snippet = `
+source scripts/lib/node-runtime-guard.sh
+if node_runtime_supported "${process.execPath}"; then printf 'supported'; else printf 'unsupported'; fi
+`;
+
+  const plain = runBash(snippet);
+  const colored = runBash(snippet, { FORCE_COLOR: '3' });
+
+  assert.doesNotMatch(colored.stderr, /integer expression expected/);
+  assert.equal(
+    colored.stdout,
+    plain.stdout,
+    `FORCE_COLOR flipped the verdict: plain=${plain.stdout} colored=${colored.stdout}\nstderr:\n${colored.stderr}`,
+  );
+});
+
 test('node runtime guard finds Homebrew node@24 before unsupported current node', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'cat-cafe-node-guard-brew-'));
   try {

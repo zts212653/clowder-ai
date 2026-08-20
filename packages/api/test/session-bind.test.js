@@ -235,6 +235,63 @@ describe('Session bind API route', () => {
     }
   });
 
+  test('#1329 rejects a late bind when another logical node already owns the runtime ID', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const thread = await threadStore.create('user-1', 'Test');
+      sessionChainStore.create({
+        threadId: thread.id,
+        catId: 'opus',
+        userId: 'user-1',
+      });
+      const owner = sessionChainStore.create({
+        cliSessionId: 'cli-already-owned',
+        threadId: thread.id,
+        catId: 'codex',
+        userId: 'user-1',
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/sessions/opus/bind`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+        payload: { cliSessionId: 'cli-already-owned' },
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.equal(sessionChainStore.getByCliSessionId('cli-already-owned')?.id, owner.id);
+      assert.equal(sessionChainStore.getActive('opus', thread.id)?.cliSessionId, undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('#1329 does not steal a runtime ID when the requested owner has no active node yet', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const thread = await threadStore.create('user-1', 'Test');
+      const owner = sessionChainStore.create({
+        cliSessionId: 'cli-already-owned-without-target',
+        threadId: thread.id,
+        catId: 'codex',
+        userId: 'user-1',
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/sessions/opus/bind`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+        payload: { cliSessionId: 'cli-already-owned-without-target' },
+      });
+
+      assert.equal(res.statusCode, 409);
+      assert.equal(sessionChainStore.getByCliSessionId('cli-already-owned-without-target')?.id, owner.id);
+      assert.equal(sessionChainStore.getActive('opus', thread.id, 'user-1')?.cliSessionId, undefined);
+    } finally {
+      await app.close();
+    }
+  });
+
   test('creates new session when no active exists', async () => {
     const { app, threadStore } = await buildApp();
     try {
@@ -294,7 +351,7 @@ describe('Session bind API route', () => {
     }
   });
 
-  test('returns 403 when default-thread active session belongs to another user', async () => {
+  test('#1329 creates an owner-scoped binding without touching another default-thread user', async () => {
     const { app, threadStore, sessionChainStore } = await buildApp();
     try {
       const thread = await threadStore.get('default');
@@ -309,11 +366,15 @@ describe('Session bind API route', () => {
       const res = await app.inject({
         method: 'PATCH',
         url: `/api/threads/${thread.id}/sessions/opus/bind`,
-        headers: { 'x-cat-cafe-user': 'attacker-user' },
-        payload: { cliSessionId: 'cli-evil' },
+        headers: { 'x-cat-cafe-user': 'caller-user' },
+        payload: { cliSessionId: 'cli-caller' },
       });
 
-      assert.equal(res.statusCode, 403);
+      assert.equal(res.statusCode, 200);
+      assert.equal(sessionChainStore.getActive('opus', 'default', 'owner-user')?.cliSessionId, 'cli-owner');
+      assert.equal(sessionChainStore.getActive('opus', 'default', 'caller-user')?.cliSessionId, 'cli-caller');
+      assert.equal(sessionChainStore.getChain('opus', 'default', 'owner-user').length, 1);
+      assert.equal(sessionChainStore.getChain('opus', 'default', 'caller-user').length, 1);
     } finally {
       await app.close();
     }

@@ -47,6 +47,7 @@ subjectRef + actionFamily + successorSlot
 - failure domain 只用于选择顺序：默认选一个与前手独立的 provider/quota domain；它不是 identity，也不是强制拒绝条件。
 - 外部 subject 已 merged/closed 等终态：停止交接；晚到响应由 generation/terminal fence 抑制。
 - 已完成的 `review/reviewer` lease 不能仅因出现新 HEAD 自动复活。确有复审时附 `reviewReentry`：`behavioral_delta`、`stale_or_blocking` 或 `explicit_matrix_route` + durable evidenceRef；纯 ACK、状态复述或 cloud finding 都不是本地旧 reviewer 的复入凭证。
+- 结构化 action admission 失败后若必须降级为普通消息，仍留在当前 direct review carrier，并显式发送 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`。禁止裸 `phase=active` 继承更早的 task coordination；降级消息只作通知，不伪称已经取得 custody。
 
 安全等待是合法动作。找不到有证据的 fallback，不等于必须立刻再喊一只猫。
 
@@ -99,9 +100,11 @@ body SHA 已锁定，且回读到同一 subject 的 review/comment URL，才能�
 
 ## Local Cat Review Return Route
 
-本地猫通过 `@` / handoff 交来的 review，默认把 verdict 回给作者猫。开始真实协作链时，同 thread 用
+本地猫通过 `@` / handoff 交来的 review，默认把 verdict 回给作者猫。**direct review carrier** 是直接承载本轮
+review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它的路由权高于任务祖先 thread、旧
+`sourceThreadId` 和继承来的 coordination。开始真实协作链时，同 thread 用
 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final
-verdict 用同一 carrier 的 `coordination.phase=terminal` 回原 route。完成包必须同时包含：
+verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。完成包必须同时包含：
 
 1. exact target evidence：commit/PR HEAD、文档 body/content digest 等不可变目标；
 2. 验证证据：targeted test、diff finding 或可复核命令；
@@ -195,7 +198,7 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 1. `keyPrefix` 在 `eval()` 中的行为是否和普通命令一致？
 2. 是否需要添加重试逻辑？
 
-**价值 OQ**（如需 operator 拍板，附 Decision Packet——格式见 `refs/decision-matrix.md`）：
+**价值 OQ**（如需 operator 拍板，附 Decision Packet——格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）：
 - （本次无）
 
 ### Next Action
@@ -299,5 +302,5 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 
 ## 参考
 
-- 五件套详见：`refs/shared-rules.md` §1
+- 五件套详见：`../.cat-cafe-shared-refs/shared-rules.md` §1
 - Review 信存放：`review-notes/`

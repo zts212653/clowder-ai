@@ -40,6 +40,59 @@ async function collect(iterable) {
   return msgs;
 }
 
+function installNextActiveRecordLookupBarrier(sessionChainStore) {
+  const getOrCreateActive = sessionChainStore.getOrCreateActive.bind(sessionChainStore);
+  let armed = false;
+  let resolved = false;
+  let resolveReached;
+  let rejectReached;
+  let barrierTimeout;
+  const reached = new Promise((resolve, reject) => {
+    resolveReached = resolve;
+    rejectReached = reject;
+  });
+  sessionChainStore.getOrCreateActive = (input) => {
+    const record = getOrCreateActive(input);
+    if (armed && !resolved) {
+      resolved = true;
+      resolveReached(record);
+    }
+    return record;
+  };
+  return {
+    arm() {
+      assert.equal(armed, false, 'active-record lookup barrier can only be armed once');
+      armed = true;
+      barrierTimeout = setTimeout(() => {
+        rejectReached(new Error('timed out waiting for the queued pre-custody active-record lookup'));
+      }, 10_000);
+    },
+    reached: reached.finally(() => clearTimeout(barrierTimeout)),
+  };
+}
+
+function makeUnresolvedCapacitySnapshot(member, client = 'unknown') {
+  return {
+    capacity: {
+      windowTokens: 0,
+      inputCeilingTokens: 0,
+      source: 'unresolved',
+      provenance: `test fixture: ${member}/${client} has no trusted discovery source`,
+      actionable: false,
+    },
+    capability: {
+      provider: 'unknown',
+      carrier: 'test_stream',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: true,
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'test fixture: usage is authoritative but capacity is unresolved',
+    },
+  };
+}
+
 // Bun/npm child processes can briefly keep cache directories busy on macOS.
 async function rmWithRetry(path, attempts = 5) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -163,7 +216,40 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     process.env.AUDIT_LOG_DIR = tempDir;
     // Dynamic import AFTER env is set — singleton will use this dir
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
-    invokeSingleCat = mod.invokeSingleCat;
+    const { resolveInvocationCapacitySnapshot } = await import(
+      '../dist/domains/cats/services/agents/invocation/invocation-capacity-snapshot.js'
+    );
+    const invokeSingleCatRaw = mod.invokeSingleCat;
+    // Production routes resolve one concrete-carrier snapshot before calling
+    // invokeSingleCat. Plain test doubles declare that boundary here so this
+    // file exercises the same call contract instead of relying on hidden lookup.
+    invokeSingleCat = (deps, params) =>
+      (async function* () {
+        const service = params.service.contextCapability
+          ? params.service
+          : {
+              ...params.service,
+              contextCapability: () => ({
+                provider: 'test',
+                carrier: 'test_stream',
+                reportsRuntimeWindow: true,
+                authoritativeUsage: true,
+                nativeWindowControl: false,
+                nativeCompressionControl: false,
+                observesCompression: false,
+                reason: 'invoke-single-cat test double',
+              }),
+            };
+        const capacitySnapshot =
+          params.capacitySnapshot ??
+          (await resolveInvocationCapacitySnapshot({
+            catId: params.catId,
+            threadId: params.threadId,
+            service,
+            sessionChainStore: deps.sessionChainStore,
+          }));
+        yield* invokeSingleCatRaw(deps, { ...params, service, capacitySnapshot });
+      })();
   });
 
   /** Save/restore CAT_CAFE_GLOBAL_CONFIG_ROOT to prevent test profiles leaking to ~/.cat-cafe/ */
@@ -397,6 +483,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         prompt: 'test',
         userId: 'user-git-attr',
         threadId: 'thread-git-attr',
+        parentInvocationId: 'parent-execution-wiring',
         isLastCat: true,
       }),
     );
@@ -409,6 +496,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Email is intentionally NOT set — it inherits git config (contribution graph stays on one account).
     assert.equal('GIT_AUTHOR_EMAIL' in callbackEnv, false);
     assert.equal('GIT_COMMITTER_EMAIL' in callbackEnv, false);
+    assert.equal(
+      callbackEnv.CAT_CAFE_EXECUTION_ID,
+      'parent-execution-wiring',
+      'owner manifests must bind the parent control-plane identity, never the child turn id',
+    );
+    assert.notEqual(callbackEnv.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_EXECUTION_ID);
   });
 
   it('F262 reads and passes the thread member effort override on every invocation', async () => {
@@ -497,9 +590,105 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.reasoningEffortOverride, undefined);
     const warning = messages.find((message) => {
       if (message.type !== 'system_info' || !message.content) return false;
-      return JSON.parse(message.content).type === 'thread_effort_override_read_failed';
+      try {
+        return JSON.parse(message.content).type === 'thread_effort_override_read_failed';
+      } catch {
+        return false;
+      }
     });
     assert.ok(warning, 'read failure should be visible as system_info');
+  });
+
+  it('F291 resolves thread speed over member default for eligible Codex OAuth invocations', async () => {
+    const optionsSeen = [];
+    const reads = [];
+    const base = catRegistry.getOrThrow('codex-sol').config;
+    const previous = base.cli?.serviceTier;
+    base.cli.serviceTier = 'standard';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberSpeed(threadId, catId, userId) {
+          reads.push({ threadId, catId, userId });
+          return 'fast';
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex-sol', timestamp: Date.now() };
+      },
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex-sol',
+          service,
+          prompt: 'test',
+          userId: 'user-thread-speed',
+          threadId: 'thread-speed-runtime',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      if (previous === undefined) delete base.cli.serviceTier;
+      else base.cli.serviceTier = previous;
+    }
+
+    assert.deepEqual(reads, [{ threadId: 'thread-speed-runtime', catId: 'codex-sol', userId: 'user-thread-speed' }]);
+    assert.equal(optionsSeen[0]?.requestedServiceTier, 'fast');
+  });
+
+  it('F291 falls back to the member default and emits diagnostics when thread speed cannot be loaded', async () => {
+    const optionsSeen = [];
+    const base = catRegistry.getOrThrow('codex-sol').config;
+    const previous = base.cli?.serviceTier;
+    base.cli.serviceTier = 'standard';
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: () => null,
+        getMemberSpeed() {
+          throw new Error('redis unavailable');
+        },
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex-sol', timestamp: Date.now() };
+      },
+    };
+
+    let messages;
+    try {
+      messages = await collect(
+        invokeSingleCat(deps, {
+          catId: 'codex-sol',
+          service,
+          prompt: 'test',
+          userId: 'user-thread-speed',
+          threadId: 'thread-speed-runtime',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      if (previous === undefined) delete base.cli.serviceTier;
+      else base.cli.serviceTier = previous;
+    }
+
+    assert.equal(optionsSeen[0]?.requestedServiceTier, 'standard');
+    assert.ok(
+      messages.some((message) => {
+        if (message.type !== 'system_info' || !message.content) return false;
+        return JSON.parse(message.content).type === 'thread_speed_override_read_failed';
+      }),
+    );
   });
 
   it('persists task progress snapshot with completed status on done', async () => {
@@ -1047,6 +1236,449 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(active.catId, 'opus');
     assert.equal(active.threadId, 'thread-f24-init');
     assert.equal(active.status, 'active');
+  });
+
+  it('#1329 creates a one-node logical chain even when the carrier emits no session_init', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const transcriptSessions = [];
+    const transcriptWriter = {
+      appendEvent: (session) => transcriptSessions.push(session),
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'logical session output', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, transcriptWriter },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-one-node-no-init',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('opus', 'thread-one-node-no-init');
+    assert.equal(chain.length, 1);
+    assert.equal(chain[0].cliSessionId, undefined, 'runtime ID remains optional late-bound metadata');
+    assert.equal(chain[0].status, 'active');
+    assert.ok(transcriptSessions.length > 0);
+    assert.equal(
+      transcriptSessions.some((session) => session.cliSessionId !== undefined),
+      false,
+      'logical transcript envelopes must not fabricate the Clowder session ID as a provider runtime ID',
+    );
+  });
+
+  it('#1329 fails closed before provider launch when logical session creation fails', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    sessionChainStore.getOrCreateActive = () => {
+      throw new Error('deliberate logical session store failure');
+    };
+    let invokeCount = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        invokeCount += 1;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'must not reach provider',
+          userId: 'user-session-store-failure',
+          threadId: 'thread-session-store-failure',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.equal(invokeCount, 0, 'provider must not launch without the required logical session record');
+    assert.ok(
+      messages.some(
+        (message) => message.type === 'error' && String(message.error).includes('logical session store failure'),
+      ),
+      'the invocation must surface the session-store failure',
+    );
+    assert.ok(
+      messages.some((message) => message.type === 'done'),
+      'the failed invocation still terminates',
+    );
+  });
+
+  it('#1329 isolates logical session policy by user on the shared default thread', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const policy = (strategy, revision) => ({
+      config: { strategy, thresholds: { warn: 0.8, action: 0.9 } },
+      source: 'runtime_override',
+      revision,
+      changedAt: 10,
+      execution: { status: 'unavailable', missingCapabilities: [] },
+    });
+    const deps = { ...makeDeps(), sessionChainStore };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'owner A',
+        userId: 'user-a',
+        threadId: 'default',
+        isLastCat: true,
+        sessionPolicySnapshot: policy('compress', 'revision-a'),
+      }),
+    );
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'owner B',
+        userId: 'user-b',
+        threadId: 'default',
+        isLastCat: true,
+        sessionPolicySnapshot: policy('handoff', 'revision-b'),
+      }),
+    );
+
+    const ownerA = sessionChainStore.getActive('opus', 'default', 'user-a');
+    const ownerB = sessionChainStore.getActive('opus', 'default', 'user-b');
+    assert.ok(ownerA);
+    assert.ok(ownerB);
+    assert.notEqual(ownerA.id, ownerB.id);
+    assert.equal(ownerA.appliedPolicy.revision, 'revision-a');
+    assert.equal(ownerB.appliedPolicy.revision, 'revision-b');
+    assert.equal(sessionChainStore.getChain('opus', 'default', 'user-a').length, 1);
+    assert.equal(sessionChainStore.getChain('opus', 'default', 'user-b').length, 1);
+  });
+
+  it('#1329 never resumes a runtime ID owned by another logical session', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    sessionChainStore.create({
+      cliSessionId: 'cli-owned-by-a',
+      threadId: 'default',
+      catId: 'opus',
+      userId: 'user-a',
+    });
+    let optionsSeen;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen = options;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        {
+          ...makeDeps(),
+          sessionChainStore,
+          sessionManager: {
+            get: async () => 'cli-owned-by-a',
+            store: async () => {},
+            delete: async () => {},
+          },
+        },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'owner B',
+          userId: 'user-b',
+          threadId: 'default',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.equal(optionsSeen.cliSessionId, undefined);
+    assert.equal(sessionChainStore.getActive('opus', 'default', 'user-a').cliSessionId, 'cli-owned-by-a');
+    assert.equal(sessionChainStore.getActive('opus', 'default', 'user-b').cliSessionId, undefined);
+  });
+
+  it('#1329 fails session_init when its runtime ID belongs to another logical session', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const runtimeOwner = sessionChainStore.create({
+      cliSessionId: 'cli-owned-by-a',
+      threadId: 'thread-runtime-owner',
+      catId: 'codex',
+      userId: 'user-a',
+    });
+    const storedSessionIds = [];
+    let providerContinuedAfterInit = false;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-owned-by-a', timestamp: Date.now() };
+        providerContinuedAfterInit = true;
+        yield { type: 'text', catId: 'opus', content: 'must not escape', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        {
+          ...makeDeps(),
+          sessionChainStore,
+          sessionManager: {
+            get: async () => undefined,
+            store: async (_userId, _catId, _threadId, sessionId) => storedSessionIds.push(sessionId),
+            delete: async () => {},
+          },
+        },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'owner B',
+          userId: 'user-b',
+          threadId: 'thread-runtime-consumer',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.equal(providerContinuedAfterInit, false, 'binding conflict must terminate the provider stream');
+    assert.deepEqual(storedSessionIds, [], 'a rejected runtime ID must not enter the resume store');
+    assert.ok(
+      messages.some(
+        (message) => message.type === 'error' && String(message.error).includes('session_runtime_id_binding_conflict'),
+      ),
+      'the binding conflict must be surfaced as an invocation error',
+    );
+    assert.equal(sessionChainStore.getActive('opus', 'thread-runtime-consumer', 'user-b').cliSessionId, undefined);
+    assert.equal(sessionChainStore.getByCliSessionId('cli-owned-by-a').id, runtimeOwner.id);
+  });
+
+  it('#1329 rejects an ephemeral runtime-ID rotation claimed by another logical session', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const active = sessionChainStore.create({
+      cliSessionId: 'acp-owner-b-original',
+      threadId: 'thread-ephemeral-consumer',
+      catId: 'gemini',
+      userId: 'user-b',
+    });
+    const runtimeOwner = sessionChainStore.create({
+      cliSessionId: 'acp-owned-by-a',
+      threadId: 'thread-ephemeral-owner',
+      catId: 'gemini',
+      userId: 'user-a',
+    });
+    const storedSessionIds = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'gemini',
+          sessionId: 'acp-owned-by-a',
+          ephemeralSession: true,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        {
+          ...makeDeps(),
+          sessionChainStore,
+          sessionManager: {
+            get: async () => 'acp-owner-b-original',
+            store: async (_userId, _catId, _threadId, sessionId) => storedSessionIds.push(sessionId),
+            delete: async () => {},
+          },
+        },
+        {
+          catId: 'gemini',
+          service,
+          prompt: 'owner B',
+          userId: 'user-b',
+          threadId: 'thread-ephemeral-consumer',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.deepEqual(storedSessionIds, [], 'a rejected ephemeral ID must not enter the resume store');
+    assert.ok(
+      messages.some(
+        (message) => message.type === 'error' && String(message.error).includes('session_runtime_id_binding_conflict'),
+      ),
+    );
+    assert.equal(sessionChainStore.get(active.id).cliSessionId, 'acp-owner-b-original');
+    assert.equal(sessionChainStore.getByCliSessionId('acp-owned-by-a').id, runtimeOwner.id);
+  });
+
+  it('#1329 scopes every invocation capacity-pin lookup to the session owner', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const getActive = sessionChainStore.getActive.bind(sessionChainStore);
+    const unscopedLookups = [];
+    sessionChainStore.getActive = (catId, threadId, ownerUserId) => {
+      if (ownerUserId === undefined) unscopedLookups.push({ catId, threadId });
+      return getActive(catId, threadId, ownerUserId);
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-owner-scoped-pin', timestamp: Date.now() };
+        yield {
+          type: 'done',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            usage: {
+              inputTokens: 1_000,
+              outputTokens: 10,
+              contextWindowSize: 100_000,
+            },
+          },
+        };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'test',
+          userId: 'user-owner-scoped-pin',
+          threadId: 'default',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.deepEqual(unscopedLookups, []);
+  });
+
+  it('#1329 does not promote prior-invocation health into this invocation usage proof', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const prior = sessionChainStore.create({
+      cliSessionId: 'cli-prior-health',
+      threadId: 'thread-prior-health-proof',
+      catId: 'codex',
+      userId: 'user1',
+    });
+    sessionChainStore.update(prior.id, {
+      contextHealth: {
+        usedTokens: 90_000,
+        windowTokens: 100_000,
+        fillRatio: 0.9,
+        source: 'exact',
+        usedFrom: 'context',
+        measuredAt: Date.now(),
+      },
+    });
+    const capability = {
+      provider: 'openai',
+      carrier: 'exec_json',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: true,
+      nativeCompressionControl: true,
+      observesCompression: true,
+      reason: 'test carrier',
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => capability,
+      async *invoke() {
+        yield {
+          type: 'done',
+          catId: 'codex',
+          timestamp: Date.now(),
+          metadata: {
+            usage: {
+              contextUsedTokens: 10_000,
+              contextWindowSize: 100_000,
+            },
+          },
+        };
+      },
+    };
+    const sessionSealer = {
+      async requestSeal() {
+        assert.fail('prior-invocation health must not trigger a seal');
+      },
+      async finalize() {},
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer },
+        {
+          catId: 'codex',
+          service,
+          capacitySnapshot: {
+            capacity: {
+              windowTokens: 100_000,
+              inputCeilingTokens: 95_000,
+              source: 'reported',
+              provenance: 'same carrier report',
+              actionable: true,
+            },
+            capability,
+            memberWindowTokens: null,
+            model: 'gpt-test',
+          },
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-prior-health-proof',
+          isLastCat: true,
+          rebuildPromptAfterSessionSeal: async () => 'rebuilt',
+        },
+      ),
+    );
+
+    const created = messages
+      .filter((message) => message.type === 'system_info')
+      .map((message) => JSON.parse(message.content))
+      .find((payload) => payload.type === 'invocation_created');
+    assert.deepEqual(created.effectiveStrategy.execution, {
+      status: 'unavailable',
+      missingCapabilities: ['authoritative_usage'],
+    });
+    const transition = messages
+      .filter((message) => message.type === 'system_info')
+      .map((message) => JSON.parse(message.content))
+      .find((payload) => payload.type === 'session_policy_execution');
+    assert.equal(transition.previousExecution.status, 'unavailable');
+    assert.equal(transition.effectiveStrategy.execution.status, 'active');
+    assert.deepEqual(sessionChainStore.get(prior.id).appliedPolicy.execution, {
+      status: 'active',
+      missingCapabilities: [],
+    });
   });
 
   it('F211 A2: repeated Antigravity cascade updates runtime metadata without creating a new SessionRecord', async () => {
@@ -1844,41 +2476,166 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.deepEqual(active.continuityCapsule, continuityCapsule);
   });
 
-  it('F24: updates cliSessionId when session_init arrives for existing active record', async () => {
+  it('active_writer_reborn seals by replacement mechanism but emits runtime-replacement continuity provenance', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState, formatContinuationPrompt } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'native-old',
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      userId: 'user1',
+    });
+    const sessionSealer = {
+      requestSeal: async ({ sessionId, reason }) => {
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason, updatedAt: Date.now() });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      finalize: async ({ sessionId }) => {
+        sessionChainStore.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+      },
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const replacement = {
+      cause: 'active_writer_reborn',
+      previousNativeThreadId: 'native-old',
+      detectedAt: 1_786_630_000,
+      attempt: 1,
+      diagnostics: {
+        observedAt: 1_786_630_000,
+        classification: 'native_active_turn_without_local_lease',
+        confidence: 'medium',
+        localHostLease: { state: 'not_observed', source: 'carrier_affinity' },
+        nativeThread: {
+          readOutcome: 'succeeded',
+          threadId: 'native-old',
+          status: 'active',
+          activeTurn: { turnId: 'turn-old', startedAt: 1_786_629_000 },
+        },
+        writerClientIdentity: 'unavailable',
+      },
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'codex',
+          sessionId: 'native-fresh',
+          sessionReplacement: replacement,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const continuityCapsule = buildCapsuleFromRouteState({
+      threadId: 'thread-active-writer-recovery',
+      catId: 'codex',
+      mode: 'independent',
+      a2aEnabled: true,
+    });
+
+    const msgs = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer },
+        {
+          catId: 'codex',
+          service,
+          prompt: 'continue',
+          userId: 'user1',
+          threadId: 'thread-active-writer-recovery',
+          isLastCat: true,
+          continuityCapsule,
+        },
+      ),
+    );
+
+    const chain = sessionChainStore.getChain('codex', 'thread-active-writer-recovery');
+    const sealed = chain.find((record) => record.id === oldRecord.id);
+    const active = chain.find((record) => record.status === 'active');
+    assert.equal(sealed.sealReason, 'cli_session_replaced', 'seal reason remains the mechanism');
+    assert.equal(sealed.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(sealed.continuityCapsule.replacement, replacement);
+    assert.equal(active.cliSessionId, 'native-fresh');
+
+    const sealEvent = msgs.find((message) => {
+      if (message.type !== 'system_info') return false;
+      try {
+        return JSON.parse(message.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(sealEvent, 'runtime replacement must emit a continuation carrier');
+    const payload = JSON.parse(sealEvent.content);
+    assert.equal(payload.continuityCapsule.continuationReason, 'runtime_replacement');
+    assert.deepEqual(payload.continuityCapsule.replacement, replacement);
+    assert.equal(payload.continuityCapsule.seal.reason, 'cli_session_replaced');
+    assert.equal(payload.continuityDiagnostics.source, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.boundary, 'runtime_replacement');
+    assert.equal(payload.continuityDiagnostics.sealMechanism, 'cli_session_replaced');
+    assert.deepEqual(payload.continuityDiagnostics.replacement, replacement);
+
+    const prompt = formatContinuationPrompt(payload.continuityCapsule);
+    assert.match(prompt, /automatic native runtime recovery/i);
+    assert.doesNotMatch(prompt, /threshold|manual|handoff/i);
+  });
+
+  it('F24: plain cli_session_replaced remains a mechanism and does not invent runtime recovery', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { buildCapsuleFromRouteState } = await import(
+      '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
+    );
     const sessionChainStore = new SessionChainStore();
 
     // Pre-create an active session with old cliSessionId
     sessionChainStore.create({
       cliSessionId: 'old-cli',
       threadId: 'thread-f24-update',
-      catId: 'opus',
+      catId: 'codex',
       userId: 'user1',
     });
 
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
-        yield { type: 'session_init', catId: 'opus', sessionId: 'new-cli', timestamp: Date.now() };
-        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'codex', sessionId: 'new-cli', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
 
     const deps = { ...makeDeps(), sessionChainStore };
-    await collect(
+    const msgs = await collect(
       invokeSingleCat(deps, {
-        catId: 'opus',
+        catId: 'codex',
         service,
         prompt: 'test',
         userId: 'user1',
         threadId: 'thread-f24-update',
         isLastCat: true,
+        continuityCapsule: buildCapsuleFromRouteState({
+          threadId: 'thread-f24-update',
+          catId: 'codex',
+          mode: 'independent',
+          a2aEnabled: true,
+        }),
       }),
     );
 
-    const active = sessionChainStore.getActive('opus', 'thread-f24-update');
+    const chain = sessionChainStore.getChain('codex', 'thread-f24-update');
+    const sealed = chain.find((record) => record.status === 'sealed');
+    const active = sessionChainStore.getActive('codex', 'thread-f24-update');
     assert.ok(active);
     assert.equal(active.cliSessionId, 'new-cli', 'should have updated cliSessionId');
+    assert.equal(sealed.sealReason, 'cli_session_replaced');
+    assert.equal(active.continuityCapsule.continuationReason, 'threshold_seal');
+    assert.equal(
+      msgs.some((message) => message.type === 'system_info' && /runtime_replacement/.test(message.content ?? '')),
+      false,
+    );
   });
 
   it('ACP session: ephemeralSession=true skips seal on sessionId change', async () => {
@@ -1958,6 +2715,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: 50000,
+              lastTurnInputTokens: 50000,
               outputTokens: 2000,
               contextWindowSize: 200000,
             },
@@ -2086,6 +2844,101 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(agentLoopVisible.length, 0, 'agent_loop must stay telemetry-only — no user-visible output');
   });
 
+  it('issue #1208: ACP usage evidence promotes the captured catalog binding without a window-size report', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    let usageObserved = false;
+    const conditionalCapability = {
+      provider: 'opencode',
+      carrier: 'acp',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: true,
+      usageTelemetry: 'conditional',
+      nativeWindowControl: true,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'waiting for ACP usage_update',
+    };
+    const service = {
+      contextCapability() {
+        return usageObserved
+          ? { ...conditionalCapability, usageTelemetry: 'available', reason: 'ACP usage_update observed' }
+          : conditionalCapability;
+      },
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-acp-promote', timestamp: Date.now() };
+        usageObserved = true;
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'claude-opus-4-6',
+            usage: {
+              inputTokens: 900_000,
+              lastTurnInputTokens: 900_000,
+              outputTokens: 32,
+              totalTokens: 900_032,
+            },
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const capacitySnapshot = {
+      capacity: {
+        windowTokens: 1_000_000,
+        inputCeilingTokens: 984_000,
+        source: 'catalog',
+        provenance: 'Model catalog (claude-opus-4-6) → 1,000,000 tokens',
+        actionable: false,
+      },
+      capability: conditionalCapability,
+      binding: {
+        model: 'claude-opus-4-6',
+        windowTokens: 1_000_000,
+        source: 'service_spawn',
+      },
+      memberWindowTokens: null,
+      model: 'claude-opus-4-6',
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore },
+        {
+          catId: 'opus',
+          service,
+          capacitySnapshot,
+          prompt: 'test ACP telemetry promotion',
+          userId: 'user-acp-promote',
+          threadId: 'thread-acp-promote',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const health = messages
+      .filter((message) => message.type === 'system_info')
+      .map((message) => {
+        try {
+          return JSON.parse(message.content);
+        } catch {
+          return null;
+        }
+      })
+      .find((payload) => payload?.type === 'context_health');
+    assert.ok(health, 'usage_update-derived evidence must still produce context health without a size field');
+    assert.equal(health.health.source, 'exact', 'same-invocation usage evidence must promote the bound catalog window');
+    assert.equal(health.health.windowTokens, 1_000_000);
+    assert.equal(
+      sessionChainStore.getActive('opus', 'thread-acp-promote')?.contextHealth?.source,
+      'exact',
+      'the promoted health must persist for the next invocation preflight',
+    );
+  });
+
   it('clowder#915 R4 cloud P1 #3: agent_loop above seal threshold DEFERS seal to done (transcript continuity)', async () => {
     // Cloud's failing scenario: an opencode tool loop with step_finish.reason='tool-calls'
     // crosses the seal threshold mid-stream. If we fire requestSeal inline, the active
@@ -2161,6 +3014,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'user1',
         threadId: 'thread-915-defer-seal',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -2210,14 +3064,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(postThresholdText.length, 1, 'post-threshold text must reach outputs (transcript continuity)');
   });
 
-  it('clowder#915 R5 cloud P2: 3-tier window resolution — known opencode model uses fallback table (NOT clobbered by default)', async () => {
-    // Cloud's R5 regression catch: R4's unconditional 128k attach in the
-    // transformer would prevent claude-opus-4-6 (default opencode breed
-    // model per cat-template.json) from resolving to its true 200k via the
-    // fallback table. This test pins the 3-tier chain:
-    //   1) usage.contextWindowSize (none here)
-    //   2) getContextWindowFallback('claude-opus-4-6') = 200_000 ← THIS WINS
-    //   3) opencode last-resort default (128_000) — should NOT be used here
+  it('clowder#915 R5 cloud P2 / issue #1208 P1: opencode known models use the catalog', async () => {
+    // clowder-ai#1208 resolver: model catalog wins for known models even through
+    // OpenCode. Users with a different supported window should set contextWindow
+    // explicitly. Unknown models remain unresolved; there is no provider-wide default.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2231,13 +3081,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           timestamp: Date.now(),
           metadata: {
             provider: 'opencode',
-            model: 'claude-opus-4-6', // KNOWN to fallback table (200k)
+            model: 'claude-opus-4-6', // KNOWN to direct-provider fallback table (1M)
             usage: {
-              inputTokens: 150_000,
-              lastTurnInputTokens: 150_000,
+              inputTokens: 90_000,
+              lastTurnInputTokens: 90_000,
               outputTokens: 50,
-              totalTokens: 150_050,
-              // NO contextWindowSize from transformer — forces tier 2+3
+              totalTokens: 90_050,
+              // NO contextWindowSize from transformer — the member snapshot supplies the catalog value
             },
           },
         };
@@ -2268,21 +3118,21 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       })
       .filter((p) => p && p.type === 'context_health');
     assert.equal(healthInfos.length, 1, 'must emit context_health');
-    // CRITICAL: windowTokens MUST be 200_000 (from fallback table) NOT 128_000
-    // (the opencode last-resort default — which would wrongly cap claude-opus-4-6).
+    // Known model (opus) resolves via catalog to 1M, even through OpenCode.
+    // Users whose OpenCode binding supports 128K should set contextWindow: 128000.
     assert.equal(
       healthInfos[0].health.windowTokens,
-      200_000,
-      'claude-opus-4-6 must resolve to its precise 200k via fallback table — NOT clobbered by opencode last-resort default',
+      1_000_000,
+      'opencode with known model must use catalog value (1M for opus)',
     );
-    // Sanity: 150k of 200k = 0.75 fillRatio (would be 1.17 if window were clobbered to 128k)
-    assert.ok(healthInfos[0].health.fillRatio < 0.8, 'fillRatio must reflect true 200k window');
+    // 90k of 1M = 0.09 fillRatio, well below seal threshold.
+    assert.ok(healthInfos[0].health.fillRatio < 0.15, 'fillRatio must reflect 1M catalog window');
   });
 
   it('opencode GLM-5.2 resolves to 1M context window and does not false-seal at 140k', async () => {
     // Production regression: GLM-5.2 opencode invocations do not report
     // contextWindowSize. Without an explicit table entry, invoke-single-cat
-    // falls through to OPENCODE_DEFAULT_CONTEXT_WINDOW=128k and seals a healthy
+    // used to inherit a fabricated 128k provider default and seal a healthy
     // 140k/1M turn as budget_exhausted.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
@@ -2300,10 +3150,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
-        yield { type: 'session_init', catId: 'glm', sessionId: 'cli-glm-52', timestamp: Date.now() };
+        yield { type: 'session_init', catId: 'glm52', sessionId: 'cli-glm-52', timestamp: Date.now() };
         yield {
           type: 'agent_loop',
-          catId: 'glm',
+          catId: 'glm52',
           timestamp: Date.now(),
           metadata: {
             provider: 'opencode',
@@ -2317,14 +3167,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             },
           },
         };
-        yield { type: 'done', catId: 'glm', timestamp: Date.now() };
+        yield { type: 'done', catId: 'glm52', timestamp: Date.now() };
       },
     };
 
     const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
     const msgs = await collect(
       invokeSingleCat(deps, {
-        catId: 'glm',
+        catId: 'glm52',
         service,
         prompt: 'test',
         userId: 'user1',
@@ -2356,11 +3206,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(sealCalls.length, 0, 'sessionSealer must not be called for healthy GLM-5.2 context usage');
   });
 
-  it('clowder#915 R5 cloud P2: 3-tier window resolution — unknown opencode model falls back to default', async () => {
-    // Counterpart to the known-model test: when the model is NOT in the
-    // fallback table (GLM-5.1, openrouter customs — the actual breed
-    // clowder#915 targets), the opencode last-resort default (128_000)
-    // kicks in so handoff still fires. This is tier 3 of the chain.
+  it('issue #1208: unresolved OpenCode binding does not invent a fallback window', async () => {
+    // Unknown/Auto without a trusted discovery source must remain unresolved.
+    // Lifecycle health must not silently substitute the retired 128K default.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2396,6 +3244,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'user1',
         threadId: 'thread-915-r5-unknown-model',
         isLastCat: true,
+        capacitySnapshot: makeUnresolvedCapacitySnapshot('opus', 'opencode'),
       }),
     );
 
@@ -2409,18 +3258,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }
       })
       .filter((p) => p && p.type === 'context_health');
-    assert.equal(healthInfos.length, 1, 'unknown opencode model must still emit context_health (last-resort fallback)');
-    assert.equal(healthInfos[0].health.windowTokens, 128_000, 'unknown opencode model resolves to last-resort 128k');
+    assert.equal(healthInfos.length, 0, 'unresolved OpenCode binding must not emit fabricated context health');
   });
 
-  it('clowder#915 R2 cloud P1: agent_loop with provider-prefixed model (account-routing path) triggers context_health', async () => {
+  it('clowder#915 R2 cloud P1 / issue #1208 P1: opencode provider-prefixed model resolves via catalog', async () => {
     // Production opencode invocation path: invoke-single-cat.ts:1459 sets
     // callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE to `safeProvider/safeModel`
     // form. OpenCodeAgentService.ts:139 then propagates that as effectiveModel.
-    // Transformer doesn't set contextWindowSize, so we fall back to
-    // getContextWindowFallback. Before the R2 cloud P1 fix, the prefixed
-    // string missed the lookup table → no windowSize → context_health silently
-    // skipped → handoff bypassed. This test pins the production scenario.
+    // clowder-ai#1208: model catalog wins for known models — even through OpenCode.
+    // Users whose gateway supports 128K should set contextWindow explicitly.
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
@@ -2443,7 +3289,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               lastTurnInputTokens: 36928,
               outputTokens: 9,
               totalTokens: 36937,
-              // NO contextWindowSize — forces fallback through model lookup
+              // NO contextWindowSize — the member snapshot supplies the catalog value
             },
           },
         };
@@ -2477,9 +3323,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'prefixed-model agent_loop with usage MUST emit context_health (clowder#915 R2 P1)',
     );
     const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.health.windowTokens, 200_000, 'fallback must resolve anthropic/claude-opus-4-6 → 200k');
+    assert.equal(
+      payload.health.windowTokens,
+      1_000_000,
+      'opencode anthropic/claude-opus-4-6 resolves via catalog to 1M',
+    );
     assert.equal(payload.health.usedTokens, 36928);
-    assert.equal(payload.health.source, 'approx', 'fallback (no contextWindowSize on usage) → approx');
+    assert.equal(payload.health.source, 'approx', 'catalog resolution (no contextWindowSize on usage) → approx');
   });
 
   it('F24: uses fallback window size for models without contextWindowSize', async () => {
@@ -2499,6 +3349,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: 100000,
+              lastTurnInputTokens: 100000,
               outputTokens: 1000,
               // no contextWindowSize — should use fallback
             },
@@ -2530,7 +3381,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     assert.equal(healthInfos.length, 1, 'should yield context_health with fallback window');
     const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.health.windowTokens, 200000, 'should use fallback 200k for claude-opus-4-6');
+    assert.equal(payload.health.windowTokens, 1_000_000, 'should use fallback 1M for claude-opus-4-6');
     assert.equal(payload.health.source, 'approx', 'should mark as approx when using fallback');
   });
 
@@ -2596,6 +3447,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: 140000,
+              lastTurnInputTokens: 140000,
               outputTokens: 3000,
               contextWindowSize: 200000,
             },
@@ -2621,7 +3473,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(active.contextHealth, 'session record should have contextHealth');
     assert.equal(active.contextHealth.usedTokens, 140000);
     assert.equal(active.contextHealth.windowTokens, 200000);
-    assert.equal(active.contextHealth.fillRatio, 0.7);
+    // #1208 denominator fix: fillRatio = usedTokens / inputCeiling (not windowTokens)
+    // inputCeiling = 200000 - 16000 (output reserve) = 184000
+    // fillRatio = 140000 / 184000 ≈ 0.7609
+    const expectedRatio = 140000 / (200000 - 16000);
+    assert.ok(
+      Math.abs(active.contextHealth.fillRatio - expectedRatio) < 0.001,
+      `fillRatio should be ~${expectedRatio.toFixed(4)}, got ${active.contextHealth.fillRatio}`,
+    );
     assert.equal(active.contextHealth.source, 'exact');
   });
 
@@ -2682,15 +3541,17 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
     assert.equal(payload.health.usedFrom, 'last_turn');
     assert.equal(payload.health.windowTokens, 200000);
-    // fillRatio should be 44000/200000 = 0.22, not 192000/200000 = 0.96
-    const expectedRatio = 44000 / 200000;
+    // #1208 denominator fix: fillRatio = lastTurnInputTokens / inputCeiling
+    // inputCeiling = 200000 - 16000 (output reserve) = 184000
+    // fillRatio = 44000 / 184000 ≈ 0.2391, not 192000/200000 = 0.96
+    const expectedRatio = 44000 / (200000 - 16000);
     assert.ok(
       Math.abs(payload.health.fillRatio - expectedRatio) < 0.001,
-      `fillRatio should be ~${expectedRatio} (22%), got ${payload.health.fillRatio}`,
+      `fillRatio should be ~${expectedRatio.toFixed(4)} (24%), got ${payload.health.fillRatio}`,
     );
   });
 
-  it('F24-fix: falls back to inputTokens when lastTurnInputTokens is absent', async () => {
+  it('issue #1208: aggregate inputTokens alone is not context-health authority', async () => {
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
@@ -2732,20 +3593,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       }
     });
 
-    assert.equal(healthInfos.length, 1);
-    const payload = JSON.parse(healthInfos[0].content);
-    // Falls back to inputTokens since lastTurnInputTokens is absent
-    assert.equal(
-      payload.health.usedTokens,
-      50000,
-      'should fall back to inputTokens when lastTurnInputTokens is absent',
-    );
-    assert.equal(payload.health.usedFrom, 'input');
+    assert.equal(healthInfos.length, 0, 'aggregate inputTokens must not drive lifecycle context health');
   });
 
-  it('F24: falls back to totalTokens when inputTokens are unavailable (totalTokens-only provider)', async () => {
-    // Use codex to test totalTokens fallback path.
-    // (F053: gemini now also has sessionChain=true, either cat would work here.)
+  it('issue #1208: totalTokens-only provider does not emit context health', async () => {
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
@@ -2786,15 +3637,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       }
     });
 
-    assert.equal(healthInfos.length, 1, 'should emit context_health from totalTokens fallback');
-    const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.catId, 'codex');
-    assert.equal(payload.health.usedTokens, 4200);
-    assert.equal(payload.health.source, 'approx');
+    assert.equal(healthInfos.length, 0, 'aggregate totalTokens must not drive lifecycle context health');
   });
 
-  it('F24: marks source as approx when usedTokens falls back to totalTokens despite exact window', async () => {
-    // Use codex (sessionChain enabled) to test approx source detection.
+  it('issue #1208: exact window does not make aggregate totalTokens authoritative', async () => {
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
@@ -2835,11 +3681,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       }
     });
 
-    assert.equal(healthInfos.length, 1);
-    const payload = JSON.parse(healthInfos[0].content);
-    assert.equal(payload.health.usedTokens, 3000);
-    assert.equal(payload.health.windowTokens, 1_000_000);
-    assert.equal(payload.health.source, 'approx');
+    assert.equal(healthInfos.length, 0, 'a trustworthy denominator cannot repair a non-authoritative numerator');
   });
 
   it('resume failure classification: maps missing session / cli exit / auth / invalid thinking signature / unknown', async () => {
@@ -2912,6 +3754,31 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       isTransientCliExitCode1('Codex CLI: CLI 异常退出 (code: 1, signal: none)'),
       true,
       'vanilla transient exit without overflow marker must still be retryable',
+    );
+  });
+
+  it('isTransientCliExitCode1: argv/CLI-version incompatibility must NOT be retried (deterministic)', async () => {
+    const { isTransientCliExitCode1 } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-helpers.js'
+    );
+
+    // Real shape after formatCliExitError appends the classified reasonCode.
+    // Witnessed 76x in runtime logs 2026-08-06..08-10 (48x "unknown option
+    // '--agent-file'" + 28x "Cannot combine --agent/--agent-file with
+    // --session/--continue") — every one of them retried once for nothing,
+    // which is where the user-visible "未识别的 CLI 错误 ×2" came from.
+    const argvMsg = 'Kimi CLI: CLI 异常退出 (code: 1, signal: none) [incompatible_cli_arguments]';
+    assert.equal(
+      isTransientCliExitCode1(argvMsg),
+      false,
+      'a CLI that rejected our argv rejects the identical argv again — retrying only doubles the failure',
+    );
+
+    // Regression guard: vanilla transient exit still retries
+    assert.equal(
+      isTransientCliExitCode1('Kimi CLI: CLI 异常退出 (code: 1, signal: none)'),
+      true,
+      'untagged transient exit must stay retryable',
     );
   });
 
@@ -3250,6 +4117,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
     const activeRecord = {
       id: 'sess-retry-seal',
+      cliSessionId: 'stale-sess',
       catId: 'codex',
       threadId: 'thread-retry-seal',
       userId: 'user-retry-seal',
@@ -3282,6 +4150,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'gpt-5.5',
             usage: {
               inputTokens: 90000,
+              lastTurnInputTokens: 90000,
               outputTokens: 100,
               contextWindowSize: 100000,
             },
@@ -3323,6 +4192,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'user-retry-seal',
         threadId: 'thread-retry-seal',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after retry seal',
         continuityCapsule: buildCapsuleFromRouteState({
           threadId: 'thread-retry-seal',
           catId: 'codex',
@@ -3931,6 +4801,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: 182000,
+              lastTurnInputTokens: 182000,
               outputTokens: 2000,
               contextWindowSize: 200000,
             },
@@ -3947,6 +4818,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'user-seal',
         threadId: 'thread-seal-race',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -3992,6 +4864,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: invokeCount === 1 ? 182000 : 5000,
+              lastTurnInputTokens: invokeCount === 1 ? 182000 : 5000,
               outputTokens: 1000,
               contextWindowSize: 200000,
             },
@@ -4024,6 +4897,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'u1',
         threadId: 'thread-seal-clean',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -4039,6 +4913,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'u1',
         threadId: 'thread-seal-clean',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -4088,6 +4963,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: invokeCount === 1 ? 182000 : 5000,
+              lastTurnInputTokens: invokeCount === 1 ? 182000 : 5000,
               outputTokens: 1000,
               contextWindowSize: 200000,
             },
@@ -4123,6 +4999,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'u1',
         threadId: 'thread-slow-delete',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -4140,6 +5017,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'u1',
         threadId: 'thread-slow-delete',
         isLastCat: true,
+        rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
       }),
     );
 
@@ -4169,13 +5047,14 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       },
     };
 
-    // sessionChainStore that always throws on getChain
+    // The chain read fails, but creating the mandatory replacement logical
+    // node remains available after the stale resume identity is discarded.
     const failingChainStore = {
       getChain() {
         throw new Error('Redis connection lost');
       },
       getActive() {
-        throw new Error('Redis connection lost');
+        return null;
       },
       get() {
         return null;
@@ -4206,6 +5085,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         userId: 'u1',
         threadId: 'thread-chain-fail',
         isLastCat: true,
+        capacitySnapshot: makeUnresolvedCapacitySnapshot('opus', 'anthropic'),
       }),
     );
 
@@ -4354,7 +5234,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           catId: 'gemini',
           timestamp: Date.now(),
           metadata: {
-            usage: { totalTokens: 500000, contextWindowSize: 1000000 },
+            usage: {
+              contextUsedTokens: 500000,
+              lastTurnInputTokens: 500000,
+              totalTokens: 500000,
+              contextWindowSize: 1000000,
+            },
             model: 'gemini-3-pro',
           },
         };
@@ -4369,7 +5254,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         sessionRecordCreated = true;
         return activeRecord;
       },
-      update: async () => null,
+      update: async (_id, patch) => Object.assign(activeRecord, patch),
     };
     const sealer = {
       requestSeal: async () => ({ accepted: false }),
@@ -4799,6 +5684,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'gpt-5.3-codex',
             usage: {
               inputTokens: callNum === 1 ? 60000 : 15000,
+              lastTurnInputTokens: callNum === 1 ? 60000 : 15000,
               outputTokens: 1000,
               contextWindowSize: 128000,
             },
@@ -6597,6 +7483,139 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
+  it('#1329/#1359: bare OpenCode native subscription binds the window at the Clowder AI layer and supplies no limit block', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'context-binding-native-oc-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig);
+    const boundCatId = 'opencode-native-capacity-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      provider: undefined,
+      accountRef: undefined,
+      defaultModel: 'claude-opus-4-6',
+      contextWindow: undefined,
+    });
+
+    const optionsSeen = [];
+    const callOrder = [];
+    let seenPrompt;
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const active = sessionChainStore.create({
+      cliSessionId: 'cli-native-capacity-old',
+      threadId: 'thread-native-capacity',
+      catId: boundCatId,
+      userId: 'user-native-capacity',
+    });
+    sessionChainStore.update(active.id, {
+      contextHealth: {
+        usedTokens: 900_000,
+        windowTokens: 1_000_000,
+        fillRatio: 0.9,
+        source: 'exact',
+        usedFrom: 'last_turn',
+        measuredAt: Date.now(),
+      },
+    });
+    const sessionSealer = {
+      async reconcileStuck() {
+        return 0;
+      },
+      async requestSeal({ sessionId, reason }) {
+        callOrder.push(['requestSeal', reason]);
+        sessionChainStore.update(sessionId, { status: 'sealing', sealReason: reason });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      async finalize({ sessionId }) {
+        callOrder.push(['finalize']);
+        sessionChainStore.update(sessionId, { status: 'sealed' });
+      },
+    };
+    let seenRuntimeConfig;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability() {
+        return {
+          provider: 'opencode',
+          carrier: 'run_json',
+          reportsRuntimeWindow: false,
+          authoritativeUsage: true,
+          usageTelemetry: 'available',
+          nativeWindowControl: true,
+          nativeCompressionControl: true,
+          observesCompression: false,
+          reason: 'OpenCode test carrier',
+        };
+      },
+      async *invoke(prompt, options) {
+        callOrder.push(['invoke']);
+        seenPrompt = prompt;
+        optionsSeen.push(options ?? {});
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        if (configPath) seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        yield { type: 'done', catId: boundCatId, timestamp: Date.now() };
+      },
+    };
+
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      const deps = makeDeps();
+      deps.sessionManager.get = async () => 'cli-native-capacity-old';
+      deps.sessionManager.delete = async () => {
+        callOrder.push(['clearProviderSession']);
+      };
+      await collect(
+        invokeSingleCat(
+          { ...deps, sessionChainStore, sessionSealer },
+          {
+            catId: boundCatId,
+            service,
+            prompt: 'resume-only current delta',
+            rebuildPromptAfterSessionSeal: async () => {
+              callOrder.push(['rebuildPrompt']);
+              return '[Previous Session Summary]\nactive-session history\n\nresume-only current delta';
+            },
+            userId: 'user-native-capacity',
+            threadId: 'thread-native-capacity',
+            isLastCat: true,
+          },
+        ),
+      );
+
+      assert.ok(seenRuntimeConfig, 'provider must observe a per-invocation runtime config');
+      assert.equal(seenRuntimeConfig.model, 'anthropic/claude-opus-4-6');
+      const nativeEntry = seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6'];
+      assert.ok(nativeEntry, 'the native model must still be registered in the runtime config');
+      assert.equal(nativeEntry.name, 'claude-opus-4-6');
+      assert.equal(nativeEntry.limit, undefined, 'no limit block may be supplied at this layer');
+      assert.equal(seenRuntimeConfig.$schema, 'https://opencode.ai/config.json');
+      // The invocation window is still bound at the Clowder AI layer, where it
+      // drives context health and session handoff.
+      assert.equal(optionsSeen[0]?.contextCapacity?.windowTokens, 1_000_000);
+      assert.equal(optionsSeen[0]?.contextCapacity?.inputCeilingTokens, 984_000);
+      assert.equal(optionsSeen[0]?.contextCapacity?.actionable, true);
+      assertStagingPromptContract(seenPrompt, '#1329 native OpenCode capacity binding');
+      assert.ok(seenPrompt.endsWith('resume-only current delta'));
+      assert.ok(!seenPrompt.includes('[Previous Session Summary]'));
+      assert.ok(!seenPrompt.includes('active-session history'));
+      assert.deepEqual(callOrder, [['invoke']]);
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) catRegistry.register(id, config);
+      await rmWithRetry(root);
+    }
+  });
+
   // F203 Phase I: compile fail-closed — throwing l0CompilerFn aborts invocation
   it('F203-I: OpenCode compile failure → fail-closed, service.invoke never called', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
@@ -6681,7 +7700,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('fix(#280): known legacy model without provider skips runtime config', async () => {
+  it('issue #1208/#1359: known native OpenCode model receives a schema-valid, limit-free runtime config', async () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
@@ -6713,21 +7732,18 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       clientId: 'opencode',
       accountRef: anthropicProfile.id,
       defaultModel: 'anthropic/claude-opus-4-6',
+      contextWindow: 256_000,
     });
 
     const optionsSeen = [];
+    let seenRuntimeConfig;
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        // F203 Phase I: known legacy model without provider STILL gets OPENCODE_CONFIG
-        // for L0 instructions (instructions-only fallback path). Before F203 this was undefined.
-        assert.ok(
-          options?.callbackEnv?.OPENCODE_CONFIG,
-          'F203: known legacy model must get instructions-only config for L0',
-        );
-        // Verify it's an instructions-only config (no provider auth clearing)
-        assert.equal(options?.callbackEnv?.CAT_CAFE_OC_INSTRUCTIONS_ONLY, '1');
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        assert.ok(configPath, 'known native model must receive an invocation-scoped runtime config');
+        seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -6761,11 +7777,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    // F203 Phase I: known legacy model now gets instructions-only config for L0.
-    // Before F203 this was undefined; now it always has a config path.
-    assert.ok(callbackEnv.OPENCODE_CONFIG, 'F203: must get instructions-only config');
-    assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, '1', 'must signal instructions-only');
-    assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, undefined);
+    assert.ok(callbackEnv.OPENCODE_CONFIG);
+    assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, undefined);
+    const knownEntry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
+    assert.ok(knownEntry, 'the known native model must still be registered');
+    assert.equal(knownEntry.limit, undefined, 'no limit block may be supplied at this layer');
+    assert.equal(seenRuntimeConfig?.$schema, 'https://opencode.ai/config.json');
+    assert.ok(seenRuntimeConfig?.provider?.anthropic?.options, 'provider options must survive');
   });
 
   it('clowder-ai#223-P1: provider takes priority over parseOpenCodeModel for namespaced models', async () => {
@@ -6989,6 +8007,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               // Simulate non-standard gateway semantics where this value is
               // not a trustworthy "current context fill" signal.
               inputTokens: 195000,
+              lastTurnInputTokens: 195000,
               outputTokens: 10,
               // Intentionally omit contextWindowSize so source becomes approx.
             },
@@ -7050,7 +8069,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('F062-fix: skips auto-seal for api_key + compress strategy even when context health is exact', async () => {
+  it('issue #1329: preserves an api_key compress policy without rewriting it to handoff', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const { _setTestStrategyOverride, _clearTestStrategyOverrides } = await import(
       '../dist/config/session-strategy.js'
@@ -7117,6 +8136,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             usage: {
               // Simulate gateway telemetry that reports at/over window.
               inputTokens: 128211,
+              lastTurnInputTokens: 128211,
               outputTokens: 10,
               contextWindowSize: 128000,
             },
@@ -7168,8 +8188,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           return false;
         }
       });
-      assert.equal(hasSealRequested, false, 'should not emit session_seal_requested in api_key mode');
-      assert.equal(sealRequests.length, 0, 'should not request seal in api_key mode');
+      assert.equal(hasSealRequested, false, 'capability status must not rewrite compress into handoff');
+      assert.equal(sealRequests.length, 0, 'compress intent must never execute the handoff action family');
     } finally {
       process.chdir(previousCwd);
       restoreGlobalRoot();
@@ -7178,6 +8198,311 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       _clearTestStrategyOverrides();
       await rmWithRetry(root);
     }
+  });
+
+  it('#1329 commits the next invocation policy only after the active invocation releases session custody', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const originalRecord = sessionChainStore.create({
+      cliSessionId: 'cli-policy-custody',
+      threadId: 'thread-policy-custody',
+      catId: 'opus',
+      userId: 'user-policy-custody',
+      compressionCount: 0,
+    });
+    const queuedLookup = installNextActiveRecordLookupBarrier(sessionChainStore);
+
+    let firstStarted;
+    const firstStartedPromise = new Promise((resolve) => {
+      firstStarted = resolve;
+    });
+    let releaseFirst;
+    const firstReleasePromise = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        firstStarted();
+        await firstReleasePromise;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    let secondInvokeCount = 0;
+    const secondService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        secondInvokeCount += 1;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const policy = (strategy, revision) => ({
+      config: { strategy, thresholds: { warn: 0.8, action: 0.9 } },
+      source: 'runtime_override',
+      revision,
+      changedAt: 10,
+      execution: { status: 'unavailable', missingCapabilities: [] },
+    });
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionManager: {
+        get: async () => 'cli-policy-custody',
+        store: async () => {},
+        delete: async () => {},
+      },
+    };
+    const common = {
+      catId: 'opus',
+      prompt: 'test',
+      userId: 'user-policy-custody',
+      threadId: 'thread-policy-custody',
+      isLastCat: true,
+    };
+
+    const first = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: firstService,
+        sessionPolicySnapshot: policy('compress', 'revision-a'),
+      }),
+    );
+    await firstStartedPromise;
+    assert.equal(sessionChainStore.getActive('opus', 'thread-policy-custody').appliedPolicy.revision, 'revision-a');
+
+    queuedLookup.arm();
+    const second = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: secondService,
+        sessionPolicySnapshot: policy('handoff', 'revision-b'),
+      }),
+    );
+    const queuedPreCustodyRecord = await queuedLookup.reached;
+    assert.equal(queuedPreCustodyRecord.id, originalRecord.id);
+    assert.equal(secondInvokeCount, 0, 'the queued provider must still be blocked behind policy custody');
+    assert.equal(
+      sessionChainStore.getActive('opus', 'thread-policy-custody').appliedPolicy.revision,
+      'revision-a',
+      'a queued invocation must not rewrite the active invocation policy snapshot',
+    );
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    assert.equal(sessionChainStore.getActive('opus', 'thread-policy-custody').appliedPolicy.revision, 'revision-b');
+  });
+
+  it('#1329 re-resolves the active logical session after queued policy custody transfers', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const originalRecord = sessionChainStore.create({
+      cliSessionId: 'cli-policy-custody-sealed',
+      threadId: 'thread-policy-custody-sealed',
+      catId: 'opus',
+      userId: 'user-policy-custody-sealed',
+      compressionCount: 0,
+    });
+    const queuedLookup = installNextActiveRecordLookupBarrier(sessionChainStore);
+
+    let firstStarted;
+    const firstStartedPromise = new Promise((resolve) => {
+      firstStarted = resolve;
+    });
+    let releaseFirst;
+    const firstReleasePromise = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        firstStarted();
+        await firstReleasePromise;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    let secondInvokeCount = 0;
+    const secondService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        secondInvokeCount += 1;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const policy = (strategy, revision) => ({
+      config: { strategy, thresholds: { warn: 0.8, action: 0.9 } },
+      source: 'runtime_override',
+      revision,
+      changedAt: 10,
+      execution: { status: 'unavailable', missingCapabilities: [] },
+    });
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionManager: {
+        get: async () => 'cli-policy-custody-sealed',
+        store: async () => {},
+        delete: async () => {},
+      },
+    };
+    const common = {
+      catId: 'opus',
+      prompt: 'test',
+      userId: 'user-policy-custody-sealed',
+      threadId: 'thread-policy-custody-sealed',
+      isLastCat: true,
+    };
+
+    const first = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: firstService,
+        sessionPolicySnapshot: policy('compress', 'revision-a'),
+      }),
+    );
+    await firstStartedPromise;
+
+    queuedLookup.arm();
+    const second = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: secondService,
+        sessionPolicySnapshot: policy('handoff', 'revision-b'),
+      }),
+    );
+    const queuedPreCustodyRecord = await queuedLookup.reached;
+    assert.equal(
+      queuedPreCustodyRecord.id,
+      originalRecord.id,
+      'the queued invocation must select the original active record before it can be sealed',
+    );
+    assert.equal(secondInvokeCount, 0, 'the queued provider must still be blocked behind policy custody');
+
+    assert.ok(
+      sessionChainStore.transitionToSealing(originalRecord.id, 'test-custody-race', 'revision-a'),
+      'the active holder should seal the record while the next invocation is queued',
+    );
+    releaseFirst();
+    const [, secondMessages] = await Promise.all([first, second]);
+
+    assert.equal(secondInvokeCount, 1, 'the queued provider must launch on a fresh active logical record');
+    assert.equal(
+      secondMessages.some((message) => message.type === 'error'),
+      false,
+    );
+    const replacement = sessionChainStore.getActive(
+      'opus',
+      'thread-policy-custody-sealed',
+      'user-policy-custody-sealed',
+    );
+    assert.ok(replacement);
+    assert.notEqual(replacement.id, originalRecord.id);
+    assert.equal(replacement.cliSessionId, undefined, 'the sealed runtime ID must not be resumed');
+    assert.equal(replacement.appliedPolicy.revision, 'revision-b');
+  });
+
+  it('#1329 keeps policy custody across a runtime session rotation inside the active invocation', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const originalRecord = sessionChainStore.create({
+      cliSessionId: 'cli-policy-before-rotation',
+      threadId: 'thread-policy-rotation',
+      catId: 'opus',
+      userId: 'user-policy-rotation',
+      compressionCount: 0,
+    });
+    const queuedLookup = installNextActiveRecordLookupBarrier(sessionChainStore);
+
+    let currentCliSessionId = 'cli-policy-before-rotation';
+    let firstRotated;
+    const firstRotatedPromise = new Promise((resolve) => {
+      firstRotated = resolve;
+    });
+    let releaseFirst;
+    const firstReleasePromise = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'opus',
+          sessionId: 'cli-policy-after-rotation',
+          timestamp: Date.now(),
+        };
+        firstRotated();
+        await firstReleasePromise;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    let secondInvokeCount = 0;
+    const secondService = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        secondInvokeCount += 1;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const policy = (strategy, revision) => ({
+      config: { strategy, thresholds: { warn: 0.8, action: 0.9 } },
+      source: 'runtime_override',
+      revision,
+      changedAt: 10,
+      execution: { status: 'unavailable', missingCapabilities: [] },
+    });
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore,
+      sessionManager: {
+        get: async () => currentCliSessionId,
+        store: async (_userId, _catId, _threadId, cliSessionId) => {
+          currentCliSessionId = cliSessionId;
+        },
+        delete: async () => {},
+      },
+    };
+    const common = {
+      catId: 'opus',
+      prompt: 'test',
+      userId: 'user-policy-rotation',
+      threadId: 'thread-policy-rotation',
+      isLastCat: true,
+    };
+
+    const first = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: firstService,
+        sessionPolicySnapshot: policy('compress', 'revision-a'),
+      }),
+    );
+    await firstRotatedPromise;
+    assert.equal(currentCliSessionId, 'cli-policy-after-rotation');
+    const rotatedRecord = sessionChainStore.getActive('opus', 'thread-policy-rotation', 'user-policy-rotation');
+    assert.ok(rotatedRecord);
+    assert.notEqual(rotatedRecord.id, originalRecord.id);
+    assert.equal(rotatedRecord.appliedPolicy.revision, 'revision-a');
+
+    queuedLookup.arm();
+    const second = collect(
+      invokeSingleCat(deps, {
+        ...common,
+        service: secondService,
+        sessionPolicySnapshot: policy('handoff', 'revision-b'),
+      }),
+    );
+    const queuedPreCustodyRecord = await queuedLookup.reached;
+    assert.equal(queuedPreCustodyRecord.id, rotatedRecord.id);
+    assert.equal(secondInvokeCount, 0, 'the queued provider must still be blocked behind policy custody');
+    assert.equal(
+      sessionChainStore.getActive('opus', 'thread-policy-rotation').appliedPolicy.revision,
+      'revision-a',
+      'a runtime ID rotation must not let the next invocation bypass conversation policy custody',
+    );
+
+    releaseFirst();
+    await Promise.all([first, second]);
+    assert.equal(sessionChainStore.getActive('opus', 'thread-policy-rotation').appliedPolicy.revision, 'revision-b');
   });
 
   it('F062-fix: keeps auto-seal for api_key + handoff strategy on exact budget overflow', async () => {
@@ -7246,6 +8571,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
             model: 'claude-opus-4-6',
             usage: {
               inputTokens: 128211,
+              lastTurnInputTokens: 128211,
               outputTokens: 10,
               contextWindowSize: 128000,
             },
@@ -7273,6 +8599,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
           userId: 'user-f062-exact-handoff-seal',
           threadId: 'thread-f062-exact-handoff-seal',
           isLastCat: true,
+          rebuildPromptAfterSessionSeal: async () => 'rebuilt after threshold seal',
         }),
       );
 
@@ -8084,19 +9411,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();
 
-    const activeRecord = {
-      id: 'sess-gemini-cumul',
+    sessionChainStore.create({
       catId: 'gemini',
       threadId: 'thread-gemini-cumul',
       userId: 'user-gemini-cumul',
-      seq: 0,
-      status: 'active',
       compressionCount: 0,
       cliSessionId: 'cli-gemini-cumul',
-    };
-    // Override getActive to return our active record
-    sessionChainStore.getActive = async () => activeRecord;
-    sessionChainStore.update = async () => activeRecord;
+    });
 
     const sealRequests = [];
     const sessionSealer = {

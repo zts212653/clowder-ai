@@ -23,6 +23,7 @@
 #define MyAppPublisher "Clowder AI"
 #define MyAppURL       "https://github.com/zts212653/clowder-ai"
 #define MyAppExeName   "Clowder AI.exe"
+#define MyAppUserModelID "ai.clowderai.desktop"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -130,8 +131,8 @@ Source: "..\..\bundled\redis\*";                 DestDir: "{app}\.cat-cafe\redis
   Flags: recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}";        Filename: "{app}\desktop-dist\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\desktop-dist\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}";        Filename: "{app}\desktop-dist\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelID}"
+Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\desktop-dist\{#MyAppExeName}"; AppUserModelID: "{#MyAppUserModelID}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]

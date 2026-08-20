@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { writeOpportunityRefV1Schema } from './proactive-memory-deferred-receipt.js';
+
 export const PROACTIVE_MEMORY_ABSTENTION_REASON_CODES = [
   'not_continuity_valued',
   'insufficient_owner_evidence',
@@ -22,6 +24,11 @@ export const proactiveMemoryAbstentionReasonCodeSchema = z.enum(PROACTIVE_MEMORY
 export const proactiveMemoryAbstentionInputSchema = z
   .object({
     reasonCode: proactiveMemoryAbstentionReasonCodeSchema,
+    writeOpportunityRef: writeOpportunityRefV1Schema
+      .optional()
+      .describe(
+        'Exact content-free opportunity identity printed in an ASR person-memory prompt. Omit only when abstaining from an ordinary proactive-memory opportunity.',
+      ),
   })
   .strict();
 
@@ -41,8 +48,17 @@ const proactiveMemoryAbstentionEpisodeSchema = z
   })
   .strict();
 
+const proactiveMemoryDeferredEpisodeSchema = z
+  .object({
+    opportunityRef: proactiveMemoryOpportunityRefSchema,
+    disposition: z.literal('defer'),
+    reasonCode: z.literal('deferred_receipt_recorded'),
+  })
+  .strict();
+
 export const proactiveMemoryOpportunityEpisodeSchema = z.discriminatedUnion('disposition', [
   proactiveMemoryProposalEpisodeSchema,
+  proactiveMemoryDeferredEpisodeSchema,
   proactiveMemoryAbstentionEpisodeSchema,
 ]);
 

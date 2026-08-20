@@ -19,6 +19,7 @@ import { getAllConnectorDefinitions } from '@cat-cafe/shared';
 import { useEffect } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { hexToOklch } from '@/lib/color-utils';
+import { connectorThemeToken } from '@/lib/connector-theme-token';
 
 const DYNAMIC_STYLE_ID = 'f056-dynamic-cat-tokens';
 const CSS_SAFE_ID = /^[a-zA-Z0-9_-]+$/;
@@ -80,8 +81,9 @@ export function CatHueInjector() {
     /* Connector sources use the same pipeline as cats: one theme hex →
      * hexToOklch → hue/chroma → lightDecl/darkDecl derives all tiers. */
     for (const def of getAllConnectorDefinitions()) {
-      if (!def.id || !CSS_SAFE_ID.test(def.id)) continue;
-      if (ruleIds.includes(def.id)) continue;
+      if (!def.id) continue;
+      const tokenId = connectorThemeToken(def.id);
+      if (!CSS_SAFE_ID.test(tokenId) || ruleIds.includes(tokenId)) continue;
       const hex = def.themeColor;
       let h = 0;
       let c = 0;
@@ -96,9 +98,9 @@ export function CatHueInjector() {
           /* neutral fallback */
         }
       }
-      root.style.setProperty(`--${def.id}-hue`, h.toFixed(1));
-      root.style.setProperty(`--${def.id}-chroma`, c.toFixed(3));
-      ruleIds.push(def.id);
+      root.style.setProperty(`--${tokenId}-hue`, h.toFixed(1));
+      root.style.setProperty(`--${tokenId}-chroma`, c.toFixed(3));
+      ruleIds.push(tokenId);
     }
 
     /* Generate dynamic token stylesheet for ALL cats + connector sources. */

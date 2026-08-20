@@ -12,16 +12,17 @@
  *   Notification time (lastNotifiedAt): advances only after the owner wake is accepted.
  *   With no eventLog injected: original single-cursor behaviour is unchanged.
  */
-import type { CatId, CommunityEvent, IssuePendingWake, LegacyIssueAutomationState, TaskItem } from '@cat-cafe/shared';
+import type { CatId, CommunityEvent, IssuePendingWake, TaskItem } from '@cat-cafe/shared';
 import { parseIssueSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
-import { decideDelivery, decideTrackingWake } from '../../domains/community/community-delivery-policy.js';
+import { decideDelivery } from '../../domains/community/community-delivery-policy.js';
 import { issueCommentEventId } from '../../domains/community/community-keys.js';
 import {
   classifyIssueComment,
   type IssueCommentClassification,
 } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
+import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type { IssueComment, IssueCommentRouter } from './IssueCommentRouter.js';
@@ -35,6 +36,7 @@ export interface IssueCommentSignal {
   readonly retryWake?: IssuePendingWake;
   readonly commitRoutedWake?: (wake: IssuePendingWake) => Promise<void>;
   readonly commitWakeAccepted: () => Promise<void>;
+  readonly issueState?: 'open' | 'closed';
 }
 
 export interface IssueTrackingMetadata {
@@ -51,6 +53,8 @@ export interface IssueCommentTaskSpecOptions {
   /** Preferred actor-aware metadata path; fetchIssueState remains for backward-compatible adapters. */
   readonly fetchIssueMetadata?: (repoFullName: string, issueNumber: number) => Promise<IssueTrackingMetadata>;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
+  /** F280 Phase C canonical one-shot wait lifecycle. Production wiring requires this. */
+  readonly waitLifecycle?: Pick<GitHubWaitLifecycleService, 'observe'>;
   readonly log: {
     info: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -111,12 +115,7 @@ function classifyForTask(comment: IssueComment, opts: IssueCommentTaskSpecOption
   return opts.classifyComment?.(comment) ?? classifyIssueComment(comment, opts);
 }
 
-function shouldDeliverComment(
-  comment: IssueComment,
-  classification: IssueCommentClassification,
-  task: TaskItem,
-  subjectAuthorLogin?: string,
-): boolean {
+function shouldCollectAsWaitFact(comment: IssueComment, classification: IssueCommentClassification): boolean {
   const baseDecision = decideDelivery({
     state: 'in_progress',
     eventKind: 'issue.commented',
@@ -124,19 +123,7 @@ function shouldDeliverComment(
     critical: classification.critical,
     suppressionReason: classification.suppressionReason,
   });
-  if (baseDecision === 'silent-log') return false;
-  // Preserve existing immediate-delivery protocols (security/data-loss criticality)
-  // before applying the opt-in actor policy.
-  if (classification.critical) return true;
-  return (
-    decideTrackingWake({
-      wakePolicy: (task.automationState as LegacyIssueAutomationState | undefined)?.wakePolicy,
-      actorLogin: comment.author,
-      actorType: comment.actorType,
-      subjectAuthorLogin,
-      authorAssociation: comment.authorAssociation as import('@cat-cafe/shared').GitHubAuthorAssociation | undefined,
-    }).decision === 'deliver'
-  );
+  return baseDecision !== 'silent-log';
 }
 
 export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): TaskSpec_P1<IssueCommentSignal> {
@@ -376,7 +363,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               const pendingDelivery = processedComments.filter((c) => {
                 if (c.id <= deliveryCursor) return false;
                 const commentClassification = classifications.get(c.id) ?? classifyForTask(c, opts);
-                return shouldDeliverComment(c, commentClassification, task, issueMetadata.authorLogin);
+                return shouldCollectAsWaitFact(c, commentClassification);
               });
               const processedDeliveryBoundary =
                 processedComments.length > 0
@@ -392,6 +379,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                       repoFullName,
                       issueNumber,
                       newComments: pendingDelivery,
+                      issueState,
                       deliveredCursor: processedDeliveryBoundary,
                       commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake),
                       commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
@@ -413,9 +401,24 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                     const maxSuppressedId = Math.max(...processedComments.map((c) => c.id));
                     await advanceDeliveryCursor(task.id, issueKey, maxSuppressedId);
                   }
-                  await opts.taskStore.update(task.id, { status: 'done' });
-                  await opts.taskStore.patchAutomationState(task.id, { issue: { issueState: 'closed' } });
-                  opts.log.info(`[issue-comment] Issue ${issueKey} closed — task marked done`);
+                  if (opts.waitLifecycle) {
+                    workItems.push({
+                      signal: {
+                        task,
+                        repoFullName,
+                        issueNumber,
+                        newComments: [],
+                        issueState,
+                        deliveredCursor: processedDeliveryBoundary,
+                        commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
+                      },
+                      subjectKey: task.subjectKey!,
+                    });
+                  } else {
+                    await opts.taskStore.update(task.id, { status: 'done' });
+                    await opts.taskStore.patchAutomationState(task.id, { issue: { issueState: 'closed' } });
+                    opts.log.info(`[issue-comment] Issue ${issueKey} closed — task marked done`);
+                  }
                 }
                 continue;
               }
@@ -443,6 +446,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   repoFullName,
                   issueNumber,
                   newComments: pendingDelivery,
+                  issueState,
                   deliveredCursor: processedDeliveryBoundary,
                   commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake),
                   commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
@@ -462,7 +466,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               // legacy deployments preserve critical overrides and exact-only suppression.
               const newComments = allNewComments.filter((c) => {
                 const commentClassification = classifyForTask(c, opts);
-                return shouldDeliverComment(c, commentClassification, task, issueMetadata.authorLogin);
+                return shouldCollectAsWaitFact(c, commentClassification);
               });
 
               const maxCommentId =
@@ -483,6 +487,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                       repoFullName,
                       issueNumber,
                       newComments,
+                      issueState,
                       deliveredCursor: maxCommentId,
                       commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake, true),
                       commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
@@ -491,9 +496,24 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   });
                 } else {
                   // No pending comments → close immediately
-                  await opts.taskStore.update(task.id, { status: 'done' });
-                  await opts.taskStore.patchAutomationState(task.id, { issue: { issueState: 'closed' } });
-                  opts.log.info(`[issue-comment] Issue ${issueKey} closed — task marked done`);
+                  if (opts.waitLifecycle) {
+                    workItems.push({
+                      signal: {
+                        task,
+                        repoFullName,
+                        issueNumber,
+                        newComments: [],
+                        issueState,
+                        deliveredCursor: maxCommentId,
+                        commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
+                      },
+                      subjectKey: task.subjectKey!,
+                    });
+                  } else {
+                    await opts.taskStore.update(task.id, { status: 'done' });
+                    await opts.taskStore.patchAutomationState(task.id, { issue: { issueState: 'closed' } });
+                    opts.log.info(`[issue-comment] Issue ${issueKey} closed — task marked done`);
+                  }
                 }
                 continue;
               }
@@ -506,6 +526,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   repoFullName,
                   issueNumber,
                   newComments,
+                  issueState,
                   deliveredCursor: maxCommentId,
                   commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake, true),
                   commitWakeAccepted: () => acknowledgeWake(task.id, issueKey),
@@ -545,6 +566,36 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
           return;
         }
 
+        if (opts.waitLifecycle) {
+          const deliveredCursor =
+            signal.deliveredCursor ??
+            (signal.newComments.length > 0
+              ? Math.max(...signal.newComments.map((comment) => comment.id))
+              : (task.automationState?.issue?.lastCommentCursor ?? 0));
+          await opts.waitLifecycle.observe({
+            taskId: task.id,
+            facts: {
+              issue: {
+                state: signal.issueState ?? 'open',
+                comments: signal.newComments.map((comment) => ({
+                  id: comment.id,
+                  author: comment.author,
+                  sourceRef: `github:issue-comment:${comment.id}`,
+                })),
+              },
+            },
+            collectorPatch: {
+              issue: {
+                lastCommentCursor: deliveredCursor,
+                lastDeliveredCursor: deliveredCursor,
+                issueState: signal.issueState ?? 'open',
+              },
+            },
+            ...(signal.issueState === 'closed' ? { subjectState: 'closed' as const } : {}),
+          });
+          return;
+        }
+
         let wake = signal.retryWake;
         if (!wake) {
           const routeResult = await opts.issueCommentRouter.route(
@@ -557,8 +608,6 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               threadId: task.threadId,
               catId: task.ownerCatId,
               userId: task.userId,
-              trackingInstructions: (task.automationState as LegacyIssueAutomationState | undefined)
-                ?.trackingInstructions,
             },
           );
 

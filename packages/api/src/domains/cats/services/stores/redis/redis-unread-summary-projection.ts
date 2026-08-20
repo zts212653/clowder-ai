@@ -45,17 +45,21 @@ async function projectMessageIds(
     return raw === null ? null : Number(raw);
   });
 
-  type RangePlan =
-    | { kind: 'expired'; commandIndex: number }
-    | { kind: 'scored'; sameScoreIndex: number; higherScoreIndex: number };
+  type RangePlan = { kind: 'stale' } | { kind: 'scored'; sameScoreIndex: number; higherScoreIndex: number };
   const rangePipeline = redis.pipeline();
   const rangePlans: RangePlan[] = [];
+  const idsByThread = new Map<string, string[]>();
   let commandIndex = 0;
   for (const [index, { cursor }] of cursorPlans.entries()) {
     const position = positions[index];
     if (position === null) {
-      rangePipeline.zrange(MessageKeys.threadVisibility(cursor.threadId), 0, -1);
-      rangePlans.push({ kind: 'expired', commandIndex: commandIndex++ });
+      // #1304: Stale cursor — position can't be resolved in the visibility
+      // index (message hash pruned AND ZSET membership evicted). Scanning
+      // the entire visibility set (zrange 0 -1) produces phantom 99+ unread
+      // badges for every old thread. The cursor was valid at some point; the
+      // safe default is 0 unread, not "entire history is unread."
+      idsByThread.set(cursor.threadId, []);
+      rangePlans.push({ kind: 'stale' });
       continue;
     }
     rangePipeline.zrangebyscore(MessageKeys.threadVisibility(cursor.threadId), position, position);
@@ -64,21 +68,19 @@ async function projectMessageIds(
     rangePlans.push({ kind: 'scored', sameScoreIndex, higherScoreIndex: commandIndex++ });
   }
 
-  const rangeResults = (await rangePipeline.exec()) as PipelineResults;
-  const idsByThread = new Map<string, string[]>();
-  for (const [index, { cursor, parsed }] of cursorPlans.entries()) {
-    const plan = rangePlans[index];
-    if (!plan) throw new Error(`Unread range plan missing cursor ${index}`);
-    if (plan.kind === 'expired') {
-      const allIds = readPipelineValue<string[]>(rangeResults, plan.commandIndex, 'Unread range');
-      // Match getByThreadAfter's fully-pruned fallback: scan from visibility
-      // start. Raw-ID filtering would recreate the C -> Q -> C cursor cycle.
-      idsByThread.set(cursor.threadId, allIds);
-      continue;
+  if (commandIndex > 0) {
+    const rangeResults = (await rangePipeline.exec()) as PipelineResults;
+    for (const [index, { cursor, parsed }] of cursorPlans.entries()) {
+      const plan = rangePlans[index];
+      if (!plan) throw new Error(`Unread range plan missing cursor ${index}`);
+      if (plan.kind === 'stale') {
+        // Already set to empty in the range-building loop
+        continue;
+      }
+      const sameScoreIds = readPipelineValue<string[]>(rangeResults, plan.sameScoreIndex, 'Unread range');
+      const higherScoreIds = readPipelineValue<string[]>(rangeResults, plan.higherScoreIndex, 'Unread range');
+      idsByThread.set(cursor.threadId, [...sameScoreIds.filter((id) => id > parsed.id), ...higherScoreIds]);
     }
-    const sameScoreIds = readPipelineValue<string[]>(rangeResults, plan.sameScoreIndex, 'Unread range');
-    const higherScoreIds = readPipelineValue<string[]>(rangeResults, plan.higherScoreIndex, 'Unread range');
-    idsByThread.set(cursor.threadId, [...sameScoreIds.filter((id) => id > parsed.id), ...higherScoreIds]);
   }
   return idsByThread;
 }

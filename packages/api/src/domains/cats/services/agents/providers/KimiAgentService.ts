@@ -11,6 +11,7 @@ import {
 } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
+import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
@@ -128,6 +129,20 @@ export class KimiAgentService implements AgentService {
     return { provider: 'kimi', carrier: 'kimi_stream_json', deliverySemantics: 'unsupported' };
   }
 
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'kimi',
+      carrier: 'stream_json',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: true,
+      reason: 'Kimi session stats report current context usage and model window',
+    };
+  }
+
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const requestedModel = options?.callbackEnv?.CAT_CAFE_KIMI_MODEL_OVERRIDE ?? this.model;
     const effectiveModel = resolveKimiModelAlias(requestedModel, options?.callbackEnv);
@@ -222,15 +237,25 @@ export class KimiAgentService implements AgentService {
             timestamp: Date.now(),
           };
         }
-        l0AgentFilePath = writeKimiL0AgentFile(
-          buildKimiL0AgentFileContent({
-            catId: this.catId as string,
-            l0,
-            packSystemPrompt: freshStartReason
-              ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
-              : options?.systemPrompt,
-          }),
-        );
+        // kimi-code >=0.30 hard-rejects `--agent-file` alongside `--session`
+        // ("the agent is bound at session creation and the bound agent is
+        // restored automatically on resume") — exit 1 before any turn runs.
+        // The flag only ever selected the agent for a *new* session, so on a
+        // resume it was already a silent no-op; the fingerprint gate above has
+        // just proven the bound agent IS this exact L0, so dropping the file
+        // is the honest expression of the CLI's own semantics, not a downgrade.
+        // The L0 stays compiled either way — the gate depends on it.
+        if (!effectiveResumeSessionId) {
+          l0AgentFilePath = writeKimiL0AgentFile(
+            buildKimiL0AgentFileContent({
+              catId: this.catId as string,
+              l0,
+              packSystemPrompt: freshStartReason
+                ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
+                : options?.systemPrompt,
+            }),
+          );
+        }
       } catch (err) {
         if (tempMcpConfig) {
           try {
@@ -255,6 +280,7 @@ export class KimiAgentService implements AgentService {
     const args: string[] = isLegacy
       ? ['--print', '--output-format', 'stream-json']
       : ['--output-format', 'stream-json'];
+    const managedArgvFlags: string[] = [];
     if (effectiveResumeSessionId) {
       args.push('--session', effectiveResumeSessionId);
       metadata.sessionId = effectiveResumeSessionId;
@@ -283,6 +309,7 @@ export class KimiAgentService implements AgentService {
     }
     if (l0AgentFilePath) {
       args.push('--agent-file', l0AgentFilePath);
+      managedArgvFlags.push('--agent-file');
     }
     if (isLegacy) {
       args.push('--prompt', effectivePrompt);
@@ -316,9 +343,16 @@ export class KimiAgentService implements AgentService {
       let sawThinking = false;
       let emittedImageCapability = false;
       let hadCliError = false;
+      // clowder-ai#1197 review (Terra P1): cost estimation is only allowed
+      // from an immutable raw cost basis captured from usage/stats actually
+      // emitted by THIS invocation — never from post-enrichment
+      // metadata.usage (the session snapshot writes lastTurnInputTokens for
+      // health display; it is not verified billable turn telemetry).
+      let rawCostBasis: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined;
       const cliOpts = {
         command: kimiCommand,
         args,
+        ...(managedArgvFlags.length > 0 ? { managedArgvFlags } : {}),
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         // env is always present: KIMI_MODEL_THINKING_EFFORT carries the resolved
         // member/thread effort for tier-capable models. For boolean-thinking
@@ -481,7 +515,17 @@ export class KimiAgentService implements AgentService {
         }
 
         const usage = parseUsage(msg.usage) ?? parseUsage(msg.stats);
-        if (usage) metadata.usage = { ...(metadata.usage ?? {}), ...usage };
+        if (usage) {
+          metadata.usage = { ...(metadata.usage ?? {}), ...usage };
+          // Capture the raw billable fields BEFORE any snapshot enrichment
+          // can touch metadata.usage. Latest non-null value per field wins,
+          // mirroring the merge semantics above.
+          rawCostBasis = {
+            inputTokens: usage.inputTokens ?? usage.lastTurnInputTokens ?? rawCostBasis?.inputTokens,
+            outputTokens: usage.outputTokens ?? rawCostBasis?.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens ?? rawCostBasis?.cacheReadTokens,
+          };
+        }
 
         const messageSessionId = readSessionIdFromMessage(msg);
         if (messageSessionId && messageSessionId !== rejectedResumeSessionId) {
@@ -596,6 +640,40 @@ export class KimiAgentService implements AgentService {
           }
         } catch {
           // best-effort snapshot enrichment only
+        }
+      }
+
+      // clowder-ai#1197: Kimi CLI never reports costUsd. Estimate an
+      // API-equivalent cost from the pricing table (same pattern as Codex).
+      // Keyed by effectiveModel (= metadata.model, what the client actually
+      // reports); unknown aliases return null and stay unpriced — token
+      // telemetry still shows, no guessing.
+      //
+      // Review gates (Terra, cat-cafe#3479):
+      //   1. Estimate only from the immutable raw cost basis captured above,
+      //      and only when that raw record itself carries billable fields
+      //      (input or last-turn input, plus output). stats carrying only
+      //      total/context tokens do NOT qualify, and the post-enrichment
+      //      snapshot lastTurnInputTokens is never read for cost.
+      //   2. Skip estimation when the raw record reports cached input:
+      //      whether Kimi's cached_input_tokens is a subset of input_tokens
+      //      (OpenAI-shaped) is NOT documented by any official schema and we
+      //      hold no verified live sample. Until one is captured, cache-split
+      //      arithmetic would rest on an unproven input contract — omit cost.
+      const rawInput = rawCostBasis?.inputTokens;
+      const rawOutput = rawCostBasis?.outputTokens;
+      const rawCachedInput = rawCostBasis?.cacheReadTokens ?? 0;
+      if (
+        rawInput != null &&
+        rawOutput != null &&
+        rawCachedInput === 0 &&
+        metadata.usage &&
+        metadata.usage.costUsd == null
+      ) {
+        const estimatedCost = estimateCostFromTokens(effectiveModel, rawInput, rawOutput);
+        if (estimatedCost != null) {
+          metadata.usage.costUsd = estimatedCost;
+          metadata.usage.costEstimated = true;
         }
       }
 

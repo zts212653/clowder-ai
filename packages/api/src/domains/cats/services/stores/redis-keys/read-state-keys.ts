@@ -4,7 +4,7 @@
  */
 
 export const ReadStateKeys = {
-  /** Hash: read-state:{userId}:{threadId} → { lastReadMessageId, updatedAt } */
+  /** Hash: read-state:{userId}:{threadId} → { lastReadMessageId, lastReadVisibilityCursor?, updatedAt } */
   cursor: (userId: string, threadId: string) => `read-state:${userId}:${threadId}`,
   /** Pattern for cleanup: read-state:*:{threadId} */
   threadPattern: (threadId: string) => `read-state:*:${threadId}`,

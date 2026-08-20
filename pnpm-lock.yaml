@@ -29,9 +29,15 @@ importers:
       '@cat-cafe/shared':
         specifier: workspace:*
         version: link:../shared
+      '@clowder-ai/feishu-meeting-intake':
+        specifier: 0.1.0-alpha.6
+        version: 0.1.0-alpha.6
       '@clowder-ai/plugin-contract':
-        specifier: 0.1.0-beta.7
-        version: 0.1.0-beta.7
+        specifier: 0.1.0-beta.9
+        version: 0.1.0-beta.9
+      '@clowder-ai/plugin-sdk':
+        specifier: 0.1.0-beta.5
+        version: 0.1.0-beta.5
       '@fastify/cookie':
         specifier: '9'
         version: 9.4.0
@@ -272,6 +278,18 @@ importers:
       ioredis:
         specifier: ^5.3.0
         version: 5.9.2
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      remark-math:
+        specifier: ^6.0.0
+        version: 6.0.0
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       yaml:
         specifier: ^2.8.1
         version: 2.8.2
@@ -1024,8 +1042,32 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.7':
-    resolution: {integrity: sha512-dDtMthN6ssmBtJM6oQ7sOWqKPcIW2zOe3BRdughWR/gjT5mkuwPK5X16BOypslWeYpGUUWkWC3cOw8W3Z3i/ow==}
+  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.6':
+    resolution: {integrity: sha512-lYf6b5JXMiSYoxg128nyGso1zUvb+rxStAsq08vlcdRY7aeVyt7vGTCQQ2qsThr1KxfythFKIrSFS+2sdaMwpw==}
+    engines: {node: '>=20.0.0'}
+    bundledDependencies:
+      - '@clack/core'
+      - '@clack/prompts'
+      - '@clowder-ai/plugin-contract'
+      - '@clowder-ai/plugin-sdk'
+      - '@larksuite/cli'
+      - ajv
+      - ajv-formats
+      - fast-deep-equal
+      - fast-string-truncated-width
+      - fast-string-width
+      - fast-uri
+      - fast-wrap-ansi
+      - json-schema-traverse
+      - require-from-string
+      - sisteransi
+
+  '@clowder-ai/plugin-contract@0.1.0-beta.9':
+    resolution: {integrity: sha512-YPpJguiVd0qdoOX8HdU26k36b+58zj0V9w02z/GpRnF8WBubfwuoZ5RBQPE2gf5qwSQwCl/+WVRhsMG/i65Epg==}
+    engines: {node: '>=20.0.0'}
+
+  '@clowder-ai/plugin-sdk@0.1.0-beta.5':
+    resolution: {integrity: sha512-NHSoIqMjA3ymyyxAHdVmj99Sd+1Enem6Y9/twQAzHkspzuamGMvkdz/+6w0X9oxvbYeAdPQ/4749TB7ykTS2tA==}
     engines: {node: '>=20.0.0'}
 
   '@codemirror/autocomplete@6.20.1':
@@ -7392,10 +7434,16 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.7':
+  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.6': {}
+
+  '@clowder-ai/plugin-contract@0.1.0-beta.9':
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
+
+  '@clowder-ai/plugin-sdk@0.1.0-beta.5':
+    dependencies:
+      '@clowder-ai/plugin-contract': 0.1.0-beta.9
 
   '@codemirror/autocomplete@6.20.1':
     dependencies:

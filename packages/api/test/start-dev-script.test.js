@@ -597,6 +597,80 @@ function createTempProject() {
   return tmp;
 }
 
+function createManagedRuntimeFixture({
+  launcherHasConnectorInjection = false,
+  runtimeDirName = 'cat-cafe-runtime',
+  runtimeBranch = 'runtime/main-sync',
+} = {}) {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'managed-runtime-'));
+  const workspaceRoot = join(tempRoot, 'launcher');
+  const runtimeRoot = join(tempRoot, runtimeDirName);
+  mkdirSync(join(workspaceRoot, 'scripts'), { recursive: true });
+
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', workspaceRoot, ...args], {
+      encoding: 'utf8',
+      env: baseShellEnv(),
+    });
+    assert.equal(
+      result.status,
+      0,
+      `git ${args.join(' ')} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  };
+
+  git('init', '--initial-branch=main');
+  git('config', 'user.name', 'Clowder AI Test');
+  git('config', 'user.email', 'test@cat-cafe.local');
+  writeFileSync(join(workspaceRoot, 'launcher-version.txt'), 'pre-1282\n');
+  writeFileSync(
+    join(workspaceRoot, 'scripts', 'runtime-worktree.sh'),
+    [
+      '#!/bin/bash',
+      ...(launcherHasConnectorInjection
+        ? ['export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"']
+        : []),
+      'exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource "$@"',
+      '',
+    ].join('\n'),
+  );
+  git('add', 'launcher-version.txt', 'scripts/runtime-worktree.sh');
+  git('commit', '-m', 'seed legacy launcher');
+  git('worktree', 'add', '-b', runtimeBranch, runtimeRoot);
+
+  copyStartDevClosure(
+    runtimeRoot,
+    resolve(process.cwd(), '../../scripts/start-dev.sh'),
+    join(runtimeRoot, 'scripts', 'start-dev.sh'),
+    join(runtimeRoot, 'scripts', 'download-source-overrides.sh'),
+  );
+
+  return { tempRoot, workspaceRoot, runtimeRoot };
+}
+
+function readManagedRuntimeConnectorAutostart({ runtimeRoot, workspaceRoot }, envOverrides = {}) {
+  const scriptPath = join(runtimeRoot, 'scripts', 'start-dev.sh');
+  const result = spawnSync(
+    'bash',
+    [
+      '-lc',
+      `set -e\nsource "${scriptPath}" --source-only --prod-web --profile=opensource >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "\${CONNECTOR_GATEWAY_AUTOSTART-unset}"`,
+    ],
+    {
+      cwd: runtimeRoot,
+      encoding: 'utf8',
+      env: baseShellEnv({
+        CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
+        CAT_CAFE_WORKSPACE_ROOT: workspaceRoot,
+        CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1',
+        ...envOverrides,
+      }),
+    },
+  );
+  assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return result.stdout.trim();
+}
+
 function copyStartDevClosure(tempRoot, scriptPath, tempScriptPath, tempOverridesPath) {
   mkdirSync(join(tempRoot, 'scripts', 'lib'), { recursive: true });
   cpSync(scriptPath, tempScriptPath);
@@ -862,6 +936,64 @@ test('dotenv cannot grant connector autostart without wrapper env', () => {
     assert.equal(result.stdout.trim(), 'unset');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('new runtime preserves connector autostart when invoked by the pre-1282 managed launcher', () => {
+  const fixture = createManagedRuntimeFixture();
+  try {
+    assert.equal(readManagedRuntimeConnectorAutostart(fixture), '1');
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('legacy managed launcher honors its explicit runtime path and branch selection', () => {
+  const fixture = createManagedRuntimeFixture({
+    runtimeDirName: 'custom-runtime',
+    runtimeBranch: 'runtime/custom',
+  });
+  try {
+    assert.equal(
+      readManagedRuntimeConnectorAutostart(fixture, {
+        CAT_CAFE_RUNTIME_DIR: fixture.runtimeRoot,
+        CAT_CAFE_RUNTIME_BRANCH: 'runtime/custom',
+      }),
+      '1',
+    );
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('pre-1282 managed launcher compatibility never overrides an explicit connector opt-out', () => {
+  const fixture = createManagedRuntimeFixture();
+  try {
+    writeFileSync(join(fixture.runtimeRoot, '.env.local'), 'CONNECTOR_GATEWAY_AUTOSTART=1\n');
+    assert.equal(readManagedRuntimeConnectorAutostart(fixture, { CONNECTOR_GATEWAY_AUTOSTART: '0' }), '0');
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('registered worktree topology alone cannot grant connector autostart', () => {
+  const fixture = createManagedRuntimeFixture({ launcherHasConnectorInjection: true });
+  try {
+    assert.equal(readManagedRuntimeConnectorAutostart(fixture), 'unset');
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('arbitrary registered feature worktree cannot impersonate the managed runtime', () => {
+  const fixture = createManagedRuntimeFixture({
+    runtimeDirName: 'feature-probe',
+    runtimeBranch: 'feat/probe',
+  });
+  try {
+    assert.equal(readManagedRuntimeConnectorAutostart(fixture), 'unset');
+  } finally {
+    rmSync(fixture.tempRoot, { recursive: true, force: true });
   }
 });
 

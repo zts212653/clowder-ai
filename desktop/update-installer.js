@@ -5,9 +5,13 @@
 // Resume: Range + If-Range; discard partial on ETag mismatch (spec §2).
 // Spawn: platform-specific installer launch (Windows UAC / macOS open).
 
-'use strict';
-
 const fs = require('node:fs');
+const {
+  attachRedirectDiagnostics,
+  diagnoseProxy,
+  safeErrorMessage,
+  safeHost,
+} = require('./update-network-diagnostics');
 
 const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
@@ -98,10 +102,13 @@ function fetchReleases(net, appVersion, etag, timeoutMs) {
  * @param {Function} setProgressBar — (0..1 | -1)
  * @param {Function} dbg — logger
  */
-function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, timeoutMs) {
+async function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, timeoutOrOptions) {
+  const options = typeof timeoutOrOptions === 'number' ? { timeoutMs: timeoutOrOptions } : timeoutOrOptions || {};
+  const url =
+    asset.browser_download_url || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${asset.name}`;
+  await diagnoseProxy(options.session, url, dbg);
+
   return new Promise((resolve, reject) => {
-    const url =
-      asset.browser_download_url || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${asset.name}`;
     const metaPath = `${destPath}.meta`;
     let existingSize = 0;
     let savedEtag = null;
@@ -133,9 +140,15 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
     let dlTimeout = null;
     let activeResponse = null;
     let activeWs = null;
+    let request = null;
+    let phase = 'request';
+    let receivedBytes = 0;
     const settle = (fn, val) => {
       if (settled) return;
       settled = true;
+      if (fn === reject) {
+        dbg(`Download failed phase=${phase} bytes=${receivedBytes}: ${safeErrorMessage(val)}`);
+      }
       if (dlTimeout) clearTimeout(dlTimeout);
       // Unified cleanup: cancel request, destroy response, close writer
       if (activeResponse) {
@@ -146,16 +159,22 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
         activeWs.end();
         activeWs = null;
       }
-      if (typeof request.abort === 'function') request.abort();
+      if (typeof request?.abort === 'function') request.abort();
       fn(val);
     };
 
-    const request = net.request(url);
+    try {
+      request = net.request(url);
+    } catch (error) {
+      settle(reject, error);
+      return;
+    }
     request.setHeader('User-Agent', `ClowderAI/${appVersion}`);
     if (existingSize > 0 && savedEtag) {
       request.setHeader('Range', `bytes=${existingSize}-`);
       request.setHeader('If-Range', savedEtag);
     }
+    attachRedirectDiagnostics(request, dbg);
 
     request.on('response', (response) => {
       // Guard: discard late response arriving after timeout/error settled the Promise.
@@ -166,7 +185,9 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
         return;
       }
       activeResponse = response;
-      let isResume = response.statusCode === 206;
+      phase = 'response';
+      dbg(`Download response: status=${response.statusCode} host=${safeHost(response.url || url)}`);
+      const isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
         settle(reject, new Error(`HTTP ${response.statusCode}`));
         return;
@@ -213,11 +234,13 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
       let downloaded = existingSize;
       const ws = fs.createWriteStream(destPath, { flags: isResume ? 'a' : 'w' });
       activeWs = ws;
+      phase = 'stream';
 
       ws.on('error', (err) => settle(reject, err));
 
       response.on('data', (chunk) => {
         if (settled) return;
+        receivedBytes += chunk.length;
         downloaded += chunk.length;
         setProgressBar(asset.size > 0 ? downloaded / asset.size : -1);
         if (!ws.write(chunk)) {
@@ -246,11 +269,15 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg, ti
         dbg('Download timeout (30 min)');
         settle(reject, new Error('Download timeout (30 minutes)'));
       },
-      timeoutMs || 30 * 60 * 1000,
+      options.timeoutMs || 30 * 60 * 1000,
     );
 
     request.on('error', (err) => settle(reject, err));
-    request.end();
+    try {
+      request.end();
+    } catch (error) {
+      settle(reject, error);
+    }
   });
 }
 

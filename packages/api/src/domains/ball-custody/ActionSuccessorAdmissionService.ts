@@ -35,6 +35,65 @@ export type {
 } from './ActionSuccessorAdmissionContract.js';
 export { buildActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
 
+export type ActionSuccessorStandingMismatchDimension = 'owner' | 'target_thread' | 'tenant';
+
+export class ActionSuccessorStandingError extends Error {
+  constructor(
+    readonly status: 'mismatch' | 'insufficient',
+    readonly reason: string,
+    readonly mismatchDimensions: readonly ActionSuccessorStandingMismatchDimension[] = [],
+  ) {
+    super(`action successor freshness rejected: ${status}: ${reason}`);
+    this.name = 'ActionSuccessorStandingError';
+  }
+}
+
+type ActionSuccessorStandingInput = Pick<
+  ActionSuccessorAdmissionInput,
+  'action' | 'holderCatIds' | 'targetThreadId' | 'tenantScope'
+>;
+
+export function assertActionSuccessorStanding(
+  input: ActionSuccessorStandingInput,
+  freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
+): void {
+  const mismatchDimensions: ActionSuccessorStandingMismatchDimension[] = [];
+  if (
+    freshness.ownerCatId !== undefined &&
+    (input.holderCatIds.length !== 1 || input.holderCatIds[0] !== freshness.ownerCatId)
+  ) {
+    mismatchDimensions.push('owner');
+  }
+  if (freshness.holderThreadId !== undefined && input.targetThreadId !== freshness.holderThreadId) {
+    mismatchDimensions.push('target_thread');
+  }
+  if (freshness.tenantScope !== undefined && input.tenantScope !== freshness.tenantScope) {
+    mismatchDimensions.push('tenant');
+  }
+  if (mismatchDimensions.length > 0) {
+    throw new ActionSuccessorStandingError(
+      'mismatch',
+      'task standing does not match the persisted owner, tenant, and task thread',
+      mismatchDimensions,
+    );
+  }
+}
+
+export type LocalReviewTerminalRoutePreflight =
+  | { applicable: false }
+  | { applicable: true; allow: true; expectedThreadId: string }
+  | {
+      applicable: true;
+      allow: false;
+      reason:
+        | 'generation_mismatch'
+        | 'reviewer_not_holder'
+        | 'holder_thread_mismatch'
+        | 'predecessor_route_missing'
+        | 'target_thread_mismatch';
+      expectedThreadId?: string;
+    };
+
 export class ActionSuccessorAdmissionService {
   constructor(
     private readonly leaseStore: Pick<
@@ -80,6 +139,78 @@ export class ActionSuccessorAdmissionService {
     );
   }
 
+  /**
+   * Read-only standing preflight for an initial structured transfer. F246 calls
+   * this before proposal persistence; F167 calls the same assertion again at
+   * lease admission so the approval window cannot weaken durable task truth.
+   */
+  async preflightStructuredTransferStanding(
+    input: ActionSuccessorStandingInput,
+  ): Promise<Extract<ActionFreshnessResolution, { status: 'verified' }>> {
+    const terminalPredicate = this.requireTerminalPredicate(input);
+    const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
+    assertActionSuccessorStanding(input, freshness);
+    return freshness;
+  }
+
+  /**
+   * A local-review terminal carrier returns to the thread that directly issued
+   * the review lease. Task ancestry and older coordination provenance are not
+   * delivery authority. This runs before callback persistence.
+   */
+  async preflightLocalReviewTerminalRoute(input: {
+    leaseId: string;
+    generation: number;
+    reviewerCatId: string;
+    holderThreadId: string;
+    targetThreadId: string;
+  }): Promise<LocalReviewTerminalRoutePreflight> {
+    const lease = await this.leaseStore.get(input.leaseId);
+    // Without the lease there is no authoritative action-family evidence. Do
+    // not misclassify an unknown/non-review terminal as a review route error;
+    // the callback's other carrier and terminal guards remain in force.
+    if (!lease) return { applicable: false };
+    if (lease.actionFamily !== 'review' || lease.successorSlot !== 'reviewer') return { applicable: false };
+
+    const expectedThreadId = lease.predecessorThreadId;
+    if (lease.generation !== input.generation) {
+      return {
+        applicable: true,
+        allow: false,
+        reason: 'generation_mismatch',
+        ...(expectedThreadId ? { expectedThreadId } : {}),
+      };
+    }
+    if (!lease.holderCatIds.includes(input.reviewerCatId)) {
+      return {
+        applicable: true,
+        allow: false,
+        reason: 'reviewer_not_holder',
+        ...(expectedThreadId ? { expectedThreadId } : {}),
+      };
+    }
+    if (lease.holderThreadId !== input.holderThreadId) {
+      return {
+        applicable: true,
+        allow: false,
+        reason: 'holder_thread_mismatch',
+        ...(expectedThreadId ? { expectedThreadId } : {}),
+      };
+    }
+    if (!expectedThreadId) {
+      return { applicable: true, allow: false, reason: 'predecessor_route_missing' };
+    }
+    if (input.targetThreadId !== expectedThreadId) {
+      return {
+        applicable: true,
+        allow: false,
+        reason: 'target_thread_mismatch',
+        expectedThreadId,
+      };
+    }
+    return { applicable: true, allow: true, expectedThreadId };
+  }
+
   async admit(
     input: ActionSuccessorAdmissionInput,
     options?: ActionSuccessorAdmissionOptions,
@@ -101,7 +232,7 @@ export class ActionSuccessorAdmissionService {
 
     const terminalPredicate = this.requireTerminalPredicate(input);
     const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
-    this.assertFreshnessStanding(input, freshness);
+    assertActionSuccessorStanding(input, freshness);
     const claimInput: ClaimActionSuccessorInput = {
       leaseId: randomUUID(),
       ...identity,
@@ -210,7 +341,7 @@ export class ActionSuccessorAdmissionService {
       resolveVerifiedPredicate: async (request) => {
         const terminalPredicate = this.requireTerminalPredicate(request);
         const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
-        this.assertFreshnessStanding(request, freshness);
+        assertActionSuccessorStanding(request, freshness);
         return { terminalPredicate, freshnessEvidenceRef: freshness.evidenceRef };
       },
       admitted: (outcome, lease, dispatchId) => this.admitted(outcome, lease, dispatchId),
@@ -218,7 +349,9 @@ export class ActionSuccessorAdmissionService {
     });
   }
 
-  private requireTerminalPredicate(input: ActionSuccessorAdmissionInput): CanonicalActionTerminalPredicate {
+  private requireTerminalPredicate(
+    input: Pick<ActionSuccessorAdmissionInput, 'action'>,
+  ): CanonicalActionTerminalPredicate {
     if (!input.action.terminalPredicate) {
       throw new Error('terminal predicate is required for a new action successor generation');
     }
@@ -244,23 +377,9 @@ export class ActionSuccessorAdmissionService {
   ): Promise<Extract<ActionFreshnessResolution, { status: 'verified' }>> {
     const freshness = await this.resolveGenerationFreshness(terminalPredicate);
     if (freshness.status !== 'verified') {
-      throw new Error(`action successor freshness rejected: ${freshness.status}: ${freshness.reason}`);
+      throw new ActionSuccessorStandingError(freshness.status, freshness.reason);
     }
     return freshness;
-  }
-
-  private assertFreshnessStanding(
-    input: ActionSuccessorAdmissionInput,
-    freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
-  ): void {
-    const ownerMatches =
-      freshness.ownerCatId === undefined ||
-      (input.holderCatIds.length === 1 && input.holderCatIds[0] === freshness.ownerCatId);
-    const threadMatches = freshness.holderThreadId === undefined || input.targetThreadId === freshness.holderThreadId;
-    const tenantMatches = freshness.tenantScope === undefined || input.tenantScope === freshness.tenantScope;
-    if (!ownerMatches || !threadMatches || !tenantMatches) {
-      throw new Error('task standing does not match the persisted owner, tenant, and task thread');
-    }
   }
 
   private async returnToPredecessor(

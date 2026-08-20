@@ -25,6 +25,13 @@ export const MessageKeys = {
   /** Callback content-dedup claim (race-safe exact-duplicate gate): msg:cbdedup:{fingerprint} */
   contentDedup: (fingerprint: string) => `msg:cbdedup:${fingerprint}`,
 
+  /** F264 Gap F: TTL=0 owner+thread composer draft. */
+  ownerComposerDraft: (ownerUserId: string, threadId: string) =>
+    `msg:composer-draft:${encodeURIComponent(ownerUserId)}:${encodeURIComponent(threadId)}`,
+
+  /** F264 Gap F: content-free reverse index from exact child exposure to source message IDs. */
+  queueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
+
   /**
    * #1200 Visibility index: per-thread sorted set, member=messageId, score=visibilitySeq.
    * Queued messages are NOT members until delivered. The thread ZSET (raw-time) is unchanged.

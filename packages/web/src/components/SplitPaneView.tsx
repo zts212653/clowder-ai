@@ -1,6 +1,6 @@
 'use client';
 
-import type { MessageWorkDisposition } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageWorkDisposition } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
@@ -12,6 +12,7 @@ import { MiniThreadSidebar } from './MiniThreadSidebar';
 import { SplitPaneCell, SplitPanePlaceholder } from './SplitPaneCell';
 
 interface SplitPaneViewProps {
+  isReadonly?: boolean;
   onSend: (
     content: string,
     images?: File[],
@@ -20,8 +21,8 @@ interface SplitPaneViewProps {
     deliveryMode?: DeliveryMode,
     replyToId?: string,
     messageDisposition?: MessageWorkDisposition,
+    contextAttachments?: ContextAttachment[],
   ) => void | boolean | Promise<void | boolean>;
-  onStop: (overrideThreadId?: string) => void;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -34,7 +35,13 @@ const PANE_COUNT = 4;
  * Split-pane mode: 2x2 grid of mini chat views + mini sidebar + shared input.
  * The shared input bar sends to the currently selected pane (splitPaneTargetId).
  */
-export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoomToThread }: SplitPaneViewProps) {
+export function SplitPaneView({
+  isReadonly = false,
+  onSend,
+  uploadStatus,
+  uploadError,
+  onZoomToThread,
+}: SplitPaneViewProps) {
   const { threads, splitPaneThreadIds, splitPaneTargetId, setSplitPaneTarget, setSplitPaneThreadIds, getThreadState } =
     useChatStore(
       useShallow((s) => ({
@@ -86,9 +93,6 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
     },
     [splitPaneThreadIds, splitPaneTargetId, paneSlots, setSplitPaneThreadIds, setSplitPaneTarget],
   );
-
-  const targetThreadState = splitPaneTargetId ? getThreadState(splitPaneTargetId) : null;
-  const isTargetActiveInvocation = targetThreadState?.hasActiveInvocation ?? false;
 
   const handleBackToSingle = useCallback(() => {
     const target = splitPaneTargetId ?? splitPaneThreadIds[0];
@@ -158,20 +162,29 @@ export function SplitPaneView({ onSend, onStop, uploadStatus, uploadError, onZoo
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition) =>
-                onSend(
-                  content,
-                  images,
-                  splitPaneTargetId ?? undefined,
-                  whisper,
-                  deliveryMode,
-                  replyToId,
-                  messageDisposition,
-                )
+              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+                contextAttachments?.length
+                  ? onSend(
+                      content,
+                      images,
+                      splitPaneTargetId ?? undefined,
+                      whisper,
+                      deliveryMode,
+                      replyToId,
+                      messageDisposition,
+                      contextAttachments,
+                    )
+                  : onSend(
+                      content,
+                      images,
+                      splitPaneTargetId ?? undefined,
+                      whisper,
+                      deliveryMode,
+                      replyToId,
+                      messageDisposition,
+                    )
               }
-              onStop={() => onStop(splitPaneTargetId ?? undefined)}
-              disabled={!splitPaneTargetId}
-              hasActiveInvocation={isTargetActiveInvocation}
+              disabled={!splitPaneTargetId || isReadonly}
               uploadStatus={uploadStatus}
               uploadError={uploadError}
             />

@@ -1950,7 +1950,113 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('model_reasoning_effort="ultra"'));
   });
 
-  test('passes persisted GPT-5.6 ultra effort to new Codex invocations', async () => {
+  test('F291 maps requested Standard/Fast speed to reserved Codex exec config', async () => {
+    for (const { requestedServiceTier, expected } of [
+      { requestedServiceTier: 'standard', expected: 'service_tier="default"' },
+      { requestedServiceTier: 'fast', expected: 'service_tier="fast"' },
+    ]) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(
+        service.invoke('hello', {
+          requestedServiceTier,
+          cliConfigArgs: ['--config service_tier="user-bypass"'],
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-speed-${requestedServiceTier}` }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.equal(args.filter((arg) => arg.startsWith('service_tier=')).length, 1);
+      assert.ok(args.includes(expected), `expected ${expected}, got argv: ${JSON.stringify(args)}`);
+      assert.ok(!args.includes('service_tier="user-bypass"'));
+    }
+  });
+
+  test('F291 inheritance omits service_tier and still blocks raw cliConfigArgs bypass', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+    const promise = collect(service.invoke('hello', { cliConfigArgs: ['-c service_tier="fast"'] }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-speed-inherit' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('service_tier=')),
+      false,
+    );
+  });
+
+  test('F291 strips attached service_tier config spellings across inherit, API-key, and Standard modes', async () => {
+    const rawBypasses = ['--config=service_tier="fast"', '-c=service_tier="fast"', '-cservice_tier="fast"'];
+    const cases = [
+      {
+        name: 'inherit',
+        options: { cliConfigArgs: rawBypasses },
+        expected: undefined,
+      },
+      {
+        name: 'API-key',
+        options: {
+          requestedServiceTier: 'fast',
+          cliConfigArgs: rawBypasses,
+          callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'sk-test' },
+        },
+        expected: undefined,
+      },
+      {
+        name: 'Standard',
+        options: { requestedServiceTier: 'standard', cliConfigArgs: rawBypasses },
+        expected: 'service_tier="default"',
+      },
+    ];
+
+    for (const { name, options, expected } of cases) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+      const promise = collect(service.invoke('hello', options));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: `t-speed-attached-${name}` }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const serviceTierArgs = args.filter((arg) => arg.includes('service_tier='));
+      assert.deepEqual(serviceTierArgs, expected ? [expected] : [], `${name}: ${JSON.stringify(args)}`);
+    }
+  });
+
+  test('F291 suppresses a typed Fast request in API-key mode', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.6-sol' });
+
+    const promise = collect(
+      service.invoke('hello', {
+        requestedServiceTier: 'fast',
+        callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'sk-test' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-speed-api-key' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('service_tier=')),
+      false,
+    );
+  });
+
+  test('passes persisted GPT-5.6 ultra effort and invocation-owned capacity to new Codex invocations', async () => {
     const projectRoot = makeTempDir('codex-ultra-effort-');
     const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;
     const templatePath = writeCodexEffortTemplate(projectRoot, 'ultra', {
@@ -1971,7 +2077,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         model: 'gpt-5.6-sol',
       });
 
-      const promise = collect(service.invoke('hello'));
+      const promise = collect(
+        service.invoke('hello', {
+          contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+        }),
+      );
       emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-effort-ultra' }]);
       await promise;
 
@@ -1981,7 +2091,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         `expected persisted ultra effort, got argv: ${JSON.stringify(args)}`,
       );
       assert.ok(args.includes('model_context_window=372000'));
-      assert.ok(args.includes('model_auto_compact_token_limit=340000'));
+      assert.ok(args.includes('model_auto_compact_token_limit=327360'));
     } finally {
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
       else process.env.CAT_TEMPLATE_PATH = previousTemplatePath;
@@ -1990,7 +2100,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('keeps persisted context overrides for equivalent bare and provider-prefixed model slugs', async () => {
+  test('keeps invocation-owned context controls for equivalent bare and provider-prefixed model slugs', async () => {
     for (const { persistedModel, effectiveModel } of [
       { persistedModel: 'gpt-5.6-sol', effectiveModel: 'openai/gpt-5.6-sol' },
       { persistedModel: 'openai/gpt-5.6-sol', effectiveModel: 'gpt-5.6-sol' },
@@ -2023,6 +2133,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         const promise = collect(
           service.invoke('hello', {
             callbackEnv: { CAT_CAFE_OPENAI_MODEL_OVERRIDE: effectiveModel },
+            contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
           }),
         );
         emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-equivalent-model-context' }]);
@@ -2035,8 +2146,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           `equivalent model slug ${effectiveModel} must keep the persisted context window`,
         );
         assert.ok(
-          args.includes('model_auto_compact_token_limit=340000'),
-          `equivalent model slug ${effectiveModel} must keep the persisted compaction limit`,
+          args.includes('model_auto_compact_token_limit=327360'),
+          `equivalent model slug ${effectiveModel} must derive compaction from the invocation capacity`,
         );
       } finally {
         if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
@@ -2044,6 +2155,100 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         _resetCachedConfig();
         rmSync(projectRoot, { recursive: true, force: true });
       }
+    }
+  });
+
+  test('keeps binding-owned context controls ahead of free-form cliConfigArgs', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      catId: 'runtime-sol',
+      model: 'gpt-5.6-sol',
+    });
+
+    const promise = collect(
+      service.invoke('hello', {
+        contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+        cliConfigArgs: [
+          '--config model_context_window=111000',
+          '--config=model_auto_compact_token_limit=95000',
+          '-c=model_context_window=222000',
+          '-cmodel_auto_compact_token_limit=96000',
+          '--config model_reasoning_effort="low"',
+          '--config model_provider="custom"',
+        ],
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-binding-owned-context' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(
+      args.includes('model_context_window=372000'),
+      `binding window missing from argv: ${JSON.stringify(args)}`,
+    );
+    assert.ok(
+      args.includes('model_auto_compact_token_limit=327360'),
+      `binding-derived compaction limit missing from argv: ${JSON.stringify(args)}`,
+    );
+    assert.equal(
+      args.some((arg) => /model_context_window=(111000|222000)/.test(arg)),
+      false,
+      'free-form args must not replace the invocation-owned context window',
+    );
+    assert.equal(
+      args.some((arg) => /model_auto_compact_token_limit=(95000|96000)/.test(arg)),
+      false,
+      'free-form args must not replace the invocation-owned compaction limit',
+    );
+    assert.ok(
+      args.includes('model_reasoning_effort="low"'),
+      'ordinary user-configurable Codex preferences must retain their existing precedence',
+    );
+    assert.ok(
+      args.includes('model_provider="custom"'),
+      'provider selection is not part of the capacity binding and must retain its existing precedence',
+    );
+  });
+
+  test('keeps binding-owned model identity ahead of free-form cliConfigArgs', async () => {
+    for (const rawOverride of [
+      '--model gpt-4o',
+      '--model=gpt-4o',
+      '-m gpt-4o',
+      '-m=gpt-4o',
+      '-mgpt-4o',
+      '--config model="gpt-4o"',
+    ]) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn,
+        catId: 'runtime-sol',
+        model: 'gpt-5.6-sol',
+      });
+
+      const promise = collect(
+        service.invoke('hello', {
+          contextCapacity: { windowTokens: 372000, inputCeilingTokens: 356000, actionable: true },
+          cliConfigArgs: [rawOverride],
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-binding-owned-model' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const modelIndex = args.indexOf('--model');
+      assert.ok(modelIndex >= 0, `binding model flag missing for ${rawOverride}: ${JSON.stringify(args)}`);
+      assert.equal(args[modelIndex + 1], 'gpt-5.6-sol', `free-form model override survived: ${rawOverride}`);
+      assert.equal(
+        args.some((arg) => arg.includes('gpt-4o')),
+        false,
+        `free-form model identity override survived: ${rawOverride}`,
+      );
     }
   });
 
@@ -2611,7 +2816,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-    const promise = collect(service.invoke('reconnect failure'));
+    const promise = collect(service.invoke('reconnect failure', { invocationId: 'inv-reconnect-failure' }));
 
     proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'thread-reconnect' })}\n`);
     proc.stdout.write(
@@ -2637,9 +2842,17 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
     const msgs = await promise;
     const sysInfos = msgs.filter((m) => m.type === 'system_info');
-    assert.equal(sysInfos.length, 2, 'should stream reconnect status to UI in real time');
-    assert.ok(sysInfos[0].content.includes('Reconnecting... 1/5'));
-    assert.ok(sysInfos[1].content.includes('Reconnecting... 2/5'));
+    assert.equal(sysInfos.length, 3, 'reconnect attempts must end in one terminal failed transition');
+    const recoveryTransitions = sysInfos.map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      recoveryTransitions.map((transition) => transition.phase),
+      ['reconnecting', 'reconnecting', 'failed'],
+    );
+    assert.equal(recoveryTransitions[2].invocationId, 'inv-reconnect-failure');
+    assert.deepEqual(recoveryTransitions[2].attempts, [
+      'Reconnecting... 1/5 (stream disconnected before completion)',
+      'Reconnecting... 2/5 (stream disconnected before completion)',
+    ]);
 
     const errMsg = msgs.find((m) => m.type === 'error');
     assert.ok(errMsg);
@@ -2723,7 +2936,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
 
-    const promise = collect(service.invoke('review this after reconnect'));
+    const promise = collect(service.invoke('review this after reconnect', { invocationId: 'inv-reconnect-success' }));
 
     proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
     proc.stdout.write(
@@ -2753,11 +2966,68 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const errors = msgs.filter((m) => m.type === 'error');
     const sysInfos = msgs.filter((m) => m.type === 'system_info');
     assert.equal(errors.length, 0, 'transient reconnect events should not defeat semanticDone silent-completion path');
-    assert.equal(sysInfos.length, 2, 'reconnect status should still stream to UI');
+    assert.equal(sysInfos.length, 3, 'reconnect attempts must end in one recovered transition');
+    const recoveryTransitions = sysInfos.map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      recoveryTransitions.map((transition) => transition.phase),
+      ['reconnecting', 'reconnecting', 'recovered'],
+    );
+    assert.equal(recoveryTransitions[2].invocationId, 'inv-reconnect-success');
+    assert.deepEqual(recoveryTransitions[2].attempts, [
+      'Reconnecting... 1/5 (stream disconnected before completion)',
+      'Reconnecting... 2/5 (stream disconnected before completion)',
+    ]);
     assert.ok(
       msgs.some((m) => m.type === 'text' && m.content === 'Recovered answer.'),
       'completed answer should still be yielded',
     );
+  });
+
+  test('reconnect survives resumable turn.failed noise and ends recovered after the next completed turn', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(
+      service.invoke('resume after reconnect failure noise', {
+        invocationId: 'inv-reconnect-resumed',
+      }),
+    );
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx-reconnect-resumed' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 1/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'turn.failed',
+        error: { message: 'stream disconnected before completion' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.started' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered after the failed transport turn.' },
+      })}\n`,
+    );
+    proc.stdout.write(`${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 25 } })}\n`);
+    finishExit(proc, 1);
+
+    const messages = await promise;
+    const transitions = messages
+      .filter((message) => message.type === 'system_info')
+      .map((message) => JSON.parse(message.content));
+    assert.deepEqual(
+      transitions.map((transition) => transition.phase),
+      ['reconnecting', 'recovered'],
+    );
+    assert.equal(transitions[1].invocationId, 'inv-reconnect-resumed');
+    assert.equal(transitions[1].evidence, 'turn.started');
+    assert.equal(messages.filter((message) => message.type === 'error').length, 0);
   });
 
   // F212 Phase H archive-witness regression: cyber-safety policy rejection (archive

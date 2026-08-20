@@ -103,6 +103,7 @@ describe('ProactiveCandidateRegistryResolver', () => {
             return [
               {
                 entityId: 'person:alden',
+                type: 'person',
                 matchedAlias: 'Alden',
               },
             ];
@@ -140,6 +141,64 @@ describe('ProactiveCandidateRegistryResolver', () => {
     assert.deepEqual(await personSecond.resolve({ ownerUserId, phrase: 'Alden' }), {
       kind: 'registered_person',
       ref: 'person_owner_alden',
+    });
+  });
+
+  it('does not classify a non-person Entity as a registered person relationship subject', async () => {
+    const { ProactiveCandidateRegistryResolver } = await import(
+      '../../dist/domains/memory/ProactiveCandidateRegistryResolver.js'
+    );
+    const resolver = new ProactiveCandidateRegistryResolver(
+      deps({
+        entityRegistry: {
+          resolveExactAlias: () => [
+            {
+              entityId: 'feature:f276',
+              type: 'feature',
+              canonicalName: 'F276',
+              matchedAlias: 'F276',
+              provenance: [],
+            },
+          ],
+        },
+      }),
+    );
+
+    assert.deepEqual(await resolver.resolve({ ownerUserId, phrase: 'F276' }), {
+      kind: 'registered_non_person_entity',
+      ref: 'feature:f276',
+    });
+  });
+
+  it('fails closed when one exact alias resolves to multiple active person Entities', async () => {
+    const { ProactiveCandidateRegistryResolver } = await import(
+      '../../dist/domains/memory/ProactiveCandidateRegistryResolver.js'
+    );
+    const resolver = new ProactiveCandidateRegistryResolver(
+      deps({
+        entityRegistry: {
+          resolveExactAlias: () => [
+            {
+              entityId: 'person:alden-primary',
+              type: 'person',
+              canonicalName: 'Alden',
+              matchedAlias: 'Alden',
+              provenance: [],
+            },
+            {
+              entityId: 'person:alden-duplicate',
+              type: 'person',
+              canonicalName: 'Alden K.',
+              matchedAlias: 'Alden',
+              provenance: [],
+            },
+          ],
+        },
+      }),
+    );
+
+    assert.deepEqual(await resolver.resolve({ ownerUserId, phrase: 'Alden' }), {
+      kind: 'unknown',
     });
   });
 

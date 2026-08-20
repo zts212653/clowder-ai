@@ -25,25 +25,54 @@ function item(overrides = {}) {
 class MemoryWatermarkStore {
   current;
 
-  async claim(watermark, claimedAt) {
+  async claim(watermark, claimedAt, snapshot) {
     if (!this.current || this.current.watermark !== watermark) {
-      this.current = { watermark, status: 'claimed', updatedAt: claimedAt };
+      if (this.current && this.current.status !== 'complete') {
+        if (this.current.status === 'delivered') {
+          return {
+            outcome: 'resume_invocation',
+            watermark: this.current.watermark,
+            messageId: this.current.messageId,
+          };
+        }
+        if (this.current.status === 'awaiting_receipt') {
+          return {
+            outcome: 'resume_invocation',
+            watermark: this.current.watermark,
+            messageId: this.current.messageId,
+          };
+        }
+        return { outcome: 'claimed_elsewhere' };
+      }
+      this.current = { watermark, status: 'claimed', updatedAt: claimedAt, snapshot };
       return { outcome: 'claimed' };
     }
     if (this.current.status === 'delivered') {
-      return { outcome: 'resume_invocation', messageId: this.current.messageId };
+      return { outcome: 'resume_invocation', watermark: this.current.watermark, messageId: this.current.messageId };
+    }
+    if (this.current.status === 'awaiting_receipt') {
+      return { outcome: 'resume_invocation', watermark: this.current.watermark, messageId: this.current.messageId };
     }
     return { outcome: this.current.status === 'complete' ? 'complete' : 'claimed_elsewhere' };
   }
 
+  async readCurrent() {
+    return this.current ? structuredClone(this.current) : null;
+  }
+
   async markDelivered(watermark, messageId, updatedAt) {
     assert.equal(this.current.watermark, watermark);
-    this.current = { watermark, status: 'delivered', messageId, updatedAt };
+    this.current = { ...this.current, status: 'delivered', messageId, updatedAt };
   }
 
   async markComplete(watermark, updatedAt) {
     assert.equal(this.current.watermark, watermark);
     this.current = { ...this.current, status: 'complete', updatedAt };
+  }
+
+  async markAwaitingReceipt(watermark, updatedAt) {
+    assert.equal(this.current.watermark, watermark);
+    this.current = { ...this.current, status: 'awaiting_receipt', updatedAt };
   }
 }
 
@@ -60,12 +89,18 @@ function duty(primaryCatId = 'codex-sol', backupCatId = 'opus') {
 
 function makeTask(overrides = {}) {
   const watermarkStore = overrides.watermarkStore ?? new MemoryWatermarkStore();
+  const receiptReconciler = overrides.receiptReconciler ?? {
+    async reconcile() {
+      return { outcome: 'incomplete' };
+    },
+  };
   return {
     watermarkStore,
     task: createPawFeelDutyTaskSpec({
       loadUndispositioned: overrides.loadUndispositioned ?? (async () => [item()]),
       loadDutyConfig: overrides.loadDutyConfig ?? (async () => duty()),
       watermarkStore,
+      receiptReconciler,
       now: () => NOW,
       ownerUserId: 'user-1',
       inboxHref: '/workspace?tab=eval&section=paw-feel',
@@ -190,16 +225,38 @@ describe('F278 paw-feel duty task', () => {
     assert.match(invoked[0][3], /10\/20\/50-item slices are execution limits, not a terminal condition/i);
     assert.match(invoked[0][3], /real task \+ named owner \+ active F167 lease/i);
     assert.match(invoked[0][3], /durable proposal awaiting operator approval/i);
+    assert.match(invoked[0][3], /signature-waiting must continue.*independent signature or blocker/i);
     assert.match(invoked[0][3], /structured continuation instead of waiting for the next duty cron/i);
-    assert.equal(fixture.watermarkStore.current.status, 'complete');
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
 
     const retryGate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: 1, tickCount: 2 });
-    assert.deepEqual(retryGate, { run: false, reason: 'duty notice watermark already complete' });
+    assert.equal(retryGate.run, true);
+    assert.equal(retryGate.workItems[0].signal.deliveryRequired, false);
+    assert.equal(retryGate.workItems[0].signal.messageId, 'notice-message-1');
+    await fixture.task.run.execute(retryGate.workItems[0].signal, retryGate.workItems[0].subjectKey, {
+      assignedCatId: null,
+      async deliver() {
+        assert.fail('awaiting receipt recovery must reuse the durable notice');
+      },
+      invokeTrigger: {
+        async trigger(...args) {
+          invoked.push(args);
+        },
+      },
+    });
+    assert.equal(invoked.length, 2);
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
   });
 
   it('delivers a red no-owner notice without invoking or inventing a cat', async () => {
-    const fixture = makeTask({ loadDutyConfig: async () => null });
+    let currentDuty = null;
+    let currentItems = [item()];
+    const fixture = makeTask({
+      loadDutyConfig: async () => currentDuty,
+      loadUndispositioned: async () => currentItems,
+    });
     const gate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: null, tickCount: 1 });
+    const originalWatermark = gate.workItems[0].signal.watermark;
     const delivered = [];
     await fixture.task.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {
       assignedCatId: null,
@@ -216,7 +273,39 @@ describe('F278 paw-feel duty task', () => {
 
     assert.equal(delivered.length, 1);
     assert.match(delivered[0].content, /尚未配置值班猫/);
-    assert.equal(fixture.watermarkStore.current.status, 'complete');
+    assert.equal(fixture.watermarkStore.current.status, 'delivered');
+
+    currentDuty = duty();
+    currentItems = [
+      ...currentItems,
+      item({
+        signalId: `message-2:${'b'.repeat(64)}:0`,
+        bundleKey: 'message:message-2',
+        sourceMessageId: 'message-2',
+      }),
+    ];
+    const resumedGate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: 1, tickCount: 2 });
+    assert.equal(resumedGate.run, true);
+    assert.equal(resumedGate.workItems[0].signal.deliveryRequired, false);
+    assert.equal(resumedGate.workItems[0].signal.watermark, originalWatermark);
+    assert.equal(resumedGate.workItems[0].dedupeKey, originalWatermark);
+    assert.equal(resumedGate.workItems[0].signal.rawSignalCount, 1);
+    assert.equal(resumedGate.workItems[0].signal.reviewBundleCount, 1);
+    const invoked = [];
+    await fixture.task.run.execute(resumedGate.workItems[0].signal, resumedGate.workItems[0].subjectKey, {
+      assignedCatId: null,
+      async deliver() {
+        assert.fail('duty configuration must reuse the durable red notice');
+      },
+      invokeTrigger: {
+        async trigger(...args) {
+          invoked.push(args);
+        },
+      },
+    });
+    assert.equal(invoked.length, 1);
+    assert.equal(invoked[0][1], 'codex-sol');
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
   });
 
   it('retries a failed invocation from the delivered message without sending a second notice', async () => {
@@ -238,7 +327,7 @@ describe('F278 paw-feel duty task', () => {
       }),
       /wake unavailable/,
     );
-    assert.equal(fixture.watermarkStore.current.status, 'delivered');
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
 
     const retryGate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: 1, tickCount: 2 });
     assert.equal(retryGate.run, true);
@@ -253,6 +342,39 @@ describe('F278 paw-feel duty task', () => {
     });
 
     assert.equal(deliveries, 1);
-    assert.equal(fixture.watermarkStore.current.status, 'complete');
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
+  });
+
+  it('writes an incomplete receipt from the scheduler before a duty invocation can fail', async () => {
+    const reconciliations = [];
+    const fixture = makeTask({
+      receiptReconciler: {
+        async reconcile(actorCatId) {
+          reconciliations.push({ actorCatId, status: fixture.watermarkStore.current.status });
+          return { outcome: 'incomplete' };
+        },
+      },
+    });
+    const gate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: null, tickCount: 1 });
+
+    await assert.rejects(
+      fixture.task.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {
+        assignedCatId: null,
+        async deliver() {
+          return 'notice-message-1';
+        },
+        invokeTrigger: {
+          async trigger() {
+            throw new Error('usage limit');
+          },
+        },
+      }),
+      /usage limit/,
+    );
+
+    assert.deepEqual(reconciliations, [
+      { actorCatId: 'scheduler:paw-feel-disposition-duty', status: 'awaiting_receipt' },
+    ]);
+    assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
   });
 });

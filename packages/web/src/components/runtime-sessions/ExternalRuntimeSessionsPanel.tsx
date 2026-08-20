@@ -145,6 +145,12 @@ function RuntimeSessionRow({
   const badge = formatLifecycleBadge(session.lifecycle);
   const sealReason = formatSealReason(session.lifecycle.sealReason);
   const surfaceBadge = formatSurfaceBadge(session.surface);
+  const policyMissing = session.sessionPolicy?.execution.missingCapabilities ?? [];
+  const policyMissingLabel = policyMissing.includes('managed_invocation_boundary')
+    ? 'unmanaged boundary'
+    : policyMissing.length > 0
+      ? `missing ${policyMissing.join(', ')}`
+      : null;
   return (
     <li className="min-w-0 bg-[var(--console-card-bg)] px-3 py-2" data-testid="runtime-session-row">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3">
@@ -174,6 +180,12 @@ function RuntimeSessionRow({
             <span className="min-w-0 truncate">
               {formatBindingLabel(session.binding)} · {formatTimestamp(session.lastObservedAt)}
             </span>
+            {session.sessionPolicy && (
+              <span className="min-w-0 truncate">
+                policy {session.sessionPolicy.config.strategy} · {session.sessionPolicy.execution.status}
+                {policyMissingLabel ? ` · ${policyMissingLabel}` : ''}
+              </span>
+            )}
           </div>
         </div>
         <button

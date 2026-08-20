@@ -13,6 +13,22 @@ const catId = 'gemini';
 const metadata = { provider: 'google', model: 'gemini-2.5-pro' };
 
 describe('transformAcpEvent', () => {
+  it('usage_update normalizes authoritative ACP context usage', () => {
+    const update = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'usage_update',
+        used: 85_000,
+        size: 100_000,
+      },
+    };
+    const result = transformAcpEvent(update, catId, metadata);
+    assert.equal(result.type, 'agent_loop');
+    assert.equal(result.metadata.usage.contextUsedTokens, 85_000);
+    assert.equal(result.metadata.usage.lastTurnInputTokens, 85_000);
+    assert.equal(result.metadata.usage.contextWindowSize, 100_000);
+  });
+
   it('agent_message_chunk → text', () => {
     const update = {
       sessionId: 's1',

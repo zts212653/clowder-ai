@@ -27,8 +27,8 @@ const STEP_FINISH = {
   part: { type: 'step-finish', reason: 'stop', cost: 0.01, tokens: { total: 5000 } },
 };
 
-function createHiddenAliasOpenCodeCli() {
-  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-hidden-opencode-cli-'));
+function createHelpMaskingUnknownFlagsOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-help-masking-opencode-cli-'));
   const file = join(dir, 'opencode');
   writeFileSync(
     file,
@@ -37,12 +37,50 @@ if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
   echo "opencode run [message..]"
   exit 0
 fi
-if [ "$1" = "run" ] && [ "$2" = "--dangerously-skip-permissions" ] && [ "$3" = "--help" ]; then
+if [ "$1" = "run" ] && [ "$3" = "--help" ]; then
   echo "opencode run [message..]"
   exit 0
 fi
 echo "unknown option" >&2
 exit 1
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+function createAdvertisedAutoApprovalOpenCodeCli(...flags) {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-advertised-opencode-cli-'));
+  const file = join(dir, 'opencode');
+  const advertisedFlags = flags.map((flag) => `  echo "      ${flag}"`).join('\n');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  echo "opencode run [message..]"
+${advertisedFlags}
+  exit 0
+fi
+echo "unexpected invocation" >&2
+exit 1
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
+
+function createExecutionOwnerRejectingOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-non-owner-opencode-probe-'));
+  const file = join(dir, 'opencode');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ -n "$CAT_CAFE_PROCESS_EXECUTION_OWNER" ] || [ -n "$CAT_CAFE_EXECUTION_ID" ]; then
+  echo "probe inherited execution ownership" >&2
+  exit 42
+fi
+echo "opencode run [message..]"
+echo "      --auto"
 `,
   );
   chmodSync(file, 0o755);
@@ -307,12 +345,44 @@ describe('OpenCode headless permission mode', () => {
     assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject --auto exactly once');
   });
 
-  test('opencode auto-approval probe detects hidden legacy aliases', async () => {
-    const command = createHiddenAliasOpenCodeCli();
+  test('opencode auto-approval probe prefers an advertised --auto flag', async () => {
+    const command = createAdvertisedAutoApprovalOpenCodeCli('--dangerously-skip-permissions', '--auto');
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, '--auto');
+  });
+
+  test('opencode auto-approval probe accepts an advertised legacy alias', async () => {
+    const command = createAdvertisedAutoApprovalOpenCodeCli('--dangerously-skip-permissions');
 
     const result = await probeOpenCodeAutoApproveSupport(command);
 
     assert.equal(result.approvalFlag, '--dangerously-skip-permissions');
+  });
+
+  test('opencode auto-approval probe never becomes an invocation execution owner', async () => {
+    const command = createExecutionOwnerRejectingOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command, undefined, {
+      CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+      CAT_CAFE_EXECUTION_ID: 'parent-execution-first-probe',
+      CAT_CAFE_INVOCATION_ID: 'turn-first-probe',
+      CAT_CAFE_THREAD_ID: 'thread-first-probe',
+      CAT_CAFE_CAT_ID: 'opencode',
+      CAT_CAFE_USER_ID: 'scheduler',
+    });
+
+    assert.equal(result.approvalFlag, '--auto');
+  });
+
+  test('opencode auto-approval probe does not infer hidden aliases when --help masks unknown flags', async () => {
+    const command = createHelpMaskingUnknownFlagsOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, undefined, 'help-only success cannot prove an unadvertised flag is supported');
+    assert.match(result.warning ?? '', /did not advertise a supported auto-approval flag/);
   });
 
   test('opencode auto-approval probe retries after transient warning result', async () => {

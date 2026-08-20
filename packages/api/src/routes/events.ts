@@ -11,6 +11,7 @@ import { COGNITIVE_TRANSITIONS, EVENT_CONFIDENCES, EVENT_TRIGGERS } from '@cat-c
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { loadCompiledGovernanceL0Sync } from '../domains/cats/services/context/governance-l0.js';
+import { loadStagingBody } from '../domains/cats/services/context/StagingContent.js';
 import type { EventMemoryFilter, IEventMemoryStore } from '../domains/memory/EventMemoryStore.js';
 import type { BackfillMessageSource, BackfillThreadSource } from '../domains/memory/event-backfill.js';
 import { runCorpusBackfill } from '../domains/memory/event-backfill.js';
@@ -41,15 +42,17 @@ function ownerUserIdOf(request: FastifyRequest): string | null {
   return r.sessionUserId ?? r.callbackPrincipal?.userId ?? null;
 }
 
-// F227 Task 8 (AC-A5): magic-word meanings come from L0 (compiled governance),
-// never a hardcoded table. Static + small → lazy-load once and cache.
+// F227 Task 8 (AC-A5): magic-word meanings come from their injected governance
+// sources (compiled L0 + ADR-038 staging), never a hardcoded meaning table.
+// Static + small → lazy-load once and cache.
 let cachedMagicWordMeanings: MagicWordMeaning[] | null = null;
 function getMagicWordMeanings(): MagicWordMeaning[] {
   if (cachedMagicWordMeanings) return cachedMagicWordMeanings;
   try {
-    cachedMagicWordMeanings = parseMagicWordMeanings(loadCompiledGovernanceL0Sync().content);
+    const parsed = parseMagicWordMeanings(`${loadCompiledGovernanceL0Sync().content}\n${loadStagingBody()}`);
+    cachedMagicWordMeanings = [...new Map(parsed.map((meaning) => [meaning.word, meaning])).values()];
   } catch {
-    cachedMagicWordMeanings = []; // missing/uncompilable L0 → graceful empty (popover shows nothing)
+    cachedMagicWordMeanings = []; // missing/uncompilable governance → graceful empty (popover shows nothing)
   }
   return cachedMagicWordMeanings;
 }
@@ -125,7 +128,7 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
     return response;
   });
 
-  // F227 Task 8 (AC-A5): magic-word meanings (word → meaning/action) read from L0.
+  // F227 Task 8 (AC-A5): magic-word meanings (word → meaning/action) read from injected governance.
   // The timeline's meaning popover consumes this; no hardcoded word table.
   app.get('/api/memory/magic-words', async (request, reply) => {
     if (!isAuthenticated(request)) {

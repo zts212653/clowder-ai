@@ -6,8 +6,10 @@
 import crypto from 'node:crypto';
 import type { CatConfig, CatId, OutputCommitDecision } from '@cat-cafe/shared';
 import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
-import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
-import { getConfigSessionStrategy, isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import {
+  deriveHistoryContextTokenCeiling,
+  resolvePromptInputCeilingTokens,
+} from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import {
   ROUTE_HAS_A2A_HANDOFF,
@@ -59,7 +61,7 @@ import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import { buildSessionBootstrap } from '../../session/SessionBootstrap.js';
+import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import {
@@ -70,12 +72,20 @@ import { canViewMessage } from '../../stores/visibility.js';
 import { classifyTool } from '../../tool-usage/classify.js';
 import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
+import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
 import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
+import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
+import {
+  applyActiveSessionCapacityPin,
+  resolveInvocationCapacitySnapshot,
+  sealBeforeInvocationIfNeeded,
+} from '../invocation/invocation-capacity-snapshot.js';
 import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
@@ -83,6 +93,7 @@ import { accumulateTextAggregate } from '../text-aggregation.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
+import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -91,13 +102,15 @@ import {
   computeContextBudget,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
+  explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
+  hydrateVisibleA2ATriggerPromptMessage,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
+  mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
-  shouldAppendExplicitCurrentMessage,
   subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
@@ -165,11 +178,14 @@ export async function* routeParallel(
   const thinkingMode = options.thinkingMode ?? 'play';
   const isFreshnessSupplement = Boolean(options.freshnessSupplementId);
   const turnExecutionKind = isFreshnessSupplement ? 'freshness_supplement' : 'ordinary';
+  const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
+  const bridgeMentioningCatId = options.a2aTriggerMessageId ? exactA2ACallerCatId : userId;
+  const bridgeTriggerMessageId = options.a2aTriggerMessageId ?? currentUserMessageId;
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
   const parallelBatchId = options.parallelBatchId ?? crypto.randomUUID();
-  const incrementallyExposedMessageIdsByCat = new Map<string, string[]>();
+  const exactPromptMessageIdsByCat = new Map<string, string[]>();
 
   const evaluateParallelFreshness = async (
     catId: CatId,
@@ -182,13 +198,7 @@ export async function* routeParallel(
       threadId,
       currentTriggerMessageId: currentUserMessageId,
       parallelBatchId,
-      coveredMessageIds: collectExactPromptMessageIds(
-        options.persistedPromptMessageIds ?? [],
-        [currentUserMessageId, options.a2aTriggerMessageId],
-        incrementallyExposedMessageIdsByCat.get(catId as string) ?? [],
-        options.freshnessSupplementRequiredMessageIds ?? [],
-        options.freshnessClosureRequiredMessageIds ?? [],
-      ),
+      coveredMessageIds: exactPromptMessageIdsByCat.get(catId as string) ?? [],
       throughMessageId: priorFrontierMessageId,
       cursorStore: deps.deliveryCursorStore!,
       messageStore: deps.messageStore,
@@ -203,7 +213,6 @@ export async function* routeParallel(
           )
         )
           return false;
-        if (thinkingMode === 'play' && raw.catId != null && raw.origin === 'stream') return false;
         return true;
       },
       queueChecker: getQueuedFreshnessMessagesForCat
@@ -478,6 +487,41 @@ export async function* routeParallel(
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
       const service = getService(deps.services, catId);
+      const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
+        catId,
+        service,
+      });
+      let capacitySnapshot = resolvedCapacitySnapshot;
+      capacitySnapshot = await applyActiveSessionCapacityPin({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+      });
+      const sessionPolicySnapshot = resolveManagedSessionPolicySnapshot({
+        catId: catId as string,
+        evidence: {
+          capacitySnapshot,
+          // A carrier declaration is not this invocation's usage evidence.
+          // invokeSingleCat may refine the snapshot only after this invocation
+          // emits authoritative current-context usage.
+          authoritativeUsage: false,
+          sessionRotation: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.sessionSealer),
+          continuityBootstrap: Boolean(deps.invocationDeps.sessionChainStore && deps.invocationDeps.transcriptReader),
+        },
+      });
+      const sealedForCapacity = await sealBeforeInvocationIfNeeded({
+        snapshot: capacitySnapshot,
+        catId,
+        threadId,
+        userId,
+        sessionChainStore: deps.invocationDeps.sessionChainStore,
+        sessionSealer: deps.invocationDeps.sessionSealer,
+        policySnapshot: sessionPolicySnapshot,
+        clearProviderSession: () => deps.invocationDeps.sessionManager.delete(userId, catId, threadId),
+      });
+      if (sealedForCapacity) capacitySnapshot = resolvedCapacitySnapshot;
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
       // Staging is injected in invoke-single-cat independently of staticIdentity
       // (Cloud R2 P1 #2237 L1099). See route-serial.ts for the architecture rationale.
@@ -577,11 +621,20 @@ export async function* routeParallel(
         catId: catId as string,
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         mode: 'parallel',
-        a2aEnabled: false,
+        ...(exactA2ACallerCatId ? { directMessageFrom: exactA2ACallerCatId } : {}),
+        ...(options.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
+        a2aEnabled: Boolean(options.a2aTriggerMessageId),
       });
 
       const targetContentBlocks = routeContentBlocksForCat(catId, contentBlocks);
       const targetUploadDir = targetContentBlocks ? uploadDir : undefined;
+      const exactA2ATriggerPromptMessage = incrementalMode
+        ? await hydrateVisibleA2ATriggerPromptMessage(deps, options.a2aTriggerMessageId, threadId, catId, thinkingMode)
+        : undefined;
+      const persistedPromptMessagesForCat = mergePersistedPromptMessages(
+        options.persistedPromptMessages,
+        exactA2ATriggerPromptMessage,
+      );
 
       // F24 Phase E: Bootstrap context for Session #2+
       // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
@@ -600,25 +653,29 @@ export async function* routeParallel(
           '[routeParallel] #836: isRebornSession lookup failed pre-bootstrap, defaulting to non-reborn',
         );
       }
-      if (
-        !isParReborn &&
-        isSessionChainEnabled(catId) &&
-        deps.invocationDeps.sessionChainStore &&
-        deps.invocationDeps.transcriptReader
-      ) {
+      const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
+      const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const rebuildSessionBootstrap =
+        !isParReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
+          ? async () => {
+              const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
+              return buildSessionBootstrap(
+                {
+                  sessionChainStore: bootstrapSessionChainStore,
+                  transcriptReader: bootstrapTranscriptReader,
+                  ownerUserId: userId,
+                  ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
+                  ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
+                  ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                },
+                catId,
+                threadId,
+              );
+            }
+          : undefined;
+      if (rebuildSessionBootstrap) {
         try {
-          const bootstrapDepth = getConfigSessionStrategy(catId)?.handoff?.bootstrapDepth;
-          const bootstrap = await buildSessionBootstrap(
-            {
-              sessionChainStore: deps.invocationDeps.sessionChainStore,
-              transcriptReader: deps.invocationDeps.transcriptReader,
-              ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
-              ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
-              ...(bootstrapDepth ? { bootstrapDepth } : {}),
-            },
-            catId,
-            threadId,
-          );
+          const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
             bootstrapCtx = bootstrap.text;
             if (bootstrap.pushRecallPresentations?.length) {
@@ -667,21 +724,22 @@ export async function* routeParallel(
 
       let prompt: string;
       let incrementallyExposedMessageIds: string[] = [];
+      let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
+      let explicitlyExposedMessageIds: string[] = [];
       if (incrementalMode) {
-        // A+ fix: calculate effective context budget by deducting ALL system parts from maxPromptTokens.
+        // Deduct fixed prompt parts from the invocation-owned input ceiling.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parIncBudget = getCatContextBudget(catId as string);
-        const parIncSystemTokens = estimateTokens(
-          [staticIdentity, invocationContext, parCatModePromptForBudget, bootstrapCtx, mcpInstructions]
-            .filter(Boolean)
-            .join('\n'),
-        );
+        const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
+        const parIncSystemTokens =
+          estimateTokens(
+            [staticIdentity, invocationContext, parCatModePromptForBudget, mcpInstructions].filter(Boolean).join('\n'),
+          ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapCtx));
         const parIncMessageTokens = estimateTokens([message, conciergeSearchContextForCat].filter(Boolean).join('\n'));
         // P1 R7 fix: use shared budget helper (parallel incremental path)
         const parIncNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
         const parEffectiveContextBudget = computeContextBudget({
-          maxPromptTokens: parIncBudget.maxPromptTokens,
-          maxContextTokens: parIncBudget.maxContextTokens,
+          inputCeilingTokens,
+          historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
           systemPartsTokens: parIncSystemTokens,
           promptTokens: parIncMessageTokens,
           nudgeTokens: parIncNudgeTokens,
@@ -698,11 +756,12 @@ export async function* routeParallel(
             effectiveMaxContextTokens: parEffectiveContextBudget,
             canonicalFeatureId: sopStageHint?.featureId,
             threadTitle: routeThread?.title ?? undefined,
+            projectPath: routeThread?.projectPath,
+            cursorOverlay: options.cursorBoundaries?.get(catId as string),
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
-        incrementallyExposedMessageIds = inc.exposedMessageIds.filter((id) => id !== currentUserMessageId);
-        incrementallyExposedMessageIdsByCat.set(catId as string, incrementallyExposedMessageIds);
+        incrementallyExposedMessageIds = inc.exposedMessageIds;
         if (inc.pushRecallPresentations?.length) {
           pushRecallPresentationsByCat.set(catId, [
             ...(pushRecallPresentationsByCat.get(catId) ?? []),
@@ -760,45 +819,52 @@ export async function* routeParallel(
         /* @segment R1 — Mode System Prompt */
         /* @segment R2 — Mode System Prompt (per-cat) */
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
-        if (inc.contextText) parts.push(inc.contextText);
-        // F35 fix: only inject raw message when it was genuinely absent from unseen rows.
-        // Defensive guard: if the current message ID is already present anywhere in
-        // the assembled context text, do not append the raw message again.
-        if (shouldAppendExplicitCurrentMessage(inc, currentUserMessageId)) parts.push(message);
-        prompt = parts.join('\n\n---\n\n');
+        // F35/F063: append only persisted Queue bodies without structural exposure ownership.
+        const explicitProjection = explicitPromptForIncrementalContext(
+          inc,
+          message,
+          currentUserMessageId,
+          persistedPromptMessagesForCat,
+        );
+        explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          const parts = [invocationContext, parCatModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+          if (inc.contextText) parts.push(inc.contextText);
+          if (explicitProjection.text) parts.push(explicitProjection.text);
+          return parts.join('\n\n---\n\n');
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapCtx);
       } else {
         // Per-cat context budget (Phase 4.0)
         let catContextHistory = contextHistory;
         if (history && history.length > 0 && !contextHistory) {
-          const budget = getCatContextBudget(catId as string);
+          const inputCeilingTokens = resolvePromptInputCeilingTokens(capacitySnapshot.capacity);
           // F8: token-based budget — estimate non-context tokens, remainder goes to context
           // A+ fix: include catModePrompt + bootstrapCtx in system parts estimate (P2-1)
           const parCatModePromptLegacyForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-          const parSystemTokens = estimateTokens(
-            [staticIdentity, invocationContext, parCatModePromptLegacyForBudget, bootstrapCtx, mcpInstructions]
-              .filter(Boolean)
-              .join('\n'),
-          );
+          const parSystemTokens =
+            estimateTokens(
+              [staticIdentity, invocationContext, parCatModePromptLegacyForBudget, mcpInstructions]
+                .filter(Boolean)
+                .join('\n'),
+            ) + (rebuildSessionBootstrap ? MAX_SESSION_BOOTSTRAP_TOKENS : estimateTokens(bootstrapCtx));
           const parPromptTokens = estimateTokens([message, conciergeSearchContextForCat].filter(Boolean).join('\n'));
           // P1 R7 fix: use shared budget helper (parallel legacy path)
           const parLegacyNudgeTokens = routeLevelNudgePromptContext ? estimateTokens(routeLevelNudgePromptContext) : 0;
           const budgetForContext = computeContextBudget({
-            maxPromptTokens: budget.maxPromptTokens,
-            maxContextTokens: budget.maxContextTokens,
+            inputCeilingTokens,
+            historyTokenCeiling: deriveHistoryContextTokenCeiling(inputCeilingTokens),
             systemPartsTokens: parSystemTokens,
             promptTokens: parPromptTokens,
             nudgeTokens: parLegacyNudgeTokens,
           });
           const { contextText, messageCount } = assembleContext(history, {
-            maxMessages: budget.maxMessages,
-            maxContentLength: budget.maxContentLengthPerMsg,
             maxTotalTokens: budgetForContext,
           });
           catContextHistory = contextText || undefined;
 
           // Degradation check: notify user if context was truncated (count budget or char budget)
-          const degradation = detectContextDegradation(history.length, messageCount, budget);
+          const degradation = detectContextDegradation(history.length, messageCount);
           if (degradation?.degraded) {
             degradationMsgs.push({
               type: 'system_info' as AgentMessageType,
@@ -810,15 +876,15 @@ export async function* routeParallel(
         }
 
         const parCatModePromptLegacy = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        if (invocationContext || parCatModePromptLegacy || mcpInstructions || bootstrapCtx) {
-          const parts = [invocationContext, parCatModePromptLegacy, bootstrapCtx, mcpInstructions].filter(Boolean);
-          if (catContextHistory) parts.push(catContextHistory);
-          prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${message}`;
-        } else if (catContextHistory) {
-          prompt = `${catContextHistory}\n\n---\n\n${message}`;
-        } else {
-          prompt = message;
-        }
+        rebuildPromptWithBootstrap = (bootstrap) => {
+          if (invocationContext || parCatModePromptLegacy || mcpInstructions || bootstrap) {
+            const parts = [invocationContext, parCatModePromptLegacy, bootstrap, mcpInstructions].filter(Boolean);
+            if (catContextHistory) parts.push(catContextHistory);
+            return `${parts.join('\n\n---\n\n')}\n\n---\n\n${message}`;
+          }
+          return catContextHistory ? `${catContextHistory}\n\n---\n\n${message}` : message;
+        };
+        prompt = rebuildPromptWithBootstrap(bootstrapCtx);
       }
 
       // F229 KD-24: budget and inject the same duty-cat context after final assembly.
@@ -833,6 +899,34 @@ export async function* routeParallel(
           deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
         }
       }
+      const assemblePromptAfterSeal = rebuildPromptWithBootstrap;
+      const rebuildPromptAfterSessionSeal =
+        rebuildSessionBootstrap && assemblePromptAfterSeal
+          ? async () => {
+              const refreshed = await rebuildSessionBootstrap();
+              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (refreshed.pushRecallPresentations?.length) {
+                pushRecallPresentationsByCat.set(catId, [
+                  ...(pushRecallPresentationsByCat.get(catId) ?? []),
+                  ...refreshed.pushRecallPresentations,
+                ]);
+              }
+              let rebuilt = assemblePromptAfterSeal(refreshed.text);
+              if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
+              if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
+              return rebuilt;
+            }
+          : undefined;
+
+      const exactPromptMessageIds = collectExactPromptMessageIds(
+        incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
+        incrementalMode ? [] : [currentUserMessageId, options.a2aTriggerMessageId],
+        incrementallyExposedMessageIds,
+        explicitlyExposedMessageIds,
+        options.freshnessSupplementRequiredMessageIds ?? [],
+        options.freshnessClosureRequiredMessageIds ?? [],
+      );
+      exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
 
       // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
       // shared primaryController.signal — canceling one cat must not abort its siblings.
@@ -848,10 +942,15 @@ export async function* routeParallel(
       return invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
+        capacitySnapshot,
+        sessionPolicySnapshot,
         prompt,
+        ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
         ownerAuthProvenance,
         threadId,
+        invocationOrigin: resolveInvocationOrigin(options.humanDispositionInvocationOrigin),
+        routeTopology: 'parallel',
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
@@ -861,28 +960,26 @@ export async function* routeParallel(
         // helper namespace bridge 失效 → ideate/parallel 场景气泡又裂。
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
-        // F247 AC-B1c-3 PR-C: Plumb raw mention text for cloud bridge dispatch.
-        // Parallel routes are user-initiated (no A2A), so mentioningCatId = userId.
+        // F247: preserve server-owned A2A provenance through parallel fan-out.
+        // User-initiated parallel routes have no A2A caller and retain userId;
+        // an unpaired A2A trigger fails closed in invokeSingleCat instead of
+        // attributing the call to the thread owner.
         mentionContent: message,
-        mentioningCatId: userId as import('@cat-cafe/shared').CatId,
+        ...(bridgeMentioningCatId
+          ? { mentioningCatId: bridgeMentioningCatId as import('@cat-cafe/shared').CatId }
+          : {}),
+        ...(options.a2aTriggerMessageId ? { a2aTriggerMessageId: options.a2aTriggerMessageId } : {}),
         continuityCapsule,
         ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
+        ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         executionKind: turnExecutionKind,
         executionCausal: {
-          ...((currentUserMessageId ?? options.a2aTriggerMessageId)
-            ? { triggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId }
-            : {}),
+          ...(bridgeTriggerMessageId ? { triggerMessageId: bridgeTriggerMessageId } : {}),
           ...(options.freshnessSupplementId ? { freshnessSupplementId: options.freshnessSupplementId } : {}),
         },
-        promptMessageIds: collectExactPromptMessageIds(
-          options.persistedPromptMessageIds ?? [],
-          [currentUserMessageId, options.a2aTriggerMessageId],
-          incrementallyExposedMessageIds,
-          options.freshnessSupplementRequiredMessageIds ?? [],
-          options.freshnessClosureRequiredMessageIds ?? [],
-        ),
+        promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         isLastCat: false,
       });
@@ -898,6 +995,7 @@ export async function* routeParallel(
   const catThinking = new Map<string, string[]>();
   const catMeta = new Map<string, MessageMetadata>();
   const catSawUserFacingSystemInfo = new Map<string, boolean>();
+  const catUserFacingSystemInfoContents = new Map<string, string[]>();
   const catToolEvents = new Map<string, StoredToolEvent[]>();
   const catVerifiedConciergeToolTargets = new Map<string, VerifiedConciergeToolTargetCollector>();
   // F060: Collect inline rich blocks per cat from system_info stream
@@ -1064,6 +1162,9 @@ export async function* routeParallel(
       if (effectiveMsg.type === 'system_info' && effectiveMsg.content && effectiveMsg.catId) {
         if (isUserFacingSystemInfoContent(effectiveMsg.content)) {
           catSawUserFacingSystemInfo.set(effectiveMsg.catId, true);
+          const contents = catUserFacingSystemInfoContents.get(effectiveMsg.catId) ?? [];
+          contents.push(effectiveMsg.content);
+          catUserFacingSystemInfoContents.set(effectiveMsg.catId, contents);
         }
         try {
           const parsed = JSON.parse(effectiveMsg.content);
@@ -1998,6 +2099,15 @@ export async function* routeParallel(
         }
       }
 
+      await persistUserFacingSystemInfoNotices({
+        messageStore: deps.messageStore,
+        threadId,
+        catId: msg.catId,
+        contents: catUserFacingSystemInfoContents.get(msg.catId) ?? [],
+        ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+      });
+      catUserFacingSystemInfoContents.delete(msg.catId);
+
       // Persist error as system message so it survives F5 reload but does NOT
       // re-enter the prompt as a cat message (aligned with route-serial.ts).
       // Previously errors were mixed into catText and persisted with userId=user,
@@ -2176,12 +2286,14 @@ export async function* routeParallel(
     options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
   }
 
-  // F200 AC-A1: fire-and-forget recall correlation after all cats complete
+  // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
+  // TD 2026-08-12: bounded tail read — full-thread reads of large keys
+  // (observed 221MB) froze the API event loop every round-end.
   if (deps.toolEventLog && deps.evidenceStore && completedCatInvocationIds.length > 0) {
     const evidenceDb = (deps.evidenceStore as { getDb?: () => import('better-sqlite3').Database }).getDb?.();
     if (evidenceDb) {
       deps.toolEventLog
-        .readByThread(threadId)
+        .readRecentByThread(threadId, RECALL_CORRELATION_EVENT_WINDOW)
         .then((events) => {
           const raw = events as unknown as Parameters<typeof triggerRecallCorrelation>[1];
           for (const [catId, invId] of completedCatInvocationIds) {

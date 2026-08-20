@@ -2,6 +2,7 @@
 
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useElapsedTime } from '@/hooks/useElapsedTime';
+import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorMix, catColorVar } from '@/lib/cat-slug';
 import type { TokenUsage } from '@/stores/chat-types';
@@ -99,7 +100,7 @@ export function aggregateUsage(
   };
 }
 
-export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; threadId: string }) {
+export function ParallelStatusBar({ threadId }: { threadId: string }) {
   // F173 Phase C Task 3 — thread-scoped read. Caller (ChatContainer) passes
   // its threadId so we follow the per-thread liveness, not flat current.
   const {
@@ -118,6 +119,7 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
     // 全程显示，slot 移除（猫完成清 slot）不应让卡片消失
     intentMode,
   });
+  const { state: cancelState, cancelAll: handleProjectedStop } = useLiveExecutionCancelControl(threadId);
 
   if (activeCats.length === 0) return null;
 
@@ -135,20 +137,26 @@ export function ParallelStatusBar({ onStop, threadId }: { onStop?: () => void; t
             invocation={catInvocations[catId]}
           />
         ))}
-        {onStop && (
-          <button
-            onClick={() => onStop()}
-            className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-full bg-conn-red-bg text-conn-red-text hover:opacity-90 transition-colors text-xs font-medium"
-            title="停止所有猫猫"
-            aria-label="Stop all cats"
-            data-testid="parallel-stop-button"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <rect x="4" y="4" width="12" height="12" rx="2" />
-            </svg>
-            停止
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => void handleProjectedStop()}
+          disabled={cancelState !== 'available'}
+          className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-full bg-conn-red-bg text-conn-red-text hover:opacity-90 transition-colors text-xs font-medium disabled:cursor-wait disabled:opacity-50"
+          title={
+            cancelState === 'pending'
+              ? '正在停止所有猫猫'
+              : cancelState === 'available'
+                ? '停止所有猫猫'
+                : '正在确认可停止的运行状态'
+          }
+          aria-label="Stop all cats"
+          data-testid="parallel-stop-button"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <rect x="4" y="4" width="12" height="12" rx="2" />
+          </svg>
+          {cancelState === 'pending' ? '停止中…' : cancelState === 'available' ? '停止' : '暂不可停止'}
+        </button>
       </div>
       {agg && (
         <div

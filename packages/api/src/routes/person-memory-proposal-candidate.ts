@@ -7,6 +7,7 @@ import {
   captureCandidateIdSchema,
   type PersonIdentityDraft,
   type PersonMemoryResolvedSourceBundle,
+  type PersonMemorySourceRef,
 } from '@cat-cafe/shared';
 import {
   digestPersonMemoryResolvedBundle,
@@ -18,6 +19,7 @@ import type {
   StoredPersonMemoryCandidate,
 } from '../domains/memory/people/PersonMemoryStore.js';
 import { candidateRepresentsPerson } from '../domains/memory/people/person-memory-candidate-identity.js';
+import { proposalPersonMemoryDeltaFingerprint } from '../domains/memory/people/person-memory-delta-lineage.js';
 import type { WorkspacePersonAliasSetResolution } from '../domains/memory/people/WorkspacePersonResolver.js';
 import type { ProposePersonMemoryBody } from './person-memory-proposal-source-contract.js';
 
@@ -44,6 +46,7 @@ export function makeCandidateInput(
   originMessageId: string,
   interactionSourceEvidence: CandidateInteractionDraft['sourceEvidence'] | undefined,
   sourceBundle: PersonMemoryResolvedSourceBundle,
+  sourceMessageRef?: PersonMemorySourceRef,
 ): StagePersonMemoryCandidateInput {
   const candidateId = candidateIdForProposal(parsed, auth);
   const claimDrafts = parsed.claims.map((claim, index) => ({
@@ -69,17 +72,26 @@ export function makeCandidateInput(
         };
       })()
     : undefined;
+  const deltaFingerprint = proposalPersonMemoryDeltaFingerprint({
+    targetPersonId: parsed.targetPersonId,
+    person: parsed.person,
+    sourceBundle,
+    replacesProposalId: parsed.replacesProposalId,
+  });
   return {
     candidateId,
     ownerUserId: auth.userId,
     requesterCatId: auth.catId,
-    sourceMessageRef: { kind: 'message', threadId: auth.threadId, messageId: originMessageId },
+    sourceMessageRef: sourceMessageRef ?? { kind: 'message', threadId: auth.threadId, messageId: originMessageId },
     personDraft: parsed.person,
     ...(parsed.targetPersonId ? { targetPersonId: parsed.targetPersonId } : {}),
     claimDrafts,
     ...(relationshipDraft ? { relationshipDraft } : {}),
     ...(interactionDraft ? { interactionDraft } : {}),
     sourceBundle,
+    ...(parsed.deferredReceipt ? { deferredReceiptId: parsed.deferredReceipt.receiptId } : {}),
+    ...(parsed.deferredReceipt ? { deferredReceiptClaimId: parsed.deferredReceipt.claimId } : {}),
+    ...(deltaFingerprint ? { deltaFingerprint } : {}),
     ...(parsed.replacesProposalId ? { replacesProposalId: parsed.replacesProposalId } : {}),
     remainingDraftIds: [
       ...claimDrafts.map((draft) => draft.draftId),
@@ -158,7 +170,11 @@ export function derivePersonDraft(
 }
 
 export type PriorCandidateValidation =
-  | { status: 'ok'; prior: StoredPersonMemoryCandidate | null }
+  | {
+      status: 'ok';
+      prior: StoredPersonMemoryCandidate | null;
+      deferredClaimRenewal?: { previousClaimId: string; nextClaimId: string; deltaFingerprint: string };
+    }
   | { status: 'error'; statusCode: 404 | 409; error: string };
 
 async function targetPersonIsActive(
@@ -171,6 +187,20 @@ async function targetPersonIsActive(
   return target?.status === 'active';
 }
 
+function sameWriteOpportunityLineage(
+  left: StagePersonMemoryCandidateInput['writeOpportunityLineage'],
+  right: StagePersonMemoryCandidateInput['writeOpportunityLineage'],
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.reflexId === right.reflexId &&
+    left.reflexVersion === right.reflexVersion &&
+    left.opportunityId === right.opportunityId &&
+    left.dedupeLineage === right.dedupeLineage &&
+    left.generation === right.generation
+  );
+}
+
 function validateExistingCandidate(
   prior: StoredPersonMemoryCandidate | null,
   input: StagePersonMemoryCandidateInput,
@@ -181,11 +211,44 @@ function validateExistingCandidate(
   if (prior.replacesProposalId !== input.replacesProposalId) {
     return { status: 'error', statusCode: 409, error: 'replacement_conflict' };
   }
+  if (prior.deferredReceiptId !== input.deferredReceiptId) {
+    return { status: 'error', statusCode: 409, error: 'deferred_receipt_conflict' };
+  }
+  if (!sameWriteOpportunityLineage(prior.writeOpportunityLineage, input.writeOpportunityLineage)) {
+    return { status: 'error', statusCode: 409, error: 'write_opportunity_lineage_conflict' };
+  }
+  if (prior.deltaFingerprint !== input.deltaFingerprint) {
+    return { status: 'error', statusCode: 409, error: 'delta_lineage_conflict' };
+  }
   if (!prior.sourceBundle || digestPersonMemoryResolvedBundle(prior.sourceBundle) !== sourceDigest) {
     return { status: 'error', statusCode: 409, error: 'source_conflict' };
   }
   if (!candidateRepresentsPerson(prior, person)) {
     return { status: 'error', statusCode: 409, error: 'identity_conflict' };
+  }
+  if (prior.deferredReceiptClaimId !== input.deferredReceiptClaimId) {
+    const previousClaimId = prior.deferredReceiptClaimId;
+    const nextClaimId = input.deferredReceiptClaimId;
+    const deltaFingerprint = prior.deltaFingerprint;
+    const renewable =
+      prior.state === 'staged' &&
+      prior.publication.state === 'staged' &&
+      prior.deferredReceiptId !== undefined &&
+      previousClaimId !== undefined &&
+      nextClaimId !== undefined &&
+      deltaFingerprint !== undefined;
+    if (!renewable) {
+      return { status: 'error', statusCode: 409, error: 'deferred_receipt_claim_conflict' };
+    }
+    return {
+      status: 'ok',
+      prior,
+      deferredClaimRenewal: {
+        previousClaimId,
+        nextClaimId,
+        deltaFingerprint,
+      },
+    };
   }
   return { status: 'ok', prior };
 }

@@ -32,7 +32,11 @@ function makeStubRouter() {
 
 // Minimal mock dependencies
 function makeStubRegistry() {
-  return { getLatestId: () => null, register: () => {} };
+  // getRecord 必须存在且返回 null（生产语义：child registry 权威表示"无此 turn 记录"，
+  // 对未知 id 从不 throw）。旧 stub 缺这个方法，wrapper 调用直接 TypeError——一直被
+  // resolveDraftToTurn 的 catch 吞着才没炸；cloud R5 P1-A 删掉吞错后（throw = 未知必须
+  // 传播，null = 权威 skip），stub 的缺口立刻暴露。吞错掩盖缺陷的又一个标本。
+  return { getLatestId: () => null, getRecord: async () => null, register: () => {} };
 }
 
 function makeStubSocketManager() {
@@ -204,6 +208,88 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.isDraft, true, 'Draft should have isDraft flag');
     assert.equal(draft.content, 'Draft content...');
     assert.equal(draft.catId, 'opus');
+  });
+
+  it('hydrates only exposed recall tombstones and never returns their body', async () => {
+    const custody = (entryId, exposure) => ({
+      version: 1,
+      entryId,
+      revision: 1,
+      intent: 'user_message',
+      status: 'queued',
+      allTargetCats: ['opus'],
+      pendingTargetCats: ['opus'],
+      notifiedByCatIds: [],
+      seenByCatIds: exposure ? ['opus'] : [],
+      seenInvocationIdByCatId: exposure ? { opus: exposure.invocationId } : {},
+      ...(exposure ? { bodyExposures: [exposure] } : {}),
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    const hidden = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'zero exposure secret',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-hidden'),
+    });
+    const exposure = { targetCatId: 'opus', invocationId: 'child-read', seenAt: 1_500 };
+    const exposed = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'exposed secret',
+      mentions: ['opus'],
+      timestamp: 1_100,
+      threadId: 'thread-1',
+      deliveryStatus: 'queued',
+      queueCustody: custody('entry-exposed', exposure),
+    });
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(hidden.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 0,
+        merge: 'replace',
+        recalledAt: 2_000,
+      }).kind,
+      'recalled',
+    );
+    assert.equal(
+      messageStore.recallMessageToComposerDraft(exposed.id, {
+        ownerUserId: 'user-1',
+        threadId: 'thread-1',
+        expectedDraftRevision: 1,
+        merge: 'replace',
+        recalledAt: 2_100,
+      }).kind,
+      'recalled',
+    );
+
+    const app = await buildApp();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/messages?threadId=thread-1',
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const messages = response.json().messages;
+    assert.equal(
+      messages.some((message) => message.id === hidden.id),
+      false,
+    );
+    const tombstone = messages.find((message) => message.id === exposed.id);
+    assert.ok(tombstone);
+    assert.equal(tombstone.content, '');
+    assert.equal(tombstone.extra.recall.exposure, 'seen');
+    assert.deepEqual(tombstone.extra.recall.exposures, [exposure]);
+    assert.doesNotMatch(JSON.stringify(tombstone), /exposed secret/);
   });
 
   it('excludes drafts on paginated request (with before cursor)', async () => {

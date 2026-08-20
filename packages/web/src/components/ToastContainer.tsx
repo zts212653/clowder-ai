@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { type ToastItem, useToastStore } from '@/stores/toastStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
+import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { LongFormReader } from './content-overflow';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
 const DISMISS_DELAY = 300; // animation duration
 
@@ -83,6 +86,28 @@ export function ToastCard({ toast, onDismiss, stackPosition, stackSize }: ToastC
         ? 'text-green-500'
         : 'text-conn-amber-text';
 
+  const runAction = useCallback(() => {
+    const action = toast.action;
+    if (!action) return;
+    if (!action.messageId) {
+      pushThreadRouteWithHistory(action.threadId, typeof window === 'undefined' ? undefined : window);
+      dismiss();
+      return;
+    }
+    const plan = planTeleport({
+      threadId: action.threadId,
+      messageId: action.messageId,
+      currentThreadId: useChatStore.getState().currentThreadId,
+    });
+    if (plan.scrollNow) {
+      scrollToMessage(plan.scrollNow);
+      kickTeleportResolve();
+    } else if (plan.navigateTo) {
+      pushThreadRouteWithHistory(plan.navigateTo, typeof window === 'undefined' ? undefined : window);
+    }
+    dismiss();
+  }, [dismiss, toast.action]);
+
   return (
     <div
       className={`
@@ -109,6 +134,15 @@ export function ToastCard({ toast, onDismiss, stackPosition, stackSize }: ToastC
             triggerAriaLabel={`查看“${toast.title}”通知全文${stackContext}`}
             onOpenChange={handleReaderOpenChange}
           />
+          {toast.action ? (
+            <button
+              type="button"
+              className="mt-1.5 rounded-md border border-cafe px-2 py-1 text-xs font-semibold text-cafe-interactive hover:bg-cafe-surface-sunken"
+              onClick={runAction}
+            >
+              {toast.action.label}
+            </button>
+          ) : null}
         </div>
         <button
           type="button"

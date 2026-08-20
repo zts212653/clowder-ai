@@ -5,18 +5,20 @@ topics: [plugin-framework, capability-registry, settings, resource-activation, s
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "K-2A adds a dormant internal inventory and store boundary; it introduces no new user-invokable action or discovery surface, while the existing Settings plugin journey remains unchanged."
+tips_exempt: "K-2A through K-2D add dormant Host inventory, Broker-session, settlement, and supervised stdio boundaries; they introduce no new user-invokable activation or discovery surface, while the existing Settings plugin journey remains unchanged."
 ---
 
 # F202: Plugin Framework — local discovery, config, resource activation, and schedule resources
 
-> **Status**: in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
+> **Status**: in-progress (local Phase 1 merged; K-2A/K-2B merged; K-2D supervised stdio runtime composed dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
 Architecture cell: plugin
-Map delta: new cell required
-Why: F202 introduces the first repository-local plugin lifecycle boundary: manifest discovery, config persistence, plugin-owned resource activation, and Settings controls.
+Map delta: completed; updated 2026-08-11 for K-2D.
+Why: F202 owns both the repository-local lifecycle boundary and the Host-governed external package,
+session, grant, and durable Broker-settlement boundary. Product-domain effects remain in their
+canonical cells.
 
 ## Source
 
@@ -48,7 +50,7 @@ PR #686 is a concrete Phase 1 implementation proposal for that missing layer. It
 4. On enable, Clowder AI activates only resources owned by that plugin and shows their resulting status through the existing plugin and capability surfaces.
 5. After restart, Clowder AI rehydrates only plugins that are still enabled and valid; disabled or invalid plugins remain inactive with a visible error state.
 
-**Failure journey:** invalid manifests, ownership collisions, unsafe configuration, or activation failures are rejected without mutating unrelated plugin resources. K-2A's contract-native inventory is a dormant internal prerequisite for the future external-package path and does not activate a new user-facing runtime by itself.
+**Failure journey:** invalid manifests, ownership collisions, unsafe configuration, or activation failures are rejected without mutating unrelated plugin resources. K-2A's contract-native inventory and K-2B's Broker session/settlement state machine remain dormant internal boundaries; neither activates a new user-facing runtime by itself.
 
 ## What
 
@@ -72,6 +74,17 @@ Phase 2 covers:
 - Move GitHub plugin configuration to the F202 plugin config boundary while preserving scoped fallback to existing GitHub CLI / env behavior during migration.
 - Add PR/issue tracking ergonomics that naturally belong to the GitHub plugin migration slice: tracking instructions, generic unregister by subject key, and issue comment tracking.
 - Bundle plugin manifests/resources into desktop packaging so packaged installs discover the same repository-local plugins as source installs.
+
+The external-package K-2 path currently covers:
+
+- K-2A: contract-native package, installation-instance, activation, and effective-grant inventory.
+- K-2B: Host-owned one-use handshake sessions, runtime leases, durable call settlement, and a builtin
+  loopback adapter that exercises the same control plane without bypassing it.
+- A ready-only `events.publish` handler that reuses F292 signal admission and canonical settlement;
+  core imports the published contract validators and wire registry instead of mirroring them.
+- K-2D: immutable package-to-process authority, closed-environment child supervision, bounded
+  contract-owned stdio transport, and fail-closed restart recovery. Production composition is
+  constructed but dormant; installation UI, activation authority, and real co-run remain later slices.
 
 ## Non-Goals
 
@@ -144,6 +157,29 @@ Phase 2 covers:
 - [ ] AC-H4: GitHub PR/issue bodies and comments are explicitly marked or delimited as untrusted external content before they are routed to cats.
 - [ ] AC-H5: Existing PR tracking tasks remain backward compatible after the migration.
 
+### AC-I: K-2A through K-2D External Package and Runtime Boundary
+
+- [x] AC-I1: Host inventory binds admitted package digest, installation instance, activation, and
+  effective grants to exact published contract truth without a core-local manifest mirror.
+- [x] AC-I2: Candidate hello is validated against Host inventory; nonce/session binding is one-use,
+  deadline-bound, and cannot widen plugin identity, package digest, wire version, or grants.
+- [x] AC-I3: Runtime sessions and leases normalize closed/stopped after restart while durable calls,
+  package identity, installation state, and grants survive atomically.
+- [x] AC-I4: Every call rechecks current grants/lease and is recorded before domain dispatch;
+  concurrent retries have one winner and ambiguous recovery consults canonical domain settlement.
+- [x] AC-I5: Only contract registry methods with `ready: true` can dispatch. `events.publish` flows
+  through F292 Host authorization/idempotency without copying C-2 schema into core.
+- [x] AC-I6: Builtin loopback and external stdio traverse the same Host Broker state machine;
+  production composition constructs and restart-recovers the supervisor but never calls `start`
+  or exposes an activation route.
+- [x] AC-I7: External start copies the exact Host-owned archive into a private stage, verifies its
+  admitted SRI, atomically publishes and re-hashes the launchable tree, contains the entrypoint,
+  launches without a shell or inherited credentials, and accepts only bounded
+  contract/SDK-classified frames.
+- [x] AC-I8: Process, protocol, deadline, stop, crash, and Host-restart terminal paths close Broker
+  authority and normalize runtime state without trusting a persisted PID or blindly redispatching
+  an ambiguous effect.
+
 ## Intake Timeline
 
 | Date | Event |
@@ -151,6 +187,9 @@ Phase 2 covers:
 | 2026-05-31 | clowder-ai#686 absorbed into cat-cafe via cat-cafe#1999 (squash `11b24d60334789a3f95d12be355d3ddbd196309c`). Intake ledger advanced to clowder-ai merge `60d1dbbfcbf84954000fcfcdbd645fd20948aa5d`. |
 | 2026-05-31 | Post-merge follow-ups opened: cat-cafe#2000 for P2 deferral re-ranking, cat-cafe#2001 for `eval:capability-wakeup` with the new limb/plugin surface. Architecture ownership cell `plugin` added in this doc sync. |
 | 2026-06-08 | Maintainer decision: clowder-ai#844/#846 is re-anchored from its conflicting standalone feature number to F202 Phase 2. The source-truth plan lives here; the open PR must retitle/rewrite body/docs/roadmap before merge review continues. |
+| 2026-08-05 | K-2A Host inventory merged via cat-cafe#3422 (`a6b38ac53`); package/install/grant truth landed with runtime dormant. |
+| 2026-08-10 | K-2B production-transport state machine merged via cat-cafe#3555 (`f7fe82303`): contract-native handshake, durable call ledger, restart normalization, builtin loopback, and typed F292 `events.publish`; external runtime activation remains dormant. |
+| 2026-08-11 | K-2D implemented on cat-cafe#3558: immutable package verification, supervised stdio transport, closed bootstrap environment, and current-main project persistence composition; startup remains dormant with no activation route. |
 
 ## Current Maintainer Position
 
@@ -160,4 +199,10 @@ Phase 2 is accepted as the correct home for schedule resources and the existing 
 
 Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
 
-[Maine Coon/GPT-5.5🐾]
+K-2A through K-2D are accepted as the Host-owned external-package foundation. The Host now has a
+supervised stdio process boundary and a production composition object, but startup only performs
+fail-closed persistence recovery. No package is installed or started by that wiring, no activation
+route exists, and real plugin co-run remains separately gated. Core must continue importing the
+exact public contract rather than growing a private wire registry.
+
+[小太阳·Maine Coon/GPT-5.6 Sol🐾]

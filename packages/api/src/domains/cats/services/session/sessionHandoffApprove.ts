@@ -57,7 +57,7 @@ export async function approveSessionHandoff(
   // ── Pre-commit step 2: 校验 sourceSessionId 仍是同 (user,thread,cat) 的 active session ──
   // getActive 返回当前 active；若 sourceSessionId 已被新 session 取代 → 晚 approve，reject (KD-6)。
   const session = await sessionChainStore.get(claimed.sourceSessionId);
-  const active = await sessionChainStore.getActive(claimed.sourceCatId, claimed.sourceThreadId);
+  const active = await sessionChainStore.getActive(claimed.sourceCatId, claimed.sourceThreadId, claimed.userId);
   const stillActive =
     session?.status === 'active' && active?.id === claimed.sourceSessionId && session.userId === claimed.userId;
   if (!stillActive) {

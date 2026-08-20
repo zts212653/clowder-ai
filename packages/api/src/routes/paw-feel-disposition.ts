@@ -5,6 +5,7 @@ import {
   type IPawFeelDutyConfigStore,
   PawFeelDutyConfigStoreError,
 } from '../infrastructure/harness-eval/paw-feel-disposition/duty-config-store.js';
+import type { PawFeelDutyReceiptService } from '../infrastructure/harness-eval/paw-feel-disposition/duty-receipt.js';
 import type {
   PawFeelCaptureIntentSidecar,
   PawFeelCaptureService,
@@ -37,6 +38,7 @@ export interface PawFeelDispositionRoutesOptions {
   captureService?: Pick<PawFeelCaptureService, 'capture'>;
   captureIntentSidecar?: Pick<PawFeelCaptureIntentSidecar, 'declare'>;
   dutyConfigStore?: IPawFeelDutyConfigStore;
+  dutyReceiptService?: Pick<PawFeelDutyReceiptService, 'reconcile'>;
   callbackRegistry?: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
 }
@@ -114,8 +116,26 @@ function mapServiceError(error: unknown, reply: FastifyReply) {
   });
 }
 
+async function reconcileDutyReceipt(
+  service: Pick<PawFeelDutyReceiptService, 'reconcile'> | undefined,
+  actorCatId: string,
+) {
+  if (!service) return {};
+  try {
+    return { dutyReceipt: await service.reconcile(actorCatId) };
+  } catch (error) {
+    return {
+      dutyReceiptWarning: {
+        code: 'receipt_reconciliation_failed' as const,
+        detail: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
 async function triage(
   service: Pick<PawFeelDispositionService, 'executeMany'> | undefined,
+  receiptService: Pick<PawFeelDutyReceiptService, 'reconcile'> | undefined,
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
@@ -131,7 +151,7 @@ async function triage(
       { kind: 'cat', id: principal.catId },
       parsed.data.commands,
     );
-    return { results };
+    return { results, ...(await reconcileDutyReceipt(receiptService, principal.catId)) };
   } catch (error) {
     return mapServiceError(error, reply);
   }
@@ -230,7 +250,7 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
       const results = await opts.dispositionService.executeMany({ kind: 'cvo', id: userId }, [
         pawFeelSingleActionCommand(parsed.data),
       ]);
-      return { results };
+      return { results, ...(await reconcileDutyReceipt(opts.dutyReceiptService, `cvo:${userId}`)) };
     } catch (error) {
       return mapServiceError(error, reply);
     }
@@ -254,7 +274,8 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
       });
     }
     try {
-      return await opts.dispositionService.executeBundle({ kind: 'cvo', id: userId }, parsed.data);
+      const result = await opts.dispositionService.executeBundle({ kind: 'cvo', id: userId }, parsed.data);
+      return { ...result, ...(await reconcileDutyReceipt(opts.dutyReceiptService, `cvo:${userId}`)) };
     } catch (error) {
       return mapServiceError(error, reply);
     }
@@ -266,7 +287,7 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
   });
 
   app.post('/api/callbacks/paw-feel-triage', async (request, reply) => {
-    return triage(opts.dispositionService, request, reply);
+    return triage(opts.dispositionService, opts.dutyReceiptService, request, reply);
   });
 
   app.post('/api/callbacks/paw-feel-bundle-triage', async (request, reply) => {
@@ -275,8 +296,13 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
     }
     const principal = requireCallbackPrincipal(request, reply);
     if (!principal) return;
+    const parsed = PawFeelBundleActionBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'invalid paw-feel bundle action', details: parsed.error.issues });
+    }
     try {
-      return await opts.dispositionService.executeBundle({ kind: 'cat', id: principal.catId }, request.body);
+      const result = await opts.dispositionService.executeBundle({ kind: 'cat', id: principal.catId }, parsed.data);
+      return { ...result, ...(await reconcileDutyReceipt(opts.dutyReceiptService, principal.catId)) };
     } catch (error) {
       return mapServiceError(error, reply);
     }

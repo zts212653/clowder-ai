@@ -65,6 +65,13 @@ export interface EvalHubLifecycleView {
   taskId?: string;
   leaseId?: string;
   leaseGeneration?: number;
+  responsibilityBlocker?: {
+    eventId: string;
+    reasonCode: 'feature_thread_not_found' | 'feature_thread_ambiguous';
+    featureId: string;
+    ownerCatId: string;
+    candidateThreadIds: string[];
+  };
   mainCommitSha?: string;
   liveCommitSha?: string;
   ownerResponseRefs?: EvalLifecycleRef[];
@@ -73,6 +80,11 @@ export interface EvalHubLifecycleView {
   reevalRefs?: EvalLifecycleRef[];
   unavailableRefs?: EvalLifecycleRef[];
   reevalStatus?: 'not_required' | 'unavailable' | 'not_requested' | 'pending' | 'passed' | 'failed';
+  repairDebtStatus?: 'not_required' | 'active' | 'cleared';
+  reevalDebtStatus?: 'not_scheduled' | 'scheduled' | 'due' | 'in_progress' | 'passed' | 'failed';
+  reevalTaskId?: string;
+  reevalLeaseId?: string;
+  reevalLeaseGeneration?: number;
   reevalDueAt?: string;
   escalation?: { eventId: string; stage: 'acknowledgement' | 'reevaluation'; dueAt: string };
   closureReason?: string;

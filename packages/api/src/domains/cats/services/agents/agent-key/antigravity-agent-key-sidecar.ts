@@ -1,8 +1,7 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createCatId } from '@cat-cafe/shared';
 import type { AgentKeyRegistry } from './AgentKeyRegistry.js';
+import { ensureAgentKeySidecar } from './AgentKeySidecarProvisioner.js';
 
 const DEFAULT_ANTIGRAVITY_AGENT_KEY_DIR = join(homedir(), '.cat-cafe', 'agent-keys');
 const DEFAULT_ANTIGRAVITY_AGENT_KEY_FILE = join(DEFAULT_ANTIGRAVITY_AGENT_KEY_DIR, 'antigravity.secret');
@@ -53,7 +52,7 @@ export async function ensureAntigravityAgentKeySidecar(
   const catId = options.catId ?? 'antigravity';
   const catIds = uniqueCatIds(catId, options.catIds);
   const userId =
-    options.userId ?? env.CAT_CAFE_AGENT_KEY_USER_ID?.trim() ?? env.CAT_CAFE_USER_ID?.trim() ?? 'default-user';
+    options.userId?.trim() || env.CAT_CAFE_AGENT_KEY_USER_ID?.trim() || env.CAT_CAFE_USER_ID?.trim() || 'default-user';
   const filePath = options.filePath ?? env.CAT_CAFE_AGENT_KEY_FILE?.trim() ?? DEFAULT_ANTIGRAVITY_AGENT_KEY_FILE;
 
   const agentKeyIds: Record<string, string> = {};
@@ -62,14 +61,13 @@ export async function ensureAntigravityAgentKeySidecar(
   for (const currentCatId of catIds) {
     const currentFilePath =
       options.filePathByCatId?.[currentCatId] ?? defaultFilePathForCatId(catId, filePath, currentCatId);
-    const issued = await registry.issue(createCatId(currentCatId), userId);
-    await mkdir(dirname(currentFilePath), { recursive: true, mode: 0o700 });
-    await writeFile(currentFilePath, `${issued.secret}\n`, { mode: 0o600 });
-    await chmod(currentFilePath, 0o600).catch(() => {
-      // Best-effort on filesystems that do not support chmod; writeFile(mode)
-      // already requested the strict sidecar permission.
+    const reconciled = await ensureAgentKeySidecar({
+      registry,
+      catId: currentCatId,
+      userId,
+      keyFile: currentFilePath,
     });
-    agentKeyIds[currentCatId] = issued.agentKeyId;
+    agentKeyIds[currentCatId] = reconciled.agentKeyId;
     agentKeyFiles[currentCatId] = currentFilePath;
   }
 

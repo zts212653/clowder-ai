@@ -106,6 +106,21 @@ function processIsRunning(child) {
   return child.exitCode === null && child.signalCode === null;
 }
 
+async function waitForProcessToDisappear(pid, { timeoutMs = 5_000, pollIntervalMs = 10 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error?.code === 'ESRCH') return;
+      throw error;
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw new Error(`OpenCode descendant ${pid} did not exit`);
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remainingMs)));
+  }
+}
+
 async function terminateWindowsProcessTree(child, exited) {
   const result = spawnSync('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
     encoding: 'utf8',
@@ -180,6 +195,18 @@ function bestEffortKill(pid) {
   }
 }
 
+test('bounds descendant disappearance polling internally', async () => {
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 250)'], { stdio: 'ignore' });
+  try {
+    await assert.rejects(
+      waitForProcessToDisappear(sleeper.pid, { timeoutMs: 20 }),
+      new RegExp(`OpenCode descendant ${sleeper.pid} did not exit`),
+    );
+  } finally {
+    bestEffortKill(sleeper.pid);
+  }
+});
+
 test('terminates an OpenCode process tree after request capture', async () => {
   const childScript = [
     "const { spawn } = require('node:child_process');",
@@ -197,7 +224,8 @@ test('terminates an OpenCode process tree after request capture', async () => {
     await terminateOpenCodeProcess(processHandle);
     const result = await Promise.race([processHandle.completed, timeoutAfter(5_000, 'test process did not terminate')]);
     assert.notEqual(result.signal ?? result.code, null);
-    assert.throws(() => process.kill(descendantPid, 0), { code: 'ESRCH' });
+    // Linux runners may retain a signalled descendant until its new parent reaps it.
+    await waitForProcessToDisappear(descendantPid);
   } finally {
     if (processHandle.child.exitCode === null) bestEffortKill(processHandle.child.pid);
     if (descendantPid) bestEffortKill(descendantPid);

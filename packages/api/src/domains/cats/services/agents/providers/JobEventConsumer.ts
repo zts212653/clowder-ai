@@ -21,8 +21,9 @@ const JOBS_DIR = join(HOME, '.claude/jobs');
 /** State machine values emitted by Anthropic Agent View daemon.
  *  F198 Phase D Bug #2 fix: `failed` / `blocked` / `stopped` were observed
  *  in real `~/.claude/jobs/<id>/state.json` files (evidence: b67f7411=failed,
- *  25d080fe=blocked) but were missing from this union — the carrier's
- *  terminal check silently ignored them and hung to the 30-min timeout. */
+ *  25d080fe=blocked) but were missing from this union. `blocked` completes the
+ *  current Clowder AI delivery with an actionable error while the native job
+ *  remains alive and waiting; it is not a provider job-terminal state. */
 export type JobState = 'queued' | 'working' | 'done' | 'error' | 'idle' | 'failed' | 'blocked' | 'stopped';
 
 export interface JobStateSnapshot {

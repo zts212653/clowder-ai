@@ -27,26 +27,68 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import io
+import json
 import logging
 import os
 import shutil
 import signal
 import sys
 import tempfile
+import threading
+import wave
 from abc import ABC, abstractmethod
+from array import array
+from concurrent.futures import ThreadPoolExecutor
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 MAX_INPUT_CHARS = 5000
+MIN_MLX_AUDIO_VERSION = (0, 4, 7)
+TTS_API_CAPABILITIES = ["speech", "speech-stream-route-v1"]
 
 log = logging.getLogger("tts-api")
 
 app = FastAPI(title="Clowder AI TTS Server")
+
+
+def require_mlx_audio_runtime() -> None:
+    """Fail closed when clone/stream fixes required by F279 are unavailable."""
+    try:
+        raw_version = version("mlx-audio")
+        parsed = tuple(int(part) for part in raw_version.split(".")[:3])
+    except (PackageNotFoundError, ValueError) as exc:
+        raise RuntimeError("mlx-audio>=0.4.7 is required for Qwen clone streaming") from exc
+    if parsed < MIN_MLX_AUDIO_VERSION:
+        raise RuntimeError(
+            f"mlx-audio>={'.'.join(map(str, MIN_MLX_AUDIO_VERSION))} is required; found {raw_version}. "
+            "Reinstall the TTS service from Console settings."
+        )
+
+
+def _pcm16_bytes(audio) -> bytes:
+    samples = audio.tolist() if hasattr(audio, "tolist") else audio
+    pcm = array("h", (round(max(-1.0, min(1.0, float(sample))) * 32767) for sample in samples))
+    if sys.byteorder != "little":
+        pcm.byteswap()
+    return pcm.tobytes()
+
+
+def _wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm)
+    return output.getvalue()
 
 
 def resolve_cat_cafe_home() -> Path:
@@ -356,7 +398,12 @@ class Qwen3CloneAdapter(TtsAdapter):
 
     def __init__(self, model: str | None = None):
         self._model = model or self.DEFAULT_MODEL
-        self._lock = asyncio.Lock()
+        self._lock = threading.Lock()
+        self._loaded_model = None
+        self._inference_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="cat-cafe-qwen-tts",
+        )
 
     @property
     def name(self) -> str:
@@ -379,66 +426,145 @@ class Qwen3CloneAdapter(TtsAdapter):
         instruct: str | None = None,
         temperature: float = 0.3,
     ) -> tuple[bytes, str]:
-        try:
-            from mlx_audio.tts.generate import generate_audio as tts_generate
-        except ImportError as exc:
-            raise RuntimeError(
-                "mlx_audio.tts not available — pip install mlx-audio 'misaki[zh]'"
-            ) from exc
-
         if ref_audio and not Path(ref_audio).exists():
             log.warning("Reference audio not found: %s — falling back to voice ID mode", ref_audio)
             ref_audio = None
             ref_text = None
             instruct = None
 
+        return await asyncio.wrap_future(
+            self._inference_executor.submit(
+                self._synthesize_sync,
+                text,
+                voice,
+                lang_code,
+                speed,
+                audio_format,
+                ref_audio,
+                ref_text,
+                instruct,
+                temperature,
+            )
+        )
+
+    def submit_inference(self, operation):
+        """Queue one uninterrupted MLX operation on the model-owning thread."""
+        return self._inference_executor.submit(operation)
+
+    def _ensure_model(self):
+        if self._loaded_model is None:
+            from mlx_audio.tts.utils import load_model
+
+            self._loaded_model = load_model(self._model)
+        return self._loaded_model
+
+    def _synthesize_sync(
+        self,
+        text: str,
+        voice: str,
+        lang_code: str,
+        speed: float,
+        audio_format: str,
+        ref_audio: str | None,
+        ref_text: str | None,
+        instruct: str | None,
+        temperature: float,
+    ) -> tuple[bytes, str]:
+        from mlx_audio.tts.generate import generate_audio as tts_generate
+
         output_dir = Path(tempfile.mkdtemp(prefix="cat-cafe-tts-clone-"))
         try:
-            kwargs: dict = {
-                "text": text,
-                "model": self._model,
-                "lang_code": lang_code,
-                "speed": speed,
-                "audio_format": audio_format,
-                "output_path": str(output_dir),
-                "temperature": temperature,
-            }
-            # Clone mode: ref_audio + ref_text (voice param not used)
-            if ref_audio:
-                kwargs["ref_audio"] = ref_audio
-                if ref_text:
-                    kwargs["ref_text"] = ref_text
-                if instruct:
-                    kwargs["instruct"] = instruct
-            else:
-                # Fallback: use voice param like Kokoro adapter
-                kwargs["voice"] = voice
-
-            async with self._lock:
-                await asyncio.to_thread(tts_generate, **kwargs)
+            with self._lock:
+                model = self._ensure_model()
+                kwargs: dict = {
+                    "text": text,
+                    "model": model,
+                    "lang_code": lang_code,
+                    "speed": speed,
+                    "audio_format": audio_format,
+                    "output_path": str(output_dir),
+                    "temperature": temperature,
+                }
+                if ref_audio:
+                    kwargs["ref_audio"] = ref_audio
+                    if ref_text:
+                        kwargs["ref_text"] = ref_text
+                    if instruct:
+                        kwargs["instruct"] = instruct
+                else:
+                    kwargs["voice"] = voice
+                tts_generate(**kwargs)
 
             audio_files = list(output_dir.glob(f"*.{audio_format}"))
             if not audio_files:
                 raise RuntimeError("No audio file generated")
-
             return audio_files[0].read_bytes(), audio_format
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
 
-    def warmup(self) -> None:
-        from mlx_audio.tts.generate import generate_audio as tts_generate
+    def synthesize_stream(
+        self,
+        *,
+        text: str,
+        lang_code: str,
+        ref_audio: str,
+        ref_text: str,
+        temperature: float = 0.3,
+        streaming_interval: float = 0.5,
+    ):
+        """Yield independently playable WAV chunks, then one complete cache WAV."""
+        if not Path(ref_audio).exists():
+            raise RuntimeError(f"Reference audio not found: {ref_audio}")
 
-        warmup_dir = Path(tempfile.mkdtemp(prefix="cat-cafe-tts-clone-warmup-"))
+        self._lock.acquire()
         try:
-            tts_generate(
-                text="你好",
-                model=self._model,
-                voice="zm_yunjian",
-                lang_code="z",
-                output_path=str(warmup_dir),
-            )
+            model = self._ensure_model()
+            pcm_chunks: list[bytes] = []
+            sample_rate: int | None = None
+            for result in model.generate(
+                text=text,
+                lang_code=lang_code,
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+                temperature=temperature,
+                stream=True,
+                streaming_interval=streaming_interval,
+                verbose=False,
+            ):
+                sample_rate = int(result.sample_rate)
+                pcm = _pcm16_bytes(result.audio)
+                pcm_chunks.append(pcm)
+                yield {
+                    "type": "chunk",
+                    "audio_base64": base64.b64encode(_wav_bytes(pcm, sample_rate)).decode("ascii"),
+                    "duration_sec": len(pcm) / 2 / sample_rate,
+                    "final": bool(getattr(result, "is_final_chunk", False)),
+                }
+
+            if not pcm_chunks or sample_rate is None:
+                raise RuntimeError("Qwen clone stream produced no audio")
+            complete_pcm = b"".join(pcm_chunks)
+            yield {
+                "type": "final",
+                "audio_base64": base64.b64encode(_wav_bytes(complete_pcm, sample_rate)).decode("ascii"),
+                "duration_sec": len(complete_pcm) / 2 / sample_rate,
+            }
         finally:
-            shutil.rmtree(warmup_dir, ignore_errors=True)
+            self._lock.release()
+
+    def warmup(self) -> None:
+        self._inference_executor.submit(
+            self._synthesize_sync,
+            "你好",
+            "zm_yunjian",
+            "z",
+            1.0,
+            "wav",
+            None,
+            None,
+            None,
+            0.3,
+        ).result()
 
 
 # ─── Factory ──────────────────────────────────────────────────────────
@@ -535,12 +661,76 @@ async def synthesize_endpoint(req: SpeechRequest):
         raise HTTPException(500, detail=f"Synthesis error: {exc}") from exc
 
 
+@app.post("/v1/audio/speech/stream")
+async def synthesize_stream_endpoint(request: Request, req: SpeechRequest):
+    """Stream native Qwen clone chunks as NDJSON and finish with one cacheable WAV."""
+    if not adapter_ready or adapter is None:
+        raise HTTPException(503, detail="TTS adapter not ready yet")
+    if not isinstance(adapter, Qwen3CloneAdapter):
+        raise HTTPException(409, detail="Native clone streaming requires the qwen3-clone provider")
+    if not req.ref_audio or not req.ref_text:
+        raise HTTPException(400, detail="ref_audio and ref_text are required for clone streaming")
+
+    stream = adapter.synthesize_stream(
+        text=req.input,
+        lang_code=req.lang_code,
+        ref_audio=req.ref_audio,
+        ref_text=req.ref_text,
+        temperature=req.temperature,
+    )
+
+    stream_finished = object()
+    event_queue: asyncio.Queue[object] = asyncio.Queue()
+    stop_requested = threading.Event()
+    event_loop = asyncio.get_running_loop()
+
+    def produce_events():
+        try:
+            for event in stream:
+                if stop_requested.is_set():
+                    break
+                event_loop.call_soon_threadsafe(event_queue.put_nowait, event)
+        except Exception as exc:
+            event_loop.call_soon_threadsafe(event_queue.put_nowait, exc)
+        finally:
+            stream.close()
+            event_loop.call_soon_threadsafe(event_queue.put_nowait, stream_finished)
+
+    async def generate_events():
+        producer = asyncio.wrap_future(adapter.submit_inference(produce_events))
+        try:
+            while not await request.is_disconnected():
+                event = await event_queue.get()
+                if event is stream_finished:
+                    break
+                if isinstance(event, Exception):
+                    raise event
+                if await request.is_disconnected():
+                    break
+                yield json.dumps(event, separators=(",", ":")) + "\n"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.exception("Native clone stream failed for %d-char input", len(req.input))
+            if not await request.is_disconnected():
+                yield json.dumps({"type": "error", "error": str(exc)}, separators=(",", ":")) + "\n"
+        finally:
+            stop_requested.set()
+            try:
+                await asyncio.shield(producer)
+            except BaseException:
+                pass
+
+    return StreamingResponse(generate_events(), media_type="application/x-ndjson")
+
+
 @app.get("/health")
 async def health():
     return {
         "status": "ok" if adapter_ready else "loading",
         "model": adapter.model_name if adapter else "none",
         "backend": adapter.name if adapter else "none",
+        "capabilities": TTS_API_CAPABILITIES,
     }
 
 
@@ -569,6 +759,7 @@ async def health_deep():
             "status": "ok",
             "probe": "synthesis",
             "model": adapter.model_name,
+            "capabilities": TTS_API_CAPABILITIES,
         }
     except Exception as exc:
         log.warning("Deep health probe failed: %s", exc)
@@ -604,6 +795,9 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     provider = os.environ.get("TTS_PROVIDER", "qwen3-clone").strip().lower()
+
+    if provider in {"qwen3-clone", "mlx-audio"}:
+        require_mlx_audio_runtime()
 
     log.info("=== Clowder AI TTS Server ===")
     log.info("Provider: %s | Port: %d", provider, args.port)

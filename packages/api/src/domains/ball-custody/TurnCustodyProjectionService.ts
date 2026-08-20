@@ -3,76 +3,35 @@ import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
+import {
+  exactStructuredWakeIndex,
+  findWakeTerminal,
+  releasedStructuredWake,
+  supersededBeforeAdoption,
+} from './managed-hold-supersession.js';
 
-export type TurnCustodyWakeProvenance =
-  | {
-      readonly kind: 'unstructured';
-      readonly source: 'user_chat' | 'roam' | 'cron' | 'brainstorm' | 'protocol_decline';
-    }
-  | {
-      readonly kind: 'non_obligation';
-      readonly source: 'cross_thread_fyi' | 'cross_thread_coordinate' | 'coordination_terminal';
-    }
-  | {
-      readonly kind: 'action_successor';
-      readonly leaseId: string;
-      readonly generation: number;
-      readonly holderCatId: string;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'hold' | 'event_wait' | 'assign_work' | 'coordination' | 'callback';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-    }
-  | {
-      readonly kind: 'structured';
-      readonly protocol: 'dispatch';
-      readonly subjectKey: string;
-      readonly holderCatId: string;
-      readonly handoff: {
-        readonly sourceEventId: string;
-        readonly messageId: string;
-        readonly fromCatId: string;
-      };
-    }
-  | {
-      readonly kind: 'legacy';
-      readonly reason: 'text_mention' | 'source_missing' | 'carrier_missing' | 'query_failed';
-      readonly sourceCategory?: string;
-    };
+// Public vocabulary re-exported so the seven existing importers stay untouched.
+export type {
+  ActionTransitionBaseline,
+  StructuredTransitionBaseline,
+  StructuredTransitionObservation,
+  TurnCustodyProjection,
+  TurnCustodyProjectionState,
+  TurnCustodyShadowComparison,
+  TurnCustodyStopDecision,
+  TurnCustodyWakeProvenance,
+} from './turn-custody-projection-types.js';
 
-export type TurnCustodyProjectionState = 'covered_active' | 'covered_empty' | 'unknown_legacy';
-
-interface ActionTransitionBaseline {
-  readonly kind: 'action_successor';
-  readonly leaseId: string;
-  readonly generation: number;
-  readonly holderCatId: string;
-  readonly fingerprint: string;
-}
-
-interface StructuredTransitionBaseline {
-  readonly kind: 'structured';
-  readonly subjectKey: string;
-  readonly holderCatId: string;
-  readonly fromSequence: number;
-}
-
-export interface TurnCustodyProjection {
-  readonly state: TurnCustodyProjectionState;
-  readonly evidenceRefs: readonly string[];
-  readonly baseline?: ActionTransitionBaseline | StructuredTransitionBaseline;
-}
-
-export interface TurnCustodyStopDecision {
-  readonly state: TurnCustodyProjectionState;
-  readonly shouldBlock: boolean;
-  readonly transitionObserved: boolean;
-  readonly evidenceRefs: string[];
-}
-
-export type TurnCustodyShadowComparison = 'agree_allow' | 'agree_block' | 'old_only_block' | 'new_only_block';
+// Only what this file's body actually references.
+import type {
+  ActionTransitionBaseline,
+  StructuredTransitionBaseline,
+  StructuredTransitionObservation,
+  TurnCustodyProjection,
+  TurnCustodyShadowComparison,
+  TurnCustodyStopDecision,
+  TurnCustodyWakeProvenance,
+} from './turn-custody-projection-types.js';
 
 interface TurnCustodyProjectionDeps {
   readonly actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
@@ -98,6 +57,31 @@ function actionTransitionFingerprint(lease: ActionSuccessorLease, holderCatId: s
   });
 }
 
+function dispatchTransitionObservation(
+  event: BallCustodyEvent,
+  baseline: StructuredTransitionBaseline,
+): StructuredTransitionObservation | undefined {
+  if (
+    baseline.protocol !== 'dispatch' ||
+    event.payload.catId !== baseline.holderCatId ||
+    event.payload.sourceMessageId !== baseline.dispatchSourceMessageId ||
+    event.payload.fromCatId !== baseline.dispatchFromCatId
+  ) {
+    return undefined;
+  }
+  const disposition = event.payload.disposition;
+  return {
+    structuredTransitionKind: 'dispatch_dispositioned',
+    ...(disposition === 'handled' || disposition === 'completed'
+      ? {
+          dispatchDisposition: disposition,
+          dispatchDispositionEventId: event.sourceEventId,
+          dispatchDispositionAt: event.at,
+        }
+      : {}),
+  };
+}
+
 function unknown(reason: string): TurnCustodyProjection {
   return { state: 'unknown_legacy', evidenceRefs: [`unknown:${reason}`] };
 }
@@ -106,11 +90,13 @@ function decision(
   projection: TurnCustodyProjection,
   transitionObserved: boolean,
   state = projection.state,
+  structuredTransition?: StructuredTransitionObservation,
 ): TurnCustodyStopDecision {
   return {
     state,
     shouldBlock: state === 'unknown_legacy' || (state === 'covered_active' && !transitionObserved),
     transitionObserved,
+    ...structuredTransition,
     evidenceRefs: [...projection.evidenceRefs],
   };
 }
@@ -139,11 +125,11 @@ export class TurnCustodyProjectionService {
   async close(projection: TurnCustodyProjection): Promise<TurnCustodyStopDecision> {
     if (projection.state !== 'covered_active' || !projection.baseline) return decision(projection, false);
     try {
-      const observed =
-        projection.baseline.kind === 'action_successor'
-          ? await this.actionTransitionObserved(projection.baseline)
-          : await this.structuredTransitionObserved(projection.baseline);
-      return decision(projection, observed);
+      if (projection.baseline.kind === 'action_successor') {
+        return decision(projection, await this.actionTransitionObserved(projection.baseline));
+      }
+      const structuredTransition = await this.structuredTransitionObserved(projection.baseline);
+      return decision(projection, structuredTransition !== undefined, projection.state, structuredTransition);
     } catch {
       return decision(
         { state: 'unknown_legacy', evidenceRefs: [...projection.evidenceRefs, 'unknown:query_failed'] },
@@ -185,26 +171,61 @@ export class TurnCustodyProjectionService {
       this.deps.ballCustodyProjectionStore.get(wake.subjectKey),
       this.deps.ballCustodyEventLog.read(wake.subjectKey),
     ]);
+    // Sol R3 P1: a non-retired terminal drives the subject to `resolved`. If the
+    // F264 receipt then fails and Queue re-exposes the same wake, the successor
+    // route would bail to unknown_legacy here and write
+    // `managed_hold_disposition_missing` even though the wake is already settled.
+    // Per-wake terminal truth is checked before subject-level state.
+    if (wake.protocol === 'hold') {
+      const settled = findWakeTerminal(events, {
+        catId: wake.holderCatId,
+        sourceMessageId: wake.sourceMessageId,
+        taskId: wake.taskId,
+      });
+      if (settled) {
+        return {
+          state: 'covered_empty',
+          evidenceRefs: [`${wake.protocol}:${wake.subjectKey}`, `settled:${settled.sourceEventId}`],
+        };
+      }
+    }
     if (projection?.state !== 'active' && projection?.state !== 'blocked') {
       return unknown('structured_projection_missing');
     }
-    if (projection.holder !== wake.holderCatId) return unknown('structured_holder_mismatch');
-    if (
-      wake.protocol === 'dispatch' &&
-      !events.some(
-        (event) =>
-          event.kind === 'ball.handed' &&
-          event.sourceEventId === wake.handoff.sourceEventId &&
-          event.payload.fromCatId === wake.handoff.fromCatId &&
-          event.payload.toCatId === wake.holderCatId,
-      )
-    ) {
+    const exactWakeIndex = exactStructuredWakeIndex(wake, events);
+    if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
       return unknown('dispatch_handoff_missing');
     }
+    if (projection.holder !== wake.holderCatId) {
+      return releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
+    }
+    // clowder-ai#1366: a wake superseded before this turn adopted it is not a
+    // live obligation; treating it as one blocked unrelated healthy turns.
+    if (wake.protocol === 'hold') {
+      const superseded = supersededBeforeAdoption(
+        events,
+        { catId: wake.holderCatId, sourceMessageId: wake.sourceMessageId, taskId: wake.taskId },
+        wake.subjectKey,
+      );
+      if (superseded) return { state: 'covered_empty', evidenceRefs: [...superseded] };
+    }
+    return this.coveredActiveProjection(wake, events);
+  }
+
+  /** Live obligation plus the exact baseline `close()` will diff its transition against. */
+  private coveredActiveProjection(
+    wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
+    events: readonly BallCustodyEvent[],
+  ): TurnCustodyProjection {
     return {
       state: 'covered_active',
       evidenceRefs: [
         `${wake.protocol}:${wake.subjectKey}`,
+        ...(wake.protocol === 'event_wait'
+          ? [
+              `wait:${wake.waitContinuationCarrier.waitId}:${wake.waitContinuationCarrier.outcomeId}:g${wake.waitContinuationCarrier.ownerFence.generation}`,
+            ]
+          : []),
         ...(wake.protocol === 'dispatch' ? [wake.handoff.sourceEventId] : []),
       ],
       baseline: {
@@ -212,6 +233,14 @@ export class TurnCustodyProjectionService {
         subjectKey: wake.subjectKey,
         holderCatId: wake.holderCatId,
         fromSequence: events.length,
+        protocol: wake.protocol,
+        ...(wake.protocol === 'hold' ? { sourceMessageId: wake.sourceMessageId, taskId: wake.taskId } : {}),
+        ...(wake.protocol === 'dispatch'
+          ? {
+              dispatchSourceMessageId: wake.handoff.messageId,
+              dispatchFromCatId: wake.handoff.fromCatId,
+            }
+          : {}),
       },
     };
   }
@@ -222,16 +251,39 @@ export class TurnCustodyProjectionService {
     return actionTransitionFingerprint(lease, baseline.holderCatId) !== baseline.fingerprint;
   }
 
-  private async structuredTransitionObserved(baseline: StructuredTransitionBaseline): Promise<boolean> {
+  private async structuredTransitionObserved(
+    baseline: StructuredTransitionBaseline,
+  ): Promise<StructuredTransitionObservation | undefined> {
     const events = await this.deps.ballCustodyEventLog?.read(baseline.subjectKey, baseline.fromSequence);
-    return events?.some((event) => this.isLegitimateStructuredTransition(event, baseline.holderCatId)) ?? false;
+    for (const event of events ?? []) {
+      const kind = this.structuredTransitionKind(event, baseline);
+      if (kind) return kind;
+    }
+    return undefined;
   }
 
-  private isLegitimateStructuredTransition(event: BallCustodyEvent, holderCatId: string): boolean {
-    if (event.kind === 'ball.handed' || event.kind === 'ball.handed_cvo') {
-      return event.payload.fromCatId === holderCatId;
+  private structuredTransitionKind(
+    event: BallCustodyEvent,
+    baseline: StructuredTransitionBaseline,
+  ): StructuredTransitionObservation | undefined {
+    const holderCatId = baseline.holderCatId;
+    if (event.kind === 'ball.hold_dispositioned') {
+      return baseline.protocol === 'hold' &&
+        event.payload.catId === holderCatId &&
+        event.payload.sourceMessageId === baseline.sourceMessageId &&
+        event.payload.taskId === baseline.taskId
+        ? { structuredTransitionKind: 'hold_dispositioned' }
+        : undefined;
     }
-    if (event.kind === 'ball.held') return event.payload.catId === holderCatId;
-    return false;
+    if (event.kind === 'ball.dispatch_dispositioned') {
+      return dispatchTransitionObservation(event, baseline);
+    }
+    if (event.kind === 'ball.handed' || event.kind === 'ball.handed_cvo') {
+      return event.payload.fromCatId === holderCatId ? { structuredTransitionKind: 'handed' } : undefined;
+    }
+    if (event.kind === 'ball.held') {
+      return event.payload.catId === holderCatId ? { structuredTransitionKind: 'held' } : undefined;
+    }
+    return undefined;
   }
 }

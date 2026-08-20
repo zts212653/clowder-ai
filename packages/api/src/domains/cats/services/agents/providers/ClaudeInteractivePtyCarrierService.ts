@@ -130,6 +130,20 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     return policy.mode === 'read_only';
   }
 
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'anthropic',
+      carrier: 'interactive_pty',
+      reportsRuntimeWindow: false,
+      authoritativeUsage: false,
+      usageTelemetry: 'unavailable',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: false,
+      reason: 'Interactive PTY hooks expose no token telemetry',
+    };
+  }
+
   /**
    * Invoke claude via interactive PTY.
    *

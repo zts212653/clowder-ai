@@ -4,6 +4,7 @@ import test from 'node:test';
 import Fastify from 'fastify';
 
 import { InMemoryDispatchProposalStore } from '../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js';
+import { ActionSuccessorStandingError } from '../../dist/domains/ball-custody/ActionSuccessorAdmissionService.js';
 import { dispatchProposalRoutes } from '../../dist/routes/dispatch-proposal-routes.js';
 import { anchorApproval } from './helpers.js';
 
@@ -159,6 +160,37 @@ test('lease-claim failure keeps proposal pending and produces no target delivery
 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().code, 'ACTION_LEASE_CLAIM_FAILED');
+  assert.equal((await store.get(proposal.proposalId)).status, 'pending');
+  assert.deepEqual(deliveries, []);
+});
+
+test('persisted task-standing mismatch returns an actionable typed conflict and remains pending', async (t) => {
+  const store = new InMemoryDispatchProposalStore();
+  const deliveries = [];
+  const app = createApp(store, deliveries, {
+    approveAction: async () => {
+      throw new ActionSuccessorStandingError('mismatch', 'task standing does not match the persisted target thread', [
+        'target_thread',
+      ]);
+    },
+    recoverApprovedAction: async () => {
+      deliveries.push('unexpected');
+      return { outcome: 'pending' };
+    },
+  });
+  t.after(() => app.close());
+  const proposal = await createActionProposal(store);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: `/api/dispatch-proposals/${proposal.proposalId}/approve`,
+    headers: { 'x-cat-cafe-user': OWNER_ID },
+  });
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.json().code, 'ACTION_STANDING_MISMATCH');
+  assert.equal(response.json().guidance, 'reject_and_resubmit_with_current_task_standing');
+  assert.deepEqual(response.json().mismatchDimensions, ['target_thread']);
   assert.equal((await store.get(proposal.proposalId)).status, 'pending');
   assert.deepEqual(deliveries, []);
 });

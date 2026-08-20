@@ -7,7 +7,15 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext: assembleIncrementalContextWithoutCapacity } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
+
+function assembleIncrementalContext(deps, userId, threadId, catId) {
+  return assembleIncrementalContextWithoutCapacity(deps, userId, threadId, catId, undefined, undefined, {
+    effectiveMaxContextTokens: 500_000,
+  });
+}
 
 function mockMsg(overrides) {
   return {

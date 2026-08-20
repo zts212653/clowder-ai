@@ -14,7 +14,10 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
-const TEST_DIR = '__file_mgmt_test__';
+// Public gates can run concurrently against the same discovered worktree.
+// Keep each Node test process in its own directory so one suite cannot delete
+// or overwrite another suite's fixtures between endpoint assertions.
+const TEST_DIR = `__file_mgmt_test__-${process.pid}`;
 
 describe('workspace file management endpoints', () => {
   let app;

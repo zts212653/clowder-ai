@@ -21,6 +21,17 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
   let threadStore;
   let taskStore;
 
+  function issueWaitPayload(issueNumber, overrides = {}) {
+    return {
+      repoFullName: 'owner/repo',
+      issueNumber,
+      when: [{ kind: 'issue_comment_added' }],
+      nextStep: 'Inspect the matched issue comment.',
+      expiresAt: Date.now() + 60_000,
+      ...overrides,
+    };
+  }
+
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -68,7 +79,15 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       reflectionService,
       markerQueue,
       taskStore,
-      fetchIssueCommentCursor: async () => 0,
+      fetchIssueWaitBaseline: async () => ({
+        baseline: {
+          capturedAt: Date.now(),
+          issue: { lastCommentCursor: 0, state: 'open', authorLogin: 'issue-author' },
+        },
+        collectorState: {
+          issue: { lastCommentCursor: 0, lastDeliveredCursor: 0, issueState: 'open' },
+        },
+      }),
     });
     return app;
   }
@@ -82,7 +101,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 100 },
+      payload: issueWaitPayload(100),
     });
 
     assert.equal(response.statusCode, 200, 'normal thread issue tracking must succeed');
@@ -101,7 +120,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 200 },
+      payload: issueWaitPayload(200),
     });
 
     assert.equal(response.statusCode, 200, 'new keeper-owned issue tracking allowed in gate-keeping thread');
@@ -123,7 +142,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': downInvId, 'x-callback-token': downToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 300 },
+      payload: issueWaitPayload(300),
     });
     assert.equal(registerRes.statusCode, 200, 'downstream registration must succeed first');
 
@@ -136,7 +155,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 300 },
+      payload: issueWaitPayload(300),
     });
 
     assert.equal(response.statusCode, 400, 'issue tracked in different thread must be blocked');
@@ -156,7 +175,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 400 },
+      payload: issueWaitPayload(400),
     });
     assert.equal(first.statusCode, 200, 'first registration must succeed');
 
@@ -165,12 +184,12 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', issueNumber: 400 },
+      payload: issueWaitPayload(400),
     });
     assert.equal(second.statusCode, 200, 're-registration in same thread must succeed');
   });
 
-  test('PR-O4: override claim in payload still ignored (Zod strips it)', async () => {
+  test('PR-O4: caller-supplied override claim is rejected by the strict contract', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-o4d', 'repo-inbox');
     await threadStore.updateThreadKind(thread.id, 'gate-keeping');
@@ -181,15 +200,11 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-issue-tracking',
       method: 'POST',
       url: '/api/callbacks/register-issue-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: {
-        repoFullName: 'owner/repo',
-        issueNumber: 500,
-        override: 'i-am-the-downstream-owner',
-      },
+      payload: issueWaitPayload(500, { override: 'i-am-the-downstream-owner' }),
     });
 
-    // New issue → keeper → allowed (override claim is irrelevant)
-    assert.equal(response.statusCode, 200, 'override field is stripped, cross-store determines outcome');
+    assert.equal(response.statusCode, 400, 'caller authority claims must not cross the public schema');
+    assert.equal(taskStore.getBySubject('issue:owner/repo#500'), null);
   });
 
   test('INV-G2-regression: PR tracking always blocked in gate-keeping (unaffected by PR-O4)', async () => {

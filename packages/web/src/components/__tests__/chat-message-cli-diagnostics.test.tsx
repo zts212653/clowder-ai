@@ -6,6 +6,8 @@ import type { CatData } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 
+const chatStoreState = vi.hoisted(() => ({ messages: [] as unknown[] }));
+
 /**
  * F212 Phase B (AC-B1 + AC-B2 wire-through): ChatMessage routes `extra.cliDiagnostics`
  * to CliDiagnosticsPanel instead of the legacy red-pill error bubble.
@@ -23,7 +25,7 @@ vi.mock('@/stores/chatStore', () => ({
       threads: [],
       currentThreadId: null,
       isLoadingThreads: false,
-      messages: [],
+      messages: chatStoreState.messages,
       globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
     }),
   resolveBubbleExpanded: (
@@ -108,6 +110,7 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
   });
 
   beforeEach(() => {
+    chatStoreState.messages = [];
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
       name: 'co-creator',
@@ -150,6 +153,52 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
     // Banner shows humanized summary, not the raw bubble content
     expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain('API 认证失败');
+  });
+
+  it('keeps an exact-child absorption footer below a classified terminal error receipt', () => {
+    const invocationId = 'child-gap-f-error';
+    const sourceMessage = {
+      id: 'source-gap-f-error',
+      type: 'user',
+      content: '失败前已经读取的补充',
+      timestamp: 100,
+      extra: {
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-gap-f-error',
+          targets: [
+            {
+              catId: 'opus',
+              state: 'seen',
+              invocationId,
+              seenAt: 120,
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    } as ChatMessageType;
+    const terminalMessage = makeErrorMessage({
+      cliDiagnostics: {
+        reasonCode: 'auth_failed',
+        publicSummary: 'API 认证失败',
+        publicHint: '检查 API key',
+        debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId },
+      },
+      turnExecution: {
+        invocationId,
+        parentInvocationId: 'parent-gap-f-error',
+        executionKind: 'ordinary',
+      },
+    });
+    chatStoreState.messages = [sourceMessage, terminalMessage];
+
+    render(terminalMessage);
+
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
+    expect(container.querySelector(`[data-turn-absorption-invocation="${invocationId}"]`)?.textContent).toContain(
+      '本轮处理了 0/1 条补充',
+    );
   });
 
   it('system_info silent_completion + cliDiagnostics → CliDiagnosticsPanel mounts without error variant', () => {

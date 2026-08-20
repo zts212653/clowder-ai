@@ -15,25 +15,16 @@ function hasExactInvocation(message: StoredMessage, invocationId: string): boole
   return stream?.turnInvocationId === invocationId || stream?.invocationId === invocationId;
 }
 
-/**
- * Resolve only durable, user-visible output records which explicitly bind an
- * exact Queue source. Prompt exposure and generic tool activity are not
- * consumption evidence and intentionally do not enter this projection.
- */
-export async function resolveQueueSourceResponseEvidence(input: {
-  messageStore: IMessageStore;
-  threadId: string;
-  userId: string;
+export function resolveQueueSourceResponseEvidenceFromMessages(input: {
+  messages: readonly StoredMessage[];
   catId: string;
   invocationId: string;
   sourceMessageIds: readonly string[];
-}): Promise<QueueSourceResponseEvidence[]> {
-  const readThread = input.messageStore.getByThreadAfter?.bind(input.messageStore);
-  if (!readThread || input.sourceMessageIds.length === 0) return [];
+}): QueueSourceResponseEvidence[] {
+  if (input.sourceMessageIds.length === 0) return [];
   const sourceMessageIds = new Set(input.sourceMessageIds);
   const outputIdsBySource = new Map<string, string[]>();
-  const messages = await readThread(input.threadId, undefined, undefined, input.userId);
-  for (const message of messages) {
+  for (const message of input.messages) {
     if (
       message.catId !== input.catId ||
       message.deliveryStatus === 'canceled' ||
@@ -57,4 +48,28 @@ export async function resolveQueueSourceResponseEvidence(input: {
     sourceMessageId,
     witness: { kind: 'source_response', outputMessageIds },
   }));
+}
+
+/**
+ * Resolve only durable, user-visible output records which explicitly bind an
+ * exact Queue source. Prompt exposure and generic tool activity are not
+ * consumption evidence and intentionally do not enter this projection.
+ */
+export async function resolveQueueSourceResponseEvidence(input: {
+  messageStore: IMessageStore;
+  threadId: string;
+  userId: string;
+  catId: string;
+  invocationId: string;
+  sourceMessageIds: readonly string[];
+}): Promise<QueueSourceResponseEvidence[]> {
+  const readThread = input.messageStore.getByThreadAfter?.bind(input.messageStore);
+  if (!readThread || input.sourceMessageIds.length === 0) return [];
+  const messages = await readThread(input.threadId, undefined, undefined, input.userId);
+  return resolveQueueSourceResponseEvidenceFromMessages({
+    messages,
+    catId: input.catId,
+    invocationId: input.invocationId,
+    sourceMessageIds: input.sourceMessageIds,
+  });
 }

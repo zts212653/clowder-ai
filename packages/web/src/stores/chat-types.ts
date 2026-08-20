@@ -1,6 +1,9 @@
 import type {
   CliDiagnostics,
+  ContextAttachment,
   FreshnessSupplementProjection,
+  MessageBundleCarrierV1,
+  MessageContent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
   ReplyPreview,
@@ -15,18 +18,7 @@ export type { CliDiagnostics } from '@cat-cafe/shared';
 
 export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
 
-/** Content block types matching backend MessageContent */
-export interface TextContent {
-  type: 'text';
-  text: string;
-}
-
-export interface ImageContent {
-  type: 'image';
-  url: string;
-}
-
-export type MessageContent = TextContent | ImageContent;
+export type { FileContent, ImageContent, MessageContent, TextContent } from '@cat-cafe/shared';
 
 /** F8: Token usage data from CLI invocations.
  *  inputTokens = TOTAL input (normalised across providers).
@@ -263,6 +255,8 @@ export interface SystemInfoProjection {
 
 export interface ChatMessage {
   id: string;
+  /** Client-only exact persisted records folded into this canonical bubble. */
+  projectionSourceMessageIds?: string[];
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
   /** Visual variant for system messages */
   variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
@@ -319,6 +313,8 @@ export interface ChatMessage {
     auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
     /** F098-C1: Explicit target cats from post_message API */
     targetCats?: string[];
+    /** F294: refs-only durable Bundle carrier hydrated from the target message. */
+    messageBundle?: MessageBundleCarrierV1;
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;
     /** Scheduler presentation metadata (hidden trigger / ephemeral lifecycle toast) */
@@ -362,6 +358,13 @@ export interface ChatMessage {
     freshnessSupplement?: FreshnessSupplementProjection;
     /** F264: server-derived durable per-target message receipt. */
     queueReceipt?: QueueMessageReceipt;
+    /** F264 Gap F: content-free message recall truth projected for the owner timeline. */
+    recall?: {
+      version: 1;
+      exposure: 'none' | 'seen';
+      recalledAt: number;
+      exposures?: ReadonlyArray<{ targetCatId: string; invocationId: string; seenAt: number }>;
+    };
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
      * timestamp-ordered into the message list (not appended at end).
@@ -378,6 +381,28 @@ export interface ChatMessage {
     recovery?: MessageRecoveryExtra;
     /** Original visible system_info payload; content remains the persisted fallback copy. */
     systemInfo?: SystemInfoProjection;
+    /** Rebuildable projection of canonical InvocationRecord truth after the UI wait window expires. */
+    invocationReconciliation?: {
+      v: 1;
+      invocationId: string;
+      catIds: string[];
+      turnInvocationIds: string[];
+      phase: 'running' | 'succeeded' | 'failed' | 'canceled' | 'unknown_running';
+      reason?: 'record_not_found' | 'record_unavailable' | 'record_mismatch';
+      updatedAt: number;
+    };
+    /** Invocation-scoped transient provider reconnect lifecycle. Raw attempts stay as evidence. */
+    providerRecovery?: {
+      v: 1;
+      provider: string;
+      phase: 'reconnecting' | 'recovered' | 'failed';
+      invocationId?: string;
+      parentInvocationId?: string;
+      attempt?: number;
+      attempts: string[];
+      evidence?: string;
+      updatedAt: number;
+    };
   };
   /** F045: Extended thinking content, rendered as collapsible block inside assistant bubble */
   thinking?: string;
@@ -493,7 +518,7 @@ export interface ContextHealthData {
   fillRatio: number;
   source: 'exact' | 'approx';
   /** Backend usage field that fed usedTokens. Older records may omit it. */
-  usedFrom?: 'last_turn' | 'input' | 'total';
+  usedFrom?: 'context' | 'last_turn' | 'input' | 'total';
   measuredAt: number;
 }
 
@@ -676,7 +701,7 @@ export interface QueueEntry {
   /** #706: Server-enriched message preview for QueuePanel display + recall-edit.
    *  Attached by emitQueueUpdated() at push time via messageStore join. */
   messagePreview?: {
-    contentBlocks?: ReadonlyArray<{ type: string; url?: string; text?: string; alt?: string }>;
+    contentBlocks?: ReadonlyArray<MessageContent>;
     replyTo?: string;
   };
   /** F264: same durable receipt projection used by the terminal timeline bubble. */
@@ -691,6 +716,21 @@ export interface ComposerDraftInsert {
   threadId: string;
   text: string;
   imageUrls?: string[];
+  contextAttachments?: ContextAttachment[];
+  /** Draft-only edit operation; never enters the durable message contract. */
+  removeContextAttachmentIds?: string[];
+  /** Server ACK owns the complete editor text; do not append it to a stale local snapshot. */
+  authoritative?: boolean;
+  /** Newly transferred source range in authoritative text; ChatInput focuses and selects it after hydration. */
+  selectionRange?: { start: number; end: number };
+  /** Durable owner+thread draft revision acknowledged by the server. */
+  serverRevision?: number;
+  /** Local editor snapshot captured immediately before the recall mutation. */
+  clientSnapshot?: {
+    text: string;
+    contextAttachments: ContextAttachment[];
+    replyToId?: string;
+  };
   /** Message ID of the quoted parent — maps to messagePreview.replyTo from queue enrichment.
    *  After #833 merge: ChatInput consumes this to restore quote composing state. */
   replyToId?: string;
@@ -698,6 +738,30 @@ export interface ComposerDraftInsert {
    *  Populated from backend-enriched messagePreview (visibility-filtered by
    *  resolveVisibleReplyParent on the server side). */
   replyToPreview?: ReplyPreview;
+}
+
+export interface OwnerComposerDraft {
+  version: 1;
+  ownerUserId: string;
+  threadId: string;
+  revision: number;
+  text: string;
+  contentBlocks?: ReadonlyArray<MessageContent>;
+  replyTo?: string;
+  updatedAt: number;
+}
+
+export interface TrueRecallResponse {
+  verdict: 'zero_exposure' | 'exposed' | 'already_recalled';
+  message: {
+    id: string;
+    threadId: string;
+    recall: NonNullable<NonNullable<ChatMessage['extra']>['recall']>;
+  };
+  draft: OwnerComposerDraft | null;
+  insertedRange: { start: number; end: number } | null;
+  queue: QueueEntry[];
+  clientSnapshot?: ComposerDraftInsert['clientSnapshot'];
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */
@@ -753,6 +817,27 @@ export interface ThreadState {
   workspaceOpenFilePath: string | null;
   /** F063: Scroll-to line per thread */
   workspaceOpenFileLine: number | null;
+  /** F284 × F120: active Workspace surface per thread (browser preview survives
+   * thread switches instead of leaking or vanishing). Optional for fixture
+   * compatibility; restore falls back to 'home'. */
+  workspaceSurface?: WorkspaceSurface;
+  /** F284 × F120: browser preview target (port/path) per thread */
+  workspacePreview?: WorkspacePreviewState;
+  /** F284 × F120: right panel visibility mode per thread */
+  rightPanelMode?: 'status' | 'workspace' | 'transcript';
+  /** F284 × F120 review P1: right panel open/closed per thread — orthogonal to
+   * mode (a visible Status panel ≠ folded). Restore falls back to closed. */
+  rightPanelOpen?: boolean;
+}
+
+/** F284: the object currently occupying the Workspace viewport.
+ * This is app state, not route/component state: folding or navigating away
+ * must not destroy a live surface. */
+export type WorkspaceSurface = 'home' | 'files' | 'changes' | 'git' | 'terminal' | 'browser';
+
+export interface WorkspacePreviewState {
+  port?: number;
+  path: string;
 }
 
 /** F063: Presentation Lock — frozen workspace snapshot for demo mode */
@@ -831,4 +916,8 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceSurface: 'home',
+  workspacePreview: { port: undefined, path: '/' },
+  rightPanelMode: 'status',
+  rightPanelOpen: false,
 };

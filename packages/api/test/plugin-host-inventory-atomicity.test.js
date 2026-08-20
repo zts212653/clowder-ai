@@ -79,6 +79,7 @@ describe('K-2A fail-closed inventory writes', () => {
       () =>
         controlPlane.upgradePackage({
           pluginInstanceId: 'pi_atomic',
+          expectedLifecycleRevision: 1,
           expectedGrantRevision: 1,
           ...candidate({
             computedPackageDigest: digest('atomic-v2'),
@@ -138,10 +139,33 @@ describe('K-2A fail-closed inventory writes', () => {
       () =>
         controlPlane.upgradePackage({
           pluginInstanceId: 'pi_atomic',
+          expectedLifecycleRevision: 1,
           expectedGrantRevision: 1,
           ...upgradedCandidate(),
         }),
       'STALE_GRANT_REVISION',
+    );
+  });
+
+  it('stale lifecycle revision cannot update a package behind an owner action', async () => {
+    const store = new MemoryPluginInventoryStore();
+    const controlPlane = service(store);
+    await controlPlane.installPackage(candidate());
+    await store.transaction((transaction) => {
+      const current = transaction.instances.get('pi_atomic');
+      transaction.instances.put({ ...current, lifecycleRevision: 2 });
+    });
+
+    await expectNoWrites(
+      store,
+      () =>
+        controlPlane.upgradePackage({
+          pluginInstanceId: 'pi_atomic',
+          expectedLifecycleRevision: 1,
+          expectedGrantRevision: 1,
+          ...upgradedCandidate(),
+        }),
+      'STALE_LIFECYCLE_REVISION',
     );
   });
 
@@ -158,6 +182,7 @@ describe('K-2A fail-closed inventory writes', () => {
         upgrade: (target) =>
           target.upgradePackage({
             pluginInstanceId: 'pi_atomic',
+            expectedLifecycleRevision: 1,
             expectedGrantRevision: 1,
             ...upgradedCandidate(),
           }),

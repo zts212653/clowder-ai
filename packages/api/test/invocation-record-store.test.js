@@ -109,6 +109,59 @@ describe('InvocationRecordStore', () => {
     });
   });
 
+  test('create() persists an exact wait continuation carrier without promoting its owner fence', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    const waitContinuationCarrier = {
+      v: 1,
+      waitId: 'task-pr-7',
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      ownerFence: { kind: 'action_successor', leaseId: 'lease-wait-4', generation: 4 },
+    };
+    const { invocationId } = store.create({
+      threadId: 'thread-wait',
+      userId: 'user-wait',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'wait-carrier',
+      actionLeaseCarrier: { kind: 'none' },
+      waitContinuationCarrier,
+    });
+
+    assert.deepEqual(store.get(invocationId).waitContinuationCarrier, waitContinuationCarrier);
+    assert.deepEqual(store.get(invocationId).actionLeaseCarrier, { kind: 'none' });
+  });
+
+  test('create() rejects a malformed wait continuation carrier before recording it', async () => {
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+
+    const store = new InvocationRecordStore();
+    assert.throws(
+      () =>
+        store.create({
+          threadId: 'thread-wait-invalid',
+          userId: 'user-wait',
+          targetCats: ['codex-sol'],
+          intent: 'execute',
+          idempotencyKey: 'wait-carrier-invalid',
+          actionLeaseCarrier: { kind: 'none' },
+          waitContinuationCarrier: {
+            v: 1,
+            waitId: 'task-pr-7',
+            outcomeId: 'wait:pr:owner/repo#7:g0:matched',
+            ownerFence: { kind: 'containing_task', generation: 0 },
+          },
+        }),
+      /invalid wait continuation carrier/,
+    );
+    assert.equal(store.size, 0);
+  });
+
   test('idempotency dedup returns duplicate on same key', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

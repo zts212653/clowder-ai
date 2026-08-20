@@ -21,6 +21,7 @@ export interface GenerateCapabilityWakeupLiveVerdictInput {
   domain: EvalDomainRegistryEntry;
   capability: CapabilityName;
   trials: ClassifiedCapabilityWakeupTrial[];
+  emptyTrialWindow?: { startMs: number; endMs: number; reason: string };
   generatedAt?: string;
   generatorCommit?: string;
   submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1 (a2a mirror): Phase H cat-mediated; undefined = operator regen
@@ -53,7 +54,7 @@ export function generateCapabilityWakeupLiveVerdict(
 ): CapabilityWakeupLiveVerdictArtifact {
   assertSafeVerdictId(input.verdictId);
   const relevantTrials = input.trials.filter((trial) => trial.capability === input.capability);
-  if (relevantTrials.length === 0) {
+  if (relevantTrials.length === 0 && (!input.emptyTrialWindow || !input.submittedPacket)) {
     throw new Error(`no trials recorded for capability ${input.capability}`);
   }
 
@@ -156,8 +157,12 @@ function buildSnapshot(
   const misses = trials.filter((trial) => trial.outcome === 'miss');
   const falsePositives = trials.filter((trial) => trial.outcome === 'false_positive');
   const byLabel = countByLabel(misses);
-  const start = Math.min(...trials.map((trial) => trial.timeSpan.startMs));
-  const end = Math.max(...trials.map((trial) => trial.timeSpan.endMs));
+  const start =
+    trials.length > 0 ? Math.min(...trials.map((trial) => trial.timeSpan.startMs)) : input.emptyTrialWindow?.startMs;
+  const end =
+    trials.length > 0 ? Math.max(...trials.map((trial) => trial.timeSpan.endMs)) : input.emptyTrialWindow?.endMs;
+  if (start === undefined || end === undefined)
+    throw new Error(`no trials recorded for capability ${input.capability}`);
   return {
     verdictId: input.verdictId,
     evalSnapshotId: `eval-${input.domain.handoffTargetResolver.featureId}-${slug(input.capability)}-${generatedAt.slice(0, 10)}`,
@@ -185,7 +190,7 @@ function buildSnapshot(
           reachability_doubt_count: byLabel.reachability_doubt ?? 0,
           unclassified_count: byLabel.unclassified ?? 0,
         },
-        confidence: trials.length >= 3 ? 'medium' : 'low',
+        confidence: trials.length === 0 ? 'no-data' : trials.length >= 3 ? 'medium' : 'low',
       },
     ],
   };
@@ -208,7 +213,10 @@ function buildAttribution(
       generatedAt,
       findings: [],
       noFindingRecord: {
-        reason: 'no actionable miss findings exceeded threshold',
+        reason:
+          trials.length === 0 && input.emptyTrialWindow
+            ? input.emptyTrialWindow.reason
+            : 'no actionable miss findings exceeded threshold',
         evidence: `${input.capability}/miss_count`,
       },
     };

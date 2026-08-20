@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { IMessageStore } from '../../../cats/services/stores/ports/MessageStore.js';
+import { isDelivered } from '../../../cats/services/stores/ports/MessageStore.js';
 import type { PersonMemoryRecallService } from '../../people/PersonMemoryRecallService.js';
 import type { MemoryCueSourceProjection } from '../MemoryCueResolverRegistry.js';
 import type { PersonEntityCueSource } from '../resolvers/PersonEntityCueResolver.js';
@@ -12,7 +13,29 @@ function revisionOf(value: unknown): string {
 
 export type PersonMemoryCueReadResult =
   | { status: 'ok'; payload: unknown }
-  | { status: 'not_available'; invalidationReason: 'source_corrected' | 'source_forgotten' };
+  | {
+      status: 'not_available';
+      invalidationReason: 'source_corrected' | 'source_forgotten' | 'scope_revoked';
+    };
+
+function sourceVisibilityFailure(
+  message: Awaited<ReturnType<IMessageStore['getById']>>,
+  ownerUserId: string,
+  threadId: string,
+): 'source_forgotten' | 'scope_revoked' | null {
+  if (!message || message.deletedAt !== undefined || message._tombstone) return 'source_forgotten';
+  if (
+    message.userId !== ownerUserId ||
+    message.threadId !== threadId ||
+    message.catId !== null ||
+    message.source !== undefined ||
+    message.visibility === 'whisper' ||
+    !isDelivered(message)
+  ) {
+    return 'scope_revoked';
+  }
+  return null;
+}
 
 /** Read-only projection over F276 canonical person memory. */
 export class PersonMemoryCueSource implements PersonEntityCueSource {
@@ -32,14 +55,7 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
   }): Promise<MemoryCueSourceProjection | null> {
     if (!input.entityId.startsWith('person:')) return null;
     const sourceMessage = await Promise.resolve(this.deps.messageStore.getById(input.sourceMessageId));
-    if (
-      !sourceMessage ||
-      sourceMessage.userId !== input.ownerUserId ||
-      sourceMessage.threadId !== input.threadId ||
-      sourceMessage.catId !== null ||
-      sourceMessage.deletedAt !== undefined ||
-      sourceMessage._tombstone
-    ) {
+    if (sourceVisibilityFailure(sourceMessage, input.ownerUserId, input.threadId)) {
       return null;
     }
     const recalled = await this.deps.recall.recallByWorkspaceEntityRef(input.ownerUserId, input.entityId);
@@ -51,6 +67,7 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
       }).`,
       anchor: `${PERSON_MEMORY_ANCHOR_PREFIX}${recalled.card.personId}`,
       revision: revisionOf(recalled.card),
+      asOf: recalled.asOf,
       visibility: 'owner_private',
       drillFamily: 'person_memory',
     };
@@ -72,6 +89,19 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
     if (revisionOf(recalled.card) !== input.expectedRevision) {
       return { status: 'not_available', invalidationReason: 'source_corrected' };
     }
-    return { status: 'ok', payload: recalled.card };
+    for (const ref of recalled.card.provenanceRefs) {
+      const sourceMessage = await Promise.resolve(this.deps.messageStore.getById(ref.messageId));
+      const failure = sourceVisibilityFailure(sourceMessage, input.ownerUserId, ref.threadId);
+      if (failure) return { status: 'not_available', invalidationReason: failure };
+    }
+    return {
+      status: 'ok',
+      payload: {
+        ...recalled.card,
+        sourceRevision: input.expectedRevision,
+        asOf: recalled.asOf,
+        drill: { family: 'person_memory', anchor: input.anchor },
+      },
+    };
   }
 }

@@ -19,9 +19,14 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/reeval-closure-reconciler.ts
   - packages/api/src/infrastructure/harness-eval/reeval-closure-task-spec.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case.ts
+  - packages/api/src/infrastructure/harness-eval/reeval-case-cycle-order.ts
+  - packages/api/src/infrastructure/harness-eval/reeval-case-types.ts
+  - packages/api/src/infrastructure/harness-eval/reeval-case-guards.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-root.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-service.ts
   - packages/api/src/infrastructure/harness-eval/reeval-case-responsibility.ts
+  - packages/api/src/infrastructure/harness-eval/reeval-case-reevaluation.ts
+  - packages/api/src/infrastructure/harness-eval/legacy-reeval-case-migration.ts
   - packages/api/src/infrastructure/harness-eval/eval-release-truth-resolver.ts
   - packages/api/src/infrastructure/harness-eval/freshness/freshness-replay-types.ts
   - packages/api/src/infrastructure/harness-eval/freshness/freshness-replay-fixtures.ts
@@ -33,6 +38,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/a2a/eval-a2a-adapter.ts
   - packages/api/src/infrastructure/harness-eval/hub/eval-hub-read-model.ts
   - packages/api/src/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.ts
+  - packages/api/src/infrastructure/harness-eval/hub/eval-hub-lifecycle-debt.ts
   - packages/api/src/infrastructure/harness-eval/hub/eval-hub-operator-narrative.ts
   - packages/api/src/infrastructure/harness-eval/friction/friction-signal-source.ts
   - packages/api/src/infrastructure/harness-eval/friction/paw-feel-marker.ts
@@ -51,6 +57,9 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-census.ts
   - packages/api/src/infrastructure/harness-eval/measurement/friction-measurement-bundle.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-replay.ts
+  - packages/api/src/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.ts
+  - scripts/check-verdict-publish-contract.mjs
+  - scripts/guarded-bin/gh
   - packages/shared/src/types/friction-signal.ts
   - packages/api/src/routes/eval-hub.ts
   - packages/api/src/routes/eval-verdict-lifecycle.ts
@@ -75,22 +84,19 @@ doc_anchors:
   - docs/features/F267-eval-measurement-validity.md
   - docs/features/F278-paw-feel-disposition-inbox.md
   - feature-discussions/2026-07-26-f278-paw-feel-disposition-inbox/README.md
-  - docs/harness-feedback/
+  - docs/harness-feedback/migrations/f266-legacy-reeval-cases.yaml
   - docs/harness-feedback/eval-domains/eval-freshness.yaml
-  - docs/harness-feedback/fixtures/f254/
   - docs/harness-feedback/registry/measurement-bundles.yaml
-  - docs/harness-feedback/certificates/
-  - docs/harness-feedback/measurement-results/
-  - docs/harness-feedback/replays/
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, paw-feel-inbox, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, same-version-replay, prospective_paired_capture]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, paw-feel-inbox, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, same-version-replay, prospective_paired_capture]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
   - F248 Phase A (Eval Hub human-readability: registry descriptionForHuman + Hub display + state/verdict badge disambiguation)
   - F248 Phase B design (registry-driven metricGlossary / metricGlossaryRef explainability; frontend renders, does not hardcode metric semantics)
   - F248 Phase B2 (structured operator narrative from registry + verdict bundle; machine wording stays drill-down only)
+  - F248 publish target hardening (owner-repo, canonical census, domain/window uniqueness, and automatic/manual transport fences)
   - F167 Phase R (terminal coordination ACK suppression counter + Claim/Release/ACK regression fixture)
   - F254 AC-E9 (server-owned eight-fixture / durable-closure replay selector, normalized evidence bundle, live verdict generator, and explicit no-data verdict)
   - F267 Phase A (frozen canonical cancel join, four-channel opportunity-to-action funnel, and measurement-validity artifact)
@@ -104,7 +110,7 @@ cited_by:
 
 ## Canonical Owner
 
-F192 owns the socio-technical harness evaluation contract: harnesses declare expected behavior, runtime eval observes actual behavior, attribution explains gaps, verdict packets hand off evidence to feature owners, and later eval verifies closure. F266 owns the durable lifecycle control plane after an actionable verdict is published: the immutable bundle seeds identity, an append-only Redis event log records authenticated state transitions, a reconciler resurfaces overdue work, and F248 surfaces project canonical state for humans. F254 extends this control plane with one domain adapter: `freshness-closure-replay` resolves only server-owned fixtures or durable closure identity, normalizes raw/snapshot/attribution/provenance evidence, and generates an `eval:freshness` verdict without moving control-plane ownership out of F192/F266. F278 owns the distinct pre-verdict responsibility object for each canonical cat-authored paw-feel signal: MessageStore remains body truth, F245 remains read-only analysis truth, and one append-only source-ref ledger projects duty into `thread_eval_friction`, Workspace「评估」live view, Settings Eval Hub history and the original message without copying marker prose. All four surfaces read the same F278 event projection; none owns a second disposition writer.
+F192 owns the socio-technical harness evaluation contract: harnesses declare expected behavior, runtime eval observes actual behavior, attribution explains gaps, verdict packets hand off evidence to feature owners, and later eval verifies closure. F266 owns the durable lifecycle control plane after an actionable verdict is published: the immutable bundle seeds identity, an append-only Redis event log records authenticated state transitions, a reconciler resurfaces overdue work, and F248 surfaces project canonical state for humans. Its operational acceptance layer also migrates audited legacy v1 roots into stable in-memory cases without rewriting artifacts, binds repair and cadence work to separate TaskStore + F167 responsibilities, and turns `nextEvalAt` into executable re-evaluation work. F254 extends this control plane with one domain adapter: `freshness-closure-replay` resolves only server-owned fixtures or durable closure identity, normalizes raw/snapshot/attribution/provenance evidence, and generates an `eval:freshness` verdict without moving control-plane ownership out of F192/F266. F278 owns the distinct pre-verdict responsibility object for each canonical cat-authored paw-feel signal: MessageStore remains body truth, F245 remains read-only analysis truth, and one append-only source-ref ledger projects duty into `thread_eval_friction`, Workspace「评估」live view, Settings Eval Hub history and the original message without copying marker prose. All four surfaces read the same F278 event projection; none owns a second disposition writer.
 
 ## Use This When
 
@@ -114,6 +120,7 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Adding or changing F254 freshness replay selectors, fixture truth, durable closure normalization, derived metrics/samples, or live verdict generation.
 - Adding or changing a decision-bearing measurement bundle, opportunity join, uncertainty/insufficient state, or withdrawal condition.
 - Producing or validating Verdict Handoff Packets.
+- Publishing or refreshing verdict evidence branches and PRs, including manual fallback paths.
 - Recording owner acknowledgement, action plans, landed fixes, re-evaluation, reasoned operator suppression, or SLA escalation for an actionable verdict.
 - Recording or projecting per-paw-feel `new / seen / route_pending / routed / closed / duplicate / no_action` responsibility.
 - Migrating legacy scheduled tasks into unified eval runtime.
@@ -125,6 +132,12 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Keep raw telemetry ownership in F153; this cell consumes telemetry and produces derived verdicts.
 - Keep domain thread text as working context only; registry, snapshots, verdicts, and closure records are the state source of truth.
 - Keep finding truth immutable in the verdict bundle. Persist only lifecycle identity in `lifecycle-root.json` and authenticated transition deltas in the append-only event log.
+- Fail verdict publication closed unless the Git remote matches the configured owner repo, the candidate contains and refreshes the canonical measurement census, and its `{domainId,startMs,endMs}` identity is unique against base plus candidate. Automatic publisher, pre-push, and agent-shell PR fallback must reuse one executable guard.
+- Cover the manifest's explicit `reviewedThrough` legacy-v1 snapshot with audited completeness/freshness review. Synthesize stable v2 roots and recovered owner/action/re-evaluation continuity only at read/reconcile time; never rewrite historical verdict artifacts or let a later unknown v1 root take down reviewed cases.
+- Resolve current repair ownership from eval-domain registry truth, then bind repair and due re-evaluation work to separate deterministic TaskStore subjects and active F167 leases.
+- Treat `nextEvalAt` as a work trigger. A due monitor or live cycle must create durable re-evaluation responsibility before the lifecycle can claim `reeval_pending`.
+- Project repair debt separately from cadence/re-evaluation debt, and consume trusted later verdicts in the same stable case stream.
+- Reopen failed monitoring cadence as an owner-bindable repair state; derive repair debt from lifecycle state and cadence debt from the current main/live activation rather than the immutable verdict label or a superseded result.
 - Treat Eval Hub lifecycle state as a projection of the immutable root plus canonical events; never add a second mutable finding or attention store.
 - Put human-facing domain / metric explanations in the eval-domain registry or its sidecar; Eval Hub frontend must render these projections rather than hardcoding domain-specific semantics.
 - Resolve replay selectors on the server, cap windows/IDs, derive metrics and sample refs from the normalized artifact, and carry raw/snapshot/attribution/provenance hashes through publish. Treat zero eligible data as `no_data`, never as healthy.
@@ -140,9 +153,12 @@ F192 owns the socio-technical harness evaluation contract: harnesses declare exp
 - Do not replace F188 Health Dashboard or F200 memory recall metrics here; consume them as domain inputs.
 - Do not treat Eval Hub as a metrics dashboard. A surfaced item must have verdict, owner ask, and re-eval plan.
 - Do not infer owner or action backlinks from filenames, branches, commit text, or chat. Owner continuity and refs change only through authenticated lifecycle commands.
+- Do not use a legacy artifact's frozen owner text as current task ownership, mutate v1 artifacts during migration, or let one legacy finding render multiple actionable case cards.
+- Do not mark cadence complete because repair landed, let stale UI substitute for an executable re-evaluation task, or mint a new case for a trusted follow-up verdict.
 - Do not give reconciliation automation fix, merge, or suppression authority; it may only open, project, remind, and escalate.
 - Do not accept caller-authored freshness metrics/sample evidence or arbitrary fixture paths, and do not let an empty replay window produce a healthy verdict.
 - Do not infer source coverage from `droppedChannels=[]`, convert unavailable observations into zero, or publish a decision-bearing friction rollup without its measurement-validity artifact.
+- Do not infer a verdict PR target from the current directory, publish from a checkout missing the canonical census, or use a manual PR fallback to bypass domain/window collision checks.
 - Do not accept point-only results as usable, compare replay outputs across different cohort/version identities, or let an unissued/thin certificate unlock a gated eval domain.
 - Do not let clustering, embedding, Top-N, degradation or source-preview availability gate per-signal visibility.
 - Do not reuse F266 verdict identity for raw paw-feel signals, and do not present F278 `routed` as “fixed”.

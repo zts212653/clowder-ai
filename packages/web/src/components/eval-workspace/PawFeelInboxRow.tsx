@@ -2,16 +2,18 @@
 
 import type { PawFeelInboxItem } from '@cat-cafe/shared';
 
-const STATE_LABELS: Record<PawFeelInboxItem['disposition']['state'], string> = {
-  new: '未看',
-  seen: '已看',
-  route_pending: '等待接单',
-  routed: '已移交',
-  closed: '已关闭',
-  duplicate: '重复',
-  no_action: '无需行动',
-  fix: '已确认要修',
+const RESPONSIBILITY_LABELS: Record<PawFeelInboxItem['responsibility']['state'], string> = {
+  unreviewed: 'unreviewed · 尚无业务出口',
+  bound_in_repair: 'bound-in-repair · 修复责任已绑定',
+  signature_waiting: 'signature-waiting · 等待独立签署',
+  blocked: 'blocked · 有结构化阻塞',
+  terminal: 'terminal · 已终结',
 };
+
+function responsibilityLabel(item: PawFeelInboxItem): string {
+  const label = RESPONSIBILITY_LABELS[item.responsibility.state];
+  return item.responsibility.validExit ? label : `${label} · 尚未形成有效出口`;
+}
 
 function formatAge(ageMs: number): string {
   const hours = Math.floor(ageMs / 3_600_000);
@@ -33,6 +35,18 @@ function formatTimestamp(value: string): string {
 
 function dispositionDetail(item: PawFeelInboxItem): string | undefined {
   const { disposition } = item;
+  const { responsibility } = item;
+  if (responsibility.exitKind === 'pending_proposal') {
+    return `等待 durable proposal ${responsibility.proposalId ?? 'unavailable'} 获批`;
+  }
+  if (responsibility.exitKind === 'explicit_blocker') {
+    return `阻塞 ${responsibility.blocker?.code ?? 'unknown'} · ${responsibility.blocker?.ref ?? 'unavailable'}`;
+  }
+  if (responsibility.exitKind === 'signature_request') {
+    return `排除报告猫 @${responsibility.signerExclusionCatId ?? 'unknown'} 自签${
+      responsibility.preferredSignerCatId ? ` · 首选 @${responsibility.preferredSignerCatId}` : ''
+    }；其他独立签署猫可从此请求恢复`;
+  }
   if (disposition.state === 'routed') {
     const target = disposition.targetThreadId ?? disposition.proposalId ?? '目标责任面';
     return `已移交至 ${target}，不代表已经修复`;
@@ -40,15 +54,16 @@ function dispositionDetail(item: PawFeelInboxItem): string | undefined {
   if (disposition.state === 'route_pending') {
     return disposition.targetThreadId
       ? `等待 ${disposition.targetThreadId} 接单`
-      : `等待 F128 proposal ${disposition.proposalId ?? ''} 获批`;
+      : `F128 proposal ${disposition.proposalId ?? 'unavailable'} 当前不是 pending，需重新路由或显式阻塞`;
   }
   if (disposition.state === 'duplicate' && disposition.duplicateOf) {
     return `重复于 ${disposition.duplicateOf}`;
   }
   if (disposition.state === 'fix') {
-    return `由 @${disposition.ownerCatId ?? 'unknown'} 负责 · 任务 ${disposition.taskId ?? 'unavailable'} · F167 lease ${
-      disposition.actionLeaseRef?.leaseId ?? 'unavailable'
-    }`;
+    const binding = `由 @${disposition.ownerCatId ?? 'unknown'} 负责 · 任务 ${
+      disposition.taskId ?? 'unavailable'
+    } · F167 lease ${disposition.actionLeaseRef?.leaseId ?? 'unavailable'}`;
+    return item.responsibility.validExit ? binding : `${binding} · 当前 active lease 复验失败`;
   }
   if (disposition.reasonCode) return `理由：${disposition.reasonCode}`;
   return undefined;
@@ -58,7 +73,7 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
   const detail = dispositionDetail(item);
   const stateTone = item.overdue
     ? 'border-conn-red-ring bg-conn-red-bg text-conn-red-text'
-    : item.disposition.state === 'new'
+    : !item.responsibility.validExit
       ? 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text'
       : 'border-cafe bg-cafe-surface text-cafe-secondary';
 
@@ -66,12 +81,14 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
     <article
       className={`rounded-lg border px-3 py-3 ${stateTone}`}
       data-testid="paw-feel-inbox-row"
-      data-state={item.disposition.state}
+      data-state={item.responsibility.state}
+      data-valid-exit={item.responsibility.validExit ? 'true' : 'false'}
+      data-disposition-state={item.disposition.state}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-micro font-semibold">
-            <span>{STATE_LABELS[item.disposition.state]}</span>
+            <span>{responsibilityLabel(item)}</span>
             {item.disposition.backfilled ? (
               <span className="rounded-full border border-current px-1.5 py-0.5">历史回填</span>
             ) : null}
@@ -84,13 +101,7 @@ export function PawFeelInboxRow({ item }: { item: PawFeelInboxItem }) {
           <div className="mt-1 text-micro opacity-70">
             原消息时间 {item.sourceOccurredAt ? formatTimestamp(item.sourceOccurredAt) : '暂不可读'} · 入箱 / SLA{' '}
             {formatTimestamp(item.disposition.discoveredAt)} ·
-            {item.disposition.state === 'routed' ||
-            item.disposition.state === 'closed' ||
-            item.disposition.state === 'duplicate' ||
-            item.disposition.state === 'no_action' ||
-            item.disposition.state === 'fix'
-              ? ` 处置耗时 ${formatAge(item.ageMs)}`
-              : ` 已运行 ${formatAge(item.ageMs)}`}
+            {item.responsibility.validExit ? ` 处置耗时 ${formatAge(item.ageMs)}` : ` 已运行 ${formatAge(item.ageMs)}`}
           </div>
         </div>
         <span className="max-w-full truncate font-mono text-micro opacity-70" title={item.disposition.signalId}>

@@ -87,7 +87,7 @@ describe('GET /api/approval-hub/pending', () => {
     assert.ok(body.items.every((i) => i.ownerUserId === 'user-1'));
     assert.deepEqual(
       body.manifest.map((entry) => entry.id),
-      ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F221', 'F276'],
+      ['F128', 'F139', 'F225', 'F193', 'F231', 'F260', 'F221', 'F276', 'F292'],
     );
   });
 
@@ -255,7 +255,7 @@ describe('F246 approval fan-out telemetry and failure policy', () => {
 
     const measurements = measurementLogs('pending');
     const adapterMeasurements = measurements.filter((entry) => entry.scope === 'adapter');
-    assert.equal(adapterMeasurements.length, 8);
+    assert.equal(adapterMeasurements.length, 9);
     assert.deepEqual(adapterMeasurements.map((entry) => entry.producerId).sort(), [
       'F128',
       'F139',
@@ -265,6 +265,7 @@ describe('F246 approval fan-out telemetry and failure policy', () => {
       'F231',
       'F260',
       'F276',
+      'F292',
     ]);
     const f128 = adapterMeasurements.find((entry) => entry.producerId === 'F128');
     assert.equal(f128.itemCount, 1);
@@ -345,7 +346,7 @@ describe('GET /api/approval-hub/settled', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.count, 0);
     assert.deepEqual(body.items, []);
-    assert.equal(body.manifest.length, 8);
+    assert.equal(body.manifest.length, 9);
   });
 
   /** Create + anchor a dispatch proposal so settled adapter projection works. */

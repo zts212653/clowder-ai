@@ -1,7 +1,7 @@
 ---
 name: proactive-memory-judgment
 tips_exempt: internal cat judgment policy; owner-facing behavior remains the existing F276 approval card
-description: "单次 continuity-valued 人物线索或频率 nudge 的 F276 提案与 enum-only abstention 判断；禁止重复即重要、静默物化和私密正文记录。"
+description: "Use when 人物线索需在 F276 即时提案、known-person defer、abstention 间判断。Not for 裸人名、taste、后台扫描或 workspace alias。Output: 可拒绝 proposal、无正文 receipt 或 abstention；永不静默物化。"
 triggers:
   - "continuity-valued 人物线索"
   - "proactive-memory-candidate"
@@ -14,7 +14,7 @@ not_for:
   - "后台语料扫描"
   - "重复即重要"
   - "workspace alias 单独登记"
-output: "One F276 proposal or one enum-only calibrated abstention receipt"
+output: "One rejectable F276 proposal, one content-free known-person deferred receipt, or one enum-only abstention"
 ---
 
 # Proactive Memory Judgment
@@ -48,13 +48,16 @@ Entity 与 F276，分别审批。
 - agent inference 不得 materialize；
 - 时间、headline、duration 等 interaction fields 必须有对应 typed evidence。
 
-证据不足时不猜、不补写 owner 没说过的话；记录
+证据不足时不猜、不补写 owner 没说过的话；若本轮已形成 opportunity exposure，记录
 `cat_cafe_record_proactive_memory_abstention({ reasonCode: "insufficient_owner_evidence" })`。
 
 ### 3. 时机
 
-只在自然回复边界行动；同一轮至多一张 person-memory card。已有 pending/已登记候选时，
-不要制造重复卡；需要纠正 pending 时按 F276 immutable replacement 契约提交完整新快照。
+只在自然回复边界行动；同一轮至多一张 person-memory card。已有 pending 时不要制造重复卡；
+需要纠正 pending 时按 F276 immutable replacement 契约提交完整新快照。人物已登记不等于没有
+新关系/互动：若当前任务适合，立即提完整 delta 卡；若提卡会打断主任务且 exact owner sources
+已经明确，调用 `cat_cafe_defer_person_memory_delta`，只传 subject、source coordinates 与稳定
+clientRequestId。defer 不存正文，daily clerk 也不会扫描对话，只会把 exact refs 转回普通审批卡。
 
 ### 4. 授权
 
@@ -63,16 +66,17 @@ Entity 与 F276，分别审批。
 
 ### 5. 降档表达
 
-不确定性越高，intervention 越浅。确认这是一次机会但决定不提案时，只记录一条 enum-only
-abstention，不写解释、原文、坐标或自定义 reason：
+不确定性越高，intervention 越浅。defer 是“证据足、人物已登记、只是当前不宜打断”，不是
+证据不足的垃圾桶。确认不应 proposal/defer 时，只记录一条 enum-only abstention，不写解释、
+原文、坐标或自定义 reason：
 
 | 情形 | `reasonCode` |
 |---|---|
 | 没有 continuity value | `not_continuity_valued` |
 | owner 证据不足 | `insufficient_owner_evidence` |
-| 当前时机不自然或本轮已有卡 | `bad_timing` |
+| 当前时机不自然且不是可安全 defer 的 known-person delta，或本轮已有卡 | `bad_timing` |
 | 需要的授权不存在 | `authorization_boundary` |
-| 已登记或已有 pending | `already_registered_or_pending` |
+| 已有 pending，或当前内容只重复既有人物事实、没有新 delta | `already_registered_or_pending` |
 | privacy / source scope 不可确认 | `privacy_boundary` |
 
 调用形式：
@@ -84,10 +88,31 @@ cat_cafe_record_proactive_memory_abstention({ reasonCode })
 工具不接受 `opportunityRef`、owner、person、message 或 thread 坐标。若 proposal 工具失败，
 只在重新判断后确实应该降档时记录准确的 abstention；不能把失败回执冒充成功提案。
 
+defer 调用只接受路由坐标，不接受私密正文：
+
+```text
+cat_cafe_defer_person_memory_delta({
+  subject,
+  sources: [{ kind: "message", messageId }],
+  clientRequestId
+})
+```
+
+附件/ASR 未绑定 owner 的明确准确性确认时，不得产生 interaction fact。可以得到
+`awaiting_confirmation` receipt，但它不会进入 daily queue；不得把这当成已提案或已写入。
+
+## Common Mistakes
+
+- 人物已登记 → 仍可能有新的 relationship/interaction delta；不要继续整类 suppression。
+- 主任务正忙 → exact known-person delta 用 defer；不要把本应稍后提卡的机会洗成 `bad_timing`。
+- 纠正错字 → 原子替换完整人物卡；不要把“这次纠错”新增成 interaction event。
+- receipt 已产生 proposal → 后续删除走 exact proposal lifecycle；不要只删 receipt 冒充事实已忘记。
+
 ## 出口
 
-- 五门通过 → 用既有 `cat_cafe_propose_person_memory`，保留 typed evidence 与 approval-first 边界。
-- 识别到机会但不提案 → 用一次 enum-only abstention。
-- 根本不是机会 → 正常回答，不调用 proposal 或 abstention。
+- 五门通过且时机自然 → 用 `cat_cafe_propose_person_memory`，保留 typed evidence 与 approval-first 边界。
+- 已登记人物 + exact sources + 当前不宜打断 → 用一次 `cat_cafe_defer_person_memory_delta`。
+- opportunity exposure 已发生但不应 proposal/defer → 用一次 enum-only abstention。
+- 没有 exposure、只是普通裸人名 → 正常回答，不制造 opportunity receipt。
 
 禁止用 proposal 接受率、猫排名或“出现三次所以重要”作为判断依据。

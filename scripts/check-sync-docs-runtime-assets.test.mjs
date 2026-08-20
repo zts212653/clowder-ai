@@ -301,4 +301,18 @@ describe('sync-to-opensource.sh source-only guard contract', () => {
       'public @cat-cafe/mcp-server package scripts must not advertise home-bound governance commands',
     );
   });
+
+  it('binds the post-merge tag handoff to the exported source snapshot', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    assert.match(
+      syncScript,
+      /PUBLISH_HANDOFF_CMD="bash scripts\/publish-sync-tag\.sh --source-sha=\$SOURCE_SHA --push"/,
+      'the handoff must publish the SOURCE_SHA selected for export, not the caller worktree HEAD',
+    );
+    assert.match(
+      syncScript,
+      /Release mapping: \$RELEASE_TAG ← \$SOURCE_SNAPSHOT_TAG ← \$SOURCE_SHA_SHORT/,
+      'the release mapping hint must report the same exported source snapshot',
+    );
+  });
 });

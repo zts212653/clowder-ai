@@ -6,8 +6,10 @@ import {
   CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID,
 } from './capability-wakeup-closure-import.js';
 import { loadDomains } from './hub/eval-hub-read-model.js';
-import { scanLifecycleRootArtifacts } from './publish-verdict/lifecycle-root-artifact.js';
+import { loadLifecycleRootsWithLegacyCases, migrationForCase } from './legacy-reeval-case-migration.js';
 import { projectReevalCase } from './reeval-case.js';
+import { compareReevalCycles } from './reeval-case-cycle-order.js';
+import type { ReevalCaseReevaluationService } from './reeval-case-reevaluation.js';
 import type { ReevalCaseResponsibilityService } from './reeval-case-responsibility.js';
 import { lifecycleRootRefs } from './reeval-closure-bootstrap.js';
 import type { IReevalClosureEventLog } from './reeval-closure-event-log.js';
@@ -28,13 +30,17 @@ export async function loadReevalClosureSubjects(
   options: ReevalClosureSubjectsLoaderOptions,
 ): Promise<ReevalLifecycleReconcileSubject[]> {
   const domains = loadDomains(options.harnessFeedbackRoot);
-  const roots = scanLifecycleRootArtifacts(options.harnessFeedbackRoot);
   const historical = buildCapabilityWakeupClosureImport();
+  const historicalBootstrapEvents = historical.bootstrapEvents ?? [];
+  const historicalVerdictExists = existsSync(
+    join(options.harnessFeedbackRoot, 'verdicts', `${CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID}.md`),
+  );
+  const roots = loadLifecycleRootsWithLegacyCases(options.harnessFeedbackRoot);
   const subjects: ReevalLifecycleReconcileSubject[] = [];
   const caseRoots = new Map<string, Extract<(typeof roots)[number], { schemaVersion: 2 }>[]>();
 
   for (const root of roots) {
-    if (root.verdictId === historical.root.verdictId) continue;
+    if (root.verdictId === historical.root.verdictId && root.schemaVersion === 1) continue;
     if (root.schemaVersion === 2) {
       const grouped = caseRoots.get(root.caseId) ?? [];
       grouped.push(root);
@@ -55,16 +61,14 @@ export async function loadReevalClosureSubjects(
   }
 
   for (const [caseId, groupedRoots] of caseRoots) {
-    groupedRoots.sort(
-      (left, right) => left.createdAt.localeCompare(right.createdAt) || left.verdictId.localeCompare(right.verdictId),
-    );
+    groupedRoots.sort(compareReevalCycles);
     const first = groupedRoots[0];
     if (!first) continue;
     for (const candidate of groupedRoots.slice(1)) {
       if (
         candidate.domainId !== first.domainId ||
         candidate.findingKey !== first.findingKey ||
-        candidate.ownerAsk.targetOwnerCatId !== first.ownerAsk.targetOwnerCatId
+        candidate.harnessUnderEval.featureId !== first.harnessUnderEval.featureId
       ) {
         throw new Error(`case ${caseId} contains incompatible immutable lifecycle roots`);
       }
@@ -73,12 +77,14 @@ export async function loadReevalClosureSubjects(
     if (!domain) throw new Error(`lifecycle case ${caseId} references unregistered domain ${first.domainId}`);
     const assignedEvalCatId =
       (await options.resolveAssignedEvalCatId?.(first.domainId, domain.evalCat.catId)) ?? domain.evalCat.catId;
+    const migration = migrationForCase(options.harnessFeedbackRoot, caseId);
     const caseSubject: ReevalCaseReconcileSubject = {
       caseRoot: {
         caseId,
         domainId: first.domainId,
-        targetOwnerCatId: first.ownerAsk.targetOwnerCatId,
+        targetOwnerCatId: domain.handoffTargetResolver.ownerCatId,
         assignedEvalCatId,
+        reevalWithinHours: domain.sla.reevalWithinHours,
         cycles: groupedRoots.map((root) => ({
           verdictId: root.verdictId,
           createdAt: root.createdAt,
@@ -89,20 +95,43 @@ export async function loadReevalClosureSubjects(
       assignedEvalCatId,
       acknowledgeHours: domain.sla.acknowledgeHours,
       events: await options.eventLog.read(caseId),
-      openRefsByVerdictId: new Map(groupedRoots.map((root) => [root.verdictId, lifecycleRootRefs(root)])),
+      openRefsByVerdictId: new Map(
+        groupedRoots.map((root) => [
+          root.verdictId,
+          root.verdictId === historical.root.verdictId ? historical.openRefs : lifecycleRootRefs(root),
+        ]),
+      ),
       responsibilityContext: {
         systemThreadId: domain.systemThreadId,
         featureId: domain.handoffTargetResolver.featureId,
+        ownerCatId: domain.handoffTargetResolver.ownerCatId,
         evalCatId: assignedEvalCatId,
       },
+      ...(migration ? { legacyMigration: migration.freshnessReview } : {}),
+      ...(groupedRoots.some((root) => root.verdictId === historical.root.verdictId)
+        ? {
+            legacyContinuity: {
+              ownerResponseRefs: historicalBootstrapEvents
+                .filter((event) => event.type === 'owner_acknowledged')
+                .flatMap((event) => event.refs),
+              planRefs: historicalBootstrapEvents
+                .filter((event) => event.type === 'action_planned')
+                .flatMap((event) => event.refs),
+              actionRefs: historicalBootstrapEvents
+                .filter((event) => event.type === 'fix_recorded')
+                .flatMap((event) => event.refs),
+              reevalRefs: historicalBootstrapEvents
+                .filter((event) => event.type === 'reeval_requested')
+                .flatMap((event) => event.refs),
+            },
+          }
+        : {}),
     };
     subjects.push(caseSubject);
   }
 
-  const historicalVerdictExists = existsSync(
-    join(options.harnessFeedbackRoot, 'verdicts', `${CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID}.md`),
-  );
-  if (historicalVerdictExists) {
+  const historicalRoot = roots.find((root) => root.verdictId === historical.root.verdictId);
+  if (historicalVerdictExists && historicalRoot?.schemaVersion !== 2) {
     const domain = domains.get(historical.root.domainId);
     if (!domain) {
       throw new Error(`historical lifecycle ${historical.root.verdictId} references an unregistered domain`);
@@ -110,11 +139,10 @@ export async function loadReevalClosureSubjects(
     const assignedEvalCatId =
       (await options.resolveAssignedEvalCatId?.(historical.root.domainId, domain.evalCat.catId)) ??
       domain.evalCat.catId;
-    const backfilledRoot = roots.find((root) => root.verdictId === historical.root.verdictId);
     subjects.push({
       ...historical,
       assignedEvalCatId,
-      ...(backfilledRoot ? { root: backfilledRoot, openRefs: lifecycleRootRefs(backfilledRoot) } : {}),
+      ...(historicalRoot ? { root: historicalRoot, openRefs: lifecycleRootRefs(historicalRoot) } : {}),
       events: await options.eventLog.read(historical.root.verdictId),
     });
   }
@@ -128,6 +156,7 @@ function reconcileSubjectId(subject: ReevalLifecycleReconcileSubject): string {
 interface ReevalClosureBatchSignal {
   planned: PlannedReevalClosureAppend[];
   bindResponsibility: boolean;
+  bindReevaluation: boolean;
 }
 
 function caseNeedsResponsibility(
@@ -147,6 +176,7 @@ export interface ReevalClosureTaskSpecOptions {
   eventLog: IReevalClosureEventLog;
   loadSubjects: () => Promise<ReevalLifecycleReconcileSubject[]>;
   responsibilityService?: Pick<ReevalCaseResponsibilityService, 'reconcile'>;
+  reevaluationService?: Pick<ReevalCaseReevaluationService, 'needsReconcile' | 'reconcile'>;
   now?: () => string;
   pollIntervalMs?: number;
   log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
@@ -162,23 +192,38 @@ export function createReevalClosureTaskSpec(
     trigger: { type: 'interval', ms: options.pollIntervalMs ?? 600_000 },
     admission: {
       async gate(_ctx: GateCtx) {
-        const workItems = (await options.loadSubjects())
-          .map((subject) => {
-            const planned = planReevalClosureEvents(subject, now());
-            const bindResponsibility =
-              Boolean(options.responsibilityService) &&
-              'caseRoot' in subject &&
-              caseNeedsResponsibility(subject, planned);
-            return { subject, planned, bindResponsibility };
-          })
-          .filter((candidate) => candidate.planned.length > 0 || candidate.bindResponsibility)
-          .map(({ subject, planned, bindResponsibility }) => ({
-            subjectKey: reconcileSubjectId(subject),
-            dedupeKey:
-              planned.map((item) => item.event.eventId).join('|') ||
-              `f266:${reconcileSubjectId(subject)}:responsibility`,
-            signal: { planned, bindResponsibility },
-          }));
+        const workItems = (
+          await Promise.all(
+            (
+              await options.loadSubjects()
+            ).map(async (subject) => {
+              const planned = planReevalClosureEvents(subject, now());
+              const bindResponsibility =
+                Boolean(options.responsibilityService) &&
+                'caseRoot' in subject &&
+                caseNeedsResponsibility(subject, planned);
+              const bindReevaluation =
+                Boolean(options.reevaluationService) &&
+                'caseRoot' in subject &&
+                (await options.reevaluationService?.needsReconcile(subject, now())) === true;
+              return { subject, planned, bindResponsibility, bindReevaluation };
+            }),
+          )
+        )
+          .filter(
+            (candidate) => candidate.planned.length > 0 || candidate.bindResponsibility || candidate.bindReevaluation,
+          )
+          .map(({ subject, planned, bindResponsibility, bindReevaluation }) => {
+            const subjectId = reconcileSubjectId(subject);
+            const serviceDedupe = bindReevaluation
+              ? `f266:${subjectId}:reevaluation:${subject.events.length}`
+              : `f266:${subjectId}:responsibility`;
+            return {
+              subjectKey: subjectId,
+              dedupeKey: planned.map((item) => item.event.eventId).join('|') || serviceDedupe,
+              signal: { planned, bindResponsibility, bindReevaluation },
+            };
+          });
         if (workItems.length === 0) return { run: false, reason: 'no lifecycle events due' };
         return { run: true, workItems };
       },
@@ -207,6 +252,14 @@ export function createReevalClosureTaskSpec(
           );
           if (refreshed && 'caseRoot' in refreshed) {
             await options.responsibilityService.reconcile(refreshed, refreshed.responsibilityContext);
+          }
+        }
+        if (signal.bindReevaluation && options.reevaluationService) {
+          const refreshed = (await options.loadSubjects()).find(
+            (subject) => reconcileSubjectId(subject) === subjectKey && 'caseRoot' in subject,
+          );
+          if (refreshed && 'caseRoot' in refreshed) {
+            await options.reevaluationService.reconcile(refreshed, refreshed.responsibilityContext);
           }
         }
       },

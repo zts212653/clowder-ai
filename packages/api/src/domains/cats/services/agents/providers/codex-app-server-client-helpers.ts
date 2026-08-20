@@ -9,6 +9,8 @@ interface ThreadParamsInput {
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
   developerInstructions?: string;
   config?: CodexAppServerJsonObject;
+  /** Omitted = inherit Codex config; null = explicit Standard; fast = request Fast. */
+  serviceTier?: string | null;
 }
 
 export function buildCodexAppServerThreadParams(
@@ -23,6 +25,7 @@ export function buildCodexAppServerThreadParams(
     ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.config ? { config: input.config } : {}),
+    ...(Object.hasOwn(input, 'serviceTier') ? { serviceTier: input.serviceTier ?? null } : {}),
   };
 }
 

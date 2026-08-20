@@ -4,7 +4,7 @@ related_features: [F179, F180]
 topics: [desktop, electron, auto-update, inno-setup, dmg, github-releases, installer, opensource-ops]
 doc_kind: spec
 created: 2026-07-07
-updated: 2026-07-26
+updated: 2026-08-08
 description: "Desktop in-app update system: fresh GitHub release discovery, resumable verified download, Windows installer upgrade, and guided macOS DMG replacement."
 description_source: model
 description_author: codex-sol
@@ -16,13 +16,20 @@ description_updated_at: 2026-07-26T03:59:46Z
 
 # F273: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
-> **Status**: in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；exact-head RC package verification 与 macOS arm64 isolated old-install 验收通过；**Phase E 首次 upstream stable release field validation 待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1
+> **Status**: in-progress（Phase A–D 已通过 clowder-ai #1105 合入；Clowder AI intake #3222 已合入 `8424af315`；clowder-ai #1227 的 hardened renderer/update recovery 已合入并完成 Windows RC `.14` 主路径现场验收；**Phase E 首次 upstream stable release 的完整 field validation 仍待完成**） | **Source author**: mindfn | **Intake owner**: @codex-sol | **Priority**: P1
 >
-> **Source**: clowder-ai#1105（Phase A–D 实现 PR，已合入 `d908aa265`）→ clowder-ai#1102（issue）→ clowder-ai#1219（docs sync，已合入 `7207936a38`）
+> **Source**: clowder-ai#1105（Phase A–D 实现 PR，已合入 `d908aa265`）→ clowder-ai#1102（issue）→ clowder-ai#1219（docs sync，已合入 `7207936a38`）→ clowder-ai#1227（renderer/update recovery，已合入 `c643961b8`）
 >
 > **operator signoff**: 2026-07-24，operator授权分配 F273 + intake 回家
 >
 > **operator sequencing decision (2026-07-26)**: 既有 Windows 安装验证作为合入前证据；真实旧版 → 首个 upstream stable release 升级验证移至合入后。若现场验证发现缺陷，以新的 follow-up issue / PR 修复，不改写已审 exact HEAD。
+
+## 2026-08-08 intake evidence — clowder-ai #1227
+
+- 源 PR 最终 exact HEAD `beea02584adb0cbce76d358da25e2bf751df8f0d`，merge commit `c643961b8a7d23013a725b9f963725f3f7bfedea`；formal exact-head review 为 APPROVED。
+- Windows RC `0.12.0-rc.1105.14` 来自 source `69e02c55ed80e39b0bac9c88989389732aaf346f`，构建 run `31159345443` 成功并产出 installer / portable artifacts。
+- operator 与吴浪现场确认 `.14` 的升级检测、下载和安装主路径正常；这是真实 Windows 主路径证据，不外推为 macOS、失败恢复、代理故障、portable 或首次 stable release 的全量 Phase E 验收。
+- 本次回家吸收保持 GitHub Releases 为 feed/source-of-binaries，同时将桌面产品身份、AUMID 与用户可见文案恢复为 Clowder AI 契约。
 
 ## Why
 
@@ -300,3 +307,4 @@ README / README.zh-CN 加 **Upgrading** 章节：数据存放位置 + 覆盖升�
 - 2026-07-26: clowder-ai PR #1105 合入（Phase A–D），merge commit `d908aa265`；Phase E 首次 stable release field validation 移至合入后（operator sequencing override，不改变安全/完整性/恢复/portable/持久化/平台契约）
 - 2026-07-26: clowder-ai PR #1219 docs sync 合入（`7207936a38`），status/AC-8/10/11/Timeline 同步更新；家里 intake 同步更新状态
 - 2026-07-26: Clowder AI intake PR #3222 合入（`8424af315`）；代码与家里品牌/路径/feature truth 已吸收，Phase E upstream stable release field validation 仍待完成
+- 2026-08-08: clowder-ai PR #1227 合入（`c643961b8`）；Windows RC `.14`（source `69e02c55e`）的检测、下载、安装主路径由 operator/吴浪现场确认。Clowder AI intake issue #3462 / PR #3463 合入（`cca11e79a`），吸收 renderer/update recovery；完整 Phase E stable validation 不因单一路径成功而提前关闭。

@@ -108,6 +108,14 @@ export class DynamicTaskStore {
       .run(JSON.stringify(params), id);
     return result.changes > 0;
   }
+
+  /** Compare-and-swap a lifecycle projection without introducing a second ledger. */
+  updateParamsIfCurrent(id: string, current: Record<string, unknown>, next: Record<string, unknown>): boolean {
+    const result = this.db
+      .prepare('UPDATE dynamic_task_defs SET params_json = ? WHERE id = ? AND params_json = ?')
+      .run(JSON.stringify(next), id, JSON.stringify(current));
+    return result.changes > 0;
+  }
 }
 
 interface RawRow {

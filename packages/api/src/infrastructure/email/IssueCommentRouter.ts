@@ -50,13 +50,13 @@ export class IssueCommentRouter {
 
   async route(
     signal: IssueCommentSignal,
-    tracking: { threadId: string; catId: string; userId: string; trackingInstructions?: string },
+    tracking: { threadId: string; catId: string; userId: string },
   ): Promise<IssueCommentRouteResult> {
     if (signal.newComments.length === 0) {
       return { kind: 'skipped', reason: 'no new comments' };
     }
 
-    const content = buildIssueCommentContent(signal, tracking.trackingInstructions);
+    const content = buildIssueCommentContent(signal);
 
     const source: ConnectorSource = {
       connector: 'github-issue-comment',
@@ -90,7 +90,7 @@ export class IssueCommentRouter {
 
 // ── Message Formatting ────────────────────────────────────────────
 
-export function buildIssueCommentContent(signal: IssueCommentSignal, trackingInstructions?: string): string {
+export function buildIssueCommentContent(signal: IssueCommentSignal): string {
   const lines: string[] = [
     `💬 **Issue Comments** — Issue #${signal.issueNumber} (${signal.repoFullName})`,
     '',
@@ -133,10 +133,6 @@ export function buildIssueCommentContent(signal: IssueCommentSignal, trackingIns
   lines.push('', '---', '🔧 **自动处理**');
   lines.push(`- 目标: ${signal.repoFullName}#${signal.issueNumber} (issue)`);
   lines.push('- 操作: 阅读评论内容，需要回复则回复');
-
-  if (trackingInstructions) {
-    lines.push('', '📌 **Tracking Instructions**', trackingInstructions);
-  }
 
   return lines.join('\n');
 }

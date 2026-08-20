@@ -19,6 +19,16 @@ function formatScheduleTiming(schedule: ScheduleRunTiming | undefined): string {
   return `本次是 ${schedule.scheduledAt} 预定任务的补拍，实际 ${schedule.firedAt} 触发，迟到 ${formatLateness(schedule.latenessMs)}${merged}。\n`;
 }
 
+function isManagedCommandWake(params: Record<string, unknown>): boolean {
+  const lifecycle = params.holdLifecycle;
+  return (
+    typeof lifecycle === 'object' &&
+    lifecycle !== null &&
+    !Array.isArray(lifecycle) &&
+    (lifecycle as Record<string, unknown>).mode === 'wake_when'
+  );
+}
+
 /** Reminder template — fires on schedule, wakes a cat to handle the reminder in-thread */
 export const reminderTemplate: TaskTemplate = {
   templateId: 'reminder',
@@ -36,6 +46,7 @@ export const reminderTemplate: TaskTemplate = {
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const threadId = p.deliveryThreadId;
+    const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
     // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
     // Gate on the `hold-ball-` instanceId prefix — callback-hold-ball-routes mints those
     // ids, while public /api/schedule/tasks only mints `dyn-*` (schedule.ts:417), so a
@@ -59,6 +70,11 @@ export const reminderTemplate: TaskTemplate = {
         overlap: 'skip',
         timeoutMs: 30_000,
         async execute(_signal, subjectKey, ctx) {
+          if (managedCommandWake) {
+            if (!ctx.managedCommandWakeRecovery) throw new Error('managed-command wake recovery is unavailable');
+            await ctx.managedCommandWakeRecovery(instanceId);
+            return;
+          }
           if (!ctx.deliver) throw new Error('deliver not available');
           const tid = subjectKey.startsWith('thread-') ? subjectKey.slice(7) : subjectKey;
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';

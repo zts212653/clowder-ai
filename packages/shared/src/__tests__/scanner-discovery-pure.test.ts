@@ -33,6 +33,8 @@ describe('F243 B-0 scanner discovery pure function', () => {
       writeFixtureFile(docsRoot, 'lessons-learned.md');
       writeFixtureFile(docsRoot, 'diagrams/map.svg');
       writeFixtureFile(docsRoot, 'custom/prior-art.md');
+      writeFixtureFile(docsRoot, 'study/unannotated-reading.md');
+      writeFixtureFile(docsRoot, 'competitor-research/unannotated-project.md');
       writeFixtureFile(docsRoot, 'mailbox/inbox.md');
       writeFixtureFile(docsRoot, 'features/generated.tmp');
       writeFixtureFile(docsRoot, 'features/exported-threads/skip.md');
@@ -46,12 +48,14 @@ describe('F243 B-0 scanner discovery pure function', () => {
       expect(relativeResults(docsRoot)).toEqual([
         { path: 'architecture/memory-system-overview.md', kind: 'architecture' },
         { path: 'archive/2026-06-01/features/F001-archived.md', kind: 'feature' },
+        { path: 'competitor-research/unannotated-project.md', kind: 'research' },
         { path: 'custom/prior-art.md', kind: 'plan' },
         { path: 'decisions/ADR-999.md', kind: 'decision' },
         { path: 'diagrams/map.svg', kind: 'plan' },
         { path: 'features/F999-good.md', kind: 'feature' },
         { path: 'features/nested/F998-nested.md', kind: 'feature' },
         { path: 'lessons-learned.md', kind: 'plan' },
+        { path: 'study/unannotated-reading.md', kind: 'research' },
       ]);
     } finally {
       rmSync(docsRoot, { recursive: true, force: true });
@@ -63,6 +67,8 @@ describe('F243 B-0 scanner discovery pure function', () => {
     expect(KIND_DIRS.features).toBe('feature');
     expect(KIND_DIRS.architecture).toBe('architecture');
     expect(KIND_DIRS.discussions).toBe('discussion');
+    expect(KIND_DIRS.study).toBe('research');
+    expect(KIND_DIRS['competitor-research']).toBe('research');
     expect([...GENERATED_DOC_DIRS]).toEqual(['exported-threads']);
   });
 });

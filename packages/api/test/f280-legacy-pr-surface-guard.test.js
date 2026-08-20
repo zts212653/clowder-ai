@@ -10,75 +10,21 @@ const legacyFieldPattern = /\b(wakePolicy|trackingInstructions|eventWait|detectE
 
 const allowedRegions = [
   {
-    path: 'packages/shared/src/types/task.ts',
-    label: 'LegacyIssueAutomationState',
-    start: 'export interface LegacyIssueAutomationState',
-    end: 'export type AutomationState',
-  },
-  {
-    path: 'packages/mcp-server/src/tools/callback-tools.ts',
-    label: 'registerIssueTrackingInputSchema + handleRegisterIssueTracking',
-    start: 'export const registerIssueTrackingInputSchema',
-    end: 'export const unregisterTrackingInputSchema',
-  },
-  {
-    path: 'packages/api/src/routes/callbacks.ts',
-    label: 'register-issue-tracking route',
-    start: 'const registerIssueTrackingSchema',
-    end: "app.post('/api/callbacks/unregister-tracking'",
-  },
-  {
-    path: 'packages/api/src/infrastructure/email/IssueCommentRouter.ts',
-    label: 'IssueCommentRouter',
-    start: 'export class IssueCommentRouter',
-    end: '// ── Message Formatting',
-  },
-  {
-    path: 'packages/api/src/infrastructure/email/IssueCommentRouter.ts',
-    label: 'buildIssueCommentContent',
-    start: 'export function buildIssueCommentContent',
-    end: undefined,
-  },
-  {
-    path: 'packages/api/src/infrastructure/email/IssueCommentTaskSpec.ts',
-    label: 'shouldDeliverComment',
-    start: 'function shouldDeliverComment',
-    end: 'export function createIssueCommentTaskSpec',
-  },
-  {
-    path: 'packages/api/src/infrastructure/email/IssueCommentTaskSpec.ts',
-    label: 'createIssueCommentTaskSpec',
-    start: 'export function createIssueCommentTaskSpec',
-    end: undefined,
-  },
-  {
-    path: 'packages/api/src/domains/community/community-delivery-policy.ts',
-    label: 'TrackingWakePolicyInput',
-    start: 'export interface TrackingWakePolicyInput',
-    end: '// ---------------------------------------------------------------------------\n// Rule constants',
-  },
-  {
-    path: 'packages/api/src/domains/community/community-delivery-policy.ts',
-    label: 'decideTrackingWake',
-    start: 'export function decideTrackingWake',
-    end: undefined,
-  },
-  {
-    path: 'packages/api/src/domains/cats/services/stores/ports/TaskAutomationState.ts',
-    label: 'mergeTaskAutomationState issue compatibility seam',
-    start: 'export function mergeTaskAutomationState',
-    end: undefined,
-  },
-  {
     path: 'packages/api/src/domains/ball-custody/PrWaitMigrationService.ts',
     label: 'one-time atomic PR legacy migration',
     start: 'const LEGACY_KEYS',
     end: undefined,
   },
   {
+    path: 'packages/api/src/domains/ball-custody/IssueWaitMigrationService.ts',
+    label: 'one-time atomic issue legacy migration',
+    start: 'const LEGACY_KEYS',
+    end: undefined,
+  },
+  {
     path: 'packages/api/src/domains/cats/services/agents/routing/route-serial.ts',
     label: 'structured custody stop-gate vocabulary',
-    start: 'const TURN_CUSTODY_STOP_GATE_REMEDIAL_PROMPT',
+    start: 'export function buildTurnCustodyStopGateRemedialPrompt',
     end: '/**\n * F233 Phase B (B2): persist ball.handed',
   },
 ];
@@ -100,8 +46,8 @@ function bounds(source, region) {
   return { start, end };
 }
 
-describe('F280 legacy PR surface guard', () => {
-  it('allows legacy fields only in exact issue symbols and the one-time migration module', () => {
+describe('F280 legacy wait surface guard', () => {
+  it('allows legacy fields only in exact one-time migration modules and custody vocabulary', () => {
     const files = sourceRoots.flatMap((root) => sourceFiles(resolve(repoRoot, root)));
     const hits = [];
     for (const path of files) {
@@ -143,11 +89,17 @@ describe('F280 legacy PR surface guard', () => {
     }
   });
 
-  it('PrAutomationState itself contains no legacy PR key', () => {
+  it('typed PR and issue automation states contain no legacy wait key', () => {
     const source = readFileSync(resolve(repoRoot, 'packages/shared/src/types/task.ts'), 'utf8');
-    const start = source.indexOf('export interface PrAutomationState');
-    const end = source.indexOf('export type IssueTrackingWakePolicy', start);
-    const prState = source.slice(start, end);
+    const prStart = source.indexOf('export interface PrAutomationState');
+    const issueStart = source.indexOf('export interface IssueWaitAutomationState');
+    const issueEnd = source.indexOf('export type AutomationState', issueStart);
+    assert.notEqual(prStart, -1);
+    assert.notEqual(issueStart, -1);
+    assert.notEqual(issueEnd, -1);
+    const prState = source.slice(prStart, issueStart);
+    const issueState = source.slice(issueStart, issueEnd);
     assert.doesNotMatch(prState, /\b(intent|wakePolicy|trackingInstructions|eventWait)\b/);
+    assert.doesNotMatch(issueState, /\b(intent|wakePolicy|trackingInstructions|eventWait)\b/);
   });
 });

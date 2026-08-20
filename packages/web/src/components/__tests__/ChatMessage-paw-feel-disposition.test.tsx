@@ -63,6 +63,7 @@ const seenPage: PawFeelInboxPage = {
         captureMethod: 'typed',
         captureAssessment: 'confirmed',
       },
+      responsibility: { state: 'unreviewed', validExit: false, exitKind: 'none', evidenceRefs: [] },
       source: {
         availability: 'available',
         preview: 'not rendered in the dock',
@@ -89,6 +90,13 @@ const seenPage: PawFeelInboxPage = {
     problemFamilies: { status: 'unavailable', reason: 'No authoritative grouping contract' },
   },
   counts: { total: 1, unseen: 0, inProgress: 1, routePending: 0, disposed: 0, overdue: 0 },
+  responsibilityCounts: {
+    unreviewed: 1,
+    bound_in_repair: 0,
+    signature_waiting: 0,
+    blocked: 0,
+    terminal: 0,
+  },
   degraded: false,
 };
 
@@ -152,7 +160,7 @@ describe('ChatMessage paw-feel disposition projection', () => {
     expect(mocks.apiFetch).toHaveBeenCalledWith('/api/paw-feel/source/message-cat');
     expect(container.querySelector('[data-testid="paw-feel-disposition-dock"]')).not.toBeNull();
     expect(container.textContent).toContain('责任收件箱 · 1 条报告');
-    expect(container.textContent).toContain('已看');
+    expect(container.textContent).toContain('unreviewed');
     expect(container.textContent).toContain('@sonnet');
     expect(container.textContent).not.toContain('not rendered in the dock');
   });
@@ -193,6 +201,15 @@ describe('ChatMessage paw-feel disposition projection', () => {
     if (!baseItem) throw new Error('seenPage fixture must contain one item');
     const second = {
       ...baseItem,
+      responsibility: {
+        state: 'bound_in_repair' as const,
+        validExit: true,
+        exitKind: 'repair_binding' as const,
+        evidenceRefs: ['task-1', 'lease-1'],
+        ownerCatId: 'opus',
+        taskId: 'task-1',
+        leaseId: 'lease-1',
+      },
       disposition: {
         ...baseItem.disposition,
         signalId: 'signal-2',
@@ -219,8 +236,8 @@ describe('ChatMessage paw-feel disposition projection', () => {
 
     expect(container.querySelectorAll('[data-testid="paw-feel-disposition-dock"]')).toHaveLength(1);
     expect(container.textContent).toContain('责任收件箱 · 2 条报告');
-    expect(container.textContent).toContain('已看 1');
-    expect(container.textContent).toContain('已确认要修 1');
+    expect(container.textContent).toContain('unreviewed 1');
+    expect(container.textContent).toContain('bound-in-repair 1');
     expect(container.textContent).toContain('最近审阅 @opus');
     expect(container.textContent).not.toContain('marker #');
     expect(container.querySelectorAll('[data-testid="paw-feel-disposition-detail"]')).toHaveLength(0);

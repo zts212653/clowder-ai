@@ -5,9 +5,14 @@
 
 import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
-import { formatMessage } from '../domains/cats/services/context/ContextAssembler.js';
+import { formatMessage, getSenderName } from '../domains/cats/services/context/ContextAssembler.js';
+import {
+  MessageSelectionResolver,
+  type ResolvedMessageSelectionItem,
+} from '../domains/cats/services/context/MessageSelectionResolver.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { resolveStrictUserId } from '../utils/request-identity.js';
 
 const pad = (n: number) => n.toString().padStart(2, '0');
 
@@ -123,15 +128,72 @@ export function formatThreadAsText(thread: Thread, messages: StoredMessage[]): s
   return lines.join('\n');
 }
 
+function selectionSender(item: ResolvedMessageSelectionItem): string {
+  return item.author.kind === 'user' ? 'co-creator' : getSenderName(item.author.catId);
+}
+
+export function formatSelectionAsMarkdown(
+  thread: Pick<Thread, 'id' | 'title'>,
+  items: readonly ResolvedMessageSelectionItem[],
+): string {
+  const lines = [
+    `# 精选聊天记录: ${thread.title ?? '未命名对话'}`,
+    '',
+    `- **来源 Thread**: ${thread.id}`,
+    `- **消息数**: ${items.length}`,
+    '',
+    '---',
+    '',
+  ];
+  for (const item of items) {
+    lines.push(`[${formatLocalTime(item.timestamp)} ${selectionSender(item)}] ${item.readableContent}`);
+    lines.push(`*[来源消息: ${item.messageId}]*`);
+    if (item.comment) lines.push(`> **Comment:** ${item.comment}`);
+    lines.push('');
+  }
+  lines.push('---', `*导出时间: ${formatDatetime(new Date())}*`);
+  return lines.join('\n');
+}
+
+export function formatSelectionAsText(
+  thread: Pick<Thread, 'id' | 'title'>,
+  items: readonly ResolvedMessageSelectionItem[],
+): string {
+  const lines = [
+    `精选聊天记录: ${thread.title ?? '未命名对话'}`,
+    '',
+    `来源 Thread: ${thread.id}`,
+    `消息数: ${items.length}`,
+    '',
+    '---',
+    '',
+  ];
+  for (const item of items) {
+    lines.push(`[${formatLocalTime(item.timestamp)} ${selectionSender(item)}] ${item.readableContent}`);
+    lines.push(`来源消息: ${item.messageId}`);
+    if (item.comment) lines.push(`Comment: ${item.comment}`);
+    lines.push('');
+  }
+  lines.push('---', `导出时间: ${formatDatetime(new Date())}`);
+  return lines.join('\n');
+}
+
 const SUPPORTED_FORMATS = new Set(['md', 'txt']);
 
 export const exportRoutes: FastifyPluginAsync<ExportRoutesOptions> = async (app, opts) => {
   const { messageStore, threadStore } = opts;
+  const selectionResolver = new MessageSelectionResolver({ messageStore, threadStore });
 
   // GET /api/export/thread/:threadId?format=md|txt
   app.get('/api/export/thread/:threadId', async (request, reply) => {
     const { threadId } = request.params as { threadId: string };
     const format = (request.query as { format?: string }).format ?? 'md';
+    const userId = resolveStrictUserId(request);
+
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
 
     if (!SUPPORTED_FORMATS.has(format)) {
       reply.status(400);
@@ -143,8 +205,12 @@ export const exportRoutes: FastifyPluginAsync<ExportRoutesOptions> = async (app,
       reply.status(404);
       return { error: 'Thread not found' };
     }
+    if (thread.createdBy !== userId && thread.createdBy !== 'system') {
+      reply.status(403);
+      return { error: 'Access denied' };
+    }
 
-    const messages = await messageStore.getByThread(threadId, 10000, undefined, {
+    const messages = await messageStore.getByThread(threadId, 10000, userId, {
       includeQueuedCatMessages: true,
     });
 
@@ -159,5 +225,41 @@ export const exportRoutes: FastifyPluginAsync<ExportRoutesOptions> = async (app,
     reply.header('Content-Type', 'text/markdown; charset=utf-8');
     reply.header('Content-Disposition', `attachment; filename="thread-${threadId}.md"`);
     return md;
+  });
+
+  app.post('/api/export/thread/:threadId/selection', async (request, reply) => {
+    const { threadId } = request.params as { threadId: string };
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const body = request.body as { format?: unknown; items?: unknown } | null;
+    const format = body?.format;
+    if (format !== 'md' && format !== 'txt') {
+      reply.status(400);
+      return { error: 'Unsupported format. Use format=md or format=txt' };
+    }
+
+    const resolution = await selectionResolver.resolveForAdmission(
+      { sourceThreadId: threadId, items: body?.items },
+      { userId },
+    );
+    if (resolution.status === 'invalid') {
+      reply.status(resolution.reason === 'not_authorized' ? 403 : 400);
+      return {
+        error: resolution.reason,
+        ...(resolution.messageId ? { messageId: resolution.messageId } : {}),
+      };
+    }
+
+    const content =
+      format === 'txt'
+        ? formatSelectionAsText(resolution.sourceThread, resolution.items)
+        : formatSelectionAsMarkdown(resolution.sourceThread, resolution.items);
+    reply.header('Content-Type', format === 'txt' ? 'text/plain; charset=utf-8' : 'text/markdown; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="selection-${threadId}.${format}"`);
+    return content;
   });
 };

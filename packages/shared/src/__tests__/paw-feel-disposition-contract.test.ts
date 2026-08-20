@@ -3,6 +3,7 @@ import {
   PAW_FEEL_DISPOSITION_STATES,
   PAW_FEEL_INBOX_SORTS,
   PAW_FEEL_NO_ACTION_REASONS,
+  PAW_FEEL_RESPONSIBILITY_STATES,
   type PawFeelDispositionProjection,
 } from '../types/paw-feel-disposition.js';
 
@@ -17,6 +18,15 @@ describe('F278 paw-feel disposition shared contract', () => {
       'duplicate',
       'no_action',
       'fix',
+      'signature_waiting',
+      'blocked',
+    ]);
+    expect(PAW_FEEL_RESPONSIBILITY_STATES).toEqual([
+      'unreviewed',
+      'bound_in_repair',
+      'signature_waiting',
+      'blocked',
+      'terminal',
     ]);
   });
 

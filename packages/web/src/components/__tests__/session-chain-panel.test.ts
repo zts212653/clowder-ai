@@ -78,6 +78,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.restoreAllMocks();
 });
 
 function renderPanel(threadId: string, catInvocations: Record<string, CatInvocationInfo> = {}) {
@@ -138,6 +139,68 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('1 active');
     expect(container.textContent).toContain('2 total');
+  });
+
+  it('distinguishes unknown compression history from observed zero', async () => {
+    mockSessionsResponse([
+      {
+        id: 'unknown-count',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+      },
+      {
+        id: 'observed-zero',
+        catId: 'codex',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: 0,
+        createdAt: Date.now(),
+      },
+    ]);
+
+    renderPanel('thread-count-state');
+    await flushFetch();
+
+    expect(container.textContent).toContain('compress count unknown');
+    expect(container.textContent).toContain('0 compress observed');
+  });
+
+  it('shows the applied policy and exact execution status on the active session node', async () => {
+    mockSessionsResponse([
+      {
+        id: 'policy-node',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 0,
+        compressionCount: null,
+        createdAt: Date.now(),
+        appliedPolicy: {
+          config: { strategy: 'hybrid', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'runtime:hybrid:1',
+          changedAt: 1,
+          execution: {
+            status: 'degraded',
+            missingCapabilities: ['compression_signal', 'session_rotation'],
+          },
+        },
+      },
+    ]);
+
+    renderPanel('thread-policy-state');
+    await flushFetch();
+
+    const policyState = container.querySelector('[data-testid="session-policy-state"]');
+    expect(policyState?.textContent).toContain('hybrid');
+    expect(policyState?.textContent).toContain('degraded');
+    expect(policyState?.textContent).toContain('compression_signal');
+    expect(policyState?.textContent).toContain('session_rotation');
   });
 
   it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
@@ -252,7 +315,7 @@ describe('F24: SessionChainPanel', () => {
 
   it('does NOT collapse in-flight sealing 0-msg tool_conflict records (砚砚 review P2)', async () => {
     // requestSeal() writes sealReason while status is still 'sealing' (async-finalizes to 'sealed'
-    // later) — a sealing record must keep its own card (live status + 查看/解封), NOT be folded.
+    // later) — a sealing record must keep its own card (live status + 查看), NOT be folded.
     const sealingCorpseLike = (seq: number) => ({
       id: `sealing-${seq}`,
       catId: 'antig-opus',
@@ -678,7 +741,7 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('Session #1');
   });
 
-  it('disables unseal button on stale data during AND after failed refetch (stale barrier)', async () => {
+  it('disables restore-current button on stale data during AND after failed refetch (stale barrier)', async () => {
     // Load sealed session for thread-1
     mockSessionsResponse([
       {
@@ -695,27 +758,103 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expandSealed();
 
-    const findUnsealBtn = () => {
+    const findRestoreBtn = () => {
       const buttons = Array.from(container.querySelectorAll('button'));
-      return buttons.find((b) => b.textContent?.includes('解封')) as HTMLButtonElement | undefined;
+      return buttons.find((b) => b.textContent?.includes('恢复为当前')) as HTMLButtonElement | undefined;
     };
 
-    // Unseal button should be enabled for fresh data
-    expect(findUnsealBtn()!.disabled).toBe(false);
+    // Restore button should be enabled for fresh data
+    expect(findRestoreBtn()!.disabled).toBe(false);
 
     // Switch to thread-2, fetch fails — stale data from thread-1 stays visible
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-2');
     await flushFetch();
 
-    // Unseal button must stay DISABLED even after loading finishes,
+    // Restore button must stay DISABLED even after loading finishes,
     // because data belongs to thread-1 not thread-2 (entity mismatch)
-    const staleBtn = findUnsealBtn();
+    const staleBtn = findRestoreBtn();
     expect(staleBtn).toBeDefined();
     expect(staleBtn!.disabled).toBe(true);
 
     // Also verify stale indicator is shown
     expect(container.textContent).toContain('Refreshing...');
+  });
+
+  it('confirms and sends the expected active identity when restoring a historical session', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockApiFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [
+            { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+            { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ mode: 'restored' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessions: [
+            { id: 'old', catId: 'opus', seq: 0, status: 'active', messageCount: 3, createdAt: 1 },
+            {
+              id: 'current',
+              catId: 'opus',
+              seq: 2,
+              status: 'sealed',
+              messageCount: 1,
+              createdAt: 3,
+              sealedAt: 4,
+            },
+          ],
+        }),
+      });
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+
+    const restoreButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('恢复为当前'),
+    );
+    expect(restoreButton).toBeDefined();
+    await act(async () => {
+      restoreButton!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Session #3'));
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/sessions/old/unseal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expectedActiveSessionId: 'current' }),
+    });
+  });
+
+  it('does not restore or seal anything when the current-session confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    mockSessionsResponse([
+      { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+      { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+    ]);
+
+    renderPanel('thread-1');
+    await flushFetch();
+    expandSealed();
+    const restoreButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('恢复为当前'),
+    );
+
+    await act(async () => {
+      restoreButton!.click();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
   });
 
   it('replaces stale data when new thread fetch succeeds (stale-while-revalidate)', async () => {

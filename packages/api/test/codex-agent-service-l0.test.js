@@ -251,3 +251,24 @@ test('Task 4 reserved key: short-form `-c` cannot override system developer_inst
     '`-c` short-form override must not enter system developer_instructions',
   );
 });
+
+test('Task 4 reserved key: attached config spellings cannot override system developer_instructions', async () => {
+  for (const rawOverride of [
+    '--config=developer_instructions="USER-OVERRIDE-LONG-EQUALS"',
+    '-c=developer_instructions="USER-OVERRIDE-SHORT-EQUALS"',
+    '-cdeveloper_instructions="USER-OVERRIDE-SHORT-ATTACHED"',
+  ]) {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const l0CompilerFn = fixedL0('SYSTEM-L0-CONTENT');
+    const service = new CodexAgentService({ spawnFn, catId: createCatId('codex'), l0CompilerFn });
+
+    const promise = collect(service.invoke('hi', { cliConfigArgs: [rawOverride] }));
+    emitOk(proc);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const developerInstructions = assertCompiledL0Preserved(args, 'SYSTEM-L0-CONTENT');
+    assert.doesNotMatch(developerInstructions, /USER-OVERRIDE/, `reserved override survived: ${rawOverride}`);
+  }
+});

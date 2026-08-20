@@ -145,6 +145,7 @@ test('B4: mapAnthropicUsage converts full usage correctly', () => {
     cache_creation_input_tokens: 10,
   });
   assert.equal(result.inputTokens, 130, 'inputTokens = 100 + 20 + 10');
+  assert.equal(result.lastTurnInputTokens, 130, 'single-response input is authoritative current-context usage');
   assert.equal(result.outputTokens, 50);
   assert.equal(result.cacheReadTokens, 20);
   assert.equal(result.cacheCreationTokens, 10);

@@ -83,6 +83,39 @@ class PoolWire {
   }
 }
 
+class ActiveWriterWire extends PoolWire {
+  constructor(threadId) {
+    super(threadId);
+    this.previousThreadId = threadId;
+  }
+
+  async write(message) {
+    if (message.method === 'thread/resume') {
+      this.writes.push(message);
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32600, message: `thread ${this.previousThreadId} already has an active writer` },
+      });
+      return;
+    }
+    if (message.method === 'thread/read') {
+      this.writes.push(message);
+      this.inbox.push({
+        id: message.id,
+        result: {
+          thread: {
+            id: this.previousThreadId,
+            status: { type: 'active', activeFlags: [] },
+            turns: [{ id: 'turn-old', status: 'inProgress', startedAt: 1_786_630_000, items: [] }],
+          },
+        },
+      });
+      return;
+    }
+    return super.write(message);
+  }
+}
+
 class FakeHostPool {
   constructor() {
     this.calls = [];
@@ -244,6 +277,63 @@ test('CodexAgentService hides a recovered model-capacity failure from the Clowde
   assert.equal(retryTurn.params.additionalContext?.['cat-cafe.capacity-recovery']?.kind, 'application');
 });
 
+test('CodexAgentService exposes active-writer refusal without minting a replacement session', async () => {
+  const first = new ActiveWriterWire('native-old');
+  const second = new ActiveWriterWire('native-old');
+  const wires = [first, second];
+  let factoryCalls = 0;
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.6-sol',
+  });
+
+  const output = await drain(
+    service.invoke('continue', {
+      invocationId: 'invocation-active-writer-reborn',
+      sessionId: 'native-old',
+      agentCarrierSessionFactory: async () => wires[factoryCalls++],
+    }),
+  );
+
+  assert.equal(factoryCalls, 2, 'one failed resume may receive only one bounded same-session retry');
+  assert.equal(
+    output.some((message) => message.type === 'session_init'),
+    false,
+  );
+  assert.equal(
+    output.filter((message) => message.type === 'session_init' && message.sessionReplacement).length,
+    0,
+    'active-writer refusal must not mint replacement provenance or a new native session',
+  );
+  assert.equal(
+    output.some(
+      (message) =>
+        message.type === 'error' &&
+        message.error.includes('拒绝自动替换或封存当前会话') &&
+        message.error.includes('请稍后重试'),
+    ),
+    true,
+  );
+  assert.equal(
+    output.filter((message) => message.metadata?.diagnostics?.appServerRecovery?.reason === 'active_writer_retry')
+      .length,
+    1,
+    'the bounded retry must preserve diagnostics without claiming a replacement',
+  );
+  const terminalError = output.find((message) => message.type === 'error');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.reasonCode, 'active_writer_recovery');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.activeWriterRecovery?.state, 'owner_busy');
+  assert.equal(terminalError.metadata?.cliDiagnostics?.publicSummary, '原生会话仍绑定原 writer host');
+  assert.match(terminalError.metadata?.cliDiagnostics?.publicHint, /原 Session 已保留/);
+  assert.doesNotMatch(
+    JSON.stringify(terminalError.metadata?.cliDiagnostics),
+    /thread native-old already has an active writer/,
+    'typed diagnostics must not expose raw upstream active-writer text',
+  );
+});
+
 test('CodexAgentService surfaces one checkpoint card when an in-flight tool blocks capacity recovery', async () => {
   const pool = new FakeHostPool();
   pool.turnCompletions.push({
@@ -330,10 +420,15 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
     rawArchive: { append: async (_invocationId, payload) => archived.push(payload) },
   });
 
+  const firstCallbackEnv = {
+    ...callbackEnv('invocation-1', 'callback-token-1'),
+    CAT_CAFE_EXECUTION_ID: 'parent-execution-1',
+    CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+  };
   await drain(
     service.invoke('first turn', {
       invocationId: 'invocation-1',
-      callbackEnv: callbackEnv('invocation-1', 'callback-token-1'),
+      callbackEnv: firstCallbackEnv,
       auditContext: {
         invocationId: 'invocation-1',
         threadId: 'cafe-thread-1',
@@ -354,6 +449,7 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
   const firstLaunch = JSON.stringify(pool.calls[0]);
   assert.doesNotMatch(firstLaunch, /callback-token-1/);
   assert.doesNotMatch(firstLaunch, /mcp_servers\.cat-cafe/);
+  assert.doesNotMatch(firstLaunch, /parent-execution-1|CAT_CAFE_PROCESS_EXECUTION_OWNER/);
   assert.doesNotMatch(JSON.stringify(firstStart), /callback-token-1|CAT_CAFE_CALLBACK_TOKEN/);
   assert.equal(
     archived.some((payload) => JSON.stringify(payload).includes('callback-token-1')),

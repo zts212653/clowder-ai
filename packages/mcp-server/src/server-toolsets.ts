@@ -4,7 +4,13 @@ import { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
 import { derivedProfileSet, projectServerFamily } from './canonical-tool-registry.js';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
 import type { FamilyToolDefinition, McpServerFamily } from './tool-governance-snapshot.js';
-import { callbackPost, getCallbackConfig } from './tools/callback-tools.js';
+import {
+  callbackPost,
+  getCallbackConfig,
+  type PostMessageRegistrationPrincipal,
+  projectPostMessageInputSchema,
+} from './tools/callback-tools.js';
+import { getInvocationAuthSignal } from './tools/invocation-auth.js';
 
 export { CANONICAL_TOOL_REGISTRY } from './canonical-server-tools.js';
 
@@ -169,7 +175,13 @@ async function maybeFreshnessNotice(toolName: string, isReadOnly: boolean): Prom
   return null;
 }
 
-function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
+function resolvePostMessageRegistrationPrincipal(env: ToolsetEnv): PostMessageRegistrationPrincipal {
+  if (getInvocationAuthSignal().hasFullCredentials) return 'invocation';
+  if (env.hasAgentKey) return 'agent-key';
+  return 'unconfigured';
+}
+
+function registerTools(server: McpServer, tools: readonly ToolDef[], env: ToolsetEnv = parseToolsetEnv()): void {
   // Use server.registerTool(name, config, cb) — the explicit config-object API.
   // server.tool()'s overload parser uses isZodRawShapeCompat to detect whether
   // an arg is inputSchema vs annotations. Our plain JSON Schema objects fail the
@@ -182,13 +194,21 @@ function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
   ) => void;
   for (const tool of tools) {
     const annotations = tool.annotations;
+    const postMessagePrincipal =
+      tool.name === 'cat_cafe_post_message' ? resolvePostMessageRegistrationPrincipal(env) : null;
     // Distinguish Zod raw shape (callback tools) from plain JSON Schema (limb tools).
     // Zod raw shapes have Zod instances as values; JSON Schema has type/properties keys.
-    const schema = tool.inputSchema;
-    const zodSchema =
+    const schema = postMessagePrincipal ? projectPostMessageInputSchema(postMessagePrincipal) : tool.inputSchema;
+    let zodSchema =
       typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
         ? jsonSchemaToZod(schema)
         : z.object(schema as z.ZodRawShape);
+    if (postMessagePrincipal === 'invocation') {
+      // Omitting threadId from tools/list is not enough: a default Zod object
+      // strips unknown keys, which would erase the evidence before the handler's
+      // fail-closed KD-1 check. Reject it explicitly at the public boundary.
+      zodSchema = (zodSchema as z.ZodObject<z.ZodRawShape>).strict();
+    }
     registerExplicit(
       tool.name,
       { description: tool.description, inputSchema: zodSchema, annotations },
@@ -217,7 +237,8 @@ function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
 }
 
 export function registerCollabToolset(server: McpServer): void {
-  registerTools(server, buildCollabTools());
+  const env = parseToolsetEnv();
+  registerTools(server, buildCollabTools(env), env);
 }
 
 export function registerMemoryToolset(server: McpServer): void {

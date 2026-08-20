@@ -179,6 +179,12 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.match(messages[0].content, /HEAD aaaa111 → bbbb222/);
     assert.match(messages[0].content, /Next: Re-lock the exact HEAD/);
     assert.equal(messages[0].content.includes('OLD_BODY'), false);
+    assert.deepEqual(messages[0].source?.meta?.waitContinuationCarrier, {
+      v: 1,
+      waitId: task.id,
+      outcomeId: 'wait:pr:owner/repo#7:g3:matched',
+      ownerFence: { kind: 'containing_task', generation: 3 },
+    });
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'delivered');
     const events = await eventLog.read(task.id);
     assert.equal(events.length, 1);
@@ -244,6 +250,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
           outcomeId: 'wait:pr:owner/repo#11:g1:superseded',
           generation: 1,
           subjectRef: 'pr:owner/repo#11',
+          ownerFence: { kind: 'containing_task', generation: 1 },
           reason: 'superseded',
           at: 500,
           delivery: 'not_applicable',
@@ -266,6 +273,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
           outcomeId: 'wait:pr:owner/repo#12:g2:matched',
           generation: 2,
           subjectRef: 'pr:owner/repo#12',
+          ownerFence: { kind: 'containing_task', generation: 2 },
           reason: 'matched',
           at: 600,
           delivery: 'pending',
@@ -286,6 +294,150 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal(messageStore.getByThread('thread_silent').length, 0);
     assert.equal(messageStore.getByThread('thread_pending').length, 1);
     assert.equal((await taskStore.get(pending.id)).automationState.waitOutcome.delivery, 'delivered');
+  });
+
+  it('quarantines a legacy unfenced pending outcome and continues recovering a later fenced outcome', async () => {
+    const taskStore = new TaskStore();
+    const messageStore = new MessageStore();
+    const warnings = [];
+    const lifecycle = new GitHubWaitLifecycleService({
+      taskStore,
+      deliveryDeps: { messageStore },
+      log: {
+        info() {},
+        warn(...args) {
+          warnings.push(args);
+        },
+        error() {},
+      },
+    });
+    const legacy = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#13',
+      threadId: 'thread_legacy_unfenced',
+      title: 'PR tracking: owner/repo#13',
+      ownerCatId: 'codex-sol',
+      why: 'pre-Gate-4 pending recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'wait:pr:owner/repo#13:g4:matched',
+          generation: 4,
+          subjectRef: 'pr:owner/repo#13',
+          reason: 'matched',
+          at: 700,
+          delivery: 'pending',
+          actor: { kind: 'system' },
+          matched: [{ kind: 'pr_head_changed', delta: 'HEAD ccccccc → ddddddd' }],
+          nextStep: 'Review the new HEAD.',
+        },
+      },
+    });
+    const current = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#14',
+      threadId: 'thread_current_fenced',
+      title: 'PR tracking: owner/repo#14',
+      ownerCatId: 'codex-sol',
+      why: 'current pending recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'wait:pr:owner/repo#14:g5:matched',
+          generation: 5,
+          subjectRef: 'pr:owner/repo#14',
+          ownerFence: { kind: 'containing_task', generation: 5 },
+          reason: 'matched',
+          at: 800,
+          delivery: 'pending',
+          actor: { kind: 'system' },
+          matched: [{ kind: 'pr_head_changed', delta: 'HEAD eeeeeee → fffffff' }],
+          nextStep: 'Review the new HEAD.',
+        },
+      },
+    });
+    const sweep = new WaitLifecycleRecoverySweep(taskStore, lifecycle);
+
+    assert.deepEqual(await sweep.run(), { recovered: 2 });
+
+    assert.equal(messageStore.getByThread(legacy.threadId).length, 0);
+    assert.equal((await taskStore.get(legacy.id)).automationState.waitOutcome.delivery, 'legacy_unfenced');
+    assert.equal(messageStore.getByThread(current.threadId).length, 1);
+    assert.equal((await taskStore.get(current.id)).automationState.waitOutcome.delivery, 'delivered');
+    assert.ok(warnings.some((args) => args.some((value) => String(value).includes(legacy.id))));
+  });
+
+  it('isolates an unexpected task recovery failure from the remainder of the startup sweep', async () => {
+    const taskStore = new TaskStore();
+    const first = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#15',
+      threadId: 'thread_first_recovery',
+      title: 'PR tracking: owner/repo#15',
+      ownerCatId: 'codex-sol',
+      why: 'first recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'wait:pr:owner/repo#15:g1:superseded',
+          generation: 1,
+          subjectRef: 'pr:owner/repo#15',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          reason: 'superseded',
+          at: 900,
+          delivery: 'not_applicable',
+        },
+      },
+    });
+    const second = await taskStore.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#16',
+      threadId: 'thread_second_recovery',
+      title: 'PR tracking: owner/repo#16',
+      ownerCatId: 'codex-sol',
+      why: 'second recovery',
+      createdBy: 'codex-sol',
+      userId: 'user_1',
+      automationState: {
+        waitOutcome: {
+          v: 1,
+          outcomeId: 'wait:pr:owner/repo#16:g1:superseded',
+          generation: 1,
+          subjectRef: 'pr:owner/repo#16',
+          ownerFence: { kind: 'containing_task', generation: 1 },
+          reason: 'superseded',
+          at: 901,
+          delivery: 'not_applicable',
+        },
+      },
+    });
+    const recoveredTaskIds = [];
+    const warnings = [];
+    const sweep = new WaitLifecycleRecoverySweep(
+      taskStore,
+      {
+        async recoverOutcome(taskId) {
+          recoveredTaskIds.push(taskId);
+          if (taskId === first.id) throw new Error('corrupt persisted outcome');
+          return { kind: 'state_only', reason: 'superseded' };
+        },
+      },
+      {
+        warn(...args) {
+          warnings.push(args);
+        },
+      },
+    );
+
+    assert.deepEqual(await sweep.run(), { recovered: 1 });
+    assert.deepEqual(recoveredTaskIds, [first.id, second.id]);
+    assert.ok(warnings.some((args) => args.some((value) => value?.taskId === first.id)));
   });
 });
 

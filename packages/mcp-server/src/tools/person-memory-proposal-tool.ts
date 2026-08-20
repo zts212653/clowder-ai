@@ -5,17 +5,19 @@ import {
   candidateRelationshipDraftSchema,
   captureCandidateIdSchema,
   createTemporalValueSchema,
+  deferredPersonMemoryReceiptIdSchema,
   personIdentityDraftSchema,
   personIdSchema,
   personMemorySourceBundleInputSchema,
+  writeOpportunityRefV1Schema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 import type { ToolResult } from './file-tools.js';
 import { errorResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('person-memory-proposal-tool.ts', './tools/callback-tools.js', {
+const defineTool = defineMcpCanonicalFactory('person-memory-proposal-tool.ts', './tools/callback-tools.js', {
   resourceFamily: 'person-memory',
   authority: 'callback-owner-private',
 });
@@ -56,6 +58,16 @@ export const proposePersonMemoryInputSchema = {
     .describe(
       'Exact pending/not-now F276 proposal ID to replace with this corrected card. The server anchors the new card and withdraws the old one atomically.',
     ),
+  deferredReceipt: z
+    .object({
+      receiptId: deferredPersonMemoryReceiptIdSchema,
+      claimId: z.string().trim().min(1).max(240).describe('Exact active daily-clerk claim fence for the receipt.'),
+    })
+    .strict()
+    .optional()
+    .describe(
+      'Daily-clerk lineage only: exact claimed deferred receipt and claim lease. The server verifies owner, cat, subject, sources, and active claim before creating a card.',
+    ),
   claims: z
     .array(claimInputSchema)
     .max(3)
@@ -79,6 +91,11 @@ export const proposePersonMemoryInputSchema = {
     .describe(
       'Optional exact owner-authored source from any owner-visible thread. Historical sources must contain every claim/relationship evidence excerpt and pass visibility checks.',
     ),
+  writeOpportunityRef: writeOpportunityRefV1Schema
+    .optional()
+    .describe(
+      'Exact content-free opportunityId, dedupeLineage, and generation printed in an ASR person-memory prompt. Pass it verbatim so the server can bind this proposal disposition to that delivered opportunity.',
+    ),
   clientRequestId: z.string().min(1).max(200).optional().describe('Optional idempotency key.'),
 };
 
@@ -86,11 +103,13 @@ type ProposePersonMemoryInput = {
   person: z.infer<typeof personIdentityDraftSchema>;
   targetPersonId?: z.infer<typeof personIdSchema>;
   replacesProposalId?: z.infer<typeof captureCandidateIdSchema>;
+  deferredReceipt?: { receiptId: z.infer<typeof deferredPersonMemoryReceiptIdSchema>; claimId: string };
   claims: Array<z.infer<typeof claimInputSchema>>;
   relationship?: z.infer<typeof relationshipInputSchema>;
   interaction?: z.infer<typeof interactionInputSchema>;
   sourceBundle: z.infer<typeof personMemorySourceBundleInputSchema>;
   sourceMessageId?: string;
+  writeOpportunityRef?: z.infer<typeof writeOpportunityRefV1Schema>;
   clientRequestId?: string;
 };
 
@@ -109,11 +128,13 @@ export function createPersonMemoryProposalTool(callbackPost: CallbackPost) {
       person: input.person,
       targetPersonId: input.targetPersonId,
       replacesProposalId: input.replacesProposalId,
+      deferredReceipt: input.deferredReceipt,
       claims: input.claims,
       relationship: input.relationship,
       interaction: input.interaction,
       sourceBundle: input.sourceBundle,
       sourceMessageId: input.sourceMessageId,
+      writeOpportunityRef: input.writeOpportunityRef,
       clientRequestId: input.clientRequestId ?? randomUUID(),
     });
     if (result.isError) return result;
@@ -141,7 +162,8 @@ export function createPersonMemoryProposalTool(callbackPost: CallbackPost) {
         'The server derives owner, requester, current card thread, and every exact source thread. Do not create a silent dossier. ' +
         'GOTCHA: when correcting a pending/not-now F276 card, pass replacesProposalId so the corrected card atomically withdraws the old one; never route a private-memory correction into workspace Entity merely because the pending card cannot be edited in place. ' +
         'A replacement is a complete new pending snapshot, not a patch. Reusing one clientRequestId with a different replacesProposalId fails closed. ' +
-        'If complete facts live in other owner-visible threads, stay in the current conversation and attach those exact messages as typed sources; the approval card remains in the current conversation while each source drills to its original thread. Never replace missing facts with a zero-information card, and never model the correction itself as a new interaction event.',
+        'If complete facts live in other owner-visible threads, stay in the current conversation and attach those exact messages as typed sources; the approval card remains in the current conversation while each source drills to its original thread. Never replace missing facts with a zero-information card, and never model the correction itself as a new interaction event.' +
+        ' When an ASR write-opportunity prompt prints opportunityId, dedupeLineage, and generation, pass that exact content-free triple as writeOpportunityRef; omitting or forging it is rejected for that invocation.',
       inputSchema: proposePersonMemoryInputSchema,
       handler: handleProposePersonMemory,
       governance: {

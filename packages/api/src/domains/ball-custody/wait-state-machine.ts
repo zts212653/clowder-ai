@@ -5,6 +5,7 @@ import type {
   WaitTerminationActor,
   WaitTerminationReason,
 } from '@cat-cafe/shared';
+import { parseWaitOwnerFence } from '@cat-cafe/shared';
 
 export interface WaitRuntimeState {
   readonly await?: AwaitStateV1;
@@ -65,6 +66,7 @@ function terminalize(
     outcomeId: outcomeId(active.subjectRef, active.generation, input.reason),
     generation: active.generation,
     subjectRef: active.subjectRef,
+    ownerFence: active.ownerFence,
     reason: input.reason,
     at: input.at,
     delivery,
@@ -131,6 +133,23 @@ export function markWaitOutcomeDelivered(current: WaitRuntimeState, outcomeId: s
     waitOutcome: {
       ...current.waitOutcome,
       delivery: 'delivered',
+    },
+  };
+}
+
+export function markWaitOutcomeLegacyUnfenced(current: WaitRuntimeState, outcomeId: string): WaitRuntimeState {
+  if (
+    current.waitOutcome?.outcomeId !== outcomeId ||
+    current.waitOutcome.delivery !== 'pending' ||
+    parseWaitOwnerFence(current.waitOutcome.ownerFence)
+  ) {
+    return current;
+  }
+  return {
+    ...current,
+    waitOutcome: {
+      ...current.waitOutcome,
+      delivery: 'legacy_unfenced',
     },
   };
 }

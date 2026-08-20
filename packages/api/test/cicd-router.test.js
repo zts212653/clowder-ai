@@ -34,7 +34,7 @@ function awaitState(when) {
   };
 }
 
-async function setup(when) {
+async function setup(when, routerOverrides = {}) {
   const taskStore = new TaskStore();
   const messageStore = new MessageStore();
   const lifecycle = new GitHubWaitLifecycleService({
@@ -67,8 +67,9 @@ async function setup(when) {
       events.push(event);
       return { idempotencyKey: event.idempotencyKey };
     },
+    ...routerOverrides,
   });
-  return { taskStore, messageStore, task, router, events };
+  return { taskStore, messageStore, task, router, events, lifecycle };
 }
 
 function poll(overrides = {}) {
@@ -78,12 +79,76 @@ function poll(overrides = {}) {
     headSha: 'aaa1111',
     prState: 'open',
     aggregateBucket: 'pass',
+    checkRollup: 'present',
     checks: [{ name: 'tests', bucket: 'pass' }],
     ...overrides,
   };
 }
 
 describe('CiCdRouter F280 typed waits', () => {
+  test('requires a same-HEAD empty rollup to stay empty for one poll interval before passing', async () => {
+    let now = 1_000;
+    const projected = [];
+    const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {
+      now: () => now,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+    });
+    const empty = poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] });
+
+    const first = await router.route(empty);
+    assert.equal(first.kind, 'skipped');
+    assert.equal(projected.at(-1).aggregateBucket, 'pending');
+    assert.deepEqual((await taskStore.get(task.id)).automationState.ci.rollupObservation, {
+      headSha: 'aaa1111',
+      state: 'empty',
+      streakStartedAt: 1_000,
+    });
+
+    now = 61_000;
+    const settled = await router.route(empty);
+    assert.equal(settled.kind, 'notified');
+    assert.equal(projected.at(-1).aggregateBucket, 'pass');
+  });
+
+  test('a non-empty observation resets the empty-rollup stability window', async () => {
+    let now = 1_000;
+    const projected = [];
+    const { router, taskStore, task } = await setup([{ kind: 'pr_ci_terminal' }], {
+      now: () => now,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+    });
+
+    await router.route(poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] }));
+    now = 30_000;
+    await router.route(
+      poll({
+        aggregateBucket: 'pending',
+        checkRollup: 'present',
+        checks: [{ name: 'tests', bucket: 'pending' }],
+      }),
+    );
+    now = 61_000;
+    const afterReset = await router.route(poll({ aggregateBucket: 'pending', checkRollup: 'empty', checks: [] }));
+
+    assert.equal(afterReset.kind, 'skipped');
+    assert.equal(projected.at(-1).aggregateBucket, 'pending');
+    assert.deepEqual((await taskStore.get(task.id)).automationState.ci.rollupObservation, {
+      headSha: 'aaa1111',
+      state: 'empty',
+      streakStartedAt: 61_000,
+    });
+  });
+
   test('unregistered PR is state-only', async () => {
     const { router } = await setup(null);
     assert.equal((await router.route(poll())).kind, 'skipped');
@@ -104,6 +169,47 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal((await router.route(poll())).kind, 'skipped');
     assert.equal(messageStore.getByThread('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
+  });
+
+  test('completed HEAD wait still advances external-case CI projection without another wake', async () => {
+    const { taskStore, messageStore, task, lifecycle } = await setup([{ kind: 'pr_head_changed' }]);
+    const headSha = 'bbb2222';
+    const waitResult = await lifecycle.observe({
+      taskId: task.id,
+      facts: { headSha },
+      collectorPatch: {
+        review: {
+          lastInlineCommentCursor: 0,
+          lastConversationCommentCursor: 0,
+          lastDecisionCursor: 0,
+        },
+      },
+    });
+    assert.equal(waitResult.kind, 'notified');
+    assert.equal((await taskStore.get(task.id)).status, 'done');
+
+    const projected = [];
+    const router = new CiCdRouter({
+      taskStore,
+      deliveryDeps: { messageStore },
+      waitLifecycle: lifecycle,
+      externalReviewCoordinator: {
+        recordCi: async (facts) => {
+          projected.push(facts);
+          return { kind: 'state_only', reason: 'explicit_wait_required' };
+        },
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const result = await router.route(poll({ headSha }));
+
+    assert.equal(result.kind, 'skipped');
+    assert.equal(result.reason, 'no_active_wait');
+    assert.equal(projected.length, 1);
+    assert.equal(projected[0].headSha, headSha);
+    assert.equal((await taskStore.get(task.id)).automationState.ci.headSha, headSha);
+    assert.equal(messageStore.getByThread('thread_1').length, 1, 'only the original HEAD wake is delivered');
   });
 
   test('merged PR consumes the wait, marks done, and emits world truth once', async () => {

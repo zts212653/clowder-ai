@@ -54,6 +54,7 @@ describe('F282 Phase D opportunity evaluator', () => {
     const exposures = [
       exposure('inv-propose', 'proposal_ready', 'relevant'),
       exposure('inv-abstain', 'abstention_expected'),
+      exposure('inv-defer', 'proposal_ready'),
       exposure('inv-silence', 'proposal_ready'),
       exposure('inv-failed-then-abstain', 'abstention_expected'),
       exposure('inv-contradiction', 'proposal_ready', 'irrelevant'),
@@ -71,6 +72,11 @@ describe('F282 Phase D opportunity evaluator', () => {
         toolName: 'record_proactive_memory_abstention',
         outcome: 'abstention_recorded',
         reasonCode: 'insufficient_owner_evidence',
+      }),
+      toolEvent({
+        invocationId: 'inv-defer',
+        toolName: 'defer_person_memory_delta',
+        outcome: 'deferred_receipt_recorded',
       }),
       toolEvent({
         invocationId: 'inv-failed-then-abstain',
@@ -93,6 +99,11 @@ describe('F282 Phase D opportunity evaluator', () => {
         toolName: 'record_proactive_memory_abstention',
         outcome: 'abstention_recorded',
         reasonCode: 'bad_timing',
+      }),
+      toolEvent({
+        invocationId: 'inv-contradiction',
+        toolName: 'defer_person_memory_delta',
+        outcome: 'deferred_receipt_recorded',
       }),
       toolEvent({
         invocationId: 'inv-duplicate',
@@ -126,9 +137,9 @@ describe('F282 Phase D opportunity evaluator', () => {
     assert.equal(Object.hasOwn(result, 'totalScore'), false);
     assert.equal(Object.hasOwn(result, 'acceptanceRate'), false);
     assert.deepEqual(result.vector.coverage, {
-      eligibleEpisodes: 7,
-      informedEpisodes: 4,
-      proposalReadyEpisodes: 3,
+      eligibleEpisodes: 8,
+      informedEpisodes: 5,
+      proposalReadyEpisodes: 4,
       proposedReadyEpisodes: 1,
       uninformedSilenceEpisodes: 2,
     });
@@ -137,6 +148,7 @@ describe('F282 Phase D opportunity evaluator', () => {
       [
         [deriveProactiveMemoryOpportunityRef('inv-propose'), 'propose', 'proposal_submitted'],
         [deriveProactiveMemoryOpportunityRef('inv-abstain'), 'abstain', 'insufficient_owner_evidence'],
+        [deriveProactiveMemoryOpportunityRef('inv-defer'), 'defer', 'deferred_receipt_recorded'],
         [deriveProactiveMemoryOpportunityRef('inv-failed-then-abstain'), 'abstain', 'authorization_boundary'],
         [deriveProactiveMemoryOpportunityRef('inv-duplicate'), 'abstain', 'not_continuity_valued'],
       ],

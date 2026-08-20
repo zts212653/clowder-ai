@@ -133,6 +133,12 @@ function assertMigrationClassification(entry: CensusEntry, migration: ValidityMi
   if (migration.status === 'gated' || migration.status === 'nonoperational') {
     throw new Error(`validity migration status mismatch for active bundle ${entry.domainId}`);
   }
+  if (migration.status === 'unmigrated' && migration.batch !== null) {
+    throw new Error(`unmigrated bundle ${entry.domainId} cannot claim a validity migration batch`);
+  }
+  if (migration.batch !== null && migration.batch !== migration.riskRank) {
+    throw new Error(`validity migration batch must match risk rank for ${entry.domainId}`);
+  }
 }
 
 function assertMigrationEvidenceRefs(entry: CensusEntry, migration: ValidityMigration): void {
@@ -187,6 +193,14 @@ function assertMigrationCoverage(census: MeasurementBundleCensus): void {
   const firstBatch = active.filter((entry) => entry.validityMigration.batch === 1);
   if (firstBatch.length !== 1 || firstBatch[0]?.domainId !== 'eval:memory') {
     throw new Error('validity migration batch 1 must contain only eval:memory');
+  }
+  const assignedBatches = active
+    .map((entry) => entry.validityMigration.batch)
+    .filter((batch): batch is number => batch !== null)
+    .sort((left, right) => left - right);
+  const expectedBatches = Array.from({ length: assignedBatches.at(-1) ?? 0 }, (_, index) => index + 1);
+  if (JSON.stringify(assignedBatches) !== JSON.stringify(expectedBatches)) {
+    throw new Error('validity migration batches must be unique and contiguous in risk order');
   }
 }
 

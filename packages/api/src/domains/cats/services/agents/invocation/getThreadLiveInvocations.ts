@@ -99,7 +99,9 @@ export interface LiveInvocation {
 export type ZombieReason =
   | 'no_tracker_no_fresh_draft_age_exceeded'
   // F194 Phase Z (KD-22): cat slot reused by another parent invocation, this parent has no own child draft
-  | 'cat_slot_reused_no_self_draft';
+  | 'cat_slot_reused_no_self_draft'
+  // F118 post-close: explicit reaper proved the old lease has no independent live owner.
+  | 'owner_lease_stale_provider_absent';
 
 export interface ZombieRecord {
   invocationId: string;
@@ -552,19 +554,24 @@ interface NamespaceLinkContext {
   getTurnInvocation: NonNullable<LivenessReadDeps['getTurnInvocation']>;
 }
 
-/** Returns null when draft should be skipped (out-of-scope, stale, missing turn info, or cross-user/thread/cat). */
+/**
+ * Returns null when draft should be skipped (out-of-scope, stale, missing turn info, or cross-user/thread/cat).
+ *
+ * Cloud R5 P1-A：null 与 throw 是两个不同的真相位面——`getTurnInvocation` 返回
+ * null 是 registry **权威**表示"该 child 无 turn info"（合法 skip）；抛错是**未知**，
+ * 必须传播。旧的 `catch { return null }` 把瞬时读失败降成"draft 不存在"：当 running
+ * parent 超过 record-only grace、唯一 live 证明是 fresh child draft 时，一次瞬时失败
+ * 会让 strict 路径产出**权威空**（而非抛错），presence 记 complete:true，sidebar 落
+ * 历史 done/error——false terminal。queue 路径的 fail-open 由外层 wrapper 承接，
+ * 不在这里提前吞。
+ */
 async function resolveDraftToTurn(
   draft: DraftRecord,
   ctx: NamespaceLinkContext,
 ): Promise<{ parentInvocationId: string; turnCreatedAt: number } | null> {
   if (draft.threadId !== ctx.threadId || draft.userId !== ctx.userId) return null;
   if (ctx.now - draft.updatedAt > ctx.freshDraftWindowMs) return null;
-  let info: TurnInvocationInfo | null | undefined;
-  try {
-    info = await Promise.resolve(ctx.getTurnInvocation(draft.invocationId));
-  } catch {
-    return null;
-  }
+  const info = await Promise.resolve(ctx.getTurnInvocation(draft.invocationId));
   if (!info || !info.parentInvocationId) return null;
   // R2 P1-B: cross-user/thread/cat isolation guard — prevent default/system thread spillover
   if (info.threadId !== ctx.threadId || info.userId !== ctx.userId || info.catId !== draft.catId) return null;

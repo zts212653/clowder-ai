@@ -4,6 +4,9 @@ import { describe, it, mock } from 'node:test';
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+const { QueuedMessageCustodyCoordinator } = await import(
+  '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { InMemoryFreshnessClosureStore } = await import(
   '../dist/domains/cats/services/freshness/FreshnessClosureStore.js'
@@ -355,7 +358,7 @@ describe('QueueProcessor pause epoch', () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(deps.messageStore.getById.mock.calls.length, 1, 'recovery is blocked in real queue-preview I/O');
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -371,6 +374,67 @@ describe('QueueProcessor pause epoch', () => {
       deps.socketManager.emitToUser.mock.calls.some((call) => call.arguments[1] === 'queue_paused'),
       false,
       'the discarded old terminal must not publish a paused replacement projection',
+    );
+  });
+
+  it('discards an old user-cancel pause when a replacement acquires during queue preview I/O', async (t) => {
+    // Same shape as the failed-terminal contract above. The user-cancel park was
+    // added later and mirrored that path's bookkeeping without mirroring its
+    // supersession fence, so a replacement owner could be parked by a turn that
+    // had already been cancelled.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const tracker = new InvocationTracker();
+    const queue = new InvocationQueue();
+    const previewGate = asyncGate();
+    const queued = queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: 'work the user interrupted',
+      messageId: 'msg-user-cancel',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+    });
+    assert.ok(queued.entry);
+    queue.markQueuedSeen('thread-1', 'user-1', queued.entry.id, 'opus', 'inv-cancelled');
+
+    tracker.start('thread-1', 'opus', 'user-1', ['opus'], 'inv-cancelled');
+    const deps = depsWithQueuedThread(tracker);
+    deps.queue = queue;
+    deps.messageStore.getById = mock.fn(async () => {
+      await previewGate.promise;
+      return null;
+    });
+    const processor = new QueueProcessor(/** @type {any} */ (deps));
+
+    const cancelled = processor.onInvocationComplete(
+      'thread-1',
+      'opus',
+      'canceled_by_user',
+      'inv-cancelled',
+      ['opus'],
+      true,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(deps.messageStore.getById.mock.calls.length, 1, 'the park is blocked in real queue-preview I/O');
+
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+      mode: 'replacement',
+      executionId: 'inv-replacement',
+    });
+    assert.ok(replacement);
+    previewGate.resolve();
+    await cancelled;
+
+    assert.equal(tracker.has('thread-1', 'opus'), true);
+    assert.equal(replacement.signal.aborted, false);
+    assert.equal(processor.isPaused('thread-1', 'opus'), false);
+    assert.equal(/** @type {any} */ (processor).pauseEpoch.has(SLOT_KEY), false);
+    assert.equal(
+      deps.socketManager.emitToUser.mock.calls.some((call) => call.arguments[1] === 'queue_paused'),
+      false,
+      'a slot that moved on must not publish a paused projection',
     );
   });
 
@@ -406,7 +470,7 @@ describe('QueueProcessor pause epoch', () => {
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(deps.messageStore.getById.mock.calls.length, 1);
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-codex-replacement',
     });
@@ -430,7 +494,7 @@ describe('QueueProcessor pause epoch', () => {
     await processor.onReconciledZombieComplete('thread-1', ['opus'], 'inv-zombie');
     assert.equal(processor.isPaused('thread-1', 'opus'), true);
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -447,7 +511,7 @@ describe('QueueProcessor pause epoch', () => {
     const processor = new QueueProcessor(/** @type {any} */ (deps));
 
     await processor.onReconciledZombieComplete('thread-1', ['opus'], 'inv-zombie');
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -531,7 +595,7 @@ describe('QueueProcessor pause epoch', () => {
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
     assert.equal(/** @type {any} */ (processor).processingSlots.has(SLOT_KEY), true);
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -601,7 +665,7 @@ describe('QueueProcessor pause epoch', () => {
     queue.backfillMessageId('thread-1', 'user-1', enqueued.entry.id, 'msg-merged');
 
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -633,7 +697,7 @@ describe('QueueProcessor pause epoch', () => {
     );
   });
 
-  it('does not cancel a delivered message when replacement tombstones its active carrier', async () => {
+  it('cancels honest queued custody when replacement tombstones its active carrier', async () => {
     const tracker = new InvocationTracker();
     const queue = new InvocationQueue();
     const messageStore = new MessageStore();
@@ -642,6 +706,7 @@ describe('QueueProcessor pause epoch', () => {
     const deps = depsWithQueuedThread(tracker);
     deps.queue = queue;
     deps.messageStore = messageStore;
+    deps.queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
     deps.router.routeExecution = mock.fn(async function* () {
       routeEntered.resolve();
       await routeRelease.promise;
@@ -671,9 +736,9 @@ describe('QueueProcessor pause epoch', () => {
 
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
     await routeEntered.promise;
-    assert.equal(messageStore.getById(message.id)?.deliveryStatus, 'delivered');
+    assert.equal(messageStore.getById(message.id)?.deliveryStatus, 'queued');
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -684,18 +749,23 @@ describe('QueueProcessor pause epoch', () => {
 
     assert.equal(
       messageStore.getById(message.id)?.deliveryStatus,
-      'delivered',
-      'replacement must not reverse an already-visible message to canceled',
+      'canceled',
+      'explicit replacement cancellation must withdraw rather than publish the queued source',
     );
     assert.equal(
       deps.socketManager.emitToUser.mock.calls.some(
         (call) => call.arguments[1] === 'message_deleted' && call.arguments[2]?.messageId === message.id,
       ),
-      false,
+      true,
     );
 
     routeRelease.resolve();
-    await new Promise((resolve) => setImmediate(resolve));
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const terminal = messageStore.getById(message.id);
+    assert.equal(terminal?.deliveryStatus, 'canceled');
+    assert.equal(terminal?.queueCustody, undefined);
   });
 
   it('fences a secondary replacement before a multi-cat queued start resumes after record creation', async () => {
@@ -718,7 +788,7 @@ describe('QueueProcessor pause epoch', () => {
     });
 
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
-    const replacement = processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
@@ -792,7 +862,7 @@ describe('QueueProcessor pause epoch', () => {
     const foreignReservation = /** @type {any} */ (processor).processingSlots.get(SLOT_KEY);
     assert.ok(foreignReservation);
 
-    const attempted = processor.acquireExternalExecution('thread-1', ['opus'], 'user-a', {
+    const attempted = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-a', {
       mode: 'replacement',
       executionId: 'inv-user-a',
     });
@@ -819,12 +889,12 @@ describe('QueueProcessor pause epoch', () => {
     }
   });
 
-  it('rejects replacement acquisition when a tracker owner belongs to another user', () => {
+  it('rejects replacement acquisition when a tracker owner belongs to another user', async () => {
     const tracker = new InvocationTracker();
     const foreign = tracker.startAll('thread-1', ['opus'], 'user-b', 'inv-user-b');
     const processor = new QueueProcessor(/** @type {any} */ (depsWithQueuedThread(tracker)));
 
-    const attempted = processor.acquireExternalExecution('thread-1', ['opus'], 'user-a', {
+    const attempted = await processor.acquireExternalExecution('thread-1', ['opus'], 'user-a', {
       mode: 'replacement',
       executionId: 'inv-user-a',
     });
@@ -892,15 +962,19 @@ describe('QueueProcessor pause epoch', () => {
     await preflightEntered.promise;
     assert.equal(/** @type {any} */ (processor).processingSlots.get(SLOT_KEY)?.invocationId, 'inv-stub');
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
+    const replacementPromise = processor.acquireExternalExecution('thread-1', ['opus'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });
+    // Replacement now owns a durable retirement barrier. Let the old
+    // supplement read and the terminalizer resume; the provider cannot publish
+    // until terminal truth commits.
+    resumePreflight.resolve();
+    const replacement = await replacementPromise;
     assert.ok(replacement);
     const replacementSlotController = tracker.getController('thread-1', 'opus');
     assert.ok(replacementSlotController);
 
-    resumePreflight.resolve();
     for (let turn = 0; turn < 5; turn += 1) {
       await new Promise((resolve) => setImmediate(resolve));
     }
@@ -953,7 +1027,7 @@ describe('QueueProcessor pause epoch', () => {
     assert.equal((await processor.processNext('thread-1', 'user-1')).started, true);
     await preflightEntered.promise;
 
-    const replacement = processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
+    const replacement = await processor.acquireExternalExecution('thread-1', ['codex'], 'user-1', {
       mode: 'replacement',
       executionId: 'inv-replacement',
     });

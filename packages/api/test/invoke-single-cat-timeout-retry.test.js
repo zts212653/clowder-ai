@@ -21,6 +21,7 @@ async function collect(iterable) {
 
 let tempDir;
 let invokeSingleCat;
+let SessionChainStore;
 
 describe('#774 CLI timeout retry on session resume', () => {
   before(async () => {
@@ -28,6 +29,7 @@ describe('#774 CLI timeout retry on session resume', () => {
     process.env.AUDIT_LOG_DIR = tempDir;
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     invokeSingleCat = mod.invokeSingleCat;
+    ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
   });
 
   after(async () => {
@@ -55,6 +57,24 @@ describe('#774 CLI timeout retry on session resume', () => {
       apiUrl: 'http://127.0.0.1:3004',
       ...overrides,
     };
+  }
+
+  function makeManagedSessionStore({ threadId, cliSessionId, onUpdate }) {
+    const store = new SessionChainStore();
+    store.create({
+      cliSessionId,
+      threadId,
+      catId: 'codex',
+      userId: 'u1',
+    });
+    if (onUpdate) {
+      const update = store.update.bind(store);
+      store.update = (id, patch) => {
+        onUpdate(id, patch);
+        return update(id, patch);
+      };
+    }
+    return store;
   }
 
   it('resume + timeout + only system_info → drops session and retries fresh', async () => {
@@ -86,23 +106,10 @@ describe('#774 CLI timeout retry on session resume', () => {
     };
 
     const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-stale',
-            cliSessionId: 'cli-sess-stale',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-stale',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async () => {},
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-timeout-retry',
+        cliSessionId: 'cli-sess-stale',
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -165,26 +172,11 @@ describe('#774 CLI timeout retry on session resume', () => {
         },
         resolveWorkingDirectory: () => '/tmp/test',
       },
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-full',
-            cliSessionId: 'cli-sess-full',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-full',
-          cliSessionId: 'cli-sess-full',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async (id, patch) => {
-          updateCalls.push({ id, patch });
-        },
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-overflow-retry',
+        cliSessionId: 'cli-sess-full',
+        onUpdate: (id, patch) => updateCalls.push({ id, patch }),
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -223,7 +215,7 @@ describe('#774 CLI timeout retry on session resume', () => {
   it('resume + timeout + substantive model output → does NOT retry', async () => {
     let attempt = 0;
     const service = {
-      async *invoke(_prompt, opts) {
+      async *invoke(_prompt, _opts) {
         attempt++;
         // Has real model output before timeout → should not retry
         yield { type: 'text', catId: 'codex', content: 'partial work', timestamp: Date.now() };
@@ -244,23 +236,10 @@ describe('#774 CLI timeout retry on session resume', () => {
     };
 
     const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-active',
-            cliSessionId: 'cli-sess-active',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({
-          id: 'sess-active',
-          consecutiveRestoreFailures: 0,
-        }),
-        update: async () => {},
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-no-retry-substantive',
+        cliSessionId: 'cli-sess-active',
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },
@@ -397,20 +376,10 @@ describe('#774 CLI timeout retry on session resume', () => {
 
     // Session resume path (matches archive: existing runtime session cliSessionId).
     const deps = makeDeps({
-      sessionChainStore: {
-        getChain: () => [
-          {
-            id: 'sess-217969a7',
-            cliSessionId: 'cli-sess-217969a7',
-            status: 'active',
-            consecutiveRestoreFailures: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ],
-        getActive: async () => ({ id: 'sess-217969a7', consecutiveRestoreFailures: 0 }),
-        update: async () => {},
-      },
+      sessionChainStore: makeManagedSessionStore({
+        threadId: 't-archive-217969a7',
+        cliSessionId: 'cli-sess-217969a7',
+      }),
       sessionSealer: {
         reconcileStuck: async () => {},
       },

@@ -10,6 +10,7 @@ export const EvalVerdictLifecycleStatusSchema = z.enum([
   'fix_landed',
   'main_landed',
   'live_active',
+  'monitoring',
   'reeval_pending',
   'resolved',
   'suppressed_with_reason',
@@ -53,6 +54,15 @@ export const EvalLifecycleRefSchema = z.discriminatedUnion('availability', [
 
 export type EvalLifecycleRef = z.infer<typeof EvalLifecycleRefSchema>;
 
+const legacyContinuitySchema = z
+  .object({
+    ownerResponseRefs: z.array(EvalLifecycleRefSchema),
+    planRefs: z.array(EvalLifecycleRefSchema),
+    actionRefs: z.array(EvalLifecycleRefSchema),
+    reevalRefs: z.array(EvalLifecycleRefSchema),
+  })
+  .strict();
+
 export const EvalLifecycleActorSchema = z
   .object({
     kind: z.enum(['cat', 'cvo', 'automation', 'migration']),
@@ -88,6 +98,26 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
     .strict(),
   eventBaseSchema
     .extend({
+      type: z.literal('legacy_case_migrated'),
+      caseId: nonEmptyString,
+      reviewedAt: isoDateTime,
+      legacyVerdictIds: z.array(nonEmptyString).min(1),
+      disposition: z.enum(['repair', 'monitor']),
+      legacyContinuity: legacyContinuitySchema.optional(),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
+      type: z.literal('responsibility_blocked'),
+      caseId: nonEmptyString,
+      reasonCode: z.enum(['feature_thread_not_found', 'feature_thread_ambiguous']),
+      featureId: nonEmptyString,
+      ownerCatId: nonEmptyString,
+      candidateThreadIds: z.array(nonEmptyString),
+    })
+    .strict(),
+  eventBaseSchema
+    .extend({
       type: z.literal('responsibility_bound'),
       caseId: nonEmptyString,
       taskId: nonEmptyString,
@@ -115,6 +145,9 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
       type: z.literal('reeval_requested'),
       dueAt: isoDateTime,
       assignedEvalCatId: nonEmptyString.optional(),
+      reevalTaskId: nonEmptyString.optional(),
+      reevalLeaseId: nonEmptyString.optional(),
+      reevalLeaseGeneration: z.number().int().positive().optional(),
     })
     .strict(),
   eventBaseSchema.extend({ type: z.literal('reeval_passed'), assignedEvalCatId: nonEmptyString }).strict(),

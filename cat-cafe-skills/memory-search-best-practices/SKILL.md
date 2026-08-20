@@ -1,5 +1,6 @@
 ---
 name: memory-search-best-practices
+tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
 description: >
   记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。
   Use when: 任务是 "哪些地方提过 X" / "X 的来源 / source map" / "有没有提过 Y / absence check" / "上次到现在变了什么 / delta" / 冷启动 onboard 复杂主题 / 任何召回任务搜了一刀觉得不够。
@@ -144,5 +145,5 @@ operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜
 ## 相关
 
 - **Spec**: `docs/features/F200-memory-recall-eval.md` v1.2 SW-1 / `docs/features/F256-memory-search-strategy-evolution.md`（Phase A 链入 session hook；Phase B/C 上线 Related directions）
-- **Related**: `memory-navigation`（前置入口决策） / `cat-cafe-skills/refs/memory-routing-partial.md`
+- **Related**: `memory-navigation`（前置入口决策） / `../.cat-cafe-shared-refs/memory-routing-partial.md`
 - **触发案例**: operator AUDHD recall 任务（2026-05-17）暴露三猫搜出不同子集，催生本 skill；2026-07-08 operator触发 Lint → 补 F256 接法 + 双向校准

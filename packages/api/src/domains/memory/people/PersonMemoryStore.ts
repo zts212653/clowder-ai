@@ -21,6 +21,7 @@ import type {
   PersonMemorySourceRef,
   PersonMemorySuppressionToken,
   PersonRelationship,
+  WriteOpportunityLineageV1,
 } from '@cat-cafe/shared';
 
 export interface StagePersonMemoryCandidateInput {
@@ -34,11 +35,30 @@ export interface StagePersonMemoryCandidateInput {
   relationshipDraft?: CandidateRelationshipDraft;
   interactionDraft?: CandidateInteractionDraft;
   sourceBundle: PersonMemoryResolvedSourceBundle;
+  deferredReceiptId?: string;
+  deferredReceiptClaimId?: string;
+  deltaFingerprint?: string;
   replacesProposalId?: CaptureCandidateId;
+  /** IDs-only lineage for proposals created from a delivered Standing Reflex opportunity. */
+  writeOpportunityLineage?: WriteOpportunityLineageV1;
   remainingDraftIds: CandidateClaimDraftId[];
   retention: 'owner_controlled_no_ttl';
   createdAt: number;
 }
+
+export interface RenewDeferredPersonMemoryCandidateClaimInput {
+  ownerUserId: string;
+  candidateId: CaptureCandidateId;
+  receiptId: string;
+  previousClaimId: string;
+  nextClaimId: string;
+  deltaFingerprint: string;
+  renewedAt: number;
+}
+
+export type RenewDeferredPersonMemoryCandidateClaimResult =
+  | { outcome: 'renewed' | 'replayed'; candidate: StoredPersonMemoryCandidate }
+  | { outcome: 'conflict' | 'not_available' };
 
 export interface StoredPersonMemoryCandidate
   extends Omit<StagePersonMemoryCandidateInput, 'personDraft' | 'sourceBundle'> {
@@ -209,6 +229,9 @@ export type PersonAliasResolution =
 
 export interface PersonMemoryStore {
   stageCandidate(input: StagePersonMemoryCandidateInput): Promise<StoredPersonMemoryCandidate>;
+  renewDeferredCandidateClaim(
+    input: RenewDeferredPersonMemoryCandidateClaimInput,
+  ): Promise<RenewDeferredPersonMemoryCandidateClaimResult>;
   getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null>;
   listPending(ownerUserId: string, limit?: number): Promise<StoredPersonMemoryCandidate[]>;
   resolvePendingCandidateBySubject(ownerUserId: string, subject: string): Promise<StoredPersonMemoryCandidate | null>;
@@ -222,6 +245,7 @@ export interface PersonMemoryStore {
   withdrawCandidate(ownerUserId: string, candidateId: string, decidedAt: number): Promise<StoredPersonMemoryCandidate>;
   rejectCandidate(input: RejectPersonMemoryCandidateInput): Promise<PersonMemoryRejectResult>;
   getPerson(ownerUserId: string, personId: PersonId): Promise<PersonIdentity | null>;
+  listCandidateIdsForPerson(ownerUserId: string, personId: PersonId): Promise<CaptureCandidateId[]>;
   resolveActivePersonByAlias(ownerUserId: string, alias: string): Promise<PersonAliasResolution>;
   resolveActivePersonByWorkspaceEntityRef(ownerUserId: string, entityRef: string): Promise<PersonAliasResolution>;
   listClaims(ownerUserId: string, personId: PersonId): Promise<PersonClaimVersion[]>;

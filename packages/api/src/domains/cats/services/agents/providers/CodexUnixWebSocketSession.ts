@@ -7,6 +7,8 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { MCP_CALLBACK_ENV_KEYS } from '../../../../../config/capabilities/mcp-constants.js';
+import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
+import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
 
@@ -191,12 +193,7 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
 }
 
 function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(input ?? {})) {
-    if (value === null) delete env[key];
-    else env[key] = value;
-  }
-  return env;
+  return buildChildEnv(input);
 }
 
 export function createCodexSocketDirectory(): string {
@@ -211,9 +208,14 @@ export async function removeCodexSocketDirectory(path: string): Promise<void> {
 
 export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch): Promise<CodexAppServerHostProcess> {
   const stderr: string[] = [];
-  const child = spawn(launch.command, [...launch.args], {
-    ...(launch.cwd ? { cwd: launch.cwd } : {}),
+  const supervised = buildUnixSupervisedSpawnPlan(launch.command, launch.args, {
     env: normalizeEnv(launch.env),
+    killGraceMs: Math.max(250, CLOSE_GRACE_MS - 500),
+    socketDirectory: launch.socketDirectory,
+  });
+  const child = spawn(supervised.command, supervised.args, {
+    ...(launch.cwd ? { cwd: launch.cwd } : {}),
+    env: supervised.env,
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   child.stderr?.setEncoding('utf8');

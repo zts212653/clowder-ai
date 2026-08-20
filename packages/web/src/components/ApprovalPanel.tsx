@@ -31,7 +31,7 @@ export function ApprovalPanel() {
       <div className="flex items-center justify-between border-b border-cafe-subtle/40 px-3 py-2">
         <div className="flex items-center gap-0.5" data-testid="approval-tab-bar">
           <TabButton active={activeTab === 'pending'} onClick={() => setActiveTab('pending')} testId="pending">
-            待审批
+            待我处理
             {count > 0 && (
               <span
                 className="flex h-5 min-w-[18px] items-center justify-center rounded-full px-1 text-micro font-bold"

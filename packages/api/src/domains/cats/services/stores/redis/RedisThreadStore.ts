@@ -10,8 +10,8 @@
  * 默认持久化；用户可见状态禁止默认 TTL（LL-048）。
  */
 
-import type { CatId, CliEffortPreset, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
-import { CLI_EFFORT_VALUES, generateThreadId } from '@cat-cafe/shared';
+import type { CatId, CliEffortPreset, CodexSpeedValue, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
+import { CLI_EFFORT_VALUES, CODEX_SPEED_VALUES, generateThreadId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { StoreReadOptions } from '../ports/StoreReadOptions.js';
 import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptions.js';
@@ -34,18 +34,25 @@ import type {
 import {
   buildExternalRuntimeAnchorThreadId,
   DEFAULT_THREAD_ID,
+  deriveAutoThreadTitle,
   mergeThreadMetadata,
   parseThreadMetadataJson,
   validateMergedTotals,
 } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
+import { readAuthoritativeHash, readAuthoritativeMembers } from './redis-pipeline-reply.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
+const CODEX_SPEED_VALUE_SET = new Set<string>(CODEX_SPEED_VALUES);
 
 function parseCliEffortValue(raw: string | null | undefined): CliEffortPreset | undefined {
   return raw && CLI_EFFORT_VALUE_SET.has(raw) ? (raw as CliEffortPreset) : undefined;
+}
+
+function parseCodexSpeedValue(raw: string | null | undefined): CodexSpeedValue | undefined {
+  return raw && CODEX_SPEED_VALUE_SET.has(raw) ? (raw as CodexSpeedValue) : undefined;
 }
 
 /**
@@ -429,6 +436,55 @@ export class RedisThreadStore implements IThreadStore {
     return result;
   }
 
+  /**
+   * F297 AC-B3: pipeline 批量读，把 2×T 次串行往返压成 2 个 pipeline stage。
+   * 排序契约与单条版本一致（lastMessageAt 降序）—— F297 的 done/error 依赖 `[0]` 是最近一次回应。
+   */
+  async getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Promise<Map<string, ThreadParticipantActivity[]>> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    if (threadIds.length === 0) return result;
+
+    const participantsPipeline = this.redis.pipeline();
+    for (const threadId of threadIds) participantsPipeline.smembers(ThreadKeys.participants(threadId));
+    const participantsReplies = (await participantsPipeline.exec()) ?? [];
+
+    // R10 / cloud R11 P1：两段 pipeline 以前都用 `[, x] = replies[i] ?? []` 丢掉 entry error，
+    // 短 reply 也静默变成空。读失败当时**碰巧**产出 idle（安全方向），但那是碰巧安全不是
+    // 显式安全：一次读故障会让真实回过话的行被显示成 idle，且上层无从得知知识不完整。
+    // 判据统一到 readAuthoritative*，让故障显式抛出，由 composeSidebarPresence 封 idle。
+    const withParticipants: Array<{ threadId: string; participants: CatId[] }> = [];
+    threadIds.forEach((threadId, index) => {
+      const members = readAuthoritativeMembers(participantsReplies[index], `thread participants ${threadId}`);
+      const participants = members as CatId[];
+      if (participants.length === 0) result.set(threadId, []);
+      else withParticipants.push({ threadId, participants });
+    });
+    if (withParticipants.length === 0) return result;
+
+    const activityPipeline = this.redis.pipeline();
+    for (const { threadId } of withParticipants) activityPipeline.hgetall(ThreadKeys.activity(threadId));
+    const activityReplies = (await activityPipeline.exec()) ?? [];
+
+    withParticipants.forEach(({ threadId, participants }, index) => {
+      // 权威空 hash（从未记录过 activity）→ 所有 cat lastMessageAt=0 → idle，这是正确的。
+      const activityData = readAuthoritativeHash(activityReplies[index], `thread activity ${threadId}`) ?? {};
+      const entries: ThreadParticipantActivity[] = participants.map((catId) => {
+        const healthyRaw = activityData[`${catId}:healthy`];
+        return {
+          catId,
+          lastMessageAt: parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10),
+          messageCount: parseInt(activityData[`${catId}:messageCount`] ?? '0', 10),
+          lastResponseHealthy: healthyRaw === undefined ? undefined : healthyRaw === '1',
+        };
+      });
+      entries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+      result.set(threadId, entries);
+    });
+    return result;
+  }
+
   /** F032 P1-2 fix: Update participant activity on every message */
   async updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): Promise<void> {
     // Cloud Codex P2 fix: Use Lua script to atomically check thread existence
@@ -455,6 +511,20 @@ export class RedisThreadStore implements IThreadStore {
   async updateTitle(threadId: string, title: string): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'title', title);
+  }
+
+  async compareAndSetTitle(threadId: string, expectedTitle: string, nextTitle: string): Promise<boolean> {
+    const key = ThreadKeys.detail(threadId);
+    const changed = (await this.redis.eval(
+      CAS_HSET_IF_HAS_ID_LUA,
+      1,
+      key,
+      'title',
+      expectedTitle,
+      nextTitle,
+    )) as number;
+    if (changed === 1) await this.applyKeyRetention([key]);
+    return changed === 1;
   }
 
   async updateProjectPath(threadId: string, projectPath: string): Promise<void> {
@@ -938,7 +1008,7 @@ export class RedisThreadStore implements IThreadStore {
     const recovered: Thread = {
       id: threadId,
       projectPath: 'default',
-      title: this.deriveRecoveredTitle(firstMessage.content),
+      title: deriveAutoThreadTitle(firstMessage.content),
       createdBy: firstMessage.userId,
       participants,
       createdAt: firstMessage.timestamp,
@@ -1018,12 +1088,6 @@ export class RedisThreadStore implements IThreadStore {
       .filter((message): message is RecoveredMessageSnapshot => Boolean(message?.catId))
       .map((message) => message.catId as CatId);
     return [...new Set(fromMessages)];
-  }
-
-  private deriveRecoveredTitle(content: string): string | null {
-    const normalized = content.trim();
-    if (!normalized) return null;
-    return normalized.length > 30 ? `${normalized.slice(0, 30)}...` : normalized;
   }
 
   private async applyKeyRetention(keys: string[], options?: StoreReadOptions): Promise<void> {
@@ -1445,6 +1509,34 @@ export class RedisThreadStore implements IThreadStore {
       efforts[catId] = effort;
     }
     return efforts;
+  }
+
+  async updateMemberSpeed(threadId: string, catId: CatId, speed: CodexSpeedValue | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `memberSpeed:${catId}`;
+    if (speed === null) {
+      await this.deleteDetailFields(key, field);
+    } else {
+      await this.setDetailFields(key, field, speed);
+    }
+  }
+
+  async getMemberSpeed(threadId: string, catId: CatId, _userId: string): Promise<CodexSpeedValue | undefined> {
+    const raw = await this.redis.hget(ThreadKeys.detail(threadId), `memberSpeed:${catId}`);
+    return parseCodexSpeedValue(raw);
+  }
+
+  async getMemberSpeeds(threadId: string, _userId: string): Promise<Partial<Record<CatId, CodexSpeedValue>>> {
+    const fields = await this.redis.hgetall(ThreadKeys.detail(threadId));
+    const speeds: Partial<Record<CatId, CodexSpeedValue>> = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!field.startsWith('memberSpeed:')) continue;
+      const speed = parseCodexSpeedValue(raw);
+      if (!speed) continue;
+      const catId = field.slice('memberSpeed:'.length) as CatId;
+      speeds[catId] = speed;
+    }
+    return speeds;
   }
 
   /** #836: Check if cat uses reborn strategy in this thread. */

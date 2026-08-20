@@ -44,6 +44,33 @@ describe('merge-gate review provenance contract', () => {
     );
   });
 
+  it('scarce judgment reviewers are one-shot by default instead of iterative fix validators', () => {
+    const requestReview = read('cat-cafe-skills/request-review/SKILL.md');
+    const receiveReview = read('cat-cafe-skills/receive-review/SKILL.md');
+    const sharedRules = read('cat-cafe-skills/refs/shared-rules.md');
+
+    assert.ok(
+      requestReview.includes('engagementMode=one_shot_calibration|final_seal'),
+      'review requests must declare the bounded scarce-reviewer engagement mode',
+    );
+    assert.ok(
+      requestReview.includes('普通修复不复入原稀缺 reviewer'),
+      'request-review must stop routine re-entry for scarce judgment seats',
+    );
+    assert.ok(
+      receiveReview.includes('one_shot_calibration'),
+      'receive-review must branch on one-shot calibration feedback',
+    );
+    assert.ok(
+      receiveReview.includes('转日常 reviewer'),
+      'routine fix verification must be routable to a daily reviewer without recalling the scarce reviewer',
+    );
+    assert.ok(
+      sharedRules.includes('`one-shot` 自证，必要时转日常 reviewer'),
+      'the shared handoff mnemonic must not blindly send every fix back to the original reviewer',
+    );
+  });
+
   it('L0 template, compiler overlay, and runtime prompt builder carry the same reflex', () => {
     const l0 = read('assets/system-prompts/system-prompt-l0.md');
     const compiler = read('scripts/compile-system-prompt-l0.mjs');

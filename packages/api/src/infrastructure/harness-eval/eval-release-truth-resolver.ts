@@ -13,7 +13,7 @@ export interface VerifiedEvalReleaseFact {
 }
 
 export interface EvalReleaseTruthResolver {
-  readonly loadedRuntimeHead: string;
+  readonly loadedRuntimeHead: string | undefined;
   verifyMainLanded(commitSha: string): VerifiedEvalReleaseFact;
   verifyLiveActive(commitSha: string): VerifiedEvalReleaseFact;
 }
@@ -68,6 +68,18 @@ function resolveCommit(git: EvalReleaseGit, revision: string, label: string): st
   }
 }
 
+function createUnavailableResolver(error: EvalReleaseTruthError): EvalReleaseTruthResolver {
+  const rejectUnavailable = (commitSha: string): never => {
+    requireCommitInput(commitSha);
+    throw new EvalReleaseTruthError('commit_unavailable', error.message);
+  };
+  return {
+    loadedRuntimeHead: undefined,
+    verifyMainLanded: rejectUnavailable,
+    verifyLiveActive: rejectUnavailable,
+  };
+}
+
 export function createEvalReleaseTruthResolver(options: {
   repoRoot?: string;
   git?: EvalReleaseGit;
@@ -75,7 +87,15 @@ export function createEvalReleaseTruthResolver(options: {
 }): EvalReleaseTruthResolver {
   if (!options.git && !options.repoRoot) throw new Error('repoRoot is required when no Git adapter is supplied');
   const git = options.git ?? createRealGit(options.repoRoot as string);
-  const loadedRuntimeHead = resolveCommit(git, options.loadedRuntimeHead ?? 'HEAD', 'loaded runtime HEAD');
+  let loadedRuntimeHead: string;
+  try {
+    loadedRuntimeHead = resolveCommit(git, options.loadedRuntimeHead ?? 'HEAD', 'loaded runtime HEAD');
+  } catch (error) {
+    if (error instanceof EvalReleaseTruthError && error.code === 'commit_unavailable') {
+      return createUnavailableResolver(error);
+    }
+    throw error;
+  }
 
   return {
     loadedRuntimeHead,

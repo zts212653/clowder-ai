@@ -1,6 +1,12 @@
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildOpenCodeMcpSync } from './opencode-mcp-injection.js';
 
+export {
+  inferOpenCodeProviderFromModelName,
+  parseOpenCodeModel,
+  resolveEffectiveOpenCodeModel,
+} from '../../../../../config/opencode-model.js';
+
 const log = createModuleLogger('opencode-config');
 
 interface OpenCodeConfigOptions {
@@ -79,6 +85,17 @@ export function generateOpenCodeConfig(options: OpenCodeConfigOptions): OpenCode
 
 export const OC_API_KEY_ENV = 'CAT_CAFE_OC_API_KEY';
 export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
+
+/**
+ * We deliberately emit no `limit` block at all.
+ *
+ * OpenCode requires `limit.output` whenever `limit` is present and resolves
+ * explicit config before its catalog and built-in fallback. Pinning only our
+ * invocation context window here therefore makes the config invalid; guessing
+ * an output would instead overwrite authoritative catalog output limits. This layer has no
+ * carrier-aware output authority, so it supplies neither field. Clowder AI still
+ * retains the invocation window for context health and session handoff.
+ */
 
 /**
  * OpenCode API type determines which AI SDK npm adapter to use.
@@ -164,16 +181,6 @@ export interface OpenCodeRuntimeConfigDebugSummary {
       baseUrlSource?: string;
     }
   >;
-}
-
-export function parseOpenCodeModel(model: string): { providerName: string; modelName: string } | null {
-  const trimmed = model.trim();
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) return null;
-  return {
-    providerName: trimmed.slice(0, slashIndex),
-    modelName: trimmed.slice(slashIndex + 1),
-  };
 }
 
 function stripOwnProviderPrefix(modelName: string, providerName: string): string {

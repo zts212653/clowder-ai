@@ -32,6 +32,24 @@ export function isTimelinePublished(msg: StoredMessage): boolean {
   return msg.deliveryStatus === 'queued' && isRealCatSpeech(msg);
 }
 
+/**
+ * A queued user body that was already exposed to one exact child is durable
+ * cognition for that target cat. The append-only exposure witness survives
+ * child/session replacement, while other cats remain unable to read the body.
+ */
+export function hasDurableQueueBodyExposure(msg: StoredMessage, catId: CatId): boolean {
+  return (
+    msg.deliveryStatus === 'queued' &&
+    msg.catId === null &&
+    (msg.queueCustody?.bodyExposures ?? []).some((exposure) => exposure.targetCatId === catId)
+  );
+}
+
+/** Published history plus target-scoped queued bodies the cat has already read. */
+export function isDurablyReadableByCat(msg: StoredMessage, catId: CatId): boolean {
+  return isTimelinePublished(msg) || hasDurableQueueBodyExposure(msg, catId);
+}
+
 /** Resolve the publication predicate for a thread read in one place. */
 export function resolveThreadMessageVisibility(
   options?: ThreadMessageReadOptions,
@@ -39,7 +57,10 @@ export function resolveThreadMessageVisibility(
   return (message) =>
     isDeliveredMessage(message) ||
     (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
-    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message));
+    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
+    (options?.includeExposedQueuedUserMessagesForCatId !== undefined &&
+      hasDurableQueueBodyExposure(message, options.includeExposedQueuedUserMessagesForCatId)) ||
+    (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message));
 }
 
 /**
@@ -94,6 +115,15 @@ function isQueuedUserTimelineMessage(message: StoredMessage): boolean {
   return message.queueCustody !== undefined;
 }
 
+function isOwnerVisibleRecalledUserMessage(message: StoredMessage): boolean {
+  return (
+    message.deliveryStatus === 'canceled' &&
+    message.catId === null &&
+    message._tombstone === true &&
+    message.recall?.exposure === 'seen'
+  );
+}
+
 /** Who is viewing */
 export type Viewer = { readonly type: 'user' } | { readonly type: 'cat'; readonly catId: CatId };
 
@@ -124,7 +154,7 @@ export function canViewMessage(msg: StoredMessage, viewer: Viewer): boolean {
  *
  * A fetched parent message is eligible for inline preview only if it passes
  * the SAME predicates used to build prompt context. This prevents leaking
- * system/undelivered/deleted/whisper/stream content via formatMessage preview.
+ * system/undelivered/deleted/whisper content via formatMessage preview.
  *
  * Used by: route-helpers cursor-gap fetch, callbacks replyTo validation.
  */
@@ -133,8 +163,6 @@ export interface ReplyParentEligibilityOptions {
   threadId: string;
   /** Viewer context for whisper visibility */
   viewer: Viewer;
-  /** When true, other-cat stream messages are hidden (play mode default) */
-  hideOtherCatStreams?: boolean;
   /** The catId of the child message sender — NOT filtered out (own messages are valid parents) */
   childCatId?: CatId | null;
 }
@@ -176,8 +204,6 @@ export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEl
   if (isInternalNonQuotableParent(parent)) return false;
   // Whisper visibility
   if (!canViewMessage(parent, opts.viewer)) return false;
-  // Play-mode: hide other cats' stream (thinking) messages
-  if (opts.hideOtherCatStreams && parent.catId !== null && parent.origin === 'stream') return false;
   return true;
 }
 

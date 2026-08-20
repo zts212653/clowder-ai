@@ -1,11 +1,11 @@
 import { PAW_FEEL_DISPOSITION_STATES, PAW_FEEL_INBOX_SORTS, PAW_FEEL_NO_ACTION_REASONS } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
-const defineTool = defineMcpMigrationFactory('paw-feel-disposition-tools.ts', undefined, {
+const defineTool = defineMcpCanonicalFactory('paw-feel-disposition-tools.ts', undefined, {
   resourceFamily: 'eval-feedback',
   authority: 'callback-owner',
 });
@@ -20,21 +20,53 @@ const agentKeyCatIdSchema = z
     'Persistent-agent identity selector. Required for shared agent-key MCP variants; ignored under invocation auth.',
   );
 
-const bundleActionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('duplicate'), duplicateOf: nonEmpty }).strict(),
+const terminalActionSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('duplicate'),
+      duplicateOf: nonEmpty.describe('Existing canonical signalId that this report duplicates.'),
+    })
+    .strict(),
   z
     .object({
       type: z.literal('no_action'),
-      reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS),
+      reasonCode: z.enum(PAW_FEEL_NO_ACTION_REASONS).describe('Canonical reason this report needs no action.'),
     })
     .strict(),
-  z.object({ type: z.literal('fix'), leaseId: nonEmpty }).strict(),
+  z
+    .object({
+      type: z.literal('fix'),
+      leaseId: nonEmpty.describe(
+        'Active F167 implement/task_done lease whose owner, task, and custody are authoritative.',
+      ),
+    })
+    .strict(),
+]);
+
+const bundleActionSchema = z.discriminatedUnion('type', [
+  ...terminalActionSchema.options,
+  z
+    .object({
+      type: z.literal('request_signature'),
+      action: terminalActionSchema.describe('Exact terminal candidate that an independent cat must sign.'),
+      preferredSignerCatId: nonEmpty
+        .optional()
+        .describe('Optional routing preference; any legal independent signer can recover the request.'),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('block'),
+      blockerCode: nonEmpty.describe('Stable machine-readable blocker category.'),
+      blockerRef: nonEmpty.describe('Auditable reference proving the blocker.'),
+    })
+    .strict(),
 ]);
 
 const bundleMemberSchema = z
   .object({
-    signalId: nonEmpty,
-    expectedSequence: z.number().int().nonnegative(),
+    signalId: nonEmpty.describe('Exact signalId returned in the listed bundle snapshot.'),
+    expectedSequence: z.number().int().nonnegative().describe('CAS sequence returned for this signal.'),
   })
   .strict();
 
@@ -84,15 +116,25 @@ export async function handleCapturePawFeel(_input: CapturePawFeelInput): Promise
 
 export const triagePawFeelInputSchema = {
   bundleKey: nonEmpty.describe('Authoritative bundleKey returned by cat_cafe_list_paw_feel_inbox.'),
+  membershipToken: nonEmpty.describe('Server-authenticated exact membership snapshot returned with the bundle.'),
   eventIdPrefix: nonEmpty.describe('Stable idempotency prefix for this one bundle confirmation.'),
   members: z
     .array(bundleMemberSchema)
     .min(1)
     .max(50)
     .describe('Exact signalId + sequence snapshot returned in the review bundle.'),
-  action: bundleActionSchema.describe('One common duplicate, reasoned no_action, or verified fix action.'),
+  action: bundleActionSchema.describe(
+    'One common terminal action, durable independent-signature request, or explicit blocker.',
+  ),
   exceptions: z
-    .array(z.object({ signalId: nonEmpty, action: bundleActionSchema }).strict())
+    .array(
+      z
+        .object({
+          signalId: nonEmpty.describe('Bundle member whose action differs from the common action.'),
+          action: bundleActionSchema.describe('Replacement action for this one member.'),
+        })
+        .strict(),
+    )
     .max(50)
     .optional()
     .describe('Only members whose action differs from the common action. O(exceptions).'),
@@ -101,6 +143,7 @@ export const triagePawFeelInputSchema = {
 
 export type TriagePawFeelInput = {
   bundleKey: string;
+  membershipToken: string;
   eventIdPrefix: string;
   members: Array<z.infer<typeof bundleMemberSchema>>;
   action: z.infer<typeof bundleActionSchema>;
@@ -152,10 +195,10 @@ export const pawFeelDispositionTools = [
     name: 'cat_cafe_triage_paw_feel',
     description:
       'Confirm one authoritative F278 bundle in O(1) common action plus O(exceptions) member splits. ' +
-      'Use when: you reviewed the bundle source evidence and can choose duplicate, reasoned no_action, or fix backed by a real task and active F167 lease. ' +
+      'Use when: you reviewed the bundle source evidence and can choose a terminal action, a verified repair binding, an independent-signature request, or an explicit blocker. ' +
       'NOT for: routine owner-thread discovery, old routed/closed commands, guessing an owner, or signing your own report terminal. ' +
-      'Output: ordered appended/duplicate/conflict/rejected results; partial conflicts stay explicit and retryable. ' +
-      'GOTCHA: member IDs and sequences are a snapshot, server membership is revalidated, and late members remain untouched.',
+      'Output: ordered appended/duplicate/conflict/rejected results plus duty-receipt status; a signature request remains active and keeps the receipt open until an independent signer finishes it or an explicit blocker is recorded. ' +
+      'GOTCHA: member IDs, sequences, and membershipToken form the exact list snapshot; late members remain untouched.',
     inputSchema: triagePawFeelInputSchema,
     handler: handleTriagePawFeel,
     governance: {

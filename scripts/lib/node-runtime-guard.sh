@@ -17,7 +17,8 @@ node_runtime_version() {
 
 node_runtime_major() {
   local node_bin="$1"
-  "$node_bin" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || return 1
+  # Keep this a string: Number(...) gains ANSI decoration when FORCE_COLOR is set.
+  "$node_bin" -p 'process.versions.node.split(".")[0]' 2>/dev/null || return 1
 }
 
 node_runtime_supported() {

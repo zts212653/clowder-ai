@@ -48,6 +48,10 @@ import type { IWorkflowSopStore } from '../../stores/ports/WorkflowSopStore.js';
 import { getTimelineOrderTime, SYSTEM_USER_IDS } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
+import {
+  type InvocationCapacitySnapshot,
+  resolveInvocationCapacitySnapshot,
+} from '../invocation/invocation-capacity-snapshot.js';
 import type { TaskProgressStore } from '../invocation/TaskProgressStore.js';
 import type { AgentRegistry } from '../registry/AgentRegistry.js';
 import type {
@@ -59,6 +63,7 @@ import type {
 import { routeParallel } from '../routing/route-parallel.js';
 import { routeSerial } from '../routing/route-serial.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
+import { appendContextAttachmentsToPrompt } from './context-attachment-prompt.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 
 const log = createModuleLogger('agent-router');
@@ -601,6 +606,11 @@ export interface AgentRouterOptions {
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
   cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  /** F247/F167: server-owned terminal producer for the exact cloud A2A carrier. */
+  a2aDispatchDispositionService?: Pick<
+    import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
+    'complete'
+  >;
   /** F254 B3: freshnessReinvokeCheck for invoke-single-cat terminal hook */
   freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
   /** Durable per-child execution lifecycle; independent from callback-auth registry TTL. */
@@ -686,6 +696,10 @@ export class AgentRouter {
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
   private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  private a2aDispatchDispositionService?: Pick<
+    import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
+    'complete'
+  >;
   /** F254 B3 */
   private freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
   private turnExecutionStore?: import('../../stores/ports/TurnExecutionStore.js').ITurnExecutionStore;
@@ -817,6 +831,7 @@ export class AgentRouter {
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
+    this.a2aDispatchDispositionService = options.a2aDispatchDispositionService;
     this.freshnessReinvokeCheck = options.freshnessReinvokeCheck;
     this.turnExecutionStore = options.turnExecutionStore;
     this.freshnessStateStore = options.freshnessStateStore;
@@ -843,6 +858,29 @@ export class AgentRouter {
     );
   }
 
+  /** #1208: exact context capability of the concrete service/carrier. */
+  contextCapability(catId: CatId): import('../../types.js').AgentContextCapability {
+    return (
+      this.services[catId]?.contextCapability?.() ?? {
+        provider: 'unknown',
+        carrier: 'unknown',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: false,
+        reason: 'No concrete context capability is registered for this member',
+      }
+    );
+  }
+
+  /** #1208: Hub projection from the same concrete service snapshot used by invocations. */
+  contextCapacitySnapshot(catId: CatId): InvocationCapacitySnapshot | undefined {
+    const service = this.services[catId];
+    return service ? resolveInvocationCapacitySnapshot({ catId, service }) : undefined;
+  }
+
   private isRoutableCat(catId: string | null | undefined): catId is CatId {
     return typeof catId === 'string' && Object.hasOwn(this.services, catId) && isCatAvailable(catId);
   }
@@ -857,6 +895,24 @@ export class AgentRouter {
       filtered.push(catId);
     }
     return filtered;
+  }
+
+  /**
+   * F294: validate an explicit target set without parsing prose or applying fallback routing.
+   * An unavailable/disabled/unknown member makes the whole set invalid; callers must fail
+   * closed instead of silently dropping one target or substituting the default cat.
+   */
+  async resolveExplicitTargets(
+    requestedCatIds: readonly string[],
+    threadId: string,
+    options?: { persist?: boolean },
+  ): Promise<CatId[]> {
+    const resolved = this.filterRoutableCats(requestedCatIds);
+    if (resolved.length !== requestedCatIds.length) return [];
+    if (options?.persist && this.threadStore) {
+      await this.threadStore.addParticipants(threadId, resolved);
+    }
+    return resolved;
   }
 
   /**
@@ -1420,6 +1476,9 @@ export class AgentRouter {
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
+        ...(this.a2aDispatchDispositionService
+          ? { a2aDispatchDispositionService: this.a2aDispatchDispositionService }
+          : {}),
         ...(this.freshnessReinvokeCheck ? { freshnessReinvokeCheck: this.freshnessReinvokeCheck } : {}),
         ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
         ...(this.providerNativeFreshnessFactory
@@ -1500,7 +1559,7 @@ export class AgentRouter {
     const targetCats = await this.resolveTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), contentBlocks);
 
     const routeSpan = routeTracer.startSpan('cat_cafe.route', {
       attributes: {
@@ -1510,8 +1569,7 @@ export class AgentRouter {
       },
     });
 
-    // Fetch thread for thinkingMode + update lastActive
-    // Default to play mode when no threadStore is available: stream thinking stays isolated.
+    // Fetch the legacy thinkingMode used for same-turn multi-cat response isolation.
     let legacyThinkingMode: 'debug' | 'play' = 'play';
     if (this.threadStore) {
       const thread = await this.threadStore.get(resolvedThreadId);
@@ -1655,12 +1713,16 @@ export class AgentRouter {
       onPromptMessagesExposed: NonNullable<RouteOptions['onPromptMessagesExposed']>;
       /** Exact persisted bodies already folded into `message` by the queue caller. */
       persistedPromptMessageIds?: RouteOptions['persistedPromptMessageIds'];
+      /** Per-message ownership for partial incremental Queue windows. */
+      persistedPromptMessages?: RouteOptions['persistedPromptMessages'];
       /** F281: required on typed first-party ingress; only direct_owner is injectable. */
       humanDispositionInvocationOrigin: HumanDispositionInvocationOrigin;
       /** F153: caller trace context for cross-route A2A propagation */
       callerTraceContext?: CallerTraceContext;
       /** Explicit A2A trigger message ID for queue-dispatched stream reply threading */
       a2aTriggerMessageId?: string;
+      /** Server-owned caller identity paired with the exact A2A trigger. */
+      a2aCallerCatId?: string;
       /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
        *  true/undefined = user-origin (eligible, default for backward compat).
        *  false = agent/connector-origin (A2A handoff) — suppress detection. */
@@ -1675,7 +1737,7 @@ export class AgentRouter {
       toolExecutionPolicy?: RouteOptions['toolExecutionPolicy'];
     },
   ): AsyncIterable<AgentMessage> {
-    const cleanMessage = stripIntentTags(message);
+    const cleanMessage = appendContextAttachmentsToPrompt(stripIntentTags(message), options.contentBlocks);
     const strategy = intent.intent === 'ideate' && targetCats.length > 1 ? 'parallel' : 'serial';
 
     // F153: Reconstruct remote parent context for cross-route A2A trace propagation
@@ -1701,8 +1763,7 @@ export class AgentRouter {
       parentCtx,
     );
 
-    // Fetch thread for thinkingMode + update lastActive
-    // Default to play mode when no threadStore is available: stream thinking stays isolated.
+    // Fetch thinkingMode for same-turn multi-cat response isolation + update lastActive.
     let thinkingMode: 'debug' | 'play' = 'play';
     if (this.threadStore) {
       const thread = await this.threadStore.get(threadId);
@@ -1788,7 +1849,12 @@ export class AgentRouter {
       promptTags: intent.promptTags,
       currentUserMessageId: userMessageId,
       persistedPromptMessageIds: options?.persistedPromptMessageIds,
+      persistedPromptMessages: options?.persistedPromptMessages?.map((persisted) => ({
+        ...persisted,
+        content: stripIntentTags(persisted.content),
+      })),
       a2aTriggerMessageId: options?.a2aTriggerMessageId,
+      a2aCallerCatId: options?.a2aCallerCatId,
       humanDispositionInvocationOrigin: options.humanDispositionInvocationOrigin,
       thinkingMode,
       ...(options?.cursorBoundaries ? { cursorBoundaries: options.cursorBoundaries } : {}),

@@ -54,7 +54,7 @@ export async function proposeSessionHandoff(
 ): Promise<ProposeResult> {
   const { handoffProposalStore: store, sessionChainStore } = deps;
 
-  const active = await sessionChainStore.getActive(input.sourceCatId, input.sourceThreadId);
+  const active = await sessionChainStore.getActive(input.sourceCatId, input.sourceThreadId, input.userId);
   if (!active) return { ok: false, reason: 'no_active_session' };
 
   // A4: ≤1 pending|approving handoff proposal per active session.

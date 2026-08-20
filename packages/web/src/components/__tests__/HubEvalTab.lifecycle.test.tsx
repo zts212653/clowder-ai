@@ -95,4 +95,36 @@ describe('HubEvalTab lifecycle states', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it('shows repair debt separately from cadence and re-evaluation debt', async () => {
+    const summary = summaryWithUnavailableLifecycle();
+    Object.assign(summary.items[0].lifecycle, {
+      availability: 'available',
+      ownerResponseStatus: 'not_required',
+      closureStatus: 'monitoring',
+      reevalStatus: 'not_requested',
+      repairDebtStatus: 'not_required',
+      reevalDebtStatus: 'due',
+      stale: true,
+      targetOwnerCatId: 'opus',
+      caseId: `eval-case-v1-${'a'.repeat(64)}`,
+      activeVerdictId: 'actionable-without-redis',
+      observedVerdictIds: ['actionable-without-redis'],
+    });
+    apiFetch.mockResolvedValue(new Response(JSON.stringify(summary), { status: 200 }));
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<HubEvalTab />));
+    await act(async () => {});
+
+    expect(container.textContent).toContain('修复债务');
+    expect(container.textContent).toContain('无需修复');
+    expect(container.textContent).toContain('节奏 / 复评债务');
+    expect(container.textContent).toContain('复评已到期');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
 });

@@ -13,8 +13,8 @@ vi.mock('@/hooks/useCatData', () => ({
 
 vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => null }));
 vi.mock('@/components/ThreadCatStatus', () => ({
-  ThreadCatStatus: ({ unreadCount }: { unreadCount: number }) => {
-    statusRender(unreadCount);
+  ThreadCatStatus: ({ unreadCount, liveness }: { unreadCount: number; liveness?: unknown }) => {
+    statusRender(unreadCount, liveness);
     return React.createElement('span', { 'data-testid': 'unread' }, String(unreadCount));
   },
 }));
@@ -70,5 +70,53 @@ describe('ThreadItem state subscription', () => {
     });
 
     expect(container.querySelector('[data-testid="unread"]')?.textContent).toBe('7');
+  });
+
+  it('passes the terminal-aware thread liveness projection to the sidebar status', () => {
+    useChatStore.setState({
+      currentThreadId: 'other-thread',
+      threadStates: {
+        'thread-1': {
+          ...DEFAULT_THREAD_STATE,
+          hasActiveInvocation: true,
+          activeInvocations: { 'inv-closed': { catId: 'codex-sol', mode: 'execute' } },
+          catStatuses: { 'codex-sol': 'streaming' },
+          catInvocations: {
+            'codex-sol': {
+              invocationId: 'inv-closed',
+              appServerLifecycle: {
+                stage: 'closed',
+                lastActivityAt: 123,
+                recoveryAttempt: 0,
+                turnStartSent: true,
+                turnAccepted: true,
+                itemObserved: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    act(() => {
+      root.render(
+        React.createElement(ThreadItem, {
+          id: 'thread-1',
+          title: 'Thread 1',
+          participants: ['codex-sol'],
+          lastActiveAt: 1,
+          isActive: false,
+          onSelect: vi.fn(),
+        }),
+      );
+    });
+
+    expect(statusRender).toHaveBeenLastCalledWith(
+      0,
+      expect.objectContaining({
+        hasActive: false,
+        catStatuses: { 'codex-sol': 'done' },
+      }),
+    );
   });
 });

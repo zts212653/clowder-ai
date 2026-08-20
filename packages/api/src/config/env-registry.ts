@@ -14,6 +14,23 @@
 
 import { DEFAULT_CLI_TIMEOUT_LABEL } from '../utils/cli-timeout.js';
 
+/** Semantic groups used by the curated System Settings projection. */
+export type SettingsGroupKey = 'network' | 'storage' | 'lifecycle' | 'runtime' | 'security';
+
+export const SETTINGS_GROUPS: Record<SettingsGroupKey, string> = {
+  network: '网络 & 端口',
+  storage: '存储',
+  lifecycle: '数据生命周期',
+  runtime: '运行与调用',
+  security: '安全 & 访问控制',
+};
+
+/** Shared boolean convention for settings whose consumers accept `1` or `true`. */
+export function parseBoolEnv(raw: string | undefined, defaultOn = false): boolean {
+  if (raw == null || raw === '') return defaultOn;
+  return raw === '1' || raw.toLowerCase() === 'true';
+}
+
 export type EnvCategory =
   | 'server'
   | 'storage'
@@ -55,8 +72,21 @@ export interface EnvDefinition {
   runtimeEditable?: boolean;
   /** If true, this var should appear in .env.example (enforced by check:env-example) */
   exampleRecommended?: boolean;
+  /** Human-readable reason shown by Settings when a retained registry entry has no live consumer. */
+  deprecated?: string;
   /** Explicit allowed values for cycle-style toggles (e.g. ['off','shadow','on']) */
   allowedValues?: string[];
+  /** User-facing label in the curated System Settings projection. */
+  label?: string;
+  /** Display group in the curated System Settings projection. */
+  settingsGroup?: SettingsGroupKey;
+  /** Whether the effective runtime value changes only after a process restart. */
+  restartRequired?: boolean;
+  /** Runtime truthiness semantics for read-only boolean status rows. */
+  booleanSemantics?: {
+    defaultOn: boolean;
+    trueWhen?: 'parseBoolEnv' | 'exactTrue' | 'exactOne' | 'notZero';
+  };
 }
 
 export const ENV_CATEGORIES: Record<EnvCategory, string> = {
@@ -92,6 +122,9 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: false,
     exampleRecommended: true,
+    label: '服务端口',
+    settingsGroup: 'network',
+    restartRequired: true,
   },
   {
     name: 'PREVIEW_GATEWAY_PORT',
@@ -100,6 +133,9 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'server',
     sensitive: false,
     runtimeEditable: true,
+    label: '预览端口',
+    settingsGroup: 'network',
+    restartRequired: true,
   },
   {
     name: 'REDIS_PORT',
@@ -124,6 +160,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'API 监听地址（改为 0.0.0.0 可让手机/平板通过局域网或 Tailscale 访问）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '监听地址',
+    settingsGroup: 'network',
+    restartRequired: true,
   },
   {
     name: 'CORS_ALLOW_PRIVATE_NETWORK',
@@ -134,8 +174,22 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: false,
     exampleRecommended: true,
+    label: '允许局域网访问',
+    settingsGroup: 'network',
+    restartRequired: true,
+    booleanSemantics: { defaultOn: false, trueWhen: 'exactTrue' },
   },
-  { name: 'UPLOAD_DIR', defaultValue: './uploads', description: '文件上传目录', category: 'server', sensitive: false },
+  {
+    name: 'UPLOAD_DIR',
+    defaultValue: './uploads',
+    description: '用户上传的文件（图片、附件等）存放位置',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    label: '上传目录',
+    settingsGroup: 'storage',
+    restartRequired: true,
+  },
   {
     name: 'PROJECT_ALLOWED_ROOTS',
     defaultValue: '(未设置 — 使用 denylist 模式，仅拦截系统目录)',
@@ -143,6 +197,9 @@ export const ENV_VARS: EnvDefinition[] = [
       'Legacy allowlist 模式：设置后切换为 allowlist，仅允许列出的根目录（按系统路径分隔符分隔；配合 PROJECT_ALLOWED_ROOTS_APPEND=true 可追加默认 roots）。未设置时使用 denylist 模式（见 PROJECT_DENIED_ROOTS）。',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '目录白名单',
+    settingsGroup: 'security',
   },
   {
     name: 'PROJECT_ALLOWED_ROOTS_APPEND',
@@ -150,6 +207,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 true 则将 PROJECT_ALLOWED_ROOTS 追加到默认根目录（home, /tmp, /workspace 等）而非覆盖',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '追加白名单',
+    settingsGroup: 'security',
+    booleanSemantics: { defaultOn: false, trueWhen: 'exactTrue' },
   },
   {
     name: 'PROJECT_DENIED_ROOTS',
@@ -158,6 +219,9 @@ export const ENV_VARS: EnvDefinition[] = [
       'Denylist 模式下额外拦截的目录（按系统路径分隔符分隔，会合并到平台默认拦截列表）。仅在未设置 PROJECT_ALLOWED_ROOTS 时生效。',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '目录黑名单',
+    settingsGroup: 'security',
   },
   {
     name: 'FRONTEND_URL',
@@ -166,6 +230,10 @@ export const ENV_VARS: EnvDefinition[] = [
       '前端固定地址（有反向代理或固定域名时设置，如 https://cafe.example.com）。本机和局域网直连通常不需要改',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '前端 URL',
+    settingsGroup: 'network',
+    restartRequired: true,
   },
   {
     name: 'FRONTEND_PORT',
@@ -173,14 +241,23 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '前端端口',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '前端端口',
+    settingsGroup: 'network',
+    restartRequired: true,
   },
   {
     name: 'DEFAULT_OWNER_USER_ID',
-    defaultValue: '(未设置)',
-    description: '默认所有者用户 ID（信任锚点，不可从 Hub 修改）',
+    defaultValue: '(未设置 = 单用户本地模式)',
+    description:
+      '所有者信任锚点：未设置时为单用户本地模式（依赖 loopback 保护）；设置后特权操作按此 ID 做 owner 校验。' +
+      '仅可通过编辑 .env 并重启修改——Hub 内可写会造成权限自举（会话可将自己设为 owner），故永久只读',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
+    label: '所有者用户 ID',
+    settingsGroup: 'security',
+    restartRequired: true,
   },
   {
     name: 'CAT_CAFE_USER_ID',
@@ -247,6 +324,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_VERDICT_REPO_FULL_NAME',
+    defaultValue: 'CAT_CAFE_REPO_FULL_NAME or zts212653/cat-cafe',
+    description:
+      'F248 verdict publisher canonical owner/repo; automatic, pre-push, and managed agent-shell publication fail closed on target mismatch',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_AGENT_KEY_SECRET',
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — 共享密钥（直接环境变量提供）',
@@ -275,6 +361,44 @@ export const ENV_VARS: EnvDefinition[] = [
     defaultValue: '3098',
     description:
       'F247 B1a Cloud Cat — remote-spike.ts 监听端口（公网 Remote MCP gateway for cloud cat e.g. ChatGPT Pro 砚砚 Pro）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_GPT_PRO_AGENT_KEY_FILE',
+    defaultValue: '$CAT_CAFE_DATA_DIR/agent-keys/gpt-pro.secret',
+    description:
+      'F247 Cloud Cat — gpt-pro Remote MCP agent-key sidecar override；默认由 runtime owner 自动 provision/renew，无需手工 mint。',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PERSONAL_CHROME_SOCKET',
+    defaultValue: '(空)',
+    description:
+      'F247 Personal Chrome Host Adapter — operator-provisioned Unix socket path；仅与 pairing secret 同时存在时启用。',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET',
+    defaultValue: '(空)',
+    description:
+      'F247 Personal Chrome Host Adapter — 本地 API ↔ Native Messaging helper 配对密钥；仅 operator/dev seam，禁止日志输出。',
+    category: 'server',
+    sensitive: true,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_ENABLE_LEGACY_PINCHTAB_BRIDGE',
+    defaultValue: '0',
+    description:
+      'F247 Cloud Cat — 显式启用会控制前台浏览器的 legacy PinchTab bridge；默认 0，Host Adapter 缺失时 fail closed。',
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
@@ -411,7 +535,11 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '日志级别（debug / info / warn / error）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
     exampleRecommended: true,
+    label: '日志级别',
+    settingsGroup: 'runtime',
+    restartRequired: true,
   },
   {
     name: 'LOG_DIR',
@@ -444,6 +572,11 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 0 禁用 Preview Gateway（F120）',
     category: 'server',
     sensitive: false,
+    runtimeEditable: false,
+    label: '网页预览',
+    settingsGroup: 'network',
+    restartRequired: true,
+    booleanSemantics: { defaultOn: true, trueWhen: 'notZero' },
   },
   {
     name: 'CHROME_EXECUTABLE_PATH',
@@ -546,13 +679,16 @@ export const ENV_VARS: EnvDefinition[] = [
   // --- storage ---
   {
     name: 'REDIS_URL',
-    defaultValue: '(未设置 → 内存模式)',
-    description: 'Redis 连接地址',
+    defaultValue: '(未设置)',
+    description: '数据库连接地址。未设置时需要同时开启“内存模式”才能启动',
     category: 'storage',
     sensitive: false,
     maskMode: 'url',
     runtimeEditable: false,
     exampleRecommended: true,
+    label: '数据库连接',
+    settingsGroup: 'storage',
+    restartRequired: true,
   },
   {
     name: 'REDIS_KEY_PREFIX',
@@ -561,13 +697,21 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'storage',
     sensitive: false,
     runtimeEditable: false,
+    label: '数据库前缀',
+    settingsGroup: 'storage',
+    restartRequired: true,
   },
   {
     name: 'MEMORY_STORE',
     defaultValue: '(未设置)',
-    description: '设为 1 显式允许内存模式',
+    description: '当 Redis 不可用时允许以内存模式启动。已配置 Redis 时此选项不改变存储后端',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '内存模式（后备）',
+    settingsGroup: 'storage',
+    restartRequired: true,
+    booleanSemantics: { defaultOn: false, trueWhen: 'exactOne' },
   },
   {
     name: 'MESSAGE_TTL_SECONDS',
@@ -576,6 +720,10 @@ export const ENV_VARS: EnvDefinition[] = [
       '消息过期时间（秒）。默认 604800（7天）。设为 0 或负数 → 消息永不过期。注意：过期的 Redis 消息不影响已索引的 evidence_passages（Phase I 保证永久性）。',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '消息过期时间',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'THREAD_TTL_SECONDS',
@@ -583,6 +731,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '对话过期时间',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: 'Thread 保留',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'TASK_TTL_SECONDS',
@@ -590,6 +742,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '任务过期时间',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '任务保留',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'SUMMARY_TTL_SECONDS',
@@ -597,6 +753,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '摘要过期时间',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '摘要保留',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'BACKLOG_TTL_SECONDS',
@@ -604,6 +764,10 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Backlog 过期时间',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '待办保留',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'DRAFT_TTL_SECONDS',
@@ -611,13 +775,21 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '草稿过期时间',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '草稿保留',
+    settingsGroup: 'lifecycle',
+    restartRequired: true,
   },
   {
     name: 'TRANSCRIPT_DATA_DIR',
-    defaultValue: './data/transcripts',
-    description: 'Session transcript 存储目录',
+    defaultValue: '<项目根>/data/transcripts',
+    description: '猫猫的对话录制文件存放位置',
     category: 'storage',
     sensitive: false,
+    runtimeEditable: false,
+    label: '会话记录目录',
+    settingsGroup: 'storage',
+    restartRequired: true,
   },
   {
     name: 'ANNOTATION_DATA_DIR',
@@ -645,59 +817,11 @@ export const ENV_VARS: EnvDefinition[] = [
 
   // --- budget ---
   {
-    name: 'MAX_PROMPT_CHARS',
-    defaultValue: '(per-cat 默认)',
-    description: '全局 prompt 字符上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'CAT_OPUS_MAX_PROMPT_CHARS',
-    defaultValue: '150000',
-    description: '布偶猫 prompt 上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'CAT_CODEX_MAX_PROMPT_CHARS',
-    defaultValue: '80000',
-    description: '缅因猫 prompt 上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'CAT_GEMINI_MAX_PROMPT_CHARS',
-    defaultValue: '150000',
-    description: '暹罗猫 prompt 上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
-    name: 'MAX_CONTEXT_MSG_CHARS',
-    defaultValue: '1500',
-    description: '单条消息上下文截断',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
-  },
-  {
     name: 'MAX_A2A_DEPTH',
     defaultValue: '15',
     description: 'A2A 猫猫互调最大深度',
     category: 'budget',
     sensitive: false,
-  },
-  {
-    name: 'MAX_PROMPT_TOKENS',
-    defaultValue: '(未设置)',
-    description: '全局 prompt token 上限',
-    category: 'budget',
-    sensitive: false,
-    hubVisible: false,
   },
   {
     name: 'WEB_PUSH_TIMEOUT_MS',
@@ -714,6 +838,19 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'CLI 自动终止超时（0 = 关闭，仅人工取消）',
     category: 'cli',
     sensitive: false,
+    runtimeEditable: false,
+    label: 'CLI 超时',
+    settingsGroup: 'runtime',
+  },
+  {
+    name: 'OPENCODE_DB',
+    defaultValue: '(OpenCode default data dir)',
+    description:
+      'Optional OpenCode SQLite database override used only for read-only silent-completion recovery. Leave unset to use OpenCode data-dir discovery.',
+    category: 'cli',
+    sensitive: false,
+    runtimeEditable: false,
+    hubVisible: false,
   },
   {
     name: 'CAT_CAFE_SUPERVISOR_PARENT_PID',
@@ -737,6 +874,33 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_SUPERVISOR_KILL_GRACE_MS',
     defaultValue: '3003',
     description: 'CLI supervisor 内部 SIGTERM 到 SIGKILL 的等待时间',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_SUPERVISOR_SOCKET_DIR',
+    defaultValue: '(内部注入)',
+    description: 'CLI supervisor owner manifest 绑定的 Codex Unix socket 目录',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PROCESS_OWNER_ID',
+    defaultValue: '(内部注入)',
+    description: 'CLI 子进程树继承的随机 ownership token，不需要手动设置',
+    category: 'cli',
+    sensitive: true,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_PROCESS_EXECUTION_OWNER',
+    defaultValue: '(内部注入)',
+    description: '标记当前 CLI supervisor 是单次 invocation 的 execution owner，不需要手动设置',
     category: 'cli',
     sensitive: false,
     hubVisible: false,
@@ -799,6 +963,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '模式切换需要确认',
     category: 'cli',
     sensitive: false,
+    deprecated:
+      '模式系统消费者已在 F101 Mode v2 重构（2dfece987）中移除，早于 cat-cafe#832 的 TD117 registry backfill（b58106d0d）；当前无活消费者，去留待 maintainer 决定',
   },
   {
     name: 'CAT_CAFE_TMUX_AGENT',
@@ -816,10 +982,14 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CAFE_DATA_DIR',
-    defaultValue: '(未设置)',
-    description: '数据目录根路径',
+    defaultValue: '~/.cat-cafe',
+    description: '猫猫数据的默认根目录。会话记录和上传目录可通过各自设置单独指定',
     category: 'cli',
     sensitive: false,
+    runtimeEditable: false,
+    label: '数据根目录',
+    settingsGroup: 'storage',
+    restartRequired: true,
   },
   {
     name: 'CAT_CAFE_CALLBACK_TOKEN',
@@ -906,6 +1076,15 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'cli',
     sensitive: false,
     hubVisible: false,
+  },
+  {
+    name: 'CAT_CAFE_EXECUTION_ID',
+    defaultValue: '(运行时注入)',
+    description: '当前 invocation 所属的父 execution ID（用于 CLI owner 投影与精确取消）',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
   },
   {
     name: 'CAT_CAFE_CREDENTIAL_FILE',
@@ -1273,8 +1452,15 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'TTS_CACHE_DIR',
-    defaultValue: './data/tts-cache',
-    description: 'TTS 音频缓存目录',
+    defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/assets/tts`,
+    description: 'TTS 音频缓存目录；设置后覆盖 CAT_CAFE_DATA_DIR 下的稳定默认位置',
+    category: 'tts',
+    sensitive: false,
+  },
+  {
+    name: 'LISTEN_MODE_DB',
+    defaultValue: `\${CAT_CAFE_DATA_DIR:-~/.cat-cafe}/listen-mode.sqlite`,
+    description: '听读模式持久状态数据库；设置后覆盖 CAT_CAFE_DATA_DIR 下的默认位置',
     category: 'tts',
     sensitive: false,
   },
@@ -1408,6 +1594,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'QQ 邮箱地址 (xxx@qq.com)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PASS',
@@ -1415,6 +1603,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'QQ 邮箱授权码 (非登录密码)',
     category: 'github_review',
     sensitive: true,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_HOST',
@@ -1422,6 +1612,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 服务器地址',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PORT',
@@ -1429,6 +1621,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 端口 (SSL)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_REVIEW_POLL_INTERVAL_MS',
@@ -1436,6 +1630,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '邮件轮询间隔 (毫秒)',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
   {
     name: 'GITHUB_MCP_PAT',
@@ -1451,6 +1647,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'IMAP 连接代理地址（如 socks5://127.0.0.1:1080）',
     category: 'github_review',
     sensitive: false,
+    deprecated:
+      'IMAP 邮件监控通道已在 v0.9.0（clowder-ai#596）移除；PR review 反馈现由 register_pr_tracking 驱动的 GitHub API 轮询获取',
   },
 
   // --- evidence (F102 记忆系统) ---
@@ -1899,13 +2097,44 @@ export function buildEnvSummary(): Array<EnvDefinition & { currentValue: string 
   });
 }
 
+/**
+ * Curated platform-level settings for the System page. The full registry stays
+ * canonical for Environment & Files and module-owned surfaces.
+ */
+export const SYSTEM_VARS: ReadonlySet<string> = new Set([
+  'API_SERVER_HOST',
+  'API_SERVER_PORT',
+  'BACKLOG_TTL_SECONDS',
+  'CAT_CAFE_DATA_DIR',
+  'CLI_TIMEOUT_MS',
+  'CORS_ALLOW_PRIVATE_NETWORK',
+  'DEFAULT_OWNER_USER_ID',
+  'DRAFT_TTL_SECONDS',
+  'FRONTEND_PORT',
+  'FRONTEND_URL',
+  'LOG_LEVEL',
+  'MEMORY_STORE',
+  'MESSAGE_TTL_SECONDS',
+  'PREVIEW_GATEWAY_ENABLED',
+  'PREVIEW_GATEWAY_PORT',
+  'PROJECT_ALLOWED_ROOTS',
+  'PROJECT_ALLOWED_ROOTS_APPEND',
+  'PROJECT_DENIED_ROOTS',
+  'REDIS_KEY_PREFIX',
+  'REDIS_URL',
+  'SUMMARY_TTL_SECONDS',
+  'TASK_TTL_SECONDS',
+  'THREAD_TTL_SECONDS',
+  'TRANSCRIPT_DATA_DIR',
+  'UPLOAD_DIR',
+]);
+
+export function buildSystemEnvSummary(): Array<EnvDefinition & { currentValue: string | null }> {
+  return buildEnvSummary().filter((variable) => SYSTEM_VARS.has(variable.name));
+}
+
 export function isEditableEnvVar(def: EnvDefinition): boolean {
-  // Explicit opt-in: runtimeEditable: true allows editing even if sensitive (fail-closed whitelist)
-  if (def.runtimeEditable === true) return true;
-  // Explicit opt-out: runtimeEditable: false blocks editing unconditionally
-  if (def.runtimeEditable === false) return false;
-  // Default: non-sensitive vars are editable
-  return !def.sensitive;
+  return def.runtimeEditable === true;
 }
 
 /** True if this env var is both sensitive AND explicitly opted into runtime editing. */

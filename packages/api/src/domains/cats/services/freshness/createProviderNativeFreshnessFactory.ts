@@ -33,11 +33,12 @@ export function createProviderNativeFreshnessFactory(
       const stored = message as unknown as StoredMessage;
       if (stored.deletedAt || !isDelivered(stored) || stored.origin === 'briefing') return false;
       if (!playMode) return true;
-      if (!canViewMessage(stored, viewer)) return false;
-      return stored.origin !== 'stream' || !stored.catId || stored.catId === catId;
+      return canViewMessage(stored, viewer);
     };
     const queue = deps.getQueue?.();
-    const queueChecker: QueuedMessageChecker | undefined = queue ? createQueueChecker(queue) : undefined;
+    const queueChecker: QueuedMessageChecker | undefined = queue
+      ? createQueueChecker(queue, { parentInvocationId: invocationId })
+      : undefined;
     const unseenChecker = new ThreadUnseenChecker({
       userId,
       cursorStore: deps.cursorStore,

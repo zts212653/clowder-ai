@@ -82,6 +82,7 @@ describe('PersonMemoryRecallService', () => {
     const service = new PersonMemoryRecallService(fakeStore(), workspaceResolver());
     const result = await service.recallByAlias('owner-1', '黄挺');
     assert.equal(result.status, 'resolved');
+    assert.equal(result.asOf, 120);
     assert.equal(result.card.storable, false);
     assert.equal(result.card.indexable, false);
     assert.equal(result.card.facts.length, 1);

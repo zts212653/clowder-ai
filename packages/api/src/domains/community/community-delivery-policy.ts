@@ -12,7 +12,6 @@ import type {
   CommunityObjectState,
   GitHubAuthorAssociation,
   IssueCommentSuppressionReason,
-  IssueTrackingWakePolicy,
 } from '@cat-cafe/shared';
 
 export type DeliveryDecision = 'wake-owner' | 'silent-log';
@@ -23,23 +22,6 @@ export interface DeliveryPolicyInput {
   authorAssociation?: GitHubAuthorAssociation;
   critical?: boolean;
   suppressionReason?: IssueCommentSuppressionReason;
-}
-
-export type TrackingWakeDecision =
-  | {
-      readonly decision: 'deliver';
-      readonly reason: 'all_feedback' | 'subject_author' | 'human_participant' | 'unknown_actor';
-    }
-  | { readonly decision: 'state_only'; readonly reason: 'automation_actor' };
-
-export interface TrackingWakePolicyInput {
-  wakePolicy?: IssueTrackingWakePolicy;
-  actorLogin?: string;
-  /** GitHub REST `user.type`. Only exact `User` and `Bot` values are classified. */
-  actorType?: string;
-  subjectAuthorLogin?: string;
-  /** Context only. Repository permissions do not identify the subject author or a human. */
-  authorAssociation?: GitHubAuthorAssociation;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,31 +66,4 @@ export function decideDelivery(input: DeliveryPolicyInput): DeliveryDecision {
     return 'silent-log';
   }
   return 'wake-owner';
-}
-
-/**
- * Apply the explicit actor-aware wake contract after durable collection and
- * exact echo/noise suppression.
- *
- * Missing policy preserves #1002 (`all_feedback`). In human-participant mode,
- * only GitHub's reliable `Bot` actor type is suppressed; missing or unfamiliar
- * metadata fails safe to delivery. `authorAssociation` is intentionally ignored.
- */
-export function decideTrackingWake(input: TrackingWakePolicyInput): TrackingWakeDecision {
-  if ((input.wakePolicy ?? 'all_feedback') === 'all_feedback') {
-    return { decision: 'deliver', reason: 'all_feedback' };
-  }
-  if (input.actorType === 'Bot') {
-    return { decision: 'state_only', reason: 'automation_actor' };
-  }
-  if (input.actorType !== 'User') {
-    return { decision: 'deliver', reason: 'unknown_actor' };
-  }
-
-  const actorLogin = input.actorLogin?.trim().toLowerCase();
-  const subjectAuthorLogin = input.subjectAuthorLogin?.trim().toLowerCase();
-  if (actorLogin && subjectAuthorLogin && actorLogin === subjectAuthorLogin) {
-    return { decision: 'deliver', reason: 'subject_author' };
-  }
-  return { decision: 'deliver', reason: 'human_participant' };
 }

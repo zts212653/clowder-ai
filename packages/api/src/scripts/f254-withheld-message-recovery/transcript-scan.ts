@@ -36,7 +36,7 @@ function parseTargetEvent(line: string): RecoveryTranscriptEvent {
     typeof value.threadId !== 'string' ||
     typeof value.catId !== 'string' ||
     typeof value.sessionId !== 'string' ||
-    typeof value.cliSessionId !== 'string' ||
+    (value.cliSessionId !== undefined && typeof value.cliSessionId !== 'string') ||
     typeof value.invocationId !== 'string' ||
     typeof value.eventNo !== 'number' ||
     !isRecord(value.event)
@@ -49,7 +49,7 @@ function parseTargetEvent(line: string): RecoveryTranscriptEvent {
     threadId: value.threadId,
     catId: value.catId,
     sessionId: value.sessionId,
-    cliSessionId: value.cliSessionId,
+    ...(typeof value.cliSessionId === 'string' ? { cliSessionId: value.cliSessionId } : {}),
     invocationId: value.invocationId,
     eventNo: value.eventNo,
     event: value.event,

@@ -51,11 +51,11 @@ export interface F282ReplayEpisodeResult {
   readonly eligibleSubjects: readonly string[];
   readonly irrelevantSubjects: readonly string[];
   readonly privateCoordinatesSurfaced: readonly string[];
-  readonly registrySubjectsSurfaced: readonly string[];
+  readonly blockedRegistrySubjectsSurfaced: readonly string[];
 }
 
 export interface F282ProactiveMemoryReplayResult {
-  readonly fixtureRevision: 'f282-phase-a-b-v2';
+  readonly fixtureRevision: 'f282-phase-a-b-v3';
   readonly status: 'incubating';
   readonly threshold: {
     readonly windowMs: number;
@@ -158,7 +158,7 @@ const F282_THRESHOLD_EPISODES: readonly ReplayEpisodeFixture[] = [
     irrelevantSubjects: [],
   },
   {
-    id: 'registry-and-dormant-suppressed',
+    id: 'known-person-admitted-pending-dormant-suppressed',
     threads: [{ id: 'registry-a' }, { id: 'registry-b' }],
     messages: [
       { content: 'Alden，Beren，Cora', threadId: 'registry-a', timestamp: 100 },
@@ -264,7 +264,10 @@ async function replayEpisode(fixture: ReplayEpisodeFixture): Promise<F282ReplayE
         .filter((coordinate) => privateThreadIds.has(coordinate.threadId))
         .map((coordinate) => `${candidate.normalizedPhrase}@${coordinate.threadId}`),
     );
-    const registrySubjectsSurfaced = surfacedSubjects.filter((subject) => fixture.registry?.[subject] !== undefined);
+    const blockedRegistrySubjectsSurfaced = surfacedSubjects.filter((subject) => {
+      const disposition = fixture.registry?.[subject];
+      return disposition === 'pending' || disposition === 'dormant';
+    });
 
     return {
       id: fixture.id,
@@ -272,7 +275,7 @@ async function replayEpisode(fixture: ReplayEpisodeFixture): Promise<F282ReplayE
       eligibleSubjects: fixture.eligibleSubjects,
       irrelevantSubjects: fixture.irrelevantSubjects,
       privateCoordinatesSurfaced,
-      registrySubjectsSurfaced,
+      blockedRegistrySubjectsSurfaced,
     };
   } finally {
     db.close();
@@ -397,7 +400,7 @@ export async function runF282ProactiveMemoryReplay(): Promise<F282ProactiveMemor
 
   const hardConstraintFailures = episodes.flatMap((episode) => [
     ...episode.privateCoordinatesSurfaced.map((coordinate) => `privacy:${episode.id}:${coordinate}`),
-    ...episode.registrySubjectsSurfaced.map((subject) => `registry:${episode.id}:${subject}`),
+    ...episode.blockedRegistrySubjectsSurfaced.map((subject) => `registry:${episode.id}:${subject}`),
   ]);
   const eligibleOpportunities = episodes.reduce((count, episode) => count + episode.eligibleSubjects.length, 0);
   const surfacedEligibleOpportunities = episodes.reduce(
@@ -414,7 +417,7 @@ export async function runF282ProactiveMemoryReplay(): Promise<F282ProactiveMemor
   const evidenceContract = await replayEvidenceContract();
 
   return {
-    fixtureRevision: 'f282-phase-a-b-v2',
+    fixtureRevision: 'f282-phase-a-b-v3',
     status: 'incubating',
     threshold: {
       ...DEFAULT_PROACTIVE_MEMORY_CANDIDATE_CONFIG,

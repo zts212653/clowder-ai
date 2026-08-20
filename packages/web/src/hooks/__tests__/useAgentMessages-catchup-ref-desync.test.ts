@@ -867,7 +867,15 @@ describe('useAgentMessages catch-up ref desync (#266 Round 2)', () => {
       });
 
       act(() => {
-        captured?.handleStop(vi.fn(), 'thread-1');
+        captured?.handleStop(
+          vi.fn(() => true),
+          'thread-1',
+          {
+            sourceControl: 'chat_input_action',
+            gesture: 'pointer',
+            trustedGesture: true,
+          },
+        );
       });
 
       act(() => {

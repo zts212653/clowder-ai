@@ -18,6 +18,7 @@ const KEY_PREFIX = 'cat-cafe-f276-person-memory-test:';
 
 describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   let RedisPersonMemoryStore;
+  let RedisDeferredPersonMemoryReceiptStore;
   let BEGIN_HARD_FORGET_LUA;
   let FINISH_HARD_FORGET_LUA;
   let HumanDispositionKeys;
@@ -191,6 +192,9 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisPersonMemoryStore');
     const storeModule = await import('../dist/domains/memory/people/RedisPersonMemoryStore.js');
     RedisPersonMemoryStore = storeModule.RedisPersonMemoryStore;
+    ({ RedisDeferredPersonMemoryReceiptStore } = await import(
+      '../dist/domains/memory/RedisDeferredPersonMemoryReceiptStore.js'
+    ));
     const luaModule = await import('../dist/domains/memory/people/person-memory-lua.js');
     BEGIN_HARD_FORGET_LUA = luaModule.BEGIN_HARD_FORGET_LUA;
     FINISH_HARD_FORGET_LUA = luaModule.FINISH_HARD_FORGET_LUA;
@@ -231,6 +235,50 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.deepEqual(await store.listPending(input.ownerUserId), []);
     await store.commitEnvelope(input.candidateId, envelopeFor(input));
     return input;
+  }
+
+  async function stageDeferredReceipt(receiptId, overrides = {}) {
+    const receiptStore = new RedisDeferredPersonMemoryReceiptStore(redis);
+    const staged = await receiptStore.stage({
+      receiptId,
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-sol',
+      invocationId: 'invocation-deferred-forget',
+      originMessageRef: sourceMessageRef,
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding: { kind: 'registered_person', ref: 'person_huang_ting' },
+      sourceCoordinates: [
+        {
+          kind: 'message',
+          sourceRef: sourceMessageRef,
+          resolvedDigest: '9'.repeat(64),
+        },
+      ],
+      sourceBundleDigest: '8'.repeat(64),
+      dedupeHash: receiptId.slice(-32).padStart(64, '7'),
+      ready: true,
+      createdAt: 100,
+      ...overrides,
+    });
+    assert.equal(staged.outcome, 'created');
+    return { receiptStore, receipt: staged.receipt };
+  }
+
+  async function claimDeferredReceiptForProposal(receiptStore, receipt, claimId) {
+    const claimed = await receiptStore.claim({
+      ownerUserId: receipt.ownerUserId,
+      receiptId: receipt.receiptId,
+      claimId,
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(claimed.outcome, 'claimed');
+    return {
+      deferredReceiptId: receipt.receiptId,
+      deferredReceiptClaimId: claimId,
+      deltaFingerprint: receipt.dedupeHash,
+    };
   }
 
   async function snapshotRedisBytes(keys) {
@@ -289,6 +337,233 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
 
     const fresh = new RedisPersonMemoryStore(redis);
     assert.equal((await fresh.getCandidateForOwner(input.ownerUserId, input.candidateId)).state, 'pending_approval');
+  });
+
+  it('shares one exact-delta lineage between immediate proposals and deferred capture', async () => {
+    const deltaFingerprint = 'f'.repeat(64);
+    const input = candidateInput({ deltaFingerprint });
+    await store.stageCandidate(input);
+
+    const receiptStore = new RedisDeferredPersonMemoryReceiptStore(redis);
+    const receiptId = `deferred_person_${'d'.repeat(32)}`;
+    const duplicate = await receiptStore.stage({
+      receiptId,
+      ownerUserId: input.ownerUserId,
+      requesterCatId: input.requesterCatId,
+      invocationId: 'invocation-after-immediate',
+      originMessageRef: sourceMessageRef,
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding: { kind: 'registered_person', ref: 'person_huang_ting' },
+      sourceCoordinates: [
+        {
+          kind: 'message',
+          sourceRef: sourceMessageRef,
+          resolvedDigest: '9'.repeat(64),
+        },
+      ],
+      sourceBundleDigest: '8'.repeat(64),
+      dedupeHash: deltaFingerprint,
+      ready: true,
+      createdAt: 110,
+    });
+
+    assert.deepEqual(duplicate, {
+      outcome: 'already_proposed',
+      proposalId: input.candidateId,
+    });
+    assert.equal(await receiptStore.get(input.ownerUserId, receiptId), null);
+
+    const deferredFirstFingerprint = 'a'.repeat(64);
+    const deferredFirstReceiptId = `deferred_person_${'a'.repeat(32)}`;
+    const deferredFirst = await receiptStore.stage({
+      receiptId: deferredFirstReceiptId,
+      ownerUserId: input.ownerUserId,
+      requesterCatId: input.requesterCatId,
+      invocationId: 'invocation-before-immediate',
+      originMessageRef: sourceMessageRef,
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding: { kind: 'registered_person', ref: 'person_huang_ting' },
+      sourceCoordinates: [
+        {
+          kind: 'message',
+          sourceRef: sourceMessageRef,
+          resolvedDigest: '7'.repeat(64),
+        },
+      ],
+      sourceBundleDigest: '6'.repeat(64),
+      dedupeHash: deferredFirstFingerprint,
+      ready: true,
+      createdAt: 120,
+    });
+    assert.equal(deferredFirst.outcome, 'created');
+
+    const immediateAfterDeferred = candidateInput({
+      candidateId: 'person_candidate_after_deferred',
+      deltaFingerprint: deferredFirstFingerprint,
+    });
+    await assert.rejects(
+      () => store.stageCandidate(immediateAfterDeferred),
+      /exact person-memory delta already has active lineage/,
+    );
+    assert.equal(
+      await store.getCandidateForOwner(immediateAfterDeferred.ownerUserId, immediateAfterDeferred.candidateId),
+      null,
+    );
+    assert.equal((await receiptStore.get(input.ownerUserId, deferredFirstReceiptId)).state, 'deferred');
+  });
+
+  it('atomically anchors a deferred proposal only while its exact claim remains active', async () => {
+    const deltaFingerprint = 'e'.repeat(64);
+    const receiptId = `deferred_person_${'e'.repeat(32)}`;
+    const { receiptStore, receipt } = await stageDeferredReceipt(receiptId, {
+      dedupeHash: deltaFingerprint,
+    });
+    const now = Date.now();
+    const claim = await receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId,
+      claimId: 'claim-atomic',
+      now,
+      leaseMs: 60_000,
+    });
+    assert.equal(claim.outcome, 'claimed');
+
+    const input = candidateInput({
+      candidateId: 'person_candidate_deferred_atomic',
+      deferredReceiptId: receiptId,
+      deferredReceiptClaimId: 'claim-atomic',
+      deltaFingerprint,
+    });
+    await store.stageCandidate(input);
+    await store.commitEnvelope(input.candidateId, envelopeFor(input));
+
+    assert.equal((await store.getCandidateForOwner(input.ownerUserId, input.candidateId)).state, 'pending_approval');
+    const proposedReceipt = await receiptStore.get(input.ownerUserId, receipt.receiptId);
+    assert.equal(proposedReceipt.state, 'proposed');
+    assert.equal(proposedReceipt.proposalId, input.candidateId);
+    assert.equal(proposedReceipt.subject, undefined);
+    assert.equal(proposedReceipt.sourceCoordinates, undefined);
+    assert.equal(proposedReceipt.invocationId, undefined);
+
+    const racedReceiptId = `deferred_person_${'c'.repeat(32)}`;
+    const racedFingerprint = 'c'.repeat(64);
+    const raced = await stageDeferredReceipt(racedReceiptId, { dedupeHash: racedFingerprint });
+    await raced.receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId: racedReceiptId,
+      claimId: 'claim-raced',
+      now,
+      leaseMs: 60_000,
+    });
+    const racedInput = candidateInput({
+      candidateId: 'person_candidate_deferred_raced',
+      deferredReceiptId: racedReceiptId,
+      deferredReceiptClaimId: 'claim-raced',
+      deltaFingerprint: racedFingerprint,
+    });
+    await store.stageCandidate(racedInput);
+    await raced.receiptStore.withdraw('owner-1', racedReceiptId, now + 1);
+
+    await assert.rejects(
+      () => store.commitEnvelope(racedInput.candidateId, envelopeFor(racedInput)),
+      /deferred receipt|CONFLICT/i,
+    );
+    assert.equal((await store.getCandidateForOwner('owner-1', racedInput.candidateId)).state, 'staged');
+    assert.deepEqual(
+      (await store.listPending('owner-1')).map((candidate) => candidate.candidateId),
+      [input.candidateId],
+    );
+
+    const expiredReceiptId = `deferred_person_${'b'.repeat(32)}`;
+    const expiredFingerprint = 'b'.repeat(64);
+    const expired = await stageDeferredReceipt(expiredReceiptId, { dedupeHash: expiredFingerprint });
+    await expired.receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId: expiredReceiptId,
+      claimId: 'claim-expired-after-stage',
+      now,
+      leaseMs: 60_000,
+    });
+    const expiredInput = candidateInput({
+      candidateId: 'person_candidate_deferred_expired_after_stage',
+      targetPersonId: 'person_huang_ting',
+      deferredReceiptId: expiredReceiptId,
+      deferredReceiptClaimId: 'claim-expired-after-stage',
+      deltaFingerprint: expiredFingerprint,
+    });
+    await store.stageCandidate(expiredInput);
+    const expiredReceiptKey = expired.receiptStore.keys.receipt('owner-1', expiredReceiptId);
+    const expiredReceipt = JSON.parse(await redis.get(expiredReceiptKey));
+    await redis.set(expiredReceiptKey, JSON.stringify({ ...expiredReceipt, claimUntil: Date.now() - 1 }));
+
+    await assert.rejects(
+      () => store.commitEnvelope(expiredInput.candidateId, envelopeFor(expiredInput)),
+      /deferred receipt|CONFLICT/i,
+    );
+    const reclaimed = await expired.receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId: expiredReceiptId,
+      claimId: 'claim-reclaimed',
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(reclaimed.outcome, 'claimed');
+    const staleRenewal = await store.renewDeferredCandidateClaim({
+      ownerUserId: 'owner-1',
+      candidateId: expiredInput.candidateId,
+      receiptId: expiredReceiptId,
+      previousClaimId: 'not-the-staged-claim',
+      nextClaimId: 'claim-reclaimed',
+      deltaFingerprint: expiredFingerprint,
+      renewedAt: Date.now(),
+    });
+    assert.equal(staleRenewal.outcome, 'conflict');
+    assert.equal(
+      (await store.getCandidateForOwner('owner-1', expiredInput.candidateId)).deferredReceiptClaimId,
+      'claim-expired-after-stage',
+    );
+    const forgetFence = PersonMemoryKeys.forgetFence('owner-1', expiredInput.targetPersonId);
+    await redis.set(forgetFence, 'forget-in-progress');
+    const fencedRenewal = await store.renewDeferredCandidateClaim({
+      ownerUserId: 'owner-1',
+      candidateId: expiredInput.candidateId,
+      receiptId: expiredReceiptId,
+      previousClaimId: 'claim-expired-after-stage',
+      nextClaimId: 'claim-reclaimed',
+      deltaFingerprint: expiredFingerprint,
+      renewedAt: Date.now(),
+    });
+    assert.equal(fencedRenewal.outcome, 'not_available');
+    assert.equal(
+      (await store.getCandidateForOwner('owner-1', expiredInput.candidateId)).deferredReceiptClaimId,
+      'claim-expired-after-stage',
+    );
+    await redis.del(forgetFence);
+    const renewed = await store.renewDeferredCandidateClaim({
+      ownerUserId: 'owner-1',
+      candidateId: expiredInput.candidateId,
+      receiptId: expiredReceiptId,
+      previousClaimId: 'claim-expired-after-stage',
+      nextClaimId: 'claim-reclaimed',
+      deltaFingerprint: expiredFingerprint,
+      renewedAt: Date.now(),
+    });
+    assert.equal(renewed.outcome, 'renewed');
+    assert.equal(renewed.candidate.deferredReceiptClaimId, 'claim-reclaimed');
+    const replayedRenewal = await store.renewDeferredCandidateClaim({
+      ownerUserId: 'owner-1',
+      candidateId: expiredInput.candidateId,
+      receiptId: expiredReceiptId,
+      previousClaimId: 'claim-expired-after-stage',
+      nextClaimId: 'claim-reclaimed',
+      deltaFingerprint: expiredFingerprint,
+      renewedAt: Date.now(),
+    });
+    assert.equal(replayedRenewal.outcome, 'replayed');
+    await store.commitEnvelope(expiredInput.candidateId, envelopeFor(expiredInput));
+    assert.equal((await store.getCandidateForOwner('owner-1', expiredInput.candidateId)).state, 'pending_approval');
   });
 
   it('aborts a staged candidate without leaving a pending dossier or alias', async () => {
@@ -1593,6 +1868,239 @@ describe('RedisPersonMemoryStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(forgotten.receipt.purgedSurfaceCounts.candidates, 2);
     assert.equal(await store.getCandidateForOwner(root.ownerUserId, root.candidateId), null);
     assert.equal(await store.getCandidateForOwner(successor.ownerUserId, successor.candidateId), null);
+  });
+
+  it('purges a linked deferred receipt when hard-forgetting its materialized person', async () => {
+    const receiptId = `deferred_person_${'f'.repeat(32)}`;
+    const { receiptStore, receipt } = await stageDeferredReceipt(receiptId);
+    const lineage = await claimDeferredReceiptForProposal(receiptStore, receipt, 'claim-deferred-person-forget');
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: 'person_candidate_deferred_person_forget',
+        ...lineage,
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    const approved = await store.approveDrafts({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      selectedDraftIds: [claimDraft.draftId],
+      decisionId: 'decision_deferred_person_forget',
+      authorizedAt: 200,
+    });
+
+    await store.hardForget({
+      ownerUserId: input.ownerUserId,
+      personId: approved.receipt.personId,
+      requestId: 'person_forget_deferred_receipt',
+      requestedAt: 500,
+    });
+
+    assert.equal(await receiptStore.get(input.ownerUserId, receiptId), null);
+  });
+
+  it('purges an actionable deferred receipt bound to the person before any proposal exists', async () => {
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: 'person_candidate_deferred_preproposal_forget',
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    const approved = await store.approveDrafts({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      selectedDraftIds: [claimDraft.draftId],
+      decisionId: 'decision_deferred_preproposal_forget',
+      authorizedAt: 200,
+    });
+    const receiptId = `deferred_person_${'b'.repeat(32)}`;
+    const { receiptStore } = await stageDeferredReceipt(receiptId, {
+      registryBinding: { kind: 'registered_person', ref: approved.receipt.personId },
+      createdAt: 300,
+    });
+
+    const forgotten = await store.hardForget({
+      ownerUserId: input.ownerUserId,
+      personId: approved.receipt.personId,
+      requestId: 'person_forget_deferred_preproposal_receipt',
+      requestedAt: 500,
+    });
+
+    assert.equal(forgotten.verdict, 'purged');
+    assert.equal(forgotten.purgedSurfaceCounts.deferredReceipts, 1);
+    assert.equal(await receiptStore.get(input.ownerUserId, receiptId), null);
+  });
+
+  it('purges an actionable deferred receipt bound through the person workspace Entity', async () => {
+    const entityRef = 'person:huang-ting-huawei';
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: 'person_candidate_deferred_entity_preproposal_forget',
+        personDraft: {
+          displayName: '黄挺',
+          privateAliases: ['黄挺'],
+          workspaceEntityLink: { entityRef, state: 'linked', checkedAt: 150 },
+        },
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    const approved = await store.approveDrafts({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      selectedDraftIds: [claimDraft.draftId],
+      decisionId: 'decision_deferred_entity_preproposal_forget',
+      authorizedAt: 200,
+    });
+    const receiptId = `deferred_person_${'c'.repeat(32)}`;
+    const { receiptStore } = await stageDeferredReceipt(receiptId, {
+      registryBinding: { kind: 'registered_entity', ref: entityRef },
+      createdAt: 300,
+    });
+
+    const forgotten = await store.hardForget({
+      ownerUserId: input.ownerUserId,
+      personId: approved.receipt.personId,
+      requestId: 'person_forget_deferred_entity_preproposal_receipt',
+      requestedAt: 500,
+    });
+
+    assert.equal(forgotten.purgedSurfaceCounts.deferredReceipts, 1);
+    assert.equal(await receiptStore.get(input.ownerUserId, receiptId), null);
+  });
+
+  it('purges a deferred receipt by exact registered person ID even if canonical person truth is already absent', async () => {
+    const personId = 'person_already_absent_with_deferred_receipt';
+    const receiptId = `deferred_person_${'1'.repeat(32)}`;
+    const { receiptStore } = await stageDeferredReceipt(receiptId, {
+      registryBinding: { kind: 'registered_person', ref: personId },
+    });
+
+    const forgotten = await store.hardForget({
+      ownerUserId: 'owner-1',
+      personId,
+      requestId: 'person_forget_absent_with_deferred_receipt',
+      requestedAt: 500,
+    });
+
+    assert.equal(forgotten.verdict, 'purged');
+    assert.equal(forgotten.purgedSurfaceCounts.deferredReceipts, 1);
+    assert.equal(await receiptStore.get('owner-1', receiptId), null);
+  });
+
+  it('preflights deferred receipt indexes before any person hard-forget mutation', async () => {
+    const receiptId = `deferred_person_${'d'.repeat(32)}`;
+    const { receiptStore, receipt } = await stageDeferredReceipt(receiptId);
+    const lineage = await claimDeferredReceiptForProposal(receiptStore, receipt, 'claim-deferred-forget-preflight');
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: 'person_candidate_deferred_forget_preflight',
+        ...lineage,
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    const approved = await store.approveDrafts({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      selectedDraftIds: [claimDraft.draftId],
+      decisionId: 'decision_deferred_forget_preflight',
+      authorizedAt: 200,
+    });
+    const dedupeKey = receiptStore.keys.dedupe(input.ownerUserId, receipt.dedupeHash);
+    await redis.del(dedupeKey);
+    await redis.hset(dedupeKey, 'poisoned', 'wrong-type');
+
+    await assert.rejects(
+      store.hardForget({
+        ownerUserId: input.ownerUserId,
+        personId: approved.receipt.personId,
+        requestId: 'person_forget_deferred_preflight',
+        requestedAt: 500,
+      }),
+    );
+
+    assert.notEqual(await store.getPerson(input.ownerUserId, approved.receipt.personId), null);
+    assert.notEqual(await store.getCandidateForOwner(input.ownerUserId, input.candidateId), null);
+    assert.notEqual(await receiptStore.get(input.ownerUserId, receiptId), null);
+  });
+
+  it('purges a proposed deferred receipt with its exact unbound proposal', async () => {
+    const receiptId = `deferred_person_${'e'.repeat(32)}`;
+    const { receiptStore, receipt } = await stageDeferredReceipt(receiptId);
+    const proposalId = 'person_candidate_deferred_proposal_forget';
+    const lineage = await claimDeferredReceiptForProposal(receiptStore, receipt, 'claim-deferred-proposal-forget');
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: proposalId,
+        ...lineage,
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    assert.equal(
+      (
+        await store.rejectCandidate({
+          ownerUserId: input.ownerUserId,
+          candidateId: input.candidateId,
+          decisionId: 'decision_deferred_proposal_forget',
+          feedback: { reasonCode: 'wrong' },
+          decidedAt: 300,
+        })
+      ).outcome,
+      'applied',
+    );
+
+    assert.equal(
+      (
+        await store.hardForgetProposal({
+          ownerUserId: input.ownerUserId,
+          proposalId,
+          requestId: 'person_forget_proposal_deferred_receipt',
+          requestedAt: 500,
+        })
+      ).outcome,
+      'purged',
+    );
+    assert.equal(await receiptStore.get(input.ownerUserId, receiptId), null);
+  });
+
+  it('preflights deferred receipt indexes before any exact proposal hard-forget mutation', async () => {
+    const receiptId = `deferred_person_${'2'.repeat(32)}`;
+    const { receiptStore, receipt } = await stageDeferredReceipt(receiptId);
+    const proposalId = 'person_candidate_deferred_proposal_preflight';
+    const lineage = await claimDeferredReceiptForProposal(receiptStore, receipt, 'claim-deferred-proposal-preflight');
+    const input = await stageAndAnchor(
+      candidateInput({
+        candidateId: proposalId,
+        ...lineage,
+        interactionDraft: undefined,
+        remainingDraftIds: [claimDraft.draftId],
+      }),
+    );
+    await store.rejectCandidate({
+      ownerUserId: input.ownerUserId,
+      candidateId: input.candidateId,
+      decisionId: 'decision_deferred_proposal_preflight',
+      feedback: { reasonCode: 'wrong' },
+      decidedAt: 300,
+    });
+    const dedupeKey = receiptStore.keys.dedupe(input.ownerUserId, receipt.dedupeHash);
+    await redis.del(dedupeKey);
+    await redis.hset(dedupeKey, 'poisoned', 'wrong-type');
+
+    const forgotten = await store.hardForgetProposal({
+      ownerUserId: input.ownerUserId,
+      proposalId,
+      requestId: 'person_forget_proposal_deferred_preflight',
+      requestedAt: 500,
+    });
+
+    assert.equal(forgotten.outcome, 'conflict');
+    assert.notEqual(await store.getCandidateForOwner(input.ownerUserId, proposalId), null);
+    assert.notEqual(await receiptStore.get(input.ownerUserId, receiptId), null);
   });
 
   it('fails an unbound lineage-handle collision before producer or F281 mutation', async () => {

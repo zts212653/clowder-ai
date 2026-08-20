@@ -23,13 +23,30 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
   let artifactResolutions;
   let socketEvents;
   let digestSourceMaterial;
+  let personMemoryDeltaFingerprint;
+  let proposalPersonMemoryDeltaCoordinates;
+  let receiptStore;
   let stageCalls = 0;
   let afterStage;
+  let beforeCommitEnvelope;
+  let deferredReceipt;
+  let deliveredWriteOpportunities;
+  let writeOpportunityTerminals;
   let connected = false;
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'F276 proposal routes');
-    const [routeMod, storeMod, registryMod, messageMod, authMod, redisMod, sourceResolverMod] = await Promise.all([
+    const [
+      routeMod,
+      storeMod,
+      registryMod,
+      messageMod,
+      authMod,
+      redisMod,
+      sourceResolverMod,
+      receiptStoreMod,
+      deltaLineageMod,
+    ] = await Promise.all([
       import('../dist/routes/callback-propose-person-memory-routes.js'),
       import('../dist/domains/memory/people/RedisPersonMemoryStore.js'),
       import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'),
@@ -37,8 +54,12 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       import('../dist/routes/callback-auth-prehandler.js'),
       import('@cat-cafe/shared/utils'),
       import('../dist/domains/memory/people/PersonMemorySourceBundleResolver.js'),
+      import('../dist/domains/memory/RedisDeferredPersonMemoryReceiptStore.js'),
+      import('../dist/domains/memory/people/person-memory-delta-lineage.js'),
     ]);
     digestSourceMaterial = sourceResolverMod.digestPersonMemorySourceMaterial;
+    personMemoryDeltaFingerprint = deltaLineageMod.personMemoryDeltaFingerprint;
+    proposalPersonMemoryDeltaCoordinates = deltaLineageMod.proposalPersonMemoryDeltaCoordinates;
     redis = redisMod.createRedisClient({ url: REDIS_URL, keyPrefix: KEY_PREFIX });
     try {
       await redis.ping();
@@ -48,6 +69,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       return;
     }
     store = new storeMod.RedisPersonMemoryStore(redis);
+    receiptStore = new receiptStoreMod.RedisDeferredPersonMemoryReceiptStore(redis);
     routeStore = new Proxy(store, {
       get(target, property) {
         if (property === 'stageCandidate') {
@@ -56,6 +78,12 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
             const staged = await target.stageCandidate(input);
             if (afterStage) await afterStage(input);
             return staged;
+          };
+        }
+        if (property === 'commitEnvelope') {
+          return async (...args) => {
+            if (beforeCommitEnvelope) await beforeCommitEnvelope(...args);
+            return target.commitEnvelope(...args);
           };
         }
         const value = target[property];
@@ -84,6 +112,34 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
         resolve: async (ownerUserId, artifactLocator) =>
           artifactResolutions.get(`${ownerUserId}:${artifactLocator}`) ?? null,
       },
+      deferredReceiptStore: receiptStore,
+      writeOpportunityDeliveryStore: {
+        async get(ownerUserId, opportunityId) {
+          return (
+            deliveredWriteOpportunities.find(
+              (record) => record.ownerUserId === ownerUserId && record.opportunityId === opportunityId,
+            ) ?? null
+          );
+        },
+        async recordDelivered() {},
+        async listInvocationOpportunityIds(ownerUserId, invocationId) {
+          return deliveredWriteOpportunities
+            .filter((record) => record.ownerUserId === ownerUserId && record.invocationId === invocationId)
+            .map((record) => record.opportunityId);
+        },
+        async purgeLineage() {
+          return 0;
+        },
+      },
+      writeOpportunityTerminalLedger: {
+        async recordTerminal(input) {
+          writeOpportunityTerminals.push(input);
+        },
+        async recordInvalidated() {},
+        async readLineageStates() {
+          return new Map();
+        },
+      },
     });
     await app.ready();
   });
@@ -99,6 +155,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     if (connected) await cleanupClientKeyspace(redis);
     stageCalls = 0;
     afterStage = undefined;
+    beforeCommitEnvelope = undefined;
     socketEvents = [];
     workspaceResolution = {
       status: 'resolved',
@@ -107,6 +164,9 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     };
     workspaceResolutions = new Map();
     artifactResolutions = new Map();
+    deferredReceipt = undefined;
+    deliveredWriteOpportunities = [];
+    writeOpportunityTerminals = [];
   });
 
   async function propose(body, originContent = '黄挺是终端用户计算开发部 21 级') {
@@ -122,7 +182,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     return { response, origin };
   }
 
-  async function proposeFromOrigin(body, origin) {
+  async function proposeFromOrigin(body, origin, onAuth) {
     const auth = await registry.create(
       'owner-1',
       'codex-sol',
@@ -132,6 +192,7 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       undefined,
       origin.id,
     );
+    onAuth?.(auth);
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/propose-person-memory',
@@ -163,6 +224,94 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     clientRequestId: 'f276-route-1',
   };
 
+  const writeOpportunityRef = {
+    opportunityId: `write_opp_${'c'.repeat(32)}`,
+    dedupeLineage: `write_lineage_${'a'.repeat(32)}`,
+    generation: 1,
+  };
+
+  function deliveredWriteOpportunity(invocationId) {
+    return {
+      v: 1,
+      ...writeOpportunityRef,
+      reflexId: 'asr-person-memory',
+      reflexVersion: 1,
+      ownerUserId: 'owner-1',
+      threadId: 'thread_people',
+      consumerCatId: 'codex-sol',
+      invocationId,
+      eligibleAt: 1,
+      expiresAt: Date.now() + 86_400_000,
+      rearmPredicate: 'next_eligible_owner_context_after_defer',
+      destinationProposalContract: 'F276.CaptureCandidate.v1',
+      sourceRefs: [
+        {
+          artifactId: 'meeting-intake-1',
+          sourceRevision: `sha256:${'b'.repeat(64)}`,
+          attributionRevision: `sha256:${'d'.repeat(64)}`,
+          segmentStart: 0,
+          segmentEnd: 128,
+        },
+      ],
+      presentedAt: 2,
+      generationId: `sha256:${'e'.repeat(64)}`,
+      evidenceRef: `context-delivery:x:sha256:${'e'.repeat(64)}`,
+      continuityDispositionRef: 'continuity:x',
+    };
+  }
+
+  it('binds an ASR proposal to delivered evidence and closes that generation', async () => {
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺是终端用户计算开发部 21 级',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const response = await proposeFromOrigin({ ...proposalBody, writeOpportunityRef }, origin, (auth) =>
+      deliveredWriteOpportunities.push(deliveredWriteOpportunity(auth.invocationId)),
+    );
+
+    assert.equal(response.statusCode, 200, response.body);
+    const candidateId = response.json().candidateId;
+    assert.deepEqual(writeOpportunityTerminals, [
+      {
+        ownerUserId: 'owner-1',
+        dedupeLineage: writeOpportunityRef.dedupeLineage,
+        generation: 1,
+        outcome: 'propose',
+        recordedAt: writeOpportunityTerminals[0].recordedAt,
+      },
+    ]);
+    const candidate = await store.getCandidateForOwner('owner-1', candidateId);
+    assert.equal(candidate.publication.state, 'anchored');
+    assert.deepEqual(candidate.writeOpportunityLineage, {
+      reflexId: 'asr-person-memory',
+      reflexVersion: 1,
+      ...writeOpportunityRef,
+    });
+  });
+
+  it('rejects an unattributed proposal when this invocation received an opportunity', async () => {
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺是终端用户计算开发部 21 级',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const response = await proposeFromOrigin(proposalBody, origin, (auth) =>
+      deliveredWriteOpportunities.push(deliveredWriteOpportunity(auth.invocationId)),
+    );
+
+    assert.equal(response.statusCode, 409);
+    assert.equal(response.json().reason, 'write_opportunity_ref_required');
+    assert.equal(stageCalls, 0);
+    assert.deepEqual(writeOpportunityTerminals, []);
+  });
+
   it('derives ownership and origin, persists the rich card, then anchors one candidate', async () => {
     const { response, origin } = await propose(proposalBody);
     assert.equal(response.statusCode, 200);
@@ -188,6 +337,542 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       card.actions.map((action) => action.action),
       ['person-memory:open-approval-hub'],
     );
+  });
+
+  it('atomically binds an exact claimed deferred receipt and rejects a withdraw race', async () => {
+    const history = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺和我聊了三小时团队管理',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_history',
+    });
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: 'daily deferred memory clerk',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const unrelated = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '这是一条未进入 deferred receipt 的其他人物证据',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_history',
+    });
+    const sourceCoordinates = [
+      {
+        kind: 'message',
+        sourceRef: { kind: 'message', threadId: 'thread_history', messageId: history.id },
+        resolvedDigest: digestSourceMaterial(history.content),
+      },
+    ];
+    const registryBinding = { kind: 'registered_entity', ref: 'person:huang-ting-huawei' };
+    const receiptId = `deferred_person_${'a'.repeat(32)}`;
+    const stagedReceipt = await receiptStore.stage({
+      receiptId,
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-sol',
+      invocationId: 'invocation-deferred',
+      originMessageRef: { kind: 'message', threadId: 'thread_people', messageId: origin.id },
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding,
+      sourceCoordinates,
+      sourceBundleDigest: 'a'.repeat(64),
+      dedupeHash: personMemoryDeltaFingerprint(registryBinding, sourceCoordinates),
+      ready: true,
+      createdAt: Date.now() - 1_000,
+    });
+    assert.equal(stagedReceipt.outcome, 'created');
+    const claimedReceipt = await receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId,
+      claimId: 'daily-claim-1',
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(claimedReceipt.outcome, 'claimed');
+    deferredReceipt = claimedReceipt.receipt;
+    const body = {
+      ...proposalBody,
+      claims: [],
+      interaction: {
+        payload: {
+          duration: { kind: 'approximate', raw: '约三小时', qualifier: 'about' },
+          eventKind: 'meeting',
+          headline: '黄挺与 You 交流团队管理',
+          importanceOrTopic: '团队管理',
+          uncertaintyNotes: ['具体发生时间未说明'],
+        },
+        normalizedDraft: '黄挺与 You 进行了约三小时的团队管理交流',
+        sourceRole: 'owner_explicit',
+        evidenceExcerpt: history.content,
+        sources: [
+          {
+            messageId: history.id,
+            evidenceExcerpt: history.content,
+            supports: ['eventKind', 'headline', 'duration', 'importanceOrTopic', 'uncertaintyNotes'],
+          },
+        ],
+      },
+      sourceBundle: {
+        sources: [
+          {
+            sourceId: 'history-message',
+            kind: 'message_text',
+            messageId: history.id,
+            excerpt: history.content,
+          },
+        ],
+        assertionBindings: [
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'eventKind' }, role: 'reported_fact' },
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'headline' }, role: 'reported_fact' },
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'duration' }, role: 'reported_fact' },
+          {
+            sourceId: 'history-message',
+            target: { kind: 'interaction', field: 'importanceOrTopic' },
+            role: 'user_assessment',
+          },
+          {
+            sourceId: 'history-message',
+            target: { kind: 'interaction', field: 'uncertaintyNotes' },
+            role: 'user_assessment',
+          },
+        ],
+      },
+      deferredReceipt: { receiptId: deferredReceipt.receiptId, claimId: 'daily-claim-1' },
+      clientRequestId: deferredReceipt.receiptId,
+    };
+
+    afterStage = async () => {
+      await receiptStore.withdraw('owner-1', deferredReceipt.receiptId, Date.now());
+    };
+    const racedRequestId = 'deferred-withdraw-race';
+    const racedResponse = await proposeFromOrigin({ ...body, clientRequestId: racedRequestId }, origin);
+    assert.equal(racedResponse.statusCode, 409, racedResponse.body);
+    assert.deepEqual(JSON.parse(racedResponse.body), { error: 'deferred_receipt_transition_conflict' });
+    const racedCandidateId = `person_candidate_${createHash('sha256')
+      .update(['owner-1', 'codex-sol', racedRequestId].join('\0'))
+      .digest('hex')
+      .slice(0, 24)}`;
+    const racedCandidate = await store.getCandidateForOwner('owner-1', racedCandidateId);
+    assert.equal(racedCandidate.state, 'staged');
+    assert.equal(racedCandidate.publication.state, 'staged');
+    assert.deepEqual(await store.listPending('owner-1'), []);
+    afterStage = undefined;
+
+    const readyReceiptId = `deferred_person_${'b'.repeat(32)}`;
+    const readyReceipt = await receiptStore.stage({
+      receiptId: readyReceiptId,
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-sol',
+      invocationId: 'invocation-deferred-ready',
+      originMessageRef: { kind: 'message', threadId: 'thread_people', messageId: origin.id },
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding,
+      sourceCoordinates,
+      sourceBundleDigest: 'a'.repeat(64),
+      dedupeHash: personMemoryDeltaFingerprint(registryBinding, sourceCoordinates),
+      ready: true,
+      createdAt: Date.now(),
+    });
+    assert.equal(readyReceipt.outcome, 'created');
+    const readyClaim = await receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId: readyReceiptId,
+      claimId: 'daily-claim-ready',
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(readyClaim.outcome, 'claimed');
+    deferredReceipt = readyClaim.receipt;
+    const readyBody = {
+      ...body,
+      deferredReceipt: { receiptId: readyReceiptId, claimId: 'daily-claim-ready' },
+      clientRequestId: readyReceiptId,
+    };
+    const extraSource = await proposeFromOrigin(
+      {
+        ...readyBody,
+        sourceBundle: {
+          ...readyBody.sourceBundle,
+          sources: [
+            ...readyBody.sourceBundle.sources,
+            {
+              sourceId: 'unrelated-message',
+              kind: 'message_text',
+              messageId: unrelated.id,
+              excerpt: unrelated.content,
+            },
+          ],
+        },
+      },
+      origin,
+    );
+    assert.equal(extraSource.statusCode, 409);
+    assert.equal(JSON.parse(extraSource.body).error, 'deferred_receipt_source_conflict');
+
+    const response = await proposeFromOrigin(readyBody, origin);
+
+    assert.equal(response.statusCode, 200, response.body);
+    const result = JSON.parse(response.body);
+    const candidate = await store.getCandidateForOwner('owner-1', result.candidateId);
+    assert.equal(candidate.deferredReceiptId, deferredReceipt.receiptId);
+    const proposedReceipt = await receiptStore.get('owner-1', deferredReceipt.receiptId);
+    assert.equal(proposedReceipt.state, 'proposed');
+    assert.equal(proposedReceipt.proposalId, result.candidateId);
+
+    const badClaim = await proposeFromOrigin(
+      { ...readyBody, deferredReceipt: { receiptId: deferredReceipt.receiptId, claimId: 'wrong-claim' } },
+      origin,
+    );
+    assert.equal(badClaim.statusCode, 409);
+  });
+
+  it('renews a reclaimed deferred receipt after its first approval card outlives claim expiry', async () => {
+    const history = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '黄挺和我聊了三小时团队管理',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_history',
+    });
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: 'daily deferred memory clerk',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const sourceCoordinates = [
+      {
+        kind: 'message',
+        sourceRef: { kind: 'message', threadId: history.threadId, messageId: history.id },
+        resolvedDigest: digestSourceMaterial(history.content),
+      },
+    ];
+    const registryBinding = { kind: 'registered_entity', ref: 'person:huang-ting-huawei' };
+    const receiptId = `deferred_person_${'9'.repeat(32)}`;
+    const staged = await receiptStore.stage({
+      receiptId,
+      ownerUserId: 'owner-1',
+      requesterCatId: 'codex-sol',
+      invocationId: 'invocation-deferred-retry',
+      originMessageRef: { kind: 'message', threadId: origin.threadId, messageId: origin.id },
+      subject: '黄挺',
+      normalizedSubject: '黄挺',
+      registryBinding,
+      sourceCoordinates,
+      sourceBundleDigest: '9'.repeat(64),
+      dedupeHash: personMemoryDeltaFingerprint(registryBinding, sourceCoordinates),
+      ready: true,
+      createdAt: Date.now() - 1_000,
+    });
+    assert.equal(staged.outcome, 'created');
+    const claimA = await receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId,
+      claimId: 'daily-claim-a',
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(claimA.outcome, 'claimed');
+
+    const body = {
+      ...proposalBody,
+      claims: [],
+      interaction: {
+        payload: {
+          duration: { kind: 'approximate', raw: '约三小时', qualifier: 'about' },
+          eventKind: 'meeting',
+          headline: '黄挺与 You 交流团队管理',
+          importanceOrTopic: '团队管理',
+          uncertaintyNotes: ['具体发生时间未说明'],
+        },
+        normalizedDraft: '黄挺与 You 进行了约三小时的团队管理交流',
+        sourceRole: 'owner_explicit',
+        evidenceExcerpt: history.content,
+        sources: [
+          {
+            messageId: history.id,
+            evidenceExcerpt: history.content,
+            supports: ['eventKind', 'headline', 'duration', 'importanceOrTopic', 'uncertaintyNotes'],
+          },
+        ],
+      },
+      sourceBundle: {
+        sources: [
+          {
+            sourceId: 'history-message',
+            kind: 'message_text',
+            messageId: history.id,
+            excerpt: history.content,
+          },
+        ],
+        assertionBindings: [
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'eventKind' }, role: 'reported_fact' },
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'headline' }, role: 'reported_fact' },
+          { sourceId: 'history-message', target: { kind: 'interaction', field: 'duration' }, role: 'reported_fact' },
+          {
+            sourceId: 'history-message',
+            target: { kind: 'interaction', field: 'importanceOrTopic' },
+            role: 'user_assessment',
+          },
+          {
+            sourceId: 'history-message',
+            target: { kind: 'interaction', field: 'uncertaintyNotes' },
+            role: 'user_assessment',
+          },
+        ],
+      },
+      deferredReceipt: { receiptId, claimId: 'daily-claim-a' },
+      clientRequestId: receiptId,
+    };
+
+    let expiredAfterCard = false;
+    beforeCommitEnvelope = async () => {
+      if (expiredAfterCard) return;
+      expiredAfterCard = true;
+      const receiptKey = receiptStore.keys.receipt('owner-1', receiptId);
+      const current = JSON.parse(await redis.get(receiptKey));
+      await redis.set(receiptKey, JSON.stringify({ ...current, claimUntil: Date.now() - 1 }));
+    };
+    const first = await proposeFromOrigin(body, origin);
+    assert.equal(first.statusCode, 409, first.body);
+    assert.deepEqual(JSON.parse(first.body), { error: 'deferred_receipt_transition_conflict' });
+    const candidateId = `person_candidate_${createHash('sha256')
+      .update(['owner-1', 'codex-sol', receiptId].join('\0'))
+      .digest('hex')
+      .slice(0, 24)}`;
+    const stagedCandidate = await store.getCandidateForOwner('owner-1', candidateId);
+    assert.equal(stagedCandidate.state, 'staged');
+    assert.equal(stagedCandidate.deferredReceiptClaimId, 'daily-claim-a');
+    const cardsAfterFirstAttempt = (await messageStore.getByThread('thread_people', 50, 'owner-1'))
+      .flatMap((message) => message.extra?.rich?.blocks ?? [])
+      .filter((block) => block.meta?.kind === 'person_memory_proposal' && block.meta.candidateId === candidateId);
+    assert.equal(cardsAfterFirstAttempt.length, 1);
+
+    beforeCommitEnvelope = undefined;
+    const claimB = await receiptStore.claim({
+      ownerUserId: 'owner-1',
+      receiptId,
+      claimId: 'daily-claim-b',
+      now: Date.now(),
+      leaseMs: 60_000,
+    });
+    assert.equal(claimB.outcome, 'claimed');
+    const retried = await proposeFromOrigin(
+      { ...body, deferredReceipt: { receiptId, claimId: 'daily-claim-b' } },
+      origin,
+    );
+    assert.equal(retried.statusCode, 200, retried.body);
+
+    const result = JSON.parse(retried.body);
+    assert.equal(result.candidateId, candidateId);
+    assert.equal(stageCalls, 1);
+    const candidate = await store.getCandidateForOwner('owner-1', result.candidateId);
+    assert.equal(candidate.state, 'pending_approval');
+    assert.equal(candidate.publication.state, 'anchored');
+    assert.equal(candidate.deferredReceiptClaimId, undefined);
+    const terminalReceipt = await receiptStore.get('owner-1', receiptId);
+    assert.equal(terminalReceipt.state, 'proposed');
+    assert.equal(terminalReceipt.proposalId, result.candidateId);
+    const cards = (await messageStore.getByThread('thread_people', 50, 'owner-1'))
+      .flatMap((message) => message.extra?.rich?.blocks ?? [])
+      .filter(
+        (block) => block.meta?.kind === 'person_memory_proposal' && block.meta.candidateId === result.candidateId,
+      );
+    assert.equal(cards.length, 1);
+  });
+
+  it('rejects duplicate resolved coordinates in a direct proposal before any candidate or card write', async () => {
+    const originContent = '黄挺是终端用户计算开发部 21 级';
+    const clientRequestId = 'direct-duplicate-coordinate';
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: originContent,
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const response = await proposeFromOrigin(
+      {
+        ...proposalBody,
+        clientRequestId,
+        sourceBundle: {
+          sources: [
+            {
+              sourceId: 'same-coordinate-a',
+              kind: 'message_text',
+              messageId: origin.id,
+              excerpt: originContent,
+            },
+            {
+              sourceId: 'same-coordinate-b',
+              kind: 'message_text',
+              messageId: origin.id,
+              excerpt: originContent,
+            },
+          ],
+          assertionBindings: [
+            { sourceId: 'same-coordinate-a', target: { kind: 'claim', index: 0 }, role: 'reported_fact' },
+            { sourceId: 'same-coordinate-b', target: { kind: 'claim', index: 0 }, role: 'reported_fact' },
+          ],
+        },
+      },
+      origin,
+    );
+
+    assert.equal(response.statusCode, 422, response.body);
+    assert.deepEqual(JSON.parse(response.body), { error: 'duplicate_source_coordinate' });
+    assert.equal(stageCalls, 0);
+    const candidateId = `person_candidate_${createHash('sha256')
+      .update(['owner-1', 'codex-sol', clientRequestId].join('\0'))
+      .digest('hex')
+      .slice(0, 24)}`;
+    assert.equal(await store.getCandidateForOwner('owner-1', candidateId), null);
+    const cards = (await messageStore.getByThread('thread_people', 50, 'owner-1'))
+      .flatMap((message) => message.extra?.rich?.blocks ?? [])
+      .filter((block) => block.meta?.kind === 'person_memory_proposal' && block.meta.candidateId === candidateId);
+    assert.deepEqual(cards, []);
+  });
+
+  it('rejects duplicate message coordinates even when an owner-private artifact makes the bundle fingerprint-unsupported', async () => {
+    const originContent = '黄挺是终端用户计算开发部 21 级';
+    const locator = 'workspace:people/huang-ting.md#organization';
+    const artifactDigest = digestSourceMaterial(originContent);
+    const clientRequestId = 'direct-mixed-duplicate-coordinate';
+    artifactResolutions.set(`owner-1:${locator}`, {
+      digest: artifactDigest,
+      boundedText: originContent,
+    });
+    const evidence = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: originContent,
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const confirmation = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '对，这份记录内容准确。',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+
+    const response = await proposeFromOrigin(
+      {
+        ...proposalBody,
+        clientRequestId,
+        sourceBundle: {
+          sources: [
+            {
+              sourceId: 'mixed-private-artifact',
+              kind: 'owner_private_artifact',
+              artifactLocator: locator,
+              expectedDigest: artifactDigest,
+              boundedExcerpt: originContent,
+              confirmationMessageId: confirmation.id,
+            },
+            {
+              sourceId: 'mixed-same-coordinate-a',
+              kind: 'message_text',
+              messageId: evidence.id,
+              excerpt: originContent,
+            },
+            {
+              sourceId: 'mixed-same-coordinate-b',
+              kind: 'message_text',
+              messageId: evidence.id,
+              excerpt: originContent,
+            },
+          ],
+          assertionBindings: [
+            {
+              sourceId: 'mixed-private-artifact',
+              target: { kind: 'claim', index: 0 },
+              role: 'reported_fact',
+            },
+            {
+              sourceId: 'mixed-same-coordinate-a',
+              target: { kind: 'claim', index: 0 },
+              role: 'reported_fact',
+            },
+            {
+              sourceId: 'mixed-same-coordinate-b',
+              target: { kind: 'claim', index: 0 },
+              role: 'reported_fact',
+            },
+          ],
+        },
+      },
+      confirmation,
+    );
+
+    assert.equal(response.statusCode, 422, response.body);
+    assert.deepEqual(JSON.parse(response.body), { error: 'duplicate_source_coordinate' });
+    assert.equal(stageCalls, 0);
+    const candidateId = `person_candidate_${createHash('sha256')
+      .update(['owner-1', 'codex-sol', clientRequestId].join('\0'))
+      .digest('hex')
+      .slice(0, 24)}`;
+    assert.equal(await store.getCandidateForOwner('owner-1', candidateId), null);
+    const cards = (await messageStore.getByThread('thread_people', 50, 'owner-1'))
+      .flatMap((message) => message.extra?.rich?.blocks ?? [])
+      .filter((block) => block.meta?.kind === 'person_memory_proposal' && block.meta.candidateId === candidateId);
+    assert.deepEqual(cards, []);
+  });
+
+  it('detects duplicate attachment coordinates throughout a fingerprint-unsupported mixed bundle', () => {
+    const digest = 'a'.repeat(64);
+    const sourceRef = { threadId: 'thread_people', messageId: 'message-with-attachment' };
+    const attachmentLocator = { surface: 'content_block', index: 0 };
+    const coordinates = proposalPersonMemoryDeltaCoordinates({
+      sources: [
+        {
+          sourceId: 'mixed-artifact',
+          kind: 'owner_private_artifact',
+          artifactLocator: 'workspace:people/huang-ting.md#organization',
+          confirmationSourceRef: { threadId: 'thread_people', messageId: 'artifact-confirmation' },
+          ownerUserId: 'owner-1',
+          resolvedDigest: digest,
+          boundedExcerpt: '黄挺属于终端用户计算开发部',
+        },
+        {
+          sourceId: 'mixed-attachment-a',
+          kind: 'message_attachment',
+          sourceRef,
+          ownerUserId: 'owner-1',
+          attachmentLocator,
+          resolvedDigest: digest,
+          boundedTranscript: '黄挺属于终端用户计算开发部',
+        },
+        {
+          sourceId: 'mixed-attachment-b',
+          kind: 'message_attachment',
+          sourceRef,
+          ownerUserId: 'owner-1',
+          attachmentLocator,
+          resolvedDigest: digest,
+          boundedTranscript: '黄挺属于终端用户计算开发部',
+        },
+      ],
+      assertionBindings: [],
+    });
+
+    assert.deepEqual(coordinates, { status: 'duplicate' });
   });
 
   it('blocks an over-budget rendered card before staging with an actionable preflight', async () => {
@@ -688,32 +1373,26 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       const sourceBundle = {
         sources: [
           {
-            sourceId: 'alden-project',
+            sourceId: 'alden-owner-message',
             kind: 'message_text',
             messageId: origin.id,
-            excerpt: `负责 ${projectName}`,
-          },
-          {
-            sourceId: 'alden-interaction',
-            kind: 'message_text',
-            messageId: origin.id,
-            excerpt: '我们聊过主动记忆，这次讨论很重要',
+            excerpt: content,
           },
         ],
         assertionBindings: [
-          { sourceId: 'alden-project', target: { kind: 'claim', index: 0 }, role: 'reported_fact' },
+          { sourceId: 'alden-owner-message', target: { kind: 'claim', index: 0 }, role: 'reported_fact' },
           {
-            sourceId: 'alden-interaction',
+            sourceId: 'alden-owner-message',
             target: { kind: 'interaction', field: 'eventKind' },
             role: 'reported_fact',
           },
           {
-            sourceId: 'alden-interaction',
+            sourceId: 'alden-owner-message',
             target: { kind: 'interaction', field: 'headline' },
             role: 'reported_fact',
           },
           {
-            sourceId: 'alden-interaction',
+            sourceId: 'alden-owner-message',
             target: { kind: 'interaction', field: 'importanceOrTopic' },
             role: 'user_assessment',
           },
@@ -1522,9 +2201,9 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
 
   it('deduplicates retries and rejects an invalid caller-selected source message', async () => {
     const first = await propose(proposalBody);
-    const second = await propose(proposalBody);
-    assert.equal(JSON.parse(first.response.body).candidateId, JSON.parse(second.response.body).candidateId);
-    assert.equal(JSON.parse(second.response.body).deduped, true);
+    const second = await proposeFromOrigin(proposalBody, first.origin);
+    assert.equal(JSON.parse(first.response.body).candidateId, JSON.parse(second.body).candidateId);
+    assert.equal(JSON.parse(second.body).deduped, true);
 
     const forged = await propose({ ...proposalBody, sourceMessageId: 'msg_forged', clientRequestId: 'forged' });
     assert.equal(forged.response.statusCode, 400);

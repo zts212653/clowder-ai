@@ -61,6 +61,16 @@ export {
   buildExternalCaseClosureHealth,
   evaluateExternalCaseReplay,
 } from './external-case-closure-eval.js';
+export type {
+  DomainNegativeControlCase,
+  DomainNegativeControlCohort,
+  DomainNegativeControlResultOptions,
+} from './measurement/domain-negative-control.js';
+export {
+  buildDomainNegativeControlResult,
+  DomainNegativeControlCohortSchema,
+  parseDomainNegativeControlCohort,
+} from './measurement/domain-negative-control.js';
 export type { FrictionMeasurementBundleResultOptions } from './measurement/friction-measurement-bundle.js';
 export { buildFrictionMeasurementBundleResult } from './measurement/friction-measurement-bundle.js';
 export type { MeasurementBundleCensus } from './measurement/measurement-bundle-census.js';

@@ -64,7 +64,7 @@ describe('F24: mid-invocation message injection', () => {
       );
     });
 
-    const stopBtn = container.querySelector('button[aria-label="停止对话"]');
+    const stopBtn = container.querySelector('button[aria-label="Stop generation"]');
     const micBtn = container.querySelector('button[aria-label*="voice input"]');
     expect(stopBtn).not.toBeNull();
     expect(micBtn).not.toBeNull();
@@ -87,7 +87,7 @@ describe('F24: mid-invocation message injection', () => {
       );
     });
 
-    const stopBtn = container.querySelector('button[aria-label="停止对话"]');
+    const stopBtn = container.querySelector('button[aria-label="Stop generation"]');
     const sendBtn = container.querySelector('button[aria-label="Send message"]');
     expect(stopBtn).not.toBeNull();
     expect(sendBtn).not.toBeNull();
@@ -133,7 +133,7 @@ describe('F24: mid-invocation message injection', () => {
       );
     });
 
-    const stopBtns = container.querySelectorAll('button[aria-label="停止对话"]');
+    const stopBtns = container.querySelectorAll('button[aria-label="Stop generation"]');
     const sendBtn = container.querySelector('button[aria-label="Send message"]');
     // When disabled=true, only the primary (large) Stop button should exist
     expect(stopBtns.length).toBe(1);

@@ -80,6 +80,8 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       'dispatch-proposal-user-settled:*',
       'dispatch-proposal-clientmsg:*',
       'dispatch-proposal-lineage:*',
+      'dispatch-proposal-canonical-admission:*',
+      'dispatch-proposal-canonical-admission-rebuild-completed-at',
       'action:successor:*',
     ]);
   });
@@ -136,6 +138,77 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     assert.equal(persisted.actionLeaseRef.generation, 1);
     assert.equal(await proposalStore.getApprovalOwnerAuthProvenance(proposal.proposalId), 'strict');
     assert.equal(first.value.actionLease.dispatchDeliveryState, 'pending');
+    assert.equal(await redis.scard('action:successor:all'), 1);
+    const { computeDispatchCanonicalActionKey } = await import(
+      '../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'
+    );
+    assert.deepEqual(
+      await proposalStore.findCanonicalAdmissionBlocks({
+        ownerUserId: proposal.ownerUserId,
+        canonicalActionKey: computeDispatchCanonicalActionKey(proposal.ownerUserId, proposal.proposedAction),
+      }),
+      [],
+      'the atomic approval removes its proposal from canonical admission before subsequent carriers inspect it',
+    );
+  });
+
+  test('matching task standing approves exactly one executable implement lease', async () => {
+    const taskAction = {
+      subjectRef: 'subject:task:task-standing-redis',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
+      mode: 'single',
+      terminalPredicate: { kind: 'task_done' },
+    };
+    const { validateDispatchProposedAction } = await import(
+      '../../dist/domains/approval-hub/DispatchProposedAction.js'
+    );
+    const validated = validateDispatchProposedAction(taskAction, ['codex-terra']);
+    const { proposal } = await proposalStore.create({
+      proposalId: 'dp-task-standing-redis',
+      sourceThreadId: 'thread-source',
+      targetThreadId: 'thread-target',
+      senderCatId: 'codex-sol',
+      ownerUserId: 'user-1',
+      content: 'Implement the durable task.',
+      targetCats: ['codex-terra'],
+      clientMessageId: 'task-standing-redis',
+      proposedAction: validated.action,
+      envelopeDigest: validated.envelopeDigest,
+      createdAt: 9_000,
+    });
+    const { ActionSuccessorAdmissionService } = await import(
+      '../../dist/domains/ball-custody/ActionSuccessorAdmissionService.js'
+    );
+    const taskAdmission = new ActionSuccessorAdmissionService(leaseStore, {
+      async resolve() {
+        return { terminal: false, source: 'task_store', state: 'active' };
+      },
+      async resolveFreshness(predicate) {
+        return {
+          status: 'verified',
+          evidenceRef: 'task:task-standing-redis:active:9000',
+          freshnessKey: predicate.freshnessKey,
+          ownerCatId: 'codex-terra',
+          holderThreadId: 'thread-target',
+          tenantScope: 'user-1',
+        };
+      },
+    });
+    const taskApproval = new DispatchActionApprovalService({
+      store: proposalStore,
+      leaseStore,
+      admissionService: taskAdmission,
+      claimAndApprove: approveWithClaim,
+      now: () => 10_000,
+    });
+
+    const result = await taskApproval.approve(proposal, 'user-1', 'strict');
+
+    assert.equal(result.approved, true);
+    assert.equal(result.value.actionLease.actionFamily, 'implement');
+    assert.deepEqual(result.value.actionLease.holderCatIds, ['codex-terra']);
+    assert.equal(result.value.actionLease.holderThreadId, 'thread-target');
     assert.equal(await redis.scard('action:successor:all'), 1);
   });
 

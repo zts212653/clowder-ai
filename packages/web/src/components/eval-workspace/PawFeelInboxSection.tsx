@@ -8,10 +8,10 @@ import { type PawFeelFilter, PawFeelInboxToolbar } from './PawFeelInboxToolbar';
 import { usePawFeelDuty } from './usePawFeelDuty';
 
 const FILTER_STATES: Record<PawFeelFilter, PawFeelDispositionState[] | undefined> = {
-  active: ['new', 'seen', 'route_pending'],
+  active: ['new', 'seen', 'route_pending', 'routed', 'fix', 'signature_waiting', 'blocked'],
   all: undefined,
-  overdue: ['new', 'seen', 'route_pending'],
-  disposed: ['routed', 'closed', 'duplicate', 'no_action', 'fix'],
+  overdue: ['new', 'seen', 'route_pending', 'routed', 'fix', 'signature_waiting', 'blocked'],
+  disposed: ['closed', 'duplicate', 'no_action'],
 };
 
 function isInboxPage(value: unknown): value is PawFeelInboxPage {

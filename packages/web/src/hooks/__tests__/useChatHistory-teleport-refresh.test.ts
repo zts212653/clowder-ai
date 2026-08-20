@@ -123,6 +123,7 @@ describe('useChatHistory approval-card teleport refresh', () => {
     apiFetchMock.mockReset();
     __resetPendingTeleportForTest();
     __resetPendingCrossPostScrollForTest();
+    vi.restoreAllMocks();
   });
 
   it('revalidates a cached thread when the requested approval-card anchor is missing', async () => {
@@ -157,5 +158,33 @@ describe('useChatHistory approval-card teleport refresh', () => {
     expect(historyCall?.[0]).toBe(`/api/messages?limit=50&threadId=${THREAD_ID}`);
     expect(useChatStore.getState().messages.map((message) => message.id)).toContain(CROSS_POST_SOURCE.id);
     expect(peekPendingCrossPostScroll(THREAD_ID)).toBeNull();
+  });
+
+  it('cancels a pending anchor-scroll retry when the history hook unmounts', async () => {
+    let nextFrameId = 1;
+    const pendingFrames = new Set<number>();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => {
+      const frameId = nextFrameId++;
+      pendingFrames.add(frameId);
+      return frameId;
+    });
+    const cancelFrame = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((frameId) => {
+      pendingFrames.delete(frameId);
+    });
+    setPendingTeleport({ threadId: THREAD_ID, messageId: APPROVAL_CARD.id });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(pendingFrames.size).toBe(1);
+    const activeFrameId = [...pendingFrames][0];
+
+    act(() => root.render(null));
+
+    expect(cancelFrame).toHaveBeenCalledWith(activeFrameId);
+    expect(pendingFrames.size).toBe(0);
   });
 });

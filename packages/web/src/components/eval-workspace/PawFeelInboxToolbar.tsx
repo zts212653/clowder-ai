@@ -37,12 +37,17 @@ export function PawFeelInboxToolbar({
   onSort: (sort: PawFeelInboxSort) => void;
   onNewest: () => void;
 }) {
-  const activeCount = page ? Math.max(0, page.counts.total - page.counts.disposed) : 0;
+  const activeCount = page
+    ? page.responsibilityCounts.unreviewed +
+      page.responsibilityCounts.bound_in_repair +
+      page.responsibilityCounts.signature_waiting +
+      page.responsibilityCounts.blocked
+    : 0;
   const filterCounts: Record<PawFeelFilter, number> = {
     active: activeCount,
-    all: page?.counts.total ?? 0,
+    all: page?.bundleCounts.total ?? 0,
     overdue: page?.counts.overdue ?? 0,
-    disposed: page?.counts.disposed ?? 0,
+    disposed: page?.responsibilityCounts.terminal ?? 0,
   };
 
   return (
@@ -52,8 +57,11 @@ export function PawFeelInboxToolbar({
           className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-2 rounded-xl bg-[var(--console-card-bg)] px-3 py-2.5 shadow-[var(--console-shadow-soft)]"
           data-testid="paw-feel-primary-summary"
         >
-          <SummaryMetric label="待处置" value={activeCount} />
-          <SummaryMetric label="审阅包" value={page.denominator.reviewBundles} />
+          <SummaryMetric label="unreviewed" value={page.responsibilityCounts.unreviewed} />
+          <SummaryMetric label="bound-in-repair" value={page.responsibilityCounts.bound_in_repair} />
+          <SummaryMetric label="signature-waiting" value={page.responsibilityCounts.signature_waiting} />
+          <SummaryMetric label="blocked" value={page.responsibilityCounts.blocked} />
+          <SummaryMetric label="terminal" value={page.responsibilityCounts.terminal} />
           <SummaryMetric label="72h+" value={page.counts.overdue} alert={page.counts.overdue > 0} />
         </dl>
       ) : null}
@@ -132,7 +140,7 @@ export function PawFeelInboxToolbar({
                 </p>
                 <p className="mt-1 text-micro leading-relaxed text-cafe-muted">
                   {dutyConfigured
-                    ? '由值班猫在系统 thread 签署；24h 后 backup 接管。Workspace 不代猫签，也不把 routed 冒充已修复。'
+                    ? 'Primary 持续负责；Backup 仅在显式交接后接班。报告猫不能签自己的 terminal，routed 也不冒充业务完成。'
                     : '值班未配置；Workspace 不代猫签，也不会猜 owner。'}
                 </p>
               </div>

@@ -244,10 +244,10 @@ describe('F254 legacy closure accounting', () => {
 });
 
 describe('F254 frozen legacy closure migration bundle', () => {
-  test('unions 16 census closures with 35 post-census log closures under the full 51-active root', () => {
+  test('unions 16 census closures with 35 durable post-census turns after runtime logs rotate', () => {
     const closures = Array.from({ length: 51 }, (_, index) => blockedClosure(`closure-inventory-${index}`, index));
     const entries = closures.map((closure, index) =>
-      recoveryEntry(`invocation-inventory-${String(index).padStart(2, '0')}`, closure.id, `final-${index}`),
+      recoveryEntry(closure.turnInvocationId, closure.id, `final-${index}`),
     );
     const census = closures.slice(0, 16).map((closure, index) => ({
       invocationId: entries[index].invocationId,
@@ -263,27 +263,15 @@ describe('F254 frozen legacy closure migration bundle', () => {
         decisionKind: 'blocked_known_closure',
       },
     }));
-    const logEvents = closures.slice(16).map((closure, offset) => {
-      const index = offset + 16;
-      return {
-        withheldAtUtc: `2026-07-13T03:${String(offset).padStart(2, '0')}:00.000Z`,
-        threadId: closure.threadId,
-        catId: closure.catId,
-        invocationId: entries[index].invocationId,
-        closureId: closure.id,
-        decisionKind: 'blocked_known_closure',
-        evidenceRef: `api-log:api.log#L${index}`,
-      };
-    });
     const attachments = collectLegacyWithheldAttachments({
       closures,
       census,
-      logEvents,
+      logEvents: [],
       legacyBeforeExclusive: '2026-07-13T04:47:19.000Z',
     });
     assert.equal(attachments.length, 51);
     assert.equal(attachments.filter((item) => item.source === 'legacy_census').length, 16);
-    assert.equal(attachments.filter((item) => item.source === 'runtime_log').length, 35);
+    assert.equal(attachments.filter((item) => item.source === 'closure_state').length, 35);
 
     const bundle = buildLegacyClosureMigrationBundle({
       generatedAt: '2026-07-13T08:31:00.000Z',
@@ -363,6 +351,34 @@ describe('F254 frozen legacy closure migration bundle', () => {
       if (previousIsolationFlag === undefined) delete process.env.CAT_CAFE_REDIS_TEST_ISOLATED;
       else process.env.CAT_CAFE_REDIS_TEST_ISOLATED = previousIsolationFlag;
     }
+  });
+
+  test('uses durable turn custody only when retry history proves no other withheld output', () => {
+    const collect = (attempts) =>
+      collectLegacyWithheldAttachments({
+        closures: [{ ...blockedClosure('closure-history'), attempts }],
+        census: [],
+        logEvents: [],
+        legacyBeforeExclusive: '2026-07-13T04:47:19.000Z',
+      });
+    assert.equal(collect([{ outcome: 'failed' }, { outcome: 'canceled' }])[0].source, 'closure_state');
+    for (const outcome of ['superseded', 'committed', 'unknown']) {
+      assert.deepEqual(collect([{ outcome }]), [], `${outcome} attempt must block closure_state provenance`);
+    }
+  });
+
+  test('does not derive closure_state provenance for closures at or after the legacy cutoff', () => {
+    const collect = (createdAt) =>
+      collectLegacyWithheldAttachments({
+        closures: [{ ...blockedClosure('closure-cutoff'), createdAt }],
+        census: [],
+        logEvents: [],
+        legacyBeforeExclusive: '2026-07-13T04:47:19.000Z',
+      });
+    const cutoff = Date.parse('2026-07-13T04:47:19.000Z');
+    assert.equal(collect(cutoff - 1)[0].source, 'closure_state');
+    assert.deepEqual(collect(cutoff), []);
+    assert.deepEqual(collect(cutoff + 1), []);
   });
 
   test('parses only exact withheld log events with line-addressable evidence', () => {

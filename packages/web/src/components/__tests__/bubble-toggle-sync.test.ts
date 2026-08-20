@@ -24,7 +24,7 @@ function jsonOk(data: unknown) {
 
 const CONFIG: ConfigData = {
   cats: {},
-  perCatBudgets: {},
+  perCatCapacities: {},
   a2a: { enabled: true, maxDepth: 2 },
   memory: { enabled: true, maxKeysPerThread: 50 },
   governance: { degradationEnabled: true, doneTimeoutMs: 300000, heartbeatIntervalMs: 30000 },

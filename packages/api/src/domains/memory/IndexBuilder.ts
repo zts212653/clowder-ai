@@ -1,7 +1,7 @@
 // F102: IIndexBuilder — scan docs, parse frontmatter, build/rebuild evidence index
 // F152 Phase A: refactored to use RepoScanner strategy (KD-5)
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { CatCafeScanner, extractFrontmatter, extractSupersedes, isFeatureDocPath } from './CatCafeScanner.js';
@@ -12,6 +12,7 @@ import type {
   EvidenceKind,
   IEmbeddingService,
   IIndexBuilder,
+  MessageRecallSuppressionLease,
   RebuildResult,
   RepoScanner,
 } from './interfaces.js';
@@ -45,8 +46,9 @@ import type { VectorStore } from './VectorStore.js';
  *   9 — temporal frontmatter fields: status/supersedes graph extraction
  *  10 — feature assets use path anchors; top-level feature specs own Fxxx
  *  11 — F287: approved Taste vignettes materialize complete decision passages
+ *  12 — external-knowledge artifact roles, study tags, and authority backfill
  */
-export const INDEXING_VERSION = 11;
+export const INDEXING_VERSION = 12;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {
@@ -86,6 +88,14 @@ export interface ThreadSnapshot {
 
 function computeThreadSourceHash(title: string, summary: string, keywords: string[]): string {
   return createHash('sha256').update(JSON.stringify({ title, summary, keywords })).digest('hex').slice(0, 16);
+}
+
+function projectThreadIndexTitle(thread: ThreadSnapshot, hasRecallSuppression: boolean): string {
+  // Thread titles may be generated from the first user message. Without title
+  // provenance, a prepared/committed true recall must fail closed instead of
+  // keeping a derived copy of the recalled body searchable.
+  if (hasRecallSuppression) return `Thread ${thread.id.slice(0, 12)}`;
+  return thread.title ?? `Thread ${thread.id.slice(0, 12)}`;
 }
 
 const SEARCHABLE_BLOCK_TEXT_FIELDS = [
@@ -511,61 +521,17 @@ export class IndexBuilder implements IIndexBuilder {
       }
 
       for (const thread of threads) {
-        const anchor = `thread-${thread.id}`;
-        const title = thread.title ?? `Thread ${thread.id.slice(0, 12)}`;
-        const keywords = [...thread.participants, ...(thread.featureIds ?? [])];
-
-        // KD-32/33: Build summary from message content, not threadMemory.summary
-        // threadMemory.summary is empty for 96% of threads — useless as data source
-        let summary = '';
-        if (this.messageListFn) {
-          try {
-            const messages = await this.messageListFn(thread.id, 100);
-            if (messages.length > 0) {
-              const turns = messages
-                .map((m) => {
-                  const content = buildSearchableMessageContent(m);
-                  return content ? `[${m.catId ?? 'user'}] ${content}` : '';
-                })
-                .filter(Boolean);
-              // Truncate to ~3000 chars for FTS5 summary field
-              const joined = turns.join('\n');
-              summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
-            }
-          } catch {
-            // fail-open: skip this thread's messages
-          }
-        }
-        // Fallback: use threadMemory.summary if messages unavailable
-        if (!summary) {
-          summary = thread.threadMemory?.summary ?? '';
-        }
-        // Still nothing? Use title as minimal searchable content
-        if (!summary) {
-          summary = title;
-        }
-
-        const sourceHash = computeThreadSourceHash(title, summary, keywords);
+        const item = await this.buildThreadEvidenceItem(thread);
+        const anchor = item.anchor;
 
         currentAnchors.add(anchor);
         if (!options?.force) {
           const existing = await this.store.getByAnchor(anchor);
-          if (existing?.sourceHash === sourceHash) {
+          if (existing?.sourceHash === item.sourceHash) {
             skipped++;
             continue;
           }
         }
-        const item: EvidenceItem = {
-          anchor,
-          kind: 'thread',
-          status: 'active',
-          title,
-          summary,
-          keywords: keywords.length > 0 ? keywords : undefined,
-          sourcePath: `threads/${thread.id}`,
-          sourceHash,
-          updatedAt: new Date(thread.lastActiveAt).toISOString(),
-        };
         await this.store.upsert([item]);
         indexedItems.push(item);
         indexed++;
@@ -944,6 +910,339 @@ export class IndexBuilder implements IIndexBuilder {
     this.dirtyThreads.add(threadId);
   }
 
+  private suppressedMessageIds(threadId: string): Set<string> {
+    const rows = this.store
+      .getDb()
+      .prepare(
+        `SELECT passage_id AS passageId
+         FROM message_recall_index_suppressions
+         WHERE doc_anchor = ?`,
+      )
+      .all(`thread-${threadId}`) as Array<{ passageId: string }>;
+    return new Set(rows.map((row) => row.passageId.replace(/^msg-/, '')));
+  }
+
+  /** Shared projection for both full rebuilds and dirty-thread flushes. */
+  private async buildThreadEvidenceItem(thread: ThreadSnapshot): Promise<EvidenceItem> {
+    const suppressed = this.suppressedMessageIds(thread.id);
+    const title = projectThreadIndexTitle(thread, suppressed.size > 0);
+    const keywords = [...thread.participants, ...(thread.featureIds ?? [])];
+    let summary = '';
+    if (this.messageListFn) {
+      try {
+        const messages = (await this.messageListFn(thread.id, 100)).filter((message) => !suppressed.has(message.id));
+        if (messages.length > 0) {
+          const turns = messages
+            .map((message) => {
+              const content = buildSearchableMessageContent(message);
+              return content ? `[${message.catId ?? 'user'}] ${content}` : '';
+            })
+            .filter(Boolean);
+          const joined = turns.join('\n');
+          summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
+        }
+      } catch {
+        // Message projection is fail-open; the title remains the minimal index body.
+      }
+    }
+    if (!summary && suppressed.size === 0) summary = thread.threadMemory?.summary ?? '';
+    if (!summary) summary = title;
+    return {
+      anchor: `thread-${thread.id}`,
+      kind: 'thread',
+      status: 'active',
+      title,
+      summary,
+      keywords: keywords.length > 0 ? keywords : undefined,
+      sourcePath: `threads/${thread.id}`,
+      sourceHash: computeThreadSourceHash(title, summary, keywords),
+      updatedAt: new Date(thread.lastActiveAt).toISOString(),
+    };
+  }
+
+  /**
+   * F264 Gap F: persist a fail-closed suppression before the canonical recall
+   * CAS. The SQLite transaction removes both direct passage and stale summary;
+   * every rebuild path consults the same derived guard, so a concurrent flush
+   * cannot re-create the body between index cleanup and MessageStore commit.
+   */
+  async suppressMessagePassage(threadId: string, messageId: string): Promise<MessageRecallSuppressionLease> {
+    const docAnchor = `thread-${threadId}`;
+    const passageId = `msg-${messageId}`;
+    const lease: MessageRecallSuppressionLease = { threadId, messageId, leaseId: randomUUID() };
+    await this.store.runExclusive(() => {
+      const db = this.store.getDb();
+      db.transaction(() => {
+        const passage = db
+          .prepare(
+            `SELECT content, speaker, position, created_at AS createdAt
+             FROM evidence_passages
+             WHERE doc_anchor = ? AND passage_id = ?`,
+          )
+          .get(docAnchor, passageId) as
+          | { content: string; speaker: string | null; position: number | null; createdAt: string }
+          | undefined;
+        const doc = db
+          .prepare(
+            `SELECT title, summary, source_hash AS sourceHash, updated_at AS updatedAt
+             FROM evidence_docs WHERE anchor = ?`,
+          )
+          .get(docAnchor) as
+          | { title: string; summary: string | null; sourceHash: string | null; updatedAt: string }
+          | undefined;
+        db.prepare(
+          `INSERT OR IGNORE INTO message_recall_index_snapshots
+             (doc_anchor, passage_id, passage_content, passage_speaker, passage_position,
+              passage_created_at, doc_title, doc_summary, doc_source_hash, doc_updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          docAnchor,
+          passageId,
+          passage?.content ?? null,
+          passage?.speaker ?? null,
+          passage?.position ?? null,
+          passage?.createdAt ?? null,
+          doc?.title ?? null,
+          doc?.summary ?? null,
+          doc?.sourceHash ?? null,
+          doc?.updatedAt ?? null,
+        );
+        db.prepare(
+          `INSERT INTO message_recall_index_suppressions
+             (doc_anchor, passage_id, lease_id, state, prepared_at, committed_at)
+           VALUES (?, ?, ?, 'prepared', ?, NULL)`,
+        ).run(docAnchor, passageId, lease.leaseId, new Date().toISOString());
+        db.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ? AND passage_id = ?').run(docAnchor, passageId);
+        db.prepare(
+          `UPDATE evidence_docs
+           SET summary = '', source_hash = COALESCE(source_hash, '') || ?
+           WHERE anchor = ?`,
+        ).run(`:recall-suppressed:${messageId}`, docAnchor);
+      })();
+      this.embedDeps?.passageVectorStore?.delete(passageVectorKey(docAnchor, passageId));
+      this.embedDeps?.vectorStore.delete(docAnchor);
+    });
+    try {
+      await this.store.refreshEntityMentions([docAnchor]);
+      this.markThreadDirty(threadId);
+      await this.flushDirtyThreads();
+      return lease;
+    } catch (error) {
+      try {
+        await this.releaseMessagePassageSuppression(lease);
+      } catch {
+        // The original preparation failure is authoritative; startup
+        // reconciliation still sees any lease that could not be released.
+      }
+      throw error;
+    }
+  }
+
+  /** Release one prepared lease; restore the exact snapshot only after the last lease leaves. */
+  async releaseMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<boolean> {
+    const docAnchor = `thread-${lease.threadId}`;
+    const passageId = `msg-${lease.messageId}`;
+    const restored = await this.store.runExclusive(() => {
+      const db = this.store.getDb();
+      return db.transaction(() => {
+        const row = db
+          .prepare(
+            `SELECT state FROM message_recall_index_suppressions
+             WHERE doc_anchor = ? AND passage_id = ? AND lease_id = ?`,
+          )
+          .get(docAnchor, passageId, lease.leaseId) as { state: 'prepared' | 'committed' } | undefined;
+        if (!row || row.state !== 'prepared') return false;
+        db.prepare(
+          `DELETE FROM message_recall_index_suppressions
+           WHERE doc_anchor = ? AND passage_id = ? AND lease_id = ? AND state = 'prepared'`,
+        ).run(docAnchor, passageId, lease.leaseId);
+        const remaining = db
+          .prepare(
+            `SELECT 1 AS present FROM message_recall_index_suppressions
+             WHERE doc_anchor = ? AND passage_id = ? LIMIT 1`,
+          )
+          .get(docAnchor, passageId);
+        if (remaining) return false;
+
+        const snapshot = db
+          .prepare(
+            `SELECT passage_content AS passageContent, passage_speaker AS passageSpeaker,
+                    passage_position AS passagePosition, passage_created_at AS passageCreatedAt,
+                    doc_title AS docTitle, doc_summary AS docSummary,
+                    doc_source_hash AS docSourceHash, doc_updated_at AS docUpdatedAt
+             FROM message_recall_index_snapshots
+             WHERE doc_anchor = ? AND passage_id = ?`,
+          )
+          .get(docAnchor, passageId) as
+          | {
+              passageContent: string | null;
+              passageSpeaker: string | null;
+              passagePosition: number | null;
+              passageCreatedAt: string | null;
+              docTitle: string | null;
+              docSummary: string | null;
+              docSourceHash: string | null;
+              docUpdatedAt: string | null;
+            }
+          | undefined;
+        if (snapshot?.passageContent !== null && snapshot?.passageContent !== undefined) {
+          db.prepare(
+            `INSERT INTO evidence_passages
+               (doc_anchor, passage_id, content, speaker, position, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(doc_anchor, passage_id) DO UPDATE SET
+               content = excluded.content,
+               speaker = excluded.speaker,
+               position = excluded.position,
+               created_at = excluded.created_at`,
+          ).run(
+            docAnchor,
+            passageId,
+            snapshot.passageContent,
+            snapshot.passageSpeaker,
+            snapshot.passagePosition,
+            snapshot.passageCreatedAt,
+          );
+        }
+        if (snapshot?.docTitle !== null && snapshot?.docTitle !== undefined) {
+          db.prepare(
+            `UPDATE evidence_docs
+             SET title = ?, summary = ?, source_hash = ?, updated_at = ?
+             WHERE anchor = ?`,
+          ).run(snapshot.docTitle, snapshot.docSummary, snapshot.docSourceHash, snapshot.docUpdatedAt, docAnchor);
+        }
+        db.prepare('DELETE FROM message_recall_index_snapshots WHERE doc_anchor = ? AND passage_id = ?').run(
+          docAnchor,
+          passageId,
+        );
+        return true;
+      })();
+    });
+    if (!restored) return false;
+    this.embedDeps?.passageVectorStore?.delete(passageVectorKey(docAnchor, passageId));
+    this.embedDeps?.vectorStore.delete(docAnchor);
+    await this.store.refreshEntityMentions([docAnchor]);
+    await this.restoreSuppressionEmbeddings(docAnchor);
+    return true;
+  }
+
+  /** Commit every concurrent lease so a losing request cannot release the winner's guard. */
+  async finalizeMessagePassageSuppression(lease: MessageRecallSuppressionLease): Promise<void> {
+    const docAnchor = `thread-${lease.threadId}`;
+    const passageId = `msg-${lease.messageId}`;
+    await this.store.runExclusive(() => {
+      const db = this.store.getDb();
+      db.transaction(() => {
+        const exists = db
+          .prepare(
+            `SELECT 1 AS present FROM message_recall_index_suppressions
+             WHERE doc_anchor = ? AND passage_id = ? AND lease_id = ?`,
+          )
+          .get(docAnchor, passageId, lease.leaseId);
+        if (!exists) return;
+        const now = new Date().toISOString();
+        db.prepare(
+          `UPDATE message_recall_index_suppressions
+           SET state = 'committed', committed_at = COALESCE(committed_at, ?)
+           WHERE doc_anchor = ? AND passage_id = ?`,
+        ).run(now, docAnchor, passageId);
+        db.prepare('DELETE FROM message_recall_index_snapshots WHERE doc_anchor = ? AND passage_id = ?').run(
+          docAnchor,
+          passageId,
+        );
+        db.prepare('DELETE FROM summary_segments WHERE thread_id = ?').run(lease.threadId);
+        db.prepare(
+          `UPDATE evidence_docs
+           SET summary = '', source_hash = COALESCE(source_hash, '') || ?
+           WHERE anchor = ?`,
+        ).run(`:recall-committed:${lease.messageId}`, docAnchor);
+        db.prepare(
+          `UPDATE summary_state SET
+             last_summarized_message_id = NULL,
+             pending_message_count = 0,
+             pending_token_count = 0,
+             pending_signal_flags = 0,
+             carry_over = 1,
+             summary_type = 'concat',
+             last_abstractive_at = NULL,
+             abstractive_token_count = NULL
+           WHERE thread_id = ?`,
+        ).run(lease.threadId);
+      })();
+      this.embedDeps?.passageVectorStore?.delete(passageVectorKey(docAnchor, passageId));
+      this.embedDeps?.vectorStore.delete(docAnchor);
+    });
+    await this.store.refreshEntityMentions([docAnchor]);
+  }
+
+  private async restoreSuppressionEmbeddings(docAnchor: string): Promise<void> {
+    if (this.embedDeps?.embedding.isReady()) {
+      const doc = this.store
+        .getDb()
+        .prepare('SELECT title, summary FROM evidence_docs WHERE anchor = ?')
+        .get(docAnchor) as { title: string; summary: string | null } | undefined;
+      if (doc) {
+        try {
+          const [vector] = await this.embedDeps.embedding.embed([`${doc.title} ${doc.summary ?? ''}`]);
+          this.embedDeps.vectorStore.upsert(docAnchor, vector);
+        } catch {
+          // Lexical restoration is authoritative; vector repair retries during warmup.
+        }
+      }
+    }
+    await this.embedMissingPassages([docAnchor]);
+  }
+
+  /**
+   * Resolve the only crash window in the cross-store protocol. A prepared row
+   * is retained iff canonical MessageStore truth is recalled; otherwise it is
+   * released and the normal thread rebuild restores the searchable passage.
+   */
+  async reconcileMessageRecallSuppressions(
+    isRecalled: (threadId: string, messageId: string) => boolean | Promise<boolean>,
+  ): Promise<{ retained: number; released: number }> {
+    const rows = this.store
+      .getDb()
+      .prepare(
+        `SELECT doc_anchor AS docAnchor, passage_id AS passageId, lease_id AS leaseId
+         FROM message_recall_index_suppressions
+         GROUP BY doc_anchor, passage_id`,
+      )
+      .all() as Array<{ docAnchor: string; passageId: string; leaseId: string }>;
+    const released: Array<{ docAnchor: string; passageId: string }> = [];
+    let retained = 0;
+    for (const row of rows) {
+      const threadId = row.docAnchor.replace(/^thread-/, '');
+      const messageId = row.passageId.replace(/^msg-/, '');
+      if (await isRecalled(threadId, messageId)) {
+        await this.finalizeMessagePassageSuppression({ threadId, messageId, leaseId: row.leaseId });
+        retained++;
+      } else {
+        released.push(row);
+      }
+    }
+
+    if (released.length > 0) {
+      for (const row of released) {
+        const leases = this.store
+          .getDb()
+          .prepare(
+            `SELECT lease_id AS leaseId FROM message_recall_index_suppressions
+             WHERE doc_anchor = ? AND passage_id = ? AND state = 'prepared'`,
+          )
+          .all(row.docAnchor, row.passageId) as Array<{ leaseId: string }>;
+        for (const lease of leases) {
+          await this.releaseMessagePassageSuppression({
+            threadId: row.docAnchor.replace(/^thread-/, ''),
+            messageId: row.passageId.replace(/^msg-/, ''),
+            leaseId: lease.leaseId,
+          });
+        }
+      }
+    }
+    return { retained, released: released.length };
+  }
+
   /**
    * G-3c: Accumulate pending delta into summary_state.
    * Called at append time with actual new message content (not rebuilt summary).
@@ -988,6 +1287,7 @@ export class IndexBuilder implements IIndexBuilder {
     try {
       threads = await this.threadListFn();
     } catch {
+      for (const threadId of dirtyIds) this.dirtyThreads.add(threadId);
       return 0;
     }
 
@@ -997,59 +1297,18 @@ export class IndexBuilder implements IIndexBuilder {
       const thread = threadMap.get(threadId);
       if (!thread) continue;
 
-      const anchor = `thread-${threadId}`;
-      const title = thread.title ?? `Thread ${threadId.slice(0, 12)}`;
-      const keywords = [...thread.participants, ...(thread.featureIds ?? [])];
-
-      // KD-32/33: Build summary from message content, same logic as rebuild()
-      let summary = '';
-      if (this.messageListFn) {
-        try {
-          const messages = await this.messageListFn(threadId, 100);
-          if (messages.length > 0) {
-            const turns = messages
-              .map((m) => {
-                const content = buildSearchableMessageContent(m);
-                return content ? `[${m.catId ?? 'user'}] ${content}` : '';
-              })
-              .filter(Boolean);
-            const joined = turns.join('\n');
-            summary = joined.length > 3000 ? `${joined.slice(0, 2997)}...` : joined;
-          }
-        } catch {
-          // fail-open
-        }
-      }
-      if (!summary) {
-        summary = thread.threadMemory?.summary ?? '';
-      }
-      if (!summary) {
-        summary = title;
-      }
-
-      const sourceHash = computeThreadSourceHash(title, summary, keywords);
+      const item = await this.buildThreadEvidenceItem(thread);
+      const anchor = item.anchor;
 
       const existing = await this.store.getByAnchor(anchor);
-      if (existing?.sourceHash === sourceHash) continue; // unchanged
-
-      const item: EvidenceItem = {
-        anchor,
-        kind: 'thread',
-        status: 'active',
-        title,
-        summary,
-        keywords: keywords.length > 0 ? keywords : undefined,
-        sourcePath: `threads/${threadId}`,
-        sourceHash,
-        updatedAt: new Date(thread.lastActiveAt).toISOString(),
-      };
+      if (existing?.sourceHash === item.sourceHash) continue; // unchanged
 
       await this.store.upsert([item]);
 
       // Embed if available
       if (this.embedDeps?.embedding.isReady()) {
         try {
-          const [vec] = await this.embedDeps.embedding.embed([`${title} ${summary}`]);
+          const [vec] = await this.embedDeps.embedding.embed([`${item.title} ${item.summary ?? ''}`]);
           this.embedDeps.vectorStore.upsert(anchor, vec);
         } catch {
           // fail-open
@@ -1211,7 +1470,8 @@ export class IndexBuilder implements IIndexBuilder {
     for (const thread of threads) {
       let messages: StoredMessageSnapshot[];
       try {
-        messages = await this.messageListFn(thread.id, 2000);
+        const suppressed = this.suppressedMessageIds(thread.id);
+        messages = (await this.messageListFn(thread.id, 2000)).filter((message) => !suppressed.has(message.id));
       } catch {
         continue;
       }

@@ -52,6 +52,19 @@ function createFakeRedis() {
       return 0;
     },
 
+    /** ZREMRANGEBYRANK semantics: rank 0 = lowest score; negative = from tail. */
+    async zremrangebyrank(key, start, stop) {
+      const list = getList(key);
+      const len = list.length;
+      let s = start < 0 ? len + start : start;
+      let e = stop < 0 ? len + stop : stop;
+      s = Math.max(0, s);
+      e = Math.min(len - 1, e);
+      if (s > e) return 0;
+      const removed = list.splice(s, e - s + 1);
+      return removed.length;
+    },
+
     /** SCAN cursor iteration: returns [nextCursor, batch]. Cursor='0' = done. */
     async scan(cursor, ...args) {
       const matchIdx = args.indexOf('MATCH');
@@ -714,5 +727,269 @@ describe('SkillLoadEventLog (AC-F10 / AS-4)', () => {
     assert.equal(await skillLog.countLoadsBySkill('sess-1', 'memory-navigation'), 1);
     assert.equal(await skillLog.countLoadsBySkill('sess-1', 'tdd'), 1);
     assert.equal(await skillLog.countLoadsBySkill('sess-1', 'unknown'), 0);
+  });
+});
+
+/**
+ * TD (2026-08-12): tool-event-log unbounded growth.
+ *
+ * Production incident: one thread key reached 12,887 events / 221MB because
+ * route-serial wired raw `toolInput` into `summary` (single events up to
+ * 1.98MB) with no per-thread cap, while TTL refreshes on every append —
+ * active threads never expire. Every round-end recall correlation then
+ * full-scans the zset (`zrange 0 -1`) + JSON.parses it on the API event
+ * loop → periodic seconds-long freezes = "越来越卡".
+ *
+ * Contract under test:
+ *   1. summary is sanitized at the ToolEventLog boundary (append + updateSummary)
+ *   2. per-thread event count is capped (oldest evicted)
+ *   3. readRecentByThread offers a bounded tail read for hot paths
+ */
+describe('ToolEventLog bounded growth (TD 2026-08-12)', () => {
+  let fakeRedis;
+
+  beforeEach(() => {
+    fakeRedis = createFakeRedis();
+  });
+
+  test('append truncates oversized string summary fields and marks _truncated', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    const bigCommand = 'x'.repeat(50_000);
+    await eventLog.append(makeBaseEvent({ toolName: 'Bash', summary: { command: bigCommand, _toolUseId: 'tu-1' } }));
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.ok(
+      event.summary.command.length <= 1100,
+      `oversized string field must be capped, got ${event.summary.command.length} chars`,
+    );
+    assert.ok(
+      event.summary.command.startsWith('xxx'),
+      'truncation keeps the prefix (grep-fallback detection relies on it)',
+    );
+    assert.equal(event.summary._toolUseId, 'tu-1', 'sentinel field preserved verbatim');
+    assert.equal(event.summary._truncated, true, 'truncation must be marked');
+  });
+
+  test('append truncates oversized arrays element-wise — type is preserved (R1 gpt52 review)', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    // R1 blocking finding: consumers read structural arrays with .map/.filter
+    // (F200 _f200Candidates/_f200Edges in recall-correlation-hook). A marker
+    // string there throws TypeError and poisons the whole correlation batch.
+    const bigArray = Array.from({ length: 5000 }, (_, i) => ({ anchor: `anchor-${i}`, rank: i }));
+    await eventLog.append(makeBaseEvent({ summary: { _f200Candidates: bigArray } }));
+
+    const [event] = await eventLog.readByThread('thread-A');
+    const kept = event.summary._f200Candidates;
+    assert.ok(Array.isArray(kept), 'oversized array must STAY an array — never a marker string');
+    assert.ok(kept.length > 0 && kept.length < 5000, `element-wise prefix truncation, got ${kept.length}`);
+    assert.deepEqual(kept[0], { anchor: 'anchor-0', rank: 0 }, 'kept elements are structurally intact');
+    assert.doesNotThrow(() => kept.map((c) => c.anchor), 'consumer access pattern (.map) must work');
+    assert.equal(event.summary._truncated, true);
+  });
+
+  test('append collapses oversized plain objects to {} — type is preserved (R1 gpt52 review)', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    const bigObject = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, 'v'.repeat(50)]));
+    await eventLog.append(makeBaseEvent({ summary: { nested: bigObject } }));
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.equal(typeof event.summary.nested, 'object', 'object stays an object');
+    assert.ok(!Array.isArray(event.summary.nested), 'not coerced to array');
+    // `{} && {}.length > 0` is false — safe under the truthy-length consumer idiom.
+    assert.equal(Object.keys(event.summary.nested).length, 0, 'collapsed to empty object');
+    assert.equal(event.summary._truncated, true);
+  });
+
+  test('realistic 20-candidate _f200Candidates passes through UNTRUNCATED (R1 gpt52 review)', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    // COVERAGE_MAX_LIMIT=20 — the real upper bound of search_evidence results.
+    // Serializes to ~2.4KB; must survive whole (reviewer-measured 2431 chars).
+    const cands = Array.from({ length: 20 }, (_, i) => ({
+      anchor: `docs/features/F${200 + i}-some-feature-name.md`,
+      rank: i,
+      docKind: 'feature',
+      sourcePath: `docs/features/F${200 + i}-some-feature-name.md`,
+    }));
+    await eventLog.append(makeBaseEvent({ summary: { resultCount: 20, _f200Candidates: cands } }));
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.equal(event.summary._f200Candidates.length, 20, 'real-world max candidate set survives whole');
+    assert.equal(event.summary._truncated, undefined, 'no truncation marker for realistic payloads');
+  });
+
+  test('small typed FM summaries pass through unchanged (no _truncated)', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    await eventLog.append(makeBaseEvent());
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.deepEqual(
+      event.summary,
+      { resultCount: 5, topScore: 0.8, nudgeEmitted: false },
+      'typed FM summary must be byte-identical — no marker pollution',
+    );
+  });
+
+  test('summary total budget drops overflow fields but keeps sentinels', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    const summary = { _toolUseId: 'tu-9' };
+    for (let i = 0; i < 20; i++) summary[`f${i}`] = 'z'.repeat(900); // 18,000 chars total
+    await eventLog.append(makeBaseEvent({ summary }));
+
+    const [event] = await eventLog.readByThread('thread-A');
+    const keptDataFields = Object.keys(event.summary).filter((k) => k.startsWith('f'));
+    assert.ok(
+      keptDataFields.length >= 1 && keptDataFields.length < 20,
+      `total budget must drop some fields but not all, kept ${keptDataFields.length}/20`,
+    );
+    assert.equal(event.summary._toolUseId, 'tu-9', 'sentinel survives budget pressure');
+    assert.equal(event.summary._truncated, true);
+  });
+
+  test('append enforces per-thread max event count (oldest evicted)', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis, { maxEventsPerThread: 5 });
+
+    for (let i = 0; i < 8; i++) {
+      await eventLog.append(makeBaseEvent({ timestamp: 100 + i, turnIndex: i }));
+    }
+
+    const events = await eventLog.readByThread('thread-A');
+    assert.equal(events.length, 5, 'zset must be capped at maxEventsPerThread');
+    assert.deepEqual(
+      events.map((e) => e.turnIndex),
+      [3, 4, 5, 6, 7],
+      'newest events kept, oldest evicted',
+    );
+  });
+
+  test('readRecentByThread returns only the newest N in ascending order', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    for (let i = 0; i < 10; i++) {
+      await eventLog.append(makeBaseEvent({ timestamp: 100 + i, turnIndex: i }));
+    }
+
+    const recent = await eventLog.readRecentByThread('thread-A', 4);
+    assert.deepEqual(
+      recent.map((e) => e.turnIndex),
+      [6, 7, 8, 9],
+      'bounded tail read, ascending order',
+    );
+
+    const all = await eventLog.readRecentByThread('thread-A', 99);
+    assert.equal(all.length, 10, 'limit larger than size returns everything');
+  });
+
+  test('updateSummary matches within the tail window — full-log scan removed (PR #3613 residual)', async () => {
+    const { ToolEventLog, UPDATE_SUMMARY_TAIL_WINDOW } = await import(
+      '../dist/domains/cats/services/tool-usage/ToolEventLog.js'
+    );
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    // Production residual: a 2000-event window of pre-sanitize fat members is
+    // 21.8MB; updateSummary ran a full zrange WITHSCORES per tool RESULT.
+    // FIFO merge targets are always near the tail (tool_use append and its
+    // result arrive within the same round), so the read must be tail-bounded.
+    const total = UPDATE_SUMMARY_TAIL_WINDOW + 20;
+    // Oldest event shares the matcher toolName but sits OUTSIDE the window.
+    await eventLog.append(
+      makeBaseEvent({ toolName: 'search_evidence', timestamp: 1000, turnIndex: 0, summary: { resultCount: 1 } }),
+    );
+    for (let i = 1; i < total - 1; i++) {
+      await eventLog.append(makeBaseEvent({ toolName: 'Read', timestamp: 1000 + i, turnIndex: i, summary: {} }));
+    }
+    // Newest matching event sits INSIDE the window — the realistic merge target.
+    await eventLog.append(
+      makeBaseEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000 + total,
+        turnIndex: total - 1,
+        summary: { resultCount: 9 },
+      }),
+    );
+
+    const ok = await eventLog.updateSummary(
+      'thread-A',
+      { toolName: 'search_evidence', catId: 'opus-47' },
+      { resultStatus: 'hit' },
+    );
+    assert.equal(ok, true, 'merge must succeed against the in-window event');
+
+    const events = await eventLog.readByThread('thread-A');
+    const oldest = events.find((e) => e.turnIndex === 0);
+    const newest = events.find((e) => e.turnIndex === total - 1);
+    assert.equal(
+      oldest.summary._resultMerged,
+      undefined,
+      'out-of-window stale event must NOT be the merge target (full-log scan removed)',
+    );
+    assert.equal(newest.summary._resultMerged, true, 'in-window event receives the merge');
+    assert.equal(newest.summary.resultStatus, 'hit');
+  });
+
+  test('updateSummary exact toolUseId match survives beyond the tail window (R1 gpt52 #3629)', async () => {
+    const { ToolEventLog, UPDATE_SUMMARY_TAIL_WINDOW } = await import(
+      '../dist/domains/cats/services/tool-usage/ToolEventLog.js'
+    );
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    // R1 finding: toolUseId is the explicit exact-match contract for delayed /
+    // out-of-order results (a slow tool on a busy multi-cat thread can see
+    // 200+ events land before its result arrives). The tail window may bound
+    // the fuzzy FIFO path, but a unique-key lookup must not silently fail.
+    const total = UPDATE_SUMMARY_TAIL_WINDOW + 20;
+    await eventLog.append(
+      makeBaseEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 0,
+        summary: { resultCount: 1, _toolUseId: 'tu-late-result' },
+      }),
+    );
+    for (let i = 1; i < total; i++) {
+      await eventLog.append(makeBaseEvent({ toolName: 'Read', timestamp: 1000 + i, turnIndex: i, summary: {} }));
+    }
+
+    const ok = await eventLog.updateSummary('thread-A', { toolUseId: 'tu-late-result' }, { resultStatus: 'hit' });
+    assert.equal(ok, true, 'exact toolUseId match must find its event even outside the tail window');
+
+    const events = await eventLog.readByThread('thread-A');
+    const target = events.find((e) => e.turnIndex === 0);
+    assert.equal(target.summary._resultMerged, true, 'late result merged onto the exact-id event');
+    assert.equal(target.summary.resultStatus, 'hit');
+  });
+
+  test('updateSummary sanitizes oversized patch before merging', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const eventLog = new ToolEventLog(fakeRedis);
+
+    await eventLog.append(makeBaseEvent({ toolName: 'search_evidence' }));
+    const ok = await eventLog.updateSummary(
+      'thread-A',
+      { toolName: 'search_evidence', catId: 'opus-47' },
+      { rawOutput: 'y'.repeat(60_000), resultStatus: 'hit' },
+    );
+    assert.equal(ok, true, 'merge itself must succeed');
+
+    const [event] = await eventLog.readByThread('thread-A');
+    assert.ok(
+      event.summary.rawOutput.length <= 1100,
+      `oversized patch field must be capped, got ${event.summary.rawOutput.length} chars`,
+    );
+    assert.equal(event.summary.resultStatus, 'hit', 'small patch fields merge normally');
+    assert.equal(event.summary._resultMerged, true, 'FIFO merge sentinel still written');
   });
 });

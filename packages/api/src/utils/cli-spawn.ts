@@ -5,7 +5,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
@@ -25,9 +25,14 @@ import {
   type CliTimeoutTerminalContext,
   formatCliStderrForLog,
 } from './cli-diagnostics.js';
+import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from './cli-process-ownership.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
+import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
 import { resolveCliTimeoutMs } from './cli-timeout.js';
+
+export { resolveCliSupervisorNodeArgs } from './cli-supervised-process.js';
+
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
@@ -36,6 +41,67 @@ import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
 const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
+const CAT_CAFE_RUNTIME_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const GUARDED_GH_BIN = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-bin');
+const GUARDED_ZSH_DIR = resolve(CAT_CAFE_RUNTIME_ROOT, 'scripts', 'guarded-zsh');
+type GuardedChildEnv = Record<string, string | null | undefined>;
+type SourceEnvOverrides = Readonly<Record<string, string | null>> | undefined;
+
+function hasSourceOverride(sourceOverrides: SourceEnvOverrides, key: string): boolean {
+  return sourceOverrides !== undefined && Object.hasOwn(sourceOverrides, key);
+}
+
+function shouldRefreshOriginalZdotdir(
+  env: GuardedChildEnv,
+  sourceOverrides: SourceEnvOverrides,
+  currentZdotdir: string,
+): boolean {
+  if (hasSourceOverride(sourceOverrides, 'CAT_CAFE_ORIGINAL_ZDOTDIR')) return false;
+  if (resolve(currentZdotdir) === GUARDED_ZSH_DIR) return false;
+  return hasSourceOverride(sourceOverrides, 'ZDOTDIR') || !env.CAT_CAFE_ORIGINAL_ZDOTDIR;
+}
+
+function shouldRefreshHistfile(env: GuardedChildEnv, sourceOverrides: SourceEnvOverrides): boolean {
+  if (hasSourceOverride(sourceOverrides, 'HISTFILE')) return false;
+  return hasSourceOverride(sourceOverrides, 'ZDOTDIR') || !env.HISTFILE;
+}
+
+function configureGuardedZshEnv(env: GuardedChildEnv, sourceOverrides: SourceEnvOverrides): void {
+  const currentZdotdir = env.ZDOTDIR ?? env.HOME ?? process.env.HOME;
+  // An explicit ZDOTDIR selects a new startup context. Refresh inherited companion values unless
+  // the caller supplied those companions explicitly; otherwise parent-shell state leaks across contexts.
+  if (currentZdotdir && shouldRefreshOriginalZdotdir(env, sourceOverrides, currentZdotdir)) {
+    env.CAT_CAFE_ORIGINAL_ZDOTDIR = currentZdotdir;
+  }
+  if (currentZdotdir && shouldRefreshHistfile(env, sourceOverrides)) {
+    env.HISTFILE = resolve(currentZdotdir, '.zsh_history');
+  }
+  env.SHELL_SESSIONS_DISABLE ||= '1';
+  env.ZDOTDIR = GUARDED_ZSH_DIR;
+}
+
+export function withVerdictGhGuardEnv<T extends Record<string, string | null | undefined>>(
+  env: T,
+  sourceOverrides?: Readonly<Record<string, string | null>>,
+): T {
+  if (IS_WINDOWS || !existsSync(resolve(GUARDED_GH_BIN, 'gh'))) return env;
+  const mutable = env as Record<string, string | null | undefined>;
+  const currentPath = typeof mutable.PATH === 'string' ? mutable.PATH : (process.env.PATH ?? '');
+  const pathEntries = currentPath.split(':').filter(Boolean);
+  if (!pathEntries.includes(GUARDED_GH_BIN)) {
+    mutable.PATH = currentPath ? `${GUARDED_GH_BIN}:${currentPath}` : GUARDED_GH_BIN;
+  }
+  mutable.CAT_CAFE_VERDICT_GH_GUARD_ROOT = CAT_CAFE_RUNTIME_ROOT;
+  mutable.CAT_CAFE_VERDICT_GH_GUARD_BIN = GUARDED_GH_BIN;
+  if (existsSync(resolve(GUARDED_ZSH_DIR, '.zprofile'))) {
+    configureGuardedZshEnv(mutable, sourceOverrides);
+  }
+  if (!mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME) {
+    mutable.CAT_CAFE_VERDICT_REPO_FULL_NAME =
+      process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ?? process.env.CAT_CAFE_REPO_FULL_NAME ?? 'zts212653/cat-cafe';
+  }
+  return env;
+}
 
 /**
  * F212 Phase A — collect text from NDJSON stream `error` events. CLI providers (Codex, opencode)
@@ -161,34 +227,6 @@ export interface CliSpawnerDeps {
   livenessWarningDrainIntervalMs?: number;
 }
 
-const CLI_SUPERVISOR_ENV_FILE_FLAGS = new Set(['--env-file', '--env-file-if-exists']);
-
-function sanitizeCliSupervisorExecArgv(execArgv: string[]): string[] {
-  const safeArgs: string[] = [];
-  for (let index = 0; index < execArgv.length; index += 1) {
-    const arg = execArgv[index];
-    if (CLI_SUPERVISOR_ENV_FILE_FLAGS.has(arg)) {
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('--env-file=') || arg.startsWith('--env-file-if-exists=')) {
-      continue;
-    }
-    safeArgs.push(arg);
-  }
-  return safeArgs;
-}
-
-export function resolveCliSupervisorNodeArgs(moduleUrl = import.meta.url, execArgv = process.execArgv): string[] {
-  const jsPath = fileURLToPath(new URL('./cli-supervisor.js', moduleUrl));
-  if (existsSync(jsPath)) return [jsPath];
-
-  const tsPath = fileURLToPath(new URL('./cli-supervisor.ts', moduleUrl));
-  if (existsSync(tsPath)) return [...sanitizeCliSupervisorExecArgv(execArgv), tsPath];
-
-  return [jsPath];
-}
-
 /** Env vars to strip from child processes to prevent E2BIG (overly large values). */
 const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   'LS_COLORS', // typically 1-2 KB of color mappings
@@ -198,6 +236,10 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   // forwarding either value would let a raw dev command act like the runtime owner.
   'CONNECTOR_GATEWAY_AUTOSTART',
   'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+  // Per-invocation process ownership is a capability, not ambient config. A
+  // nested API or persistent host must not inherit the outer invocation.
+  CLI_EXECUTION_OWNER_BINDING_ENV,
+  CLI_EXECUTION_ID_ENV,
 ]);
 
 export interface CliPlainTextResult {
@@ -250,26 +292,33 @@ async function waitForIteratorUntil<T>(
   }
 }
 
-export function buildChildEnv(overrides?: Record<string, string | null>): NodeJS.ProcessEnv {
+export function buildChildEnv(
+  overrides?: Record<string, string | null>,
+  options: { bindExecutionOwner?: boolean } = {},
+): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (ENV_VARS_TO_STRIP.has(key)) continue;
     merged[key] = value;
   }
-  if (!overrides) return merged;
-  for (const [key, value] of Object.entries(overrides)) {
-    if (ENV_VARS_TO_STRIP.has(key)) {
-      delete merged[key];
-      continue;
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      if (ENV_VARS_TO_STRIP.has(key)) {
+        delete merged[key];
+        if (key === CLI_EXECUTION_ID_ENV && options.bindExecutionOwner === true && value !== null) {
+          merged[key] = value;
+        }
+        continue;
+      }
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
+      merged[key] = value;
     }
-    if (value === null) {
-      delete merged[key];
-      continue;
-    }
-    merged[key] = value;
   }
-  return merged;
+  return withVerdictGhGuardEnv(merged, overrides);
 }
 
 /**
@@ -304,11 +353,12 @@ export async function* spawnCli(
 
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
-    env: buildChildEnv(options.env),
+    env: buildChildEnv(options.env, { bindExecutionOwner: options.bindExecutionOwner !== false }),
     // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
     // provided, open stdin as a pipe so the prompt can be streamed off the command
     // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
     stdio: [options.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    bindExecutionOwner: options.bindExecutionOwner !== false,
   });
 
   // Incident 2026-05-29: feed prompt via stdin instead of argv to prevent
@@ -859,6 +909,7 @@ export async function* spawnCli(
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
         stderrEmpty: stderrTrimLen === 0,
+        ...(options.managedArgvFlags ? { managedArgvFlags: options.managedArgvFlags } : {}),
         debugRef: {
           command: options.command,
           exitCode,
@@ -946,6 +997,7 @@ export async function* spawnCli(
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
         stderrEmpty: timeoutStderrTrimLen === 0,
+        ...(options.managedArgvFlags ? { managedArgvFlags: options.managedArgvFlags } : {}),
         debugRef: {
           command: options.command,
           signal: null,
@@ -1134,6 +1186,7 @@ function defaultSpawn(
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ): ChildProcessLike {
   if (IS_WINDOWS) {
@@ -1169,26 +1222,17 @@ function defaultSpawn(
     });
   }
 
-  // macOS GUI apps (Electron) have a minimal PATH that excludes version
-  // managers (nvm/fnm/Volta). CLI shims use `#!/usr/bin/env node`, so the
-  // child process must be able to find `node` in its PATH. Prepend the
-  // directory containing the resolved CLI binary — it typically sits next
-  // to the `node` binary that installed it (e.g. ~/.nvm/versions/node/v24/bin/).
-  const env = { ...options.env };
-  if (isAbsolute(command)) {
-    const binDir = dirname(command);
-    env.PATH = env.PATH ? `${binDir}:${env.PATH}` : binDir;
-  }
-
-  const supervisorArgs = resolveCliSupervisorNodeArgs();
-
-  return nodeSpawn(process.execPath, [...supervisorArgs, '--', command, ...args], {
-    cwd: options.cwd,
+  const plan = buildUnixSupervisedSpawnPlan(command, args, {
     env: {
-      ...env,
-      CAT_CAFE_SUPERVISOR_PARENT_PID: String(process.pid),
-      CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: String(Math.max(250, KILL_GRACE_MS - 500)),
+      ...options.env,
+      ...(options.bindExecutionOwner === false ? {} : { [CLI_EXECUTION_OWNER_BINDING_ENV]: '1' }),
     },
+    killGraceMs: Math.max(250, KILL_GRACE_MS - 500),
+  });
+
+  return nodeSpawn(plan.command, plan.args, {
+    cwd: options.cwd,
+    env: plan.env,
     stdio: options.stdio,
   });
 }

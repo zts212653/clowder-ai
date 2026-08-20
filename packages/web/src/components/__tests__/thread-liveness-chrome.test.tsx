@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
 import { ThinkingIndicator } from '../ThinkingIndicator';
 import { ThreadExecutionBar } from '../ThreadExecutionBar';
@@ -25,6 +26,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 function resetStore() {
+  useActiveExecutionStore.getState().reset();
   useChatStore.setState({
     messages: [],
     isLoading: false,
@@ -46,6 +48,32 @@ function resetStore() {
     currentProjectPath: 'default',
     threads: [],
     isLoadingThreads: false,
+  });
+}
+
+function seedThreadBExecution() {
+  const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+  useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
+    projectPath: '/project/cafe',
+    executions: [
+      {
+        executionId: 'inv-b',
+        threadId: 'thread-b',
+        threadTitle: 'Background thread',
+        catId: 'opus',
+        kind: 'live_invocation',
+        startedAt: 1000,
+        cancelability: {
+          state: 'cancelable',
+          target: {
+            kind: 'live_invocation',
+            threadId: 'thread-b',
+            catId: 'opus',
+            executionId: 'inv-b',
+          },
+        },
+      },
+    ],
   });
 }
 
@@ -79,6 +107,7 @@ describe('thread-scoped liveness chrome', () => {
   });
 
   it('ThreadExecutionBar reads the requested thread liveness, not the flat current-thread mirror', () => {
+    seedThreadBExecution();
     useChatStore.setState({
       currentThreadId: 'thread-a',
       activeInvocations: {},
@@ -101,7 +130,8 @@ describe('thread-scoped liveness chrome', () => {
     expect(container.textContent).toContain('布偶猫（Opus 4.7）');
   });
 
-  it('ThreadExecutionBar stop uses the requested thread id', async () => {
+  it('ThreadExecutionBar cancel uses the requested thread id', async () => {
+    seedThreadBExecution();
     useChatStore.setState({
       currentThreadId: 'thread-a',
       activeInvocations: {},
@@ -120,25 +150,24 @@ describe('thread-scoped liveness chrome', () => {
       root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-b' }));
     });
 
-    const stopButton = container.querySelector('[data-testid="thread-stop-entry"]') as HTMLButtonElement | null;
+    const stopButton = container.querySelector(
+      'button[aria-label="Stop opus live_invocation inv-b"]',
+    ) as HTMLButtonElement | null;
     expect(stopButton).not.toBeNull();
 
     await act(async () => {
       stopButton?.click();
     });
 
-    const confirmButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === '停止',
-    ) as HTMLButtonElement | undefined;
-    expect(confirmButton).not.toBeUndefined();
-    await act(async () => {
-      confirmButton?.click();
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/threads/thread-b/executions/live/inv-b/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ catId: 'opus' }),
     });
-
-    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/threads/thread-b/force-reset', { method: 'POST' });
   });
 
   it('ThinkingIndicator shows the requested thread spawning cat during A2A handoff windows', () => {
+    seedThreadBExecution();
     useChatStore.setState({
       currentThreadId: 'thread-a',
       targetCats: [],
@@ -157,6 +186,7 @@ describe('thread-scoped liveness chrome', () => {
       root.render(React.createElement(ThinkingIndicator, { threadId: 'thread-b' }));
     });
 
-    expect(container.textContent).toContain('布偶猫（Opus 4.7） 启动中');
+    expect(container.textContent).toContain('布偶猫（Opus 4.7）');
+    expect(container.textContent).toContain('Background thread · 实时回合启动中');
   });
 });

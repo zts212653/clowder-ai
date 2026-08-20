@@ -91,6 +91,31 @@ describe('F254 Freshness Gate Integration', async () => {
     assert.equal(result.previews[0].from, 'codex');
   });
 
+  it('reads a persisted seen cursor with the fail-closed unresolved-anchor policy', async () => {
+    const cursorStore = makeMockCursorStore(msg1);
+    let readOptions;
+    const messageStore = {
+      getByThreadAfter: mock.fn(async (_threadId, _afterId, _limit, _userId, options) => {
+        readOptions = options;
+        return [];
+      }),
+      getByThread: mock.fn(async () => []),
+    };
+
+    const result = await wireModule.checkFreshnessForPostMessage({
+      userId,
+      catId,
+      threadId,
+      invocationId,
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+    });
+
+    assert.equal(result.decision, 'forward');
+    assert.deepEqual(readOptions, { unresolvedCursorPolicy: 'empty' });
+  });
+
   it('uses connector source label for unseen connector preview sender', async () => {
     const cursorStore = makeMockCursorStore(msg1);
     const messageStore = makeMockMessageStore([

@@ -6,7 +6,9 @@ import {
   personMemorySuppressionTokenSchema,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { DeferredPersonMemoryReceiptKeys } from '../RedisDeferredPersonMemoryReceiptStore.js';
 import type { HardForgetPersonInput } from './PersonMemoryStore.js';
+import { loadDeferredReceiptForgetClosure, planDeferredReceiptForgetClosure } from './person-memory-deferred-forget.js';
 import {
   type PersonMemoryCandidateSnapshot,
   planPersonMemoryDispositionPurge,
@@ -48,6 +50,7 @@ const ARTIFACT_TYPE_BY_PREFIX: ReadonlyArray<readonly [string, CanonicalRedisVal
   ['person-memory:disposition-lineage:', 'string'],
   ['person-memory:disposition-lineage-handle:', 'string'],
   ['person-memory:disposition-receipt:', 'string'],
+  ['person-memory:deferred-dedupe:', 'string'],
 ];
 
 function canonicalArtifactType(key: string): CanonicalRedisValueType {
@@ -166,14 +169,20 @@ export async function hardForgetPerson(
   const receiptKey = PersonMemoryKeys.forgetReceipt(input.ownerUserId, input.requestId);
   const personKey = PersonMemoryKeys.person(input.ownerUserId, input.personId);
   const artifactSet = PersonMemoryKeys.personArtifacts(input.ownerUserId, input.personId);
+  const registeredPersonBindingKey = DeferredPersonMemoryReceiptKeys.binding(
+    input.ownerUserId,
+    'registered_person',
+    input.personId,
+  );
   const begin = String(
     await redis.eval(
       BEGIN_HARD_FORGET_LUA,
-      4,
+      5,
       fenceKey,
       receiptKey,
       personKey,
       artifactSet,
+      registeredPersonBindingKey,
       input.requestId,
       String(HARD_FORGET_FENCE_TTL_MS),
     ),
@@ -199,6 +208,13 @@ export async function hardForgetPerson(
     loadSuppressionTokens(redis, input.ownerUserId, candidateIds),
     loadCandidateSnapshots(redis, input.ownerUserId, candidateIds),
   ]);
+  const deferredReceiptClosure = await loadDeferredReceiptForgetClosure(
+    redis,
+    input.ownerUserId,
+    input.personId,
+    person,
+    candidateSnapshots,
+  );
   const plan = new PersonMemoryRedisPlan([fenceKey, receiptKey]);
   plan.expectSetMembers(artifactSet, artifactKeys);
   const reverseKey = await planOwnedReverseRemoval(redis, plan, input.ownerUserId, person);
@@ -227,10 +243,12 @@ export async function hardForgetPerson(
     if (!candidateRaw) throw new Error('F276 hard-forget candidate snapshot disappeared');
     planCandidatePurge(plan, input.ownerUserId, candidateId, candidateRaw, suppressionTokens[index]);
   }
+  planDeferredReceiptForgetClosure(plan, input.ownerUserId, deferredReceiptClosure);
   const receipt = deletionReceipt(input, 'purged', {
     artifacts: new Set([...artifactKeys, personKey, artifactSet]).size,
     aliases: person?.privateAliases.length ?? 0,
     candidates: candidateIds.length,
+    deferredReceipts: deferredReceiptClosure.snapshots.size,
   });
   const finish = String(
     await redis.eval(

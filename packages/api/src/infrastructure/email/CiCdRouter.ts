@@ -1,4 +1,10 @@
-import type { DeliveryDecisionCueCarrierV1, ManagedWorkBinding, PrAutomationState, TaskItem } from '@cat-cafe/shared';
+import type {
+  CiAutomationState,
+  DeliveryDecisionCueCarrierV1,
+  ManagedWorkBinding,
+  PrAutomationState,
+  TaskItem,
+} from '@cat-cafe/shared';
 import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
@@ -102,6 +108,38 @@ export interface CiCdRouterOptions {
   readonly projector?: ICommunityProjectorMin;
   readonly externalReviewCoordinator?: Pick<ExternalReviewCoordinator, 'recordCi'>;
   readonly distillationCheckpoint?: import('../../infrastructure/distillation/DistillationCheckpoint.js').DistillationCheckpoint;
+  readonly now?: () => number;
+}
+
+export const EMPTY_ROLLUP_STABILITY_MS = 60_000;
+
+type RollupObservation = NonNullable<CiAutomationState['rollupObservation']>;
+
+/**
+ * GitHub reports [] both when a repository has no checks and during the brief
+ * window before checks appear for a fresh HEAD. Require the exact same HEAD to
+ * remain empty for a full poll interval; any non-empty observation resets the
+ * streak. The observation is persisted with the PR tracking collector state.
+ */
+export function settleEmptyCheckRollup(
+  poll: CiPollResult,
+  previous: RollupObservation | undefined,
+  now: number,
+): { readonly poll: CiPollResult; readonly observation: RollupObservation } {
+  if (poll.prState !== 'open' || poll.checkRollup !== 'empty') {
+    return {
+      poll,
+      observation: { headSha: poll.headSha, state: 'present', streakStartedAt: now },
+    };
+  }
+
+  const streakStartedAt =
+    previous?.headSha === poll.headSha && previous.state === 'empty' ? previous.streakStartedAt : now;
+  const aggregateBucket = now - streakStartedAt >= EMPTY_ROLLUP_STABILITY_MS ? 'pass' : 'pending';
+  return {
+    poll: { ...poll, aggregateBucket },
+    observation: { headSha: poll.headSha, state: 'empty', streakStartedAt },
+  };
 }
 
 function routeFromLifecycle(
@@ -137,37 +175,47 @@ function routeFromLifecycle(
 }
 
 export class CiCdRouter {
-  constructor(private readonly opts: CiCdRouterOptions) {}
+  private readonly now: () => number;
+
+  constructor(private readonly opts: CiCdRouterOptions) {
+    this.now = opts.now ?? Date.now;
+  }
 
   async route(poll: CiPollResult): Promise<CiRouteResult> {
     const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
     const task = await this.opts.taskStore.getBySubject(sk);
     if (!task) return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
 
-    const terminal = terminalPrState(poll);
-    if (task.status === 'done' && !terminal && task.automationState?.waitOutcome?.delivery !== 'pending') {
-      return { kind: 'skipped', reason: 'tracking task already terminal' };
-    }
-
+    const settled = settleEmptyCheckRollup(poll, task.automationState?.ci?.rollupObservation, this.now());
+    const observedPoll = settled.poll;
+    const terminal = terminalPrState(observedPoll);
     const disabled = await this.skipDisabledCi(task);
     if (disabled) return disabled;
-    await this.recordExternalReviewCi(poll, task, sk);
+    await this.recordExternalReviewCi(observedPoll, task, sk);
 
-    const waitBucket = classifyCiWaitBucket(poll);
-    const fingerprint = `${poll.headSha}:${waitBucket}`;
-    const deliveryDecision = buildDeliveryDecisionCueCarrier(poll, task, Date.now());
+    const waitBucket = classifyCiWaitBucket(observedPoll);
+    const fingerprint = `${observedPoll.headSha}:${waitBucket}`;
+    const deliveryDecision = buildDeliveryDecisionCueCarrier(observedPoll, task, this.now());
     let lifecycle: GitHubWaitLifecycleResult;
     try {
-      lifecycle = await this.observeWait(poll, task, waitBucket, fingerprint, terminal, deliveryDecision);
+      lifecycle = await this.observeWait(
+        observedPoll,
+        task,
+        waitBucket,
+        fingerprint,
+        terminal,
+        deliveryDecision,
+        settled.observation,
+      );
     } catch (error) {
       // The wait transition is durable before connector delivery. Recover world
       // truth from that durable terminal state even when delivery throws.
-      if (terminal) await this.recoverTerminalSideEffects(poll, task.id, sk);
+      if (terminal) await this.recoverTerminalSideEffects(observedPoll, task.id, sk);
       throw error;
     }
 
     if (terminal) {
-      await this.recoverTerminalSideEffects(poll, task.id, sk);
+      await this.recoverTerminalSideEffects(observedPoll, task.id, sk);
       if (lifecycle.kind !== 'notified') {
         await this.opts.taskStore.update(task.id, { status: 'done' });
       }
@@ -204,6 +252,7 @@ export class CiCdRouter {
     fingerprint: string,
     terminal: TerminalPrState | undefined,
     deliveryDecision: DeliveryDecisionCueCarrierV1 | null,
+    rollupObservation: RollupObservation,
   ): Promise<GitHubWaitLifecycleResult> {
     return this.opts.waitLifecycle.observe({
       taskId: task.id,
@@ -220,6 +269,7 @@ export class CiCdRouter {
           headSha: poll.headSha,
           lastFingerprint: fingerprint,
           lastBucket: waitBucket,
+          rollupObservation,
           ...(terminal ? { prState: terminal } : {}),
         },
       },

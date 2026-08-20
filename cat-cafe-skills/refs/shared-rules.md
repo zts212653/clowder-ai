@@ -392,7 +392,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 **SOP 链条确认**（决定下一棒是哪只猫）：
 - review 完 → **必须** @ author 告知结果（不传球 = 假终局）
-- 修完 → @ reviewer 请 review
+- 修完 → 按 review engagement 收口：`iterative` 回原 reviewer；`one-shot` 自证，必要时转日常 reviewer
 - merge 完 → @ 非作者非 reviewer 的猫做愿景守护
 - 分析/方案/建议完成 → @ 提问者（而非反射式 @operator）
 

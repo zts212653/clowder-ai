@@ -9,6 +9,7 @@ import type {
 import {
   carrierCapabilityLabel,
   type FreshnessCarrierSupport,
+  humanCarrierLabel,
   unsupportedCarrierCopy,
 } from './message-disposition-presentation';
 
@@ -45,10 +46,19 @@ export function MessageDispositionSelector({
   const [scope, setScope] = useState<MessageDispositionPreferenceScope>('once');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const selectedForScope = useMemo(() => {
-    if (scope === 'once') return controller.oneShot ?? controller.effective;
-    if (scope === 'thread') return controller.snapshot.thread ?? controller.effective;
-    return controller.snapshot.global ?? controller.snapshot.productDefault;
+  const scopeOverride = useMemo(() => {
+    if (scope === 'once') return controller.oneShot;
+    if (scope === 'thread') return controller.snapshot.thread;
+    return controller.snapshot.global;
+  }, [controller, scope]);
+  const inheritedEffective = useMemo(() => {
+    if (scope === 'once') {
+      return { disposition: controller.snapshot.effective, source: controller.snapshot.source };
+    }
+    if (scope === 'thread' && controller.snapshot.global) {
+      return { disposition: controller.snapshot.global, source: 'global' as const };
+    }
+    return { disposition: controller.snapshot.productDefault, source: 'product' as const };
   }, [controller, scope]);
   const displayedDisposition =
     controller.effective === 'continue_current' && carrierSupport !== 'exact' ? 'next_work' : controller.effective;
@@ -93,12 +103,7 @@ export function MessageDispositionSelector({
     if (saved) setOpen(false);
   };
 
-  const hasOverride =
-    scope === 'once'
-      ? controller.oneShot !== null
-      : scope === 'thread'
-        ? controller.snapshot.thread !== null
-        : controller.snapshot.global !== null;
+  const hasOverride = scopeOverride !== null;
 
   return (
     <div ref={rootRef} className="relative px-4 pt-2" data-testid="message-disposition-selector">
@@ -130,9 +135,15 @@ export function MessageDispositionSelector({
             <div className="text-sm font-semibold text-cafe-primary">这条消息要去哪？</div>
             <p className="mt-1 text-micro text-cafe-muted" data-provider-carrier-capability>
               {carrierCapabilities.length > 0
-                ? carrierCapabilities.map(carrierCapabilityLabel).join('；')
-                : carrierCapabilityLabel(undefined)}
+                ? carrierCapabilities.map((c) => humanCarrierLabel(c)).join('；')
+                : humanCarrierLabel(undefined)}
             </p>
+            {carrierCapabilities.length > 0 && carrierCapabilities.some((c) => c) && (
+              <details className="mt-0.5 text-micro text-cafe-muted">
+                <summary className="cursor-pointer select-none inline">接入详情</summary>
+                <span className="block ml-2 mt-0.5">{carrierCapabilities.map(carrierCapabilityLabel).join('；')}</span>
+              </details>
+            )}
             {carrierCopy && <p className="mt-1 text-xs text-conn-amber-text">{carrierCopy}</p>}
             {showOnboarding && (
               <p
@@ -163,24 +174,32 @@ export function MessageDispositionSelector({
             ))}
           </fieldset>
 
+          <p className="mb-2 text-xs text-cafe-muted" data-testid="message-disposition-scope-state">
+            {scopeOverride
+              ? `本作用域已显式覆盖为「${DISPOSITION_LABEL[scopeOverride]}」`
+              : `本作用域未设置；继承当前有效值「${DISPOSITION_LABEL[inheritedEffective.disposition]}」（${SOURCE_LABEL[inheritedEffective.source]}）`}
+          </p>
+
           <div className="grid gap-2">
             {(['next_work', 'continue_current'] as const).map((disposition) => (
               <button
                 key={disposition}
                 type="button"
                 data-disposition-option={disposition}
-                aria-pressed={selectedForScope === disposition}
+                aria-pressed={scopeOverride === disposition}
                 disabled={controller.loading || (disposition === 'continue_current' && carrierSupport !== 'exact')}
                 onClick={() => void choose(disposition)}
-                className="flex items-start gap-2 rounded-xl border border-cafe px-3 py-2 text-left transition-colors hover:bg-cafe-surface-elevated disabled:cursor-wait disabled:opacity-60"
+                className={`flex items-start gap-2 rounded-xl border border-cafe px-3 py-2 text-left transition-colors hover:bg-cafe-surface-elevated disabled:opacity-60 ${
+                  controller.loading
+                    ? 'disabled:cursor-wait'
+                    : disposition === 'continue_current' && carrierSupport !== 'exact'
+                      ? 'disabled:cursor-not-allowed'
+                      : ''
+                }`}
               >
                 <span
                   className={`mt-1 h-2 w-2 flex-none rounded-full ${
-                    (
-                      selectedForScope === 'continue_current' && carrierSupport !== 'exact'
-                        ? disposition === 'next_work'
-                        : selectedForScope === disposition
-                    )
+                    scopeOverride === disposition
                       ? 'bg-[var(--color-cocreator-primary)]'
                       : 'border border-[var(--console-border-strong)]'
                   }`}

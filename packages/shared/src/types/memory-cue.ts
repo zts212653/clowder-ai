@@ -149,6 +149,7 @@ export const cueEnvelopeV1Schema = z
       .object({
         anchor: boundedIdentifier(500),
         revision: boundedIdentifier(200),
+        asOf: timestampSchema.optional(),
         visibility: z.enum(['owner_public', 'owner_private']),
       })
       .strict(),
@@ -162,7 +163,16 @@ export const cueEnvelopeV1Schema = z
     invalidators: memoryCueInvalidatorsSchema,
     expiresAt: timestampSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.resolverFamily === 'person_entity' && value.source.asOf === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['source', 'asOf'],
+        message: 'person memory cues require a source asOf coordinate',
+      });
+    }
+  });
 
 export type RecallScopeV1 = z.infer<typeof recallScopeV1Schema>;
 export type SubjectSeenOpportunityV1 = z.infer<typeof subjectSeenOpportunityV1Schema>;

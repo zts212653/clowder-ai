@@ -104,20 +104,43 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
       if (message.type !== 'system_info' || !message.content) return false;
       return JSON.parse(message.content).type === 'invocation_created';
     });
-    assert.deepEqual(JSON.parse(created.content), {
+    const createdBody = JSON.parse(created.content);
+    assert.deepEqual(createdBody, {
       type: 'invocation_created',
       invocationId: 'child-success',
       parentInvocationId: 'parent-1',
       executionKind: 'freshness_supplement',
-      startedAt: JSON.parse(created.content).startedAt,
+      startedAt: createdBody.startedAt,
       freshnessCarrierCapability: {
         provider: 'other',
         carrier: 'other',
         deliverySemantics: 'undeclared',
       },
+      effectiveStrategy: {
+        config: {
+          strategy: 'handoff',
+          thresholds: { warn: 0.75, action: 0.85 },
+          turnBudget: 12_000,
+          safetyMargin: 4_000,
+        },
+        source: 'provider_default',
+        revision: createdBody.effectiveStrategy.revision,
+        changedAt: 0,
+        execution: {
+          status: 'unavailable',
+          missingCapabilities: [
+            'effective_input_ceiling',
+            'carrier_binding',
+            'authoritative_usage',
+            'session_rotation',
+            'continuity_bootstrap',
+          ],
+        },
+      },
     });
+    assert.match(createdBody.effectiveStrategy.revision, /^provider_default:[a-f0-9]{64}$/);
     assert.equal(created.turnInvocationId, 'child-success');
-    assert.equal(created.turnExecutionStartedAt, JSON.parse(created.content).startedAt);
+    assert.equal(created.turnExecutionStartedAt, createdBody.startedAt);
     assert.deepEqual(created.extra?.turnExecution, {
       invocationId: 'child-success',
       parentInvocationId: 'parent-1',

@@ -55,6 +55,14 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     );
   }
 
+  listRunningByUser(userId: string): TurnExecutionRecord[] {
+    return sortRecords(
+      [...this.records.values()]
+        .filter((record) => record.status === 'running' && record.userId === userId)
+        .map(cloneTurnExecutionRecord),
+    );
+  }
+
   transitionTerminal(invocationId: string, input: TurnExecutionTerminalInput): TransitionTurnExecutionResult {
     const record = this.records.get(invocationId);
     if (!record) return { outcome: 'not_found', record: null };

@@ -354,6 +354,20 @@ export class ClaudeAgentService implements AgentService {
     return { provider: 'anthropic', carrier: 'claude_print_sdk', deliverySemantics: 'unsupported' };
   }
 
+  contextCapability(): import('../../types.js').AgentContextCapability {
+    return {
+      provider: 'anthropic',
+      carrier: 'print_sdk',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: true,
+      reason: 'Claude print stream reports modelUsage and last API-turn input',
+    };
+  }
+
   private async compileL0ToTempFile(userId?: string): Promise<string> {
     const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
     const l0Path = join(l0Dir, 'system-prompt-l0.md');

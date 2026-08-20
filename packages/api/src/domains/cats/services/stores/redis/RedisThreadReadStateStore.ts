@@ -3,7 +3,7 @@
  * Per-user/per-thread read cursor for unread badge persistence.
  */
 
-import type { RedisClient } from '@cat-cafe/shared/utils';
+import { type RedisClient, VISIBILITY_RESOLVE_SEQ_LUA } from '@cat-cafe/shared/utils';
 import type { IMessageStore } from '../ports/MessageStore.js';
 import type { IThreadReadStateStore, ThreadReadState, ThreadUnreadSummary } from '../ports/ThreadReadStateStore.js';
 import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
@@ -13,43 +13,93 @@ import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
  * KEYS[1] = read-state hash key
  * ARGV[1] = new messageId
  * ARGV[2] = updatedAt timestamp
+ * ARGV[3] = key prefix (for manual key construction inside Lua)
+ * ARGV[4] = threadId (visibility ZSET fallback; '' disables)
+ * ARGV[5] = canonical visibility cursor (optional)
  * Returns 1 if advanced, 0 if rejected (same or older).
  *
- * #1200 codex R14 + Sol R14: Fail-closed on cross-format comparison.
- * String comparison gives wrong results for v1-vs-v2: 'v' (0x76) > any digit,
- * so v2 always "wins" even when it represents an earlier message.
- * Same-format is safe: v2 lex ≡ (seq, id) order; v1 lex ≈ time order.
- * Cross-format → reject; app-layer pre-reconcile upgrades stored v1→v2
- * before reaching this CAS so same-format comparison is the norm.
+ * #3444 root-2 fix (audit thread_msk4hm5oat1ldrbh): the previous same-format
+ * raw string comparison conflated creation order with visibility order — a
+ * valid visibility inversion (created-early message becoming visible later)
+ * made legitimate forward acks rejected, resurrecting unread badges.
+ * Comparison now resolves both sides to (seq, id) via the shared
+ * VISIBILITY_RESOLVE_SEQ_LUA fragment (message hash first, visibility ZSET
+ * fallback for legacy messages the lazy backfill left without hash seq) and
+ * compares in the visibility pair domain — the same coordinate system as
+ * delivery/mention/seen (SET_IF_GREATER_LUA). One-sided fully-pruned residuals
+ * stay fail-closed. Both-unresolvable pre-migration values retain raw lex for
+ * compatibility; that bounded residual cannot repair a visibility inversion
+ * until at least one side has canonical visibility evidence.
  */
 const ACK_CAS_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
+local durableCur = redis.call('HGET', KEYS[1], 'lastReadVisibilityCursor')
+${VISIBILITY_RESOLVE_SEQ_LUA}
 if cur then
-  local curV2 = string.sub(cur, 1, 3) == 'v2:'
-  local newV2 = string.sub(ARGV[1], 1, 3) == 'v2:'
-  if curV2 ~= newV2 then return 0 end
-  if ARGV[1] <= cur then return 0 end
+  if ARGV[1] == cur then
+    if ARGV[5] and ARGV[5] ~= '' then
+      redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[5])
+    elseif string.sub(ARGV[1], 1, 3) == 'v2:' then
+      redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[1])
+    end
+    return 0
+  end
+  -- The rollout-gated primary may have been pruned. Once present, the
+  -- canonical anchor is the authoritative monotonic comparison coordinate.
+  local curSeq, curId = resolveSeq(durableCur or cur)
+  local newSeq, newId = resolveSeq(ARGV[1])
+  if curSeq and newSeq then
+    -- Both resolved: visibility pair-domain comparison
+    if newSeq < curSeq or (newSeq == curSeq and newId <= curId) then return 0 end
+  elseif curSeq and not newSeq then
+    -- Stored resolvable, incoming unresolvable: cannot prove advancement
+    return 0
+  elseif not curSeq and newSeq then
+    -- Stored fully pruned (post-fallback): position unknowable → fail-closed
+    return 0
+  else
+    -- Both unresolvable: raw lex fallback (pre-migration compatibility)
+    if ARGV[1] <= cur then return 0 end
+  end
 end
 redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[1], 'updatedAt', ARGV[2])
+if ARGV[5] and ARGV[5] ~= '' then
+  redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[5])
+elseif string.sub(ARGV[1], 1, 3) == 'v2:' then
+  redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[1])
+end
 return 1
 `;
 
 /**
- * #1200 codex R13: Atomic reconcile of read-state cursor format.
- * CAS: if stored lastReadMessageId == ARGV[1] (old v1), upgrade to ARGV[2] (v2).
- * Returns 1 if reconciled, 0 if stored changed (race) or didn't match.
+ * Atomic exact read-cursor replacement. Used both for same-position format
+ * reconciliation and for accepted read evidence repairing a fully pruned slot.
+ * Returns 1 if replaced, 0 if a concurrent writer changed the value.
  */
-const RECONCILE_READ_CURSOR_LUA = `
+const REPLACE_READ_CURSOR_IF_EQUAL_LUA = `
 local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
 if cur == ARGV[1] then
   redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[2])
+  if ARGV[3] and ARGV[3] ~= '' then
+    redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[3])
+  end
+  if ARGV[4] and ARGV[4] ~= '' then
+    redis.call('HSET', KEYS[1], 'updatedAt', ARGV[4])
+  end
   return 1
 end
 return 0
 `;
 
 export class RedisThreadReadStateStore implements IThreadReadStateStore {
-  constructor(private readonly redis: RedisClient) {}
+  private readonly keyPrefix: string;
+
+  constructor(private readonly redis: RedisClient) {
+    // Read ioredis keyPrefix for Lua scripts that construct keys manually
+    // (same pattern as SessionStore in @cat-cafe/shared). Optional-chained:
+    // test doubles may not expose ioredis options.
+    this.keyPrefix = redis.options?.keyPrefix ?? '';
+  }
 
   private parseReadState(
     userId: string,
@@ -61,6 +111,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       userId,
       threadId,
       lastReadMessageId: data.lastReadMessageId,
+      ...(data.lastReadVisibilityCursor ? { lastReadVisibilityCursor: data.lastReadVisibilityCursor } : {}),
       updatedAt: Number(data.updatedAt ?? 0),
     };
   }
@@ -71,9 +122,22 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     return this.parseReadState(userId, threadId, data);
   }
 
-  async ack(userId: string, threadId: string, messageId: string): Promise<boolean> {
+  private readPosition(state: ThreadReadState): string {
+    return state.lastReadVisibilityCursor ?? state.lastReadMessageId;
+  }
+
+  async ack(userId: string, threadId: string, messageId: string, canonicalCursor = ''): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
-    const result = await this.redis.eval(ACK_CAS_LUA, 1, key, messageId, String(Date.now()));
+    const result = await this.redis.eval(
+      ACK_CAS_LUA,
+      1,
+      key,
+      messageId,
+      String(Date.now()),
+      this.keyPrefix,
+      threadId,
+      canonicalCursor,
+    );
     return result === 1;
   }
 
@@ -83,8 +147,28 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
    * so concurrent writes don't lose data.
    */
   async reconcileReadCursor(userId: string, threadId: string, oldV1: string, newV2: string): Promise<boolean> {
+    return this.replaceReadCursorIfEqual(userId, threadId, oldV1, newV2);
+  }
+
+  async replaceReadCursorIfEqual(
+    userId: string,
+    threadId: string,
+    expectedValue: string,
+    newValue: string,
+    canonicalCursor?: string,
+  ): Promise<boolean> {
     const key = ReadStateKeys.cursor(userId, threadId);
-    const result = await this.redis.eval(RECONCILE_READ_CURSOR_LUA, 1, key, oldV1, newV2);
+    const anchor = canonicalCursor ?? (newValue.startsWith('v2:') ? newValue : '');
+    const updatedAt = canonicalCursor ? String(Date.now()) : '';
+    const result = await this.redis.eval(
+      REPLACE_READ_CURSOR_IF_EQUAL_LUA,
+      1,
+      key,
+      expectedValue,
+      newValue,
+      anchor,
+      updatedAt,
+    );
     return result === 1;
   }
 
@@ -117,7 +201,7 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     if (messageStore.getUnreadSummaryProjection) {
       const cursors = states.flatMap((state, index) => {
         const threadId = threadIds[index];
-        return state && threadId ? [{ threadId, afterId: state.lastReadMessageId }] : [];
+        return state && threadId ? [{ threadId, afterId: this.readPosition(state) }] : [];
       });
       const projected = await messageStore.getUnreadSummaryProjection(cursors, userId);
       const projectedByThread = new Map(projected.map((summary) => [summary.threadId, summary]));
@@ -136,10 +220,11 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
       if (!state) {
         return { threadId, unreadCount: 0, hasUserMention: false };
       }
-      const afterId = state.lastReadMessageId;
+      const afterId = this.readPosition(state);
 
       const unreadMessages = await messageStore.getByThreadAfter(threadId, afterId, undefined, userId, {
         includeQueuedCatMessages: true,
+        unresolvedCursorPolicy: 'empty',
       });
       // P1-2 fix: exclude user's own typed messages + deleted/tombstone messages
       // Cat messages (catId !== null) and connector messages (source) are counted as unread.

@@ -2,10 +2,22 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext: assembleIncrementalContextWithoutCapacity } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
 const { estimateTokens } = await import('../dist/utils/token-counter.js');
+
+const TEST_INVOCATION_HISTORY_CEILING = 500_000;
+
+function assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, options) {
+  return assembleIncrementalContextWithoutCapacity(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, {
+    ...options,
+    effectiveMaxContextTokens: options?.effectiveMaxContextTokens ?? TEST_INVOCATION_HISTORY_CEILING,
+  });
+}
 
 function mockMsg(overrides) {
   const ts = overrides.timestamp ?? Date.now();
@@ -89,6 +101,36 @@ function buildDeps(messageStore, deliveryCursorStore, options = {}) {
 }
 
 describe('F148: assembleIncrementalContext — smart window integration', () => {
+  test('F296 AC-A3: stale artifact alone cannot become command-like truth source', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    seedMessages(messageStore, 1);
+
+    const staleRef = '.codex-tmp-pr1359-review.md';
+    const threadStore = mockThreadStore('PR #1359 review', {
+      v: 1,
+      summary: 'Earlier review session',
+      sessionsIncorporated: 1,
+      updatedAt: Date.now(),
+      recentArtifacts: [
+        {
+          type: 'file',
+          ref: staleRef,
+          label: staleRef,
+          updatedAt: Date.now(),
+          updatedBy: 'fable5',
+          ops: ['create'],
+        },
+      ],
+    });
+    const deps = buildDeps(messageStore, deliveryCursorStore, { threadStore });
+
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
+
+    assert.ok(result.navigationHeader?.includes('真相源: 未定位'), 'stale-only ledger must fail closed');
+    assert.ok(!result.navigationHeader?.includes(staleRef), 'stale artifact must not become 真相源 or 下一步');
+  });
+
   test('AC-A6: warm path (≤15 msgs) produces unchanged output format', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -827,7 +869,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     assert.ok(result.briefingContext.anchorSummaries?.length > 0, 'anchorSummaries should have entries');
   });
 
-  test('VG-1: coverageMap.retrievalHints === 2 when evidence recall returns 2 hits', async () => {
+  test('VG-1 + F296 AC-A1: coverageMap counts 2 recall candidates without carrying their titles', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
@@ -845,23 +887,27 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus');
     assert.ok(result_is_smart_window(result), 'should use smart window');
     assert.ok(result.coverageMap, 'coverageMap should exist');
-    // VG-1: exactly 2 — only evidence titles, no tombstone search hints
+    // VG-1: exactly 2 — only evidence recall candidates, no tombstone search hints
     assert.strictEqual(
-      result.coverageMap.retrievalHints.length,
+      result.coverageMap.recallPointer.candidateCount,
       2,
-      `retrievalHints should be exactly 2 (evidence titles only), got ${result.coverageMap.retrievalHints.length}`,
+      `recall pointer should count exactly 2 candidates, got ${result.coverageMap.recallPointer.candidateCount}`,
     );
-    assert.ok(result.coverageMap.retrievalHints[0].includes('ADR-005'), 'first hint should be evidence title');
+    // F296 AC-A1: the titles themselves must not survive anywhere in the map.
+    assert.ok(
+      !JSON.stringify(result.coverageMap).includes('ADR-005'),
+      'coverage map must not carry heuristic candidate titles',
+    );
   });
 
-  test('VG-1: coverageMap.retrievalHints === 0 when no evidence store', async () => {
+  test('VG-1: recall pointer counts 0 when no evidence store', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
       messageStore.append(mockMsg({ content: `msg ${i}`, timestamp: baseTs + i * 60_000 }));
     }
-    // No evidence store — retrievalHints must be exactly 0
+    // No evidence store — recall pointer count must be exactly 0
     const deps = buildDeps(messageStore, deliveryCursorStore, {
       threadStore: mockThreadStore('Test Thread'),
     });
@@ -869,9 +915,9 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
     assert.ok(result_is_smart_window(result), 'should use smart window');
     assert.ok(result.coverageMap, 'coverageMap should exist');
     assert.strictEqual(
-      result.coverageMap.retrievalHints.length,
+      result.coverageMap.recallPointer.candidateCount,
       0,
-      `retrievalHints should be 0 without evidence store, got ${result.coverageMap.retrievalHints.length}`,
+      `recall pointer should be 0 without evidence store, got ${result.coverageMap.recallPointer.candidateCount}`,
     );
   });
 
@@ -944,6 +990,178 @@ describe('F148 Phase E: origin briefing filter (AC-E2)', () => {
   });
 });
 
+describe('assembleIncrementalContext — unread visible message contract', () => {
+  test('play mode preserves every unread visible user and cat message in timeline order', async () => {
+    const messageStore = new MessageStore();
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const baseTs = Date.now() - 3_000;
+    const firstUserMessage = await messageStore.append(
+      mockMsg({ content: 'UNREAD MESSAGE 1 FROM USER', timestamp: baseTs }),
+    );
+    const catMessage = await messageStore.append(
+      mockMsg({
+        catId: 'codex-sol',
+        content: 'UNREAD MESSAGE 2 FROM CAT',
+        origin: 'stream',
+        timestamp: baseTs + 1_000,
+      }),
+    );
+    const currentUserMessage = await messageStore.append(
+      mockMsg({ content: 'UNREAD MESSAGE 3 FROM USER', mentions: ['opus'], timestamp: baseTs + 2_000 }),
+    );
+
+    const deps = buildDeps(messageStore, deliveryCursorStore);
+    const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'opus', currentUserMessage.id, 'play');
+
+    // Navigation may preview the current trigger before the incremental block;
+    // compare the persisted-body occurrences inside the final history projection.
+    const positions = [firstUserMessage, catMessage, currentUserMessage].map((message) =>
+      result.contextText.lastIndexOf(message.content),
+    );
+    assert.ok(
+      positions.every((position) => position >= 0),
+      'all three unread visible bodies must be projected',
+    );
+    assert.deepEqual(
+      [...positions].sort((left, right) => left - right),
+      positions,
+      'timeline order must be preserved',
+    );
+    assert.deepEqual(
+      result.exposedMessageIds,
+      [firstUserMessage.id, catMessage.id, currentUserMessage.id],
+      'every unchanged persisted body must earn an exposure receipt',
+    );
+  });
+
+  test('keeps same-route output isolated unless it is the exact A2A trigger', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-same-route';
+    const userId = 'user-same-route';
+    const current = messageStore.append({
+      userId,
+      catId: null,
+      content: '@opus then @codex solve independently',
+      mentions: ['opus', 'codex'],
+      timestamp: 1,
+      threadId,
+    });
+    const earlierOutput = messageStore.append({
+      userId,
+      catId: 'opus',
+      content: 'opus first-pass answer',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+    });
+    const deps = buildDeps(messageStore, new DeliveryCursorStore());
+
+    const isolated = await assembleIncrementalContext(deps, userId, threadId, 'codex', current.id, 'play', {
+      sameRouteOutputMessageIds: new Set([earlierOutput.id]),
+    });
+    assert.ok(!isolated.contextText.includes('opus first-pass answer'));
+
+    const directHandoff = await assembleIncrementalContext(deps, userId, threadId, 'codex', current.id, 'play', {
+      sameRouteOutputMessageIds: new Set([earlierOutput.id]),
+      exactA2ATriggerMessageId: earlierOutput.id,
+    });
+    assert.ok(directHandoff.contextText.includes('opus first-pass answer'));
+  });
+
+  test('does not advance the cursor past an earlier same-route output withheld in play mode', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-same-route-boundary';
+    const userId = 'user-same-route-boundary';
+    const current = messageStore.append({
+      userId,
+      catId: null,
+      content: '@opus then @codex continue the chain',
+      mentions: ['opus', 'codex'],
+      timestamp: 1,
+      threadId,
+    });
+    const earlierOutput = messageStore.append({
+      userId,
+      catId: 'opus',
+      content: 'opus earlier output must remain unread',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 2,
+      threadId,
+    });
+    const exactTrigger = messageStore.append({
+      userId,
+      catId: 'fable-5',
+      content: '@codex exact handoff',
+      mentions: ['codex'],
+      origin: 'stream',
+      timestamp: 3,
+      threadId,
+    });
+    const deps = buildDeps(messageStore, new DeliveryCursorStore());
+
+    const result = await assembleIncrementalContext(deps, userId, threadId, 'codex', exactTrigger.id, 'play', {
+      sameRouteOutputMessageIds: new Set([earlierOutput.id, exactTrigger.id]),
+      exactA2ATriggerMessageId: exactTrigger.id,
+    });
+
+    assert.ok(!result.contextText.includes(earlierOutput.content));
+    assert.ok(result.contextText.includes(exactTrigger.content));
+    assert.equal(
+      result.boundaryId,
+      cursorFor(current),
+      'the durable boundary must stay before the first deliberately withheld message',
+    );
+  });
+
+  test('applies the same withheld-message cursor cap on the cold smart-window path', async () => {
+    const messageStore = new MessageStore();
+    const threadId = 'thread-same-route-cold-boundary';
+    const userId = 'user-same-route-cold-boundary';
+    let precedingMessage;
+    for (let index = 0; index < 16; index++) {
+      precedingMessage = messageStore.append({
+        userId,
+        catId: null,
+        content: `older visible message ${index}`,
+        mentions: [],
+        timestamp: index + 1,
+        threadId,
+      });
+    }
+    const earlierOutput = messageStore.append({
+      userId,
+      catId: 'opus',
+      content: 'withheld cold-path output',
+      mentions: [],
+      origin: 'stream',
+      timestamp: 17,
+      threadId,
+    });
+    const exactTrigger = messageStore.append({
+      userId,
+      catId: 'fable-5',
+      content: '@codex cold exact handoff',
+      mentions: ['codex'],
+      origin: 'stream',
+      timestamp: 18,
+      threadId,
+    });
+    const deps = buildDeps(messageStore, new DeliveryCursorStore(), {
+      threadStore: mockThreadStore('Cold boundary thread'),
+    });
+
+    const result = await assembleIncrementalContext(deps, userId, threadId, 'codex', exactTrigger.id, 'play', {
+      sameRouteOutputMessageIds: new Set([earlierOutput.id, exactTrigger.id]),
+      exactA2ATriggerMessageId: exactTrigger.id,
+    });
+
+    assert.ok(result_is_smart_window(result));
+    assert.equal(result.boundaryId, cursorFor(precedingMessage));
+  });
+});
+
 // --- VG-3 P1-1: coverageMap must include decisions/openQuestions from threadMemory ---
 
 describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
@@ -1006,10 +1224,12 @@ describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
       ['选择了方案B', '确定用 redis 6398'],
       'decisions should be passed through to coverageMap',
     );
-    assert.deepStrictEqual(
+    // F296 AC-A2: openQuestions have no lifecycle state / invalidator, so they
+    // must NOT be passed through — the store keeps them, the projection does not.
+    assert.equal(
       result.coverageMap.threadMemory.openQuestions,
-      ['阈值待定'],
-      'openQuestions should be passed through to coverageMap',
+      undefined,
+      'openQuestions must not be projected into the coverageMap',
     );
   });
 });

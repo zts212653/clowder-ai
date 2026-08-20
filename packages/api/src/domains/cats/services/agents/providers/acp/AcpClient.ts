@@ -20,6 +20,7 @@ import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../../utils/cli-spawn.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { buildUnixSupervisedSpawnPlan } from '../../../../../../utils/cli-supervised-process.js';
 import { AcpCwdIdentityTracker } from './acp-cwd-identity.js';
 import type {
   AcpAgentRequest,
@@ -251,6 +252,18 @@ export class AcpClient {
       }
     }
 
+    const providerCommand = command;
+    const providerArgs = args;
+    if (!IS_WINDOWS && !this.config.spawnFn) {
+      const supervised = buildUnixSupervisedSpawnPlan(command, args, {
+        env: childEnv,
+        killGraceMs: Math.max(250, KILL_GRACE_MS - 1_000),
+      });
+      command = supervised.command;
+      args = supervised.args;
+      spawnOpts.env = supervised.env;
+    }
+
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
 
     this.child.stderr?.on('data', (chunk: Buffer) => {
@@ -278,7 +291,13 @@ export class AcpClient {
     this.startReading();
 
     log.info(
-      buildAcpSpawnLogFields({ command, args, cwd: this.config.cwd, pid: this.child.pid, env: this.config.env }),
+      buildAcpSpawnLogFields({
+        command: providerCommand,
+        args: providerArgs,
+        cwd: this.config.cwd,
+        pid: this.child.pid,
+        env: this.config.env,
+      }),
       'ACP initialize: process spawned, sending initialize request',
     );
     const resp = await this.sendRequest(ACP_METHODS.initialize, { protocolVersion: 1 });

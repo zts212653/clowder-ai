@@ -13,6 +13,8 @@ const KEY_PATTERNS = [
   'dispatch-proposal-user-settled:*',
   'dispatch-proposal-clientmsg:*',
   'dispatch-proposal-lineage:*',
+  'dispatch-proposal-canonical-admission:*',
+  'dispatch-proposal-canonical-admission-rebuild-completed-at',
   'entity-proposal:*',
   'entity-proposal-user-pending:*',
   'entity-proposal-user-settled:*',

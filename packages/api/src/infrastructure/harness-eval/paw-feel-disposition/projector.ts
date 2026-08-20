@@ -109,12 +109,12 @@ function transitionDuplicate(
 ): PawFeelDispositionProjection {
   requireActionableTransition(projection, event);
   if (event.duplicateOf === projection.signalId) fail('duplicate target cannot reference itself');
-  return clearLegacyRoute({
-    ...projection,
+  return {
+    ...clearPriorResponsibility(projection),
     state: 'duplicate',
     duplicateOf: event.duplicateOf,
     ...(event.ownerCatId ? { ownerCatId: event.ownerCatId } : {}),
-  });
+  };
 }
 
 function transitionNoAction(
@@ -122,12 +122,12 @@ function transitionNoAction(
   event: Extract<PawFeelDispositionEvent, { type: 'no_action' }>,
 ): PawFeelDispositionProjection {
   requireActionableTransition(projection, event);
-  return clearLegacyRoute({
-    ...projection,
+  return {
+    ...clearPriorResponsibility(projection),
     state: 'no_action',
     reasonCode: event.reasonCode,
     ...(event.ownerCatId ? { ownerCatId: event.ownerCatId } : {}),
-  });
+  };
 }
 
 function transitionFix(
@@ -135,31 +135,108 @@ function transitionFix(
   event: Extract<PawFeelDispositionEvent, { type: 'fix' }>,
 ): PawFeelDispositionProjection {
   requireActionableTransition(projection, event);
-  return clearLegacyRoute({
-    ...projection,
+  return {
+    ...clearPriorResponsibility(projection),
     state: 'fix',
     ownerCatId: event.ownerCatId,
     taskId: event.taskId,
     actionLeaseRef: { leaseId: event.leaseId, generation: event.leaseGeneration },
     custodyEvidenceRef: event.custodyEvidenceRef,
-  });
+  };
+}
+
+function transitionSignatureRequested(
+  projection: PawFeelDispositionProjection,
+  event: Extract<PawFeelDispositionEvent, { type: 'signature_requested' }>,
+): PawFeelDispositionProjection {
+  requireActionableTransition(projection, event);
+  if (event.actor.kind !== 'cat') fail('signature request requires a cat reviewer');
+  if (event.preferredSignerCatId === projection.sourceCatId) {
+    fail('preferred signer must be independent from the source cat');
+  }
+  return {
+    ...clearPriorResponsibility(projection),
+    state: 'signature_waiting',
+    signatureRequest: {
+      requestId: event.eventId,
+      requestedByCatId: event.actor.id,
+      excludedSignerCatId: projection.sourceCatId,
+      ...(event.preferredSignerCatId ? { preferredSignerCatId: event.preferredSignerCatId } : {}),
+      action: event.action,
+    },
+  };
+}
+
+function transitionBlocked(
+  projection: PawFeelDispositionProjection,
+  event: Extract<PawFeelDispositionEvent, { type: 'blocked' }>,
+): PawFeelDispositionProjection {
+  requireActionableTransition(projection, event);
+  return {
+    ...clearPriorResponsibility(projection),
+    state: 'blocked',
+    blocker: { code: event.blockerCode, ref: event.blockerRef },
+  };
 }
 
 function requireActionableTransition(projection: PawFeelDispositionProjection, event: PawFeelDispositionEvent): void {
-  if (projection.state !== 'new' && projection.state !== 'seen' && projection.state !== 'route_pending') {
+  if (
+    projection.state !== 'new' &&
+    projection.state !== 'seen' &&
+    projection.state !== 'route_pending' &&
+    projection.state !== 'routed' &&
+    projection.state !== 'signature_waiting' &&
+    projection.state !== 'blocked' &&
+    projection.state !== 'fix'
+  ) {
     fail(`illegal transition: ${projection.state} --${event.type}--> ?`);
   }
 }
 
-function clearLegacyRoute(projection: PawFeelDispositionProjection): PawFeelDispositionProjection {
-  const { proposalId: _proposalId, targetThreadId: _targetThreadId, ...terminal } = projection;
-  return terminal;
+function clearPriorResponsibility(projection: PawFeelDispositionProjection): PawFeelDispositionProjection {
+  const {
+    proposalId: _proposalId,
+    targetThreadId: _targetThreadId,
+    signatureRequest: _signatureRequest,
+    blocker: _blocker,
+    ownerCatId: _ownerCatId,
+    taskId: _taskId,
+    actionLeaseRef: _actionLeaseRef,
+    custodyEvidenceRef: _custodyEvidenceRef,
+    duplicateOf: _duplicateOf,
+    reasonCode: _reasonCode,
+    outcomeRef: _outcomeRef,
+    ...clean
+  } = projection;
+  return clean;
+}
+
+function assertRequestedActionMatches(projection: PawFeelDispositionProjection, event: PawFeelDispositionEvent): void {
+  const requested = projection.signatureRequest?.action;
+  if (!requested) return;
+  const matches =
+    (requested.type === 'duplicate' && event.type === 'duplicate' && requested.duplicateOf === event.duplicateOf) ||
+    (requested.type === 'no_action' && event.type === 'no_action' && requested.reasonCode === event.reasonCode) ||
+    (requested.type === 'fix' &&
+      event.type === 'fix' &&
+      requested.ownerCatId === event.ownerCatId &&
+      requested.taskId === event.taskId &&
+      requested.leaseId === event.leaseId &&
+      requested.leaseGeneration === event.leaseGeneration &&
+      requested.custodyEvidenceRef === event.custodyEvidenceRef);
+  if (!matches) fail('terminal signature does not match the durable signature request');
 }
 
 function applyDispositionEvent(
   projection: PawFeelDispositionProjection,
   event: Exclude<PawFeelDispositionEvent, { type: 'discovered' }>,
 ): PawFeelDispositionProjection {
+  if (
+    projection.state === 'signature_waiting' &&
+    (event.type === 'duplicate' || event.type === 'no_action' || event.type === 'fix')
+  ) {
+    assertRequestedActionMatches(projection, event);
+  }
   switch (event.type) {
     case 'seen':
       return transitionSeen(projection, event);
@@ -177,11 +254,15 @@ function applyDispositionEvent(
       return transitionNoAction(projection, event);
     case 'fix':
       return transitionFix(projection, event);
+    case 'signature_requested':
+      return transitionSignatureRequested(projection, event);
+    case 'blocked':
+      return transitionBlocked(projection, event);
   }
 }
 
-function isTerminalState(state: PawFeelDispositionState): boolean {
-  return state === 'routed' || state === 'closed' || state === 'duplicate' || state === 'no_action' || state === 'fix';
+function isSignedFinalDisposition(state: PawFeelDispositionState): boolean {
+  return state === 'closed' || state === 'duplicate' || state === 'no_action' || state === 'fix';
 }
 
 function assertTerminalSigner(
@@ -189,11 +270,8 @@ function assertTerminalSigner(
   next: PawFeelDispositionProjection,
   actor: Extract<PawFeelDispositionEvent['actor'], { kind: 'cat' | 'cvo' }>,
 ): void {
-  if (isTerminalState(next.state) && actor.kind === 'cat' && actor.id === projection.sourceCatId) {
+  if (isSignedFinalDisposition(next.state) && actor.kind === 'cat' && actor.id === projection.sourceCatId) {
     fail('source cat cannot sign its own terminal disposition');
-  }
-  if (isTerminalState(next.state) && next.ownerCatId === projection.sourceCatId) {
-    fail('source cat cannot own its own terminal disposition');
   }
 }
 
@@ -229,7 +307,7 @@ export function projectPawFeelDisposition(rawEvents: readonly PawFeelDisposition
     const actor = requireDispositionActor(event);
     const next = applyDispositionEvent(projection, event);
     const legacyOwner =
-      isTerminalState(next.state) &&
+      isSignedFinalDisposition(next.state) &&
       (event.type === 'duplicate' || event.type === 'no_action') &&
       !next.ownerCatId &&
       actor.kind === 'cat'

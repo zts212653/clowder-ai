@@ -857,6 +857,156 @@ test('captures usage and session id from kimi stream events when available', asy
   assert.equal(text?.metadata?.usage?.totalTokens, 46);
 });
 
+test('estimates API-equivalent costUsd on done for priced Kimi models', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 200_000,
+        output_tokens: 50_000,
+        total_tokens: 250_000,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Kimi K2.7 Code card (no cached input): input 200k × $0.95/M
+  // + output 50k × $4.00/M = $0.19 + $0.2 = $0.39
+  assert.equal(done?.metadata?.usage?.costUsd, 0.39);
+  assert.equal(done?.metadata?.usage?.costEstimated, true);
+});
+
+test('omits cost when raw usage reports cached_input_tokens (unproven subset contract)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 200_000,
+        cached_input_tokens: 100_000,
+        output_tokens: 50_000,
+        total_tokens: 250_000,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Terra P1 (cat-cafe#3479): cached_input_tokens ⊂ input_tokens is not an
+  // officially documented relationship — omit cost until a verified live
+  // sample proves the contract. Tokens stay visible.
+  assert.equal(done?.metadata?.usage?.inputTokens, 200_000);
+  assert.equal(done?.metadata?.usage?.cacheReadTokens, 100_000);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
+test('does not bill the snapshot when raw stats carry only context tokens', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-context-share-'));
+  const sessionId = 'kimi-context-session';
+  const sessionDir = join(shareDir, 'sessions', 'project-hash', sessionId);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(
+    join(shareDir, 'config.toml'),
+    [
+      'default_model = "kimi-code/kimi-for-coding"',
+      '',
+      '[models."kimi-code/kimi-for-coding"]',
+      'max_context_size = 262144',
+      'capabilities = ["thinking", "image_in"]',
+    ].join('\n'),
+    'utf8',
+  );
+  writeFileSync(
+    join(sessionDir, 'context.jsonl'),
+    ['{"role":"user","content":"hi"}', '{"role":"_usage","token_count":6335}'].join('\n'),
+    'utf8',
+  );
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  try {
+    const promise = collect(
+      service.invoke('Hello', {
+        sessionId,
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    // Terra residual P1 (cat-cafe#3479): raw stats with ONLY context tokens
+    // is not a billable input/output record. The snapshot enrichment will
+    // still write lastTurnInputTokens=6335 — it must never become cost.
+    emitKimiEvents(proc, [{ role: 'assistant', stats: { context_used_tokens: 1 }, content: 'ok' }]);
+    const msgs = await promise;
+    const done = msgs.find((msg) => msg.type === 'done');
+    assert.ok(done?.metadata?.usage, 'done should have usage metadata');
+    assert.equal(done.metadata.usage.contextUsedTokens, 6335);
+    assert.equal(done.metadata.usage.lastTurnInputTokens, 6335);
+    assert.equal(done.metadata.usage.costUsd, undefined);
+    assert.equal(done.metadata.usage.costEstimated, undefined);
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('does not estimate when raw usage carries only total_tokens', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: { total_tokens: 46 },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // total_tokens alone is not a billable input/output record.
+  assert.equal(done?.metadata?.usage?.totalTokens, 46);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
+test('leaves costUsd unset for unverified Kimi model aliases (no guessing)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-code/kimi-for-coding-v1' });
+
+  const promise = collect(service.invoke('Hello'));
+  emitKimiEvents(proc, [
+    {
+      role: 'assistant',
+      usage: {
+        input_tokens: 12,
+        output_tokens: 34,
+        total_tokens: 46,
+      },
+      content: 'ok',
+    },
+  ]);
+  const msgs = await promise;
+  const done = msgs.find((msg) => msg.type === 'done');
+  // Tokens stay visible; cost is omitted rather than guessed.
+  assert.equal(done?.metadata?.usage?.inputTokens, 12);
+  assert.equal(done?.metadata?.usage?.costUsd, undefined);
+  assert.equal(done?.metadata?.usage?.costEstimated, undefined);
+});
+
 test('enriches done metadata with local Kimi context snapshot for session-chain health', async () => {
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-context-share-'));
   const sessionId = 'kimi-context-session';
@@ -898,6 +1048,12 @@ test('enriches done metadata with local Kimi context snapshot for session-chain 
     assert.equal(done.metadata.usage.contextUsedTokens, 6335);
     assert.equal(done.metadata.usage.contextWindowSize, 262144);
     assert.equal(done.metadata.usage.lastTurnInputTokens, 6335);
+    // Terra P1 (cat-cafe#3479): the context snapshot is health/display
+    // context, not verified billable turn telemetry. With no raw usage from
+    // THIS invocation, cost must stay unset even though the model is priced
+    // and lastTurnInputTokens is populated by the enrichment above.
+    assert.equal(done.metadata.usage.costUsd, undefined);
+    assert.equal(done.metadata.usage.costEstimated, undefined);
   } finally {
     rmSync(shareDir, { recursive: true, force: true });
   }
@@ -1216,6 +1372,25 @@ test('native L0: user cliConfigArgs cannot override --agent-file / --agent', asy
   }
 });
 
+test('native L0: declares --agent-file as managed argv provenance for diagnostics', async () => {
+  const restore = enterNonLegacyKimiPath();
+  try {
+    let capturedOptions;
+    async function* spawnCliOverride(options) {
+      capturedOptions = options;
+      yield { role: 'assistant', content: 'ok' };
+    }
+    const l0CompilerFn = mock.fn(async () => 'L0_X');
+    const service = new KimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
+
+    await collect(service.invoke('Hello', { spawnCliOverride }));
+
+    assert.deepEqual(capturedOptions?.managedArgvFlags, ['--agent-file']);
+  } finally {
+    restore();
+  }
+});
+
 test('legacy kimi-cli: no --agent-file, no v2 env flag, prompt keeps <system_instructions> wrap', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -1279,8 +1454,166 @@ test('native L0 resume: matching fingerprint honors --session', async () => {
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(args.includes('--session'), 'matching fingerprint must resume');
     assert.equal(args[args.indexOf('--session') + 1], 'sess-match');
+    assert.ok(
+      !args.includes('--agent-file'),
+      'kimi-code rejects --agent-file combined with --session (agent is bound at session creation)',
+    );
     const freshInfo = msgs.find((m) => m.type === 'system_info' && /l0_resume_fresh_start/.test(m.content ?? ''));
     assert.equal(freshInfo, undefined, 'no fresh-start notice on clean resume');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// kimi-code >=0.30 turned the previously-silent no-op into a hard arg error:
+//   "error: Cannot combine --agent/--agent-file with --session/--continue:
+//    the agent is bound at session creation and the bound agent is restored
+//    automatically on resume."
+// Observed as exit 1 on every resumed kimi turn from 2026-08-09 (CLI 0.34.0).
+// The L0 must still be compiled on resume — the fingerprint gate above depends
+// on it — but the agent file only ever applied to a *new* session.
+test('native L0 resume: compiles L0 for the fingerprint gate but passes no agent flag', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-noagent-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-bound': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-bound',
+        systemPrompt: 'PACK_CONTENT',
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    await promise;
+
+    assert.equal(l0CompilerFn.mock.callCount(), 1, 'resume still compiles L0 to verify the fingerprint');
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(args.includes('--session'), 'verified fingerprint resumes the bound session');
+    assert.ok(!args.includes('--agent-file'), '--agent-file must not travel with --session');
+    assert.ok(!args.includes('--agent'), '--agent must not travel with --session');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// @codex-terra REQUEST_CHANGES on PR #1323 (exact HEAD 0f7c453be): session-selection flags
+// must be server-owned. Before this PR a user-configured --session still crashed on the CLI's
+// --agent-file mutual-exclusion check; dropping --agent-file on verified resume removes that
+// accidental shield, so the fingerprint gate could verify session A while the CLI resumes an
+// unverified session B — silently, with no l0_resume_fresh_start notice.
+test('native L0 resume: cliConfigArgs cannot swap the fingerprint-verified session', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-argv-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-verified': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-verified',
+        cliConfigArgs: ['--session sess-unverified'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    const msgs = await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('sess-unverified'), 'user cliConfigArgs must not select an unverified session');
+    assert.equal(args.filter((a) => a === '--session' || a === '-S').length, 1, 'exactly one session flag survives');
+    assert.equal(
+      args[args.indexOf('--session') + 1],
+      'sess-verified',
+      'the gate-verified session must be the one used',
+    );
+    // The gate said "resume verified" — metadata and argv must agree, not diverge silently.
+    const init = msgs.find((m) => m.type === 'session_init');
+    assert.equal(init?.sessionId, 'sess-verified');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+// Attached-value spellings verified against kimi-code 0.34.0: both `-S<id>` and
+// `--session=<id>` are accepted and select the session (`Session "bogus-sess-zzz" not
+// found`), so a space-separated-only strip would leave the bypass wide open.
+test('native L0 resume: attached-value session spellings (-S<id> / --session=<id>) are stripped too', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-attached-'));
+  try {
+    writeFingerprintStore(shareDir, {
+      'kimi:sess-verified': { fingerprint: computeKimiL0Fingerprint('L0_V1'), catId: 'kimi', updatedAt: 1 },
+    });
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V1');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Continue', {
+        sessionId: 'sess-verified',
+        cliConfigArgs: ['-Ssneaky-one', '--session=sneaky-two'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'resumed' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.some((a) => a.includes('sneaky-one')), '-S<id> concatenated form must be stripped');
+    assert.ok(!args.some((a) => a.includes('sneaky-two')), '--session=<id> form must be stripped');
+    assert.equal(args[args.indexOf('--session') + 1], 'sess-verified', 'gate-verified session survives intact');
+  } finally {
+    restore();
+    rmSync(shareDir, { recursive: true, force: true });
+  }
+});
+
+test('native L0 fresh start: cliConfigArgs cannot sneak --continue past the fingerprint gate', async () => {
+  const restore = enterNonLegacyKimiPath();
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-fp-cont-'));
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const l0CompilerFn = mock.fn(async () => 'L0_V2');
+    const service = new KimiAgentService({ spawnFn, model: 'kimi-code/k3', l0CompilerFn });
+
+    const promise = collect(
+      service.invoke('Hello', {
+        // no sessionId → fresh bind, --agent-file is carried
+        cliConfigArgs: ['--continue', '--verbose'],
+        callbackEnv: { KIMI_SHARE_DIR: shareDir },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'fresh' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('--continue'), '--continue would resume an unverified session behind the gate');
+    assert.ok(!args.includes('-c'), '-c is the same flag under its short alias');
+    assert.ok(args.includes('--agent-file'), 'fresh bind still carries the L0 agent file');
+    // Arity guard: --continue takes NO value, so stripping it must not swallow the next user arg.
+    assert.ok(args.includes('--verbose'), 'a valueless reserved flag must not eat the following user arg');
   } finally {
     restore();
     rmSync(shareDir, { recursive: true, force: true });

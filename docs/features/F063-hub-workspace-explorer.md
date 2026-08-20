@@ -4,7 +4,8 @@ related_features: [F060, F058, F279]
 topics: [hub, ux, workspace, file-browser, code-preview, collaboration]
 doc_kind: spec
 created: 2026-03-05
-tips_exempt: chat document links are a direct click affordance with no separate capability or workflow to teach
+updated: 2026-08-11
+tips_exempt: composer + button, slash commands, and picker footer teach context linking in place without a separate waiting-state tip
 ---
 
 # F063: Hub Workspace Explorer — operator不用打开 IDE 也可以和猫猫们优雅协作
@@ -14,7 +15,7 @@ tips_exempt: chat document links are a direct click affordance with no separate 
 > **Completed**: 2026-03-09
 
 Architecture cell: hub-action-surface
-Map delta: none — chat document links reuse the existing Workspace open-file action without changing ownership.
+Map delta: none — `hub-action-surface` already names F063, the shared ContextAttachment schema, prompt projection, rendering, and selection action anchors; AC-31 extends that owned contract without adding an owner, store, queue, or router.
 
 ## Why
 
@@ -102,6 +103,14 @@ operator日常向外展示猫猫协作时，会在多个 thread 间切换讲解�
 3. 锁定期间猫猫消息中的自动文件跳转不抢占右侧面板；需要提供“替换锁定对象”的显式入口。
 4. 退出锁定后，当前 thread 恢复它自己的 Workspace 状态，不能被锁定内容污染。
 5. 若当前处于专注模式，演示锁定应尽量保持专注视图，不因 thread 切换自动退出。
+
+### Post-completion Enhancement: Structured Context Attachments
+
+Composer 中由 Thread、Workspace File 和文字选区产生的上下文，不再伪装成普通 Markdown 文本。三类对象统一进入结构化 `ContextAttachment` 合约，并沿发送、消息存储、草稿恢复、模型消费和 UI 渲染完整保真；普通 Markdown 链接继续保持普通链接语义。
+
+聊天消息和 CLI Output 的可见文字选区复用 Workspace 已验证的选区定位规则，提供 `Add to chat`，生成带来源身份的 Quote attachment。该能力只暴露稳定的 context/action 接口，不改变 F284 的工具栏布局。
+
+所有从 Workspace、聊天消息或 CLI Output 发出的 `Add to chat` 在统一 composer draft consumer 成功接收 attachment 后，把 DOM focus 交给 textarea，并将折叠光标放在已有草稿末尾；原文字与附件保持不变，也不会自动发送。
 
 ## Technical Direction
 
@@ -218,6 +227,15 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 - [x] AC-20: 深层目录（depth≥4）展开时按需加载子节点（Gap 7, PR #311）
 - [x] AC-21: 切换线程后恢复该线程上次的文件树展开状态和打开的文件标签（Gap 7, PR #311）
 - [x] AC-22: 演示锁定模式：operator锁定当前 Workspace 文档后，切换 thread 仍保持右侧文档/行号/滚动位置；退出锁定后恢复各 thread 原本的 Workspace 状态（PR #1570）
+- [x] AC-23: CodeMirror 与 Markdown rendered mode 的 Add to chat 操作浮层锚定当前可见选区；选区随滚动移动时浮层同步移动，选区离开视口时隐藏，不再固定在 viewer 顶部。
+- [x] AC-24: 输入框提供统一“添加上下文”入口：桌面 `+` 与移动端工具栏均可选择 Thread / Workspace 文件；`/thread`、`/file` 是键盘入口，`@` 继续只负责召唤猫猫。Thread 引用同时保留标题和稳定 ID，并可在 Hub 内跳转。
+- [x] AC-25: Thread / Workspace File / Quote 使用同一个版本化 `ContextAttachment` 契约；发送、消息持久化、队列恢复、composer 草稿恢复、模型当前轮与历史消费均保持结构和来源身份。
+- [x] AC-26: Composer 与已发送消息把 Thread / Workspace File 渲染为可识别、可点击的 rich chip/card；普通 Markdown 链接不被提升为 attachment。
+- [x] AC-27: Composer picker、Workspace 当前文件、Workspace 选区、聊天消息选区与 CLI Output 选区都写入同一 attachment 扩展点，不再各自拼装特殊 Markdown 文本；Reply、Image、Rich Block 继续使用各自原生契约。
+- [x] AC-28: 聊天消息和 CLI Output 的有效可见文字选区显示 `Add to chat`，浮层随嵌套滚动/resize 更新、选区离开视口即隐藏，点击后写入带稳定 source 的 Quote attachment。
+- [x] AC-29: F284 仅通过稳定的 composer context/action 接口消费该能力；本增强不重做或绑定其工具栏布局。
+- [x] AC-30: Workspace、聊天消息与 CLI Output 的 attachment 经统一 draft insert consumer 成功加入当前 thread 后，composer textarea 获得 DOM focus，折叠光标落在已有草稿末尾；已有文字/附件不丢失且不自动发送。
+- [x] AC-31: Workspace、聊天消息与 CLI Output 选区先打开就地批注编辑器；Save 后把选文、用户点评与可选 source-relative 选区坐标保存在同一个扁平 Quote attachment 中。CLI 坐标只相对带稳定 `segmentId` 的 stdout / tool label / tool detail 语义叶节点；叶节点折叠或缺失时锚点隐藏，禁止迁移到相邻文字。多个批注在 composer 显示为一个可展开的 `N annotations` 汇总，聊天消息与 CLI Output 原文处显示从同一草稿恢复的编号锚点；Workspace 保留 file/line 来源，不承诺文件变化后的持久 DOM 锚点。编辑器靠近视口或 Workspace 容器边缘时，内容区可滚动且 Save/Cancel 始终可达；非空点评按 Enter 保存、Shift+Enter 换行，IME 候选确认不得误保存。正文继续表示整条消息的总评，不靠顺序猜配对、不自动发送，也不新增 Comment/Group/Relation 领域对象。
 
 ## 需求点 Checklist
 
@@ -239,6 +257,16 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 | R14 | "要允许我能够调整两个的占比？或者说三个？聊天 然后文件系统 然后打开的文件" | AC-14 | manual: 拖拽分隔条调整三视图比例 | [x] |
 | R15 | "直接点击一个文件然后在 chat 里 mention，或者选中某些行某个文件点击 add to chat" | AC-15 | manual: 选中代码/文件 → 点击引用 → 插入到聊天输入框 | [x] |
 | R16 | "演示时切换 thread，右边 Workspace 仍固定在原本打开的文件/行号" | AC-22 | manual + store test: 锁定文档 → 切换 thread → 右侧不变；退出锁定 → 各 thread workspace 未被污染 | [x] |
+| R17 | "文档移动到下方，Add to chat 竟然还在文档最上面，不移动" | AC-23 | unit + manual: 下方选区浮层靠近选区；滚动后坐标变化；离开视口隐藏 | [x] |
+| R18 | "能 link 某个 thread 告诉你看看那个 thread；现在要复制 thread id" | AC-24 | component + manual: `+` / `/thread` 选标题 → 草稿插入含 title+threadId 的可点击引用；`@` 仍为猫猫 | [x] |
+| R19 | 上下文对象不能再伪装成普通 Markdown 链接 | AC-25, AC-26, AC-27 | schema + API + component tests | [x] |
+| R20 | Thread / File / Quote 从 composer 到模型必须使用同一契约 | AC-25 | shared schema + persistence + prompt projection tests | [x] |
+| R21 | 聊天消息和 CLI Output 选区可 Add to chat | AC-28 | DOM selection + geometry + store tests | [x] |
+| R22 | 普通 Markdown 链接仍是普通链接 | AC-26 | message rendering regression test | [x] |
+| R23 | 不重做 F284 工具栏，只给稳定 context/action 接口 | AC-29 | ownership diff + component contract test | [x] |
+| R24 | “都 Add to chat 了说明我就是想和你发消息”——加入后无需再点输入框 | AC-30 | component: Workspace/File/Message/CLI attachment 插入后 focus + caret-end + draft preservation + no-send | [x] |
+| R25 | “111 / 222 到底谁和 quote 1 / quote 2 有关”以及 Codex App 最新 numbered annotations 参考 | AC-31 | shared/API prompt contract + Message/CLI/Workspace DOM + draft restore + composer summary | [x] |
+| R26 | “这个情况下我也不知道如何 add”以及“支持一个回车 = 确定” | AC-31 | shared editor viewport + Enter/Shift+Enter/IME regression + browser guardian | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -255,6 +283,9 @@ PUT  /api/workspace/file    { worktreeId, path, content, baseSha256, editSession
 | 布局方案 | 侧边栏 / Tab / Modal / 可拖拽 | **顶栏按钮切换，右侧文件系统取代状态栏，聊天:文件 = 50:50** | operator (2026-03-05) |
 | 文件编辑能力 | 只读 / 可编辑 | **可编辑** — operator帮忙编辑后猫猫可直接 commit | operator (2026-03-05) |
 | Worktree 感知 | 忽略 / 感知 | **必须感知 worktree** — 猫猫可能在不同 worktree 工作，文件系统需显示对应 worktree 的文件 | operator (2026-03-05) |
+| Composer 快捷语义 | `@` 复用 / `+` 与 `/` 分工 | **`@` 保留猫猫路由；`+` 打开统一上下文选择器；`/thread`、`/file` 作为键盘直达** | operator反馈 + Maine Coon收敛 (2026-08-08) |
+| Composer 上下文载体 | 特殊 Markdown / 结构化 attachment | **Thread / Workspace File / Quote 统一为版本化 ContextAttachment；Markdown 不承担对象身份** | operator + Maine Coon收敛 (2026-08-08) |
+| 多选文点评关系 | 新增 ContextComment/关系图 / 扩展现有 Quote | **只给现有 Quote 增加有界 `comment` 与可选 source-relative 坐标；数组保持扁平，编号锚点和汇总面板都是同一草稿的投影** | operator参考 Codex App + Maine Coon收敛 (2026-08-10) |
 | 演示锁定追踪方式 | 单开新 feature / 作为 F063 增量 | **作为 F063 post-completion enhancement 追踪** — 不单开新 feature，避免 Workspace 能力分散 | operator (2026-05-06) |
 | Mermaid 图表渲染 | 新 feature / 作为 F063 Markdown 渲染增量 | **作为 F063 post-completion enhancement 追踪** — workspace 已负责 Markdown rendered mode，`mermaid` fenced block 是同一渲染面的格式支持 | operator (2026-05-19) |
 | 参考实现 | 自研 / 参考现有 | **参考 Claude.ai Project + Codex 布局**，取其精华 | operator (2026-03-05) |
@@ -367,6 +398,11 @@ operator评价 Phase 1 UI："有点丑不够猫猫，感觉没有设计感"。�
 | P2B-11 | **BUG**: Markdown 渲染模式下相对链接不可跳转 — `[F046](features/F046-xxx.md)` 这样的相对路径链接在 Rendered 模式下点击无效（`target="_blank"` 打开的是无意义的浏览器 URL）。应拦截相对 `.md` 链接，解析为相对于当前文件的路径，用 `setWorkspaceOpenFile` 在 workspace 内打开目标文件 | — | **done** |
 | P2B-12 | **Enhancement**: Markdown rendered mode 支持 `mermaid` fenced code block，避免长文/设计文档里的流程图退化成普通代码块 | — | **done** |
 | P2B-13 | **BUG**: 聊天气泡中的命名 Markdown 链接把家内绝对路径藏在 href 后，绕过裸路径识别并由浏览器打开 404。Chat 默认 anchor 需识别 active project 内的绝对/仓库相对 `.md`/`.mdx`（含 `:line`），复用 `setWorkspaceOpenFile`；外部 URL 与项目外路径保持浏览器链接 | AC-4, AC-13 | **done** |
+| P2B-14 | **REGRESSION**: P2B-10 后续实现退化为 viewer 顶部绝对定位；改为从 CodeMirror / DOM selection 读取视口坐标，滚动同步更新并在离开视口时隐藏 | AC-23 | **done** |
+| P2B-15 | **Enhancement**: Composer 新增统一上下文选择器；`+` / `/thread` / `/file` 引用 Thread 与 Workspace 文件，Thread markdown link 在 Hub 内导航，`@` 语义不变 | AC-24 | **done** |
+| P2B-16 | **Enhancement**: Thread / Workspace File / Quote 进入结构化 ContextAttachment 全链；消息与 CLI Output 选区支持 Add to chat；普通 Markdown 保持普通链接 | AC-25~29 | **done** |
+| P2B-17 | **Enhancement**: Add to chat 成功后统一把焦点交给 composer，并把光标放在已有草稿末尾；不改 producer 或 F284 布局 | AC-30 | **done** |
+| P2B-18 | **Enhancement**: Add to chat 先就地写批注；Quote 自带 comment，原文显示编号锚点，composer 汇总为 `N annotations`，模型获得确定配对 | AC-31 | **done** |
 
 ### Phase 2C: 预览能力
 

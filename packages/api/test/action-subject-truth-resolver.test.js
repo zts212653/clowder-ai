@@ -24,6 +24,17 @@ const activeTrackingSnapshot = (headSha) => ({
   closedAt: null,
 });
 
+const completedTrackingSnapshot = (headSha) => ({
+  ...activeTrackingSnapshot(headSha),
+  status: 'done',
+});
+
+const livePrSnapshot = (headSha, prState = 'open', subjectRef = 'pr:owner/repo#2868') => ({
+  subjectRef,
+  headSha,
+  prState,
+});
+
 function projection(state, overrides = {}) {
   return {
     repo: 'owner/repo',
@@ -55,6 +66,7 @@ function harness({
   trackingSnapshot,
   task = null,
   localReviewEvidenceProvider,
+  livePrSnapshot: observedLivePr,
 } = {}) {
   const marks = [];
   const leaseStore = {
@@ -90,6 +102,16 @@ function harness({
           },
         }
       : undefined;
+  const livePrReads = [];
+  const livePrFreshnessProvider =
+    observedLivePr !== undefined
+      ? {
+          async observe(input) {
+            livePrReads.push(input);
+            return observedLivePr;
+          },
+        }
+      : undefined;
   return {
     resolver: new ActionSubjectTruthResolver(
       leaseStore,
@@ -101,9 +123,11 @@ function harness({
         },
       },
       localReviewEvidenceProvider,
+      livePrFreshnessProvider,
     ),
     marks,
     communityStore,
+    livePrReads,
   };
 }
 
@@ -493,6 +517,62 @@ describe('ActionSubjectTruthResolver', () => {
     });
   });
 
+  it('accepts durable tracking HEAD after the wait lifecycle completes without PR terminal truth', async () => {
+    const { resolver } = harness({
+      object: projection('in_progress'),
+      trackingSnapshot: completedTrackingSnapshot(HEAD_NEW),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'verified',
+      evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_NEW}`,
+      freshnessKey: predicate.freshnessKey,
+    });
+  });
+
+  it('accepts durable tracking HEAD for todo and blocked nonterminal wait states', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    for (const status of ['todo', 'blocked']) {
+      const { resolver } = harness({
+        object: projection('in_progress'),
+        trackingSnapshot: { ...activeTrackingSnapshot(HEAD_NEW), status },
+      });
+
+      assert.deepEqual(await resolver.resolveFreshness(predicate), {
+        status: 'verified',
+        evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_NEW}`,
+        freshnessKey: predicate.freshnessKey,
+      });
+    }
+  });
+
+  it('rejects a stale review HEAD against durable tracking truth after the wait lifecycle completes', async () => {
+    const { resolver } = harness({
+      object: projection('in_progress'),
+      trackingSnapshot: completedTrackingSnapshot(HEAD_OLD),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the tracking-observed current HEAD',
+    });
+  });
+
   it('returns mismatch when tracking HEAD does not match predicate HEAD', async () => {
     const { resolver } = harness({
       object: projection('in_progress'),
@@ -541,7 +621,65 @@ describe('ActionSubjectTruthResolver', () => {
     });
   });
 
-  it('rejects non-PR and terminal tracking snapshots even when they retain the matching HEAD', async () => {
+  it('bootstraps the first review from a server-observed live PR HEAD after durable sources are absent', async () => {
+    const { resolver, livePrReads } = harness({
+      object: null,
+      livePrSnapshot: livePrSnapshot(HEAD_NEW),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'verified',
+      evidenceRef: `github:pr:owner/repo#2868:head:${HEAD_NEW}`,
+      freshnessKey: predicate.freshnessKey,
+    });
+    assert.deepEqual(livePrReads, [{ subjectRef: 'pr:owner/repo#2868', repoFullName: 'owner/repo', prNumber: 2868 }]);
+  });
+
+  it('rejects stale or terminal live GitHub observations instead of trusting the caller predicate', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    const stale = harness({ object: null, livePrSnapshot: livePrSnapshot(HEAD_OLD) }).resolver;
+    assert.deepEqual(await stale.resolveFreshness(predicate), {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the bootstrap-observed current HEAD',
+    });
+
+    for (const prState of ['merged', 'closed']) {
+      const terminal = harness({ object: null, livePrSnapshot: livePrSnapshot(HEAD_NEW, prState) }).resolver;
+      assert.deepEqual(await terminal.resolveFreshness(predicate), {
+        status: 'mismatch',
+        reason: 'bootstrap observation reports a terminal PR',
+      });
+    }
+  });
+
+  it('rejects a bootstrap observation bound to another PR subject', async () => {
+    const { resolver } = harness({
+      object: null,
+      livePrSnapshot: livePrSnapshot(HEAD_NEW, 'open', 'pr:other/repo#2868'),
+    });
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+
+    assert.deepEqual(await resolver.resolveFreshness(predicate), {
+      status: 'insufficient',
+      reason: 'bootstrap PR observation subject mismatch',
+    });
+  });
+
+  it('rejects non-PR and PR-terminal tracking snapshots even when they retain the matching HEAD', async () => {
     const predicate = canonicalizeActionTerminalPredicate({
       actionFamily: 'review',
       subjectRef: 'pr:owner/repo#2868',
@@ -549,7 +687,6 @@ describe('ActionSubjectTruthResolver', () => {
     });
     const inactiveSnapshots = [
       { ...activeTrackingSnapshot(HEAD_NEW), kind: 'issue_tracking' },
-      { ...activeTrackingSnapshot(HEAD_NEW), status: 'done' },
       { ...activeTrackingSnapshot(HEAD_NEW), ciPrState: 'merged' },
       { ...activeTrackingSnapshot(HEAD_NEW), reviewPrState: 'closed' },
       { ...activeTrackingSnapshot(HEAD_NEW), closedAt: 300 },
@@ -586,5 +723,33 @@ describe('ActionSubjectTruthResolver', () => {
       evidenceRef: `community:pr:owner/repo#2868:head:${HEAD_NEW}`,
       freshnessKey: predicate.freshnessKey,
     });
+  });
+
+  it('does not query the bootstrap observer when durable CommunityStore or tracking truth is available', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+    const externalReview = {
+      currentHeadSha: HEAD_NEW,
+      lastReviewedHeadSha: null,
+      delivery: null,
+      ci: null,
+    };
+    const community = harness({
+      object: projection('in_progress', { externalReview }),
+      livePrSnapshot: livePrSnapshot(HEAD_OLD),
+    });
+    const tracking = harness({
+      object: null,
+      trackingHead: HEAD_NEW,
+      livePrSnapshot: livePrSnapshot(HEAD_OLD),
+    });
+
+    assert.equal((await community.resolver.resolveFreshness(predicate)).status, 'verified');
+    assert.equal((await tracking.resolver.resolveFreshness(predicate)).status, 'verified');
+    assert.deepEqual(community.livePrReads, []);
+    assert.deepEqual(tracking.livePrReads, []);
   });
 });

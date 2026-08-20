@@ -127,6 +127,134 @@ describe('useAgentMessages system_info warning', () => {
     );
   });
 
+  it('renders cloud bridge status as readable text instead of raw JSON', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'gpt-pro',
+        content: JSON.stringify({
+          type: 'cloud_bridge_status',
+          catId: 'gpt-pro',
+          status: 'unavailable',
+          reason: 'no-adapter',
+          message: '未发送给 @gpt-pro：还没有可用的后台 Host Adapter。',
+        }),
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'system',
+        variant: 'info',
+        content: '未发送给 @gpt-pro：还没有可用的后台 Host Adapter。',
+      }),
+    );
+  });
+
+  it('updates one invocation-scoped reconnect notice to recovered', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        invocationId: 'parent-inv',
+        turnInvocationId: 'turn-inv',
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'reconnecting',
+          invocationId: 'turn-inv',
+          attempt: 1,
+          attempts: ['Reconnecting... 1/5 (stream disconnected before completion)'],
+        }),
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'provider-recovery:codex-sol:turn-inv',
+        type: 'system',
+        variant: 'info',
+        content: expect.stringContaining('Reconnecting'),
+        extra: expect.objectContaining({
+          providerRecovery: expect.objectContaining({ phase: 'reconnecting', invocationId: 'turn-inv' }),
+        }),
+      }),
+    );
+    storeState.messages = [mockAddMessage.mock.calls.at(-1)?.[0] as ChatMessage];
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        invocationId: 'parent-inv',
+        turnInvocationId: 'turn-inv',
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'recovered',
+          invocationId: 'turn-inv',
+          attempt: 1,
+          attempts: ['Reconnecting... 1/5 (stream disconnected before completion)'],
+          evidence: 'item.completed',
+        }),
+      });
+    });
+
+    expect(mockPatchMessage).toHaveBeenCalledWith(
+      'provider-recovery:codex-sol:turn-inv',
+      expect.objectContaining({
+        content: 'Connection recovered.',
+        extra: expect.objectContaining({
+          providerRecovery: expect.objectContaining({
+            phase: 'recovered',
+            invocationId: 'turn-inv',
+            attempts: ['Reconnecting... 1/5 (stream disconnected before completion)'],
+          }),
+        }),
+      }),
+    );
+    expect(mockAddMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unrecovered reconnect notice in failed state', () => {
+    act(() => root.render(React.createElement(Harness)));
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        turnInvocationId: 'turn-failed',
+        content: JSON.stringify({
+          type: 'provider_recovery',
+          provider: 'codex',
+          phase: 'failed',
+          invocationId: 'turn-failed',
+          attempts: ['Reconnecting... 1/5'],
+          evidence: 'cli_error',
+        }),
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'provider-recovery:codex-sol:turn-failed',
+        variant: 'error',
+        content: 'Reconnect failed.',
+        extra: expect.objectContaining({
+          providerRecovery: expect.objectContaining({ phase: 'failed', evidence: 'cli_error' }),
+        }),
+      }),
+    );
+  });
+
   it('suppresses tool_activity telemetry on the active stream path', () => {
     act(() => {
       root.render(React.createElement(Harness));

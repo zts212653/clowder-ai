@@ -163,7 +163,7 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     assert.equal((await h.service.close(opened)).shouldBlock, true);
   });
 
-  test('structured hold wake ignores invocation.started but accepts hold/transfer/done transitions', async () => {
+  test('structured hold wake ignores unrelated truth but accepts hold/transfer/exact disposition transitions', async () => {
     const h = harness();
     const opened = await h.service.open({
       kind: 'structured',
@@ -186,6 +186,34 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
       payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
     });
     assert.equal((await h.service.close(opened)).shouldBlock, true, 'receiving the wake is not turn progress');
+
+    const exact = harness();
+    const exactOpened = await exact.service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-1',
+      taskId: 'task-1',
+    });
+    exact.addEvent({
+      kind: 'ball.hold_dispositioned',
+      sourceEventId: 'hold-disposition:inv-1:message-1:task-1',
+      payload: {
+        catId: 'codex-sol',
+        invocationId: 'inv-1',
+        sourceMessageId: 'message-1',
+        taskId: 'task-1',
+        disposition: 'completed',
+      },
+    });
+    assert.deepEqual(await exact.service.close(exactOpened), {
+      state: 'covered_active',
+      shouldBlock: false,
+      transitionObserved: true,
+      structuredTransitionKind: 'hold_dispositioned',
+      evidenceRefs: ['hold:ball:thread:thread-1'],
+    });
 
     for (const kind of ['ball.held', 'ball.handed', 'ball.handed_cvo']) {
       const next = harness();
@@ -226,6 +254,82 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
       assert.equal(opened.state, 'unknown_legacy');
       assert.equal((await service.close(opened)).shouldBlock, true);
     }
+  });
+
+  test('an exact structured wake released by a later handoff is covered_empty for the stale carrier', async () => {
+    const dispatch = harness({
+      projection: { state: 'active', holder: 'codex-terra' },
+      events: [
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:message-1:codex-sol',
+          payload: { fromCatId: 'opus', toCatId: 'codex-sol' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:successor-message:codex-terra',
+          payload: { fromCatId: 'codex-sol', toCatId: 'codex-terra' },
+        },
+      ],
+    });
+    const dispatchOpened = await dispatch.service.open({
+      kind: 'structured',
+      protocol: 'dispatch',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      handoff: {
+        sourceEventId: 'route:message-1:codex-sol',
+        messageId: 'message-1',
+        fromCatId: 'opus',
+      },
+    });
+    assert.deepEqual(dispatchOpened, {
+      state: 'covered_empty',
+      evidenceRefs: [
+        'dispatch:ball:thread:thread-1',
+        'route:message-1:codex-sol',
+        'released:route:successor-message:codex-terra',
+      ],
+    });
+    assert.equal((await dispatch.service.close(dispatchOpened)).shouldBlock, false);
+
+    const hold = harness({
+      projection: { state: 'active', holder: 'codex-terra' },
+      events: [
+        {
+          kind: 'ball.wake_condition_met',
+          sourceEventId: 'wakecond:task-1',
+          payload: { catId: 'codex-sol', taskId: 'task-1' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:message-1:codex-sol',
+          payload: { toCatId: 'codex-sol' },
+        },
+        {
+          kind: 'ball.handed',
+          sourceEventId: 'route:successor-message:codex-terra',
+          payload: { fromCatId: 'codex-sol', toCatId: 'codex-terra' },
+        },
+      ],
+    });
+    const holdOpened = await hold.service.open({
+      kind: 'structured',
+      protocol: 'hold',
+      subjectKey: 'ball:thread:thread-1',
+      holderCatId: 'codex-sol',
+      sourceMessageId: 'message-1',
+      taskId: 'task-1',
+    });
+    assert.deepEqual(holdOpened, {
+      state: 'covered_empty',
+      evidenceRefs: [
+        'hold:ball:thread:thread-1',
+        'route:message-1:codex-sol',
+        'released:route:successor-message:codex-terra',
+      ],
+    });
+    assert.equal((await hold.service.close(holdOpened)).shouldBlock, false);
   });
 
   test('unknown projections preserve bounded machine-readable failure reasons', async () => {

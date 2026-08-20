@@ -1,3 +1,4 @@
+import type { QueueMessageReceiptProjection } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
@@ -29,8 +30,11 @@ import type {
   ThreadState,
   TokenUsage,
   ToolEvent,
+  WorkspacePreviewState,
+  WorkspaceSurface,
 } from './chat-types';
 import { DEFAULT_THREAD_STATE } from './chat-types';
+import { projectTerminalActiveInvocationSlots } from './invocation-liveness';
 import { getMessageTimelineOrderTime } from './message-timeline';
 import { crossesUserTurnBoundary } from './turn-boundary';
 
@@ -90,13 +94,20 @@ function mergeCatInvocationInfo(
   };
 }
 
-function projectQueueReceiptsOntoMessages(messages: ChatMessage[], queue: QueueEntry[]): ChatMessage[] {
+function projectQueueReceiptsOntoMessages(
+  messages: ChatMessage[],
+  queue: QueueEntry[],
+  messageReceipts: readonly QueueMessageReceiptProjection[],
+): ChatMessage[] {
   const receiptByMessageId = new Map<string, NonNullable<QueueEntry['queueReceipt']>>();
   for (const entry of queue) {
     if (!entry.queueReceipt) continue;
     for (const messageId of [entry.messageId, ...entry.mergedMessageIds]) {
       if (messageId) receiptByMessageId.set(messageId, entry.queueReceipt);
     }
+  }
+  for (const projection of messageReceipts) {
+    receiptByMessageId.set(projection.messageId, projection.queueReceipt);
   }
   if (receiptByMessageId.size === 0) return messages;
 
@@ -225,6 +236,10 @@ function snapshotActive(s: ChatState): ThreadState {
     workspaceOpenTabs: s.workspaceOpenTabs,
     workspaceOpenFilePath: s.workspaceOpenFilePath,
     workspaceOpenFileLine: s.workspaceOpenFileLine,
+    workspaceSurface: s.workspaceSurface,
+    workspacePreview: s.workspacePreview,
+    rightPanelMode: s.rightPanelMode,
+    rightPanelOpen: s.rightPanelOpen,
   };
 }
 
@@ -271,12 +286,21 @@ function mirrorActiveFlat(
   return mirrorActiveToThreadStates(state, state.currentThreadId, patch);
 }
 
-function buildQueueStoreUpdate(state: ChatState, threadId: string, queue: QueueEntry[]): Partial<ChatState> {
+function buildQueueStoreUpdate(
+  state: ChatState,
+  threadId: string,
+  queue: QueueEntry[],
+  messageReceipts: readonly QueueMessageReceiptProjection[],
+): Partial<ChatState> {
   const activeThread = threadId === state.currentThreadId;
   const existing = activeThread ? undefined : (state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE });
   const wasFull = activeThread ? state.queueFull : existing?.queueFull;
   const isShrinking = wasFull && queue.length < 5;
-  const messages = projectQueueReceiptsOntoMessages(activeThread ? state.messages : (existing?.messages ?? []), queue);
+  const messages = projectQueueReceiptsOntoMessages(
+    activeThread ? state.messages : (existing?.messages ?? []),
+    queue,
+    messageReceipts,
+  );
 
   if (activeThread) {
     const patch: Partial<ThreadState> = {
@@ -346,6 +370,10 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     workspaceOpenTabs: ts.workspaceOpenTabs,
     workspaceOpenFilePath: ts.workspaceOpenFilePath,
     workspaceOpenFileLine: ts.workspaceOpenFileLine,
+    // F284 × F120: restore the surface/preview/panel exactly as the thread was
+    // left — always (fail-closed), so a browser preview neither leaks into
+    // another thread nor vanishes on return.
+    ...restoreWorkspaceView(ts),
   };
   // Only restore worktreeId if the thread had one set — avoids wiping
   // the global selection for threads that never opened workspace.
@@ -353,6 +381,27 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
     result.workspaceWorktreeId = ts.workspaceWorktreeId;
   }
   return result;
+}
+
+/**
+ * F284 × F120 (review P1-2, 缅因猫 fallback 坐标系收口): THE single projection
+ * for per-thread workspace view fields (surface / preview / panel mode / panel
+ * visibility). The four fields are optional on ThreadState only so older
+ * fixtures and legacy in-memory shapes stay valid; every `??` default lives
+ * here, and nowhere else. Callers: flattenThread (thread switch restore),
+ * setCurrentThread presentation-lock non-owner save, disablePresentationLock
+ * non-owner restore. None can be removed — each is a distinct semantic default
+ * for a field that was introduced after existing fixtures were written.
+ */
+function restoreWorkspaceView(
+  ts: Pick<ThreadState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'>,
+): Pick<ChatState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'> {
+  return {
+    workspaceSurface: ts.workspaceSurface ?? 'home',
+    workspacePreview: ts.workspacePreview ?? { port: undefined, path: '/' },
+    rightPanelMode: ts.rightPanelMode ?? 'status',
+    rightPanelOpen: ts.rightPanelOpen ?? false,
+  };
 }
 
 const MAX_BLOB_MESSAGES = 200;
@@ -452,7 +501,7 @@ function revokeBlobUrls(messages: ChatMessage[]) {
   for (const msg of messages) {
     if (msg.contentBlocks) {
       for (const block of msg.contentBlocks) {
-        if (block.type === 'image' && block.url.startsWith('blob:')) {
+        if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
           URL.revokeObjectURL(block.url);
         }
       }
@@ -465,7 +514,7 @@ function collectBlobUrls(messages: ChatMessage[]): Set<string> {
   for (const msg of messages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:')) {
+      if ((block.type === 'image' || block.type === 'file') && block.url.startsWith('blob:')) {
         blobUrls.add(block.url);
       }
     }
@@ -501,7 +550,11 @@ function revokeRemovedBlobUrls(previousMessages: ChatMessage[], nextMessages: Ch
   for (const msg of previousMessages) {
     if (!msg.contentBlocks) continue;
     for (const block of msg.contentBlocks) {
-      if (block.type === 'image' && block.url.startsWith('blob:') && !retainedBlobUrls.has(block.url)) {
+      if (
+        (block.type === 'image' || block.type === 'file') &&
+        block.url.startsWith('blob:') &&
+        !retainedBlobUrls.has(block.url)
+      ) {
         URL.revokeObjectURL(block.url);
       }
     }
@@ -804,6 +857,10 @@ export interface ChatState {
   _unreadSuppressedUntil: Record<string, number>;
   /** #586: Count of in-flight ack requests per thread — suppression clears only when 0 */
   _pendingAckCount: Record<string, number>;
+  /** #1304: Badge snapshot restored when the latest ack batch fails to catch up. */
+  _unreadAckRollback: Record<string, { unreadCount: number; hasUserMention: boolean }>;
+  /** #1304: Aggregate failure bit for overlapping ack requests in the current batch. */
+  _unreadAckHadFailure: Record<string, boolean>;
   threads: Thread[];
   isLoadingThreads: boolean;
   /** F164: True when messages are from offline snapshot, not fresh API data */
@@ -854,6 +911,7 @@ export interface ChatState {
   /** F108: Clear all active invocations (timeout/error/stop recovery) */
   clearAllActiveInvocations: () => void;
   setLoadingHistory: (loading: boolean) => void;
+  setThreadLoadingHistory: (threadId: string, loading: boolean) => void;
   setIntentMode: (mode: 'execute' | 'ideate' | null) => void;
   setTargetCats: (cats: string[]) => void;
   setCatStatus: (catId: string, status: CatStatusType) => void;
@@ -1041,7 +1099,9 @@ export interface ChatState {
   clearUnread: (threadId: string) => void;
   /** F072: Clear unread badges for all threads at once */
   clearAllUnread: () => void;
-  /** #586: One ack resolved — decrement pending count; clear suppression when 0 */
+  /** #1304: Settle one ack; only a fully caught-up batch confirms the optimistic badge clear. */
+  settleUnreadAck: (threadId: string, caughtUp: boolean) => void;
+  /** @deprecated Use settleUnreadAck(threadId, true). Retained for non-HTTP callers. */
   confirmUnreadAck: (threadId: string) => void;
   /** #586: Ack about to fire — increment pending count + set Infinity suppression */
   armUnreadSuppression: (threadId: string) => void;
@@ -1073,7 +1133,7 @@ export interface ChatState {
   resetThreadInvocationState: (threadId: string) => void;
 
   // ── F39: Queue actions ──
-  setQueue: (threadId: string, queue: QueueEntry[]) => void;
+  setQueue: (threadId: string, queue: QueueEntry[], messageReceipts?: readonly QueueMessageReceiptProjection[]) => void;
   setQueuePaused: (threadId: string, paused: boolean, reason?: 'canceled' | 'failed') => void;
   setQueueFull: (threadId: string, source: 'user' | 'connector') => void;
   /** Mark queued messages delivered, terminalize existing bubbles, and recover any missed live insert. */
@@ -1104,12 +1164,24 @@ export interface ChatState {
   workspaceOpenTabs: string[];
   workspaceOpenFilePath: string | null;
   workspaceOpenFileLine: number | null;
+  /** F284: current Workspace object; survives panel folds and route unmounts. */
+  workspaceSurface: WorkspaceSurface;
+  /** Explicit user navigation: select the surface and reveal Workspace. */
+  setWorkspaceSurface: (surface: WorkspaceSurface) => void;
+  /** Passive thread restoration: select the surface without changing panel visibility. */
+  restoreWorkspaceSurface: (surface: WorkspaceSurface) => void;
+  workspacePreview: WorkspacePreviewState;
+  setWorkspacePreview: (preview: WorkspacePreviewState) => void;
   workspaceEditToken: string | null;
   workspaceEditTokenExpiry: number | null;
   /** @internal Last workspace-file-set event context (timestamp + threadId).
    * Used by WorkspacePanel to distinguish fresh navigate from stale leftovers on mount. */
   _workspaceFileSetAt: { ts: number; threadId: string | null };
   setRightPanelMode: (mode: 'status' | 'workspace' | 'transcript') => void;
+  /** F284 × F120 review P1: canonical right panel visibility (orthogonal to
+   * rightPanelMode). Snapshotted per thread — see ThreadState.rightPanelOpen. */
+  rightPanelOpen: boolean;
+  setRightPanelOpen: (open: boolean) => void;
   /** 显式关闭右侧 panel 时退出 workspace/transcript mode（否则 ChatContainer auto-open effect 立即重开，关不掉）。 */
   closeRightPanel: () => void;
   setWorkspaceWorktreeId: (id: string | null) => void;
@@ -1149,7 +1221,10 @@ export interface ChatState {
   // Phase H + F139 + F160 + F168 + F246: Workspace mode
   // F233 Phase C C3: 'trajectory' — feat 球权轨迹时间轴
   workspaceMode: WorkspaceMode;
+  /** Explicit user navigation: select the mode and reveal Workspace. */
   setWorkspaceMode: (mode: WorkspaceMode) => void;
+  /** Passive thread restoration: select the mode without changing panel visibility. */
+  restoreWorkspaceMode: (mode: WorkspaceMode) => void;
 
   // ── F195 Phase C: Floating transcript window ──
   floatingTranscriptVisible: boolean;
@@ -1159,6 +1234,10 @@ export interface ChatState {
   pendingPreviewAutoOpen: { port: number; path: string } | null;
   setPendingPreviewAutoOpen: (data: { port: number; path: string }) => void;
   consumePreviewAutoOpen: () => { port: number; path: string } | null;
+  /** F120 × F284: write a preview into an INACTIVE thread's ThreadState so
+   * returning to that thread reveals it (browser surface + open panel).
+   * Used by the auto-open delivery contract for thread_inactive events. */
+  queueThreadPreview: (threadId: string, preview: { port: number; path: string }) => void;
 
   // ── F63-AC15: Code-to-chat reference ── #706: typed ComposerDraftInsert for recall-edit
   pendingChatInsert: ComposerDraftInsert | null;
@@ -1201,6 +1280,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentProjectPath: 'default',
   _unreadSuppressedUntil: {},
   _pendingAckCount: {},
+  _unreadAckRollback: {},
+  _unreadAckHadFailure: {},
   threads: [],
   isLoadingThreads: true,
   isOfflineSnapshot: false,
@@ -1249,7 +1330,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── F39: Queue actions ──
 
-  setQueue: (threadId, queue) => set((state) => buildQueueStoreUpdate(state, threadId, queue)),
+  setQueue: (threadId, queue, messageReceipts = []) =>
+    set((state) => buildQueueStoreUpdate(state, threadId, queue, messageReceipts)),
 
   setQueuePaused: (threadId, paused, reason) =>
     set((state) => {
@@ -1423,16 +1505,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceSurface: 'home' as const,
+  setWorkspaceSurface: (surface) => set({ workspaceSurface: surface, rightPanelMode: 'workspace' }),
+  restoreWorkspaceSurface: (surface) => set({ workspaceSurface: surface }),
+  workspacePreview: { port: undefined, path: '/' },
+  setWorkspacePreview: (preview) => set({ workspacePreview: preview }),
   workspaceEditToken: null,
   workspaceEditTokenExpiry: null,
   _workspaceFileSetAt: { ts: 0, threadId: null },
   setRightPanelMode: (mode) => set({ rightPanelMode: mode }),
+  rightPanelOpen: false,
+  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   // F232 P2（云端 round 5）：workspace/transcript mode 被 ChatContainer auto-open effect 强制开，
   // 显式关闭 panel 时必须先退出这两个 mode 回 status，否则 effect 立即重开（关不掉）。status 无此问题，保留。
   closeRightPanel: () =>
     set((s) => ({
       rightPanelMode:
         s.rightPanelMode === 'workspace' || s.rightPanelMode === 'transcript' ? 'status' : s.rightPanelMode,
+      rightPanelOpen: false,
     })),
   setWorkspaceWorktreeId: (id) => {
     // Guard: skip destructive reset when worktreeId is unchanged.
@@ -1508,6 +1598,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenFileLine: line ?? null,
           workspaceEditToken: null,
           workspaceEditTokenExpiry: null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1518,6 +1609,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspaceOpenTabs: newTabs,
           workspaceOpenFilePath: path,
           workspaceOpenFileLine: line ?? null,
+          workspaceSurface: 'files',
           rightPanelMode: 'workspace',
           _workspaceFileSetAt: stamp,
         });
@@ -1541,10 +1633,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     } else {
-      set({
+      set(() => ({
         workspaceOpenFilePath: null,
         workspaceOpenFileLine: null,
-      });
+      }));
     }
   },
   closeWorkspaceTab: (path) => {
@@ -1590,6 +1682,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setWorkspaceRevealPath: (path, originThreadId) =>
     set((state) => ({
       workspaceRevealPath: path,
+      ...(path ? { workspaceSurface: 'files' as const } : {}),
       rightPanelMode: 'workspace' as const,
       _workspaceFileSetAt: { ts: Date.now(), threadId: originThreadId ?? state.currentThreadId },
     })),
@@ -1638,6 +1731,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         workspaceOpenTabs: restored.workspaceOpenTabs ?? [],
         workspaceOpenFilePath: restored.workspaceOpenFilePath ?? null,
         workspaceOpenFileLine: restored.workspaceOpenFileLine ?? null,
+        // F284 × F120: restore is suppressed under lock, so the flat surface /
+        // preview / panel still show the lock view. On unlock, return them to
+        // the current thread's own saved values.
+        ...restoreWorkspaceView(threadState ?? { ...DEFAULT_THREAD_STATE }),
       };
     }),
   replacePresentationLockTarget: (snapshot) =>
@@ -1757,6 +1854,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Phase H: Workspace mode
   workspaceMode: 'dev' as const,
   setWorkspaceMode: (mode) => set({ workspaceMode: mode, rightPanelMode: 'workspace' }),
+  restoreWorkspaceMode: (mode) => set({ workspaceMode: mode }),
 
   // F195 Phase C: Floating transcript window
   floatingTranscriptVisible: false,
@@ -1767,12 +1865,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── F120: Preview auto-open ──
   pendingPreviewAutoOpen: null,
-  setPendingPreviewAutoOpen: (data) => set({ pendingPreviewAutoOpen: data, rightPanelMode: 'workspace' }),
+  setPendingPreviewAutoOpen: (data) =>
+    set((state) =>
+      state.presentationLock
+        ? {}
+        : {
+            pendingPreviewAutoOpen: data,
+            workspacePreview: data,
+            workspaceSurface: 'browser' as const,
+            rightPanelMode: 'workspace' as const,
+            rightPanelOpen: true,
+          },
+    ),
   consumePreviewAutoOpen: () => {
     const pending = get().pendingPreviewAutoOpen;
     if (pending) set({ pendingPreviewAutoOpen: null });
     return pending;
   },
+  queueThreadPreview: (threadId, preview) =>
+    set((state) => {
+      const patch = {
+        workspaceSurface: 'browser' as const,
+        workspacePreview: preview,
+        rightPanelMode: 'workspace' as const,
+        rightPanelOpen: true,
+      };
+      if (threadId === state.currentThreadId) {
+        if (state.presentationLock) return {};
+        return { ...patch, ...mirrorActiveFlat(state, patch) };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: { ...existing, ...patch },
+        },
+      };
+    }),
 
   // ── F63-AC15: Code-to-chat reference ──
   pendingChatInsert: null,
@@ -2029,7 +2158,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }),
         };
       }
-      return { hasActiveInvocation: v, ...mirrorActiveFlat(state, { hasActiveInvocation: v }) };
+      const activeInvocations = v
+        ? projectTerminalActiveInvocationSlots(state.activeInvocations, state.catInvocations).activeInvocations
+        : state.activeInvocations;
+      const patch = { hasActiveInvocation: v, activeInvocations };
+      return { ...patch, ...mirrorActiveFlat(state, patch) };
     }),
   /** F108: Register a new active invocation slot */
   addActiveInvocation: (invocationId, catId, mode, startedAt?) =>
@@ -2450,6 +2583,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             workspaceOpenTabs: prevThreadState?.workspaceOpenTabs ?? [],
             workspaceOpenFilePath: prevThreadState?.workspaceOpenFilePath ?? null,
             workspaceOpenFileLine: prevThreadState?.workspaceOpenFileLine ?? null,
+            // F284 × F120: the flat surface/preview/panel hold the lock view
+            // (restore is suppressed under lock), so a non-owner thread must
+            // save its own pre-visit values, not the locked overlay.
+            ...restoreWorkspaceView(prevThreadState ?? { ...DEFAULT_THREAD_STATE }),
           };
         }
       }
@@ -2457,8 +2594,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // F164: Write-through outgoing thread's messages to IndexedDB (fire-and-forget)
       // Always write — even empty arrays — so server-cleared threads don't leave stale snapshots
       void saveMessagesSnapshot(state.currentThreadId, saved.messages, saved.hasMore).catch(() => {});
-      // Load target thread state (or defaults for first visit)
-      const loaded = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      // A first visit has no in-memory projection yet. Surface that as history
+      // hydration immediately so the UI cannot mistake "not loaded" for an
+      // authoritative empty conversation while IDB/API restore is pending.
+      const loaded = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE, isLoadingHistory: true };
       const flattened = flattenThread(loaded);
 
       // F063 Presentation Lock: overlay locked workspace fields so the visible
@@ -2470,6 +2609,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         flattened.workspaceOpenFilePath = lock.filePath;
         flattened.workspaceOpenFileLine = lock.line;
         flattened.workspaceScrollTop = lock.scrollTop;
+        // F284 × F120: surface/preview/panel are part of the frozen demo view —
+        // keep the current (locked) values instead of restoring the target's.
+        flattened.workspaceSurface = state.workspaceSurface;
+        flattened.workspacePreview = state.workspacePreview;
+        flattened.rightPanelMode = state.rightPanelMode;
+        flattened.rightPanelOpen = state.rightPanelOpen;
       }
 
       return {
@@ -2776,13 +2921,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
 
-  /** Update hasActiveInvocation for a specific thread (active or background). */
-  setThreadHasActiveInvocation: (threadId, active) =>
+  /** Update presentation-only history hydration state for a specific thread. */
+  setThreadLoadingHistory: (threadId, loading) =>
     set((state) => {
       if (threadId === state.currentThreadId) {
         return {
-          hasActiveInvocation: active,
-          ...mirrorActiveToThreadStates(state, threadId, { hasActiveInvocation: active }),
+          isLoadingHistory: loading,
+          ...mirrorActiveToThreadStates(state, threadId, { isLoadingHistory: loading }),
         };
       }
       const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
@@ -2791,7 +2936,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ...state.threadStates,
           [threadId]: {
             ...existing,
+            isLoadingHistory: loading,
+          },
+        },
+      };
+    }),
+
+  /** Update hasActiveInvocation for a specific thread (active or background). */
+  setThreadHasActiveInvocation: (threadId, active) =>
+    set((state) => {
+      if (threadId === state.currentThreadId) {
+        const activeInvocations = active
+          ? projectTerminalActiveInvocationSlots(state.activeInvocations, state.catInvocations).activeInvocations
+          : state.activeInvocations;
+        const patch = { hasActiveInvocation: active, activeInvocations };
+        return {
+          ...patch,
+          ...mirrorActiveToThreadStates(state, threadId, patch),
+        };
+      }
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const activeInvocations = active
+        ? projectTerminalActiveInvocationSlots(existing.activeInvocations, existing.catInvocations).activeInvocations
+        : existing.activeInvocations;
+      return {
+        threadStates: {
+          ...state.threadStates,
+          [threadId]: {
+            ...existing,
             hasActiveInvocation: active,
+            activeInvocations,
             lastActivity: Date.now(),
           },
         },
@@ -3023,7 +3197,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const ts = state.threadStates[threadId];
       if (!ts || (ts.unreadCount === 0 && !ts.hasUserMention)) return state;
       // #586 Bug 3: Use Infinity instead of 10s timeout. Suppression persists
-      // until confirmUnreadAck() is called after POST /read/latest succeeds,
+      // until settleUnreadAck() records the terminal POST /read/latest result,
       // preventing stale server unread counts from overwriting cleared state.
       return {
         threadStates: {
@@ -3033,6 +3207,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         _unreadSuppressedUntil: {
           ...state._unreadSuppressedUntil,
           [threadId]: Infinity,
+        },
+        _unreadAckRollback: {
+          ...state._unreadAckRollback,
+          [threadId]: state._unreadAckRollback[threadId] ?? {
+            unreadCount: ts.unreadCount,
+            hasUserMention: ts.hasUserMention,
+          },
         },
       };
     }),
@@ -3059,38 +3240,76 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return changed ? { threadStates: updated, _unreadSuppressedUntil: suppressed } : state;
     }),
 
-  confirmUnreadAck: (threadId) =>
+  settleUnreadAck: (threadId, caughtUp) =>
     set((state) => {
-      // #586 final: Decrement pending ack count. Only clear suppression when
-      // ALL in-flight acks have resolved — this prevents an early-resolving ack
-      // from clearing suppression while a newer ack is still in flight.
+      // Every terminal response settles the request count. A non-2xx,
+      // network failure, or caughtUp:false is not a confirmed durable read;
+      // remember that failure until the overlapping batch fully drains.
       const count = Math.max(0, (state._pendingAckCount[threadId] ?? 1) - 1);
       const newCounts = { ...state._pendingAckCount, [threadId]: count };
+      const hadFailure = (state._unreadAckHadFailure[threadId] ?? false) || !caughtUp;
+      const newFailures = { ...state._unreadAckHadFailure, [threadId]: hadFailure };
       if (count > 0) {
-        // Still have pending acks — keep suppression, just update counter
-        return { _pendingAckCount: newCounts };
+        return { _pendingAckCount: newCounts, _unreadAckHadFailure: newFailures };
       }
-      // All acks resolved — safe to clear suppression
-      if (!state._unreadSuppressedUntil[threadId]) return { _pendingAckCount: newCounts };
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [threadId]: _removed, ...rest } = state._unreadSuppressedUntil;
-      return { _unreadSuppressedUntil: rest, _pendingAckCount: newCounts };
+      const { [threadId]: _removedSuppression, ...remainingSuppressions } = state._unreadSuppressedUntil;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: rollback, ...remainingRollbacks } = state._unreadAckRollback;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _removedFailure, ...remainingFailures } = newFailures;
+
+      if (!hadFailure || !rollback) {
+        return {
+          _unreadSuppressedUntil: remainingSuppressions,
+          _pendingAckCount: newCounts,
+          _unreadAckRollback: remainingRollbacks,
+          _unreadAckHadFailure: remainingFailures,
+        };
+      }
+
+      const current = state.threadStates[threadId];
+      return {
+        _unreadSuppressedUntil: remainingSuppressions,
+        _pendingAckCount: newCounts,
+        _unreadAckRollback: remainingRollbacks,
+        _unreadAckHadFailure: remainingFailures,
+        ...(current
+          ? {
+              threadStates: {
+                ...state.threadStates,
+                [threadId]: {
+                  ...current,
+                  unreadCount: Math.max(current.unreadCount, rollback.unreadCount),
+                  hasUserMention: current.hasUserMention || rollback.hasUserMention,
+                },
+              },
+            }
+          : {}),
+      };
     }),
 
+  confirmUnreadAck: (threadId) => get().settleUnreadAck(threadId, true),
+
   armUnreadSuppression: (threadId) =>
-    set((state) => ({
-      // #586 final: Increment pending ack count + set Infinity suppression.
-      // Each ack attempt increments; confirmUnreadAck decrements. Suppression
-      // only clears when counter reaches 0 (all in-flight acks resolved).
-      _unreadSuppressedUntil: {
-        ...state._unreadSuppressedUntil,
-        [threadId]: Infinity,
-      },
-      _pendingAckCount: {
-        ...state._pendingAckCount,
-        [threadId]: (state._pendingAckCount[threadId] ?? 0) + 1,
-      },
-    })),
+    set((state) => {
+      const pending = state._pendingAckCount[threadId] ?? 0;
+      return {
+        _unreadSuppressedUntil: {
+          ...state._unreadSuppressedUntil,
+          [threadId]: Infinity,
+        },
+        _pendingAckCount: {
+          ...state._pendingAckCount,
+          [threadId]: pending + 1,
+        },
+        _unreadAckHadFailure: {
+          ...state._unreadAckHadFailure,
+          [threadId]: pending > 0 ? (state._unreadAckHadFailure[threadId] ?? false) : false,
+        },
+      };
+    }),
 
   initThreadUnread: (threadId, unreadCount, hasUserMention) =>
     set((state) => {

@@ -49,6 +49,109 @@ describe('SummaryCompaction e2e', () => {
     ).run('test-thread', 25, 2000, 0, 'concat');
   });
 
+  it('does not start abstractive compaction while a recall suppression is prepared', async () => {
+    db.prepare(
+      `INSERT INTO message_recall_index_suppressions
+       (doc_anchor, passage_id, lease_id, state, prepared_at)
+       VALUES (?, ?, ?, 'prepared', ?)`,
+    ).run('thread-test-thread', 'msg-recalled', 'lease-prepared', new Date().toISOString());
+    let generated = false;
+    const result = await processThread(
+      {
+        thread_id: 'test-thread',
+        last_summarized_message_id: null,
+        pending_message_count: 25,
+        pending_token_count: 2000,
+        pending_signal_flags: 0,
+        summary_type: 'concat',
+        last_abstractive_at: null,
+        abstractive_token_count: null,
+        carry_over: 0,
+      },
+      {
+        db,
+        enabled: () => true,
+        getThreadLastActivity: async () => ({
+          threadId: 'test-thread',
+          lastMessageAt: Date.now() - 20 * 60 * 1000,
+        }),
+        getMessagesAfterWatermark: async () => makeMsgs(25),
+        generateAbstractive: async () => {
+          generated = true;
+          return null;
+        },
+        logger: { info: () => {}, error: () => {} },
+      },
+      SUMMARY_CONFIG_OVERRIDE,
+    );
+
+    assert.equal(result, false);
+    assert.equal(generated, false);
+  });
+
+  it('drops an in-flight compaction result when the committed suppression epoch changes', async () => {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO message_recall_index_suppressions
+       (doc_anchor, passage_id, lease_id, state, prepared_at, committed_at)
+       VALUES (?, ?, ?, 'committed', ?, ?)`,
+    ).run('thread-test-thread', 'msg-old-recall', 'lease-old', now, now);
+    const msgs = makeMsgs(25);
+    const result = await processThread(
+      {
+        thread_id: 'test-thread',
+        last_summarized_message_id: null,
+        pending_message_count: 25,
+        pending_token_count: 2000,
+        pending_signal_flags: 0,
+        summary_type: 'concat',
+        last_abstractive_at: null,
+        abstractive_token_count: null,
+        carry_over: 0,
+      },
+      {
+        db,
+        enabled: () => true,
+        getThreadLastActivity: async () => ({
+          threadId: 'test-thread',
+          lastMessageAt: Date.now() - 20 * 60 * 1000,
+        }),
+        getMessagesAfterWatermark: async () => msgs,
+        generateAbstractive: async () => {
+          const committedAt = new Date(Date.now() + 1).toISOString();
+          db.prepare(
+            `INSERT INTO message_recall_index_suppressions
+             (doc_anchor, passage_id, lease_id, state, prepared_at, committed_at)
+             VALUES (?, ?, ?, 'committed', ?, ?)`,
+          ).run('thread-test-thread', 'msg-new-recall', 'lease-new', committedAt, committedAt);
+          return {
+            segments: [
+              {
+                summary: 'stale generated summary',
+                topicKey: 'stale',
+                topicLabel: 'Stale',
+                boundaryReason: 'race',
+                boundaryConfidence: 'high',
+                fromMessageId: msgs[0].id,
+                toMessageId: msgs[msgs.length - 1].id,
+                messageCount: msgs.length,
+              },
+            ],
+          };
+        },
+        logger: { info: () => {}, error: () => {} },
+      },
+      SUMMARY_CONFIG_OVERRIDE,
+    );
+
+    assert.equal(result, false);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM summary_segments').get().n, 0);
+    assert.equal(
+      db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread').summary,
+      'Old concat summary',
+    );
+  });
+
   it('e2e: mock Opus → inserts segment → submits candidate → updates watermark', async () => {
     const candidates = [];
     const msgs = makeMsgs(25);
@@ -142,7 +245,7 @@ describe('SummaryCompaction e2e', () => {
         threadId: 'test-thread',
         lastMessageAt: Date.now() - 20 * 60 * 1000,
       }),
-      getMessagesAfterWatermark: async (_tid, afterId, _limit) => {
+      getMessagesAfterWatermark: async (_tid, _afterId, _limit) => {
         callCount++;
         // First call: return batch of 200
         if (callCount === 1) return batch1;

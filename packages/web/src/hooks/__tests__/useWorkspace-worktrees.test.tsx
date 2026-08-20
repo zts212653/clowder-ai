@@ -128,6 +128,52 @@ describe('useWorkspace worktree refresh', () => {
     expect(treeAndFileCalls.some((url) => url.includes('worktreeId=230809_cat-cafe'))).toBe(true);
   });
 
+  it('automatically selects the worktree matching the current project when there is no current selection', async () => {
+    useChatStore.setState({
+      workspaceWorktreeId: null,
+      workspaceOpenFilePath: null,
+      workspaceOpenFileLine: null,
+      workspaceOpenTabs: [],
+    });
+    apiFetchMock.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.startsWith('/api/workspace/worktrees')) {
+        return {
+          ok: true,
+          json: async () => ({
+            worktrees: [
+              {
+                id: '230809_cat-cafe-main',
+                canonicalId: 'cat-cafe-main',
+                root: '/tmp/primary-project',
+                branch: 'main',
+                head: 'main1234',
+              },
+              {
+                id: '230809_cat-cafe-current',
+                canonicalId: 'cat-cafe-current',
+                root: '/tmp/current-project',
+                branch: 'feat/current',
+                head: 'feat1234',
+              },
+            ],
+          }),
+        } as Response;
+      }
+      if (path.startsWith('/api/workspace/tree')) {
+        return { ok: true, json: async () => ({ tree: [] }) } as Response;
+      }
+      return { ok: false, json: async () => ({ error: 'unexpected url' }) } as Response;
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost));
+    });
+    await flushEffects();
+
+    expect(useChatStore.getState().workspaceWorktreeId).toBe('230809_cat-cafe-current');
+  });
+
   it('stays on the eval repo after switching away from a foreign project before opening a file', async () => {
     useChatStore.setState({
       currentProjectPath: '/tmp/foreign-project',

@@ -22,7 +22,7 @@ import type { ContextHealth, ContextManagementHint } from '@cat-cafe/shared';
  */
 export function buildContextManagementHint(args: {
   source: ContextHealth['source'];
-  compressionCount: number;
+  compressionCount: number | null;
 }): ContextManagementHint {
   return {
     severity: 'warn',
@@ -39,7 +39,7 @@ export function buildContextManagementHint(args: {
  */
 export function formatContextManagementHint(hint: ContextManagementHint): string {
   return [
-    `[context_management_hint] severity=${hint.severity} · fillConfidence=${hint.fillConfidence} · compressionCount=${hint.compressionCount}`,
+    `[context_management_hint] severity=${hint.severity} · fillConfidence=${hint.fillConfidence} · compressionCount=${hint.compressionCount ?? 'unknown'}`,
     '你进入了 context warn 区。加载 context-self-management skill 做三轴自检（线/树? 干净断点? 压了几轮?）再决定 handoff/续/冲刺——别反射 handoff、也别无脑等压缩。',
   ].join('\n');
 }

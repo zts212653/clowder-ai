@@ -1,6 +1,7 @@
 import {
   type ApprovalEnvelope,
   type ApprovalPublication,
+  captureCandidateIdSchema,
   type InteractionEvent,
   type PersonClaimVersion,
   type PersonIdentity,
@@ -8,6 +9,7 @@ import {
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { HumanDispositionRandomBytesSource } from '../../human-disposition/human-disposition-adapters.js';
+import { DeferredPersonMemoryReceiptKeys } from '../deferred-person-memory-redis-contract.js';
 import { PersonMemoryDispositionProofResolver } from './PersonMemoryDispositionProofResolver.js';
 import type {
   AmendPersonInteractionInput,
@@ -26,6 +28,8 @@ import type {
   PersonMemoryUndoResult,
   RedactPersonMemoryItemInput,
   RejectPersonMemoryCandidateInput,
+  RenewDeferredPersonMemoryCandidateClaimInput,
+  RenewDeferredPersonMemoryCandidateClaimResult,
   RetirePersonClaimInput,
   StagePersonMemoryCandidateInput,
   StoredPersonMemoryCandidate,
@@ -37,6 +41,7 @@ import {
   resolveDormantPersonCandidateBySubject,
   resolvePendingPersonCandidateBySubject,
 } from './person-memory-candidate-registry.js';
+import { personMemoryProposalLineageMarker } from './person-memory-delta-lineage.js';
 import { PersonMemoryDispositionAnchor } from './person-memory-disposition-anchor.js';
 import { PersonMemoryDispositionReject } from './person-memory-disposition-reject.js';
 import { hardForgetPerson } from './person-memory-forget.js';
@@ -67,6 +72,7 @@ function terminalCandidate(
     relationshipDraft: _relationshipDraft,
     interactionDraft: _interactionDraft,
     sourceBundle: _sourceBundle,
+    deferredReceiptClaimId: _deferredReceiptClaimId,
     ...base
   } = candidate;
   return {
@@ -114,8 +120,25 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
     return this.candidatePublication.stage(input);
   }
 
+  renewDeferredCandidateClaim(
+    input: RenewDeferredPersonMemoryCandidateClaimInput,
+  ): Promise<RenewDeferredPersonMemoryCandidateClaimResult> {
+    return this.candidatePublication.renewDeferredClaim(input);
+  }
+
   async getCandidateForOwner(ownerUserId: string, candidateId: string): Promise<StoredPersonMemoryCandidate | null> {
     return parseStoredCandidate(await this.redis.get(PersonMemoryKeys.candidate(ownerUserId, candidateId)));
+  }
+
+  async listCandidateIdsForPerson(ownerUserId: string, personId: string) {
+    const [materializedIds, targetedIds] = await Promise.all([
+      this.redis.smembers(PersonMemoryKeys.personCandidates(ownerUserId, personId)),
+      this.redis.smembers(PersonMemoryKeys.targetCandidates(ownerUserId, personId)),
+    ]);
+    return [...new Set([...materializedIds, ...targetedIds])].flatMap((candidateId) => {
+      const parsed = captureCandidateIdSchema.safeParse(candidateId);
+      return parsed.success ? [parsed.data] : [];
+    });
   }
 
   async listPending(ownerUserId: string, limit = 100): Promise<StoredPersonMemoryCandidate[]> {
@@ -213,13 +236,28 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
     const candidate = await this.getCandidateForOwner(ownerUserId, candidateId);
     if (!candidate) throw new Error('candidate not available');
     const updated = terminalCandidate(candidate, 'withdrawn');
+    const candidateKey = PersonMemoryKeys.candidate(ownerUserId, candidateId);
+    const personId = candidatePersonId(candidate);
+    const lineageKey = candidate.deltaFingerprint
+      ? DeferredPersonMemoryReceiptKeys.dedupe(ownerUserId, candidate.deltaFingerprint)
+      : null;
     const keys = [
-      PersonMemoryKeys.candidate(ownerUserId, candidateId),
+      candidateKey,
       PersonMemoryKeys.pending(ownerUserId),
-      candidateForgetFence(candidate),
+      personId ? candidateForgetFence(candidate) : candidateKey,
+      lineageKey ?? candidateKey,
     ];
     const result = String(
-      await this.redis.eval(WITHDRAW_CANDIDATE_LUA, keys.length, ...keys, JSON.stringify(updated), candidateId),
+      await this.redis.eval(
+        WITHDRAW_CANDIDATE_LUA,
+        keys.length,
+        ...keys,
+        JSON.stringify(updated),
+        candidateId,
+        personMemoryProposalLineageMarker(candidateId),
+        lineageKey ? '1' : '0',
+        personId ? '1' : '0',
+      ),
     );
     if (result !== 'UPDATED') throw new Error(`F276 withdraw failed: ${result}`);
     return updated;
@@ -291,11 +329,11 @@ export class RedisPersonMemoryStore implements PersonMemoryStore {
     return redactPersonMemoryItem(this.redis, input);
   }
 
-  hardForget(input: HardForgetPersonInput) {
+  async hardForget(input: HardForgetPersonInput) {
     return hardForgetPerson(this.redis, input);
   }
 
-  hardForgetProposal(input: HardForgetPersonMemoryProposalInput) {
+  async hardForgetProposal(input: HardForgetPersonMemoryProposalInput) {
     return hardForgetPersonMemoryProposal(this.redis, input);
   }
 

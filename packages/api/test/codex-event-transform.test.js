@@ -82,7 +82,13 @@ test('item.completed file_change → tool_use', () => {
 test('Reconnecting error → system_info', () => {
   const msg = transformCodexEvent({ type: 'error', message: 'Reconnecting... (attempt 1)' }, CAT);
   assert.equal(msg?.type, 'system_info');
-  assert.ok(msg?.content?.startsWith('Reconnecting...'));
+  assert.deepEqual(JSON.parse(msg.content), {
+    type: 'provider_recovery',
+    provider: 'codex',
+    phase: 'reconnecting',
+    attempt: 1,
+    message: 'Reconnecting... (attempt 1)',
+  });
 });
 
 test('unknown event type → null', () => {

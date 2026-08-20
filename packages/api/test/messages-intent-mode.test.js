@@ -37,7 +37,9 @@ function makeMockSocketManager() {
       events.push({ room, event, payload });
     },
     broadcastAgentMessage() {},
-    emitToUser() {},
+    emitToUser(userId, event, payload) {
+      events.push({ room: `user:${userId}`, event, payload });
+    },
   };
 }
 
@@ -98,6 +100,63 @@ async function buildApp(overrides = {}) {
 // ── Legacy path (no invocationRecordStore) ──────────────────────────
 
 describe('#768 messages.ts legacy path', () => {
+  it('publishes persisted participants to the user room before the first CLI event', async () => {
+    const sm = makeMockSocketManager();
+    let releaseFirstEvent;
+    const firstEventGate = new Promise((resolve) => {
+      releaseFirstEvent = resolve;
+    });
+    const participants = ['opus'];
+    const threadStore = {
+      get: async (threadId) => ({
+        id: threadId,
+        title: 'Sidebar presence regression',
+        participants: [...participants],
+      }),
+      addParticipants: async (_threadId, catIds) => {
+        for (const catId of catIds) {
+          if (!participants.includes(catId)) participants.push(catId);
+        }
+      },
+    };
+    const { app } = await buildApp({
+      socketManager: sm,
+      router: makeMockRouter(async function* () {
+        await firstEventGate;
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      }, undefined),
+      invocationRecordStore: undefined,
+      extra: { threadStore },
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: { content: '@codex test', threadId: 'thread-sidebar-presence' },
+    });
+
+    const participantsBeforeFirstEvent = [...participants];
+    const eventsBeforeFirstEvent = [...sm.events];
+
+    releaseFirstEvent();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await app.close();
+
+    const participantEvents = eventsBeforeFirstEvent.filter((event) => event.event === 'thread_updated');
+    assert.deepEqual(participantsBeforeFirstEvent, ['opus', 'codex']);
+    assert.equal(participantEvents.length, 1);
+    assert.equal(participantEvents[0].room, 'user:default-user');
+    assert.deepEqual(participantEvents[0].payload, {
+      threadId: 'thread-sidebar-presence',
+      participants: ['opus', 'codex'],
+    });
+    assert.equal(
+      eventsBeforeFirstEvent.some((event) => event.event === 'intent_mode'),
+      false,
+    );
+    assert.equal(sm.events.filter((event) => event.event === 'thread_updated').length, 1);
+  });
+
   it('intent_mode is NOT broadcast when router.route throws before yielding', async () => {
     const sm = makeMockSocketManager();
     const { app } = await buildApp({

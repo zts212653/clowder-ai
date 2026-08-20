@@ -16,7 +16,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mergeLiveActivityIntoThreads, sortAndGroupThreads } from '@/components/ThreadSidebar/thread-utils';
 import { clearDebugEvents, configureDebug } from '@/debug/invocationEventDebug';
+import type { Thread } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
 const ACTIVE_TID = 'thread-active';
@@ -241,6 +243,69 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
     });
   });
 
+  describe('setThreadLoadingHistory', () => {
+    it('active thread: writes flat hydration state AND mirrors to threadStates', () => {
+      useChatStore.getState().setThreadLoadingHistory(ACTIVE_TID, true);
+
+      const state = useChatStore.getState();
+      expect(state.isLoadingHistory).toBe(true);
+      expect(state.threadStates[ACTIVE_TID]?.isLoadingHistory).toBe(true);
+    });
+
+    it('background hydration preserves activity and sidebar order through delayed completion', () => {
+      const originalBackgroundActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const newerSemanticActivity = Date.now() - 60_000;
+      const sidebarThreads: Thread[] = [
+        {
+          id: BG_TID,
+          projectPath: '/projects/history',
+          title: 'Old cached thread',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: originalBackgroundActivity,
+          createdAt: originalBackgroundActivity - 1,
+        },
+        {
+          id: 'thread-recent',
+          projectPath: '/projects/history',
+          title: 'Recent semantic activity',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: newerSemanticActivity,
+          createdAt: newerSemanticActivity - 1,
+        },
+      ];
+      const sidebarOrder = () =>
+        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+          .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
+          ?.threads.map((thread) => thread.id);
+
+      useChatStore.setState({
+        threadStates: {
+          [BG_TID]: { ...DEFAULT_THREAD_STATE, lastActivity: originalBackgroundActivity },
+        },
+      });
+
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
+
+      const store = useChatStore.getState();
+      store.setThreadLoadingHistory(BG_TID, true);
+
+      let state = useChatStore.getState();
+      expect(state.isLoadingHistory).toBe(false);
+      expect(state.threadStates[BG_TID]?.isLoadingHistory).toBe(true);
+      expect(state.threadStates[BG_TID]?.lastActivity).toBe(originalBackgroundActivity);
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
+
+      store.setThreadLoadingHistory(BG_TID, false);
+
+      state = useChatStore.getState();
+      expect(state.threadStates[BG_TID]?.isLoadingHistory).toBe(false);
+      expect(state.threadStates[BG_TID]?.lastActivity).toBe(originalBackgroundActivity);
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
+    });
+  });
+
   describe('setThreadIntentMode', () => {
     it('active thread: writes intentMode flat AND mirrors to threadStates', () => {
       useChatStore.getState().setThreadIntentMode(ACTIVE_TID, 'execute');
@@ -272,6 +337,51 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       expect(s.messages.find((m) => m.id === 'm1')).toBeDefined();
       // mirror (RED)
       expect(s.threadStates[ACTIVE_TID]?.messages.find((m) => m.id === 'm1')).toBeDefined();
+    });
+
+    it('background real message activity still advances its sidebar position', () => {
+      const originalBackgroundActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
+      const newerSummaryActivity = Date.now() - 60_000;
+      const sidebarThreads: Thread[] = [
+        {
+          id: BG_TID,
+          projectPath: '/projects/history',
+          title: 'Old cached thread',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: originalBackgroundActivity,
+          createdAt: originalBackgroundActivity - 1,
+        },
+        {
+          id: 'thread-recent',
+          projectPath: '/projects/history',
+          title: 'Recent semantic activity',
+          createdBy: 'user',
+          participants: [],
+          lastActiveAt: newerSummaryActivity,
+          createdAt: newerSummaryActivity - 1,
+        },
+      ];
+      const sidebarOrder = () =>
+        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+          .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
+          ?.threads.map((thread) => thread.id);
+
+      useChatStore.setState({
+        threadStates: {
+          [BG_TID]: { ...DEFAULT_THREAD_STATE, lastActivity: originalBackgroundActivity },
+        },
+      });
+
+      useChatStore.getState().addMessageToThread(BG_TID, {
+        id: 'bg-real-message',
+        type: 'user',
+        content: 'A real message arrived.',
+        timestamp: Date.now(),
+      });
+
+      expect(useChatStore.getState().threadStates[BG_TID]?.lastActivity).toBeGreaterThan(newerSummaryActivity);
+      expect(sidebarOrder()).toEqual([BG_TID, 'thread-recent']);
     });
   });
 

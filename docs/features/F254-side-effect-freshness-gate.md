@@ -5,7 +5,7 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-08-04
+updated: 2026-08-08
 tips_exempt: true
 ---
 
@@ -164,7 +164,7 @@ Phase E 上线后 48h 内 operator 连续"消息被吞/闪回"投诉的完整案
 | 维度 | `deliveryCursor` | `seenCursor`（F254 新增） |
 |------|------------------|--------------------------|
 | **追踪什么** | harness invoke 时 DELIVERED 到猫 context 的消息边界 | 猫在 turn 中实际 READ 过的消息边界 |
-| **谁推进** | route-serial / route-parallel（路由层） | MCP 工具层（list_recent / get_thread_context / get_message / post_message 成功时） |
+| **谁推进** | route-serial / route-parallel（路由层） | MCP callback 的无 filter、连续 `get_thread_context` 读取；targeted/sparse reads 与发送不推进 |
 | **驱动什么** | 下次 invoke 的增量消息注入（fetchAfterCursor） | F254 freshness gate + content-free notice |
 | **推错了的后果** | 下次 invoke 跳过消息（**不可接受**） | 漏一次 hold（fail-open，可接受） |
 | **实现** | 复用 `DeliveryCursorStore` 基础设施，独立 key 前缀（如 `mentionAckCursor` 先例） | 同左 |
@@ -223,7 +223,7 @@ Phase A 先落地（价值最高 + 基础设施最成熟），Phase B 扩展通�
    [Maine Coon]: "等一下，我发现了一个 bug，这个 PR 先别合…"
    
    你的选择：
-   1. 调 cat_cafe_list_recent 看完整内容，再决定怎么回
+   1. 调无 filter 的 cat_cafe_get_thread_context({ responseMode: "full" }) 看完整内容，再决定怎么回
    2. 修改你的回复后重新调 post_message
    3. 调 post_message 时加 acknowledgeHeld: true 强制发送原文
 
@@ -235,9 +235,9 @@ Phase A 先落地（价值最高 + 基础设施最成熟），Phase B 扩展通�
 **如果Ragdoll已经看过了呢？**
 
 ```
-场景：Ragdoll turn 中途调了 list_recent，已经读过Maine Coon的消息。
+场景：Ragdoll turn 中途做了无 filter 的 full thread read，已经读过Maine Coon的消息。
 
-① Ragdoll调 list_recent → 读到Maine Coon的消息 → seenCursor 推进到最新
+① Ragdoll调 cat_cafe_get_thread_context({ responseMode: "full" }) → 读到Maine Coon的消息 → seenCursor 推进到最新
 ② Ragdoll继续写回复，综合Maine Coon的信息
 ③ Ragdoll调 post_message →
    检查: seenCursor[opus][thisThread] < thread.latestMessageId ?
@@ -268,11 +268,11 @@ operator在 thread 里发了一条消息。
 
    📬 提醒：你有 1 条新消息（in 当前 thread）
    来自：operator
-   内容未展示 — 在自然断点时调 list_recent 查看
+   内容未展示 — 在自然断点时调无 filter 的 full get_thread_context 查看
 
 ④ Ragdoll看到提醒 → 判断当前改到一半不适合停 →
    继续完成 Edit → 跑测试 → 测试通过
-⑤ Ragdoll在自然断点调 list_recent → 读到operator说"方向改了"
+⑤ Ragdoll在自然断点调 full get_thread_context → 读到operator说"方向改了"
 ⑥ Ragdoll调整方案 → 发回复
 ```
 
@@ -286,7 +286,7 @@ operator在 thread 里发了一条消息。
 ② 返回 hold_ball 正常结果 + 附加提醒：
 
    ⚠️ 你这轮有 1 条未读消息未查看（来自operator）
-   建议调 list_recent 先看看再退出。
+   建议调无 filter 的 full get_thread_context 先看看再退出。
 
 ③ Ragdoll看到提醒 → 决定先看 → 读消息 → 回复
    或
@@ -304,7 +304,7 @@ operator在 thread 里发了一条消息。
 ③ 触发新 invocation（限一次，防循环）：
 
    "你上一轮的 turn 中有来自operator的消息你没查看。
-    请调 list_recent 查看并回应。"
+    请调无 filter 的 full get_thread_context 查看并回应。"
 
 ④ 新 invocation 启动 → Ragdoll读消息 → 回复
 ```
@@ -409,7 +409,7 @@ interface HeldEnvelope {
 - 检测 `data.status === 'held'` → 返回可读的提示文本给猫
 - 提示包含：原因、新消息摘要、可选动作说明
 - 猫读完 held 信封后可以：
-  - 调 `list_recent` / `get_thread_context` 读新消息（自动推进游标）
+  - 调无 filter 的 `get_thread_context` 连续读新消息（自动推进游标）
   - 修改内容后重新调 `post_message`
   - 加 `acknowledgeHeld: true` 参数强制发送原文
 
@@ -420,8 +420,8 @@ interface HeldEnvelope {
 | 动作 | seenCursor 推进 | 理由 |
 |------|-----------------|------|
 | **invoke 开始**（路由层） | ✅ 从 deliveryCursor 拷贝初始值 | seed：invoke 时 delivered 的消息 = 猫的初始 seen 边界（**net-new 工作项**） |
-| `list_recent` / `get_thread_context` / `get_message` 读了消息 | ✅ 推进到读到的最新 | 猫看过了（**net-new**：MCP 工具层 `ackSeenCursor` 调用） |
-| `post_message` 成功发送 | ✅ 推进到当前 latest | 发消息 = 隐含"我知道当前状态" |
+| 无 filter 的连续 `get_thread_context` 读了消息 | ✅ 推进到读到的最新 | 猫看过了（MCP callback 层 `ackSeenCursor`；targeted/sparse reads 不推进） |
+| `post_message` 成功发送 | ❌ 不推进 | 发送不等于读取；不能越过检查后并发到达的消息 |
 | `post_message` 被 held | ❌ 不推进 | 猫还没看新消息 |
 | `search_evidence` 等非 thread 只读工具 | ❌ 不推进 | 不代表猫看了 thread 消息 |
 
@@ -511,7 +511,7 @@ interface FreshnessInvocationState {
 ```
 📬 提醒：你有 N 条未读消息（当前 thread）
 来自：{senders}
-调 list_recent 查看完整内容
+调无 filter 的 cat_cafe_get_thread_context({ responseMode: "full" }) 查看完整内容
 ```
 
 **约束**：
@@ -553,7 +553,7 @@ interface FreshnessInvocationState {
 
 **Re-invoke prompt**：只含 sender 信息 + threadId + noticeId，不含消息内容。
 ```
-你上一轮 turn 中有来自 {senders} 的 N 条未读消息，请调 list_recent 查看并回应。
+你上一轮 turn 中有来自 {senders} 的 N 条未读消息，请调无 filter 的 full get_thread_context 查看并回应。
 ```
 
 **挂钩位置**：`invoke-single-cat.ts` 的 terminal invocation event 后统一决策（codex 建议：不在每个工具自己触发）。
@@ -637,7 +637,7 @@ interface RuntimeCapabilityDescriptor {
 **D1.1 回归根因（thread `[thread-id]`, 2026-06-30 18:58-19:03 PT）**：
 
 - PR #2691 把 D1 的 `stream output stale` 升级成 unconditional `sourceCategory: 'freshness'` re-invoke
-- re-invoke prompt 让猫调 `list_recent`；gpt52 照做，并进一步调 `get_thread_context?catId=codex`
+- 当时的 re-invoke prompt 错误地让猫调 `list_recent`；gpt52 照做，并进一步调 `get_thread_context?catId=codex`
 - `list_recent` 不是 thread seenCursor ack 工具；`get_thread_context` 带 `catId` 是 sparse read，按 AC-A9/R1 blocker 设计**不得推进 seenCursor**
 - 因此同一组 `unseenCount=3, unseenSenders=["codex"]` 没被账本承认，每次 stream output 结束又触发 D1 forced re-invoke，形成重复唤醒
 
@@ -709,7 +709,7 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
 ### Phase A（Freshness Gate MVP）
 
 - [x] AC-A1: 猫调 `post_message` 时，如果 thread 有猫未看过的消息（`latestMessageId > seenCursor`），返回 held 信封而非执行发送——**用独立 seenCursor seq 游标判断，不用 timestamp，不用 deliveryCursor**
-- [x] AC-A2: 猫 turn 中途通过 `list_recent` / `get_thread_context` 读过新消息后，seenCursor 推进，再调 `post_message` 不被 hold（**零误 hold 验证**）
+- [x] AC-A2: 猫 turn 中途通过无 filter 的 full `get_thread_context` 读过新消息后，seenCursor 推进，再调 `post_message` 不被 hold（**零误 hold 验证**）
 - [x] AC-A3: `seenCursor` 不存在时 fail-open 放行（不因缺数据卡死副作用）
 - [x] AC-A4: held 信封最多展示 3 条摘要 + omittedCount（防 context 膨胀）
 - [x] AC-A5: 猫加 `acknowledgeHeld: true` 可强制发送（escape hatch）
@@ -877,7 +877,7 @@ piggyback 推断 native coverage。
 - [x] AC-E20: **可观测性**：记录 `published_with_unseen`、`supplement_offered`、`supplement_produced`、`supplement_declined`，并用 focused API/Web/Redis/connector fixtures 覆盖原文不消失、补充不替换、失败不静默。
 - [x] AC-E21: **Queue 单一所有权与发表不变量**：普通 queued user message 不得同时进入 supplement lifecycle。猫实际读到 exact message 才记录 `(messageId, targetCat, invocationId)` ACK；成功后 handled 且不再 spawn，未读则自然下轮 spawn，失败/取消标记 failed 并回队。Steer 只允许“取消当前 invocation + 立即以同一条消息启动一次”。所有路径都不得扣押 completed original；per-target 五态必须在 F5/reconnect 后水合一致。
 - [x] AC-E22: **Queue restart-durable custody**：普通 queued user message 在 MessageStore 上持久保存 revisioned、TTL=0 custody；API restart 必须按原 `messageId / entryId / position / target` 确定性重建 Queue owner。exact seen 仅在同一 invocation 的 immutable per-target `successfulCatIds` witness 包含该猫时 handled；aggregate parent `succeeded` / target membership 不得代替逐猫证明，缺失 witness、失败、取消与 restart-crash 均回 `failed/queued`，多 target 独立恢复。不得用 `markDelivered` 把尚未执行的责任降级成仅可见 timeline 消息。Formal review 进一步证明 A2A worklist growth、provider failure + bare done 与 fail-silent writer 会破坏该 witness；`d93dda62e` 固化 immutable target domain、typed rejection、checked terminal writers 与 per-record startup isolation，聚焦与隔离 Redis 回归已绿，待 exact-head gate/re-review 与 PR/cloud/CI。
-- [x] AC-E23: **legacy closure 全量核销迁移**：迁移以全部 active legacy closure 为根集合，逐 attached withheld invocation 分类为 `already_formal_exact / already_recovered_exact / recoverable_text / no_text / conflict`；conflict fail-closed。只有所有 invocation 均有 exact message/evidence 或审计化 no-text 归宿后，closure 才以显式 `legacy_migrated` disposition terminalize；不得伪装成用户 dismissed。恢复复用 exact transcript proof + idempotent append，零 route/Queue/Socket/A2A；重跑不复制正文或递增 revision。当前分支 provenance 为 formal-review base `2936df429` + latest-main repair `d93dda62e`；sanctioned random-port Redis 已证明 dry-run/apply/idempotency/write-ahead journal，生产 apply 仍需独立 manifest + operator 授权。
+- [x] AC-E23: **legacy closure 全量核销迁移**：迁移以全部 active legacy closure 为根集合，逐 attached withheld invocation 分类为 `already_formal_exact / already_recovered_exact / recoverable_text / no_text / conflict`；conflict fail-closed。只有所有 invocation 均有 exact message/evidence 或审计化 no-text 归宿后，closure 才以显式 `legacy_migrated` disposition terminalize；不得伪装成用户 dismissed。恢复复用 exact transcript proof + idempotent append，零 route/Queue/Socket/A2A；重跑不复制正文或递增 revision。PR #3572（squash `d1044074a`）补齐日志轮转后的 35 个 `closure_state` provenance 缺口：51 个 active closure 均进入 root set，134 个 attachment 按 `legacy_census > runtime_log > closure_state` 归一化；exact bundle `250cc9d81938d4a3bcdaef28313d02aefe9bf2101cb08c5c4e8c038a2ba03a7f` 在 production-RDB 隔离克隆上证明 dry-run、33 条恢复、51 个 terminal transition、第二次 apply 零重复与 write-ahead journal。生产 apply 仍未执行，且必须取得绑定该 bundle SHA 的新 operator 授权。
 
 ### Phase E-C ✅（Child Execution Truth + Typed Causal Relevance，2026-07-16 实弹重开）
 
@@ -995,7 +995,7 @@ Map delta why: 本轮只修正现有 Web closure projection / hydration 的时�
 
 ### Regression Fixture
 1. 猫 invoke 后 thread 有新消息 → 猫调 post_message → 收到 held（不是正常发送）
-2. 猫 invoke 后 thread 有新消息 → 猫先 list_recent 读了 → 再 post_message → 正常发送（seenCursor 已推进，不 hold）
+2. 猫 invoke 后 thread 有新消息 → 猫先做无 filter 的 full get_thread_context → 再 post_message → 正常发送（seenCursor 已推进，不 hold）
 3. 新 thread 首次 invoke，无 seenCursor → post_message → 正常发送（fail-open）
 4. held 信封 preview 不超过 3 条（context cap）
 5. **seenCursor 隔离**：推进 seenCursor → 验证 deliveryCursor 值不变 → 验证下次 invoke 增量注入不跳消息（AC-A9）
@@ -1068,7 +1068,7 @@ Map delta why: 本轮只修正现有 Web closure projection / hydration 的时�
 | R34 | lineage custody + running lease | E | AC-E12 | old blocked × independent fresh/stale matrices, route custody, Redis CAS | ✅ merged PR #2880 |
 | R35 | current/attributable recovery | E | AC-E13 | retry preflight, relevance, cancel provenance, cross-thread effect, peer-context IR13 | ✅ merged PR #2880; runtime dogfood pending |
 | R36 | Queue restart-durable custody | E-B | AC-E22 | exact identity/order + same-invocation success + crash/cancel/restart + multi-target Redis fixtures | ✅ merged PR #2912 (`07f46f5aa`); post-merge operator/alpha validation pending |
-| R37 | all-active legacy closure accounting | E-B | AC-E23 | 51-root inventory + per-invocation outcomes + exact 399-char target + idempotent Redis replay | ✅ migration machinery merged PR #2912 (`07f46f5aa`); production apply not run |
+| R37 | all-active legacy closure accounting | E-B | AC-E23 | 51-root inventory + per-invocation outcomes + exact 399-char target + idempotent Redis replay | ✅ machinery merged PR #2912 (`07f46f5aa`); rotated-log inventory closure merged PR #3572 (`d1044074a`); production apply not run |
 | R38 | Codex provider-native same-turn notice | D2 | AC-D12/D13 | stable `turn/steer` exact-turn delivery + notified/seen truth split | ✅ default-off adapter + exact-turn live cognition fixture |
 | R39 | carrier parity + no replay | D2 | AC-D14 | session/auth/approval/tmux/timeout/internal-archive/F212 matrix | ✅ AC-D14a-g merged via PR #3079/#3082/#3097；AC-D16 live matrix 仍独立 gated |
 | R40 | provider × tool-surface eval | D2 | AC-D15/D16 | installed-schema census + command/file/MCP/collab/search/image/sleep decisions + Redis 6398 live regression | 🟡 code repair merged PR #3431（squash `b1c9c8e26`，exact-HEAD review APPROVE）：installed schema census、`collabAgentToolCall` safe boundary、逐类 no-boundary/deferred 分类、bounded unknown telemetry/denominator 与 Claude/Kimi unsupported/no-data truth 已落地；full exact-read/handled + late/no-boundary 正常 runtime 回归仍待执行 |
@@ -1091,5 +1091,5 @@ Map delta why: 本轮只修正现有 Web closure projection / hydration 的时�
 - Phase E v1.2 emergency lane: **merged PR #2880 (`a763e0b6d`)** after local Red→Green + Fable formal review/continuity + required CI. Cloud reviewer and alpha were explicitly skipped because only the real TTL=0 closure/socket/runtime scene can prove the incident family closed. Merge 后由 operator 重启、先硬刷新前端，再在原受害 thread dogfood；author 不自行重启 runtime。
 - Phase E-D: Fable 的 incident verdict 只作为 diagnosis input；Terra 已对 final implementation HEAD `d0c95dfc5` 独立 APPROVE，覆盖 lineage placement、legacy/current retry 分界与 background unread/activity invariant，且 P1 fallback 修复经 active/background 反向 RED 验证后闭合。
 - Phase E-B ADR-042 glass-box: **merged PR #2906 (`ace5412c0`)** after exact-head full gate, Opus 4.6 final-SHA continuity approval, resolved cloud review, and green CI.
-- Phase E-B post-merge closure: **merged PR #2912 (`07f46f5aa`)** after final head `e19c05182` / base `17afbcd1d` passed full `pnpm gate`, Terra exact-head continuity approval, cloud zero-major review, and CI. Historical repair/review checkpoints remain provenance only. Production migration apply and runtime restart are outside the author boundary; post-merge operator/alpha validation remains before F254 is marked done.
+- Phase E-B post-merge closure: **merged PR #2912 (`07f46f5aa`)** after final head `e19c05182` / base `17afbcd1d` passed full `pnpm gate`, Terra exact-head continuity approval, cloud zero-major review, and CI. Log-retention provenance repair later merged in PR #3572 (`d1044074a`) after Opus5 exact-content continuity review, a latest-main full gate, and green CI. Historical repair/review checkpoints remain provenance only. Production migration apply and runtime restart are outside the author boundary; an exact-bundle operator authorization remains required before F254 can be marked done.
 - Phase E-C: Sol author；final HEAD 仅交 Terra，review 必须覆盖 typed prompt-coverage relevance、same-wave false-negative/false-positive 边界、supplement exactly-once、child terminal persistence 与 ADR-042 original-publication invariant；随后 normal merge-gate。

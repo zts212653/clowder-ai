@@ -437,6 +437,153 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(state.catInvocations.opus?.turnInvocationId).toBeUndefined();
   });
 
+  it('resumes an unresolved timeout reconciliation after F5 hydration and updates the same notice', async () => {
+    useChatStore.setState({
+      messages: [
+        {
+          id: 'invocation-status-parent-refresh',
+          type: 'system',
+          variant: 'info',
+          content: 'Client wait window ended. Canonical status could not be verified.',
+          timestamp: Date.now() - 60_000,
+          cachedFrom: 'idb',
+          extra: {
+            invocationReconciliation: {
+              v: 1,
+              invocationId: 'parent-refresh',
+              catIds: ['opus'],
+              turnInvocationIds: ['child-refresh'],
+              phase: 'unknown_running',
+              reason: 'record_unavailable',
+              updatedAt: Date.now() - 60_000,
+            },
+          },
+        },
+      ],
+    });
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invocations/parent-refresh') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: 'parent-refresh',
+              threadId: 'thread-q',
+              status: 'succeeded',
+              updatedAt: Date.now(),
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              queue: [],
+              paused: false,
+              activeInvocations: [
+                {
+                  catId: 'opus',
+                  startedAt: Date.now() - 6 * 60 * 1000,
+                  executionId: 'parent-refresh',
+                  turnInvocationId: 'child-refresh',
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+    await vi.waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/invocations/parent-refresh');
+    });
+
+    const state = useChatStore.getState();
+    const notice = state.messages.find((message) => message.id === 'invocation-status-parent-refresh');
+    expect(notice?.extra?.invocationReconciliation?.phase).toBe('succeeded');
+    expect(notice?.content).toContain('completed');
+    expect(state.activeInvocations).not.toHaveProperty('parent-refresh');
+    expect(state.catInvocations.opus?.invocationId).toBeUndefined();
+    expect(state.catInvocations.opus?.turnInvocationId).toBeUndefined();
+  });
+
+  it('terminalizes an unresolved F5 receipt even when queue hydration is already empty', async () => {
+    useChatStore.setState({
+      messages: [
+        {
+          id: 'invocation-status-parent-empty-queue',
+          type: 'system',
+          variant: 'info',
+          content: 'Client wait window ended. Canonical status could not be verified.',
+          timestamp: Date.now() - 60_000,
+          cachedFrom: 'idb',
+          extra: {
+            invocationReconciliation: {
+              v: 1,
+              invocationId: 'parent-empty-queue',
+              catIds: ['opus'],
+              turnInvocationIds: ['child-empty-queue'],
+              phase: 'unknown_running',
+              reason: 'record_unavailable',
+              updatedAt: Date.now() - 60_000,
+            },
+          },
+        },
+      ],
+      activeInvocations: {},
+      hasActiveInvocation: false,
+      catInvocations: {},
+    });
+    apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invocations/parent-empty-queue') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: 'parent-empty-queue',
+              threadId: 'thread-q',
+              status: 'succeeded',
+              updatedAt: Date.now(),
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ queue: [], paused: false, activeInvocations: [] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
+      );
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+    });
+    await vi.waitFor(() => {
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/invocations/parent-empty-queue');
+    });
+
+    const state = useChatStore.getState();
+    const notices = state.messages.filter((message) => message.id === 'invocation-status-parent-empty-queue');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.extra?.invocationReconciliation?.phase).toBe('succeeded');
+    expect(notices[0]?.content).toContain('completed');
+    expect(state.activeInvocations).toEqual({});
+    expect(state.hasActiveInvocation).toBe(false);
+    expect(state.catInvocations).toEqual({});
+    expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/invocations/parent-empty-queue')).toHaveLength(1);
+  });
+
   it('F264: same-parent authoritative hydration clears the old child and exposes its receipt as unsettled', async () => {
     useChatStore.setState({
       catInvocations: {
@@ -509,7 +656,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       invocationId: 'parent-opus',
       turnInvocationId: undefined,
     });
-    expect(container.textContent).toContain('opus · 已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
     expect(container.textContent).not.toContain('当前轮处理中');
     expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
   });

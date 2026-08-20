@@ -29,6 +29,13 @@ export interface EnvVar {
   deprecated?: string;
   allowedValues?: string[];
   currentValue: string | null;
+  label?: string;
+  settingsGroup?: string;
+  restartRequired?: boolean;
+  booleanSemantics?: {
+    defaultOn: boolean;
+    trueWhen?: 'parseBoolEnv' | 'exactTrue' | 'exactOne' | 'notZero';
+  };
 }
 
 export interface DataDirs {
@@ -93,9 +100,7 @@ function needsRestart(variable: EnvVar): boolean {
 }
 
 export function isEditableVariable(variable: EnvVar): boolean {
-  if (variable.runtimeEditable === true) return true;
-  if (variable.runtimeEditable === false) return false;
-  return !variable.sensitive;
+  return variable.runtimeEditable === true;
 }
 
 export function isSensitiveEditable(variable: EnvVar): boolean {

@@ -5,16 +5,29 @@
  */
 
 import type {
+  AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
   ConnectorSource,
   CrossThreadCoordination,
   MessageContent,
   RichMessageExtra,
+  WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
-import { deliveryDecisionCueCarrierV1Schema } from '@cat-cafe/shared';
+import {
+  asrPersonMemoryDynamicSceneEntryV1Schema,
+  deliveryDecisionCueCarrierV1Schema,
+  MessageBundleCarrierV1Schema,
+  MessageContentsSchema,
+  writeOpportunityReentryCarrierV1Schema,
+} from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
-import type { StoredMessage, StoredPluginMessage, StoredToolEvent } from '../ports/MessageStore.js';
+import type {
+  MessageRecallMarker,
+  StoredMessage,
+  StoredPluginMessage,
+  StoredToolEvent,
+} from '../ports/MessageStore.js';
 import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
@@ -56,14 +69,48 @@ export function safeParseToolEvents(raw: string | undefined): readonly StoredToo
 export function safeParseContentBlocks(raw: string | undefined): readonly MessageContent[] | undefined {
   if (!raw) return undefined;
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : undefined;
+    const result = MessageContentsSchema.safeParse(JSON.parse(raw));
+    return result.success ? (result.data as MessageContent[]) : undefined;
   } catch {
     return undefined;
   }
 }
 
 export const safeParseQueueCustody = parseQueuedMessageCustody;
+
+export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      value.version !== 1 ||
+      (value.exposure !== 'none' && value.exposure !== 'seen') ||
+      typeof value.recalledAt !== 'number' ||
+      !Number.isFinite(value.recalledAt)
+    ) {
+      return undefined;
+    }
+    const exposures = Array.isArray(value.exposures)
+      ? value.exposures.filter(
+          (entry): entry is { targetCatId: string; invocationId: string; seenAt: number } =>
+            typeof entry === 'object' &&
+            entry !== null &&
+            typeof (entry as Record<string, unknown>).targetCatId === 'string' &&
+            typeof (entry as Record<string, unknown>).invocationId === 'string' &&
+            typeof (entry as Record<string, unknown>).seenAt === 'number' &&
+            Number.isFinite((entry as Record<string, unknown>).seenAt),
+        )
+      : [];
+    return {
+      version: 1,
+      exposure: value.exposure,
+      recalledAt: value.recalledAt,
+      ...(exposures.length > 0 ? { exposures } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 function parseCrossThreadCoordination(value: unknown): CrossThreadCoordination | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -83,6 +130,11 @@ function parseCrossThreadCoordination(value: unknown): CrossThreadCoordination |
     id: coordination.id,
     phase: coordination.phase as CrossThreadCoordination['phase'],
     hop: Number(coordination.hop),
+    ...(typeof coordination.subjectRef === 'string' &&
+    coordination.subjectRef.trim().length > 0 &&
+    coordination.subjectRef.trim().length <= 240
+      ? { subjectRef: coordination.subjectRef.trim() }
+      : {}),
   };
 }
 
@@ -105,105 +157,52 @@ function parseTurnExecutionProjection(value: unknown): TurnExecutionMessageProje
   };
 }
 
+type StoredMessageExtra = NonNullable<StoredMessage['extra']>;
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function parseProactiveCarrier(value: unknown): StoredMessageExtra['proactive'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(candidate.visitId) ||
+    !isNonEmptyString(candidate.intentId) ||
+    candidate.source !== 'private_time'
+  ) {
+    return undefined;
+  }
+  return { visitId: candidate.visitId, intentId: candidate.intentId, source: 'private_time' };
+}
+
+function parseMeetingArtifactCarrier(value: unknown): StoredMessageExtra['meetingArtifact'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(candidate.intakeId) ||
+    !isNonEmptyString(candidate.sourceHandle) ||
+    candidate.trust !== 'untrusted_external' ||
+    candidate.instructionPolicy !== 'data_only'
+  ) {
+    return undefined;
+  }
+  return {
+    intakeId: candidate.intakeId,
+    sourceHandle: candidate.sourceHandle,
+    trust: 'untrusted_external',
+    instructionPolicy: 'data_only',
+  };
+}
+
 /** F022+F052: Parse extra field (contains rich blocks, stream metadata, cross-post origin) */
-export function safeParseExtra(raw: string | undefined):
-  | {
-      rich?: RichMessageExtra;
-      memoryCue?: NonNullable<StoredMessage['extra']>['memoryCue'];
-      // F194 Phase Z9 hotfix: stream now carries dual id (parent + per-cat-turn).
-      // Frontend `getBubbleInvocationId` uses turnInvocationId for bubble identity
-      // (falls back to invocationId / parent only for legacy records).
-      stream?: { invocationId?: string; turnInvocationId?: string; parallelBatchId?: string };
-      causal?: { kind: 'invocation_reply'; triggerMessageId: string };
-      turnExecution?: TurnExecutionMessageProjection;
-      auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
-      crossPost?: {
-        sourceThreadId: string;
-        sourceInvocationId?: string;
-        effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
-      };
-      coordination?: CrossThreadCoordination;
-      callbackDedup?: NonNullable<StoredMessage['extra']>['callbackDedup'];
-      scheduler?: {
-        hiddenTrigger?: boolean;
-        toast?: {
-          type: 'success' | 'error' | 'info';
-          title: string;
-          message: string;
-          duration: number;
-          lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
-        };
-      };
-      targetCats?: string[];
-      isExplicitPost?: boolean;
-      freshness?: NonNullable<StoredMessage['extra']>['freshness'];
-      supplement?: NonNullable<StoredMessage['extra']>['supplement'];
-      recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
-      tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing' | 'context_briefing';
-      a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
-      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
-      pluginMessage?: {
-        instanceId: string;
-        revision: number;
-        provenance: Record<string, unknown>;
-        elements: ReadonlyArray<Record<string, unknown>>;
-        sourceEventId?: string;
-        correlationId?: string;
-        causationId?: string;
-        appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
-      };
-    }
-  | undefined {
+export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] | undefined {
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return undefined;
 
-    const result: {
-      rich?: RichMessageExtra;
-      memoryCue?: NonNullable<StoredMessage['extra']>['memoryCue'];
-      stream?: { invocationId?: string; turnInvocationId?: string; parallelBatchId?: string };
-      causal?: { kind: 'invocation_reply'; triggerMessageId: string };
-      turnExecution?: TurnExecutionMessageProjection;
-      auxiliaryTurnExecutions?: TurnExecutionMessageProjection[];
-      crossPost?: {
-        sourceThreadId: string;
-        sourceInvocationId?: string;
-        effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
-      };
-      coordination?: CrossThreadCoordination;
-      callbackDedup?: NonNullable<StoredMessage['extra']>['callbackDedup'];
-      scheduler?: {
-        hiddenTrigger?: boolean;
-        toast?: {
-          type: 'success' | 'error' | 'info';
-          title: string;
-          message: string;
-          duration: number;
-          lifecycleEvent: 'registered' | 'paused' | 'resumed' | 'deleted' | 'succeeded' | 'failed' | 'missed_window';
-        };
-      };
-      targetCats?: string[];
-      isExplicitPost?: boolean;
-      freshness?: NonNullable<StoredMessage['extra']>['freshness'];
-      supplement?: NonNullable<StoredMessage['extra']>['supplement'];
-      recovery?: NonNullable<NonNullable<StoredMessage['extra']>['recovery']>;
-      tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing' | 'context_briefing';
-      a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
-      /** F288 (K-1): plugin messaging canonical payload — structural mirror of MessageStore.ts extra typing. */
-      pluginMessage?: {
-        instanceId: string;
-        revision: number;
-        provenance: Record<string, unknown>;
-        elements: ReadonlyArray<Record<string, unknown>>;
-        sourceEventId?: string;
-        correlationId?: string;
-        causationId?: string;
-        appendOps: ReadonlyArray<{ operationId: string; elementIds: readonly string[]; baseRevision?: number }>;
-      };
-    } = {};
+    const result: StoredMessageExtra = {};
     let hasField = false;
 
     // Validate rich sub-field shape
@@ -215,6 +214,47 @@ export function safeParseExtra(raw: string | undefined):
     const deliveryDecision = deliveryDecisionCueCarrierV1Schema.safeParse(parsed.memoryCue?.deliveryDecision);
     if (deliveryDecision.success) {
       result.memoryCue = { deliveryDecision: deliveryDecision.data };
+      hasField = true;
+    }
+
+    const messageBundle = MessageBundleCarrierV1Schema.safeParse(parsed.messageBundle);
+    if (messageBundle.success) {
+      result.messageBundle = messageBundle.data;
+      hasField = true;
+    }
+
+    const proactive = parseProactiveCarrier(parsed.proactive);
+    if (proactive) {
+      result.proactive = proactive;
+      hasField = true;
+    }
+
+    const meetingArtifact = parseMeetingArtifactCarrier(parsed.meetingArtifact);
+    if (meetingArtifact) {
+      result.meetingArtifact = meetingArtifact;
+      hasField = true;
+    }
+
+    if (Array.isArray(parsed.dynamicSceneEntries)) {
+      const scenes: AsrPersonMemoryDynamicSceneEntryV1[] = [];
+      let valid = parsed.dynamicSceneEntries.length > 0;
+      for (const candidate of parsed.dynamicSceneEntries as unknown[]) {
+        const scene = asrPersonMemoryDynamicSceneEntryV1Schema.safeParse(candidate);
+        if (!scene.success) {
+          valid = false;
+          break;
+        }
+        scenes.push(scene.data);
+      }
+      if (valid) {
+        result.dynamicSceneEntries = scenes;
+        hasField = true;
+      }
+    }
+
+    const writeOpportunityReentry = writeOpportunityReentryCarrierV1Schema.safeParse(parsed.writeOpportunityReentry);
+    if (writeOpportunityReentry.success) {
+      result.writeOpportunityReentry = writeOpportunityReentry.data as WriteOpportunityReentryCarrierV1;
       hasField = true;
     }
 
@@ -505,6 +545,18 @@ export function safeParseConnectorSource(raw: string | undefined): ConnectorSour
   } catch {
     return undefined;
   }
+}
+
+export type ConnectorSourceFieldParseResult =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'valid'; readonly source: ConnectorSource }
+  | { readonly kind: 'invalid' };
+
+/** Preserve Redis field presence so malformed connector provenance fails closed. */
+export function parseConnectorSourceField(raw: string | undefined): ConnectorSourceFieldParseResult {
+  if (raw === undefined) return { kind: 'absent' };
+  const source = safeParseConnectorSource(raw);
+  return source ? { kind: 'valid', source } : { kind: 'invalid' };
 }
 
 export function safeParseMetadata(raw: string | undefined): MessageMetadata | undefined {

@@ -299,7 +299,8 @@ NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 
 # 文字转语音（TTS）
 TTS_URL=http://localhost:9879
-TTS_CACHE_DIR=./data/tts-cache
+# 可选覆盖；默认使用 ~/.cat-cafe/assets/tts
+# TTS_CACHE_DIR=/绝对路径/tts-cache
 
 # 语音纠正（LLM 后处理）
 NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
@@ -381,34 +382,16 @@ TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 
 ### GitHub PR Review 通知
 
-当 GitHub review 邮件到达时自动通知（轮询 IMAP）。Review 评论自动路由到对应的猫和线程。
+当 GitHub review 到达时自动通知。已注册跟踪的 PR 通过 GitHub API 轮询——无需配置邮箱——review 评论自动路由到对应的猫和线程。
 
 ```bash
-# QQ 邮箱示例
-GITHUB_REVIEW_IMAP_USER=xxx@qq.com
-GITHUB_REVIEW_IMAP_PASS=<授权码>    # 应用专用密码，不是登录密码
-GITHUB_REVIEW_IMAP_HOST=imap.qq.com
-GITHUB_REVIEW_IMAP_PORT=993
-
-# Gmail 示例（需要开启两步验证 + 生成应用专用密码）
-# GITHUB_REVIEW_IMAP_USER=xxx@gmail.com
-# GITHUB_REVIEW_IMAP_PASS=<应用专用密码>    # Google 账号 → 安全性 → 应用专用密码
-# GITHUB_REVIEW_IMAP_HOST=imap.gmail.com
-# GITHUB_REVIEW_IMAP_PORT=993
-
-# Outlook / Hotmail 示例
-# GITHUB_REVIEW_IMAP_USER=xxx@outlook.com
-# GITHUB_REVIEW_IMAP_PASS=<应用专用密码>    # Microsoft 账号 → 安全 → 应用密码
-# GITHUB_REVIEW_IMAP_HOST=outlook.office365.com
-# GITHUB_REVIEW_IMAP_PORT=993
-
 # 可选的后台 GitHub API token，仅用于获取 review 内容。
 # 仓库操作统一使用已认证的 gh CLI；GitHub MCP 已退休。
 GITHUB_MCP_PAT=ghp_...
 ```
 
 **路由机制（三层）：**
-1. **PR 注册**（首选）：猫猫在开 PR 时通过 `register_pr_tracking` MCP 工具注册。收到 review 邮件后，直接路由到该猫的线程。
+1. **PR 注册**（首选）：猫猫在开 PR 时通过 `register_pr_tracking` MCP 工具注册。收到 review 后，直接路由到该猫的线程。
 2. **标题标签**（备选）：如果没有注册记录，系统从 PR 标题中查找猫名标签（如 `[宪宪🐾]`），路由到该猫的 Review 收件箱。
 3. **分诊**（兜底）：如果无法识别猫，review 进入分诊线程等待手动分配。
 

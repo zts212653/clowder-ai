@@ -8,6 +8,12 @@ const mocks = vi.hoisted(() => ({
   useChatStore: vi.fn(),
   apiFetch: vi.fn(),
   usePersistedState: vi.fn(),
+  enablePresentationLock: vi.fn(),
+  disablePresentationLock: vi.fn(),
+  setWorkspaceMode: vi.fn(),
+  restoreWorkspaceMode: vi.fn(),
+  setWorkspaceSurface: vi.fn(),
+  restoreWorkspaceSurface: vi.fn(),
 }));
 
 vi.mock('@/hooks/useWorkspace', () => ({
@@ -30,9 +36,18 @@ vi.mock('@/hooks/usePersistedState', () => ({
 vi.mock('@/components/MarkdownContent', () => ({
   MarkdownContent: () => React.createElement('div', { 'data-testid': 'markdown' }),
 }));
-vi.mock('@/components/workspace/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('@/components/workspace/GitPanel', () => ({ GitPanel: () => null }));
-vi.mock('@/components/workspace/TerminalTab', () => ({ TerminalTab: () => null }));
+vi.mock('@/components/workspace/ChangesPanel', () => ({
+  ChangesPanel: () => React.createElement('div', { 'data-testid': 'changes-panel' }),
+}));
+vi.mock('@/components/workspace/GitPanel', () => ({
+  GitPanel: () => React.createElement('div', { 'data-testid': 'git-panel' }),
+}));
+vi.mock('@/components/workspace/TerminalTab', () => ({
+  TerminalTab: () => React.createElement('div', { 'data-testid': 'terminal-tab' }),
+}));
+vi.mock('@/components/workspace/BrowserPanel', () => ({
+  BrowserPanel: () => React.createElement('div', { 'data-testid': 'browser-panel' }),
+}));
 vi.mock('@/components/workspace/JsxPreview', () => ({ JsxPreview: () => null }));
 vi.mock('@/components/workspace/LinkedRootsManager', () => ({
   LinkedRootsManager: () => null,
@@ -50,14 +65,28 @@ vi.mock('@/components/eval-workspace/EvalWorkspacePanel', () => ({
   EvalWorkspacePanel: () => React.createElement('div', { 'data-testid': 'eval-workspace-panel' }, '评估'),
 }));
 
-function setupMocks() {
+function setupMocks({
+  workspaceMode = 'eval',
+  workspaceSurface = 'home',
+  file = null,
+  currentThreadId = 'thread-1',
+  preferredWorkspaceMode = 'eval',
+}: {
+  workspaceMode?: string;
+  workspaceSurface?: string;
+  file?: Record<string, unknown> | null;
+  currentThreadId?: string;
+  preferredWorkspaceMode?: string;
+} = {}) {
   mocks.useWorkspace.mockReturnValue({
     worktrees: [{ id: 'cat-cafe-runtime', branch: 'runtime/main-sync', root: '/tmp/repo' }],
     worktreeId: 'cat-cafe-runtime',
     tree: [],
-    file: null,
+    file,
     searchResults: [],
     loading: false,
+    worktreesLoading: false,
+    worktreesError: null,
     searchLoading: false,
     error: null,
     search: vi.fn().mockResolvedValue(undefined),
@@ -78,10 +107,10 @@ function setupMocks() {
   mocks.useChatStore.mockImplementation((sel: (s: Record<string, unknown>) => unknown) => {
     const store: Record<string, unknown> = {
       workspaceWorktreeId: 'cat-cafe-runtime',
-      workspaceOpenFilePath: null,
-      workspaceOpenTabs: [],
+      workspaceOpenFilePath: typeof file?.path === 'string' ? file.path : null,
+      workspaceOpenTabs: typeof file?.path === 'string' ? [file.path] : [],
       currentProjectPath: '/tmp/repo',
-      currentThreadId: 'thread-1',
+      currentThreadId,
       setWorkspaceWorktreeId: vi.fn(),
       setWorkspaceOpenFilePath: vi.fn(),
       setWorkspaceOpenTabs: vi.fn(),
@@ -98,13 +127,22 @@ function setupMocks() {
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
-      workspaceMode: 'eval',
-      setWorkspaceMode: vi.fn(),
+      workspaceMode,
+      setWorkspaceMode: mocks.setWorkspaceMode,
+      restoreWorkspaceMode: mocks.restoreWorkspaceMode,
+      workspaceSurface,
+      setWorkspaceSurface: mocks.setWorkspaceSurface,
+      restoreWorkspaceSurface: mocks.restoreWorkspaceSurface,
+      workspacePreview: { port: undefined, path: '/' },
+      setWorkspacePreview: vi.fn(),
+      presentationLock: false,
+      enablePresentationLock: mocks.enablePresentationLock,
+      disablePresentationLock: mocks.disablePresentationLock,
     };
     return sel(store);
   });
   mocks.usePersistedState.mockImplementation((_key: string, init: unknown) => [init, vi.fn()]);
-  mocks.apiFetch.mockResolvedValue({ json: async () => ({ preferredWorkspaceMode: 'eval' }) });
+  mocks.apiFetch.mockResolvedValue({ json: async () => ({ preferredWorkspaceMode }) });
 }
 
 describe('WorkspacePanel eval mode', () => {
@@ -117,6 +155,12 @@ describe('WorkspacePanel eval mode', () => {
   });
 
   beforeEach(() => {
+    mocks.enablePresentationLock.mockReset();
+    mocks.disablePresentationLock.mockReset();
+    mocks.setWorkspaceMode.mockReset();
+    mocks.restoreWorkspaceMode.mockReset();
+    mocks.setWorkspaceSurface.mockReset();
+    mocks.restoreWorkspaceSurface.mockReset();
     setupMocks();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -141,5 +185,175 @@ describe('WorkspacePanel eval mode', () => {
     });
 
     expect(container.querySelector('[data-testid="eval-workspace-panel"]')).not.toBeNull();
+  });
+
+  it('restores a thread preferred mode without treating it as a request to open Workspace', async () => {
+    setupMocks({ workspaceMode: 'dev', preferredWorkspaceMode: 'tasks' });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(mocks.restoreWorkspaceMode).toHaveBeenCalledWith('tasks');
+    expect(mocks.setWorkspaceMode).not.toHaveBeenCalled();
+  });
+
+  it('restores the Files surface on a thread switch without treating it as a request to open Workspace', async () => {
+    const threadAFile = {
+      path: 'docs/a.md',
+      content: '# A',
+      sha256: 'aaa',
+      size: 3,
+      mime: 'text/markdown',
+      truncated: false,
+      binary: false,
+    };
+    const threadBFile = { ...threadAFile, path: 'docs/b.md', content: '# B', sha256: 'bbb' };
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: threadAFile,
+      currentThreadId: 'thread-a',
+      preferredWorkspaceMode: 'dev',
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+    mocks.setWorkspaceSurface.mockClear();
+    mocks.restoreWorkspaceSurface.mockClear();
+
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: threadBFile,
+      currentThreadId: 'thread-b',
+      preferredWorkspaceMode: 'dev',
+    });
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(mocks.restoreWorkspaceSurface).toHaveBeenCalledWith('files');
+    expect(mocks.setWorkspaceSurface).not.toHaveBeenCalled();
+  });
+
+  it('keeps the file tree visible while a file detail is open', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 7,
+        mime: 'text/markdown',
+        truncated: false,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="markdown"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="关闭标签页"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="关闭 guide.md"]')?.textContent?.trim()).toBe('×');
+    expect(container.querySelector('aside')?.className).not.toContain('hidden lg:flex');
+  });
+
+  it('keeps every file action reachable through a horizontally scrollable toolbar', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 7,
+        mime: 'text/markdown',
+        truncated: false,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const toolbar = container.querySelector<HTMLElement>('[data-testid="workspace-file-toolbar"]');
+    const content = container.querySelector<HTMLElement>('[data-testid="workspace-file-toolbar-content"]');
+    const viewer = container.querySelector<HTMLElement>('[data-testid="workspace-file-viewer"]');
+    expect(viewer).not.toBeNull();
+    expect(viewer?.className).toContain('min-w-0');
+    expect(toolbar).not.toBeNull();
+    expect(toolbar?.className).toContain('overflow-x-auto');
+    expect(toolbar?.getAttribute('role')).toBe('toolbar');
+    expect(content?.className).toContain('w-max');
+    expect(content?.className).toContain('min-w-full');
+    expect(container.querySelector('[aria-label="关闭标签页"]')).not.toBeNull();
+  });
+
+  it('keeps Presentation Lock reachable from the Workspace Launcher', async () => {
+    setupMocks({ workspaceMode: 'dev', workspaceSurface: 'home' });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    const lock = container.querySelector<HTMLButtonElement>('[aria-label="锁定当前文件视图"]');
+    expect(lock).not.toBeNull();
+
+    await act(async () => {
+      lock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(mocks.enablePresentationLock).toHaveBeenCalledOnce();
+  });
+
+  it('renders the large-file truncation notice as readable text', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'files',
+      file: {
+        path: 'docs/guide.md',
+        content: '# Guide',
+        sha256: 'abc123',
+        size: 1_048_577,
+        mime: 'text/markdown',
+        truncated: true,
+        binary: false,
+      },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.textContent).toContain('文件已截断 (超过 1MB)');
+    expect(container.textContent).not.toContain('\\u6587');
+  });
+
+  it.each([
+    ['changes', 'changes-panel'],
+    ['git', 'git-panel'],
+    ['terminal', 'terminal-tab'],
+    ['browser', 'browser-panel'],
+  ])('keeps the %s Dev surface reachable', async (workspaceSurface, testId) => {
+    setupMocks({ workspaceMode: 'dev', workspaceSurface });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector(`[data-testid="${testId}"]`)).not.toBeNull();
   });
 });

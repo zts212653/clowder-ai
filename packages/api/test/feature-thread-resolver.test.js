@@ -43,7 +43,12 @@ describe('feature-thread resolver', () => {
     const missing = stores([], new Map());
     await assert.rejects(
       () => resolveUniqueFeatureThreadId(missing.threadStore, missing.backlogStore, 'user-1', 'F203', logger),
-      /feature_thread_not_found/,
+      (error) => {
+        assert.equal(error.code, 'feature_thread_not_found');
+        assert.equal(error.featureId, 'F203');
+        assert.deepEqual(error.candidateThreadIds, []);
+        return true;
+      },
     );
     const ambiguous = stores(
       [
@@ -57,7 +62,12 @@ describe('feature-thread resolver', () => {
     );
     await assert.rejects(
       () => resolveUniqueFeatureThreadId(ambiguous.threadStore, ambiguous.backlogStore, 'user-1', 'F203', logger),
-      /feature_thread_ambiguous/,
+      (error) => {
+        assert.equal(error.code, 'feature_thread_ambiguous');
+        assert.equal(error.featureId, 'F203');
+        assert.deepEqual(error.candidateThreadIds, ['thread_f203_a', 'thread_f203_b']);
+        return true;
+      },
     );
   });
 });

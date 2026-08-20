@@ -2,17 +2,27 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { buildDeps, mockMsg, seedMessages } from './helpers/incremental-context-helpers.js';
 
-const { assembleIncrementalContext } = await import('../dist/domains/cats/services/agents/routing/route-helpers.js');
+const { assembleIncrementalContext: assembleIncrementalContextRaw } = await import(
+  '../dist/domains/cats/services/agents/routing/route-helpers.js'
+);
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
-const { getCatContextBudget } = await import('../dist/config/cat-budgets.js');
 const { estimateTokens } = await import('../dist/utils/token-counter.js');
 const { parseCursor } = await import('../dist/domains/cats/services/stores/cursor.js');
 
-describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
-  test('caps messages to maxMessages when cursor is undefined (first-time cat)', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+const INVOCATION_HISTORY_CEILING = 160_000;
+const COLD_WINDOW_MESSAGE_COUNT = 65;
+
+function assembleIncrementalContext(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, options) {
+  return assembleIncrementalContextRaw(deps, userId, threadId, catId, currentUserMessageId, thinkingMode, {
+    effectiveMaxContextTokens: INVOCATION_HISTORY_CEILING,
+    ...options,
+  });
+}
+
+describe('assembleIncrementalContext — invocation ceiling and Smart Window selection', () => {
+  test('Smart Window selects a bounded burst when cursor is undefined (first-time cat)', async () => {
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -23,8 +33,8 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
 
     const deliveredCount = (result.contextText.match(/\[(\d{16}-\d{6}-[a-f0-9]{8})\]/g) || []).length;
     assert.ok(
-      deliveredCount <= budget.maxMessages,
-      `Expected at most ${budget.maxMessages} messages, got ${deliveredCount}`,
+      deliveredCount < overCount,
+      `Expected Smart Window to select fewer than ${overCount} messages, got ${deliveredCount}`,
     );
 
     assert.ok(result.contextText.includes(msgs[msgs.length - 1].id), 'Should include the newest message');
@@ -38,8 +48,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('caps messages when stale cursor produces large unseen batch', async () => {
-    const budget = getCatContextBudget('opus');
-    const totalCount = budget.maxMessages + 100;
+    const totalCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -52,16 +61,15 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
 
     const deliveredCount = (result.contextText.match(/\[(\d{16}-\d{6}-[a-f0-9]{8})\]/g) || []).length;
     assert.ok(
-      deliveredCount <= budget.maxMessages,
-      `Stale cursor: expected at most ${budget.maxMessages} messages, got ${deliveredCount}`,
+      deliveredCount < totalCount - 10,
+      `Stale cursor: expected Smart Window to select fewer than ${totalCount - 10} unseen messages, got ${deliveredCount}`,
     );
 
     assert.ok(result.contextText.includes(msgs[msgs.length - 1].id), 'Should include the newest message');
   });
 
   test('includesCurrentUserMessage is based on capped set, not raw relevant', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -75,8 +83,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('includesCurrentUserMessage is false when current msg is in oldest capped-off portion', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -211,8 +218,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('boundaryId is the last message in capped set', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -228,8 +234,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('currentMessageFilteredOut reflects visibility filtering, not budget cap', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -247,8 +252,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('returns context when messages exceed budget', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
@@ -274,8 +278,7 @@ describe('assembleIncrementalContext — GAP-1 budget enforcement', () => {
   });
 
   test('context header shows count info after cap', async () => {
-    const budget = getCatContextBudget('opus');
-    const overCount = budget.maxMessages + 50;
+    const overCount = COLD_WINDOW_MESSAGE_COUNT;
 
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();

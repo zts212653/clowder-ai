@@ -34,6 +34,14 @@ function branchExists(repoRoot, branchName) {
   }
 }
 
+function createTestPublisher(createGitWorktreePublisher, repoRoot) {
+  return createGitWorktreePublisher({
+    repoRoot,
+    expectedRepoFullName: 'zts212653/cat-cafe',
+    contractRunner: async () => {},
+  });
+}
+
 afterEach(() => {
   syncBuiltinESMExports();
 });
@@ -52,7 +60,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       await assert.rejects(
         publisher.publishOnIsolatedWorktree({
@@ -84,6 +92,10 @@ describe('createGitWorktreePublisher', () => {
     // Verdict commits are out of scope for that guard (only touch docs/harness-feedback/
     // artifacts produced by Zod-validated generator adapters), so the fix is `--no-verify`.
     const { repoRoot, remoteRoot } = createRepoWithOrigin();
+    // Explicit --repo scoping lets the cleanup probe conclusively find no PR,
+    // so retain the pushed ref as test evidence by making this fixture remote
+    // reject the publisher's best-effort delete cleanup.
+    execFileSync('git', ['config', 'receive.denyDeletes', 'true'], { cwd: remoteRoot, stdio: 'ignore' });
     // Install an always-failing pre-commit hook in the test repo. This simulates the
     // production .githooks/pre-commit failing inside the isolated worktree.
     const hooksDir = fs.mkdtempSync(join(tmpdir(), 'publish-wt-hooks-'));
@@ -114,7 +126,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-noverify`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       // We expect the publisher to FAIL eventually (at `gh pr create` — there is no gh
       // configured for the bare local remote in tests). But the commit + push MUST have
@@ -181,7 +193,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-keep`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       await assert.rejects(
         publisher.publishOnIsolatedWorktree({
@@ -229,7 +241,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-allow-${label}`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       await assert.rejects(
         publisher.publishOnIsolatedWorktree({
@@ -319,7 +331,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-raw-${label}`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       await assert.rejects(
         publisher.publishOnIsolatedWorktree({
@@ -421,7 +433,7 @@ describe('createGitWorktreePublisher', () => {
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-masquerade`
       );
-      const publisher = createGitWorktreePublisher({ repoRoot });
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
 
       await assert.rejects(
         publisher.publishOnIsolatedWorktree({

@@ -25,6 +25,7 @@ import { projectFreshnessClosure } from '../domains/cats/services/freshness/glas
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
+import { parseCursor } from '../domains/cats/services/stores/cursor.js';
 import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -43,11 +44,17 @@ import type {
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { SYSTEM_USER_IDS } from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { visibilityCursorUnresolvedRepair } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
 import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import {
+  composeSidebarPresence,
+  type SidebarPresence,
+  type SidebarPresenceSource,
+} from './sidebar-presence-projection.js';
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
@@ -96,6 +103,7 @@ async function gatedReadStateAck(
   userId: string,
   threadId: string,
   incomingCursor: string,
+  options: { repairUnresolvableLegacy?: boolean } = {},
 ): Promise<boolean> {
   const existing = await readStateStore.get(userId, threadId);
   const existingCursor = existing?.lastReadMessageId ?? null;
@@ -106,7 +114,60 @@ async function gatedReadStateAck(
     await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
   }
 
-  return readStateStore.ack(userId, threadId, gated);
+  const advanced = await readStateStore.ack(userId, threadId, gated, incomingCursor);
+  if (advanced || !existingCursor || !incomingCursor.startsWith('v2:')) return advanced;
+  if (!options.repairUnresolvableLegacy) return false;
+  // A durable anchor remains ordering evidence when the rollout-gated primary
+  // is pruned. ACK already compared against it, so legacy repair must not
+  // bypass that monotonic verdict.
+  if (existing?.lastReadVisibilityCursor) return false;
+  const replace = readStateStore.replaceReadCursorIfEqual;
+  if (!replace || !messageStore?.canonicalizeCursor) return false;
+
+  let parsedExisting: ReturnType<typeof parseCursor> = null;
+  try {
+    parsedExisting = parseCursor(existingCursor);
+  } catch {
+    // Malformed persisted tokens have no comparable visibility position and
+    // may be replaced by the validated incoming read evidence below.
+  }
+  if (parsedExisting?.version === 2) return false;
+  if (parsedExisting?.version === 1) {
+    try {
+      const storedCanonical = await messageStore.canonicalizeCursor(existingCursor, threadId);
+      if (storedCanonical !== existingCursor) return false;
+    } catch {
+      // Resolver availability is not proof that the stored position is gone.
+      return false;
+    }
+  }
+
+  const repaired = await replace.call(readStateStore, userId, threadId, existingCursor, gated, incomingCursor);
+  if (repaired) visibilityCursorUnresolvedRepair.add(1, { namespace: 'read' });
+  return repaired;
+}
+
+function isReadStateCaughtUp(
+  state: Awaited<ReturnType<IThreadReadStateStore['get']>>,
+  targetCursor: string,
+  targetMessageId: string,
+): boolean {
+  if (!state) return false;
+  if (state.lastReadMessageId === targetCursor || state.lastReadMessageId === targetMessageId) return true;
+  const anchor = state.lastReadVisibilityCursor;
+  if (!anchor) return false;
+  try {
+    const parsedAnchor = parseCursor(anchor);
+    const parsedTarget = parseCursor(targetCursor);
+    return (
+      parsedAnchor?.version === 2 &&
+      parsedTarget?.version === 2 &&
+      (parsedAnchor.seq > parsedTarget.seq ||
+        (parsedAnchor.seq === parsedTarget.seq && parsedAnchor.id >= parsedTarget.id))
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface ThreadIndexBuilder {
@@ -116,6 +177,13 @@ interface ThreadIndexBuilder {
 
 export interface ThreadsRoutesOptions {
   threadStore: IThreadStore;
+  /**
+   * F297 Phase B: batched active-execution presence for the Sidebar snapshot (C10).
+   *
+   * **必填**：生产上不接线就等于 Sidebar 永远报不出 working（PR #3748 P1-1）。
+   * 类型上强制，让 TS 生产调用点无法漏接；JS 测试不涉及运行态时可省略，运行时按无 active 处理。
+   */
+  presenceSource: SidebarPresenceSource;
   /** Optional: cascade delete messages when thread is deleted */
   messageStore?: IMessageStore;
   /** Optional: cascade delete tasks when thread is deleted */
@@ -320,10 +388,14 @@ export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thre
   return sanitized as Thread;
 }
 
-function projectThreadForListView(thread: Thread, view: 'sidebar' | undefined): Thread | Omit<Thread, 'threadMemory'> {
+function projectThreadForListView(
+  thread: Thread,
+  view: 'sidebar' | undefined,
+  presence?: SidebarPresence,
+): Thread | (Omit<Thread, 'threadMemory'> & { presence: SidebarPresence }) {
   if (view !== 'sidebar') return thread;
   const { threadMemory: _threadMemory, ...summary } = thread;
-  return summary;
+  return { ...summary, presence: presence ?? { status: 'idle' } };
 }
 
 async function migrateRuntimeProjectPath(thread: Thread, threadStore: IThreadStore): Promise<Thread> {
@@ -652,7 +724,16 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       });
     }
 
-    return { threads: threads.map((thread) => projectThreadForListView(thread, view)) };
+    // F297 Phase B (AC-B4): Sidebar snapshot 必须自带 C10 presence，
+    // 否则浏览器只能自己 fold runtime 事件——那正是 F5 才恢复真相的根因。
+    const presenceByThread =
+      view === 'sidebar' && threads.length > 0
+        ? await composeSidebarPresence(threads, userId, threadStore, opts.presenceSource)
+        : undefined;
+
+    return {
+      threads: threads.map((thread) => projectThreadForListView(thread, view, presenceByThread?.get(thread.id))),
+    };
   });
 
   // GET /api/threads/:id - 获取对话详情
@@ -1220,7 +1301,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       const latest = await messageStore.getLatestVisibleCursor(thread.id);
       if (!latest) continue;
       // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor);
+      const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor, {
+        repairUnresolvableLegacy: true,
+      });
       if (advanced) advancedCount++;
     }
 
@@ -1274,8 +1357,15 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken);
-    return { advanced };
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, cursorToken, {
+      // #3476: a validated same-thread message is explicit read evidence.
+      repairUnresolvableLegacy: true,
+    });
+    // #1304: caughtUp distinguishes "cursor at/beyond target" from "stale/can't compare"
+    // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
+    const afterState = await opts.readStateStore.get(userId, id);
+    const caughtUp = advanced || isReadStateCaughtUp(afterState, cursorToken, parseResult.data.upToMessageId);
+    return { advanced, caughtUp };
   });
 
   // F069-R5: POST /api/threads/:id/read/latest — ack to latest real message server-side.
@@ -1310,12 +1400,21 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // so getLatestVisibleCursor covers all visible items without fallback.
     const latest = await messageStore.getLatestVisibleCursor(id);
     if (!latest) {
-      return { advanced: false, reason: 'no messages' };
+      return { advanced: false, caughtUp: true, reason: 'no messages' };
     }
 
     // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
-    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor);
+    const advanced = await gatedReadStateAck(opts.readStateStore, messageStore, userId, id, latest.cursor, {
+      repairUnresolvableLegacy: true,
+    });
+    // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
+    // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
+    const afterState = await opts.readStateStore.get(userId, id);
+    const caughtUp = advanced || isReadStateCaughtUp(afterState, latest.cursor, latest.messageId);
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
-    return { advanced, messageId: latest.messageId, cursor: latest.cursor };
+    return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
   });
 };
+
+/** Re-export：presence 投影已抽到 `sidebar-presence-projection.ts`（cloud R9 P1）。 */
+export type { SidebarPresence, SidebarPresenceSource };

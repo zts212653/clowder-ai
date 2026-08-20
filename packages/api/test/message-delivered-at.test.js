@@ -110,5 +110,16 @@ describe('MessageStore.getByThreadAfter', () => {
       results.map((m) => m.id),
       [beforeCursor.id, afterCursor.id],
     );
+
+    // Stateful read/seen consumers already hold durable evidence. They must
+    // opt out of FM-3's at-least-once replay or stale history becomes "new".
+    const failClosed = store.getByThreadAfter('thread-a', missingCursor, 5, 'u1', {
+      unresolvedCursorPolicy: 'empty',
+    });
+    assert.deepEqual(failClosed, []);
+
+    const malformed = 'v2:not-canonical:persisted-corruption';
+    assert.throws(() => store.getByThreadAfter('thread-a', malformed, 5, 'u1'), /Malformed v2 cursor/);
+    assert.deepEqual(store.getByThreadAfter('thread-a', malformed, 5, 'u1', { unresolvedCursorPolicy: 'empty' }), []);
   });
 });
