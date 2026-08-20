@@ -19,13 +19,18 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-
+import {
+  buildDispatchDispositionEvent,
+  buildHandedCvoEvent,
+  buildHandedEvent,
+  buildInvocationDiedEvent,
+  buildInvocationStartedEvent,
+} from '../dist/domains/ball-custody/ball-custody-events.js';
 import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
-import { buildHandedEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
 import {
   createA2ADispositionAuth as auth,
-  createA2ADispositionHarness as harness,
   createA2ADispositionWake as dispatchWake,
+  createA2ADispositionHarness as harness,
 } from './helpers/a2a-dispatch-disposition-harness.js';
 
 async function gate(h) {
@@ -102,3 +107,111 @@ describe('F167 fan-out A2A dispatch (same message, multiple handed targets)', ()
     assert.equal(settled.structuredTransitionKind, 'dispatch_dispositioned');
   });
 });
+
+describe('F167 fan-out exemption survives non-active ball states (recurrence, 2026-08-19/20)', () => {
+  // thread_mrqb0yfauece1tmm recurrence: after the fan-out exemption landed,
+  // the queue's terminal-failed clorinde entry kept being retried (8 attempts,
+  // 16:35 through 06:18 next day), each failing again with
+  // a2a_dispatch_disposition_missing. Between retries the single ball
+  // projection oscillates: dead (invocation.died at process restart),
+  // resolved (a sibling target's dispatch disposition), parked (the holder's
+  // handed_cvo handoff at turn end). openStructured checked projection.state
+  // BEFORE the fan-out sibling exemption, so every retry open hit
+  // unknown('structured_projection_missing') → stop-gate block → failure.
+  // The exemption's semantics — "this trigger was broadcast, so no
+  // single-holder dispatch obligation ever existed for this wake" — do not
+  // depend on the ball's current state, and must be evaluated before the
+  // state gate. These tests pin that for each observed non-active state.
+  test('dead ball (invocation.died) does not defeat the fan-out exemption', async () => {
+    const h = await harness();
+    const service = await gate(h);
+    await recordFanoutSibling(h);
+    // Holder-side invocation dies (process restart) → projection state = dead.
+    await h.ingest.record(
+      buildInvocationStartedEvent({
+        invocationId: 'inv-holder',
+        threadId: 'thread-1',
+        catId: 'other-cat',
+        at: 1_200,
+      }),
+    );
+    await h.ingest.record(
+      buildInvocationDiedEvent({
+        invocationId: 'inv-holder',
+        threadId: 'thread-1',
+        catId: 'other-cat',
+        reason: 'process-restart',
+        lastScanAt: 1_250,
+        at: 1_300,
+      }),
+    );
+
+    const opened = await service.open(dispatchWake(h));
+    const decision = await service.close(opened);
+
+    assert.equal(decision.state, 'covered_empty');
+    assert.equal(decision.shouldBlock, false);
+  });
+
+  test('resolved ball (sibling dispatch dispositioned) does not defeat the fan-out exemption', async () => {
+    const h = await harness();
+    const service = await gate(h);
+    await recordFanoutSibling(h);
+    // The projection holder (last handed target) completes its dispatch →
+    // projection state = resolved.
+    await h.ingest.record(
+      buildDispatchDispositionEvent({
+        threadId: 'thread-1',
+        catId: 'other-cat',
+        fromCatId: 'fable5',
+        invocationId: 'inv-holder',
+        sourceMessageId: h.source.id,
+        disposition: 'completed',
+        at: 1_300,
+      }),
+    );
+
+    const opened = await service.open(dispatchWake(h));
+    const decision = await service.close(opened);
+
+    assert.equal(decision.state, 'covered_empty');
+    assert.equal(decision.shouldBlock, false);
+  });
+
+  test('parked ball (handed_cvo handoff) does not defeat the fan-out exemption', async () => {
+    const h = await harness();
+    const service = await gate(h);
+    await recordFanoutSibling(h);
+    // The projection holder hands the ball to the CVO at its turn end →
+    // projection state = parked (holder = cvo). This is the exact shape of
+    // the 06:18 UTC recurrence: nahida's investigation turn settled via
+    // handed_cvo(handoff) and every later clorinde queue retry opened parked.
+    await h.ingest.record(
+      buildHandedCvoEvent({
+        threadId: 'thread-1',
+        messageId: `${h.source.id}-settle`,
+        fromCatId: 'other-cat',
+        intent: 'handoff',
+        at: 1_300,
+      }),
+    );
+
+    const opened = await service.open(dispatchWake(h));
+    const decision = await service.close(opened);
+
+    assert.equal(decision.state, 'covered_empty');
+    assert.equal(decision.shouldBlock, false);
+  });
+});
+
+async function recordFanoutSibling(h) {
+  await h.ingest.record(
+    buildHandedEvent({
+      threadId: 'thread-1',
+      fromCatId: 'fable5',
+      toCatId: 'other-cat',
+      messageId: h.source.id,
+      at: 1_100,
+    }),
+  );
+}
