@@ -40,15 +40,22 @@ describe('InvocationTracker: Stop→Seal race (#1313)', () => {
     guard.release();
   });
 
-  it('guardSessionSeal succeeds after completeSlot() marks batch teardown done', () => {
+  it('guardSessionSeal stays blocked after a per-event completeSlot(); route-terminal completeAll unblocks', () => {
     const tracker = new InvocationTracker();
     const batch = tracker.startAll('t1', ['opus', 'codex'], 'user1');
     tracker.cancel('t1', 'opus');
 
+    // A canceled slot can emit a per-cat 'error' event while the stream still has
+    // trailing events and route-finally persistence pending — the per-event
+    // completeSlot() must NOT prove teardown finished.
     tracker.completeSlot('t1', 'opus', batch);
+    const early = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(early.acquired, false, 'per-event completeSlot must not unblock the seal fence');
 
+    // The route's terminal completion (finally) is the teardown-complete proof.
+    tracker.completeAll('t1', ['opus', 'codex'], batch);
     const guard = tracker.guardSessionSeal('t1', 'opus');
-    assert.equal(guard.acquired, true, 'seal allowed after completeSlot');
+    assert.equal(guard.acquired, true, 'seal allowed after route-terminal completeAll');
     guard.release();
   });
 

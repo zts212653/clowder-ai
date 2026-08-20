@@ -186,6 +186,48 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('0 active');
   });
 
+  it('refreshes the chain after a seal transport failure (server may have sealed)', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+
+    const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
+    mockApiFetch.mockImplementation((url: unknown) =>
+      url === '/api/sessions/s1/seal'
+        ? Promise.reject(new Error('socket hang up'))
+        : Promise.resolve({
+            ok: true,
+            json: async () => ({
+              sessions: [
+                {
+                  id: 's1',
+                  catId: 'opus',
+                  seq: 0,
+                  status: 'sealed',
+                  messageCount: 5,
+                  createdAt: Date.now(),
+                  sealedAt: Date.now(),
+                },
+              ],
+            }),
+          }),
+    );
+
+    act(() => {
+      sealButton.click();
+    });
+    await flushFetch();
+    await flushFetch();
+
+    // The ambiguous transport failure must trigger an authoritative re-fetch —
+    // the server may have claimed and sealed the session before the drop.
+    expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
+    expect(container.textContent).toContain('封存请求失败');
+    expect(container.textContent).toContain('0 active');
+  });
+
   it('disables manual seal for a running Agent and explains how to proceed', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },

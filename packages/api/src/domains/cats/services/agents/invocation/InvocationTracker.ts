@@ -519,9 +519,12 @@ export class InvocationTracker {
     // exactly the call route consumers fire on the abort-induced terminal message BEFORE the
     // aggregate finalStatus check, so deleting a canceled slot here would lose the cancellation
     // and resolveFinalStatus() would wrongly return 'succeeded'.
-    // #1313: mark teardown as done so guardSessionSeal() unblocks.
+    // #1313: do NOT mark teardown done here. A cancellation can surface a per-cat
+    // 'error' event while the stream still has trailing events and route-finally
+    // persistence pending; only the route's terminal completion (complete() /
+    // completeAll() in its finally) proves teardown finished, so the manual-seal
+    // fence must hold until then.
     if (inv.state === 'canceled') {
-      inv.teardownComplete = true;
       return;
     }
     this.active.delete(key);

@@ -311,6 +311,10 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
       setRefreshKey((key) => key + 1);
     } catch {
       setActionError('封存请求失败');
+      // A transport failure is ambiguous: the server may have claimed and sealed
+      // the session before the connection dropped. Reconcile with the
+      // authoritative chain rather than leaving an actionable stale card.
+      setRefreshKey((key) => key + 1);
     } finally {
       setSealingSessionId(null);
     }
