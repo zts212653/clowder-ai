@@ -30,6 +30,7 @@ import { PerCatTerminalDispositionCollector } from '../domains/cats/services/age
 import {
   createCrossThreadQueueEntryFromCustody,
   createInitialCrossThreadQueuedMessageCustody,
+  createInitialFanoutQueuedMessageCustody,
 } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
@@ -482,6 +483,36 @@ export async function enqueueA2ATargets(
     // (merged into an existing queued entry), so its cursor must advance too, otherwise the
     // merged-away mention lingers as a phantom pending backlog.
     const handled = [...enqueued, ...coalesced];
+    // Same-thread A2A fan-out: one trigger message, one independent Queue entry
+    // per target. Without up-front custody init the lazy per-entry initialization
+    // in QueueProcessor binds allTargetCats to whichever entry attempts first,
+    // and every sibling entry then fails with a custody entry mismatch. Bind
+    // each target to its exact carrier entry here (mirroring the cross-thread
+    // branch) so each sibling settles independently.
+    if (!isCrossThread && deps.messageStore && enqueued.length > 1 && enqueued.length === handled.length) {
+      const fanoutEntries = enqueued
+        .map((catId) => acceptedEntryByCatId.get(catId))
+        .filter((entry): entry is QueueEntry => !!entry);
+      if (fanoutEntries.length === enqueued.length) {
+        try {
+          const initialized = await deps.messageStore.initializeQueueCustody(
+            triggerMessageId,
+            createInitialFanoutQueuedMessageCustody(triggerMessageId, fanoutEntries),
+          );
+          if (initialized.kind === 'not_found' || initialized.kind === 'not_queued') {
+            log.warn(
+              { threadId, triggerMessageId, kind: initialized.kind },
+              '[callbacks] same-thread fan-out custody init unavailable; falling back to lazy per-entry init',
+            );
+          }
+        } catch (error) {
+          log.warn(
+            { err: error, threadId, triggerMessageId },
+            '[callbacks] same-thread fan-out custody init failed; falling back to lazy per-entry init',
+          );
+        }
+      }
+    }
     if (isCrossThread && targetCats.length > 0) {
       const messageStore = deps.messageStore!;
       const acceptedEntries = handled

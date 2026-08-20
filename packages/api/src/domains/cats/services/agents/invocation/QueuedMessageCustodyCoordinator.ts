@@ -627,6 +627,78 @@ export function createInitialCrossThreadQueuedMessageCustody(
   };
 }
 
+/**
+ * Same-thread A2A fan-out: one trigger message dispatches one independent Queue
+ * entry per target. The lazy single-entry initialization
+ * (createInitialQueuedMessageCustody) cannot see sibling entries, so it would
+ * bind allTargetCats to the first attempted entry alone and reject every other
+ * sibling with a custody mismatch. This constructor binds each target to its
+ * exact carrier entry up front (mirroring the cross-thread constructor), so
+ * activeCustodyFromEntry's carrier branch projects each sibling independently.
+ */
+export function createInitialFanoutQueuedMessageCustody(
+  messageId: string,
+  entries: readonly QueueEntry[],
+): QueuedMessageCustody {
+  if (entries.length === 0) throw new Error('fan-out Queue custody requires at least one entry');
+  const intent = entries[0].intent;
+  const threadId = entries[0].threadId;
+  const userId = entries[0].userId;
+  const ownerAuthProvenance = normalizeOwnerAuthProvenance(entries[0].ownerAuthProvenance);
+  const carrierByTargetCatId: Record<string, QueueTargetCarrierBinding> = {};
+  const carrierTargetCats: CatId[] = [];
+  for (const entry of entries) {
+    if (
+      entry.intent !== intent ||
+      entry.threadId !== threadId ||
+      entry.userId !== userId ||
+      normalizeOwnerAuthProvenance(entry.ownerAuthProvenance) !== ownerAuthProvenance ||
+      entry.source !== 'agent' ||
+      entry.sourceCategory !== 'a2a'
+    ) {
+      throw new Error('fan-out Queue carriers must share one A2A message identity');
+    }
+    for (const targetCatId of entry.targetCats) {
+      if (carrierByTargetCatId[targetCatId]) {
+        throw new Error(`fan-out Queue target has multiple carriers: ${targetCatId}`);
+      }
+      carrierTargetCats.push(targetCatId as CatId);
+      carrierByTargetCatId[targetCatId] = {
+        entryId: entry.id,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
+        ...(entry.a2aParentInvocationId ? { a2aParentInvocationId: entry.a2aParentInvocationId } : {}),
+        a2aTriggerMessageId: entry.a2aTriggerMessageId ?? messageId,
+        autoExecute: true,
+        createdAt: entry.createdAt,
+      };
+    }
+  }
+  const createdAt = Math.min(...entries.map((entry) => entry.createdAt));
+  if (!Number.isFinite(createdAt)) throw new Error('fan-out Queue custody requires a finite createdAt');
+  return {
+    version: 1,
+    entryId: `fanout:${messageId}`,
+    revision: 1,
+    ownerAuthProvenance,
+    carrierByTargetCatId,
+    intent,
+    status: 'queued',
+    allTargetCats: [...carrierTargetCats],
+    pendingTargetCats: [...carrierTargetCats],
+    notifiedByCatIds: [],
+    seenByCatIds: [],
+    seenInvocationIdByCatId: {},
+    failedByCatIds: [],
+    handledByCatIds: [],
+    targetAttempts: carrierTargetCats.map((catId) => initialTargetAttempt(`fanout:${messageId}`, catId, createdAt)),
+    priority: entries[0].priority,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
 function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody, now: number): QueuedMessageCustody {
   if (normalizeOwnerAuthProvenance(current.ownerAuthProvenance) !== entry.ownerAuthProvenance) {
     throw new Error(`Queue entry ${entry.id} owner authentication provenance is immutable`);
