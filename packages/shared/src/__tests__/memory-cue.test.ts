@@ -110,6 +110,7 @@ describe('F287 memory cue shared contract', () => {
       source: {
         anchor: 'person:alden',
         revision: 'revision-1',
+        asOf: 1_700_000_000_000,
         visibility: 'owner_private',
       },
       drill: {

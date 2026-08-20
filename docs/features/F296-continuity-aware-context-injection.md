@@ -13,7 +13,7 @@ tips_exempt: "内部 prompt/context transport 契约收敛；不新增用户可�
 
 # F296: Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量
 
-> **Status**: spec / Wave 1 contract frozen-v1 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in progress / Phase A complete；Phase B foundations B0–B2 landed + live；B3/B4 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **operator kickoff**: `0001786766025646-000156-269d3cfb` — F148 若已关闭则新立 related
 > feature，由Maine Coon选择正确路径并执行。
@@ -23,12 +23,14 @@ tips_exempt: "内部 prompt/context transport 契约收敛；不新增用户可�
 > 要求补上 compaction 转移边、明确无 invalidator 的 regex `openQuestions` 不得进正文，
 > 并按“先确定性止血、再终态合同”落地。
 
-Architecture cell: `identity-session`（continuity / epoch owner）+ `memory`（recall source owner）
+Architecture cell: `identity-session` + `memory`
 
 Map delta: **none** — F296 在现有 invocation/session continuity 与 memory source 之间增加统一的
 context presentation contract，不新建第二套 Evidence Store、Session Store 或 Prompt Pipeline。
 F237 继续拥有注入可见性与 trace surface；F263 继续拥有 memory lifecycle / RecallEvent；各动态
 producer 继续拥有自己的 canonical 状态。
+
+Owner split: `identity-session` owns continuity / epoch；`memory` owns recall source truth。
 
 Why: “猫是否仍有连续工作记忆”属于 identity/session continuity；“历史候选是否存在、来自哪里”
 属于 memory。F296 只在 route/bootstrap 组装边界决定本轮该呈现什么、以什么权威语气呈现，以及
@@ -48,6 +50,22 @@ You 的价值要求不是“候选语气更客气”，而是系统对自己知�
 本 Feature 把这句话再推进一层：**可验证事实可以直接呈现；已校验状态只能陈述；启发式候选不进
 正文，只留检索入口。冷启动给小而可信的定向包，热续只给新发生的 delta；压缩后无条件重新进入
 冷启动定向包。**
+
+## Progress / 人话版（2026-08-17）
+
+F296 现在不是“做完了”，也不是“还没开始”：**先止血已经完成，终态的核心零件已经造好，但还没
+接进所有真实 prompt 入口。** 因此 Phase A 的四条 AC 已关闭；Phase B 虽然完成了 B0/B1/B2 的实施
+步骤，却还没有任何一条端到端 AC 可以诚实打勾。
+
+| 阶段 | 人话 | 当前状态 |
+|---|---|---|
+| Phase A — Stop-Bleed | 先停止把启发式 recall、已失效待决问题、过期 artifact 当成当前真相喂给猫 | **完成**：AC-A1~A4 全绿并已合入 main |
+| B0 — Coordinate + Handshake | 先问清“这次是哪种 carrier、从哪里调用、是否真的续上旧 runtime” | **部分覆盖**：`codex/exec_json` 有非 heuristic handshake；其余 carrier 仍按 census 保持 `unsupported/conditional` |
+| B1 — Context Epoch Owner | 给每次 fresh/replaced/unknown/权威压缩一个新“上下文世代”，只有精确 resumed 才保持 hot | **地基已落地**：Redis 持久化 owner + CAS；尚未由所有 prompt surface 消费 |
+| B2 — Mapper + Ledger | 按证据强度决定 directive/state/pointer/omit，并记“这一世代是否真的送达过” | **地基已落地**：mapper + in-memory ledger；尚未接入真实 surface，Phase B AC 仍为 0 |
+| B3 — Surface Convergence | 把 serial/parallel/bootstrap/briefing/provider hook 全部接到同一投影与送达合同 | **未开始**：下一阶段；开工前先关闭下方四个结构性硬门 |
+| B4 — Telemetry + UAT | 观察 mode/reason/tier/tokens/latency，并在 alpha 证明真实冷/热/压缩旅程 | **未开始** |
+| Live runtime | 让已经合入 main 的行为真正被在线 API 加载 | **已加载至 B2b**：live API 于 2026-08-17 17:30:40 PDT 启动，runtime HEAD=`2415bef8`，dist 含 A1/A2/B2b 标记；这只证明代码已加载，不代表 B3/B4 或端到端 UAT 完成 |
 
 ## Current State / 现状基线
 
@@ -193,11 +211,17 @@ type ContextEpochState = Readonly<{
 | `unknown` | 证据不足或 carrier 不支持 | `epoch+1`；清空 binding | `cold` |
 | `resumed` | runtime ID 与 binding 精确一致 | epoch 与 binding 不变 | `hot` |
 | `resumed` 但 binding 缺失/不一致 | 不得采信 resumed | 规范化为 `unknown(binding_mismatch)`，`epoch+1` | `cold` |
-| authoritative `context_compacted` | event ID + runtime binding 校验通过 | 每个 event ID 只推进一次 `epoch+1`；binding 保持 | `cold` |
+| authoritative `context_compacted` | event ID + runtime binding 校验通过 | **有界重放抑制**：最近 64 个已消费 event ID 内，同一 ID 只推进一次 `epoch+1`；binding 保持 | `cold` |
 | token/message drop、scratchpad signature、auto-continue breaker | heuristic，不是 epoch event | 不改变 epoch | 保持原 mode；另记 health telemetry |
 
 epoch 单调递增且不复用。任何 epoch 转移都不重置 message delivery cursor 或 seen cursor；它只使旧
-presentation ledger key 失效。cold rebuild 必须重新向 canonical producer 取当前 revision，不能重放旧
+presentation ledger key 失效。
+
+> **Compaction 去重的认知天花板（B2a 实测边界，勿再表述为 exact-once）**：实现保留最近 64 个已消费
+> compaction event ID 并逐出更旧的。因此保证是**有界重放抑制**，不是 lifecycle 级 exact-once——
+> 一个在 64 个不同的后续 compaction 之后才重放的 event，**会**再推进一次 epoch（多一个 cold 世代，
+> 方向安全但不是零成本）。真正的全局 exact-once 需要 lifecycle/retirement ownership 或无界持久状态；
+> Wave 1 明确不买这个开销。任何 AC（含 AC-B7）不得引用比这更强的承诺。cold rebuild 必须重新向 canonical producer 取当前 revision，不能重放旧
 prompt bytes 或仅清 dedupe 后复活已过期对象。
 
 #### 3. 统一 presentation mapper + ledger
@@ -378,9 +402,38 @@ hot(epoch=N) -- context_compacted --> cold(epoch=N+1)
 4. **B3 Surface convergence**：serial/parallel/bootstrap/briefing/Claude post-compact hook 同源消费；
 5. **B4 Telemetry + UAT**：mode reason、coordinate、tier counts、payload tokens/latency；不记录候选正文。
 
-Phase A 与 B0 可以顺序开工；禁止从 mapper/ledger 抢跑，也禁止为 unsupported carrier 补 heuristic。
-provider 在 launch 时由 resume 转 fresh 会让预先计算的 hot projection 失真；Opportunity owner 与 F296
-若互相复制 store，则会让 presentation receipt 错变成第二份 truth。
+**B3 接线前四个结构性硬门（2026-08-17 vision guard）**：
+
+1. **ledger key 必须无碰撞**：当前 `\u001f` join 没有编码或拒绝 field 内分隔符；例如
+   `subjectKey="x\u001fv:y", asOf="z"` 与 `subjectKey="x", asOf="y\u001fv:z"` 会得到同一个 key。
+   B3 不得拿该字符串当五元组唯一性证据，须改为 canonical tuple / length-prefix 等无歧义编码并加对抗测试。
+2. **receipt 必须由 provider adapter 铸造**：普通 `{ promptGenerationId, providerReceivedAt }` struct 谁都能伪造，
+   无法结构性证明 provider 真收到了最终 prompt。B3 必须用 branded type 或 adapter-only factory 封住入口。
+3. **并发 admission 与 delivery 必须形成诚实状态机**：`has() → put()` 会双投；但在 `admit()` 直接
+   `SETNX` 又会在 render/launch 失败时永久压制猫从未看到的内容。B3 必须选择并验证
+   `pending reservation → delivered`（含 generation/token、失败释放/过期与 crash recovery），或明确接受
+   at-least-once 投递；不能一边保留两步语义，一边声称原子 exactly-once。
+4. **AC-B6 的作用域必须覆盖重启与多实例**：当前只有 in-memory ledger，进程重启或另一 API 实例会忘记
+   已送达记录。要保持“同 epoch 同 revision 不重复”的现有 AC，就需要共享持久化 ledger；若不购买该能力，
+   必须先缩窄 AC，而不是把 process-local 行为写成全局保证。producer 还必须对内容变化推进 revision，
+   否则任何 ledger 都会把新内容误判成旧版本。
+
+Phase A 已完成，B0/B1/B2 地基已按冻结顺序落地；后续只能沿 B3 → B4 收口，仍禁止为 unsupported
+carrier 补 heuristic。provider 在 launch 时由 resume 转 fresh 会让预先计算的 hot projection 失真；
+Opportunity owner 与 F296 若互相复制 store，则会让 presentation receipt 错变成第二份 truth。
+
+**B0 首个 carrier slice（2026-08-15）**：`codex / exec_json` 已接入 provider-start handshake。无请求
+session 时为 `fresh(no_prior_session)`；携带 session 时因 provider 无 prompt-preflight 确认能力而为
+`unknown(signal_unavailable)`，必须先走 cold rebuild，缺少 rebuild port 时在 provider 启动前 fail closed。
+当前 ingress 只把可证明的 `direct_owner → interactive`、`connector → connector` 映射为具体 origin，其他来源
+保持 `unknown`；serial / parallel topology 由 route 明确传入。Memory Cue 的 `presented` 已从 render 时写入改为
+首个 substantive provider output 前写入，并绑定最终 prompt generation；self-heal 替换的旧 generation 不得领
+receipt，`presented / omitted` trace 均只携带 ID、generation 与 evidence ref，不携带候选正文。
+
+这只是 B0 的首个可举证 carrier，不把其他 carrier 冒充完成：Codex app-server 及 Claude、Gemini、
+Antigravity、Kimi、OpenCode、ACP、CatAgent、A2A 仍为 `unsupported`，各自 adapter 必须按 W0-E census
+逐项接入后才能更新支持矩阵。B1 epoch owner 与 B2 通用 mapper/ledger 已作为**零 consumer 地基**落地；
+它们尚未接入 route/bootstrap/briefing/provider surface，因此不能据此关闭 Phase B AC。
 
 ## User Journey
 
@@ -414,16 +467,16 @@ provider 在 launch 时由 resume 转 fresh 会让预先计算的 hot projection
 
 ### Phase A（Epistemic Stop-Bleed）
 
-- [ ] AC-A1: cold-context 与 SessionBootstrap 两条 auto recall 路径都不再把启发式候选的标题、snippet
+- [x] AC-A1: cold-context 与 SessionBootstrap 两条 auto recall 路径都不再把启发式候选的标题、snippet
   或正文注入模型；只保留 content-free retrieval pointer。测试同时断言 route-serial / route-parallel
   与 session bootstrap 无旁路。
-- [ ] AC-A2: 没有 canonical lifecycle state + invalidator 的 `ThreadMemory.openQuestions` 不进入任何
+- [x] AC-A2: 没有 canonical lifecycle state + invalidator 的 `ThreadMemory.openQuestions` 不进入任何
   model-facing cold packet；已关闭问题 fixture 证明它不会以 Coverage Map、Thread Memory 或其他
   fallback 形式重新出现。
-- [ ] AC-A3: source ranking 在 stale #1108 artifact + 当前 #1128、已删除临时文件 + 当前 typed PR
+- [x] AC-A3: source ranking 在 stale #1108 artifact + 当前 #1128、已删除临时文件 + 当前 typed PR
   callback 两组 fixture 中只允许当前 subject 获得 T0/T1；纯 regex/recency 项不能生成命令式
   `真相源 / 下一步`。
-- [ ] AC-A4: Phase A 删除候选正文后不新增 summary/classifier/fallback 补空；prompt snapshot 明确接受
+- [x] AC-A4: Phase A 删除候选正文后不新增 summary/classifier/fallback 补空；prompt snapshot 明确接受
   稀疏输出，并保留 `未定位 + exact drill`。
 
 ### Phase B（Continuity-Aware Contract）
@@ -468,7 +521,7 @@ provider 在 launch 时由 resume 转 fresh 会让预先计算的 hot projection
 | R2 | 无法完全保证的内容不能冒充权威 | AC-A2, AC-A3, AC-B4, AC-B8, AC-B10 | adversarial fixtures | [ ] |
 | R3 | 冷启动与不在冷启动必须不同 | AC-B1, AC-B2, AC-B3, AC-B5, AC-B6, AC-B7 | handshake + state-table tests | [ ] |
 | R4 | 压缩后不能被误当成仍有完整 context 的 hot | AC-B7, AC-B8 | provider compaction fixture | [ ] |
-| R5 | 先止血，不让终态架构阻塞已知错误 | AC-A1~A4 | Phase A targeted gate | [ ] |
+| R5 | 先止血，不让终态架构阻塞已知错误 | AC-A1~A4 | Phase A targeted gate | [x] |
 
 ### 覆盖检查
 

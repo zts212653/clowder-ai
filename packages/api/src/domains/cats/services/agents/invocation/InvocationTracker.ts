@@ -642,6 +642,24 @@ export class InvocationTracker {
   }
 
   /**
+   * F297 OQ-1: sparse active-candidate index for list-scale presence reads.
+   *
+   * Sidebar 有 ~1760 行但同时活跃的通常个位数；逐 thread 跑 4-store 对账是 O(T)。
+   * 本方法只枚举**进程内已持有 slot** 的 thread，把候选集压到 O(A)。
+   *
+   * 它是**候选发现**，不是 liveness 判定 —— tracker 按 F194 明确不是 lifecycle 真相源。
+   * 候选拿到后仍必须交给 canonical classifier 定性。
+   */
+  listActiveThreadIds(): string[] {
+    const threadIds = new Set<string>();
+    for (const inv of this.active.values()) {
+      if (inv.state === 'canceled') continue;
+      threadIds.add(inv.threadId);
+    }
+    return [...threadIds];
+  }
+
+  /**
    * Enumerate old ownership leases for the explicit liveness reaper. This method
    * is deliberately non-mutating: age alone is never terminal evidence.
    */

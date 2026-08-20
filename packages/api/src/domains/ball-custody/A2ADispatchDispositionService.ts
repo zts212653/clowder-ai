@@ -1,6 +1,12 @@
 import { type BallCustodyEvent, isCrossThreadProvenance } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import {
+  type A2ADispatchHandoffInspection,
+  type A2ADispatchHandoffSource,
+  type A2ADispatchReplacement,
+  resolveA2ADispatchHandoff,
+} from './A2ADispatchReplacementResolver.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyFencedIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
@@ -19,8 +25,13 @@ export interface A2ADispatchDispositionResult {
   readonly fromCatId: string;
 }
 
+export type { A2ADispatchHandoffInspection, A2ADispatchReplacement } from './A2ADispatchReplacementResolver.js';
+
 export class A2ADispatchDispositionError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly replacement?: A2ADispatchReplacement,
+  ) {
     super(code);
     this.name = 'A2ADispatchDispositionError';
   }
@@ -32,6 +43,7 @@ interface A2ADispatchDispositionDeps {
   readonly ballCustodyEventLog: Pick<IBallCustodyEventLog, 'read'>;
   readonly ballCustodyProjectionStore: Pick<IBallCustodyProjectionStore, 'get'>;
   readonly ballCustody: IBallCustodyFencedIngest;
+  readonly log?: { warn(obj: unknown, msg?: string): void };
   readonly repairProjection?: (subjectKey: string) => Promise<void>;
   readonly now?: () => number;
 }
@@ -41,11 +53,7 @@ type A2ADispatchDispositionAuth = Pick<
   'invocationId' | 'catId' | 'threadId' | 'a2aTriggerMessageId' | 'originTriggerMessageId'
 >;
 
-interface DispatchSource {
-  readonly sourceMessageId: string;
-  readonly fromCatId: string;
-  readonly handoffSourceEventId: string;
-}
+type DispatchSource = A2ADispatchHandoffSource;
 
 /** Invocation-bound terminal producer for one exact ordinary A2A dispatch. */
 export class A2ADispatchDispositionService {
@@ -80,8 +88,11 @@ export class A2ADispatchDispositionService {
       };
     }
 
+    const inspection = await this.inspectResolvedHandoff(auth.threadId, auth.catId, source, events);
+    if (inspection.outcome === 'replaced') {
+      throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced', inspection.replacement);
+    }
     await this.assertCurrentHolder(subjectKey, auth.catId);
-    this.assertExactHandoffIsLive(events, auth.catId, source);
     await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length);
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
@@ -96,6 +107,17 @@ export class A2ADispatchDispositionService {
     };
   }
 
+  /** Queue-start and callback completion share this exact source/event fence. */
+  async inspectHandoff(input: {
+    readonly threadId: string;
+    readonly catId: string;
+    readonly sourceMessageId: string;
+  }): Promise<A2ADispatchHandoffInspection> {
+    const source = await this.resolveSourceCoordinates(input);
+    const events = await this.deps.ballCustodyEventLog.read(`ball:thread:${input.threadId}`);
+    return this.inspectResolvedHandoff(input.threadId, input.catId, source, events);
+  }
+
   private async assertLatestInvocation(invocationId: string): Promise<void> {
     if (!(await this.deps.registry.isLatest(invocationId))) {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_stale_invocation');
@@ -107,21 +129,29 @@ export class A2ADispatchDispositionService {
     if (!sourceMessageId || auth.originTriggerMessageId !== sourceMessageId) {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_source_missing');
     }
-    const message = await this.deps.messageStore.getById(sourceMessageId);
-    if (!this.isExactA2ASource(message, auth)) {
+    return this.resolveSourceCoordinates({ threadId: auth.threadId, catId: auth.catId, sourceMessageId });
+  }
+
+  private async resolveSourceCoordinates(input: {
+    readonly threadId: string;
+    readonly catId: string;
+    readonly sourceMessageId: string;
+  }): Promise<DispatchSource> {
+    const message = await this.deps.messageStore.getById(input.sourceMessageId);
+    if (!this.isExactA2ASource(message, input)) {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_source_mismatch');
     }
     const fromCatId = message.catId;
     return {
-      sourceMessageId,
+      sourceMessageId: input.sourceMessageId,
       fromCatId,
-      handoffSourceEventId: handedEventSourceId(sourceMessageId, auth.catId),
+      handoffSourceEventId: handedEventSourceId(input.sourceMessageId, input.catId),
     };
   }
 
   private isExactA2ASource(
     message: StoredMessage | null,
-    auth: A2ADispatchDispositionAuth,
+    auth: { readonly threadId: string; readonly catId: string },
   ): message is StoredMessage & { catId: NonNullable<StoredMessage['catId']> } {
     return Boolean(
       message &&
@@ -129,7 +159,8 @@ export class A2ADispatchDispositionService {
         message.catId &&
         (message.catId !== auth.catId ||
           isCrossThreadProvenance(message.extra?.crossPost?.sourceThreadId, message.threadId)) &&
-        (message.mentions.includes(auth.catId) || message.extra?.targetCats?.includes(auth.catId)),
+        (message.mentions.some((candidate) => candidate === auth.catId) ||
+          message.extra?.targetCats?.includes(auth.catId)),
     );
   }
 
@@ -140,25 +171,24 @@ export class A2ADispatchDispositionService {
     }
   }
 
-  private assertExactHandoffIsLive(events: readonly BallCustodyEvent[], catId: string, source: DispatchSource): void {
-    const exactHandoffIndex = events.findIndex(
-      (event) =>
-        event.kind === 'ball.handed' &&
-        event.sourceEventId === source.handoffSourceEventId &&
-        event.payload.fromCatId === source.fromCatId &&
-        event.payload.toCatId === catId,
-    );
-    if (exactHandoffIndex === -1) {
+  private async inspectResolvedHandoff(
+    threadId: string,
+    catId: string,
+    source: DispatchSource,
+    events: readonly BallCustodyEvent[],
+  ): Promise<A2ADispatchHandoffInspection> {
+    const inspection = await resolveA2ADispatchHandoff({
+      threadId,
+      catId,
+      source,
+      events,
+      messageStore: this.deps.messageStore,
+      ...(this.deps.log ? { log: this.deps.log } : {}),
+    });
+    if (inspection.outcome === 'missing') {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_handoff_missing');
     }
-    const wasReplaced = events.slice(exactHandoffIndex + 1).some((event) => {
-      if (event.kind === 'ball.held') return event.payload.catId === catId;
-      if (event.kind === 'ball.handed') {
-        return event.payload.fromCatId === catId || event.payload.toCatId === catId;
-      }
-      return event.kind === 'ball.handed_cvo' && event.payload.fromCatId === catId;
-    });
-    if (wasReplaced) throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced');
+    return inspection;
   }
 
   private assertMatchingDispositionEvent(

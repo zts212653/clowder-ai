@@ -2,6 +2,7 @@ import {
   type CliProcessOwnerRecord,
   completeCliProcessOwnerCleanup,
   findOwnedUnixProcesses,
+  quarantineInvalidCliProcessOwnerManifests,
   readCliProcessOwnerRecords,
   readUnixProcessSnapshotSync,
   sameUnixProcess,
@@ -118,7 +119,13 @@ export async function reapStaleCliProcessOwners(
   const { records, invalidPaths } = readCliProcessOwnerRecords(options.dataDir);
   result.foundOwners = records.length;
   result.invalidManifests = invalidPaths.length;
-  for (const path of invalidPaths) options.log.warn(`[cli-owner-reaper] retained invalid manifest: ${path}`);
+  const quarantine = quarantineInvalidCliProcessOwnerManifests(invalidPaths, options.dataDir);
+  for (const path of quarantine.quarantinedPaths) {
+    options.log.warn(`[cli-owner-reaper] quarantined invalid manifest: ${path}`);
+  }
+  for (const path of quarantine.failedPaths) {
+    options.log.warn(`[cli-owner-reaper] failed to quarantine invalid manifest: ${path}`);
+  }
   if (records.length === 0) return result;
 
   const identitySnapshot = readUnixProcessSnapshotSync();

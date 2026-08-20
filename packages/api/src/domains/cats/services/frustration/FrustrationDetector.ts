@@ -29,6 +29,12 @@ export const TRIGGERING_REASON_CODES = new Set([
   'tool_call_parse_failed',
   'spawn_failed',
   'invalid_config',
+  // clowder-ai#1324/#1325: the harness's managed argv drifted from the installed CLI
+  // version. Unlike upstream_policy_reject (an upstream decision we should not file
+  // against ourselves), this IS our bug — auto-filing is the point. @codex-terra P2:
+  // shouldTrigger()'s final gate is this allowlist, NOT the EXCLUDED denylist above,
+  // so merely staying out of the denylist silently produced the opposite behaviour.
+  'incompatible_cli_arguments',
 ]);
 
 /** Transient/internal codes that should NOT trigger (not user-actionable). */

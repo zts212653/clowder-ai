@@ -11,7 +11,7 @@ function makeCoverageMap(overrides = {}) {
     burst: { count: 6, timeRange: { from: 1712003600000, to: 1712004000000 } },
     anchorIds: ['a1', 'a2'],
     threadMemory: { available: true, sessionsIncorporated: 3, decisions: ['use Redis 6398'], openQuestions: [] },
-    retrievalHints: ['search_evidence("redis")'],
+    recallPointer: { candidateCount: 1 },
     ...overrides,
   };
 }
@@ -67,7 +67,7 @@ describe('F148 OQ-2: extractContextEvalSignals', () => {
       coverageMap: makeCoverageMap({
         anchorIds: ['a1', 'a2', 'a3'],
         threadMemory: { available: true, sessionsIncorporated: 5 },
-        retrievalHints: ['h1', 'h2', 'h3'],
+        recallPointer: { candidateCount: 3 },
       }),
       toolNames: [],
       responseTokenEstimate: 800,

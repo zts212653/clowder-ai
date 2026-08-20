@@ -1,18 +1,44 @@
 ---
 feature_ids: [F081]
-related_features: [F069, F072]
+related_features: [F069, F072, F297]
+superseded_by: F297
 topics: [audit, state-machine, write-path, unread, catStatuses, messages, bubble]
 doc_kind: audit
 created: 2026-03-10
 status: done
 completed: 2026-03-10
+tips_exempt: completed write-path audit appendix superseded by F297; diagnostic record with no cat-facing capability or workflow to teach
 ---
 
 # F081 Appendix — Bubble/Thread State Write-Path Audit
 
-> **Status**: done | **Owner**: Ragdoll
+> **Status**: done — superseded by [F297](F297-sidebar-projection-convergence.md) | **Owner**: Ragdoll
 > 起因：operator 2026-03-09 "别让operator发现什么你们修什么？修了一个另一个又出现问？"
 > gpt52 提议系统级全量审计，opus 对齐到 F081 scope。
+>
+> **2026-08-17 结算（Ragdoll/@opus5，operator 授权 owner 自决 `0001786949883267-000007-1c4fc745`）**：
+> 本 audit **诊断正确但机制选错**。Risk 表第一行已精准预见"写路径分散导致修复互相覆盖"，
+> 但缓解措施是**约定**（"变更必须回填"）——文档快照拦不住新增写入点，约定没有执行者。
+> 五个月后（2026-08-17）operator提出同一抱怨，期间同 family 累计 12 份 bug report / 11 个修复 PR。
+> 按 ADR-031 机制选择，「任何写入不得绕过仲裁」属**确定契约**，应落 structural guard 而非 convention。
+> F297 在新的 authority boundary 下重做：Sidebar canonical writer 收敛到 1；wider
+> `threadStates` writer 不纳入该口径，精确 scope 由 F297 AC-A3 的 AST census 冻结。
+
+## 结算说明：为什么 AC-B2 作废而不是补勾
+
+`AC-B2`（Remaining Gaps 逐项关闭）长期未勾却标 `done`，这笔账在此做平——
+**作废，不补勾**。
+
+理由：Remaining Gaps 是在**旧坐标系**（Sidebar 与 wider thread runtime 混在同一份 inventory、
+靠 pairwise guard 仲裁）下列的清单。F297 把 Sidebar-owned projection 单独划出 authority boundary，
+清单中属于该切片的 gap 由单一 canonical writer 消除；属于 messages/intent/queue 等其他 owner 的项
+则明确归还，不用“60+ 全部消失”的错误口径吞掉。
+逐条关闭等于在错误坐标系里做功——正是本 audit 想终结、而 F297 要根除的补锅模式。
+
+本文件继续保留为**历史 provenance**，但不再作为现行写入约束；其中的 write-path inventory
+转为 F297 AC-A3 的 source-map 输入。F297 只对 Sidebar-owned fields 逐条标记迁移 / 删除 / UI-only
+保留，并由 structural guard 阻止 allowlist 外 canonical write。F081 五个月前那句“变更必须回填”，
+到 F297 才第一次变成机器执行的东西。
 
 ## Why
 
@@ -32,7 +58,8 @@ F081 附录文档用于把“消息/未读/猫状态”的写路径一次性摸�
 
 ### Phase B（风险与闭环）
 - [x] AC-B1: 已知风险与已修复项形成映射表（风险→修复→PR）。
-- [ ] AC-B2: Remaining Gaps 列表逐项关闭（当前仍在进行）。
+- [~] AC-B2: Remaining Gaps 列表逐项关闭 — **2026-08-17 作废**（非完成）。旧坐标系下的 gap 清单
+  保留为 provenance，并转为 F297 scope census 的输入；理由见文首「结算说明」。
 
 ## Dependencies
 

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { writeOpportunityLineage } from './memory/person-memory-write-opportunity-fixture.js';
 
 describe('F276 callback recall and lifecycle routes', () => {
   let app;
   const calls = [];
-
+  const invalidations = [];
   before(async () => {
     const [routeMod, registryMod, authMod] = await Promise.all([
       import('../dist/routes/callback-person-memory-routes.js'),
@@ -25,7 +26,11 @@ describe('F276 callback recall and lifecycle routes', () => {
     const store = {
       getCandidateForOwner: async (ownerUserId, candidateId) => {
         calls.push(['status', { ownerUserId, candidateId }]);
-        if (ownerUserId !== 'owner-1' || candidateId !== 'person_candidate_live_status') return null;
+        if (ownerUserId !== 'owner-1') return null;
+        if (candidateId === 'person_candidate_lineage') {
+          return { candidateId, ownerUserId, writeOpportunityLineage };
+        }
+        if (candidateId !== 'person_candidate_live_status') return null;
         return {
           candidateId,
           ownerUserId,
@@ -45,6 +50,7 @@ describe('F276 callback recall and lifecycle routes', () => {
       },
       correctClaim: async (input) => {
         calls.push(['correct', input]);
+        if (input.requestId === 'correction_conflict') return { outcome: 'conflict' };
         return { outcome: 'applied', claim: { claimId: 'person_claim_new' } };
       },
       retireClaim: async (input) => {
@@ -83,6 +89,10 @@ describe('F276 callback recall and lifecycle routes', () => {
         calls.push(['redact', input]);
         return { outcome: 'applied', item: input.item };
       },
+      listCandidateIdsForPerson: async (ownerUserId, personId) => {
+        calls.push(['list-person-candidates', { ownerUserId, personId }]);
+        return personId === 'person_lineage' ? ['person_candidate_lineage'] : [];
+      },
     };
     const recallService = {
       recallByAlias: async (ownerUserId, alias) => {
@@ -97,7 +107,32 @@ describe('F276 callback recall and lifecycle routes', () => {
     };
     app = Fastify();
     authMod.registerCallbackAuthHook(app, registry);
-    routeMod.registerCallbackPersonMemoryRoutes(app, { store, recallService });
+    routeMod.registerCallbackPersonMemoryRoutes(app, {
+      store,
+      recallService,
+      writeOpportunityTerminalLedger: {
+        async recordTerminal() {},
+        async recordInvalidated(input) {
+          invalidations.push(['terminal', input]);
+        },
+        async readLineageStates() {
+          return new Map();
+        },
+      },
+      writeOpportunityDeliveryStore: {
+        async recordDelivered() {},
+        async get() {
+          return null;
+        },
+        async listInvocationOpportunityIds() {
+          return [];
+        },
+        async purgeLineage(ownerUserId, dedupeLineage) {
+          invalidations.push(['purge', { ownerUserId, dedupeLineage }]);
+          return 1;
+        },
+      },
+    });
     await app.ready();
     app.authHeaders = {
       'x-invocation-id': auth.invocationId,
@@ -254,5 +289,61 @@ describe('F276 callback recall and lifecycle routes', () => {
       requestId: 'person_forget_proposal_3',
     });
     assert.equal(forged.statusCode, 400);
+  });
+
+  it('invalidates and purges bound opportunity lineages only after a successful canonical mutation', async () => {
+    invalidations.length = 0;
+    const source = { sourceMessageId: 'message_source' };
+    const corrected = await post('/api/callbacks/person-memory/correct-claim', {
+      personId: 'person_lineage',
+      expectedCurrentClaimId: 'person_claim_old',
+      payload: {
+        kind: 'reported_fact',
+        predicate: 'organization_unit',
+        value: 'corrected',
+        assertedBy: 'owner',
+      },
+      requestId: 'correction_lineage',
+      ...source,
+    });
+    assert.equal(corrected.statusCode, 200, corrected.body);
+    assert.deepEqual(
+      invalidations.map(([kind]) => kind),
+      ['terminal', 'purge'],
+    );
+    assert.equal(invalidations[0][1].ownerUserId, 'owner-1');
+    assert.equal(invalidations[0][1].dedupeLineage, writeOpportunityLineage.dedupeLineage);
+    assert.equal(invalidations[0][1].reason, 'source_corrected');
+    assert.equal(typeof invalidations[0][1].recordedAt, 'number');
+
+    invalidations.length = 0;
+    const conflicted = await post('/api/callbacks/person-memory/correct-claim', {
+      personId: 'person_lineage',
+      expectedCurrentClaimId: 'person_claim_old',
+      payload: {
+        kind: 'reported_fact',
+        predicate: 'organization_unit',
+        value: 'conflicted',
+        assertedBy: 'owner',
+      },
+      requestId: 'correction_conflict',
+      ...source,
+    });
+    assert.equal(conflicted.statusCode, 200, conflicted.body);
+    assert.deepEqual(invalidations, []);
+  });
+  it('resolves proposal lineage before a destructive proposal forget and then invalidates it', async () => {
+    invalidations.length = 0;
+    const response = await post('/api/callbacks/person-memory/forget-proposal', {
+      proposalId: 'person_candidate_lineage',
+      requestId: 'person_forget_proposal_lineage',
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(
+      invalidations.map(([kind]) => kind),
+      ['terminal', 'purge'],
+    );
+    assert.equal(invalidations[0][1].reason, 'source_forgotten');
+    assert.equal(invalidations[0][1].dedupeLineage, writeOpportunityLineage.dedupeLineage);
   });
 });

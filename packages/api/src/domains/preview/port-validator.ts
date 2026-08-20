@@ -49,9 +49,10 @@ const PORT_MIN = 1024;
 const PORT_MAX = 65535;
 
 export function validatePort(rawPort: number | string, opts: PortValidationOptions = {}): PortValidationResult {
-  const port = typeof rawPort === 'string' ? Number.parseInt(rawPort, 10) : rawPort;
-  if (!Number.isFinite(port)) {
-    return { allowed: false, reason: 'Port must be a valid number' };
+  const normalized = typeof rawPort === 'string' ? rawPort.trim() : rawPort;
+  const port = typeof normalized === 'string' && /^\d+$/.test(normalized) ? Number(normalized) : normalized;
+  if (typeof port !== 'number' || !Number.isInteger(port)) {
+    return { allowed: false, reason: 'Port must be a valid integer' };
   }
 
   const { host, gatewaySelfPort, runtimePorts } = opts;

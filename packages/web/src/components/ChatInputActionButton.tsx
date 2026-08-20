@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import { createExplicitStopIntent, type ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
@@ -16,7 +15,8 @@ interface ChatInputActionButtonProps {
   onQueueSend?: () => void;
   /** F39: Force-mode send (cancel running + execute immediately) */
   onForceSend?: () => void;
-  onStop?: (intent: ExplicitStopIntent) => void;
+  onStop?: () => void;
+  stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
@@ -50,6 +50,7 @@ export function ChatInputActionButton({
   onQueueSend,
   onForceSend,
   onStop,
+  stopState,
   disabled,
   sendDisabled,
   hasActiveInvocation,
@@ -57,6 +58,15 @@ export function ChatInputActionButton({
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
   const isSendDisabled = Boolean(disabled || sendDisabled);
+  const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
+  const showStop = Boolean(hasActiveInvocation && resolvedStopState !== 'hidden');
+  const stopDisabled = resolvedStopState !== 'available' || !onStop;
+  const stopTitle =
+    resolvedStopState === 'pending'
+      ? '正在停止'
+      : resolvedStopState === 'unavailable'
+        ? '正在确认可停止的运行状态'
+        : '停止生成';
 
   useEffect(() => {
     if (voice.transcript) onTranscript(voice.transcript);
@@ -107,12 +117,13 @@ export function ChatInputActionButton({
       )}
 
       {/* Stop button: visible alongside queue send (primary stop covers disabled state) */}
-      {hasActiveInvocation && !disabled && onStop && (
+      {showStop && !disabled && (
         <button
           type="button"
-          onClick={(event) => onStop(createExplicitStopIntent(event, 'chat_input_action'))}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
-          title="停止生成"
+          onClick={() => onStop?.()}
+          disabled={stopDisabled}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40 disabled:cursor-wait disabled:opacity-50"
+          title={stopTitle}
           aria-label="Stop generation"
         >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -122,13 +133,14 @@ export function ChatInputActionButton({
       )}
 
       {/* Primary action button priority chain */}
-      {disabled && onStop && hasActiveInvocation ? (
+      {disabled && showStop ? (
         /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
           type="button"
-          onClick={(event) => onStop(createExplicitStopIntent(event, 'chat_input_action'))}
-          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors"
-          title="停止生成"
+          onClick={() => onStop?.()}
+          disabled={stopDisabled}
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors disabled:cursor-wait disabled:opacity-50"
+          title={stopTitle}
           aria-label="Stop generation"
         >
           <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">

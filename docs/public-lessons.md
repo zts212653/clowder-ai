@@ -1883,3 +1883,50 @@ created: 2026-02-26
 - 来源锚点：PR #3276 / operator 原话（2026-07-29）“我也不知道为啥 billing 发生了至少几十次了……这玩意你还能变出钱解决吗？肯定只能合入啊” / 原 Taste proposal `proposal_ms5p93ykuh9worvf`（F287 Phase A 迁出误放的 Taste lane） / *(internal reference removed)*
 - 原理：**没有运行过的 job 不能裁决被测代码。** 先分清 source truth、独立验证与外部执行器 availability，再决定继续验证、合入或等待。
 - 关联：F287 operational precedent resolver | merge-gate | F153 runtime observability | LL-097 三层完成真相分账
+
+### LL-099: 给没有 canonical 账本的对象拼轨迹是结构性失败
+
+- 状态：validated
+- 更新时间：2026-08-17
+
+- 坑：F233 Phase C 花 3 周实现 feat trajectory 全链（`TrajectoryPanel` + `FeatTrajectoryProjector` + 3 collectors + 15min cron + backfill 脚本 + read model + `feat-trajectory` routes），AC-C2/C3 全 ✅、通过 KD-C6 11 轮本地 + cloud R1→R5 review、有 F188 提包球 regression fixture 兜底、含 5 个 cloud P1/P2 修复的 163 focused backend tests——但 operator 从未消费，在 workspace 里变成挂画，2026-08-17 failed-close（[docs/features/F233-ball-custody-observability.md#close-summary-2026-08-17](features/F233-ball-custody-observability.md#close-summary-2026-08-17)）。
+- 根因：feat 不是 canonical 事件源。它是一个横跨 spec + N thread + commits + PR + verdict 的**抽象聚合对象**，没有一手账本；trajectory 是从 `feat_index` + Timeline + `git log` + threads + verdict stitch 起来的**推测的可视化**，不是账本的投影。operator 打开看会疑惑"这真的是发生的吗"——用户旅程失败，产品面无人使用；即使 AC 全绿也无法弥补"证据来源天生不可信"这个结构缺陷。对照 DSH：DSH trajectory 强在**只是 canonical session log 的直接投影**（契约 `Model-visible ⟺ logged`，见 DSH audit (internal) §2.1），用户可以信任每个事件真实发生过。
+- 触发条件：任何"给 X 做 trajectory / observability / sense"提案，先问：**"X 有没有 canonical append-only 账本？账本 owner 是谁？"**——如果答案是"从散乱证据 stitch"或"多个真相源合并"，就是本类失败的候选。历史迹象：F041 能力看板同型失败（AC 全绿、review 12 轮通过，但用户打开发现"能力"字段从散乱来源拼——见 chatgpt-deep-research-2 (internal)）。
+- 修复：F233 close，Phase B（球权事件账本）保留（它自己就是 canonical 账本），Phase C（feat 拼装轨迹）方向标记失败；新 feat（候选 F298 invocation trajectory + F299 Self-Sensing）第一条家规——**"sense / trajectory 只做 canonical 账本的投影和送达，不做第二真相、不拼接推断"**（Fable 5 2026-08-17 message `0001786931585226` 原话）。invocation 有 canonical session log 一手账本；Self-Sensing 消费的每个子事实都有一手 owner（F167/F220/F233-B custody / F202 plugin / F153 health / F293 route preflight）——这是新两 feat 会成的结构性理由。
+- 防护：
+  1. **Design Gate 反射**：涉 trajectory / observability / sense 类 feat，Why 章节必须显式回答"对象有一手账本吗？账本 owner 是谁？"——无账本对象的可视化提案必须先立账本 owner，再谈可视化。
+  2. **AC gate 反射**：AC 全绿 + reviewer 全 APPROVE 但 operator 从未消费 → 触发 Goal Drift 审查（chatgpt-deep-research-2 (internal)），不能默认 "AC 全绿 = complete"。
+  3. **Timeline 反射**：sunset signal（"N 天 operator 介入 = 0 → sunset"）到期必须实测消费数据，不能靠"感觉还行"续命。
+- 来源锚点：
+  - [docs/features/F233-ball-custody-observability.md#close-summary-2026-08-17](features/F233-ball-custody-observability.md#close-summary-2026-08-17)（本次 close report）
+  - project-research/2026-08-15-deepseek-harness-trajectory-audit.md (internal) §2.1（DSH canonical log 契约）
+  - feature-discussions/2026-08-13-self-sensing-portrait-system-map.md (internal)（no-second-truth contract）
+  - feature-discussions/2026-08-15-observability-ux-journey.md (internal)（P0 契约优先、"AC 全绿但入口没有可感知形状" friction evidence）
+  - thread `[thread-id]` operator 签字 `0001786950943499` + Fable 5 切割方案 `0001786931585226`
+- 原理：**canonical log 契约（DSH `Model-visible ⟺ logged`）是"证据基础设施"的第一性；产品可视化只是账本的一种投影。跳过账本直接做可视化 = 无地基的证据展示 = 猜测的可视化。** 多个真相源拼一个视图 = 违反 P4 单账本，用户不会信任、也不该信任。
+
+- 关联：F233 close / 候选 F298 invocation trajectory / 候选 F299 Self-Sensing Agent Interaction / LL-095 过宽口号 × 每轮注入放大 / LL-097 三层完成真相分账 / DSH audit (internal) / Self-Sensing map (internal) / UX journey 稿 (internal)
+
+### LL-100: Fail-closed 要按 claim 分层——未知不能冒充不等，护栏爆炸半径必须匹配受保护路径
+
+- 状态：validated
+- 更新时间：2026-08-17
+
+- 坑：F294 为阻止旧浏览器把过时 Quote offsets 转发给新版 API，引入 browser/runtime revision 守卫；但 Web build stamp 实际从未产出，`/api/health` 恒返回 `deploymentRevision: null`。实现又把“revision 未知”直接锁存成 `mismatch`，并用同一个 `isReadonly` 同时关闭 F294 转发与全局 Composer，导致守卫第一次随冷启动真正上线就让整个猫咖无法发送；页面还提示“刷新后可以继续”，而刷新只会再次得到同一个 `null`，恢复动作物理上无法兑现。
+- 根因：把三个不同 claim 压成一个布尔值：①身份尚未证明（`unverified`）；②两枚已知身份明确不等（`mismatch`）；③网络不可用（connectivity down）。随后又把这个布尔值当成全应用写权限，令只保护一种跨 Thread 精确转发载荷的护栏获得了关闭所有消息发送的爆炸半径。真正的 stamp 生命周期错误因此从“转发暂不可用”放大为“全站写入中断”。
+- 触发条件：任何兼容性、权限、健康或 freshness 护栏同时满足以下任一项：缺失值被当作否定结论；同一 admission flag 被多个不同风险域复用；恢复 UI 没有证明用户动作能改变底层状态；保护局部高风险动作却顺带关闭无关主路径。
+- 修复：PR #3750 将 Web stamp 绑定到 `next build` 的 `postbuild`，让浏览器内嵌 revision 与 API 读取的磁盘 stamp 共用同一 resolver；状态机保留 `unverified / compatible / mismatch` 三态，只有两枚 revision 已知且不等才进入可刷新恢复的 `mismatch`；`deriveDeploymentAdmission` 分别派生 `forwardingBlocked` 与 `composerReadonly`，未知时继续 fail-closed 地关闭全部 F294 转发入口、picker 与 submit sink，但普通 Composer 保持可写，已知 mismatch 或断网才关闭两者。
+- 防护：
+  1. **先写 claim 表再写 guard**：每个状态必须写明“已证明什么 / 尚未证明什么 / 因而允许关闭哪些路径”，禁止用一个 `blocked` 布尔值替代多种证据状态。
+  2. **恢复动作必须可兑现**：显示“刷新/重试后恢复”前，要证明该动作能改变状态；未知 identity、缺 stamp 或持续 null 不能进入只能靠刷新清除的 latch。
+  3. **爆炸半径回归必须含反例**：测试不只断言危险动作被关，还要断言无关主路径仍可用。本例同时锁定 `unverified → forwarding off + Composer on`、`mismatch → both off`、`compatible → both on`。
+  4. **产物身份绑产物生命周期**：会被 build 清空重建的 stamp 必须由 build 自己在产物完成后写入；启动脚本预写不是构建身份。
+- 来源锚点：
+  - PR #3750，squash commit `b49b6813ceced9cf708b7c27f5fe0253aa8cd89c`
+  - `docs/features/F294-selective-message-bundles.md`“浏览器部署准入状态机”与 2026-08-17 timeline
+  - `packages/web/src/hooks/useConnectionStatus.ts`（`deriveDeploymentAdmission`）
+  - `packages/web/test/build-stamp.test.cjs` 与 `packages/web/src/hooks/__tests__/useConnectionStatus-deployment-revision.test.ts`
+  - source thread `[thread-id]#0001786969233723-000003-d8236618`
+- 原理：**Fail-closed 不是“信息不足时关闭最多东西”，而是“信息不足时只拒绝无法证明安全的 claim”。** 护栏的权限应等于它保护的风险域；超过这个范围，护栏本身就成为更高影响的故障源。恢复承诺同样是一种契约——若动作不能推动状态迁移，就不该把它展示为出口。
+
+- 关联：F294 / PR #3744（旧页面兼容性守卫）/ PR #3750（事故修复）/ LL-097（不同完成 claim 必须分账）/ ADR-031（按问题选择机制，不把工具箱当清单）

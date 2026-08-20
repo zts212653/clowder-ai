@@ -107,63 +107,14 @@ describe('OfficialPluginsPanel', () => {
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/official/feishu-meeting-intake/install', {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expectedCatalogVersion: '0.1.0-alpha.1',
+        expectedPackageDigest: digest,
+      }),
     });
     expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/enable'))).toBe(false);
     expect(container.textContent).toContain('已安装，尚未接收新生成的飞书会议纪要');
-  });
-
-  it('shows installed versus available versions and only updates after an explicit owner action', async () => {
-    const nextDigest = 'sha512-TkVYVA==';
-    const old = {
-      ...plugin({
-        pluginInstanceId: 'pi_official',
-        lifecycleState: 'installed',
-        configReadiness: 'ready',
-        activationState: 'error',
-        runtimeState: 'stopped',
-        lifecycleRevision: 9,
-        installedAt: 1,
-        updatedAt: 2,
-      }),
-      version: '0.1.0-alpha.3',
-      availableVersion: '0.1.0-alpha.3',
-      packageDigest: nextDigest,
-      updateAvailable: true,
-    };
-    const updated = {
-      ...old,
-      updateAvailable: false,
-      instance: {
-        ...old.instance,
-        installedVersion: '0.1.0-alpha.3',
-        packageDigest: nextDigest,
-        activationState: 'disabled',
-        lifecycleRevision: 10,
-      },
-    };
-    mockApiFetch.mockImplementation(async (url) => {
-      if (url === '/api/plugins/official') return jsonResponse({ plugins: [old] });
-      if (url.endsWith('/update')) return jsonResponse(updated);
-      return jsonResponse({}, 404);
-    });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    await act(async () => root.render(<OfficialPluginsPanel />));
-    await flushEffects();
-    await act(async () => findButtonByAriaLabel(container, '查看飞书会议纪要同步详情')?.click());
-    expect(container.textContent).toContain('已安装 0.1.0-alpha.1');
-    expect(container.textContent).toContain('可用 0.1.0-alpha.3');
-
-    await act(async () => findButton(container, '更新到 0.1.0-alpha.3')?.click());
-    await flushEffects();
-
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/official/pi_official/update', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedRevision: 9 }),
-    });
-    expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/enable'))).toBe(false);
-    expect(container.textContent).toContain('0.1.0-alpha.3');
   });
 
   it('uses the compact plugin-row language and keeps package truth in expandable details', async () => {

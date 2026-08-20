@@ -46,8 +46,9 @@ import type { VectorStore } from './VectorStore.js';
  *   9 — temporal frontmatter fields: status/supersedes graph extraction
  *  10 — feature assets use path anchors; top-level feature specs own Fxxx
  *  11 — F287: approved Taste vignettes materialize complete decision passages
+ *  12 — external-knowledge artifact roles, study tags, and authority backfill
  */
-export const INDEXING_VERSION = 11;
+export const INDEXING_VERSION = 12;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {

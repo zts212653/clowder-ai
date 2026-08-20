@@ -22,7 +22,6 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
-import type { ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useTeleport } from '@/hooks/useTeleport';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
@@ -78,6 +77,7 @@ import { derivePendingMemberInvocations } from './pending-member-projection';
 import { QueuePanel } from './QueuePanel';
 import { collectExactLiveInvocationIds } from './queue-receipt-projection';
 import { RightStatusPanel } from './RightStatusPanel';
+import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -271,7 +271,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
   // F284: Chat is the calm default. Typed workspace/transcript actions still
   // open the contextual shell through the existing rightPanelMode effect.
-  const [statusPanelOpen, setStatusPanelOpen] = useState(false);
+  // F284 × F120 review P1: panel visibility is canonical per-thread store
+  // state (snapshotted in ThreadState), not route-local component state.
+  const statusPanelOpen = useChatStore((s) => s.rightPanelOpen);
+  const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
@@ -335,32 +338,32 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F063/F195: auto-open panel when workspace or transcript mode is set
   useEffect(() => {
     if ((rightPanelMode === 'workspace' || rightPanelMode === 'transcript') && !statusPanelOpen) {
-      setStatusPanelOpen(true);
+      setRightPanelOpen(true);
     }
     if (rightPanelMode === 'workspace') setWorkspacePanelMounted(true);
     if (rightPanelMode === 'status' && statusPanelOpen) setActivityPanelMounted(true);
-  }, [rightPanelMode, statusPanelOpen]);
+  }, [rightPanelMode, statusPanelOpen, setRightPanelOpen]);
 
   // F232 P2（云端 round 5）：显式关闭右侧 panel——先退出 workspace/transcript mode（否则上面的 auto-open
   // effect 立即重开，关不掉），再关闭。所有 close 入口（header toggle / ResizeHandle 折叠）统一走这里。
+  // F284 × F120: closeRightPanel 同时退出 mode 并关闭 canonical visibility。
   const closeStatusPanel = useCallback(() => {
     closeRightPanel();
-    setStatusPanelOpen(false);
   }, [closeRightPanel]);
 
   const openStatusPanel = useCallback(() => {
     setActivityPanelMounted(true);
     setRightPanelMode('status');
-    setStatusPanelOpen(true);
-  }, [setRightPanelMode]);
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setRightPanelOpen]);
 
   const openWorkspaceLauncher = useCallback(() => {
     setWorkspacePanelMounted(true);
     setWorkspaceMode('dev');
     setWorkspaceSurface('home');
     setRightPanelMode('workspace');
-    setStatusPanelOpen(true);
-  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface]);
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
 
   const isDesktop = useIsDesktop();
 
@@ -382,7 +385,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [isDesktop, openSidebar]);
 
-  const { handleAgentMessage, handleStop: stopHandler, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
+  const { handleAgentMessage, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const {
@@ -760,6 +763,18 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     onNavigateToThread: navigateToThread,
     onIndexEvent: handleIndexSocketEvent,
   });
+  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
+  const socketThreadIds = useMemo(
+    () =>
+      viewMode === 'split' && splitPaneThreadIds.length > 0
+        ? [...new Set([...splitPaneThreadIds, threadId])]
+        : [threadId],
+    [viewMode, splitPaneThreadIds, threadId],
+  );
+  const { socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
+  useActiveExecutionProjection(threadId, socketConnected);
+  const connectionStatus = useConnectionStatus(socketConnected);
+  const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
   const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
@@ -800,6 +815,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           selectionEligible={selectionEligible}
           onEnterSelection={enterMessageSelection}
           onToggleSelection={toggleMessageSelection}
+          forwardingDisabled={connectionStatus.forwardingBlocked}
           eager={mountPolicy.eager}
           backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
         />
@@ -818,21 +834,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       selectedMessageIds,
       selectionMode,
       toggleMessageSelection,
+      connectionStatus.forwardingBlocked,
     ],
   );
-
-  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
-  const socketThreadIds = useMemo(
-    () =>
-      viewMode === 'split' && splitPaneThreadIds.length > 0
-        ? [...new Set([...splitPaneThreadIds, threadId])]
-        : [threadId],
-    [viewMode, splitPaneThreadIds, threadId],
-  );
-  const { cancelInvocation, socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
-  useActiveExecutionProjection(threadId, socketConnected);
-  const connectionStatus = useConnectionStatus(socketConnected);
-  const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
 
   const pendingInvocations = useMemo(
     () => (hasActiveInvocation ? derivePendingMemberInvocations(activeInvocations, messages, threadId) : []),
@@ -952,14 +956,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       });
   }, [threadId, _messageCount, settleUnreadAck, armUnreadSuppression]);
 
-  const handleStop = useCallback(
-    (intent: ExplicitStopIntent, overrideThreadId?: unknown) => {
-      const targetThreadId = typeof overrideThreadId === 'string' ? overrideThreadId : threadId;
-      stopHandler(cancelInvocation, targetThreadId, intent);
-    },
-    [stopHandler, cancelInvocation, threadId],
-  );
-
   const handleZoomToThread = useCallback(
     (tid: string) => {
       setViewMode('single');
@@ -998,9 +994,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   if (viewMode === 'split') {
     return (
       <>
+        {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
         <SplitPaneView
+          isReadonly={connectionStatus.isReadonly}
           onSend={handleSend}
-          onStop={handleStop}
           uploadStatus={uploadStatus}
           uploadError={uploadError}
           onZoomToThread={handleZoomToThread}
@@ -1039,6 +1036,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 onEditCoCreator={handleEditCoCreator}
                 hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
                 dedupCount={dedupInfo?.dedupCount}
+                forwardingDisabled
               />
             );
           })}
@@ -1049,6 +1047,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   return (
     <div ref={containerRef} className="flex h-screen h-dvh">
+      {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
         <>
@@ -1086,12 +1085,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             } else {
               setWorkspacePanelMounted(true);
               setRightPanelMode('workspace');
-              setStatusPanelOpen(true);
+              setRightPanelOpen(true);
             }
           }}
         />
 
-        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
+        {intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
         <ThinkingIndicator threadId={threadId} />
 
         <div className="flex-1 relative overflow-hidden">
@@ -1281,6 +1280,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               selectedMessageIds={normalizedSelectedMessageIds}
               onCancel={clearMessageSelection}
               onExportSuccess={clearMessageSelection}
+              forwardingDisabled={connectionStatus.forwardingBlocked}
               onForward={() => setSelectionForwardOpen(true)}
             />
           ) : (
@@ -1315,7 +1315,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     contextAttachments,
                   )
                 }
-                onStop={handleStop}
                 disabled={connectionStatus.isReadonly}
                 hasActiveInvocation={hasActiveInvocation}
                 uploadStatus={uploadStatus}
@@ -1334,7 +1333,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </button>
           )}
           <TransferTargetPicker
-            open={selectionForwardOpen}
+            open={selectionForwardOpen && !connectionStatus.forwardingBlocked}
+            admissionBlocked={connectionStatus.forwardingBlocked}
             sourceThreadId={threadId}
             items={selectedBundleItems}
             onClose={() => setSelectionForwardOpen(false)}

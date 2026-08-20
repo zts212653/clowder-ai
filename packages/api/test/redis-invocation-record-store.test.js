@@ -1107,4 +1107,667 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(setA.includes(r.invocationId), false, 'user-A set must not contain succeeded record');
     assert.equal(setB.includes(r.invocationId), false, 'user-B set must not contain succeeded record');
   });
+
+  it('F297 (cloud R7 P2) — listRunningThreadIds is bounded by active threads, not keyspace size', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 语境：buildSnapshot 在每次 GET /api/threads?view=sidebar 上调用本方法。
+    // 旧实现用 SCAN MATCH —— Redis 的 SCAN 仍然遍历整个 keyspace，MATCH 只过滤**返回值**。
+    // 于是 sidebar 挂载/重连的成本随「库里所有持久化键」增长，而不是随「在跑的 thread 数」。
+    // 实测（本地无网络延迟）：dbsize 3 → 0.3ms；200k → 201ms。
+    const running = await store.create({
+      threadId: 'thread-active',
+      userId: 'scan-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-scan-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(running.invocationId, { status: 'running' });
+
+    // 灌入与本用户无关的键，模拟 message / thread / invocation 数据积累
+    const filler = redis.pipeline();
+    for (let i = 0; i < 5000; i += 1) filler.set(`f297scanfill:${i}`, 'x');
+    await filler.exec();
+
+    let commandCount = 0;
+    const originalScan = redis.scan.bind(redis);
+    const originalSmembers = redis.smembers.bind(redis);
+    redis.scan = (...args) => {
+      commandCount += 1;
+      return originalScan(...args);
+    };
+    redis.smembers = (...args) => {
+      commandCount += 1;
+      return originalSmembers(...args);
+    };
+    try {
+      const threadIds = await store.listRunningThreadIds('scan-user');
+      assert.deepEqual(threadIds, ['thread-active'], 'the active thread must still be found');
+      // 5000 个无关键下，SCAN COUNT=100 需要 ~50+ 次往返；直接寻址只需 1 次。
+      assert.ok(
+        commandCount <= 2,
+        `sidebar read path must be directly addressable, not a keyspace walk (commands=${commandCount})`,
+      );
+    } finally {
+      redis.scan = originalScan;
+      redis.smembers = originalSmembers;
+      const cleanup = redis.pipeline();
+      for (let i = 0; i < 5000; i += 1) cleanup.del(`f297scanfill:${i}`);
+      await cleanup.exec();
+    }
+  });
+
+  it('F297 (cloud R7 P2) — per-user thread index never under-reports a running thread', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 漏报 = false terminal（正在跑的行被显示成 done/error），是 F297 的核心禁忌。
+    // 因此索引写入必须与 running set 在同一原子操作里，不能 fire-and-forget。
+    const a = await store.create({
+      threadId: 'thread-idx-a',
+      userId: 'idx-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-idx-a',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    const b = await store.create({
+      threadId: 'thread-idx-b',
+      userId: 'idx-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-idx-b',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(a.invocationId, { status: 'running' });
+    await store.update(b.invocationId, { status: 'running' });
+
+    assert.deepEqual((await store.listRunningThreadIds('idx-user')).sort(), ['thread-idx-a', 'thread-idx-b']);
+    assert.deepEqual(await store.listRunningThreadIds('other-user'), [], 'user scoping is the store\u2019s job');
+
+    // 终态后必须退出候选，否则 sidebar 会一直把它当 working
+    await store.update(a.invocationId, { status: 'succeeded' });
+    assert.deepEqual(await store.listRunningThreadIds('idx-user'), ['thread-idx-b']);
+
+    await store.update(b.invocationId, { status: 'succeeded' });
+    assert.deepEqual(await store.listRunningThreadIds('idx-user'), []);
+  });
+
+  it('F297 (cloud R7 P2) — backfill seeds the per-user index so pre-deploy records are not missed', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 漏报方向的回归：pre-deploy 的 running record 不在任何索引里。若 backfill 只 seed
+    // per-thread set 而漏了 per-user 候选索引，sidebar 就完全看不到它 —— 正在跑的行被
+    // 终态回落显示成 done/error（F297 核心禁忌）。
+    const preDeployId = 'f297-pre-deploy-running';
+    await redis.hset(`invoc:${preDeployId}`, {
+      id: preDeployId,
+      threadId: 'thread-F297PD',
+      userId: 'user-F297PD',
+      targetCats: '["opus"]',
+      intent: 'execute',
+      idempotencyKey: 'f297-pre-deploy-key',
+      status: 'running',
+      userMessageId: '',
+      error: '',
+      createdAt: String(Date.now() - 10_000),
+      updatedAt: String(Date.now() - 10_000),
+    });
+    assert.equal(
+      (await redis.smembers('invoc:running-threads:user-F297PD')).length,
+      0,
+      'precondition: pre-deploy record is in no index',
+    );
+
+    // fresh store：per-process backfill flag 未置位
+    const freshStore = new RedisInvocationRecordStore(redis);
+    assert.deepEqual(
+      await freshStore.listRunningThreadIds('user-F297PD'),
+      ['thread-F297PD'],
+      'a pre-deploy running thread must reach the sidebar candidate set',
+    );
+  });
+
+  it('F297 (cloud R7 P2) — the write side removes a thread from the index at terminal', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 直接检查索引内容，绕过读侧 SCARD 过滤 —— 否则写侧清理坏掉会被读侧兜底掩盖，
+    // 索引将无界增长（每个历史 thread 永久留驻）。
+    const rec = await store.create({
+      threadId: 'thread-wr',
+      userId: 'wr-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-wr-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+    assert.deepEqual(await redis.smembers('invoc:running-threads:wr-user'), ['thread-wr']);
+
+    await store.update(rec.invocationId, { status: 'succeeded' });
+    assert.deepEqual(
+      await redis.smembers('invoc:running-threads:wr-user'),
+      [],
+      'terminal transition must evict the thread from the index itself, not rely on read-side filtering',
+    );
+  });
+
+  it('F297 (cloud R7 P2) — the read side filters a drifted index entry', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 索引只是候选加速器，真相是 per-thread running set。人为制造多报（索引有、set 空），
+    // 读侧必须过滤掉，否则 sidebar 会把一个早已结束的 thread 一直显示成 working。
+    await redis.sadd('invoc:running-threads:drift-user', 'thread-ghost');
+    assert.deepEqual(
+      await store.listRunningThreadIds('drift-user'),
+      [],
+      'an index entry with no live running set must not be reported as active',
+    );
+  });
+
+  it('F297 (local R8 P1) — a transient SCARD failure must fail closed, not delete a live candidate', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 本 PR 花了六轮修「把读失败当成没在跑」，结果新代码又犯同一个病：
+    // pipeline entry 的 error 被 `const [, size]` 丢掉，非数字 size 归入 stale，
+    // 于是 (a) 真实 running 候选当次消失、(b) fire-and-forget SREM 把瞬时读故障
+    // **固化成持久漏报**、(c) 方法仍正常 resolve，调用方把 recordOk 记为 true、
+    // discovery 标 complete → Sidebar 直接走终态回落 = false terminal。
+    const rec = await store.create({
+      threadId: 'thread-scard-live',
+      userId: 'scard-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-scard-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+    assert.deepEqual(await store.listRunningThreadIds('scard-user'), ['thread-scard-live']);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = () => {
+      const p = originalPipeline();
+      p.exec = async () => [[new Error('transient-scard'), null]];
+      return p;
+    };
+    try {
+      await assert.rejects(
+        () => store.listRunningThreadIds('scard-user'),
+        /transient-scard/,
+        'an owner-truth read failure must propagate so the caller can fail closed (complete=false → idle)',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+
+    // 关键：读故障不得被固化成持久删除
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(
+      await redis.smembers('invoc:running-threads:scard-user'),
+      ['thread-scard-live'],
+      'a transient read failure must never evict a real candidate from the index',
+    );
+    assert.deepEqual(
+      await store.listRunningThreadIds('scard-user'),
+      ['thread-scard-live'],
+      'and the candidate must still be there once the read recovers',
+    );
+  });
+
+  it('F297 (local R8 P1) — a malformed SCARD reply is a read failure, not an empty set', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    const rec = await store.create({
+      threadId: 'thread-scard-malformed',
+      userId: 'malformed-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-scard-2',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = () => {
+      const p = originalPipeline();
+      p.exec = async () => [[null, 'not-a-number']]; // 非数字 size
+      return p;
+    };
+    try {
+      await assert.rejects(
+        () => store.listRunningThreadIds('malformed-user'),
+        /SCARD/i,
+        'a non-numeric SCARD reply is unknown truth, not "no running invocation"',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+    assert.deepEqual(
+      await redis.smembers('invoc:running-threads:malformed-user'),
+      ['thread-scard-malformed'],
+      'index untouched',
+    );
+  });
+
+  it('F297 (local R8 P1) — a genuinely empty running set is still cleaned from the index', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // fail-closed 不能把真正的 stale 也保住，否则索引无界增长。
+    // 判据是 error == null && size === 0，两个条件都要。
+    await redis.sadd('invoc:running-threads:gc-user', 'thread-gone');
+    assert.deepEqual(await store.listRunningThreadIds('gc-user'), []);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(
+      await redis.smembers('invoc:running-threads:gc-user'),
+      [],
+      'an authoritative empty set must still be garbage-collected',
+    );
+  });
+
+  it('F297 (local R8 P1) — a short/absent pipeline reply is a read failure, not an empty set', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // pipeline 回复条数少于候选数（连接抖动 / 客户端异常）时，缺失的那条既不是
+    // "空集合"也不是"在跑"——是未知。当成 stale 会删掉真候选，方向同 P1-1。
+    const rec = await store.create({
+      threadId: 'thread-short-reply',
+      userId: 'short-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-scard-3',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = () => {
+      const p = originalPipeline();
+      p.exec = async () => []; // 候选有 1 个，回复 0 条
+      return p;
+    };
+    try {
+      await assert.rejects(
+        () => store.listRunningThreadIds('short-user'),
+        /SCARD reply missing/,
+        'a missing pipeline entry is unknown truth, not "no running invocation"',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+    assert.deepEqual(
+      await redis.smembers('invoc:running-threads:short-user'),
+      ['thread-short-reply'],
+      'index untouched',
+    );
+  });
+
+  it('F297 (local R10 P1) — negative table: unknown replies never become stale (and never SREM)', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 关键差异：本方法的「非 live」分支会 **SREM 索引**。把未知降成 stale 会把一次
+    // 瞬时异常固化成持久漏报。所以未知必须抛出，且索引一根汗毛都不能动。
+    const rec = await store.create({
+      threadId: 'thread-neg',
+      userId: 'neg-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-neg-1',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+    const setKey = 'invoc:running:thread-neg:neg-user';
+    assert.deepEqual(await redis.smembers(setKey), [rec.invocationId]);
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withReply = (reply) => {
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        p.exec = async () => reply;
+        return p;
+      };
+    };
+
+    try {
+      const unknownReplies = [
+        ['short reply (missing entry)', []],
+        ['entry error', [[new Error('transient-read'), null]]],
+        ['null payload', [[null, null]]],
+        ['string payload', [[null, 'wrong-type']]],
+        ['array payload', [[null, []]]],
+        ['non-empty hash without id', [[null, { foo: 'bar' }]]],
+      ];
+      for (const [label, reply] of unknownReplies) {
+        withReply(reply);
+        await assert.rejects(
+          () => store.listRunningByThread('thread-neg', 'neg-user'),
+          (err) => err instanceof Error,
+          `an unknown reply must fail closed: ${label}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.deepEqual(
+          await redis.smembers(setKey),
+          [rec.invocationId],
+          `index must survive an unknown reply: ${label}`,
+        );
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+
+    // 权威 terminal 才可以清理索引
+    await store.update(rec.invocationId, { status: 'succeeded' });
+    assert.deepEqual(await store.listRunningByThread('thread-neg', 'neg-user'), []);
+  });
+
+  it('F297 (local R11 P1) — negative table: unknown ≠ non-live (prototype, inner types, identity, status, payload)', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // R10 的表只锁了「缺 id」一种损坏形态。真正的判据是「能否**权威** hydrate」：
+    // 非 plain object（Date）、非 string 字段、id 与索引不符、status 不在合法 union、
+    // owner-truth 数组坏 JSON —— 全是未知，都不能降成 stale（stale 会连带 SREM）。
+    const rec = await store.create({
+      threadId: 'thread-neg2',
+      userId: 'neg2-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-neg2',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+    const setKey = 'invoc:running:thread-neg2:neg2-user';
+    const id = rec.invocationId;
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withReply = (reply) => {
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        p.exec = async () => reply;
+        return p;
+      };
+    };
+    const base = {
+      id,
+      threadId: 'thread-neg2',
+      userId: 'neg2-user',
+      status: 'running',
+      targetCats: '["opus"]',
+      createdAt: '1700000000000',
+      updatedAt: '1700000000000',
+    };
+
+    try {
+      const unknown = [
+        ['non-plain object (Date)', [[null, new Date(0)]]],
+        ['non-string hash value', [[null, { ...base, status: [] }]]],
+        ['id mismatch vs index', [[null, { ...base, id: 'other-id' }]]],
+        ['status outside the union', [[null, { ...base, status: 'banana' }]]],
+        ['malformed targetCats JSON', [[null, { ...base, targetCats: 'not-json' }]]],
+        ['targetCats not an array', [[null, { ...base, targetCats: '{"a":1}' }]]],
+      ];
+      for (const [label, reply] of unknown) {
+        withReply(reply);
+        await assert.rejects(
+          () => store.listRunningByThread('thread-neg2', 'neg2-user'),
+          (err) => err instanceof Error,
+          `unknown must fail closed, never become stale: ${label}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.deepEqual(await redis.smembers(setKey), [id], `index must survive: ${label}`);
+      }
+
+      // 对照：合法 terminal 才是可证明的非 live，允许清理
+      withReply([[null, { ...base, status: 'succeeded' }]]);
+      assert.deepEqual(await store.listRunningByThread('thread-neg2', 'neg2-user'), []);
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+
+  it('F297 (cloud R12 P1) — a failed backfill must not mark the process as backfilled', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 部分失败却把进程永久标 backfilled ⇒ pre-deploy 的 running thread 被**永久**漏报。
+    const preDeployId = 'f297-backfill-abort';
+    await redis.hset(`invoc:${preDeployId}`, {
+      id: preDeployId,
+      threadId: 'thread-BFA',
+      userId: 'user-BFA',
+      targetCats: '["opus"]',
+      intent: 'execute',
+      idempotencyKey: 'f297-bfa',
+      status: 'running',
+      userMessageId: '',
+      error: '',
+      createdAt: String(Date.now() - 10_000),
+      updatedAt: String(Date.now() - 10_000),
+    });
+
+    const freshStore = new RedisInvocationRecordStore(redis);
+    const originalPipeline = redis.pipeline.bind(redis);
+    let failNext = true;
+    redis.pipeline = () => {
+      const p = originalPipeline();
+      if (failNext) {
+        failNext = false;
+        p.exec = async () => [[new Error('transient-backfill'), null]];
+      }
+      return p;
+    };
+    try {
+      await assert.rejects(
+        () => freshStore.listRunningThreadIds('user-BFA'),
+        (err) => err instanceof Error,
+        'a failed backfill must propagate, not silently half-populate',
+      );
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+
+    // 关键：重试必须真的重跑 backfill（flag 未被置位）
+    assert.deepEqual(
+      await freshStore.listRunningThreadIds('user-BFA'),
+      ['thread-BFA'],
+      'the retry must re-run backfill and surface the pre-deploy running thread',
+    );
+  });
+
+  it('F297 (self-found) — backfill must skip the per-user candidate index (SET, not hash)', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // `invoc:running-threads:{userId}` 匹配 backfill 的 SCAN pattern `invoc:*`，但它是 SET。
+    // 对它发 HGETALL 会 WRONGTYPE。旧代码把该错误静默 continue 掉，所以从没被发现；
+    // fail-closed 一上线立刻暴露 —— 吞掉读错误会掩盖真实缺陷，这是活证据。
+    await redis.sadd('invoc:running-threads:wrongtype-user', 'thread-WT');
+    await redis.hset('invoc:wrongtype-rec', {
+      id: 'wrongtype-rec',
+      threadId: 'thread-WT',
+      userId: 'wrongtype-user',
+      targetCats: '["opus"]',
+      intent: 'execute',
+      idempotencyKey: 'f297-wt',
+      status: 'running',
+      userMessageId: '',
+      error: '',
+      createdAt: String(Date.now()),
+      updatedAt: String(Date.now()),
+    });
+
+    const freshStore = new RedisInvocationRecordStore(redis);
+    assert.deepEqual(
+      await freshStore.listRunningByThread('thread-WT', 'wrongtype-user'),
+      await freshStore.listRunningByThread('thread-WT', 'wrongtype-user'),
+      'backfill must not throw WRONGTYPE on the candidate index',
+    );
+    assert.deepEqual(await freshStore.listRunningThreadIds('wrongtype-user'), ['thread-WT']);
+  });
+
+  it('F297 (local R12 P1) — listRunning: record-invalid hashes are unknown, never stale (no SREM)', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // R11 表锁了 transport 层；R12 锁 record 层：缺 owner 字段 / 非 string 成员 / 非有限
+    // 时间戳的 hash 无法权威 hydrate ⇒ 未知 ⇒ 抛出且不得 SREM。「resolved [] + SREM」
+    // 会把一次数据损坏固化成持久漏报（false terminal 方向）。
+    const rec = await store.create({
+      threadId: 'thread-r12',
+      userId: 'r12-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-r12',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(rec.invocationId, { status: 'running' });
+    const setKey = 'invoc:running:thread-r12:r12-user';
+    const id = rec.invocationId;
+    const base = {
+      id,
+      threadId: 'thread-r12',
+      userId: 'r12-user',
+      status: 'running',
+      targetCats: '["opus"]',
+      createdAt: '1700000000000',
+      updatedAt: '1700000000000',
+    };
+
+    const originalPipeline = redis.pipeline.bind(redis);
+    const withReply = (reply) => {
+      redis.pipeline = () => {
+        const p = originalPipeline();
+        p.exec = async () => reply;
+        return p;
+      };
+    };
+
+    try {
+      const recordInvalid = [
+        [
+          'missing threadId',
+          (() => {
+            const { threadId, ...rest } = base;
+            return rest;
+          })(),
+        ],
+        [
+          'missing userId',
+          (() => {
+            const { userId, ...rest } = base;
+            return rest;
+          })(),
+        ],
+        ['targetCats with non-string member', { ...base, targetCats: '[123]' }],
+        ['non-finite createdAt', { ...base, createdAt: 'abc' }],
+      ];
+      for (const [label, hash] of recordInvalid) {
+        withReply([[null, hash]]);
+        await assert.rejects(
+          () => store.listRunningByThread('thread-r12', 'r12-user'),
+          (err) => err instanceof Error,
+          `record-invalid must fail closed, never become stale: ${label}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.deepEqual(await redis.smembers(setKey), [id], `index must survive: ${label}`);
+      }
+    } finally {
+      redis.pipeline = originalPipeline;
+    }
+  });
+
+  it('F297 (local R12 P1) — backfill: a record-invalid hash aborts the pass; the flag is only set by a fully valid scan', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // 砚砚 R12 probe：status=banana / 缺 threadId 的 pre-deploy hash 被静默 skip 后
+    // `runningIndexBackfilled=true` 永久置位 ⇒ 该 running 记录被**永久**漏报，而
+    // owner-truth source 一路报成功 —— 与原始 bug 相同的 false-terminal 方向。
+    // 正确语义：record-invalid = 未知 = abort 本轮 backfill（flag 不置位），修复后重试必须真重扫。
+    const corruptShapes = [
+      ['status outside the union', { status: 'banana' }],
+      ['missing threadId', { threadId: undefined }],
+    ];
+    for (const [label, patch] of corruptShapes) {
+      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+      const corruptId = 'r12-bf-corrupt';
+      const goodId = 'r12-bf-good';
+      const hash = (id, overrides) => {
+        const full = {
+          id,
+          threadId: `thread-${id}`,
+          userId: 'r12-bf-user',
+          targetCats: '["opus"]',
+          intent: 'execute',
+          idempotencyKey: `idem-${id}`,
+          status: 'running',
+          userMessageId: '',
+          error: '',
+          createdAt: '1700000000000',
+          updatedAt: '1700000000000',
+          ...overrides,
+        };
+        return Object.fromEntries(Object.entries(full).filter(([, v]) => v !== undefined));
+      };
+      await redis.hset(`invoc:${corruptId}`, hash(corruptId, patch));
+      await redis.hset(`invoc:${goodId}`, hash(goodId, {}));
+
+      const freshStore = new RedisInvocationRecordStore(redis);
+      await assert.rejects(
+        () => freshStore.listRunningThreadIds('r12-bf-user'),
+        (err) => err instanceof Error,
+        `a record-invalid hash must abort backfill: ${label}`,
+      );
+
+      // 修复损坏 hash → 重试必须真的重扫（flag 未被置位）并浮出 pre-deploy running thread
+      await redis.hset(`invoc:${corruptId}`, hash(corruptId, {}));
+      assert.deepEqual(
+        (await freshStore.listRunningThreadIds('r12-bf-user')).sort(),
+        [`thread-${corruptId}`, `thread-${goodId}`],
+        `the retry after repair must re-scan and surface both running threads: ${label}`,
+      );
+    }
+  });
+
+  it('F297 (local R12 P1) — scanAll fails closed on a corrupt hash instead of silently omitting it', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    // scanAll 喂 zombie recovery 与 duty briefing 的 liveness 判断（filter running）。
+    // 静默 skip 损坏记录 = zombie 永不恢复。上层各有 catch/degraded 语义，抛出是安全的。
+    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+    const rec = await store.create({
+      threadId: 'thread-sa',
+      userId: 'sa-user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'f297-sa',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await redis.hset('invoc:sa-corrupt', { id: 'sa-corrupt', status: 'banana' });
+
+    await assert.rejects(
+      () => store.scanAll(),
+      (err) => err instanceof Error,
+      'scanAll must not silently omit a corrupt record',
+    );
+
+    // id/key parity：hash id 与 key 内 id 不符 = 数据损坏，同样未知
+    await redis.del('invoc:sa-corrupt');
+    await redis.hset('invoc:sa-mismatch', {
+      id: 'other-id',
+      threadId: 'thread-sa',
+      userId: 'sa-user',
+      targetCats: '["opus"]',
+      status: 'running',
+      createdAt: '1700000000000',
+      updatedAt: '1700000000000',
+    });
+    await assert.rejects(
+      () => store.scanAll(),
+      (err) => err instanceof Error,
+      'scanAll must reject a hash whose id does not match its key',
+    );
+
+    await redis.del('invoc:sa-mismatch');
+    const all = await store.scanAll();
+    assert.deepEqual(
+      all.map((r) => r.id),
+      [rec.invocationId],
+      'a clean keyspace scans normally',
+    );
+  });
 });

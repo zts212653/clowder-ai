@@ -53,6 +53,7 @@ function stubDeps(overrides = {}) {
       append: mock.fn(async () => ({ id: 'msg-stub' })),
       getByIdempotencyKey: mock.fn(async () => null),
       getById: mock.fn(async () => null),
+      // Whole-message selection resolves the canonical bubble group from the thread timeline.
       getByThreadAfter: mock.fn(async () => []),
       markDelivered: mock.fn(async (id) => ({
         id,
@@ -170,6 +171,10 @@ describe('QueueProcessor', () => {
         ...stubDeps().messageStore,
         getById: mock.fn(async (id) =>
           id === targetMessage.id ? targetMessage : id === sourceMessage.id ? sourceMessage : null,
+        ),
+        // Whole-message re-resolution reads the canonical bubble group from the thread timeline.
+        getByThreadAfter: mock.fn(async (threadId) =>
+          [targetMessage, sourceMessage].filter((message) => message.threadId === threadId),
         ),
       },
     });
@@ -7456,6 +7461,8 @@ describe('QueueProcessor', () => {
       enqueueEntry(deps.queue, { content: 'msg-c', ownerAuthProvenance: 'strict' });
       const reserved = deps.queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
       assert.equal(reserved.outcome, 'reserved');
+      assert.equal(deps.queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(deps.queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
 
       await processor.processNext('t1', 'u1');
       await waitForQueue(deps.queue, 't1', 'u1', () => deps.router.routeExecution.mock.calls.length >= 1);
@@ -7504,6 +7511,8 @@ describe('QueueProcessor', () => {
       const c = enqueueEntry(failDeps.queue, { content: 'c', ownerAuthProvenance: 'strict' });
       const reserved = failDeps.queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
       assert.equal(reserved.outcome, 'reserved');
+      assert.equal(failDeps.queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(failDeps.queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
 
       await failProcessor.processNext('t1', 'u1');
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -7524,7 +7533,10 @@ describe('QueueProcessor', () => {
       const persistProcessor = new QueueProcessor(persistDeps);
       const a = enqueueEntry(persistDeps.queue, { content: 'a', ownerAuthProvenance: 'strict' });
       const b = enqueueEntry(persistDeps.queue, { content: 'b', ownerAuthProvenance: 'strict' });
-      persistDeps.queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+      const reserved = persistDeps.queue.reserveExactUserBatch('t1', 'u1', [a.id, b.id]);
+      assert.equal(reserved.outcome, 'reserved');
+      assert.equal(persistDeps.queue.beginExactSteerPreemption('t1', 'u1', reserved.reservationId), true);
+      assert.equal(persistDeps.queue.activateExactSteerReservation('t1', 'u1', reserved.reservationId), true);
 
       const result = await persistProcessor.processNext('t1', 'u1');
 

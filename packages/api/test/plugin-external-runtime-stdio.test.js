@@ -219,3 +219,95 @@ test('authority revocation closes transport on the next call with zero new effec
   const broker = await harness.brokerStore.snapshot();
   assert.equal(broker.sessions[0].phase, 'closed');
 });
+
+test('Host pings the active child and renews the exact runtime lease before idle expiry', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-heartbeat-'));
+  const dispatches = [];
+  const harness = await createExternalRuntimeHarness({
+    rootDir,
+    methods: [eventsHandler(dispatches)],
+    activeLeaseTtlMs: 120,
+  });
+  const processes = new FakePluginProcessAdapter();
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => undefined,
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+    heartbeatIntervalMs: 20,
+    heartbeatTimeoutMs: 40,
+  });
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  await completeExternalHandshake(child);
+  const handle = await starting;
+  const initialExpiry = (await harness.brokerStore.snapshot()).runtimeLeases[0].expiresAt;
+
+  const ping = await readFrame(child);
+  assert.equal(ping.method, 'host.lifecycle.ping');
+  assert.equal(ping.params.input.nonce, ping.id);
+  sendFrame(child, { jsonrpc: '2.0', id: ping.id, result: { nonce: ping.id } });
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const renewed = await harness.brokerStore.snapshot();
+  assert.ok(renewed.runtimeLeases[0].expiresAt > initialExpiry);
+  assert.equal(renewed.sessions[0].activeLeaseExpiresAt, renewed.runtimeLeases[0].expiresAt);
+
+  sendFrame(child, wireRequest('publish-after-idle', 'events.publish', externalPublishInput()));
+  assert.deepEqual(await readFrame(child), {
+    jsonrpc: '2.0',
+    id: 'publish-after-idle',
+    result: { publicationId: 'publication-1', disposition: 'accepted' },
+  });
+  assert.equal(dispatches.length, 1);
+  await supervisor.stop(EXTERNAL_INSTANCE_ID);
+  await handle.closed;
+});
+
+test('missing Host ping response crashes and closes a runtime instead of projecting false healthy', async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), 'cat-cafe-k2d-heartbeat-timeout-'));
+  const harness = await createExternalRuntimeHarness({ rootDir, activeLeaseTtlMs: 100 });
+  const processes = new FakePluginProcessAdapter();
+  const supervisor = new ExternalPluginRuntimeSupervisor({
+    inventory: harness.inventory,
+    broker: harness.broker,
+    packages: {
+      async resolveInstalledPackage() {
+        return {
+          rootDir,
+          manifest: externalManifest(),
+          verifyIntegrity: async () => undefined,
+          release: async () => undefined,
+        };
+      },
+    },
+    processes,
+    heartbeatIntervalMs: 10,
+    heartbeatTimeoutMs: 10,
+  });
+  const starting = supervisor.start(EXTERNAL_INSTANCE_ID);
+  const child = await processes.nextProcess();
+  await completeExternalHandshake(child);
+  const handle = await starting;
+
+  const ping = await readFrame(child);
+  assert.equal(ping.method, 'host.lifecycle.ping');
+  await handle.closed;
+
+  assert.equal(child.terminateCalls, 1);
+  const broker = await harness.brokerStore.snapshot();
+  assert.equal(broker.sessions[0].phase, 'closed');
+  assert.equal(broker.sessions[0].closeReason, 'heartbeat_failure');
+  const inventory = await harness.inventory.snapshot();
+  assert.equal(inventory.instances[0].activationState, 'error');
+  assert.equal(inventory.instances[0].runtimeState, 'crashed');
+});

@@ -12,7 +12,9 @@ function renderCue(cue: CueEnvelopeV1): string {
     `<memory-cue v="1" cue-id="${cue.cueId}" why-now="${cue.whyNow}">`,
     `Title: ${cue.title}`,
     `Summary: ${cue.summary}`,
-    `Source: ${cue.source.anchor} @ ${cue.source.revision}`,
+    `Source: ${cue.source.anchor} @ ${cue.source.revision}${
+      cue.source.asOf === undefined ? '' : ` asOf=${new Date(cue.source.asOf).toISOString()}`
+    }`,
     `Drill: ${cue.drill.family} ${cue.drill.handle}`,
     '</memory-cue>',
   ].join('\n');

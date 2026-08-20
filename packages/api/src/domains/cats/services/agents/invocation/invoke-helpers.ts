@@ -109,6 +109,12 @@ export function isTransientCliExitCode1(message: string | undefined): boolean {
   // writes the same user turn into the rollout JSONL again (see bug-report
   // 2026-04-19-codex-transient-retry-context-overflow).
   if (/ran out of room|context window|context_window/i.test(message)) return false;
+  // clowder-ai#1324 (refs #848): the CLI's argument parser rejected our argv. The retry
+  // re-runs the *identical* argv, so it is rejected identically — the only thing a retry
+  // buys is a second failure (that is literally the "×2" users saw on the error bubble).
+  // formatCliExitError appends the classified reasonCode to the message, so the tag is the
+  // reliable channel here; the humanized text is i18n-mutable and must not be matched on.
+  if (/\[incompatible_cli_arguments\]/.test(message)) return false;
   return true;
 }
 

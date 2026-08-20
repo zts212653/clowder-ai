@@ -14,6 +14,13 @@ export interface TextSelectionAction {
   sourceSegmentId?: string;
   selectionStart?: number;
   selectionEnd?: number;
+  /**
+   * How many times these characters appear in the rendered source root. The server cannot
+   * compute this: the renderer generates text with no Markdown counterpart (footnote labels,
+   * KaTeX glyphs, component loading states). Admission requires 1, so reporting it honestly
+   * is what keeps a repeated on-screen fragment from being anchored to the wrong occurrence.
+   */
+  renderedOccurrences?: number;
 }
 
 function rectLike(rect: DOMRect | DOMRectReadOnly): RectLike {
@@ -55,6 +62,46 @@ function selectionOffsets(selection: Selection, container: Node): { start: numbe
   } catch {
     return null;
   }
+}
+
+/**
+ * Interface chrome (action toolbars, annotation markers, component loading/error states) is
+ * painted inside the source root but is not message content. It must never become quotable
+ * evidence, so any selection touching it is refused outright.
+ */
+function crossesExcludedChrome(range: Range, root: Element): boolean {
+  const excluded = [
+    ...(root.matches('[data-quote-exclude]') ? [root] : []),
+    ...Array.from(root.querySelectorAll('[data-quote-exclude]')),
+  ];
+  return excluded.some((candidate) => {
+    try {
+      return typeof range.intersectsNode === 'function' && range.intersectsNode(candidate);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function countRenderedOccurrences(root: Element, text: string): number {
+  if (!text) return 0;
+  // Selection.toString() follows the rendered layout: block boundaries contribute newlines.
+  // textContent flattens those boundaries (for example <p>foo</p><p>foo</p> → "foofoo"),
+  // so it cannot attest uniqueness for the exact characters the human selected. innerText is
+  // the matching browser plane; textContent remains only for non-layout DOMs such as jsdom.
+  const rendered =
+    root instanceof HTMLElement && typeof root.innerText === 'string' ? root.innerText : (root.textContent ?? '');
+  return rendered.split(text).length - 1;
+}
+
+function trimSelectionOffsets(
+  offsets: { start: number; end: number } | null,
+  rawText: string,
+): { start: number; end: number } | null {
+  if (!offsets) return null;
+  const leadingWhitespaceLength = rawText.length - rawText.trimStart().length;
+  const trailingWhitespaceLength = rawText.length - rawText.trimEnd().length;
+  return { start: offsets.start + leadingWhitespaceLength, end: offsets.end - trailingWhitespaceLength };
 }
 
 function selectionSource(selection: Selection): {
@@ -114,12 +161,14 @@ function projectSelectionAction(
   if (
     !selection ||
     selection.isCollapsed ||
-    !selection.toString().trim() ||
     !container.contains(selection.anchorNode) ||
     !container.contains(selection.focusNode)
   ) {
     return null;
   }
+  const rawText = selection.toString();
+  const text = rawText.trim();
+  if (!text) return null;
 
   const viewport =
     coordinateSpace === 'container'
@@ -134,15 +183,19 @@ function projectSelectionAction(
         };
   const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
   const source = selectionSource(selection);
+  if (source.coordinateRoot && crossesExcludedChrome(selection.getRangeAt(0), source.coordinateRoot)) return null;
   const offsetRoot = source.kind === 'cli_output' ? source.coordinateRoot : (source.coordinateRoot ?? container);
   const offsets = offsetRoot ? selectionOffsets(selection, offsetRoot) : null;
+  const trimmedOffsets = trimSelectionOffsets(offsets, rawText);
   if (!position || source.mixed) return null;
+  const renderedRoot = source.coordinateRoot ?? container;
   return {
-    text: selection.toString().trim(),
+    text,
     position,
     sourceKind: source.kind,
-    ...(offsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
-    ...(offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
+    renderedOccurrences: countRenderedOccurrences(renderedRoot, text),
+    ...(trimmedOffsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
+    ...(trimmedOffsets ? { selectionStart: trimmedOffsets.start, selectionEnd: trimmedOffsets.end } : {}),
   };
 }
 

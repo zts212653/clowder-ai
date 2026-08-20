@@ -14,6 +14,7 @@ import {
   extractEvidenceStatus,
   extractFeatureIdKeywords,
   extractFrontmatter,
+  extractFrontmatterKeywords,
   extractSectionKeywords,
   extractSummary,
   extractSupersededBy,
@@ -113,13 +114,10 @@ export class CatCafeScanner implements RepoScanner {
     const status = extractEvidenceStatus(frontmatter);
     const supersededBy = extractSupersededBy(frontmatter);
 
-    const topics = frontmatter?.topics;
+    const taxonomyKeywords = extractFrontmatterKeywords(frontmatter);
     const sectionKeywords = extractSectionKeywords(content);
     const featureIdKeywords = extractFeatureIdKeywords(frontmatter, sourcePath);
-    const keywords = mergeKeywords(
-      [...(Array.isArray(topics) ? (topics as string[]) : []), ...featureIdKeywords],
-      sectionKeywords,
-    );
+    const keywords = mergeKeywords([...taxonomyKeywords, ...featureIdKeywords], sectionKeywords);
     const materializedKeywords = mergeKeywords([...keywords, ...(tasteMaterialization?.keywords ?? [])], []);
 
     return {

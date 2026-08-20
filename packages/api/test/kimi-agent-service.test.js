@@ -1372,6 +1372,25 @@ test('native L0: user cliConfigArgs cannot override --agent-file / --agent', asy
   }
 });
 
+test('native L0: declares --agent-file as managed argv provenance for diagnostics', async () => {
+  const restore = enterNonLegacyKimiPath();
+  try {
+    let capturedOptions;
+    async function* spawnCliOverride(options) {
+      capturedOptions = options;
+      yield { role: 'assistant', content: 'ok' };
+    }
+    const l0CompilerFn = mock.fn(async () => 'L0_X');
+    const service = new KimiAgentService({ model: 'kimi-code/k3', l0CompilerFn });
+
+    await collect(service.invoke('Hello', { spawnCliOverride }));
+
+    assert.deepEqual(capturedOptions?.managedArgvFlags, ['--agent-file']);
+  } finally {
+    restore();
+  }
+});
+
 test('legacy kimi-cli: no --agent-file, no v2 env flag, prompt keeps <system_instructions> wrap', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);

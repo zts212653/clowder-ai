@@ -10,6 +10,8 @@ export interface MessageSelectionToolbarProps {
   selectedMessageIds: readonly string[];
   onCancel: () => void;
   onExportSuccess: () => void;
+  /** Blocks only the network-forward action until this browser document is admitted. */
+  forwardingDisabled: boolean;
   onForward?: () => void;
 }
 
@@ -67,6 +69,7 @@ export function MessageSelectionToolbar({
   selectedMessageIds,
   onCancel,
   onExportSuccess,
+  forwardingDisabled,
   onForward,
 }: MessageSelectionToolbarProps) {
   const [pendingFormat, setPendingFormat] = useState<SelectionExportFormat | null>(null);
@@ -190,8 +193,14 @@ export function MessageSelectionToolbar({
                 </svg>
               }
               onClick={() => onForward?.()}
-              disabled={!hasSelection || !!pendingFormat || !onForward}
-              title={onForward ? '转发所选消息' : '转发将在 Phase B 开放'}
+              disabled={!hasSelection || !!pendingFormat || forwardingDisabled || !onForward}
+              title={
+                forwardingDisabled
+                  ? '正在验证页面版本，暂不可转发'
+                  : onForward
+                    ? '转发所选消息'
+                    : '转发将在 Phase B 开放'
+              }
             />
             <SelectionAction
               label="取消"

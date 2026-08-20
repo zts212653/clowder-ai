@@ -35,6 +35,7 @@ import type {
 } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
@@ -312,22 +313,10 @@ export interface HoldBallRouteDeps {
   dynamicTaskStore: DynamicTaskStore;
   messageStore: IMessageStore;
   socketManager: SocketManager;
-  threadStore: {
-    get(threadId: string):
-      | {
-          createdBy: string;
-          deletedAt?: number | null;
-          systemKind?: 'connector_hub' | 'eval_domain' | 'cat_bedroom';
-          /** F167: gate-keeping thread marker used by checkGateKeepingGuard. */
-          threadKind?: 'concierge' | 'gate-keeping';
-        }
-      | null
-      | Promise<{
-          createdBy: string;
-          deletedAt?: number | null;
-          systemKind?: 'connector_hub' | 'eval_domain' | 'cat_bedroom';
-          threadKind?: 'concierge' | 'gate-keeping';
-        } | null>;
+  threadStore: Pick<IThreadStore, 'get' | 'list'>;
+  ownerUserId: string;
+  scheduleMutationAuditStore: {
+    deleteTaskWithAudit(taskId: string, audit: import('@cat-cafe/shared').ScheduleMutationAuditEntry): boolean;
   };
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
@@ -980,7 +969,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     } catch (error) {
       if (error instanceof A2ADispatchDispositionError) {
         reply.status(409);
-        return { error: 'A2A dispatch disposition rejected', code: error.code };
+        return {
+          error: 'A2A dispatch disposition rejected',
+          code: error.code,
+          ...(error.replacement ? { replacement: error.replacement } : {}),
+        };
       }
       throw error;
     }

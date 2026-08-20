@@ -592,6 +592,16 @@ export interface IThreadStore {
   getParticipants(threadId: string): CatId[] | Promise<CatId[]>;
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
   getParticipantsWithActivity(threadId: string): ThreadParticipantActivity[] | Promise<ThreadParticipantActivity[]>;
+  /**
+   * F297 AC-B3: batched variant for list-scale reads (Sidebar snapshot).
+   *
+   * 逐 thread 调用 `getParticipantsWithActivity` 在 Redis 后端下是 2×T 次串行往返；
+   * Sidebar 现网 ~1760 行，必须 pipeline。实现方**必须**保持与单条版本相同的
+   * lastMessageAt 降序契约（F297 的 done/error 取 `[0]` 作为"最近一次回应"）。
+   */
+  getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Map<string, ThreadParticipantActivity[]> | Promise<Map<string, ThreadParticipantActivity[]>>;
   /** F032 P1-2 fix: Update participant activity on every message (not just join) */
   updateParticipantActivity(threadId: string, catId: CatId, healthy?: boolean): void | Promise<void>;
   updateTitle(threadId: string, title: string): void | Promise<void>;
@@ -962,6 +972,15 @@ export class ThreadStore implements IThreadStore {
     });
     // Sort by lastMessageAt descending (most recent first)
     result.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    return result;
+  }
+
+  /** F297 AC-B3: in-memory 无 I/O，逐条复用单查即可；契约同单条版本（lastMessageAt 降序）。 */
+  getParticipantsWithActivityBatch(threadIds: readonly string[]): Map<string, ThreadParticipantActivity[]> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    for (const threadId of threadIds) {
+      result.set(threadId, this.getParticipantsWithActivity(threadId));
+    }
     return result;
   }
 

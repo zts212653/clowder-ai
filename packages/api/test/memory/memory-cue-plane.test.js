@@ -81,6 +81,7 @@ function source(overrides = {}) {
     summary: 'The source can be drilled without preselecting a conclusion.',
     anchor: 'person:alden',
     revision: 'revision-1',
+    asOf: 1_000,
     visibility: 'owner_private',
     drillFamily: 'person_memory',
     ...overrides,
@@ -301,6 +302,12 @@ describe('F287 MemoryCuePlaneService', () => {
     });
 
     assert.equal(result.cues.length, 1);
+    assert.deepEqual(appended, []);
+    assert.equal(result.deliveryReceipts.length, 1);
+    await service.recordPresented(result.deliveryReceipts, {
+      generationId: 'sha256:final-provider-prompt',
+      evidenceRef: 'context-delivery:invocation-1:sha256:final-provider-prompt',
+    });
     assert.deepEqual(appended, [
       {
         eventId: appended[0].eventId,

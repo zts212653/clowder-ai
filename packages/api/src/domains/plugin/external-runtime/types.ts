@@ -14,6 +14,8 @@ export type ExternalPluginRuntimeErrorCode =
   | 'PROCESS_START_FAILED'
   | 'PROCESS_EXITED'
   | 'HANDSHAKE_TIMEOUT'
+  | 'HEARTBEAT_TIMEOUT'
+  | 'HEARTBEAT_REJECTED'
   | 'PROTOCOL_VIOLATION';
 
 export class ExternalPluginRuntimeError extends Error {
@@ -84,5 +86,7 @@ export interface ExternalPluginRuntimeSupervisorOptions {
   readonly packages: VerifiedPluginPackageLocator;
   readonly processes?: ExternalPluginProcessAdapter;
   readonly handshakeTimeoutMs?: number;
+  readonly heartbeatIntervalMs?: number;
+  readonly heartbeatTimeoutMs?: number;
   readonly now?: () => number;
 }

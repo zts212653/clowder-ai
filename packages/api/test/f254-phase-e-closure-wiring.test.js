@@ -68,7 +68,7 @@ describe('F254 Phase E production wiring guard', () => {
     assert.match(index, /const callbackOpts = \{[\s\S]*?queueCustodyCoordinator,[\s\S]*?\} as Parameters/);
     assert.match(
       index,
-      /new StartupReconciler\(\{[\s\S]*?invocationQueue,[\s\S]*?resumeQueue:\s*\(threadId, userId\) => queueProcessor\.processNext\(threadId, userId\)/,
+      /new StartupReconciler\(\{[\s\S]*?invocationQueue,[\s\S]*?resumePrestartRetirement:\s*\(entries\) => queueProcessor\.resumeDurablePrestartRetirement\(entries\),[\s\S]*?resumeQueue:\s*\(threadId, userId\) => queueProcessor\.processNext\(threadId, userId\)/,
     );
   });
 

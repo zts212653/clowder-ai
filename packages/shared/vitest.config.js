@@ -14,6 +14,7 @@ export default defineConfig({
       'src/__tests__/human-disposition-feedback.test.ts',
       'src/__tests__/wait-termination.test.ts',
       'src/__tests__/proactive-memory-opportunity.test.ts',
+      'src/__tests__/memory-write-opportunity.test.ts',
       'src/__tests__/subject-key.test.ts',
       'src/__tests__/cli-effort.test.ts',
       'src/__tests__/codex-speed.test.ts',
@@ -21,6 +22,7 @@ export default defineConfig({
       'src/__tests__/approval-hub-types.test.ts',
       'src/__tests__/approval-producer-catalog.test.ts',
       'src/__tests__/explicit-stop-intent.test.ts',
+      'src/__tests__/preview-gateway.test.ts',
       'src/__tests__/person-memory-contract.test.ts',
       'src/__tests__/person-memory-rich-card.test.ts',
       'src/__tests__/eval-metric-ref.test.ts',
@@ -35,6 +37,7 @@ export default defineConfig({
       'src/__tests__/memory-cue.test.ts',
       'src/__tests__/context-attachment.test.ts',
       'test/message-bundle-schema.test.ts',
+      'test/markdown-readable-text.test.ts',
     ],
   },
 });

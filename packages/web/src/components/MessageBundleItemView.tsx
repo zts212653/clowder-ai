@@ -1,16 +1,19 @@
+import type { RichBlock } from '@/stores/chat-types';
 import { HubIcon } from './hub-icons';
+import { RichBlocks } from './rich/RichBlocks';
 
 export type BundleAuthor = { kind: 'user'; userId: string } | { kind: 'cat'; catId: string };
 export type BundleItem =
   | {
       status: 'available';
-      kind: 'message' | 'quote';
+      kind: 'message' | 'quote' | 'cli_quote' | 'rich_block';
       messageId: string;
       sourceThreadId: string;
       author: BundleAuthor;
       timestamp: number;
       readableContent: string;
       comment?: string;
+      richBlock?: RichBlock;
     }
   | { status: 'tombstone'; messageId: string; reason: 'source_unavailable' | 'source_changed' };
 
@@ -71,9 +74,15 @@ export function MessageBundleItemView({
           <HubIcon name="external-link" className="h-3 w-3 shrink-0" />
         </button>
       </div>
-      <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-cafe-primary">
-        {item.readableContent}
-      </div>
+      {item.kind === 'rich_block' && item.richBlock ? (
+        <div data-forwarded-rich-block={item.richBlock.id}>
+          <RichBlocks blocks={[item.richBlock]} readOnly />
+        </div>
+      ) : (
+        <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-cafe-primary">
+          {item.readableContent}
+        </div>
+      )}
       {item.comment ? (
         <div className="mt-3 border-l-2 border-cafe pl-3 text-sm">
           <div className="text-xs font-semibold text-cafe-secondary">{forwarderName} 的点评</div>

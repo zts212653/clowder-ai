@@ -420,10 +420,15 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
     rawArchive: { append: async (_invocationId, payload) => archived.push(payload) },
   });
 
+  const firstCallbackEnv = {
+    ...callbackEnv('invocation-1', 'callback-token-1'),
+    CAT_CAFE_EXECUTION_ID: 'parent-execution-1',
+    CAT_CAFE_PROCESS_EXECUTION_OWNER: '1',
+  };
   await drain(
     service.invoke('first turn', {
       invocationId: 'invocation-1',
-      callbackEnv: callbackEnv('invocation-1', 'callback-token-1'),
+      callbackEnv: firstCallbackEnv,
       auditContext: {
         invocationId: 'invocation-1',
         threadId: 'cafe-thread-1',
@@ -444,6 +449,7 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
   const firstLaunch = JSON.stringify(pool.calls[0]);
   assert.doesNotMatch(firstLaunch, /callback-token-1/);
   assert.doesNotMatch(firstLaunch, /mcp_servers\.cat-cafe/);
+  assert.doesNotMatch(firstLaunch, /parent-execution-1|CAT_CAFE_PROCESS_EXECUTION_OWNER/);
   assert.doesNotMatch(JSON.stringify(firstStart), /callback-token-1|CAT_CAFE_CALLBACK_TOKEN/);
   assert.equal(
     archived.some((payload) => JSON.stringify(payload).includes('callback-token-1')),

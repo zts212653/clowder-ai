@@ -43,6 +43,8 @@ export interface QueueCustodyStartupResult {
   handledTargets: number;
   failedTargets: number;
   resumeScopes: QueueCustodyResumeScope[];
+  /** Restart-stable exact groups that must finish retirement before normal Queue resume. */
+  prestartRetirements: QueueEntry[][];
   /** Pre-custody agent handoffs retain their legacy visibility recovery path. */
   legacyVisibilityFallbackMessageIds: string[];
 }
@@ -320,14 +322,11 @@ export class QueuedMessageCustodyStartupReconciler {
 
     const groups = this.groupActiveMessages(activeMessages);
     const resumeScopes: QueueCustodyResumeScope[] = [];
+    const builtEntries: QueueEntry[] = [];
     let entriesRestored = 0;
     for (const [entryId, messages] of groups) {
       try {
-        const entry = this.buildQueueEntry(messages, entryId);
-        const outcome = this.deps.invocationQueue.restoreDurableEntry(entry);
-        if (outcome !== 'restored') continue;
-        entriesRestored += 1;
-        resumeScopes.push({ threadId: entry.threadId, userId: entry.userId });
+        builtEntries.push(this.buildQueueEntry(messages, entryId));
       } catch (error) {
         if (error instanceof WaitContinuationCarrierError) {
           for (const message of messages) {
@@ -354,6 +353,35 @@ export class QueuedMessageCustodyStartupReconciler {
       }
     }
 
+    const retirementIntents = new Map(
+      builtEntries.flatMap((entry) =>
+        entry.prestartRetirement ? [[entry.prestartRetirement.id, entry.prestartRetirement] as const] : [],
+      ),
+    );
+    const retirementGroups = new Map<string, QueueEntry[]>();
+    for (const entry of builtEntries) {
+      const inheritedIntent =
+        entry.prestartRetirement ??
+        [...retirementIntents.values()].find((intent) => intent.entryIds.includes(entry.id));
+      const restoredEntry = inheritedIntent
+        ? {
+            ...entry,
+            status: 'processing' as const,
+            processingStartedAt: entry.processingStartedAt ?? inheritedIntent.startedAt,
+            prestartRetirement: { ...inheritedIntent, entryIds: [...inheritedIntent.entryIds] },
+          }
+        : entry;
+      const outcome = this.deps.invocationQueue.restoreDurableEntry(restoredEntry);
+      if (outcome === 'restored') entriesRestored += 1;
+      if (inheritedIntent) {
+        const retirementGroup = retirementGroups.get(inheritedIntent.id) ?? [];
+        retirementGroup.push(restoredEntry);
+        retirementGroups.set(inheritedIntent.id, retirementGroup);
+      } else if (outcome === 'restored') {
+        resumeScopes.push({ threadId: entry.threadId, userId: entry.userId });
+      }
+    }
+
     if (queuedMessageIds.length > 0) {
       this.deps.log.info(
         `[queue-custody-startup] reconciled ${queuedMessageIds.length} queued message(s), ` +
@@ -368,6 +396,7 @@ export class QueuedMessageCustodyStartupReconciler {
       handledTargets,
       failedTargets,
       resumeScopes,
+      prestartRetirements: [...retirementGroups.values()],
       legacyVisibilityFallbackMessageIds,
     };
   }
@@ -381,6 +410,7 @@ export class QueuedMessageCustodyStartupReconciler {
       handledTargets: 0,
       failedTargets: 0,
       resumeScopes: [],
+      prestartRetirements: [],
       legacyVisibilityFallbackMessageIds: [],
     };
   }
@@ -673,8 +703,19 @@ export class QueuedMessageCustodyStartupReconciler {
       queuedHandledByCatIds: filterTargets(custody.handledByCatIds),
       steerRequestedByCatIds: filterTargets(custody.steerRequestedByCatIds ?? []),
       steeredInvocationIdByCatId: filterInvocationMap(custody.steeredInvocationIdByCatId ?? {}),
+      ...(custody.prestartRetirement
+        ? {
+            prestartRetirement: {
+              ...custody.prestartRetirement,
+              entryIds: [...custody.prestartRetirement.entryIds],
+            },
+          }
+        : {}),
       intent: custody.intent,
-      status: 'queued',
+      status: custody.prestartRetirement ? 'processing' : 'queued',
+      ...(custody.prestartRetirement
+        ? { processingStartedAt: custody.processingStartedAt ?? custody.prestartRetirement.startedAt }
+        : {}),
       createdAt: custody.createdAt,
       autoExecute: false,
       priority: custody.priority,

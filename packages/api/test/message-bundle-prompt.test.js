@@ -12,6 +12,9 @@ function buildDeps(messages, sourceThread = { id: 'source-thread', title: 'Sourc
   return {
     messageStore: {
       getById: async (messageId) => messages.get(messageId) ?? null,
+      // Whole-message selection resolves the canonical bubble group, so the store must expose the
+      // same timeline the browser projected from.
+      getByThreadAfter: async (threadId) => [...messages.values()].filter((message) => message.threadId === threadId),
     },
     threadStore: {
       get: async (threadId) => (threadId === sourceThread.id ? sourceThread : null),
@@ -51,6 +54,7 @@ describe('Message Bundle prompt projection', () => {
     const carrier = {
       v: 1,
       sourceThreadId: 'source-thread',
+      note: 'bundle-level reason for forwarding',
       items: [
         { kind: 'message', messageId: message.id },
         {
@@ -85,6 +89,12 @@ describe('Message Bundle prompt projection', () => {
     assert.match(result.content, /source body/);
     assert.match(result.content, /\[卡片: Build result\]\nall checks passed/);
     assert.match(result.content, /Forwarder comment by user:user-1:\nmy forwarding note/);
+    assert.match(result.content, /Bundle note by user:user-1:\nbundle-level reason for forwarding/);
+    assert.equal(
+      result.content.indexOf('Bundle note by user:user-1:') < result.content.indexOf('## Item 1'),
+      true,
+      'bundle note must remain distinct from the first item comment',
+    );
   });
 
   it('uses the same quote-drift tombstone and never leaks the changed source body', async () => {

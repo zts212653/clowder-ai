@@ -22,6 +22,7 @@ interface ChatMessageRowProps {
   selectionEligible: boolean;
   onEnterSelection: (messageId: string) => void;
   onToggleSelection: (messageId: string) => void;
+  forwardingDisabled: boolean;
   eager?: boolean;
   backgroundMountDelayMs?: number;
 }
@@ -46,6 +47,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   selectionEligible,
   onEnterSelection,
   onToggleSelection,
+  forwardingDisabled,
   eager,
   backgroundMountDelayMs,
 }: ChatMessageRowProps) {
@@ -59,6 +61,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
         selectionEligible={selectionEligible}
         onEnterSelection={onEnterSelection}
         onToggleSelection={onToggleSelection}
+        forwardingDisabled={forwardingDisabled}
       >
         <ChatMessage
           message={message}
@@ -70,6 +73,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           onEditCoCreator={onEditCoCreator}
           hideDiagnosticsPanel={hideDiagnosticsPanel}
           dedupCount={dedupCount}
+          forwardingDisabled={forwardingDisabled}
         />
       </MessageActions>
     </MessageViewportBoundary>

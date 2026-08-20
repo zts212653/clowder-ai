@@ -168,7 +168,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
     const primaryCat = record.targetCats[0] ?? 'unknown';
     const jointAcquire = opts.queueProcessor?.acquireExternalExecution?.bind(opts.queueProcessor);
     const controller = jointAcquire
-      ? jointAcquire(record.threadId, record.targetCats, record.userId, {
+      ? await jointAcquire(record.threadId, record.targetCats, record.userId, {
           mode: 'replacement',
           executionId: id,
         })

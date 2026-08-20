@@ -1,3 +1,4 @@
+import { buildPreviewGatewayHostname } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 
 export type HmrStatus = 'idle' | 'connected' | 'disconnected';
@@ -9,7 +10,7 @@ export function useHmrStatus(gatewayPort: number, targetPort: number): HmrStatus
     if (!gatewayPort || !targetPort) return;
     setStatus('idle');
 
-    const wsUrl = `ws://localhost:${gatewayPort}/?__preview_port=${targetPort}`;
+    const wsUrl = `ws://${buildPreviewGatewayHostname(targetPort)}:${gatewayPort}/`;
     let ws: WebSocket | null = null;
     let closed = false;
     let hasEverConnected = false;

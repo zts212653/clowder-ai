@@ -844,6 +844,26 @@ export {
   type SubjectSeenOpportunityV1,
   subjectSeenOpportunityV1Schema,
 } from './memory-cue.js';
+export {
+  ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
+  type AsrPersonMemoryDynamicSceneEntryV1,
+  type AsrPersonMemoryWriteOpportunityV1,
+  type AsrTranscriptSourceCoordinateV1,
+  asrPersonMemoryDynamicSceneEntryV1Schema,
+  asrPersonMemoryWriteOpportunityV1Schema,
+  asrTranscriptSourceCoordinateV1Schema,
+  type DeliveredWriteOpportunityRecordV1,
+  deliveredWriteOpportunityRecordV1Schema,
+  MAX_WRITE_OPPORTUNITY_GENERATION,
+  projectDeliveredWriteOpportunityRecord,
+  WRITE_OPPORTUNITY_DISPOSITIONS,
+  WRITE_OPPORTUNITY_INVALIDATORS,
+  type WriteOpportunityDispositionV1,
+  type WriteOpportunityReentryCarrierV1,
+  writeOpportunityDispositionV1Schema,
+  writeOpportunityGenerationId,
+  writeOpportunityReentryCarrierV1Schema,
+} from './memory-write-opportunity.js';
 // Message types
 export type {
   AgentStreamMessage,
@@ -1056,11 +1076,18 @@ export {
   type DeferredPersonMemoryReceipt,
   type DeferredPersonMemoryResolvedSource,
   type DeferredPersonMemorySourceInput,
+  type DeferredWriteOpportunityReceiptV1,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   deferredPersonMemoryReceiptSchema,
   deferredPersonMemoryResolvedSourceSchema,
   deferredPersonMemorySourceInputSchema,
+  deferredWriteOpportunityReceiptV1Schema,
+  deferredWriteOpportunitySourceRefV1Schema,
+  type WriteOpportunityLineageV1,
+  type WriteOpportunityRefV1,
+  writeOpportunityLineageV1Schema,
+  writeOpportunityRefV1Schema,
 } from './proactive-memory-deferred-receipt.js';
 // F282 Phase D: opaque opportunity episode and calibrated-abstention contract
 export {
