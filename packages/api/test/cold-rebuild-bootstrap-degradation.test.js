@@ -13,7 +13,8 @@
  * These tests pin the degradation contract on all three rebuild paths:
  *   1. serial   — rebuildPromptAfterSessionSeal degrades to the initial
  *      bootstrap context (route-serial.ts).
- *   2. parallel — same contract on the concurrent path (route-parallel.ts).
+ *   2. parallel siblings — same contract on the concurrent path, with two
+ *      targets degrading independently against one empty chain (route-parallel.ts).
  *   3. remedial — rebuildRemedialPromptAfterSessionSeal degrades to the bare
  *      remedial prompt (route-serial.ts stop-gate remedial child).
  *
@@ -122,13 +123,13 @@ function createProjectionService({ state, closeDecisions }) {
 }
 
 function createMockDeps(
-  service,
+  services,
   appended,
   { turnCustodyProjectionService, sessionChainStore, sessionSealer, transcriptReader, sessionManager } = {},
 ) {
   let sequence = 0;
   return {
-    services: { codex: service },
+    services,
     invocationDeps: {
       registry: {
         create: () => ({ invocationId: `outer-inv-${++sequence}`, callbackToken: `tok-${sequence}` }),
@@ -188,7 +189,12 @@ function createMockDeps(
   };
 }
 
-async function runRoute(route, service, threadId, { projectionService, routeOptions = {} } = {}) {
+async function runRoute(
+  route,
+  services,
+  threadId,
+  { targetCats = ['codex'], projectionService, routeOptions = {} } = {},
+) {
   return withCatRegistryLock(async () => {
     const original = catRegistry.getAllConfigs();
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
@@ -198,7 +204,7 @@ async function runRoute(route, service, threadId, { projectionService, routeOpti
     }
     const appended = [];
     try {
-      const deps = createMockDeps(service, appended, {
+      const deps = createMockDeps(services, appended, {
         turnCustodyProjectionService: projectionService,
         // REAL store, ZERO records — the Session #1 / no-sealed-prior shape.
         sessionChainStore: countingChain(new SessionChainStore()),
@@ -211,7 +217,7 @@ async function runRoute(route, service, threadId, { projectionService, routeOpti
         transcriptReader: { readDigest: async () => null },
       });
       const yielded = [];
-      for await (const message of route(deps, ['codex'], 'cold rebuild probe', 'user1', threadId, {
+      for await (const message of route(deps, targetCats, 'cold rebuild probe', 'user1', threadId, {
         invocationController: new AbortController(),
         trackA2ASlot: () => true,
         completeA2ASlots: () => {},
@@ -256,7 +262,7 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
   test('serial: cold-rebuild handshake degrades to the initial prompt instead of failing', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const service = createHandshakeService('codex', ['serial answer']);
-    const { yielded, deps } = await runRoute(routeSerial, service, 'thread-cold-rebuild-serial');
+    const { yielded, deps } = await runRoute(routeSerial, { codex: service }, 'thread-cold-rebuild-serial');
     assertDegradedInvocations({
       yielded,
       service,
@@ -266,17 +272,24 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
     assert.match(service.calls[0], /cold rebuild probe/, 'degraded prompt still carries the user message');
   });
 
-  test('parallel: cold-rebuild handshake degrades to the initial prompt instead of failing', async () => {
+  test('parallel siblings: concurrent cats each degrade independently instead of failing', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
-    const service = createHandshakeService('codex', ['parallel answer']);
-    const { yielded, deps } = await runRoute(routeParallel, service, 'thread-cold-rebuild-parallel');
-    assertDegradedInvocations({
-      yielded,
-      service,
-      getChainCalls: deps.invocationDeps.sessionChainStore.getChainCalls,
+    // Two concurrent targets share one empty chain read window — both hit the
+    // cold-rebuild handshake at the same time (the fan-out sibling shape).
+    const codex = createHandshakeService('codex', ['codex answer']);
+    const claude = createHandshakeService('claude', ['claude answer']);
+    const { yielded, deps } = await runRoute(routeParallel, { codex, claude }, 'thread-cold-rebuild-parallel', {
+      targetCats: ['codex', 'claude'],
     });
-    assert.equal(service.calls.length, 1, 'parallel routes exactly one invocation for the single target');
-    assert.match(service.calls[0], /cold rebuild probe/, 'degraded prompt still carries the user message');
+    for (const service of [codex, claude]) {
+      assertDegradedInvocations({
+        yielded,
+        service,
+        getChainCalls: deps.invocationDeps.sessionChainStore.getChainCalls,
+      });
+      assert.equal(service.calls.length, 1, 'each parallel sibling routes exactly one invocation');
+      assert.match(service.calls[0], /cold rebuild probe/, 'degraded prompt still carries the user message');
+    }
   });
 
   test('remedial: stop-gate remedial child degrades to the bare remedial prompt instead of failing', async () => {
@@ -287,7 +300,7 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
       closeDecisions: [{ shouldBlock: true, transitionObserved: false }],
     });
     const service = createHandshakeService('codex', ['No structured transition.', 'remedial answer']);
-    const { yielded, deps } = await runRoute(routeSerial, service, 'thread-cold-rebuild-remedial', {
+    const { yielded, deps } = await runRoute(routeSerial, { codex: service }, 'thread-cold-rebuild-remedial', {
       projectionService: projection,
       routeOptions: {
         turnCustodyWake: {
