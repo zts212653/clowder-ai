@@ -496,14 +496,6 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                   >
                     {sealingSessionId === session.id ? '封存中…' : '封存当前会话'}
                   </button>
-                  {invocationIsActive && (
-                    <span
-                      data-testid={`seal-session-blocked-${session.id}`}
-                      className="text-micro text-conn-amber-text"
-                    >
-                      请先停止该 Agent，再封存会话
-                    </span>
-                  )}
                 </div>
                 {/* Bind CLI session ID (skip default thread — system-owned, bind returns 403) */}
                 {threadId !== 'default' && (

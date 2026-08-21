@@ -228,7 +228,7 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('0 active');
   });
 
-  it('disables manual seal for a running Agent and explains how to proceed', async () => {
+  it('disables manual seal for a running Agent and explains how to proceed on hover only', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
     ]);
@@ -237,9 +237,9 @@ describe('F24: SessionChainPanel', () => {
 
     const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
     expect(sealButton.disabled).toBe(true);
-    expect(container.querySelector('[data-testid="seal-session-blocked-s1"]')?.textContent).toContain(
-      '请先停止该 Agent，再封存会话',
-    );
+    expect(sealButton.title).toBe('请先停止该 Agent，再封存会话');
+    expect(container.querySelector('[data-testid="seal-session-blocked-s1"]')).toBeNull();
+    expect(container.textContent).not.toContain('请先停止该 Agent，再封存会话');
   });
 
   it('renders panel with bind section even when API returns empty sessions (F33)', async () => {
