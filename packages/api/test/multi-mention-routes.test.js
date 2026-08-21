@@ -117,6 +117,7 @@ function createMockInvocationTracker() {
   const starts = [];
   const completes = [];
   const slotCompletes = [];
+  const allCompletes = [];
   return {
     start(threadId, catId, userId, catIds) {
       const controller = new AbortController();
@@ -129,6 +130,9 @@ function createMockInvocationTracker() {
     completeSlot(threadId, catId, controller) {
       slotCompletes.push({ threadId, catId, controller });
     },
+    completeAll(threadId, catIds, controller) {
+      allCompletes.push({ threadId, catIds: [...catIds], controller });
+    },
     trackExternalSlot() {
       return true;
     },
@@ -140,6 +144,9 @@ function createMockInvocationTracker() {
     },
     getSlotCompletes() {
       return slotCompletes;
+    },
+    getAllCompletes() {
+      return allCompletes;
     },
   };
 }
@@ -241,6 +248,7 @@ describe('Multi-Mention Routes', () => {
       routeController = options.invocationController;
       assert.equal(options.trackA2ASlot(threadId, 'gemini', 'user-1', routeController), true);
       yield { type: 'done', catId: 'gemini', isFinal: true, timestamp: Date.now() };
+      options.completeA2ASlots(threadId, ['gemini'], routeController);
     };
 
     const res = await app.inject({
@@ -256,7 +264,7 @@ describe('Multi-Mention Routes', () => {
     assert.equal(res.statusCode, 200);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const dynamicCompletions = mockInvocationTracker.getSlotCompletes().filter((call) => call.catId === 'gemini');
+    const dynamicCompletions = mockInvocationTracker.getAllCompletes().filter((call) => call.catIds.includes('gemini'));
     assert.equal(dynamicCompletions.length, 1);
     assert.equal(dynamicCompletions[0].threadId, 'thread-1');
     assert.equal(dynamicCompletions[0].controller, routeController);

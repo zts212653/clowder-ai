@@ -227,6 +227,20 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
     guard2.release();
   });
 
+  it('guardSessionSeal blocks only its slot until the active-session pointer can change', () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(guard.acquired, true);
+
+    assert.equal(tracker.start('t1', 'opus', 'user1', ['opus']).signal.aborted, true);
+    assert.equal(tracker.tryStartThread('t1', 'opus', 'user1'), null);
+    assert.equal(tracker.startAll('t1', ['opus', 'codex'], 'user1'), null);
+    assert.equal(tracker.start('t1', 'codex', 'user1', ['codex']).signal.aborted, false);
+
+    guard.release();
+    assert.equal(tracker.start('t1', 'opus', 'user1', ['opus']).signal.aborted, false);
+  });
+
   it('different threads are fully independent', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1', ['opus']);
