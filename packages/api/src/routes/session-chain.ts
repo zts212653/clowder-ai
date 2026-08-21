@@ -58,6 +58,11 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
     has(threadId: string, catId: string): boolean;
     guardSessionSeal?(threadId: string, catId: string): { acquired: boolean; release(): void };
   };
+  /** Canonical durable/provider liveness projection. Incomplete reads fail closed. */
+  resolveSessionSealLiveness?: (
+    threadId: string,
+    ownerUserId: string,
+  ) => Promise<{ catIds: readonly string[]; complete: boolean }>;
 }
 
 interface RuntimeSessionSummary {
@@ -385,6 +390,29 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return candidate.body;
     }
     const { session } = candidate;
+
+    let liveness: { catIds: readonly string[]; complete: boolean };
+    try {
+      if (!opts.resolveSessionSealLiveness) throw new Error('session seal liveness resolver missing');
+      liveness = await opts.resolveSessionSealLiveness(session.threadId, session.userId);
+    } catch {
+      reply.status(503);
+      return {
+        error: 'Unable to verify whether this Agent is still running',
+        code: 'SESSION_LIVENESS_UNAVAILABLE',
+      };
+    }
+    if (!liveness.complete) {
+      reply.status(503);
+      return {
+        error: 'Unable to verify whether this Agent is still running',
+        code: 'SESSION_LIVENESS_UNAVAILABLE',
+      };
+    }
+    if (liveness.catIds.includes(session.catId)) {
+      reply.status(409);
+      return { error: '请先停止该 Agent，再封存会话', code: 'SESSION_ACTIVE_INVOCATION', catId: session.catId };
+    }
 
     // The check and the session-store transition are separated by awaits. Use
     // the tracker slot guard when available so a local invocation cannot start

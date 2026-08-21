@@ -327,6 +327,31 @@ describe('SessionSealer', () => {
   });
 
   describe('postSealHook guard (F231 AC-C3 / KD-10)', () => {
+    test('returns the terminal seal result without waiting for an unbounded best-effort hook', async () => {
+      const { store, sealer } = await createFixtures();
+      const record = store.create(BASE_INPUT);
+      let releaseHook;
+      let hookStarted = false;
+      sealer.registerPostSealHook(async () => {
+        hookStarted = true;
+        await new Promise((resolve) => {
+          releaseHook = resolve;
+        });
+      });
+
+      await sealer.requestSeal({ sessionId: record.id, reason: 'manual' });
+      const outcome = await Promise.race([
+        sealer.finalize({ sessionId: record.id }).then((value) => ({ kind: 'done', value })),
+        new Promise((resolve) => setTimeout(() => resolve({ kind: 'timeout' }), 50)),
+      ]);
+
+      assert.equal(outcome.kind, 'done', 'terminal persistence must not inherit hook latency');
+      assert.deepEqual(outcome.value, { sealed: true, clean: true });
+      assert.equal(hookStarted, true);
+      releaseHook();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
     test('hooks fire after successful finalize terminal write', async () => {
       const { store, sealer } = await createFixtures();
       const record = store.create(BASE_INPUT);

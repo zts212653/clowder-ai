@@ -29,6 +29,7 @@ describe('Session Chain Routes', () => {
     runtimeSessionStoreOverride,
     isSessionSwitchBusy,
     invocationTrackerOverride,
+    resolveSessionSealLiveness = async () => ({ catIds: [], complete: true }),
   ) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
@@ -67,6 +68,7 @@ describe('Session Chain Routes', () => {
       ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
       ...(isSessionSwitchBusy ? { isSessionSwitchBusy } : {}),
       ...(invocationTrackerOverride ? { invocationTracker: invocationTrackerOverride } : {}),
+      resolveSessionSealLiveness,
     });
     await app.ready();
     return store;
@@ -488,6 +490,51 @@ describe('Session Chain Routes', () => {
     assert.equal(store.get(active.id).status, 'active');
   });
 
+  it('POST /api/sessions/:sessionId/seal rejects durable live work after process-local tracker loss', async () => {
+    const tracker = { has: () => false };
+    const durableLiveness = async () => ({ catIds: ['opus'], complete: true });
+    const store = await setup(undefined, undefined, undefined, undefined, tracker, durableLiveness);
+    const active = store.create({
+      cliSessionId: 'cli-running-after-restart',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal fails closed when durable liveness is incomplete', async () => {
+    const store = await setup(undefined, undefined, undefined, undefined, { has: () => false }, async () => ({
+      catIds: [],
+      complete: false,
+    }));
+    const active = store.create({
+      cliSessionId: 'cli-liveness-unknown',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_LIVENESS_UNAVAILABLE');
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
   it('POST /api/sessions/:sessionId/seal returns a conflict when requestSeal loses its CAS race', async () => {
     let store;
     const racingSealer = {
@@ -528,14 +575,15 @@ describe('Session Chain Routes', () => {
     let admittedAfterClaim;
     const sealer = {
       requestSeal: async ({ sessionId, reason }) => {
-        blockedDuringClaim = tracker.start('thread-1', 'opus', 'user-1', ['opus']);
+        blockedDuringClaim = tracker.startAll('thread-1', ['opus'], 'user-1');
         const claimed = store.transitionToSealing(sessionId, reason);
         return claimed ? { accepted: true, status: 'sealing', sessionId } : { accepted: false, status: 'sealed' };
       },
       finalize: async ({ sessionId }) => {
-        admittedAfterClaim = tracker.start('thread-1', 'opus', 'user-1', ['opus']);
+        admittedAfterClaim = tracker.startAll('thread-1', ['opus'], 'user-1');
+        assert.ok(admittedAfterClaim);
         store.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
-        tracker.complete('thread-1', 'opus', admittedAfterClaim);
+        tracker.completeAll('thread-1', ['opus'], admittedAfterClaim);
         return { sealed: true, clean: true };
       },
     };
@@ -554,7 +602,7 @@ describe('Session Chain Routes', () => {
     });
 
     assert.equal(res.statusCode, 200);
-    assert.equal(blockedDuringClaim.signal.aborted, true, 'new work must not capture the old active session');
+    assert.equal(blockedDuringClaim, null, 'new work must not be admitted while the seal CAS owns the slot');
     assert.equal(admittedAfterClaim.signal.aborted, false, 'new work may start after the pointer is cleared');
   });
 

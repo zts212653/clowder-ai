@@ -104,6 +104,7 @@ export class InvocationTracker {
   private active = new Map<string, ActiveInvocation>();
   private deleting = new Set<string>();
   private sessionSealing = new Set<string>();
+  private sessionSealWaiters = new Map<string, Set<() => void>>();
   /** F118: max age before a slot becomes a reaper candidate; `0` disables candidacy. */
   private maxSlotTtlMs: number;
 
@@ -219,10 +220,46 @@ export class InvocationTracker {
       return { acquired: false, release: () => {} };
     }
     this.sessionSealing.add(key);
+    let released = false;
     return {
       acquired: true,
-      release: () => this.sessionSealing.delete(key),
+      release: () => {
+        if (released) return;
+        released = true;
+        if (!this.sessionSealing.delete(key)) return;
+        const waiters = this.sessionSealWaiters.get(key);
+        this.sessionSealWaiters.delete(key);
+        for (const resolve of waiters ?? []) resolve();
+      },
     };
+  }
+
+  /**
+   * Park queue admission behind an in-process session-seal CAS without polling.
+   * The caller must retry startAll() after this resolves because another seal may
+   * have acquired the same slot in the meantime.
+   */
+  async waitForSessionSealRelease(threadId: string, catIds: readonly string[]): Promise<void> {
+    const waits: Promise<void>[] = [];
+    for (const catId of new Set(catIds)) {
+      const key = this.slotKey(threadId, catId);
+      if (!this.sessionSealing.has(key)) continue;
+      waits.push(
+        new Promise<void>((resolve) => {
+          let waiters = this.sessionSealWaiters.get(key);
+          if (!waiters) {
+            waiters = new Set();
+            this.sessionSealWaiters.set(key, waiters);
+          }
+          waiters.add(resolve);
+          if (!this.sessionSealing.has(key) && waiters.delete(resolve)) {
+            if (waiters.size === 0) this.sessionSealWaiters.delete(key);
+            resolve();
+          }
+        }),
+      );
+    }
+    await Promise.all(waits);
   }
 
   /**
@@ -310,6 +347,10 @@ export class InvocationTracker {
     for (const [key, inv] of this.active) {
       if (key.startsWith(prefix)) {
         if (requestUserId && inv.userId !== requestUserId) continue;
+        // Tombstones remain in the map for final-status and seal-fence observation,
+        // but they are not newly canceled work. Re-reporting one would rebroadcast
+        // stale execution IDs and pause a queued replacement a second time.
+        if (inv.state === 'canceled') continue;
         cancelledCatIds.push(inv.catId);
         if (inv.executionId) {
           cancelledExecutionIds.add(inv.executionId);
@@ -506,6 +547,21 @@ export class InvocationTracker {
   }
 
   /**
+   * Release an exact slot after an independent durable/provider probe has
+   * already proved the execution terminal. Unlike routine late cleanup, this
+   * path may remove a canceled teardown tombstone; executionId still fences a
+   * replacement from inheriting that decision.
+   */
+  releaseTerminalByExecutionId(threadId: string, catId: string, executionId: string): ExactExecutionOwnerState {
+    const key = this.slotKey(threadId, catId);
+    const inv = this.active.get(key);
+    if (!inv) return 'absent';
+    if (inv.executionId !== executionId) return 'replacement';
+    this.active.delete(key);
+    return 'released';
+  }
+
+  /**
    * Mark a SINGLE slot from a batch invocation as complete.
    * Unlike complete(), this also matches batchController so a startAll()/tryStartThreadAll()
    * caller can retire finished cats one-by-one without waiting for the whole batch.
@@ -559,8 +615,14 @@ export class InvocationTracker {
    * Returns the primaryCat's (catIds[0]) controller for execution signal.
    * All slots share a `batchController` ref so completeAll can match the batch.
    */
-  startAll(threadId: string, catIds: string[], userId: string = 'unknown', executionId?: string): AbortController {
-    if (this.deleting.has(threadId) || catIds.some((catId) => this.sessionSealing.has(this.slotKey(threadId, catId)))) {
+  startAll(
+    threadId: string,
+    catIds: string[],
+    userId: string = 'unknown',
+    executionId?: string,
+  ): AbortController | null {
+    if (catIds.some((catId) => this.sessionSealing.has(this.slotKey(threadId, catId)))) return null;
+    if (this.deleting.has(threadId)) {
       const controller = new AbortController();
       controller.abort();
       return controller;

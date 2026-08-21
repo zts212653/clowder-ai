@@ -252,18 +252,24 @@ export class SessionSealer implements ISessionSealer {
         ownerUserId: record.userId,
         sealReason: record.sealReason ?? 'unknown',
       };
-      for (const hook of this.postSealHooks) {
-        try {
-          await hook(hookEvent);
-        } catch (err) {
-          log.warn(
-            { sessionId: args.sessionId, error: err instanceof Error ? err.message : String(err) },
-            'post-seal hook failed (best-effort, non-blocking)',
-          );
-        }
-      }
+      // Terminal persistence is the response boundary. Hooks are best-effort
+      // follow-up work and must not make a successful seal wait without bound.
+      void this.runPostSealHooks(hookEvent);
     }
     return { sealed: sealWriteSucceeded, clean: sealWriteSucceeded && finalizeClean };
+  }
+
+  private async runPostSealHooks(event: Parameters<PostSealHook>[0]): Promise<void> {
+    for (const hook of this.postSealHooks) {
+      try {
+        await hook(event);
+      } catch (err) {
+        log.warn(
+          { sessionId: event.sessionId, error: err instanceof Error ? err.message : String(err) },
+          'post-seal hook failed (best-effort, non-blocking)',
+        );
+      }
+    }
   }
 
   /**

@@ -143,7 +143,8 @@ import { stampVisibleTurn } from './visible-turn.js';
 
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[], executionId?: string): AbortController;
-  startAll(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController;
+  startAll(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController | null;
+  waitForSessionSealRelease(threadId: string, catIds: readonly string[]): Promise<void>;
   tryStartThreadAll?(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController | null;
   complete(threadId: string, catId: string, controller?: AbortController): void;
   completeSlot?(threadId: string, catId: string, controller?: AbortController): void;
@@ -170,6 +171,7 @@ interface TrackerLike {
     batch: { aborted: boolean; reason?: string },
   ): 'succeeded' | 'canceled' | 'canceled_by_user';
   completeByExecutionId(threadId: string, catId: string, executionId: string): ExactExecutionOwnerState;
+  releaseTerminalByExecutionId(threadId: string, catId: string, executionId: string): ExactExecutionOwnerState;
 }
 
 interface QueueExecutionResult {
@@ -1154,6 +1156,7 @@ export class QueueProcessor {
       );
     }
     const controller = this.deps.invocationTracker.startAll(threadId, uniqueCatIds, userId, options.executionId);
+    if (!controller) return null;
     if (!controller.signal.aborted) {
       for (const catId of uniqueCatIds) this.supersedePausedTerminalEffects(threadId, catId);
     }
@@ -2723,8 +2726,42 @@ export class QueueProcessor {
     replacementCatIds: string[];
     ownerStates: Record<string, ExactExecutionOwnerState>;
   } {
+    return this.releaseExactExecutionOwnerWith(threadId, targetCats, invocationId, (catId) =>
+      this.deps.invocationTracker.completeByExecutionId(threadId, catId, invocationId),
+    );
+  }
+
+  /**
+   * Reaper-only release after independent durable/provider terminal proof. This
+   * intentionally reaches canceled tombstones that routine terminal cleanup
+   * must leave fenced until route-finally runs.
+   */
+  releaseExactTerminalExecutionOwner(
+    threadId: string,
+    targetCats: readonly string[],
+    invocationId: string,
+  ): {
+    recoveredCatIds: string[];
+    replacementCatIds: string[];
+    ownerStates: Record<string, ExactExecutionOwnerState>;
+  } {
+    return this.releaseExactExecutionOwnerWith(threadId, targetCats, invocationId, (catId) =>
+      this.deps.invocationTracker.releaseTerminalByExecutionId(threadId, catId, invocationId),
+    );
+  }
+
+  private releaseExactExecutionOwnerWith(
+    threadId: string,
+    targetCats: readonly string[],
+    invocationId: string,
+    releaseTrackerOwner: (catId: string) => ExactExecutionOwnerState,
+  ): {
+    recoveredCatIds: string[];
+    replacementCatIds: string[];
+    ownerStates: Record<string, ExactExecutionOwnerState>;
+  } {
     const ownerProjections = [...new Set(targetCats)].map((catId) => {
-      const trackerOwnerState = this.deps.invocationTracker.completeByExecutionId(threadId, catId, invocationId);
+      const trackerOwnerState = releaseTrackerOwner(catId);
       const processingOwnerState = this.completeProcessingSlotByExecutionId(threadId, catId, invocationId);
       const ownerState: ExactExecutionOwnerState =
         trackerOwnerState === 'replacement' || processingOwnerState === 'replacement'
@@ -4504,8 +4541,9 @@ export class QueueProcessor {
       // F194 R7: freshness/action carrier preflight can await after the reservation
       // binds. Re-fence the complete target set immediately before tracker
       // registration: the primary must still own its exact reservation, and every
-      // secondary target must still be free. There is intentionally no await between
-      // this check and startAll.
+      // secondary target must still be free. The first attempt is synchronous; if a
+      // session-seal CAS rejects admission, the retry path below re-fences the exact
+      // processing reservation after waiting for the guard to release.
       if (
         processingReservation &&
         !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
@@ -4524,7 +4562,31 @@ export class QueueProcessor {
       }
 
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
-      controller = invocationTracker.startAll(threadId, targetCats, userId, invocationId);
+      controller = invocationTracker.startAll(threadId, targetCats, userId, invocationId) ?? undefined;
+      while (!controller) {
+        log.info(
+          { threadId, entryId: entry.id, invocationId, targetCats },
+          '[QueueProcessor] queued admission parked behind session-seal CAS',
+        );
+        await invocationTracker.waitForSessionSealRelease(threadId, targetCats);
+        if (
+          processingReservation &&
+          !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
+        ) {
+          processingReservationReplaced = true;
+          log.info(
+            { threadId, entryId: entry.id, invocationId },
+            '[QueueProcessor] canceled parked execution after its processing reservation was replaced',
+          );
+          await invocationRecordStore.update(invocationId, {
+            status: 'canceled',
+            error: 'queue_processing_reservation_replaced',
+          });
+          finalStatus = 'canceled';
+          return executionResult('canceled');
+        }
+        controller = invocationTracker.startAll(threadId, targetCats, userId, invocationId) ?? undefined;
+      }
       if (processingReservation) processingReservation.trackerStarted = true;
 
       // F216 c3: supersede tombstone guard. If a same-turn follow-up arrived during the

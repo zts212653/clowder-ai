@@ -13,6 +13,29 @@ import { describe, it } from 'node:test';
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 
 describe('InvocationTracker: Stop→Seal race (#1313)', () => {
+  it('rejects queued batch admission while a seal guard is held and wakes after release', async () => {
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(guard.acquired, true);
+
+    const blocked = tracker.startAll('t1', ['opus'], 'user1', 'inv-blocked');
+    assert.equal(blocked, null, 'seal contention must be explicit non-admission, not an aborted owner');
+
+    let released = false;
+    const wait = tracker.waitForSessionSealRelease('t1', ['opus']).then(() => {
+      released = true;
+    });
+    await Promise.resolve();
+    assert.equal(released, false, 'queue retry must stay parked while the CAS guard is held');
+
+    guard.release();
+    await wait;
+    assert.equal(released, true);
+    const admitted = tracker.startAll('t1', ['opus'], 'user1', 'inv-admitted');
+    assert.ok(admitted);
+    assert.equal(admitted.signal.aborted, false);
+  });
+
   // ── Core regression: cancel tombstone blocks seal until teardown completes ──
 
   it('guardSessionSeal rejects while a cancel tombstone has pending teardown', () => {
@@ -253,6 +276,21 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
     assert.equal(ctrl.signal.aborted, false);
   });
 
+  it('does not report an already-canceled tombstone as a new cancelAll result', () => {
+    const tracker = new InvocationTracker();
+    const controller = tracker.startAll('t1', ['opus'], 'user1', 'inv-canceled');
+    assert.ok(controller);
+    assert.deepEqual(tracker.cancelAll('t1').catIds, ['opus']);
+    tracker.completeAll('t1', ['opus'], controller);
+
+    const repeated = tracker.cancelAll('t1');
+
+    assert.deepEqual(repeated.catIds, []);
+    assert.deepEqual(repeated.executionIds, []);
+    assert.deepEqual(repeated.executionIdByCatId, {});
+    assert.equal(tracker.getSlotState('t1', 'opus'), 'canceled', 'completed tombstone remains observable');
+  });
+
   it('cancelAll preserves batch final status via batch.aborted (not tombstone)', () => {
     const tracker = new InvocationTracker();
     const batch = tracker.startAll('t1', ['opus', 'codex'], 'user1');
@@ -308,6 +346,21 @@ describe('InvocationTracker: cancelAll → Seal race (#1313 P1)', () => {
     assert.equal(tracker.completeByExecutionId('t1', 'codex', 'inv-late'), 'absent');
     const guard = tracker.guardSessionSeal('t1', 'codex');
     assert.equal(guard.acquired, false, 'teardown fence must survive execution-id cleanup');
+  });
+
+  it('lets only the independently-proven terminal release path reap an exact canceled tombstone', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['codex'], 'user1', 'inv-zombie');
+    tracker.cancelAll('t1');
+
+    assert.equal(tracker.completeByExecutionId('t1', 'codex', 'inv-zombie'), 'absent');
+    assert.equal(tracker.releaseTerminalByExecutionId('t1', 'codex', 'inv-other'), 'replacement');
+    assert.equal(tracker.guardSessionSeal('t1', 'codex').acquired, false);
+
+    assert.equal(tracker.releaseTerminalByExecutionId('t1', 'codex', 'inv-zombie'), 'released');
+    const guard = tracker.guardSessionSeal('t1', 'codex');
+    assert.equal(guard.acquired, true, 'independent terminal proof may release the stale fence');
+    guard.release();
   });
 
   it('startAll replaces cancelAll tombstones and runs normally', () => {

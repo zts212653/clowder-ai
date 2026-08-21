@@ -234,7 +234,7 @@ describe('SlotTracker: per-thread-per-cat isolation', () => {
 
     assert.equal(tracker.start('t1', 'opus', 'user1', ['opus']).signal.aborted, true);
     assert.equal(tracker.tryStartThread('t1', 'opus', 'user1'), null);
-    assert.equal(tracker.startAll('t1', ['opus', 'codex'], 'user1').signal.aborted, true);
+    assert.equal(tracker.startAll('t1', ['opus', 'codex'], 'user1'), null);
     assert.equal(tracker.start('t1', 'codex', 'user1', ['codex']).signal.aborted, false);
 
     guard.release();
