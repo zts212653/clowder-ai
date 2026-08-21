@@ -1587,11 +1587,20 @@ export async function* routeSerial(
         rebuildSessionBootstrap && assemblePromptAfterSeal
           ? async () => {
               const refreshed = await rebuildSessionBootstrap();
-              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
-              if (refreshed.pushRecallPresentations?.length) {
+              if (!refreshed) {
+                // buildSessionBootstrap returns null when the chain has no sealed
+                // prior (Session #1) — a NORMAL condition on cold-rebuild paths
+                // (context-continuity), not a fatal error. Align with the initial
+                // best-effort bootstrap call: degrade to the initial context.
+                log.warn(
+                  { catId, threadId },
+                  '[routeSerial] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context',
+                );
+              }
+              if (refreshed?.pushRecallPresentations?.length) {
                 currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
               }
-              let rebuilt = assemblePromptAfterSeal(refreshed.text);
+              let rebuilt = assemblePromptAfterSeal(refreshed?.text ?? bootstrapContext);
               if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
               if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
               if (structuredDispositionPrompt) rebuilt = `${rebuilt}\n\n---\n\n${structuredDispositionPrompt}`;
@@ -2815,7 +2824,16 @@ export async function* routeSerial(
         const rebuildRemedialPromptAfterSessionSeal = rebuildSessionBootstrap
           ? async () => {
               const refreshed = await rebuildSessionBootstrap();
-              if (!refreshed) throw new Error('sealed_session_bootstrap_unavailable');
+              if (!refreshed) {
+                // Same best-effort semantics as the initial bootstrap call: null
+                // (Session #1, no sealed prior) degrades instead of failing the
+                // remedial invocation.
+                log.warn(
+                  { catId, threadId },
+                  '[routeSerial] remedial session bootstrap rebuild returned no sealed prior; degrading to bare remedial prompt',
+                );
+                return turnCustodyRemedialPrompt;
+              }
               if (refreshed.pushRecallPresentations?.length) {
                 currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
               }
