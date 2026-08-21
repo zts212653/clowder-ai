@@ -94,6 +94,11 @@ export interface SessionSealGuard {
   release: () => void;
 }
 
+/** A short per-slot lease that keeps manual seal/delete out until execution ownership is published. */
+export interface ExecutionAdmissionGuard {
+  release: () => void;
+}
+
 /** Result of atomically comparing a terminal execution with the current slot owner. */
 export type ExactExecutionOwnerState = 'released' | 'absent' | 'replacement';
 /** Non-destructive projection used to fence async terminal side effects. */
@@ -105,6 +110,7 @@ export class InvocationTracker {
   private deleting = new Set<string>();
   private sessionSealing = new Set<string>();
   private sessionSealWaiters = new Map<string, Set<() => void>>();
+  private executionAdmissions = new Map<string, number>();
   /** F118: max age before a slot becomes a reaper candidate; `0` disables candidacy. */
   private maxSlotTtlMs: number;
 
@@ -114,6 +120,15 @@ export class InvocationTracker {
 
   private slotKey(threadId: string, catId: string): string {
     return `${threadId}:${catId}`;
+  }
+
+  private hasExecutionAdmission(threadId: string, catId?: string): boolean {
+    if (catId) return (this.executionAdmissions.get(this.slotKey(threadId, catId)) ?? 0) > 0;
+    const prefix = `${threadId}:`;
+    for (const [key, count] of this.executionAdmissions) {
+      if (count > 0 && key.startsWith(prefix)) return true;
+    }
+    return false;
   }
 
   /**
@@ -191,8 +206,8 @@ export class InvocationTracker {
     if (this.deleting.has(threadId)) {
       return { acquired: false, release: () => {} };
     }
-    // Check if ANY slot is active for this thread
-    if (this.has(threadId)) {
+    // Check if ANY slot is active or between durable retirement and tracker publication.
+    if (this.has(threadId) || this.hasExecutionAdmission(threadId)) {
       return { acquired: false, release: () => {} };
     }
     this.deleting.add(threadId);
@@ -214,6 +229,7 @@ export class InvocationTracker {
     if (
       this.deleting.has(threadId) ||
       this.sessionSealing.has(key) ||
+      this.hasExecutionAdmission(threadId, catId) ||
       this.has(threadId, catId) ||
       this.hasPendingTeardown(threadId, catId)
     ) {
@@ -260,6 +276,42 @@ export class InvocationTracker {
       );
     }
     await Promise.all(waits);
+  }
+
+  /**
+   * Wait out any active manual seal, then synchronously reserve every target slot
+   * against a new seal/delete. The caller may perform asynchronous durable work
+   * under this lease and must publish tracker ownership before releasing it.
+   */
+  async acquireExecutionAdmission(
+    threadId: string,
+    catIds: readonly string[],
+  ): Promise<ExecutionAdmissionGuard | null> {
+    const uniqueCatIds = [...new Set(catIds)];
+    const keys = uniqueCatIds.map((catId) => this.slotKey(threadId, catId));
+    while (true) {
+      if (this.deleting.has(threadId)) return null;
+      if (keys.some((key) => this.sessionSealing.has(key))) {
+        await this.waitForSessionSealRelease(threadId, uniqueCatIds);
+        continue;
+      }
+
+      for (const key of keys) {
+        this.executionAdmissions.set(key, (this.executionAdmissions.get(key) ?? 0) + 1);
+      }
+      let released = false;
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          for (const key of keys) {
+            const count = this.executionAdmissions.get(key) ?? 0;
+            if (count <= 1) this.executionAdmissions.delete(key);
+            else this.executionAdmissions.set(key, count - 1);
+          }
+        },
+      };
+    }
   }
 
   /**

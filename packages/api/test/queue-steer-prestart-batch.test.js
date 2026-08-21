@@ -242,6 +242,86 @@ describe('Steer trackerless exact-batch preemption', () => {
     assert.equal(tracker.has('t1', 'opus'), true, 'the replacement becomes the only slot owner');
   });
 
+  it('parks external replacement before retiring its old batch while manual seal owns the slot', async () => {
+    const queue = new InvocationQueue();
+    const tracker = new InvocationTracker();
+    const durableEntries = new Map();
+    const withdrawalGate = asyncGate();
+    let withdrawalStarted = false;
+    const queueCustodyCoordinator = {
+      persistEntry: mock.fn(async (entry) => {
+        durableEntries.set(entry.id, structuredClone(entry));
+      }),
+      withdrawEntry: mock.fn(async (entry) => {
+        withdrawalStarted = true;
+        withdrawalGate.enter();
+        await withdrawalGate.blocked;
+        return durableEntries.delete(entry.id);
+      }),
+    };
+    const processor = new QueueProcessor({
+      queue,
+      invocationTracker: tracker,
+      queueCustodyCoordinator,
+      messageStore: { markCanceled: mock.fn(async () => null) },
+      socketManager: {
+        broadcastAgentMessage: mock.fn(),
+        broadcastToRoom: mock.fn(),
+        emitToUser: mock.fn(),
+      },
+      log: { info: mock.fn(), warn: mock.fn(), error: mock.fn() },
+    });
+    const a = enqueue(queue, 'old-a');
+    const b = enqueue(queue, 'old-b');
+    durableEntries.set(a.id, structuredClone(a));
+    durableEntries.set(b.id, structuredClone(b));
+
+    const reservation = queue.reserveExactUserBatch('t1', 'user-a', [a.id, b.id]);
+    assert.equal(reservation.outcome, 'reserved');
+    assert.equal(queue.beginExactSteerPreemption('t1', 'user-a', reservation.reservationId), true);
+    assert.equal(queue.activateExactSteerReservation('t1', 'user-a', reservation.reservationId), true);
+    assert.ok(queue.claimExactSteerReservation('t1', 'user-a', reservation.primaryEntryId, reservation.reservationId));
+    processor.reserveProcessingSlot(JSON.stringify(['t1', 'opus']), a.id, 'user-a');
+
+    const sealGuard = tracker.guardSessionSeal('t1', 'opus');
+    assert.equal(sealGuard.acquired, true);
+    let settled = false;
+    const replacementPromise = processor
+      .acquireExternalExecution('t1', ['opus'], 'user-a', {
+        mode: 'replacement',
+        executionId: 'inv-replacement-after-seal',
+      })
+      .then((replacement) => {
+        settled = true;
+        return replacement;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const settledBeforeRelease = settled;
+    const withdrawalStartedBeforeRelease = withdrawalStarted;
+    const oldABeforeRelease = queue.getEntrySnapshot('t1', 'user-a', a.id);
+    const oldBBeforeRelease = queue.getEntrySnapshot('t1', 'user-a', b.id);
+    const durableBeforeRelease = [durableEntries.has(a.id), durableEntries.has(b.id)];
+    sealGuard.release();
+    await withdrawalGate.entered;
+    const racingSealGuard = tracker.guardSessionSeal('t1', 'opus');
+    racingSealGuard.release();
+    withdrawalGate.release();
+    const replacement = await replacementPromise;
+
+    assert.equal(settledBeforeRelease, false, 'replacement must wait before durable retirement begins');
+    assert.equal(withdrawalStartedBeforeRelease, false, 'durable retirement must not start behind a manual seal');
+    assert.equal(oldABeforeRelease?.status, 'processing');
+    assert.equal(oldBBeforeRelease?.status, 'processing');
+    assert.deepEqual(durableBeforeRelease, [true, true]);
+    assert.equal(racingSealGuard.acquired, false, 'execution admission must exclude a second seal during retirement');
+    assert.ok(replacement);
+    assert.equal(queue.getEntrySnapshot('t1', 'user-a', a.id), null);
+    assert.equal(queue.getEntrySnapshot('t1', 'user-a', b.id), null);
+    await waitFor(() => !durableEntries.has(a.id) && !durableEntries.has(b.id));
+    assert.equal(tracker.getExecutionId('t1', 'opus'), 'inv-replacement-after-seal');
+  });
+
   it('persists the occupied slot identity instead of the carrier target order', async () => {
     const queue = new InvocationQueue();
     const tracker = new InvocationTracker();

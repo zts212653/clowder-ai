@@ -99,6 +99,7 @@ import {
 import {
   DEFAULT_INVOCATION_SLOT_TTL_MS,
   type ExactExecutionOwnerState,
+  type ExecutionAdmissionGuard,
   type ExecutionOwnerMatch,
 } from './InvocationTracker.js';
 import { requireOwnerAuthProvenance } from './owner-auth-provenance.js';
@@ -144,6 +145,7 @@ import { stampVisibleTurn } from './visible-turn.js';
 interface TrackerLike {
   start(threadId: string, catId: string, userId: string, catIds?: string[], executionId?: string): AbortController;
   startAll(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController | null;
+  acquireExecutionAdmission(threadId: string, catIds: readonly string[]): Promise<ExecutionAdmissionGuard | null>;
   waitForSessionSealRelease(threadId: string, catIds: readonly string[]): Promise<void>;
   tryStartThreadAll?(threadId: string, catIds: string[], userId?: string, executionId?: string): AbortController | null;
   complete(threadId: string, catId: string, controller?: AbortController): void;
@@ -1086,10 +1088,10 @@ export class QueueProcessor {
   /**
    * Acquire tracker ownership for execution paths that originate outside the queue.
    *
-   * Non-preemptive callers fail if either projection is occupied. Replacement callers
-   * install retirement barriers synchronously, await every durable terminal transition,
-   * then remove the old group and publish the tracker owner. A failed terminal write keeps
-   * the old group visible and prevents the replacement provider from starting.
+   * Non-preemptive callers fail if either projection is occupied. Replacement callers wait
+   * for manual seal exclusion, then keep that admission lease while retiring the old durable
+   * group and publishing the tracker owner. A failed terminal write keeps the old group
+   * visible and prevents the replacement provider from starting.
    */
   async acquireExternalExecution(
     threadId: string,
@@ -1126,41 +1128,60 @@ export class QueueProcessor {
       );
       return null;
     }
-    const retirements = this.preparePrestartRetirements(threadId, uniqueCatIds, userId);
-    if (!retirements) {
-      this.deps.log.error(
-        { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
-        '[QueueProcessor] external replacement rejected inconsistent processing group',
-      );
-      return null;
-    }
-    if (!(await this.terminalizePreparedPrestartRetirements(retirements))) return null;
-    if (!this.commitPreparedPrestartRetirements(retirements)) {
-      this.deps.log.error(
-        { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
-        '[QueueProcessor] external replacement lost retirement barrier before commit',
-      );
-      return null;
-    }
+    const admission = await this.deps.invocationTracker.acquireExecutionAdmission(threadId, uniqueCatIds);
+    if (!admission) return null;
+    try {
+      if (!this.canReplaceExternalTargetSet(threadId, uniqueCatIds, userId)) {
+        this.deps.log.info(
+          { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
+          '[QueueProcessor] external replacement rejected after waiting for execution admission',
+        );
+        return null;
+      }
+      const retirements = this.preparePrestartRetirements(threadId, uniqueCatIds, userId);
+      if (!retirements) {
+        this.deps.log.error(
+          { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
+          '[QueueProcessor] external replacement rejected inconsistent processing group',
+        );
+        return null;
+      }
+      if (!(await this.terminalizePreparedPrestartRetirements(retirements))) return null;
+      if (!this.commitPreparedPrestartRetirements(retirements)) {
+        this.deps.log.error(
+          { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
+          '[QueueProcessor] external replacement lost retirement barrier before commit',
+        );
+        return null;
+      }
 
-    this.runOwnershipValidatedHook(options.onOwnershipValidated);
+      this.runOwnershipValidatedHook(options.onOwnershipValidated);
 
-    const retiredReservations = retirements.map(({ barrier }) => ({
-      entryId: barrier.entryId,
-      ...(barrier.invocationId ? { invocationId: barrier.invocationId } : {}),
-    }));
-    if (retiredReservations.length > 0) {
-      this.deps.log.info(
-        { threadId, replacementExecutionId: options.executionId, retiredReservations },
-        '[QueueProcessor] external replacement retired exact processing reservations',
-      );
+      const retiredReservations = retirements.map(({ barrier }) => ({
+        entryId: barrier.entryId,
+        ...(barrier.invocationId ? { invocationId: barrier.invocationId } : {}),
+      }));
+      if (retiredReservations.length > 0) {
+        this.deps.log.info(
+          { threadId, replacementExecutionId: options.executionId, retiredReservations },
+          '[QueueProcessor] external replacement retired exact processing reservations',
+        );
+      }
+      const controller = this.deps.invocationTracker.startAll(threadId, uniqueCatIds, userId, options.executionId);
+      if (!controller) {
+        this.deps.log.error(
+          { threadId, targetCats: uniqueCatIds, replacementExecutionId: options.executionId },
+          '[QueueProcessor] execution admission lost its manual-seal exclusion before tracker publication',
+        );
+        return null;
+      }
+      if (!controller.signal.aborted) {
+        for (const catId of uniqueCatIds) this.supersedePausedTerminalEffects(threadId, catId);
+      }
+      return controller;
+    } finally {
+      admission.release();
     }
-    const controller = this.deps.invocationTracker.startAll(threadId, uniqueCatIds, userId, options.executionId);
-    if (!controller) return null;
-    if (!controller.signal.aborted) {
-      for (const catId of uniqueCatIds) this.supersedePausedTerminalEffects(threadId, catId);
-    }
-    return controller;
   }
 
   /**
