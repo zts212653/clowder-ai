@@ -463,7 +463,9 @@ export class SessionSealer implements ISessionSealer {
                 ...(this.handoffConfig.fetchFn ? { fetchFn: this.handoffConfig.fetchFn } : {}),
               });
 
-              if (result) {
+              if (!result) {
+                clean = false;
+              } else {
                 const sessionDir = this.transcriptReader.getSessionDir(record.threadId, record.catId, record.id);
                 const { TranscriptWriter: TW } = await import('./TranscriptWriter.js');
                 await TW.writeHandoffDigest(
