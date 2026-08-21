@@ -171,7 +171,7 @@ sequenceDiagram
 
     O->>O: retain typed carrier / generation in owner store
     O->>Q: enqueue private_input(inline, exact targets=[B])
-    Note over Q: append at physical tail; no implicit private priority
+    Note over Q: append at physical tail, no implicit private priority
     Note over Q,H: input itself is absent from Queue Panel and History
     Q-->>D: requestDrain(threadId)
     D->>O: prepare exact invocation binding if this source requires disposition
