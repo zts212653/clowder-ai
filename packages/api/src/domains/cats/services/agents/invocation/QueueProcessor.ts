@@ -93,6 +93,7 @@ import type { StaleProcessingOwnerLease } from './InvocationOwnerLeaseCandidates
 import {
   actionSuccessorInvocationIdempotencyKey,
   type InvocationQueue,
+  isOrdinaryQueueTargetEligible,
   type QueuedHandledResult,
   type QueueEntry,
 } from './InvocationQueue.js';
@@ -3014,6 +3015,10 @@ export class QueueProcessor {
         });
         return;
       }
+      if (primaryEntryRequeued && !this.deps.queue.hasOrdinaryEligibleQueuedForThread(threadId)) {
+        this.pausedSlots.delete(sk);
+        return;
+      }
       // canceled or failed → pause ONLY if there are queued entries to manage.
       if (!this.hasDispatchableQueuedForThread(threadId)) {
         this.pausedSlots.delete(sk);
@@ -3261,7 +3266,11 @@ export class QueueProcessor {
     if (!opts.bypassNonAgentGate && this.hasDispatchableNonAgentQueued(threadId)) return;
     const entries = (this.deps.queue.listAutoExecute?.(threadId) ?? [])
       .filter((entry) => !opts.onlyContinuation || entry.sourceCategory === 'continuation')
-      .filter((entry) => !opts.onlyTargetCat || entry.targetCats[0] === opts.onlyTargetCat)
+      .filter(
+        (entry) =>
+          !opts.onlyTargetCat ||
+          (entry.targetCats[0] === opts.onlyTargetCat && isOrdinaryQueueTargetEligible(entry, opts.onlyTargetCat)),
+      )
       .filter((entry) => !opts.onlyEntryId || entry.id === opts.onlyEntryId)
       .filter((entry) => !opts.excludeEntryIds?.has(entry.id))
       .sort((a, b) => a.createdAt - b.createdAt);
@@ -3283,16 +3292,18 @@ export class QueueProcessor {
     }
 
     for (const entry of entries) {
-      const entryCat = entry.targetCats[0] ?? 'unknown';
+      const eligibleTargetCats = entry.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(entry, catId));
+      const entryCat = eligibleTargetCats[0];
+      if (!entryCat) continue;
       const sk = QueueProcessor.slotKey(threadId, entryCat);
       // Skip if slot is busy (mutex or tracker)
       if (this.processingSlots.has(sk)) continue;
       if (this.deps.invocationTracker.has(threadId, entryCat)) continue;
 
       // Guard: markProcessingById may fail if entry was consumed between snapshot and now
-      if (!this.deps.queue.markProcessingById(threadId, entry.id)) continue;
+      if (!this.deps.queue.markProcessingById(threadId, entry.id, entryCat)) continue;
       const processingEntry = this.deps.queue.getEntrySnapshot(threadId, entry.userId, entry.id);
-      if (!(await this.startReservedEntry(processingEntry ?? entry, sk, entryCat))) continue;
+      if (!(await this.startReservedEntry(processingEntry ?? entry, sk, entryCat, eligibleTargetCats))) continue;
       // Continue scanning — start all entries with free cat slots (parallel dispatch)
     }
   }
@@ -3325,7 +3336,8 @@ export class QueueProcessor {
         !excludeEntryIds.has(entry.id) &&
         entry.source === 'agent' &&
         entry.sourceCategory === 'continuation' &&
-        entry.targetCats[0] === catId,
+        entry.targetCats[0] === catId &&
+        isOrdinaryQueueTargetEligible(entry, catId),
     );
   }
 
@@ -3336,7 +3348,7 @@ export class QueueProcessor {
 
     const slotKey = QueueProcessor.slotKey(threadId, catId);
     if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(threadId, catId)) return false;
-    if (!this.deps.queue.markProcessingById(threadId, entryId)) return false;
+    if (!this.deps.queue.markProcessingById(threadId, entryId, catId)) return false;
 
     const processing = this.deps.queue.getEntrySnapshot(threadId, userId, entryId);
     return this.startReservedEntry(processing ?? current, slotKey, catId, [catId], true);
@@ -3497,7 +3509,10 @@ export class QueueProcessor {
         return { started: false };
       }
 
-      const entryCat = entry.targetCats[0] ?? catId;
+      const eligibleTargetCats = entry.targetCats.filter((targetCatId) =>
+        isOrdinaryQueueTargetEligible(entry, targetCatId),
+      );
+      const entryCat = eligibleTargetCats[0] ?? catId;
       const entrySk = QueueProcessor.slotKey(threadId, entryCat);
 
       if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
@@ -3507,7 +3522,7 @@ export class QueueProcessor {
         continue;
       }
 
-      if (!(await this.startReservedEntry(entry, entrySk, entryCat))) {
+      if (!(await this.startReservedEntry(entry, entrySk, entryCat, eligibleTargetCats))) {
         this.emitContinuationDiagnostic(threadId, catId, 'start_rejected', deferredForBusySlot, entry.id);
         return { started: false };
       }
@@ -3556,7 +3571,8 @@ export class QueueProcessor {
     const nextEntry = exact?.entry ?? this.deps.queue.peekNextQueued(threadId, userId);
     if (!nextEntry) return { started: false };
 
-    const entryCat = nextEntry.targetCats[0] ?? 'unknown';
+    const eligibleTargetCats = nextEntry.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(nextEntry, catId));
+    const entryCat = eligibleTargetCats[0] ?? 'unknown';
     const sk = QueueProcessor.slotKey(threadId, entryCat);
 
     // Mutex check — per-slot (before mutating queue state)
@@ -3585,7 +3601,7 @@ export class QueueProcessor {
     if (!entry) return { started: false };
 
     // Fire-and-forget execution — exact reservation cleanup owns completion side effects.
-    if (!(await this.startReservedEntry(entry, sk, entryCat))) return { started: false };
+    if (!(await this.startReservedEntry(entry, sk, entryCat, eligibleTargetCats))) return { started: false };
 
     return { started: true, entry };
   }
@@ -4539,12 +4555,18 @@ export class QueueProcessor {
 
       // F175: user-message batching — collect adjacent matching entries
       // Placed after idempotency check so batched entries aren't dropped on duplicate
-      if (entry.source === 'user' && !entry.exactSteerBatch && !entry.steerRequestedByCatIds?.length) {
+      if (
+        entry.source === 'user' &&
+        !entry.queuedFailedByCatIds?.length &&
+        !entry.exactSteerBatch &&
+        !entry.steerRequestedByCatIds?.length
+      ) {
         const batch = queue.collectUserBatch(threadId, userId);
         const sortedTargets = [...entry.targetCats].sort();
         const matching = batch.filter(
           (e) =>
             e.source === 'user' &&
+            !e.queuedFailedByCatIds?.length &&
             !e.steerRequestedByCatIds?.length &&
             e.intent === entry.intent &&
             e.ownerAuthProvenance === entry.ownerAuthProvenance &&

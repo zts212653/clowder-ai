@@ -117,6 +117,32 @@ describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
     const q = new InvocationQueue();
     assert.equal(q.findInFlightAgentEntry('t1', 'antig-opus'), null);
   });
+
+  test('does not reuse failed retry staging for a fresh same-turn handoff', async () => {
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const q = new InvocationQueue();
+    const failed = q.enqueue(agentEntryInput({ content: 'old failed handoff' })).entry;
+    assert.deepEqual(
+      q.markQueuedFailedForCatAcrossUsers(
+        failed.threadId,
+        'antig-opus',
+        'inv-failed-child',
+        new Set([failed.id]),
+        'invocation_failed',
+      ),
+      [{ entryId: failed.id, userId: failed.userId }],
+    );
+
+    assert.equal(q.findInFlightAgentEntry('t1', 'antig-opus'), null);
+    assert.equal(
+      q.coalesceContentIntoQueuedAgent('t1', 'system', failed.id, 'fresh handoff', 'm2'),
+      false,
+      'direct callers must not splice content into failed retry staging',
+    );
+    const retained = q.getEntrySnapshot('t1', 'system', failed.id);
+    assert.equal(retained.content, 'old failed handoff');
+    assert.deepEqual(retained.queuedFailedByCatIds, ['antig-opus']);
+  });
 });
 
 describe('InvocationQueue.coalesceContentIntoQueuedAgent (F-coalesce sourceCategory guard)', () => {

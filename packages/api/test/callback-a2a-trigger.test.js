@@ -2713,3 +2713,155 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     );
   });
 });
+
+describe('enqueueA2ATargets same-thread fan-out custody', () => {
+  function enqueueExistingCarrier(queue) {
+    const existing = queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-fanout',
+      userId: 'user-1',
+      content: 'first handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-source',
+      a2aTriggerMessageId: 'message-first',
+    }).entry;
+    queue.backfillMessageId('thread-fanout', 'user-1', existing.id, 'message-first');
+    return existing;
+  }
+
+  function appendTriggerMessage(store) {
+    return store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'fan-out follow-up',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 200,
+      threadId: 'thread-fanout',
+      deliveryStatus: 'queued',
+    });
+  }
+
+  function buildDeps(invocationQueue, messageStore, tryAutoExecute) {
+    return {
+      router: { async *routeExecution() {} },
+      invocationRecordStore: { create() {}, update() {} },
+      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      messageStore,
+      queueProcessor: { onInvocationComplete() {}, tryAutoExecute },
+      invocationQueue,
+      log: { info() {}, warn() {}, error() {} },
+    };
+  }
+
+  test('binds mixed enqueued and coalesced carriers before auto-execution', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    enqueueExistingCarrier(invocationQueue);
+    const triggerMessage = appendTriggerMessage(messageStore);
+    let custodyAtAutoExecute;
+
+    const result = await enqueueA2ATargets(
+      buildDeps(invocationQueue, messageStore, () => {
+        custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
+      }),
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        threadId: 'thread-fanout',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-source',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['codex-terra']);
+    assert.deepEqual(result.coalesced, ['codex']);
+    assert.ok(custodyAtAutoExecute, 'complete fan-out custody must exist before either child can start');
+    assert.deepEqual(Object.keys(custodyAtAutoExecute.carrierByTargetCatId).sort(), ['codex', 'codex-terra']);
+  });
+
+  test('rolls back mixed admissions when existing custody has an incompatible carrier set', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const existing = enqueueExistingCarrier(invocationQueue);
+    const before = invocationQueue.getEntrySnapshot('thread-fanout', 'user-1', existing.id);
+    const triggerMessage = appendTriggerMessage(messageStore);
+    assert.equal(
+      messageStore.initializeQueueCustody(triggerMessage.id, {
+        version: 1,
+        entryId: `fanout:${triggerMessage.id}`,
+        revision: 1,
+        ownerAuthProvenance: 'unknown',
+        carrierByTargetCatId: {
+          codex: {
+            entryId: 'wrong-codex-carrier',
+            source: 'agent',
+            sourceCategory: 'a2a',
+            callerCatId: 'opus',
+            a2aParentInvocationId: 'parent-source',
+            a2aTriggerMessageId: triggerMessage.id,
+            autoExecute: true,
+            createdAt: 100,
+          },
+          'codex-terra': {
+            entryId: 'wrong-terra-carrier',
+            source: 'agent',
+            sourceCategory: 'a2a',
+            callerCatId: 'opus',
+            a2aParentInvocationId: 'parent-source',
+            a2aTriggerMessageId: triggerMessage.id,
+            autoExecute: true,
+            createdAt: 100,
+          },
+        },
+        intent: 'execute',
+        status: 'queued',
+        allTargetCats: ['codex', 'codex-terra'],
+        pendingTargetCats: ['codex', 'codex-terra'],
+        notifiedByCatIds: [],
+        seenByCatIds: [],
+        seenInvocationIdByCatId: {},
+        failedByCatIds: [],
+        handledByCatIds: [],
+        priority: 'normal',
+        createdAt: 100,
+        updatedAt: 100,
+      }).kind,
+      'initialized',
+    );
+    let autoExecuteCalls = 0;
+
+    await assert.rejects(
+      enqueueA2ATargets(
+        buildDeps(invocationQueue, messageStore, () => {
+          autoExecuteCalls += 1;
+        }),
+        {
+          targetCats: ['codex', 'codex-terra'],
+          content: triggerMessage.content,
+          userId: 'user-1',
+          threadId: 'thread-fanout',
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-source',
+        },
+      ),
+      /same-thread fan-out Queue custody identity mismatch/,
+    );
+
+    assert.equal(autoExecuteCalls, 0);
+    assert.deepEqual(invocationQueue.list('thread-fanout', 'user-1'), [before]);
+  });
+});

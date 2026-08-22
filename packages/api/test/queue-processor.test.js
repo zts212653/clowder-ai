@@ -3156,7 +3156,9 @@ describe('QueueProcessor', () => {
 
       try {
         await durableProcessor.processNext('t1', 'u1');
-        await waitFor(() => durableProcessor.getPauseReason('t1', 'opus') === 'failed');
+        await waitFor(() =>
+          durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id)?.queuedFailedByCatIds?.includes('opus'),
+        );
 
         const restored = durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
         const stored = durableStore.getById(message.id);
@@ -3166,6 +3168,11 @@ describe('QueueProcessor', () => {
         assert.equal(stored.deliveryStatus, 'queued');
         assert.equal(stored.queueCustody.status, 'queued');
         assert.deepEqual(stored.queueCustody.failedByCatIds, ['opus']);
+        assert.equal(
+          durableProcessor.getPauseReason('t1', 'opus'),
+          undefined,
+          'failed retry staging is fenced by receipt authority, not a generic Queue pause/resume path',
+        );
         assert.equal(
           scheduledRecoveryCount,
           0,
@@ -4629,6 +4636,33 @@ describe('QueueProcessor', () => {
     assert.ok(result.entry);
   });
 
+  it('ordinary dequeue preserves an eligible sibling on the same failed-target carrier', async () => {
+    const routedTargetSets = [];
+    deps.router.routeExecution = mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats) {
+      routedTargetSets.push([...targetCats]);
+      yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+    });
+    processor = new QueueProcessor(deps);
+    const mixed = enqueueEntry(deps.queue, {
+      targetCats: ['opus', 'codex'],
+      source: 'agent',
+      sourceCategory: 'a2a',
+    });
+    deps.queue.markQueuedFailedForCatAcrossUsers(
+      mixed.threadId,
+      'opus',
+      'failed-opus',
+      new Set([mixed.id]),
+      'invocation_failed',
+    );
+
+    const result = await processor.processNext('t1', 'u1');
+
+    assert.equal(result.started, true, 'the carrier remains dispatchable for its nonfailed target');
+    await waitFor(() => routedTargetSets.length === 1);
+    assert.deepEqual(routedTargetSets, [['codex']], 'provider execution must exclude the failed sibling');
+  });
+
   it('queued execution broadcasts intent_mode with invocationId when processing starts', async () => {
     const entry = enqueueEntry(deps.queue, { targetCats: ['codex'], intent: 'execute' });
     deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
@@ -5371,7 +5405,7 @@ describe('QueueProcessor', () => {
     );
   });
 
-  it('threshold seal capsule in failed queued execution still starts continuation', async () => {
+  it('threshold seal capsule starts its successor without generically retrying failed primary work', async () => {
     let routeCalls = 0;
     const routeContents = [];
     let pendingContinuation = null;
@@ -5428,17 +5462,19 @@ describe('QueueProcessor', () => {
 
     await new Promise((r) => setTimeout(r, 150));
 
-    assert.equal(routeCalls, 3, 'continuation runs first, then the failed primary work naturally retries');
+    assert.equal(routeCalls, 2, 'the new continuation runs, but failed primary work requires explicit retry authority');
     assert.match(routeContents[1], /previous session was sealed/i);
     assert.equal(
       (routeContents[1].match(/Continue the same structured work from the sealed session/g) ?? []).length,
       1,
       'stored pending continuation and queued continuation must not duplicate the bootstrap prompt',
     );
-    assert.equal(routeContents[2], 'initial work', 'failed primary work remains Queue-owned after continuation');
+    const retained = failDeps.queue.getEntrySnapshot('t1', 'u1', entry.id);
+    assert.equal(retained.content, 'initial work', 'failed primary work remains Queue-owned after continuation');
+    assert.deepEqual(retained.queuedFailedByCatIds, ['opus']);
   });
 
-  it('failed continuation dispatches its newly sealed successor before retrying the attempted carrier', async () => {
+  it('failed continuation dispatches its newly sealed successor without retrying the attempted carrier', async () => {
     const routeContents = [];
     const successorCapsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
@@ -5483,16 +5519,15 @@ describe('QueueProcessor', () => {
     });
 
     await continuationProcessor.tryAutoExecute('t1', { bypassNonAgentGate: true });
-    await waitFor(() => routeContents.length === 3);
+    await waitFor(() => routeContents.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     assert.equal(routeContents[0], 'old-continuation');
     assert.match(routeContents[1], /previous session was sealed/i, 'the exact new successor must dispatch next');
-    assert.equal(routeContents[2], 'old-continuation', 'the failed carrier remains Queue-owned for a later retry');
-    assert.equal(
-      continuationDeps.queue.list('t1', 'u1').some((entry) => entry.id === oldContinuation.id),
-      false,
-      'the later successful retry consumes the original continuation',
-    );
+    assert.equal(routeContents.length, 2, 'ordinary continuation scheduling must not replay failed retry staging');
+    const retained = continuationDeps.queue.getEntrySnapshot('t1', 'u1', oldContinuation.id);
+    assert.equal(retained.content, 'old-continuation');
+    assert.deepEqual(retained.queuedFailedByCatIds, ['opus']);
   });
 
   it('threshold seal capsule after user stop stores pending but does not auto-run continuation', async () => {
@@ -6430,6 +6465,33 @@ describe('QueueProcessor', () => {
   // ── F122B: tryAutoExecute ──
 
   describe('tryAutoExecute (F122B agent auto-execute)', () => {
+    it('executes only the eligible sibling from a mixed failed-target carrier', async () => {
+      const routedTargetSets = [];
+      deps.router.routeExecution = mock.fn(async function* (_userId, _content, _threadId, _messageId, targetCats) {
+        routedTargetSets.push([...targetCats]);
+        yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+      });
+      processor = new QueueProcessor(deps);
+      const mixed = enqueueEntry(deps.queue, {
+        targetCats: ['opus', 'codex'],
+        source: 'agent',
+        sourceCategory: 'a2a',
+        autoExecute: true,
+      });
+      deps.queue.markQueuedFailedForCatAcrossUsers(
+        mixed.threadId,
+        'opus',
+        'failed-opus',
+        new Set([mixed.id]),
+        'invocation_failed',
+      );
+
+      await processor.tryAutoExecute('t1', { bypassNonAgentGate: true });
+
+      await waitFor(() => routedTargetSets.length === 1);
+      assert.deepEqual(routedTargetSets, [['codex']]);
+    });
+
     it('immediately executes autoExecute entry when target cat slot is free', async () => {
       enqueueEntry(deps.queue, {
         userId: 'system',
