@@ -6,6 +6,34 @@ export function isLoopbackAddress(address: string): boolean {
   return LOOPBACK_ADDRS.has(address);
 }
 
+function parseIpv4Address(address: string): [number, number, number, number] | null {
+  const normalized = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+  const octets = normalized.split('.');
+  if (octets.length !== 4) return null;
+
+  const parsed = octets.map((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) return Number.NaN;
+    const value = Number(octet);
+    return value <= 255 ? value : Number.NaN;
+  });
+  if (parsed.some(Number.isNaN)) return null;
+  return parsed as [number, number, number, number];
+}
+
+/** RFC 1918 plus the 100.64.0.0/10 shared range used by Tailscale IPv4 peers. */
+export function isPrivateNetworkAddress(address: string): boolean {
+  const octets = parseIpv4Address(address);
+  if (!octets) return false;
+
+  const [first, second] = octets;
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 100 && second >= 64 && second <= 127)
+  );
+}
+
 function normalizeHostName(rawHost: string): string | null {
   const trimmed = rawHost.trim().toLowerCase();
   if (!trimmed) return null;
@@ -69,6 +97,12 @@ function hasNonEmptyHeader(value: string | string[] | undefined): boolean {
  */
 export function isDirectLoopbackRequest(request: FastifyRequest): boolean {
   if (!isLoopbackAddress(request.ip)) return false;
+  return !PROXY_FORWARDING_HEADERS.some((h) => hasNonEmptyHeader(request.headers[h]));
+}
+
+/** A directly connected RFC 1918/Tailscale IPv4 peer, never a forwarded client. */
+export function isDirectPrivateNetworkRequest(request: FastifyRequest): boolean {
+  if (!isPrivateNetworkAddress(request.ip)) return false;
   return !PROXY_FORWARDING_HEADERS.some((h) => hasNonEmptyHeader(request.headers[h]));
 }
 

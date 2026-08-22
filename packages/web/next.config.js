@@ -99,8 +99,8 @@ module.exports = withPWA({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
   reloadOnOnline: false,
-  // Start URL is a static shell; precache it so PWA cold-open does not block on network.
-  dynamicStartUrl: false,
+  // The chat shell is build-specific; resolve it through the runtime page cache.
+  dynamicStartUrl: true,
   // Keep default page/document runtime caching and only override what we need.
   extendDefaultRuntimeCaching: true,
   workboxOptions: {

@@ -462,7 +462,10 @@ async function main(): Promise<void> {
   // F156 D-1: Cookie parsing + session-based identity (replaces userId self-reporting)
   await app.register(fastifyCookie);
   await app.register(sessionAuthPlugin);
-  await app.register(sessionRoute, { ownerUserId: privateUserId });
+  await app.register(sessionRoute, {
+    ownerUserId: privateUserId,
+    trustPrivateNetwork: process.env.CORS_ALLOW_PRIVATE_NETWORK === 'true',
+  });
 
   // WebSocket support (F089 terminal)
   await app.register(fastifyWebsocket);

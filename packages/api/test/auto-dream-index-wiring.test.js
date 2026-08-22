@@ -15,7 +15,10 @@ describe('F255 production bootstrap wiring', () => {
 
   it('binds every private memory surface to one normalized startup owner', () => {
     assert.match(source, /const privateUserId = \(process\.env\.CAT_CAFE_USER_ID \?\? 'default-user'\)\.trim\(\);/);
-    assert.match(source, /await app\.register\(sessionRoute, \{ ownerUserId: privateUserId \}\);/);
+    assert.match(
+      source,
+      /await app\.register\(sessionRoute, \{\n\s+ownerUserId: privateUserId,\n\s+trustPrivateNetwork: process\.env\.CORS_ALLOW_PRIVATE_NETWORK === 'true',\n\s+\}\);/,
+    );
     assert.match(source, /privateUserId,\n\s+\/\/ Phase E-2/);
     assert.match(source, /messageStore\.getByThread\(threadId, limit \?\? 2000, privateUserId\)/);
     assert.match(source, /privateOwnerUserId: privateUserId/);

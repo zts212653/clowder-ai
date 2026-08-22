@@ -5,7 +5,7 @@ topics: [security, websocket, cswsh, origin-validation, auth]
 doc_kind: spec
 created: 2026-04-10
 reopened: 2026-04-16
-updated: 2026-04-16
+updated: 2026-08-12
 ---
 
 # F156: Security Hardening — 实时通道 + 本机信任边界加固
@@ -360,6 +360,31 @@ operator实测：刷新页面后 thread 又消失了，只有回到首页再进�
 - 若只修了可用性止血、没修体验分层，只能算"事故止血完成"，不能算"F156 体验闭环"
 
 ---
+
+## 2026-08-12 Fallout：显式可信私网无法恢复 owner session
+
+### 现象与根因
+
+手机和平板通过 Tailscale IPv4 直连 `:3003` 时，网络、静态资源和前端渲染均正常，但 `/api/session` 被签为 `unpaired-user`，页面因此只显示空猫咖。根因是 D-1 后续收紧把 owner bootstrap 限定为 direct loopback，却没有把 Phase A 已存在的 `CORS_ALLOW_PRIVATE_NETWORK=true` 映射到 session 配对语义。另有一条独立放大链：静态 chat 文档和 PWA start URL 允许旧 HTML shell 跨构建存活，先表现为客户端 chunk 异常。
+
+完整诊断证据见 `docs/bug-report/tailscale-owner-session-bootstrap/bug-report.md`。
+
+### 决策
+
+1. 默认边界不变：未显式开启私网信任时，所有远端 bootstrap 继续是非 owner。
+2. `CORS_ALLOW_PRIVATE_NETWORK=true` 的含义在单用户部署中保持一致：它同时允许私网 Origin，并允许**直接连接**的 RFC1918/Tailscale IPv4 peer bootstrap 启动时归一化出的 owner 身份。
+3. 身份判断只使用实际 peer IP；任何带标准 proxy forwarding header 的请求都不走该 owner bootstrap，避免把代理宣称的来源当信任证据。
+4. chat 根页和 thread 页使用动态文档，PWA start URL 不再跨构建 precache；静态 chunk 仍可按内容哈希安全缓存。
+
+### Fallout 验收
+
+- [x] 可信 RFC1918、Tailscale `100.64.0.0/10` 和 IPv4-mapped Tailscale peer 在 opt-in 下获得 owner session
+- [x] 公网、CGNAT 边界外、loopback/private proxy 与未 opt-in 私网仍不能获得 owner session
+- [x] chat 根页和 thread 页均显式退出静态 HTML 缓存
+- [x] PWA start URL 改为 dynamic，不再把根文档作为跨构建静态 shell
+- [x] 隔离生产构建验收：两条 chat 路由均标为 dynamic，实际响应为 `Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate`，service worker precache manifest 不含 `/`
+- [ ] 非作者安全 review 与 merge gate
+- [ ] runtime 更新后使用真实 Tailscale IP 验收历史 thread 恢复
 
 ## Spun-off Items（闭环时拆出，不留尾巴）
 
