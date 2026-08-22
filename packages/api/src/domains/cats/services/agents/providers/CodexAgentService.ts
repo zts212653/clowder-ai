@@ -1123,9 +1123,23 @@ export class CodexAgentService implements AgentService {
     const reasoningArgs = buildCodexReasoningArgs(effortLevel);
     const sandboxConfigArgs = ['--config', `sandbox_mode=${toTomlString(sandboxMode)}`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
-    const contextWindow = this.carrierMode === 'exec_json' ? options?.contextCapacity?.windowTokens : undefined;
+    // #1381: inject the config-owned RAW/NATIVE window, never the
+    // effective/pinned capacity — Codex reports back
+    // `native * effective_context_window_percent`, so injecting the pinned
+    // value recursed (258400 → 245480 → 233206 → …). An explicit null means
+    // this invocation has no config-owned window (report/pin-derived) and
+    // nothing may be injected; undefined is a legacy caller without an
+    // invocation snapshot and keeps the pre-#1381 contextCapacity behavior.
+    const nativeWindowTokens =
+      options?.contextNativeWindowTokens !== undefined
+        ? options.contextNativeWindowTokens
+        : options?.contextCapacity?.windowTokens;
+    const contextWindow =
+      this.carrierMode === 'exec_json' && nativeWindowTokens != null && nativeWindowTokens > 0
+        ? nativeWindowTokens
+        : undefined;
     const contextWindowArgs: string[] =
-      contextWindow && contextWindow > 0
+      contextWindow != null
         ? [
             '--config',
             `model_context_window=${contextWindow}`,

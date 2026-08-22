@@ -460,6 +460,18 @@ export interface AgentServiceOptions {
   sessionId?: string;
   /** #1208: same capacity snapshot used by prompt assembly and lifecycle health. */
   contextCapacity?: AgentContextCapacity;
+  /**
+   * #1381: raw/native provider window owned by member config (manual/catalog),
+   * captured before any session pin or carrier report shrinks the effective
+   * capacity. Providers with nativeWindowControl inject THIS as their native
+   * window (e.g. Codex `model_context_window`), never the effective/pinned
+   * `contextCapacity.windowTokens` — Codex reports back
+   * `native * effective_context_window_percent`, so feeding the effective value
+   * back recursed (258400 → 245480 → 233206 → …).
+   * `null` explicitly means "no config-owned native window; do not inject".
+   * `undefined` is a legacy caller: fall back to `contextCapacity.windowTokens`.
+   */
+  contextNativeWindowTokens?: number | null;
   /** F262: Raw per-thread member effort. Providers validate against the effective model before applying it. */
   reasoningEffortOverride?: CliEffortPreset;
   /** F291: Resolved Codex OAuth requested tier. Undefined means inherit Codex user config. */

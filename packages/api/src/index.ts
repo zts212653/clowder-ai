@@ -2538,7 +2538,7 @@ async function main(): Promise<void> {
         },
       }),
     releaseExactOwner: (threadId, targetCats, executionId) => {
-      queueProcessor.releaseExactExecutionOwner(threadId, targetCats, executionId);
+      queueProcessor.releaseExactTerminalExecutionOwner(threadId, targetCats, executionId);
     },
     log: app.log,
   });
@@ -4889,6 +4889,9 @@ async function main(): Promise<void> {
     isSessionSwitchBusy: (threadId, catId, userId) =>
       (invocationTracker.has(threadId, catId) && invocationTracker.getUserId(threadId, catId) === userId) ||
       queueProcessor.hasPendingForCat(threadId, userId, catId),
+    invocationTracker,
+    resolveSessionSealLiveness: (threadId, ownerUserId) =>
+      activeExecutionService.resolveWorkingPresence(threadId, ownerUserId),
   });
   await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });

@@ -487,7 +487,7 @@ export function createA2ASlotTrackingBridge(
   invocationTracker:
     | {
         trackExternalSlot?: InvocationTracker['trackExternalSlot'];
-        completeSlot?: InvocationTracker['completeSlot'];
+        completeAll?: InvocationTracker['completeAll'];
       }
     | undefined,
   invocationController: AbortController,
@@ -496,16 +496,16 @@ export function createA2ASlotTrackingBridge(
   return {
     invocationController,
     trackA2ASlot: (threadId, catId, userId, controller) => {
-      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeSlot) {
+      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeAll) {
         throw new Error('A2A slot admission unavailable: InvocationTracker bridge missing');
       }
       return invocationTracker.trackExternalSlot(threadId, catId, controller, userId, [catId], executionId);
     },
     completeA2ASlots: (threadId, catIds, controller) => {
-      if (!invocationTracker?.completeSlot) {
+      if (!invocationTracker?.completeAll) {
         throw new Error('A2A slot cleanup unavailable: InvocationTracker bridge missing');
       }
-      for (const catId of catIds) invocationTracker.completeSlot(threadId, catId, controller);
+      invocationTracker.completeAll(threadId, [...catIds], controller);
     },
   };
 }

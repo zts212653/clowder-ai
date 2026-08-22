@@ -1,4 +1,26 @@
 /**
+ * #1382 review P2: stable identity of the capacity-pin recovery note. A pin
+ * carries at most ONE recovery instruction — when the carrier's reported
+ * number jitters (245480 → 245481), the previous note is replaced in place
+ * rather than appended, so provenance never grows unbounded.
+ */
+export const CAPACITY_PIN_RECOVERY_NOTE_PATTERN =
+  /; carrier now reports [\d,]+ tokens — seal the session to recover if this pin was polluted/;
+
+/**
+ * Upsert the recovery note into a provenance string: exact note already
+ * present → unchanged; an older note with a different report number →
+ * replaced in place; otherwise appended.
+ */
+export function upsertCapacityPinRecoveryNote(provenance: string, note: string): string {
+  if (provenance.includes(note)) return provenance;
+  if (CAPACITY_PIN_RECOVERY_NOTE_PATTERN.test(provenance)) {
+    return provenance.replace(CAPACITY_PIN_RECOVERY_NOTE_PATTERN, note);
+  }
+  return `${provenance}${note}`;
+}
+
+/**
  * Session Chain Store
  * F24: Thread → N Sessions per cat, context health tracking.
  *
@@ -7,7 +29,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, HybridProgress, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
+import type { CatId, HybridProgress, SessionCapacityPin, SessionPolicySnapshot, SessionRecord } from '@cat-cafe/shared';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
@@ -123,6 +145,23 @@ export interface ISessionChainStore {
   getByChainKey(chainKey: string): SessionRecord | null | Promise<SessionRecord | null>;
   /** Atomically increment compressionCount and return the new value. Returns null if session not found. */
   incrementCompressionCount(id: string): number | null | Promise<number | null>;
+  /**
+   * #1382 maintainer P1: atomically merge a provenance note into the STORED
+   * capacityPin without copying caller-stale numeric fields — a concurrent
+   * pin shrink must never be undone by a delayed provenance write. Dedup:
+   * no-op when the exact note is already present. Returns the updated record,
+   * or null when nothing was written.
+   */
+  appendCapacityPinProvenance(id: string, note: string): SessionRecord | null | Promise<SessionRecord | null>;
+  /**
+   * #1382 maintainer P1: atomically apply a shrink-only capacity pin — the
+   * candidate is written only when no usable pin is stored or its windowTokens
+   * is <= the CURRENT stored pin's. A stored smaller constraint is never
+   * overwritten by a delayed larger candidate (one-way pin invariant).
+   * Returns the record as it stands after the atomic decision, or null when
+   * the session does not exist.
+   */
+  shrinkCapacityPin(id: string, candidate: SessionCapacityPin): SessionRecord | null | Promise<SessionRecord | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
   listSealingSessions(): string[] | Promise<string[]>;
 }
@@ -481,6 +520,39 @@ export class SessionChainStore implements ISessionChainStore {
     record.compressionCount += 1;
     record.updatedAt = Date.now();
     return record.compressionCount;
+  }
+
+  appendCapacityPinProvenance(id: string, note: string): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record?.capacityPin) return null;
+    const pin = record.capacityPin;
+    if (typeof pin.provenance !== 'string' || pin.provenance.includes(note)) return null;
+    // Merge onto the CURRENT stored pin — never a caller-stale copy, so a
+    // concurrent shrink is never undone (synchronous store = atomic here).
+    // upsert = semantic dedup: a jittered report number replaces the previous
+    // note in place instead of growing provenance unbounded.
+    record.capacityPin = { ...pin, provenance: upsertCapacityPinRecoveryNote(pin.provenance, note) };
+    record.updatedAt = Date.now();
+    return record;
+  }
+
+  shrinkCapacityPin(id: string, candidate: SessionCapacityPin): SessionRecord | null {
+    const record = this.records.get(id);
+    if (!record) return null;
+    const current = record.capacityPin;
+    if (
+      current &&
+      Number.isFinite(current.windowTokens) &&
+      current.windowTokens > 0 &&
+      candidate.windowTokens > current.windowTokens
+    ) {
+      // A smaller constraint is already stored — never expand (synchronous
+      // store = the compare-and-write is atomic here).
+      return record;
+    }
+    record.capacityPin = candidate;
+    record.updatedAt = Date.now();
+    return record;
   }
 
   listSealingSessions(): string[] {

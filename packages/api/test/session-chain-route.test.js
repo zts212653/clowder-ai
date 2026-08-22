@@ -23,7 +23,14 @@ describe('Session Chain Routes', () => {
   let SessionChainStore;
   let sessionChainRoutes;
 
-  async function setup(threadStoreOverride, sealerOverride, runtimeSessionStoreOverride, isSessionSwitchBusy) {
+  async function setup(
+    threadStoreOverride,
+    sealerOverride,
+    runtimeSessionStoreOverride,
+    isSessionSwitchBusy,
+    invocationTrackerOverride,
+    resolveSessionSealLiveness = async () => ({ catIds: [], complete: true }),
+  ) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const routeMod = await import('../dist/routes/session-chain.js');
     SessionChainStore = storeMod.SessionChainStore;
@@ -38,8 +45,19 @@ describe('Session Chain Routes', () => {
       });
     app = Fastify();
     const mockSealer = sealerOverride ?? {
-      requestSeal: async () => ({ accepted: true }),
-      finalize: async () => {},
+      requestSeal: async ({ sessionId, reason }) => {
+        const session = store.get(sessionId);
+        if (!session || session.status !== 'active') return { accepted: false, status: session?.status ?? 'sealed' };
+        store.update(sessionId, { status: 'sealing', sealReason: reason, updatedAt: Date.now() });
+        return { accepted: true, status: 'sealing', sessionId };
+      },
+      finalize: async ({ sessionId }) => {
+        const session = store.get(sessionId);
+        if (session?.status === 'sealing') {
+          store.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+        }
+        return { sealed: true, clean: true };
+      },
       reconcileStuck: async () => 0,
       reconcileAllStuck: async () => 0,
     };
@@ -49,6 +67,8 @@ describe('Session Chain Routes', () => {
       sessionSealer: mockSealer,
       ...(runtimeSessionStoreOverride ? { runtimeSessionStore: runtimeSessionStoreOverride } : {}),
       ...(isSessionSwitchBusy ? { isSessionSwitchBusy } : {}),
+      ...(invocationTrackerOverride ? { invocationTracker: invocationTrackerOverride } : {}),
+      resolveSessionSealLiveness,
     });
     await app.ready();
     return store;
@@ -387,6 +407,231 @@ describe('Session Chain Routes', () => {
     assert.equal(body.contextHealth.source, 'exact');
   });
 
+  it('POST /api/sessions/:sessionId/seal seals an idle owned active session and the next activation gets a new record', async () => {
+    const store = await setup();
+    const active = store.create({ cliSessionId: 'cli-active', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.mode, 'sealed');
+    assert.equal(body.session.id, active.id);
+    assert.equal(body.session.status, 'sealed');
+    assert.equal(body.session.sealReason, 'manual');
+    assert.equal(store.getActive('opus', 'thread-1'), null);
+
+    const next = store.create({ cliSessionId: 'cli-next', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    assert.equal(next.status, 'active');
+    assert.equal(next.seq, active.seq + 1);
+    assert.notEqual(next.id, active.id);
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects a caller without session access', async () => {
+    const store = await setup();
+    const active = store.create({ cliSessionId: 'cli-private', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'other-user' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects an active invocation without changing the session', async () => {
+    const invocationTracker = {
+      has: (threadId, catId) => threadId === 'thread-1' && catId === 'opus',
+    };
+    const store = await setup(undefined, undefined, undefined, undefined, invocationTracker);
+    const active = store.create({ cliSessionId: 'cli-running', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
+    assert.equal(store.getChain('opus', 'thread-1').length, 1);
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects an active invocation owned by another runtime identity', async () => {
+    const invocationTracker = {
+      has: (threadId, catId) => threadId === 'thread-1' && catId === 'opus',
+      // A2A and scheduled turns are not initiated with the browser caller's identity.
+      getUserId: () => 'unknown',
+    };
+    const store = await setup(undefined, undefined, undefined, undefined, invocationTracker);
+    const active = store.create({
+      cliSessionId: 'cli-running-a2a',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal rejects durable live work after process-local tracker loss', async () => {
+    const tracker = { has: () => false };
+    const durableLiveness = async () => ({ catIds: ['opus'], complete: true });
+    const store = await setup(undefined, undefined, undefined, undefined, tracker, durableLiveness);
+    const active = store.create({
+      cliSessionId: 'cli-running-after-restart',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_ACTIVE_INVOCATION');
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal fails closed when durable liveness is incomplete', async () => {
+    const store = await setup(undefined, undefined, undefined, undefined, { has: () => false }, async () => ({
+      catIds: [],
+      complete: false,
+    }));
+    const active = store.create({
+      cliSessionId: 'cli-liveness-unknown',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_LIVENESS_UNAVAILABLE');
+    assert.equal(store.get(active.id).status, 'active');
+  });
+
+  it('POST /api/sessions/:sessionId/seal returns a conflict when requestSeal loses its CAS race', async () => {
+    let store;
+    const racingSealer = {
+      requestSeal: async ({ sessionId }) => {
+        store.update(sessionId, {
+          status: 'sealed',
+          sealReason: 'threshold',
+          sealedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        return { accepted: false, status: 'sealed' };
+      },
+      finalize: async () => {
+        throw new Error('must not finalize after a rejected seal');
+      },
+    };
+    store = await setup(undefined, racingSealer);
+    const active = store.create({ cliSessionId: 'cli-race', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    const body = JSON.parse(res.payload);
+    assert.equal(body.code, 'SESSION_SEAL_RACE');
+    assert.equal(body.currentStatus, 'sealed');
+    assert.equal(store.getChain('opus', 'thread-1').length, 1);
+  });
+
+  it('POST /api/sessions/:sessionId/seal holds the exact tracker slot until the active pointer is cleared', async () => {
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const tracker = new InvocationTracker();
+    let store;
+    let blockedDuringClaim;
+    let admittedAfterClaim;
+    const sealer = {
+      requestSeal: async ({ sessionId, reason }) => {
+        blockedDuringClaim = tracker.startAll('thread-1', ['opus'], 'user-1');
+        const claimed = store.transitionToSealing(sessionId, reason);
+        return claimed ? { accepted: true, status: 'sealing', sessionId } : { accepted: false, status: 'sealed' };
+      },
+      finalize: async ({ sessionId }) => {
+        admittedAfterClaim = tracker.startAll('thread-1', ['opus'], 'user-1');
+        assert.ok(admittedAfterClaim);
+        store.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+        tracker.completeAll('thread-1', ['opus'], admittedAfterClaim);
+        return { sealed: true, clean: true };
+      },
+    };
+    store = await setup(undefined, sealer, undefined, undefined, tracker);
+    const active = store.create({
+      cliSessionId: 'cli-slot-guard',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(blockedDuringClaim, null, 'new work must not be admitted while the seal CAS owns the slot');
+    assert.equal(admittedAfterClaim.signal.aborted, false, 'new work may start after the pointer is cleared');
+  });
+
+  it('POST /api/sessions/:sessionId/seal reports a partial terminal seal instead of success', async () => {
+    let store;
+    const partialSealer = {
+      requestSeal: async ({ sessionId, reason }) => {
+        const claimed = store.transitionToSealing(sessionId, reason);
+        return claimed ? { accepted: true, status: 'sealing', sessionId } : { accepted: false, status: 'sealed' };
+      },
+      finalize: async ({ sessionId }) => {
+        store.update(sessionId, { status: 'sealed', sealedAt: Date.now(), updatedAt: Date.now() });
+        return { sealed: true, clean: false };
+      },
+    };
+    store = await setup(undefined, partialSealer);
+    const active = store.create({ cliSessionId: 'cli-partial', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${active.id}/seal`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(JSON.parse(res.payload).code, 'SESSION_SEAL_PARTIAL');
+    assert.equal(store.get(active.id).status, 'sealed');
+  });
+
   it('POST /api/sessions/:sessionId/unseal returns 401 without identity for untrusted browser origin', async () => {
     const store = await setup();
     const sealed = store.create({ cliSessionId: 'cli-sealed', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
@@ -457,7 +702,14 @@ describe('Session Chain Routes', () => {
   });
 
   it('POST /api/sessions/:sessionId/unseal restores over an explicitly confirmed empty active session', async () => {
-    const store = await setup();
+    // Displaced finalize is async fire-and-forget in prod. Pin a no-op sealer so
+    // the displaced record stays observable in its intermediate 'sealing' state.
+    const store = await setup(undefined, {
+      requestSeal: async () => ({ accepted: true }),
+      finalize: async () => ({ sealed: false, clean: false }),
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    });
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
     // Empty active session is preserved as a separate sealing record.
@@ -550,7 +802,14 @@ describe('Session Chain Routes', () => {
   });
 
   it('POST /api/sessions/:sessionId/unseal explicitly switches to the selected record without deleting active work', async () => {
-    const store = await setup();
+    // Displaced finalize is async fire-and-forget in prod. Pin a no-op sealer so
+    // the displaced record stays observable in its intermediate 'sealing' state.
+    const store = await setup(undefined, {
+      requestSeal: async () => ({ accepted: true }),
+      finalize: async () => ({ sealed: false, clean: false }),
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    });
     const sealed = store.create({ cliSessionId: 'cli-old', threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
     store.update(sealed.id, { status: 'sealed', sealReason: 'threshold', sealedAt: Date.now(), updatedAt: Date.now() });
     // Non-empty active work must be preserved while it is safely sealed.

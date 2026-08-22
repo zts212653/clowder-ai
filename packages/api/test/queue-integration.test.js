@@ -86,6 +86,7 @@ function mockInvocationRecordStore() {
   return {
     creates,
     updates,
+    records,
     /** @type {any} */
     store: {
       async create(input) {
@@ -254,6 +255,47 @@ describe('Queue Integration (E2E scenarios)', () => {
 
     // Queue should be empty after processing
     assert.strictEqual(queue.list('thread-1', 'user-1').length, 0);
+  });
+
+  it('E2E: queued work waits behind a manual-seal CAS without running or terminalizing', async () => {
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const tracker = new InvocationTracker();
+    const guard = tracker.guardSessionSeal('thread-1', 'opus');
+    assert.equal(guard.acquired, true);
+    const localProcessor = new QueueProcessor({
+      queue,
+      invocationTracker: tracker,
+      invocationRecordStore: recordMock.store,
+      router: routerMock.router,
+      socketManager: socketMock.manager,
+      messageStore: /** @type {any} */ ({ getById: async () => null }),
+      log: noopLog(),
+    });
+    queue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      content: 'Run only after the old session pointer is cleared',
+      source: 'user',
+      targetCats: ['opus'],
+      intent: 'execute',
+      autoExecute: true,
+    });
+
+    const start = await localProcessor.processNext('thread-1', 'user-1');
+    assert.equal(start.started, true);
+    await settle(25);
+    assert.equal(routerMock.calls.length, 0, 'route execution must not start under the seal guard');
+    assert.equal(
+      [...recordMock.records.values()].some((record) => record.status === 'running'),
+      false,
+      'the queued InvocationRecord must not be marked running under the seal guard',
+    );
+
+    guard.release();
+    await settle(150);
+    assert.equal(routerMock.calls.length, 1, 'the same queued turn must retry after the seal CAS releases');
+    assert.equal(queue.list('thread-1', 'user-1').length, 0);
   });
 
   it('E2E: cancel → queue paused → processNext → resumes', async () => {

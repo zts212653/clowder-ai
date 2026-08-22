@@ -2843,7 +2843,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     const baseOptions: AgentServiceOptions = {
       callbackEnv,
-      ...(invocationCapacitySnapshot ? { contextCapacity: invocationCapacitySnapshot.capacity } : {}),
+      ...(invocationCapacitySnapshot
+        ? {
+            contextCapacity: invocationCapacitySnapshot.capacity,
+            // #1381: native window for provider-native injection is owned by
+            // member config, captured pre-pin; may be null (no injection).
+            contextNativeWindowTokens: invocationCapacitySnapshot.nativeWindowTokens,
+          }
+        : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
       ...(requestedServiceTier ? { requestedServiceTier } : {}),
       ...(accountEnv ? { accountEnv } : {}),

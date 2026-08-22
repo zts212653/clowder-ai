@@ -453,15 +453,14 @@ describe('routeParallel collaboration continuity', () => {
 
   it('includes continuity capsule in threshold seal payload for parallel invocations', async () => {
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
-    const activeRecord = {
-      id: 'sess-parallel-seal',
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+    const activeRecord = sessionChainStore.create({
+      cliSessionId: 'cli-parallel-seal',
       catId: 'codex',
       threadId: 'thread-parallel-seal',
       userId: 'user1',
-      seq: 0,
-      status: 'active',
-      compressionCount: 0,
-    };
+    });
     const service = {
       contextCapability() {
         return {
@@ -495,12 +494,7 @@ describe('routeParallel collaboration continuity', () => {
     };
     const deps = createMockDeps({ codex: service });
     deps.invocationDeps.sessionManager.delete = async () => {};
-    deps.invocationDeps.sessionChainStore = {
-      getChain: async () => [activeRecord],
-      getActive: async () => activeRecord,
-      update: async () => activeRecord,
-      create: async () => activeRecord,
-    };
+    deps.invocationDeps.sessionChainStore = sessionChainStore;
     deps.invocationDeps.sessionSealer = {
       requestSeal: async () => ({ accepted: true, status: 'sealing' }),
       finalize: async () => {},
@@ -531,7 +525,7 @@ describe('routeParallel collaboration continuity', () => {
     assert.equal(payload.continuityCapsule.threadId, 'thread-parallel-seal');
     assert.equal(payload.continuityCapsule.catId, 'codex');
     assert.equal(payload.continuityCapsule.mode, 'parallel');
-    assert.equal(payload.continuityCapsule.seal.sessionId, 'sess-parallel-seal');
+    assert.equal(payload.continuityCapsule.seal.sessionId, activeRecord.id);
   });
 });
 
