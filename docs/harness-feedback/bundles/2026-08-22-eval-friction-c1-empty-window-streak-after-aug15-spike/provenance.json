@@ -1,0 +1,22 @@
+{
+  "verdictId": "2026-08-22-eval-friction-c1-empty-window-streak-after-aug15-spike",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-22-eval-friction-c1-empty-window-streak-after-aug15-spike/raw/rollup-report.json",
+      "sha256": "0a77b357daf61e92eeae82c4779cd32d5f6aad14c5b99d23e58c2fdbc6b08a78"
+    },
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-22-eval-friction-c1-empty-window-streak-after-aug15-spike/raw/measurement-validity.json",
+      "sha256": "4639d5261da8f0437933750ef169add68504155ccc11af86cbce13c07e7ba494"
+    }
+  ],
+  "generatedAt": "2026-08-22T03:06:32.000Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "2",
+    "commit": "manual-fallback"
+  },
+  "sanitizeRulesVersion": "f267-friction-measurement-v1",
+  "sourceThreadId": "thread_eval_friction",
+  "publishPath": "manual-fallback-after-cat-cafe-publish-verdict-generator-failed"
+}

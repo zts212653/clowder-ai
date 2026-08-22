@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "measurementTarget": "friction_opportunity_to_action",
+  "window": {
+    "sinceMs": 1787108400000,
+    "untilMs": 1787367600000
+  },
+  "capturedAt": "2026-08-22T03:11:06.414Z",
+  "baselineKind": "prospective_paired_capture",
+  "historicalBaseline": {
+    "classification": "symptom_cohort",
+    "rollupCount": 11,
+    "limitation": "historical_rollups_lack_frozen_canonical_row_ids"
+  },
+  "cancelJoin": {
+    "status": "no_opportunity",
+    "expectedIds": [],
+    "actualIds": [],
+    "intersectionIds": [],
+    "missingIds": [],
+    "extraIds": [],
+    "recall": null
+  },
+  "channels": {
+    "paw-feel": {
+      "opportunity": {
+        "status": "unmeasured",
+        "ids": null,
+        "provenance": "canonical_opportunity_source_not_instrumented"
+      },
+      "adapter": {
+        "status": "ok",
+        "emittedIds": [],
+        "provenance": "single_window_adapter_capture"
+      },
+      "aggregate": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_aggregator_output"
+      },
+      "clustered": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_cluster_membership"
+      },
+      "eligibility": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "non_eval_domain_only_cluster_membership"
+      },
+      "actionable": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "rollup_actionable_candidate_selection"
+      }
+    },
+    "cancel": {
+      "opportunity": {
+        "status": "measured",
+        "ids": [],
+        "provenance": "frozen_task_outcome_rows"
+      },
+      "adapter": {
+        "status": "ok",
+        "emittedIds": [],
+        "provenance": "single_window_adapter_capture"
+      },
+      "aggregate": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_aggregator_output"
+      },
+      "clustered": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_cluster_membership"
+      },
+      "eligibility": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "non_eval_domain_only_cluster_membership"
+      },
+      "actionable": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "rollup_actionable_candidate_selection"
+      }
+    },
+    "user-feedback": {
+      "opportunity": {
+        "status": "unmeasured",
+        "ids": null,
+        "provenance": "canonical_opportunity_source_not_instrumented"
+      },
+      "adapter": {
+        "status": "ok",
+        "emittedIds": [],
+        "provenance": "single_window_adapter_capture"
+      },
+      "aggregate": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_aggregator_output"
+      },
+      "clustered": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_cluster_membership"
+      },
+      "eligibility": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "non_eval_domain_only_cluster_membership"
+      },
+      "actionable": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "rollup_actionable_candidate_selection"
+      }
+    },
+    "eval-domain": {
+      "opportunity": {
+        "status": "unmeasured",
+        "ids": null,
+        "provenance": "canonical_opportunity_source_not_instrumented"
+      },
+      "adapter": {
+        "status": "ok",
+        "emittedIds": [],
+        "provenance": "single_window_adapter_capture"
+      },
+      "aggregate": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_aggregator_output"
+      },
+      "clustered": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "friction_cluster_membership"
+      },
+      "eligibility": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "non_eval_domain_only_cluster_membership"
+      },
+      "actionable": {
+        "ids": [],
+        "excludedIds": [],
+        "provenance": "rollup_actionable_candidate_selection"
+      }
+    }
+  },
+  "decision": {
+    "status": "insufficient",
+    "reasons": [
+      "cancel_join:no_opportunity",
+      "downstream_degraded"
+    ],
+    "withdrawalConditions": [
+      "rerun_after_closed_window_with_cancel_opportunity",
+      "rerun_after_downstream_dependencies_recover"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "verdictId": "2026-08-22-eval-friction-c1-empty-window-streak-after-aug15-spike",
+  "domainId": "eval:friction",
+  "createdAt": "2026-08-22T03:06:32.000Z",
+  "verdict": "keep_observe",
+  "harnessUnderEval": {
+    "featureId": "F245",
+    "componentId": "friction-rollup",
+    "name": "friction rollup (Top-N + sensorForm)"
+  },
+  "ownerAsk": {
+    "targetFeatureId": "F245",
+    "targetOwnerCatId": "opus-47",
+    "requestedAction": "Keep the every-3d friction rollup running and only reopen owner action if either August 12, 2026 to August 15, 2026 singleton reappears, a new actionableCandidate surfaces, or referenceOnly eval-domain clusters start recurring."
+  },
+  "acceptanceReevalPlan": {
+    "nextEvalAt": "2026-08-25T03:00:00.000Z",
+    "closureCondition": "Another scheduled every-3d window remains free of new friction signals, actionableCandidates, and referenceOnly recurrence."
+  },
+  "schemaVersion": 1
+}

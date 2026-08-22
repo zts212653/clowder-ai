@@ -1,0 +1,39 @@
+{
+  "verdictId": "2026-08-22-eval-friction-c1-empty-window-streak-after-aug15-spike",
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1787108400000,
+    "windowEndMs": 1787367600000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "window": {
+    "sinceMs": 1787108400000,
+    "untilMs": 1787367600000
+  },
+  "signalCount": 0,
+  "clusterCount": 0,
+  "degraded": true,
+  "droppedChannels": [],
+  "report": {
+    "window": {
+      "sinceMs": 1787108400000,
+      "untilMs": 1787367600000
+    },
+    "generatedAt": "2026-08-22T03:06:32.000Z",
+    "topClusters": [],
+    "actionableCandidates": [],
+    "referenceOnly": [],
+    "tailSummary": {
+      "clusterCount": 0,
+      "signalCount": 0,
+      "byChannel": {}
+    },
+    "degraded": true,
+    "droppedChannels": [],
+    "tokenBudget": {
+      "cap": 4000,
+      "estimated": 78
+    }
+  }
+}
