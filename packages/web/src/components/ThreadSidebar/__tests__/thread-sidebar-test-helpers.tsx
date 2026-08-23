@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { vi } from 'vitest';
+import { markApiGetGeneration } from '@/utils/api-get-generation';
 
 const hoistedMocks = vi.hoisted(() => ({
   addToastMock: vi.fn(),
@@ -17,6 +18,11 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mockPush }) }));
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
   API_URL: 'http://localhost:3102',
+}));
+
+vi.mock('@/utils/offline-store', () => ({
+  loadSidebarSnapshot: () => Promise.resolve(null),
+  saveSidebarSnapshot: () => Promise.resolve(),
 }));
 
 export const mockStore: Record<string, unknown> = {
@@ -58,7 +64,11 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { __resetSidebarRefreshForTests } from '@/utils/sidebar-thread-snapshot';
 import { ThreadSidebar } from '../ThreadSidebar';
+
+let nextMockGetGeneration = 0;
 
 export function installThreadSidebarGlobals() {
   (globalThis as { React?: typeof React }).React = React;
@@ -71,7 +81,12 @@ export function resetThreadSidebarGlobals() {
 }
 
 export function jsonOk(data: unknown) {
-  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
+  const response = new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  markApiGetGeneration(response, ++nextMockGetGeneration);
+  return Promise.resolve(response);
 }
 
 export function textFail(status = 500, body = 'fail') {
@@ -79,7 +94,7 @@ export function textFail(status = 500, body = 'fail') {
 }
 
 export function defaultSidebarApiMock(path: string) {
-  if (path === '/api/threads?view=sidebar') return jsonOk({ threads: [] });
+  if (path === '/api/threads?view=sidebar') return jsonOk({ threads: mockStore.threads });
   if (path === '/api/governance/health') return jsonOk({ projects: [] });
   if (path === '/api/projects/cwd') return jsonOk({ path: '/test' });
   if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -95,6 +110,15 @@ export function defaultSidebarApiMock(path: string) {
 }
 
 export function resetThreadSidebarMocks() {
+  __resetSidebarRefreshForTests();
+  nextMockGetGeneration = 0;
+  useSidebarProjectionStore.setState({
+    rows: [],
+    appliedGeneration: 0,
+    hasCanonicalSnapshot: false,
+    pendingThreadCommands: {},
+    refreshing: false,
+  });
   mockApiFetch.mockReset();
   mockPush.mockReset();
   addToastMock.mockReset();

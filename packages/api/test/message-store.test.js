@@ -169,6 +169,138 @@ describe('MessageStore', () => {
     assert.equal(store.size, 3);
   });
 
+  test('prepareQueueAdmission adopts only a legacy-visible source and is idempotent', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const legacy = store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'approved carrier persisted before Queue admission',
+      mentions: ['codex-terra'],
+      timestamp: 100,
+      threadId: 'thread-target',
+    });
+
+    const prepared = store.prepareQueueAdmission(legacy.id);
+    assert.equal(prepared.kind, 'prepared');
+    assert.equal(prepared.message.deliveryStatus, 'queued');
+    assert.equal(store.prepareQueueAdmission(legacy.id).kind, 'existing');
+    assert.deepEqual(store.prepareQueueAdmission('missing-message'), { kind: 'not_found' });
+
+    const delivered = store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'already terminal',
+      mentions: ['codex-terra'],
+      timestamp: 101,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    store.markDelivered(delivered.id, 102);
+    assert.deepEqual(store.prepareQueueAdmission(delivered.id), { kind: 'conflict' });
+
+    const canceled = store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'canceled source',
+      mentions: ['codex-terra'],
+      timestamp: 103,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    store.markCanceled(canceled.id);
+    assert.deepEqual(store.prepareQueueAdmission(canceled.id), { kind: 'conflict' });
+  });
+
+  test('fan-out admission intent is idempotent, blocks legacy delivery, and is replaced by full custody', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const message = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'durable pre-CAS fan-out',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 200,
+      threadId: 'thread-admission',
+      deliveryStatus: 'queued',
+    });
+    const admission = {
+      version: 1,
+      admissionId: `queue-custody:${message.id}`,
+      ownerUserId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      intent: 'execute',
+      targetCats: ['codex'],
+      requestedTargetCats: ['codex', 'codex-terra'],
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-1',
+      priority: 'normal',
+      createdAt: 200,
+    };
+
+    assert.equal(store.initializeQueueCustodyAdmission(message.id, admission).kind, 'initialized');
+    assert.equal(store.initializeQueueCustodyAdmission(message.id, structuredClone(admission)).kind, 'existing');
+    assert.equal(store.initializeQueueCustodyAdmission(message.id, { ...admission, targetCats: [] }).kind, 'conflict');
+    assert.equal(store.markDelivered(message.id, 201).deliveryTransitioned, false);
+    assert.equal(store.getById(message.id).deliveryStatus, 'queued');
+
+    const custody = {
+      version: 1,
+      entryId: `fanout:${message.id}`,
+      revision: 1,
+      ownerUserId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      carrierByTargetCatId: {
+        codex: {
+          entryId: 'carrier-codex',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          callerCatId: 'opus',
+          a2aParentInvocationId: 'parent-1',
+          a2aTriggerMessageId: message.id,
+          autoExecute: true,
+          createdAt: 200,
+        },
+      },
+      carrierStateByTargetCatId: { codex: { status: 'queued' } },
+      intent: 'execute',
+      status: 'queued',
+      allTargetCats: ['codex', 'codex-terra'],
+      pendingTargetCats: ['codex'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: ['codex-terra'],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 200,
+      updatedAt: 200,
+    };
+    assert.equal(store.initializeQueueCustody(message.id, custody).kind, 'initialized');
+    assert.equal(store.getById(message.id).queueCustodyAdmission, undefined);
+    assert.deepEqual(store.getById(message.id).queueCustody.allTargetCats, ['codex', 'codex-terra']);
+
+    const canceled = store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'cancel pre-CAS fan-out',
+      mentions: ['codex'],
+      timestamp: 202,
+      threadId: 'thread-admission',
+      deliveryStatus: 'queued',
+    });
+    assert.equal(
+      store.initializeQueueCustodyAdmission(canceled.id, {
+        ...admission,
+        admissionId: `queue-custody:${canceled.id}`,
+        requestedTargetCats: ['codex'],
+      }).kind,
+      'initialized',
+    );
+    assert.equal(store.markCanceled(canceled.id).deliveryStatus, 'canceled');
+    assert.equal(store.getById(canceled.id).queueCustodyAdmission, undefined);
+  });
+
   test('markDelivered rejects unsafe effective-order timestamps before state mutation and permits a valid retry', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const invalidTimestamps = [
@@ -816,6 +948,139 @@ describe('MessageStore', () => {
     const msgs = store.getByThreadAfter('th', first.id, undefined, 'user-1');
     assert.equal(msgs.length, 1, 'should include scheduler message after cursor');
     assert.equal(msgs[0].userId, 'scheduler');
+  });
+
+  test('managed-hold history stays bound to the durable owner before and after terminal delivery', async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const store = new MessageStore();
+    const makeQueueCustody = (ownerUserId) => ({
+      version: 1,
+      entryId: `entry-${ownerUserId}`,
+      revision: 1,
+      ownerUserId,
+      intent: 'managed command wake',
+      status: 'queued',
+      allTargetCats: ['opus5'],
+      pendingTargetCats: ['opus5'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 200,
+      updatedAt: 200,
+    });
+    const source = {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: { taskId: 'hold-ball-task-1', threadId: 'th-managed', catId: 'opus5', wakeWhen: true },
+    };
+    const receipt = store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: '[定时任务] managed result',
+      mentions: [],
+      timestamp: 200,
+      threadId: 'th-managed',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody('user-1'),
+      source,
+    });
+    const hidden = store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: '[定时任务] hidden trigger',
+      mentions: [],
+      timestamp: 201,
+      threadId: 'th-managed',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody('user-1'),
+      extra: { scheduler: { hiddenTrigger: true } },
+      source,
+    });
+    const foreignOwned = store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'owner-A command result',
+      mentions: [],
+      timestamp: 202,
+      threadId: 'th-managed',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody('user-owner'),
+      source,
+    });
+    const ownerless = store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'legacy ownerless result',
+      mentions: [],
+      timestamp: 203,
+      threadId: 'th-managed',
+      deliveryStatus: 'queued',
+      source,
+    });
+
+    assert.deepEqual(store.getByThreadAfter('th-managed', undefined, undefined, 'user-1'), []);
+    assert.deepEqual(
+      store
+        .getByThreadAfter('th-managed', undefined, undefined, 'user-1', { includeQueuedUserMessages: true })
+        .map((message) => message.id),
+      [receipt.id],
+    );
+    assert.deepEqual(
+      store.getByThread('th-managed', 50, 'user-foreign', { includeQueuedUserMessages: true }),
+      [],
+      "foreign viewers must not receive another owner's scheduler-authored result",
+    );
+
+    const terminalize = (message, deliveredAt) => {
+      const result = store.transitionQueueCustody(message.id, {
+        expectedRevision: 1,
+        next: {
+          ...message.queueCustody,
+          revision: 2,
+          status: 'terminal',
+          pendingTargetCats: [],
+          failedByCatIds: ['opus5'],
+          updatedAt: deliveredAt,
+        },
+        deliveredAt,
+      });
+      assert.equal(result.kind, 'updated');
+    };
+    terminalize(receipt, 300);
+    terminalize(hidden, 301);
+    terminalize(foreignOwned, 302);
+
+    // A legacy ownerless row cannot use the custody transition API, but old
+    // persisted data can still carry delivered status and must fail closed.
+    store.getById(ownerless.id).deliveryStatus = 'delivered';
+    store.getById(ownerless.id).deliveredAt = 303;
+
+    assert.deepEqual(
+      store.getByThreadAfter('th-managed', undefined, undefined, 'user-1').map((message) => message.id),
+      [receipt.id],
+      'terminal delivery must not restore generic system visibility to hidden, foreign, or ownerless rows',
+    );
+    assert.deepEqual(store.getByThread('th-managed', 50, 'user-foreign'), []);
+    assert.deepEqual(store.getByThreadIncludingQueued('th-managed', 50, 'user-foreign'), []);
+    assert.equal(
+      store.getLatestVisibleCursor('th-managed', {
+        evidence: 'durable_owner_read',
+        viewerUserId: 'user-1',
+      }).messageId,
+      receipt.id,
+    );
+    assert.equal(
+      store.getLatestVisibleCursor('th-managed', {
+        evidence: 'durable_owner_read',
+        viewerUserId: 'user-foreign',
+      }),
+      null,
+    );
   });
 
   test('P1: forged userId=scheduler with non-system catId does NOT bypass filter', async () => {

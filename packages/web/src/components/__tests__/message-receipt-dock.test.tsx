@@ -449,6 +449,46 @@ describe('MessageReceiptDock', () => {
     expect(container.querySelector('[data-retry-target="codex"]')).toBeNull();
   });
 
+  it('shows runtime restart as an explicit interruption without automatic retry', () => {
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-interrupted"
+          receipt={{
+            version: 1,
+            entryId: 'entry-interrupted',
+            targets: [
+              {
+                catId: 'codex',
+                state: 'interrupted',
+                invocationId: 'invocation-interrupted',
+                attempts: [
+                  {
+                    id: 'entry-interrupted:codex:1',
+                    targetCatId: 'codex',
+                    sequence: 1,
+                    state: 'interrupted',
+                    invocationId: 'invocation-interrupted',
+                    createdAt: 100,
+                    updatedAt: 200,
+                    terminalReason: 'runtime_restart',
+                  },
+                ],
+              },
+            ],
+            reminderAttempts: [],
+          }}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('砚砚 · 运行因服务重启中断 · 未自动重试');
+    expect(container.textContent).toContain('运行已因服务重启中断；系统没有自动重放');
+    expect(container.querySelector('[data-retry-target="codex"]')).toBeNull();
+  });
+
   it('offers retry when a delivered invocation was stopped before it completed', () => {
     act(() => {
       root.render(

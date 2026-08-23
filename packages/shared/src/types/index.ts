@@ -43,6 +43,13 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
+// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
+export {
+  A2A_INLINE_MENTION_MODE,
+  type A2ARoutingMode,
+  type A2ARoutingProjection,
+  isRoutingProjectionStartingNow,
+} from './a2a-routing-mode.js';
 // F167 Phase S: action-scoped A2A successor single-flight contract
 export {
   ACTION_SUBJECT_REF_DESCRIPTION,
@@ -299,6 +306,7 @@ export type {
   GitHubAuthorAssociation,
   IssueCommentSuppressionReason,
   IssueFixEvidence,
+  PendingExternalReviewVerdict,
   ReviewDeliveryOutcome,
 } from './community-event.js';
 export type {
@@ -414,6 +422,7 @@ export type {
 export {
   getAllConnectorDefinitions,
   getConnectorDefinition,
+  isSelectableManagedHoldConnectorSource,
   isStaticConnectorId,
   registerConnectorDefinition,
   SCHEDULER_TRIGGER_PREFIX,
@@ -717,6 +726,16 @@ export type {
   TriageIntentCardInput,
   TriageResult,
 } from './intent-card.js';
+// F299: invocation-first trajectory projection and typed source navigation.
+export type {
+  InvocationPromptInputProjection,
+  InvocationPromptMessageProjection,
+  InvocationTrajectoryListResponse,
+  InvocationTrajectoryStatus,
+  InvocationTrajectorySummary,
+  InvocationTrajectoryTokens,
+  TrajectoryOriginRef,
+} from './invocation-trajectory.js';
 // Leaderboard types (F075 排行榜)
 export type {
   Achievement,
@@ -859,9 +878,11 @@ export {
   WRITE_OPPORTUNITY_DISPOSITIONS,
   WRITE_OPPORTUNITY_INVALIDATORS,
   type WriteOpportunityDispositionV1,
+  type WriteOpportunityPresentationRetryCarrierV1,
   type WriteOpportunityReentryCarrierV1,
   writeOpportunityDispositionV1Schema,
   writeOpportunityGenerationId,
+  writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from './memory-write-opportunity.js';
 // Message types

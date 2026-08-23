@@ -18,6 +18,118 @@ const assigned = (overrides = {}) => ({
 const event = (kind, payload, at = 1_000) => ({ kind, payload, at });
 
 describe('F168 external review aggregate', () => {
+  it('holds one verdict submission on the current generation until canonical readiness arrives', () => {
+    let state = createExternalReviewAggregate(assigned({ cloudPolicy: 'optional' }));
+    state = applyExternalReviewEvent(
+      state,
+      event('case.head_observed', { headSha: 'head-pending', headGeneration: 1 }),
+    ).value;
+    state = applyExternalReviewEvent(
+      state,
+      event('case.ci_observed', { headSha: 'head-pending', headGeneration: 1, status: 'pending' }),
+    ).value;
+
+    const submitted = applyExternalReviewEvent(
+      state,
+      event('case.review_verdict_submitted', {
+        fingerprint: 'verdict-fingerprint',
+        headSha: 'head-pending',
+        headGeneration: 1,
+        verdict: 'approved',
+        summary: 'Already reviewed.',
+        userNudgeRequired: false,
+        delivery: {
+          kind: 'delivered',
+          headSha: 'head-pending',
+          githubUrl: 'https://github.com/acme/widgets/pull/7#pullrequestreview-42',
+          deliveredAt: 1_000,
+        },
+        principal: { catId: 'codex-sol', threadId: 'thread-f168' },
+        actionLeaseRef: null,
+        verificationReason: 'ci_pending',
+      }),
+    );
+
+    assert.equal(submitted.ok, true);
+    assert.equal(submitted.value.lifecycle, 'awaiting_ci');
+    assert.equal(submitted.value.pendingVerdict.fingerprint, 'verdict-fingerprint');
+
+    const nextHead = applyExternalReviewEvent(
+      submitted.value,
+      event('case.head_observed', { headSha: 'head-next', headGeneration: 2 }),
+    );
+    assert.equal(nextHead.ok, true);
+    assert.equal(nextHead.value.pendingVerdict, null, 'a later HEAD must invalidate the pending submission');
+  });
+
+  it('invalidates pending reviewer intent when cloud truth becomes blocking or terminally insufficient', () => {
+    for (const status of ['blocking', 'failed_or_timeout']) {
+      let state = createExternalReviewAggregate(assigned());
+      state = applyExternalReviewEvent(
+        state,
+        event('case.head_observed', { headSha: 'head-cloud', headGeneration: 1 }),
+      ).value;
+      state = applyExternalReviewEvent(
+        state,
+        event('case.ci_observed', { headSha: 'head-cloud', headGeneration: 1, status: 'pass' }),
+      ).value;
+      state = applyExternalReviewEvent(
+        state,
+        event('case.cloud_review_observed', {
+          headSha: 'head-cloud',
+          headGeneration: 1,
+          status: 'running',
+        }),
+      ).value;
+      state = applyExternalReviewEvent(
+        state,
+        event('case.review_verdict_submitted', {
+          fingerprint: `verdict-${status}`,
+          headSha: 'head-cloud',
+          headGeneration: 1,
+          verdict: 'approved',
+          summary: 'Already reviewed.',
+          userNudgeRequired: false,
+          delivery: {
+            kind: 'delivered',
+            headSha: 'head-cloud',
+            githubUrl: 'https://github.com/acme/widgets/pull/7#pullrequestreview-42',
+            deliveredAt: 1_000,
+          },
+          principal: { catId: 'codex-sol', threadId: 'thread-f168' },
+          actionLeaseRef: null,
+          verificationReason: 'cloud_review_running',
+        }),
+      ).value;
+
+      const disqualified = applyExternalReviewEvent(
+        state,
+        event('case.cloud_review_observed', {
+          headSha: 'head-cloud',
+          headGeneration: 1,
+          status,
+        }),
+      );
+
+      assert.equal(disqualified.ok, true);
+      assert.equal(disqualified.value.pendingVerdict, null, `${status} must invalidate prior reviewer intent`);
+      assert.equal(
+        disqualified.value.verdictSubmissionEpoch,
+        1,
+        `${status} must advance the durable submission epoch before a later verdict is accepted`,
+      );
+      const duplicate = applyExternalReviewEvent(
+        disqualified.value,
+        event('case.cloud_review_observed', { headSha: 'head-cloud', headGeneration: 1, status }, 2_000),
+      );
+      assert.equal(
+        duplicate.value.verdictSubmissionEpoch,
+        1,
+        `${status} without a new pending intent must not advance the epoch again`,
+      );
+    }
+  });
+
   it('invalidates current-head CI, cloud, and wake state without rewriting review/delivery history', () => {
     let state = createExternalReviewAggregate(assigned());
     state = applyExternalReviewEvent(state, event('case.head_observed', { headSha: 'head-1' })).value;

@@ -129,6 +129,8 @@ function createTestContext(store, storeType, redis) {
       threadId,
       deliveryStatus: 'queued',
       idempotencyKey: opts.idempotencyKey,
+      origin: opts.origin,
+      extra: opts.extra,
     });
     return msg;
   }

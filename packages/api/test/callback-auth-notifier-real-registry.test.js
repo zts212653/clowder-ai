@@ -1,9 +1,6 @@
 /**
- * F174 D2b-1 — 砚砚 P1 #1397 regression: in-context surface MUST trigger
- * for `expired` even though MemoryAuthInvocationBackend.verify() deletes the
- * record on expired (and getRecord() also deletes on expired). The fix uses
- * peekRecord() (pure read, no TTL check) BEFORE verify() so metadata is
- * captured before deletion can race in.
+ * F298 regression: in-context surface MUST preserve metadata for typed
+ * terminal tombstones through the real registry + preHandler path.
  *
  * Also covers: appended message classified as connector (not user) on reload
  * via the `source` field (砚砚 P1 #2).
@@ -14,10 +11,10 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
 
-async function buildRealRegistryApp({ ttlMs = 1, notifier }) {
+async function buildRealRegistryApp({ notifier }) {
   const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
   const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');
-  const registry = new InvocationRegistry({ ttlMs });
+  const registry = new InvocationRegistry();
   const app = Fastify({ logger: false });
   registerCallbackAuthHook(app, registry, { notifier });
   app.get('/api/callbacks/post-message', async () => ({ ok: true }));
@@ -25,8 +22,8 @@ async function buildRealRegistryApp({ ttlMs = 1, notifier }) {
   return { registry, app };
 }
 
-describe('P1 regression — expired actually surfaces with real InvocationRegistry (F174-D2b-1)', () => {
-  it('reason=expired triggers notifier.notify with record metadata', async () => {
+describe('typed terminal state surfaces with real InvocationRegistry (F298)', () => {
+  it('reason=interrupted triggers notifier.notify with tombstone metadata', async () => {
     const calls = [];
     const notifier = {
       async notify(params) {
@@ -34,11 +31,16 @@ describe('P1 regression — expired actually surfaces with real InvocationRegist
         return true;
       },
     };
-    const { registry, app } = await buildRealRegistryApp({ ttlMs: 1, notifier });
+    const { registry, app } = await buildRealRegistryApp({ notifier });
 
-    // Create a real record then sleep past TTL so verify() will see expired.
     const { invocationId, callbackToken } = await registry.create('user-real-1', 'opus', 'thread-real-1');
-    await new Promise((r) => setTimeout(r, 10)); // outlive ttlMs=1
+    await registry.commitTerminal({
+      invocationId,
+      disposition: 'interrupted',
+      endedAt: Date.now(),
+      endReason: 'api_restart',
+      terminalRef: `turn_execution:${invocationId}`,
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -48,9 +50,9 @@ describe('P1 regression — expired actually surfaces with real InvocationRegist
 
     assert.equal(res.statusCode, 401);
     const body = res.json();
-    assert.equal(body.reason, 'expired', 'preHandler returns 401 reason=expired');
-    assert.equal(calls.length, 1, '砚砚 P1: notifier MUST receive expired event (was 0 in original PR)');
-    assert.equal(calls[0].reason, 'expired');
+    assert.equal(body.reason, 'interrupted');
+    assert.equal(calls.length, 1, 'notifier must receive the typed terminal event');
+    assert.equal(calls[0].reason, 'interrupted');
     assert.equal(calls[0].threadId, 'thread-real-1');
     assert.equal(calls[0].catId, 'opus');
     assert.equal(calls[0].userId, 'user-real-1');
@@ -66,7 +68,7 @@ describe('P1 regression — expired actually surfaces with real InvocationRegist
         return true;
       },
     };
-    const { registry, app } = await buildRealRegistryApp({ ttlMs: 60_000, notifier });
+    const { registry, app } = await buildRealRegistryApp({ notifier });
     const { invocationId } = await registry.create('user-real-2', 'codex', 'thread-real-2');
 
     const res = await app.inject({
@@ -91,7 +93,7 @@ describe('P1 regression — expired actually surfaces with real InvocationRegist
         return true;
       },
     };
-    const { app } = await buildRealRegistryApp({ ttlMs: 60_000, notifier });
+    const { app } = await buildRealRegistryApp({ notifier });
     const res = await app.inject({
       method: 'GET',
       url: '/api/callbacks/post-message',
@@ -127,7 +129,7 @@ describe('P1 regression — message source classifies as connector on reload (F1
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
 

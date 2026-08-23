@@ -48,6 +48,8 @@ export async function realPresenceSource(deps, overrides = {}) {
       buildSnapshot: (userId) => service.buildSnapshot(userId),
       resolveWorkingPresence: (threadId, userId, snapshot) =>
         service.resolveWorkingPresence(threadId, userId, snapshot),
+      listLatestTerminalExecutions: (threadIds, userId) =>
+        deps.recordStore.listLatestTerminalByThreadIds(threadIds, userId),
       ...overrides.sourceDeps,
     }),
   };

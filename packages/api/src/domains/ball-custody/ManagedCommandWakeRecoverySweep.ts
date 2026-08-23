@@ -2,7 +2,6 @@ import { createModuleLogger } from '../../infrastructure/logger.js';
 import {
   managedCommandCompletionUnconsumedTotal,
   managedCommandDispatchRetryTotal,
-  managedCommandWakeSlaBreachTotal,
 } from '../../infrastructure/telemetry/instruments.js';
 import type { InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../cats/services/stores/ports/invocation-state-machine.js';
@@ -19,6 +18,11 @@ import {
   persistManagedCommandCompletionEvidence,
 } from './managed-command-wake-lifecycle.js';
 import { publishManagedCommandWakeMessage } from './managed-command-wake-message-fence.js';
+import {
+  isDispatchableManagedCommandWakeState,
+  recordManagedCommandWakeSlaBreach,
+  recoverManagedCommandMissingDisposition,
+} from './managed-command-wake-recovery-policy.js';
 import {
   persistManagedCommandFallbackDue,
   recordCancelledManagedCommandCompletion,
@@ -45,9 +49,6 @@ export {
 } from './managed-command-wake-lifecycle.js';
 
 const log = createModuleLogger('ball-custody/managed-command-wake-recovery');
-function isDispatchableWakeState(state: ManagedCommandWakeProjection['state']): boolean {
-  return state === 'message_written' || state === 'dispatch_pending' || state === 'dispatched' || state === 'enqueued';
-}
 export class ManagedCommandWakeRecoverySweep {
   private readonly now: () => number;
   private readonly dispatchedCarrierGraceMs: number;
@@ -141,14 +142,14 @@ export class ManagedCommandWakeRecoverySweep {
   async recoverTask(taskId: string): Promise<ManagedCommandWakeRecoveryResult> {
     let parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
     if (!parsed) return 'missing';
-    parsed = this.recordSlaBreach(parsed);
+    parsed = recordManagedCommandWakeSlaBreach(this.deps, parsed, this.now, this.wakeSlaMs);
     if (parsed.command.state === 'condition_met') {
       const published = await this.publishCompletion(parsed);
       if (!published) return 'pending';
       parsed = parseWakeTask(this.deps.dynamicTaskStore.getById(taskId));
       if (!parsed) return 'missing';
     }
-    if (isDispatchableWakeState(parsed.command.state)) {
+    if (isDispatchableManagedCommandWakeState(parsed.command.state)) {
       const eventCarrier = parsed.command.messageId
         ? await this.deps.getEventCarrier?.({
             threadId: parsed.threadId,
@@ -160,6 +161,11 @@ export class ManagedCommandWakeRecoverySweep {
       if (eventCarrier?.state === 'handled') return this.consume(parsed, eventCarrier.invocationId);
       if (eventCarrier?.state === 'terminal') {
         return this.consume(parsed, undefined, eventCarrier.reason);
+      }
+      if (eventCarrier?.state === 'failed') {
+        return eventCarrier.errorCode === 'managed_hold_disposition_missing'
+          ? recoverManagedCommandMissingDisposition(this.deps, parsed, eventCarrier, this.now)
+          : 'pending';
       }
       if (eventCarrier?.state === 'pending') return 'pending';
       // An orphaned receipt proves durable responsibility while also proving
@@ -310,32 +316,6 @@ export class ManagedCommandWakeRecoverySweep {
     this.deps.dynamicTaskStore.setEnabled(parsed.task.id, false);
     this.deps.taskRunner.unregister(parsed.task.id);
     return 'recovered';
-  }
-
-  private recordSlaBreach(parsed: ParsedManagedCommandWakeTask): ParsedManagedCommandWakeTask {
-    const conditionMetAt = parsed.command.conditionMetAt;
-    if (
-      conditionMetAt === undefined ||
-      parsed.command.slaBreachObservedAt !== undefined ||
-      this.now() - conditionMetAt < this.wakeSlaMs
-    ) {
-      return parsed;
-    }
-    const observedAt = this.now();
-    const updated = this.updateCommand(parsed, { ...parsed.command, slaBreachObservedAt: observedAt });
-    if (!updated) return parsed;
-    managedCommandWakeSlaBreachTotal.add(1);
-    log.warn(
-      {
-        taskId: parsed.task.id,
-        threadId: parsed.threadId,
-        messageId: parsed.command.messageId,
-        conditionMetAt,
-        observedAt,
-      },
-      'managed-command completion wake exceeded SLA',
-    );
-    return parseWakeTask(this.deps.dynamicTaskStore.getById(parsed.task.id)) ?? parsed;
   }
 
   private updateCommand(parsed: ParsedManagedCommandWakeTask, command: ManagedCommandWakeProjection): boolean {

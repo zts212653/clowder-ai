@@ -57,6 +57,7 @@ function makeQueueProcessor({ canReleaseSlotForUser = true } = {}) {
     clearPause: (tid, cid) => actions.push({ op: 'clearPause', tid, cid }),
     releaseSlot: (tid, cid) => actions.push({ op: 'releaseSlot', tid, cid }),
     releaseThread: (tid) => actions.push({ op: 'releaseThread', tid }),
+    retireThreadPrestartProcessingGroups: async () => ({ outcome: 'none', retiredCatIds: [] }),
     hasActiveExecution: () => false,
     isCatBusy: () => false,
     actions,

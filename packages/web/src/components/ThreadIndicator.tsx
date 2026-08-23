@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useChatStore } from '@/stores/chatStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 
 /** Tail-preserving truncation for project chip labels.
  * The suffix usually carries the distinguishing worktree or nested directory name. */
@@ -18,8 +20,9 @@ const PROJECT_PATH_COPY_KEYS = new Set(['Enter', ' ']);
  *  Double-click the title to enter inline edit mode for renaming. */
 export function ThreadIndicator({ threadId }: { threadId: string }) {
   const threads = useChatStore((s) => s.threads);
+  const sidebarRows = useSidebarProjectionStore((state) => state.rows);
   const updateThreadTitle = useChatStore((s) => s.updateThreadTitle);
-  const currentThread = threads.find((t) => t.id === threadId);
+  const currentThread = sidebarRows.find((row) => row.id === threadId) ?? threads.find((t) => t.id === threadId);
   const [copied, setCopied] = useState(false);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const title = currentThread?.title ?? '未命名对话';
@@ -76,6 +79,7 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
       if (res.ok) {
         const updated = await res.json();
         updateThreadTitle(threadId, updated.title ?? next);
+        void invalidateSidebarProjection();
       }
     } catch {
       // Silently ignore — title stays unchanged

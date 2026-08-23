@@ -200,6 +200,9 @@ export class InvocationTracker {
   /**
    * Atomically check-and-guard for thread deletion.
    * Synchronous: checks ALL slots + marks deleting in one tick.
+   * Unlike guardSessionSeal(), deletion intentionally treats canceled tombstones
+   * as idle: deletion is terminal for the whole thread, and the deleting fence
+   * prevents new work while teardown finishes.
    * Caller MUST call release() in a finally block after delete completes.
    */
   guardDelete(threadId: string): DeleteGuard {

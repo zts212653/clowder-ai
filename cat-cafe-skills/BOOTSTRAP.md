@@ -37,7 +37,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
-| `eval-design` | 指标出生证（五件套）+ 六公理设计自检 + 存量 eval 体检尺（摸鱼/划水/污染） | — |
+| `eval-design` | E0 资格门 + 指标出生证契约 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
 | `ttfund-skills` | 天天基金官方 Skills 网关：基金搜索/净值/持仓/经理/指数/黄金/债市/活期宝事实数据 | — |
 | `convention-graph-discovery` | 进入陌生 repo / F242 约定图工作：定义 domain、extractor、gap/freshness/provenance 报告 | — |
 | `knowledge-engineering` | 外部项目文档重构/冷启动知识注入 | — |

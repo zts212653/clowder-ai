@@ -99,8 +99,10 @@ module.exports = withPWA({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
   reloadOnOnline: false,
-  // Start URL is a static shell; precache it so PWA cold-open does not block on network.
-  dynamicStartUrl: false,
+  // The document shell carries build-specific chunk references. Resolve it
+  // NetworkFirst so an online navigation cannot be trapped on an older build,
+  // while the runtime cache still supplies the last coherent shell offline.
+  dynamicStartUrl: true,
   // Keep default page/document runtime caching and only override what we need.
   extendDefaultRuntimeCaching: true,
   workboxOptions: {

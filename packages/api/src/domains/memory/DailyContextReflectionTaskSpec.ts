@@ -42,17 +42,9 @@ export function createDailyContextReflectionTaskSpec(deps: DailyContextReflectio
     run: {
       overlap: 'skip',
       timeoutMs: runTimeoutMs,
-      async execute() {
-        const controller = new AbortController();
-        const timer = setTimeout(() => {
-          controller.abort(new Error(`daily context reflection timed out after ${runTimeoutMs}ms`));
-        }, runTimeoutMs);
-        try {
-          const result = await deps.producer.run({ signal: controller.signal });
-          logRun(deps, result);
-        } finally {
-          clearTimeout(timer);
-        }
+      async execute(_signal, _subjectKey, ctx) {
+        const result = await deps.producer.run({ signal: ctx.signal });
+        logRun(deps, result);
       },
     },
     state: { runLedger: 'sqlite' },

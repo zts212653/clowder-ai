@@ -231,8 +231,9 @@ export function createReevalClosureTaskSpec(
     run: {
       overlap: 'skip',
       timeoutMs: 60_000,
-      async execute(signal, subjectKey) {
+      async execute(signal, subjectKey, ctx) {
         for (const item of signal.planned) {
+          ctx.signal?.throwIfAborted();
           const result = await options.eventLog.append(item.event, item.expectedSequence);
           if (result.outcome === 'conflict') {
             options.log.warn(
@@ -247,6 +248,7 @@ export function createReevalClosureTaskSpec(
           }
         }
         if (signal.bindResponsibility && options.responsibilityService) {
+          ctx.signal?.throwIfAborted();
           const refreshed = (await options.loadSubjects()).find(
             (subject) => reconcileSubjectId(subject) === subjectKey && 'caseRoot' in subject,
           );
@@ -255,6 +257,7 @@ export function createReevalClosureTaskSpec(
           }
         }
         if (signal.bindReevaluation && options.reevaluationService) {
+          ctx.signal?.throwIfAborted();
           const refreshed = (await options.loadSubjects()).find(
             (subject) => reconcileSubjectId(subject) === subjectKey && 'caseRoot' in subject,
           );

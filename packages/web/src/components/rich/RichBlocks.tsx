@@ -23,6 +23,52 @@ import { isProposalCardBlock, ProposalCard } from './ProposalCard';
 import { RichBlockForwardButton } from './RichBlockForwardButton';
 import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
 
+const RICH_BLOCK_OVERLAY_ACTIONS_CLASS =
+  'pointer-events-none absolute right-2 top-2 z-20 flex translate-y-1 gap-0.5 rounded-lg border border-cafe bg-cafe-surface/90 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-150 group-hover/rich-block:pointer-events-auto group-hover/rich-block:translate-y-0 group-hover/rich-block:opacity-100 group-focus-within/rich-block:pointer-events-auto group-focus-within/rich-block:translate-y-0 group-focus-within/rich-block:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:translate-y-0 [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
+
+const RICH_BLOCK_FLOW_ACTIONS_CLASS =
+  'pointer-events-none grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-150 group-hover/rich-block:pointer-events-auto group-hover/rich-block:grid-rows-[1fr] group-hover/rich-block:opacity-100 group-focus-within/rich-block:pointer-events-auto group-focus-within/rich-block:grid-rows-[1fr] group-focus-within/rich-block:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:grid-rows-[1fr] [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
+
+function RichBlockForwardActions({
+  blocks,
+  onForward,
+  layout = 'overlay',
+}: {
+  blocks: readonly RichBlock[];
+  onForward: (blockId: string) => void;
+  layout?: 'overlay' | 'flow';
+}) {
+  const actions = blocks.map((block, index) => (
+    <RichBlockForwardButton
+      key={block.id}
+      block={block}
+      groupedIndex={blocks.length > 1 ? index : undefined}
+      onForward={onForward}
+    />
+  ));
+
+  if (layout === 'flow') {
+    return (
+      <div data-testid="rich-block-forward-actions" data-quote-exclude className={RICH_BLOCK_FLOW_ACTIONS_CLASS}>
+        <div className="min-h-0 overflow-hidden">
+          <div
+            data-testid="rich-block-forward-action-dock"
+            className="ml-auto mt-1 flex w-fit max-w-full flex-wrap justify-end gap-0.5 rounded-lg border border-cafe bg-cafe-surface/90 p-0.5 shadow-sm backdrop-blur-sm"
+          >
+            {actions}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="rich-block-forward-actions" data-quote-exclude className={RICH_BLOCK_OVERLAY_ACTIONS_CLASS}>
+      {actions}
+    </div>
+  );
+}
+
 function RichCardRenderer({
   block,
   messageId,
@@ -262,23 +308,14 @@ export function RichBlocks({
       <div className="mt-2 space-y-2">
         {items.map((item) =>
           'grouped' in item ? (
-            <div key={item.groupId}>
+            <div key={item.groupId} data-rich-block-group-id={item.groupId} className="group/rich-block relative">
               <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
               {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
-                <div className="mt-1 flex flex-wrap justify-end gap-1">
-                  {item.blocks.map((block, index) => (
-                    <RichBlockForwardButton
-                      key={block.id}
-                      block={block}
-                      groupedIndex={index}
-                      onForward={setForwardBlockId}
-                    />
-                  ))}
-                </div>
+                <RichBlockForwardActions blocks={item.blocks} layout="flow" onForward={setForwardBlockId} />
               ) : null}
             </div>
           ) : (
-            <div key={item.id} className="group/rich-block relative">
+            <div key={item.id} data-rich-block-id={item.id} className="group/rich-block relative">
               {readOnly ? (
                 <ReadOnlyRichBlockRenderer block={item} />
               ) : (
@@ -292,7 +329,7 @@ export function RichBlocks({
                 />
               )}
               {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
-                <RichBlockForwardButton block={item} onForward={setForwardBlockId} />
+                <RichBlockForwardActions blocks={[item]} onForward={setForwardBlockId} />
               ) : null}
             </div>
           ),

@@ -12,6 +12,8 @@
 
 import crypto from 'node:crypto';
 import {
+  A2A_INLINE_MENTION_MODE,
+  type A2ARoutingProjection,
   type CatConfig,
   type CatId,
   catRegistry,
@@ -152,6 +154,7 @@ import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOut
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import {
   type AppendMessageInput,
@@ -180,7 +183,7 @@ import {
   resolveInvocationCapacitySnapshot,
   sealBeforeInvocationIfNeeded,
 } from '../invocation/invocation-capacity-snapshot.js';
-import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
@@ -190,11 +193,12 @@ import {
   isSubstantiveTool,
   peekStreakOnPush,
   registerWorklist,
+  setWorklistCallerAdmissionOpen,
   unregisterWorklist,
   updateStreakOnPush,
 } from '../routing/WorklistRegistry.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
-import { formatA2AHandoffContent } from './a2a-handoff-label.js';
+import { formatA2AHandoffContent, formatSerialMultiTargetNotice } from './a2a-handoff-label.js';
 import {
   buildCallbackFinalReplacementMetadataPatch,
   CallbackFinalReplacementTracker,
@@ -218,17 +222,21 @@ import {
   assembleIncrementalContext,
   collectExactPromptMessageIds,
   computeContextBudget,
+  contextProjectionFromEpochDecision,
+  createIdempotentPendingProjectionQueue,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
   hydrateVisibleA2ATriggerPromptMessage,
+  isFinalGenerationBriefingBoundary,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
   mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
+  shouldPersistContextBriefing,
   subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
@@ -245,6 +253,28 @@ const log = createModuleLogger('route-serial');
 // (shared across serial + parallel strategies — see sharedCandidateTracker/sharedNudgeCooldown)
 
 const BALL_CUSTODY_INVOCATION_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * F086/F216: single builder for the serial-normalization notice payload.
+ *
+ * `message` is the human-readable line — it is what `formatVisibleSystemInfo` renders live and what
+ * `persistUserFacingSystemInfoNotices` writes for F5 hydration. `mode`/`order` stay machine-readable.
+ * Emitting a payload with no registered visible/persistent consumer would ship a raw JSON blob that
+ * vanishes on refresh (砚砚 R1 P1) — the notice must be wired end to end or it is not a notice.
+ */
+function buildSerialMultiTargetNoticePayload(
+  fromCatId: CatId,
+  legs: Array<{ catId: CatId; config?: CatConfig }>,
+): string {
+  return JSON.stringify({
+    type: 'a2a_multi_target_serialized',
+    fromCatId,
+    mode: A2A_INLINE_MENTION_MODE,
+    order: legs.map((leg) => leg.catId),
+    message: formatSerialMultiTargetNotice(legs),
+  });
+}
+
 export function buildTurnCustodyStopGateRemedialPrompt(wake: TurnCustodyWakeProvenance): string {
   if (wake.kind === 'structured' && wake.protocol === 'hold') {
     return (
@@ -617,6 +647,9 @@ export async function* routeSerial(
   const worklist = [...targetCats];
   const maxDepth = options.maxA2ADepth ?? getMaxA2ADepth();
   const worklistEntry = registerWorklist(threadId, worklist, maxDepth, options.parentInvocationId);
+  // No callback caller is active while route-level setup is still running. Each turn opens
+  // this window only after its abort gate, then the final admission drain closes it.
+  setWorklistCallerAdmissionOpen(worklistEntry, false);
 
   let index = 0;
   // done-guarantee: Track whether we yielded a done(isFinal=true) so the finally block can
@@ -1328,9 +1361,13 @@ export async function* routeSerial(
       }
       const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
       const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const defersProjection =
+        incrementalMode &&
+        Boolean(deps.invocationDeps.contextEpochOwner) &&
+        catConfig?.provider !== 'openai-chatgpt-pro';
       const rebuildSessionBootstrap =
         !isSerialReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
-          ? async () => {
+          ? async (contextProjection?: Parameters<typeof buildSessionBootstrap>[0]['contextProjection']) => {
               const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
               return buildSessionBootstrap(
                 {
@@ -1340,13 +1377,14 @@ export async function* routeSerial(
                   ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
                   ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
                   ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                  ...(contextProjection ? { contextProjection } : {}),
                 },
                 catId,
                 threadId,
               );
             }
           : undefined;
-      if (rebuildSessionBootstrap) {
+      if (rebuildSessionBootstrap && !defersProjection) {
         try {
           const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
@@ -1395,6 +1433,54 @@ export async function* routeSerial(
       const invocationMessagePrompt = prompt;
       let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
       let explicitlyExposedMessageIds: string[] = [];
+      let contextPromptFactory: InvocationParams['contextPromptFactory'];
+      let exactPromptMessageIds: string[] = [];
+      const pendingContextProjectionMessages = createIdempotentPendingProjectionQueue<AgentMessage>();
+      let briefingProjectionMessage: AgentMessage | undefined;
+      let pendingBriefingInput: AppendMessageInput | undefined;
+      let bootstrapPresentationCounts: PresentationCounts | undefined;
+      let proactiveMemoryNudgeFinalized = false;
+      const appendRoutePromptAdditions = (basePrompt: string): string => {
+        let projectedPrompt = basePrompt;
+        if (conciergeSearchContextForCat) projectedPrompt = `${projectedPrompt}\n${conciergeSearchContextForCat}`;
+        if (routeLevelNudgePromptContext) {
+          projectedPrompt = `${projectedPrompt}\n${routeLevelNudgePromptContext}`;
+          if (preparedProactiveMemoryNudge && !proactiveMemoryNudgeFinalized) {
+            deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
+            proactiveMemoryNudgeFinalized = true;
+          }
+        }
+        if (structuredDispositionPrompt) {
+          projectedPrompt = `${projectedPrompt}\n\n---\n\n${structuredDispositionPrompt}`;
+        }
+        return projectedPrompt;
+      };
+      const materializeFinalGenerationBriefing = async (): Promise<void> => {
+        if (!pendingBriefingInput || briefingProjectionMessage) return;
+        try {
+          const stored = await deps.messageStore.append(pendingBriefingInput);
+          briefingMessageId = stored.id;
+          briefingProjectionMessage = {
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: JSON.stringify({
+              type: 'context_briefing',
+              messageId: stored.id,
+              storedMessage: {
+                id: stored.id,
+                content: stored.content,
+                origin: stored.origin,
+                timestamp: stored.timestamp,
+                extra: stored.extra,
+              },
+            }),
+            timestamp: stored.timestamp,
+          } as AgentMessage;
+          pendingContextProjectionMessages.enqueue(`briefing:${stored.id}`, briefingProjectionMessage);
+        } catch {
+          // fail-open: briefing is a non-critical UI projection
+        }
+      };
       if (incrementalMode) {
         // Serial incremental mode depends on AgentRouter having appended current user message first.
         // We still explicitly include `message` when that message is not present in unseen rows.
@@ -1417,97 +1503,124 @@ export async function* routeSerial(
           nudgeTokens: incNudgeTokens,
         });
 
-        const inc = await assembleIncrementalContext(
-          deps,
-          userId,
-          threadId,
-          catId,
-          currentUserMessageId,
-          thinkingMode,
-          {
-            effectiveMaxContextTokens: effectiveContextBudget,
-            canonicalFeatureId: sopStageHint?.featureId,
-            threadTitle: routeThread?.title ?? undefined,
-            projectPath: routeThread?.projectPath,
-            cursorOverlay: options.cursorBoundaries?.get(catId as string),
-            sameRouteOutputMessageIds,
-            exactA2ATriggerMessageId: streamReplyTo,
-          },
-        );
-        deliveryBoundaryId = inc.boundaryId;
-        incrementallyExposedMessageIds = inc.exposedMessageIds;
-        if (inc.pushRecallPresentations?.length) {
-          currentPushRecallPresentations.push(...inc.pushRecallPresentations);
-        }
-
-        // F254 Phase A (AC-A3 seed): Initialize seenCursor from delivery boundary
-        // so the freshness gate knows "messages delivered at invoke-start = already seen".
-        // This is the seed — mid-turn reads via MCP tools push it further forward.
-        // Fail-open: if seed fails, the freshness gate fails open (no cursor = forward).
-        if (deliveryBoundaryId && deps.deliveryCursorStore) {
-          try {
-            await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, deliveryBoundaryId);
-          } catch (err) {
-            log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+        const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const buildIncrementalProjection = async (
+          epochInput?: Parameters<NonNullable<InvocationParams['contextPromptFactory']>>[0],
+        ) => {
+          // The factory may rerun after provider-generation replacement. Only
+          // the final run owns the pending UI projection; durable briefing
+          // creation is separately guarded below.
+          pendingContextProjectionMessages.reset();
+          const contextProjection = epochInput
+            ? contextProjectionFromEpochDecision(epochInput.decision, epochInput.handshake.coordinate)
+            : undefined;
+          if (contextProjection && rebuildSessionBootstrap) {
+            try {
+              const bootstrap = await rebuildSessionBootstrap(contextProjection);
+              bootstrapContext = bootstrap?.text ?? '';
+              bootstrapPresentationCounts = bootstrap?.presentationCounts;
+              if (bootstrap?.pushRecallPresentations?.length) {
+                currentPushRecallPresentations.push(...bootstrap.pushRecallPresentations);
+              }
+            } catch {
+              bootstrapContext = '';
+              bootstrapPresentationCounts = undefined;
+            }
           }
-        }
-
-        if (inc.degradation) {
-          yield {
-            type: 'system_info' as AgentMessageType,
+          const inc = await assembleIncrementalContext(
+            deps,
+            userId,
+            threadId,
             catId,
-            content: inc.degradation,
-            timestamp: Date.now(),
-          } as AgentMessage;
-        }
-
-        // F148 Phase E: Auto-insert context briefing when smart window triggered (AC-E1)
-        if (inc.coverageMap) {
-          const briefingInput = buildBriefingMessage(inc.coverageMap, threadId, inc.briefingContext);
-          try {
-            const stored = await deps.messageStore.append(briefingInput);
-            briefingMessageId = stored.id;
-            briefingCoverageMap = inc.coverageMap;
-            // P1-3: Include full stored message in payload so frontend can addMessage directly
-            yield {
+            currentUserMessageId,
+            thinkingMode,
+            {
+              effectiveMaxContextTokens: effectiveContextBudget,
+              canonicalFeatureId: sopStageHint?.featureId,
+              threadTitle: routeThread?.title ?? undefined,
+              projectPath: routeThread?.projectPath,
+              cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              sameRouteOutputMessageIds,
+              exactA2ATriggerMessageId: streamReplyTo,
+              ...(contextProjection ? { contextProjection } : {}),
+            },
+          );
+          deliveryBoundaryId = inc.boundaryId;
+          incrementallyExposedMessageIds = inc.exposedMessageIds;
+          if (inc.pushRecallPresentations?.length) {
+            currentPushRecallPresentations.push(...inc.pushRecallPresentations);
+          }
+          if (deliveryBoundaryId && deps.deliveryCursorStore) {
+            try {
+              await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, deliveryBoundaryId);
+            } catch (err) {
+              log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+            }
+          }
+          if (inc.degradation) {
+            pendingContextProjectionMessages.enqueue(`degradation:${inc.degradation}`, {
               type: 'system_info' as AgentMessageType,
               catId,
-              content: JSON.stringify({
-                type: 'context_briefing',
-                messageId: stored.id,
-                storedMessage: {
-                  id: stored.id,
-                  content: stored.content,
-                  origin: stored.origin,
-                  timestamp: stored.timestamp,
-                  extra: stored.extra,
-                },
-              }),
-              timestamp: stored.timestamp,
-            } as AgentMessage;
-          } catch {
-            // fail-open: briefing is non-critical UI enhancement
+              content: inc.degradation,
+              timestamp: Date.now(),
+            } as AgentMessage);
           }
-        }
-
-        /* @segment R1 — Mode System Prompt */
-        /* @segment R2 — Mode System Prompt (per-cat) */
-        const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        // F35/F063: append only persisted Queue bodies without structural exposure ownership.
-        const explicitProjection = explicitPromptForIncrementalContext(
-          inc,
-          message,
-          currentUserMessageId,
-          persistedPromptMessagesForCat,
-        );
-        explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
-        rebuildPromptWithBootstrap = (bootstrap) => {
-          const parts = [invocationContext, catModePrompt, bootstrap, mcpInstructions].filter(Boolean);
-          if (inc.contextText) parts.push(inc.contextText);
-          if (explicitProjection.text) parts.push(explicitProjection.text);
-          return parts.join('\n\n---\n\n');
+          if (shouldPersistContextBriefing(inc)) {
+            briefingCoverageMap = inc.coverageMap;
+            const contextSurfaceProjection = inc.surfaceProjection
+              ? {
+                  ...inc.surfaceProjection,
+                  presentationCounts: mergePresentationCounts(
+                    inc.surfaceProjection.presentationCounts,
+                    ...(bootstrapPresentationCounts ? [bootstrapPresentationCounts] : []),
+                  ),
+                }
+              : undefined;
+            pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
+              ...inc.briefingContext,
+              ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
+            });
+          } else {
+            pendingBriefingInput = undefined;
+          }
+          const explicitProjection = explicitPromptForIncrementalContext(
+            inc,
+            message,
+            currentUserMessageId,
+            persistedPromptMessagesForCat,
+          );
+          explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+          rebuildPromptWithBootstrap = (bootstrap) => {
+            const parts = [invocationContext, catModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+            if (inc.contextText) parts.push(inc.contextText);
+            if (explicitProjection.text) parts.push(explicitProjection.text);
+            return parts.join('\n\n---\n\n');
+          };
+          const projectedPrompt = appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapContext));
+          exactPromptMessageIds = collectExactPromptMessageIds(
+            incrementallyExposedMessageIds,
+            explicitlyExposedMessageIds,
+            options.freshnessSupplementRequiredMessageIds ?? [],
+            options.freshnessClosureRequiredMessageIds ?? [],
+          );
+          return {
+            prompt: projectedPrompt,
+            promptMessageIds: exactPromptMessageIds,
+            ...(inc.surfaceProjection ? { deltaSize: inc.surfaceProjection.deltaSize } : {}),
+          };
         };
-        prompt = rebuildPromptWithBootstrap(bootstrapContext);
+        // Once the epoch owner is composed, every local carrier crosses the
+        // same fail-closed pre-provider seam. Unsupported or undeclared
+        // carriers resolve to unknown+cold inside invocation. Cloud-only cats
+        // use a different bounded Host transport before that seam.
+        if (defersProjection) {
+          contextPromptFactory = async (epochInput) => buildIncrementalProjection(epochInput);
+          prompt = '[F296 context projection pending provider preflight]';
+        } else {
+          const projection = await buildIncrementalProjection();
+          prompt = projection.prompt;
+          exactPromptMessageIds = [...(projection.promptMessageIds ?? [])];
+        }
       } else {
         // Per-cat context budget (Phase 4.0): assemble context with cat-specific limits
         let catContextHistory = contextHistory; // fallback to legacy pre-assembled
@@ -1563,59 +1676,36 @@ export async function* routeSerial(
         prompt = rebuildPromptWithBootstrap(bootstrapContext);
       }
 
-      // F229 KD-24: append the table only after incremental/legacy assembly reaches
-      // its final shape. The same invocation-scoped handle table is used below to
-      // resolve actions, so prompt visibility and validator identity stay coupled.
-      if (conciergeSearchContextForCat) {
-        prompt = `${prompt}\n${conciergeSearchContextForCat}`;
-      }
-
-      // F260 AC-B8: Inject entity nudge context AFTER incremental/legacy prompt
-      // assembly so it survives `prompt = parts.join(...)` in incremental mode.
-      // Keep this after the concierge table so their cross-feature ordering is stable.
-      if (routeLevelNudgePromptContext) {
-        prompt = `${prompt}\n${routeLevelNudgePromptContext}`;
-        if (preparedProactiveMemoryNudge) {
-          deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
-        }
-      }
-      if (structuredDispositionPrompt) {
-        prompt = `${prompt}\n\n---\n\n${structuredDispositionPrompt}`;
-      }
-      const assemblePromptAfterSeal = rebuildPromptWithBootstrap;
+      if (!incrementalMode) prompt = appendRoutePromptAdditions(prompt);
       const rebuildPromptAfterSessionSeal =
-        rebuildSessionBootstrap && assemblePromptAfterSeal
+        !defersProjection && rebuildSessionBootstrap && (rebuildPromptWithBootstrap || contextPromptFactory)
           ? async () => {
               const refreshed = await rebuildSessionBootstrap();
               if (!refreshed) {
-                // buildSessionBootstrap returns null when the chain has no sealed
-                // prior (Session #1) — a NORMAL condition on cold-rebuild paths
-                // (context-continuity), not a fatal error. Align with the initial
-                // best-effort bootstrap call: degrade to the initial context.
                 log.warn(
                   { catId, threadId },
                   '[routeSerial] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context',
                 );
+              } else {
+                bootstrapContext = refreshed.text;
+                if (refreshed.pushRecallPresentations?.length) {
+                  currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
+                }
               }
-              if (refreshed?.pushRecallPresentations?.length) {
-                currentPushRecallPresentations.push(...refreshed.pushRecallPresentations);
-              }
-              let rebuilt = assemblePromptAfterSeal(refreshed?.text ?? bootstrapContext);
-              if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
-              if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
-              if (structuredDispositionPrompt) rebuilt = `${rebuilt}\n\n---\n\n${structuredDispositionPrompt}`;
-              return rebuilt;
+              return rebuildPromptWithBootstrap
+                ? appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapContext))
+                : prompt;
             }
           : undefined;
 
-      const exactPromptMessageIds = collectExactPromptMessageIds(
-        incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
-        incrementalMode ? [] : [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
-        incrementallyExposedMessageIds,
-        explicitlyExposedMessageIds,
-        options.freshnessSupplementRequiredMessageIds ?? [],
-        options.freshnessClosureRequiredMessageIds ?? [],
-      );
+      if (!incrementalMode) {
+        exactPromptMessageIds = collectExactPromptMessageIds(
+          options.persistedPromptMessageIds ?? [],
+          [currentUserMessageId, a2aTriggerMessageId, streamReplyTo],
+          options.freshnessSupplementRequiredMessageIds ?? [],
+          options.freshnessClosureRequiredMessageIds ?? [],
+        );
+      }
 
       let textContent = '';
       const thinkingChunks: string[] = [];
@@ -2007,12 +2097,17 @@ export async function* routeSerial(
             }
           : projectedMsg;
       };
+      // The caller may extend this worklist only while its route turn is live. Keeping the
+      // window closed through prompt/session setup also rejects stale callbacks from an earlier
+      // occurrence of the same cat in this parent chain.
+      setWorklistCallerAdmissionOpen(worklistEntry, true);
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
         capacitySnapshot,
         sessionPolicySnapshot,
         prompt,
+        ...(contextPromptFactory ? { contextPromptFactory } : {}),
         ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
         ownerAuthProvenance,
@@ -2062,6 +2157,11 @@ export async function* routeSerial(
       })) {
         // F39 bugfix: stop yielding after cancel (pipe buffer may still drain)
         if (catSignal?.aborted) break;
+        if (isFinalGenerationBriefingBoundary(msg)) await materializeFinalGenerationBriefing();
+        while (pendingContextProjectionMessages.length > 0) {
+          const pendingMessage = pendingContextProjectionMessages.shift();
+          if (pendingMessage) yield pendingMessage;
+        }
 
         const effectiveMsgs: AgentMessage[] = [];
         if (msg.type === 'text' && msg.content) {
@@ -2825,9 +2925,6 @@ export async function* routeSerial(
           ? async () => {
               const refreshed = await rebuildSessionBootstrap();
               if (!refreshed) {
-                // Same best-effort semantics as the initial bootstrap call: null
-                // (Session #1, no sealed prior) degrades instead of failing the
-                // remedial invocation.
                 log.warn(
                   { catId, threadId },
                   '[routeSerial] remedial session bootstrap rebuild returned no sealed prior; degrading to bare remedial prompt',
@@ -4090,7 +4187,7 @@ export async function* routeSerial(
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);
           // F216 c1.3 + P1-2 (砚砚 review): route each mentioned cat through the pure
-          // resolveRoutingDecisions function (unifies the depth/dedup/pendingTail/streak/fairness guards
+          // resolveRoutingDecisions function (unifies the depth/pendingTail/streak/occupancy/fairness guards
           // that used to be inline here + duplicated in the relay path). Resolve+apply ONE cat at a time
           // so each target's decision observes the prior targets' mutations (a2aCount++ and streak
           // update) — matching the original sequential semantics. A single batch resolve would freeze
@@ -4162,10 +4259,9 @@ export async function* routeSerial(
               continue;
             }
 
-            // decision.action === 'enqueue_worklist'
-            // The queue-only dedup hook above cannot see direct/user invocations. Claim the
-            // InvocationTracker slot before mutating the worklist; another live owner means this
-            // return must wait in the durable queue rather than start a same-session invocation.
+            // enqueue_worklist means the target looks free; defer_queue means Queue already has a
+            // responsibility for it. In both cases the tracker claim is the final admission fence:
+            // another live owner leaves this exact source in the durable queue, never in this worklist.
             const claimed = await claimOrDeferA2ATarget(
               nextCat,
               catId,
@@ -4274,7 +4370,7 @@ export async function* routeSerial(
           }
         } else if (a2aMentions.length > 0 && queuedMessagesPending && deferA2AEnqueue && !catSignal?.aborted) {
           // F216 c2: deferred enqueue via the unified resolveRoutingDecisions decision layer.
-          // Same guard chain as inline (depth/dedup/pendingTail/streak) but ctx.queuedMessagesPending=true
+          // Same guard chain as inline (depth/pendingTail/streak/occupancy) but ctx.queuedMessagesPending=true
           // makes the LAST gate return defer_queue instead of enqueue_worklist. Resolve+apply ONE cat at a
           // time (NOT batch) so each target's decision observes prior targets' a2aCount++ and streak
           // mutations — same per-target ordering fix as the inline path (砚砚 P1-2: a batch resolve would
@@ -4402,54 +4498,109 @@ export async function* routeSerial(
 
         // F27: Emit a2a_handoff for ALL new A2A targets (both response-text and callback-pushed).
         // We track which targets have already been announced to avoid duplicate handoff events.
-        for (let wi = handoffEmitted; wi < worklist.length; wi++) {
-          const pendingCat = worklist[wi]!;
-          if (wi < targetCats.length) continue; // Skip original targets — not A2A
-
-          const claimed = await claimOrDeferA2ATarget(
-            pendingCat,
-            catId,
-            storedContent,
-            storedMsgId,
-            noteAcceptedTurnCustodyHandoff,
-          );
-          if (!claimed) {
-            worklist.splice(wi, 1);
-            wi--;
-            continue;
+        const serialLegs: Array<{ catId: CatId; config?: CatConfig }> = [];
+        // ── INV-1 HOLDER: SEALED ADMITTED BATCH ────────────────────────────────────────────
+        // Announce only from a frozen batch whose admission is already closed.
+        //
+        // Two defects live at this exact spot, and they pull in opposite directions:
+        //  (a) deriving index/total while claims are still outstanding announces a group size that
+        //      counts legs which may still be pruned  → 砚砚 R5: "串行 1/2" with one real leg;
+        //  (b) splitting claim and emit into two passes over the MUTABLE worklist opens a
+        //      reentrancy window: `yield` suspends this generator, a callback `pushToWorklist`
+        //      lands, and the emit pass announces AND starts a cat that never claimed a slot
+        //      → 砚砚 R6, a custody violation I introduced while fixing (a).
+        //
+        // Sealing resolves both: claim/prune the pending tail, freeze a copy, close the batch
+        // BEFORE the first yield, then emit only from the frozen copy. A push arriving mid-emit
+        // cannot join this batch's size and cannot skip admission — it simply becomes the next
+        // batch, which the drain loop claims on its following pass. Late arrivals are therefore
+        // late, not unadmitted.
+        let sealGuard = maxDepth + targetCats.length + 2;
+        while (handoffEmitted < worklist.length && sealGuard-- > 0) {
+          for (let wi = handoffEmitted; wi < worklist.length; wi++) {
+            if (wi < targetCats.length) continue;
+            const claimed = await claimOrDeferA2ATarget(
+              worklist[wi]!,
+              catId,
+              storedContent,
+              storedMsgId,
+              noteAcceptedTurnCustodyHandoff,
+            );
+            if (!claimed) {
+              worklist.splice(wi, 1);
+              wi--;
+            }
           }
+          if (handoffEmitted >= worklist.length) break;
+          const batchStart = handoffEmitted;
+          const sealedBatch: readonly CatId[] = Object.freeze(worklist.slice(batchStart));
+          handoffEmitted = worklist.length; // close the batch BEFORE any yield can suspend us
+          for (const [legIndex, pendingCat] of sealedBatch.entries()) {
+            if (batchStart + legIndex < targetCats.length) continue; // originals are not A2A legs
 
-          // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
-          const auditLog = getEventAuditLog();
-          auditLog
-            .append({
-              type: AuditEventTypes.A2A_HANDOFF,
-              threadId,
-              data: {
-                fromCat: catId,
-                toCat: pendingCat,
-                userId,
-                a2aDepth: worklistEntry.a2aCount,
-                maxDepth,
-              },
-            })
-            .catch((err) => {
-              log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
-            });
+            // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
+            const auditLog = getEventAuditLog();
+            auditLog
+              .append({
+                type: AuditEventTypes.A2A_HANDOFF,
+                threadId,
+                data: {
+                  fromCat: catId,
+                  toCat: pendingCat,
+                  userId,
+                  a2aDepth: worklistEntry.a2aCount,
+                  maxDepth,
+                },
+              })
+              .catch((err) => {
+                log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
+              });
 
-          // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
-          // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
-          const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+            // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
+            // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
+            const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+            // F086/F216: the scheduling mode is DECLARED, never inferred from how many targets
+            // appeared or in what order. Inline line-start @mentions are one ordered worklist.
+            const projection: A2ARoutingProjection = {
+              mode: A2A_INLINE_MENTION_MODE,
+              index: legIndex + 1,
+              total: sealedBatch.length,
+            };
+            serialLegs.push({ catId: pendingCat, ...(nextConfig ? { config: nextConfig } : {}) });
+            yield {
+              type: 'a2a_handoff' as AgentMessageType,
+              catId,
+              content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig, projection),
+              invocationId: ownInvocationId,
+              targetCatId: pendingCat,
+              routing: projection,
+              timestamp: Date.now(),
+            } as AgentMessage;
+          }
+        }
+        // F086/F216 requirement 4: multi-target inline @ is normalized to serial (the semantics
+        // the runtime already executes) and SAID OUT LOUD. No NLP over the body, no silent
+        // downgrade, and the structured parallel escape hatch is named explicitly.
+        if (serialLegs.length > 1) {
+          const noticePayload = buildSerialMultiTargetNoticePayload(catId, serialLegs);
           yield {
-            type: 'a2a_handoff' as AgentMessageType,
+            type: 'system_info' as AgentMessageType,
             catId,
-            content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig),
+            content: noticePayload,
             invocationId: ownInvocationId,
-            targetCatId: pendingCat,
             timestamp: Date.now(),
           } as AgentMessage;
+          // Persist directly rather than via userFacingSystemInfoContents: the tool-only emit site
+          // below runs AFTER that array is flushed, so routing the notice through it would silently
+          // drop half the cases. Same writer, ordering-independent.
+          await persistUserFacingSystemInfoNotices({
+            messageStore: deps.messageStore,
+            threadId,
+            catId: catId as string,
+            contents: [noticePayload],
+            ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+          });
         }
-        handoffEmitted = worklist.length;
       } else if (!hadError) {
         // No text content and no error.
         // Persist only when we have non-text payload (tool/thinking/rich).
@@ -4786,54 +4937,95 @@ export async function* routeSerial(
       // Keep this outside the text branch: callback/tool-only turns can push worklist entries
       // without producing text, but their child slots still must be tracked before parent done.
       // We track which targets have already been announced to avoid duplicate handoff events.
-      for (let wi = handoffEmitted; wi < worklist.length; wi++) {
-        const pendingCat = worklist[wi]!;
-        if (wi < targetCats.length) continue; // Skip original targets — not A2A
-
-        const claimed = await claimOrDeferA2ATarget(
-          pendingCat,
-          catId,
-          undefined,
-          undefined,
-          noteAcceptedTurnCustodyHandoff,
-        );
-        if (!claimed) {
-          worklist.splice(wi, 1);
-          wi--;
-          continue;
+      const toolOnlySerialLegs: Array<{ catId: CatId; config?: CatConfig }> = [];
+      // INV-1 HOLDER (serial side, tool-only turn) — SAME sealed-batch drain as the text path.
+      // 砚砚 R6 required both loops to hold the line: a callback push can feed either one, so
+      // leaving one loop iterating the mutable worklist would just relocate the reentrancy window
+      // rather than close it.
+      let toolOnlySealGuard = maxDepth + targetCats.length + 2;
+      while (handoffEmitted < worklist.length && toolOnlySealGuard-- > 0) {
+        for (let wi = handoffEmitted; wi < worklist.length; wi++) {
+          if (wi < targetCats.length) continue;
+          const claimed = await claimOrDeferA2ATarget(
+            worklist[wi]!,
+            catId,
+            undefined,
+            undefined,
+            noteAcceptedTurnCustodyHandoff,
+          );
+          if (!claimed) {
+            worklist.splice(wi, 1);
+            wi--;
+          }
         }
+        if (handoffEmitted >= worklist.length) break;
+        const batchStart = handoffEmitted;
+        const sealedBatch: readonly CatId[] = Object.freeze(worklist.slice(batchStart));
+        handoffEmitted = worklist.length; // close the batch BEFORE any yield can suspend us
+        for (const [legIndex, pendingCat] of sealedBatch.entries()) {
+          if (batchStart + legIndex < targetCats.length) continue; // originals are not A2A legs
 
-        // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
-        const auditLog = getEventAuditLog();
-        auditLog
-          .append({
-            type: AuditEventTypes.A2A_HANDOFF,
-            threadId,
-            data: {
-              fromCat: catId,
-              toCat: pendingCat,
-              userId,
-              a2aDepth: worklistEntry.a2aCount,
-              maxDepth,
-            },
-          })
-          .catch((err) => {
-            log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
-          });
+          // === A2A_HANDOFF 审计 (fire-and-forget, 缅因猫 review P2-3) ===
+          const auditLog = getEventAuditLog();
+          auditLog
+            .append({
+              type: AuditEventTypes.A2A_HANDOFF,
+              threadId,
+              data: {
+                fromCat: catId,
+                toCat: pendingCat,
+                userId,
+                a2aDepth: worklistEntry.a2aCount,
+                maxDepth,
+              },
+            })
+            .catch((err) => {
+              log.warn({ threadId, fromCat: catId, toCat: pendingCat, err }, 'A2A_HANDOFF audit write failed');
+            });
 
-        // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
-        // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
-        const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+          // F233 P1 (云端 review): ball.handed 已移到 worklist 主循环接球时刻统一 emit（覆盖 original +
+          // A2A），此处不再 emit——这里只是 A2A handoff 发射点（球离开前手），A2A target 真正接球在主循环。
+          const nextConfig: CatConfig | undefined = catRegistry.tryGet(pendingCat as string)?.config;
+          // F086/F216: same declared-serial contract as the text path above.
+          const projection: A2ARoutingProjection = {
+            mode: A2A_INLINE_MENTION_MODE,
+            index: legIndex + 1,
+            total: sealedBatch.length,
+          };
+          toolOnlySerialLegs.push({ catId: pendingCat, ...(nextConfig ? { config: nextConfig } : {}) });
+          yield {
+            type: 'a2a_handoff' as AgentMessageType,
+            catId,
+            content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig, projection),
+            invocationId: ownInvocationId,
+            targetCatId: pendingCat,
+            routing: projection,
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
+      }
+      // FINAL ADMISSION BOUNDARY: no callback from this caller may extend the worklist after
+      // this point. Close before the notice yield and every later await, not merely before done;
+      // otherwise a callback can land after the last claim/prune pass and start unadmitted on
+      // the next loop iteration while executedIndex still names the old caller.
+      setWorklistCallerAdmissionOpen(worklistEntry, false);
+      if (toolOnlySerialLegs.length > 1) {
+        const noticePayload = buildSerialMultiTargetNoticePayload(catId, toolOnlySerialLegs);
         yield {
-          type: 'a2a_handoff' as AgentMessageType,
+          type: 'system_info' as AgentMessageType,
           catId,
-          content: formatA2AHandoffContent(catId, pendingCat, catConfig, nextConfig),
+          content: noticePayload,
           invocationId: ownInvocationId,
-          targetCatId: pendingCat,
           timestamp: Date.now(),
         } as AgentMessage;
+        await persistUserFacingSystemInfoNotices({
+          messageStore: deps.messageStore,
+          threadId,
+          catId: catId as string,
+          contents: [noticePayload],
+          ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
+        });
       }
-      handoffEmitted = worklist.length;
 
       // Persist error as system message so it survives F5 reload.
       // During streaming, errors render as red badges via ephemeral frontend state.

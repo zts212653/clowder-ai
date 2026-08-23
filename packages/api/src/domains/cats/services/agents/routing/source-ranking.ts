@@ -1,3 +1,4 @@
+import { type ContextPresentation, mapToPresentation } from '../../session/context-presentation.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 
 export interface ThreadMeta {
@@ -14,6 +15,8 @@ export interface RankedSource {
   provenance: 'canonical' | 'regex' | 'recency';
   /** Only exact current subjects may drive command-like 真相源 / 下一步 UI. */
   directiveEligible: boolean;
+  /** Producer content revision used by the presentation identity. */
+  updatedAt?: number;
 }
 
 interface ActiveTask {
@@ -80,6 +83,7 @@ export function rankArtifactSources(
       label: a.label,
       provenance,
       directiveEligible: false,
+      updatedAt: a.updatedAt,
     };
 
     if (matchedFeatureId && a.type === 'feature-doc' && extractFeatureIdFromRef(a.ref) === matchedFeatureId) {
@@ -101,7 +105,24 @@ export function rankArtifactSources(
   return [...tier1, ...tier2, ...tier3.map((t) => t.source)];
 }
 
-/** Keep ranking useful for history while fail-closing command-like navigation. */
+/**
+ * Turn ranking metadata into the canonical presentation contract.
+ *
+ * `directiveEligible` is only a producer observation. The mapper still owns the
+ * final ceiling: regex/recency sources are T2 even if a buggy caller flips the
+ * boolean, while a typed/current canonical source may become T0.
+ */
+export function projectRankedSource(source: RankedSource): ContextPresentation {
+  const isCurrentCanonical = source.provenance === 'canonical' && source.directiveEligible;
+  return mapToPresentation({
+    subjectKey: `artifact:${source.type}:${source.ref}`,
+    asOf: { kind: 'as_of', value: source.updatedAt ?? 0 },
+    sourceTier: isCurrentCanonical ? 'T0' : 'T2',
+    requested: isCurrentCanonical ? 'directive' : 'pointer',
+  });
+}
+
+/** Keep ranking useful for history while fail-closing command-like navigation through the mapper. */
 export function selectDirectiveSources(sources: readonly RankedSource[]): RankedSource[] {
-  return sources.filter((source) => source.directiveEligible);
+  return sources.filter((source) => projectRankedSource(source).presentation === 'directive');
 }

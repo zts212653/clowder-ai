@@ -99,6 +99,22 @@ describe('InMemoryTurnExecutionStore', () => {
     );
   });
 
+  test('binds factory-owned prompt coverage exactly once after child admission', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const input = runningInput();
+    await store.createRunning(input);
+
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-1', 'msg-context'])).outcome, 'bound');
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-context', 'msg-1'])).outcome, 'replayed');
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-1', 'msg-other'])).outcome, 'conflict');
+    assert.equal((await store.bindCoveredMessageIds('missing', ['msg-1'])).outcome, 'not_found');
+    assert.deepEqual((await store.get('child-1')).causal, {
+      triggerMessageId: 'msg-1',
+      coveredMessageIds: ['msg-1', 'msg-context'],
+    });
+    assert.equal((await store.createRunning(input)).outcome, 'replayed');
+  });
+
   test('success-vs-cancel race produces one immutable terminal winner', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput());

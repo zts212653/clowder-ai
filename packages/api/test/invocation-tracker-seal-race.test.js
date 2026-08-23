@@ -180,7 +180,7 @@ describe('InvocationTracker: Stop→Seal race (#1313)', () => {
     assert.equal(guard.acquired, false, 'wrong-controller complete must not unlock seal');
   });
 
-  it('guardDelete still rejects tombstone with pending teardown', () => {
+  it('guardDelete intentionally allows a tombstone with pending teardown', () => {
     const tracker = new InvocationTracker();
     tracker.start('t1', 'opus', 'user1', ['opus']);
     tracker.cancel('t1', 'opus');

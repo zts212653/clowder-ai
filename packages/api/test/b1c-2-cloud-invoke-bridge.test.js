@@ -278,6 +278,53 @@ describe('F247 AC-B1c-2: existing binding read + corruption-safe', () => {
 });
 
 describe('F247 Host Adapter: background append without foreground UI takeover', () => {
+  it('routes two Clowder AI threads to two exact authorized conversation IDs without cross-talk', async () => {
+    const bindingsByThread = new Map([
+      ['thread_a', { 'gpt-pro': 'https://chatgpt.com/c/conversation-7' }],
+      ['thread_b', { 'gpt-pro': 'https://chatgpt.com/c/conversation-8' }],
+    ]);
+    const threadStore = {
+      get: async (threadId) => ({ id: threadId, title: threadId, participants: ['gpt-pro'] }),
+      getCloudCatBindings: async (threadId) => ({ ...bindingsByThread.get(threadId) }),
+      updateCloudCatBinding: async (threadId, catId, chatUrl) => {
+        bindingsByThread.set(threadId, { ...bindingsByThread.get(threadId), [catId]: chatUrl });
+      },
+    };
+    const hostCalls = [];
+    const bridge = new CloudInvokeBridge({
+      hostAdapter: {
+        append_message: async (...args) => {
+          hostCalls.push(args);
+          return { hostMessageId: `host-${args[0]}` };
+        },
+      },
+      pinchTabAdapter: null,
+      emitFallback: async () => undefined,
+      threadStore,
+    });
+
+    const first = await bridge.dispatchInternal({
+      ...baseParams,
+      threadId: 'thread_a',
+      idempotencyKey: 'source-thread-a',
+    });
+    const second = await bridge.dispatchInternal({
+      ...baseParams,
+      threadId: 'thread_b',
+      idempotencyKey: 'source-thread-b',
+    });
+
+    assert.equal(first.hostMessageId, 'host-conversation-7');
+    assert.equal(second.hostMessageId, 'host-conversation-8');
+    assert.deepEqual(
+      hostCalls.map(([conversationId, _text, idempotencyKey]) => [conversationId, idempotencyKey]),
+      [
+        ['conversation-7', 'source-thread-a'],
+        ['conversation-8', 'source-thread-b'],
+      ],
+    );
+  });
+
   it('prefers append_message for a bound conversation and returns the host message ID', async () => {
     const existing = 'https://chatgpt.com/c/existing-uuid';
     const threadStore = makeMockThreadStore({ initialBindings: { 'gpt-pro': existing } });

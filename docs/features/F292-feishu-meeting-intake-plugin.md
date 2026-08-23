@@ -4,25 +4,25 @@ related_features: [F141, F168, F195, F202, F240, F285, F288, F290]
 topics: [feishu, lark, meeting-intake, plugin, input-source, signal-ingress, needs-me, transcript]
 doc_kind: spec
 created: 2026-08-08
-architecture-cell: plugin, signal-intake
+architecture-cell: plugin, signal-intake, approval-index
 community_issue: "clowder-ai-plugins#23"
 description: "飞书生成会议文字稿后，官方 input-source 插件把它变成可恢复的 Meeting Intake；人只补说话人、背景与去向，猫带着家里记忆产出纪要、决定、Roadmap 或任务。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-17T04:42:00Z
-tips_exempt: "Internal Host startup-budget repair; it adds no new owner action or discoverable capability."
+description_updated_at: 2026-08-22T02:35:00Z
+tips_exempt: "The existing feature-f292-feishu-meeting-intake tip already opens this capability; search and in-place Thread creation are contextual actions inside its existing Needs Me card."
 ---
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: implementation / alpha.6 is published and the owner-driven historical Minutes import plus idle-runtime heartbeat are on Host main; alpha.5 remains enabled+healthy with connected owner auth, and the next gate is alpha.6 adoption plus historical dogfood
+> **Status**: implementation / alpha.6 is deployed with connected owner auth; live dogfood exposed a Host restart/sleep recovery defect, whose repair is in verification before automatic-intake and duplicate-delivery acceptance
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
 
 ## Architecture Ownership
 
-Architecture cell: plugin, signal-intake
+Architecture cell: plugin, signal-intake, approval-index
 
 Host-state cell: `signal-intake`（Phase A frozen）
 
@@ -31,7 +31,8 @@ plus the Host-governed official external plugin contract, so it is the correct o
 manifest/wire surface. It must not silently absorb K-3a routing, durable `MeetingIntake`, or Needs Me
 projection: those are Host domain truth, not extension lifecycle. The new `signal-intake` cell owns
 generic signal admission, Host routes, durable workflow intake, source-access authority, and repair
-projection. `github-signals` keeps its GitHub-specific collection frontier/snapshots and remains the
+truth. The existing `approval-index` cell owns the one-meeting attention projection and its bounded
+destination picker; it does not become a second intake store. `github-signals` keeps its GitHub-specific collection frontier/snapshots and remains the
 behavior oracle rather than a schema or migration target. F292 still does not create a parallel
 `event_source` resource or a universal event store.
 
@@ -114,10 +115,12 @@ missed events and pre-plugin meetings, not the primary journey.
 
 ### Current activation and repair truth
 
-- **Automatic intake is explicitly activatable, never automatic.** The activation slice admits only
+- **First activation is explicit; enabled owner intent is durable.** The activation slice admits only
   the immutable official catalog artifact after SRI/manifest/schema verification, installs it without
-  starting a process, and exposes revision-fenced owner controls in Settings. API boot, restart, and
-  install stay dormant; only an explicit owner `enable` starts the supervised stdio process.
+  starting a process, and exposes revision-fenced owner controls in Settings. Install stays dormant and
+  only an explicit owner `enable` establishes activation intent. A later Host restart preserves that
+  enabled intent but never revives the old process/session/lease: it starts a fresh verified process and
+  requires a new Broker handshake. Interrupted enable/disable transitions still recover to `error`.
 - **Package adoption is explicit and state-honest.** Settings distinguishes the installed artifact
   from the catalog's available version. An owner update verifies the exact internal-archive/SRI and both
   lifecycle and grant revisions, preserves the same instance/config, and leaves it disabled/stopped;
@@ -150,26 +153,33 @@ missed events and pre-plugin meetings, not the primary journey.
   and admits the signal through the same active-session grant and durable `events.publish` ledger.
 - **Idle runtime health is leased, not assumed.** Host pings the exact child before the active lease
   expires and renews only the same live authority. A missed or malformed heartbeat closes the runtime
-  and projects a crash instead of leaving a falsely healthy instance that rejects the next intake.
+  and projects a crash instead of leaving a falsely healthy instance that rejects the next intake. If
+  wall-clock time jumps past the lease while the machine is asleep, the expired lease remains terminal;
+  Host may preserve the explicit enabled intent only by replacing the child and completing a fresh
+  package check, connection, session, handshake, and lease.
 
 ## User Journey
 
-### J1 — Generated meeting becomes one intake
+### J1 — Generated meeting becomes one approval entity
 
-1. Feishu finishes generating a note/minute.
-2. The official plugin publishes one declared, versioned signal with an idempotency key, occurrence
-   time, epistemic/privacy metadata, bounded meeting metadata, and an opaque source handle.
+1. Feishu finishes generating a meeting artifact. When the same meeting exposes both a Minute and a
+   Note, Minute is canonical; Note is a fallback only when no Minute exists.
+2. The official plugin publishes declared, versioned artifact signals with idempotency keys, occurrence
+   time, epistemic/privacy metadata, bounded meeting metadata, and opaque source handles. Polling emits
+   the canonical Minute and uses Note only as a fallback; realtime delivery may still observe both.
 3. Host validates plugin identity, declaration, grant, payload bounds, and liveness lease before
-   persisting one `MeetingIntake` with TTL=0.
-4. Redelivery or restart updates/reconciles the same intake rather than creating duplicates.
+   persisting each source artifact as a `MeetingIntake` with TTL=0, then projects shared `meetingId`
+   siblings as one approval entity.
+4. Redelivery or restart updates/reconciles the same intake rather than creating duplicates. The Host
+   also projects already-persisted Minute/Note siblings as one meeting card, without deleting audit truth.
 
 ### J2 — Needs Me asks only what a human must decide
 
 1. Host resolves safe defaults from meeting metadata and existing user policy.
 2. If speaker identities, missing background, destination, or desired output still require judgment,
    Needs Me shows one meeting card with title/time/source/readiness and the unresolved fields.
-3. You can map speakers, add context, choose an existing private thread (or explicitly create one),
-   and select minutes / decisions / Roadmap / tasks without downloading a file.
+3. You can map speakers, add context, search recent private threads by title/project/ID or create and
+   auto-select one in place, and select minutes / decisions / Roadmap / tasks without downloading a file.
 4. Auto-resolvable meetings do not create inbox noise. A future F290 Channel appears only after Host
    has a real Channel contract and authority check; the plugin itself never sees that destination.
 
@@ -327,7 +337,8 @@ missed events and pre-plugin meetings, not the primary journey.
 
 - [x] AC-C1: Host accepts a conforming generated-note/minute signal, verifies identity/grant/lease,
   persists exactly one TTL=0 `MeetingIntake` per source artifact, and reconciles restart/redelivery
-  without losing recovery evidence or duplicating user-visible work.
+  without losing recovery evidence or duplicating user-visible work. Minute/Note siblings for the same
+  meeting remain auditable records but project as one canonical meeting card.
 - [x] AC-C2: Projection tests prove that only unresolved human judgment or repair appears in Needs Me;
   confirmed speaker/context/destination/output choices transition the same durable record and all
   visible degraded states offer a concrete retry/regrant/manual-import action.

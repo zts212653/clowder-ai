@@ -24,24 +24,33 @@ import type { MessageMetadata } from '../../types.js';
 import { cursorFor, parseCursor } from '../cursor.js';
 import {
   getTimelineOrderTime,
+  isDurableOwnerReadEvidence,
   isSystemUserMessage,
   isTimelinePublished as isTimelinePublishedFn,
+  passesManagedHoldViewerBoundary,
   resolveDeliveryTimelineScore,
   resolveThreadMessageVisibility,
 } from '../visibility.js';
 import {
   assertQueueCustodyMessageBinding,
   assertQueueCustodyTransition,
+  cloneQueueCustodyAdmissionIntent,
   cloneQueuedMessageCustody,
+  type QueueCustodyAdmissionIntent,
   type QueueCustodyTransitionInput,
   type QueuedMessageCustody,
+  queueCustodyAdmissionIntentsMatch,
   terminalizeRecalledQueueCustody,
 } from './queued-message-custody.js';
 // Single source of truth: ThreadStore.ts owns DEFAULT_THREAD_ID
 import { DEFAULT_THREAD_ID } from './ThreadStore.js';
 import type { TurnExecutionMessageProjection } from './TurnExecutionStore.js';
 export { DEFAULT_THREAD_ID };
-export type { QueueCustodyTransitionInput, QueuedMessageCustody } from './queued-message-custody.js';
+export type {
+  QueueCustodyAdmissionIntent,
+  QueueCustodyTransitionInput,
+  QueuedMessageCustody,
+} from './queued-message-custody.js';
 
 /**
  * F117: Check if a message should be visible in timeline/history/context.
@@ -141,6 +150,8 @@ export type RecallMessageToComposerDraftResult =
 export interface ThreadUnreadProjectionCursor {
   threadId: string;
   afterId: string;
+  /** Viewer-validated fallback when the canonical anchor itself is ineligible. */
+  fallbackAfterId?: string;
 }
 
 export interface ThreadUnreadMessageProjection {
@@ -224,7 +235,14 @@ export interface StoredMessage {
      *    - `turnInvocationId` = per-cat-turn invocation (Z3 new — bubble identity SoT for frontend
      *      hydrate/merge stable key; required so same-parent multi-turn-same-cat bubbles do NOT merge)
      *  Frontend prefers `turnInvocationId` (fallback `invocationId` for legacy messages). */
-    stream?: { invocationId?: string; turnInvocationId?: string; parallelBatchId?: string };
+    stream?: {
+      invocationId?: string;
+      turnInvocationId?: string;
+      parallelBatchId?: string;
+      /** F194 R21 rollback cache compatibility; new projection does not write these split fields. */
+      cliStdout?: string;
+      speechContent?: string;
+    };
     /** Typed causal origin for cat output; freshness must never infer this from prose or timing. */
     causal?: { kind: 'invocation_reply'; triggerMessageId: string };
     /** F272: one canonical home message projected from a durable proactive visit. */
@@ -245,6 +263,11 @@ export interface StoredMessage {
     };
     /** F167 Phase R: lifecycle state is independent of cross-thread provenance. */
     coordination?: CrossThreadCoordination;
+    /** #1371 PR1b: typed local-review fact; public prose is presentation only. */
+    localReviewVerdict?: {
+      verdict: 'approved' | 'changes_requested' | 'commented';
+      clientMessageId: string;
+    };
     /** Internal callback-dedup provenance; never used as routing authority. */
     callbackDedup?: {
       coordinationKey: 'minted-active-root' | 'minted-terminal-root' | 'action-active-root';
@@ -263,6 +286,8 @@ export interface StoredMessage {
     dynamicSceneEntries?: readonly import('@cat-cafe/shared').AsrPersonMemoryDynamicSceneEntryV1[];
     /** Server-written deferred-generation carrier; never accepted as owner-authored truth. */
     writeOpportunityReentry?: import('@cat-cafe/shared').WriteOpportunityReentryCarrierV1;
+    /** Server-written same-generation presentation retry; contains refs only. */
+    writeOpportunityPresentationRetry?: import('@cat-cafe/shared').WriteOpportunityPresentationRetryCarrierV1;
     freshness?:
       | PublishedFreshnessAnnotation
       | {
@@ -357,6 +382,8 @@ export interface StoredMessage {
   deliveryStatus?: 'queued' | 'delivered' | 'canceled';
   /** F254 ADR-042: TTL-0 execution custody for this exact ordinary queued user message. */
   queueCustody?: QueuedMessageCustody;
+  /** Crash-recoverable A2A fan-out intent before the first complete custody CAS. */
+  queueCustodyAdmission?: QueueCustodyAdmissionIntent;
   /** F264 Gap F: content-free terminal recall truth; body custody lives only in owner composer draft. */
   recall?: MessageRecallMarker;
   /** F121: ID of the message this is replying to (same thread only) */
@@ -400,6 +427,19 @@ export type QueueCustodyInitializeResult =
   | { kind: 'existing'; message: StoredMessage }
   | { kind: 'not_found' }
   | { kind: 'not_queued' };
+
+export type QueueCustodyAdmissionInitializeResult =
+  | { kind: 'initialized' | 'existing'; message: StoredMessage }
+  | { kind: 'not_found' | 'not_queued' | 'conflict' };
+
+/**
+ * Narrow recovery transition for a legacy timeline-visible carrier that was
+ * persisted before Queue admission. Only an unclassified message with no
+ * custody may enter queued state; delivered/canceled/custodied rows fail closed.
+ */
+export type QueueAdmissionPrepareResult =
+  | { kind: 'prepared' | 'existing'; message: StoredMessage }
+  | { kind: 'not_found' | 'conflict' };
 
 /**
  * One structurally bounded backwards scan over a thread index.
@@ -716,6 +756,13 @@ export interface IMessageStore {
    * Returns null only when the message is not found.
    */
   markDelivered(id: string, deliveredAt: number): MarkDeliveredResult | null | Promise<MarkDeliveredResult | null>;
+  /** Recover one exact legacy-visible carrier into queued state before custody initialization. */
+  prepareQueueAdmission(id: string): QueueAdmissionPrepareResult | Promise<QueueAdmissionPrepareResult>;
+  /** Persist the complete fan-out recovery intent before staging any process-local Queue carrier. */
+  initializeQueueCustodyAdmission(
+    id: string,
+    admission: QueueCustodyAdmissionIntent,
+  ): QueueCustodyAdmissionInitializeResult | Promise<QueueCustodyAdmissionInitializeResult>;
   /** F254: atomically backfill custody on an existing legacy queued message. */
   initializeQueueCustody(
     id: string,
@@ -748,12 +795,18 @@ export interface IMessageStore {
    * #1200 §8.7: Get the latest visible cursor for a thread.
    *
    * Returns the visibility-domain latest (not time-domain latest) as a
-   * {cursor: v2 token, messageId: raw ID} pair. Used by read-state routes
-   * (mark-all, read/latest) where time-latest ≠ visibility-latest once
-   * late delivery exists. Returns null for empty/no-visible-messages threads.
+   * {cursor: v2 token, messageId: raw ID} pair. Read-state callers select
+   * `durable_owner_read` so a queued mutable stream cannot become human-read
+   * evidence before final delivery; timeline/freshness callers retain the
+   * published frontier. Returns null for empty/no-eligible-messages threads.
    */
   getLatestVisibleCursor(
     threadId: string,
+    options?: {
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      /** Bind human read-state evidence to viewer-scoped managed-hold publication. */
+      readonly viewerUserId?: string;
+    },
   ): { cursor: string; messageId: string } | null | Promise<{ cursor: string; messageId: string } | null>;
   /**
    * #1200 §8.7: Canonicalize a raw message ID to a v2 cursor token.
@@ -927,6 +980,9 @@ export class MessageStore {
     const stored: StoredMessage = {
       ...payload,
       ...(payload.queueCustody ? { queueCustody: cloneQueuedMessageCustody(payload.queueCustody) } : {}),
+      ...(payload.queueCustodyAdmission
+        ? { queueCustodyAdmission: cloneQueueCustodyAdmissionIntent(payload.queueCustodyAdmission) }
+        : {}),
       id: generateSortableId(normalizedMessage.timestamp),
       threadId,
     };
@@ -1280,7 +1336,7 @@ export class MessageStore {
   getByThread(threadId: string, limit?: number, userId?: string, options?: ThreadMessageReadOptions): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
@@ -1302,6 +1358,9 @@ export class MessageStore {
       if (msg.threadId !== threadId) continue;
       if (msg.deletedAt) continue;
       if (msg.deliveryStatus === 'canceled') continue;
+      if (!passesManagedHoldViewerBoundary(msg, userId)) {
+        continue;
+      }
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
       matches.push(msg);
     }
@@ -1328,7 +1387,7 @@ export class MessageStore {
     options?: ThreadMessageReadOptions,
   ): StoredMessage[] {
     const max = Number.isFinite(limit as number) && (limit as number) > 0 ? (limit as number) : Number.MAX_SAFE_INTEGER;
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
 
     // The canonical visibility index intentionally excludes queued user work.
     // A caller that explicitly requests those rows therefore needs the raw
@@ -1445,15 +1504,24 @@ export class MessageStore {
    * live message as {cursor: v2 token, messageId: raw ID}.
    * Mirrors RedisMessageStore.getLatestVisibleCursor for FM-4 parity.
    */
-  getLatestVisibleCursor(threadId: string): { cursor: string; messageId: string } | null {
-    // Collect visible messages (same filter as getByThreadAfter)
+  getLatestVisibleCursor(
+    threadId: string,
+    options?: {
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly viewerUserId?: string;
+    },
+  ): { cursor: string; messageId: string } | null {
+    // Collect messages from the shared visibility order, then apply the
+    // consumer-selected evidence strength.
     const visible: Array<{ id: string; seq: number }> = [];
     for (const msg of this.messages) {
       if (msg.threadId !== threadId) continue;
       const seq = this.visibilitySeq.get(msg.id);
       if (seq === undefined) continue;
-      // #1269: include timeline-published queued cat speech (has visibilitySeq since append)
-      if (!isTimelinePublishedFn(msg)) continue;
+      const eligible =
+        options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublishedFn(msg);
+      if (!eligible) continue;
+      if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
       // #1200 codex P1: skip tombstones — same contract as Redis impl.
       // getLatestVisibleCursor returns the latest LIVE message, not a tombstone.
       if (msg.deletedAt) continue;
@@ -1500,7 +1568,7 @@ export class MessageStore {
   ): StoredMessage[] {
     const n = limit ?? DEFAULT_LIMIT;
     const matches: StoredMessage[] = [];
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
 
     for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
       const msg = this.messages[i]!;
@@ -1544,7 +1612,7 @@ export class MessageStore {
         return effectiveTimestamp === timestamp && beforeId !== undefined && message.id < beforeId;
       });
 
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
     const messages = candidates.filter((message) => {
       if (message.deletedAt || !isVisible(message)) return false;
       return !userId || message.userId === userId || isSystemUserMessage(message);
@@ -1678,6 +1746,7 @@ export class MessageStore {
     const msg = this.messages.find((m) => m.id === id);
     if (!msg) return null;
     if (msg.deliveryStatus !== 'queued') return { ...msg, deliveryTransitioned: false }; // only transition queued → delivered
+    if (msg.queueCustodyAdmission) return { ...msg, deliveryTransitioned: false };
     if (msg.queueCustody && msg.queueCustody.status !== 'terminal') {
       return { ...msg, deliveryTransitioned: false };
     }
@@ -1696,6 +1765,33 @@ export class MessageStore {
     return { ...msg, deliveryTransitioned: true };
   }
 
+  prepareQueueAdmission(id: string): QueueAdmissionPrepareResult {
+    const msg = this.messages.find((message) => message.id === id);
+    if (!msg) return { kind: 'not_found' };
+    if (msg.deliveryStatus === 'queued') return { kind: 'existing', message: { ...msg } };
+    if (msg.deliveryStatus !== undefined || msg.queueCustody) return { kind: 'conflict' };
+    msg.deliveryStatus = 'queued';
+    return { kind: 'prepared', message: { ...msg } };
+  }
+
+  initializeQueueCustodyAdmission(
+    id: string,
+    admission: QueueCustodyAdmissionIntent,
+  ): QueueCustodyAdmissionInitializeResult {
+    const msg = this.messages.find((message) => message.id === id);
+    if (!msg) return { kind: 'not_found' };
+    if (msg.deliveryStatus !== 'queued') return { kind: 'not_queued' };
+    if (msg.queueCustody) return { kind: 'conflict' };
+    if (msg.queueCustodyAdmission) {
+      return queueCustodyAdmissionIntentsMatch(msg.queueCustodyAdmission, admission)
+        ? { kind: 'existing', message: { ...msg } }
+        : { kind: 'conflict' };
+    }
+    assertQueueCustodyMessageBinding({ deliveryStatus: msg.deliveryStatus, queueCustodyAdmission: admission });
+    msg.queueCustodyAdmission = cloneQueueCustodyAdmissionIntent(admission);
+    return { kind: 'initialized', message: { ...msg } };
+  }
+
   initializeQueueCustody(id: string, custody: QueuedMessageCustody): QueueCustodyInitializeResult {
     const msg = this.messages.find((message) => message.id === id);
     if (!msg) return { kind: 'not_found' };
@@ -1703,6 +1799,7 @@ export class MessageStore {
     if (msg.deliveryStatus !== 'queued') return { kind: 'not_queued' };
     assertQueueCustodyMessageBinding({ deliveryStatus: msg.deliveryStatus, queueCustody: custody });
     msg.queueCustody = cloneQueuedMessageCustody(custody);
+    delete msg.queueCustodyAdmission;
     return { kind: 'initialized', message: { ...msg } };
   }
 
@@ -1750,6 +1847,7 @@ export class MessageStore {
     // #1200: Remove from visibility index if present (backfill parity with Redis CANCEL_WITH_VISIBILITY_LUA)
     this.visibilitySeq.delete(id);
     delete msg.queueCustody;
+    delete msg.queueCustodyAdmission;
     return { ...msg, deliveryTransitioned: true };
   }
 

@@ -18,7 +18,13 @@ import type { CatId } from '@cat-cafe/shared';
 import { l1StreakBreakCount, l1StreakWarnCount } from '../../../../../infrastructure/telemetry/instruments.js';
 
 /** F122: Structured result from pushToWorklist — reason explains empty adds */
-export type PushReason = 'not_found' | 'depth_limit' | 'caller_mismatch' | 'all_duplicate' | 'pingpong_terminated';
+export type PushReason =
+  | 'not_found'
+  | 'depth_limit'
+  | 'caller_mismatch'
+  | 'caller_admission_closed'
+  | 'all_duplicate'
+  | 'pingpong_terminated';
 export interface PushResult {
   added: CatId[];
   reason?: PushReason;
@@ -42,6 +48,8 @@ export interface WorklistEntry {
   /** Index of the cat currently being executed (updated by routeSerial).
    *  Used for dedup: cats already executed can be re-enqueued. */
   executedIndex: number;
+  /** False between the final admission drain and the next route turn. */
+  callerAdmissionOpen: boolean;
   /**
    * A2A sender mapping — for each enqueued target, record who @mentioned it.
    * Used to inject "Direct message from ...; reply to ..." into the target's prompt.
@@ -221,6 +229,7 @@ export function registerWorklist(
     a2aCount: 0,
     maxDepth,
     executedIndex: 0,
+    callerAdmissionOpen: true,
     a2aFrom: new Map(),
     a2aTriggerMessageId: new Map(),
   };
@@ -235,6 +244,11 @@ export function registerWorklist(
   keys.add(key);
 
   return entry;
+}
+
+/** WorklistRegistry owns authorization; routeSerial supplies the lifecycle boundary. */
+export function setWorklistCallerAdmissionOpen(entry: WorklistEntry, open: boolean): void {
+  entry.callerAdmissionOpen = open;
 }
 
 /**
@@ -288,6 +302,9 @@ export function pushToWorklist(
 
   // Caller authorization: only the currently-executing cat may push
   if (callerCatId !== undefined) {
+    if (!entry.callerAdmissionOpen) {
+      return { added: [], reason: 'caller_admission_closed' };
+    }
     const currentCat = entry.list[entry.executedIndex];
     if (currentCat !== callerCatId) return { added: [], reason: 'caller_mismatch' };
   }

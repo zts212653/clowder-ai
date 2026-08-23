@@ -5,6 +5,7 @@ import {
   listManagedCommandExecutions,
   type ManagedCommandExecution,
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
+import { resolveThreadAccess, threadAccessDeniedBody } from '../domains/cats/services/session/thread-access-policy.js';
 import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { DynamicTaskDef } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -62,7 +63,8 @@ export interface ActiveExecutionRouteDeps {
 
 const cancelLiveBodySchema = z.object({ catId: z.string().min(1).max(100) }).strict();
 
-function canAccessThread(thread: Thread, userId: string): boolean {
+/** `listByProject` is already user-index scoped; retain the legacy owner/system guard against malformed indexes. */
+function canProjectThread(thread: Thread, userId: string): boolean {
   return thread.createdBy === 'system' || thread.createdBy === userId;
 }
 
@@ -181,23 +183,30 @@ async function requireAccessibleThread(
   request: FastifyRequest<{ Params: { threadId: string } }>,
   reply: FastifyReply,
   threadStore: IThreadStore,
-  forbiddenError: string,
-): Promise<{ userId: string; thread: Thread } | null> {
+  action: 'read' | 'cancel',
+): Promise<{ userId: string; thread: Thread; visibleThreads?: readonly Thread[] } | null> {
   const userId = resolveUserId(request);
   if (!userId) {
     reply.status(401).send({ error: 'Identity required', code: 'AUTH_REQUIRED' });
     return null;
   }
   const thread = await threadStore.get(request.params.threadId);
-  if (!thread) {
-    reply.status(404).send({ error: '对话不存在', code: 'THREAD_NOT_FOUND' });
+  const decision = await resolveThreadAccess({
+    threadStore,
+    thread,
+    userId,
+    request: { resource: 'executions', action },
+  });
+  if (decision.status !== 200) {
+    reply.status(decision.status).send(threadAccessDeniedBody(decision));
     return null;
   }
-  if (!canAccessThread(thread, userId)) {
-    reply.status(403).send({ error: forbiddenError, code: 'FORBIDDEN' });
-    return null;
-  }
-  return { userId, thread };
+  if (!thread) throw new Error('Thread access policy allowed a missing thread');
+  return {
+    userId,
+    thread,
+    ...(decision.basis === 'user_index' ? { visibleThreads: decision.visibleThreads } : {}),
+  };
 }
 
 /**
@@ -233,9 +242,12 @@ async function buildActiveExecutionList(
   userId: string,
   request: FastifyRequest,
   deps: ActiveExecutionRouteDeps,
+  admittedVisibleThreads?: readonly Thread[],
 ): Promise<ActiveExecutionListResponse> {
-  const threads = (await deps.threadStore.listByProject(userId, currentThread.projectPath)).filter((thread) =>
-    canAccessThread(thread, userId),
+  const visibleThreads =
+    admittedVisibleThreads ?? (await deps.threadStore.listByProject(userId, currentThread.projectPath));
+  const threads = visibleThreads.filter(
+    (thread) => thread.projectPath === currentThread.projectPath && canProjectThread(thread, userId),
   );
   const threadById = new Map(threads.map((thread) => [thread.id, thread]));
   const scanTargets = await narrowLiveScanTargets(threads, userId, request, deps);
@@ -258,16 +270,16 @@ async function buildActiveExecutionList(
 
 export function registerActiveExecutionRoutes(app: FastifyInstance, deps: ActiveExecutionRouteDeps): void {
   app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/executions/active', async (request, reply) => {
-    const access = await requireAccessibleThread(request, reply, deps.threadStore, '无权查看此项目的运行状态');
+    const access = await requireAccessibleThread(request, reply, deps.threadStore, 'read');
     if (!access) return;
-    return buildActiveExecutionList(access.thread, access.userId, request, deps);
+    return buildActiveExecutionList(access.thread, access.userId, request, deps, access.visibleThreads);
   });
 
   app.post<{
     Params: { threadId: string; executionId: string };
     Body: { catId: string };
   }>('/api/threads/:threadId/executions/live/:executionId/cancel', async (request, reply) => {
-    const access = await requireAccessibleThread(request, reply, deps.threadStore, '无权取消此执行');
+    const access = await requireAccessibleThread(request, reply, deps.threadStore, 'cancel');
     if (!access) return;
     const parsed = cancelLiveBodySchema.safeParse(request.body);
     if (!parsed.success) {

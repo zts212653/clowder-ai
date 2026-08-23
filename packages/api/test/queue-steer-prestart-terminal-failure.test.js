@@ -143,6 +143,7 @@ async function createHarness() {
       return { outcome: 'created', invocationId: createCount === 1 ? 'inv-old-batch' : `inv-${createCount}` };
     }),
     update: mock.fn(async () => ({})),
+    listRunningByThread: mock.fn(async () => []),
   };
   const socketManager = {
     broadcastAgentMessage: mock.fn(),
@@ -228,6 +229,73 @@ describe('pre-start exact-batch durable retirement failure', () => {
 
   afterEach(async () => {
     if (app) await app.close();
+  });
+
+  it('force-reset retires a recordless processing owner and fences its late cleanup from a replacement', async () => {
+    const h = await createHarness();
+    app = Fastify();
+    await app.register(queueRoutes, {
+      threadStore: { get: mock.fn(async () => ({ id: 't1', title: 'test', createdBy: 'user-a' })) },
+      invocationQueue: h.queue,
+      queueProcessor: h.processor,
+      invocationTracker: h.tracker,
+      invocationRecordStore: h.invocationRecordStore,
+      queueCustodyCoordinator: h.queueCustodyCoordinator,
+      messageStore: h.messageStore,
+      socketManager: h.socketManager,
+      agentSessionMutex: {
+        forceReleaseByScope: mock.fn(() => ({ releasedHolders: 0, rejectedWaiters: 0, catIds: [] })),
+      },
+    });
+    await app.ready();
+
+    assert.equal(h.tracker.has('t1', 'opus'), false, 'the reproducer must remain before tracker admission');
+    assert.equal(h.invocationRecordStore.listRunningByThread.mock.calls.length, 0);
+    assert.equal(h.queue.getEntrySnapshot('t1', 'user-a', h.a.id)?.status, 'processing');
+
+    const reset = await app.inject({
+      method: 'POST',
+      url: '/api/threads/t1/force-reset',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(reset.statusCode, 200, reset.body);
+    assert.equal(h.queue.getEntrySnapshot('t1', 'user-a', h.a.id), null, 'exact processing anchor must retire');
+    assert.equal(h.queue.getEntrySnapshot('t1', 'user-a', h.b.id), null, 'the whole processing group must retire');
+    assert.equal(h.durableEntries.has(h.a.id), false);
+    assert.equal(h.durableEntries.has(h.b.id), false);
+    assert.equal(h.messages.get('msg-a').deliveryStatus, 'canceled');
+    assert.equal(h.messages.get('msg-b').deliveryStatus, 'canceled');
+    assert.ok(
+      h.socketManager.emitToUser.mock.calls.some(
+        ({ arguments: [userId, event, payload] }) =>
+          userId === 'user-a' &&
+          event === 'queue_updated' &&
+          payload.action === 'force_reset' &&
+          payload.queue.length === 1,
+      ),
+      'force-reset must publish the remaining queue after retiring the processing group',
+    );
+
+    const replacement = await h.processor.acquireExternalExecution('t1', ['opus'], 'user-a', {
+      mode: 'non_preemptive',
+      executionId: 'inv-replacement-after-reset',
+    });
+    assert.ok(replacement, 'a replacement may acquire the now-terminal slot');
+    assert.equal(h.tracker.has('t1', 'opus'), true);
+
+    h.createGate.release();
+    await waitFor(() => h.invocationRecordStore.update.mock.calls.length > 0);
+
+    assert.deepEqual(h.routedContents, [], 'the late recordless coroutine must not start the canceled provider');
+    assert.equal(h.tracker.has('t1', 'opus'), true, 'late cleanup must not release the replacement owner');
+    assert.equal(replacement.signal.aborted, false, 'late cleanup must not cancel the replacement invocation');
+    assert.deepEqual(
+      await h.processor.retireThreadPrestartProcessingGroups('t1', 'user-a'),
+      { outcome: 'none', retiredCatIds: [] },
+      'a live external owner without a Queue row is outside Queue-group retirement',
+    );
+    h.tracker.completeAll('t1', ['opus'], replacement);
   });
 
   it('keeps an unresolved Steer batch recoverable and starts C only after a successful retry', async () => {

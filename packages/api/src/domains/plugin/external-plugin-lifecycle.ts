@@ -5,6 +5,11 @@ import type { ActivationState, PluginInstanceRecord } from './host-inventory/typ
 
 export * from './external-plugin-lifecycle-types.js';
 
+export interface ExternalPluginRestartRecovery {
+  readonly recoveredInstances: number;
+  readonly resumeRequested: number;
+}
+
 class InstanceOperationQueue {
   private readonly tails = new Map<string, Promise<void>>();
 
@@ -138,16 +143,74 @@ export class ExternalPluginLifecycleService {
     });
   }
 
-  async recoverAfterRestart(): Promise<number> {
-    return this.options.store.transaction((transaction) => {
-      let changed = 0;
+  async recoverAfterRestart(): Promise<ExternalPluginRestartRecovery> {
+    const recovery = await this.options.store.transaction((transaction) => {
+      let recoveredInstances = 0;
       for (const instance of transaction.instances.list()) {
         const recovered = normalizePluginInstanceAfterRestart(instance, this.now());
         if (recovered === undefined) continue;
         transaction.instances.put(recovered);
-        changed += 1;
+        recoveredInstances += 1;
       }
-      return changed;
+      const resumableInstanceIds = transaction.instances
+        .list()
+        .filter(
+          (instance) =>
+            instance.lifecycleState === 'installed' &&
+            transaction.instances.getCurrent(instance.pluginId)?.pluginInstanceId === instance.pluginInstanceId &&
+            instance.configReadiness === 'ready' &&
+            instance.activationState === 'enabled' &&
+            instance.runtimeState === 'stopped',
+        )
+        .map((instance) => instance.pluginInstanceId);
+      return { recoveredInstances, resumableInstanceIds };
+    });
+    for (const instanceId of recovery.resumableInstanceIds) {
+      void this.resumeAfterRestart(instanceId).catch(() => undefined);
+    }
+    return {
+      recoveredInstances: recovery.recoveredInstances,
+      resumeRequested: recovery.resumableInstanceIds.length,
+    };
+  }
+
+  private resumeAfterRestart(instanceId: string): Promise<void> {
+    return this.queue.run(instanceId, async () => {
+      const current = await this.readCurrent(instanceId);
+      if (
+        current.configReadiness !== 'ready' ||
+        current.activationState !== 'enabled' ||
+        (current.runtimeState !== 'stopped' && current.runtimeState !== 'crashed')
+      ) {
+        return;
+      }
+      try {
+        await this.options.supervisor.start(instanceId);
+      } catch {
+        await this.projectResumeFailure(instanceId);
+      }
+    });
+  }
+
+  private projectResumeFailure(instanceId: string): Promise<void> {
+    return this.options.store.transaction((transaction) => {
+      const current = transaction.instances.get(instanceId);
+      if (
+        !current ||
+        current.lifecycleState !== 'installed' ||
+        transaction.instances.getCurrent(current.pluginId)?.pluginInstanceId !== instanceId ||
+        current.activationState !== 'enabled' ||
+        (current.runtimeState !== 'stopped' && current.runtimeState !== 'crashed')
+      ) {
+        return;
+      }
+      transaction.instances.put({
+        ...current,
+        activationState: 'error',
+        runtimeState: 'stopped',
+        lifecycleRevision: current.lifecycleRevision + 1,
+        updatedAt: this.now(),
+      });
     });
   }
 

@@ -1,17 +1,11 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { ThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import type { SidebarPresence } from '@/stores/sidebarProjectionStore';
 import { getCatStatusType, ThreadCatStatus } from '../ThreadCatStatus';
 
-type SidebarLiveness = Pick<ThreadLiveness, 'hasActive' | 'catStatuses' | 'catStatusDetails'>;
-
-function makeLiveness(catStatuses: Record<string, string>, hasActive = false): SidebarLiveness {
-  return {
-    hasActive,
-    catStatuses: catStatuses as ThreadLiveness['catStatuses'],
-    catStatusDetails: {},
-  };
+function presence(status: SidebarPresence['status'], cats?: readonly string[]): SidebarPresence {
+  return { status, ...(cats ? { cats } : {}) };
 }
 
 describe('ThreadCatStatus', () => {
@@ -24,23 +18,23 @@ describe('ThreadCatStatus', () => {
 
   it('returns null when idle and no unread', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({}), unreadCount: 0 }),
+      React.createElement(ThreadCatStatus, { presence: presence('idle'), unreadCount: 0 }),
     );
     expect(html).toBe('');
   });
 
   it('shows bouncing cat when a cat is streaming', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({ opus: 'streaming' }), unreadCount: 0 }),
+      React.createElement(ThreadCatStatus, { presence: presence('working', ['opus']), unreadCount: 0 }),
     );
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('animate-cat-bounce');
     expect(html).toContain('text-conn-amber-text');
   });
 
-  it('shows a working cat from coarse active truth before per-cat status arrives', () => {
+  it('shows a working cat from canonical snapshot presence', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({}, true), unreadCount: 0 }),
+      React.createElement(ThreadCatStatus, { presence: presence('working'), unreadCount: 0 }),
     );
 
     expect(html).toContain('ᓚᘏᗢ');
@@ -50,7 +44,7 @@ describe('ThreadCatStatus', () => {
 
   it('shows green cat + check when done', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({ opus: 'done' }), unreadCount: 0 }),
+      React.createElement(ThreadCatStatus, { presence: presence('done', ['opus']), unreadCount: 0 }),
     );
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('text-conn-emerald-text');
@@ -59,7 +53,7 @@ describe('ThreadCatStatus', () => {
 
   it('shows red shaking cat on error', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({ opus: 'error' }), unreadCount: 0 }),
+      React.createElement(ThreadCatStatus, { presence: presence('error', ['opus']), unreadCount: 0 }),
     );
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('animate-cat-shake');
@@ -68,7 +62,7 @@ describe('ThreadCatStatus', () => {
 
   it('shows unread badge', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({}), unreadCount: 5 }),
+      React.createElement(ThreadCatStatus, { presence: presence('idle'), unreadCount: 5 }),
     );
     expect(html).toContain('5');
     expect(html).toContain('bg-[var(--semantic-warning)]');
@@ -76,7 +70,7 @@ describe('ThreadCatStatus', () => {
 
   it('caps unread at 99+', () => {
     const html = renderToStaticMarkup(
-      React.createElement(ThreadCatStatus, { liveness: makeLiveness({}), unreadCount: 150 }),
+      React.createElement(ThreadCatStatus, { presence: presence('idle'), unreadCount: 150 }),
     );
     expect(html).toContain('99+');
   });
@@ -84,7 +78,7 @@ describe('ThreadCatStatus', () => {
   it('shows both cat and unread badge together', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({ codex: 'streaming' }),
+        presence: presence('working', ['codex']),
         unreadCount: 3,
       }),
     );
@@ -92,10 +86,10 @@ describe('ThreadCatStatus', () => {
     expect(html).toContain('3');
   });
 
-  it('error takes priority over streaming', () => {
+  it('renders canonical error presence without client-side arbitration', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({ opus: 'streaming', codex: 'error' }),
+        presence: presence('error', ['opus', 'codex']),
         unreadCount: 0,
       }),
     );
@@ -105,7 +99,7 @@ describe('ThreadCatStatus', () => {
   it('shows paw badge when hasUserMention is true', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({}),
+        presence: presence('idle'),
         unreadCount: 1,
         hasUserMention: true,
       }),
@@ -117,7 +111,7 @@ describe('ThreadCatStatus', () => {
   it('shows red unread badge when hasUserMention is true', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({}),
+        presence: presence('idle'),
         unreadCount: 3,
         hasUserMention: true,
       }),
@@ -129,7 +123,7 @@ describe('ThreadCatStatus', () => {
   it('shows amber unread badge when no user mention', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({}),
+        presence: presence('idle'),
         unreadCount: 3,
         hasUserMention: false,
       }),
@@ -140,7 +134,7 @@ describe('ThreadCatStatus', () => {
   it('renders paw even with zero unread when hasUserMention', () => {
     const html = renderToStaticMarkup(
       React.createElement(ThreadCatStatus, {
-        liveness: makeLiveness({}),
+        presence: presence('idle'),
         unreadCount: 0,
         hasUserMention: true,
       }),

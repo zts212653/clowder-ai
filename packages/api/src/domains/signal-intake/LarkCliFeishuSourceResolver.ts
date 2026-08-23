@@ -14,7 +14,7 @@ export interface LarkCliRunResult {
 }
 
 export interface LarkCliFeishuSourceResolverOptions {
-  readonly run?: (args: readonly string[], signal: AbortSignal) => Promise<LarkCliRunResult>;
+  readonly run?: (args: readonly string[], signal: AbortSignal, cwd?: string) => Promise<LarkCliRunResult>;
   readonly makeTempDirectory?: () => Promise<string>;
   readonly readText?: (path: string) => Promise<string>;
   readonly removeTempDirectory?: (path: string) => Promise<void>;
@@ -34,6 +34,7 @@ function parseSourceHandle(value: string): FeishuLocator {
     throw new TypeError('Feishu source handle must be canonical');
   }
   const parts = url.pathname.split('/').filter(Boolean);
+  const artifactId = parts[1] ?? '';
   const revision = url.searchParams.get('revision');
   if (
     url.protocol !== 'feishu:' ||
@@ -46,14 +47,14 @@ function parseSourceHandle(value: string): FeishuLocator {
     (parts[0] !== 'minute' && parts[0] !== 'note') ||
     [...url.searchParams.keys()].join(',') !== 'revision' ||
     !revision ||
-    !/^[A-Za-z0-9._-]{1,128}$/u.test(parts[1] ?? '') ||
+    !/^[A-Za-z0-9._-]{1,128}$/u.test(artifactId) ||
     !/^[A-Za-z0-9._-]{1,64}$/u.test(revision)
   ) {
     throw new TypeError('Feishu source handle must be canonical');
   }
-  const canonical = `feishu://meeting-artifacts/${parts[0]}/${parts[1]}?revision=${encodeURIComponent(revision)}`;
+  const canonical = `feishu://meeting-artifacts/${parts[0]}/${artifactId}?revision=${encodeURIComponent(revision)}`;
   if (value !== canonical) throw new TypeError('Feishu source handle must be canonical');
-  return { kind: parts[0], artifactId: parts[1]!, revision };
+  return { kind: parts[0], artifactId, revision };
 }
 
 function parseJson(stdout: string): Record<string, unknown> {
@@ -79,6 +80,23 @@ function findString(value: Record<string, unknown>, keys: readonly string[]): st
   return data ? findString(data, keys) : null;
 }
 
+function findMinuteArtifactString(
+  value: Record<string, unknown>,
+  minuteToken: string,
+  keys: readonly string[],
+): string | null {
+  const data = nestedRecord(value, 'data');
+  const minutes = data?.minutes;
+  if (!Array.isArray(minutes)) return null;
+  const minute = minutes.find(
+    (candidate): candidate is Record<string, unknown> =>
+      typeof candidate === 'object' && candidate !== null && candidate.minute_token === minuteToken,
+  );
+  if (!minute) return null;
+  const artifacts = nestedRecord(minute, 'artifacts');
+  return findString(minute, keys) ?? (artifacts ? findString(artifacts, keys) : null);
+}
+
 function requireTranscript(text: string): SourceArtifact {
   if (text.trim().length === 0 || Buffer.byteLength(text, 'utf8') > MAX_TRANSCRIPT_BYTES) {
     throw Object.assign(new Error('Feishu transcript is empty or too large'), { code: 'EXECUTION_FAILED' });
@@ -88,7 +106,7 @@ function requireTranscript(text: string): SourceArtifact {
 
 function requirePathInside(root: string, candidate: string): string {
   const rootPath = resolve(root);
-  const candidatePath = resolve(candidate);
+  const candidatePath = isAbsolute(candidate) ? resolve(candidate) : resolve(rootPath, candidate);
   const rel = relative(rootPath, candidatePath);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
     throw Object.assign(new Error('lark-cli returned an unsafe transcript path'), { code: 'EXECUTION_FAILED' });
@@ -96,22 +114,51 @@ function requirePathInside(root: string, candidate: string): string {
   return candidatePath;
 }
 
+function errorStream(error: unknown, key: 'stdout' | 'stderr'): string {
+  if (typeof error !== 'object' || error === null || !(key in error)) return '';
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function structuredErrorDetail(stdout: string): string {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    if (typeof parsed !== 'object' || parsed === null) return '';
+    const envelope = parsed as Record<string, unknown>;
+    const error = envelope.error;
+    if (typeof error === 'string') return error;
+    if (typeof error !== 'object' || error === null) return '';
+    const fields = error as Record<string, unknown>;
+    return ['type', 'subtype', 'code', 'message']
+      .map((key) => fields[key])
+      .filter((value): value is string => typeof value === 'string')
+      .join(' ');
+  } catch {
+    return '';
+  }
+}
+
 function mappedCliError(error: unknown): Error {
-  const detail = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  const code = /auth|login|token|permission|unauthorized|forbidden/u.test(detail)
-    ? 'SOURCE_AUTH_REQUIRED'
-    : /not found|deleted|404/u.test(detail)
-      ? 'SOURCE_DELETED'
-      : /not ready|pending|generating|409/u.test(detail)
-        ? 'SOURCE_NOT_READY'
-        : 'EXECUTION_FAILED';
+  const stdout = errorStream(error, 'stdout');
+  const detail = [errorStream(error, 'stderr'), structuredErrorDetail(stdout)].join(' ').toLowerCase();
+  const code =
+    /\bauth(?:entication|orization)?\b|login|access token|refresh token|token (?:expired|invalid|revoked)|unauthorized|forbidden|permission/u.test(
+      detail,
+    )
+      ? 'SOURCE_AUTH_REQUIRED'
+      : /not found|deleted|404/u.test(detail)
+        ? 'SOURCE_DELETED'
+        : /not ready|pending|generating|409/u.test(detail)
+          ? 'SOURCE_NOT_READY'
+          : 'EXECUTION_FAILED';
   return Object.assign(new Error('Feishu transcript resolution failed'), { code });
 }
 
-async function defaultRun(args: readonly string[], signal: AbortSignal): Promise<LarkCliRunResult> {
+async function defaultRun(args: readonly string[], signal: AbortSignal, cwd?: string): Promise<LarkCliRunResult> {
   try {
     const result = await execFileAsync('lark-cli', [...args], {
       signal,
+      ...(cwd ? { cwd } : {}),
       maxBuffer: 4_000_000,
       encoding: 'utf8',
     });
@@ -144,6 +191,47 @@ export class LarkCliFeishuSourceResolver implements SourceResolver {
     }
   }
 
+  private async resolveMinute(
+    locator: FeishuLocator,
+    signal: AbortSignal,
+    temporaryDirectory: string,
+  ): Promise<SourceArtifact> {
+    const response = parseJson(
+      (
+        await this.run(
+          [
+            'minutes',
+            '+detail',
+            '--minute-tokens',
+            locator.artifactId,
+            '--transcript',
+            '--output-dir',
+            '.',
+            '--format',
+            'json',
+            '--as',
+            'user',
+          ],
+          signal,
+          temporaryDirectory,
+        )
+      ).stdout,
+    );
+    const inline =
+      findString(response, ['transcript', 'content', 'text']) ??
+      findMinuteArtifactString(response, locator.artifactId, ['transcript', 'content', 'text']);
+    if (inline) return requireTranscript(inline);
+    const path =
+      findString(response, ['transcript_file', 'transcriptFile', 'output']) ??
+      findMinuteArtifactString(response, locator.artifactId, ['transcript_file', 'transcriptFile', 'output']);
+    if (!path) {
+      throw Object.assign(new Error('lark-cli did not return a bounded transcript file'), {
+        code: 'EXECUTION_FAILED',
+      });
+    }
+    return requireTranscript(await this.readText(requirePathInside(temporaryDirectory, path)));
+  }
+
   async resolve(
     access: { readonly sourceHandle: string; readonly intakeId: string; readonly sourceGrant: string },
     signal: AbortSignal,
@@ -152,35 +240,7 @@ export class LarkCliFeishuSourceResolver implements SourceResolver {
     const temporaryDirectory = await this.makeTempDirectory();
     try {
       if (locator.kind === 'minute') {
-        const response = parseJson(
-          (
-            await this.run(
-              [
-                'minutes',
-                '+detail',
-                '--minute-tokens',
-                locator.artifactId,
-                '--transcript',
-                '--output-dir',
-                temporaryDirectory,
-                '--format',
-                'json',
-                '--as',
-                'user',
-              ],
-              signal,
-            )
-          ).stdout,
-        );
-        const inline = findString(response, ['transcript', 'content', 'text']);
-        if (inline) return requireTranscript(inline);
-        const path = findString(response, ['transcript_file', 'transcriptFile', 'output']);
-        if (!path) {
-          throw Object.assign(new Error('lark-cli did not return a bounded transcript file'), {
-            code: 'EXECUTION_FAILED',
-          });
-        }
-        return requireTranscript(await this.readText(requirePathInside(temporaryDirectory, path)));
+        return await this.resolveMinute(locator, signal, temporaryDirectory);
       }
 
       const detail = parseJson(
@@ -193,7 +253,7 @@ export class LarkCliFeishuSourceResolver implements SourceResolver {
       );
       const displayType = findString(detail, ['note_display_type', 'noteDisplayType']);
       if (displayType === 'unified') {
-        const outputPath = join(temporaryDirectory, 'note.txt');
+        const outputPath = './note.txt';
         const response = parseJson(
           (
             await this.run(
@@ -212,6 +272,7 @@ export class LarkCliFeishuSourceResolver implements SourceResolver {
                 'user',
               ],
               signal,
+              temporaryDirectory,
             )
           ).stdout,
         );

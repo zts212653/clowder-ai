@@ -18,14 +18,18 @@
  *   written into that thread's ThreadState so returning to it reveals the
  *   preview.
  * - blocked — presentation lock freezes the visible workspace.
- * - skipped — the client is out of scope (worktree mismatch, judged by the
- *   target thread's canonical worktree). Skipped receipts answer promptly
- *   (no ack-timeout drag) but never win aggregation.
+ * - skipped — the client is out of scope (hidden browser tab or worktree
+ *   mismatch, judged by the target thread's canonical worktree). Skipped
+ *   receipts answer promptly (no ack-timeout drag) but never win aggregation.
  */
 
 export type PreviewAutoOpenDeliveryStatus = 'applied' | 'queued' | 'blocked' | 'unconfirmed';
 
-export type PreviewAutoOpenReceiptReason = 'thread_inactive' | 'presentation_lock' | 'worktree_mismatch';
+export type PreviewAutoOpenReceiptReason =
+  | 'thread_inactive'
+  | 'presentation_lock'
+  | 'worktree_mismatch'
+  | 'client_inactive';
 
 export type PreviewAutoOpenDeliveryReason = PreviewAutoOpenReceiptReason | 'no_client_ack' | 'no_matching_client';
 
@@ -50,6 +54,7 @@ const REASON_PRIORITY: Record<PreviewAutoOpenReceiptReason, number> = {
   presentation_lock: 3,
   thread_inactive: 2,
   worktree_mismatch: 1,
+  client_inactive: 0,
 };
 
 function isReceiptReason(value: unknown): value is PreviewAutoOpenReceiptReason {

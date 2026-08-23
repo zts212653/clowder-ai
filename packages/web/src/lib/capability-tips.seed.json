@@ -1312,5 +1312,30 @@
       }
     },
     "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f299-invocation-trajectory",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "Primary Journey: 出事确诊三步"
+    },
+    "structureSource": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "Phase B.1: P1 语义阅读层纠偏"
+    },
+    "bodySource": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "Primary Journey: 出事确诊三步"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo", "developer"],
+    "body": "猫猫这一轮出错、取消或超时？从消息锚点进入轨迹，先看触发输入，再按 USER / ASSISTANT / TOOL 等语义卡和工具来源、结果确诊；Raw 仍保留逐事件证据。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "怎么看这轮轨迹",
+      "draftPrompt": "请打开当前对话的 Workspace 轨迹，带我从触发输入开始检查语义时间线、工具来源和结果，再看 Raw 事件并回到原消息。"
+    },
+    "owner": "codex-sol"
   }
 ]

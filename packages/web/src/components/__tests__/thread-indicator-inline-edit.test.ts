@@ -175,7 +175,14 @@ describe('ThreadIndicator inline title editing', () => {
       await flushSubmitRename();
     });
     expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread_xyz', expect.objectContaining({ method: 'PATCH' }));
-    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    const patchCalls = mockApiFetch.mock.calls.filter(
+      ([url, options]) =>
+        url === '/api/threads/thread_xyz' && (options as { method?: string } | undefined)?.method === 'PATCH',
+    );
+    expect(patchCalls).toHaveLength(1);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads?view=sidebar', undefined, {
+      afterCurrentGet: true,
+    });
     expect(mockUpdateThreadTitle).toHaveBeenCalledWith('thread_xyz', '模糊保存');
   });
 

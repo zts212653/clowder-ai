@@ -122,4 +122,29 @@ describe('useScrollAnchor sticky visibility', () => {
 
     act(() => root.unmount());
   });
+
+  it('restores the anchored row when the browser resets scrollTop during a snapshot reorder', () => {
+    window.sessionStorage.removeItem('cat-cafe:sidebar:scrollTop');
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() => root.render(<Harness revision={0} />));
+
+    const scroller = host.querySelector('[data-testid="scroller"]') as HTMLDivElement;
+    scroller.scrollTop = 200;
+    act(() => scroller.dispatchEvent(new Event('scroll', { bubbles: true })));
+
+    // Chromium may apply native scroll anchoring before React's layout effect.
+    // The snapshot commit must use the last user-observed position, not accept
+    // this transient zero as evidence that the user intentionally returned top.
+    scroller.scrollTop = 0;
+    contentTop += 84;
+    act(() => root.render(<Harness revision={1} />));
+
+    expect(scroller.scrollTop).toBe(284);
+    expect(window.sessionStorage.getItem('cat-cafe:sidebar:scrollTop')).toBe('284');
+
+    act(() => root.unmount());
+  });
 });

@@ -76,6 +76,7 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
     assert.equal(notifier.calls.length, 1);
     const call = notifier.calls[0];
     assert.equal(call.threadId, 'thread-abc');
+    assert.equal(call.invocationId, 'inv-001');
     assert.equal(call.catId, 'opus');
     assert.equal(call.userId, 'user-1');
     assert.equal(call.reason, 'invalid_token');
@@ -83,9 +84,9 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
     await app.close();
   });
 
-  it('notify called when expired + record found', async () => {
+  it('notify called when interrupted + record found', async () => {
     const registry = makeRegistry({
-      verifyResult: () => ({ ok: false, reason: 'expired' }),
+      verifyResult: () => ({ ok: false, reason: 'interrupted' }),
       recordById: () => RECORD,
     });
     const app = await buildApp({ registry, notifier });
@@ -95,13 +96,13 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
       headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'tok' },
     });
     assert.equal(notifier.calls.length, 1);
-    assert.equal(notifier.calls[0].reason, 'expired');
+    assert.equal(notifier.calls[0].reason, 'interrupted');
     await app.close();
   });
 
   it('notify NOT called when peekRecord returns null (record evicted)', async () => {
     const registry = makeRegistry({
-      verifyResult: () => ({ ok: false, reason: 'expired' }),
+      verifyResult: () => ({ ok: false, reason: 'interrupted' }),
       recordById: () => null,
     });
     const app = await buildApp({ registry, notifier });
@@ -116,7 +117,7 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
 
   it('notify NOT called when missing creds (no invocationId to lookup)', async () => {
     const registry = makeRegistry({
-      verifyResult: () => ({ ok: false, reason: 'expired' }),
+      verifyResult: () => ({ ok: false, reason: 'interrupted' }),
       recordById: () => RECORD,
     });
     const app = await buildApp({ registry, notifier });
@@ -131,7 +132,7 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
 
   it('notifier failure is non-fatal (still 401, no crash)', async () => {
     const registry = makeRegistry({
-      verifyResult: () => ({ ok: false, reason: 'expired' }),
+      verifyResult: () => ({ ok: false, reason: 'interrupted' }),
       recordById: () => RECORD,
     });
     const explosiveNotifier = {
@@ -151,7 +152,7 @@ describe('preHandler × CallbackAuthSystemMessageNotifier wiring (F174-D2b-1)', 
 
   it('preHandler still works without notifier (back-compat)', async () => {
     const registry = makeRegistry({
-      verifyResult: () => ({ ok: false, reason: 'expired' }),
+      verifyResult: () => ({ ok: false, reason: 'interrupted' }),
       recordById: () => RECORD,
     });
     const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');

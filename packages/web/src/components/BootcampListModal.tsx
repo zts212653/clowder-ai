@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 
@@ -139,6 +140,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
       }
       const thread: Thread = await res.json();
       setThreads([thread, ...storeThreads]);
+      await invalidateSidebarProjection();
       pushThreadRouteWithHistory(thread.id, typeof window !== 'undefined' ? window : undefined);
       onClose();
     } catch (err) {

@@ -7,7 +7,13 @@ import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } f
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
-import { type CatInvocationInfo, type ChatMessage as ChatMessageData, useChatStore } from '@/stores/chatStore';
+import {
+  type CatInvocationInfo,
+  type ChatMessage as ChatMessageData,
+  captureThreadWorkspaceState,
+  hydrateThreadWorkspaceState,
+  useChatStore,
+} from '@/stores/chatStore';
 import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
@@ -21,6 +27,7 @@ import {
 import {
   loadThreadMessages as loadCachedMessages,
   loadThreadActiveState,
+  loadThreadWorkspaceState,
   saveThreadMessages as saveMessagesSnapshot,
   saveThreadActiveState,
 } from '@/utils/offline-store';
@@ -461,22 +468,33 @@ function crossesResidueTurnBoundary(
   });
 }
 
+function getPersistedResidueSiblings(
+  historyMsgs: ChatMessageData[],
+  msg: ChatMessageData,
+  turnBoundaryMessages: ChatMessageData[],
+): ChatMessageData[] {
+  const catId = msg.catId;
+  const parentInvocationId = getStreamParentInvocationId(msg);
+  if (!catId || !parentInvocationId) return [];
+
+  return historyMsgs.filter((historyMsg) => {
+    if (historyMsg.catId !== catId) return false;
+    if (historyMsg.id.startsWith('msg-') || historyMsg.id.startsWith('draft-')) return false;
+    if (historyMsg.extra?.isExplicitPost) return false;
+    if (getStreamParentInvocationId(historyMsg) !== parentInvocationId) return false;
+    return !crossesResidueTurnBoundary(turnBoundaryMessages, historyMsg, msg, catId, parentInvocationId);
+  });
+}
+
 function hasPersistedTextResidueSiblingEvidence(
   historyMsgs: ChatMessageData[],
   msg: ChatMessageData,
   turnBoundaryMessages: ChatMessageData[],
 ): boolean {
-  const catId = msg.catId;
-  const parentInvocationId = getStreamParentInvocationId(msg);
   const residueText = normalizeResidueText(getComparableMessageText(msg));
-  if (!catId || !parentInvocationId || !residueText) return false;
+  if (!residueText) return false;
 
-  for (const historyMsg of historyMsgs) {
-    if (historyMsg.catId !== catId) continue;
-    if (historyMsg.id.startsWith('msg-') || historyMsg.id.startsWith('draft-')) continue;
-    if (historyMsg.extra?.isExplicitPost) continue;
-    if (getStreamParentInvocationId(historyMsg) !== parentInvocationId) continue;
-    if (crossesResidueTurnBoundary(turnBoundaryMessages, historyMsg, msg, catId, parentInvocationId)) continue;
+  for (const historyMsg of getPersistedResidueSiblings(historyMsgs, msg, turnBoundaryMessages)) {
     const persistedText = normalizeResidueText(getComparableMessageText(historyMsg));
     if (persistedText.includes(residueText)) return true;
   }
@@ -489,20 +507,31 @@ function hasPersistedToolResidueSiblingEvidence(
   msg: ChatMessageData,
   turnBoundaryMessages: ChatMessageData[],
 ): boolean {
-  const catId = msg.catId;
-  const parentInvocationId = getStreamParentInvocationId(msg);
-  if (!catId || !parentInvocationId || !msg.toolEvents?.length) return false;
+  if (!msg.toolEvents?.length) return false;
   const residueToolEvents = msg.toolEvents;
   const persistedToolEvents: MessageToolEvent[] = [];
-  for (const historyMsg of historyMsgs) {
-    if (historyMsg.catId !== catId) continue;
-    if (historyMsg.id.startsWith('msg-') || historyMsg.id.startsWith('draft-')) continue;
-    if (historyMsg.extra?.isExplicitPost) continue;
-    if (getStreamParentInvocationId(historyMsg) !== parentInvocationId) continue;
-    if (crossesResidueTurnBoundary(turnBoundaryMessages, historyMsg, msg, catId, parentInvocationId)) continue;
+  for (const historyMsg of getPersistedResidueSiblings(historyMsgs, msg, turnBoundaryMessages)) {
     if (historyMsg.toolEvents?.length) persistedToolEvents.push(...historyMsg.toolEvents);
   }
   return hasFullToolResidueEvidence(persistedToolEvents, residueToolEvents);
+}
+
+function hasPersistedRichResidueSiblingEvidence(
+  historyMsgs: ChatMessageData[],
+  msg: ChatMessageData,
+  turnBoundaryMessages: ChatMessageData[],
+): boolean {
+  const residueBlocks = msg.extra?.rich?.blocks;
+  if (!residueBlocks?.length) return false;
+
+  // Rich-block id is the canonical identity used by live append, store merge,
+  // and rendering dedup. Once authoritative same-turn history owns every id,
+  // keeping the terminal local carrier can only duplicate that projection.
+  const persistedBlockIds = new Set<string>();
+  for (const historyMsg of getPersistedResidueSiblings(historyMsgs, msg, turnBoundaryMessages)) {
+    for (const block of historyMsg.extra?.rich?.blocks ?? []) persistedBlockIds.add(block.id);
+  }
+  return residueBlocks.every((block) => persistedBlockIds.has(block.id));
 }
 
 function isUnclaimedTerminalStreamResidueWithPersistedEvidence(
@@ -518,13 +547,17 @@ function isUnclaimedTerminalStreamResidueWithPersistedEvidence(
   if (msg.isStreaming !== false) return false;
   if (!msg.id.startsWith('msg-')) return false;
   if (msg.contentBlocks?.length) return false;
-  if (msg.extra?.rich?.blocks.length) return false;
 
   const hasTextResidue = Boolean(getComparableMessageText(msg));
   const hasToolResidue = Boolean(msg.toolEvents?.length);
-  if (!hasTextResidue && !hasToolResidue) return false;
+  const hasRichResidue = Boolean(msg.extra?.rich?.blocks.length);
+  if (!hasTextResidue && !hasToolResidue && !hasRichResidue) return false;
+
+  // Reconciliation is conjunctive: authoritative history must cover every
+  // payload dimension that would keep this local carrier user-visible.
   if (hasTextResidue && !hasPersistedTextResidueSiblingEvidence(historyMsgs, msg, turnBoundaryMessages)) return false;
   if (hasToolResidue && !hasPersistedToolResidueSiblingEvidence(historyMsgs, msg, turnBoundaryMessages)) return false;
+  if (hasRichResidue && !hasPersistedRichResidueSiblingEvidence(historyMsgs, msg, turnBoundaryMessages)) return false;
   return !isClaimedByLiveInvocation(invocationId, getStreamParentInvocationId(msg), msg.catId, currentCatInvocations);
 }
 
@@ -1511,9 +1544,25 @@ export function useChatHistory(threadId: string) {
     // Check if this thread has cached messages in the threadStates map.
     // If so, the store's setCurrentThread already restored them — skip API fetch.
     const state = useChatStore.getState();
+    const workspaceStateAtLoadStart = captureThreadWorkspaceState(state, threadId);
     const cached = state.threadStates[threadId];
     const hasCachedMessages = cached && cached.messages.length > 0;
     const isThreadSynced = state.currentThreadId === threadId;
+
+    // F120 durable workspace restore: the server remains authoritative for
+    // thread/messages, while this user-visible local view (surface, exact
+    // preview target, worktree and panel visibility) is restored from IDB.
+    // A live event or manual navigation that wins the race invalidates the
+    // captured expectation, so stale disk state cannot overwrite newer UI.
+    void (async () => {
+      try {
+        const snapshot = await loadThreadWorkspaceState(threadId);
+        if (isStaleThreadRequest(controller, threadId) || !snapshot) return;
+        hydrateThreadWorkspaceState(threadId, snapshot, workspaceStateAtLoadStart);
+      } catch {
+        // Best-effort local view restore; normal workspace navigation remains available.
+      }
+    })();
     // #80 fix-A: If the thread has an active invocation, force-refresh from API
     // so that DraftStore drafts are merged into the response. Without this,
     // switching away and back shows stale cached messages (no streaming draft).

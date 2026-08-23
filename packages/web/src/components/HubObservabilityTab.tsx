@@ -31,14 +31,20 @@ export interface HubObservabilityTabProps {
    * user manually navigated away and then re-clicked 详情.
    */
   subTabNonce?: number;
+  initialInvocationId?: string;
 }
 
-export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }: HubObservabilityTabProps = {}) {
+export function HubObservabilityTab({
+  initialSubTab = 'overview',
+  subTabNonce,
+  initialInvocationId,
+}: HubObservabilityTabProps = {}) {
   const [subTab, setSubTab] = useState<SubTab>(initialSubTab);
 
   // Sync prop → state on every initialSubTab change OR per-invocation nonce
   // bump. The nonce dep handles the same-value re-deep-link case (cloud P2).
   useEffect(() => {
+    void subTabNonce;
     setSubTab(initialSubTab);
   }, [initialSubTab, subTabNonce]);
 
@@ -63,7 +69,7 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
       </div>
 
       {subTab === 'overview' && <OverviewPanel />}
-      {subTab === 'traces' && <TraceBrowser />}
+      {subTab === 'traces' && <TraceBrowser initialInvocationId={initialInvocationId} />}
       {subTab === 'health' && <HealthPanel />}
       {subTab === 'callback-auth' && <HubCallbackAuthPanel />}
       {subTab === 'eval' && <HubEvalTab />}

@@ -1,6 +1,7 @@
 import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   writeOpportunityGenerationId,
+  writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
@@ -75,6 +76,80 @@ export async function bindAsrPersonMemoryReentryFromSchedulerMessage(input: {
   return [
     {
       scene: carrier.data.scene,
+      source: {
+        kind: 'message',
+        threadId: source.threadId,
+        sourceMessageId: source.id,
+        authorUserId: source.userId,
+        authorRole: 'owner',
+        visibility: 'verified_live_owner_message',
+      },
+    },
+  ];
+}
+
+/**
+ * Re-bind one unchanged generation after F296 could not present it on the original carrier.
+ * The trigger contains only durable refs; authority and scene content are re-read from the exact
+ * live owner message, so deleting/editing the original or changing its consumer fails closed.
+ */
+export async function bindAsrPersonMemoryPresentationRetryFromSchedulerMessage(input: {
+  triggerMessage: StoredMessage;
+  ownerUserId: string;
+  threadId: string;
+  targetCatId: string;
+  messageStore: Pick<IMessageStore, 'getById'>;
+}): Promise<readonly BoundAsrPersonMemoryScene[]> {
+  const carrier = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
+    input.triggerMessage.extra?.writeOpportunityPresentationRetry,
+  );
+  if (
+    !carrier.success ||
+    input.triggerMessage.userId !== 'scheduler' ||
+    input.triggerMessage.catId !== null ||
+    input.triggerMessage.threadId !== input.threadId ||
+    input.triggerMessage.deletedAt !== undefined ||
+    input.triggerMessage._tombstone ||
+    input.triggerMessage.extra?.scheduler?.hiddenTrigger !== true ||
+    carrier.data.sourceMessageRef.threadId !== input.threadId
+  ) {
+    return [];
+  }
+
+  const source = await input.messageStore.getById(carrier.data.sourceMessageRef.messageId);
+  const meetingArtifact = source?.extra?.meetingArtifact;
+  if (
+    !eligibleOwnerMessage(source, { ownerUserId: input.ownerUserId }) ||
+    source.threadId !== carrier.data.sourceMessageRef.threadId ||
+    meetingArtifact?.trust !== 'untrusted_external' ||
+    meetingArtifact.instructionPolicy !== 'data_only'
+  ) {
+    return [];
+  }
+  const original = (source.extra?.dynamicSceneEntries ?? [])
+    .map((candidate) => asrPersonMemoryDynamicSceneEntryV1Schema.safeParse(candidate))
+    .find(
+      (candidate) => candidate.success && candidate.data.opportunity.opportunityId === carrier.data.sourceOpportunityId,
+    );
+  if (
+    !original?.success ||
+    original.data.opportunity.scope.ownerUserId !== input.ownerUserId ||
+    original.data.opportunity.scope.threadId !== input.threadId ||
+    original.data.opportunity.consumer.catId !== input.targetCatId ||
+    original.data.opportunity.generation !== 1 ||
+    original.data.opportunity.opportunityId !==
+      writeOpportunityGenerationId(original.data.opportunity.dedupeLineage, 1) ||
+    original.data.opportunity.sourceCoordinates.some(
+      (coordinate) =>
+        coordinate.artifactId !== meetingArtifact.intakeId || coordinate.sourceHandle !== meetingArtifact.sourceHandle,
+    )
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      scene: original.data,
       source: {
         kind: 'message',
         threadId: source.threadId,

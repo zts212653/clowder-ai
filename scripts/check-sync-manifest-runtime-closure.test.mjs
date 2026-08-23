@@ -5,6 +5,8 @@ import { describe, it } from 'node:test';
 
 import YAML from 'yaml';
 
+import { resolvePublicTestFiles } from '../packages/api/scripts/resolve-public-test-files.mjs';
+
 const ROOT = resolve(import.meta.dirname, '..');
 const MANIFEST_PATH = resolve(ROOT, 'sync-manifest.yaml');
 const isHomeRepo = existsSync(MANIFEST_PATH);
@@ -150,6 +152,65 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       [],
       `sync-manifest omits direct runtime dependencies:\n${[...new Set(missing)].sort().join('\n')}`,
     );
+  });
+
+  it('exports every direct local import of a selected public API test', async () => {
+    const { selectedFiles } = await resolvePublicTestFiles();
+    const missing = [];
+
+    for (const publicTest of selectedFiles) {
+      const importer = `packages/api/${publicTest}`;
+      const source = readFileSync(resolve(ROOT, importer), 'utf8');
+      for (const specifier of collectRelativeImports(source)) {
+        const dependency = resolveLocalImport(importer, specifier);
+        const dependencyPath = toRepoPath(dependency);
+        assert.ok(
+          !dependencyPath.startsWith('../'),
+          `${importer} imports local module outside the repository: ${specifier}`,
+        );
+        if (!isExported(dependencyPath)) missing.push(`${importer} -> ${dependencyPath}`);
+      }
+    }
+
+    assert.deepEqual(
+      [...new Set(missing)].sort(),
+      [],
+      `sync-manifest omits direct public-test dependencies:\n${[...new Set(missing)].sort().join('\n')}`,
+    );
+  });
+
+  it('exports the shell helper sourced by the public sync-skills CLI', () => {
+    const cli = 'scripts/sync-skills.sh';
+    const helper = 'scripts/lib/sync-skills-helpers.sh';
+    const source = readFileSync(resolve(ROOT, cli), 'utf8');
+
+    assert.ok(managedScripts.has(cli), `${cli} must remain exported`);
+    assert.match(
+      source,
+      /source "\$SCRIPT_DIR\/lib\/sync-skills-helpers\.sh"/,
+      `${cli} must bind the helper path exercised by this closure contract`,
+    );
+    assert.ok(
+      managedScripts.has(helper),
+      `${helper} must be exported with ${cli}, otherwise the public CLI exits before parsing its arguments`,
+    );
+  });
+
+  it('exports the project post-compact hook exercised by the public F296 contract', () => {
+    const contract = 'packages/api/test/f296-b3b3-post-compact-hook.test.js';
+    const hook = '.claude/hooks/f24-post-compact-bootstrap.sh';
+    const source = readFileSync(resolve(ROOT, contract), 'utf8');
+
+    assert.match(
+      source,
+      /join\(REPO_ROOT, '\.claude\/hooks\/f24-post-compact-bootstrap\.sh'\)/,
+      `${contract} must stay bound to the real project hook`,
+    );
+    assert.ok(
+      managedFiles.has(hook),
+      `${hook} must be exported with ${contract}, otherwise the public suite cannot exercise the cold-packet boundary`,
+    );
+    assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
   });
 
   it('exports the prompt-hook manifests scanned by PipelinePromptBuilder', () => {

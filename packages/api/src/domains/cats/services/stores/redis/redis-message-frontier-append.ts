@@ -122,6 +122,7 @@ export async function appendMessageIfThreadFrontier(input: {
           queueCustodyRevision: String(message.queueCustody.revision),
         }
       : {}),
+    ...(message.queueCustodyAdmission ? { queueCustodyAdmission: JSON.stringify(message.queueCustodyAdmission) } : {}),
     ...(message.replyTo ? { replyTo: message.replyTo } : {}),
   };
   const idempotencyRedisKey = message.idempotencyKey
@@ -212,6 +213,7 @@ export async function appendMessageAndObservePriorFrontier(input: {
           queueCustodyRevision: String(message.queueCustody.revision),
         }
       : {}),
+    ...(message.queueCustodyAdmission ? { queueCustodyAdmission: JSON.stringify(message.queueCustodyAdmission) } : {}),
     ...(message.replyTo ? { replyTo: message.replyTo } : {}),
   };
   const idempotencyRedisKey = message.idempotencyKey

@@ -30,6 +30,7 @@ export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Prom
       timestamp: Date.now(),
       threadId: opts.threadId,
       source: SCHEDULER_SOURCE,
+      ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
       ...(opts.extra ? { extra: opts.extra } : {}),
     });
     const schedulerExtra = stored.extra?.scheduler ?? opts.extra?.scheduler;
@@ -38,7 +39,7 @@ export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Prom
       message: {
         id: stored.id,
         type: 'connector',
-        content: opts.content,
+        content: typeof stored.content === 'string' ? stored.content : opts.content,
         source: SCHEDULER_SOURCE,
         ...(schedulerExtra ? { extra: { scheduler: schedulerExtra } } : {}),
         timestamp: stored.timestamp,

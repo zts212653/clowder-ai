@@ -36,28 +36,16 @@ describe('cat_cafe_record_local_review_verdict', () => {
     restoreEnv('CAT_CAFE_CREDENTIAL_FILE', originalEnv.credentialFile);
   });
 
-  it('accepts only a durable message locator, exact HEAD, and enum verdict', () => {
+  it('accepts only a durable typed-message locator and optional exact carrier fence', () => {
     const schema = z.object(localReviewVerdictInputSchema);
     assert.equal(
       schema.safeParse({
         messageId: 'message-1',
-        reviewedHeadSha: 'a'.repeat(40),
-        verdict: 'approved',
       }).success,
       true,
     );
-    assert.equal(
-      schema.safeParse({ messageId: 'message-1', reviewedHeadSha: 'short', verdict: 'approved' }).success,
-      false,
-    );
-    assert.equal(
-      schema.safeParse({ messageId: 'message:1', reviewedHeadSha: 'a'.repeat(40), verdict: 'approved' }).success,
-      false,
-    );
-    assert.equal(
-      schema.safeParse({ messageId: 'message 1', reviewedHeadSha: 'a'.repeat(40), verdict: 'approved' }).success,
-      false,
-    );
+    assert.equal(schema.safeParse({ messageId: 'message:1' }).success, false);
+    assert.equal(schema.safeParse({ messageId: 'message 1' }).success, false);
   });
 
   it('posts the bounded completion packet to the invocation callback', async () => {
@@ -75,8 +63,6 @@ describe('cat_cafe_record_local_review_verdict', () => {
 
     const result = await handleLocalReviewVerdict({
       messageId: 'message-1',
-      reviewedHeadSha: 'a'.repeat(40),
-      verdict: 'approved',
       actionLeaseRef: { leaseId: 'lease-1', generation: 2 },
     });
 
@@ -84,8 +70,6 @@ describe('cat_cafe_record_local_review_verdict', () => {
     assert.equal(requests[0].url, 'http://127.0.0.1:3003/api/callbacks/record-local-review-verdict');
     assert.deepEqual(JSON.parse(requests[0].options.body), {
       messageId: 'message-1',
-      reviewedHeadSha: 'a'.repeat(40),
-      verdict: 'approved',
       actionLeaseRef: { leaseId: 'lease-1', generation: 2 },
     });
   });
@@ -103,8 +87,6 @@ describe('cat_cafe_record_local_review_verdict', () => {
     const schema = z.object(localReviewRecoveryInputSchema);
     const packet = {
       messageId: 'message-stale-verdict-1',
-      reviewedHeadSha: 'b'.repeat(40),
-      verdict: 'changes_requested',
       actionLeaseRef: { leaseId: 'lease-stale-review-1', generation: 1 },
     };
     assert.equal(schema.safeParse(packet).success, true);

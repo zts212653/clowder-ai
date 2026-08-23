@@ -69,6 +69,11 @@ interface RuntimeSessionSummary {
   };
 }
 
+interface SessionChainLoadError {
+  kind: 'access_denied' | 'request_failed';
+  message: string;
+}
+
 const sessionCache = new Map<string, SessionSummary[]>();
 
 export function __resetSessionChainCacheForTest() {
@@ -78,6 +83,7 @@ export function __resetSessionChainCacheForTest() {
 export interface SessionChainPanelProps {
   threadId: string;
   catInvocations: Record<string, CatInvocationInfo>;
+  activeInvocations?: Record<string, { catId: string; mode: string; startedAt?: number }>;
   onViewSession?: (sessionId: string, catId?: string) => void;
 }
 
@@ -151,11 +157,39 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-export function SessionChainPanel({ threadId, catInvocations, onViewSession }: SessionChainPanelProps) {
+function unsealedSessionLifecycle(isRunning: boolean) {
+  if (isRunning) {
+    return {
+      kind: 'running',
+      label: '正在工作',
+      dotClass: 'animate-pulse bg-[var(--color-conn-emerald-text)]',
+      labelClass: 'text-conn-emerald-text',
+    } as const;
+  }
+  return {
+    kind: 'resumable',
+    label: '未封存 · 可续接',
+    dotClass: 'bg-cafe-muted',
+    labelClass: 'text-cafe-muted',
+  } as const;
+}
+
+function terminalSessionLifecycle(status: SessionSummary['status']) {
+  if (status === 'sealed') return { kind: 'sealed', label: '已封存' } as const;
+  return { kind: 'sealing', label: '封存中' } as const;
+}
+
+export function SessionChainPanel({
+  threadId,
+  catInvocations,
+  activeInvocations = {},
+  onViewSession,
+}: SessionChainPanelProps) {
   const { getCatById } = useCatData();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<SessionChainLoadError | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [restoringSessionId, setRestoringSessionId] = useState<string | null>(null);
   const [sealingSessionId, setSealingSessionId] = useState<string | null>(null);
@@ -182,8 +216,8 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
     .map((inv) => `${inv.sessionSeq ?? ''}:${inv.sessionSealed ?? ''}`)
     .join(',');
 
-  // Fetch sessions — stale-while-revalidate: keep old data visible until
-  // the new response arrives, preventing blank flashes on thread switch / F5.
+  // Fetch sessions into a thread-owned result set. Cached data for the requested
+  // thread may render immediately; data owned by another thread never may.
   // biome-ignore lint/correctness/useExhaustiveDependencies: sealSignal+refreshKey intentionally trigger re-fetch
   useEffect(() => {
     let cancelled = false;
@@ -192,20 +226,43 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
       setSessions(cached);
       setLoadedThreadId(threadId);
     }
+    setLoadError(null);
     setLoading(true);
     apiFetch(`/api/threads/${threadId}/sessions`)
       .then(async (res) => {
         if (cancelled) return;
-        if (!res.ok) return;
+        if (!res.ok) {
+          let code: string | undefined;
+          try {
+            code = ((await res.json()) as { code?: string }).code;
+          } catch {
+            // A non-JSON failure still gets an honest typed fallback below.
+          }
+          if (cancelled) return;
+          if (res.status === 403 || code === 'THREAD_ACCESS_DENIED') {
+            sessionCache.delete(threadId);
+            setSessions([]);
+            setLoadedThreadId(null);
+            setLoadError({
+              kind: 'access_denied',
+              message: '无权查看这个 Thread 的 Session Chain',
+            });
+          } else {
+            setLoadError({ kind: 'request_failed', message: `Session Chain 加载失败 (${res.status})` });
+          }
+          return;
+        }
         const data = (await res.json()) as { sessions: SessionSummary[] };
         if (!cancelled) {
           sessionCache.set(threadId, data.sessions);
           setSessions(data.sessions);
           setLoadedThreadId(threadId);
+          setLoadError(null);
         }
       })
       .catch(() => {
-        // Keep stale data visible on transient errors
+        // Keep the last result cached under its owner, but never project it under this thread.
+        if (!cancelled) setLoadError({ kind: 'request_failed', message: 'Session Chain 加载失败' });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -215,9 +272,11 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
     };
   }, [threadId, sealSignal, refreshKey]);
 
-  const activeSessions = sessions.filter((s) => s.status === 'active');
-  const activeCatIds = new Set(activeSessions.map((s) => s.catId));
-  const sealedSessions = sessions
+  const visibleSessions = loadedThreadId === threadId ? sessions : [];
+  const unsealedSessions = visibleSessions.filter((s) => s.status === 'active');
+  const activeCatIds = new Set(unsealedSessions.map((s) => s.catId));
+  const runningCatIds = new Set(Object.values(activeInvocations).map((invocation) => invocation.catId));
+  const sealedSessions = visibleSessions
     .filter((s) => s.status === 'sealed' || s.status === 'sealing')
     .sort((a, b) => (b.sealedAt ?? b.createdAt) - (a.sealedAt ?? a.createdAt));
 
@@ -258,7 +317,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
 
   const handleRestoreAsCurrent = async (session: SessionSummary) => {
     if (restoringSessionId) return;
-    const current = activeSessions.find((candidate) => candidate.catId === session.catId);
+    const current = unsealedSessions.find((candidate) => candidate.catId === session.catId);
     if (
       current &&
       !window.confirm(
@@ -337,9 +396,19 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           <h3 className="text-xs font-bold text-cafe">Session Chain</h3>
         </div>
         <span className="text-micro font-bold text-cafe-muted">
-          {activeSessions.length} active · {sessions.length} total
+          {loadError?.kind === 'access_denied' && visibleSessions.length === 0
+            ? '不可用'
+            : `${unsealedSessions.length} 未封存 · ${visibleSessions.length} total`}
         </span>
       </button>
+      {loadError && (
+        <div
+          data-testid={loadError.kind === 'access_denied' ? 'session-chain-access-denied' : 'session-chain-load-failed'}
+          className="mb-2 rounded border border-conn-red-ring bg-conn-red-bg px-2 py-1 text-micro text-conn-red-text"
+        >
+          {loadError.message}
+        </div>
+      )}
       {actionError && (
         <div className="mb-2 rounded border border-conn-red-ring bg-conn-red-bg px-2 py-1 text-micro text-conn-red-text">
           {actionError}
@@ -359,10 +428,11 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         </div>
       )}
 
-      {/* Active sessions */}
+      {/* Current unsealed sessions. Storage status "active" does not imply live execution. */}
       {!chainCollapsed &&
-        activeSessions.map((session) => {
+        unsealedSessions.map((session) => {
           const inv = catInvocations[session.catId];
+          const lifecycle = unsealedSessionLifecycle(runningCatIds.has(session.catId));
           const health: ContextHealthData | undefined =
             inv?.contextHealth ??
             (session.contextHealth
@@ -381,12 +451,13 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
           return (
             <div key={session.id} className="mb-2">
               <div className="flex items-center gap-1 mb-1">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-conn-emerald-text)]" />
-                <span className="text-micro font-bold text-conn-emerald-text uppercase tracking-wider">Active</span>
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${lifecycle.dotClass}`} />
+                <span className={`text-micro font-bold ${lifecycle.labelClass}`}>{lifecycle.label}</span>
               </div>
               <div
                 data-testid="session-card-active"
                 data-cat-id={session.catId}
+                data-session-lifecycle={lifecycle.kind}
                 className="console-list-card session-corner-arcs rounded-xl p-2.5"
                 style={{ boxShadow: colors.cardShadow }}
               >
@@ -526,18 +597,20 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
             >
               ▾
             </span>
-            <span className="text-micro font-bold text-cafe-muted uppercase tracking-wider">Sealed</span>
+            <span className="text-micro font-bold text-cafe-muted tracking-wider">已封存</span>
             <span className="text-micro text-cafe-muted">{sealedSessions.length}</span>
           </button>
           {!sealedCollapsed && (
             <div className="space-y-1">
               {visibleSealedSessions.map((session) => {
                 const sealedColors = colorsForCat(session.catId);
+                const lifecycle = terminalSessionLifecycle(session.status);
                 return (
                   <div
                     key={session.id}
                     data-testid="session-card-sealed"
                     data-cat-id={session.catId}
+                    data-session-lifecycle={lifecycle.kind}
                     className="console-list-card session-corner-arcs flex items-center gap-2 rounded-xl px-2.5 py-1.5"
                     style={{ boxShadow: sealedColors.cardShadow }}
                   >
@@ -571,6 +644,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                         <SessionIdTag id={session.cliSessionId ?? session.id} />
                       </div>
                       <div data-testid="sealed-session-summary" className="min-w-0">
+                        <div className="text-micro font-medium text-cafe-muted">{lifecycle.label}</div>
                         <CriticalText
                           summary={sealedSessionSummary(session)}
                           details={sealedSessionDetails(session)}
@@ -631,7 +705,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
       )}
 
       {/* F33: Bind new external session (skip default thread — system-owned, bind returns 403) */}
-      {threadId !== 'default' && (
+      {threadId !== 'default' && loadError?.kind !== 'access_denied' && (
         <BindNewSessionSection
           threadId={threadId}
           activeCatIds={activeCatIds}
@@ -640,11 +714,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
         />
       )}
 
-      {isStale && sessions.length > 0 && (
-        <div className="text-micro text-cafe-muted text-center py-1 animate-pulse">Refreshing...</div>
-      )}
-
-      {loading && sessions.length === 0 && (
+      {loading && visibleSessions.length === 0 && (
         <div className="text-micro text-cafe-muted text-center py-2">Loading sessions...</div>
       )}
     </section>

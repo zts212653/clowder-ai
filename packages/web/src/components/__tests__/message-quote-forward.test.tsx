@@ -183,6 +183,54 @@ describe('Message quote forwarding', () => {
     ]);
   });
 
+  it('labels Markdown-rendered CLI stdout with its readable projection and browser uniqueness proof', () => {
+    act(() => {
+      root.render(
+        <MessageActions
+          message={{
+            id: 'source-message-1',
+            type: 'assistant',
+            catId: 'opus',
+            content: '| Surface | Status |\n| --- | --- |\n| Hub | `green` |',
+            timestamp: 1,
+            projectionSourceMessageIds: ['source-stream-1', 'source-message-1'],
+          }}
+          threadId="source-thread"
+        >
+          <div data-context-quote-source="cli_output">
+            <span
+              data-testid="source-text"
+              data-context-quote-segment-id="stdout"
+              data-context-quote-projection-version="2"
+            >
+              Hub green
+            </span>
+          </div>
+        </MessageActions>,
+      );
+    });
+    const textNode = container.querySelector('[data-testid="source-text"]')?.firstChild;
+    if (!textNode) throw new Error('source text missing');
+    act(() => selectText(textNode, 'Hub green'));
+    act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="message-selection-add-to-chat"]')?.click());
+    act(() => document.body.querySelector<HTMLButtonElement>('[data-testid="context-annotation-forward"]')?.click());
+
+    const probe = container.querySelector<HTMLOutputElement>('[data-testid="forward-picker-probe"]');
+    expect(JSON.parse(probe?.dataset.items ?? '[]')).toEqual([
+      {
+        kind: 'cli_quote',
+        messageId: 'source-message-1',
+        sourceMessageIds: ['source-stream-1', 'source-message-1'],
+        segmentId: 'stdout',
+        text: 'Hub green',
+        selectionStart: 0,
+        selectionEnd: 9,
+        sourceProjectionVersion: 2,
+        renderedOccurrences: 1,
+      },
+    ]);
+  });
+
   it.each([
     'before the first health verification',
     'after a deployment mismatch',

@@ -4,6 +4,7 @@
  */
 
 import type {
+  A2ARoutingProjection,
   CatId,
   CliEffortPreset,
   CodexSpeedValue,
@@ -182,12 +183,34 @@ export type AgentMessageType =
 export interface AgentMessage {
   /** The type of this message */
   type: AgentMessageType;
+  /**
+   * F296: provider-authored compaction edge; never inferred from message text.
+   *
+   * Claude derives the event identity from its session record. The Codex
+   * app-server instead carries the identity on the wire, so it supplies the
+   * minted event directly rather than having one reconstructed from a counter.
+   */
+  contextCompaction?:
+    | {
+        readonly eventSource: 'claude_compact_boundary';
+        readonly preTokens?: number;
+      }
+    | {
+        readonly eventSource: 'codex_app_server_context_compaction';
+        readonly event: ProviderCompactionObservation;
+      };
   /** Which cat (agent) produced this message */
   catId: CatId;
   /** Text content (for 'text' and 'tool_result' types) */
   content?: string;
   /** Machine-readable A2A target cat for 'a2a_handoff' events. */
   targetCatId?: CatId;
+  /**
+   * F086/F216: structured scheduling mode for 'a2a_handoff' events.
+   * Carries serial-vs-parallel explicitly so no consumer has to infer it from the number
+   * of targets or their ordering. Absent only on legacy/replayed events.
+   */
+  routing?: A2ARoutingProjection;
   /**
    * How the frontend should apply text content.
    * Default append preserves streaming semantics; replace is used when the
@@ -205,6 +228,10 @@ export interface AgentMessage {
   sessionReplacement?: CodexSessionReplacementProvenance;
   /** Tool name (for 'tool_use' and 'tool_result' types; required by F153 Phase J AC-J1) */
   toolName?: string;
+  /** Canonical execution carrier. Consumers must display unknown instead of inferring from toolName. */
+  toolSource?: 'host_cli' | 'mcp' | 'plugin_connector' | 'unknown';
+  /** Canonical model-output channel when the provider reports one; otherwise unknown. */
+  toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
@@ -425,7 +452,88 @@ export type ContinuityDisposition =
 export interface ContextContinuityHandshake {
   readonly coordinate: ContextCoordinate;
   readonly disposition: ContinuityDisposition;
-  readonly contextMode: 'cold' | 'hot';
+}
+
+/**
+ * F296 B4a: the raw continuity fact a provider adapter observed, before any
+ * normalization into a {@link ContinuityDisposition}.
+ *
+ * Only the adapter that issued the underlying provider call may construct this.
+ * Every variant is derived from an actual provider response — never from a
+ * persisted binding, a token drop, a scratchpad, or an equality check between
+ * what we asked for and what we stored. Gate 0 (2026-08-20, codex-cli 0.147.0)
+ * proved each variant is dynamically observable on `codex/app_server`.
+ */
+export type ProviderContinuityEvidence =
+  /** A new provider runtime was created and returned its id. */
+  | { readonly kind: 'started'; readonly runtimeSessionId: string }
+  /** Resume succeeded and the provider echoed back exactly the requested id. */
+  | {
+      readonly kind: 'resumed';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /** Resume was rejected by the provider; a fallback start created a new runtime. */
+  | {
+      readonly kind: 'replaced';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /**
+   * Resume "succeeded" but the provider returned a different id. This is never
+   * coerced to `resumed`; it normalizes to `unknown/binding_mismatch`.
+   */
+  | {
+      readonly kind: 'mismatched';
+      readonly requestedRuntimeSessionId: string;
+      readonly runtimeSessionId: string;
+    }
+  /** The adapter reached a verdict point but the provider gave no usable signal. */
+  | { readonly kind: 'unavailable'; readonly reason: UnknownReason };
+
+/** The prompt bytes an adapter is allowed to send, plus the generation they belong to. */
+export interface ProviderContinuityPrompt {
+  readonly prompt: string;
+  /** Content hash of {@link prompt}; the ledger generation these bytes were reserved under. */
+  readonly promptGenerationId: string;
+}
+
+/**
+ * F296 B4b: an authoritative compaction the adapter observed on the wire,
+ * reduced to a stable coordinate. Gate 0 proved the coordinate for
+ * `codex/app_server` is `(envelope.threadId, envelope.turnId, item.id)` — the
+ * `contextCompaction` item body itself carries no thread or turn identity.
+ */
+export interface ProviderCompactionObservation {
+  /** Stable, replay-suppressible identity for this compaction. */
+  readonly eventId: string;
+  /** The runtime this compaction actually applies to. Never inferred from a binding. */
+  readonly runtimeSessionId: string;
+  readonly evidenceRef: string;
+}
+
+/**
+ * F296 B4a preflight fence. The invocation hands this to a preflight-capable
+ * adapter instead of a frozen prompt string.
+ */
+export interface ProviderContinuityPreflight {
+  /** The runtime the invocation wants resumed, if any. The adapter requests it; it proves nothing on its own. */
+  readonly requestedRuntimeSessionId?: string;
+  /**
+   * Called exactly once, by the adapter, after the continuity verdict is minted
+   * from the actual provider response and after buffered authoritative
+   * compaction events for the bound runtime have been drained — and strictly
+   * before any prompt bytes leave the process.
+   *
+   * Resolving this runs the epoch owner, the context prompt factory, the
+   * presentation mapper and the ledger reservation, in that order, and returns
+   * the only prompt bytes the adapter is permitted to send.
+   */
+  settle(input: {
+    readonly evidence: ProviderContinuityEvidence;
+    /** Compactions observed for the bound runtime before these bytes were built. */
+    readonly compactions?: readonly ProviderCompactionObservation[];
+  }): Promise<ProviderContinuityPrompt>;
 }
 
 /** The invocation-owned capacity snapshot passed to provider-native controls. */
@@ -538,6 +646,25 @@ export interface AgentService {
    * @returns An async iterable of agent messages
    */
   invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage>;
+
+  /**
+   * F296 B4a: invoke a carrier that owns a real pre-prompt continuity seam.
+   *
+   * There is deliberately no `prompt` parameter. The final prompt bytes exist
+   * only as the return value of {@link ProviderContinuityPreflight.settle},
+   * which the adapter can call only after it has minted a continuity verdict
+   * from an actual provider response. This makes "freeze the prompt first, then
+   * notify that we resumed" structurally unrepresentable rather than merely
+   * discouraged.
+   *
+   * Declared only by services whose adapter has been dynamically proven to
+   * expose the seam (F296 B4 Gate 0). Callers must fall back to {@link invoke}
+   * when it is absent.
+   */
+  invokeWithContinuityPreflight?(
+    preflight: ProviderContinuityPreflight,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage>;
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;

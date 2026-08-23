@@ -44,9 +44,9 @@ export interface CommunityReconcilerTaskSpecOptions {
   projector: IProjectorApply;
   findingStore: CommunityReconciliationFindingStore;
   /** Fetch live GitHub state for an issue. */
-  fetchIssueState: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
+  fetchIssueState: (repo: string, number: number, signal?: AbortSignal) => Promise<GitHubSnapshot | null>;
   /** Fetch live GitHub state for a PR. */
-  fetchPrState: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
+  fetchPrState: (repo: string, number: number, signal?: AbortSignal) => Promise<GitHubSnapshot | null>;
   slaPolicy?: SlaPolicy;
   log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
   /** Task poll interval (default 10 minutes). */
@@ -116,8 +116,10 @@ export function createCommunityReconcilerTaskSpec(
     run: {
       overlap: 'skip',
       timeoutMs: 120_000,
-      async execute(signal: ReconcilerBatchSignal, _subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: ReconcilerBatchSignal, _subjectKey: string, ctx: ExecuteContext) {
+        ctx.signal?.throwIfAborted();
         const baselineEstablished = await opts.isBaselineEstablished();
+        ctx.signal?.throwIfAborted();
         const { subjectKeys } = signal;
 
         // Fetch all projections + GitHub snapshots
@@ -128,7 +130,9 @@ export function createCommunityReconcilerTaskSpec(
         const fetchSuccessSubjects = new Set<string>();
 
         for (const sk of subjectKeys) {
+          ctx.signal?.throwIfAborted();
           const projection = await opts.objectStore.get(sk);
+          ctx.signal?.throwIfAborted();
           if (!projection) continue;
 
           projections.push(projection);
@@ -141,7 +145,8 @@ export function createCommunityReconcilerTaskSpec(
 
           try {
             const fetchFn = parsed.type === 'issue' ? opts.fetchIssueState : opts.fetchPrState;
-            const ghSnap = await fetchFn(parsed.repo, parsed.number);
+            const ghSnap = await fetchFn(parsed.repo, parsed.number, ctx.signal);
+            ctx.signal?.throwIfAborted();
             if (ghSnap) {
               githubSnapshots.set(sk, ghSnap);
             }
@@ -187,6 +192,9 @@ export function createCommunityReconcilerTaskSpec(
 
         // Append events to Event Log + projector
         for (const event of result.events) {
+          ctx.signal?.throwIfAborted();
+          // An appended event and its projector application are one causal unit.
+          // Cancellation is safe before append, never between append and apply.
           const { appended } = await opts.eventLog.append(event);
           if (appended) {
             await opts.projector.apply(event);
@@ -197,6 +205,7 @@ export function createCommunityReconcilerTaskSpec(
         // Upsert findings
         const currentFindingIds: string[] = [];
         for (const finding of result.findings) {
+          ctx.signal?.throwIfAborted();
           await opts.findingStore.upsert(finding);
           currentFindingIds.push(finding.findingId);
         }
@@ -204,6 +213,7 @@ export function createCommunityReconcilerTaskSpec(
         // Auto-resolve absent findings only for subjects with successful GitHub fetches.
         // D3.4: transient fetch failure must not clear existing findings.
         for (const subjectKey of fetchSuccessSubjects) {
+          ctx.signal?.throwIfAborted();
           const subjectFindings = currentFindingIds.filter((id) => {
             const finding = result.findings.find((f) => f.findingId === id);
             return finding?.subjectKey === subjectKey;

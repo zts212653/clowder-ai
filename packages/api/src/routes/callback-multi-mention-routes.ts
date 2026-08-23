@@ -65,6 +65,7 @@ import {
   successorUnfencedSingleTargetMultiMention,
 } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { emitParallelRoutingPills } from './a2a-routing-projection.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { resolveCallbackActionLeaseRef } from './callback-scope-helpers.js';
 
@@ -250,10 +251,7 @@ function registerMultiMentionCompletionHook(input: {
       { requestId: input.requestId, catId: input.catId, newStatus, responseLength: finalResponse.length },
       '[F122B B6] multi-mention queue response recorded',
     );
-    if (newStatus === 'done') {
-      cancelTimeout(input.requestId);
-      void flushResult(input.deps, input.requestId, input.threadId, input.userId, input.log);
-    }
+    settleGroupIfComplete(input.deps, input.requestId, input.threadId, input.userId, input.log);
   });
 }
 
@@ -335,6 +333,15 @@ async function dispatchViaQueue(
   log: FastifyBaseLogger,
   actionFence?: ActionSuccessorFence,
   actionCarrierDisposition?: ActionSuccessorCarrierDisposition,
+  /**
+   * F086/F216: runs AFTER every target has real Queue custody and BEFORE any target is started.
+   * Projection must describe admitted siblings only — announcing the requested target list before
+   * admission is the exact "projection ahead of fact" defect this change exists to remove.
+   * Deliberately NOT awaited by the caller: see the call site: custody is durable by then, and
+   * awaiting a projection write in front of `tryAutoExecute` would turn a slow message store into
+   * a scheduling stall.
+   */
+  onAdmitted?: (admitted: CatId[]) => Promise<void>,
 ): Promise<void> {
   const { invocationQueue, queueProcessor } = deps;
   if (!invocationQueue || !queueProcessor) return;
@@ -344,6 +351,8 @@ async function dispatchViaQueue(
   );
 
   const unavailable: CatId[] = [];
+  /** Targets that actually obtained Queue custody — the only honest basis for a fan-out pill. */
+  const admitted: CatId[] = [];
   for (const catId of targetCatIds) {
     const enqueueOutcome = enqueueMultiMentionTarget({
       deps,
@@ -364,6 +373,7 @@ async function dispatchViaQueue(
       break;
     }
     if (enqueueOutcome === 'unavailable') unavailable.push(catId);
+    if (enqueueOutcome === 'enqueued') admitted.push(catId);
   }
 
   await reconcileActionSuccessorEnqueue({
@@ -374,50 +384,85 @@ async function dispatchViaQueue(
     now: Date.now(),
   });
 
+  // Same-class sweep after 砚砚 R4: a target rejected at admission can NEVER produce a response, so
+  // the orchestrator has to hear about it or the whole group sits at `partial` until the timeout.
+  // R4 fixed exactly this on the legacy path; the Queue path had the identical hole, where
+  // `skipped` / `depth_limited` only fed the action-lease reconciliation.
+  const orch = getMultiMentionOrchestrator();
+  const rejected = targetCatIds.filter((catId) => !admitted.includes(catId));
+  for (const catId of rejected) {
+    orch.recordResponse(requestId, catId, '[dispatch unavailable: target was not admitted to the queue]');
+  }
+  if (rejected.length > 0) settleGroupIfComplete(deps, requestId, threadId, userId, log);
+
+  // Custody is durable here and start has not happened yet — the only correct window to describe
+  // the fan-out. Deliberately NOT awaited: the projection is downstream of durable custody, so it
+  // must never sit in front of `tryAutoExecute`. Awaiting it (even after custody) let a slow or
+  // never-settling message store stall every admitted sibling's start — the same "cannot gate
+  // scheduling" claim being false for a second time (砚砚 R2 P1). Fire-and-forget is the contract;
+  // failures are logged and can only lose a pill, never a dispatch.
+  if (onAdmitted) {
+    void onAdmitted(admitted).catch((err) => {
+      log.warn({ threadId, requestId, err }, 'parallel routing projection failed (custody + start unaffected)');
+    });
+  }
+
   await queueProcessor.tryAutoExecute?.(threadId);
 }
 
 // ── Legacy dispatch (direct routeExecution, fallback) ────────────────
-async function dispatchToTarget(
-  deps: MultiMentionRouteDeps,
-  requestId: string,
-  targetCatId: CatId,
-  question: string,
-  context: string | undefined,
-  threadId: string,
-  userId: string,
-  ownerAuthProvenance: OwnerAuthProvenance,
-  initiator: CatId,
-  log: FastifyBaseLogger,
-): Promise<void> {
+
+/** Custody handle produced by {@link admitLegacyTarget} and consumed by `dispatchToTarget`. */
+interface LegacyAdmission {
+  controller: AbortController;
+  invocationId: string;
+  /** Parsed once at admission and carried forward — no second parse of the same content (砚砚 R4 P2). */
+  intent: ReturnType<typeof parseIntent>;
+}
+
+/**
+ * One legacy target's ADMISSION half, split out of `dispatchToTarget` (砚砚 R3 P1).
+ *
+ * Requirement 2 applies to both dispatch families: for an explicit parallel fan-out every sibling
+ * must hold custody before ANY of them starts. The Queue path got that by enqueueing all targets
+ * before `tryAutoExecute`; the legacy path used to interleave admission with execution, so a fast
+ * first target could terminate while a later sibling had not yet created its invocation — and it
+ * can still drop out entirely here (pre-start cancel at the tracker gate, or a duplicate record).
+ * Hoisting admission lets the caller batch it, then project only what was admitted, then start.
+ *
+ * Returns null when the target did not obtain custody; the tracker slot is released in that case.
+ * On success the CALLER owns the slot and must pass the handle to `dispatchToTarget`, whose
+ * `finally` performs the (idempotent) release.
+ */
+async function admitLegacyTarget(input: {
+  deps: MultiMentionRouteDeps;
+  requestId: string;
+  targetCatId: CatId;
+  threadId: string;
+  userId: string;
+  intent: ReturnType<typeof parseIntent>;
+  log: FastifyBaseLogger;
+}): Promise<LegacyAdmission | null> {
+  const { deps, requestId, targetCatId, threadId, userId, intent, log } = input;
+  const { invocationRecordStore, invocationTracker } = deps;
   const orch = getMultiMentionOrchestrator();
-  const { router, invocationRecordStore, socketManager, invocationTracker } = deps;
 
-  // Build the message for this target
-  // Include multi-mention context as structured prefix so the target cat
-  // understands the request is from another cat, not the user directly.
-  const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
-    '\n\n',
-  );
-
-  const intent = parseIntent(messageContent, 1);
-
-  // Collect response text from the routing execution
-  let responseText = '';
-  const toolsUsed: string[] = [];
-  let invocationId: string | undefined;
-
-  // F122 AC-A9: Occupy tracker slot BEFORE create to close TOCTOU window.
-  // Entire create/execute lifecycle wrapped in outer try/finally for guaranteed release.
-  // F108 slot-aware: multi-mention dispatches register per (threadId, catId) slot.
+  // F122 AC-A9: occupy the tracker slot BEFORE create to close the TOCTOU window.
   const controller = invocationTracker?.start(threadId, targetCatId, userId, [targetCatId]) ?? new AbortController();
+  // 砚砚 R4 P1: hoisted so the catch can SEE a record it already created. Splitting admission out of
+  // `dispatchToTarget` moved the happy path but left that function's catch behind, so a throw after
+  // create (the state machine's canonical `queued → failed` pre-start failure, e.g. the
+  // `status: running` update failing) leaked a record stuck at `queued` forever AND never recorded a
+  // response — the whole group then sat at `partial` until the timeout fired. Extracting a function
+  // means extracting its failure obligations too, not just its success path.
+  let invocationId: string | undefined;
   try {
     if (controller.signal.aborted) {
       log.info({ requestId, targetCatId }, '[F086] Multi-mention dispatch canceled before start (deleting)');
-      return;
+      invocationTracker?.complete(threadId, targetCatId, controller);
+      return null;
     }
 
-    // Create invocation record (now protected by tracker slot)
     const createResult = await invocationRecordStore.create({
       threadId,
       userId,
@@ -429,18 +474,78 @@ async function dispatchToTarget(
 
     if (createResult.outcome === 'duplicate') {
       log.info({ requestId, targetCatId }, '[F086] Dispatch skipped: duplicate invocation');
-      return; // finally will release slot (AC-A12)
+      invocationTracker?.complete(threadId, targetCatId, controller);
+      return null;
     }
 
     invocationId = createResult.invocationId;
     invocationTracker?.bindExecutionId?.(threadId, [targetCatId], controller, invocationId);
-
-    await invocationRecordStore.update(invocationId, {
-      status: 'running',
-    });
-
+    await invocationRecordStore.update(invocationId, { status: 'running' });
     orch.registerDispatch(requestId, targetCatId, controller);
+    return { controller, invocationId, intent };
+  } catch (err) {
+    log.error({ requestId, targetCatId, err }, '[F086] Multi-mention admission failed');
+    // Converge the record we already created — otherwise it is orphaned at `queued`.
+    if (invocationId) {
+      try {
+        await invocationRecordStore.update(invocationId, {
+          status: controller.signal.aborted ? 'canceled' : 'failed',
+          ...(controller.signal.aborted ? {} : { error: 'admission_error' }),
+        });
+      } catch (updateErr) {
+        log.warn(
+          { requestId, targetCatId, invocationId, err: updateErr },
+          '[F086] Failed to converge InvocationRecord after admission error',
+        );
+      }
+    }
+    // Register the failure so the group can reach a terminal state on its own instead of
+    // hanging at `partial` until the timeout.
+    orch.recordResponse(
+      requestId,
+      targetCatId,
+      `[admission error: ${err instanceof Error ? err.message : String(err)}]`,
+    );
+    invocationTracker?.complete(threadId, targetCatId, controller);
+    return null;
+  }
+}
 
+async function dispatchToTarget(
+  deps: MultiMentionRouteDeps,
+  requestId: string,
+  targetCatId: CatId,
+  question: string,
+  context: string | undefined,
+  threadId: string,
+  userId: string,
+  ownerAuthProvenance: OwnerAuthProvenance,
+  initiator: CatId,
+  log: FastifyBaseLogger,
+  /** Custody obtained by `admitLegacyTarget`. The caller admitted every sibling before any start. */
+  admission: LegacyAdmission,
+): Promise<void> {
+  const orch = getMultiMentionOrchestrator();
+  const { router, invocationRecordStore, socketManager, invocationTracker } = deps;
+
+  // Build the message for this target
+  // Include multi-mention context as structured prefix so the target cat
+  // understands the request is from another cat, not the user directly.
+  const messageContent = [`[Multi-Mention from ${initiator}]`, question, ...(context ? ['---', context] : [])].join(
+    '\n\n',
+  );
+
+  // Parsed once at admission; re-parsing the identical content here was dead duplication (砚砚 R4 P2).
+  const intent = admission.intent;
+
+  // Collect response text from the routing execution
+  let responseText = '';
+  const toolsUsed: string[] = [];
+  // Custody was established by `admitLegacyTarget` before ANY sibling started (requirement 2).
+  const { controller } = admission;
+  let invocationId: string | undefined = admission.invocationId;
+
+  try {
     let governanceErrorCode: string | undefined;
 
     try {
@@ -458,7 +563,7 @@ async function dispatchToTarget(
           ownerAuthProvenance,
           humanDispositionInvocationOrigin: 'callback',
           signal: controller.signal,
-          ...createA2ASlotTrackingBridge(invocationTracker, controller, createResult.invocationId),
+          ...createA2ASlotTrackingBridge(invocationTracker, controller, admission.invocationId),
           ...(deps.invocationQueue
             ? {
                 deferA2AEnqueue: (entry: Parameters<InvocationQueue['enqueue']>[0]) =>
@@ -478,7 +583,7 @@ async function dispatchToTarget(
             threadId,
             mode: intent.intent,
             targetCats: [targetCatId],
-            invocationId: createResult.invocationId,
+            invocationId: admission.invocationId,
           });
           intentModeBroadcast = true;
         }
@@ -538,11 +643,7 @@ async function dispatchToTarget(
       '[F086] Multi-mention response recorded',
     );
 
-    // If done (all responded), cancel timeout and flush
-    if (newStatus === 'done') {
-      cancelTimeout(requestId);
-      await flushResult(deps, requestId, threadId, userId, log);
-    }
+    settleGroupIfComplete(deps, requestId, threadId, userId, log);
   } catch (err) {
     log.error(
       { requestId, targetCatId, err: err instanceof Error ? err.message : String(err) },
@@ -572,6 +673,7 @@ async function dispatchToTarget(
       targetCatId,
       `[dispatch error: ${err instanceof Error ? err.message : String(err)}]`,
     );
+    settleGroupIfComplete(deps, requestId, threadId, userId, log);
   } finally {
     // F122 AC-A7: unconditional slot release — covers early return, registerDispatch
     // throw, routeExecution crash, and normal completion. InvocationTracker.complete()
@@ -581,6 +683,43 @@ async function dispatchToTarget(
 }
 
 // ── Result flush ─────────────────────────────────────────────────────
+/**
+ * INV-2 HOLDER — the ONLY place a multi-mention group may settle.
+ *
+ * State machine this owns:
+ *   group: open -> settling -> flushed        (never "waiting for the timeout to notice")
+ *
+ * Five review rounds produced the same class of defect at four different call sites: a branch
+ * decided on its own whether the group was done, cancelled the timer itself, and fired
+ * `flushResult` as a bare `void` — so a failing store surfaced as an unhandledRejection (砚砚 R5
+ * measured it: HTTP 200, then `unhandledRejection("flush store unavailable")`, and production has
+ * no global handler). Each round fixed one site and the next round's new branch copied the hole
+ * again. Enumerating branches loses to branches being added; owning the transition does not.
+ *
+ * Callers now state only WHAT happened (a response was recorded, targets were rejected); this
+ * function decides whether that completes the group. Detached by design — settling is downstream
+ * of custody and must never gate a dispatch — but never unguarded.
+ */
+function settleGroupIfComplete(
+  deps: MultiMentionRouteDeps,
+  requestId: string,
+  threadId: string,
+  userId: string,
+  log: FastifyBaseLogger,
+): void {
+  const orch = getMultiMentionOrchestrator();
+  if (orch.getStatus(requestId) !== 'done') return;
+  cancelTimeout(requestId);
+  void flushResult(deps, requestId, threadId, userId, log).catch((err) => {
+    // A summary write failure must not take the process down, and must not be silent either:
+    // the group is terminal, what got lost is its aggregate.
+    log.error(
+      { requestId, threadId, err: err instanceof Error ? err.message : String(err) },
+      '[F086] Multi-mention result flush failed — group is settled but its summary was not persisted',
+    );
+  });
+}
+
 async function flushResult(
   deps: MultiMentionRouteDeps,
   requestId: string,
@@ -930,6 +1069,20 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         : undefined,
     );
 
+    // F086/F216: a real fan-out renders as "A ⇉ B（并行 N/M）", distinct from a serial leg's
+    // "A → B（串行 1/2）" / "A ⇢ B（串行 2/2·排队中）". Before this the parallel path emitted no
+    // pill at all, so the only multi-target projection users ever saw was the sequential one.
+    // The projection runs from inside the dispatch, keyed on ADMITTED targets only (砚砚 R1 P1).
+    const projectAdmittedFanOut = (admitted: CatId[]): Promise<void> =>
+      emitParallelRoutingPills({
+        ...(deps.messageStore ? { messageStore: deps.messageStore } : {}),
+        socketManager: deps.socketManager,
+        threadId: record.threadId,
+        fromCatId: callerCatId,
+        targetCatIds: admitted,
+        log: request.log,
+      });
+
     // Dispatch to all targets in parallel (fire and forget)
     // F122B B6: Use InvocationQueue when available, legacy direct dispatch as fallback
     if (deps.invocationQueue && deps.queueProcessor) {
@@ -946,9 +1099,50 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         request.log,
         actionFence,
         actionCarrierDisposition,
+        projectAdmittedFanOut,
       );
     } else {
-      for (const targetCatId of targetCatIds) {
+      // Legacy direct-dispatch fallback, now TWO-PHASE (砚砚 R3 P1): admit every target first, then
+      // project only what was admitted, then start. Previously each target admitted itself inside
+      // its own fire-and-forget dispatch, so a fast sibling could terminate before a later one had
+      // an invocation — requirement 2 held on the Queue path only. Targets that drop out during
+      // admission (pre-start cancel / duplicate record) are simply never announced.
+      const legacyMessageContent = [
+        `[Multi-Mention from ${callerCatId}]`,
+        body.question,
+        ...(body.context ? ['---', body.context] : []),
+      ].join('\n\n');
+      const legacyIntent = parseIntent(legacyMessageContent, 1);
+      const admissions = await Promise.all(
+        targetCatIds.map(async (targetCatId) => ({
+          targetCatId,
+          admission: await admitLegacyTarget({
+            deps,
+            requestId: mmRequest.id,
+            targetCatId,
+            threadId: record.threadId,
+            userId: record.userId,
+            intent: legacyIntent,
+            log: request.log,
+          }),
+        })),
+      );
+      const admittedLegacy = admissions.flatMap((a) =>
+        a.admission ? [{ targetCatId: a.targetCatId, admission: a.admission }] : [],
+      );
+
+      void projectAdmittedFanOut(admittedLegacy.map((a) => a.targetCatId)).catch((err) => {
+        request.log.warn({ err, threadId: record.threadId }, 'parallel routing projection failed');
+      });
+
+      // 砚砚 R4 P1: admission failures already recorded their own failure response, so a group where
+      // every target failed is already terminal — settle it now instead of leaving the initiator
+      // waiting on the timeout timer.
+      if (admittedLegacy.length < targetCatIds.length) {
+        settleGroupIfComplete(deps, mmRequest.id, record.threadId, record.userId, request.log);
+      }
+
+      for (const { targetCatId, admission } of admittedLegacy) {
         void dispatchToTarget(
           deps,
           mmRequest.id,
@@ -960,6 +1154,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
           record.ownerAuthProvenance,
           callerCatId,
           request.log,
+          admission,
         );
       }
     }

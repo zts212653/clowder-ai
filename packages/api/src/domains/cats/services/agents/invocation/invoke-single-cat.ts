@@ -10,7 +10,6 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -79,14 +78,16 @@ import {
 } from '../../../../../utils/persistent-project-path.js';
 import { pathsEqual } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
+import { estimateTokens } from '../../../../../utils/token-counter.js';
 import {
   type MemoryCueInvocationPromptResolver,
   type MemoryCueOpportunitySeed,
   memoryCueOpportunityId,
 } from '../../../../memory/cue/MemoryCueInvocationPromptService.js';
-import type { MemoryCueDeliveryReceipt } from '../../../../memory/cue/MemoryCuePlaneService.js';
+import type { MemoryCuePresentationEnvelope } from '../../../../memory/cue/MemoryCuePlaneService.js';
 import {
   AsrPersonMemoryOpportunityPromptService,
+  type AsrPersonMemoryPresentationEnvelope,
   type AsrPersonMemoryPresentationReceipt,
 } from '../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
@@ -99,6 +100,16 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 // (next to F225 contextHintPrefix) so it lands every turn including resumes.
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
+import {
+  authoritativeCompactionEventFromSession,
+  resolveAuthoritativeCompactionSupport,
+} from '../../session/authoritative-compaction.js';
+import {
+  ledgerOutcomeFromCommits,
+  recordContextProjectionDeliveryLatency,
+  recordContextProjectionFinalGeneration,
+  recordContextProjectionLedgerOutcome,
+} from '../../session/context-continuity-telemetry.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
@@ -115,7 +126,12 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-writer.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
-import { resolveContextContinuity, supportsPreProviderContinuityHandshake } from './context-continuity.js';
+import {
+  continuityDispositionFromProviderEvidence,
+  resolveContextContinuity,
+  supportsPreProviderContinuityHandshake,
+  supportsProviderContinuityPreflight,
+} from './context-continuity.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
 import {
   applyActiveSessionCapacityPin,
@@ -126,6 +142,12 @@ import {
   sealBeforeInvocationIfNeeded,
 } from './invocation-capacity-snapshot.js';
 import { resolveManagedWorkInvocationBinding } from './managed-work-invocation-binding.js';
+import {
+  type ProviderPresentationAttempt,
+  type ProviderPromptPresentationEnvelope,
+  prepareProviderPresentationAttempt,
+  promptGenerationId,
+} from './provider-presentation-delivery.js';
 import { resolveManagedSessionPolicySnapshot } from './session-policy-snapshot.js';
 
 const log = createModuleLogger('invoke');
@@ -144,25 +166,26 @@ let _openCodeKnownModels: Set<string> | null = null;
 
 interface MemoryCueLegacyFallbackProjection {
   readonly opportunityId: string;
-  readonly promptContext: string;
 }
+
+type InvocationPresentationReceipt =
+  | { readonly domain: 'memory_cue'; readonly receipt: MemoryCuePresentationEnvelope['receipt'] }
+  | { readonly domain: 'write_opportunity'; readonly receipt: AsrPersonMemoryPresentationEnvelope['receipt'] };
+
+type InvocationPresentationEnvelope = ProviderPromptPresentationEnvelope<InvocationPresentationReceipt>;
 
 function resolveMemoryCueLegacyFallbacks(
   fallbacks: InvocationParams['memoryCueLegacyFallbacks'],
   serverScope: { ownerUserId: string; threadId: string; invocationId: string },
   admittedOpportunityIds?: readonly string[],
-): { readonly promptSegment: string; readonly projections: readonly MemoryCueLegacyFallbackProjection[] } {
+): readonly MemoryCueLegacyFallbackProjection[] {
   const admitted = new Set(admittedOpportunityIds ?? []);
-  const projections = (fallbacks ?? []).flatMap((item) => {
+  return (fallbacks ?? []).flatMap((item) => {
     if (!item.promptContext) return [];
     const opportunityId = memoryCueOpportunityId(item.seed, serverScope);
     if (admitted.has(opportunityId)) return [];
-    return [{ opportunityId, promptContext: item.promptContext }];
+    return [{ opportunityId }];
   });
-  return {
-    promptSegment: projections.map((projection) => projection.promptContext).join('\n'),
-    projections,
-  };
 }
 
 function isSubstantiveProviderOutput(message: AgentMessage): boolean {
@@ -234,46 +257,60 @@ async function recordWriteOpportunityPresentation(input: {
 function createPresentationDeliveryAttempt(input: {
   readonly catId: CatId;
   readonly invocationId: string;
-  readonly effectivePrompt: string;
-  readonly deliveryReceipts: readonly MemoryCueDeliveryReceipt[];
+  readonly attempt: ProviderPresentationAttempt<InvocationPresentationReceipt>;
+  readonly providerAdapterId: string;
   readonly omittedOpportunityIds: readonly string[];
-  readonly legacyFallbackProjections: readonly MemoryCueLegacyFallbackProjection[];
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
   readonly asrPersonMemoryPromptService?: AsrPersonMemoryOpportunityPromptService;
   readonly asrPersonMemoryReceipts: readonly AsrPersonMemoryPresentationReceipt[];
   readonly contextContinuity?: ContextContinuityHandshake;
-}): { confirm(): Promise<AgentMessage[]> } {
-  const promptGenerationId = `sha256:${createHash('sha256').update(input.effectivePrompt).digest('hex')}`;
+  readonly telemetry?: {
+    readonly generationReadyAtMs: number;
+    recordDeliveryLatency(latencyMs: number): void;
+    recordLedgerOutcome(outcome: string): void;
+  };
+}): { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } {
+  const promptGenerationId = input.attempt.promptGenerationId;
   const evidenceRef = `context-delivery:${input.invocationId}:${promptGenerationId}`;
-  const presented = input.deliveryReceipts.filter((receipt) =>
-    input.effectivePrompt.includes(receipt.projectionMarker),
+  const presented = input.attempt.admitted.flatMap(({ envelope }) =>
+    envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt] : [],
   );
-  const presentedLegacyOpportunityIds = new Set(
-    input.legacyFallbackProjections
-      .filter((projection) => input.effectivePrompt.includes(projection.promptContext))
-      .map((projection) => projection.opportunityId),
-  );
+  const presentedOpportunityIds = new Set(presented.map((receipt) => receipt.event.opportunityId));
   const omitted = [
     ...input.omittedOpportunityIds,
-    ...input.deliveryReceipts
-      .filter((receipt) => !input.effectivePrompt.includes(receipt.projectionMarker))
-      .map((receipt) => receipt.event.opportunityId),
+    ...input.attempt.omitted.flatMap((envelope) =>
+      envelope.receipt.domain === 'memory_cue' ? [envelope.receipt.receipt.event.opportunityId] : [],
+    ),
   ].filter(
-    (opportunityId, index, all) =>
-      !presentedLegacyOpportunityIds.has(opportunityId) && all.indexOf(opportunityId) === index,
+    (opportunityId, index, all) => !presentedOpportunityIds.has(opportunityId) && all.indexOf(opportunityId) === index,
   );
-  const presentedWriteOpportunities = input.asrPersonMemoryReceipts.filter((receipt) =>
-    input.effectivePrompt.includes(receipt.projectionMarker),
+  const presentedWriteOpportunities = input.attempt.admitted.flatMap(({ envelope }) =>
+    envelope.receipt.domain === 'write_opportunity' ? [envelope.receipt.receipt] : [],
   );
+  const presentedWriteOpportunityIds = new Set(presentedWriteOpportunities.map((receipt) => receipt.opportunityId));
   const omittedWriteOpportunities = input.asrPersonMemoryReceipts.filter(
-    (receipt) => !input.effectivePrompt.includes(receipt.projectionMarker),
+    (receipt) => !presentedWriteOpportunityIds.has(receipt.opportunityId),
   );
-  let confirmed = false;
+  let terminal: 'open' | 'confirmed' | 'released' = 'open';
 
   return {
     async confirm(): Promise<AgentMessage[]> {
-      if (confirmed) return [];
-      confirmed = true;
+      if (terminal !== 'open') return [];
+      terminal = 'confirmed';
+      const providerReceivedAt = Date.now();
+      const providerReceipt = mintDeliveryReceipt({
+        promptGenerationId,
+        providerReceivedAt,
+        providerAdapterId: input.providerAdapterId,
+      });
+      input.telemetry?.recordDeliveryLatency(providerReceivedAt - input.telemetry.generationReadyAtMs);
+      const commits = await input.attempt.confirm(providerReceipt);
+      input.telemetry?.recordLedgerOutcome(
+        ledgerOutcomeFromCommits(commits.map(({ outcome }) => (outcome.committed ? 'committed' : outcome.reason))),
+      );
+      if (commits.some(({ outcome }) => !outcome.committed && outcome.reason === 'generation_mismatch')) {
+        throw new Error('presentation_delivery_generation_mismatch');
+      }
       const messages: AgentMessage[] = [];
       if (presented.length > 0 && input.memoryCuePromptService?.recordPresented) {
         await input.memoryCuePromptService.recordPresented(presented, {
@@ -325,6 +362,12 @@ function createPresentationDeliveryAttempt(input: {
       );
       return messages;
     },
+    async release(reason: string): Promise<void> {
+      if (terminal !== 'open') return;
+      terminal = 'released';
+      await input.attempt.release(reason);
+      input.telemetry?.recordLedgerOutcome(input.attempt.admitted.length > 0 ? 'released' : 'no_reservation');
+    },
   };
 }
 
@@ -365,6 +408,9 @@ import type {
   RuntimeSessionUnexpectedRuntimeSessionSwitch,
 } from '../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
+import type { AuthoritativeCompactionEvent, ContextEpochOwner } from '../../session/ContextEpochOwner.js';
+import { mintDeliveryReceipt } from '../../session/delivery-receipt.js';
+import type { PresentationLedger } from '../../session/PresentationLedger.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
@@ -382,6 +428,8 @@ import type {
   AgentServiceOptions,
   ContextContinuityHandshake,
   InvocationOrigin,
+  ProviderCompactionObservation,
+  ProviderContinuityPreflight,
   RouteTopology,
 } from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
@@ -837,6 +885,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  /** F296 B3b-1: single owner of context epoch and cold/hot mode for provider-bound invocations. */
+  readonly contextEpochOwner?: Pick<ContextEpochOwner, 'resolve' | 'observeCompaction' | 'confirmColdConsumed'>;
+  /** F296 B3b-2: shared admission/delivery state machine for dynamic prompt projections. */
+  readonly presentationLedger?: Pick<PresentationLedger, 'reserve' | 'commit' | 'release'>;
   /** F276 Wave 2 bridge: cross-invocation terminal truth consulted at opportunity admission. */
   readonly writeOpportunityTerminalLedger?: import('../../../../memory/people/WriteOpportunityTerminalLedger.js').WriteOpportunityTerminalLedger;
   /** F276 Wave 2 bridge: delivery evidence a later F276 tool callback is bound against. */
@@ -955,6 +1007,23 @@ export interface InvocationParams {
   readonly sessionPolicySnapshot?: SessionPolicySnapshot;
   /** The fully-orchestrated prompt (dynamic context + chain context already prepended by caller) */
   readonly prompt: string;
+  /**
+   * F296 B3b-1: freeze route-owned dynamic context only after the provider
+   * handshake has been normalized by the epoch owner.
+   *
+   * The result binds prompt bytes and exact body exposure ids to one epoch
+   * decision. Returning only a string would let delivery/freshness receipts
+   * keep describing the route's stale pre-decision projection.
+   */
+  readonly contextPromptFactory?: (input: {
+    readonly handshake: ContextContinuityHandshake;
+    readonly decision: Awaited<ReturnType<ContextEpochOwner['resolve']>>;
+  }) => Promise<{
+    readonly prompt: string;
+    readonly promptMessageIds?: readonly string[];
+    /** Existing F296 surface shape; telemetry forwards it without recomputing delta size. */
+    readonly deltaSize?: import('../../session/context-surface-projection.js').ContextSurfaceProjection['deltaSize'];
+  }>;
   /** Rebuild route-owned context when a late native binding turns a resume into a fresh session. */
   readonly rebuildPromptAfterSessionSeal?: () => Promise<string>;
   readonly userId: string;
@@ -1087,7 +1156,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     params.parentInvocationId,
     params.a2aTriggerMessageId,
     params.toolExecutionPolicy,
-    params.executionCausal?.triggerMessageId,
+    // The exact A2A source is server-owned callback identity. Do not make it
+    // depend on a second optional causal alias used by direct invocations.
+    params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId,
     params.ownerAuthProvenance,
     managedWorkBinding,
   );
@@ -1095,6 +1166,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let invocationPolicyRecordId: string | undefined;
   let invocationPolicyPersistenceReady = false;
   let invocationPolicyExecutionPersisted = false;
+  const hasContinuityBootstrap = Boolean(params.contextPromptFactory || params.rebuildPromptAfterSessionSeal);
   let invocationPolicySnapshot = resolveManagedSessionPolicySnapshot({
     catId: catId as string,
     ...(params.sessionPolicySnapshot ? { base: params.sessionPolicySnapshot } : {}),
@@ -1102,7 +1174,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       capacitySnapshot: invocationCapacitySnapshot,
       authoritativeUsage: false,
       sessionRotation: Boolean(deps.sessionChainStore && deps.sessionSealer),
-      continuityBootstrap: Boolean(params.rebuildPromptAfterSessionSeal),
+      continuityBootstrap: hasContinuityBootstrap,
     },
   });
   const refreshInvocationPolicyExecution = async (): Promise<void> => {
@@ -1113,7 +1185,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         capacitySnapshot: invocationCapacitySnapshot,
         authoritativeUsage: invocationHasAuthoritativeUsage,
         sessionRotation: Boolean(deps.sessionChainStore && deps.sessionSealer),
-        continuityBootstrap: Boolean(params.rebuildPromptAfterSessionSeal),
+        continuityBootstrap: hasContinuityBootstrap,
       },
     });
     if (deps.sessionChainStore && invocationPolicyRecordId && invocationPolicyPersistenceReady) {
@@ -1130,7 +1202,35 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const executionKind = params.executionKind ?? 'ordinary';
   const executionParentInvocationId = params.parentInvocationId ?? invocationId;
   const executionStartedAt = Date.now();
-  const exposedMessageIds = [...new Set(params.promptMessageIds ?? [])];
+  let promptMessageIds = [...new Set(params.promptMessageIds ?? [])];
+  /**
+   * F296 B4 (Sol review #5): a stable array the recovery anchor can hold on to.
+   *
+   * With a preflight carrier the real ids only exist once `settle` has run the
+   * context prompt factory — long after `baseOptions` was built. Reassigning
+   * `promptMessageIds` would leave the anchor pointing at a stale array, so the
+   * anchor gets this one and it is updated in place.
+   */
+  const anchorPromptMessageIds: string[] = [...promptMessageIds];
+  const syncAnchorPromptMessageIds = (): void => {
+    anchorPromptMessageIds.length = 0;
+    anchorPromptMessageIds.push(...promptMessageIds);
+  };
+  const recordedPromptMessageIds = new Set<string>();
+  const exposeCurrentPromptMessages = async (): Promise<void> => {
+    if (!params.onPromptMessagesExposed) return;
+    const unrecorded = promptMessageIds.filter((messageId) => !recordedPromptMessageIds.has(messageId));
+    if (unrecorded.length === 0) return;
+    await params.onPromptMessagesExposed({
+      threadId,
+      userId,
+      catId,
+      invocationId,
+      messageIds: unrecorded,
+      seenAt: Date.now(),
+    });
+    for (const messageId of unrecorded) recordedPromptMessageIds.add(messageId);
+  };
   let ownsTurnExecution = false;
   let turnExecutionFailureReason: string | undefined;
   let turnExecutionInterruptionReason: string | undefined;
@@ -1231,14 +1331,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     });
   }
 
-  let memoryCueDeliveryReceipts: readonly MemoryCueDeliveryReceipt[] = [];
+  let memoryCuePresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   let omittedMemoryCueOpportunityIds: readonly string[] = [];
-  let memoryCueLegacyFallbackProjections: readonly MemoryCueLegacyFallbackProjection[] = [];
   const resolveInvocationMemoryCues = async (): Promise<void> => {
     invocationPromptAdditions.length = 0;
-    memoryCueDeliveryReceipts = [];
+    memoryCuePresentationEnvelopes = [];
     omittedMemoryCueOpportunityIds = [];
-    memoryCueLegacyFallbackProjections = [];
     if (!deps.memoryCuePromptService || !params.memoryCueOpportunitySeeds?.length) return;
     const serverScope = { ownerUserId: userId, threadId, invocationId };
     try {
@@ -1247,21 +1345,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         serverScope,
         now: Date.now(),
       });
-      if (cueResolution.promptSegment) invocationPromptAdditions.push(cueResolution.promptSegment);
-      memoryCueDeliveryReceipts = cueResolution.deliveryReceipts ?? [];
+      const typedEnvelopes = cueResolution.presentationEnvelopes ?? [];
+      if (cueResolution.promptSegment && typedEnvelopes.length === 0) {
+        throw new Error('memory_cue_presentation_envelope_unavailable');
+      }
+      memoryCuePresentationEnvelopes = typedEnvelopes.map((envelope) => ({
+        ...envelope,
+        receipt: { domain: 'memory_cue' as const, receipt: envelope.receipt },
+      }));
       omittedMemoryCueOpportunityIds = cueResolution.omittedOpportunityIds ?? [];
-      const fallback = resolveMemoryCueLegacyFallbacks(
+      const fallbackProjections = resolveMemoryCueLegacyFallbacks(
         params.memoryCueLegacyFallbacks,
         serverScope,
         cueResolution.admittedOpportunityIds,
       );
-      memoryCueLegacyFallbackProjections = fallback.projections;
-      if (fallback.promptSegment) invocationPromptAdditions.push(fallback.promptSegment);
+      omittedMemoryCueOpportunityIds = [
+        ...new Set([
+          ...omittedMemoryCueOpportunityIds,
+          ...fallbackProjections.map(({ opportunityId }) => opportunityId),
+        ]),
+      ];
     } catch (err) {
       log.warn({ err, invocationId, threadId, catId }, '[F287] memory cue prompt resolution failed closed');
-      const fallback = resolveMemoryCueLegacyFallbacks(params.memoryCueLegacyFallbacks, serverScope);
-      memoryCueLegacyFallbackProjections = fallback.projections;
-      if (fallback.promptSegment) invocationPromptAdditions.push(fallback.promptSegment);
+      const fallbackProjections = resolveMemoryCueLegacyFallbacks(params.memoryCueLegacyFallbacks, serverScope);
+      omittedMemoryCueOpportunityIds = fallbackProjections.map(({ opportunityId }) => opportunityId);
     }
   };
   const asrPersonMemoryPromptService = new AsrPersonMemoryOpportunityPromptService({
@@ -1269,10 +1376,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     ...(deps.writeOpportunityDeliveryStore ? { deliveryStore: deps.writeOpportunityDeliveryStore } : {}),
   });
   let asrPersonMemoryReceipts: readonly AsrPersonMemoryPresentationReceipt[] = [];
+  let asrPersonMemoryPresentationEnvelopes: readonly InvocationPresentationEnvelope[] = [];
   const resolveAsrPersonMemoryOpportunities = async (
     continuity: ContextContinuityHandshake | undefined,
   ): Promise<void> => {
     asrPersonMemoryReceipts = [];
+    asrPersonMemoryPresentationEnvelopes = [];
     if (!continuity || !params.asrPersonMemoryScenes?.length) return;
     // Ledger-aware: suppresses generations already judged in an earlier invocation and lineages
     // killed by correct/forget/scope-revoke. With either authority store absent, the prompt is
@@ -1284,7 +1393,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       now: Date.now(),
     });
     asrPersonMemoryReceipts = resolution.presentationReceipts;
-    if (resolution.promptSegment) invocationPromptAdditions.push(resolution.promptSegment);
+    if (resolution.promptSegment && resolution.presentationEnvelopes.length === 0) {
+      throw new Error('write_opportunity_presentation_envelope_unavailable');
+    }
+    asrPersonMemoryPresentationEnvelopes = resolution.presentationEnvelopes.map((envelope) => ({
+      ...envelope,
+      receipt: { domain: 'write_opportunity' as const, receipt: envelope.receipt },
+    }));
   };
 
   const auditLog = getEventAuditLog();
@@ -1421,6 +1536,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   // Used when provider emits toolUseId; falls back to legacy recordToolUseSpan when not.
   const toolSpanTracker = new ToolSpanTracker(invocationSpan, catId as string);
   let activeServiceIterator: AsyncIterator<AgentMessage> | null = null;
+  let presentationDelivery: { confirm(): Promise<AgentMessage[]>; release(reason: string): Promise<void> } | undefined;
   const closeActiveServiceIterator = async (): Promise<void> => {
     const iterator = activeServiceIterator;
     if (!iterator) return;
@@ -1458,25 +1574,53 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     emitOtelLog('INFO', 'invocation_started', { [AGENT_ID]: catId, [OPERATION_NAME]: 'invoke' }, invocationSpan);
 
     if (deps.turnExecutionStore) {
+      // The running record is created before provider/session preflight. A
+      // factory-owned projection does not have truthful covered ids yet, so do
+      // not persist the caller's stale pre-decision set as immutable causal data.
+      const initialCoveredMessageIds = params.contextPromptFactory ? [] : promptMessageIds;
       const executionCausal = {
         ...(params.executionCausal ?? {}),
-        ...(exposedMessageIds.length > 0 ? { coveredMessageIds: exposedMessageIds } : {}),
+        ...(initialCoveredMessageIds.length > 0 ? { coveredMessageIds: initialCoveredMessageIds } : {}),
       };
-      const created = await deps.turnExecutionStore.createRunning({
-        invocationId,
-        parentInvocationId: executionParentInvocationId,
-        threadId,
-        userId,
-        catId,
-        executionKind,
-        startedAt: executionStartedAt,
-        ...(Object.keys(executionCausal).length > 0 ? { causal: executionCausal } : {}),
-      });
+      let created;
+      try {
+        created = await deps.turnExecutionStore.createRunning({
+          invocationId,
+          parentInvocationId: executionParentInvocationId,
+          threadId,
+          userId,
+          catId,
+          executionKind,
+          startedAt: executionStartedAt,
+          ...(Object.keys(executionCausal).length > 0 ? { causal: executionCausal } : {}),
+        });
+      } catch (error) {
+        // Auth was minted first so the exact child id could be shared with the
+        // canonical TurnExecution. The credential has never been exposed to a
+        // provider at this point; record the typed admission failure explicitly.
+        if (typeof deps.registry.commitTerminal === 'function') {
+          await deps.registry.commitTerminal({
+            invocationId,
+            disposition: 'failed',
+            endedAt: Date.now(),
+            endReason: 'registration_failed',
+          });
+        }
+        throw error;
+      }
       if (created.outcome !== 'created') {
         // Idempotent persistence does not grant a second provider lease. A
         // replay means another attempt already owns (or owned) this child;
         // conflict means the child id was reused for different immutable
         // identity. In both cases fail before body exposure/provider startup.
+        if (typeof deps.registry.commitTerminal === 'function') {
+          await deps.registry.commitTerminal({
+            invocationId,
+            disposition: 'failed',
+            endedAt: Date.now(),
+            endReason: `registration_${created.outcome}`,
+          });
+        }
         throw new Error(`turn_execution_not_created:${created.outcome}:${invocationId}`);
       }
       ownsTurnExecution = true;
@@ -1509,16 +1653,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       timestamp: Date.now(),
     };
 
-    if (params.onPromptMessagesExposed && exposedMessageIds.length > 0) {
-      await params.onPromptMessagesExposed({
-        threadId,
-        userId,
-        catId,
-        invocationId,
-        messageIds: exposedMessageIds,
-        seenAt: Date.now(),
-      });
-    }
+    // A contextPromptFactory owns the final prompt/exposure projection and runs
+    // only after the epoch decision below. Legacy/cloud paths still expose here.
+    if (!params.contextPromptFactory) await exposeCurrentPromptMessages();
 
     if (isCloudOnlyInvocation) {
       const sourceMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
@@ -2630,14 +2767,33 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           invocationPolicyRecordId = replacement.id;
           await refreshInvocationPolicyExecution();
         }
-        if (!params.rebuildPromptAfterSessionSeal) {
+        if (!params.contextPromptFactory && !params.rebuildPromptAfterSessionSeal) {
           throw new Error('late_capacity_seal_requires_prompt_rebuild');
         }
-        prompt = await params.rebuildPromptAfterSessionSeal();
+        if (params.rebuildPromptAfterSessionSeal) {
+          prompt = await params.rebuildPromptAfterSessionSeal();
+        }
       }
     }
 
-    const contextCapability = service.contextCapability?.();
+    const contextCapability =
+      service.contextCapability?.() ??
+      (params.contextPromptFactory
+        ? {
+            provider: 'unknown',
+            carrier: 'unknown',
+            reportsRuntimeWindow: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable' as const,
+            nativeWindowControl: false,
+            nativeCompressionControl: false,
+            observesCompression: false,
+            reason: 'context capability undeclared; F296 fail-closed projection',
+          }
+        : undefined);
+    // F296 B4a: the adapter must expose the seam AND the carrier must be one we
+    // dynamically proved has it. Either half missing keeps the carrier cold.
+    const providerPreflightAvailable = typeof service.invokeWithContinuityPreflight === 'function';
     let contextContinuityHandshake: ContextContinuityHandshake | undefined = contextCapability
       ? resolveContextContinuity({
           capability: contextCapability,
@@ -2645,18 +2801,73 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           ...(sessionId ? { requestedRuntimeSessionId: sessionId } : {}),
           invocationOrigin: params.invocationOrigin ?? 'unknown',
           routeTopology: params.routeTopology ?? 'independent',
+          providerPreflightAvailable,
         })
       : undefined;
-    const hasTargetContinuityHandshake =
-      contextContinuityHandshake && supportsPreProviderContinuityHandshake(contextContinuityHandshake);
-    if (hasTargetContinuityHandshake && contextContinuityHandshake?.disposition.state === 'unknown' && sessionId) {
-      if (!params.rebuildPromptAfterSessionSeal) {
-        throw new Error('context_continuity_cold_rebuild_unavailable');
+    const usesProviderContinuityPreflight = Boolean(
+      providerPreflightAvailable &&
+        contextContinuityHandshake &&
+        supportsProviderContinuityPreflight(contextContinuityHandshake),
+    );
+    const hasTargetContinuityHandshake = Boolean(
+      contextContinuityHandshake &&
+        (params.contextPromptFactory ||
+          usesProviderContinuityPreflight ||
+          supportsPreProviderContinuityHandshake(contextContinuityHandshake)),
+    );
+    let contextEpochDecision: Awaited<ReturnType<ContextEpochOwner['resolve']>> | undefined;
+    const resolveContextEpoch = async (): Promise<void> => {
+      if (!contextContinuityHandshake || !hasTargetContinuityHandshake) return;
+      if (!deps.contextEpochOwner) throw new Error('context_epoch_owner_unavailable');
+      contextEpochDecision = await deps.contextEpochOwner.resolve({
+        userId,
+        catId,
+        threadId,
+        disposition: contextContinuityHandshake.disposition,
+      });
+      contextContinuityHandshake = {
+        ...contextContinuityHandshake,
+        disposition: contextEpochDecision.normalizedDisposition,
+      };
+    };
+    const applyContextPromptFactory = async (): Promise<boolean> => {
+      if (!params.contextPromptFactory) return false;
+      if (!contextContinuityHandshake || !contextEpochDecision) {
+        throw new Error('context_prompt_factory_decision_unavailable');
       }
-      prompt = await params.rebuildPromptAfterSessionSeal();
-    }
-    await resolveInvocationMemoryCues();
-    await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+      const projection = await params.contextPromptFactory({
+        handshake: contextContinuityHandshake,
+        decision: contextEpochDecision,
+      });
+      prompt = projection.prompt;
+      promptMessageIds = [...new Set(projection.promptMessageIds ?? [])];
+      projectionDeltaSize = projection.deltaSize;
+      syncAnchorPromptMessageIds();
+      if (deps.turnExecutionStore && promptMessageIds.length > 0) {
+        const bound = await deps.turnExecutionStore.bindCoveredMessageIds(invocationId, promptMessageIds);
+        if (bound.outcome === 'conflict' || bound.outcome === 'not_found') {
+          throw new Error(`turn_execution_prompt_coverage_${bound.outcome}:${invocationId}`);
+        }
+      }
+      await exposeCurrentPromptMessages();
+      return true;
+    };
+    const applyEpochScopedPrompt = async (): Promise<void> => {
+      const promptBuiltForEpoch = await applyContextPromptFactory();
+      if (
+        !promptBuiltForEpoch &&
+        hasTargetContinuityHandshake &&
+        contextContinuityHandshake?.disposition.state === 'unknown' &&
+        sessionId
+      ) {
+        if (!params.rebuildPromptAfterSessionSeal) {
+          throw new Error('context_continuity_cold_rebuild_unavailable');
+        }
+        prompt = await params.rebuildPromptAfterSessionSeal();
+      }
+      await resolveInvocationMemoryCues();
+      await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+    };
 
     // F-BLOAT: Only inject staticIdentity (systemPrompt) on new provider sessions.
     // Exception: compression detected → force re-inject (see _needsReinjection).
@@ -2677,22 +2888,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       isResume &&
       lastStaticIdentityRevision !== undefined &&
       lastStaticIdentityRevision !== registryRevision;
-    const forceContinuityColdIdentity = Boolean(
-      hasTargetContinuityHandshake && contextContinuityHandshake?.contextMode === 'cold',
-    );
-    let injectSystemPrompt =
-      !canSkipOnResume ||
-      !isResume ||
-      forceReinjection ||
-      registryChangedSinceStaticIdentity ||
-      forceContinuityColdIdentity;
-    if (canSkipOnResume) {
-      if (injectSystemPrompt) {
-        _staticIdentityRegistryRevision.set(identityKey, registryRevision);
-      } else if (isResume && lastStaticIdentityRevision === undefined) {
-        _staticIdentityRegistryRevision.set(identityKey, registryRevision);
+    let injectSystemPrompt = !canSkipOnResume || !isResume || forceReinjection || registryChangedSinceStaticIdentity;
+    /**
+     * F296 B4a: whether a cold epoch forces identity re-injection can only be
+     * known after the epoch owner has seen the provider continuity verdict, so
+     * this is recomputed for each final generation rather than frozen up front.
+     */
+    const computeIdentityInjection = (): void => {
+      const forceContinuityColdIdentity = Boolean(
+        hasTargetContinuityHandshake && contextEpochDecision?.contextMode === 'cold',
+      );
+      injectSystemPrompt =
+        !canSkipOnResume ||
+        !isResume ||
+        forceReinjection ||
+        registryChangedSinceStaticIdentity ||
+        forceContinuityColdIdentity;
+      if (canSkipOnResume) {
+        if (injectSystemPrompt) {
+          _staticIdentityRegistryRevision.set(identityKey, registryRevision);
+        } else if (isResume && lastStaticIdentityRevision === undefined) {
+          _staticIdentityRegistryRevision.set(identityKey, registryRevision);
+        }
       }
-    }
+    };
 
     // F225 软层: deliver a pending context-management hint into the cat's actual
     // prompt (a system_info output can't reach cat cognition — see
@@ -2711,43 +2930,171 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const stagingPrepend = buildStagingPrepend(catId);
     let promptWithInvocationAdditions = '';
     let effectivePrompt = '';
-    const rebuildEffectivePrompt = (includeSystemPrompt: boolean): void => {
+    let projectionDeltaSize: 'small' | 'large' | undefined;
+    const composeEffectivePrompt = (
+      includeSystemPrompt: boolean,
+      presentationSegments: readonly string[],
+    ): { readonly promptWithInvocationAdditions: string; readonly effectivePrompt: string } => {
       // Prepend staticIdentity to prompt when injection is needed.
       // F070-P2: missionPrefix (dispatch context) is prepended for external projects.
-      promptWithInvocationAdditions = [prompt, ...invocationPromptAdditions].filter(Boolean).join('\n');
-      const promptWithMission = missionPrefix
-        ? `${missionPrefix}\n\n${promptWithInvocationAdditions}`
-        : promptWithInvocationAdditions;
-      effectivePrompt =
+      const composedPrompt = [prompt, ...invocationPromptAdditions, ...presentationSegments].filter(Boolean).join('\n');
+      const promptWithMission = missionPrefix ? `${missionPrefix}\n\n${composedPrompt}` : composedPrompt;
+      let composedEffectivePrompt =
         includeSystemPrompt && params.systemPrompt
           ? `${params.systemPrompt}\n\n---\n\n${promptWithMission}`
           : `${promptWithMission}`;
-      if (contextHintPrefix) effectivePrompt = `${contextHintPrefix}\n\n---\n\n${effectivePrompt}`;
-      if (stagingPrepend) effectivePrompt = `${stagingPrepend}\n\n---\n\n${effectivePrompt}`;
+      if (contextHintPrefix) composedEffectivePrompt = `${contextHintPrefix}\n\n---\n\n${composedEffectivePrompt}`;
+      if (stagingPrepend) composedEffectivePrompt = `${stagingPrepend}\n\n---\n\n${composedEffectivePrompt}`;
       /* @segment M2 — Transcript Path Hints */
-      effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);
+      composedEffectivePrompt = appendTranscriptPathHints(composedEffectivePrompt, TRANSCRIPT_DIR, threadId);
+      return { promptWithInvocationAdditions: composedPrompt, effectivePrompt: composedEffectivePrompt };
     };
-    rebuildEffectivePrompt(injectSystemPrompt);
+    const applyPreparedPrompt = (attempt: ProviderPresentationAttempt<InvocationPresentationReceipt>): void => {
+      const composed = composeEffectivePrompt(
+        injectSystemPrompt,
+        attempt.admitted.map(({ promptSegment }) => promptSegment),
+      );
+      if (composed.effectivePrompt !== attempt.effectivePrompt) {
+        throw new Error('presentation_prompt_generation_drift');
+      }
+      promptWithInvocationAdditions = composed.promptWithInvocationAdditions;
+      effectivePrompt = composed.effectivePrompt;
+    };
+    const prepareCurrentPresentationDelivery = async (): Promise<void> => {
+      const envelopes = [...memoryCuePresentationEnvelopes, ...asrPersonMemoryPresentationEnvelopes];
+      const attempt = await prepareProviderPresentationAttempt({
+        envelopes,
+        ...(deps.presentationLedger ? { ledger: deps.presentationLedger } : {}),
+        ...(contextEpochDecision
+          ? {
+              scope: {
+                scopeKey: contextEpochDecision.scopeKey,
+                contextEpoch: contextEpochDecision.contextEpoch,
+              },
+            }
+          : {}),
+        opportunityContext: {
+          ownerUserId: userId,
+          threadId,
+          invocationId,
+          consumerCatId: catId,
+          surface: 'dynamic_context',
+          now: Date.now(),
+        },
+        buildEffectivePrompt: (segments) => composeEffectivePrompt(injectSystemPrompt, segments).effectivePrompt,
+      });
+      applyPreparedPrompt(attempt);
+      const generationReadyAtMs = Date.now();
+      if (contextContinuityHandshake && contextEpochDecision) {
+        recordContextProjectionFinalGeneration(invocationSpan, {
+          handshake: contextContinuityHandshake,
+          transition: contextEpochDecision.transition,
+          contextMode: contextEpochDecision.contextMode,
+          contextEpoch: contextEpochDecision.contextEpoch,
+          ...(projectionDeltaSize ? { deltaSize: projectionDeltaSize } : {}),
+          admitted: attempt.admitted,
+        });
+      }
+      const providerCarrier = contextContinuityHandshake?.coordinate.providerCarrier;
+      presentationDelivery = createPresentationDeliveryAttempt({
+        catId,
+        invocationId,
+        attempt,
+        providerAdapterId: providerCarrier
+          ? `${providerCarrier.provider}:${providerCarrier.carrier}`
+          : 'unknown:unknown',
+        omittedOpportunityIds: omittedMemoryCueOpportunityIds,
+        ...(deps.memoryCuePromptService ? { memoryCuePromptService: deps.memoryCuePromptService } : {}),
+        asrPersonMemoryPromptService,
+        asrPersonMemoryReceipts,
+        ...(contextContinuityHandshake ? { contextContinuity: contextContinuityHandshake } : {}),
+        telemetry: {
+          generationReadyAtMs,
+          recordDeliveryLatency: (latencyMs) => recordContextProjectionDeliveryLatency(invocationSpan, latencyMs),
+          recordLedgerOutcome: (outcome) => recordContextProjectionLedgerOutcome(invocationSpan, outcome),
+        },
+      });
+    };
+    /**
+     * F296 B4a: capture the bytes that were actually built for this generation.
+     * In preflight mode these do not exist until the provider verdict settles,
+     * so the capture rides with generation construction instead of running
+     * ahead of it against an empty prompt.
+     */
+    const captureFinalGenerationPrompt = (): void => {
+      capturePromptIfEnabled({
+        catId: catId as string,
+        invocationId,
+        threadId,
+        userId,
+        model: resolvedAccount?.models?.[0] ?? 'unknown',
+        systemPrompt: params.systemPrompt ?? '',
+        missionPrefix: missionPrefix ?? undefined,
+        userPrompt: promptWithInvocationAdditions,
+        effectivePrompt,
+        injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
+        // AC-G10 (Phase G native L0 closure / KD-44): if this provider injects
+        // L0 via a native system-role channel (Claude `--system-prompt-file` /
+        // Codex `-c developer_instructions=`), the bridge will best-effort
+        // fetch the compiled L0 and stamp it onto `nativeSystemPrompt`. Hot
+        // path stays non-blocking — the bridge handles fetch async + fail-safe
+        // (see comment block in prompt-capture-bridge.ts).
+        nativeL0Provider: service.injectsL0Natively?.() ?? false,
+      });
+    };
 
-    capturePromptIfEnabled({
-      catId: catId as string,
-      invocationId,
-      threadId,
-      userId,
-      model: resolvedAccount?.models?.[0] ?? 'unknown',
-      systemPrompt: params.systemPrompt ?? '',
-      missionPrefix: missionPrefix ?? undefined,
-      userPrompt: promptWithInvocationAdditions,
-      effectivePrompt,
-      injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
-      // AC-G10 (Phase G native L0 closure / KD-44): if this provider injects
-      // L0 via a native system-role channel (Claude `--system-prompt-file` /
-      // Codex `-c developer_instructions=`), the bridge will best-effort
-      // fetch the compiled L0 and stamp it onto `nativeSystemPrompt`. Hot
-      // path stays non-blocking — the bridge handles fetch async + fail-safe
-      // (see comment block in prompt-capture-bridge.ts).
-      nativeL0Provider: service.injectsL0Natively?.() ?? false,
-    });
+    /**
+     * F296 B4a: construct exactly one final generation — epoch decision,
+     * context prompt factory, identity injection, presentation mapper and
+     * ledger reservation — from a settled continuity verdict.
+     *
+     * For carriers without a provider-owned pre-prompt seam this runs eagerly,
+     * exactly as before. For preflight carriers it runs inside `settle`, after
+     * the adapter has minted the verdict from a real provider response.
+     */
+    /**
+     * F296 B4b: apply compactions the adapter observed for the bound runtime,
+     * before this generation's prompt is built.
+     *
+     * Support is resolved per event source, so a carrier cannot borrow another
+     * carrier's proof, and an unsupported source fails the invocation instead of
+     * being silently dropped. Replay suppression lives in the epoch owner.
+     */
+    const applyProviderCompactions = async (
+      compactions: readonly ProviderCompactionObservation[] | undefined,
+    ): Promise<void> => {
+      if (!compactions || compactions.length === 0) return;
+      if (!contextCapability) throw new Error('authoritative_compaction_capability_unavailable');
+      const support = resolveAuthoritativeCompactionSupport({
+        capability: contextCapability,
+        eventSource: 'codex_app_server_context_compaction',
+      });
+      if (support.status === 'unsupported') {
+        throw new Error(`authoritative_compaction_unsupported:${support.reason}`);
+      }
+      if (!deps.contextEpochOwner) throw new Error('authoritative_compaction_owner_unavailable');
+      for (const compaction of compactions) {
+        await deps.contextEpochOwner.observeCompaction({
+          userId,
+          catId,
+          threadId,
+          event: {
+            eventId: compaction.eventId,
+            runtimeSessionId: compaction.runtimeSessionId,
+            evidenceRef: compaction.evidenceRef,
+          },
+        });
+      }
+    };
+
+    const buildFinalGeneration = async (): Promise<void> => {
+      await resolveContextEpoch();
+      await applyEpochScopedPrompt();
+      computeIdentityInjection();
+      await prepareCurrentPresentationDelivery();
+      captureFinalGenerationPrompt();
+    };
+    if (!usesProviderContinuityPreflight) await buildFinalGeneration();
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
     let spawnCliOverride: AgentServiceOptions['spawnCliOverride'];
@@ -2861,12 +3208,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         userId,
         catId,
       },
-      ...(params.promptMessageIds && params.promptMessageIds.length > 0
+      // A preflight carrier has no ids yet — they arrive inside `settle` — so it
+      // gets the stable array rather than being denied an anchor entirely.
+      // Without this, app_server model-capacity recovery could never resume the
+      // exact invocation even though the final generation knows its coordinates.
+      ...(usesProviderContinuityPreflight || anchorPromptMessageIds.length > 0
         ? {
             recoveryAnchor: {
               threadId,
               invocationId,
-              promptMessageIds: params.promptMessageIds,
+              promptMessageIds: anchorPromptMessageIds,
             },
           }
         : {}),
@@ -4101,25 +4452,34 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     let allowTransientRetry = true;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptStartedAt = Date.now();
-      const presentationDelivery = createPresentationDeliveryAttempt({
+      // In preflight mode the generation does not exist yet — it is built inside
+      // `settle`, after the provider verdict. Demanding it here would recreate
+      // exactly the ordering this slice removes.
+      if (!usesProviderContinuityPreflight && !presentationDelivery) {
+        throw new Error('presentation_delivery_attempt_unavailable');
+      }
+      const continuityInfoMessage = (): AgentMessage => ({
+        type: 'system_info',
         catId,
-        invocationId,
-        effectivePrompt,
-        deliveryReceipts: memoryCueDeliveryReceipts,
-        omittedOpportunityIds: omittedMemoryCueOpportunityIds,
-        legacyFallbackProjections: memoryCueLegacyFallbackProjections,
-        ...(deps.memoryCuePromptService ? { memoryCuePromptService: deps.memoryCuePromptService } : {}),
-        asrPersonMemoryPromptService,
-        asrPersonMemoryReceipts,
-        ...(contextContinuityHandshake ? { contextContinuity: contextContinuityHandshake } : {}),
+        content: JSON.stringify({
+          type: 'context_continuity',
+          v: 1,
+          invocationId,
+          ...contextContinuityHandshake,
+          ...(contextEpochDecision
+            ? {
+                contextEpoch: contextEpochDecision.contextEpoch,
+                contextMode: contextEpochDecision.contextMode,
+                transition: contextEpochDecision.transition,
+              }
+            : {}),
+        }),
+        timestamp: Date.now(),
       });
-      if (contextContinuityHandshake && supportsPreProviderContinuityHandshake(contextContinuityHandshake)) {
-        yield {
-          type: 'system_info',
-          catId,
-          content: JSON.stringify({ type: 'context_continuity', v: 1, invocationId, ...contextContinuityHandshake }),
-          timestamp: Date.now(),
-        };
+      /** Emitted once the provider verdict has settled, so it reports the real epoch. */
+      let pendingContinuityInfo: AgentMessage | undefined;
+      if (!usesProviderContinuityPreflight && contextContinuityHandshake && hasTargetContinuityHandshake) {
+        yield continuityInfoMessage();
       }
       const options: AgentServiceOptions = {
         ...(sessionId ? { sessionId } : {}),
@@ -4142,10 +4502,52 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
-      const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
+      let settleCount = 0;
+      /**
+       * F296 B4a preflight fence. `settle` is the only place the final bytes
+       * come into existence, and it can only be reached from an adapter that
+       * already holds a real provider verdict.
+       */
+      const continuityPreflight: ProviderContinuityPreflight = {
+        ...(sessionId ? { requestedRuntimeSessionId: sessionId } : {}),
+        settle: async ({ evidence, compactions }) => {
+          settleCount += 1;
+          if (settleCount > 1) {
+            // A second verdict in one attempt means the previous generation was
+            // never handed to a runtime. Release it rather than leaving a
+            // reservation that no prompt will ever claim.
+            await presentationDelivery?.release('provider_generation_replaced');
+            presentationDelivery = undefined;
+          }
+          if (!contextContinuityHandshake) throw new Error('context_continuity_handshake_unavailable');
+          contextContinuityHandshake = {
+            ...contextContinuityHandshake,
+            disposition: continuityDispositionFromProviderEvidence({
+              evidence,
+              coordinate: contextContinuityHandshake.coordinate,
+              invocationId,
+            }),
+          };
+          await applyProviderCompactions(compactions);
+          await buildFinalGeneration();
+          if (!presentationDelivery) throw new Error('presentation_delivery_attempt_unavailable');
+          pendingContinuityInfo = continuityInfoMessage();
+          return { prompt: effectivePrompt, promptGenerationId: promptGenerationId(effectivePrompt) };
+        },
+      };
+      const serviceIter = (
+        usesProviderContinuityPreflight && service.invokeWithContinuityPreflight
+          ? service.invokeWithContinuityPreflight(continuityPreflight, options)
+          : service.invoke(effectivePrompt, options)
+      )[Symbol.asyncIterator]();
       activeServiceIterator = serviceIter;
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);
+        if (pendingContinuityInfo) {
+          const settledInfo = pendingContinuityInfo;
+          pendingContinuityInfo = undefined;
+          yield settledInfo;
+        }
         if (iterResult.done) {
           activeServiceIterator = null;
           break;
@@ -4156,6 +4558,36 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // a daemon sending frequent status updates must not evade the 30-min kill deadline.
         if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal' && msg.type !== 'status')
           resetInvocationTimeout();
+        if (msg.contextCompaction) {
+          const support = contextCapability
+            ? resolveAuthoritativeCompactionSupport({
+                capability: contextCapability,
+                eventSource: msg.contextCompaction.eventSource,
+              })
+            : { status: 'unsupported' as const, reason: 'typed_event_unroutable' as const };
+          if (support.status === 'unsupported') {
+            throw new Error(`authoritative_compaction_unsupported:${support.reason}`);
+          }
+          if (!deps.contextEpochOwner) throw new Error('authoritative_compaction_owner_unavailable');
+          // F296 B4b: the app-server carries the event identity on the wire, so
+          // it supplies the minted event directly. Claude has no such identity
+          // and must still derive one from its session record.
+          let compactionEvent: AuthoritativeCompactionEvent;
+          if ('event' in msg.contextCompaction) {
+            compactionEvent = msg.contextCompaction.event;
+          } else {
+            if (!deps.sessionChainStore) throw new Error('authoritative_compaction_owner_unavailable');
+            const activeRecord = await deps.sessionChainStore.getActive(catId as CatId, threadId, userId);
+            if (!activeRecord) throw new Error('authoritative_compaction_scope_unavailable');
+            compactionEvent = authoritativeCompactionEventFromSession(activeRecord, msg.contextCompaction.eventSource);
+          }
+          await deps.contextEpochOwner.observeCompaction({
+            userId,
+            catId,
+            threadId,
+            event: compactionEvent,
+          });
+        }
         if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
           const failureKind = classifyResumeFailure(msg.error);
           if (failureKind) {
@@ -4339,7 +4771,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         }
 
         if (isSubstantiveProviderOutput(msg)) {
-          for (const receipt of await presentationDelivery.confirm()) {
+          // Substantive output means the provider accepted a generation, so one
+          // must exist. If it does not, the fence was bypassed — fail rather
+          // than let output flow with no reserved generation behind it.
+          if (!presentationDelivery) throw new Error('presentation_delivery_attempt_unavailable');
+          // F296 B4 (Sol review): the cold is consumed here — after the provider
+          // accepted the generation — not at resolve time. Failure and release
+          // paths must leave it unconsumed so the next projection is cold again.
+          if (contextEpochDecision && deps.contextEpochOwner?.confirmColdConsumed) {
+            try {
+              await deps.contextEpochOwner.confirmColdConsumed({
+                userId,
+                catId,
+                threadId,
+                contextEpoch: contextEpochDecision.contextEpoch,
+              });
+            } catch {
+              // An extra cold rebuild is the safe failure direction; never fail a
+              // delivery that already reached the provider.
+            }
+          }
+          // Confirm only after substantive provider output. A retired epoch is a
+          // bounded commit outcome, not a reason to suppress the provider message.
+          const confirmed = await presentationDelivery.confirm();
+          for (const receipt of confirmed) {
             for await (const out of streamProcessedOutputs(receipt)) yield out;
           }
         }
@@ -4394,6 +4849,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (activeServiceIterator === serviceIter) await closeActiveServiceIterator();
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
+        await presentationDelivery?.release('provider_generation_replaced');
         const retryReason = suppressedPromptLimitError
           ? 'prompt_token_limit'
           : suppressedContextOverflowError
@@ -4442,14 +4898,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // F-BLOAT P1: self-heal drops session → retry is now a fresh session.
         // Must re-inject systemPrompt since baseOptions may have omitted it
         // when the original attempt was a resume (injectSystemPrompt=false).
-        if (params.systemPrompt && !baseOptions.systemPrompt) {
+        //
+        // F296 B4 (kimi review P2): carriers with a target continuity handshake
+        // rebuild the prompt below with injectSystemPrompt=true, so the identity
+        // is already inside the bytes. Putting it in baseOptions as well makes
+        // the provider prepend it a second time. This predates B4 — it already
+        // affected codex/exec_json — but B4 widens it to app_server, so fix it
+        // here rather than leave a known double-injection behind a new carrier.
+        if (params.systemPrompt && !baseOptions.systemPrompt && !hasTargetContinuityHandshake) {
           baseOptions.systemPrompt = params.systemPrompt;
         }
         if (hasTargetContinuityHandshake) {
-          if (!params.rebuildPromptAfterSessionSeal) {
+          // The identity belongs to exactly one channel. The rebuild below owns
+          // it, so make sure no earlier attempt left it on the options channel.
+          delete baseOptions.systemPrompt;
+          if (!params.contextPromptFactory && !params.rebuildPromptAfterSessionSeal) {
             throw new Error('context_continuity_cold_rebuild_unavailable');
           }
-          prompt = await params.rebuildPromptAfterSessionSeal();
+          if (params.rebuildPromptAfterSessionSeal) {
+            prompt = await params.rebuildPromptAfterSessionSeal();
+          }
           await resolveInvocationMemoryCues();
           injectSystemPrompt = true;
           contextContinuityHandshake = contextCapability
@@ -4459,15 +4927,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 freshReason: 'resume_failed',
                 invocationOrigin: params.invocationOrigin ?? 'unknown',
                 routeTopology: params.routeTopology ?? 'independent',
+                // F296 B4 (kimi review): without this the retry silently
+                // downgraded a preflight carrier to carrier_unsupported, while
+                // `usesProviderContinuityPreflight` (computed once) still routed
+                // through the preflight seam — an inconsistent pair.
+                providerPreflightAvailable,
               })
             : undefined;
-          await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
-          rebuildEffectivePrompt(true);
+          // F296 B4 (kimi review P2-3): a preflight carrier must NOT build a
+          // generation here. The next attempt's `settle` rebuilds everything
+          // from the provider verdict, so doing it eagerly would advance the
+          // epoch twice for one retry, leave an ownerless reservation behind,
+          // and double-count every projection metric.
+          if (!usesProviderContinuityPreflight) {
+            await resolveContextEpoch();
+            await applyContextPromptFactory();
+            await resolveAsrPersonMemoryOpportunities(contextContinuityHandshake);
+          }
         }
+        if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
         allowSessionRetry = false;
         continue;
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
+        await presentationDelivery?.release('provider_transient_retry');
         log.info(
           {
             catId,
@@ -4483,6 +4966,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           'cat retrying invoke (transient CLI exit)',
         );
         allowTransientRetry = false;
+        if (!usesProviderContinuityPreflight) await prepareCurrentPresentationDelivery();
         continue;
       }
 
@@ -4567,6 +5051,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           yield out;
         }
       }
+      await presentationDelivery?.release('provider_attempt_ended_without_delivery');
       break;
     }
 
@@ -4651,6 +5136,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     };
   } finally {
     await closeActiveServiceIterator();
+    await presentationDelivery?.release('invocation_finalized_without_delivery');
     if (deps.turnExecutionStore && ownsTurnExecution) {
       let terminal: TurnExecutionTerminalInput;
       if (turnExecutionCompletedSuccessfully) {

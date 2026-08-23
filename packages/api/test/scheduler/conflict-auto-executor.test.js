@@ -72,9 +72,88 @@ describe('ConflictAutoExecutor', () => {
     const executor = new mod.ConflictAutoExecutor({ log: noopLog });
     assert.ok(typeof executor.resolve === 'function');
   });
+
+  it('finishes rebase cleanup before surfacing scheduler cancellation', async () => {
+    const { ConflictAutoExecutor } = await import('../../dist/infrastructure/email/ConflictAutoExecutor.js');
+    const controller = new AbortController();
+    const commands = [];
+    const executor = new ConflictAutoExecutor({ log: noopLog });
+    executor.getPrBranch = async () => 'feat/cancelled-rebase';
+    executor.findWorktree = async () => '/tmp/cat-cafe-cancelled-rebase-test';
+    executor.git = async (_cwd, args, signal) => {
+      commands.push({ args, signal });
+      if (args[0] === 'fetch') {
+        controller.abort(new Error('scheduler timeout'));
+        throw controller.signal.reason;
+      }
+      return { stdout: '' };
+    };
+
+    await assert.rejects(() => executor.resolve('a/b', 1, controller.signal), /scheduler timeout/);
+    assert.deepEqual(
+      commands.map((command) => command.args),
+      [
+        ['fetch', 'origin', 'main'],
+        ['rebase', '--abort'],
+      ],
+    );
+    assert.equal(commands[1].signal, undefined, 'cleanup keeps its own bounded process timeout');
+  });
+
+  it('warns when cancellation cleanup cannot abort the rebase', async () => {
+    const { ConflictAutoExecutor } = await import('../../dist/infrastructure/email/ConflictAutoExecutor.js');
+    const controller = new AbortController();
+    const warnings = [];
+    const executor = new ConflictAutoExecutor({
+      log: { info() {}, error() {}, warn: (...args) => warnings.push(args) },
+    });
+    executor.getPrBranch = async () => 'feat/cancelled-rebase';
+    executor.findWorktree = async () => '/tmp/cat-cafe-cancelled-rebase-test';
+    executor.git = async (_cwd, args) => {
+      if (args[0] === 'fetch') {
+        controller.abort(new Error('scheduler timeout'));
+        throw controller.signal.reason;
+      }
+      throw new Error('rebase abort failed');
+    };
+
+    await assert.rejects(() => executor.resolve('a/b', 1, controller.signal), /scheduler timeout/);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0][1]), /abort rebase cleanup/i);
+  });
 });
 
 describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
+  it('passes the scheduler cancellation signal to the git/gh auto-executor chain', async () => {
+    const { createConflictCheckTaskSpec } = await import('../../dist/infrastructure/email/ConflictCheckTaskSpec.js');
+    const controller = new AbortController();
+    let receivedSignal;
+    const spec = createConflictCheckTaskSpec({
+      taskStore: mockTaskStore([
+        mockTask({ repoFullName: 'a/b', prNumber: 1, threadId: 't1', catId: 'opus', userId: 'u1' }),
+      ]),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
+      conflictRouter: {
+        async route() {
+          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+        },
+      },
+      autoExecutor: {
+        async resolve(_repo, _pr, signal) {
+          receivedSignal = signal;
+          return { kind: 'resolved', method: 'clean-rebase', branch: 'feat/test' };
+        },
+      },
+      log: noopLog,
+    });
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {
+      assignedCatId: null,
+      signal: controller.signal,
+    });
+    assert.equal(receivedSignal, controller.signal);
+  });
+
   it('auto-resolved conflict does NOT trigger cat (Phase C AC-C1)', async () => {
     const { createConflictCheckTaskSpec } = await import('../../dist/infrastructure/email/ConflictCheckTaskSpec.js');
     const triggered = [];

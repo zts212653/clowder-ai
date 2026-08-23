@@ -6,8 +6,11 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
 import { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
+import { admitThreadParticipants } from './thread-participant-admission.js';
 
 export { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
 
@@ -77,6 +80,8 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   /** Phase AA (AC-AA5): invocation id from the proposal — for crossPost metadata. */
   sourceInvocationId?: string | null;
   messageStore: IMessageStore;
+  threadStore: Pick<IThreadStore, 'addParticipants' | 'get'>;
+  socketManager: Pick<SocketManager, 'emitToUser'>;
 }
 
 export interface AppendApprovedInitialMessageResult {
@@ -97,6 +102,8 @@ export async function appendApprovedInitialMessage({
   sourceCatId,
   sourceInvocationId,
   messageStore,
+  threadStore,
+  socketManager,
   router,
   invocationQueue,
   queueProcessor,
@@ -139,7 +146,7 @@ export async function appendApprovedInitialMessage({
 
   // Router resolve + parseIntent BOTH read raw (round-2/3 P2 — server-injected
   // header text must NOT leak into the @-mention persist boundary).
-  const resolved = await router.resolveTargetsAndIntent(rawInitialMessage, threadId, { persist: true });
+  const resolved = await router.resolveTargetsAndIntent(rawInitialMessage, threadId, { persist: false });
   const parsed = parseIntent(rawInitialMessage, preferredCats?.length ?? resolved.targetCats.length);
 
   // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
@@ -280,6 +287,19 @@ export async function appendApprovedInitialMessage({
       throw err;
     }
   }
+
+  // F128 owns the final dispatch plan: preferredCats ordering and explicit
+  // parallel intent can differ from raw-message mentions. Admit only those
+  // final targets, after Queue accepted a durable carrier and before the
+  // processor can start, so Sidebar C2 and C10 cannot contradict each other.
+  await admitThreadParticipants({
+    userId,
+    threadId,
+    targetCats,
+    threadStore,
+    socketManager,
+    emitPolicy: 'membership-changed',
+  });
 
   try {
     const started = await queueProcessor.processNext(threadId, userId);

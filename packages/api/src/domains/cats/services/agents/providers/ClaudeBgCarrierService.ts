@@ -458,7 +458,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // daemon; persist only the provider-native stop namespace instead.
       envOverrides[CLI_PROCESS_OWNER_ENV] = null;
       const childCwd = options?.workingDirectory ?? process.cwd();
-      const env = buildChildEnv(envOverrides);
+      const env = buildChildEnv(envOverrides, { workingDirectory: childCwd });
       let owner: ClaudeBgJobOwnerHandle | undefined;
       try {
         if (this.jobOwnershipEnabled) {

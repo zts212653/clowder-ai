@@ -11,50 +11,60 @@
  */
 
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
-import type { InvocationRecord, VerifyResult } from './InvocationRegistry.js';
+import type {
+  AuthTerminalCommitInput,
+  AuthTerminalCommitResult,
+  InvocationRecord,
+  VerifyResult,
+} from './InvocationRegistry.js';
 
-/** Subset of InvocationRecord fields the backend stores; expiresAt is computed by ttlMs. */
-export type AuthInvocationInput = Omit<InvocationRecord, 'expiresAt'>;
+/** Active-record input; lifecycle fields are backend-owned. */
+export type AuthInvocationInput = Omit<
+  InvocationRecord,
+  'state' | 'expiresAt' | 'endedAt' | 'endReason' | 'terminalRef'
+>;
 
 export interface IAuthInvocationBackend {
-  /** Persist a new invocation record with a TTL relative to now. */
-  create(input: AuthInvocationInput, ttlMs: number): Promise<void>;
+  /** Persist a new active invocation record. Active principals never carry a TTL. */
+  create(input: AuthInvocationInput): Promise<void>;
 
   /**
-   * Validate token + slide TTL (extend expiresAt by ttlMs from now on success).
-   * Returns VerifyResult so callers can branch on typed reason.
+   * Validate token + explicit lifecycle state. Successful active verification
+   * is read-only apart from lazily PERSISTing legacy active keys.
    */
-  verify(invocationId: string, callbackToken: string, ttlMs: number): Promise<VerifyResult>;
+  verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
 
   /**
-   * F174-C — verify token WITHOUT sliding TTL. Used by refresh-token endpoint
-   * to validate auth before claiming cooldown (otherwise unauthenticated
-   * requests could burn the cooldown slot via DoS — gpt52 P1 #2 #1368).
-   * Same VerifyResult contract as verify() but never extends expiresAt.
+   * Verify token without changing lifecycle state. Active records may still be
+   * lazily migrated from legacy TTL storage by verify()/verifyLatest().
    */
   peek(invocationId: string, callbackToken: string): Promise<VerifyResult>;
 
   /**
-   * F174-C — atomic verify + isLatest + slide. Returns stale_invocation if
-   * the record has been superseded; otherwise behaves like verify() (slides
-   * TTL on success). Closes the race window between preValidation isLatest
-   * check and preHandler verify slide (cloud Codex P2 #1368, 05de7c98b).
+   * Atomic verify + isLatest. A terminal record returns its typed disposition
+   * before latest-slot comparison; an active non-latest legacy record returns
+   * stale_invocation.
    */
-  verifyLatest(invocationId: string, callbackToken: string, ttlMs: number): Promise<VerifyResult>;
+  verifyLatest(invocationId: string, callbackToken: string): Promise<VerifyResult>;
 
-  /** Read-only fetch (does NOT slide TTL). Returns null when missing or expired. */
+  /** Monotonic active → terminal first-write-wins transition. */
+  commitTerminal(input: AuthTerminalCommitInput): Promise<AuthTerminalCommitResult>;
+
+  /** Read-only fetch. Returns null only when unknown or after terminal GC. */
   getRecord(invocationId: string): Promise<InvocationRecord | null>;
 
   /**
-   * F174 D2b-1 — Read raw record metadata, ignoring TTL. Used by the in-context
-   * observability surface (notifier) to recover threadId/catId/userId for a
-   * 401-causing invocation even when it's just expired — both verify() and
-   * getRecord() delete the record on `expired`, so the only way to associate
-   * the failure back to a thread is to peek before verify runs (or after, if
-   * Redis TTL hasn't yet evicted the hash). Returns null only when the record
-   * was never present or has already been Redis-TTL-evicted.
+   * Read raw record metadata without changing lifecycle state. Used by the
+   * in-context notifier to associate typed terminal failures with their thread.
+   * Returns null only when never present or after terminal tombstone GC.
    */
   peekRecord(invocationId: string): Promise<InvocationRecord | null>;
+
+  /** Enumerate active records for bounded startup reconciliation. */
+  listActiveRecords(): Promise<InvocationRecord[]>;
+
+  /** Idempotently migrate still-present legacy TTL records and latest slots. */
+  migrateLegacyRecords(): Promise<AuthInvocationMigrationResult>;
 
   /** Whether the invocationId is the latest for its (threadId, catId) slot. */
   isLatest(invocationId: string): Promise<boolean>;
@@ -78,4 +88,11 @@ export interface IAuthInvocationBackend {
 
   /** F153: Persist caller trace context on an invocation for cross-route A2A propagation. */
   setTraceContext(invocationId: string, ctx: CallerTraceContext): Promise<void>;
+}
+
+export interface AuthInvocationMigrationResult {
+  scanned: number;
+  persistedActive: number;
+  replaced: number;
+  rebuiltLatest: number;
 }

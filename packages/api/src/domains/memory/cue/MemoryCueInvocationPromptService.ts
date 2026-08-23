@@ -10,6 +10,7 @@ import type {
   MemoryCueDeliveryConfirmation,
   MemoryCueDeliveryReceipt,
   MemoryCuePlaneService,
+  MemoryCuePresentationEnvelope,
 } from './MemoryCuePlaneService.js';
 import type { CreateMemoryCueDrillHandleInput } from './MemoryCueResolverRegistry.js';
 
@@ -44,6 +45,7 @@ export interface MemoryCueInvocationPromptResolution {
   admittedOpportunityIds: readonly string[];
   omittedOpportunityIds: readonly string[];
   deliveryReceipts: readonly MemoryCueDeliveryReceipt[];
+  presentationEnvelopes: readonly MemoryCuePresentationEnvelope[];
 }
 
 export interface MemoryCueInvocationPromptResolver {
@@ -99,6 +101,7 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
     const admittedOpportunityIds: string[] = [];
     const omittedOpportunityIds: string[] = [];
     const deliveryReceipts: MemoryCueDeliveryReceipt[] = [];
+    const presentationEnvelopes: MemoryCuePresentationEnvelope[] = [];
     for (const seed of input.seeds) {
       const candidate = bindSeed(seed, input.serverScope);
       const resolved = await this.deps.plane.resolve({
@@ -112,6 +115,7 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
         segments.push(resolved.promptSegment);
         admittedOpportunityIds.push(candidate.opportunityId);
         deliveryReceipts.push(...resolved.deliveryReceipts);
+        presentationEnvelopes.push(...resolved.presentationEnvelopes);
       } else {
         omittedOpportunityIds.push(candidate.opportunityId);
       }
@@ -121,6 +125,7 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
       admittedOpportunityIds,
       omittedOpportunityIds,
       deliveryReceipts,
+      presentationEnvelopes,
     };
   }
 

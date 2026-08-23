@@ -1980,7 +1980,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.equal(backfillCalls[0].messageId, 'msg-trigger-123');
   });
 
-  test('F264 accepts prompt exposure for a published same-thread A2A trigger without recall custody', async () => {
+  test('PR7 initializes same-thread A2A custody before prompt exposure', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
@@ -2010,6 +2010,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       mentions: ['codex'],
       timestamp: 100,
       threadId: 'thread-target',
+      deliveryStatus: 'queued',
     });
     let promptBoundaryReached = false;
 
@@ -2040,6 +2041,10 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
           async tryAutoExecute() {
             const [entry] = invocationQueue.list('thread-target', 'user-1');
             assert.equal(entry.messageId, triggerMessage.id, 'callback must backfill the published trigger');
+            const custody = messageStore.getById(triggerMessage.id)?.queueCustody;
+            assert.ok(custody, 'same-thread custody must be durable before provider execution');
+            assert.deepEqual(custody.allTargetCats, ['codex']);
+            assert.equal(custody.carrierByTargetCatId.codex.entryId, entry.id);
             await promptProcessor.markPromptMessagesSeen({
               threadId: 'thread-target',
               userId: 'user-1',
@@ -2067,8 +2072,1150 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
 
     assert.deepEqual(result.enqueued, ['codex']);
     assert.equal(promptBoundaryReached, true);
-    assert.equal(messageStore.getById(triggerMessage.id).queueCustody, undefined);
+    assert.deepEqual(messageStore.getById(triggerMessage.id).queueCustody.seenByCatIds, ['codex']);
     assert.deepEqual(invocationQueue.list('thread-target', 'user-1')[0].queuedSeenByCatIds, ['codex']);
+  });
+
+  test('PR7 establishes complete same-thread custody for mixed enqueued and coalesced fan-out', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const existing = invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-target',
+      userId: 'user-1',
+      content: 'existing codex carrier',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-same-thread',
+      a2aTriggerMessageId: 'message-existing',
+    }).entry;
+    invocationQueue.backfillMessageId('thread-target', 'user-1', existing.id, 'message-existing');
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'fan out to both targets',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 200,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    let custodyAtAutoExecute;
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
+            return Promise.resolve();
+          },
+        },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-same-thread',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, ['codex-terra']);
+    assert.deepEqual(result.coalesced, ['codex']);
+    assert.ok(custodyAtAutoExecute, 'the complete fan-out must be durable before either target executes');
+    assert.deepEqual(custodyAtAutoExecute.allTargetCats, ['codex', 'codex-terra']);
+    assert.deepEqual(custodyAtAutoExecute.pendingTargetCats, ['codex', 'codex-terra']);
+    const entries = invocationQueue.list('thread-target', 'user-1');
+    assert.equal(custodyAtAutoExecute.carrierByTargetCatId.codex.entryId, existing.id);
+    assert.equal(
+      custodyAtAutoExecute.carrierByTargetCatId['codex-terra'].entryId,
+      entries.find((entry) => entry.targetCats.includes('codex-terra')).id,
+    );
+  });
+
+  test('PR7 establishes complete same-thread custody when every fan-out target coalesces', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const existingByCat = new Map();
+    for (const catId of ['codex', 'codex-terra']) {
+      const entry = invocationQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        userId: 'user-1',
+        content: `existing ${catId} carrier`,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [catId],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+        a2aParentInvocationId: 'parent-same-thread',
+        a2aTriggerMessageId: `message-existing-${catId}`,
+      }).entry;
+      invocationQueue.backfillMessageId('thread-target', 'user-1', entry.id, `message-existing-${catId}`);
+      existingByCat.set(catId, entry);
+    }
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'coalesce both targets',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 300,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    let custodyAtAutoExecute;
+
+    const result = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        queueProcessor: {
+          onInvocationComplete() {},
+          tryAutoExecute() {
+            custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
+            return Promise.resolve();
+          },
+        },
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-same-thread',
+      },
+    );
+
+    assert.deepEqual(result.enqueued, []);
+    assert.deepEqual(result.coalesced, ['codex', 'codex-terra']);
+    assert.ok(custodyAtAutoExecute, 'all-coalesced fan-out still requires durable group custody');
+    assert.deepEqual(custodyAtAutoExecute.allTargetCats, ['codex', 'codex-terra']);
+    assert.deepEqual(custodyAtAutoExecute.pendingTargetCats, ['codex', 'codex-terra']);
+    for (const catId of ['codex', 'codex-terra']) {
+      assert.equal(custodyAtAutoExecute.carrierByTargetCatId[catId].entryId, existingByCat.get(catId).id);
+    }
+  });
+
+  test('PR7 competing scheduler cannot cross the provider boundary before fan-out custody commits', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+    const { QueuedMessageCustodyCoordinator } = await import(
+      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const initializeQueueCustody = messageStore.initializeQueueCustody.bind(messageStore);
+    let releaseFanoutCustody;
+    const fanoutCustodyGate = new Promise((resolve) => {
+      releaseFanoutCustody = resolve;
+    });
+    let fanoutInitializationStarted;
+    const fanoutInitializationStart = new Promise((resolve) => {
+      fanoutInitializationStarted = resolve;
+    });
+    let initializationCalls = 0;
+    messageStore.initializeQueueCustody = async (...args) => {
+      initializationCalls += 1;
+      if (initializationCalls === 1) {
+        fanoutInitializationStarted();
+        await fanoutCustodyGate;
+      }
+      return initializeQueueCustody(...args);
+    };
+    const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
+    const socketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+      emitToUser() {},
+    };
+    let providerStarts = 0;
+    const invocationTracker = {
+      has() {
+        return false;
+      },
+      startAll() {
+        return new AbortController();
+      },
+      waitForSessionSealRelease() {
+        return Promise.resolve();
+      },
+      completeAll() {},
+    };
+    const queueProcessor = new QueueProcessor({
+      queue: invocationQueue,
+      messageStore,
+      queueCustodyCoordinator,
+      socketManager,
+      invocationTracker,
+      invocationRecordStore: {
+        create() {
+          return { outcome: 'created', invocationId: `inv-fanout-race-${Date.now()}` };
+        },
+        update(id, data) {
+          return { id, ...data };
+        },
+      },
+      router: {
+        async *routeExecution(_userId, _content, _threadId, _messageId, targetCats) {
+          providerStarts += 1;
+          for (const catId of targetCats) {
+            yield { type: 'done', catId, timestamp: Date.now() };
+          }
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const existingCodex = invocationQueue.enqueue({
+      ownerAuthProvenance: 'unknown',
+      threadId: 'thread-target',
+      userId: 'user-1',
+      content: 'existing codex carrier',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-same-thread',
+      a2aTriggerMessageId: 'message-existing-codex',
+    }).entry;
+    invocationQueue.backfillMessageId('thread-target', 'user-1', existingCodex.id, 'message-existing-codex');
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'fan out under a competing scheduler',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 350,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+
+    const admission = enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager,
+        messageStore,
+        invocationTracker,
+        queueProcessor,
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-same-thread',
+      },
+    );
+
+    await fanoutInitializationStart;
+    await queueProcessor.tryAutoExecute('thread-target');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const providerStartsBeforeCustody = providerStarts;
+    releaseFanoutCustody();
+    let admissionResult;
+    let admissionError;
+    try {
+      admissionResult = await admission;
+    } catch (error) {
+      admissionError = error;
+    }
+
+    assert.equal(
+      providerStartsBeforeCustody,
+      0,
+      'provider execution must not begin until complete fan-out custody is durable',
+    );
+    assert.ifError(admissionError);
+    assert.deepEqual(admissionResult.coalesced, ['codex']);
+    assert.deepEqual(admissionResult.enqueued, ['codex-terra']);
+    assert.deepEqual(messageStore.getById(triggerMessage.id).queueCustody.pendingTargetCats, ['codex', 'codex-terra']);
+  });
+
+  test('PR7 same-source reentry joins one staged carrier during the first custody CAS', async () => {
+    const [
+      { enqueueA2ATargets },
+      { MessageDeliveryService },
+      { InvocationQueue },
+      { QueueProcessor },
+      { QueuedMessageCustodyCoordinator },
+      { MessageStore },
+    ] = await Promise.all([
+      import('../dist/routes/callback-a2a-trigger.js'),
+      import('../dist/domains/cats/services/agents/invocation/MessageDeliveryService.js'),
+      import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'),
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+    ]);
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const initializeQueueCustody = messageStore.initializeQueueCustody.bind(messageStore);
+    let releaseFirstCustodyCas;
+    const firstCustodyCasGate = new Promise((resolve) => {
+      releaseFirstCustodyCas = resolve;
+    });
+    let firstCustodyCasStarted;
+    const firstCustodyCasStart = new Promise((resolve) => {
+      firstCustodyCasStarted = resolve;
+    });
+    let releaseSecondCustodyReturn;
+    const secondCustodyReturnGate = new Promise((resolve) => {
+      releaseSecondCustodyReturn = resolve;
+    });
+    let secondCustodyCommitted;
+    const secondCustodyCommit = new Promise((resolve) => {
+      secondCustodyCommitted = resolve;
+    });
+    let initializeCalls = 0;
+    let stagedCarrierIdsAtSecondCas = [];
+    messageStore.initializeQueueCustody = async (...args) => {
+      initializeCalls += 1;
+      if (initializeCalls === 1) {
+        firstCustodyCasStarted();
+        await firstCustodyCasGate;
+        return initializeQueueCustody(...args);
+      }
+      const result = initializeQueueCustody(...args);
+      stagedCarrierIdsAtSecondCas = invocationQueue
+        .list('thread-same-source-reentry', 'user-1')
+        .filter((entry) => entry.targetCats.includes('codex'))
+        .map((entry) => entry.id);
+      secondCustodyCommitted();
+      await secondCustodyReturnGate;
+      return result;
+    };
+
+    const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
+    const socketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+      emitToUser() {},
+    };
+    let providerStarts = 0;
+    const providerContents = [];
+    const invocationTracker = {
+      has() {
+        return false;
+      },
+      startAll() {
+        return new AbortController();
+      },
+      waitForSessionSealRelease() {
+        return Promise.resolve();
+      },
+      completeAll() {},
+    };
+    const queueProcessor = new QueueProcessor({
+      queue: invocationQueue,
+      messageStore,
+      queueCustodyCoordinator,
+      socketManager,
+      invocationTracker,
+      invocationRecordStore: {
+        create() {
+          return { outcome: 'created', invocationId: `inv-same-source-${Date.now()}` };
+        },
+        update(id, data) {
+          return { id, ...data };
+        },
+      },
+      router: {
+        async *routeExecution(_userId, content, _threadId, _messageId, targetCats) {
+          providerStarts += 1;
+          providerContents.push(content);
+          for (const catId of targetCats) {
+            yield { type: 'done', catId, timestamp: Date.now() };
+          }
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const realTryAutoExecute = queueProcessor.tryAutoExecute.bind(queueProcessor);
+    let autoExecuteEntrants = 0;
+    let releaseAutoExecute;
+    const autoExecuteGate = new Promise((resolve) => {
+      releaseAutoExecute = resolve;
+    });
+    queueProcessor.tryAutoExecute = async (threadId) => {
+      autoExecuteEntrants += 1;
+      if (autoExecuteEntrants === 2) releaseAutoExecute();
+      if (autoExecuteEntrants === 1) setTimeout(releaseAutoExecute, 25);
+      await autoExecuteGate;
+      return realTryAutoExecute(threadId);
+    };
+
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same durable source must execute once',
+      mentions: ['codex'],
+      timestamp: 365,
+      threadId: 'thread-same-source-reentry',
+      deliveryStatus: 'queued',
+    });
+    const deps = {
+      router: { async *routeExecution() {} },
+      invocationRecordStore: { create() {}, update() {} },
+      socketManager,
+      messageStore,
+      invocationTracker,
+      queueProcessor,
+      invocationQueue,
+      log: { info() {}, warn() {}, error() {} },
+    };
+    const opts = {
+      targetCats: ['codex'],
+      content: triggerMessage.content,
+      userId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      threadId: triggerMessage.threadId,
+      triggerMessage,
+      callerCatId: 'opus',
+      parentInvocationId: 'parent-same-source-reentry',
+    };
+    const fallbackBroadcasts = [];
+    const recoverSameSource = async () => {
+      const decision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+        canEnqueueA2A: true,
+        willEnqueueToQueue: true,
+        messageId: triggerMessage.id,
+        threadId: triggerMessage.threadId,
+        log: deps.log,
+        enqueueA2A: () => enqueueA2ATargets(deps, opts),
+        markDelivered: (deliveredAt) => messageStore.markDelivered(triggerMessage.id, deliveredAt),
+        zeroEnqueuedWarnMessage: 'same-source recovery had no target',
+        enqueueFailureMessage: 'same-source recovery failed',
+      });
+      if (decision.shouldBroadcastNow) fallbackBroadcasts.push(triggerMessage.id);
+      return decision;
+    };
+
+    const firstRecovery = recoverSameSource();
+    await firstCustodyCasStart;
+    const duplicateRecovery = recoverSameSource();
+    await secondCustodyCommit;
+    releaseFirstCustodyCas();
+    releaseSecondCustodyReturn();
+
+    const [firstDecision, duplicateDecision] = await Promise.all([firstRecovery, duplicateRecovery]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(initializeCalls, 2, 'both callers converge through the same custody CAS identity');
+    assert.equal(new Set(stagedCarrierIdsAtSecondCas).size, 1, 'same-source reentry must stage one carrier identity');
+    assert.equal(firstDecision.enqueueFailed, false, 'the legitimate first callback must converge successfully');
+    assert.equal(duplicateDecision.enqueueFailed, false, 'the duplicate recovery must converge successfully');
+    assert.deepEqual(fallbackBroadcasts, [], 'custody convergence must not fall open to live broadcast');
+    assert.equal(providerStarts, 1, 'the joined carrier may enter the provider exactly once');
+    assert.deepEqual(
+      providerContents,
+      [triggerMessage.content],
+      'same-source join must not duplicate provider content',
+    );
+  });
+
+  test('PR7 same-source delivery joins restart custody after CAS before Queue projection', async () => {
+    const [
+      { enqueueA2ATargets },
+      { MessageDeliveryService },
+      { InvocationQueue },
+      { QueueProcessor },
+      { QueuedMessageCustodyCoordinator, createFanoutQueueCustodyAdmission },
+      { StartupReconciler },
+      { MessageStore },
+    ] = await Promise.all([
+      import('../dist/routes/callback-a2a-trigger.js'),
+      import('../dist/domains/cats/services/agents/invocation/MessageDeliveryService.js'),
+      import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'),
+      import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js'),
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+    ]);
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'restart projection gap must still execute once',
+      mentions: ['codex'],
+      timestamp: 370,
+      threadId: 'thread-restart-projection-gap',
+      deliveryStatus: 'queued',
+    });
+    await messageStore.initializeQueueCustodyAdmission(
+      triggerMessage.id,
+      createFanoutQueueCustodyAdmission(triggerMessage.id, {
+        ownerUserId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        targetCats: ['codex'],
+        requestedTargetCats: ['codex'],
+        intent: 'execute',
+        callerCatId: 'opus',
+        a2aParentInvocationId: 'parent-restart-projection-gap',
+        createdAt: triggerMessage.timestamp,
+      }),
+    );
+    messageStore.scanByDeliveryStatus = (status) =>
+      status === 'queued' && messageStore.getById(triggerMessage.id)?.deliveryStatus === 'queued'
+        ? [triggerMessage.id]
+        : [];
+
+    const getById = messageStore.getById.bind(messageStore);
+    const initializeQueueCustody = messageStore.initializeQueueCustody.bind(messageStore);
+    let blockNextPostCasRead = false;
+    let postCasReadBlocked = false;
+    let enterProjectionGap;
+    const projectionGapEntered = new Promise((resolve) => {
+      enterProjectionGap = resolve;
+    });
+    let releaseProjectionGap;
+    const projectionGap = new Promise((resolve) => {
+      releaseProjectionGap = resolve;
+    });
+    messageStore.initializeQueueCustody = async (...args) => {
+      const result = await initializeQueueCustody(...args);
+      blockNextPostCasRead = true;
+      return result;
+    };
+    messageStore.getById = (messageId) => {
+      if (messageId === triggerMessage.id && blockNextPostCasRead && !postCasReadBlocked) {
+        postCasReadBlocked = true;
+        blockNextPostCasRead = false;
+        enterProjectionGap();
+        return projectionGap.then(() => getById(messageId));
+      }
+      return getById(messageId);
+    };
+
+    const startup = new StartupReconciler({
+      invocationRecordStore: {
+        async scanByStatus() {
+          return [];
+        },
+        async get() {
+          return null;
+        },
+      },
+      invocationQueue,
+      messageStore,
+      a2aDispatchDispositionService: {
+        async inspectHandoff({ sourceMessageId }) {
+          return {
+            outcome: 'live',
+            sourceMessageId,
+            fromCatId: 'opus',
+            handoffSourceEventId: `route:${sourceMessageId}`,
+          };
+        },
+      },
+      taskProgressStore: { async deleteSnapshot() {} },
+      log: { info() {}, warn() {} },
+    });
+    const startupRun = startup.reconcileOrphans();
+    await projectionGapEntered;
+
+    const committed = getById(triggerMessage.id);
+    assert.equal(committed.queueCustody?.status, 'queued', 'startup committed full custody before projection');
+    assert.equal(invocationQueue.list(triggerMessage.threadId, 'user-1').length, 0, 'local Queue is still empty');
+
+    const socketManager = {
+      broadcastAgentMessage() {},
+      broadcastToRoom() {},
+      emitToUser() {},
+    };
+    const callbackDeps = {
+      router: { async *routeExecution() {} },
+      invocationRecordStore: { create() {}, update() {} },
+      socketManager,
+      messageStore,
+      invocationQueue,
+      queueProcessor: { async tryAutoExecute() {} },
+      log: { info() {}, warn() {}, error() {} },
+    };
+    const decision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: true,
+      willEnqueueToQueue: true,
+      messageId: triggerMessage.id,
+      threadId: triggerMessage.threadId,
+      log: callbackDeps.log,
+      enqueueA2A: () =>
+        enqueueA2ATargets(callbackDeps, {
+          targetCats: ['codex'],
+          content: triggerMessage.content,
+          userId: 'user-1',
+          ownerAuthProvenance: 'unknown',
+          threadId: triggerMessage.threadId,
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-restart-projection-gap',
+        }),
+      markDelivered: (deliveredAt) => messageStore.markDelivered(triggerMessage.id, deliveredAt),
+      zeroEnqueuedWarnMessage: 'restart projection join had no target',
+      enqueueFailureMessage: 'restart projection join failed',
+    });
+
+    releaseProjectionGap();
+    await startupRun;
+
+    const canonicalEntryId = `queue-custody:${triggerMessage.id}:codex`;
+    const projectedEntries = invocationQueue.list(triggerMessage.threadId, 'user-1');
+    assert.equal(decision.enqueueFailed, false, 'same-source callback must join committed custody');
+    assert.equal(decision.shouldBroadcastNow, false, 'committed custody must never fall open to broadcast');
+    assert.deepEqual(
+      projectedEntries.map((entry) => entry.id),
+      [canonicalEntryId],
+      'callback and startup must converge on one canonical Queue carrier',
+    );
+
+    let providerStarts = 0;
+    const providerContents = [];
+    const queueProcessor = new QueueProcessor({
+      queue: invocationQueue,
+      messageStore,
+      queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore }),
+      socketManager,
+      invocationTracker: {
+        has() {
+          return false;
+        },
+        startAll() {
+          return new AbortController();
+        },
+        waitForSessionSealRelease() {
+          return Promise.resolve();
+        },
+        completeAll() {},
+      },
+      invocationRecordStore: {
+        create() {
+          return { outcome: 'created', invocationId: `inv-restart-gap-${Date.now()}` };
+        },
+        update(id, data) {
+          return { id, ...data };
+        },
+      },
+      router: {
+        async *routeExecution(_userId, content, _threadId, _messageId, targetCats) {
+          providerStarts += 1;
+          providerContents.push(content);
+          for (const catId of targetCats) yield { type: 'done', catId, timestamp: Date.now() };
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    await queueProcessor.tryAutoExecute(triggerMessage.threadId);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(providerStarts, 1, 'the custody-bound carrier executes exactly once');
+    assert.deepEqual(providerContents, [triggerMessage.content], 'the source content is not duplicated');
+  });
+
+  test('PR7 pure restart preserves a full-custody action fence before provider admission', async () => {
+    const [
+      { enqueueA2ATargets },
+      { InvocationQueue },
+      { QueueProcessor },
+      { QueuedMessageCustodyCoordinator },
+      { StartupReconciler },
+      { MessageStore },
+    ] = await Promise.all([
+      import('../dist/routes/callback-a2a-trigger.js'),
+      import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'),
+      import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js'),
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+    ]);
+
+    const actionSuccessorFence = {
+      leaseId: 'lease-action-restart',
+      generation: 7,
+      dispatchId: 'cross-post:action-restart',
+      terminalPredicateDigest: 'terminal-predicate-action-restart',
+      invocationLineageRef: 'dispatch:cross-post:action-restart',
+    };
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'terminal action must stay fenced after restart',
+      mentions: ['codex'],
+      timestamp: 372,
+      threadId: 'thread-action-restart',
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-action-source',
+          sourceInvocationId: 'parent-action-restart',
+          effectClass: 'assign_work',
+        },
+      },
+    });
+    messageStore.scanByDeliveryStatus = (status) =>
+      status === 'queued' && messageStore.getById(triggerMessage.id)?.deliveryStatus === 'queued'
+        ? [triggerMessage.id]
+        : [];
+
+    const beforeRestartQueue = new InvocationQueue();
+    const admission = await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        invocationQueue: beforeRestartQueue,
+        queueProcessor: { async tryAutoExecute() {} },
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'strict',
+        threadId: triggerMessage.threadId,
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-action-restart',
+        actionSuccessorFence,
+      },
+    );
+    assert.deepEqual(admission.enqueued, ['codex']);
+    const committed = messageStore.getById(triggerMessage.id);
+    assert.equal(committed.queueCustody?.status, 'queued');
+    assert.equal(committed.queueCustodyAdmission, undefined, 'full custody atomically replaces admission intent');
+
+    const restartedQueue = new InvocationQueue();
+    const startup = new StartupReconciler({
+      invocationRecordStore: {
+        async scanByStatus() {
+          return [];
+        },
+        async get() {
+          return null;
+        },
+      },
+      invocationQueue: restartedQueue,
+      messageStore,
+      a2aDispatchDispositionService: {
+        async inspectHandoff({ sourceMessageId }) {
+          return {
+            outcome: 'live',
+            sourceMessageId,
+            fromCatId: 'opus',
+            handoffSourceEventId: `route:${sourceMessageId}`,
+          };
+        },
+      },
+      taskProgressStore: { async deleteSnapshot() {} },
+      log: { info() {}, warn() {} },
+    });
+    await startup.reconcileOrphans();
+
+    const restored = restartedQueue.markProcessing(triggerMessage.threadId, 'user-1');
+    assert.ok(restored, 'pure restart must restore the full-custody carrier');
+    let preflightCalls = 0;
+    let providerStarts = 0;
+    let invocationRecordCreates = 0;
+    const queueProcessor = new QueueProcessor({
+      queue: restartedQueue,
+      messageStore,
+      queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore }),
+      actionSuccessorLeaseStore: {
+        async preflight(leaseId, generation, terminalPredicateDigest) {
+          preflightCalls += 1;
+          assert.deepEqual(
+            { leaseId, generation, terminalPredicateDigest },
+            {
+              leaseId: actionSuccessorFence.leaseId,
+              generation: actionSuccessorFence.generation,
+              terminalPredicateDigest: actionSuccessorFence.terminalPredicateDigest,
+            },
+          );
+          return { ok: false, reason: 'subject_terminal' };
+        },
+      },
+      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      invocationTracker: {
+        has() {
+          return false;
+        },
+        startAll() {
+          return new AbortController();
+        },
+        waitForSessionSealRelease() {
+          return Promise.resolve();
+        },
+        completeAll() {},
+      },
+      invocationRecordStore: {
+        create() {
+          invocationRecordCreates += 1;
+          return { outcome: 'created', invocationId: 'inv-action-restart' };
+        },
+        update(id, data) {
+          return { id, ...data };
+        },
+      },
+      router: {
+        async *routeExecution() {
+          providerStarts += 1;
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const result = await queueProcessor.executeEntry(restored);
+
+    assert.deepEqual(restored.actionSuccessorFence, actionSuccessorFence);
+    assert.equal(restored.idempotencyKey, 'action:lease-action-restart:7:codex');
+    assert.equal(result.status, 'canceled', 'terminal action lease must fail closed before provider admission');
+    assert.equal(preflightCalls, 1, 'restart projection must retain the action preflight boundary');
+    assert.equal(invocationRecordCreates, 0, 'terminal action must not mint an invocation record');
+    assert.equal(providerStarts, 0, 'terminal action must never reach the provider after restart');
+  });
+
+  test('PR7 restart recovers the complete fan-out when the process dies before the first custody CAS', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { StartupReconciler } = await import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const crashedQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const initializeQueueCustody = messageStore.initializeQueueCustody.bind(messageStore);
+    let releaseFirstCustodyCas;
+    const firstCustodyCasGate = new Promise((resolve) => {
+      releaseFirstCustodyCas = resolve;
+    });
+    let firstCustodyCasStarted;
+    const firstCustodyCasStart = new Promise((resolve) => {
+      firstCustodyCasStarted = resolve;
+    });
+    let initializeCalls = 0;
+    messageStore.initializeQueueCustody = async (...args) => {
+      initializeCalls += 1;
+      if (initializeCalls === 1) {
+        firstCustodyCasStarted();
+        await firstCustodyCasGate;
+      }
+      return initializeQueueCustody(...args);
+    };
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'fan out and survive restart',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 375,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    messageStore.scanByDeliveryStatus = (status) =>
+      status === 'queued' && messageStore.getById(triggerMessage.id)?.deliveryStatus === 'queued'
+        ? [triggerMessage.id]
+        : [];
+
+    const interruptedAdmission = enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        invocationQueue: crashedQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex', 'codex-terra'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-target',
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'parent-same-thread',
+      },
+    );
+
+    await firstCustodyCasStart;
+    assert.equal(crashedQueue.list('thread-target', 'user-1').length, 2, 'old process staged both carriers');
+
+    const restartedQueue = new InvocationQueue();
+    const startup = new StartupReconciler({
+      invocationRecordStore: {
+        async scanByStatus() {
+          return [];
+        },
+        async get() {
+          return null;
+        },
+      },
+      invocationQueue: restartedQueue,
+      messageStore,
+      a2aDispatchDispositionService: {
+        async inspectHandoff({ sourceMessageId }) {
+          return {
+            outcome: 'live',
+            sourceMessageId,
+            fromCatId: 'opus',
+            handoffSourceEventId: `route:${sourceMessageId}`,
+          };
+        },
+      },
+      taskProgressStore: { async deleteSnapshot() {} },
+      log: { info() {}, warn() {} },
+    });
+
+    await startup.reconcileOrphans();
+
+    const restoredEntries = restartedQueue.list('thread-target', 'user-1');
+    assert.equal(restoredEntries.length, 2, 'restart must rebuild every target carrier');
+    assert.deepEqual(restoredEntries.flatMap((entry) => entry.targetCats).sort(), ['codex', 'codex-terra']);
+    const recoveredMessage = messageStore.getById(triggerMessage.id);
+    assert.equal(recoveredMessage.deliveryStatus, 'queued', 'pending fan-out must not become delivered-only');
+    assert.deepEqual(recoveredMessage.queueCustody?.pendingTargetCats, ['codex', 'codex-terra']);
+
+    releaseFirstCustodyCas();
+    await interruptedAdmission.catch(() => {});
+  });
+
+  test('PR7 restart never revives a target rejected before the first custody CAS', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { StartupReconciler } = await import('../dist/domains/cats/services/agents/invocation/StartupReconciler.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const crashedQueue = new InvocationQueue();
+    for (let index = 0; index < 10; index += 1) {
+      crashedQueue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-depth-rejection',
+        userId: 'user-1',
+        content: `existing pending A2A ${index}`,
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['opus'],
+        intent: 'execute',
+        autoExecute: false,
+        callerCatId: 'codex-terra',
+        a2aParentInvocationId: `parent-existing-${index}`,
+        a2aTriggerMessageId: `message-existing-${index}`,
+      });
+    }
+
+    const messageStore = new MessageStore();
+    const initializeQueueCustody = messageStore.initializeQueueCustody.bind(messageStore);
+    let releaseFirstCustodyCas;
+    const firstCustodyCasGate = new Promise((resolve) => {
+      releaseFirstCustodyCas = resolve;
+    });
+    let firstCustodyCasStarted;
+    const firstCustodyCasStart = new Promise((resolve) => {
+      firstCustodyCasStarted = resolve;
+    });
+    let initializeCalls = 0;
+    messageStore.initializeQueueCustody = async (...args) => {
+      initializeCalls += 1;
+      if (initializeCalls === 1) {
+        firstCustodyCasStarted();
+        await firstCustodyCasGate;
+      }
+      return initializeQueueCustody(...args);
+    };
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'codex-terra',
+      content: 'this target must remain rejected after restart',
+      mentions: ['codex'],
+      timestamp: 390,
+      threadId: 'thread-depth-rejection',
+      deliveryStatus: 'queued',
+    });
+    messageStore.scanByDeliveryStatus = (status) =>
+      status === 'queued' && messageStore.getById(triggerMessage.id)?.deliveryStatus === 'queued'
+        ? [triggerMessage.id]
+        : [];
+
+    const interruptedAdmission = enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore: { create() {}, update() {} },
+        socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+        messageStore,
+        invocationQueue: crashedQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: ['codex'],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-depth-rejection',
+        triggerMessage,
+        callerCatId: 'codex-terra',
+        parentInvocationId: 'parent-depth-rejection',
+      },
+    );
+
+    await firstCustodyCasStart;
+    assert.equal(
+      crashedQueue.list('thread-depth-rejection', 'user-1').filter((entry) => entry.targetCats.includes('codex'))
+        .length,
+      0,
+      'ordinary enqueue policy rejects codex before the crash window',
+    );
+    const persistedAdmission = messageStore.getById(triggerMessage.id)?.queueCustodyAdmission;
+    assert.deepEqual(persistedAdmission?.requestedTargetCats, ['codex']);
+    assert.deepEqual(persistedAdmission?.targetCats, [], 'durable admission records the final rejected outcome');
+
+    const restartedQueue = new InvocationQueue();
+    const startup = new StartupReconciler({
+      invocationRecordStore: {
+        async scanByStatus() {
+          return [];
+        },
+        async get() {
+          return null;
+        },
+      },
+      invocationQueue: restartedQueue,
+      messageStore,
+      a2aDispatchDispositionService: {
+        async inspectHandoff({ sourceMessageId }) {
+          return {
+            outcome: 'live',
+            sourceMessageId,
+            fromCatId: 'codex-terra',
+            handoffSourceEventId: `route:${sourceMessageId}`,
+          };
+        },
+      },
+      taskProgressStore: { async deleteSnapshot() {} },
+      log: { info() {}, warn() {} },
+    });
+
+    await startup.reconcileOrphans();
+
+    assert.equal(
+      restartedQueue.listAutoExecute('thread-depth-rejection').filter((entry) => entry.targetCats.includes('codex'))
+        .length,
+      0,
+      'restart recovery must preserve the enqueue-time target rejection',
+    );
+
+    releaseFirstCustodyCas();
+    await interruptedAdmission.catch(() => {});
+  });
+
+  test('PR7 rejects incompatible same-thread custody before any target can auto-execute', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const invocationQueue = new InvocationQueue();
+    const messageStore = new MessageStore();
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'same-thread custody collision',
+      mentions: ['codex'],
+      timestamp: 400,
+      threadId: 'thread-target',
+      deliveryStatus: 'queued',
+    });
+    messageStore.initializeQueueCustody(triggerMessage.id, {
+      version: 1,
+      entryId: 'unrelated-entry',
+      revision: 1,
+      intent: 'execute',
+      status: 'queued',
+      allTargetCats: ['codex'],
+      pendingTargetCats: ['codex'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 400,
+      updatedAt: 400,
+    });
+    let autoExecuteCalls = 0;
+
+    await assert.rejects(
+      enqueueA2ATargets(
+        {
+          router: { async *routeExecution() {} },
+          invocationRecordStore: { create() {}, update() {} },
+          socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+          messageStore,
+          queueProcessor: {
+            onInvocationComplete() {},
+            tryAutoExecute() {
+              autoExecuteCalls += 1;
+              return Promise.resolve();
+            },
+          },
+          invocationQueue,
+          log: { info() {}, warn() {}, error() {} },
+        },
+        {
+          targetCats: ['codex'],
+          content: triggerMessage.content,
+          userId: 'user-1',
+          threadId: 'thread-target',
+          triggerMessage,
+          callerCatId: 'opus',
+          parentInvocationId: 'parent-same-thread',
+        },
+      ),
+      /custody identity mismatch/,
+    );
+
+    assert.equal(autoExecuteCalls, 0);
+    assert.deepEqual(invocationQueue.list('thread-target', 'user-1'), []);
   });
 
   test('F264 initializes per-target cross-thread custody before A2A auto-execution', async () => {
@@ -2170,6 +3317,121 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       queuedTimelineEvent.data.messages[0].extra.queueReceipt.targets.map((target) => target.state),
       ['queued', 'queued'],
     );
+  });
+
+  test('PR7 direct-active cross-thread handoff drains exactly once when the target slot becomes idle', async () => {
+    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+    const { QueuedMessageCustodyCoordinator } = await import(
+      '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
+    );
+    const { InvocationRecordStore } = await import(
+      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
+    );
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+
+    const threadId = 'thread-direct-active-cross-thread';
+    const targetCatId = 'codex-sol';
+    const invocationQueue = new InvocationQueue();
+    const invocationTracker = new InvocationTracker();
+    const invocationRecordStore = new InvocationRecordStore();
+    const messageStore = new MessageStore();
+    const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({ messageStore });
+    const socketManager = { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} };
+    let providerStarts = 0;
+    const queueProcessor = new QueueProcessor({
+      queue: invocationQueue,
+      invocationTracker,
+      invocationRecordStore,
+      messageStore,
+      queueCustodyCoordinator,
+      socketManager,
+      router: {
+        async *routeExecution(userId, _content, routedThreadId, _messageId, targetCats, _intent, options) {
+          providerStarts += 1;
+          await options.onPromptMessagesExposed({
+            threadId: routedThreadId,
+            userId,
+            catId: targetCats[0],
+            invocationId: 'inv-queued-successor',
+            messageIds: options.persistedPromptMessageIds,
+            seenAt: Date.now(),
+          });
+          yield {
+            type: 'done',
+            catId: targetCats[0],
+            invocationId: 'inv-queued-successor',
+            timestamp: Date.now(),
+          };
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const directController = invocationTracker.startAll(threadId, [targetCatId], 'user-1', 'inv-direct-active');
+    assert.ok(directController, 'test must hold the exact target slot before the handoff arrives');
+    const triggerMessage = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'coordinate queued while the target is busy',
+      mentions: [targetCatId],
+      timestamp: 450,
+      threadId,
+      deliveryStatus: 'queued',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          sourceInvocationId: 'inv-source',
+          effectClass: 'coordinate',
+        },
+      },
+    });
+
+    await enqueueA2ATargets(
+      {
+        router: { async *routeExecution() {} },
+        invocationRecordStore,
+        socketManager,
+        messageStore,
+        invocationTracker,
+        queueProcessor,
+        invocationQueue,
+        log: { info() {}, warn() {}, error() {} },
+      },
+      {
+        targetCats: [targetCatId],
+        content: triggerMessage.content,
+        userId: 'user-1',
+        ownerAuthProvenance: 'unknown',
+        threadId,
+        triggerMessage,
+        callerCatId: 'opus',
+        parentInvocationId: 'inv-source',
+      },
+    );
+
+    assert.equal(providerStarts, 0, 'busy admission must stay durable without starting a competing provider');
+    assert.equal(invocationQueue.list(threadId, 'user-1').length, 1);
+    assert.equal(messageStore.getById(triggerMessage.id).deliveryStatus, 'queued');
+
+    invocationTracker.completeAll(threadId, [targetCatId], directController);
+    await queueProcessor.onInvocationComplete(threadId, targetCatId, 'succeeded', 'inv-direct-active', [targetCatId]);
+    for (
+      let attempt = 0;
+      attempt < 50 && messageStore.getById(triggerMessage.id)?.deliveryStatus !== 'delivered';
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    assert.equal(providerStarts, 1, 'the durable carrier must start once when the direct slot becomes idle');
+    assert.deepEqual(invocationQueue.list(threadId, 'user-1'), []);
+    const terminal = messageStore.getById(triggerMessage.id);
+    assert.equal(terminal.deliveryStatus, 'delivered');
+    assert.equal(terminal.queueCustody.status, 'terminal');
+    assert.deepEqual(terminal.queueCustody.handledByCatIds, [targetCatId]);
   });
 
   test('F264 rejects a mismatched existing cross-thread custody before auto-execution', async () => {
@@ -2324,10 +3586,11 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.deepEqual(merged.mergedMessageIds, [triggerMessage.id]);
   });
 
-  test('F264 action replay restores durable carrier identity without upgrading legacy owner provenance', async () => {
+  test('F264 action replay restores every durable coalesced member beyond the recent timeline window', async () => {
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const { createInitialCrossThreadQueuedMessageCustody } = await import(
+    const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');
+    const { createInitialCrossThreadQueuedMessageCustody, QueuedMessageCustodyCoordinator } = await import(
       '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
     );
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -2350,7 +3613,7 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       }).entry;
     const opusCarrier = enqueueCarrier('opus', 'message-first');
     const codexCarrier = enqueueCarrier('codex', 'message-first');
-    const messageStore = new MessageStore();
+    const messageStore = new MessageStore({ maxMessages: 3_000 });
     const crossPost = {
       sourceThreadId: 'thread-source',
       sourceInvocationId: 'parent-source',
@@ -2411,6 +3674,18 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       ).kind,
       'initialized',
     );
+    for (let index = 0; index < 2_001; index += 1) {
+      const newerMessage = messageStore.append({
+        userId: 'user-1',
+        catId: 'sonnet',
+        content: `newer durable message ${index}`,
+        mentions: [],
+        timestamp: 102 + index,
+        threadId: 'thread-target',
+        deliveryStatus: 'queued',
+      });
+      assert.equal(messageStore.markDelivered(newerMessage.id, 102 + index)?.deliveryStatus, 'delivered');
+    }
 
     const replayQueue = new InvocationQueue();
     const result = await enqueueA2ATargets(
@@ -2456,7 +3731,73 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       generation: 2,
       dispatchId: 'cross-post:message-second',
     });
+    for (const messageId of [first.id, second.id]) {
+      const binding = messageStore.getById(messageId).queueCustody.carrierByTargetCatId.opus;
+      assert.equal(binding.idempotencyKey, 'action:lease-review-1:2:opus');
+      assert.deepEqual(
+        binding.actionSuccessorFence,
+        restored.actionSuccessorFence,
+        'action replay must durably rebind every coalesced custody member before Queue projection',
+      );
+    }
     assert.equal(replayQueue.getEntrySnapshot('thread-target', 'user-1', codexCarrier.id), null);
+
+    const processing = replayQueue.markProcessing('thread-target', 'user-1');
+    assert.ok(processing, 'the complete restored carrier must remain provider-selectable');
+    let providerStarts = 0;
+    const providerContents = [];
+    const queueProcessor = new QueueProcessor({
+      queue: replayQueue,
+      messageStore,
+      queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore }),
+      actionSuccessorLeaseStore: {
+        async preflight() {
+          return { ok: true, reason: 'active' };
+        },
+        async commitOutcome() {
+          return { outcome: 'recorded', lease: { status: 'completed' } };
+        },
+      },
+      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
+      invocationTracker: {
+        has() {
+          return false;
+        },
+        startAll() {
+          return new AbortController();
+        },
+        waitForSessionSealRelease() {
+          return Promise.resolve();
+        },
+        completeAll() {},
+      },
+      invocationRecordStore: {
+        create() {
+          return { outcome: 'created', invocationId: 'inv-windowed-action-replay' };
+        },
+        update(id, data) {
+          return { id, ...data };
+        },
+      },
+      router: {
+        async *routeExecution(_userId, content, _threadId, _messageId, targetCats, _intent, options) {
+          providerStarts += 1;
+          providerContents.push(content);
+          for (const catId of targetCats) {
+            assert.equal(await options.beforeOutputCommit(catId), true);
+            yield { type: 'done', catId, timestamp: Date.now() };
+          }
+        },
+        async ackCollectedCursors() {},
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const execution = await queueProcessor.executeEntry(processing);
+
+    assert.equal(execution.status, 'succeeded');
+    assert.equal(providerStarts, 1, 'the complete durable carrier executes exactly once');
+    assert.deepEqual(providerContents, ['first handoff\nsecond handoff']);
   });
 
   test('F264 restores a coalesced Queue carrier when durable receipt initialization fails', async () => {
@@ -2711,157 +4052,5 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       ),
       /custody identity mismatch/,
     );
-  });
-});
-
-describe('enqueueA2ATargets same-thread fan-out custody', () => {
-  function enqueueExistingCarrier(queue) {
-    const existing = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: 'thread-fanout',
-      userId: 'user-1',
-      content: 'first handoff',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-      a2aParentInvocationId: 'parent-source',
-      a2aTriggerMessageId: 'message-first',
-    }).entry;
-    queue.backfillMessageId('thread-fanout', 'user-1', existing.id, 'message-first');
-    return existing;
-  }
-
-  function appendTriggerMessage(store) {
-    return store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'fan-out follow-up',
-      mentions: ['codex', 'codex-terra'],
-      timestamp: 200,
-      threadId: 'thread-fanout',
-      deliveryStatus: 'queued',
-    });
-  }
-
-  function buildDeps(invocationQueue, messageStore, tryAutoExecute) {
-    return {
-      router: { async *routeExecution() {} },
-      invocationRecordStore: { create() {}, update() {} },
-      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
-      messageStore,
-      queueProcessor: { onInvocationComplete() {}, tryAutoExecute },
-      invocationQueue,
-      log: { info() {}, warn() {}, error() {} },
-    };
-  }
-
-  test('binds mixed enqueued and coalesced carriers before auto-execution', async () => {
-    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
-    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    const invocationQueue = new InvocationQueue();
-    const messageStore = new MessageStore();
-    enqueueExistingCarrier(invocationQueue);
-    const triggerMessage = appendTriggerMessage(messageStore);
-    let custodyAtAutoExecute;
-
-    const result = await enqueueA2ATargets(
-      buildDeps(invocationQueue, messageStore, () => {
-        custodyAtAutoExecute = messageStore.getById(triggerMessage.id)?.queueCustody;
-      }),
-      {
-        targetCats: ['codex', 'codex-terra'],
-        content: triggerMessage.content,
-        userId: 'user-1',
-        threadId: 'thread-fanout',
-        triggerMessage,
-        callerCatId: 'opus',
-        parentInvocationId: 'parent-source',
-      },
-    );
-
-    assert.deepEqual(result.enqueued, ['codex-terra']);
-    assert.deepEqual(result.coalesced, ['codex']);
-    assert.ok(custodyAtAutoExecute, 'complete fan-out custody must exist before either child can start');
-    assert.deepEqual(Object.keys(custodyAtAutoExecute.carrierByTargetCatId).sort(), ['codex', 'codex-terra']);
-  });
-
-  test('rolls back mixed admissions when existing custody has an incompatible carrier set', async () => {
-    const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
-    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    const invocationQueue = new InvocationQueue();
-    const messageStore = new MessageStore();
-    const existing = enqueueExistingCarrier(invocationQueue);
-    const before = invocationQueue.getEntrySnapshot('thread-fanout', 'user-1', existing.id);
-    const triggerMessage = appendTriggerMessage(messageStore);
-    assert.equal(
-      messageStore.initializeQueueCustody(triggerMessage.id, {
-        version: 1,
-        entryId: `fanout:${triggerMessage.id}`,
-        revision: 1,
-        ownerAuthProvenance: 'unknown',
-        carrierByTargetCatId: {
-          codex: {
-            entryId: 'wrong-codex-carrier',
-            source: 'agent',
-            sourceCategory: 'a2a',
-            callerCatId: 'opus',
-            a2aParentInvocationId: 'parent-source',
-            a2aTriggerMessageId: triggerMessage.id,
-            autoExecute: true,
-            createdAt: 100,
-          },
-          'codex-terra': {
-            entryId: 'wrong-terra-carrier',
-            source: 'agent',
-            sourceCategory: 'a2a',
-            callerCatId: 'opus',
-            a2aParentInvocationId: 'parent-source',
-            a2aTriggerMessageId: triggerMessage.id,
-            autoExecute: true,
-            createdAt: 100,
-          },
-        },
-        intent: 'execute',
-        status: 'queued',
-        allTargetCats: ['codex', 'codex-terra'],
-        pendingTargetCats: ['codex', 'codex-terra'],
-        notifiedByCatIds: [],
-        seenByCatIds: [],
-        seenInvocationIdByCatId: {},
-        failedByCatIds: [],
-        handledByCatIds: [],
-        priority: 'normal',
-        createdAt: 100,
-        updatedAt: 100,
-      }).kind,
-      'initialized',
-    );
-    let autoExecuteCalls = 0;
-
-    await assert.rejects(
-      enqueueA2ATargets(
-        buildDeps(invocationQueue, messageStore, () => {
-          autoExecuteCalls += 1;
-        }),
-        {
-          targetCats: ['codex', 'codex-terra'],
-          content: triggerMessage.content,
-          userId: 'user-1',
-          threadId: 'thread-fanout',
-          triggerMessage,
-          callerCatId: 'opus',
-          parentInvocationId: 'parent-source',
-        },
-      ),
-      /same-thread fan-out Queue custody identity mismatch/,
-    );
-
-    assert.equal(autoExecuteCalls, 0);
-    assert.deepEqual(invocationQueue.list('thread-fanout', 'user-1'), [before]);
   });
 });

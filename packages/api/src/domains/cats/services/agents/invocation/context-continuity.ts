@@ -1,8 +1,11 @@
 import type {
   AgentContextCapability,
   ContextContinuityHandshake,
+  ContextCoordinate,
+  ContinuityDisposition,
   InvocationOrigin,
   ProviderCarrier,
+  ProviderContinuityEvidence,
   RouteTopology,
 } from '../../types.js';
 import type { HumanDispositionInvocationOrigin } from '../routing/human-disposition-invocation-origin.js';
@@ -65,6 +68,13 @@ export function resolveContextContinuity(input: {
   readonly freshReason?: 'no_prior_session' | 'resume_rejected' | 'resume_failed' | 'carrier_forces_fresh';
   readonly invocationOrigin: InvocationOrigin;
   readonly routeTopology: RouteTopology;
+  /**
+   * F296 B4a: the invocation will route this call through the adapter's
+   * provider-owned preflight seam, so the real verdict arrives later. Without
+   * it, a preflight-capable carrier stays `carrier_unsupported` — declaring the
+   * seam is not the same as using it.
+   */
+  readonly providerPreflightAvailable?: boolean;
 }): ContextContinuityHandshake {
   const providerCarrier = resolveProviderCarrier(input.capability);
   const coordinate = {
@@ -72,6 +82,20 @@ export function resolveContextContinuity(input: {
     invocationOrigin: input.invocationOrigin,
     routeTopology: input.routeTopology,
   } as const;
+
+  if (input.providerPreflightAvailable && carrierHasProviderContinuityPreflight(providerCarrier)) {
+    // The provider has not spoken yet. Claiming anything here would be exactly
+    // the "binding equality means resumed" mistake; the adapter mints the real
+    // disposition in `settle`.
+    return {
+      coordinate,
+      disposition: {
+        state: 'unknown',
+        reason: 'signal_unavailable',
+        evidenceRef: evidenceRef(input.invocationId, providerCarrier, 'unknown', 'signal_unavailable'),
+      },
+    };
+  }
 
   if (providerCarrier.provider !== 'codex' || providerCarrier.carrier !== 'exec_json') {
     return {
@@ -81,7 +105,6 @@ export function resolveContextContinuity(input: {
         reason: 'carrier_unsupported',
         evidenceRef: evidenceRef(input.invocationId, providerCarrier, 'unknown', 'carrier_unsupported'),
       },
-      contextMode: 'cold',
     };
   }
 
@@ -101,10 +124,12 @@ export function resolveContextContinuity(input: {
           reason,
         ].join(':'),
       },
-      contextMode: 'cold',
     };
   }
 
+  // exec_json only reports the actual runtime after the prompt has crossed the
+  // provider boundary. A persisted binding proves what we intend to request,
+  // not that the provider resumed it, so this carrier must remain cold-first.
   return {
     coordinate,
     disposition: {
@@ -112,13 +137,93 @@ export function resolveContextContinuity(input: {
       reason: 'signal_unavailable',
       evidenceRef: evidenceRef(input.invocationId, providerCarrier, 'unknown', 'signal_unavailable'),
     },
-    contextMode: 'cold',
   };
 }
 
+/**
+ * F296 B4a: carriers with a dynamically proven pre-prompt continuity seam.
+ *
+ * `codex/app_server` qualifies because Gate 0 (2026-08-20, codex-cli 0.147.0)
+ * observed on a real app-server that `thread/start` and `thread/resume` return
+ * a trustworthy runtime id strictly before `turn/start`, and that a stale
+ * resume is rejected outright rather than silently substituted.
+ */
+export function carrierHasProviderContinuityPreflight(providerCarrier: ProviderCarrier): boolean {
+  return providerCarrier.provider === 'codex' && providerCarrier.carrier === 'app_server';
+}
+
+export function supportsProviderContinuityPreflight(handshake: ContextContinuityHandshake): boolean {
+  return carrierHasProviderContinuityPreflight(handshake.coordinate.providerCarrier);
+}
+
+/**
+ * F296 B4a: normalize adapter-observed provider evidence into a disposition.
+ *
+ * This is the ONLY way `resumed` or `replaced` enter the system. It reads the
+ * evidence and nothing else — not a persisted binding, not a token drop, not a
+ * scratchpad. A resume response for a different id becomes
+ * `unknown/binding_mismatch`, never `resumed`.
+ */
+export function continuityDispositionFromProviderEvidence(input: {
+  readonly evidence: ProviderContinuityEvidence;
+  readonly coordinate: ContextCoordinate;
+  readonly invocationId: string;
+  readonly freshReason?: 'no_prior_session' | 'resume_rejected' | 'resume_failed' | 'carrier_forces_fresh';
+}): ContinuityDisposition {
+  const { evidence } = input;
+  const { providerCarrier } = input.coordinate;
+  const ref = (state: string, reason: string): string =>
+    ['context-continuity', input.invocationId, providerCarrier.provider, providerCarrier.carrier, state, reason].join(
+      ':',
+    );
+
+  switch (evidence.kind) {
+    case 'started': {
+      const reason = input.freshReason ?? 'no_prior_session';
+      return {
+        state: 'fresh',
+        reason,
+        evidenceRef: ref('fresh', reason),
+        runtimeSessionId: evidence.runtimeSessionId,
+      };
+    }
+    case 'resumed':
+      return {
+        state: 'resumed',
+        reason: 'resume_confirmed',
+        evidenceRef: ref('resumed', 'resume_confirmed'),
+        runtimeSessionId: evidence.runtimeSessionId,
+      };
+    case 'replaced':
+      return {
+        state: 'replaced',
+        reason: 'runtime_replaced',
+        evidenceRef: ref('replaced', 'runtime_replaced'),
+        previousRuntimeSessionId: evidence.requestedRuntimeSessionId,
+        runtimeSessionId: evidence.runtimeSessionId,
+      };
+    case 'mismatched':
+      return {
+        state: 'unknown',
+        reason: 'binding_mismatch',
+        evidenceRef: ref('unknown', 'binding_mismatch'),
+      };
+    case 'unavailable':
+      return {
+        state: 'unknown',
+        reason: evidence.reason,
+        evidenceRef: ref('unknown', evidence.reason),
+      };
+  }
+}
+
 export function supportsPreProviderContinuityHandshake(handshake: ContextContinuityHandshake): boolean {
-  return (
-    handshake.coordinate.providerCarrier.provider === 'codex' &&
-    handshake.coordinate.providerCarrier.carrier === 'exec_json'
-  );
+  const providerCarrier = handshake.coordinate.providerCarrier;
+  return providerCarrier.provider === 'codex' && providerCarrier.carrier === 'exec_json';
+}
+
+/** Whether F296 can make its pre-provider continuity decision on this concrete carrier. */
+export function supportsPreProviderContinuityCapability(capability: AgentContextCapability): boolean {
+  const providerCarrier = resolveProviderCarrier(capability);
+  return providerCarrier.provider === 'codex' && providerCarrier.carrier === 'exec_json';
 }

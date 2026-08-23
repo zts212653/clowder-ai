@@ -46,6 +46,56 @@ describe('whole-message selection rules', () => {
     ).toBe(false);
   });
 
+  it('offers visible managed-hold receipts but keeps other connector and hidden scheduler rows out', () => {
+    const managedReceipt = message({
+      type: 'connector',
+      extra: { queueReceipt: { version: 1, entryId: 'entry-1', targets: [], reminderAttempts: [] } },
+      source: {
+        connector: 'hold-ball',
+        label: '持球结果',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+      },
+    });
+
+    expect(isMessageSelectableForBundle(managedReceipt)).toBe(true);
+    expect(isMessageSelectableForBundle({ ...managedReceipt, extra: undefined })).toBe(false);
+    expect(
+      isMessageSelectableForBundle({
+        ...managedReceipt,
+        extra: {
+          queueReceipt: { version: 1, entryId: 'entry-1', targets: [], reminderAttempts: [] },
+          scheduler: { hiddenTrigger: true },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isMessageSelectableForBundle({
+        ...managedReceipt,
+        extra: {
+          queueReceipt: { version: 1, entryId: 'entry-1', targets: [], reminderAttempts: [] },
+          scheduler: {},
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isMessageSelectableForBundle(
+        message({
+          type: 'connector',
+          source: { connector: 'github', label: 'GitHub', icon: '🐙' },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isMessageSelectableForBundle(
+        message({
+          type: 'system',
+          extra: { scheduler: { hiddenTrigger: true } },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('normalizes the basket by timeline order instead of click order', () => {
     const messages = [
       message({ id: 'message-2', timestamp: 2 }),

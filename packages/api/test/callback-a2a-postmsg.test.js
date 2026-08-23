@@ -259,14 +259,11 @@ describe('post_message A2A mention invocation', () => {
     assert.equal(socketManager.getMessages().length, 0, 'queued recovery should wait for QueueProcessor delivery');
   });
 
-  // F-coalesce: mechanism changed from skip-dedup (hasQueuedAgentForCat) to coalesce
-  // (findInFlightAgentEntry + coalesceContentIntoQueuedAgent). The USER-FACING CONTRACT this test
-  // guards is unchanged and still asserted verbatim: a same-cat duplicate must NOT be reported as a
-  // new route (routed=[], no "已路由" message), must NOT create a second entry (enqueue/backfill
-  // throw = hard guard), must NOT create a legacy InvocationRecord, and MUST still nudge
-  // tryAutoExecute so the already-queued entry gets picked up. Only the dedup mock methods are
-  // swapped to the new interface so the test exercises the real code path again.
+  // F-coalesce: use the real Queue and MessageStore because a queued callback now has to establish
+  // durable custody before tryAutoExecute. A method-shaped Queue fake can prove the response copy,
+  // but cannot prove that the coalesced trigger remains recoverable on the existing carrier.
   test('post-message does not claim routed when InvocationQueue coalesces a duplicate queued target', async () => {
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const tryAutoExecuteCalls = [];
     const queueProcessor = {
       async onInvocationComplete() {},
@@ -276,36 +273,22 @@ describe('post_message A2A mention invocation', () => {
       registerEntryCompleteHook() {},
       unregisterEntryCompleteHook() {},
     };
-    let coalesceCalled = false;
-    const invocationQueue = {
-      countAgentEntriesForThread() {
-        return 1;
-      },
-      // New dedup entry-point: the duplicate target already has a QUEUED agent entry.
-      findInFlightAgentEntry(threadId, catId) {
-        assert.equal(threadId, 't1');
-        assert.equal(catId, 'codex');
-        return { id: 'q-existing', userId: 'user-1', status: 'queued', source: 'agent', targetCats: ['codex'] };
-      },
-      // The new content is merged into the existing queued entry (not dropped, not re-dispatched).
-      coalesceContentIntoQueuedAgent(threadId, _userId, entryId) {
-        assert.equal(threadId, 't1');
-        assert.equal(entryId, 'q-existing');
-        coalesceCalled = true;
-        return true;
-      },
-      enqueue() {
-        throw new Error('coalesced duplicate must not be enqueued again');
-      },
-      backfillMessageId() {
-        throw new Error('coalesced duplicate must not backfill a new queue entry');
-      },
-      list() {
-        return [];
-      },
-    };
-    const app = await createApp({ invocationQueue, queueProcessor });
+    const invocationQueue = new InvocationQueue();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 't1');
+    const existing = invocationQueue.enqueue({
+      threadId: 't1',
+      userId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      content: 'earlier queued handoff',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      a2aTriggerMessageId: 'earlier-trigger',
+    }).entry;
+    const app = await createApp({ invocationQueue, queueProcessor });
 
     const response = await app.inject({
       method: 'POST',
@@ -318,7 +301,15 @@ describe('post_message A2A mention invocation', () => {
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.ok(coalesceCalled, 'duplicate queued target should be coalesced, not re-dispatched');
+    const entries = invocationQueue.list('t1', 'user-1');
+    assert.equal(entries.length, 1, 'coalesce must preserve one Queue carrier');
+    assert.equal(entries[0].id, existing.id);
+    assert.match(entries[0].content, /earlier queued handoff/);
+    assert.match(entries[0].content, /修复完成了/);
+    assert.deepEqual(entries[0].mergedMessageIds, [body.messageId]);
+    const custody = messageStore.getById(body.messageId).queueCustody;
+    assert.equal(custody.carrierByTargetCatId.codex.entryId, existing.id);
+    assert.deepEqual(custody.pendingTargetCats, ['codex']);
     assert.deepEqual(body.routed, [], 'Response must expose that no new A2A route was enqueued');
     assert.doesNotMatch(body.message, /消息已路由给 @codex/, 'Coalesced duplicate must not be reported as routed');
     assert.match(body.message, /未新增唤醒|已有待处理队列/);

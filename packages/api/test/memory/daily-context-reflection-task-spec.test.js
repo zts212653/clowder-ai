@@ -57,12 +57,14 @@ describe('F271 daily context reflection F139 task', () => {
     );
   });
 
-  test('passes a bounded signal to the producer and returns only after timed-out work is stopped', async () => {
+  test('uses the scheduler cancellation signal instead of creating a second timeout controller', async () => {
     let active = 0;
+    let receivedSignal;
     const spec = createDailyContextReflectionTaskSpec({
       runTimeoutMs: 20,
       producer: {
         run(options = {}) {
+          receivedSignal = options.signal;
           active += 1;
           return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -93,13 +95,23 @@ describe('F271 daily context reflection F139 task', () => {
       },
     });
     const startedAt = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error('scheduler timeout after 20ms')), spec.run.timeoutMs);
 
-    await assert.rejects(
-      spec.run.execute(null, 'daily-context-reflection', {}),
-      /daily context reflection timed out after 20ms/,
-    );
+    try {
+      await assert.rejects(
+        spec.run.execute(null, 'daily-context-reflection', {
+          assignedCatId: null,
+          signal: controller.signal,
+        }),
+        /scheduler timeout after 20ms/,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
 
     assert.equal(spec.run.timeoutMs, 20);
+    assert.equal(receivedSignal, controller.signal);
     assert.ok(
       Date.now() - startedAt < 500,
       'task timeout must beat the 1s backing producer even under full-suite load',

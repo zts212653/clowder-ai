@@ -5,6 +5,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { catColorVar } from '@/lib/cat-slug';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { MemberSessionStrategy } from './MemberSessionStrategy';
 import { CatSelector } from './ThreadSidebar/CatSelector';
 
@@ -113,6 +114,7 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
       });
       if (!res.ok) throw new Error('保存失败');
       updateThreadPreferredCats(threadId, selectedCats);
+      void invalidateSidebarProjection();
       setIsOpen(false);
     } catch {
       setSaveError(true);

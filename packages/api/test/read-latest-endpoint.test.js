@@ -112,6 +112,73 @@ describe('POST /api/threads/:id/read/latest', () => {
     assert.equal(body.messageId, msg2.id);
   });
 
+  it("does not advance a foreign viewer through another owner's terminal managed hold", async () => {
+    const thread = threadStore.create('system', 'Shared managed-hold thread');
+    const anchor = messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'alice-visible anchor',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const custody = {
+      version: 1,
+      entryId: 'entry-foreign-managed-hold',
+      revision: 1,
+      ownerUserId: 'bob',
+      intent: 'managed command wake',
+      status: 'queued',
+      allTargetCats: ['opus5'],
+      pendingTargetCats: ['opus5'],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      failedByCatIds: [],
+      handledByCatIds: [],
+      priority: 'normal',
+      createdAt: 2000,
+      updatedAt: 2000,
+    };
+    const terminal = messageStore.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'bob command result',
+      mentions: [],
+      timestamp: 2000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+      queueCustody: custody,
+      source: {
+        connector: 'hold-ball',
+        label: '持球结果',
+        icon: '🏓',
+        meta: { taskId: 'task-foreign', threadId: thread.id, catId: 'opus5', wakeWhen: true },
+      },
+    });
+    messageStore.transitionQueueCustody(terminal.id, {
+      expectedRevision: 1,
+      next: {
+        ...custody,
+        revision: 2,
+        status: 'terminal',
+        pendingTargetCats: [],
+        failedByCatIds: ['opus5'],
+        updatedAt: 2100,
+      },
+      deliveredAt: 2100,
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).messageId, anchor.id);
+  });
+
   it('acks a queued cat-authored message already published to the timeline', async () => {
     const thread = threadStore.create('alice', 'Thread with source-cat seed');
     const seed = messageStore.append({
@@ -173,6 +240,53 @@ describe('POST /api/threads/:id/read/latest', () => {
     // Q must be latest (higher visibilitySeq), not A
     assert.equal(body.messageId, q.id, 'latest must be Q, not A');
     assert.ok(body.cursor.startsWith('v2:'), 'cursor must be v2');
+  });
+
+  it('does not durably ack a mutable stream until its final delivery transition', async () => {
+    const thread = threadStore.create('alice', 'Mutable stream read boundary');
+    const earlier = messageStore.append({
+      userId: 'alice',
+      catId: 'opus',
+      content: 'earlier durable speech',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const stream = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'partial stream',
+      mentions: [],
+      timestamp: 2000,
+      threadId: thread.id,
+      deliveryStatus: 'queued',
+      origin: 'stream',
+      extra: { stream: { invocationId: 'inv-d4', turnInvocationId: 'turn-d4' } },
+    });
+
+    const partialAck = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(partialAck.statusCode, 200);
+    assert.equal(JSON.parse(partialAck.body).messageId, earlier.id);
+
+    const cursorBeforeDelivery = cursors.get(`alice:${thread.id}`);
+    await messageStore.markDelivered(stream.id, 3000);
+    assert.equal(
+      cursors.get(`alice:${thread.id}`),
+      cursorBeforeDelivery,
+      'delivery alone must not manufacture a read ACK after the user leaves',
+    );
+
+    const finalAck = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${thread.id}/read/latest`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(finalAck.statusCode, 200);
+    assert.equal(JSON.parse(finalAck.body).messageId, stream.id);
   });
 
   it('is idempotent — second call returns advanced=false', async () => {

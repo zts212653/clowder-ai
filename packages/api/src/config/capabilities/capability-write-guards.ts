@@ -106,7 +106,7 @@ function isApiBoundToLocalhost(): boolean {
   return isLoopbackHost(normalizeHostForLoopbackCheck(host));
 }
 
-export function isLocalCapabilityWriteRequest(request: FastifyRequest): boolean {
+function isDirectLocalCapabilityRequest(request: FastifyRequest): boolean {
   if (!isApiBoundToLocalhost()) return false;
   if (!isLoopbackAddress(request.ip)) return false;
   if (hasProxyForwardingHeaders(request)) return false;
@@ -116,8 +116,28 @@ export function isLocalCapabilityWriteRequest(request: FastifyRequest): boolean 
   const normalized = normalizeHostForLoopbackCheck(host);
   if (!isLoopbackHost(normalized)) return false;
 
+  return true;
+}
+
+export function isLocalCapabilityReadRequest(request: FastifyRequest): boolean {
+  if (!isDirectLocalCapabilityRequest(request)) return false;
+
+  // Direct same-origin reads may omit Origin. If a caller supplies one, it must
+  // still identify a loopback origin rather than weakening the local boundary.
+  const origin = firstHeaderValue(request.headers.origin);
+  return origin === undefined || hasTrustedLocalOrigin(origin);
+}
+
+export function isLocalCapabilityWriteRequest(request: FastifyRequest): boolean {
+  if (!isDirectLocalCapabilityRequest(request)) return false;
+
   // Capability writes are a direct-local Hub surface; headers narrow the loopback peer check.
   return hasTrustedLocalOrigin(firstHeaderValue(request.headers.origin));
+}
+
+export function requireLocalCapabilityReadRequest(request: FastifyRequest): CapabilityWriteRouteError | null {
+  if (isLocalCapabilityReadRequest(request)) return null;
+  return { status: 403, error: 'Capability reads require direct localhost Hub access' };
 }
 
 export function requireLocalCapabilityWriteRequest(request: FastifyRequest): CapabilityWriteRouteError | null {

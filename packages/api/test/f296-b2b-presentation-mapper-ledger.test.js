@@ -8,9 +8,9 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js');
-const { InMemoryPresentationLedgerStore, PresentationLedger, presentationLedgerKey } = await import(
-  '../dist/domains/cats/services/session/PresentationLedger.js'
-);
+const { InMemoryPresentationLedgerStore, PresentationLedger, presentationLedgerKey, decodePresentationLedgerKey } =
+  await import('../dist/domains/cats/services/session/PresentationLedger.js');
+const { mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js');
 
 const VERSION = { kind: 'version', value: 'rev-1' };
 const INVALIDATOR = { owner: 'task-store', ref: 'task-42' };
@@ -96,37 +96,48 @@ describe('F296 B2b mapper: the Opportunity ceiling applies on top of the tier', 
   });
 });
 
+// B3a migrated these from `admit()` / `recordDelivered()` to the reservation
+// state machine. The invariants are B2b's and still belong here; only the API
+// that expresses them changed. Reservation lifecycle, crash recovery and the
+// receipt brand are covered in `f296-b3a-admission-state-machine.test.js`.
 describe('F296 B2b ledger: only a provider receipt consumes dedupe', () => {
   function ledger() {
-    return new PresentationLedger(new InMemoryPresentationLedgerStore());
+    return new PresentationLedger(new InMemoryPresentationLedgerStore(), { now: () => 1_000_000 });
   }
   const stateClaim = () =>
     mapToPresentation(candidate({ sourceTier: 'T1', requested: 'state', invalidator: INVALIDATOR }));
+  const receipt = () =>
+    mintDeliveryReceipt({
+      promptGenerationId: 'gen-1',
+      providerReceivedAt: 1_700_000_000_000,
+      providerAdapterId: 'codex/exec_json',
+    });
 
-  test('admission alone does not mark delivery', async () => {
+  test('reservation alone does not mark delivery', async () => {
     const l = ledger();
-    const first = await l.admit(stateClaim(), SCOPE);
-    assert.equal(first.admit, true);
+    const first = await l.reserve(stateClaim(), SCOPE, { promptGenerationId: 'gen-1' });
+    assert.equal(first.admitted, true);
 
     // Prompt was built but the provider launch failed — nothing was received.
-    const second = await l.admit(stateClaim(), SCOPE);
-    assert.equal(second.admit, true, 'a projection the cat never saw must not be suppressed');
+    await l.release(first.reservation, 'provider_launch_failed');
+    const second = await l.reserve(stateClaim(), SCOPE, { promptGenerationId: 'gen-2' });
+    assert.equal(second.admitted, true, 'a projection the cat never saw must not be suppressed');
   });
 
   test('after a receipt, the same projection is deduped within the epoch', async () => {
     const l = ledger();
-    const first = await l.admit(stateClaim(), SCOPE);
-    await l.recordDelivered(first.key, { promptGenerationId: 'gen-1', providerReceivedAt: 1000 });
+    const first = await l.reserve(stateClaim(), SCOPE, { promptGenerationId: 'gen-1' });
+    await l.commit(first.reservation, receipt());
 
-    const second = await l.admit(stateClaim(), SCOPE);
-    assert.equal(second.admit, false);
+    const second = await l.reserve(stateClaim(), SCOPE, { promptGenerationId: 'gen-2' });
+    assert.equal(second.admitted, false);
     assert.equal(second.reason, 'already_delivered_this_epoch');
   });
 
   test('a new revision of the same subject is a different projection', async () => {
     const l = ledger();
-    const first = await l.admit(stateClaim(), SCOPE);
-    await l.recordDelivered(first.key, { promptGenerationId: 'gen-1', providerReceivedAt: 1000 });
+    const first = await l.reserve(stateClaim(), SCOPE, { promptGenerationId: 'gen-1' });
+    await l.commit(first.reservation, receipt());
 
     const newer = mapToPresentation(
       candidate({
@@ -136,55 +147,70 @@ describe('F296 B2b ledger: only a provider receipt consumes dedupe', () => {
         asOf: { kind: 'version', value: 'rev-2' },
       }),
     );
-    const second = await l.admit(newer, SCOPE);
-    assert.equal(second.admit, true, 'a newer revision is new information, not a duplicate');
+    const second = await l.reserve(newer, SCOPE, { promptGenerationId: 'gen-2' });
+    assert.equal(second.admitted, true, 'a newer revision is new information, not a duplicate');
   });
 
-  test('omit is recorded as a decision, never as a delivery', async () => {
+  test('omit is a decision, never a delivery — and never even a reservation', async () => {
     const l = ledger();
     const omitted = mapToPresentation(candidate({ sourceTier: 'invalid', requested: 'state' }));
-    const outcome = await l.admit(omitted, SCOPE);
-    assert.equal(outcome.admit, false);
+    const outcome = await l.reserve(omitted, SCOPE, { promptGenerationId: 'gen-1' });
+    assert.equal(outcome.admitted, false);
     assert.equal(outcome.reason, 'omitted_by_mapper');
 
     // The same subject later becomes verifiable — omit must not have blocked it.
     const revived = mapToPresentation(candidate({ sourceTier: 'T1', requested: 'state', invalidator: INVALIDATOR }));
-    const retry = await l.admit(revived, SCOPE);
-    assert.equal(retry.admit, true, 'an omit must not block a future valid revision');
+    const retry = await l.reserve(revived, SCOPE, { promptGenerationId: 'gen-2' });
+    assert.equal(retry.admitted, true, 'an omit must not block a future valid revision');
 
     // Load-bearing reason, asserted rather than assumed: `presentation` is part
     // of the key, so an omit entry CANNOT collide with a later state entry for
     // the same subject+revision. Without this assertion the test above would
     // pass by construction and prove nothing about intent — a mutation that
     // writes omit into the ledger would go undetected.
-    assert.notEqual(outcome.key, retry.key, 'omit and state are different ledger coordinates');
-    assert.ok(outcome.key.endsWith('omit'));
-    assert.ok(retry.key.endsWith('state'));
+    assert.notEqual(outcome.address.entryField, retry.reservation.address.entryField);
+    assert.ok(outcome.address.entryField.endsWith('4:omit'));
+    assert.ok(retry.reservation.address.entryField.endsWith('5:state'));
   });
 });
 
 describe('F296 B2b ledger: a new epoch is not replay authorization', () => {
+  const ledger = () => new PresentationLedger(new InMemoryPresentationLedgerStore(), { now: () => 1_000_000 });
+
   test('the same projection may be re-admitted in a later epoch', async () => {
-    const l = new PresentationLedger(new InMemoryPresentationLedgerStore());
+    const l = ledger();
     const claim = mapToPresentation(candidate({ sourceTier: 'T1', requested: 'state', invalidator: INVALIDATOR }));
 
-    const first = await l.admit(claim, SCOPE);
-    await l.recordDelivered(first.key, { promptGenerationId: 'gen-1', providerReceivedAt: 1000 });
-    assert.equal((await l.admit(claim, SCOPE)).admit, false);
+    const first = await l.reserve(claim, SCOPE, { promptGenerationId: 'gen-1' });
+    await l.commit(
+      first.reservation,
+      mintDeliveryReceipt({
+        promptGenerationId: 'gen-1',
+        providerReceivedAt: 1_700_000_000_000,
+        providerAdapterId: 'codex/exec_json',
+      }),
+    );
+    assert.equal((await l.reserve(claim, SCOPE, { promptGenerationId: 'gen-2' })).admitted, false);
 
-    const nextEpoch = await l.admit(claim, { ...SCOPE, contextEpoch: SCOPE.contextEpoch + 1 });
-    assert.equal(nextEpoch.admit, true, 'a new generation has not been told this yet');
+    const nextEpoch = await l.reserve(
+      claim,
+      { ...SCOPE, contextEpoch: SCOPE.contextEpoch + 1 },
+      {
+        promptGenerationId: 'gen-3',
+      },
+    );
+    assert.equal(nextEpoch.admitted, true, 'a new generation has not been told this yet');
   });
 
   test('re-admission is silence about delivery, not a claim of validity', async () => {
     // The ledger has no API that could resurrect an expired object: it is only
     // ever asked about an ALREADY-mapped presentation. An expired subject maps to
     // omit upstream, and omit is never admitted — regardless of epoch.
-    const l = new PresentationLedger(new InMemoryPresentationLedgerStore());
+    const l = ledger();
     const expired = mapToPresentation(candidate({ sourceTier: 'invalid', requested: 'state' }));
     for (const contextEpoch of [3, 4, 99]) {
-      const outcome = await l.admit(expired, { ...SCOPE, contextEpoch });
-      assert.equal(outcome.admit, false, `epoch ${contextEpoch} must not revive an expired subject`);
+      const outcome = await l.reserve(expired, { ...SCOPE, contextEpoch }, { promptGenerationId: 'gen-1' });
+      assert.equal(outcome.admitted, false, `epoch ${contextEpoch} must not revive an expired subject`);
     }
   });
 });
@@ -199,9 +225,15 @@ describe('F296 B2b ledger: the key is content-free', () => {
       presentation: 'state',
     });
     // Only coordinates: scope, epoch, subject id, revision token, presentation.
-    const SEP = '\u001f';
-    assert.equal(key, ['user-1::opus::thread-1', '3', 'pr:owner/repo#42', 'v:rev-1', 'state'].join(SEP));
-    assert.equal(key.split(SEP).length, 5, 'exactly five coordinate fields, nothing else');
+    // B3a: length-prefixed rather than separator-joined, so a subject containing
+    // the old U+001F separator can no longer forge a field boundary.
+    assert.deepEqual(decodePresentationLedgerKey(key), {
+      scopeKey: 'user-1::opus::thread-1',
+      contextEpoch: 3,
+      subjectKey: 'pr:owner/repo#42',
+      asOf: VERSION,
+      presentation: 'state',
+    });
     assert.ok(!/[a-z]{4,}\s[a-z]{4,}/i.test(key), 'no prose, no payload — coordinates only');
   });
 });

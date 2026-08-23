@@ -3,13 +3,12 @@ import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile }
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-
+import { writePersonalChromeConversationAuthorizationsAtomic } from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
 import {
   inspectNativeHostInstallation,
   installNativeHost,
   uninstallNativeHost,
 } from '../src/plugins/cloud-cat-personal-host/native-host/install-host.mjs';
-
 import {
   readPersonalChromePairingRecord,
   redactPersonalChromePairingRecord,
@@ -52,6 +51,9 @@ describe('Personal Chrome Host installation state', () => {
       rootDirectory: resolve('/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host'),
       artifactsDirectory: resolve('/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host/artifacts'),
       pairingRecordPath: resolve('/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host/pairing.json'),
+      conversationBindingPath: resolve(
+        '/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host/conversation-binding.json',
+      ),
       launcherPath: resolve('/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host/native-host-launcher.mjs'),
       socketPath: paths.socketPath,
       ledgerPath: resolve('/srv/cat-cafe/.cat-cafe/plugin-host/personal-chrome-host/delivery-ledger.json'),
@@ -140,6 +142,21 @@ describe('Personal Chrome Host installation state', () => {
     assert.equal((await stat(first.manifestPath)).mode & 0o777, 0o600);
     assert.equal(JSON.parse(await readFile(first.manifestPath, 'utf8')).path, first.launcherPath);
 
+    const paths = resolvePersonalChromeHostPaths(projectRoot);
+    await writePersonalChromeConversationAuthorizationsAtomic(paths.conversationBindingPath, {
+      schemaVersion: 2,
+      provider: 'chatgpt',
+      conversations: [
+        {
+          conversationId: 'conversation-7',
+          chatUrl: 'https://chatgpt.com/c/conversation-7',
+          authorizedAt: installedAt,
+          updatedAt: installedAt,
+        },
+      ],
+      updatedAt: installedAt,
+    });
+
     const repaired = await installNativeHost({
       platform: 'darwin',
       projectRoot,
@@ -172,6 +189,7 @@ describe('Personal Chrome Host installation state', () => {
     await assert.rejects(access(first.manifestPath));
     await assert.rejects(access(first.launcherPath));
     await assert.rejects(access(first.pairingRecordPath));
+    await assert.rejects(access(paths.conversationBindingPath));
     await access(first.artifactEntrypoint);
   });
 

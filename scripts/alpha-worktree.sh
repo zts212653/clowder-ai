@@ -41,6 +41,7 @@ Usage:
   ./scripts/alpha-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
   ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--] [start-dev args...]
   ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
+  ./scripts/alpha-worktree.sh stop   [--dir PATH]
 
 Defaults:
   --dir    ../cat-cafe-alpha
@@ -243,6 +244,7 @@ apply_alpha_env() {
   # the API can boot from alpha while routing MCP tools through stale dist files.
   export CAT_CAFE_RUNTIME_ROOT="$ALPHA_DIR"
   export CAT_CAFE_WORKSPACE_ROOT="$PROJECT_DIR"
+  export CAT_CAFE_DEPLOYMENT_ID=alpha
   export CAT_CAFE_MCP_SERVER_PATH="$ALPHA_DIR/packages/mcp-server/dist/index.js"
   export REDIS_PORT="$ALPHA_REDIS_PORT"
   export REDIS_URL="redis://localhost:$ALPHA_REDIS_PORT"
@@ -405,6 +407,17 @@ status_alpha_worktree() {
   echo "env_source: $env_source_display"
 }
 
+stop_alpha_daemon() {
+  local root
+  root="$(abs_path "$ALPHA_DIR")"
+  [ -d "$root" ] || die "alpha root not found: $root"
+  export CAT_CAFE_DEPLOYMENT_ID=alpha
+  node "$SCRIPT_DIR/daemon-state.mjs" stop \
+    --home "$HOME" \
+    --project-root "$root" \
+    --deployment-id alpha
+}
+
 # ADR-039-alpha: build-freshness gate for alpha worktree (mirrors runtime-worktree.sh Invariant 3).
 #
 # Why: alpha:start syncs origin/main (ff-only), which moves HEAD and brings in new TypeScript
@@ -547,6 +560,9 @@ case "$COMMAND" in
     ;;
   status)
     status_alpha_worktree
+    ;;
+  stop)
+    stop_alpha_daemon
     ;;
   help|-h|--help)
     usage

@@ -118,3 +118,36 @@ export function respondToCodexAppServerRequest(request: CodexAppServerJsonObject
     error: { code: -32601, message: `Unsupported app-server request: ${String(request.method)}` },
   };
 }
+
+/**
+ * F296 B4b: map a Codex app-server notification to an authoritative compaction
+ * observation, or null when it is not one.
+ *
+ * Gate 0 (2026-08-20, codex-cli 0.147.0) proved the shape dynamically: the
+ * `contextCompaction` thread item carries only `{ id, type }`, so the binding
+ * coordinates come from the enclosing `item/started` | `item/completed`
+ * envelope. `(threadId, turnId, item.id)` is therefore the stable identity, and
+ * `thread/compacted` / `ContextCompactedNotification` is deprecated upstream
+ * and is deliberately NOT accepted here.
+ *
+ * Fail closed: any missing coordinate yields null rather than a guessed event.
+ */
+export function mapCodexAppServerCompactionObservation(
+  envelope: unknown,
+): { eventId: string; runtimeSessionId: string; evidenceRef: string } | null {
+  const record = asCodexAppServerRecord(envelope);
+  if (record?.method !== 'item/started' && record?.method !== 'item/completed') return null;
+  const params = asCodexAppServerRecord(record.params);
+  const item = asCodexAppServerRecord(params?.item);
+  if (item?.type !== 'contextCompaction') return null;
+  const threadId = params?.threadId;
+  const turnId = params?.turnId;
+  const itemId = item.id;
+  if (typeof threadId !== 'string' || typeof turnId !== 'string' || typeof itemId !== 'string') return null;
+  if (!threadId || !turnId || !itemId) return null;
+  return {
+    eventId: `context-compaction:codex:app_server:${threadId}:${turnId}:${itemId}`,
+    runtimeSessionId: threadId,
+    evidenceRef: `codex_app_server_context_compaction:${threadId}:${turnId}:${itemId}`,
+  };
+}

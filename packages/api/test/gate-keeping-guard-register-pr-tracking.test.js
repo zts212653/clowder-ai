@@ -187,7 +187,6 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     const firstBinding = { workId: 'work-private-3', attemptId: 'attempt-private-3' };
     const secondBinding = { workId: 'work-private-4', attemptId: 'attempt-private-4' };
     const firstInvocation = await createInvocation(thread.id, firstBinding);
-    const secondInvocation = await createInvocation(thread.id, secondBinding);
 
     const first = await app.inject({
       method: 'POST',
@@ -200,6 +199,7 @@ describe('F167 gate-keeping guard: POST /api/callbacks/register-pr-tracking', ()
     });
     assert.equal(first.statusCode, 200);
 
+    const secondInvocation = await createInvocation(thread.id, secondBinding);
     const second = await app.inject({
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',

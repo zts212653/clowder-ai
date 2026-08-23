@@ -86,7 +86,7 @@ describe('F247 logged-in Personal Chrome live gate orchestration', () => {
 
   it('uses one exact source key twice and requires one receipt with no focus change', async () => {
     const calls = [];
-    const activeTabs = [41, 41];
+    const activeTabs = [41, 41, 41];
     const adapter = {
       append_message: async (...args) => {
         calls.push(args);

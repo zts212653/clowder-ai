@@ -92,6 +92,7 @@ export class HostBrokerError extends Error {
     readonly code: HostBrokerErrorCode,
     message: string,
     readonly reason?: HandshakeRejectReason,
+    readonly sessionCloseReason?: string,
   ) {
     super(message);
     this.name = 'HostBrokerError';

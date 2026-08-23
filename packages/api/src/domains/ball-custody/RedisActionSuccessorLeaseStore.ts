@@ -164,6 +164,7 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
     for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
       const current = await this.require(leaseId);
       const result = recoverActiveLocalReviewVerdict(current, input);
+      if (result.outcome === 'replayed') return result;
       if (result.outcome !== 'recovered') return result;
       const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
       if (committed === 'written') return result;
@@ -346,6 +347,34 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (await this.compareAndSet(current, next)) return { outcome: 'delivered', lease: next };
     }
     throw new Error(`action successor dispatch-delivery CAS exhausted: ${leaseId}`);
+  }
+
+  async markDispatchFailed(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['markDispatchFailed']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['markDispatchFailed']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      const evidenceRef = input.evidenceRef.trim();
+      if (!evidenceRef) throw new Error('dispatch failure requires an evidence identity');
+      const next: ActionSuccessorLease = {
+        ...current,
+        dispatchDeliveryState: 'failed',
+        dispatchFailureReason: input.reason,
+        dispatchFailureEvidenceRef: evidenceRef,
+        evidenceRefs: [...new Set([...current.evidenceRefs, evidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      if (await this.compareAndSet(current, next)) return { outcome: 'failed', lease: next };
+    }
+    throw new Error(`action successor dispatch-failure CAS exhausted: ${leaseId}`);
   }
 
   async markSubjectTerminal(input: {

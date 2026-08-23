@@ -46,13 +46,8 @@ declare module 'fastify' {
 
 export interface CallbackAuthRegistry {
   verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
-  /**
-   * F174 D2b-1: pure record read, ignoring TTL. Used by the in-context
-   * surface to recover threadId/catId/userId for the notifier even when
-   * verify() has just deleted the record on `expired` (砚砚 P1 #1397
-   * review — getRecord() also deletes on expired so it can't be used for
-   * this purpose).
-   */
+  isStartupRecoveryComplete?(): boolean;
+  /** Pure record read for associating typed tombstones with notifier metadata. */
   peekRecord?(invocationId: string): Promise<InvocationRecord | null>;
 }
 
@@ -67,6 +62,17 @@ export interface CallbackAuthHookOptions {
   agentKeyRegistry?: AgentKeyAuthRegistry;
 }
 
+export function rejectCallbackAuthDuringStartupRecovery(registry: CallbackAuthRegistry, reply: FastifyReply): boolean {
+  if (registry.isStartupRecoveryComplete?.() !== false) return false;
+  reply.status(503).send({
+    error: 'callback_auth_startup_recovery_pending',
+    reason: 'startup_recovery_pending',
+    message: 'Callback authentication is temporarily unavailable while durable state is recovered',
+    retryable: true,
+  });
+  return true;
+}
+
 /** Register the callbackAuth decoration + preHandler on a Fastify instance.
  *
  *  Behavior:
@@ -74,8 +80,8 @@ export interface CallbackAuthHookOptions {
  *  2. Fallback: read from body/query (legacy compat window, logs deprecation)
  *  3. Neither present → no-op (panel / non-callback request)
  *  4. Credentials present but invalid → immediate 401 (fail-closed, #474)
- *  5. F174 D2b-1: if `options.notifier` is provided + registry has getRecord,
- *     a 401 with surface-able reason (`expired`/`invalid_token`) triggers
+ *  5. If `options.notifier` is provided + registry has peekRecord,
+ *     a 401 with a surface-able terminal/identity reason triggers
  *     an in-context system message in the affected thread.
  */
 export function registerCallbackAuthHook(
@@ -90,10 +96,8 @@ export function registerCallbackAuthHook(
     app.decorateRequest('callbackPrincipal', undefined);
   }
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
-    // F174-C (cloud Codex P2 #1368, 05de7c98b): refresh-token route does its
-    // own atomic verifyLatest in preValidation and pre-populates callbackAuth.
-    // Skip the second verify here to avoid double-slide and to preserve the
-    // atomicity guarantee against the preValidation/preHandler race window.
+    // refresh-token does its own atomic verifyLatest in preValidation and
+    // pre-populates callbackAuth. Preserve that atomic freshness decision.
     if (request.callbackAuth) {
       allowToolExecution(request, reply, request.callbackAuth);
       return;
@@ -136,12 +140,9 @@ export function registerCallbackAuthHook(
       reply.status(401).send(makeCallbackAuthError('missing_creds'));
       return;
     }
-    // F174 D2b-1 (砚砚 P1 #1397 review): capture record metadata BEFORE verify().
-    // verify() deletes the record on `expired`, and getRecord() also deletes on
-    // expired — without this peek, the most important surface scenario ("token
-    // 干半小时过期") would silently miss the in-context message because the
-    // record was already gone by the time we tried to look it up. peekRecord()
-    // is non-destructive; the small race with concurrent verify is acceptable.
+    if (rejectCallbackAuthDuringStartupRecovery(registry, reply)) return;
+    // Capture metadata before verify so notifier delivery never depends on a
+    // concurrent tombstone GC boundary. peekRecord() is non-destructive.
     const recordSnapshot =
       options.notifier && registry.peekRecord ? await registry.peekRecord(invocationId).catch(() => null) : null;
 
@@ -153,6 +154,7 @@ export function registerCallbackAuthHook(
       if (options.notifier && recordSnapshot) {
         try {
           await options.notifier.notify({
+            invocationId,
             threadId: recordSnapshot.threadId,
             catId: recordSnapshot.catId,
             userId: recordSnapshot.userId,
@@ -263,7 +265,7 @@ export function requireCallbackAuth(request: FastifyRequest, reply: FastifyReply
   // unknown_invocation: preHandler didn't decorate the request, which means
   // either creds were missing entirely (handled above) or the route was hit
   // without going through the preHandler chain. Surfacing as unknown is safer
-  // than expired (we don't actually know the registry state here).
+  // than guessing a lifecycle state we cannot observe here.
   recordCallbackAuthFailure({ reason: 'unknown_invocation', tool: callbackToolFromUrl(request.url) });
   reply.send(makeCallbackAuthError('unknown_invocation'));
   return null;

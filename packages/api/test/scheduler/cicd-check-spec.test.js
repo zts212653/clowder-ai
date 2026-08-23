@@ -33,7 +33,116 @@ async function trackedTask(store) {
   });
 }
 
+async function trackedTaskFor(store, prNumber) {
+  return store.create({
+    kind: 'pr_tracking',
+    subjectKey: `pr:owner/repo#${prNumber}`,
+    threadId: `thread_${prNumber}`,
+    title: 'PR wait',
+    ownerCatId: 'codex-sol',
+    why: 'test',
+    createdBy: 'codex-sol',
+    userId: 'user_1',
+  });
+}
+
 describe('CI scheduler F280 adapter', () => {
+  test('tick-level bulk reads are not owned by the first work item cancellation signal', async () => {
+    const taskStore = new TaskStore();
+    await Promise.all([7, 8, 9].map((number) => trackedTaskFor(taskStore, number)));
+    const batchSignals = [];
+    const routed = [];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: {
+        route: async (poll) => {
+          routed.push(poll.prNumber);
+          return { kind: 'skipped', reason: 'state-only' };
+        },
+      },
+      fetchPrStatuses: async (targets, signal) => {
+        batchSignals.push(signal);
+        signal?.throwIfAborted();
+        return new Map(
+          targets.map((target) => [
+            `${target.repoFullName}#${target.prNumber}`,
+            {
+              ...target,
+              headSha: String(target.prNumber),
+              prState: 'open',
+              aggregateBucket: 'pending',
+              checks: [],
+            },
+          ]),
+        );
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    const firstController = new AbortController();
+    firstController.abort(new Error('first item timed out'));
+    await assert.rejects(
+      spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {
+        assignedCatId: null,
+        signal: firstController.signal,
+      }),
+      /first item timed out/,
+    );
+
+    await spec.run.execute(gate.workItems[1].signal, gate.workItems[1].subjectKey, {
+      assignedCatId: null,
+      signal: new AbortController().signal,
+    });
+
+    assert.deepEqual(batchSignals, [undefined]);
+    assert.deepEqual(routed, [8]);
+  });
+
+  test('one tick shares one bulk GitHub read across every tracked PR', async () => {
+    const taskStore = new TaskStore();
+    const tasks = await Promise.all([7, 8, 9].map((number) => trackedTaskFor(taskStore, number)));
+    const batchCalls = [];
+    const routed = [];
+    const spec = createCiCdCheckTaskSpec({
+      taskStore,
+      cicdRouter: {
+        route: async (poll) => {
+          routed.push(poll.prNumber);
+          return { kind: 'skipped', reason: 'state-only' };
+        },
+      },
+      fetchPrStatuses: async (targets) => {
+        batchCalls.push(targets);
+        return new Map(
+          targets.map((target) => [
+            `${target.repoFullName}#${target.prNumber}`,
+            {
+              ...target,
+              headSha: String(target.prNumber),
+              prState: 'open',
+              aggregateBucket: 'pending',
+              checks: [],
+            },
+          ]),
+        );
+      },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    for (const item of gate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
+
+    assert.equal(batchCalls.length, 1);
+    assert.deepEqual(
+      batchCalls[0].map((target) => target.prNumber),
+      [7, 8, 9],
+    );
+    assert.deepEqual(routed, [7, 8, 9]);
+    assert.equal(tasks.length, 3);
+  });
+
   test('gate emits one work item per active PR wait', async () => {
     const taskStore = new TaskStore();
     await trackedTask(taskStore);

@@ -4,10 +4,10 @@
  * Two planes, two rules:
  *
  * - `resolveExactQuoteAnchor` — for sources whose stored text *is* the rendered text
- *   (CLI `<pre>` segments). Coordinates are already canonical, so they are compared
- *   byte-for-byte and recovery is limited to a single unique exact substring.
- * - `resolveReadableQuoteAnchor` — for Markdown messages, where a DOM selection and the
- *   stored projection legitimately disagree about whitespace. Matching therefore
+ *   (raw CLI tool labels/details and historical CLI v1 stdout). Coordinates are already
+ *   canonical, so they are compared byte-for-byte and recovery is limited to one unique match.
+ * - `resolveReadableQuoteAnchor` — for Markdown messages and Markdown-rendered CLI v2 stdout,
+ *   where a DOM selection and the stored projection legitimately disagree about whitespace. Matching therefore
  *   normalizes whitespace on both sides, and **client offsets are ignored entirely**.
  *
  * A client offset is measured in the DOM's coordinate space, which is not this projection's
@@ -83,7 +83,7 @@ function verifiedCoordinates(
 }
 
 /**
- * Anchor a selection whose coordinates are already canonical (CLI segments).
+ * Anchor a selection whose coordinates are already canonical (raw CLI v1 segments).
  * Recovery is allowed only when the quoted characters occur exactly once.
  */
 export function resolveExactQuoteAnchor(

@@ -13,7 +13,7 @@ tips_exempt: "内部 prompt/context transport 契约收敛；不新增用户可�
 
 # F296: Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量
 
-> **Status**: in progress / Phase A complete；Phase B foundations B0–B2 landed + live；B3/B4 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in progress / Phase A complete；Phase B foundations + B3a + B3b + B4a/B4b landed；B4c Alpha UAT 3/5 observed、2/5 unsupported | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
 > **operator kickoff**: `0001786766025646-000156-269d3cfb` — F148 若已关闭则新立 related
 > feature，由Maine Coon选择正确路径并执行。
@@ -51,21 +51,92 @@ You 的价值要求不是“候选语气更客气”，而是系统对自己知�
 正文，只留检索入口。冷启动给小而可信的定向包，热续只给新发生的 delta；压缩后无条件重新进入
 冷启动定向包。**
 
-## Progress / 人话版（2026-08-17）
+## Progress / 人话版（2026-08-22）
 
-F296 现在不是“做完了”，也不是“还没开始”：**先止血已经完成，终态的核心零件已经造好，但还没
-接进所有真实 prompt 入口。** 因此 Phase A 的四条 AC 已关闭；Phase B 虽然完成了 B0/B1/B2 的实施
-步骤，却还没有任何一条端到端 AC 可以诚实打勾。
+F296 现在不是“做完了”，也不是“还没开始”：**先止血与 B3 surface convergence 已完成实现，
+Codex `app_server` 的 B4a behavior seam、epoch-fenced ledger retirement、B4b bounded telemetry 与 B4c runner
+均已合入；标准 Alpha 已真实观察 cold、resumed-small、resumed-large，但 replacement 与
+authoritative-compaction 因 provider trigger 不可用而保持 unsupported。** Phase A 四条 AC 已关闭；Phase B
+由真实 surface 证据关闭 B4/B5/B7/B8/B9/B10，B1/B2/B3/B6 不因部分 Alpha pass、合成 fixture 或代码级
+contract 冒充完成。
 
 | 阶段 | 人话 | 当前状态 |
 |---|---|---|
 | Phase A — Stop-Bleed | 先停止把启发式 recall、已失效待决问题、过期 artifact 当成当前真相喂给猫 | **完成**：AC-A1~A4 全绿并已合入 main |
 | B0 — Coordinate + Handshake | 先问清“这次是哪种 carrier、从哪里调用、是否真的续上旧 runtime” | **部分覆盖**：`codex/exec_json` 有非 heuristic handshake；其余 carrier 仍按 census 保持 `unsupported/conditional` |
-| B1 — Context Epoch Owner | 给每次 fresh/replaced/unknown/权威压缩一个新“上下文世代”，只有精确 resumed 才保持 hot | **地基已落地**：Redis 持久化 owner + CAS；尚未由所有 prompt surface 消费 |
-| B2 — Mapper + Ledger | 按证据强度决定 directive/state/pointer/omit，并记“这一世代是否真的送达过” | **地基已落地**：mapper + in-memory ledger；尚未接入真实 surface，Phase B AC 仍为 0 |
-| B3 — Surface Convergence | 把 serial/parallel/bootstrap/briefing/provider hook 全部接到同一投影与送达合同 | **未开始**：下一阶段；开工前先关闭下方四个结构性硬门 |
-| B4 — Telemetry + UAT | 观察 mode/reason/tier/tokens/latency，并在 alpha 证明真实冷/热/压缩旅程 | **未开始** |
-| Live runtime | 让已经合入 main 的行为真正被在线 API 加载 | **已加载至 B2b**：live API 于 2026-08-17 17:30:40 PDT 启动，runtime HEAD=`2415bef8`，dist 含 A1/A2/B2b 标记；这只证明代码已加载，不代表 B3/B4 或端到端 UAT 完成 |
+| B1 — Context Epoch Owner | 给每次 fresh/replaced/unknown/权威压缩一个新“上下文世代”，只有精确 resumed 才保持 hot | **已接入 provider launch + serial/parallel projection**：PR #3796（merge `bdfb7a57a`）；当前生产 carrier 仍无可信 hot，故 AC-B1~B3 不冒充关闭 |
+| B2 — Mapper + Ledger | 按证据强度决定 directive/state/pointer/omit，并记“这一世代是否真的送达过” | **真实 dynamic surface 已收敛**：B3b-2 将 Write/Recall typed admission 接到 mapper + shared Redis ledger；B3b-4 又把 SessionBootstrap、canonical subject 与 Context Briefing 接到同一投影。AC-B4/B10 由真实 surface fixture 关闭；Alpha 已观察 hot carrier，但 AC-B6 仍缺 unseen/version/epoch dedupe、带 dynamic presentation 的 ledger 路径与跨 restart/multi-instance 证据 |
+| B3a — Ledger/Receipt 硬门 | 先把去重键、送达凭证、并发状态机、跨实例账本这四处不诚实的地基修实 | **完成**：四道硬门全部关闭（详见下方「B3a 关闭方式」）；仍是零 consumer 地基，不关闭任何 Phase B AC |
+| B3b — Surface Convergence | 把 serial/parallel/bootstrap/briefing/provider hook 全部接到同一投影与送达合同 | **已合入 main**：B3b-1~4 收敛 serial/parallel、provider delivery、Claude post-compact、SessionBootstrap 与 Context Briefing；AC-B4/B5/B7/B8/B9/B10 有端到端证据，B1/B2/B3/B6 因 production hot 缺席保持 open |
+| B4 — Telemetry + UAT | 观察 mode/reason/tier bytes/latency/ledger terminal，并在 alpha 证明真实冷/热/压缩旅程 | **B4a behavior 已合入（PR #3845，merge `3db134d0f`）；B4b telemetry 已合入（PR #3847，merge `12909a7fa`）；B4c runner 已合入（PR #3859/#3865，merge `8e11cb3f1` / `ad827c469`）**。标准 Alpha revision `92e748ec3` 的 real-provider UAT 得到 cold、resumed-small、resumed-large `passed`，replacement 与 authoritative-compaction 分别因 `provider_replacement_trigger_unavailable` / `provider_compaction_trigger_unavailable` 保持 `unsupported`。presentation retirement 仍完全由 B4a epoch CAS 的 exact-generation 删除拥有；不新增 reaper、cursor、scheduler、worker 或第二份真相源。content-free evidence (internal) 不足以关闭 AC-B1/B2/B3/B6 |
+| Live runtime | 让已经合入 main 的行为真正被在线 API 加载 | **F296 B4 live dormant**：当前 `/health.deploymentRevision=7718a12f8b1d575fbc14b5c612bf0985b6e7fec0`，不含 B4a/B4b/B4c main changes。只能陈述 main landed、Alpha partial；不能冒充 live activation 或 production hot |
+
+### B4 路径判决（2026-08-19）
+
+B4 不通过“再开一个没人用的端口”制造隔离；仓库已经有唯一 Alpha 验收通道：`pnpm alpha:start`
+会从最新 `origin/main` 拉起 3011/3012/4111/6398，sidecar/connector 默认关闭。未合入代码先在 feature
+worktree 做确定契约与 mutation；合入后才由愿景守护在 Alpha 跑真实旅程，runtime 3003/3004 只用于
+核验 live activation，不能冒充 Alpha 验收。
+
+首个 production hot carrier 暂选 Codex `app_server`。PR #3845 已把代码接缝落成：prompt bytes 只能在
+provider start/resume/replacement disposition 决定后构造，typed `contextCompaction` observation 进入现有
+epoch owner，unsupported 或无法证明时继续 `unknown → cold`；同一改动用 epoch CAS 的原子 exact-generation
+retirement 关闭旧 ledger generation 永久驻留的缺口，不采用 reaper。
+
+标准 Alpha 已在 revision `92e748ec3608919f5d15c07943be6b327696b47a` 上观察到真实 provider 的
+cold、resumed-small 与 resumed-large；三段均满足 preflight disposition、B4b content-free trace/metric
+与 exact revision。三段同时都是零 admitted projection / `no_reservation`，所以 tier 分类、ledger
+reserve/commit 与带 dynamic presentation 的 prompt 路径尚未被活体执行，零 tier 也不能证明没有旧 recall
+回流。provider-owned replacement 与 authoritative compaction 当前没有 runner 可调用的真实 Alpha trigger，
+故两段明确为 `unsupported`。capability 继续 fail closed，AC-B1/B2/B3/B6 不关闭，也不拿代码级 contract
+或合成 fixture 冒充完整 UAT。
+逐段证据与边界见 B4c evidence (internal)。
+
+当前 F292 live 样本还有一条相邻但不归 F296 的缺口：首次 `omitted(carrier_unsupported)` 后，成功 intake
+需要 owner-facing revalidation 才能沿同一幂等 message lineage 再呈现。该入口由 F292 owner 实现；F296
+Alpha 只消费其真实重试结果，不复制 intake retry / business-success 状态机。
+
+### B4b Telemetry Contract（canonical，schema v1）
+
+B4b 回答运行健康问题，使用既有 F153 metrics/traces，不建 Eval Contract。它只观察已经存在的
+continuity / projection / delivery 事实，不产生新的 completion/authentication state，也不改变
+`ContinuityDisposition → {contextMode, contextEpoch, deltaSize}` 行为合同。
+
+**闭集枚举：**
+
+- disposition: `fresh | resumed | replaced | unknown`
+- reason: `no_prior_session | resume_rejected | resume_failed | carrier_forces_fresh | resume_confirmed |
+  runtime_replaced | carrier_unsupported | signal_unavailable | binding_mismatch`
+- transition: `scope_first_seen | fresh | replaced | unknown | binding_mismatch | resumed |
+  context_compacted | context_compaction_replay`
+- context mode: `cold | hot`；delta size: `small | large | absent`（该 final generation 没有
+  `ContextSurfaceProjection` 时为 `absent`，future/非法值仍为 `unrecognized`）
+- source tier: `T0 | T1 | T2 | invalid`
+- ledger terminal: `committed | generation_mismatch | reservation_superseded | context_epoch_retired |
+  released | no_reservation`
+
+任一 future/unknown value 归一为固定 sentinel `unrecognized`，不把 raw value 放进 telemetry。
+provider/carrier/origin/topology 同样消费代码合同中的 closed allowlist；未知值也只成为 `unrecognized`。
+
+**Metrics：**
+
+| Name | Measurement | 唯一允许的 labels |
+|---|---|---|
+| `cat_cafe.context_projection.transition_total` | final-generation continuity transition count | `context_projection.disposition`, `.reason`, `.transition`, `.mode`, `.delta_size` |
+| `cat_cafe.context_projection.tier_count` | final-generation projection count | `context_projection.tier` |
+| `cat_cafe.context_projection.tier_bytes` | final-generation UTF-8 bytes | `context_projection.tier` |
+| `cat_cafe.context_projection.delivery_latency` | final generation → provider receipt，milliseconds | none |
+| `cat_cafe.context_projection.ledger_outcome_total` | provider-receipt commit 或 release 的 terminal count | `context_projection.ledger_outcome` |
+
+**Trace attributes：** 全部沿既有 `context_projection.*` namespace：bounded
+provider/carrier/origin/topology/disposition/reason/transition/mode/delta_size、numeric epoch、T0/T1/T2/invalid/
+unrecognized 各自的 count/bytes、delivery latency ms 与 bounded ledger outcome。高基排障字段只可按现有 F153
+受控约定另行处理；本合同不写 userId/threadId/subjectKey/runtimeSessionId/invocationId/message id/正文/prompt，
+也禁止把这些字段放进 metric labels。
+
+代码唯一可导入字段合同是
+`packages/api/src/domains/cats/services/session/context-projection-telemetry-contract.ts`。当前 producer 与后续
+Alpha consumer 必须共同导入它；plan、discussion 与 BACKLOG 只导航本节，不再复制字段清单。
 
 ## Current State / 现状基线
 
@@ -400,9 +471,10 @@ hot(epoch=N) -- context_compacted --> cold(epoch=N+1)
 3. **B2 Presentation mapper + ledger**：五元组穷尽映射、Opportunity producer adapter、同 epoch 去重与
    post-delivery receipt；
 4. **B3 Surface convergence**：serial/parallel/bootstrap/briefing/Claude post-compact hook 同源消费；
-5. **B4 Telemetry + UAT**：mode reason、coordinate、tier counts、payload tokens/latency；不记录候选正文。
+5. **B4 Telemetry + UAT**：mode/reason、coordinate、tier counts/bytes、delivery latency 与 ledger terminal；
+   不记录候选正文，Alpha 在独立后续 slice 验证真实旅程。
 
-**B3 接线前四个结构性硬门（2026-08-17 vision guard）**：
+**B3 接线前四个结构性硬门（2026-08-17 vision guard）** — **四道均已于 B3a 关闭（2026-08-19）**，逐条实现与证据见下：
 
 1. **ledger key 必须无碰撞**：当前 `\u001f` join 没有编码或拒绝 field 内分隔符；例如
    `subjectKey="x\u001fv:y", asOf="z"` 与 `subjectKey="x", asOf="y\u001fv:z"` 会得到同一个 key。
@@ -418,6 +490,77 @@ hot(epoch=N) -- context_compacted --> cold(epoch=N+1)
    必须先缩窄 AC，而不是把 process-local 行为写成全局保证。producer 还必须对内容变化推进 revision，
    否则任何 ledger 都会把新内容误判成旧版本。
 
+**B3a 关闭方式（2026-08-19，零 consumer 地基，未关闭任何 Phase B AC）**：
+
+1. **ledger key**：`\u001f` join → 长度前缀编码（`<len>:<field>`）。注入性由 `decodeLedgerFields`
+   round-trip 证明，而不是靠注释论证；对抗语料含 `3:abc`、`0:`、裸分隔符、多字节与 300 字长串，
+   16×16 cross-product 断言零碰撞。
+2. **receipt**：`DeliveryReceipt` 改为 `unique symbol` branded type + `mintDeliveryReceipt` 单一铸造口。
+   brand 为 non-enumerable symbol 属性，故 spread / JSON / `structuredClone` 三种最可能的"意外伪造"
+   都会掉 brand 降级为未证明；ledger `commit` 再做 runtime guard，renderer/route 无法自铸。
+3. **并发状态机**：选择 **pending reservation → delivered**，带 token、expiry、显式 release 与
+   过期回收（crash recovery）。诚实结论写进常量
+   `PRESENTATION_DELIVERY_GUARANTEE = 'at_most_once_per_epoch_with_crash_redelivery'`——
+   provider 已收到但进程在 commit 前死掉时会**重发**，这是 at-least-once 尾巴，
+   **不是 exactly-once**，任何下游不得如此表述。选择重发而非抑制的理由：重复呈现可恢复，
+   而抑制猫从未看过的内容不可恢复。
+4. **跨重启/多实例账本**：`RedisPresentationLedgerStore`，三个操作各自一段 Lua（原子性正是本状态机
+   的诚实性所在）。delivered 记录 TTL=0（铁律 #5 / LL-048）；reservation 的过期是 **Lua 内判定的字段**，
+   不是 Redis TTL——key TTL 会把送达历史一起删掉。测试用两个 store 实例共享一个 Redis 模拟
+   "两个 API 实例 / 一次重启"。另加 `contentRevision()`：revision 由内容摘要派生，使
+   "内容变了但 revision 没变"不可表达（否则任何账本都会把新内容误判成旧版本）。
+
+每道硬门都做了 mutation 验证（19 项，全部 PROVEN-RED）。其中一项 mutation 暴露了测试自指缺陷——
+过期用例原本从被测常量本身推导时钟推进量，把默认 TTL 改成无穷大仍全绿；已改为显式 ttl 并补
+"默认 TTL 必须有限且在人类量级"的断言。
+
+**B3a review 修正（@kimi 跨族 review，PR #3783）**：两条 P1 都打在本 PR 自己的主题上——「注释/类型冒充结构」。
+
+- **`contentRevision` 对 Date / Map / Set / 类实例静默失守**：`Object.entries` 在这些对象上看不到任何
+  own enumerable 属性，于是全部塌缩成 `{}`，任意两个 Date 共用一个 revision。这正是本模块存在的唯一
+  理由在**灾难方向**上失效：新内容被判已送达，猫永远看不到；而 Date 恰恰是 producer 最自然会放进
+  payload 的类型。修法遵循本模块自己的哲学（让错误不可表达，而不是纠正错误）：honor `toJSON`
+  （覆盖 Date），其余非 plain 对象一律 **throw**——producer 侧的响亮失败可恢复，静默碰撞不可恢复。
+  顺带修掉 review 未提及但同源的一处：`JSON.stringify` 把所有非有限数映射成 `null`，导致 `NaN` /
+  `±Infinity` / 真 `null` 四者共用一个 revision。另加深度上界，循环引用改为 throw 而非挂死。
+- **brand symbol 被 export**：源码与测试头注释都写着「只有本模块能造出满足该类型的值」，但 symbol 是
+  `export const`，任何人 import 后一次 `defineProperty` 即可伪造。残余风险低（这是响亮的故意行为，
+  spread / JSON / structuredClone 三条**意外**路径始终封死），但在一个以「注释不得冒充结构」为主题的
+  改动里，假注释本身就是缺陷。已 unexport；compile-time 拒绝用 `tsc --noEmit` 实证（TS2741），
+  测试改用 `Object.getOwnPropertySymbols` 断言，并新增「模块不得导出任何 symbol」的守护。
+
+reviewer 对我点名「最可能错」的那处（删掉 `commit` 的 `reservation_expired` 分支）构造了七条时间线
+对抗后**维持原判并背书**：最坏情况一律是已 documented 的重复呈现，没有任何一条能导致「猫没看过的
+内容被压制」。
+
+**B3a 明确没做**：没有接入任何真实 prompt surface（production consumer 仍为 0），因此
+Phase B 的 AC-B1~B10 一条都不打勾——"组件存在"不冒充 AC 完成，端到端证据留给 B3b。
+
+**B3b-2 provider presentation / ledger 接线（2026-08-19，PR #3800，merge `6f0d9d635`）**：
+
+1. `invokeSingleCat` 成为动态 Opportunity 的单一 provider admission boundary。Write / Recall producer
+   只能交付 `AdmittedOpportunityPresentationV1`：producer owner、consumer scope、entry version、source refs、
+   eligible surfaces、policy/budget/dedupe、expiry/invalidators 与 epistemic ceiling 都保留，但业务 disposition、
+   canonical state 与候选正文没有字段可写。
+2. 中央边界在 provider 前复核 scope / surface / expiry、`subjectKey + asOf + ceiling` 一致性与 token budget，
+   再调用 `mapToPresentation` 选择**对应 tier 的 bytes**。这关闭了“producer 声称 T2 pointer、却把 T2
+   title/summary 作为另一字段直接塞进 prompt”的同形旁路；Recall T2 真实 route 只收到 drill pointer。
+3. ledger reservation 必须绑定最终 `effectivePrompt` SHA-256。因 admission 会改变 prompt bytes，算法使用
+   单调收缩的 reserve → reject → release → rebuild/rehash 循环，最多收缩 N 次；不存在 speculative generation。
+   provider 有 substantive output 后才由 adapter 铸 branded receipt 并 commit；render/launch/retry/replacement
+   均 release。旧 marker 子串匹配与 `projectionMarker` 字段已从 source 删除，不保留第二套送达真相。
+4. production composition 在有 Redis 时使用共享 `RedisPresentationLedgerStore`，无 Redis 才诚实降级为
+   process-local store。6398 fixture 用两个独立 ledger instance 在同 epoch 证明第一次 delivery 后第二次
+   被抑制，Redis key TTL=-1；存储内容不含 cue body、业务 disposition 或 canonical truth。
+5. ASR owner 的 `tokenBudget=160` 首次在真实 provider boundary 被执行后，测试揭示旧 prompt 实际约
+   268 token。修复没有扩大 owner 预算，而是把机械观察文案收敛到约 130 token，同时保留完整
+   `writeOpportunityRef` 三元组与唯一 disposition 指令。
+
+该 slice 关闭 **AC-B10**：两个真实 producer 均有完整 typed admission，expired opportunity 即便进入新 epoch
+仍被最后边界丢弃，T0 envelope 不能抬升内嵌 T2 claim，receipt / ledger 不复制业务 truth。**AC-B4 不关闭**：
+bootstrap / briefing / canonical subject 尚未全部进入 mapper；**AC-B6 不关闭**：exec_json 每轮 unknown → 新
+epoch，跨轮 hot 去重必须等首个真实 hot carrier，不能拿 fixed-epoch fixture 冒充生产 hot。
+
 Phase A 已完成，B0/B1/B2 地基已按冻结顺序落地；后续只能沿 B3 → B4 收口，仍禁止为 unsupported
 carrier 补 heuristic。provider 在 launch 时由 resume 转 fresh 会让预先计算的 hot projection 失真；
 Opportunity owner 与 F296 若互相复制 store，则会让 presentation receipt 错变成第二份 truth。
@@ -425,6 +568,14 @@ Opportunity owner 与 F296 若互相复制 store，则会让 presentation receip
 **B0 首个 carrier slice（2026-08-15）**：`codex / exec_json` 已接入 provider-start handshake。无请求
 session 时为 `fresh(no_prior_session)`；携带 session 时因 provider 无 prompt-preflight 确认能力而为
 `unknown(signal_unavailable)`，必须先走 cold rebuild，缺少 rebuild port 时在 provider 启动前 fail closed。
+> **B3b-1 深诊断修订（2026-08-19）**：B1 的 persisted binding 不是 B0 缺失的 provider 证据，
+> 只是 Clowder AI 自己上一轮的状态。`requestedRuntimeSessionId === boundRuntimeSessionId` 仍不能证明 provider
+> 本轮真的 resumed，也不能证明同 session 中间没有 compaction；把它铸成“可撤销 resumed/hot”会违反
+> `:170-175` 的 cold-first 硬约束。更关键的是 `exec_json` 先把 prompt 写入 stdin，之后才从
+> `thread.started` 得到实际 runtime id，后验撤销发生在被保护副作用之后。因此该方案已撤回；
+> `exec_json` 携带 session 仍为 `unknown(signal_unavailable) + cold`。首个 hot carrier 必须同时提供
+> pre-prompt resume verdict 与 authoritative compaction coverage，且最终 prompt 只能在这两项证据与
+> epoch decision 之后构造。
 当前 ingress 只把可证明的 `direct_owner → interactive`、`connector → connector` 映射为具体 origin，其他来源
 保持 `unknown`；serial / parallel topology 由 route 明确传入。Memory Cue 的 `presented` 已从 render 时写入改为
 首个 substantive provider output 前写入，并绑定最终 prompt generation；self-heal 替换的旧 generation 不得领
@@ -432,8 +583,18 @@ receipt，`presented / omitted` trace 均只携带 ID、generation 与 evidence 
 
 这只是 B0 的首个可举证 carrier，不把其他 carrier 冒充完成：Codex app-server 及 Claude、Gemini、
 Antigravity、Kimi、OpenCode、ACP、CatAgent、A2A 仍为 `unsupported`，各自 adapter 必须按 W0-E census
-逐项接入后才能更新支持矩阵。B1 epoch owner 与 B2 通用 mapper/ledger 已作为**零 consumer 地基**落地；
-它们尚未接入 route/bootstrap/briefing/provider surface，因此不能据此关闭 Phase B AC。
+逐项接入后才能更新支持矩阵。B1 epoch owner 已由 B3b-1 首个 implementation slice 接入真实 provider
+launch：production composition 使用 Redis-backed store，经 `AgentRouter` 传入 invocation；目标 carrier
+每次 launch 与 stale-session replacement generation 都在 provider consume 前 resolve epoch。handshake 已删除
+重复的 `contextMode` 真相。随后 route-projection slice 已让 serial / parallel 的 PromptFactory 消费该 decision；
+replacement 重跑使用 invocation 级幂等 projection 队列，briefing 只在 epoch-aware `cold+large` 时持久化，
+不因 cold-first 把每个小 turn 写成跨猫 thread 消息。B3b-2 又把 WriteOpportunity / RecallOpportunity 的
+metadata-only admission envelope 接到同一 provider boundary：scope/surface/expiry/revision/ceiling/budget 在
+最后一刻复核，mapper 只选择对应 tier 的 bytes，ledger 只在 substantive provider output 后 commit；
+self-heal / transient retry 先 release，再以最终 prompt SHA-256 重新 reserve。B3b-4 继续让 bootstrap 与
+briefing 在 epoch resolve 后消费同一 `ContextSurfaceProjection`：hot-before-read、cold exact handoff + drill、
+final-generation card 与 mapper-only canonical subject 均有真实 route fixture。AC-B4/B9 因此关闭；生产 hot
+仍不可达，所以 AC-B6 与 B1/B2/B3 继续保持 open。
 
 ## User Journey
 
@@ -489,24 +650,44 @@ Antigravity、Kimi、OpenCode、ACP、CatAgent、A2A 仍为 `unsupported`，各�
 - [ ] AC-B3: `contextMode` 与 `deltaSize` 为正交 typed output；首次进入、fresh/replaced/unknown、explicit
   compaction、resumed small delta、resumed large delta 的表驱动测试逐项证明转移结果。active SessionRecord、
   requested sessionId、delivery cursor、seen cursor 均不得单独证明 hot。
-- [ ] AC-B4: `ContextPresentation` 五字段与 T0/T1/T2/invalid 穷尽映射有 schema + exhaustive guard；
+- [x] AC-B4: `ContextPresentation` 五字段与 T0/T1/T2/invalid 穷尽映射有 schema + exhaustive guard；
   任一 producer 不能绕过 mapper 直接注入动态正文。
-- [ ] AC-B5: cold packet snapshot 只含 mode/reason、exact baton、合格 canonical subject、recent burst、
+  <br/>*B2b 的 exhaustive mapper、B3b-2 的真实 Write/Recall provider boundary 与 B3b-4 的
+  SessionBootstrap/canonical-subject/briefing fixtures 合起来覆盖全部具名 dynamic surface。producer boolean、
+  recency artifact 与 legacy bootstrap 都不能绕过 mapper；mutation 逐项证明绕过会红。*
+- [x] AC-B5: cold packet snapshot 只含 mode/reason、exact baton、合格 canonical subject、recent burst、
   omitted range 与 drill pointer；不含启发式候选正文或无状态历史。
+  <br/>*同一 Phase A 白名单快照继续守 route cold packet；B3b-4 的 serial/parallel replacement fixture 又在
+  两代真实 provider prompt 上证明 SessionBootstrap 只加 exact handoff + content-free drill，poison digest、
+  Thread Memory、task snapshot 与 recency artifact 均未进入。*
 - [ ] AC-B6: hot small/large delta 均只呈现 unseen messages 与新版本状态；相同
   `subjectKey + version/asOf + contextEpoch` 不重复，大 delta 不触发 cold recall。
-- [ ] AC-B7: authoritative compaction event 令 `contextEpoch` 前进、presentation dedupe 重置并重发 cold
+  <br/>*B3a 已买下该 AC 所需能力（跨重启/多实例共享持久 ledger + 内容派生 revision），所以这条
+  AC 无需缩窄作用域；但 B3a 没有接任何 surface，「不重复」的端到端证据仍缺，故不打勾。
+  去重强度按 `PRESENTATION_DELIVERY_GUARANTEE` 表述：同 epoch at-most-once + crash 重发尾巴，
+  不是 exactly-once。*
+- [x] AC-B7: authoritative compaction event 令 `contextEpoch` 前进、presentation dedupe 重置并重发 cold
   packet，同时保持 message delivery cursor 与 seen cursor；压缩前已读消息不得被整体重放。
-- [ ] AC-B8: provider signal matrix 覆盖当前生产 carrier，并区分 capability declaration 与可路由 event；
+  <br/>*端到端证据：authenticated PreCompact → `SessionRecord` compression sequence → shared epoch owner →
+  新 epoch presentation reservation → `latest-digest.postCompact` → canonical cold projector；fixture 在同一链
+  断言旧/read 消息不重放且 delivery/seen cursor 前后完全一致。hook + stream 同一 event replay 保持 cold，
+  不会二次推进或翻 hot。*
+- [x] AC-B8: provider signal matrix 覆盖当前生产 carrier，并区分 capability declaration 与可路由 event；
   支持的 carrier 使用 authoritative event，不支持的 carrier 显式 `unsupported`。`observesCompression=true`
   但无 typed event 必须仍判 unsupported；token/message drop 与 ACP/OpenCode scratchpad 文本签名/auto-continue
   熔断均不得冒充 compaction detection 或推进 epoch。
-- [ ] AC-B9: route-serial、route-parallel、SessionBootstrap、Context Briefing 与 Claude post-compact hook 消费
+  <br/>*当前只有 Claude `print_sdk` 的 typed `compact_boundary` + authenticated project hook 获得支持；
+  Claude bg/PTY 因 hook delivery parity 未证保持 unsupported，其余 production carrier 全部显式
+  `typed_event_unroutable`。provider-loop integration 证明 structural event 到达 owner；能力声明不能铸事件。*
+- [x] AC-B9: route-serial、route-parallel、SessionBootstrap、Context Briefing 与 Claude post-compact hook 消费
   同一 mode/presentation projection；人类卡片显示 coordinate + mode/reason + 各 tier 呈现数量，不建立第二份
   判断真相。十个对抗 fixture 全绿：旧 artifact vs 当前 subject、删除文件 vs typed callback、closed
   openQuestion、hot large delta 不 recall、compaction 后重发但不重放、bg daemon vs scheduled、声明无事件、
   stale-resume fresh rebuild、scratchpad heuristic 不推进 epoch、无 continuity carrier fail-closed。
-- [ ] AC-B10: WriteOpportunity / RecallOpportunity adapter 只接收已 admitted 的 typed envelope，并保留
+  <br/>*B3b-1/2/3 的 route/provider/compaction fixtures 与 B3b-4 的 bootstrap/briefing/replacement fixtures
+  共用 `ContextSurfaceProjection`；briefing 只在最终 generation 确认后落一张卡，meta 与可见字段逐字复制
+  coordinate、mode/reason、epoch、deltaSize 与 mapper-selected tier counts。上述十个对抗场景均有真实边界测试。*
+- [x] AC-B10: WriteOpportunity / RecallOpportunity adapter 只接收已 admitted 的 typed envelope，并保留
   producer owner、consumer scope、source revision、expiry/invalidator 与 epistemic ceiling。fixture 证明
   T0 opportunity envelope 不提升内嵌 T1/T2 claim、epoch reset 不复活 expired opportunity、presentation receipt
   不写业务 disposition 或 canonical truth；ceiling→presentation table fixture 证明 `mechanical_observation`
@@ -520,7 +701,7 @@ Antigravity、Kimi、OpenCode、ACP、CatAgent、A2A 仍为 `unsupported`，各�
 | R1 | “得和 Claude Code 那样克制” | AC-A1, AC-A4, AC-B4, AC-B5 | prompt snapshots + integration tests | [ ] |
 | R2 | 无法完全保证的内容不能冒充权威 | AC-A2, AC-A3, AC-B4, AC-B8, AC-B10 | adversarial fixtures | [ ] |
 | R3 | 冷启动与不在冷启动必须不同 | AC-B1, AC-B2, AC-B3, AC-B5, AC-B6, AC-B7 | handshake + state-table tests | [ ] |
-| R4 | 压缩后不能被误当成仍有完整 context 的 hot | AC-B7, AC-B8 | provider compaction fixture | [ ] |
+| R4 | 压缩后不能被误当成仍有完整 context 的 hot | AC-B7, AC-B8 | provider compaction fixture | [x] |
 | R5 | 先止血，不让终态架构阻塞已知错误 | AC-A1~A4 | Phase A targeted gate | [x] |
 
 ### 覆盖检查
@@ -534,7 +715,7 @@ Antigravity、Kimi、OpenCode、ACP、CatAgent、A2A 仍为 `unsupported`，各�
 | Claim | 机制 | 证据 / consumer |
 |---|---|---|
 | coordinate/handshake、mode 转移、tier 映射、Opportunity boundary、禁止旁路、cursor 不重置属于确定契约 | test / schema / exhaustive guard | AC-A1~A4、AC-B1~B10 的 table-driven 与 prompt fixtures |
-| 各 mode 的 payload 体积、组装耗时、provider signal coverage 属于运行健康 | F153 logs / metrics / traces | `contextMode`、reason、deltaSize、tier counts、tokens、latency；不记录候选正文 |
+| 各 mode 的 final projection 体积、delivery latency 与 ledger terminal 属于运行健康 | F153 logs / metrics / traces | 本 spec 的 B4b canonical telemetry contract；不记录候选正文 |
 | 当前没有“哪个策略更有用”的 keep/tune/sunset 不确定效用决策 | 不创建 Eval Contract | 若未来要比较 cold packet 变体或 tune 阈值，必须先加载 `eval-design` 出生证 |
 
 F263 的 RecallEvent 继续记录 memory pointer/content 的呈现与消费；F296 不复制一份 memory eval 账本。
@@ -584,6 +765,8 @@ F263 的 RecallEvent 继续记录 memory pointer/content 的呈现与消费；F2
 | KD-12 | epoch 归 identity-session；ledger 只在实际送达后记 content-free key | 不复制 session/truth store，也不让失败 render 提前消费 dedupe |
 | KD-13 | Opportunity envelope 与其 payload claim 分层映射 | typed admission 只证明机会存在，不能把“需要判断”洗成“候选已经正确/重要” |
 | KD-14 | mechanical observation 的 presentation ceiling 明确为 qualified state | 允许陈述可追溯的 predicate 命中，但禁止借 observation 声称 intent/importance/truth；source tier 更低时继续降档 |
+| KD-15 | B4 只用标准 Alpha 3011/3012/4111/6398，不另造验收端口 | Alpha 已拥有 origin/main 同步、隔离 Redis 与环境漂移守卫；随机端口会形成不可复现的影子环境 |
+| KD-16 | 首个 hot carrier 暂选 app_server，但 capability 只由动态 preflight + compaction 证据升级 | resume response 已位于 turn/start 前且 schema 有 compaction 候选；两者都不是活体证明，失败必须继续 fail-closed |
 
 ## Review Gate
 

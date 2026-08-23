@@ -127,6 +127,7 @@ test('API binds to 127.0.0.1 by default', async (t) => {
     CAT_CAFE_GLOBAL_CONFIG_ROOT: tempRoot,
     API_SERVER_PORT: '0',
     MEMORY_STORE: '1',
+    CAT_CAFE_INVOCATION_REGISTRY: 'memory',
     PREVIEW_GATEWAY_ENABLED: '0',
     PREVIEW_GATEWAY_PORT: '0',
     DOCS_ROOT: tempRoot,

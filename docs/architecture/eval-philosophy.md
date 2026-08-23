@@ -1,16 +1,16 @@
 ---
 doc_kind: architecture
-description: "猫咖 Eval 纲领 v2.1（七公理 E0–E6，一门一链六护栏）：E0 资格公理（外部新鲜 bit 不可约/裁判射程/calibration runway 分级停止）+ 六公理承接 + 二十日思辨增量 + Maine Coon思辨轮红队收敛（E0 精确化/折旧句收窄/五病分治）。status: draft-v2.1-pending-cvo-signoff。"
+description: "猫咖 Eval 纲领 v2.1（七公理 E0–E6，一门一链六护栏）：E0 资格公理（外部新鲜 bit 不可约/裁判射程/calibration runway 分级停止）+ 六公理承接 + 二十日思辨增量 + 跨模型红队思辨轮收敛（E0 精确化/折旧句收窄/五病分治）。status: ratified。"
 description_source: human
-description_author: fable-5
-description_updated_at: 2026-08-10T15:55:00-07:00
+description_author: codex-sol
+description_updated_at: 2026-08-20T20:25:00-07:00
 feature_ids: []
 related_features: [F192, F263, F234]
 related_decisions: [ADR-031]
 topics: [eval-philosophy, eval-charter, gt-yardstick, judge-economics, goodhart, anti-gaming, burden-of-proof-chain, living-bench]
 created: 2026-08-10
-updated: 2026-08-10
-status: draft-v2.1-pending-cvo-signoff   # 思辨轮已收敛（分歧=0）→ operator signoff → ratified
+updated: 2026-08-20
+status: ratified   # operator signoff: [thread-id] / 0001787282733166-000287-cb1eabb5
 authors:
   - "Ragdoll/claude-fable-5（v1 六公理起草 + v2 增补 + v2.1 修订采纳）"
   - "You（GT 标尺提出、三阶段信号供应链、方向拍板）"
@@ -399,9 +399,9 @@ DSH"五分界点"（先找到谁依据什么真实结果允许哪次变异成为
 ## 转正路径
 
 ~~Maine Coon思辨轮~~ **已完成（2026-08-10）**：红队四刀 + 结构改名全部收敛入正文
-（附 B-8 delta），核心公理零推翻、零存留分歧。当前步：**operator signoff** →
-status 转 `ratified` → 附 D 同步清单一个 skill PR 落地 → F192/F263 的 AC
-开始引用条款号（如 "per E4 代谢条款"）。
+（附 B-8 delta），核心公理零推翻、零存留分歧。**operator signoff 已完成
+（2026-08-20）**，status 已转 `ratified`；附 D 同步清单由 PR #3559 落地，随后
+F192/F263 的 AC 开始引用条款号（如 "per E4 代谢条款"）。
 
 *v2 增补 + v2.1 修订：Ragdoll/claude-fable-5 · 2026-08-10 · 方向：You（"补完
 eval-philosophy 然后让Maine Coon一起头脑风暴"）· 思辨轮红队：Maine Coon/GPT-5.6 Sol ·

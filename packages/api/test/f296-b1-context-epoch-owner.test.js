@@ -102,7 +102,11 @@ describe('F296 B1: epoch transition table (pure)', () => {
   test('resumed with an exactly matching binding → epoch held, hot', () => {
     const result = applyContinuityToEpoch({
       scopeKey: contextEpochScopeKey(SCOPE),
-      previous: priorState({ boundRuntimeSessionId: 'runtime-a', contextMode: 'cold' }),
+      previous: priorState({
+        boundRuntimeSessionId: 'runtime-a',
+        contextMode: 'cold',
+        coldConsumedAtEpoch: 7,
+      }),
       disposition: disposition('resumed', { runtimeSessionId: 'runtime-a' }),
     });
     assert.equal(result.state.contextEpoch, 7, 'epoch is held, not advanced');
@@ -173,8 +177,8 @@ describe('F296 B1: epoch transition table (pure)', () => {
       compaction: { eventId: 'compact-1', runtimeSessionId: 'runtime-a' },
     });
     assert.equal(afterReplay.state.contextEpoch, afterFirst.state.contextEpoch, 'replay must not advance');
-    assert.equal(afterReplay.transition, 'resumed');
-    assert.equal(afterReplay.state.contextMode, 'hot');
+    assert.equal(afterReplay.transition, 'context_compaction_replay');
+    assert.equal(afterReplay.state.contextMode, 'cold', 'a duplicate report cannot undo the compaction edge');
   });
 
   test('a compaction event bound to another runtime is not this scope’s event', () => {
@@ -264,6 +268,7 @@ describe('F296 B1: epoch owner (store-backed)', () => {
       disposition: disposition('fresh', { runtimeSessionId: 'runtime-a' }),
     });
     assert.equal(first.contextMode, 'cold');
+    await owner.confirmColdConsumed({ ...SCOPE, contextEpoch: first.contextEpoch });
 
     const second = await owner.resolve({
       ...SCOPE,

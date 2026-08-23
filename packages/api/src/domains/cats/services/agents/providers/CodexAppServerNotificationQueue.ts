@@ -22,6 +22,24 @@ export class CodexAppServerNotificationQueue {
     }
   }
 
+  /**
+   * F296 B4a: remove already-buffered notifications matching `predicate` and
+   * return them, preserving the order of everything left behind.
+   *
+   * Used by the preflight fence to consume compaction notifications that
+   * arrived for the bound runtime before the final prompt is built. It never
+   * blocks and never touches values that have not arrived yet, so it cannot
+   * starve or reorder the main notification loop.
+   */
+  takeBuffered(predicate: (value: unknown) => boolean): unknown[] {
+    if (this.values.length === 0) return [];
+    const taken: unknown[] = [];
+    const remaining: unknown[] = [];
+    for (const value of this.values) (predicate(value) ? taken : remaining).push(value);
+    this.values = remaining;
+    return taken;
+  }
+
   async next(): Promise<IteratorResult<unknown>> {
     const value = this.values.shift();
     if (value !== undefined) return { value, done: false };

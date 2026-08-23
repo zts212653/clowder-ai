@@ -131,6 +131,97 @@ describe('F168 external review projector integration', () => {
     assert.equal((await eventLog.read(subjectKey)).length, 3);
   });
 
+  it('invalidates pending reviewer intent when assignment custody changes on the same HEAD', async () => {
+    const eventLog = new MemoryEventLog();
+    const objectStore = new MemoryObjectStore();
+    const projector = new CommunityProjector(eventLog, objectStore);
+    const events = [
+      makeEvent(
+        'assign-original',
+        'case.external_review_assigned',
+        {
+          mode: 'maintainer_review',
+          cloudPolicy: 'optional',
+          reviewerCatId: 'codex-sol',
+          reviewerThreadId: 'thread-f168',
+          actionLeaseRef: { leaseId: 'lease-1', generation: 1 },
+        },
+        1_000,
+      ),
+      makeEvent('head-pending', 'case.head_observed', { headSha: 'abc123', headGeneration: 1 }, 1_100),
+      makeEvent('ci-pending', 'case.ci_observed', { headSha: 'abc123', headGeneration: 1, status: 'pending' }, 1_200),
+      makeEvent(
+        'verdict-pending',
+        'case.review_verdict_submitted',
+        {
+          fingerprint: 'verdict-original-reviewer',
+          headSha: 'abc123',
+          headGeneration: 1,
+          verdict: 'approved',
+          summary: 'Original reviewer intent.',
+          userNudgeRequired: false,
+          delivery: {
+            kind: 'delivered',
+            headSha: 'abc123',
+            githubUrl: 'https://github.com/acme/widgets/pull/7#pullrequestreview-42',
+            deliveredAt: 1_300,
+          },
+          principal: { catId: 'codex-sol', threadId: 'thread-f168' },
+          actionLeaseRef: { leaseId: 'lease-1', generation: 1 },
+          verificationReason: 'ci_pending',
+        },
+        1_300,
+      ),
+      makeEvent(
+        'assign-replacement',
+        'case.external_review_assigned',
+        {
+          mode: 'maintainer_review',
+          cloudPolicy: 'optional',
+          reviewerCatId: 'opus5',
+          reviewerThreadId: 'thread-replacement',
+          actionLeaseRef: { leaseId: 'lease-2', generation: 2 },
+        },
+        1_400,
+      ),
+    ];
+
+    for (const currentEvent of events) {
+      await eventLog.append(currentEvent);
+      await projector.apply(currentEvent);
+    }
+
+    const projection = await objectStore.get(subjectKey);
+    assert.equal(projection.externalReview.reviewerCatId, 'opus5');
+    assert.deepEqual(projection.externalReview.actionLeaseRef, { leaseId: 'lease-2', generation: 2 });
+    assert.equal(projection.externalReview.pendingVerdict, null);
+    assert.equal(
+      projection.externalReview.verdictSubmissionEpoch,
+      1,
+      'a replacement custody must advance the durable submission epoch',
+    );
+
+    const duplicateReplacement = makeEvent(
+      'assign-replacement-duplicate',
+      'case.external_review_assigned',
+      {
+        mode: 'maintainer_review',
+        cloudPolicy: 'optional',
+        reviewerCatId: 'opus5',
+        reviewerThreadId: 'thread-replacement',
+        actionLeaseRef: { leaseId: 'lease-2', generation: 2 },
+      },
+      1_500,
+    );
+    await eventLog.append(duplicateReplacement);
+    await projector.apply(duplicateReplacement);
+    assert.equal(
+      (await objectStore.get(subjectKey)).externalReview.verdictSubmissionEpoch,
+      1,
+      'an identical custody observation must not advance the epoch again',
+    );
+  });
+
   it('projects PR terminal facts into both generic state and the external-review aggregate', async () => {
     for (const [kind, expectedState] of [
       ['pr.merged', 'fixed'],

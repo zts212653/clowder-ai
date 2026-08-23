@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
@@ -12,13 +12,14 @@ import {
 } from '../dist/domains/plugin/index.js';
 import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
 import {
+  completeExternalHandshake,
   EXTERNAL_PACKAGE_DIGEST,
   externalCandidate,
   externalManifest,
   FakePluginProcessAdapter,
 } from './plugin-external-runtime-helpers.js';
 
-async function composition(projectRoot, processes = new FakePluginProcessAdapter()) {
+async function composition(projectRoot, processes = new FakePluginProcessAdapter(), packages) {
   return {
     processes,
     runtime: createDormantPluginRuntimeComposition({
@@ -26,6 +27,7 @@ async function composition(projectRoot, processes = new FakePluginProcessAdapter
       routes: new MemorySignalRouteStore(),
       intakes: new MemoryMeetingIntakeStore(),
       processes,
+      ...(packages === undefined ? {} : { packages }),
       now: () => 5_000,
     }),
   };
@@ -56,8 +58,20 @@ test('current-main compatibility paths are explicit, project-scoped, and replace
   assert.equal(runtime.brokerStore.path, injected.brokerSnapshotPath);
 });
 
-test('dormant composition recovers both durable stores without spawning a process', async () => {
+test('composition recovers both durable stores and resumes enabled owner intent with fresh authority', async () => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-restart-'));
+  await mkdir(resolve(projectRoot, 'dist'), { recursive: true });
+  await writeFile(resolve(projectRoot, externalManifest().runtime.entrypoint), '');
+  const packages = {
+    async resolveInstalledPackage() {
+      return {
+        rootDir: projectRoot,
+        manifest: externalManifest(),
+        verifyIntegrity: async () => undefined,
+        release: async () => undefined,
+      };
+    },
+  };
   const first = await composition(projectRoot);
   const installed = await first.runtime.inventory.installPackage({
     manifest: externalManifest(),
@@ -88,18 +102,23 @@ test('dormant composition recovers both durable stores without spawning a proces
   await connection.ready({ bindingNonce: binding.bindingNonce });
   assert.equal((await first.runtime.inventoryStore.snapshot()).instances[0].runtimeState, 'healthy');
 
-  const restarted = await composition(projectRoot);
+  const restarted = await composition(projectRoot, new FakePluginProcessAdapter(), packages);
   const recovered = await restarted.runtime.recoverAfterRestart();
 
-  assert.deepEqual(recovered, { brokerSessions: 1, inventoryInstances: 1 });
-  assert.equal(restarted.processes.specs.length, 0);
+  assert.deepEqual(recovered, { brokerSessions: 1, inventoryInstances: 0, resumeRequested: 1 });
+  const child = await restarted.processes.waitForProcess(0);
+  await completeExternalHandshake(child);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(restarted.processes.specs.length, 1);
   const recoveredInstance = (await restarted.runtime.inventoryStore.snapshot()).instances[0];
-  assert.equal(recoveredInstance.activationState, 'disabled');
-  assert.equal(recoveredInstance.runtimeState, 'stopped');
-  assert.equal(recoveredInstance.lifecycleRevision, 2);
+  assert.equal(recoveredInstance.activationState, 'enabled');
+  assert.equal(recoveredInstance.runtimeState, 'healthy');
+  assert.equal(recoveredInstance.lifecycleRevision, 1);
   const broker = await restarted.runtime.brokerStore.snapshot();
   assert.equal(broker.sessions[0].phase, 'closed');
   assert.equal(broker.sessions[0].closeReason, 'host_restart');
+  assert.equal(broker.sessions[1].phase, 'active');
+  await restarted.runtime.shutdown();
 });
 
 test('production handshake policy covers verified external source readiness without budget drift', async () => {

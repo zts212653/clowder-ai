@@ -20,6 +20,11 @@ export interface ThreadUnreadSummary {
   hasUserMention: boolean;
 }
 
+export interface ThreadReadCoordinate {
+  lastReadMessageId: string;
+  lastReadVisibilityCursor?: string;
+}
+
 export interface IThreadReadStateStore {
   /** Get read cursor for a user+thread. Returns null if never read. */
   get(userId: string, threadId: string): ThreadReadState | null | Promise<ThreadReadState | null>;
@@ -42,7 +47,7 @@ export interface IThreadReadStateStore {
   reconcileReadCursor?(userId: string, threadId: string, oldV1: string, newV2: string): boolean | Promise<boolean>;
   /**
    * Exact CAS replacement used only after the caller proves the stored cursor
-   * unresolvable and supplies new explicit read evidence.
+   * unresolvable or viewer-ineligible and supplies new validated read evidence.
    */
   replaceReadCursorIfEqual?(
     userId: string,
@@ -50,5 +55,16 @@ export interface IThreadReadStateStore {
     expectedValue: string,
     newValue: string,
     canonicalCursor?: string,
+  ): boolean | Promise<boolean>;
+  /**
+   * Exact two-field CAS for the durable read coordinate. The anchor absence is
+   * part of the expected state: a concurrent primary OR anchor change rejects
+   * the replacement instead of letting repair overwrite a newer coordinate.
+   */
+  replaceReadCoordinateIfEqual?(
+    userId: string,
+    threadId: string,
+    expected: ThreadReadCoordinate,
+    replacement: ThreadReadCoordinate,
   ): boolean | Promise<boolean>;
 }
