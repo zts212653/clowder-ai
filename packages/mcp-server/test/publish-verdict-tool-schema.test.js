@@ -382,4 +382,60 @@ describe('cat_cafe_publish_verdict MCP schema (砚砚 R1 Q3: discriminated union
     });
     assert.ok(!result.success, 'missing gitState.branch should fail min(1)');
   });
+
+  // F253 Phase C — qc-metrics-rollup kind (this PR).
+  // Regression fixture: eval:qc weekly fire was rejected with -32602 because
+  // the MCP sourceRefs union was missing this member while the API side
+  // (validation.ts / qc-generator-adapter.ts) was already wired.
+  it('accepts qc-metrics-rollup sourceRefs (eval:qc wire-up)', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 1786838400000,
+        windowEndMs: 1787443200000,
+      },
+    });
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+  });
+
+  it('accepts qc-metrics-rollup with the exact 2026-08-23 weekly fire window', () => {
+    // 2026-08-16T00:00:00Z → 2026-08-23T00:00:00Z (7d)
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 1786838400000,
+        windowEndMs: 1787443200000,
+      },
+    });
+    assert.ok(result.success, 'real weekly window should pass MCP schema');
+  });
+
+  it('rejects qc-metrics-rollup with non-finite windowStartMs', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 'not-a-number',
+        windowEndMs: 1787443200000,
+      },
+    });
+    assert.ok(!result.success, 'non-finite windowStartMs should fail');
+  });
+
+  it('rejects qc-metrics-rollup with missing windowEndMs', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:qc',
+      packet: { ...validPacket, domainId: 'eval:qc' },
+      sourceRefs: {
+        kind: 'qc-metrics-rollup',
+        windowStartMs: 1786838400000,
+      },
+    });
+    assert.ok(!result.success, 'missing windowEndMs should fail required');
+  });
 });
