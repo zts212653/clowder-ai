@@ -17,6 +17,7 @@ import { apiFetch } from '@/utils/api-client';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { createQuoteContextAttachment } from './chat-context-reference';
+import { describeMessageInvocationTrajectory, openMessageInvocationTrajectory } from './InvocationTrajectoryAnchor';
 import { LiveSelectionAnnotationAction } from './LiveSelectionAnnotationAction';
 import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -102,6 +103,39 @@ function addSelectionAnnotationToComposer(
   window.getSelection()?.removeAllRanges();
 }
 
+function cliQuoteSelectionItem(
+  action: TextSelectionAction,
+  messageId: string,
+  sourceMessageIds: readonly string[] | undefined,
+  comment: string,
+): MessageBundleSelectionItem | null {
+  if (!action.sourceSegmentId || action.selectionStart === undefined || action.selectionEnd === undefined) return null;
+  return {
+    kind: 'cli_quote',
+    messageId,
+    sourceMessageIds: sourceMessageIds ? [...sourceMessageIds] : [messageId],
+    segmentId: action.sourceSegmentId,
+    text: action.text,
+    selectionStart: action.selectionStart,
+    selectionEnd: action.selectionEnd,
+    ...(action.sourceProjectionVersion
+      ? {
+          sourceProjectionVersion: action.sourceProjectionVersion,
+          renderedOccurrences: action.renderedOccurrences,
+        }
+      : {}),
+    ...(comment ? { comment } : {}),
+  };
+}
+
+function canForwardTextSelection(action: TextSelectionAction): boolean {
+  if (action.sourceKind === 'message') return action.renderedOccurrences === 1;
+  if (action.sourceKind !== 'cli_output') return false;
+  const hasCoordinates =
+    Boolean(action.sourceSegmentId) && action.selectionStart !== undefined && action.selectionEnd !== undefined;
+  return hasCoordinates && (!action.sourceProjectionVersion || action.renderedOccurrences === 1);
+}
+
 export function MessageActions({
   message,
   threadId,
@@ -127,6 +161,7 @@ export function MessageActions({
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
   const isRecalled = Boolean(message.extra?.recall);
+  const invocationTrajectory = describeMessageInvocationTrajectory(message);
   const canAct = (isUser || isAssistant) && !message.isStreaming && !isRecalled;
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming && !isRecalled;
@@ -295,23 +330,8 @@ export function MessageActions({
   const handleSelectionForward = useCallback(
     (action: TextSelectionAction, comment: string) => {
       if (action.sourceKind === 'cli_output') {
-        if (!action.sourceSegmentId || action.selectionStart === undefined || action.selectionEnd === undefined) {
-          return;
-        }
-        setForwardSelection({
-          items: [
-            {
-              kind: 'cli_quote',
-              messageId: message.id,
-              sourceMessageIds: message.projectionSourceMessageIds ?? [message.id],
-              segmentId: action.sourceSegmentId,
-              text: action.text,
-              selectionStart: action.selectionStart,
-              selectionEnd: action.selectionEnd,
-              ...(comment ? { comment } : {}),
-            },
-          ],
-        });
+        const item = cliQuoteSelectionItem(action, message.id, message.projectionSourceMessageIds, comment);
+        if (item) setForwardSelection({ items: [item] });
         return;
       }
       if (action.sourceKind !== 'message') return;
@@ -424,13 +444,7 @@ export function MessageActions({
           triggerClassName="fixed z-[70] flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg bg-cafe-accent px-2.5 py-1.5 text-xs font-medium text-[var(--cafe-surface)] shadow-lg transition-colors hover:bg-cafe-interactive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
           onSave={handleSelectionAddToChat}
           onForward={forwardingDisabled ? undefined : handleSelectionForward}
-          canForward={(action) =>
-            (action.sourceKind === 'message' && action.renderedOccurrences === 1) ||
-            (action.sourceKind === 'cli_output' &&
-              Boolean(action.sourceSegmentId) &&
-              action.selectionStart !== undefined &&
-              action.selectionEnd !== undefined)
-          }
+          canForward={canForwardTextSelection}
         />
       )}
 
@@ -496,6 +510,29 @@ export function MessageActions({
                 />
               </svg>
             </button>
+            {invocationTrajectory && (
+              <button
+                type="button"
+                onClick={() => openMessageInvocationTrajectory(message, threadId)}
+                className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-accent"
+                title="查看这轮轨迹"
+                aria-label="查看这轮 invocation 轨迹"
+                data-testid="message-action-invocation-trajectory"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <circle cx="4" cy="4" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
+                </svg>
+              </button>
+            )}
             {canAct && (
               <>
                 <button

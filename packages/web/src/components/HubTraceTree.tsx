@@ -42,17 +42,20 @@ function groupByTrace(spans: TraceSpan[]): TraceGroup[] {
     .sort((a, b) => b.startTime - a.startTime);
 }
 
-export function TraceBrowser() {
+export function TraceBrowser({ initialInvocationId }: { initialInvocationId?: string } = {}) {
   const [spans, setSpans] = useState<TraceSpan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialInvocationId ?? '');
+  const [invocationFilter, setInvocationFilter] = useState(initialInvocationId);
   const [expandedTrace, setExpandedTrace] = useState<string | null>(null);
 
   const fetchTraces = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: '200' });
-      if (search) {
+      if (invocationFilter) {
+        params.set('invocationId', invocationFilter);
+      } else if (search) {
         if (search.length === 32 && /^[0-9a-f]+$/.test(search)) {
           params.set('traceId', search);
         } else {
@@ -69,7 +72,12 @@ export function TraceBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [invocationFilter, search]);
+
+  useEffect(() => {
+    setSearch(initialInvocationId ?? '');
+    setInvocationFilter(initialInvocationId);
+  }, [initialInvocationId]);
 
   useEffect(() => {
     fetchTraces();
@@ -83,8 +91,11 @@ export function TraceBrowser() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="traceId or catId..."
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setInvocationFilter(undefined);
+          }}
+          placeholder="traceId, invocationId or catId..."
           className="flex-1 rounded-lg bg-[var(--console-field-bg)] px-3 py-1.5 text-xs text-cafe placeholder:text-cafe-muted outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
         />
         <button

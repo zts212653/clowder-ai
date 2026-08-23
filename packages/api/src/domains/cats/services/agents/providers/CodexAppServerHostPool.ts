@@ -216,8 +216,9 @@ export class CodexAppServerHostPool {
     const releaseOnce = async (terminateHost: boolean): Promise<void> => {
       if (released) return;
       released = true;
+      const mustTerminateHost = terminateHost || lease.abortObserved;
       if (!this.releaseActiveLease(entry, lease)) return;
-      if (terminateHost) {
+      if (mustTerminateHost) {
         await this.closeEntry(entry, 'forced');
       } else {
         await this.releaseEntry(entry);

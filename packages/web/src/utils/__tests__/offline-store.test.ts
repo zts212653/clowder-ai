@@ -2,16 +2,38 @@
 import { deleteDB, openDB } from 'idb';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
+import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import {
   _closeDBForTest,
   _getDBForTest,
   _resetDBForTest,
   clearAll,
+  loadSidebarSnapshot,
   loadThreadMessages,
   loadThreads,
+  saveSidebarSnapshot,
   saveThreadMessages,
   saveThreads,
 } from '../offline-store';
+
+function sidebarRow(id: string): SidebarSnapshotRow {
+  return {
+    id,
+    title: id,
+    participants: ['codex-sol'],
+    pinned: false,
+    favorited: false,
+    labels: [],
+    preferredCats: [],
+    projectPath: 'default',
+    lastActiveAt: 1,
+    systemKind: null,
+    isHubThread: false,
+    unreadCount: 0,
+    hasUserMention: false,
+    presence: { status: 'working', cats: ['codex-sol'] },
+  };
+}
 
 // Open the DB at whatever version the production code uses (no pinned version)
 // so the existing pollution helpers keep working after a schema bump.
@@ -64,6 +86,15 @@ describe('offline-store', () => {
       const loaded = await loadThreads();
       expect(loaded).toHaveLength(2);
       expect(loaded![0].id).toBe('t2');
+    });
+  });
+
+  describe('canonical Sidebar snapshot', () => {
+    it('saves and loads the narrow snapshot independently from legacy threads', async () => {
+      await saveSidebarSnapshot([sidebarRow('sidebar-1')]);
+
+      expect(await loadThreads()).toBeNull();
+      expect(await loadSidebarSnapshot()).toEqual([sidebarRow('sidebar-1')]);
     });
   });
 
@@ -160,9 +191,11 @@ describe('offline-store', () => {
   describe('clearAll', () => {
     it('removes all cached data', async () => {
       await saveThreads([{ id: 't1' }] as any[]);
+      await saveSidebarSnapshot([sidebarRow('sidebar-1')]);
       await saveThreadMessages('t1', [{ id: 'm1' }] as any[], false);
       await clearAll();
       expect(await loadThreads()).toBeNull();
+      expect(await loadSidebarSnapshot()).toBeNull();
       expect(await loadThreadMessages('t1')).toBeNull();
     });
   });

@@ -19,6 +19,8 @@ const hasSourceStagingContent = existsSync(
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { GovernanceBootstrapService } from '../dist/config/governance/governance-bootstrap.js';
+import { ContextEpochOwner } from '../dist/domains/cats/services/session/ContextEpochOwner.js';
+import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 
 function assertStagingPromptContract(prompt, mode) {
   if (hasSourceStagingContent) {
@@ -284,6 +286,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
     };
   }
 
@@ -4052,6 +4055,228 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       msgs.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'session_not_found'),
       false,
       'stale-session error should be suppressed when retry succeeds',
+    );
+  });
+
+  // F296 B4 (kimi review P2): the identity belongs to exactly ONE channel.
+  // When a carrier has a target continuity handshake, the self-heal retry
+  // rebuilds the prompt with injectSystemPrompt=true, so the identity is
+  // already inside the bytes. Also putting it on the options channel makes the
+  // provider prepend it a second time. This predates B4 (it already affected
+  // codex/exec_json) but B4 widens the set of carriers that reach it.
+  // Sol review #7: the P2-3 fix (preflight carriers must not eagerly rebuild a
+  // generation on the retry paths) shipped without a regression test. Reverting
+  // it would advance the epoch twice for one retry, leave an ownerless
+  // reservation and double-count metrics — with nothing going red.
+  // Sol review #5: with a preflight carrier the prompt message ids only exist
+  // once `settle` has run, long after baseOptions was built — so the recovery
+  // anchor used to be omitted entirely and app_server model-capacity recovery
+  // could never resume the exact invocation.
+  it('F296 #5: a preflight carrier still receives an exact recovery anchor', async () => {
+    let anchorAtSettle;
+    let anchorAtOutput;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'app_server',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke() {
+        throw new Error('preflight carrier must not fall back to invoke()');
+      },
+      async *invokeWithContinuityPreflight(preflight, options) {
+        anchorAtSettle = options?.recoveryAnchor;
+        await preflight.settle({ evidence: { kind: 'started', runtimeSessionId: 'rt-1' } });
+        // Read again after settle: this is when a capacity retry would look.
+        anchorAtOutput = {
+          threadId: options?.recoveryAnchor?.threadId,
+          invocationId: options?.recoveryAnchor?.invocationId,
+          promptMessageIds: [...(options?.recoveryAnchor?.promptMessageIds ?? [])],
+        };
+        yield { type: 'text', catId: 'opus', content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-preflight-anchor',
+        isLastCat: true,
+        contextPromptFactory: async () => ({
+          prompt: 'projected',
+          promptMessageIds: ['msg-a', 'msg-b'],
+        }),
+      }),
+    );
+
+    assert.ok(anchorAtSettle, 'a preflight carrier must be given an anchor even before settle');
+    assert.equal(anchorAtOutput.threadId, 'thread-preflight-anchor');
+    assert.ok(anchorAtOutput.invocationId, 'the anchor carries the invocation id');
+    assert.deepEqual(
+      anchorAtOutput.promptMessageIds,
+      ['msg-a', 'msg-b'],
+      'and after settle it holds the ids of the generation that was actually built',
+    );
+  });
+
+  it('F296 P2-3: a preflight retry builds exactly one generation, not two', async () => {
+    let resolveCalls = 0;
+    let factoryCalls = 0;
+    let settleCalls = 0;
+    const owner = new ContextEpochOwner(new InMemoryContextEpochStore());
+    const countingOwner = {
+      resolve: (input) => {
+        resolveCalls += 1;
+        return owner.resolve(input);
+      },
+      observeCompaction: (input) => owner.observeCompaction(input),
+      confirmColdConsumed: (input) => owner.confirmColdConsumed(input),
+    };
+
+    let invokeCount = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'app_server',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke() {
+        throw new Error('preflight carrier must not fall back to invoke()');
+      },
+      async *invokeWithContinuityPreflight(preflight) {
+        invokeCount += 1;
+        settleCalls += 1;
+        await preflight.settle({ evidence: { kind: 'started', runtimeSessionId: `rt-${invokeCount}` } });
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.contextEpochOwner = countingOwner;
+    deps.sessionManager = { get: async () => 'stale-sess', store: async () => {}, delete: async () => {} };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-preflight-retry',
+        isLastCat: true,
+        contextPromptFactory: async () => {
+          factoryCalls += 1;
+          return { prompt: 'projected', promptMessageIds: [] };
+        },
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'the retry happened');
+    assert.equal(settleCalls, 2, 'one settle per attempt');
+    assert.equal(
+      resolveCalls,
+      settleCalls,
+      `a preflight carrier must resolve the epoch exactly once per attempt — got ${resolveCalls} resolves ` +
+        `for ${settleCalls} settles, so the retry path rebuilt a generation eagerly`,
+    );
+    assert.equal(
+      factoryCalls,
+      settleCalls,
+      'and the context prompt factory must run exactly once per attempt for the same reason',
+    );
+  });
+
+  it('F296 P2: self-heal retry does not double-inject identity when the prompt already carries it', async () => {
+    const optionsSeen = [];
+    const promptsSeen = [];
+    let invokeCount = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'exec_json',
+        reportsRuntimeWindow: true,
+        authoritativeUsage: true,
+        usageTelemetry: 'available',
+        nativeWindowControl: true,
+        nativeCompressionControl: true,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke(prompt, options) {
+        optionsSeen.push({ ...options });
+        promptsSeen.push(prompt);
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'opus', sessionId: 'fresh-sess', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = { get: async () => 'stale-sess', store: async () => {}, delete: async () => {} };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        systemPrompt: 'IDENTITY-MARKER',
+        userId: 'u1',
+        threadId: 'thread-selfheal-no-double',
+        isLastCat: true,
+        contextPromptFactory: async () => ({ prompt: 'rebuilt prompt', promptMessageIds: [] }),
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'should retry once');
+    const retryPrompt = promptsSeen[1];
+    const retryOptions = optionsSeen[1];
+    const inPrompt = retryPrompt.includes('IDENTITY-MARKER');
+    const inOptions = retryOptions.systemPrompt === 'IDENTITY-MARKER';
+    assert.ok(inPrompt || inOptions, 'the identity must reach the retry through one channel');
+    assert.ok(
+      !(inPrompt && inOptions),
+      'identity must not ride BOTH the prompt bytes and the options channel — the provider would prepend it twice',
     );
   });
 

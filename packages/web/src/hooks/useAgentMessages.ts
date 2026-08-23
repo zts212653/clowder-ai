@@ -1,6 +1,11 @@
 'use client';
 
-import type { CliDiagnostics, FreshnessSupplementProjection, ReplyPreview } from '@cat-cafe/shared';
+import type {
+  A2ARoutingProjection,
+  CliDiagnostics,
+  FreshnessSupplementProjection,
+  ReplyPreview,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { parseFreshnessCarrierCapability } from '@/components/message-disposition-presentation';
@@ -45,7 +50,7 @@ import {
   formatAgyProgressDetail,
   formatSessionSealRequested,
   formatVisibleSystemInfo,
-  isInternalSystemInfoTelemetry,
+  isSystemInfoProtocolPayload,
 } from './system-info-visible';
 import {
   type ActiveSeedSource,
@@ -299,12 +304,14 @@ interface AgentMsg {
   timestamp?: number;
   /** Machine-readable A2A target cat for handoff events. */
   targetCatId?: string;
+  /** F086/F216: structured serial-vs-parallel scheduling mode for handoff events. */
+  routing?: A2ARoutingProjection;
   /** F67: Whether this message @mentions the co-creator */
   mentionsUser?: boolean;
   /** F52: Cross-thread origin metadata */
   extra?: {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
-    a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+    a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string; routing?: A2ARoutingProjection };
     /** #814: True when message originated from an explicit post_message callback */
     isExplicitPost?: boolean;
     /** F098-C1: Explicit target cats from post_message (direction pills) */
@@ -545,6 +552,8 @@ export interface BackgroundAgentMessage {
   invocationId?: string;
   /** Machine-readable A2A target cat for handoff events. */
   targetCatId?: string;
+  /** F086/F216: structured serial-vs-parallel scheduling mode for handoff events. */
+  routing?: A2ARoutingProjection;
   /** F194 Phase Z3 (砚砚 R P1-1): per-cat-turn invocation id for bubble identity stable key
    *  (prevents same-parent multi-turn-same-cat bubble merge). Backend `messages.ts` broadcastPayload
    *  sets this from inner invokeSingleCat invocation_created event. Frontend writes to
@@ -1271,9 +1280,11 @@ export function consumeBackgroundSystemInfo(
   let sysVariant: 'info' | 'a2a_followup' = 'info';
   let consumed = false;
   let systemInfo: SystemInfoProjection | undefined;
+  let protocolPayload = false;
 
   try {
     const parsed = JSON.parse(sysContent);
+    protocolPayload = isSystemInfoProtocolPayload(parsed);
     const providerRecovery = projectProviderRecoveryMessage(parsed, {
       catId: msg.catId,
       invocationId: msg.invocationId,
@@ -1785,9 +1796,6 @@ export function consumeBackgroundSystemInfo(
         },
       });
       consumed = true;
-    } else if (isInternalSystemInfoTelemetry(parsed)) {
-      // Internal telemetry — suppress to avoid raw JSON bubbles in background threads
-      consumed = true;
     } else if (parsed?.type === 'session_seal_requested') {
       if (parsed.catId) {
         options.store.setThreadCatInvocation(msg.threadId, parsed.catId, {
@@ -1862,6 +1870,9 @@ export function consumeBackgroundSystemInfo(
       consumed = true;
     }
   } catch (error) {
+    // A recognized protocol envelope stays non-visible even when its projector fails.
+    // The failure is diagnostic; it must never reclassify machine data as chat copy.
+    if (protocolPayload) consumed = true;
     if (consumed) {
       console.warn('[system_info] background internal projection failed; payload suppressed', {
         catId: msg.catId,
@@ -1869,9 +1880,13 @@ export function consumeBackgroundSystemInfo(
         error,
       });
     }
-    // Parse failures keep the original content as user-facing system info. Known
-    // internal telemetry sets consumed first and therefore remains fail-closed.
+    // Parse failures keep the original content as user-facing system info. Structured
+    // protocol envelopes fail closed regardless of whether their projector was known.
   }
+
+  // Explicit readable formatters retain `systemInfo`; handled internal projections set
+  // `consumed`. Everything else with a typed protocol envelope is internal by default.
+  if (protocolPayload && !systemInfo) consumed = true;
 
   return { consumed, content: sysContent, variant: sysVariant, systemInfo };
 }
@@ -3171,6 +3186,7 @@ export function handleBackgroundAgentMessage(
           fromCatId: msg.catId,
           targetCatId: msg.targetCatId,
           invocationId: msg.invocationId,
+          ...(msg.routing ? { routing: msg.routing } : {}),
         },
       });
       return;
@@ -5480,7 +5496,14 @@ export function useAgentMessages() {
         const handoffInvocationId = msg.targetCatId
           ? resolveSequentialHandoffInvocationId(msg.catId, msg.invocationId)
           : undefined;
-        if (msg.targetCatId && handoffInvocationId) {
+        // F086/F216: a serial dispatch announces every queued leg up front, but only 第 1 棒
+        // actually starts. Migrating the sequential ownership slot on every announced leg made
+        // the UI show the LAST target as active while the runtime was still running the FIRST
+        // (#1291: two identical arrows, one invocation). Only the leg that starts now migrates;
+        // parallel fan-out has no single sequential successor, and legacy events (no `routing`)
+        // keep the previous behaviour.
+        const migratesOwnership = !msg.routing || (msg.routing.mode === 'serial' && msg.routing.index <= 1);
+        if (msg.targetCatId && handoffInvocationId && migratesOwnership) {
           maybeMigrateSequentialInvocationOwnership(msg.targetCatId, handoffInvocationId);
         }
         // F173 bug fix: use server timestamp + marker so chatStore inserts
@@ -5502,6 +5525,7 @@ export function useAgentMessages() {
               fromCatId: msg.catId,
               targetCatId: msg.targetCatId,
               invocationId: msg.invocationId,
+              ...(msg.routing ? { routing: msg.routing } : {}),
             },
           },
         });
@@ -5539,8 +5563,10 @@ export function useAgentMessages() {
         let sysVariant: 'info' | 'a2a_followup' = 'info';
         let consumed = false;
         let systemInfo: SystemInfoProjection | undefined;
+        let protocolPayload = false;
         try {
           const parsed = JSON.parse(sysContent);
+          protocolPayload = isSystemInfoProtocolPayload(parsed);
           const providerRecovery = projectProviderRecoveryMessage(parsed, {
             catId: msg.catId,
             invocationId: msg.invocationId,
@@ -6064,9 +6090,6 @@ export function useAgentMessages() {
               },
             });
             consumed = true;
-          } else if (isInternalSystemInfoTelemetry(parsed)) {
-            // Internal telemetry — suppress to avoid raw JSON bubbles
-            consumed = true;
           } else if (parsed?.type === 'silent_completion') {
             // Bugfix: silent-exit — cat ran tools but produced no text response
             const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
@@ -6152,6 +6175,9 @@ export function useAgentMessages() {
             }
           }
         } catch (error) {
+          // A projector failure cannot turn a protocol envelope into a visible raw
+          // fallback. Suppress first; report only bounded coordinates below.
+          if (protocolPayload) consumed = true;
           if (consumed) {
             console.warn('[system_info] active internal projection failed; payload suppressed', {
               catId: msg.catId,
@@ -6159,8 +6185,11 @@ export function useAgentMessages() {
               error,
             });
           }
-          /* Parse failures use raw content; known internal telemetry fails closed. */
+          /* Parse failures use raw content; structured protocol envelopes fail closed. */
         }
+        // Typed envelopes need either an explicit readable formatter (`systemInfo`) or
+        // an internal projector (`consumed`). Unknown future protocol is silent by default.
+        if (protocolPayload && !systemInfo) consumed = true;
         if (!consumed) {
           const sysCliDiag = msg.metadata?.cliDiagnostics;
           const extra =

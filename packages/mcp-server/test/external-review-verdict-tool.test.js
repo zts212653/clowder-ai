@@ -110,6 +110,9 @@ describe('cat_cafe_record_external_review_verdict', () => {
     assert.match(description, /Output:/);
     assert.match(description, /GOTCHA:/);
     assert.match(description, /pending_delivery/);
+    assert.match(description, /pending_verification/);
+    assert.match(description, /without a retry call/);
+    assert.match(description, /fail-closed/);
   });
 });
 

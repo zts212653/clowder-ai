@@ -81,6 +81,7 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  ProviderContinuityPreflight,
   TokenUsage,
   ToolExecutionPolicy,
 } from '../../types.js';
@@ -98,7 +99,11 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
-import type { CodexAppServerLifecycleEvent, CodexAppServerLifecycleSnapshot } from './CodexAppServerClient.js';
+import type {
+  CodexAppServerLifecycleEvent,
+  CodexAppServerLifecycleSnapshot,
+  CodexAppServerPromptSource,
+} from './CodexAppServerClient.js';
 import type { CodexAppServerHostPool } from './CodexAppServerHostPool.js';
 import { recordCodexAppServerLifecycle } from './CodexAppServerLifecycleRegistry.js';
 import {
@@ -172,6 +177,13 @@ function buildCodexProviderRecoveryTransition(
 function isCodexAppServerLifecycleEvent(value: unknown): value is CodexAppServerLifecycleEvent {
   if (typeof value !== 'object' || value === null) return false;
   return (value as { type?: unknown }).type === 'app_server.lifecycle';
+}
+
+function isCodexAppServerContextCompactionEvent(
+  value: unknown,
+): value is import('./CodexAppServerClient.js').CodexAppServerContextCompactionEvent {
+  if (!value || typeof value !== 'object') return false;
+  return (value as { type?: unknown }).type === 'app_server.context_compaction';
 }
 
 function isCodexAppServerRecoveryEvent(value: unknown): value is CodexAppServerRecoveryEvent {
@@ -1052,8 +1064,13 @@ export class CodexAgentService implements AgentService {
           usageTelemetry: 'unavailable',
           nativeWindowControl: false,
           nativeCompressionControl: false,
-          observesCompression: false,
-          reason: 'Codex app-server context telemetry is not yet proven end-to-end',
+          // F296 B4b: earned by dynamic proof, not by a schema enum. Gate 0
+          // (2026-08-20, codex-cli 0.147.0) observed a real `contextCompaction`
+          // item with binding `(threadId, turnId, item.id)` and a consumable
+          // window before the next `turn/start`. See
+          // docs/features/evidence/F296/gate0-app-server-dynamic-probe.md.
+          observesCompression: true,
+          reason: 'Codex app-server compaction observed dynamically (F296 B4 Gate 0); usage telemetry still unproven',
         }
       : {
           provider: 'openai',
@@ -1104,9 +1121,49 @@ export class CodexAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    yield* this.invokeInternal({ kind: 'frozen', prompt }, options);
+  }
+
+  /**
+   * F296 B4a: app-server invocation whose prompt bytes are minted only after the
+   * provider continuity verdict.
+   *
+   * Declared because Gate 0 (2026-08-20, codex-cli 0.147.0) dynamically proved
+   * that `thread/start` / `thread/resume` return a trustworthy runtime id
+   * strictly before `turn/start`. Any other carrier has no such seam, so it is
+   * rejected here rather than silently degraded to a frozen prompt.
+   */
+  async *invokeWithContinuityPreflight(
+    preflight: ProviderContinuityPreflight,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage> {
+    yield* this.invokeInternal({ kind: 'preflight', settle: (input) => preflight.settle(input) }, options);
+  }
+
+  private async *invokeInternal(
+    promptSource: CodexAppServerPromptSource,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage> {
+    // The preflight seam exists only on app_server. Fail closed instead of
+    // quietly falling back to a prompt frozen before the provider verdict.
+    if (promptSource.kind === 'preflight' && this.carrierMode !== 'app_server') {
+      throw new Error('codex_continuity_preflight_requires_app_server');
+    }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
-    // Codex CLI has no system prompt flag; prepend identity to prompt text
-    const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+    // Codex CLI has no system prompt flag; prepend identity to prompt text.
+    // In preflight mode the identity prepend has to ride along inside `settle`,
+    // because the bytes do not exist until the verdict is in.
+    const applyIdentity = (text: string): string =>
+      options?.systemPrompt ? `${options.systemPrompt}\n\n${text}` : text;
+    const effectivePromptSource: CodexAppServerPromptSource =
+      promptSource.kind === 'frozen'
+        ? { kind: 'frozen', prompt: applyIdentity(promptSource.prompt) }
+        : {
+            kind: 'preflight',
+            settle: async (input) => ({ prompt: applyIdentity((await promptSource.settle(input)).prompt) }),
+          };
+    /** exec_json can only carry frozen bytes; undefined means "preflight, app_server only". */
+    const execStdinInput = effectivePromptSource.kind === 'frozen' ? effectivePromptSource.prompt : undefined;
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? this.model;
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
@@ -1496,7 +1553,8 @@ export class CodexAgentService implements AgentService {
         args,
         // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
         // 传入，不进 argv —— 防 `ps -o command=` / /proc/<pid>/cmdline 跨进程泄露。
-        stdinInput: effectivePrompt,
+        // F296 B4a: stdinInput is injected at the spawn site so a preflight-mode
+        // invocation can never reach a CLI spawn with empty or premature bytes.
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -1573,7 +1631,7 @@ export class CodexAgentService implements AgentService {
               ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
             },
             runInput: {
-              prompt: effectivePrompt,
+              prompt: effectivePromptSource,
               thread: options?.sessionId
                 ? { kind: 'resume' as const, threadId: options.sessionId }
                 : { kind: 'start' as const },
@@ -1621,9 +1679,15 @@ export class CodexAgentService implements AgentService {
                 : {}),
             },
           })
-        : options?.spawnCliOverride
-          ? options.spawnCliOverride(cliOpts)
-          : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+        : (() => {
+            if (execStdinInput === undefined) {
+              throw new Error('codex_continuity_preflight_requires_app_server');
+            }
+            const spawnOpts = { ...cliOpts, stdinInput: execStdinInput };
+            return options?.spawnCliOverride
+              ? options.spawnCliOverride(spawnOpts)
+              : spawnCli(spawnOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+          })();
 
       // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).
       // cli-spawn / tmux-agent-spawner decide via `finalSemanticDone` (see delete-block
@@ -1662,6 +1726,23 @@ export class CodexAgentService implements AgentService {
               },
             },
             timestamp: event.lifecycle.lastActivityAt,
+          };
+          continue;
+        }
+        if (isCodexAppServerContextCompactionEvent(event)) {
+          // F296 B4b: hand the wire-minted event to the invocation so the epoch
+          // owner advances. Kept on the status channel — this is carrier state,
+          // not something a user should see as a bubble.
+          yield {
+            type: 'status' as const,
+            catId: this.catId,
+            content: 'thinking',
+            metadata,
+            contextCompaction: {
+              eventSource: 'codex_app_server_context_compaction' as const,
+              event: event.observation,
+            },
+            timestamp: Date.now(),
           };
           continue;
         }

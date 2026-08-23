@@ -4,6 +4,7 @@ import type {
 } from './action-successor-local-review-recovery-state-machine.js';
 import type {
   ActionCompletionVerdict,
+  ActionSuccessorDispatchFailureReason,
   ActionSuccessorIdentityInput,
   ActionSuccessorLease,
   ActionSuccessorPreflightResult,
@@ -57,6 +58,11 @@ export type ActionSuccessorDispatchAttemptResult = {
 
 export type ActionSuccessorDispatchDeliveredResult = {
   outcome: 'delivered' | 'stale_generation' | 'dispatch_not_pending';
+  lease: ActionSuccessorLease;
+};
+
+export type ActionSuccessorDispatchFailedResult = {
+  outcome: 'failed' | 'stale_generation' | 'dispatch_not_pending';
   lease: ActionSuccessorLease;
 };
 
@@ -144,6 +150,15 @@ export interface ActionSuccessorLeaseStore {
     leaseId: string,
     input: { expectedGeneration: number; deliveredMessageId: string; evidenceRef: string; now: number },
   ): Promise<ActionSuccessorDispatchDeliveredResult>;
+  markDispatchFailed(
+    leaseId: string,
+    input: {
+      expectedGeneration: number;
+      reason: ActionSuccessorDispatchFailureReason;
+      evidenceRef: string;
+      now: number;
+    },
+  ): Promise<ActionSuccessorDispatchFailedResult>;
   markSubjectTerminal(input: {
     subjectRef: string;
     state: ActionSubjectTerminalTruth['state'];

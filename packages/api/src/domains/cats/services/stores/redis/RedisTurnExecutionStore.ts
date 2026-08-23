@@ -1,7 +1,9 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import {
+  assertCoveredMessageIds,
   assertCreateTurnExecutionInput,
   assertTurnExecutionTerminalInput,
+  type BindCoveredMessageIdsResult,
   type CreateTurnExecutionInput,
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
@@ -15,7 +17,11 @@ import {
 import { TurnExecutionKeys } from '../redis-keys/turn-execution-keys.js';
 import { readAuthoritativeHash } from './redis-pipeline-reply.js';
 import { hydrateTurnExecution, type RedisTurnExecutionHash, sortTurnExecutions } from './turn-execution-redis-codec.js';
-import { CREATE_TURN_EXECUTION_LUA, TERMINALIZE_TURN_EXECUTION_LUA } from './turn-execution-redis-scripts.js';
+import {
+  BIND_TURN_EXECUTION_COVERAGE_LUA,
+  CREATE_TURN_EXECUTION_LUA,
+  TERMINALIZE_TURN_EXECUTION_LUA,
+} from './turn-execution-redis-scripts.js';
 
 export class RedisTurnExecutionStore implements ITurnExecutionStore {
   constructor(private readonly redis: RedisClient) {}
@@ -46,6 +52,44 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     const record = await this.get(input.invocationId);
     if (!record) throw new Error(`turn execution create lost record ${input.invocationId}`);
     return { outcome: result === 1 ? 'created' : result === 2 ? 'replayed' : 'conflict', record };
+  }
+
+  async bindCoveredMessageIds(
+    invocationId: string,
+    messageIds: readonly string[],
+  ): Promise<BindCoveredMessageIdsResult> {
+    assertCoveredMessageIds(messageIds);
+    const before = await this.get(invocationId);
+    if (!before) return { outcome: 'not_found', record: null };
+    const existing = before.causal?.coveredMessageIds;
+    if (existing) {
+      const expected = [...messageIds].sort();
+      const same =
+        existing.length === expected.length && [...existing].sort().every((id, index) => id === expected[index]);
+      return { outcome: same ? 'replayed' : 'conflict', record: before };
+    }
+    const requested = [...messageIds];
+    const next = {
+      ...before,
+      causal: { ...(before.causal ?? {}), coveredMessageIds: requested },
+    };
+    const result = Number(
+      await this.redis.eval(
+        BIND_TURN_EXECUTION_COVERAGE_LUA,
+        1,
+        TurnExecutionKeys.record(invocationId),
+        JSON.stringify(requested),
+        serializeTurnExecutionIdentity(next),
+      ),
+    );
+    const record = await this.get(invocationId);
+    if (result === -1 || !record) return { outcome: 'not_found', record: null };
+    if (result === 1) return { outcome: 'bound', record };
+    if (result === 2) return { outcome: 'replayed', record };
+    const current = record.causal?.coveredMessageIds;
+    const same =
+      current?.length === requested.length && [...current].sort().every((id, index) => id === requested[index]);
+    return { outcome: same ? 'replayed' : 'conflict', record };
   }
 
   async get(invocationId: string): Promise<TurnExecutionRecord | null> {
@@ -149,13 +193,14 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
     }
     const childIds = await this.redis.smembers(TurnExecutionKeys.running);
     const interrupted: TurnExecutionRecord[] = [];
+    const excluded = new Set(input.excludedInvocationIds ?? []);
     for (const invocationId of childIds) {
       const record = await this.get(invocationId);
       if (!record || record.status !== 'running') {
         await this.redis.srem(TurnExecutionKeys.running, invocationId);
         continue;
       }
-      if (record.startedAt >= cutoffStartedAt) continue;
+      if (record.startedAt >= cutoffStartedAt || excluded.has(invocationId)) continue;
       const result = await this.transitionTerminal(invocationId, {
         status: 'interrupted',
         endedAt: input.endedAt,

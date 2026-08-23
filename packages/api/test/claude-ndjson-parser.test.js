@@ -425,13 +425,17 @@ test('unknown subtype with empty errors → error.error includes subtype string'
 
 // ─── Task 6 — system events ───────────────────────────────────────────────────
 
-test('system compact_boundary → system_info(compact_boundary) with preTokens', () => {
+test('system compact_boundary → typed provider_signal(compact_boundary) with preTokens', () => {
   const state = makeStreamState();
   const event = { type: 'system', subtype: 'compact_boundary', pre_tokens: 42000 };
   const result = transformClaudeEvent(event, CAT, state);
   assert.ok(result !== null);
   assert.ok(!Array.isArray(result));
-  assert.equal(result.type, 'system_info');
+  assert.equal(result.type, 'provider_signal');
+  assert.deepEqual(result.contextCompaction, {
+    eventSource: 'claude_compact_boundary',
+    preTokens: 42000,
+  });
   assert.equal(result.catId, CAT);
   const parsed = JSON.parse(result.content);
   assert.equal(parsed.type, 'compact_boundary');

@@ -5,13 +5,8 @@
  */
 
 import type { PluginInfo } from '@cat-cafe/shared';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
-import {
-  requireCapabilityWriteOwner,
-  requireLocalCapabilityWriteRequest,
-  resolveCapabilityWriteSessionUserId,
-} from '../config/capabilities/capability-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { LimbRegistry } from '../domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../domains/limb/limb-yaml-loader.js';
@@ -22,6 +17,7 @@ import { assertPluginResourceInsideRoot } from '../domains/plugin/PluginResource
 import { loadAllPluginConfigs, resolvePluginEnv, writePluginConfig } from '../domains/plugin/plugin-config-store.js';
 import { validateEnvSafety } from '../domains/plugin/plugin-manifest.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
 
 interface PluginRoutesOpts {
   pluginRegistry: PluginRegistry;
@@ -35,48 +31,6 @@ function refreshPluginRegistry(pluginRegistry: PluginRegistry) {
   const manifests = pluginRegistry.scan();
   loadAllPluginConfigs(resolveActiveProjectRoot(), manifests);
   return manifests;
-}
-
-interface PluginWriteAccess {
-  operator: string;
-}
-
-interface PluginWriteAccessError {
-  status: number;
-  error: string;
-}
-
-export function requirePluginReadAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
-  const operator = resolveCapabilityWriteSessionUserId(request);
-  if (!operator) {
-    return { status: 401, error: 'Plugin read endpoint requires an authenticated session' };
-  }
-
-  return { operator };
-}
-
-export function requirePluginWriteAccess(request: FastifyRequest): PluginWriteAccess | PluginWriteAccessError {
-  const localError = requireLocalCapabilityWriteRequest(request);
-  if (localError) {
-    return { status: localError.status, error: localError.error };
-  }
-
-  const operator = resolveCapabilityWriteSessionUserId(request);
-  if (!operator) {
-    return { status: 401, error: 'Plugin write endpoint requires an authenticated owner session' };
-  }
-
-  const ownerError = requireCapabilityWriteOwner(operator, { allowMissingOwner: true });
-  if (ownerError) {
-    return { status: ownerError.status, error: 'Plugin write endpoint requires configured owner authorization' };
-  }
-
-  return { operator };
-}
-
-export function pluginAccessError(reply: FastifyReply, error: PluginWriteAccessError): { error: string } {
-  reply.status(error.status);
-  return { error: error.error };
 }
 
 export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpts): void {

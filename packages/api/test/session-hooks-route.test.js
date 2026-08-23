@@ -763,6 +763,10 @@ describe('Session Hooks Routes', () => {
       const body = JSON.parse(res.payload);
       assert.equal(body.action, 'no_action');
       assert.equal(body.executionStatus.status, 'unavailable');
+      assert.deepEqual(body.contextEpoch, {
+        status: 'unsupported',
+        reason: 'managed_invocation_boundary_unavailable',
+      });
     });
 
     it('reports a stale policy epoch without inventing a capability failure', async () => {

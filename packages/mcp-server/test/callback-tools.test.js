@@ -239,6 +239,7 @@ describe('MCP Callback Tools', () => {
         id: 'coord-local-review',
         subjectRef: 'pr:owner/repo#3515',
       },
+      localReviewVerdict: 'approved',
     });
 
     assert.equal(result.isError, undefined);
@@ -247,6 +248,31 @@ describe('MCP Callback Tools', () => {
       id: 'coord-local-review',
       subjectRef: 'pr:owner/repo#3515',
     });
+    assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+  });
+
+  test('handlePostMessage rejects a typed local verdict without invocation credentials', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    process.env.CAT_CAFE_AGENT_KEY_SECRET = 'agent-key-only';
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handlePostMessage({
+      content: 'Human-readable review result.',
+      threadId: 'thread-review',
+      clientMessageId: 'typed-local-review-agent-key',
+      coordination: { phase: 'terminal' },
+      localReviewVerdict: 'approved',
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /localReviewVerdict.*invocation-token/i);
+    assert.equal(attempts, 0);
   });
 
   test('handleGetMessage forwards mode + stays pass-through (F236 AC-A5/B1)', async () => {
@@ -628,6 +654,27 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.content, 'hello from another thread');
   });
 
+  test('handleCrossPostMessage forwards a typed local verdict with its terminal delivery', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handleCrossPostMessage({
+      threadId: 'thread-author',
+      content: '@codex-sol\n\n这版可以合。',
+      targetCats: ['codex-sol'],
+      clientMessageId: 'typed-cross-thread-local-review',
+      coordination: { phase: 'terminal' },
+      localReviewVerdict: 'approved',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+  });
+
   test('handleCrossPostMessage forwards action identity with the caller idempotency key', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
 
@@ -938,7 +985,7 @@ describe('MCP Callback Tools', () => {
     assert.ok(text.includes('直接在你的回复文本里另起一行写 @猫名'));
   });
 
-  test('adds reason-typed credential hint on expired callback failure with @mention', async () => {
+  test('adds reason-typed credential hint on interrupted callback failure with @mention', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
     // F174 Phase A: structured 401 carries reason; client routes hint by typed reason.
@@ -948,8 +995,8 @@ describe('MCP Callback Tools', () => {
       text: async () =>
         JSON.stringify({
           error: 'callback_auth_failed',
-          reason: 'expired',
-          message: 'Callback credentials expired (TTL elapsed)',
+          reason: 'interrupted',
+          message: 'Callback invocation was interrupted',
           hint: '...',
         }),
     });
@@ -958,7 +1005,7 @@ describe('MCP Callback Tools', () => {
     const text = result.content[0].text;
 
     assert.equal(result.isError, true);
-    assert.ok(text.includes('callback 凭证已过期'));
+    assert.ok(text.includes('exact TurnExecution 已终结（interrupted）'));
     assert.ok(text.includes('直接在你的回复文本里另起一行写 @猫名'));
   });
 
@@ -1658,15 +1705,15 @@ describe('MCP Callback Tools', () => {
     globalThis.fetch = async (url, _options) => {
       capturedUrls.push(url);
       if (url.includes('create-rich-block')) {
-        // Route A fails — F174 Phase A: structured 401 with reason=expired triggers degradation.
+        // Route A loses registry state — unknown_invocation is the only degradable auth reason.
         return {
           ok: false,
           status: 401,
           text: async () =>
             JSON.stringify({
               error: 'callback_auth_failed',
-              reason: 'expired',
-              message: 'Callback credentials expired',
+              reason: 'unknown_invocation',
+              message: 'Callback invocation is unknown',
               hint: '...',
             }),
         };
@@ -1702,8 +1749,8 @@ describe('MCP Callback Tools', () => {
       text: async () =>
         JSON.stringify({
           error: 'callback_auth_failed',
-          reason: 'expired',
-          message: 'Callback credentials expired (TTL elapsed)',
+          reason: 'unknown_invocation',
+          message: 'Callback invocation is unknown',
           hint: '...',
         }),
     });

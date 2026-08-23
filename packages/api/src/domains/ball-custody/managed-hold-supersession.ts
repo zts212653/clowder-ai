@@ -134,34 +134,6 @@ export function exactStructuredWakeIndex(wake: StructuredWakeLocator, events: re
   );
 }
 
-/**
- * F167 fan-out delivery detection: does another `ball.handed` event exist for
- * the SAME trigger message but a different target?
- *
- * A fan-out mention (one message, multiple line-start @targets) emits one
- * handed event per target — `route:{messageId}:{toCatId}` each (§F of
- * ball-custody-events). The ball projection tracks a single holder, so under
- * fan-out every non-final target reads `holder !== me`, and even the final
- * target waits for a disposition that only a successful
- * `complete_a2a_dispatch` (409 for non-holders) could write. Those sibling
- * handed events mean the ball was broadcast, not transferred: the single-ball
- * dispatch obligation does not exist for this trigger, and the anti-dropout
- * guarantee lives in queue entry settlement instead.
- */
-export function siblingHandedForMessage(
-  events: readonly BallCustodyEvent[],
-  messageId: string,
-  excludeToCatId: string,
-): BallCustodyEvent | undefined {
-  const prefix = `route:${messageId}:`;
-  return events.find(
-    (event) =>
-      event.kind === 'ball.handed' &&
-      event.sourceEventId.startsWith(prefix) &&
-      event.payload.toCatId !== excludeToCatId,
-  );
-}
-
 function findRelease(
   events: readonly BallCustodyEvent[],
   exactWakeIndex: number,

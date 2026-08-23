@@ -290,6 +290,42 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     assert.deepEqual(deps._removed, []);
   });
 
+  test('GET status projects bounded missing-disposition escalation as non-cancelable', async () => {
+    const task = makeHoldTask('hold-ball-escalated', 'thread-escalated', 'codex-sol');
+    task.enabled = false;
+    task.params = {
+      ...task.params,
+      holdLifecycle: {
+        mode: 'wake_when',
+        status: 'escalated',
+        wakeAt: task.trigger.fireAt,
+        createdBy: 'hold-ball:codex-sol',
+        managedCommand: {
+          state: 'escalated',
+          command: 'pnpm gate',
+          startedAt: Date.now() - 2_000,
+          dispositionEscalationReason: 'managed_hold_disposition_missing',
+          dispositionEscalatedAttemptId: 'entry-1:codex-sol:2',
+          dispositionEscalatedAt: Date.now() - 1_000,
+        },
+      },
+    };
+    const deps = makeStubDeps([task], { 'thread-escalated': 'test-user' });
+    const app = await createApp(deps);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/hold-ball/hold-ball-escalated/status',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'escalated');
+    assert.equal(body.cancelable, false);
+    assert.equal(body.lifecycle.managedCommand.state, 'escalated');
+  });
+
   test('200 feedback report for stale hold task — emits feedback without live task', async () => {
     const deps = makeStubDeps([], { 'thread-feedback': 'test-user' });
     const feedbackCalls = [];

@@ -7,7 +7,9 @@ import { PassThrough } from 'node:stream';
 import { after, before, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
-const TEST_CAT_ID = 'issue-1381-codex-window';
+// Use a real home cat id because prompt-capture/L0 validation crosses a
+// subprocess boundary and intentionally reloads the canonical registry.
+const TEST_CAT_ID = 'codex';
 const MANUAL_WINDOW = 258_400;
 const CODEX_EFFECTIVE_PERCENT = 0.95;
 const EFFECTIVE_WINDOW = Math.floor(MANUAL_WINDOW * CODEX_EFFECTIVE_PERCENT); // 245480
@@ -21,6 +23,8 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
   let applyUsageEvidenceToInvocationSnapshot;
   let applyActiveSessionCapacityPin;
   let SessionChainStore;
+  let ContextEpochOwner;
+  let InMemoryContextEpochStore;
   let savedConfigs;
 
   function registerTestCat(contextWindow = MANUAL_WINDOW, defaultModel = 'gpt-5.6-sol', accountRef = 'codex-oauth') {
@@ -67,6 +71,8 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
     ({ resolveInvocationCapacitySnapshot, applyUsageEvidenceToInvocationSnapshot, applyActiveSessionCapacityPin } =
       await import('../dist/domains/cats/services/agents/invocation/invocation-capacity-snapshot.js'));
     ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
+    ({ ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js'));
+    ({ InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js'));
     savedConfigs = catRegistry.getAllConfigs();
   });
 
@@ -734,6 +740,11 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
         threadStore: null,
         apiUrl: 'http://127.0.0.1:3004',
         sessionChainStore: store,
+        // Clowder AI's F296 continuity layer owns the cold/resumed epoch before
+        // invokeSingleCat may cross the provider boundary. The upstream
+        // clowder-ai bridge predates that home contract, so intake exercises
+        // the real in-memory owner instead of bypassing the production seam.
+        contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
       };
 
       for (let round = 1; round <= 12; round += 1) {

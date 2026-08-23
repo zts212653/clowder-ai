@@ -14,6 +14,7 @@ export interface RecoverActiveLocalReviewVerdictInput {
 
 export type RecoverActiveLocalReviewVerdictResult =
   | { outcome: 'recovered'; lease: ActionSuccessorLease }
+  | { outcome: 'replayed'; lease: ActionSuccessorLease }
   | {
       outcome:
         | 'stale_generation'
@@ -39,7 +40,6 @@ export function recoverActiveLocalReviewVerdict(
   if (current.generation !== input.expectedGeneration) {
     return { outcome: 'stale_generation', lease: current };
   }
-  if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
   if (
     current.actionFamily !== 'review' ||
     current.successorSlot !== 'reviewer' ||
@@ -60,6 +60,13 @@ export function recoverActiveLocalReviewVerdict(
   ) {
     return { outcome: 'predecessor_mismatch', lease: current };
   }
+  if (current.status === 'completed') {
+    const settled = current.holderOutcomes[input.reviewerCatId];
+    return settled?.outcome === 'succeeded' && settled.evidenceRef === input.evidenceRef
+      ? { outcome: 'replayed', lease: current }
+      : { outcome: 'lease_not_active', lease: current };
+  }
+  if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
   if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'output_present', lease: current };
   if (Object.keys(current.completionCandidates).length > 0) return { outcome: 'candidate_present', lease: current };
   if (current.returnTransitions.length > 0) return { outcome: 'return_present', lease: current };

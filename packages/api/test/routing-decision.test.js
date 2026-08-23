@@ -65,13 +65,13 @@ describe('resolveRoutingDecisions — inline_mention', () => {
     assert.deepEqual(out, [{ action: 'skip', cat: 'codex', reason: 'depth' }]);
   });
 
-  test('skip:dedup_active when target already processing in InvocationQueue', async () => {
+  test('defers when target is already processing in InvocationQueue', async () => {
     const { resolveRoutingDecisions } = await import(PATH);
     const out = resolveRoutingDecisions(
       { type: 'inline_mention', cats: ['codex'], content: 'hi', callerCatId: 'opus' },
       ctx({ hasActiveAgent: (c) => c === 'codex' }),
     );
-    assert.deepEqual(out, [{ action: 'skip', cat: 'codex', reason: 'dedup_active' }]);
+    assert.deepEqual(out, [{ action: 'defer_queue', cat: 'codex' }]);
   });
 
   test('mark_replyto when cat already in pendingTail but NOT an original target', async () => {
@@ -109,7 +109,7 @@ describe('resolveRoutingDecisions — inline_mention', () => {
       ctx({ hasActiveAgent: (c) => c === 'codex' }),
     );
     assert.deepEqual(out, [
-      { action: 'skip', cat: 'codex', reason: 'dedup_active' },
+      { action: 'defer_queue', cat: 'codex' },
       { action: 'enqueue_worklist', cat: 'gemini' },
     ]);
   });

@@ -19,7 +19,6 @@ import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
@@ -32,11 +31,13 @@ import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AuthorizationCard } from './AuthorizationCard';
@@ -93,6 +94,7 @@ import { ContextualWorkspaceChrome } from './workspace/ContextualWorkspaceChrome
 import { FloatingTranscriptContainer } from './workspace/FloatingTranscriptContainer';
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { TranscriptPanel } from './workspace/TranscriptPanel';
+import { hydrateInvocationTrajectoryFromCurrentUrl } from './workspace/trajectory/trajectory-navigation';
 
 interface ChatContainerProps {
   threadId: string;
@@ -153,6 +155,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F264: the timeline is the durable authoring history. QueuePanel presents
   // custody/actions for the same message, but must not erase its user bubble.
   const messages = allMessages;
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
   const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
@@ -266,7 +271,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { clearTasks } = useTaskStore();
   const { cats, getCatById, refresh: refreshCats, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
-  usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useTeleport(); // F227: drive the Hub to a teleport target message (thread:teleport)
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
   // F284: Chat is the calm default. Typed workspace/transcript actions still
@@ -470,6 +474,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // setCurrentThread saves old thread state to map, restores new thread state.
   const setCurrentProject = useChatStore((s) => s.setCurrentProject);
   const storeThreads = useChatStore((s) => s.threads);
+  const sidebarRows = useSidebarProjectionStore((state) => state.rows);
   const setThreads = useChatStore((s) => s.setThreads);
   const handleSkipFirstRunQuest = useCallback(() => {
     // #707: Persist skip to localStorage so refreshing doesn't re-trigger
@@ -698,15 +703,18 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setCurrentThread,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // B1.1: Restore projectPath when thread or storeThreads change.
-  // storeThreads is populated by ThreadSidebar.loadThreads shortly after mount,
-  // so this covers both page refresh (threads arrive async) and thread switch.
   useEffect(() => {
-    const cached = storeThreads?.find((t) => t.id === threadId);
+    hydrateInvocationTrajectoryFromCurrentUrl();
+  }, []);
+
+  // Restore projectPath from the canonical Sidebar projection; the legacy store
+  // remains only as a compatibility fallback for non-Sidebar flows.
+  useEffect(() => {
+    const cached = sidebarRows.find((row) => row.id === threadId) ?? storeThreads?.find((t) => t.id === threadId);
     if (cached) {
       setCurrentProject(cached.projectPath || 'default');
     }
-  }, [threadId, storeThreads, setCurrentProject]);
+  }, [threadId, sidebarRows, storeThreads, setCurrentProject]);
 
   // F113-E: Fetch governance status for the current project (drives ProjectSetupCard)
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
@@ -888,6 +896,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     clearUnread(threadId);
   }, [threadId, clearUnread]);
 
+  useEffect(() => {
+    const syncVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', syncVisibility);
+    return () => document.removeEventListener('visibilitychange', syncVisibility);
+  }, []);
+
   const disconnectBottomChromeObserver = useCallback(() => {
     bottomChromeObserverRef.current?.disconnect();
     bottomChromeObserverRef.current = null;
@@ -931,11 +945,17 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   // F069-R5: Ack read cursor server-side. The backend finds the latest real message
   // and acks it atomically — no frontend ID guessing, no timing races with fetchHistory.
-  // Fires on thread entry AND when new messages arrive (messages.length changes),
-  // so switching away after receiving new messages still acks to the latest.
+  // Fires on visible thread entry, new bubbles, and queued -> delivered
+  // transitions. A mutable stream keeps one bubble, so message count alone
+  // cannot observe its final delivery boundary.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _messageCount = messages.length;
+  const _deliveredMessageCount = messages.reduce(
+    (count, message) => count + (message.deliveredAt === undefined ? 0 : 1),
+    0,
+  );
   useEffect(() => {
+    if (!documentVisible) return;
     armUnreadSuppression(threadId);
     apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
@@ -945,16 +965,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       .then(async (res) => {
         if (!res.ok) {
           settleUnreadAck(threadId, false);
+          useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
           return;
         }
         const payload = (await res.json()) as { caughtUp?: unknown };
-        settleUnreadAck(threadId, payload.caughtUp === true);
+        const caughtUp = payload.caughtUp === true;
+        settleUnreadAck(threadId, caughtUp);
+        if (!caughtUp) useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
+        void invalidateSidebarProjection();
       })
       .catch((err) => {
         settleUnreadAck(threadId, false);
+        useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
         console.debug('[F069] read ack failed:', err);
       });
-  }, [threadId, _messageCount, settleUnreadAck, armUnreadSuppression]);
+  }, [threadId, _messageCount, _deliveredMessageCount, documentVisible, settleUnreadAck, armUnreadSuppression]);
 
   const handleZoomToThread = useCallback(
     (tid: string) => {
@@ -976,6 +1001,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       } catch {
         // Ignore refresh errors — navigation is the priority
       }
+      void invalidateSidebarProjection();
       navigateToThread(questThreadId);
     },
     [navigateToThread, setThreads],

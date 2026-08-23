@@ -1,5 +1,6 @@
 'use client';
 
+import { MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 } from '@cat-cafe/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useMessageDisclosureState } from '@/components/message-disclosure-state';
@@ -483,6 +484,7 @@ export function CliOutputBlock({
               )}
               <div
                 data-context-quote-segment-id="stdout"
+                data-context-quote-projection-version={MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2}
                 style={{ padding: '8px 12px 10px 12px' }}
                 className="font-mono text-xs leading-relaxed cli-output-md"
               >

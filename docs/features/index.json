@@ -1713,7 +1713,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / alpha.6 is published and the owner-driven historical Minutes import plus idle-runtime heartbeat are on Host main; alpha.5 remains enabled+healthy with connected owner auth, and the next gate is alpha.6 adoption plus historical dogfood",
+      "status": "implementation / alpha.6 is deployed with connected owner auth; live dogfood exposed a Host restart/sleep recovery defect, whose repair is in verification before automatic-intake and duplicate-delivery acceptance",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
@@ -1725,7 +1725,7 @@
     {
       "id": "F294",
       "name": "Selective Message Bundles — 消息多选、选择性导出与跨 Thread 富文本转发",
-      "status": "in-progress / Phase A and Phase B implementation are merged, including PR #3720's bundle note, exact Rich Block, and exact CLI quote increment; AC-B1–B11 remain pending Alpha UAT, and Phase C remains | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "in-progress / Phase A/B complete and operator Alpha UAT accepted; only Phase C remains, waiting for F290's Collective public-projection implementation | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F294-selective-message-bundles.md"
     },
     {
@@ -1737,19 +1737,19 @@
     {
       "id": "F296",
       "name": "Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量",
-      "status": "in progress / Phase A complete；Phase B foundations B0–B2 landed + live；B3/B4 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "in progress / Phase A complete；Phase B foundations + B3a + B3b + B4a/B4b landed；B4c Alpha UAT 3/5 observed、2/5 unsupported | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F296-continuity-aware-context-injection.md"
     },
     {
       "id": "F297",
       "name": "Sidebar Projection Convergence — 服务端权威快照，前端单一写入",
-      "status": "in progress / Phase A done + Phase B server slice **merged** (PR #3748 @ `9d19ce085`, 2026-08-18) — Phase B server slice 全部 AC 闭合（AC-B2 规模 fixture + AC-D3 重复读取审计 2026-08-18 收口）；next: **Phase C 前端 authority boundary（用户可见 bug 仍未修复）** | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Phase B 实现**: Ragdoll (@fable5) | **Reviewer**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "done | **Completed**: 2026-08-21 | **Evolved from**: F081 | **Renewed CloseGate**: PASS by 小团团·Maine Coon (@codex-terra)，P1 deferred = 0（`0001787371427031-000209-64cae1d3`）；prior Luna verdict remains superseded by the working-order runtime counterexample | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1",
       "file": "F297-sidebar-projection-convergence.md"
     },
     {
       "id": "F298",
       "name": "Runtime Promise Durability（运行态承诺持久性收敛）",
-      "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
+      "status": "done | **Completed**: 2026-08-21 | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
       "file": "F298-runtime-promise-durability.md"
     },
     {
@@ -1763,6 +1763,36 @@
       "name": "Self-Sensing 首切片 — 家况可感知（Home-State Awareness）",
       "status": "spec | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1",
       "file": "F300-self-sensing-home-state-awareness.md"
+    },
+    {
+      "id": "F301",
+      "name": "Scoped Skill Sync — 当前 Worktree 快路径与显式 Fleet Repair",
+      "status": "done | **Owner**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P2",
+      "file": "F301-scoped-skill-sync.md"
+    },
+    {
+      "id": "F302",
+      "name": "Runtime-First Portable Governance — 零写入出征与可选项目治理",
+      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F302-runtime-first-portable-governance.md"
+    },
+    {
+      "id": "F303",
+      "name": "Design Gate 归一性加固 — 防止新增 consumer 另造规则",
+      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F303-design-gate-integrity.md"
+    },
+    {
+      "id": "F304",
+      "name": "Local Interaction Request Liveness — 后台重负载下前台创建不饿死",
+      "status": "phase-b-merged | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F304-local-interaction-request-liveness.md"
+    },
+    {
+      "id": "F305",
+      "name": "UI Design Gate Closure — 先看真页面",
+      "status": "spec / Experience Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "file": "F305-ui-design-gate-closure.md"
     }
   ]
 }

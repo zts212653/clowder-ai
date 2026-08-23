@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { ChatMessageRow } from '@/components/ChatMessageRow';
+import { CliOutputBlock } from '@/components/cli-output/CliOutputBlock';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { MessageActions } from '@/components/MessageActions';
+import { RichBlocks } from '@/components/rich/RichBlocks';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 
 const DENSITY_MESSAGE: ChatMessageData = {
@@ -14,6 +16,12 @@ const DENSITY_MESSAGE: ChatMessageData = {
   timestamp: 1_786_985_594_484,
   projectionSourceMessageIds: ['f294-density-message'],
 };
+
+const CLI_MARKDOWN_TABLE = [
+  '| Surface | Status | Meaning |',
+  '| --- | --- | --- |',
+  '| Hub Browser Preview | `no_matching_client` | 不属于本 thread 的修复责任 |',
+].join('\n');
 
 /**
  * F294 quote-plane + resting-density fixtures.
@@ -52,6 +60,67 @@ export default function F294QuotePlaneFixtures() {
         <div data-testid="f294-cross-row-bubble">
           <p>foo</p>
           <p>foo</p>
+        </div>
+      </MessageActions>
+
+      {/* Production CLI stdout is rendered as Markdown rather than raw preformatted text. The
+          browser therefore selects visible table cells while durable evidence must explicitly
+          name the readable projection instead of pretending those offsets belong to raw pipes. */}
+      <MessageActions
+        message={{
+          id: 'f294-cli-markdown-message',
+          type: 'assistant',
+          catId: 'codex-sol',
+          content: CLI_MARKDOWN_TABLE,
+          timestamp: 1_786_985_594_487,
+          projectionSourceMessageIds: ['f294-cli-markdown-message'],
+        }}
+        threadId="f294-quote-plane-fixtures"
+      >
+        <div data-testid="f294-cli-markdown-bubble">
+          <CliOutputBlock
+            events={[
+              {
+                id: 'f294-cli-markdown-text',
+                kind: 'text',
+                timestamp: 1_786_985_594_487,
+                content: CLI_MARKDOWN_TABLE,
+              },
+            ]}
+            status="done"
+            defaultExpanded
+          />
+        </div>
+      </MessageActions>
+
+      {/* Regression fixture: RichBlocks appends its own excluded forwarding dock after the card.
+          Selecting the card's final paragraph must not be mistaken for selecting that sibling UI. */}
+      <MessageActions
+        message={{
+          id: 'f294-rich-last-line-message',
+          type: 'assistant',
+          catId: 'codex-sol',
+          content: '卡片正文第一段\n\n已执行：最后一行仍然可以引用。',
+          timestamp: 1_786_985_594_486,
+          projectionSourceMessageIds: ['f294-rich-last-line-message'],
+        }}
+        threadId="f294-quote-plane-fixtures"
+      >
+        <div data-testid="f294-rich-last-line-bubble">
+          <RichBlocks
+            blocks={[
+              {
+                id: 'f294-rich-last-line-card',
+                kind: 'card',
+                v: 1,
+                title: '最后一行引用回归',
+                bodyMarkdown: '卡片正文第一段\n\n已执行：最后一行仍然可以引用。',
+              },
+            ]}
+            messageId="f294-rich-last-line-message"
+            sourceThreadId="f294-quote-plane-fixtures"
+            sourceMessageIds={['f294-rich-last-line-message']}
+          />
         </div>
       </MessageActions>
 

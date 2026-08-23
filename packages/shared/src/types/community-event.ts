@@ -39,6 +39,7 @@ export type CommunityEventKind =
   | 'case.cloud_review_observed'
   | 'case.review_ready'
   | 'case.reviewer_wake_delivered'
+  | 'case.review_verdict_submitted'
   | 'case.review_verdict_recorded'
   // Route validation events (F168 Phase F: target cat accepts/rejects routed issue)
   | 'case.route_validated'
@@ -189,6 +190,20 @@ export type ReviewDeliveryOutcome =
       readonly createdAt: number;
     };
 
+export interface PendingExternalReviewVerdict {
+  readonly fingerprint: string;
+  readonly headSha: string;
+  readonly headGeneration: number;
+  readonly verdict: 'approved' | 'changes_requested' | 'commented';
+  readonly summary: string;
+  readonly userNudgeRequired: boolean;
+  readonly delivery: ReviewDeliveryOutcome;
+  readonly principal: { readonly catId: string; readonly threadId: string };
+  readonly actionLeaseRef: { readonly leaseId: string; readonly generation: number } | null;
+  readonly verificationReason: 'ci_not_observed' | 'ci_pending' | 'cloud_review_required' | 'cloud_review_running';
+  readonly submittedAt: number;
+}
+
 export interface ExternalReviewAggregate {
   readonly mode: ExternalReviewMode;
   readonly cloudPolicy: CloudReviewPolicy;
@@ -224,6 +239,14 @@ export interface ExternalReviewAggregate {
     readonly deliveredAt?: number;
   } | null;
   readonly delivery: ReviewDeliveryOutcome | null;
+  /**
+   * Monotonic within one HEAD generation. Advances only when a pending reviewer
+   * intent is invalidated, so a later accepted resubmission gets a new durable
+   * event identity while transport retries keep the original identity.
+   */
+  readonly verdictSubmissionEpoch: number;
+  /** One reviewer fact awaiting the next canonical readiness observation. */
+  readonly pendingVerdict: PendingExternalReviewVerdict | null;
   readonly reviewerCatId: string | null;
   readonly reviewerThreadId: string | null;
   readonly actionLeaseRef: {

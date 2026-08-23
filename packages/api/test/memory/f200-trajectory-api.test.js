@@ -74,6 +74,19 @@ describe('F200 Phase D — trajectory query helpers', () => {
     assert.equal(verified[0].outputVerified, true);
   });
 
+  it('resolves an exact invocation without returning neighboring task trajectories', () => {
+    seedTrajectory('t1', { invocationId: 'inv-target' });
+    seedTrajectory('t2', { invocationId: 'inv-neighbor' });
+    const svc = new TrajectoryQueryService(db);
+
+    const results = svc.listRecent({ invocationId: 'inv-target', limit: 10 });
+
+    assert.deepEqual(
+      results.map((trajectory) => trajectory.trajectoryId),
+      ['t1'],
+    );
+  });
+
   it('filters by days window', () => {
     const now = Date.now();
     seedTrajectory('t1', { createdAt: now });

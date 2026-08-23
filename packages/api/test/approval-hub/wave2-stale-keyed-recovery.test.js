@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { proposedReviewAction } from './helpers.js';
 
 describe('Wave 2 stale keyed recovery', () => {
-  it('F193 recovers an existing staged dispatch proposal before stale callback rejection', async () => {
+  it('F193 rejects the replaced attempt while a newer attempt can recover its staged dispatch proposal', async () => {
     const { ApprovalIngress } = await import('../../dist/domains/approval-hub/ApprovalIngress.js');
     const { InvocationRegistry } = await import(
       '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -73,12 +73,26 @@ describe('Wave 2 stale keyed recovery', () => {
       assert.ok(stagedProposal, 'first attempt must leave a recoverable staged proposal');
       assert.equal((await store.getPublication(stagedProposal.proposalId))?.state, 'staged');
 
-      await registry.create('user-1', 'opus', source.id);
+      const replacementAuth = await registry.create('user-1', 'opus', source.id);
+
+      const replacedRetry = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
+        payload,
+      });
+
+      assert.equal(replacedRetry.statusCode, 401);
+      assert.equal(replacedRetry.json().reason, 'replaced');
+      assert.equal((await store.getPublication(stagedProposal.proposalId))?.state, 'staged');
 
       const retry = await app.inject({
         method: 'POST',
         url: '/api/callbacks/post-message',
-        headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
+        headers: {
+          'x-invocation-id': replacementAuth.invocationId,
+          'x-callback-token': replacementAuth.callbackToken,
+        },
         payload,
       });
 
@@ -91,7 +105,7 @@ describe('Wave 2 stale keyed recovery', () => {
     }
   });
 
-  it('F221 recovers an existing staged taste proposal before stale callback rejection', async () => {
+  it('F221 rejects the replaced attempt while a newer attempt can recover its staged taste proposal', async () => {
     const { ApprovalIngress } = await import('../../dist/domains/approval-hub/ApprovalIngress.js');
     const { InvocationRegistry } = await import(
       '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -151,12 +165,26 @@ describe('Wave 2 stale keyed recovery', () => {
       assert.ok(stagedProposal, 'first attempt must leave a recoverable staged proposal');
       assert.equal((await store.getPublication(stagedProposal.id))?.state, 'staged');
 
-      await registry.create('user-1', 'opus', thread.id);
+      const replacementAuth = await registry.create('user-1', 'opus', thread.id);
+
+      const replacedRetry = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/propose-taste',
+        headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
+        payload,
+      });
+
+      assert.equal(replacedRetry.statusCode, 401);
+      assert.equal(replacedRetry.json().reason, 'replaced');
+      assert.equal((await store.getPublication(stagedProposal.id))?.state, 'staged');
 
       const retry = await app.inject({
         method: 'POST',
         url: '/api/callbacks/propose-taste',
-        headers: { 'x-invocation-id': staleAuth.invocationId, 'x-callback-token': staleAuth.callbackToken },
+        headers: {
+          'x-invocation-id': replacementAuth.invocationId,
+          'x-callback-token': replacementAuth.callbackToken,
+        },
         payload,
       });
 

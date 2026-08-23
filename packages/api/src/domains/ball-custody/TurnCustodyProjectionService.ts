@@ -7,7 +7,6 @@ import {
   exactStructuredWakeIndex,
   findWakeTerminal,
   releasedStructuredWake,
-  siblingHandedForMessage,
   supersededBeforeAdoption,
 } from './managed-hold-supersession.js';
 
@@ -187,33 +186,6 @@ export class TurnCustodyProjectionService {
         return {
           state: 'covered_empty',
           evidenceRefs: [`${wake.protocol}:${wake.subjectKey}`, `settled:${settled.sourceEventId}`],
-        };
-      }
-    }
-    // F167 fan-out: sibling handed events for the same trigger message mean the
-    // ball was broadcast, not transferred. No single-holder dispatch obligation
-    // exists for this wake — not for the non-final targets (holder mismatch),
-    // and not for the final target either (its disposition would be
-    // indistinguishable from a single-chain handoff that never happened).
-    // Fan-out accountability lives in queue entry settlement, not the ball.
-    //
-    // This check MUST precede the subject-level state gate below. Under
-    // fan-out the single-ball projection oscillates between targets (dead
-    // after a sibling's invocation.died, resolved after a disposition,
-    // parked after a handed_cvo handoff), and none of those states can
-    // un-broadcast the trigger. Checking state first made every queue retry
-    // of a fan-out entry open as unknown_legacy and die at the stop gate
-    // (thread_mrqb0yfauece1tmm recurrence, 2026-08-19/20: 8 retries).
-    if (wake.protocol === 'dispatch') {
-      const sibling = siblingHandedForMessage(events, wake.handoff.messageId, wake.holderCatId);
-      if (sibling) {
-        return {
-          state: 'covered_empty',
-          evidenceRefs: [
-            `${wake.protocol}:${wake.subjectKey}`,
-            wake.handoff.sourceEventId,
-            `fanout:${sibling.sourceEventId}`,
-          ],
         };
       }
     }

@@ -12,11 +12,16 @@
  */
 
 export const CALLBACK_AUTH_FAILURE_REASONS = [
-  'expired',
   'invalid_token',
   'unknown_invocation',
   'missing_creds',
   'stale_invocation',
+  'completed',
+  'failed',
+  'interrupted',
+  'replaced',
+  'revoked',
+  'canceled',
   'agent_key_expired',
   'agent_key_revoked',
   'agent_key_unknown',

@@ -6,7 +6,9 @@
  *   running record / managed command / running child），与请求集合求交，把工作量压到 O(A) 而非 O(T)。
  * - **定性**：交给 `ActiveExecutionService.resolveWorkingPresence`。本模块**不复制**任何 liveness
  *   规则，不读 record/draft/turn-execution/task store，因此不构成第二份 classifier。
- * - **翻译**：把 working 结果翻成 Sidebar 的 presentation-ready C10。
+ * - **终态证据**：只读 InvocationRecord 的最新 terminal pointer；participant activity
+ *   与 session-open 状态都不是完成证据。
+ * - **翻译**：把 lifecycle 结果翻成 Sidebar 的 presentation-ready C10。
  *
  * R3 P1-1/P1-2 的教训写在这里：定性通道以前只有 live-invocation classifier 一条，
  * managed command 与 standalone running child 提名得进候选、却没人能给它们定性，
@@ -19,12 +21,18 @@
 export interface SidebarPresenceValue {
   readonly status: 'idle' | 'working' | 'done' | 'error';
   readonly cats?: readonly string[];
+  readonly activeSince?: number;
 }
 
 /** 一次请求的 owner-truth 物化视图（domain 侧 `ActiveExecutionSnapshot` 的结构性契约）。 */
 export interface SidebarActiveExecutionSnapshot {
   readonly threadIds: readonly string[];
   readonly complete: boolean;
+}
+
+export interface SidebarTerminalExecution {
+  readonly status: 'succeeded' | 'failed' | 'canceled';
+  readonly successfulCatIds?: readonly string[];
 }
 
 export interface SidebarPresenceSourceDeps<TSnapshot extends SidebarActiveExecutionSnapshot> {
@@ -44,22 +52,27 @@ export interface SidebarPresenceSourceDeps<TSnapshot extends SidebarActiveExecut
     threadId: string,
     userId: string,
     snapshot: TSnapshot,
-  ): Promise<{ readonly catIds: readonly string[]; readonly complete: boolean }>;
+  ): Promise<{ readonly catIds: readonly string[]; readonly activeSince?: number; readonly complete: boolean }>;
+  /** Batch lifecycle witness; absent means no indexed terminal evidence, never "infer done". */
+  listLatestTerminalExecutions(
+    threadIds: readonly string[],
+    userId: string,
+  ): Promise<Map<string, SidebarTerminalExecution>> | Map<string, SidebarTerminalExecution>;
 }
 
 export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecutionSnapshot>(
   deps: SidebarPresenceSourceDeps<TSnapshot>,
 ): {
-  getActivePresence(threadIds: readonly string[], userId: string): Promise<Map<string, SidebarPresenceValue>>;
+  getPresence(threadIds: readonly string[], userId: string): Promise<Map<string, SidebarPresenceValue>>;
 } {
   return {
-    async getActivePresence(threadIds, userId) {
+    async getPresence(threadIds, userId) {
       const presence = new Map<string, SidebarPresenceValue>();
       if (threadIds.length === 0) return presence;
 
       const requested = new Set(threadIds);
       // 每请求一次：候选发现 + owner truth 都在这一次读里。
-      // 整体失败 = 对"谁在跑"零知识。fail-closed：全部标 idle，调用方进不了终态回落，
+      // 整体失败 = 对"谁在跑"零知识。fail-closed：全部标 idle，调用方进不了终态投影，
       // 绝不可能把 working 谎报成 done/error。
       const discovery = await deps.buildSnapshot(userId).catch(() => null);
       if (!discovery) {
@@ -70,7 +83,7 @@ export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecu
 
       /**
        * R3 P1-3 fail-closed：知识不完整时，"不在 union 里"**不等于**"没在跑"。
-       * 显式把其余行标成 idle，调用方就进不了 participant-activity 终态回落。
+       * 显式把其余行标成 idle，调用方就进不了 InvocationRecord 终态投影。
        * 宁可少显示，绝不谎报终态。
        */
       const sealed = new Set<string>();
@@ -81,8 +94,8 @@ export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecu
         }
       };
 
-      if (candidates.length === 0) {
-        sealAll(discovery.complete);
+      if (candidates.length === 0 && !discovery.complete) {
+        sealAll(false);
         return presence;
       }
 
@@ -92,7 +105,7 @@ export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecu
             return { threadId, working: await deps.resolveWorkingPresence(threadId, userId, discovery) };
           } catch {
             // 定性抛错 = 对**这个已被提名的候选** 零知识。它恰恰是最可能真在跑的行，
-            // 放它去走终态回落就是 false terminal。按同一条铁律封成 idle。
+            // 放它去走终态投影就是 false terminal。按同一条铁律封成 idle。
             return { threadId, working: { catIds: [] as readonly string[], complete: false } };
           }
         }),
@@ -100,16 +113,43 @@ export function createSidebarPresenceSource<TSnapshot extends SidebarActiveExecu
 
       for (const { threadId, working } of classified) {
         if (working.catIds.length > 0) {
-          presence.set(threadId, { status: 'working', cats: [...new Set(working.catIds)] });
+          presence.set(threadId, {
+            status: 'working',
+            cats: [...new Set(working.catIds)],
+            ...(working.activeSince !== undefined ? { activeSince: working.activeSince } : {}),
+          });
           continue;
         }
-        // 定性不完整且没拿到任何 cat：不知道它在不在跑 → 封成 idle，不交给终态回落。
+        // 定性不完整且没拿到任何 cat：不知道它在不在跑 → 封成 idle，不交给终态投影。
         if (!working.complete) {
           presence.set(threadId, { status: 'idle' });
           sealed.add(threadId);
         }
       }
       sealAll(discovery.complete);
+      if (!discovery.complete) return presence;
+
+      const terminalNeeded = threadIds.filter((threadId) => !presence.has(threadId));
+      let terminal = new Map<string, SidebarTerminalExecution>();
+      if (terminalNeeded.length > 0) {
+        try {
+          terminal = await deps.listLatestTerminalExecutions(terminalNeeded, userId);
+        } catch {
+          // Unknown terminal evidence is idle.  It must never fall back to conversation activity.
+        }
+      }
+
+      for (const threadId of terminalNeeded) {
+        const execution = terminal.get(threadId);
+        if (execution?.status === 'succeeded' && (execution.successfulCatIds?.length ?? 0) > 0) {
+          presence.set(threadId, {
+            status: 'done',
+            cats: [...new Set(execution.successfulCatIds)],
+          });
+        } else if (execution?.status === 'failed') {
+          presence.set(threadId, { status: 'error' });
+        }
+      }
       return presence;
     },
   };

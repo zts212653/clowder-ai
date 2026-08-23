@@ -30,6 +30,45 @@ export type PresentationKind = 'directive' | 'state' | 'pointer' | 'omit';
 /** What an upstream Opportunity owner already capped this envelope at. */
 export type OpportunityEpistemicCeiling = 'mechanical_observation' | 'state' | 'pointer';
 
+export type PresentationSurface = 'native_l0' | 'dynamic_context' | 'pointer' | 'deferred_queue';
+
+export type OpportunityConsumerScope =
+  | Readonly<{
+      kind: 'invocation';
+      ownerUserId: string;
+      threadId: string;
+      invocationId: string;
+    }>
+  | Readonly<{
+      kind: 'cat';
+      ownerUserId: string;
+      threadId: string;
+      consumerCatId: string;
+    }>;
+
+/**
+ * The content-free admission facts F296 is allowed to consume from an
+ * Opportunity owner. This is deliberately metadata-only: no disposition,
+ * canonical state, candidate body, or producer-owned business truth fits here.
+ */
+export interface AdmittedOpportunityPresentationV1 {
+  readonly opportunityId: string;
+  readonly opportunityKind: 'write' | 'recall';
+  readonly producerOwner: string;
+  readonly consumerScope: OpportunityConsumerScope;
+  readonly entryVersion: string;
+  readonly subjectKey: string;
+  readonly asOf: SourceRevision;
+  readonly sourceRefs: readonly string[];
+  readonly eligibleSurfaces: readonly PresentationSurface[];
+  readonly presentationPolicyRef: string;
+  readonly tokenBudget: number;
+  readonly dedupeKey: string;
+  readonly expiresAt: number;
+  readonly invalidators: readonly InvalidatorRef[];
+  readonly epistemicCeiling: OpportunityEpistemicCeiling;
+}
+
 interface PresentationIdentity {
   readonly subjectKey: string;
   readonly asOf: SourceRevision;
@@ -95,6 +134,24 @@ export interface PresentationCandidate {
   readonly requested: PresentationKind;
   /** Present only for admitted Opportunity envelopes. */
   readonly epistemicCeiling?: OpportunityEpistemicCeiling;
+}
+
+/**
+ * Typed handoff from a dynamic producer to the provider presentation boundary.
+ * The producer supplies bytes plus a candidate; only the central mapper may turn
+ * that candidate into a ContextPresentation, and only the ledger may admit it.
+ */
+export interface ContextPresentationEnvelope<TReceipt> {
+  readonly candidate: PresentationCandidate;
+  /** Proof that the producer owner admitted this opportunity for presentation. */
+  readonly admission: AdmittedOpportunityPresentationV1;
+  /**
+   * Bytes are keyed by the mapper's effective decision. A producer may offer
+   * weaker renderings, but the provider boundary selects exactly one after
+   * mapping; it never forwards a producer's preferred body unchanged.
+   */
+  readonly segments: Readonly<Partial<Record<Exclude<PresentationKind, 'omit'>, string>>>;
+  readonly receipt: TReceipt;
 }
 
 /**

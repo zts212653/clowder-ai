@@ -8,10 +8,14 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 /** Minimal mock threadStore for auth tests */
-function mockThreadStore(threads = {}) {
+function mockThreadStore(threads = {}, indexedByUser = {}) {
   return {
     get: async (id) => threads[id] ?? null,
-    list: async () => Object.values(threads),
+    list: async (userId) =>
+      Object.values(threads).filter(
+        (thread) =>
+          thread.createdBy === userId || thread.id === 'default' || (indexedByUser[userId] ?? []).includes(thread.id),
+      ),
     create: async () => {},
     update: async () => null,
     delete: async () => false,
@@ -214,6 +218,41 @@ describe('Session Chain Routes', () => {
     });
 
     assert.equal(res.statusCode, 403);
+  });
+
+  it('GET /api/threads/:threadId/sessions allows a user-indexed system thread and filters records by user', async () => {
+    const store = await setup(
+      mockThreadStore(
+        {
+          thread_eval_friction: { id: 'thread_eval_friction', createdBy: 'system' },
+        },
+        { 'owner-user': ['thread_eval_friction'] },
+      ),
+    );
+    store.create({
+      cliSessionId: 'cli-indexed-owner',
+      threadId: 'thread_eval_friction',
+      catId: 'opus',
+      userId: 'owner-user',
+    });
+    store.create({
+      cliSessionId: 'cli-indexed-other',
+      threadId: 'thread_eval_friction',
+      catId: 'codex',
+      userId: 'other-user',
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread_eval_friction/sessions',
+      headers: { 'x-cat-cafe-user': 'owner-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(
+      res.json().sessions.map((session) => session.cliSessionId),
+      ['cli-indexed-owner'],
+    );
   });
 
   // --- Normal happy-path tests (with identity) ---

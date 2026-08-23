@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { shouldAcceptAutoOpen } from '@/hooks/usePreviewAutoOpen';
+import { shouldAcceptAutoOpen } from '@/hooks/preview-auto-open-delivery';
 import { useChatStore } from '@/stores/chatStore';
 
 describe('preview auto-open store', () => {

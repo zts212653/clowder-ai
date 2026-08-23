@@ -18,6 +18,13 @@ import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-sess
 import { backfillBoundSessionHistory } from '../domains/cats/services/session/BoundSessionHistoryImporter.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
+import {
+  canReadThreadRecord,
+  filterThreadRecords,
+  resolveThreadAccess,
+  threadAccessDeniedBody,
+  threadRecordAccessDeniedBody,
+} from '../domains/cats/services/session/thread-access-policy.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type {
   ISessionChainStore,
@@ -297,9 +304,14 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
 
     const { threadId } = request.params;
     const thread = await threadStore.get(threadId);
-    if (!canAccessThread(thread, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'sessions', action: 'list' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
     }
 
     const { catId } = request.query;
@@ -317,19 +329,15 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       const sessions = await sessionChainStore.getChain(
         effectiveCatId as CatId,
         threadId,
-        isSharedDefaultThread(thread) ? userId : undefined,
+        access.scope === 'user' ? userId : undefined,
       );
-      const visibleSessions = isSharedDefaultThread(thread)
-        ? sessions.filter((session) => session.userId === userId)
-        : sessions;
+      const visibleSessions = filterThreadRecords(access, sessions);
       return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
     }
 
-    // No catId filter at all (hub UI god-view) — default thread stays user-scoped.
+    // No catId filter at all (hub UI god-view) — shared system threads stay user-scoped.
     const sessions = await sessionChainStore.getChainByThread(threadId);
-    const visibleSessions = isSharedDefaultThread(thread)
-      ? sessions.filter((session) => session.userId === userId)
-      : sessions;
+    const visibleSessions = filterThreadRecords(access, sessions);
     return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
   });
 
@@ -354,9 +362,17 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessSessionRecord(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'sessions', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
     return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));

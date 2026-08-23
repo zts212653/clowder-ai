@@ -42,6 +42,13 @@ export type ManagedCommandWakeTriggerOutcome = 'dispatched' | 'enqueued' | 'full
 
 export type ManagedCommandWakeEventCarrier =
   | { state: 'missing' | 'pending' | 'orphaned' }
+  | {
+      state: 'failed';
+      attemptId: string;
+      attemptSequence: number;
+      invocationId?: string;
+      errorCode?: string;
+    }
   | { state: 'handled'; invocationId?: string }
   | { state: 'terminal'; reason: ManagedCommandWakeCarrierTerminalReason };
 
@@ -66,6 +73,20 @@ export function resolveManagedCommandWakeEventCarrier(
   if (custody.pendingTargetCats.includes(expected.catId as CatId)) {
     if ('activeQueueEntryId' in expected && expected.activeQueueEntryId !== custody.entryId) {
       return { state: 'orphaned' };
+    }
+    if (custody.failedByCatIds.includes(expected.catId as CatId)) {
+      const failedAttempt = (custody.targetAttempts ?? [])
+        .filter((attempt) => attempt.targetCatId === expected.catId && attempt.state === 'failed')
+        .sort((left, right) => left.sequence - right.sequence)
+        .at(-1);
+      if (failedAttempt) {
+        return {
+          state: 'failed',
+          attemptId: failedAttempt.id,
+          attemptSequence: failedAttempt.sequence,
+          ...(failedAttempt.invocationId ? { invocationId: failedAttempt.invocationId } : {}),
+        };
+      }
     }
     return { state: 'pending' };
   }
@@ -112,6 +133,15 @@ export interface ManagedCommandWakeRecoveryDeps {
     catId: string;
     messageId: string;
   }) => ManagedCommandWakeEventCarrier | Promise<ManagedCommandWakeEventCarrier>;
+  /** Retry one exact failed Queue target; the implementation must append a durable attempt fence before execution. */
+  readonly retryEventCarrier?: (input: {
+    taskId: string;
+    threadId: string;
+    userId: string;
+    catId: string;
+    messageId: string;
+    attemptId: string;
+  }) => 'retried' | 'not_retryable' | 'unavailable' | Promise<'retried' | 'not_retryable' | 'unavailable'>;
   readonly now?: () => number;
   readonly dispatchedCarrierGraceMs?: number;
   readonly wakeSlaMs?: number;

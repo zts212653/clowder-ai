@@ -14,8 +14,8 @@ import { OfficialPluginInstallError } from '../domains/plugin/official-package-e
 import type { OfficialPluginPackageInstaller } from '../domains/plugin/official-package-installer.js';
 import type { OfficialPluginAuthPort } from '../domains/plugin/official-plugin-auth.js';
 import type { OfficialPluginHistoryImportPort } from '../domains/plugin/official-plugin-history-import.js';
+import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
 import { registerOfficialPluginHistoryRoutes } from './plugin-official-history-routes.js';
-import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-routes.js';
 
 interface OfficialPluginRouteOptions {
   readonly inventory: PluginInventoryStore;

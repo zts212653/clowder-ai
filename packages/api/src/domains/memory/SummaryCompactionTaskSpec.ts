@@ -121,8 +121,8 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
     run: {
       overlap: 'skip',
       timeoutMs: 120_000,
-      async execute(state: SummarySignal, _subjectKey: string, _ctx: ExecuteContext) {
-        await processThread(state, deps, config);
+      async execute(state: SummarySignal, _subjectKey: string, ctx: ExecuteContext) {
+        await processThread(state, deps, config, ctx.signal);
       },
     },
     state: { runLedger: 'sqlite' },

@@ -123,7 +123,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 vi.mock('@/utils/sidebar-thread-snapshot', () => ({
-  refreshSidebarThreadSnapshot: () => mockRefreshSidebarThreadSnapshot(),
+  invalidateSidebarProjection: () => mockRefreshSidebarThreadSnapshot(),
 }));
 
 // Mock game reconnect
@@ -299,6 +299,20 @@ describe('useSocket reconnect catch-up (#276 intake)', () => {
           (listener as () => void)();
         }
       });
+      expect(mockRefreshSidebarThreadSnapshot).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates the canonical sidebar snapshot when the document becomes visible', () => {
+      const callbacks: SocketCallbacks = { onMessage: vi.fn(), onIntentMode: vi.fn() };
+      act(() => {
+        root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-1' }));
+      });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
       expect(mockRefreshSidebarThreadSnapshot).toHaveBeenCalledTimes(1);
     });
   });

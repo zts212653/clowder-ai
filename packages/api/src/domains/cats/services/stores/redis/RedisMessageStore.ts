@@ -28,6 +28,9 @@ import type {
   OwnerComposerDraft,
   PutOwnerComposerDraftInput,
   PutOwnerComposerDraftResult,
+  QueueAdmissionPrepareResult,
+  QueueCustodyAdmissionInitializeResult,
+  QueueCustodyAdmissionIntent,
   QueueCustodyInitializeResult,
   QueueCustodyTransitionInput,
   QueueCustodyTransitionResult,
@@ -58,8 +61,10 @@ import {
 } from '../ports/queued-message-custody.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import {
+  isDurableOwnerReadEvidence,
   isSystemUserMessage,
   isTimelinePublished,
+  passesManagedHoldViewerBoundary,
   resolveDeliveryTimelineScore,
   resolveThreadMessageVisibility,
 } from '../visibility.js';
@@ -78,6 +83,7 @@ import {
   safeParseMetadata,
   safeParsePluginMessage,
   safeParseQueueCustody,
+  safeParseQueueCustodyAdmission,
   safeParseToolEvents,
   serializeExtra,
 } from './redis-message-parsers.js';
@@ -121,9 +127,49 @@ if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
 end
 local existing = redis.call('HGET', KEYS[1], 'queueCustody')
 if existing and existing ~= '' then
+  redis.call('HDEL', KEYS[1], 'queueCustodyAdmission')
   return 0
 end
 redis.call('HSET', KEYS[1], 'queueCustody', ARGV[1], 'queueCustodyRevision', ARGV[2])
+redis.call('HDEL', KEYS[1], 'queueCustodyAdmission')
+return 1
+`;
+
+const INITIALIZE_QUEUE_CUSTODY_ADMISSION_LUA = `
+local messageId = redis.call('HGET', KEYS[1], 'id')
+if not messageId then
+  return -1
+end
+if redis.call('HGET', KEYS[1], 'deliveryStatus') ~= 'queued' then
+  return -2
+end
+local custody = redis.call('HGET', KEYS[1], 'queueCustody')
+if custody and custody ~= '' then
+  return -3
+end
+local existing = redis.call('HGET', KEYS[1], 'queueCustodyAdmission')
+if existing and existing ~= '' then
+  if existing == ARGV[1] then return 0 end
+  return -3
+end
+redis.call('HSET', KEYS[1], 'queueCustodyAdmission', ARGV[1])
+return 1
+`;
+
+const PREPARE_QUEUE_ADMISSION_LUA = `
+local messageId = redis.call('HGET', KEYS[1], 'id')
+if not messageId then
+  return -1
+end
+local deliveryStatus = redis.call('HGET', KEYS[1], 'deliveryStatus')
+if deliveryStatus == 'queued' then
+  return 0
+end
+local custody = redis.call('HGET', KEYS[1], 'queueCustody')
+if deliveryStatus or (custody and custody ~= '') then
+  return -2
+end
+redis.call('HSET', KEYS[1], 'deliveryStatus', 'queued')
 return 1
 `;
 
@@ -793,6 +839,7 @@ export class RedisMessageStore {
     const sourceField = parseConnectorSourceField(data.source);
     const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
     const parsedQueueCustody = safeParseQueueCustody(data.queueCustody);
+    const parsedQueueCustodyAdmission = safeParseQueueCustodyAdmission(data.queueCustodyAdmission);
     const parsedRecall = safeParseMessageRecall(data.recall);
     const deletedAt = data.deletedAt ? parseInt(data.deletedAt, 10) : undefined;
     return {
@@ -820,6 +867,7 @@ export class RedisMessageStore {
       ...(data.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(data.timelineOrderAt) } : {}),
       ...(data.deliveryStatus ? { deliveryStatus: data.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
       ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
+      ...(parsedQueueCustodyAdmission ? { queueCustodyAdmission: parsedQueueCustodyAdmission } : {}),
       ...(parsedRecall ? { recall: parsedRecall } : {}),
       ...(parsedSource ? { source: parsedSource } : {}),
       ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),
@@ -1179,7 +1227,7 @@ export class RedisMessageStore {
       key,
       n,
       userId ? (m) => m.userId === userId || isSystemUserMessage(m) : undefined,
-      resolveThreadMessageVisibility(options),
+      resolveThreadMessageVisibility(options, userId),
     );
   }
 
@@ -1197,6 +1245,9 @@ export class RedisMessageStore {
       for (const msg of messages) {
         if (msg.deletedAt) continue;
         if (msg.deliveryStatus === 'canceled') continue;
+        if (!passesManagedHoldViewerBoundary(msg, userId)) {
+          continue;
+        }
         if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
         result.push(msg);
         if (result.length >= n) break;
@@ -1280,7 +1331,7 @@ export class RedisMessageStore {
     // 3. Chunked WITHSCORES read from visibility ZSET: filter-then-limit
     // #1269 R9 P1-1: caller-appropriate visibility predicate — respects
     // includeQueuedCatMessages option (default: isDelivered only).
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
     const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
     const result: StoredMessage[] = [];
     const staleIds: string[] = [];
@@ -1355,7 +1406,7 @@ export class RedisMessageStore {
 
     const maxResults = limit && limit > 0 ? limit : Number.MAX_SAFE_INTEGER;
     const chunkSize = Math.max(50, Math.min(maxResults, 200));
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
     const result: StoredMessage[] = [];
     let offset = 0;
 
@@ -1422,14 +1473,20 @@ export class RedisMessageStore {
    * #1200 §8.7: Get the latest visible cursor for a thread.
    *
    * Reverse chunked scan of the visibility ZSET: ZREVRANGE WITHSCORES from the
-   * top, hydrate, apply the SAME filter chain as getByThreadAfter (tombstone-keep /
-   * null-skip / canceled-skip / isDelivered), return the FIRST live member.
+   * top, hydrate, apply the requested evidence predicate, and return the FIRST
+   * live member.
    *
    * Returns {cursor: v2 token, messageId: raw ID} or null if no live messages.
-   * Used by public read-state routes (mark-all, read/latest) where time-latest ≠
-   * visibility-latest once late delivery exists.
+   * Read-state routes select durable owner-read evidence; freshness consumers
+   * keep the published timeline frontier.
    */
-  async getLatestVisibleCursor(threadId: string): Promise<{ cursor: string; messageId: string } | null> {
+  async getLatestVisibleCursor(
+    threadId: string,
+    options?: {
+      readonly evidence?: 'timeline_visible' | 'durable_owner_read';
+      readonly viewerUserId?: string;
+    },
+  ): Promise<{ cursor: string; messageId: string } | null> {
     await this.ensureVisibilityMigrated(threadId);
     const visKey = MessageKeys.threadVisibility(threadId);
     const CHUNK = 20;
@@ -1455,9 +1512,10 @@ export class RedisMessageStore {
           staleIds.push(id);
           continue;
         }
-        // #1269: include timeline-published queued cat speech (has visibilitySeq
-        // since append). Skip non-published and soft-deleted messages.
-        if (!isTimelinePublished(msg)) continue;
+        const eligible =
+          options?.evidence === 'durable_owner_read' ? isDurableOwnerReadEvidence(msg) : isTimelinePublished(msg);
+        if (!eligible) continue;
+        if (!passesManagedHoldViewerBoundary(msg, options?.viewerUserId)) continue;
         if (msg.deletedAt) continue;
 
         // Found the latest visible message — build v2 cursor
@@ -1534,7 +1592,7 @@ export class RedisMessageStore {
    * Stops when `maxCollect` published messages are collected or ZSET exhausted.
    *
    * #1269 R9 P1-1: visibilityPredicate is caller-supplied — getByThreadAfter
-   * passes resolveThreadMessageVisibility(options), mention scans pass
+   * passes resolveThreadMessageVisibility(options, userId), mention scans pass
    * isTimelinePublished. This keeps canonical position allocation independent
    * from reader eligibility.
    */
@@ -1634,7 +1692,7 @@ export class RedisMessageStore {
       // (tombstone-keep / null-skip / canceled-skip / visibilityPredicate). Parity with
       // Memory store: both stores return tombstones in getByThreadAfter.
       // #1269 R9 P1-1: caller-supplied visibilityPredicate replaces hardcoded filter.
-      // getByThreadAfter passes resolveThreadMessageVisibility(options) (option-aware);
+      // getByThreadAfter passes resolveThreadMessageVisibility(options, userId) (option-aware);
       // mention scans pass isTimelinePublished (always include published cat speech).
       // Hidden queued work is excluded by all predicates.
       if (!visibilityPredicate(msg)) continue;
@@ -1661,7 +1719,7 @@ export class RedisMessageStore {
     const n = limit ?? DEFAULT_LIMIT;
     const key = MessageKeys.thread(threadId);
     const userFilter = userId ? (m: StoredMessage) => m.userId === userId || isSystemUserMessage(m) : undefined;
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
 
     if (!beforeId) {
       // F117: Chunked desc scan — collect N delivered, scan until full or exhausted
@@ -1706,7 +1764,7 @@ export class RedisMessageStore {
     const userFilter = userId
       ? (message: StoredMessage) => message.userId === userId || isSystemUserMessage(message)
       : undefined;
-    const isVisible = resolveThreadMessageVisibility(options);
+    const isVisible = resolveThreadMessageVisibility(options, userId);
     const result: StoredMessage[] = [];
     let scannedCount = 0;
     let storageRoundTrips = 0;
@@ -2103,6 +2161,40 @@ export class RedisMessageStore {
     return { ...message, deliveryTransitioned: true };
   }
 
+  async prepareQueueAdmission(id: string): Promise<QueueAdmissionPrepareResult> {
+    const outcome = Number(await this.redis.eval(PREPARE_QUEUE_ADMISSION_LUA, 1, MessageKeys.detail(id)));
+    if (outcome === -1) return { kind: 'not_found' };
+    if (outcome === -2) return { kind: 'conflict' };
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    if (outcome === 0) return { kind: 'existing', message };
+    if (outcome !== 1) throw new Error(`unexpected queue admission prepare result: ${outcome}`);
+    return { kind: 'prepared', message };
+  }
+
+  async initializeQueueCustodyAdmission(
+    id: string,
+    admission: QueueCustodyAdmissionIntent,
+  ): Promise<QueueCustodyAdmissionInitializeResult> {
+    assertQueueCustodyMessageBinding({ deliveryStatus: 'queued', queueCustodyAdmission: admission });
+    const outcome = Number(
+      await this.redis.eval(
+        INITIALIZE_QUEUE_CUSTODY_ADMISSION_LUA,
+        1,
+        MessageKeys.detail(id),
+        JSON.stringify(admission),
+      ),
+    );
+    if (outcome === -1) return { kind: 'not_found' };
+    if (outcome === -2) return { kind: 'not_queued' };
+    if (outcome === -3) return { kind: 'conflict' };
+    const message = await this.getById(id);
+    if (!message) return { kind: 'not_found' };
+    if (outcome === 0) return { kind: 'existing', message };
+    if (outcome !== 1) throw new Error(`unexpected queue custody admission initialize result: ${outcome}`);
+    return { kind: 'initialized', message };
+  }
+
   async initializeQueueCustody(id: string, custody: QueuedMessageCustody): Promise<QueueCustodyInitializeResult> {
     assertQueueCustodyMessageBinding({ deliveryStatus: 'queued', queueCustody: custody });
     const outcome = Number(
@@ -2272,6 +2364,7 @@ export class RedisMessageStore {
       const sourceField = parseConnectorSourceField(d.source);
       const parsedSource = sourceField.kind === 'valid' ? sourceField.source : undefined;
       const parsedQueueCustody = safeParseQueueCustody(d.queueCustody);
+      const parsedQueueCustodyAdmission = safeParseQueueCustodyAdmission(d.queueCustodyAdmission);
       const parsedRecall = safeParseMessageRecall(d.recall);
       messages.push({
         id: d.id,
@@ -2298,6 +2391,7 @@ export class RedisMessageStore {
         ...(d.timelineOrderAt !== undefined ? { timelineOrderAt: parseRedisNumber(d.timelineOrderAt) } : {}),
         ...(d.deliveryStatus ? { deliveryStatus: d.deliveryStatus as StoredMessage['deliveryStatus'] } : {}),
         ...(parsedQueueCustody ? { queueCustody: parsedQueueCustody } : {}),
+        ...(parsedQueueCustodyAdmission ? { queueCustodyAdmission: parsedQueueCustodyAdmission } : {}),
         ...(parsedRecall ? { recall: parsedRecall } : {}),
         ...(parsedSource ? { source: parsedSource } : {}),
         ...(sourceField.kind === 'invalid' ? { sourceParseFailure: true as const } : {}),

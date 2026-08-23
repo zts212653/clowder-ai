@@ -58,7 +58,8 @@ describe('F296 B2a: compaction dedupe is bounded replay suppression, not last-on
 
     const replay = step(s, resumed, { eventId: 'A', runtimeSessionId: 'r1' });
     assert.equal(replay.state.contextEpoch, afterB, 'replaying A must not advance a second time');
-    assert.equal(replay.transition, 'resumed');
+    assert.equal(replay.transition, 'context_compaction_replay');
+    assert.equal(replay.state.contextMode, 'cold', 'replay suppression cannot manufacture a hot verdict');
   });
 
   test('a consumed event id survives fresh / unknown / replaced transitions', () => {
@@ -107,7 +108,8 @@ describe('F296 B2a: compaction dedupe is bounded replay suppression, not last-on
 describe('F296 B2a: health signals are exposed (not yet recorded by any consumer)', () => {
   test('resolve() surfaces heuristic signals instead of swallowing them', async () => {
     const owner = new ContextEpochOwner(new InMemoryContextEpochStore());
-    await owner.resolve({ ...SCOPE, disposition: fresh });
+    const first = await owner.resolve({ ...SCOPE, disposition: fresh });
+    await owner.confirmColdConsumed({ ...SCOPE, contextEpoch: first.contextEpoch });
     const result = await owner.resolve({
       ...SCOPE,
       disposition: resumed,

@@ -2,9 +2,10 @@ import type { DispatchProposal } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { returnDeliveryOverdueTotal } from '../../infrastructure/telemetry/instruments.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../cats/services/owner-auth-provenance.js';
+import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { type ActionSuccessorFence, buildActionSuccessorFence } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
-import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import type { ActionSuccessorDispatchFailureReason, ActionSuccessorLease } from './action-successor-state-machine.js';
 
 const log = createModuleLogger('ball-custody/action-successor-recovery');
 const DEFAULT_SCAN_LIMIT = 100;
@@ -30,11 +31,17 @@ export interface ActionSuccessorDispatchRecoveryStats {
   readonly scanned: number;
   readonly delivered: number;
   readonly pending: number;
+  readonly failed: number;
 }
 
 export type ActionSuccessorDispatchDeliveryResult =
   | { readonly outcome: 'enqueued'; readonly deliveredMessageId: string }
-  | { readonly outcome: 'unavailable' };
+  | { readonly outcome: 'unavailable' }
+  | {
+      readonly outcome: 'terminal_failure';
+      readonly reason: ActionSuccessorDispatchFailureReason;
+      readonly evidenceRef: string;
+    };
 
 export type ActionSuccessorReturnDeliveryResult =
   | { readonly outcome: 'completed'; readonly invocationId: string }
@@ -60,7 +67,7 @@ export interface ActionSuccessorRecoverySweepDeps {
   readonly dispatch?: {
     readonly leaseStore: Pick<
       ActionSuccessorLeaseStore,
-      'listPendingDispatches' | 'recordDispatchDeliveryAttempt' | 'markDispatchDelivered'
+      'listPendingDispatches' | 'recordDispatchDeliveryAttempt' | 'markDispatchDelivered' | 'markDispatchFailed'
     >;
     readonly loadProposal: (proposalId: string) => Promise<DispatchProposal | null>;
     readonly loadOwnerAuthProvenance: (proposalId: string) => Promise<OwnerAuthProvenance | undefined>;
@@ -80,7 +87,115 @@ interface ReturnRecoveryResult {
 
 export type DispatchRecoveryResult =
   | { readonly outcome: 'delivered'; readonly deliveredMessageId: string }
+  | { readonly outcome: 'failed'; readonly reason: ActionSuccessorDispatchFailureReason }
   | { readonly outcome: 'ignored' | 'pending' };
+
+export type ApprovedActionCarrierClassification =
+  | { readonly outcome: 'repairable' }
+  | { readonly outcome: 'admitted' }
+  | { readonly outcome: 'conflict'; readonly reason: ActionSuccessorDispatchFailureReason };
+
+type ApprovedDispatchProposalClassification =
+  | { readonly outcome: 'approved'; readonly proposalId: string; readonly proposal: DispatchProposal }
+  | {
+      readonly outcome: 'failure';
+      readonly reason: ActionSuccessorDispatchFailureReason;
+      readonly evidenceRef: string;
+    };
+
+function sameOrderedStrings(actual: readonly string[] | undefined, expected: readonly string[]): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function isRepairableQueueAdmission(status: StoredMessage['deliveryStatus']): boolean {
+  return status === undefined ? true : status === 'queued';
+}
+
+function hasQueueAdmission(status: StoredMessage['deliveryStatus']): boolean {
+  return status === 'queued' ? true : status === 'delivered';
+}
+
+function classifyApprovedDispatchProposal(
+  proposalId: string | null,
+  proposal: DispatchProposal | null,
+  lease: ActionSuccessorLease,
+): ApprovedDispatchProposalClassification {
+  if (!proposalId) {
+    return {
+      outcome: 'failure',
+      reason: 'proposal_fence_mismatch',
+      evidenceRef: `dispatch:${lease.dispatchId}`,
+    };
+  }
+  if (!proposal) {
+    return { outcome: 'failure', reason: 'proposal_missing', evidenceRef: `proposal:${proposalId}` };
+  }
+  if (proposal.status !== 'approved') {
+    return { outcome: 'failure', reason: 'proposal_not_approved', evidenceRef: `proposal:${proposalId}` };
+  }
+  const fenceMatches =
+    proposal.actionLeaseRef?.leaseId === lease.leaseId &&
+    proposal.actionLeaseRef.generation === lease.generation &&
+    proposal.actionLeaseRef.dispatchId === lease.dispatchId &&
+    proposal.actionLeaseRef.terminalPredicateDigest === lease.terminalPredicate?.digest;
+  return fenceMatches
+    ? { outcome: 'approved', proposalId, proposal }
+    : { outcome: 'failure', reason: 'proposal_fence_mismatch', evidenceRef: `proposal:${proposalId}` };
+}
+
+/**
+ * Classify only durable source/custody truth. The lease/proposal fence is
+ * checked separately by the recovery sweep before this carrier is consulted.
+ */
+export function classifyApprovedActionCarrier(
+  proposal: DispatchProposal,
+  message: StoredMessage,
+): ApprovedActionCarrierClassification {
+  const targetCats = proposal.targetCats;
+  const sourceMatches =
+    message.threadId === proposal.targetThreadId &&
+    message.userId === proposal.ownerUserId &&
+    message.catId === proposal.senderCatId &&
+    message.content === proposal.content &&
+    message.origin === 'callback' &&
+    message.replyTo === proposal.replyTo &&
+    message.extra?.isExplicitPost === true &&
+    message.extra.crossPost?.sourceThreadId === proposal.sourceThreadId &&
+    message.extra.crossPost.effectClass === 'assign_work' &&
+    sameOrderedStrings(message.mentions, targetCats) &&
+    sameOrderedStrings(message.extra.targetCats, targetCats);
+  if (!sourceMatches) return { outcome: 'conflict', reason: 'carrier_source_conflict' };
+
+  const custody = message.queueCustody;
+  if (!custody) {
+    return isRepairableQueueAdmission(message.deliveryStatus)
+      ? { outcome: 'repairable' }
+      : { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
+  }
+  const carrierByTargetCatId = custody.carrierByTargetCatId;
+  if (!carrierByTargetCatId) return { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
+  const carrierTargetCats = Object.keys(carrierByTargetCatId);
+  const custodyMatches =
+    hasQueueAdmission(message.deliveryStatus) &&
+    custody.entryId === `cross-thread:${message.id}` &&
+    custody.intent === 'execute' &&
+    custody.ownerUserId === proposal.ownerUserId &&
+    custody.receiptScope === 'cross_thread_delivery' &&
+    sameOrderedStrings(custody.allTargetCats, targetCats) &&
+    sameOrderedStrings(carrierTargetCats, targetCats) &&
+    targetCats.every((catId) => {
+      const binding = carrierByTargetCatId[catId];
+      return (
+        binding?.source === 'agent' &&
+        binding.sourceCategory === 'a2a' &&
+        binding.callerCatId === proposal.senderCatId &&
+        binding.a2aTriggerMessageId === message.id &&
+        binding.autoExecute === true &&
+        binding.entryId.length > 0
+      );
+    });
+  return custodyMatches ? { outcome: 'admitted' } : { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
+}
 
 function carrierFor(lease: ActionSuccessorLease): ActionSuccessorReturnCarrier {
   const targetCatId = lease.holderCatIds[0];
@@ -126,16 +241,18 @@ export class ActionSuccessorRecoverySweep {
 
   async runDispatchesOnce(): Promise<ActionSuccessorDispatchRecoveryStats> {
     const dispatch = this.deps.dispatch;
-    if (!dispatch) return { scanned: 0, delivered: 0, pending: 0 };
+    if (!dispatch) return { scanned: 0, delivered: 0, pending: 0, failed: 0 };
     const leases = await dispatch.leaseStore.listPendingDispatches(this.scanLimit);
     let delivered = 0;
     let pending = 0;
+    let failed = 0;
     for (const lease of leases) {
       const result = await this.recoverDispatch(lease);
       if (result.outcome === 'delivered') delivered += 1;
       if (result.outcome === 'pending') pending += 1;
+      if (result.outcome === 'failed') failed += 1;
     }
-    return { scanned: leases.length, delivered, pending };
+    return { scanned: leases.length, delivered, pending, failed };
   }
 
   async recoverDispatch(candidate: ActionSuccessorLease): Promise<DispatchRecoveryResult> {
@@ -156,25 +273,22 @@ export class ActionSuccessorRecoverySweep {
       return { outcome: 'ignored' };
     }
     const proposalId = proposalIdFromDispatch(attempt.lease.dispatchId);
-    if (!proposalId) return { outcome: 'ignored' };
-    const proposal = await dispatch.loadProposal(proposalId);
-    if (
-      proposal?.status !== 'approved' ||
-      proposal.actionLeaseRef?.leaseId !== attempt.lease.leaseId ||
-      proposal.actionLeaseRef.generation !== attempt.lease.generation ||
-      proposal.actionLeaseRef.dispatchId !== attempt.lease.dispatchId ||
-      proposal.actionLeaseRef.terminalPredicateDigest !== attempt.lease.terminalPredicate?.digest
-    ) {
-      return { outcome: 'ignored' };
+    const proposalState = classifyApprovedDispatchProposal(
+      proposalId,
+      proposalId ? await dispatch.loadProposal(proposalId) : null,
+      attempt.lease,
+    );
+    if (proposalState.outcome === 'failure') {
+      return this.markDispatchFailed(attempt.lease, proposalState.reason, proposalState.evidenceRef, now);
     }
-
-    if (proposal.deliveredMessageId) {
-      return this.markDispatchDelivered(attempt.lease, proposal.deliveredMessageId, now);
-    }
+    const approvedProposalId = proposalState.proposalId;
+    const proposal = proposalState.proposal;
 
     let result: ActionSuccessorDispatchDeliveryResult = { outcome: 'unavailable' };
     try {
-      const ownerAuthProvenance = normalizeOwnerAuthProvenance(await dispatch.loadOwnerAuthProvenance(proposalId));
+      const ownerAuthProvenance = normalizeOwnerAuthProvenance(
+        await dispatch.loadOwnerAuthProvenance(approvedProposalId),
+      );
       result = await dispatch.deliver(
         proposal,
         buildActionSuccessorFence(attempt.lease, attempt.lease.dispatchId),
@@ -186,10 +300,45 @@ export class ActionSuccessorRecoverySweep {
         'F246 ActionSuccessor approved carrier delivery failed',
       );
     }
+    if (result.outcome === 'terminal_failure') {
+      return this.markDispatchFailed(attempt.lease, result.reason, result.evidenceRef, now);
+    }
     if (result.outcome !== 'enqueued') return { outcome: 'pending' };
+    if (proposal.deliveredMessageId && proposal.deliveredMessageId !== result.deliveredMessageId) {
+      return this.markDispatchFailed(
+        attempt.lease,
+        'carrier_receipt_conflict',
+        `message:${proposal.deliveredMessageId}`,
+        now,
+      );
+    }
 
-    await dispatch.recordProposalDelivery(proposalId, result.deliveredMessageId);
+    if (!proposal.deliveredMessageId) {
+      await dispatch.recordProposalDelivery(approvedProposalId, result.deliveredMessageId);
+    }
     return this.markDispatchDelivered(attempt.lease, result.deliveredMessageId, now);
+  }
+
+  private async markDispatchFailed(
+    lease: ActionSuccessorLease,
+    reason: ActionSuccessorDispatchFailureReason,
+    evidenceRef: string,
+    now: number,
+  ): Promise<DispatchRecoveryResult> {
+    const dispatch = this.deps.dispatch;
+    if (!dispatch) throw new Error('ActionSuccessor dispatch recovery is not configured');
+    const failed = await dispatch.leaseStore.markDispatchFailed(lease.leaseId, {
+      expectedGeneration: lease.generation,
+      reason,
+      evidenceRef,
+      now,
+    });
+    if (failed.outcome === 'failed') return { outcome: 'failed', reason };
+    if (failed.lease.dispatchDeliveryState !== 'failed') return { outcome: 'ignored' };
+    if (!failed.lease.dispatchFailureReason) {
+      throw new Error(`failed ActionSuccessor dispatch is missing a failure reason: ${lease.leaseId}`);
+    }
+    return { outcome: 'failed', reason: failed.lease.dispatchFailureReason };
   }
 
   private async markDispatchDelivered(

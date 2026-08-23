@@ -3,9 +3,15 @@
 import { timingSafeEqual } from 'node:crypto';
 import { chmod, mkdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import {
+  authorizePersonalChromeConversation,
+  conversationIdFromExactChatGptUrl,
+  PersonalChromeConversationAuthorizationError,
+  readPersonalChromeConversationAuthorizations,
+} from './conversation-binding.mjs';
 import { encodeNativeMessage, NativeMessageDecoder } from './native-framing.mjs';
 import { hasCapacityForEntry, ledgerKey, loadLedger, textDigest, writeAtomicLedger } from './native-ledger.mjs';
 import { applyTerminalResult, failureFor, safeErrorCode, safeToken, terminalResult } from './native-results.mjs';
@@ -39,6 +45,31 @@ function parseAppendRequest(value) {
   };
 }
 
+function parseBindingRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('INVALID_REQUEST');
+  if (value.v !== 1 || value.kind !== 'bind_conversation') throw new Error('INVALID_REQUEST');
+  if (!safeToken(value.requestId, 200)) throw new Error('INVALID_REQUEST');
+  if (!safeToken(value.conversationId, 200)) throw new Error('INVALID_REQUEST');
+  if (conversationIdFromExactChatGptUrl(value.chatUrl) !== value.conversationId) {
+    throw new Error('INVALID_REQUEST');
+  }
+  return {
+    v: 1,
+    kind: 'bind_conversation',
+    requestId: value.requestId,
+    conversationId: value.conversationId,
+    chatUrl: `https://chatgpt.com/c/${value.conversationId}`,
+  };
+}
+
+function parseBindingQuery(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('INVALID_REQUEST');
+  if (value.v !== 1 || value.kind !== 'query_binding') throw new Error('INVALID_REQUEST');
+  if (!safeToken(value.requestId, 200)) throw new Error('INVALID_REQUEST');
+  if (Object.keys(value).some((key) => !['v', 'kind', 'requestId'].includes(key))) throw new Error('INVALID_REQUEST');
+  return { v: 1, kind: 'query_binding', requestId: value.requestId };
+}
+
 function secretsMatch(expected, received) {
   if (typeof received !== 'string') return false;
   const expectedBuffer = Buffer.from(expected, 'utf8');
@@ -46,12 +77,42 @@ function secretsMatch(expected, received) {
   return expectedBuffer.length === receivedBuffer.length && timingSafeEqual(expectedBuffer, receivedBuffer);
 }
 
+function parsePairedAppendEnvelope(expectedPairingSecret, rawEnvelope) {
+  const rawRequest = rawEnvelope?.request;
+  if (!secretsMatch(expectedPairingSecret, rawEnvelope?.pairingSecret)) {
+    return { failure: failureFor(rawRequest, 'PAIRING_REJECTED') };
+  }
+  try {
+    return { request: parseAppendRequest(rawRequest) };
+  } catch {
+    return { failure: failureFor(rawRequest, 'INVALID_REQUEST') };
+  }
+}
+
 function sendSocketResult(socket, result) {
   if (!socket.destroyed) socket.end(`${JSON.stringify(result)}\n`);
 }
 
-export async function createNativeHostBridge(options) {
-  if (!options?.socketPath || !options?.ledgerPath) throw new Error('socketPath and ledgerPath are required');
+function respondFromExistingAdmission({ socket, request, digest, existing, pending }) {
+  if (existing && existing.textDigest !== digest) {
+    sendSocketResult(socket, failureFor(request, 'IDEMPOTENCY_CONFLICT'));
+    return true;
+  }
+  if (pending) {
+    pending.responders.push({ socket, requestId: request.requestId });
+    return true;
+  }
+  if (existing?.state === 'host_observed' || existing?.state === 'failed') {
+    sendSocketResult(socket, terminalResult(existing, request.requestId));
+    return true;
+  }
+  return false;
+}
+
+function validateBridgeOptions(options) {
+  if (!options?.socketPath || !options?.ledgerPath || !options?.conversationBindingPath) {
+    throw new Error('socketPath, ledgerPath, and conversationBindingPath are required');
+  }
   if (typeof options.pairingSecret !== 'string' || options.pairingSecret.length < 32) {
     throw new Error('pairingSecret must contain at least 32 characters');
   }
@@ -59,7 +120,72 @@ export async function createNativeHostBridge(options) {
   if (options.writeLedger !== undefined && typeof options.writeLedger !== 'function') {
     throw new Error('writeLedger must be a function');
   }
+  if (options.authorizeConversation !== undefined && typeof options.authorizeConversation !== 'function') {
+    throw new Error('authorizeConversation must be a function');
+  }
+}
+
+async function bindingFailureForAppend(path, request) {
+  try {
+    const collection = await readPersonalChromeConversationAuthorizations(path);
+    return collection.conversations.some((entry) => entry.conversationId === request.conversationId)
+      ? null
+      : 'BOUND_CONVERSATION_MISMATCH';
+  } catch (error) {
+    return error instanceof PersonalChromeConversationAuthorizationError && error.code === 'NEEDS_AUTHORIZATION'
+      ? 'NEEDS_BINDING'
+      : 'BINDING_RECORD_INVALID';
+  }
+}
+
+function bindingRecordForRequest(path, request, timestamp, authorizeConversation) {
+  return authorizeConversation(path, {
+    conversationId: request.conversationId,
+    chatUrl: request.chatUrl,
+    authorizedAt: timestamp,
+    updatedAt: timestamp,
+  });
+}
+
+async function bindingStatusForQuery(path, requestId) {
+  try {
+    const collection = await readPersonalChromeConversationAuthorizations(path);
+    const record = collection.conversations.at(-1);
+    if (!record) {
+      return {
+        v: 1,
+        kind: 'binding_status',
+        requestId,
+        status: 'unbound',
+        errorCode: 'NEEDS_BINDING',
+      };
+    }
+    return {
+      v: 1,
+      kind: 'binding_status',
+      requestId,
+      status: 'bound',
+      conversationId: record.conversationId,
+      boundAt: record.authorizedAt,
+    };
+  } catch (error) {
+    const needsBinding =
+      error instanceof PersonalChromeConversationAuthorizationError && error.code === 'NEEDS_AUTHORIZATION';
+    return {
+      v: 1,
+      kind: 'binding_status',
+      requestId,
+      status: needsBinding ? 'unbound' : 'failed',
+      errorCode: needsBinding ? 'NEEDS_BINDING' : 'BINDING_RECORD_INVALID',
+    };
+  }
+}
+
+export async function createNativeHostBridge(options) {
+  validateBridgeOptions(options);
   const writeLedger = options.writeLedger ?? writeAtomicLedger;
+  const authorizeConversation = options.authorizeConversation ?? authorizePersonalChromeConversation;
+  const now = options.now ?? (() => new Date());
 
   const ledger = await loadLedger(options.ledgerPath);
   let ledgerDirty = false;
@@ -119,34 +245,22 @@ export async function createNativeHostBridge(options) {
   }
 
   async function handleEnvelope(socket, rawEnvelope) {
-    const rawRequest = rawEnvelope?.request;
-    if (!secretsMatch(options.pairingSecret, rawEnvelope?.pairingSecret)) {
-      sendSocketResult(socket, failureFor(rawRequest, 'PAIRING_REJECTED'));
+    const parsed = parsePairedAppendEnvelope(options.pairingSecret, rawEnvelope);
+    if (parsed.failure) {
+      sendSocketResult(socket, parsed.failure);
       return;
     }
-    let request;
-    try {
-      request = parseAppendRequest(rawRequest);
-    } catch {
-      sendSocketResult(socket, failureFor(rawRequest, 'INVALID_REQUEST'));
+    const request = parsed.request;
+    const bindingFailure = await bindingFailureForAppend(options.conversationBindingPath, request);
+    if (bindingFailure) {
+      sendSocketResult(socket, failureFor(request, bindingFailure));
       return;
     }
     const key = ledgerKey(request.conversationId, request.idempotencyKey);
     const digest = textDigest(request.text);
     const existing = ledger.get(key);
-    if (existing && existing.textDigest !== digest) {
-      sendSocketResult(socket, failureFor(request, 'IDEMPOTENCY_CONFLICT'));
-      return;
-    }
     const pending = pendingByKey.get(key);
-    if (pending) {
-      pending.responders.push({ socket, requestId: request.requestId });
-      return;
-    }
-    if (existing?.state === 'host_observed' || existing?.state === 'failed') {
-      sendSocketResult(socket, terminalResult(existing, request.requestId));
-      return;
-    }
+    if (respondFromExistingAdmission({ socket, request, digest, existing, pending })) return;
     const acceptedEntry = {
       conversationId: request.conversationId,
       idempotencyKey: request.idempotencyKey,
@@ -254,10 +368,76 @@ export async function createNativeHostBridge(options) {
     await settle(key, failureFor(message, errorCode));
   }
 
+  async function acceptBindingRequest(message) {
+    if (message?.kind !== 'bind_conversation') return false;
+    let request;
+    try {
+      request = parseBindingRequest(message);
+    } catch {
+      await options.sendNative({
+        v: 1,
+        kind: 'binding_result',
+        requestId: safeToken(message?.requestId, 200) ? message.requestId : 'invalid-request',
+        status: 'failed',
+        errorCode: 'INVALID_BINDING_REQUEST',
+      });
+      return true;
+    }
+    const timestamp = now().toISOString();
+    let record;
+    try {
+      record = await bindingRecordForRequest(
+        options.conversationBindingPath,
+        request,
+        timestamp,
+        authorizeConversation,
+      );
+    } catch {
+      await options.sendNative({
+        v: 1,
+        kind: 'binding_result',
+        requestId: request.requestId,
+        status: 'failed',
+        errorCode: 'BINDING_WRITE_FAILED',
+      });
+      return true;
+    }
+    await options.sendNative({
+      v: 1,
+      kind: 'binding_result',
+      requestId: request.requestId,
+      status: 'bound',
+      conversationId: record.authorization.conversationId,
+      boundAt: record.authorization.authorizedAt,
+    });
+    return true;
+  }
+
+  async function acceptBindingQuery(message) {
+    if (message?.kind !== 'query_binding') return false;
+    let request;
+    try {
+      request = parseBindingQuery(message);
+    } catch {
+      await options.sendNative({
+        v: 1,
+        kind: 'binding_status',
+        requestId: safeToken(message?.requestId, 200) ? message.requestId : 'invalid-request',
+        status: 'failed',
+        errorCode: 'INVALID_BINDING_QUERY',
+      });
+      return true;
+    }
+    await options.sendNative(await bindingStatusForQuery(options.conversationBindingPath, request.requestId));
+    return true;
+  }
+
   return {
     socketPath: options.socketPath,
     ledgerPath: options.ledgerPath,
     async acceptNativeMessage(message) {
+      if (await acceptBindingRequest(message)) return;
+      if (await acceptBindingQuery(message)) return;
       if (await acceptProgress(message)) return;
       await acceptTerminalResult(message);
     },
@@ -304,6 +484,7 @@ export async function resolveNativeHostConfiguration({
     return {
       socketPath: record.socketPath,
       ledgerPath: record.ledgerPath,
+      conversationBindingPath: resolve(dirname(record.ledgerPath), 'conversation-binding.json'),
       pairingSecret: record.pairingSecret,
     };
   }
@@ -313,15 +494,22 @@ export async function resolveNativeHostConfiguration({
   if (!socketPath || !ledgerPath || !pairingSecret) {
     throw new Error('required personal Chrome host configuration is missing');
   }
-  return { socketPath, ledgerPath, pairingSecret };
+  return {
+    socketPath,
+    ledgerPath,
+    conversationBindingPath: resolve(dirname(ledgerPath), 'conversation-binding.json'),
+    pairingSecret,
+  };
 }
 
 export async function runNativeHost(options = {}) {
-  const { socketPath, ledgerPath, pairingSecret } = await resolveNativeHostConfiguration(options);
+  const { socketPath, ledgerPath, conversationBindingPath, pairingSecret } =
+    await resolveNativeHostConfiguration(options);
   const decoder = new NativeMessageDecoder();
   const bridge = await createNativeHostBridge({
     socketPath,
     ledgerPath,
+    conversationBindingPath,
     pairingSecret,
     sendNative: (message) => {
       process.stdout.write(encodeNativeMessage(message));
@@ -343,7 +531,7 @@ export async function runNativeHost(options = {}) {
   };
   process.stdin.on('data', (chunk) => {
     try {
-      for (const message of decoder.push(chunk)) void bridge.acceptNativeMessage(message);
+      for (const message of decoder.push(chunk)) void bridge.acceptNativeMessage(message).catch(stopAfterInputFailure);
     } catch (error) {
       stopAfterInputFailure(error);
     }

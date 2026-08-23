@@ -27,9 +27,8 @@
  * 真实拿。API 失败 / PR 不存在 → null → projector skip emit `pr_opened` / `branch_merged_to_main`
  * （避免 collectedAt 伪装真实事件时间污染轨迹）。
  *
- * **Cron schedule**：照 Phase B ProbeScheduler pattern（server-side cron tick，
- * 不走 client-side post-push hook，KD-2 单账本 + KD-4 给数据不给结论）。tick
- * interval 由 F233_FEAT_TRAJECTORY_COLLECTOR_INTERVAL_MS 控制（step 5 引入）。
+ * **Lifecycle**：F304 已退役 production cron；本 collector 只作为历史测试 / 手动
+ * backfill 的兼容实现保留，不再由 runtime bootstrap 周期调用。
  *
  * plan: docs/plans/2026-06-18-f233-phase-c-euthanasia-trajectory.md §C
  */

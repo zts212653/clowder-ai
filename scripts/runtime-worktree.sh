@@ -32,6 +32,8 @@ Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
   ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
   ./scripts/runtime-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
+  ./scripts/runtime-worktree.sh daemon-status [--dir PATH]
+  ./scripts/runtime-worktree.sh stop   [--dir PATH]
 
 Defaults:
   --dir    ../cat-cafe-runtime
@@ -642,6 +644,59 @@ status_runtime_worktree() {
   echo "behind_${REMOTE_NAME}/main: $behind"
 }
 
+runtime_daemon_root() {
+  if is_git_repo; then
+    abs_path "$RUNTIME_DIR"
+  else
+    printf '%s\n' "$PROJECT_DIR"
+  fi
+}
+
+runtime_daemon_state() {
+  local command="$1"
+  local root
+  root="$(runtime_daemon_root)"
+  [ -d "$root" ] || die "runtime root not found: $root"
+  node "$SCRIPT_DIR/daemon-state.mjs" "$command" \
+    --home "$HOME" \
+    --project-root "$root" \
+    --deployment-id runtime
+}
+
+migrate_legacy_runtime_daemon_state() {
+  local root
+  root="$(runtime_daemon_root)"
+  [ -d "$root" ] || die "runtime root not found: $root"
+  node "$SCRIPT_DIR/daemon-state.mjs" migrate-legacy \
+    --legacy-pid-file "$HOME/.cat-cafe/daemon.pid" \
+    --legacy-log-path-file "$HOME/.cat-cafe/daemon.log-path" \
+    --home "$HOME" \
+    --project-root "$root" \
+    --deployment-id runtime
+}
+
+stop_runtime_daemon() {
+  export CAT_CAFE_DEPLOYMENT_ID=runtime
+  migrate_legacy_runtime_daemon_state
+  runtime_daemon_state stop
+}
+
+status_runtime_daemon() {
+  local root
+  export CAT_CAFE_DEPLOYMENT_ID=runtime
+  migrate_legacy_runtime_daemon_state
+  runtime_daemon_state status
+  root="$(runtime_daemon_root)"
+  if [ -f "$root/scripts/f247-cloud-services.mjs" ]; then
+    if node "$root/scripts/f247-cloud-services.mjs" status --summary >/dev/null 2>&1; then
+      echo "  F247 cloud: healthy"
+    else
+      echo "  F247 cloud: degraded (run pnpm cloud:doctor for details)"
+    fi
+  fi
+  echo "  stop: pnpm runtime:stop"
+}
+
 start_runtime_worktree() {
   info "preparing runtime worktree (checking ports, syncing origin/main...)"
 
@@ -654,6 +709,7 @@ start_runtime_worktree() {
     # In-place deployment: binary == workspace == PROJECT_DIR
     export CAT_CAFE_RUNTIME_ROOT="$PROJECT_DIR"
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
+    export CAT_CAFE_DEPLOYMENT_ID=runtime
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
     export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
     # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
@@ -695,6 +751,7 @@ start_runtime_worktree() {
   # project (the main cat-cafe repo where they're editing code).
   export CAT_CAFE_RUNTIME_ROOT="$RUNTIME_DIR"
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
+  export CAT_CAFE_DEPLOYMENT_ID=runtime
   export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
   export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
   # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
@@ -780,6 +837,12 @@ case "$COMMAND" in
     ;;
   status)
     status_runtime_worktree
+    ;;
+  daemon-status)
+    status_runtime_daemon
+    ;;
+  stop)
+    stop_runtime_daemon
     ;;
   help)
     usage

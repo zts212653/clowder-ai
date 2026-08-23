@@ -11,16 +11,12 @@
  * corresponding Clowder AI SessionRecord via `getByCliSessionId()`.
  */
 
-import type { SessionRecord } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import {
-  completeCapsuleForCompact,
-  isCollaborationContinuityCapsuleV1,
-} from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
+import { createSessionCompactionSurface, type SessionCompactionSurfaceDeps } from './session-compaction-surface.js';
 
 const sealSchema = z.object({
   cliSessionId: z.string().min(1).max(500),
@@ -33,7 +29,7 @@ const sopBookmarkSchema = z.object({
   sopStage: z.string().min(1).max(100),
 });
 
-interface SessionHooksRouteOptions extends FastifyPluginOptions {
+interface SessionHooksRouteOptions extends FastifyPluginOptions, SessionCompactionSurfaceDeps {
   sessionChainStore: ISessionChainStore;
   sessionSealer: ISessionSealer;
   transcriptReader: TranscriptReader;
@@ -42,24 +38,8 @@ interface SessionHooksRouteOptions extends FastifyPluginOptions {
 }
 
 export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHooksRouteOptions): Promise<void> {
-  const { sessionChainStore, sessionSealer, transcriptReader, hookToken } = opts;
-
-  function compactContinuityFor(record: SessionRecord) {
-    const capsule = completeCapsuleForCompact(record.continuityCapsule, { createdAt: Date.now() });
-    if (!capsule) return undefined;
-    return {
-      capsule,
-      diagnostics: {
-        source: 'active_session_route_state',
-        boundary: 'compact_boundary',
-        generated: true,
-        threadId: record.threadId,
-        catId: record.catId,
-        sessionId: record.id,
-        compressionCount: record.compressionCount,
-      },
-    };
-  }
+  const { sessionChainStore, sessionSealer, hookToken } = opts;
+  const compactionSurface = createSessionCompactionSurface(opts);
 
   // Hook authentication guard — fail-closed: always requires valid token
   app.addHook('onRequest', async (request, reply) => {
@@ -115,6 +95,10 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
           status: 'unavailable',
           missingCapabilities: ['managed_invocation_boundary'],
         },
+        contextEpoch: {
+          status: 'unsupported',
+          reason: 'managed_invocation_boundary_unavailable',
+        },
       });
     }
 
@@ -127,6 +111,9 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       return { error: 'Session disappeared during compression observation (race)', sessionId: record.id };
     }
     const updated = await sessionChainStore.get(record.id);
+    const contextEpoch = updated
+      ? await compactionSurface.observeAuthoritativeCompaction(updated, 'claude_precompact_hook')
+      : { status: 'unsupported' as const, reason: 'session_record_unavailable' as const };
 
     if (!observed.revisionMatched) {
       return reply.send({
@@ -137,6 +124,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
         strategy: policy.config.strategy,
         policyRevision: policy.revision,
         ...(updated?.appliedPolicy ? { activePolicyRevision: updated.appliedPolicy.revision } : {}),
+        contextEpoch,
       });
     }
 
@@ -160,7 +148,8 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
           ...(strategy.strategy === 'hybrid' ? { maxCompressions } : {}),
           strategy: strategy.strategy,
           executionStatus: policy.execution,
-          ...(updated ? { continuity: compactContinuityFor(updated) } : {}),
+          ...(updated ? { continuity: compactionSurface.compactContinuityFor(updated) } : {}),
+          contextEpoch,
         });
       }
     }
@@ -208,91 +197,11 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       status: 'sealing',
       strategy: strategy.strategy,
       executionStatus: policy.execution,
+      contextEpoch,
     });
   });
 
-  // GET /api/sessions/latest-digest — Get the latest sealed session's digest
-  // Called by f24-post-compact-bootstrap.sh to inject context after compression.
-  app.get<{
-    Querystring: { cliSessionId?: string };
-  }>('/api/sessions/latest-digest', async (request, reply) => {
-    const { cliSessionId } = request.query;
-    if (!cliSessionId) {
-      reply.status(400);
-      return { error: 'cliSessionId query parameter required' };
-    }
-
-    // Look up the session record to find catId + threadId
-    const record = await sessionChainStore.getByCliSessionId(cliSessionId);
-    if (!record) {
-      reply.status(404);
-      return { error: 'No session found for this CLI session ID' };
-    }
-
-    const hasObservedCompact =
-      (record.compressionCount !== null && record.compressionCount > 0) ||
-      (record.hybridProgress?.observedCount ?? 0) > 0;
-    const activeCompactContinuity =
-      record.status === 'active' && hasObservedCompact ? compactContinuityFor(record) : undefined;
-    if (activeCompactContinuity) {
-      return reply.send({
-        sessionId: record.id,
-        status: record.status,
-        seq: record.seq,
-        catId: record.catId,
-        threadId: record.threadId,
-        digest: null,
-        continuity: activeCompactContinuity,
-      });
-    }
-
-    // Get the full chain for this cat+thread, find the latest sealed session
-    const chain = await sessionChainStore.getChain(record.catId, record.threadId, record.userId);
-    const sealedSessions = chain
-      .filter((s) => s.status === 'sealed' && s.sealedAt != null)
-      .sort((a, b) => (b.sealedAt ?? 0) - (a.sealedAt ?? 0));
-
-    if (sealedSessions.length === 0) {
-      reply.status(404);
-      return { error: 'No sealed sessions found' };
-    }
-
-    const latest = sealedSessions[0]!;
-
-    // Read extractive digest
-    const digest = await transcriptReader.readDigest(latest.id, latest.threadId, latest.catId);
-    if (!digest) {
-      reply.status(404);
-      return { error: 'Digest not found for latest sealed session' };
-    }
-    const sealedCapsule = isCollaborationContinuityCapsuleV1(digest.continuityCapsule)
-      ? digest.continuityCapsule
-      : undefined;
-
-    return reply.send({
-      sessionId: latest.id,
-      seq: latest.seq,
-      catId: latest.catId,
-      threadId: latest.threadId,
-      sealedAt: latest.sealedAt,
-      digest,
-      ...(sealedCapsule
-        ? {
-            continuity: {
-              capsule: sealedCapsule,
-              diagnostics: {
-                source: 'sealed_session_digest',
-                boundary: sealedCapsule.continuationReason,
-                generated: true,
-                threadId: latest.threadId,
-                catId: latest.catId,
-                sessionId: latest.id,
-              },
-            },
-          }
-        : {}),
-    });
-  });
+  compactionSurface.registerLatestDigestRoute(app);
 
   // --- F073 P4: SOP stage bookmark ---
   // In-memory store (process-scoped). Replaces /tmp/ file bookmark for AC-14.

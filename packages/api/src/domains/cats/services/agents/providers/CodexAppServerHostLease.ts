@@ -129,6 +129,7 @@ export class CodexAppServerHostLease {
   private readonly onAbandoned: () => Promise<void>;
   private readonly abortGraceMs: number;
   private abortTimer: ReturnType<typeof setTimeout> | null = null;
+  private abortObservedValue = false;
   private readonly abortHandler: () => void;
 
   constructor(options: CodexAppServerHostLeaseOptions) {
@@ -150,6 +151,11 @@ export class CodexAppServerHostLease {
     return true;
   }
 
+  /** Once cancellation reaches this lease, its provider host is never reusable. */
+  get abortObserved(): boolean {
+    return this.abortObservedValue;
+  }
+
   dispose(): void {
     this.signal?.removeEventListener('abort', this.abortHandler);
     if (!this.abortTimer) return;
@@ -158,6 +164,7 @@ export class CodexAppServerHostLease {
   }
 
   private armAbortFallback(): void {
+    this.abortObservedValue = true;
     if (this.abortTimer) return;
     this.abortTimer = setTimeout(() => {
       this.abortTimer = null;

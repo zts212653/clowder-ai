@@ -169,6 +169,36 @@ export function registerMeetingIntakeRoutes(app: FastifyInstance, options: Meeti
     },
   );
 
+  app.post<{ Params: { intakeId: string }; Body: { expectedRevision?: unknown; clientRequestId?: unknown } }>(
+    '/api/meeting-intakes/:intakeId/presentation-retry',
+    async (request, reply) => {
+      const userId = sessionUser(request, reply);
+      if (!userId) return;
+      const expectedRevision = request.body?.expectedRevision;
+      const rawClientRequestId = request.body?.clientRequestId;
+      const clientRequestId = typeof rawClientRequestId === 'string' ? rawClientRequestId.trim() : undefined;
+      if (
+        typeof expectedRevision !== 'number' ||
+        !Number.isSafeInteger(expectedRevision) ||
+        !clientRequestId ||
+        clientRequestId.length > 200 ||
+        !/^[A-Za-z0-9._:-]+$/.test(clientRequestId)
+      ) {
+        return reply.status(400).send({ error: 'expectedRevision and clientRequestId are required' });
+      }
+      try {
+        return await options.actions!.retryPresentation(
+          userId,
+          request.params.intakeId,
+          expectedRevision,
+          clientRequestId,
+        );
+      } catch (error) {
+        return sendServiceError(reply, error);
+      }
+    },
+  );
+
   app.post<{ Params: { intakeId: string }; Body: { expectedRevision?: number } }>(
     '/api/meeting-intakes/:intakeId/regrant',
     async (request, reply) => {

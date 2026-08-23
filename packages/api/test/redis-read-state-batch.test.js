@@ -58,7 +58,11 @@ describe('RedisThreadReadStateStore batch unread projection', () => {
     assert.equal(projectionCalls.length, 1);
     assert.equal(projectionCalls[0].userId, 'user-1');
     assert.deepEqual(projectionCalls[0].cursors, [
-      { threadId: 'thread-a', afterId: 'v2:0000000000000001:a-1' },
+      {
+        threadId: 'thread-a',
+        afterId: 'v2:0000000000000001:a-1',
+        fallbackAfterId: 'a-1',
+      },
       { threadId: 'thread-b', afterId: 'b-1' },
       { threadId: 'thread-c', afterId: 'c-1' },
     ]);

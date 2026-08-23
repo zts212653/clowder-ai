@@ -219,6 +219,8 @@ export interface DispatchDispositionEventInput {
   invocationId: string;
   sourceMessageId: string;
   disposition: A2ADispatchDisposition;
+  /** The exact child completed after unrelated custody replaced the thread-level holder. */
+  retired?: boolean;
   at: number;
 }
 
@@ -239,6 +241,7 @@ export function buildDispatchDispositionEvent(input: DispatchDispositionEventInp
       invocationId: input.invocationId,
       sourceMessageId: input.sourceMessageId,
       disposition: input.disposition,
+      ...(input.retired ? { retired: true } : {}),
     },
     at: input.at,
   };

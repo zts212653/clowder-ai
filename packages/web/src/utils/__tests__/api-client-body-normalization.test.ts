@@ -91,7 +91,7 @@ describe('apiFetch body normalization for mutating requests', () => {
   });
 
   it('does NOT add body to GET requests', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const mockFetch = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     globalThis.fetch = mockFetch;
 
     const apiFetch = await loadApiFetch();

@@ -124,17 +124,18 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
   });
 
   app.get<{
-    Querystring: { days?: string; catId?: string; verified?: string; limit?: string };
+    Querystring: { days?: string; catId?: string; invocationId?: string; verified?: string; limit?: string };
   }>('/api/recall/trajectories', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
     if (!userId) return reply.status(401).send({ error: 'Missing X-Cat-Cafe-User header' });
 
     const days = Math.min(Math.max(1, parseInt(request.query.days ?? '30', 10) || 30), 90);
     const catId = request.query.catId || undefined;
+    const invocationId = request.query.invocationId || undefined;
     const verified = request.query.verified === 'true' ? true : request.query.verified === 'false' ? false : undefined;
     const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '20', 10) || 20), 100);
 
-    return { trajectories: trajectoryService.listRecent({ days, catId, verified, limit }) };
+    return { trajectories: trajectoryService.listRecent({ days, catId, invocationId, verified, limit }) };
   });
 
   app.post<{

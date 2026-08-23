@@ -11,6 +11,7 @@ import type {
   CrossThreadCoordination,
   MessageContent,
   RichMessageExtra,
+  WriteOpportunityPresentationRetryCarrierV1,
   WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
@@ -18,6 +19,7 @@ import {
   deliveryDecisionCueCarrierV1Schema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
@@ -28,7 +30,7 @@ import type {
   StoredPluginMessage,
   StoredToolEvent,
 } from '../ports/MessageStore.js';
-import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
+import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
 
@@ -77,6 +79,7 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
 }
 
 export const safeParseQueueCustody = parseQueuedMessageCustody;
+export const safeParseQueueCustodyAdmission = parseQueueCustodyAdmissionIntent;
 
 export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
   if (!raw) return undefined;
@@ -258,6 +261,15 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    const writeOpportunityPresentationRetry = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
+      parsed.writeOpportunityPresentationRetry,
+    );
+    if (writeOpportunityPresentationRetry.success) {
+      result.writeOpportunityPresentationRetry =
+        writeOpportunityPresentationRetry.data as WriteOpportunityPresentationRetryCarrierV1;
+      hasField = true;
+    }
+
     // Validate stream sub-field shape (#80: draft dedup key)
     // F194 Phase Z9 hotfix: preserve turnInvocationId (per-cat-turn id, written
     // by Z9 backend stamping). Pre-hotfix parser rebuilt only { invocationId },
@@ -265,6 +277,9 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     // to parent → multi-turn same-cat under shared parent collapsed (R13/R14).
     // F254 Phase E: parallelBatchId is an independent freshness identity. It must
     // survive Redis even if invocation metadata is absent or unavailable.
+    // F294/F194 R21 compatibility: cached split stdout/speech fields are legacy
+    // presentation evidence. Preserve them verbatim so v2 admission and durable
+    // reread see the same retained shape as Web hydration.
     if (parsed.stream && typeof parsed.stream === 'object') {
       const stream = {
         ...(typeof parsed.stream.invocationId === 'string' ? { invocationId: parsed.stream.invocationId } : {}),
@@ -274,6 +289,8 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
         ...(typeof parsed.stream.parallelBatchId === 'string'
           ? { parallelBatchId: parsed.stream.parallelBatchId }
           : {}),
+        ...(typeof parsed.stream.cliStdout === 'string' ? { cliStdout: parsed.stream.cliStdout } : {}),
+        ...(typeof parsed.stream.speechContent === 'string' ? { speechContent: parsed.stream.speechContent } : {}),
       };
       if (Object.keys(stream).length > 0) {
         result.stream = stream;

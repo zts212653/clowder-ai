@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   resolveContextContinuity,
   resolveInvocationOrigin,
+  supportsPreProviderContinuityCapability,
 } from '../dist/domains/cats/services/agents/invocation/context-continuity.js';
 
 const CODEX_EXEC = {
@@ -80,5 +81,14 @@ describe('F296 B0 context continuity handshake', () => {
     assert.equal(resolveInvocationOrigin('connector'), 'connector');
     assert.equal(resolveInvocationOrigin('queue_replay'), 'unknown');
     assert.equal(resolveInvocationOrigin('system'), 'unknown');
+  });
+
+  it('exposes the same exact carrier support predicate used by presentation retry admission', () => {
+    assert.equal(supportsPreProviderContinuityCapability(CODEX_EXEC), true);
+    assert.equal(supportsPreProviderContinuityCapability({ ...CODEX_EXEC, carrier: 'app_server' }), false);
+    assert.equal(
+      supportsPreProviderContinuityCapability({ ...CODEX_EXEC, provider: 'anthropic', carrier: 'print_sdk' }),
+      false,
+    );
   });
 });

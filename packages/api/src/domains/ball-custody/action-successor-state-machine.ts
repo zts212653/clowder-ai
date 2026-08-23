@@ -68,7 +68,13 @@ export {
 
 export type ActionSuccessorHolderOutcome = 'succeeded' | 'failed' | 'canceled' | 'unavailable' | 'rejected_ownership';
 export type ActionSuccessorLeaseStatus = 'active' | 'replaceable' | 'completed';
-export type ActionSuccessorDispatchDeliveryState = 'pending' | 'delivered';
+export type ActionSuccessorDispatchDeliveryState = 'pending' | 'delivered' | 'failed';
+export type ActionSuccessorDispatchFailureReason =
+  | 'proposal_missing'
+  | 'proposal_not_approved'
+  | 'proposal_fence_mismatch'
+  | 'carrier_source_conflict'
+  | 'carrier_receipt_conflict';
 
 interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
   leaseId: string;
@@ -98,6 +104,8 @@ interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
   dispatchDeliveryAttemptCount?: number;
   dispatchDeliveryLastAttemptAt?: number;
   dispatchDeliveredMessageId?: string;
+  dispatchFailureReason?: ActionSuccessorDispatchFailureReason;
+  dispatchFailureEvidenceRef?: string;
   revision: number;
   createdAt: number;
   updatedAt: number;

@@ -14,6 +14,9 @@ const { resolveFrontendCorsOrigins } = await import('../src/config/frontend-orig
 const { ImageExporter, buildImageExportUrl, resolveExportCaptureHeight, stitchImageExportChunks } = await import(
   '../src/services/ImageExporter.ts'
 );
+const { captureVerifiedImageExportCandidate, resolveHtmlWidgetExportReadiness } = await import(
+  '../src/services/html-widget-export-readiness.ts'
+);
 
 const ORIGINAL_CAPTURE = ImageExporter.prototype.capture;
 const ORIGINAL_CLOSE = ImageExporter.prototype.close;
@@ -259,6 +262,71 @@ describe('buildImageExportUrl', () => {
     assert.equal(resolveExportCaptureHeight({ documentHeight: 4000, exportRootHeight: 214.2 }), 215);
     assert.equal(resolveExportCaptureHeight({ documentHeight: 5100, exportRootHeight: 5100 }), 5100);
     assert.equal(resolveExportCaptureHeight({ documentHeight: 900, exportRootHeight: null }), 900);
+  });
+
+  it('requires every html_widget to be measured and fully expanded before capture', () => {
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([]), { status: 'ready', widgetIds: [] });
+    assert.deepEqual(
+      resolveHtmlWidgetExportReadiness([
+        { widgetId: 'short', layoutState: 'ready', expanded: true },
+        { widgetId: 'long', layoutState: 'pending', expanded: true },
+      ]),
+      { status: 'pending', widgetIds: ['long'] },
+    );
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([{ widgetId: 'long', layoutState: 'ready', expanded: false }]), {
+      status: 'pending',
+      widgetIds: ['long'],
+    });
+    assert.deepEqual(
+      resolveHtmlWidgetExportReadiness([
+        { widgetId: 'short', layoutState: 'ready', expanded: true },
+        { widgetId: 'long', layoutState: 'ready', expanded: true },
+      ]),
+      { status: 'ready', widgetIds: ['short', 'long'] },
+    );
+  });
+
+  it('surfaces html_widget measurement failures instead of permitting a clipped PNG', () => {
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([{ widgetId: 'broken', layoutState: 'error', expanded: true }]), {
+      status: 'error',
+      widgetIds: ['broken'],
+    });
+  });
+
+  it('requires every html_widget to acknowledge the current exporter proof request', () => {
+    const widgets = [
+      { widgetId: 'fresh', layoutState: 'ready', expanded: true, proofRequestId: 'proof-current' },
+      { widgetId: 'stale', layoutState: 'ready', expanded: true, proofRequestId: 'proof-previous' },
+    ];
+    assert.deepEqual(resolveHtmlWidgetExportReadiness(widgets, 'proof-current'), {
+      status: 'pending',
+      widgetIds: ['stale'],
+    });
+    assert.deepEqual(resolveHtmlWidgetExportReadiness([widgets[0]], 'proof-current'), {
+      status: 'ready',
+      widgetIds: ['fresh'],
+    });
+  });
+
+  it('commits a screenshot candidate only after fresh proof both before and after capture', async () => {
+    const events = [];
+    let proofCount = 0;
+    await assert.rejects(
+      () =>
+        captureVerifiedImageExportCandidate(
+          async () => {
+            events.push('proof');
+            proofCount += 1;
+            if (proofCount === 2) throw new Error('post-capture layout changed');
+          },
+          async () => {
+            events.push('screenshot');
+            return Buffer.from('candidate-png');
+          },
+        ),
+      /post-capture layout changed/,
+    );
+    assert.deepEqual(events, ['proof', 'screenshot', 'proof']);
   });
 
   it('stitches exact chunk boundaries without repeating or dropping boundary content', async () => {

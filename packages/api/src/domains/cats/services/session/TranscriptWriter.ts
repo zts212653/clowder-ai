@@ -20,6 +20,8 @@ import {
   extractContinuityCapsuleFromSystemInfo,
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
+import type { TranscriptEvent } from './TranscriptReader.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -35,6 +37,41 @@ interface BufferedEvent {
   timestamp: number;
   invocationId?: string;
   event: Record<string, unknown>;
+}
+
+function bufferedEventFingerprint(event: BufferedEvent): string {
+  return transcriptEventFingerprint({
+    t: event.timestamp,
+    ...(event.invocationId !== undefined ? { invocationId: event.invocationId } : {}),
+    event: event.event,
+  });
+}
+
+/**
+ * Merge crash-recovered disk events with the authoritative in-memory suffix.
+ * Counts matter: identical events can legitimately occur more than once, and
+ * invocation identity is part of the canonical event identity.
+ */
+function mergeLiveAndBufferedEvents(liveEvents: BufferedEvent[], bufferedEvents: BufferedEvent[]): BufferedEvent[] {
+  const bufferedCounts = new Map<string, number>();
+  for (const event of bufferedEvents) {
+    const key = bufferedEventFingerprint(event);
+    bufferedCounts.set(key, (bufferedCounts.get(key) ?? 0) + 1);
+  }
+
+  const diskOnly: BufferedEvent[] = [];
+  for (const event of liveEvents) {
+    const key = bufferedEventFingerprint(event);
+    const remaining = bufferedCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      if (remaining === 1) bufferedCounts.delete(key);
+      else bufferedCounts.set(key, remaining - 1);
+    } else {
+      diskOnly.push(event);
+    }
+  }
+
+  return [...diskOnly, ...bufferedEvents].map((event, eventNo) => ({ ...event, eventNo }));
 }
 
 export interface ExtractiveDigestV1 {
@@ -193,6 +230,31 @@ export class TranscriptWriter {
   }
 
   /**
+   * Read an active session through the same merge rule used by seal.
+   *
+   * The in-memory buffer remains primary; `events.live.jsonl` contributes only
+   * crash-recovered events which are no longer present in memory. This is a
+   * read projection — it neither clears the buffer nor promotes the live file
+   * into a second canonical transcript.
+   */
+  async readActiveEvents(session: TranscriptSessionInfo): Promise<TranscriptEvent[]> {
+    await this.drainPendingWrites(session.sessionId);
+    const liveEvents = await this.readEventsFromLiveFile(this.sessionDir(session));
+    const bufferedEvents = [...(this.buffers.get(session.sessionId) ?? [])];
+    return mergeLiveAndBufferedEvents(liveEvents, bufferedEvents).map((entry) => ({
+      v: 1,
+      t: entry.timestamp,
+      threadId: session.threadId,
+      catId: session.catId,
+      sessionId: session.sessionId,
+      ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+      ...(entry.invocationId ? { invocationId: entry.invocationId } : {}),
+      eventNo: entry.eventNo,
+      event: entry.event,
+    }));
+  }
+
+  /**
    * Get the current session's touched files.
    * Merges events from both disk (events.live.jsonl — has pre-restart events)
    * and in-memory buffer (has current events including not-yet-flushed writes).
@@ -232,7 +294,8 @@ export class TranscriptWriter {
       for (const line of content.split('\n')) {
         if (!line.trim()) continue;
         try {
-          const envelope = JSON.parse(line);
+          const envelope = normalizeTranscriptEvent(JSON.parse(line));
+          if (!envelope) continue;
           events.push({
             eventNo: events.length,
             timestamp: envelope.t,
@@ -272,16 +335,7 @@ export class TranscriptWriter {
     // events.live.jsonl has all pre-restart events.
     const liveEvents = await this.readEventsFromLiveFile(sessionDir);
     if (liveEvents.length > 0) {
-      // Content-based dedup: fingerprint each buffer event so we can identify
-      // which live-file events are disk-only (pre-restart) vs duplicates of
-      // buffer events that also made it to disk.
-      const bufKeys = new Set(buf.map((e) => `${e.timestamp}:${JSON.stringify(e.event)}`));
-      const diskOnly = liveEvents.filter((e) => !bufKeys.has(`${e.timestamp}:${JSON.stringify(e.event)}`));
-      buf = [...diskOnly, ...buf];
-      // Re-number eventNo sequentially after merge.
-      for (let i = 0; i < buf.length; i++) {
-        buf[i] = { ...buf[i], eventNo: i };
-      }
+      buf = mergeLiveAndBufferedEvents(liveEvents, buf);
       this.buffers.set(session.sessionId, buf);
     }
 

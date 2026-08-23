@@ -48,10 +48,12 @@ function verdictMessage(overrides = {}) {
     userId: 'user-1',
     catId: 'codex-terra',
     content: `@codex-sol\n\nREQUEST_CHANGES — repo #3333 exact ${HEAD}.`,
+    mentions: ['codex-sol'],
     extra: {
       targetCats: ['codex-sol'],
       crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
       stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+      localReviewVerdict: { verdict: 'changes_requested', clientMessageId: 'typed-verdict-1' },
     },
     ...overrides,
   };
@@ -114,8 +116,6 @@ function input(overrides = {}) {
     leaseId: 'lease-review-1',
     generation: 1,
     messageId: 'message-verdict-1',
-    headSha: HEAD,
-    verdict: 'changes_requested',
     now: 200,
     principal: { catId: 'codex-terra', threadId: 'thread-review', tenantScope: 'user-1' },
     ...overrides,
@@ -141,7 +141,45 @@ describe('F167 local review verdict completion producer', () => {
     });
   });
 
-  it('fails closed for another holder, generation, or exact HEAD', async () => {
+  it('accepts the four incident prose shapes and ordinary human prose from one typed verdict carrier', async () => {
+    const proseShapes = [
+      `@codex-sol\n\nVERDICT: BLOCK (changes_requested) — exact HEAD ${HEAD}.`,
+      `@codex-sol\n\nVERDICT: REQUEST_CHANGES — exact HEAD ${HEAD}.`,
+      `@codex-sol\n\nverdict: changes_requested — exact HEAD ${HEAD}.`,
+      '@codex-sol\n\n我看完了：这里还有一处授权边界需要修，改好再叫我。',
+    ];
+
+    for (const [index, content] of proseShapes.entries()) {
+      const message = verdictMessage({
+        id: `message-verdict-${index + 1}`,
+        content,
+        extra: {
+          targetCats: ['codex-sol'],
+          crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+          stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+          localReviewVerdict: {
+            verdict: 'changes_requested',
+            clientMessageId: `typed-verdict-${index + 1}`,
+          },
+        },
+      });
+      const { service, completeActionLease } = harness({ message });
+
+      assert.deepEqual(
+        await service.record(input({ messageId: message.id })),
+        {
+          outcome: 'committed',
+          leaseId: 'lease-review-1',
+          generation: 1,
+          evidenceRef: `local-review:${message.id}:g1:changes_requested`,
+        },
+        `typed verdict must not depend on public prose shape ${index + 1}`,
+      );
+      assert.equal(completeActionLease.mock.calls.length, 1);
+    }
+  });
+
+  it('fails closed for another holder or generation while deriving exact HEAD from the lease', async () => {
     const { service, completeActionLease } = harness();
 
     assert.equal(
@@ -158,76 +196,55 @@ describe('F167 local review verdict completion producer', () => {
       'mismatch',
     );
     assert.equal((await service.record(input({ generation: 2 }))).outcome, 'stale');
-    assert.equal((await service.record(input({ headSha: 'b'.repeat(40) }))).outcome, 'mismatch');
     assert.equal(completeActionLease.mock.calls.length, 0);
   });
 
-  it('rejects a message outside the predecessor route or without the declared verdict', async () => {
+  it('rejects a message outside the predecessor route but ignores verdict, subject, and HEAD prose', async () => {
     const wrongThread = harness({ message: verdictMessage({ threadId: 'thread-review' }) });
     assert.equal((await wrongThread.service.record(input())).outcome, 'mismatch');
 
-    const wrongVerdict = harness({
-      message: verdictMessage({ content: `@codex-sol\n\nAPPROVE — repo #3333 exact ${HEAD}.` }),
-    });
-    assert.equal((await wrongVerdict.service.record(input())).outcome, 'mismatch');
-
-    const wrongSubject = harness({
-      message: verdictMessage({ content: `@codex-sol\n\nREQUEST_CHANGES — cat-cafe #9999 exact ${HEAD}.` }),
-    });
-    assert.equal((await wrongSubject.service.record(input())).outcome, 'mismatch');
-  });
-
-  it('rejects subject anchors whose PR number or repository token merely extends the lease subject', async () => {
     for (const content of [
-      `@codex-sol\n\nREQUEST_CHANGES — repo #33330 exact ${HEAD}.`,
-      `@codex-sol\n\nREQUEST_CHANGES — PR #33330 exact ${HEAD}.`,
-      `@codex-sol\n\nREQUEST_CHANGES — pr:owner/repo#33330 exact ${HEAD}.`,
-      `@codex-sol\n\nREQUEST_CHANGES — owner/repository#3333 exact ${HEAD}.`,
-      `@codex-sol\n\nREQUEST_CHANGES — github.com/owner/repo/pull/33330 exact ${HEAD}.`,
+      `@codex-sol\n\nAPPROVE — wrong prose verdict and no subject.`,
+      `@codex-sol\n\nREQUEST_CHANGES — cat-cafe #9999 exact ${'b'.repeat(40)}.`,
     ]) {
-      const { service, completeActionLease } = harness({ message: verdictMessage({ content }) });
-
-      assert.deepEqual(await service.record(input()), {
-        outcome: 'mismatch',
-        reason: 'local review verdict does not bind the action subject',
-      });
-      assert.equal(completeActionLease.mock.calls.length, 0);
+      const proseIndependent = harness({ message: verdictMessage({ content }) });
+      assert.equal((await proseIndependent.service.record(input())).outcome, 'committed');
+      assert.equal(proseIndependent.completeActionLease.mock.calls.length, 1);
     }
   });
 
-  it('keeps legacy historical subject and verdict grammar out of ordinary completion', async () => {
-    const subjectRef = 'pr:zts212653/cat-cafe#3424';
-    const lease = createLease({
-      subjectRef,
-      terminalPredicate: canonicalizeActionTerminalPredicate({
-        actionFamily: 'review',
-        subjectRef,
-        predicate: { kind: 'review_delivered', headSha: HEAD },
-      }),
-    });
-    const legacySubject = harness({
-      lease,
+  it('derives the evidence verdict from typed message metadata and rejects its absence', async () => {
+    const approved = harness({
       message: verdictMessage({
-        content: `@codex-sol\n\nREQUEST_CHANGES — PR #3424 exact HEAD \`${HEAD}\`.`,
+        content: '@codex-sol\n\n这版可以合。',
+        extra: {
+          targetCats: ['codex-sol'],
+          crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+          stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+          localReviewVerdict: { verdict: 'approved', clientMessageId: 'typed-approved' },
+        },
       }),
     });
-    assert.deepEqual(await legacySubject.service.record(input()), {
-      outcome: 'mismatch',
-      reason: 'local review verdict does not bind the action subject',
+    assert.deepEqual(await approved.service.record(input()), {
+      outcome: 'committed',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      evidenceRef: 'local-review:message-verdict-1:g1:approved',
     });
-    assert.equal(legacySubject.completeActionLease.mock.calls.length, 0);
 
-    const legacyVerdict = harness({
-      lease,
+    const missing = harness({
       message: verdictMessage({
-        content: `@codex-sol\n\n**Verdict: BLOCK — ordinary completion probe** for cat-cafe #3424 exact HEAD \`${HEAD}\`.`,
+        extra: {
+          targetCats: ['codex-sol'],
+          crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+          stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+        },
       }),
     });
-    assert.deepEqual(await legacyVerdict.service.record(input()), {
-      outcome: 'mismatch',
-      reason: 'local review message does not contain the declared verdict',
+    assert.deepEqual(await missing.service.record(input()), {
+      outcome: 'insufficient',
+      reason: 'local review message has no typed verdict fact',
     });
-    assert.equal(legacyVerdict.completeActionLease.mock.calls.length, 0);
   });
 
   it('rejects a verdict message linked to an older action-lease generation', async () => {
@@ -247,6 +264,7 @@ describe('F167 local review verdict completion producer', () => {
         extra: {
           targetCats: ['codex-sol'],
           crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+          localReviewVerdict: { verdict: 'changes_requested', clientMessageId: 'typed-verdict-1' },
         },
       }),
     });
@@ -346,8 +364,6 @@ function recoveryInput(overrides = {}) {
     leaseId: 'lease-review-1',
     generation: 1,
     messageId: 'message-verdict-1',
-    headSha: HEAD,
-    verdict: 'changes_requested',
     now: 300,
     principal: { catId: 'codex-sol', threadId: 'thread-author', tenantScope: 'user-1' },
     ...overrides,
@@ -380,7 +396,7 @@ describe('F167 active stale local-review settlement recovery', () => {
     });
   });
 
-  it('keeps legacy PR-number and BLOCK rendering matches token-bounded', async () => {
+  it('keeps historical recovery independent of legacy prose grammar', async () => {
     const subjectRef = 'pr:zts212653/cat-cafe#3424';
     const lease = createLease({
       subjectRef,
@@ -390,36 +406,19 @@ describe('F167 active stale local-review settlement recovery', () => {
         predicate: { kind: 'review_delivered', headSha: HEAD },
       }),
     });
-    for (const legacySubject of [
-      'PR #34240',
-      'PR #3424-foo',
-      'PR #3424.foo',
-      'PR #3424/other',
-      'PR #3424#other',
-      'PR #3424:other',
+    for (const content of [
+      '@codex-sol\n\nNo machine tokens here; the typed fact is durable.',
+      `@codex-sol\n\n**Verdict: BLOCKED** for PR #34240 exact HEAD \`${'b'.repeat(40)}\`.`,
     ]) {
-      const wrongSubject = recoveryHarness({
+      const proseIndependent = recoveryHarness({
         lease,
-        message: verdictMessage({
-          content: `@codex-sol\n\n**Verdict: BLOCK — 1 P1 remains** for ${legacySubject} exact HEAD \`${HEAD}\`.`,
-        }),
+        message: verdictMessage({ content }),
       });
-      assert.deepEqual(await wrongSubject.service.recover(recoveryInput()), {
-        outcome: 'mismatch',
-        reason: 'local review verdict does not bind the action subject',
-      });
-    }
-
-    for (const legacyVerdict of ['BLOCKED', 'BLOCK-extra', 'BLOCK:extra']) {
-      const wrongVerdict = recoveryHarness({
-        lease,
-        message: verdictMessage({
-          content: `@codex-sol\n\n**Verdict: ${legacyVerdict}** for PR #3424 exact HEAD \`${HEAD}\`.`,
-        }),
-      });
-      assert.deepEqual(await wrongVerdict.service.recover(recoveryInput()), {
-        outcome: 'mismatch',
-        reason: 'local review message does not contain the declared verdict',
+      assert.deepEqual(await proseIndependent.service.recover(recoveryInput()), {
+        outcome: 'committed',
+        leaseId: 'lease-review-1',
+        generation: 1,
+        evidenceRef: 'local-review:message-verdict-1:g1:changes_requested',
       });
     }
   });
@@ -450,7 +449,7 @@ describe('F167 active stale local-review settlement recovery', () => {
     assert.equal(getCurrentLease().holderOutcomes['codex-terra'].outcome, 'succeeded');
   });
 
-  it('authorizes only the exact persisted predecessor route and a server-verified stale HEAD', async () => {
+  it('authorizes the persisted predecessor identity from a later same-cat invocation and a server-verified stale HEAD', async () => {
     const wrongActor = recoveryHarness();
     assert.deepEqual(
       await wrongActor.service.recover(
@@ -459,12 +458,22 @@ describe('F167 active stale local-review settlement recovery', () => {
       { outcome: 'mismatch', reason: 'local review recovery caller is not the lease predecessor' },
     );
 
-    const wrongThread = recoveryHarness();
+    const laterInvocation = recoveryHarness();
+    assert.equal(
+      (
+        await laterInvocation.service.recover(
+          recoveryInput({ principal: { catId: 'codex-sol', threadId: 'thread-convergence', tenantScope: 'user-1' } }),
+        )
+      ).outcome,
+      'committed',
+    );
+
+    const wrongTenant = recoveryHarness();
     assert.deepEqual(
-      await wrongThread.service.recover(
-        recoveryInput({ principal: { catId: 'codex-sol', threadId: 'other-thread', tenantScope: 'user-1' } }),
+      await wrongTenant.service.recover(
+        recoveryInput({ principal: { catId: 'codex-sol', threadId: 'thread-convergence', tenantScope: 'user-2' } }),
       ),
-      { outcome: 'mismatch', reason: 'local review recovery principal does not match the predecessor route' },
+      { outcome: 'mismatch', reason: 'local review recovery caller is outside the predecessor tenant' },
     );
 
     const stillCurrent = recoveryHarness({
@@ -563,12 +572,12 @@ describe('F167 active stale local-review settlement recovery', () => {
     });
   });
 
-  it('allows exactly one CAS winner and fences every concurrent replay', async () => {
+  it('allows exactly one state transition and reports every identical concurrent replay as committed', async () => {
     const { service, recoveryCalls } = recoveryHarness();
     const outcomes = await Promise.all(Array.from({ length: 12 }, () => service.recover(recoveryInput())));
 
-    assert.equal(outcomes.filter((result) => result.outcome === 'committed').length, 1);
-    assert.equal(outcomes.filter((result) => result.outcome === 'stale').length, 11);
+    assert.equal(outcomes.filter((result) => result.outcome === 'committed').length, 12);
+    assert.equal(outcomes.filter((result) => result.outcome === 'stale').length, 0);
     assert.equal(recoveryCalls.length, 12);
   });
 });

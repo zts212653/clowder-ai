@@ -317,6 +317,8 @@ export function transformCodexEvent(
         type: 'tool_use',
         catId,
         toolName: `mcp:${server}/${tool}`,
+        toolSource: 'mcp',
+        toolChannel: 'unknown',
         toolInput: args,
         timestamp: Date.now(),
       };
@@ -331,7 +333,10 @@ export function transformCodexEvent(
       type: 'tool_use',
       catId,
       toolName: 'command_execution',
+      toolSource: 'host_cli',
+      toolChannel: 'unknown',
       toolInput: { command },
+      ...(typeof item.id === 'string' ? { toolUseId: item.id } : {}),
       timestamp: Date.now(),
     };
   }
@@ -387,6 +392,16 @@ export function transformCodexEvent(
     const status = typeof item.status === 'string' ? item.status : 'completed';
     const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
     const output = typeof item.aggregated_output === 'string' ? item.aggregated_output : '';
+    const toolResultStatus: 'ok' | 'error' | 'unknown' =
+      exitCode !== null
+        ? exitCode === 0
+          ? 'ok'
+          : 'error'
+        : status === 'failed' || status === 'error'
+          ? 'error'
+          : status === 'completed'
+            ? 'ok'
+            : 'unknown';
 
     const sections: string[] = [];
     if (command) sections.push(`command: ${command}`);
@@ -398,7 +413,12 @@ export function transformCodexEvent(
     return {
       type: 'tool_result',
       catId,
+      toolName: 'command_execution',
+      toolSource: 'host_cli',
+      toolChannel: 'unknown',
+      toolResultStatus,
       content: sections.join('\n'),
+      ...(typeof item.id === 'string' ? { toolUseId: item.id } : {}),
       timestamp: Date.now(),
     };
   }
@@ -410,6 +430,8 @@ export function transformCodexEvent(
       type: 'tool_use',
       catId,
       toolName: 'file_change',
+      toolSource: 'host_cli',
+      toolChannel: 'unknown',
       toolInput: { status, changes },
       timestamp: Date.now(),
     };
@@ -460,6 +482,8 @@ export function transformCodexEvent(
       catId,
       content: `${toolLabel} (${status})\n${visibleTextParts.join('\n')}`.trim(),
       toolName: toolLabel,
+      toolSource: 'mcp',
+      toolChannel: 'unknown',
       toolResultStatus,
       ...(approvalFailure ? { toolResultErrorCode: approvalFailure.reasonCode } : {}),
       timestamp: Date.now(),

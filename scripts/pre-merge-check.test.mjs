@@ -168,6 +168,16 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
 }
 
 describe('pre-merge-check dependency refresh order', () => {
+  it('keeps the directory-size guard in the root check chain', () => {
+    const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+
+    assert.match(
+      packageJson.scripts.check,
+      /(?:^|&&\s*)pnpm check:dir-size(?:\s*&&|$)/,
+      'pnpm gate must fail locally before public CI when a source directory crosses ADR-010 limits',
+    );
+  });
+
   it('does not truncate git worktree output with a pipe that can SIGPIPE under pipefail', () => {
     const source = readFileSync(scriptPath, 'utf8');
 

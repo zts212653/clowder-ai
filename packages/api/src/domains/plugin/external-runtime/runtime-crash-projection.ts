@@ -23,6 +23,7 @@ export async function projectRuntimeCrash(
   inventory: PluginInventoryStore,
   execution: RuntimeCrashExecution,
   now: () => number,
+  options: { readonly preserveActivation?: boolean; readonly suppressExitDiagnostic?: boolean } = {},
 ): Promise<void> {
   await inventory.transaction((transaction) => {
     const instance = transaction.instances.get(execution.pluginInstanceId);
@@ -30,10 +31,10 @@ export async function projectRuntimeCrash(
     if (execution.started && (instance.lifecycleState !== 'installed' || instance.activationState !== 'enabled'))
       return;
     const occurredAt = now();
-    const error = runtimeError(execution.exit, occurredAt);
+    const error = options.suppressExitDiagnostic ? undefined : runtimeError(execution.exit, occurredAt);
     transaction.instances.put({
       ...instance,
-      ...(execution.started
+      ...(execution.started && !options.preserveActivation
         ? { activationState: 'error' as const, lifecycleRevision: instance.lifecycleRevision + 1 }
         : {}),
       runtimeState: 'crashed',

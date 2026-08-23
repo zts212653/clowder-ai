@@ -108,6 +108,8 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { persistA2ARoutingMessage } from './a2a-routing-projection.js';
+import { admitThreadParticipants } from './thread-participant-admission.js';
 
 /** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 interface OutboundDeliveryHookLike {
@@ -414,36 +416,6 @@ export function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancel
     }
   } catch (err) {
     log.warn({ threadId, err }, 'F167 Phase J: failed to auto-cancel pending holds');
-  }
-}
-
-async function persistA2ARoutingMessage(
-  messageStore: IMessageStore,
-  msg: { catId?: string; content?: string; invocationId?: string; targetCatId?: string; timestamp: number },
-  threadId: string,
-): Promise<string | undefined> {
-  if (!msg.content) return undefined;
-  try {
-    const stored = await messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: msg.content,
-      mentions: [],
-      timestamp: msg.timestamp,
-      threadId,
-      extra: {
-        systemKind: 'a2a_routing',
-        a2aRouting: {
-          fromCatId: msg.catId,
-          targetCatId: msg.targetCatId,
-          invocationId: msg.invocationId,
-        },
-      },
-    });
-    return stored.id;
-  } catch (err) {
-    log.warn({ err, threadId }, 'Failed to persist a2a_handoff');
-    return undefined;
   }
 }
 
@@ -934,15 +906,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // event through the user's always-joined room. This makes an unopened
     // thread update immediately without inventing another event or room.
     const publishSidebarParticipants = async () => {
-      let sidebarParticipants = [...targetCats];
       if (opts.threadStore?.addParticipants) {
-        await opts.threadStore.addParticipants(resolvedThreadId, targetCats);
-        const storedParticipants = (await opts.threadStore.get(resolvedThreadId))?.participants ?? [];
-        sidebarParticipants = [...new Set([...storedParticipants, ...targetCats])];
+        await admitThreadParticipants({
+          userId,
+          threadId: resolvedThreadId,
+          targetCats,
+          threadStore: opts.threadStore,
+          socketManager: opts.socketManager,
+          emitPolicy: 'always',
+        });
+        return;
       }
       opts.socketManager.emitToUser(userId, 'thread_updated', {
         threadId: resolvedThreadId,
-        participants: sidebarParticipants,
+        participants: [...targetCats],
       });
     };
     const publishAdmittedBundleParticipants = async () => {
@@ -1785,7 +1762,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             };
 
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, broadcastPayload, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(
+                opts.messageStore,
+                broadcastPayload,
+                resolvedThreadId,
+                log,
+              );
               if (storedId) broadcastPayload.messageId = storedId;
             }
 
@@ -2229,7 +2211,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             const legacyPayload = { ...msg };
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId, log);
               if (storedId) legacyPayload.messageId = storedId;
             }
             opts.socketManager.broadcastAgentMessage(legacyPayload, resolvedThreadId);

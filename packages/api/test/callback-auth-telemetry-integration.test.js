@@ -56,42 +56,17 @@ describe('callback-auth-telemetry integration (F174-D1)', () => {
     assert.equal(snap.reasonCounts.unknown_invocation, 1);
   });
 
-  test('refresh-token expired increments counter (AC-D2)', async () => {
-    // Build a context with a short-TTL registry so we can exercise the
-    // expired path quickly.
-    const { InvocationRegistry } = await import(
-      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
-    );
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
-    const Fastify = (await import('fastify')).default;
-    const registry = new InvocationRegistry({ ttlMs: 5 });
-
-    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore: new MessageStore(),
-      threadStore: new ThreadStore(),
-      socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
-      evidenceStore: {
-        search: async () => [],
-        health: async () => true,
-        initialize: async () => {},
-        upsert: async () => {},
-        deleteByAnchor: async () => {},
-        getByAnchor: async () => null,
-      },
-      reflectionService: { reflect: async () => '' },
-      markerQueue: {
-        submit: async (m) => ({ id: 'mk-1', createdAt: new Date().toISOString(), ...m }),
-        list: async () => [],
-        transition: async () => {},
-      },
-    });
-
+  test('refresh-token interrupted increments counter (AC-D2)', async () => {
+    const { registry, createApp } = await createTestContext();
+    const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
-    await new Promise((r) => setTimeout(r, 30)); // past 5ms TTL
+    await registry.commitTerminal({
+      invocationId,
+      disposition: 'interrupted',
+      endedAt: Date.now(),
+      endReason: 'api_restart',
+      terminalRef: `turn_execution:${invocationId}`,
+    });
 
     const res = await app.inject({
       method: 'POST',
@@ -100,10 +75,10 @@ describe('callback-auth-telemetry integration (F174-D1)', () => {
     });
     assert.equal(res.statusCode, 401);
     const snap = getCallbackAuthFailureSnapshot();
-    assert.equal(snap.reasonCounts.expired, 1, 'expired path must increment counter');
+    assert.equal(snap.reasonCounts.interrupted, 1, 'typed terminal path must increment counter');
   });
 
-  test('refresh-token stale_invocation increments counter (AC-D2)', async () => {
+  test('refresh-token replaced increments counter (AC-D2)', async () => {
     const { registry, createApp } = await createTestContext();
     const app = await createApp();
     const old = await registry.create('user-1', 'opus', 'thread-1');
@@ -115,6 +90,6 @@ describe('callback-auth-telemetry integration (F174-D1)', () => {
     });
     assert.equal(res.statusCode, 401);
     const snap = getCallbackAuthFailureSnapshot();
-    assert.equal(snap.reasonCounts.stale_invocation, 1);
+    assert.equal(snap.reasonCounts.replaced, 1);
   });
 });

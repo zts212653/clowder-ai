@@ -56,6 +56,8 @@ const mockSetThreadTargetCats = vi.fn();
 const mockReplaceThreadTargetCats = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
+const mockSetPendingPreviewAutoOpen = vi.fn();
+const mockQueueThreadPreview = vi.fn();
 // Stateful slot records so spawn_started/intent_mode registration behavior
 // (startedAt preservation, slot-count stability) can be asserted through the
 // real handler code, mimicking chatStore's `startedAt ?? Date.now()` write.
@@ -103,7 +105,11 @@ let mockStoreCurrentThreadId = 'thread-B';
 vi.mock('@/stores/chatStore', () => {
   const getState = () => ({
     currentThreadId: mockStoreCurrentThreadId,
-    threadStates: Object.fromEntries([...mockKnownThreadIds].map((threadId) => [threadId, {}])),
+    threadStates: Object.fromEntries(
+      [...mockKnownThreadIds].map((threadId) => [threadId, { workspaceWorktreeId: null }]),
+    ),
+    workspaceWorktreeId: null,
+    presentationLock: null,
     queue: mockThreadQueues.get(mockStoreCurrentThreadId) ?? [],
     addMessageToThread: mockAddMessageToThread,
     appendToThreadMessage: mockAppendToThreadMessage,
@@ -130,6 +136,8 @@ vi.mock('@/stores/chatStore', () => {
     setCatStatus: mockSetCatStatus,
     activeInvocations: mockActiveInvocations,
     getThreadState: mockGetThreadState,
+    setPendingPreviewAutoOpen: mockSetPendingPreviewAutoOpen,
+    queueThreadPreview: mockQueueThreadPreview,
   });
   const useChatStore = ((selector?: (state: ReturnType<typeof getState>) => unknown) =>
     selector ? selector(getState()) : getState()) as {
@@ -189,11 +197,11 @@ function HookWrapper({ callbacks, threadId }: { callbacks: SocketCallbacks; thre
  * Simulate a server-side socket event arriving at the client.
  * Uses the original EventEmitter.emit (not the mocked socket.emit).
  */
-function simulateServerEvent(event: string, data: unknown) {
+function simulateServerEvent(event: string, ...args: unknown[]) {
   // Get all listeners registered on the mock socket and call them
   const listeners = mockSocket.listeners(event);
   for (const listener of listeners) {
-    (listener as (data: unknown) => void)(data);
+    (listener as (...listenerArgs: unknown[]) => void)(...args);
   }
 }
 
@@ -225,6 +233,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
     latestSocketControls = null;
     mockUserId = 'test-user';
+    mockSocket.connected = true;
     mockStoreCurrentThreadId = 'thread-B';
     mockThreadQueues.clear();
     mockKnownThreadIds.clear();
@@ -249,6 +258,8 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     mockReplaceThreadTargetCats.mockClear();
     mockUpdateThreadCatStatus.mockClear();
     mockClearThreadActiveInvocation.mockClear();
+    mockSetPendingPreviewAutoOpen.mockClear();
+    mockQueueThreadPreview.mockClear();
     mockAddActiveInvocation.mockClear();
     mockAddFlatActiveInvocation.mockClear();
     mockRemoveActiveInvocation.mockClear();
@@ -317,6 +328,80 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       threadId: 'thread-A',
       mode: 'execute',
       targetCats: ['opus'],
+    });
+  });
+
+  it('receives preview auto-open on the stable chat socket across a thread switch', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-A' }));
+    });
+
+    const firstAck = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 5196,
+          path: '/first',
+          threadId: 'thread-A',
+          eventId: 'preview-1',
+        },
+        firstAck,
+      );
+    });
+    expect(firstAck).toHaveBeenCalledWith({ status: 'applied', eventId: 'preview-1' });
+    expect(mockSetPendingPreviewAutoOpen).toHaveBeenCalledWith({ port: 5196, path: '/first' });
+
+    const disconnectCount = (mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length;
+    mockStoreCurrentThreadId = 'thread-B';
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    const secondAck = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        {
+          port: 5196,
+          path: '/second',
+          threadId: 'thread-B',
+          eventId: 'preview-2',
+        },
+        secondAck,
+      );
+    });
+    expect(secondAck).toHaveBeenCalledWith({ status: 'applied', eventId: 'preview-2' });
+    expect((mockSocket.disconnect as ReturnType<typeof vi.fn>).mock.calls.length).toBe(disconnectCount);
+  });
+
+  it('queues an off-thread preview through the stable chat socket and acknowledges custody', () => {
+    mockStoreCurrentThreadId = 'thread-A';
+    act(() => {
+      root.render(
+        React.createElement(HookWrapper, {
+          callbacks: { onMessage: vi.fn() },
+          threadId: 'thread-A',
+        }),
+      );
+    });
+
+    const acknowledge = vi.fn();
+    act(() => {
+      simulateServerEvent(
+        'preview:auto-open',
+        { port: 5196, path: '/queued', threadId: 'thread-B', eventId: 'preview-queued' },
+        acknowledge,
+      );
+    });
+
+    expect(mockQueueThreadPreview).toHaveBeenCalledWith('thread-B', { port: 5196, path: '/queued' });
+    expect(acknowledge).toHaveBeenCalledWith({
+      status: 'queued',
+      eventId: 'preview-queued',
+      reason: 'thread_inactive',
     });
   });
 
@@ -1721,6 +1806,35 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     const joinedRooms = emitMock.mock.calls.filter(([event]) => event === 'join_room').map(([, room]) => room);
 
     expect(new Set(joinedRooms)).toEqual(new Set(['thread:thread-A', 'thread:thread-B']));
+  });
+
+  it('repairs the foreground room when the initial connect generation misses its one-shot join', async () => {
+    vi.useFakeTimers();
+    try {
+      mockStoreCurrentThreadId = 'thread-A';
+      mockSocket.connected = false;
+      act(() => {
+        root.render(
+          React.createElement(HookWrapper, {
+            callbacks: { onMessage: vi.fn() },
+            threadId: 'thread-A',
+          }),
+        );
+      });
+
+      const emitMock = mockSocket.emit as unknown as ReturnType<typeof vi.fn>;
+      emitMock.mockClear();
+      // Model the observed server truth: the socket generation is connected,
+      // but neither the mount join nor the connect callback reached join_room.
+      mockSocket.connected = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      expect(emitMock).toHaveBeenCalledWith('join_room', 'thread:thread-A', expect.any(Function));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps a requested room desired when the socket ref is temporarily unavailable', () => {

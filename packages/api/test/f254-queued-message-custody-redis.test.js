@@ -15,6 +15,7 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
   let invocationStore;
   let InvocationQueue;
   let QueuedMessageCustodyStartupReconciler;
+  let rebindCrossThreadQueueCarrierActionFence;
   let connected = false;
 
   before(async () => {
@@ -25,15 +26,18 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
       { RedisInvocationRecordStore },
       invocationQueueModule,
       startupReconcilerModule,
+      custodyCoordinatorModule,
     ] = await Promise.all([
       import('@cat-cafe/shared/utils'),
       import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
       import('../dist/domains/cats/services/stores/redis/RedisInvocationRecordStore.js'),
       import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
       import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js'),
+      import('../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'),
     ]);
     InvocationQueue = invocationQueueModule.InvocationQueue;
     QueuedMessageCustodyStartupReconciler = startupReconcilerModule.QueuedMessageCustodyStartupReconciler;
+    rebindCrossThreadQueueCarrierActionFence = custodyCoordinatorModule.rebindCrossThreadQueueCarrierActionFence;
     redis = createRedisClient({ url: REDIS_URL });
     try {
       await redis.ping();
@@ -81,6 +85,215 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.deepEqual(results.map((result) => result.kind).sort(), ['revision_mismatch', 'updated']);
     const stored = await store.getById(message.id);
     assert.equal(stored.queueCustody.revision, 2);
+  });
+
+  test('durably fences fan-out admission before custody and replaces the intent atomically', async () => {
+    const message = await store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'redis pre-CAS fan-out',
+      mentions: ['codex', 'codex-terra'],
+      timestamp: 1_000,
+      threadId: 'thread-fanout-admission',
+      deliveryStatus: 'queued',
+    });
+    const admission = {
+      version: 1,
+      admissionId: `queue-custody:${message.id}`,
+      ownerUserId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      intent: 'execute',
+      targetCats: ['codex'],
+      requestedTargetCats: ['codex', 'codex-terra'],
+      callerCatId: 'opus',
+      a2aParentInvocationId: 'parent-1',
+      priority: 'normal',
+      createdAt: 1_000,
+    };
+
+    const results = await Promise.all([
+      store.initializeQueueCustodyAdmission(message.id, admission),
+      store.initializeQueueCustodyAdmission(message.id, structuredClone(admission)),
+    ]);
+    assert.deepEqual(results.map((result) => result.kind).sort(), ['existing', 'initialized']);
+    assert.deepEqual((await store.getById(message.id)).queueCustodyAdmission, admission);
+    assert.equal(await redis.ttl(`msg:${message.id}`), -1);
+    assert.equal((await store.markDelivered(message.id, 1_001)).deliveryTransitioned, false);
+
+    const custody = makeCustody({
+      entryId: `fanout:${message.id}`,
+      ownerUserId: 'user-1',
+      ownerAuthProvenance: 'unknown',
+      intent: 'execute',
+      allTargetCats: ['codex', 'codex-terra'],
+      carrierByTargetCatId: {
+        codex: {
+          entryId: 'carrier-codex',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          callerCatId: 'opus',
+          a2aParentInvocationId: 'parent-1',
+          a2aTriggerMessageId: message.id,
+          autoExecute: true,
+          createdAt: 1_000,
+        },
+      },
+      carrierStateByTargetCatId: { codex: { status: 'queued' } },
+      pendingTargetCats: ['codex'],
+      failedByCatIds: ['codex-terra'],
+    });
+    assert.equal((await store.initializeQueueCustody(message.id, custody)).kind, 'initialized');
+
+    const stored = await store.getById(message.id);
+    assert.equal(stored.queueCustodyAdmission, undefined);
+    assert.deepEqual(stored.queueCustody.allTargetCats, ['codex', 'codex-terra']);
+    assert.equal(await redis.hget(`msg:${message.id}`, 'queueCustodyAdmission'), null);
+
+    const canceled = await store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'cancel redis pre-CAS fan-out',
+      mentions: ['codex'],
+      timestamp: 1_002,
+      threadId: 'thread-fanout-admission',
+      deliveryStatus: 'queued',
+    });
+    assert.equal(
+      (
+        await store.initializeQueueCustodyAdmission(canceled.id, {
+          ...admission,
+          admissionId: `queue-custody:${canceled.id}`,
+          requestedTargetCats: ['codex'],
+        })
+      ).kind,
+      'initialized',
+    );
+    assert.equal((await store.markCanceled(canceled.id)).deliveryStatus, 'canceled');
+    assert.equal((await store.getById(canceled.id)).queueCustodyAdmission, undefined);
+    assert.equal(await redis.hget(`msg:${canceled.id}`, 'queueCustodyAdmission'), null);
+  });
+
+  test('round-trips an action-successor carrier rebind and refuses generation rewind', async () => {
+    const message = await store.append({
+      userId: 'user-1',
+      catId: 'opus',
+      content: 'redis action carrier',
+      mentions: ['codex'],
+      timestamp: 1_000,
+      threadId: 'thread-action-carrier-redis',
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({
+        entryId: 'cross-thread:action-redis',
+        ownerUserId: 'user-1',
+        receiptScope: 'cross_thread_delivery',
+        allTargetCats: ['codex'],
+        pendingTargetCats: ['codex'],
+        carrierByTargetCatId: {
+          codex: {
+            entryId: 'carrier-action-codex',
+            source: 'agent',
+            sourceCategory: 'a2a',
+            callerCatId: 'opus',
+            a2aTriggerMessageId: 'source-action-redis',
+            autoExecute: true,
+            createdAt: 1_000,
+          },
+        },
+        carrierStateByTargetCatId: { codex: { status: 'queued' } },
+      }),
+    });
+    const fence = {
+      leaseId: 'lease-action-redis',
+      generation: 7,
+      dispatchId: 'cross-post:action-redis',
+      terminalPredicateDigest: 'predicate-action-redis',
+    };
+
+    const [rebound] = await rebindCrossThreadQueueCarrierActionFence(
+      store,
+      [message],
+      'carrier-action-codex',
+      fence,
+      () => 1_100,
+    );
+
+    assert.equal(rebound.queueCustody.revision, 2);
+    assert.deepEqual(rebound.queueCustody.carrierByTargetCatId.codex.actionSuccessorFence, fence);
+    assert.equal(rebound.queueCustody.carrierByTargetCatId.codex.idempotencyKey, 'action:lease-action-redis:7:codex');
+    assert.equal(await redis.ttl(`msg:${message.id}`), -1);
+
+    const [idempotent] = await rebindCrossThreadQueueCarrierActionFence(
+      store,
+      [rebound],
+      'carrier-action-codex',
+      fence,
+      () => 1_200,
+    );
+    assert.equal(idempotent.queueCustody.revision, 2, 'exact replay must not write a second custody revision');
+
+    await assert.rejects(
+      rebindCrossThreadQueueCarrierActionFence(
+        store,
+        [idempotent],
+        'carrier-action-codex',
+        { ...fence, generation: 6 },
+        () => 1_300,
+      ),
+      /cannot replace or rewind authority/,
+    );
+    assert.equal((await store.getById(message.id)).queueCustody.revision, 2);
+  });
+
+  test('atomically adopts one legacy-visible carrier before Queue custody admission', async () => {
+    const legacy = await store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'approved carrier persisted before Queue admission',
+      mentions: ['codex-terra'],
+      timestamp: 1_000,
+      threadId: 'thread-approved-carrier',
+    });
+
+    const results = await Promise.all([store.prepareQueueAdmission(legacy.id), store.prepareQueueAdmission(legacy.id)]);
+    assert.deepEqual(results.map((result) => result.kind).sort(), ['existing', 'prepared']);
+    const prepared = await store.getById(legacy.id);
+    assert.equal(prepared.deliveryStatus, 'queued');
+    assert.equal(prepared.queueCustody, undefined);
+    assert.equal(await redis.ttl(`msg:${legacy.id}`), -1);
+
+    const custody = makeCustody({
+      entryId: 'carrier-codex-terra',
+      receiptScope: 'cross_thread_delivery',
+      ownerUserId: 'user-1',
+      allTargetCats: ['codex-terra'],
+      pendingTargetCats: ['codex-terra'],
+      carrierByTargetCatId: {
+        'codex-terra': {
+          entryId: 'carrier-codex-terra',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          callerCatId: 'codex-sol',
+          a2aTriggerMessageId: legacy.id,
+          autoExecute: true,
+          createdAt: 1_000,
+        },
+      },
+      carrierStateByTargetCatId: { 'codex-terra': { status: 'queued' } },
+    });
+    assert.equal((await store.initializeQueueCustody(legacy.id, custody)).kind, 'initialized');
+    assert.equal((await store.prepareQueueAdmission(legacy.id)).kind, 'existing');
+
+    const delivered = await store.append({
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'terminal carrier',
+      mentions: ['codex-terra'],
+      timestamp: 1_001,
+      threadId: 'thread-approved-carrier',
+      deliveryStatus: 'queued',
+    });
+    await store.markDelivered(delivered.id, 1_002);
+    assert.deepEqual(await store.prepareQueueAdmission(delivered.id), { kind: 'conflict' });
   });
 
   test('forward queued-inclusive reads preserve raw thread order across an exposed queued cursor', async () => {
@@ -221,6 +434,88 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.equal(await redis.ttl(`msg:${message.id}`), -1);
   });
 
+  test('startup replacement preflight reads the durable queued A2A source group before restoring it', async () => {
+    const threadId = 'thread-startup-replaced-a2a';
+    const source = await store.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: '@opus original handoff',
+      mentions: ['opus'],
+      timestamp: 1_000,
+      threadId,
+    });
+    const message = await store.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: '@opus old queued prompt',
+      mentions: ['opus'],
+      timestamp: 1_001,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({
+        entryId: 'cross-thread:startup-replaced-a2a',
+        receiptScope: 'cross_thread_delivery',
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        carrierByTargetCatId: {
+          opus: {
+            entryId: 'carrier-startup-replaced-a2a',
+            source: 'agent',
+            sourceCategory: 'a2a',
+            callerCatId: 'codex',
+            a2aParentInvocationId: 'parent-startup-replaced-a2a',
+            a2aTriggerMessageId: source.id,
+            autoExecute: true,
+            createdAt: 1_001,
+          },
+        },
+        carrierStateByTargetCatId: { opus: { status: 'queued' } },
+        createdAt: 1_001,
+        updatedAt: 1_001,
+      }),
+    });
+    const inspected = [];
+    const reconciler = new QueuedMessageCustodyStartupReconciler({
+      messageStore: store,
+      invocationRecordStore: invocationStore,
+      invocationQueue: new InvocationQueue(),
+      a2aDispatchDispositionService: {
+        async inspectHandoff(input) {
+          inspected.push(input);
+          return {
+            outcome: 'replaced',
+            sourceMessageId: input.sourceMessageId,
+            fromCatId: 'codex',
+            handoffSourceEventId: `route:${input.sourceMessageId}:opus`,
+            replacement: {
+              kind: 'handed',
+              sourceEventId: 'route:startup-successor:opus',
+              sourceMessageId: 'message-startup-successor',
+              fromCatId: 'codex',
+              toCatId: 'opus',
+            },
+          };
+        },
+      },
+      now: () => 2_000,
+      log: { info() {}, warn() {} },
+    });
+
+    const result = await reconciler.reconcile();
+
+    assert.equal(result.entriesRestored, 0);
+    assert.equal(result.messagesTerminalized, 1);
+    assert.deepEqual(
+      inspected.map((input) => input.sourceMessageId),
+      [source.id, message.id],
+    );
+    const stored = await store.getById(message.id);
+    assert.equal(stored.deliveryStatus, 'delivered');
+    assert.equal(stored.queueCustody.status, 'terminal');
+    assert.deepEqual(stored.queueCustody.pendingTargetCats, []);
+    assert.deepEqual(stored.queueCustody.withdrawnByCatIds, ['opus']);
+  });
+
   test('browser timeline includes durable queued user work without exposing it to default reads', async () => {
     const ordinary = await store.append({
       userId: 'user-1',
@@ -317,6 +612,123 @@ describe('F254 queued message custody Redis CAS', { skip: redisIsolationSkipReas
     assert.deepEqual(latest[1].queueCustody.steerRequestedByCatIds, ['opus']);
     assert.equal(latest[2].catId, 'codex-sol');
     assert.equal(latest[2].queueCustody.status, 'queued');
+  });
+
+  test('managed-hold history binds scheduler publication to the durable owner across terminal delivery', async () => {
+    const threadId = 'thread-managed-hold-owner-visibility';
+    const anchor = await store.append({
+      userId: 'user-owner',
+      catId: null,
+      content: 'read anchor',
+      mentions: [],
+      timestamp: 900,
+      threadId,
+    });
+    const source = {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: { taskId: 'task-managed-hold-owner', threadId, catId: 'opus', wakeWhen: true },
+    };
+    const ownerVisible = await store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'owner-visible command result',
+      mentions: [],
+      timestamp: 1_000,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({ ownerUserId: 'user-owner' }),
+      source,
+    });
+    const hidden = await store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'hidden command trigger',
+      mentions: [],
+      timestamp: 1_001,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({ entryId: 'entry-hidden', ownerUserId: 'user-owner' }),
+      extra: { scheduler: { hiddenTrigger: true } },
+      source,
+    });
+    const ownerless = await store.append({
+      userId: 'scheduler',
+      catId: null,
+      content: 'legacy ownerless result',
+      mentions: [],
+      timestamp: 1_002,
+      threadId,
+      deliveryStatus: 'queued',
+      queueCustody: makeCustody({ entryId: 'entry-ownerless' }),
+      source,
+    });
+
+    const options = { includeQueuedUserMessages: true };
+    assert.deepEqual(
+      (await store.getByThreadAfter(threadId, anchor.id, 20, 'user-owner', options)).map((message) => message.id),
+      [ownerVisible.id],
+    );
+    assert.deepEqual(await store.getByThreadAfter(threadId, anchor.id, 20, 'user-foreign', options), []);
+
+    const terminalize = async (message, deliveredAt) => {
+      const result = await store.transitionQueueCustody(message.id, {
+        expectedRevision: 1,
+        next: makeCustody({
+          ...message.queueCustody,
+          revision: 2,
+          status: 'terminal',
+          pendingTargetCats: [],
+          failedByCatIds: ['opus', 'codex'],
+          updatedAt: deliveredAt,
+        }),
+        deliveredAt,
+      });
+      assert.equal(result.kind, 'updated');
+    };
+    await terminalize(ownerVisible, 1_100);
+    await terminalize(hidden, 1_101);
+
+    // Legacy ownerless custody is invalid for new writes but remains a valid
+    // migration input. Simulate its historical terminal state directly.
+    await redis.hset(`msg:${ownerless.id}`, 'deliveryStatus', 'delivered', 'deliveredAt', '1102');
+
+    assert.deepEqual(
+      (await store.getByThreadAfter(threadId, anchor.id, 20, 'user-owner')).map((message) => message.id),
+      [ownerVisible.id],
+    );
+    assert.deepEqual(await store.getByThreadAfter(threadId, anchor.id, 20, 'user-foreign'), []);
+    assert.deepEqual(
+      (await store.getByThreadIncludingQueued(threadId, 20, 'user-foreign')).filter(
+        (message) => message.id !== anchor.id,
+      ),
+      [],
+    );
+    assert.deepEqual(await store.getUnreadSummaryProjection([{ threadId, afterId: anchor.id }], 'user-owner'), [
+      { threadId, unreadCount: 1, hasUserMention: false },
+    ]);
+    assert.deepEqual(await store.getUnreadSummaryProjection([{ threadId, afterId: anchor.id }], 'user-foreign'), [
+      { threadId, unreadCount: 0, hasUserMention: false },
+    ]);
+    assert.equal(
+      (
+        await store.getLatestVisibleCursor(threadId, {
+          evidence: 'durable_owner_read',
+          viewerUserId: 'user-owner',
+        })
+      ).messageId,
+      ownerVisible.id,
+    );
+    assert.equal(
+      (
+        await store.getLatestVisibleCursor(threadId, {
+          evidence: 'durable_owner_read',
+          viewerUserId: 'user-foreign',
+        })
+      ).messageId,
+      anchor.id,
+    );
   });
 
   test('forward cursor applies its limit after filtering unpublished queued work', async () => {

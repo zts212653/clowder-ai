@@ -180,13 +180,19 @@ export function transformClaudeEvent(
     return null;
   }
 
-  // F045: system/compact_boundary → system_info
+  // F296 B3b-3: system/compact_boundary → typed provider signal. The JSON
+  // content stays for UI diagnostics, but epoch consumers use the structural
+  // field below and never parse a marker substring.
   if (e.type === 'system' && e.subtype === 'compact_boundary') {
     const preTokens = typeof e.pre_tokens === 'number' ? e.pre_tokens : undefined;
     return {
-      type: 'system_info',
+      type: 'provider_signal',
       catId,
       content: JSON.stringify({ type: 'compact_boundary', catId, preTokens }),
+      contextCompaction: {
+        eventSource: 'claude_compact_boundary',
+        ...(preTokens !== undefined ? { preTokens } : {}),
+      },
       timestamp: Date.now(),
     };
   }

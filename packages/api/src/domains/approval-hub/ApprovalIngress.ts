@@ -183,7 +183,7 @@ export class ApprovalIngress {
 
   private fanOutAnchoredPublication(draft: ApprovalPublishDraft, stored: StoredMessage | null): void {
     // R4 P1-2: Each fanout channel is independently isolated.  One failing
-    // must NOT short-circuit the other — broadcastToRoom (room participants)
+    // must NOT short-circuit the other — broadcastToRoom (chat projection)
     // and emitToUser (Hub sync trigger) serve different consumers.
     if (stored) {
       try {
@@ -288,17 +288,26 @@ export class ApprovalIngress {
   }
 
   private broadcastCard(draft: ApprovalPublishDraft, stored: StoredMessage): void {
-    this.deps.socketManager.broadcastToRoom(`thread:${draft.cardThreadId}`, 'connector_message', {
-      threadId: draft.cardThreadId,
-      message: {
-        id: stored.id,
-        type: 'cat',
-        catId: draft.requesterCatId,
-        content: stored.content,
-        timestamp: stored.timestamp,
-        extra: stored.extra,
+    // A reconnecting socket joins its durable user room synchronously, while
+    // desired thread rooms are reconciled asynchronously by the client. Fan
+    // the same committed card to the UNION of both rooms so a proposal created
+    // in that window still reaches the source-thread projection. Socket.IO's
+    // multi-room operator emits once per socket even when it belongs to both.
+    this.deps.socketManager.broadcastToRoom(
+      [`thread:${draft.cardThreadId}`, `user:${draft.ownerUserId}`],
+      'connector_message',
+      {
+        threadId: draft.cardThreadId,
+        message: {
+          id: stored.id,
+          type: 'cat',
+          catId: draft.requesterCatId,
+          content: stored.content,
+          timestamp: stored.timestamp,
+          extra: stored.extra,
+        },
       },
-    });
+    );
   }
 }
 

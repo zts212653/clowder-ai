@@ -6,13 +6,16 @@ import type {
 import type { RetryAuthorityFailureReason } from '../../../../ball-custody/WaitContinuationRetryPreflight.js';
 import type {
   IMessageStore,
+  QueueCustodyAdmissionIntent,
   QueuedMessageCustody,
   RecallMessageToComposerDraftInput,
   RecallMessageToComposerDraftResult,
   StoredMessage,
 } from '../../stores/ports/MessageStore.js';
 import {
+  cloneQueuedMessageCustody,
   type QueueBodyExposure,
+  type QueueCustodyActionSuccessorRebindProof,
   type QueueCustodyReplacementProof,
   type QueueTargetCarrierBinding,
   settleQueueCustodyWithdrawal,
@@ -29,21 +32,23 @@ import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 interface CoordinatorDeps {
   messageStore: IMessageStore;
   now?: () => number;
-  /** Injectable for tests; production uses a real setTimeout-based delay. */
-  delay?: (ms: number) => Promise<void>;
 }
 
-/**
- * Exponential backoff with full jitter for queue-custody CAS conflicts.
- * Base 25ms, cap 400ms: 8 attempts worst-case wall clock stays well under 2s
- * while giving concurrent fan-out siblings room to finish their transitions.
- */
-export function casBackoffDelayMs(attempt: number): number {
-  const capped = Math.min(25 * 2 ** attempt, 400);
-  return Math.floor(Math.random() * capped);
+const QUEUE_CUSTODY_CAS_MAX_ATTEMPTS = 8;
+const QUEUE_CUSTODY_CAS_BASE_DELAY_MS = 25;
+const QUEUE_CUSTODY_CAS_MAX_DELAY_MS = 400;
+
+function queueCustodyCasBackoffDelayMs(attempt: number): number {
+  const ceiling = Math.min(QUEUE_CUSTODY_CAS_BASE_DELAY_MS * 2 ** attempt, QUEUE_CUSTODY_CAS_MAX_DELAY_MS);
+  return Math.floor(ceiling / 2 + Math.random() * (ceiling / 2));
 }
 
-function isManagedHoldWakeMessage(message: StoredMessage): boolean {
+async function waitForQueueCustodyCasRetry(attempt: number): Promise<void> {
+  if (attempt + 1 >= QUEUE_CUSTODY_CAS_MAX_ATTEMPTS) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, queueCustodyCasBackoffDelayMs(attempt)));
+}
+
+export function isManagedHoldWakeMessage(message: StoredMessage): boolean {
   const meta = message.source?.meta;
   return (
     message.source?.connector === 'hold-ball' &&
@@ -98,7 +103,12 @@ function targetAttemptId(entryId: string, targetCatId: string, sequence: number)
 }
 
 function isTerminalTargetAttempt(attempt: QueueTargetAttempt): boolean {
-  return attempt.state === 'failed' || attempt.state === 'cancelled' || attempt.state === 'handled';
+  return (
+    attempt.state === 'failed' ||
+    attempt.state === 'interrupted' ||
+    attempt.state === 'cancelled' ||
+    attempt.state === 'handled'
+  );
 }
 
 function targetReplayTerminalTruth(
@@ -352,6 +362,7 @@ function markTargetAttemptsCancelled(
 export function createCrossThreadQueueEntryFromCustody(
   messages: readonly StoredMessage[],
   entryId: string,
+  options: { queuedTargetsOnly?: boolean } = {},
 ): QueueEntry {
   const ordered = [...messages].sort(
     (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
@@ -364,14 +375,16 @@ export function createCrossThreadQueueEntryFromCustody(
     const custody = message.queueCustody;
     if (
       !custody?.carrierByTargetCatId ||
-      custody.status !== 'queued' ||
+      (custody.status !== 'queued' && custody.status !== 'processing') ||
       message.threadId !== groupPrimary.threadId ||
       message.userId !== groupPrimary.userId
     ) {
       throw new Error(`invalid queued message custody group for carrier ${entryId}`);
     }
     const ownsPendingTarget = custody.pendingTargetCats.some(
-      (catId) => custody.carrierByTargetCatId?.[catId]?.entryId === entryId,
+      (catId) =>
+        custody.carrierByTargetCatId?.[catId]?.entryId === entryId &&
+        (!options.queuedTargetsOnly || custody.carrierStateByTargetCatId?.[catId]?.status !== 'processing'),
     );
     return ownsPendingTarget ? [{ message, custody }] : [];
   });
@@ -390,7 +403,11 @@ export function createCrossThreadQueueEntryFromCustody(
   const pendingTargets = [
     ...new Set(
       custodies.flatMap((custody) =>
-        custody.pendingTargetCats.filter((catId) => custody.carrierByTargetCatId?.[catId]?.entryId === entryId),
+        custody.pendingTargetCats.filter(
+          (catId) =>
+            custody.carrierByTargetCatId?.[catId]?.entryId === entryId &&
+            (!options.queuedTargetsOnly || custody.carrierStateByTargetCatId?.[catId]?.status !== 'processing'),
+        ),
       ),
     ),
   ];
@@ -449,9 +466,17 @@ export function createCrossThreadQueueEntryFromCustody(
   const awakenedAtByCatId = mergeMap((candidate) => candidate.awakenedAtByCatId);
   const seenInvocationIdByCatId = mergeMap((candidate) => candidate.seenInvocationIdByCatId);
   const steeredInvocationIdByCatId = mergeMap((candidate) => candidate.steeredInvocationIdByCatId);
+  const soleTargetCatId = allTargets.length === 1 ? allTargets[0] : undefined;
+  const durableCarrierIdempotencyKey =
+    binding.idempotencyKey ??
+    (binding.sourceCategory === 'a2a' && binding.a2aTriggerMessageId && soleTargetCatId
+      ? fanoutQueueCarrierIdempotencyKey(binding.a2aTriggerMessageId, soleTargetCatId)
+      : undefined);
   return {
     ownerAuthProvenance: normalizeOwnerAuthProvenance(custody.ownerAuthProvenance),
     id: entryId,
+    ...(durableCarrierIdempotencyKey ? { idempotencyKey: durableCarrierIdempotencyKey } : {}),
+    ...(binding.actionSuccessorFence ? { actionSuccessorFence: { ...binding.actionSuccessorFence } } : {}),
     threadId: primary.threadId,
     userId: primary.userId,
     content: members.map(({ message }) => message.content).join('\n'),
@@ -485,6 +510,158 @@ export function createCrossThreadQueueEntryFromCustody(
   };
 }
 
+/**
+ * Load every active durable source bound to the requested Queue carriers.
+ *
+ * Carrier membership is custody state, not a recent-thread-history heuristic.
+ * `getByThreadAfter` with no cursor/limit lets both Memory and Redis stores walk
+ * the complete retained raw timeline (including queued authoring rows) before
+ * we select exact `entryId` bindings.
+ */
+export async function readCompleteCrossThreadQueueCarrierGroups(
+  messageStore: Pick<IMessageStore, 'getByThreadAfter'>,
+  threadId: string,
+  userId: string,
+  entryIds: readonly string[],
+): Promise<Map<string, StoredMessage[]>> {
+  const requestedEntryIds = new Set(entryIds);
+  const groups = new Map<string, StoredMessage[]>(entryIds.map((entryId) => [entryId, []]));
+  if (requestedEntryIds.size === 0) return groups;
+
+  const messages = await messageStore.getByThreadAfter(threadId, undefined, undefined, userId, {
+    includeQueuedCatMessages: true,
+    includeQueuedUserMessages: true,
+  });
+  for (const message of messages) {
+    const custody = message.queueCustody;
+    if (message.deliveryStatus !== 'queued' || custody?.status !== 'queued') continue;
+    const matchingEntryIds = new Set(
+      Object.values(custody.carrierByTargetCatId ?? {}).flatMap((binding) =>
+        requestedEntryIds.has(binding.entryId) ? [binding.entryId] : [],
+      ),
+    );
+    for (const entryId of matchingEntryIds) groups.get(entryId)?.push(message);
+  }
+  return groups;
+}
+
+function actionSuccessorCarrierKey(fence: NonNullable<QueueEntry['actionSuccessorFence']>, catId: string): string {
+  return `action:${fence.leaseId}:${fence.generation}:${catId}`;
+}
+
+function targetBindingHasActionFence(
+  binding: QueueTargetCarrierBinding,
+  catId: string,
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+): boolean {
+  return (
+    JSON.stringify(binding.actionSuccessorFence) === JSON.stringify(fence) &&
+    binding.idempotencyKey === actionSuccessorCarrierKey(fence, catId)
+  );
+}
+
+function bindTargetCarrierActionFence(
+  binding: QueueTargetCarrierBinding,
+  catId: string,
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+): QueueTargetCarrierBinding {
+  return {
+    entryId: binding.entryId,
+    idempotencyKey: actionSuccessorCarrierKey(fence, catId),
+    actionSuccessorFence: { ...fence },
+    source: binding.source,
+    sourceCategory: binding.sourceCategory,
+    ...(binding.callerCatId ? { callerCatId: binding.callerCatId } : {}),
+    ...(binding.a2aParentInvocationId ? { a2aParentInvocationId: binding.a2aParentInvocationId } : {}),
+    a2aTriggerMessageId: binding.a2aTriggerMessageId,
+    autoExecute: binding.autoExecute,
+    createdAt: binding.createdAt,
+  };
+}
+
+/**
+ * Persist a verified action generation onto every durable member of one
+ * carrier before restoring it process-locally. A crash between members leaves
+ * divergent custody fail-closed; replay idempotently completes the same CAS
+ * rebind before provider admission.
+ */
+export async function rebindCrossThreadQueueCarrierActionFence(
+  messageStore: IMessageStore,
+  messages: readonly StoredMessage[],
+  entryId: string,
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+  now: () => number = Date.now,
+): Promise<StoredMessage[]> {
+  return Promise.all(
+    messages.map((source) => rebindActionSuccessorCarrierSource(messageStore, source, entryId, fence, now)),
+  );
+}
+
+function buildActionSuccessorCarrierRebind(
+  custody: QueuedMessageCustody,
+  entryId: string,
+  targetCatIds: CatId[],
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+  updatedAt: number,
+): { next: QueuedMessageCustody; proof: QueueCustodyActionSuccessorRebindProof } {
+  const next = cloneQueuedMessageCustody(custody);
+  const bindings = next.carrierByTargetCatId;
+  if (!bindings) throw new Error(`action-successor Queue carrier lost bindings: ${entryId}`);
+  next.revision = custody.revision + 1;
+  next.updatedAt = Math.max(custody.updatedAt, updatedAt);
+  for (const catId of targetCatIds) {
+    const binding = bindings[catId];
+    if (!binding) throw new Error(`action-successor Queue carrier target lost binding: ${entryId}/${catId}`);
+    bindings[catId] = bindTargetCarrierActionFence(binding, catId, fence);
+  }
+  return {
+    next,
+    proof: {
+      kind: 'verified_action_successor',
+      entryId,
+      targetCatIds,
+      fence: { ...fence },
+    },
+  };
+}
+
+async function rebindActionSuccessorCarrierSource(
+  messageStore: IMessageStore,
+  source: StoredMessage,
+  entryId: string,
+  fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+  now: () => number,
+): Promise<StoredMessage> {
+  for (let attempt = 0; attempt < QUEUE_CUSTODY_CAS_MAX_ATTEMPTS; attempt += 1) {
+    const current = await messageStore.getById(source.id);
+    const custody = current?.queueCustody;
+    if (!current || !custody?.carrierByTargetCatId) {
+      throw new Error(`action-successor Queue carrier source lost custody: ${source.id}`);
+    }
+    const targetCatIds = custody.pendingTargetCats.filter(
+      (catId) => custody.carrierByTargetCatId?.[catId]?.entryId === entryId,
+    );
+    if (targetCatIds.length === 0) return current;
+    const alreadyBound = targetCatIds.every((catId) => {
+      const binding = custody.carrierByTargetCatId?.[catId];
+      return !!binding && targetBindingHasActionFence(binding, catId, fence);
+    });
+    if (alreadyBound) return current;
+    const { next, proof } = buildActionSuccessorCarrierRebind(custody, entryId, targetCatIds, fence, now());
+    const result = await messageStore.transitionQueueCustody(source.id, {
+      expectedRevision: custody.revision,
+      next,
+      actionSuccessorRebind: proof,
+    });
+    if (result.kind === 'updated') return result.message;
+    if (result.kind === 'not_found') {
+      throw new Error(`action-successor Queue carrier source disappeared: ${source.id}`);
+    }
+    await waitForQueueCustodyCasRetry(attempt);
+  }
+  throw new Error(`action-successor Queue carrier rebind did not converge: ${source.id}`);
+}
+
 function mergeBodyExposures(
   current: readonly QueueBodyExposure[] | undefined,
   incoming: readonly QueueBodyExposure[] | undefined,
@@ -511,6 +688,7 @@ export function createInitialQueuedMessageCustody(entry: QueueEntry): QueuedMess
     version: 1,
     entryId: entry.id,
     revision: 1,
+    ownerUserId: entry.userId,
     ownerAuthProvenance: entry.ownerAuthProvenance,
     ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
     intent: entry.intent,
@@ -551,86 +729,213 @@ export function createInitialQueuedMessageCustody(entry: QueueEntry): QueuedMess
   };
 }
 
-export function createInitialCrossThreadQueuedMessageCustody(
+export function fanoutQueueCustodyAdmissionId(messageId: string): string {
+  return `queue-custody:${messageId}`;
+}
+
+export function fanoutQueueCarrierIdempotencyKey(messageId: string, targetCatId: string): string {
+  return `${fanoutQueueCustodyAdmissionId(messageId)}:${targetCatId}`;
+}
+
+export function createFanoutQueueCustodyAdmission(
+  messageId: string,
+  input: {
+    ownerUserId: string;
+    ownerAuthProvenance: QueueEntry['ownerAuthProvenance'];
+    /** Targets already accepted by enqueue policy and safe for restart reconstruction. */
+    targetCats: readonly CatId[];
+    /** Complete requested group, including targets rejected before carrier staging. */
+    requestedTargetCats?: readonly CatId[];
+    intent: string;
+    callerCatId?: CatId;
+    a2aParentInvocationId?: string;
+    receiptScope?: QueueCustodyAdmissionIntent['receiptScope'];
+    actionSuccessorFence?: QueueEntry['actionSuccessorFence'];
+    createdAt: number;
+  },
+): QueueCustodyAdmissionIntent {
+  return {
+    version: 1,
+    admissionId: fanoutQueueCustodyAdmissionId(messageId),
+    ownerUserId: input.ownerUserId,
+    ownerAuthProvenance: normalizeOwnerAuthProvenance(input.ownerAuthProvenance),
+    intent: input.intent,
+    targetCats: [...input.targetCats],
+    ...(input.requestedTargetCats ? { requestedTargetCats: [...input.requestedTargetCats] } : {}),
+    ...(input.callerCatId ? { callerCatId: input.callerCatId } : {}),
+    ...(input.a2aParentInvocationId ? { a2aParentInvocationId: input.a2aParentInvocationId } : {}),
+    ...(input.receiptScope ? { receiptScope: input.receiptScope } : {}),
+    ...(input.actionSuccessorFence ? { actionSuccessorFence: { ...input.actionSuccessorFence } } : {}),
+    priority: 'normal',
+    createdAt: input.createdAt,
+  };
+}
+
+/** Rebuild one independent process-local carrier per durably accepted target. */
+export function createFanoutQueueEntriesFromAdmission(
+  message: StoredMessage & { queueCustodyAdmission: QueueCustodyAdmissionIntent },
+): QueueEntry[] {
+  const admission = message.queueCustodyAdmission;
+  return admission.targetCats.map((targetCatId) => {
+    const entryId = fanoutQueueCarrierIdempotencyKey(message.id, targetCatId);
+    return {
+      id: entryId,
+      threadId: message.threadId,
+      userId: admission.ownerUserId,
+      ownerAuthProvenance: normalizeOwnerAuthProvenance(admission.ownerAuthProvenance),
+      ...(admission.actionSuccessorFence
+        ? {
+            idempotencyKey: `action:${admission.actionSuccessorFence.leaseId}:${admission.actionSuccessorFence.generation}:${targetCatId}`,
+            actionSuccessorFence: { ...admission.actionSuccessorFence },
+          }
+        : { idempotencyKey: entryId }),
+      content: message.content,
+      messageId: message.id,
+      mergedMessageIds: [],
+      source: 'agent' as const,
+      sourceCategory: 'a2a' as const,
+      targetCats: [targetCatId],
+      allTargetCats: [targetCatId],
+      intent: admission.intent,
+      status: 'queued' as const,
+      createdAt: admission.createdAt,
+      autoExecute: true,
+      queueCustodyAdmissionId: admission.admissionId,
+      priority: admission.priority,
+      ...(admission.callerCatId ? { callerCatId: admission.callerCatId } : {}),
+      ...(admission.a2aParentInvocationId ? { a2aParentInvocationId: admission.a2aParentInvocationId } : {}),
+      a2aTriggerMessageId: message.id,
+    };
+  });
+}
+
+interface FanoutQueueCarrierIdentity {
+  intent: QueueEntry['intent'] | undefined;
+  threadId: string | undefined;
+  userId: string | undefined;
+  ownerAuthProvenance: ReturnType<typeof normalizeOwnerAuthProvenance>;
+  actionSuccessorFence: QueueEntry['actionSuccessorFence'];
+}
+
+interface FanoutQueueCarriers {
+  carrierByTargetCatId: Record<string, QueueTargetCarrierBinding>;
+  carrierStateByTargetCatId: NonNullable<QueuedMessageCustody['carrierStateByTargetCatId']>;
+  targetCats: CatId[];
+}
+
+function hasFanoutQueueCarrierIdentity(entry: QueueEntry, identity: FanoutQueueCarrierIdentity): boolean {
+  return (
+    entry.intent === identity.intent &&
+    entry.threadId === identity.threadId &&
+    entry.userId === identity.userId &&
+    normalizeOwnerAuthProvenance(entry.ownerAuthProvenance) === identity.ownerAuthProvenance &&
+    JSON.stringify(entry.actionSuccessorFence) === JSON.stringify(identity.actionSuccessorFence) &&
+    entry.source === 'agent' &&
+    entry.sourceCategory === 'a2a'
+  );
+}
+
+function appendFanoutQueueCarriers(messageId: string, entry: QueueEntry, carriers: FanoutQueueCarriers): void {
+  for (const targetCatId of entry.targetCats) {
+    if (carriers.carrierByTargetCatId[targetCatId]) {
+      throw new Error(`fan-out Queue target has multiple carriers: ${targetCatId}`);
+    }
+    if (
+      entry.actionSuccessorFence &&
+      entry.idempotencyKey !== actionSuccessorCarrierKey(entry.actionSuccessorFence, targetCatId)
+    ) {
+      throw new Error(`action-successor Queue carrier has mismatched idempotency: ${entry.id}/${targetCatId}`);
+    }
+    carriers.targetCats.push(targetCatId as CatId);
+    carriers.carrierByTargetCatId[targetCatId] = {
+      entryId: entry.id,
+      ...(entry.actionSuccessorFence
+        ? {
+            idempotencyKey: actionSuccessorCarrierKey(entry.actionSuccessorFence, targetCatId),
+            actionSuccessorFence: { ...entry.actionSuccessorFence },
+          }
+        : {}),
+      source: 'agent',
+      sourceCategory: 'a2a',
+      ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
+      ...(entry.a2aParentInvocationId ? { a2aParentInvocationId: entry.a2aParentInvocationId } : {}),
+      a2aTriggerMessageId: entry.a2aTriggerMessageId ?? messageId,
+      autoExecute: true,
+      createdAt: entry.createdAt,
+    };
+    carriers.carrierStateByTargetCatId[targetCatId] = {
+      status: entry.status,
+      ...(entry.processingStartedAt !== undefined ? { processingStartedAt: entry.processingStartedAt } : {}),
+    };
+  }
+}
+
+export function createInitialFanoutQueuedMessageCustody(
   messageId: string,
   entries: readonly QueueEntry[],
   options: {
     requestedTargetCats?: readonly CatId[];
     createdAt?: number;
+    receiptScope?: QueuedMessageCustody['receiptScope'];
+    custodyEntryId?: string;
   } = {},
 ): QueuedMessageCustody {
   const intent = entries[0]?.intent;
   const threadId = entries[0]?.threadId;
   const userId = entries[0]?.userId;
   const ownerAuthProvenance = normalizeOwnerAuthProvenance(entries[0]?.ownerAuthProvenance);
-  const carrierByTargetCatId: Record<string, QueueTargetCarrierBinding> = {};
-  const carrierStateByTargetCatId: NonNullable<QueuedMessageCustody['carrierStateByTargetCatId']> = {};
-  const carrierTargetCats: CatId[] = [];
+  const actionSuccessorFence = entries[0]?.actionSuccessorFence;
+  const identity: FanoutQueueCarrierIdentity = {
+    intent,
+    threadId,
+    userId,
+    ownerAuthProvenance,
+    actionSuccessorFence,
+  };
+  const carriers: FanoutQueueCarriers = {
+    carrierByTargetCatId: {},
+    carrierStateByTargetCatId: {},
+    targetCats: [],
+  };
 
   for (const entry of entries) {
-    if (
-      entry.intent !== intent ||
-      entry.threadId !== threadId ||
-      entry.userId !== userId ||
-      normalizeOwnerAuthProvenance(entry.ownerAuthProvenance) !== ownerAuthProvenance ||
-      entry.source !== 'agent' ||
-      entry.sourceCategory !== 'a2a'
-    ) {
-      throw new Error('cross-thread Queue carriers must share one A2A message identity');
+    if (!hasFanoutQueueCarrierIdentity(entry, identity)) {
+      throw new Error('fan-out Queue carriers must share one A2A message identity');
     }
-    for (const targetCatId of entry.targetCats) {
-      if (carrierByTargetCatId[targetCatId]) {
-        throw new Error(`cross-thread Queue target has multiple carriers: ${targetCatId}`);
-      }
-      carrierTargetCats.push(targetCatId as CatId);
-      carrierByTargetCatId[targetCatId] = {
-        entryId: entry.id,
-        source: 'agent',
-        sourceCategory: 'a2a',
-        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
-        ...(entry.a2aParentInvocationId ? { a2aParentInvocationId: entry.a2aParentInvocationId } : {}),
-        a2aTriggerMessageId: entry.a2aTriggerMessageId ?? messageId,
-        autoExecute: true,
-        createdAt: entry.createdAt,
-      };
-      carrierStateByTargetCatId[targetCatId] = {
-        status: entry.status,
-        ...(entry.processingStartedAt !== undefined ? { processingStartedAt: entry.processingStartedAt } : {}),
-      };
-    }
+    appendFanoutQueueCarriers(messageId, entry, carriers);
   }
 
-  const allTargetCats = [...new Set(options.requestedTargetCats ?? carrierTargetCats)] as CatId[];
-  if (allTargetCats.length === 0) throw new Error('cross-thread Queue custody requires at least one target');
-  if (carrierTargetCats.some((catId) => !allTargetCats.includes(catId))) {
-    throw new Error('cross-thread Queue carrier target must belong to requested targets');
+  const allTargetCats = [...new Set(options.requestedTargetCats ?? carriers.targetCats)] as CatId[];
+  if (allTargetCats.length === 0) throw new Error('fan-out Queue custody requires at least one target');
+  if (carriers.targetCats.some((catId) => !allTargetCats.includes(catId))) {
+    throw new Error('fan-out Queue carrier target must belong to requested targets');
   }
-  const failedTargetCats = allTargetCats.filter((catId) => !carrierByTargetCatId[catId]);
+  const pendingTargetCats = allTargetCats.filter((catId) => !!carriers.carrierByTargetCatId[catId]);
+  const failedTargetCats = allTargetCats.filter((catId) => !carriers.carrierByTargetCatId[catId]);
   const createdAt = options.createdAt ?? Math.min(...entries.map((entry) => entry.createdAt));
-  if (!Number.isFinite(createdAt)) throw new Error('cross-thread Queue custody requires a finite createdAt');
+  if (!Number.isFinite(createdAt)) throw new Error('fan-out Queue custody requires a finite createdAt');
+  const custodyEntryId = options.custodyEntryId ?? `fanout:${messageId}`;
   return {
     version: 1,
-    entryId: `cross-thread:${messageId}`,
+    entryId: custodyEntryId,
     revision: 1,
+    ownerUserId: userId,
     ownerAuthProvenance,
-    receiptScope: 'cross_thread_delivery',
-    carrierByTargetCatId,
-    ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
+    ...(options.receiptScope ? { receiptScope: options.receiptScope } : {}),
+    carrierByTargetCatId: carriers.carrierByTargetCatId,
+    ...(Object.keys(carriers.carrierStateByTargetCatId).length > 0
+      ? { carrierStateByTargetCatId: carriers.carrierStateByTargetCatId }
+      : {}),
     intent: intent ?? 'execute',
-    status: carrierTargetCats.length > 0 ? 'queued' : 'terminal',
+    status: pendingTargetCats.length > 0 ? 'queued' : 'terminal',
     allTargetCats,
-    pendingTargetCats: [...carrierTargetCats],
+    pendingTargetCats,
     notifiedByCatIds: [],
     seenByCatIds: [],
     seenInvocationIdByCatId: {},
     failedByCatIds: failedTargetCats,
     targetAttempts: allTargetCats.map((catId) =>
-      initialTargetAttempt(
-        `cross-thread:${messageId}`,
-        catId,
-        createdAt,
-        failedTargetCats.includes(catId) ? 'failed' : 'queued',
-      ),
+      initialTargetAttempt(custodyEntryId, catId, createdAt, failedTargetCats.includes(catId) ? 'failed' : 'queued'),
     ),
     handledByCatIds: [],
     priority: 'normal',
@@ -639,87 +944,52 @@ export function createInitialCrossThreadQueuedMessageCustody(
   };
 }
 
-/**
- * Same-thread A2A fan-out: one trigger message dispatches one independent Queue
- * entry per target. The lazy single-entry initialization
- * (createInitialQueuedMessageCustody) cannot see sibling entries, so it would
- * bind allTargetCats to the first attempted entry alone and reject every other
- * sibling with a custody mismatch. This constructor binds each target to its
- * exact carrier entry up front (mirroring the cross-thread constructor), so
- * activeCustodyFromEntry's carrier branch projects each sibling independently.
- */
-export function createInitialFanoutQueuedMessageCustody(
+export function createInitialCrossThreadQueuedMessageCustody(
   messageId: string,
   entries: readonly QueueEntry[],
+  options: {
+    requestedTargetCats?: readonly CatId[];
+    createdAt?: number;
+  } = {},
 ): QueuedMessageCustody {
-  if (entries.length === 0) throw new Error('fan-out Queue custody requires at least one entry');
-  const intent = entries[0].intent;
-  const threadId = entries[0].threadId;
-  const userId = entries[0].userId;
-  const ownerAuthProvenance = normalizeOwnerAuthProvenance(entries[0].ownerAuthProvenance);
-  const carrierByTargetCatId: Record<string, QueueTargetCarrierBinding> = {};
-  const carrierTargetCats: CatId[] = [];
-  for (const entry of entries) {
-    if (
-      entry.intent !== intent ||
-      entry.threadId !== threadId ||
-      entry.userId !== userId ||
-      normalizeOwnerAuthProvenance(entry.ownerAuthProvenance) !== ownerAuthProvenance ||
-      entry.source !== 'agent' ||
-      entry.sourceCategory !== 'a2a'
-    ) {
-      throw new Error('fan-out Queue carriers must share one A2A message identity');
-    }
-    for (const targetCatId of entry.targetCats) {
-      if (carrierByTargetCatId[targetCatId]) {
-        throw new Error(`fan-out Queue target has multiple carriers: ${targetCatId}`);
-      }
-      carrierTargetCats.push(targetCatId as CatId);
-      carrierByTargetCatId[targetCatId] = {
-        entryId: entry.id,
-        source: 'agent',
-        sourceCategory: 'a2a',
-        ...(entry.callerCatId ? { callerCatId: entry.callerCatId } : {}),
-        ...(entry.a2aParentInvocationId ? { a2aParentInvocationId: entry.a2aParentInvocationId } : {}),
-        a2aTriggerMessageId: entry.a2aTriggerMessageId ?? messageId,
-        autoExecute: true,
-        createdAt: entry.createdAt,
-      };
-    }
-  }
-  const createdAt = Math.min(...entries.map((entry) => entry.createdAt));
-  if (!Number.isFinite(createdAt)) throw new Error('fan-out Queue custody requires a finite createdAt');
-  return {
-    version: 1,
-    entryId: `fanout:${messageId}`,
-    revision: 1,
-    ownerAuthProvenance,
-    carrierByTargetCatId,
-    intent,
-    status: 'queued',
-    allTargetCats: [...carrierTargetCats],
-    pendingTargetCats: [...carrierTargetCats],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    targetAttempts: carrierTargetCats.map((catId) => initialTargetAttempt(`fanout:${messageId}`, catId, createdAt)),
-    priority: entries[0].priority,
-    createdAt,
-    updatedAt: createdAt,
-  };
+  return createInitialFanoutQueuedMessageCustody(messageId, entries, {
+    ...options,
+    receiptScope: 'cross_thread_delivery',
+    custodyEntryId: `cross-thread:${messageId}`,
+  });
+}
+
+export function sameFanoutCustodyIdentity(
+  actual: QueuedMessageCustody | undefined,
+  expected: QueuedMessageCustody,
+): boolean {
+  return (
+    !!actual &&
+    actual.receiptScope === expected.receiptScope &&
+    actual.entryId === expected.entryId &&
+    actual.intent === expected.intent &&
+    normalizeOwnerAuthProvenance(actual.ownerAuthProvenance) ===
+      normalizeOwnerAuthProvenance(expected.ownerAuthProvenance) &&
+    JSON.stringify(actual.allTargetCats) === JSON.stringify(expected.allTargetCats) &&
+    JSON.stringify(actual.carrierByTargetCatId) === JSON.stringify(expected.carrierByTargetCatId)
+  );
 }
 
 function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody, now: number): QueuedMessageCustody {
+  if (current.ownerUserId !== undefined && current.ownerUserId !== entry.userId) {
+    throw new Error(`Queue entry ${entry.id} owner principal is immutable`);
+  }
   if (normalizeOwnerAuthProvenance(current.ownerAuthProvenance) !== entry.ownerAuthProvenance) {
     throw new Error(`Queue entry ${entry.id} owner authentication provenance is immutable`);
   }
-  if (current.carrierByTargetCatId) {
-    const ownedTargets = current.allTargetCats.filter(
-      (catId) => current.carrierByTargetCatId?.[catId]?.entryId === entry.id,
-    );
-    if (ownedTargets.length === 0 || entry.targetCats.some((catId) => !ownedTargets.includes(catId as CatId))) {
+  if (current.carrierByTargetCatId || current.carrierStateByTargetCatId) {
+    const ownedTargets = current.allTargetCats.filter((catId) => entry.targetCats.includes(catId));
+    const ownsTarget = (catId: string) =>
+      !current.carrierByTargetCatId || current.carrierByTargetCatId[catId]?.entryId === entry.id;
+    if (
+      ownedTargets.length === 0 ||
+      entry.targetCats.some((catId) => !ownedTargets.includes(catId as CatId) || !ownsTarget(catId))
+    ) {
       throw new Error(`Queue entry ${entry.id} does not own this message custody`);
     }
     const owned = new Set<string>(ownedTargets);
@@ -1031,12 +1301,9 @@ export class QueuedMessageCustodyCoordinator {
   private readonly now: () => number;
   private readonly entryLocks = new Map<string, Promise<void>>();
 
-  private readonly sleep: (ms: number) => Promise<void>;
-
   constructor(deps: CoordinatorDeps) {
     this.messageStore = deps.messageStore;
     this.now = deps.now ?? Date.now;
-    this.sleep = deps.delay ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   }
 
   async persistEntry(entry: QueueEntry): Promise<string[]> {
@@ -1535,14 +1802,7 @@ export class QueuedMessageCustodyCoordinator {
     deliveredAt?: number,
     allowTerminalCurrent = false,
   ): Promise<{ managed: boolean; changed: boolean }> {
-    // Fan-out entries share one messageId's custody, so N concurrent
-    // invocations CAS the same revision counter. A tight retry loop loses to
-    // siblings deterministically under load (thread_mrqb0yfauece1tmm:
-    // "queue custody CAS retries exhausted" flipped healthy invocations to
-    // failed and rolled their entries back). Back off exponentially with
-    // jitter and allow enough rounds for the contention window to drain.
-    const CAS_ATTEMPTS = 8;
-    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < QUEUE_CUSTODY_CAS_MAX_ATTEMPTS; attempt += 1) {
       const message = await this.messageStore.getById(messageId);
       const current = message?.queueCustody;
       if (!current || (current.status === 'terminal' && !allowTerminalCurrent)) {
@@ -1559,9 +1819,7 @@ export class QueuedMessageCustodyCoordinator {
       });
       if (result.kind === 'updated') return { managed: true, changed: true };
       if (result.kind === 'not_found') return { managed: false, changed: false };
-      if (attempt < CAS_ATTEMPTS - 1) {
-        await this.sleep(casBackoffDelayMs(attempt));
-      }
+      await waitForQueueCustodyCasRetry(attempt);
     }
     throw new Error(`queue custody CAS retries exhausted for message ${messageId}`);
   }

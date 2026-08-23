@@ -44,6 +44,22 @@ describe('WorklistRegistry: PushResult structured reason (F122)', () => {
     }
   });
 
+  test('caller_admission_closed reason after the route seals the current turn', async () => {
+    const { registerWorklist, setWorklistCallerAdmissionOpen, unregisterWorklist, pushToWorklist } = await import(
+      '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'
+    );
+    const threadId = 'test-f122-caller-admission-closed';
+    const entry = registerWorklist(threadId, ['opus'], 10);
+    try {
+      setWorklistCallerAdmissionOpen(entry, false);
+      const result = pushToWorklist(threadId, ['codex'], 'opus');
+      assert.deepEqual(result.added, []);
+      assert.equal(result.reason, 'caller_admission_closed');
+    } finally {
+      unregisterWorklist(threadId, entry);
+    }
+  });
+
   test('all_duplicate reason when all cats already pending', async () => {
     const { registerWorklist, unregisterWorklist, pushToWorklist } = await import(
       '../dist/domains/cats/services/agents/routing/WorklistRegistry.js'

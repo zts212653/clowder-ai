@@ -33,6 +33,8 @@ export interface ContextEpochRecord {
    * false certainty F296 exists to remove.
    */
   readonly consumedCompactionEventIds?: readonly string[];
+  /** F296: epoch whose cold has already been consumed by a projection. */
+  readonly coldConsumedAtEpoch?: number;
   /** Optimistic-concurrency version. Every successful write increments it. */
   readonly version: number;
   readonly updatedAt: number;
@@ -59,6 +61,17 @@ export interface IContextEpochStore {
 /** In-memory implementation (tests, single-process fallback). */
 export class InMemoryContextEpochStore implements IContextEpochStore {
   private readonly records = new Map<string, ContextEpochRecord>();
+  private readonly generationRetiredObservers = new Set<(scopeKey: string, retiredEpoch: number) => void>();
+
+  /**
+   * Single-process equivalent of the Redis CAS retirement side effect.
+   * Registration does not create another epoch authority: observers receive an
+   * exact generation only after this store has won the version comparison.
+   */
+  onGenerationRetired(observer: (scopeKey: string, retiredEpoch: number) => void): () => void {
+    this.generationRetiredObservers.add(observer);
+    return () => this.generationRetiredObservers.delete(observer);
+  }
 
   get(scopeKey: string): ContextEpochRecord | null {
     return this.records.get(scopeKey) ?? null;
@@ -68,6 +81,11 @@ export class InMemoryContextEpochStore implements IContextEpochStore {
     const current = this.records.get(record.scopeKey);
     const currentVersion = current?.version ?? 0;
     if (currentVersion !== expectedVersion) return false;
+    if (current && record.contextEpoch === current.contextEpoch + 1) {
+      for (const observer of this.generationRetiredObservers) {
+        observer(record.scopeKey, current.contextEpoch);
+      }
+    }
     this.records.set(record.scopeKey, { ...record, version: currentVersion + 1 });
     return true;
   }

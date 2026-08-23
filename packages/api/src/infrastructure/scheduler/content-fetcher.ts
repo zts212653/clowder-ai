@@ -62,8 +62,8 @@ export function extractText(html: string): { title: string; text: string } {
   return { title, text: cleaned };
 }
 
-export function createFetchContentFn(): (url: string) => Promise<FetchResult> {
-  return async (url: string): Promise<FetchResult> => {
+export function createFetchContentFn(): (url: string, signal?: AbortSignal) => Promise<FetchResult> {
+  return async (url: string, signal?: AbortSignal): Promise<FetchResult> => {
     validateUrl(url);
 
     if (needsBrowser(url)) {
@@ -76,9 +76,10 @@ export function createFetchContentFn(): (url: string) => Promise<FetchResult> {
       };
     }
 
+    const requestTimeout = AbortSignal.timeout(15_000);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'CatCafe-WebDigest/1.0' },
-      signal: AbortSignal.timeout(15_000),
+      signal: signal ? AbortSignal.any([signal, requestTimeout]) : requestTimeout,
     });
     if (!res.ok) {
       throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);

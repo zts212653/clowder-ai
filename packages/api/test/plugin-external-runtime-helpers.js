@@ -71,6 +71,8 @@ export async function createExternalRuntimeHarness({
   methods = [],
   packageDigest = EXTERNAL_PACKAGE_DIGEST,
   activeLeaseTtlMs,
+  brokerStore = new MemoryHostBrokerStore(),
+  now = Date.now,
 } = {}) {
   if (!rootDir) throw new TypeError('rootDir is required');
   await mkdir(join(rootDir, 'dist'), { recursive: true });
@@ -106,16 +108,20 @@ export async function createExternalRuntimeHarness({
     });
   });
 
-  const brokerStore = new MemoryHostBrokerStore();
+  let connectionSequence = 0;
+  let sessionSequence = 0;
+  let leaseSequence = 0;
+  let nonceSequence = 0;
+  const nextId = (prefix, sequence) => (sequence === 0 ? prefix : `${prefix}_${sequence + 1}`);
   const broker = new HostBrokerControlPlane({
     inventory,
     store: brokerStore,
     methods,
-    now: Date.now,
-    createConnectionId: () => 'conn_external',
-    createSessionId: () => 'bs_external',
-    createRuntimeLeaseId: () => 'lease_external',
-    createBindingNonce: () => 'nonce_external',
+    now,
+    createConnectionId: () => nextId('conn_external', connectionSequence++),
+    createSessionId: () => nextId('bs_external', sessionSequence++),
+    createRuntimeLeaseId: () => nextId('lease_external', leaseSequence++),
+    createBindingNonce: () => nextId('nonce_external', nonceSequence++),
     ...(activeLeaseTtlMs === undefined ? {} : { activeLeaseTtlMs }),
   });
 
@@ -166,6 +172,15 @@ export class FakePluginProcessAdapter {
 
   async nextProcess() {
     return this.processes.at(-1) ?? this.#spawned.promise;
+  }
+
+  async waitForProcess(index, timeoutMs = 1_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (this.processes[index] === undefined) {
+      if (Date.now() >= deadline) throw new Error(`plugin process ${index + 1} did not start before deadline`);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    return this.processes[index];
   }
 }
 

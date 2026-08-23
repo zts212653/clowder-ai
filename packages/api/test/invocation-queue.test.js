@@ -1143,51 +1143,6 @@ describe('InvocationQueue', () => {
     assert.deepEqual(autoEntries.map((entry) => entry.targetCats[0]).sort(), ['codex', 'opencode']);
   });
 
-  it('generic scheduling skips failed retry staging and advances later eligible work', () => {
-    const failed = queue.enqueue(
-      entry({
-        content: 'failed A2A handoff',
-        source: 'agent',
-        sourceCategory: 'a2a',
-        targetCats: ['codex'],
-        autoExecute: true,
-        callerCatId: 'opus',
-      }),
-    ).entry;
-    const eligible = queue.enqueue(
-      entry({
-        content: 'later eligible handoff',
-        source: 'agent',
-        sourceCategory: 'a2a',
-        targetCats: ['codex-terra'],
-        autoExecute: true,
-        callerCatId: 'opus',
-      }),
-    ).entry;
-    assert.deepEqual(
-      queue.markQueuedFailedForCatAcrossUsers(
-        failed.threadId,
-        'codex',
-        'inv-failed-child',
-        new Set([failed.id]),
-        'invocation_failed',
-      ),
-      [{ entryId: failed.id, userId: failed.userId }],
-    );
-
-    assert.deepEqual(
-      queue.listAutoExecute('t1').map((candidate) => candidate.id),
-      [eligible.id],
-    );
-    const claimed = queue.markProcessingAcrossUsers('t1');
-    assert.equal(claimed?.id, eligible.id, 'failed queue head must not starve later eligible work');
-    assert.equal(queue.markProcessingAcrossUsers('t1', undefined, 'codex'), null);
-
-    const retry = queue.retryFailedTarget('t1', 'u1', failed.id, 'codex');
-    assert.ok(retry, 'the explicit retry path must remain able to reopen the failed target');
-    assert.equal(queue.markProcessingAcrossUsers('t1', undefined, 'codex')?.id, failed.id);
-  });
-
   it('hasQueuedOrProcessingForCat treats old queued autoExecute entries as busy', () => {
     queue.enqueue({
       threadId: 't1',

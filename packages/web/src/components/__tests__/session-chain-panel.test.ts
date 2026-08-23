@@ -81,9 +81,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function renderPanel(threadId: string, catInvocations: Record<string, CatInvocationInfo> = {}) {
+type ActiveInvocations = Record<string, { catId: string; mode: string; startedAt?: number }>;
+
+function renderPanel(
+  threadId: string,
+  catInvocations: Record<string, CatInvocationInfo> = {},
+  activeInvocations: ActiveInvocations = {},
+) {
   act(() => {
-    root.render(React.createElement(SessionChainPanel, { threadId, catInvocations }));
+    root.render(React.createElement(SessionChainPanel, { threadId, catInvocations, activeInvocations }));
   });
 }
 
@@ -183,7 +189,7 @@ describe('F24: SessionChainPanel', () => {
 
     expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
     expect(container.textContent).toContain('Session sealed, but transcript or digest finalization did not complete');
-    expect(container.textContent).toContain('0 active');
+    expect(container.textContent).toContain('0 未封存');
   });
 
   it('refreshes the chain after a seal transport failure (server may have sealed)', async () => {
@@ -225,7 +231,7 @@ describe('F24: SessionChainPanel', () => {
     // the server may have claimed and sealed the session before the drop.
     expect(mockApiFetch.mock.calls.filter(([url]) => url === '/api/threads/thread-1/sessions')).toHaveLength(2);
     expect(container.textContent).toContain('封存请求失败');
-    expect(container.textContent).toContain('0 active');
+    expect(container.textContent).toContain('0 未封存');
   });
 
   it('disables manual seal for a running Agent and explains how to proceed on hover only', async () => {
@@ -249,8 +255,28 @@ describe('F24: SessionChainPanel', () => {
     // Panel should render (F33: always visible for external session binding)
     expect(container.querySelector('section')).not.toBeNull();
     // No session cards, but bind section available
+    expect(container.textContent).toContain('0 未封存');
     expect(container.textContent).toContain('0 total');
     expect(container.textContent).toContain('绑定外部 Session');
+  });
+
+  it('renders a typed access denial instead of presenting a forbidden chain as 0 total', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: 'Access denied',
+        code: 'THREAD_ACCESS_DENIED',
+        reason: 'not_visible_to_user',
+      }),
+    });
+
+    renderPanel('thread-forbidden');
+    await flushFetch();
+
+    expect(container.querySelector('[data-testid="session-chain-access-denied"]')).not.toBeNull();
+    expect(container.textContent).toContain('无权查看这个 Thread 的 Session Chain');
+    expect(container.textContent).not.toContain('0 total');
   });
 
   it('renders session count in header', async () => {
@@ -268,7 +294,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('1 active');
+    expect(container.textContent).toContain('1 未封存');
     expect(container.textContent).toContain('2 total');
   });
 
@@ -464,7 +490,7 @@ describe('F24: SessionChainPanel', () => {
     expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(2);
   });
 
-  it('renders active session with seq number, cat badge, and clickable session ID', async () => {
+  it('renders an unsealed resumable session without claiming that it is running', async () => {
     mockSessionsResponse([
       { id: 'ses_abc12345xyz', catId: 'opus', seq: 2, status: 'active', messageCount: 8, createdAt: Date.now() - 5000 },
     ]);
@@ -472,12 +498,26 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('Session #3');
     expect(container.textContent).toContain('布偶猫');
-    expect(container.textContent).toContain('Active');
+    expect(container.textContent).toContain('未封存 · 可续接');
+    expect(container.textContent).not.toContain('正在工作');
+    expect(container.querySelector('[data-session-lifecycle="resumable"]')).not.toBeNull();
     expect(container.textContent).toContain('8 msgs');
     // Session ID should be visible (truncated) with copy title
     const idBtn = container.querySelector('button[title*="ses_abc12345xyz"]');
     expect(idBtn).not.toBeNull();
     expect(idBtn?.textContent).toContain('ses_abc123');
+  });
+
+  it('labels an unsealed session as running only when its cat has a live invocation', async () => {
+    mockSessionsResponse([
+      { id: 'running-session', catId: 'opus', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-1', {}, { 'inv-running': { catId: 'opus', mode: 'execute' } });
+    await flushFetch();
+
+    expect(container.textContent).toContain('正在工作');
+    expect(container.textContent).not.toContain('未封存 · 可续接');
+    expect(container.querySelector('[data-session-lifecycle="running"]')).not.toBeNull();
   });
 
   it('renders Antigravity runtime session identity and unexpected switch diagnostics', async () => {
@@ -590,8 +630,9 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Sealed');
+    expect(container.textContent).toContain('已封存');
     expandSealed();
+    expect(container.querySelectorAll('[data-session-lifecycle="sealed"]').length).toBe(2);
     expect(container.textContent).toContain('Session #1');
     expect(container.textContent).toContain('Session #2');
     const summaries = container.querySelectorAll<HTMLElement>('[data-testid="sealed-session-summary"]');
@@ -616,7 +657,8 @@ describe('F24: SessionChainPanel', () => {
     expandSealed();
     const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
     await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
-    expect(container.textContent).toContain('sealing');
+    expect(container.textContent).toContain('封存中');
+    expect(container.querySelector('[data-session-lifecycle="sealing"]')).not.toBeNull();
   });
 
   it('renders kimi colors from cat.color (border inline style)', async () => {
@@ -824,29 +866,27 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('1 active');
+    expect(container.textContent).toContain('1 未封存');
     expect(container.textContent).toContain('1 total');
   });
 
-  it('keeps stale data visible on thread switch when fetch fails (stale-while-revalidate)', async () => {
-    // First thread loads successfully
+  it('hides the prior thread session synchronously while the next thread request is pending', async () => {
     mockSessionsResponse([
-      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+      { id: 'session-thread-a', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
     ]);
-    renderPanel('thread-1');
+    renderPanel('thread-A');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
+    expect(container.querySelector('button[title*="session-thread-a"]')).not.toBeNull();
 
-    // Switch to thread-2, but fetch fails — stale data stays visible
-    mockApiFetch.mockResolvedValue({ ok: false, status: 500 });
-    renderPanel('thread-2');
-    await flushFetch();
+    mockApiFetch.mockImplementationOnce(() => new Promise(() => {}));
+    renderPanel('thread-B');
 
-    // Stale-while-revalidate: old data remains visible on transient error
-    expect(container.textContent).toContain('Session #1');
+    expect(container.querySelector('button[title*="session-thread-a"]')).toBeNull();
+    expect(container.textContent).not.toContain('session-thread-a');
+    expect(container.textContent).toContain('Loading sessions...');
   });
 
-  it('keeps stale data visible on thread switch when fetch throws (stale-while-revalidate)', async () => {
+  it('does not expose another thread session after the replacement fetch fails', async () => {
     mockSessionsResponse([
       {
         id: 's1',
@@ -863,16 +903,14 @@ describe('F24: SessionChainPanel', () => {
     expandSealed();
     expect(container.textContent).toContain('Session #1');
 
-    // Switch to thread-B, but fetch throws — stale data stays visible
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-B');
     await flushFetch();
 
-    // Stale-while-revalidate: old data remains visible on transient error
-    expect(container.textContent).toContain('Session #1');
+    expect(container.textContent).not.toContain('Session #1');
   });
 
-  it('disables restore-current button on stale data during AND after failed refetch (stale barrier)', async () => {
+  it('does not expose another thread restore action after a failed refetch', async () => {
     // Load sealed session for thread-1
     mockSessionsResponse([
       {
@@ -895,21 +933,14 @@ describe('F24: SessionChainPanel', () => {
     };
 
     // Restore button should be enabled for fresh data
-    expect(findRestoreBtn()!.disabled).toBe(false);
+    expect(findRestoreBtn()?.disabled).toBe(false);
 
-    // Switch to thread-2, fetch fails — stale data from thread-1 stays visible
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-2');
     await flushFetch();
 
-    // Restore button must stay DISABLED even after loading finishes,
-    // because data belongs to thread-1 not thread-2 (entity mismatch)
-    const staleBtn = findRestoreBtn();
-    expect(staleBtn).toBeDefined();
-    expect(staleBtn!.disabled).toBe(true);
-
-    // Also verify stale indicator is shown
-    expect(container.textContent).toContain('Refreshing...');
+    expect(findRestoreBtn()).toBeUndefined();
+    expect(container.textContent).not.toContain('s1');
   });
 
   it('confirms and sends the expected active identity when restoring a historical session', async () => {
@@ -1493,7 +1524,7 @@ describe('F24: SessionChainPanel', () => {
       expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
       expect(container.textContent).toContain('Session #1');
       // Header shows counts
-      expect(container.textContent).toContain('1 active');
+      expect(container.textContent).toContain('1 未封存');
 
       // Click Session Chain header to collapse
       const chainHeader = Array.from(container.querySelectorAll('button')).find((b) =>
@@ -1506,7 +1537,7 @@ describe('F24: SessionChainPanel', () => {
 
       // Collapsed: active card hidden, but header/count still visible
       expect(container.querySelector('[data-testid="session-card-active"]')).toBeNull();
-      expect(container.textContent).toContain('1 active');
+      expect(container.textContent).toContain('1 未封存');
       expect(container.textContent).toContain('Session Chain');
 
       // Click again to expand
@@ -1537,7 +1568,7 @@ describe('F24: SessionChainPanel', () => {
 
       // Default: collapsed — sealed card hidden, but toggle visible
       expect(container.querySelector('[data-testid="session-card-sealed"]')).toBeNull();
-      expect(container.textContent).toContain('Sealed');
+      expect(container.textContent).toContain('已封存');
 
       // Click to expand
       expandSealed();

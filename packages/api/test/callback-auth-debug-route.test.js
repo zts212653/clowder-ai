@@ -65,9 +65,14 @@ describe('GET /api/debug/callback-auth — session-only (F174-D1)', () => {
       'agent_key_revoked',
       'agent_key_scope_mismatch',
       'agent_key_unknown',
-      'expired',
+      'canceled',
+      'completed',
+      'failed',
+      'interrupted',
       'invalid_token',
       'missing_creds',
+      'replaced',
+      'revoked',
       'stale_invocation',
       'unknown_invocation',
     ]);
@@ -78,7 +83,7 @@ describe('GET /api/debug/callback-auth — session-only (F174-D1)', () => {
   });
 
   test('reflects recorded failures live', async () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     recordCallbackAuthFailure({ reason: 'stale_invocation', tool: 'post-message', catId: 'codex' });
     const res = await app.inject({
       method: 'GET',
@@ -87,7 +92,7 @@ describe('GET /api/debug/callback-auth — session-only (F174-D1)', () => {
     });
     const body = JSON.parse(res.body);
     assert.equal(body.totalFailures, 2);
-    assert.equal(body.reasonCounts.expired, 1);
+    assert.equal(body.reasonCounts.interrupted, 1);
     assert.equal(body.reasonCounts.stale_invocation, 1);
     assert.equal(body.toolCounts['refresh-token'], 1);
     assert.equal(body.toolCounts['post-message'], 1);
@@ -226,7 +231,7 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
     __setNowForTest(T_RECORD);
     try {
       // Record 3 failures at T_RECORD — all unviewed
-      recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+      recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
       recordCallbackAuthFailure({ reason: 'stale_invocation', tool: 'post-message', catId: 'codex' });
       recordCallbackAuthFailure({ reason: 'invalid_token', tool: 'register-pr', catId: 'gpt52' });
 
@@ -267,7 +272,7 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
   });
 
   test('new failures AFTER mark-viewed re-populate unviewedFailures24h', async () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'tool-1' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'tool-1' });
     // Small delay so lastViewedAt > sample.at (Date.now() ms-resolution can
     // collide otherwise — we want strict "post-view" semantics for the badge).
     await new Promise((r) => setTimeout(r, 5));
@@ -370,7 +375,7 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
     //   t=20ms  failure B occurs        (NOT in snapshot user is viewing)
     //   t=30ms  user opens panel → markViewed(viewedUpTo=t=10ms)
     // Expected: B remains unviewed (user never saw it).
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'failure-A' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'failure-A' });
     await new Promise((r) => setTimeout(r, 10));
     const snapshotTime = Date.now();
     await new Promise((r) => setTimeout(r, 10));
@@ -470,7 +475,7 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
     __setNowForTest(FIXED_T);
     try {
       // Record a failure at exactly FIXED_T
-      recordCallbackAuthFailure({ reason: 'expired', tool: 'collision-tool', catId: 'opus' });
+      recordCallbackAuthFailure({ reason: 'interrupted', tool: 'collision-tool', catId: 'opus' });
 
       // Mark viewed at exactly FIXED_T (same ms)
       const res = await app.inject({
@@ -503,7 +508,7 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
   });
 
   test('monotonic: previously cleared failures stay cleared even after stale mark-viewed', async () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'failure-X' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'failure-X' });
     await new Promise((r) => setTimeout(r, 5));
     // Mark viewed at "now" — clears failure-X
     await app.inject({

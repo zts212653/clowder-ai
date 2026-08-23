@@ -11,15 +11,17 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
-vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => null }));
+vi.mock('@/components/CatAvatar', () => ({
+  CatAvatar: ({ catId }: { catId: string }) => React.createElement('span', { 'data-cat-id': catId }, 'avatar'),
+}));
 vi.mock('@/components/ThreadCatStatus', () => ({
-  ThreadCatStatus: ({ unreadCount, liveness }: { unreadCount: number; liveness?: unknown }) => {
-    statusRender(unreadCount, liveness);
+  ThreadCatStatus: ({ unreadCount, presence }: { unreadCount: number; presence: unknown }) => {
+    statusRender(unreadCount, presence);
     return React.createElement('span', { 'data-testid': 'unread' }, String(unreadCount));
   },
 }));
 
-describe('ThreadItem state subscription', () => {
+describe('ThreadItem snapshot authority', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -32,7 +34,7 @@ describe('ThreadItem state subscription', () => {
     useChatStore.setState({
       currentThreadId: 'other-thread',
       threadStates: {
-        'thread-1': { ...DEFAULT_THREAD_STATE, unreadCount: 1 },
+        'thread-1': { ...DEFAULT_THREAD_STATE, unreadCount: 1, lastActivity: 10 },
       },
     });
     container = document.createElement('div');
@@ -45,78 +47,136 @@ describe('ThreadItem state subscription', () => {
     container.remove();
   });
 
-  it('reads its own thread state when the parent does not pass the global state map', () => {
-    act(() => {
-      root.render(
-        React.createElement(ThreadItem, {
-          id: 'thread-1',
-          title: 'Thread 1',
-          participants: [],
-          lastActiveAt: 1,
-          isActive: false,
-          onSelect: vi.fn(),
-        }),
-      );
-    });
-    expect(container.querySelector('[data-testid="unread"]')?.textContent).toBe('1');
-
-    act(() => {
-      useChatStore.setState((state) => ({
-        threadStates: {
-          ...state.threadStates,
-          'thread-1': { ...(state.threadStates['thread-1'] ?? DEFAULT_THREAD_STATE), unreadCount: 7 },
-        },
-      }));
-    });
-
-    expect(container.querySelector('[data-testid="unread"]')?.textContent).toBe('7');
-  });
-
-  it('passes the terminal-aware thread liveness projection to the sidebar status', () => {
-    useChatStore.setState({
-      currentThreadId: 'other-thread',
-      threadStates: {
-        'thread-1': {
-          ...DEFAULT_THREAD_STATE,
-          hasActiveInvocation: true,
-          activeInvocations: { 'inv-closed': { catId: 'codex-sol', mode: 'execute' } },
-          catStatuses: { 'codex-sol': 'streaming' },
-          catInvocations: {
-            'codex-sol': {
-              invocationId: 'inv-closed',
-              appServerLifecycle: {
-                stage: 'closed',
-                lastActivityAt: 123,
-                recoveryAttempt: 0,
-                turnStartSent: true,
-                turnAccepted: true,
-                itemObserved: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
+  it('ignores legacy unread, liveness, and lastActivity changes for a fixed snapshot row', () => {
     act(() => {
       root.render(
         React.createElement(ThreadItem, {
           id: 'thread-1',
           title: 'Thread 1',
           participants: ['codex-sol'],
-          lastActiveAt: 1,
+          lastActiveAt: 100,
           isActive: false,
           onSelect: vi.fn(),
+          presence: { status: 'working', cats: ['codex-sol'] },
+          unreadCount: 2,
+          hasUserMention: false,
         }),
       );
     });
+    expect(container.querySelector('[data-testid="unread"]')?.textContent).toBe('2');
 
-    expect(statusRender).toHaveBeenLastCalledWith(
-      0,
-      expect.objectContaining({
-        hasActive: false,
-        catStatuses: { 'codex-sol': 'done' },
-      }),
-    );
+    act(() => {
+      useChatStore.setState((state) => ({
+        threadStates: {
+          ...state.threadStates,
+          'thread-1': {
+            ...(state.threadStates['thread-1'] ?? DEFAULT_THREAD_STATE),
+            unreadCount: 99,
+            lastActivity: 999_999,
+            hasActiveInvocation: false,
+            catStatuses: { 'codex-sol': 'error' },
+          },
+        },
+      }));
+    });
+
+    expect(container.querySelector('[data-testid="unread"]')?.textContent).toBe('2');
+    expect(statusRender).toHaveBeenLastCalledWith(2, {
+      status: 'working',
+      cats: ['codex-sol'],
+    });
+  });
+
+  it('changes status only when the parent supplies a newer snapshot row', () => {
+    const render = (status: 'working' | 'done', unreadCount: number) =>
+      React.createElement(ThreadItem, {
+        id: 'thread-1',
+        title: 'Thread 1',
+        participants: ['codex-sol'],
+        lastActiveAt: 100,
+        isActive: false,
+        onSelect: vi.fn(),
+        presence: { status, cats: ['codex-sol'] },
+        unreadCount,
+        hasUserMention: false,
+      });
+
+    act(() => root.render(render('working', 3)));
+    act(() => root.render(render('done', 0)));
+
+    expect(statusRender).toHaveBeenLastCalledWith(0, { status: 'done', cats: ['codex-sol'] });
+  });
+
+  it('renders and refreshes working elapsed from activeSince, never C7 lastActiveAt', () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-08-20T12:00:00.000Z').getTime();
+    vi.setSystemTime(now);
+    try {
+      act(() => {
+        root.render(
+          React.createElement(ThreadItem, {
+            id: 'thread-1',
+            title: 'Thread 1',
+            participants: ['codex-sol'],
+            lastActiveAt: now - 60_000,
+            isActive: false,
+            onSelect: vi.fn(),
+            presence: { status: 'working', cats: ['codex-sol'], activeSince: now - 21 * 60_000 },
+            unreadCount: 0,
+            hasUserMention: false,
+          }),
+        );
+      });
+      expect(container.textContent).toContain('执行中 · 21分');
+      expect(container.textContent).not.toContain('1分钟前');
+
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(container.textContent).toContain('执行中 · 22分');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows plain working when canonical activeSince is absent', () => {
+    act(() => {
+      root.render(
+        React.createElement(ThreadItem, {
+          id: 'thread-1',
+          title: 'Thread 1',
+          participants: ['codex-sol'],
+          lastActiveAt: Date.now() - 21 * 60_000,
+          isActive: false,
+          onSelect: vi.fn(),
+          presence: { status: 'working', cats: ['codex-sol'] },
+          unreadCount: 0,
+          hasUserMention: false,
+        }),
+      );
+    });
+    expect(container.textContent).toContain('执行中');
+    expect(container.textContent).not.toContain('21分');
+  });
+
+  it('keeps the admitted participant visible across working and completed snapshots', () => {
+    const render = (status: 'working' | 'idle') =>
+      React.createElement(ThreadItem, {
+        id: 'thread-1',
+        title: 'Approved proposal',
+        participants: ['kimi'],
+        lastActiveAt: 100,
+        isActive: false,
+        onSelect: vi.fn(),
+        presence: { status, ...(status === 'working' ? { cats: ['kimi'] } : {}) },
+        unreadCount: 0,
+        hasUserMention: false,
+      });
+
+    act(() => root.render(render('working')));
+    expect(container.querySelector('[data-cat-id="kimi"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('还没有猫猫加入');
+
+    act(() => root.render(render('idle')));
+    expect(container.querySelector('[data-cat-id="kimi"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('还没有猫猫加入');
   });
 });
