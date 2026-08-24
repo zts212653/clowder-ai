@@ -12,7 +12,12 @@ import {
   scopeWorktreeAliases,
   type WorktreeAliasMap,
 } from '@/utils/worktree-id-alias';
-import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
+import {
+  type PersistedThreadWorkspaceState,
+  saveThreadMessages as saveMessagesSnapshot,
+  saveThreads as saveThreadsSnapshot,
+  saveThreadWorkspaceState,
+} from '../utils/offline-store';
 import { findBubbleStoreInvariantViolations } from './bubble-invariants';
 import type {
   CatInvocationInfo,
@@ -236,6 +241,7 @@ function snapshotActive(s: ChatState): ThreadState {
     workspaceOpenTabs: s.workspaceOpenTabs,
     workspaceOpenFilePath: s.workspaceOpenFilePath,
     workspaceOpenFileLine: s.workspaceOpenFileLine,
+    workspaceMode: s.workspaceMode,
     workspaceSurface: s.workspaceSurface,
     workspacePreview: s.workspacePreview,
     rightPanelMode: s.rightPanelMode,
@@ -385,23 +391,91 @@ function flattenThread(ts: ThreadState): Partial<ChatState> {
 
 /**
  * F284 × F120 (review P1-2, 缅因猫 fallback 坐标系收口): THE single projection
- * for per-thread workspace view fields (surface / preview / panel mode / panel
- * visibility). The four fields are optional on ThreadState only so older
- * fixtures and legacy in-memory shapes stay valid; every `??` default lives
- * here, and nowhere else. Callers: flattenThread (thread switch restore),
+ * for per-thread workspace view fields (renderer mode / surface / preview /
+ * panel mode / panel visibility). The five fields are optional on ThreadState
+ * only so older fixtures and legacy in-memory shapes stay valid; every `??`
+ * default lives here, and nowhere else. Callers: flattenThread (thread switch restore),
  * setCurrentThread presentation-lock non-owner save, disablePresentationLock
  * non-owner restore. None can be removed — each is a distinct semantic default
  * for a field that was introduced after existing fixtures were written.
  */
+function resolveWorkspaceMode(
+  ts: Pick<ThreadState, 'workspaceMode' | 'workspaceSurface' | 'rightPanelMode' | 'rightPanelOpen'>,
+  fallback: WorkspaceMode = 'dev',
+): WorkspaceMode {
+  if (ts.workspaceMode) return ts.workspaceMode;
+  // Legacy v5 snapshots did not persist the top-level renderer. A visible
+  // Browser request is unambiguous evidence that Dev owns the viewport.
+  if (ts.workspaceSurface === 'browser' && ts.rightPanelMode === 'workspace' && ts.rightPanelOpen) return 'dev';
+  return fallback;
+}
+
 function restoreWorkspaceView(
-  ts: Pick<ThreadState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'>,
-): Pick<ChatState, 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'> {
+  ts: Pick<
+    ThreadState,
+    'workspaceMode' | 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'
+  >,
+): Pick<ChatState, 'workspaceMode' | 'workspaceSurface' | 'workspacePreview' | 'rightPanelMode' | 'rightPanelOpen'> {
   return {
+    workspaceMode: resolveWorkspaceMode(ts),
     workspaceSurface: ts.workspaceSurface ?? 'home',
     workspacePreview: ts.workspacePreview ?? { port: undefined, path: '/' },
     rightPanelMode: ts.rightPanelMode ?? 'status',
     rightPanelOpen: ts.rightPanelOpen ?? false,
   };
+}
+
+/** Read the canonical workspace view for one thread. Active flat fields are a
+ * compatibility mirror; inactive threads live in threadStates. Presentation
+ * lock is an overlay and must never become another thread's durable state. */
+const workspaceRevisions = new Map<string, number>();
+const workspaceHydrationInProgress = new Set<string>();
+
+function readWorkspaceRevision(threadId: string): number {
+  return workspaceRevisions.get(threadId) ?? 0;
+}
+
+function advanceWorkspaceRevision(threadId: string): number {
+  const next = Math.max(Date.now(), readWorkspaceRevision(threadId) + 1);
+  workspaceRevisions.set(threadId, next);
+  return next;
+}
+
+export function captureThreadWorkspaceState(state: ChatState, threadId: string): PersistedThreadWorkspaceState {
+  if (threadId === state.currentThreadId && !state.presentationLock) {
+    return {
+      revision: readWorkspaceRevision(threadId),
+      workspaceWorktreeId: state.workspaceWorktreeId,
+      workspaceMode: state.workspaceMode,
+      workspaceSurface: state.workspaceSurface,
+      workspacePreview: { ...state.workspacePreview },
+      rightPanelMode: state.rightPanelMode,
+      rightPanelOpen: state.rightPanelOpen,
+    };
+  }
+  const saved = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+  return {
+    revision: readWorkspaceRevision(threadId),
+    workspaceWorktreeId: saved.workspaceWorktreeId,
+    ...restoreWorkspaceView(saved),
+    workspacePreview: { ...(saved.workspacePreview ?? { port: undefined, path: '/' }) },
+  };
+}
+
+function workspaceStateContentEqual(a: PersistedThreadWorkspaceState, b: PersistedThreadWorkspaceState): boolean {
+  return (
+    a.workspaceWorktreeId === b.workspaceWorktreeId &&
+    resolveWorkspaceMode(a) === resolveWorkspaceMode(b) &&
+    a.workspaceSurface === b.workspaceSurface &&
+    a.workspacePreview.port === b.workspacePreview.port &&
+    a.workspacePreview.path === b.workspacePreview.path &&
+    a.rightPanelMode === b.rightPanelMode &&
+    a.rightPanelOpen === b.rightPanelOpen
+  );
+}
+
+function workspaceStatesEqual(a: PersistedThreadWorkspaceState, b: PersistedThreadWorkspaceState): boolean {
+  return a.revision === b.revision && workspaceStateContentEqual(a, b);
 }
 
 const MAX_BLOB_MESSAGES = 200;
@@ -1853,8 +1927,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // Phase H: Workspace mode
   workspaceMode: 'dev' as const,
-  setWorkspaceMode: (mode) => set({ workspaceMode: mode, rightPanelMode: 'workspace' }),
-  restoreWorkspaceMode: (mode) => set({ workspaceMode: mode }),
+  setWorkspaceMode: (mode) =>
+    set((state) => {
+      const patch = { workspaceMode: mode, rightPanelMode: 'workspace' as const };
+      return { ...patch, ...mirrorActiveFlat(state, patch) };
+    }),
+  restoreWorkspaceMode: (mode) =>
+    set((state) => {
+      const patch = { workspaceMode: mode };
+      return { ...patch, ...mirrorActiveFlat(state, patch) };
+    }),
 
   // F195 Phase C: Floating transcript window
   floatingTranscriptVisible: false,
@@ -1872,6 +1954,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : {
             pendingPreviewAutoOpen: data,
             workspacePreview: data,
+            workspaceMode: 'dev' as const,
             workspaceSurface: 'browser' as const,
             rightPanelMode: 'workspace' as const,
             rightPanelOpen: true,
@@ -1885,6 +1968,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   queueThreadPreview: (threadId, preview) =>
     set((state) => {
       const patch = {
+        workspaceMode: 'dev' as const,
         workspaceSurface: 'browser' as const,
         workspacePreview: preview,
         rightPanelMode: 'workspace' as const,
@@ -2613,6 +2697,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // keep the current (locked) values instead of restoring the target's.
         flattened.workspaceSurface = state.workspaceSurface;
         flattened.workspacePreview = state.workspacePreview;
+        flattened.workspaceMode = state.workspaceMode;
         flattened.rightPanelMode = state.rightPanelMode;
         flattened.rightPanelOpen = state.rightPanelOpen;
       }
@@ -3457,3 +3542,77 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setSplitPaneThreadIds: (ids) => set({ splitPaneThreadIds: ids }),
   setSplitPaneTarget: (threadId) => set({ splitPaneTargetId: threadId }),
 }));
+
+/** Apply an IDB snapshot only if no route action, manual navigation, or live
+ * preview event changed the thread while IndexedDB was resolving. */
+export function hydrateThreadWorkspaceState(
+  threadId: string,
+  snapshot: PersistedThreadWorkspaceState,
+  expected: PersistedThreadWorkspaceState,
+): boolean {
+  let applied = false;
+  workspaceHydrationInProgress.add(threadId);
+  try {
+    useChatStore.setState((state) => {
+      const current = captureThreadWorkspaceState(state, threadId);
+      if (!workspaceStatesEqual(current, expected) || snapshot.revision < current.revision) return state;
+      applied = true;
+      workspaceRevisions.set(threadId, snapshot.revision);
+      const existing = state.threadStates[threadId] ?? { ...DEFAULT_THREAD_STATE };
+      const durablePatch = {
+        workspaceWorktreeId: snapshot.workspaceWorktreeId,
+        workspaceMode: resolveWorkspaceMode(snapshot, resolveWorkspaceMode(current)),
+        workspaceSurface: snapshot.workspaceSurface,
+        workspacePreview: { ...snapshot.workspacePreview },
+        rightPanelMode: snapshot.rightPanelMode,
+        rightPanelOpen: snapshot.rightPanelOpen,
+      };
+      const threadStates = {
+        ...state.threadStates,
+        [threadId]: { ...existing, ...durablePatch },
+      };
+      if (threadId !== state.currentThreadId || state.presentationLock) return { threadStates };
+      return { ...durablePatch, threadStates };
+    });
+  } finally {
+    workspaceHydrationInProgress.delete(threadId);
+  }
+  return applied;
+}
+
+// Persist only workspace deltas. Message/queue updates may replace a
+// ThreadState object thousands of times; the fingerprint prevents IDB churn.
+const persistedWorkspaceFingerprints = new Map<string, PersistedThreadWorkspaceState>();
+function collectWorkspacePersistenceCandidates(state: ChatState, previous: ChatState): Set<string> {
+  const candidateThreadIds = new Set([state.currentThreadId, previous.currentThreadId]);
+  for (const [threadId, threadState] of Object.entries(state.threadStates)) {
+    if (threadState !== previous.threadStates[threadId]) candidateThreadIds.add(threadId);
+  }
+  return candidateThreadIds;
+}
+
+function advanceRevisionForWorkspaceDelta(state: ChatState, previous: ChatState, threadId: string): void {
+  if (workspaceHydrationInProgress.has(threadId)) return;
+  const remainedForeground = threadId === state.currentThreadId && state.currentThreadId === previous.currentThreadId;
+  const threadStateChanged = state.threadStates[threadId] !== previous.threadStates[threadId];
+  if (!remainedForeground && !threadStateChanged) return;
+  const contentChanged = !workspaceStateContentEqual(
+    captureThreadWorkspaceState(state, threadId),
+    captureThreadWorkspaceState(previous, threadId),
+  );
+  if (contentChanged) advanceWorkspaceRevision(threadId);
+}
+
+useChatStore.subscribe((state, previous) => {
+  if (typeof indexedDB === 'undefined') return;
+  const candidateThreadIds = collectWorkspacePersistenceCandidates(state, previous);
+  for (const threadId of candidateThreadIds) {
+    if (threadId === state.currentThreadId && state.presentationLock) continue;
+    advanceRevisionForWorkspaceDelta(state, previous, threadId);
+    const snapshot = captureThreadWorkspaceState(state, threadId);
+    const prior = persistedWorkspaceFingerprints.get(threadId);
+    if (prior && workspaceStatesEqual(prior, snapshot)) continue;
+    persistedWorkspaceFingerprints.set(threadId, snapshot);
+    void saveThreadWorkspaceState(threadId, snapshot).catch(() => {});
+  }
+});

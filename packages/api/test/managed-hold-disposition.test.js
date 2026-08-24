@@ -549,6 +549,29 @@ describe('F167 × F254 managed hold disposition', () => {
     assert.deepEqual(failed, [{ entryId: entry.id, userId: 'user-1' }]);
     await h.coordinator.persistEntry(h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id));
 
+    const failedEntry = h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id);
+    const failedAttempt = h.messageStore
+      .getById(h.stored.id)
+      .queueCustody.targetAttempts.find((attempt) => attempt.targetCatId === 'codex-sol' && attempt.state === 'failed');
+    assert.ok(failedAttempt);
+    const retried = await h.coordinator.retryFailedTarget(
+      failedEntry,
+      'codex-sol',
+      failedAttempt.id,
+      async (transitions) => {
+        for (const transition of transitions) {
+          const result = h.messageStore.transitionQueueCustody(transition.messageId, {
+            expectedRevision: transition.current.revision,
+            next: transition.next,
+          });
+          assert.equal(result.kind, 'updated');
+        }
+        return { outcome: 'committed' };
+      },
+    );
+    assert.equal(retried.outcome, 'retried');
+    assert.ok(h.queue.retryFailedTarget('thread-1', 'user-1', entry.id, 'codex-sol'));
+
     const successor = h.queue.markProcessing('thread-1', 'user-1');
     assert.equal(successor.id, entry.id);
     assert.equal(successor.messageId, h.stored.id);
@@ -556,7 +579,14 @@ describe('F167 × F254 managed hold disposition', () => {
     const receipt = h.messageStore.getById(h.stored.id).queueCustody;
     assert.deepEqual(receipt.handledByCatIds, []);
     assert.equal(receipt.seenInvocationIdByCatId['codex-sol'], undefined);
-    assert.equal(receipt.failedByCatIds.includes('codex-sol'), true);
+    assert.equal(receipt.failedByCatIds.includes('codex-sol'), false);
+    assert.deepEqual(
+      receipt.targetAttempts.map((attempt) => ({ id: attempt.id, state: attempt.state })),
+      [
+        { id: `${entry.id}:codex-sol:1`, state: 'failed' },
+        { id: `${entry.id}:codex-sol:2`, state: 'queued' },
+      ],
+    );
     assert.equal(
       (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
       false,

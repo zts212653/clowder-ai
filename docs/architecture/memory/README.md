@@ -11,6 +11,7 @@ view_state: fresh
 feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296]
 related_features: [F139, F148, F153, F192, F229, F237, F242, F246, F267]
 related_docs:
+  - docs/architecture/memory/memory-architecture-diagrams.md
   - docs/architecture/memory/memory-architecture-diagrams-lofi.md
   - docs/architecture/memory-system-overview.md
   - docs/architecture/memory-philosophy.md
@@ -78,9 +79,12 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 - **治理层**负责批准、拒绝、纠正、遗忘、权限和派生视图失效。
 
 公众叙事图见 EP04 正式主图。
-逐层内部结构与正式精图蓝图见
-[记忆架构逐层低保真图集](./memory-architecture-diagrams-lofi.md)；它使用固定宽度图，避免 Mermaid
-renderer 差异，并明确回答“导航与读取怎样分工、每一层里面有什么”。
+
+![记忆系统全局星图：一栋楼、两个方向、三条横切](./assets/memory-architecture-p1-overview.png)
+
+逐层内部结构见 [记忆架构逐层正式图集](./memory-architecture-diagrams.md)；每张图的可维护信息结构与
+重画约束保留在 [低保真设计源](./memory-architecture-diagrams-lofi.md)。两者共同回答“导航与读取怎样
+分工、每一层里面有什么”，但 current truth 仍由本 Atlas 的 claim registry 所指向的文档持有。
 
 ### 八个模块：给实现者的端到端链
 

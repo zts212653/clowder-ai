@@ -24,6 +24,7 @@ export type ManagedCommandWakeState =
   | 'dispatched'
   | 'enqueued'
   | 'cancelled'
+  | 'escalated'
   | 'consumed';
 
 export type ManagedCommandWakeCarrierTerminalReason = 'withdrawn' | 'canceled' | 'terminal' | 'force_reset';
@@ -56,6 +57,13 @@ export interface ManagedCommandWakeProjection {
   readonly carrierTerminalReason?: ManagedCommandWakeCarrierTerminalReason;
   readonly consumedAt?: number;
   readonly slaBreachObservedAt?: number;
+  /** Number of exact failed Queue attempts redelivered for a missing invocation-bound disposition. */
+  readonly dispositionRetryCount?: number;
+  /** Idempotency fence for the failed attempt that authorized the latest redelivery. */
+  readonly lastDispositionFailedAttemptId?: string;
+  readonly dispositionEscalationReason?: 'managed_hold_disposition_missing';
+  readonly dispositionEscalatedAttemptId?: string;
+  readonly dispositionEscalatedAt?: number;
 }
 
 export interface ParsedManagedCommandWakeTask {
@@ -80,6 +88,7 @@ function isManagedCommandWakeState(value: unknown): value is ManagedCommandWakeS
     value === 'dispatched' ||
     value === 'enqueued' ||
     value === 'cancelled' ||
+    value === 'escalated' ||
     value === 'consumed'
   );
 }
@@ -130,6 +139,7 @@ export function readHoldLifecycleProjection(task: DynamicTaskDef): Record<string
     lifecycle.status !== 'active' &&
     lifecycle.status !== 'retired_by_event' &&
     lifecycle.status !== 'cancelled_by_user' &&
+    lifecycle.status !== 'escalated' &&
     lifecycle.status !== 'fired'
   ) {
     return null;

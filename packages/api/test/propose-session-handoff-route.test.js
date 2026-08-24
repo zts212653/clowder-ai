@@ -28,9 +28,13 @@ describe('propose-session-handoff route (F225 ②a)', () => {
     assert.ok(card, 'card message appended to source thread');
     assert.equal(card.extra?.rich?.blocks?.[0]?.id, `handoff-${json.proposalId}`, 'confirmation card block present');
 
-    assert.ok(
-      ctx.socketEvents.some((e) => e.kind === 'room' && e.room === 'thread:thread_1'),
-      'broadcast to thread room',
+    const cardBroadcast = ctx.socketEvents.find(
+      (event) => event.kind === 'room' && event.event === 'connector_message' && event.data.threadId === 'thread_1',
+    );
+    assert.deepEqual(
+      cardBroadcast?.room,
+      ['thread:thread_1', 'user:user_1'],
+      'broadcast to the source thread and its owner user room',
     );
   });
 

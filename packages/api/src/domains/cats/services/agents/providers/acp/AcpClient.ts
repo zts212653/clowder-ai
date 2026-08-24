@@ -211,7 +211,7 @@ export class AcpClient {
     // PATH so `#!/usr/bin/env node` shims can find the node interpreter.
     let command = resolveCliCommandOrBare(this.config.command);
     let args = [...this.config.args];
-    const childEnv = buildChildEnv(this.config.env);
+    const childEnv = buildChildEnv(this.config.env, { workingDirectory: this.config.cwd });
     if (!IS_WINDOWS && isAbsolute(command)) {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;

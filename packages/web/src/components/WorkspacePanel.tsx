@@ -327,6 +327,18 @@ export function WorkspacePanel({
       ?.then((res) => res.json())
       .then((thread: { preferredWorkspaceMode?: string }) => {
         if (cancelled) return;
+        const currentWorkspace = useChatStore.getState();
+        // F120 explicit preview delivery outranks a thread's default landing
+        // mode. Without this post-fetch guard, a slow preferred-mode response
+        // can put Approval history back on top after the receipt said applied.
+        if (
+          currentWorkspace.workspaceMode === 'dev' &&
+          currentWorkspace.workspaceSurface === 'browser' &&
+          currentWorkspace.rightPanelMode === 'workspace' &&
+          currentWorkspace.rightPanelOpen
+        ) {
+          return;
+        }
         if (isWorkspaceMode(thread.preferredWorkspaceMode)) {
           restoreWorkspaceMode(thread.preferredWorkspaceMode);
         } else if (['community', 'artifacts'].includes(useChatStore.getState().workspaceMode)) {
@@ -354,7 +366,7 @@ export function WorkspacePanel({
         setTimeout(() => setPortDiscoveryToast(null), 8000);
       };
       socket.on('preview:port-discovered', handler);
-      // F120: auto-open listener moved to ChatContainer (usePreviewAutoOpen hook)
+      // F120: auto-open listener lives on the stable main useSocket connection.
       // WorkspacePanel consumes pendingPreviewAutoOpen from store on mount
       cleanup = () => {
         socket.off('preview:port-discovered', handler);
@@ -805,7 +817,7 @@ export function WorkspacePanel({
           ) : workspaceMode === 'eval' ? (
             <EvalWorkspacePanel />
           ) : workspaceMode === 'trajectory' ? (
-            <TrajectoryPanel />
+            <TrajectoryPanel threadId={currentThreadId} />
           ) : (
             <>
               {/* Error */}

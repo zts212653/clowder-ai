@@ -50,6 +50,7 @@ import {
   ActionTerminalPredicateError,
   getActionTerminalCapabilityForPredicateKind,
 } from '../domains/ball-custody/ActionTerminalPredicateCatalog.js';
+import type { LocalReviewVerdict } from '../domains/ball-custody/LocalReviewEvidenceProvider.js';
 import type { LocalReviewVerdictService } from '../domains/ball-custody/LocalReviewVerdictService.js';
 import {
   type ActionSuccessorCarrierAdmissionOutcome,
@@ -157,6 +158,7 @@ import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callb
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
+  rejectCallbackAuthDuringStartupRecovery,
   requireCallbackAuth,
   requireCallbackPrincipal,
 } from './callback-auth-prehandler.js';
@@ -434,6 +436,31 @@ async function getRecentCallbackDuplicateCandidates(
   return messageStore.getByThread(threadId, 20, userId);
 }
 
+async function findTypedLocalReviewMessage(
+  messageStore: IMessageStore,
+  input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    clientMessageId: string;
+    verdict: LocalReviewVerdict;
+    invocationId: string;
+  },
+): Promise<StoredMessage | undefined> {
+  const recent = await getRecentCallbackDuplicateCandidates(messageStore, input.threadId, input.userId);
+  return [...recent]
+    .reverse()
+    .find(
+      (message) =>
+        message.origin === 'callback' &&
+        message.catId === input.catId &&
+        message.extra?.stream?.turnInvocationId === input.invocationId &&
+        message.extra?.coordination?.phase === 'terminal' &&
+        message.extra.localReviewVerdict?.clientMessageId === input.clientMessageId &&
+        message.extra.localReviewVerdict.verdict === input.verdict,
+    );
+}
+
 function isExactCallbackDuplicate(
   msg: StoredMessage,
   input: {
@@ -446,6 +473,7 @@ function isExactCallbackDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
   },
 ): boolean {
   if (msg.origin !== 'callback') return false;
@@ -455,6 +483,7 @@ function isExactCallbackDuplicate(
   if (Boolean(msg.extra?.isExplicitPost) !== Boolean(input.isExplicitPost)) return false;
   if (Boolean(msg.mentionsUser) !== Boolean(input.mentionsUser)) return false;
   if (!sameStringArray(msg.mentions, input.mentions)) return false;
+  if ((msg.extra?.localReviewVerdict?.verdict ?? undefined) !== input.localReviewVerdict) return false;
   return sameCoordinationForCallbackDedup(msg, input.coordination, input.coordinationDedupKey);
 }
 
@@ -472,6 +501,7 @@ async function findRecentExactCallbackDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
     now: number;
   },
 ): Promise<StoredMessage | undefined> {
@@ -504,6 +534,7 @@ function buildCallbackContentDedupFingerprint(input: {
   isExplicitPost?: boolean | undefined;
   coordination?: CrossThreadCoordination | undefined;
   coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+  localReviewVerdict?: LocalReviewVerdict | undefined;
 }): string {
   const parts = [
     input.threadId,
@@ -515,6 +546,7 @@ function buildCallbackContentDedupFingerprint(input: {
     [...input.mentions].join(','),
     input.content,
     richBlocksFingerprintPart(input.richBlocks),
+    input.localReviewVerdict ?? '',
     input.coordinationDedupKey === 'action-active-root'
       ? ''
       : (input.coordinationDedupKey ??
@@ -554,6 +586,7 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
     clientMessageId?: string | undefined;
     now: number;
     hasRoutingWarnings: boolean;
@@ -572,6 +605,7 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
+    ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
   });
   const claimed = await messageStore.claimContentDedupKey(fingerprint, CALLBACK_EXACT_DUPLICATE_WINDOW_MS);
   if (claimed) return null;
@@ -587,6 +621,7 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
+    ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
     now: input.now,
   });
   return {
@@ -846,6 +881,8 @@ const postMessageSchema = z.object({
       subjectRef: z.string().trim().min(1).max(240).optional(),
     })
     .optional(),
+  // #1371 PR1b: one typed local-review fact rides the terminal message.
+  localReviewVerdict: z.enum(['approved', 'changes_requested', 'commented']).optional(),
   // F254 Phase A: acknowledge held — escape hatch to force-send despite unseen messages
   acknowledgeHeld: z.boolean().optional(),
   // F167 Phase S: structured subject/action/slot successor identity.
@@ -1157,6 +1194,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         return {
           kind: 'replace_final_agent_key_unsupported',
           message: 'streamDisposition="replace_final" requires invocation-token provenance.',
+        };
+      }
+      if (parsed.data.localReviewVerdict) {
+        reply.status(400);
+        return {
+          kind: 'local_review_verdict_agent_key_unsupported',
+          message: 'localReviewVerdict requires invocation-token review-carrier provenance.',
         };
       }
       if (parsed.data.coordination) {
@@ -1540,6 +1584,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       targetCats: explicitTargetCats,
       effectClass,
       coordination: explicitCoordination,
+      localReviewVerdict,
       acknowledgeHeld,
       action,
       proposedAction,
@@ -1729,6 +1774,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         message: 'action successor dispatch starts substantive work and cannot use terminal coordination.',
       };
     }
+    if (localReviewVerdict && explicitCoordination?.phase !== 'terminal') {
+      reply.status(400);
+      return {
+        kind: 'local_review_verdict_requires_terminal_coordination',
+        message: 'localReviewVerdict is valid only on coordination.phase="terminal".',
+      };
+    }
+    if (localReviewVerdict && !clientMessageId) {
+      reply.status(400);
+      return {
+        kind: 'local_review_verdict_client_message_id_required',
+        message: 'localReviewVerdict requires an explicit clientMessageId for replay-safe settlement.',
+      };
+    }
     if (
       action &&
       explicitCoordination?.subjectRef &&
@@ -1790,8 +1849,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       };
     }
 
+    let terminalActionLeaseRef: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
     if (explicitCoordination?.phase === 'terminal') {
-      let terminalActionLeaseRef: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
       try {
         terminalActionLeaseRef = await resolveCallbackActionLeaseRef(record, invocationRecordStore);
       } catch (err) {
@@ -1829,6 +1888,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             targetThreadId: effectiveThreadId,
           };
         }
+        if (preflight.applicable && !localReviewVerdict) {
+          reply.status(400);
+          return {
+            kind: 'local_review_verdict_required',
+            message: 'A local review terminal post must include localReviewVerdict.',
+          };
+        }
+        if (!preflight.applicable && localReviewVerdict) {
+          reply.status(409);
+          return {
+            kind: 'local_review_verdict_carrier_mismatch',
+            message: 'The invocation carrier is not active local-review custody.',
+          };
+        }
+      }
+      if (localReviewVerdict && !terminalActionLeaseRef) {
+        reply.status(409);
+        return {
+          kind: 'local_review_verdict_carrier_required',
+          message: 'localReviewVerdict requires an active invocation-bound review lease.',
+        };
+      }
+      if (localReviewVerdict && !opts.localReviewVerdictService) {
+        reply.status(503);
+        return { kind: 'local_review_verdict_service_unavailable' };
       }
     }
 
@@ -2396,6 +2480,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    const settleTypedLocalReviewMessage = async (messageId: string) => {
+      if (!localReviewVerdict) return undefined;
+      if (!terminalActionLeaseRef || !opts.localReviewVerdictService) {
+        throw new Error('typed local review settlement reached without its preflighted carrier');
+      }
+      return opts.localReviewVerdictService.record({
+        leaseId: terminalActionLeaseRef.leaseId,
+        generation: terminalActionLeaseRef.generation,
+        messageId,
+        now: Date.now(),
+        principal: { catId: actor.catId, threadId: actor.threadId, tenantScope: actor.userId },
+      });
+    };
+
     // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
     if (clientMessageId) {
       const isFirstSeen = await registry.claimClientMessageId(invocationId, clientMessageId);
@@ -2421,6 +2519,37 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             evidenceRef: `callback:${invocationId}:${clientMessageId}:duplicate`,
             now: Date.now(),
           });
+        }
+        if (localReviewVerdict) {
+          const persisted = await findTypedLocalReviewMessage(messageStore, {
+            threadId: effectiveThreadId,
+            userId: actor.userId,
+            catId: actor.catId,
+            clientMessageId,
+            verdict: localReviewVerdict,
+            invocationId,
+          });
+          if (!persisted) {
+            reply.status(503);
+            return {
+              kind: 'local_review_verdict_persistence_pending',
+              message: 'The typed terminal message is not yet readable; retry the same clientMessageId.',
+              clientMessageId,
+            };
+          }
+          const settlement = await settleTypedLocalReviewMessage(persisted.id);
+          if (settlement?.outcome !== 'committed') {
+            reply.status(settlement?.outcome === 'insufficient' ? 422 : 409);
+            return { kind: 'local_review_settlement_failed', settlement, clientMessageId };
+          }
+          return {
+            status: 'duplicate',
+            threadId: effectiveThreadId,
+            messageId: persisted.id,
+            replyTo,
+            clientMessageId,
+            localReviewSettlement: settlement,
+          };
         }
         return { status: 'duplicate', replyTo, clientMessageId };
       }
@@ -2555,6 +2684,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
       : {};
     const coordinationExtra = coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {};
+    const localReviewVerdictExtra = localReviewVerdict
+      ? { localReviewVerdict: { verdict: localReviewVerdict, clientMessageId: clientMessageId! } }
+      : {};
     const callbackDedupExtra = coordinationDedupKey ? { callbackDedup: { coordinationKey: coordinationDedupKey } } : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra =
@@ -2567,6 +2699,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...richExtra,
       ...crossPostExtra,
       ...coordinationExtra,
+      ...localReviewVerdictExtra,
       ...callbackDedupExtra,
       ...targetCatsExtra,
     };
@@ -2656,6 +2789,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           isExplicitPost: isStandaloneExplicitPost,
           ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
           ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
+          ...(localReviewVerdict ? { localReviewVerdict } : {}),
           now,
         })
       : undefined;
@@ -2754,12 +2888,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           now: Date.now(),
         });
       }
+      const localReviewSettlement = await settleTypedLocalReviewMessage(duplicateMsg.id);
+      if (localReviewSettlement && localReviewSettlement.outcome !== 'committed') {
+        reply.status(localReviewSettlement.outcome === 'insufficient' ? 422 : 409);
+        return { kind: 'local_review_settlement_failed', settlement: localReviewSettlement };
+      }
       return {
         status: 'duplicate',
         threadId: effectiveThreadId,
         messageId: duplicateMsg.id,
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
+        ...(localReviewSettlement ? { localReviewSettlement } : {}),
       };
     }
     // Race-safe backstop: the exact-duplicate scan above is check-then-act, so an atomic content
@@ -2776,6 +2916,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       isExplicitPost: isStandaloneExplicitPost,
       ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
       ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
+      ...(localReviewVerdict ? { localReviewVerdict } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       now,
       hasRoutingWarnings: hasDedupBlockingRoutingWarnings,
@@ -2789,7 +2930,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           now: Date.now(),
         });
       }
-      return contentDuplicate;
+      if (!localReviewVerdict) return contentDuplicate;
+      if (!contentDuplicate.messageId) {
+        reply.status(503);
+        return {
+          kind: 'local_review_verdict_persistence_pending',
+          message:
+            'The typed terminal message is still winning its content-dedup race; retry the same clientMessageId.',
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+      const localReviewSettlement = await settleTypedLocalReviewMessage(contentDuplicate.messageId);
+      if (localReviewSettlement?.outcome !== 'committed') {
+        reply.status(localReviewSettlement?.outcome === 'insufficient' ? 422 : 409);
+        return { kind: 'local_review_settlement_failed', settlement: localReviewSettlement };
+      }
+      return { ...contentDuplicate, localReviewSettlement };
     }
     const storedMsg = await messageStore.append({
       userId: actor.userId,
@@ -2804,6 +2960,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
     });
+    const localReviewSettlement = await settleTypedLocalReviewMessage(storedMsg.id);
+    if (localReviewSettlement && localReviewSettlement.outcome !== 'committed') {
+      reply.status(localReviewSettlement.outcome === 'insufficient' ? 422 : 409);
+      return {
+        kind: 'local_review_settlement_failed',
+        messageId: storedMsg.id,
+        settlement: localReviewSettlement,
+      };
+    }
     if (coordinationResult.coordination?.phase === 'active') {
       coordinationActiveDispatchCount.add(1);
     } else if (coordinationResult.coordination?.phase === 'terminal') {
@@ -2998,6 +3163,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             },
           }
         : {}),
+      ...(localReviewSettlement ? { localReviewSettlement } : {}),
       message: coordinationResult.suppressRouting
         ? 'Terminal coordination ACK recorded without routing a new invocation.'
         : buildPostMessageRoutingMessage(routingOutcome.routed, routing_warnings, routingOutcome.notEnqueued),
@@ -4922,13 +5088,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     return { status: 'ok', deleted: { id: task.id, subjectKey: parsed.data.subjectKey } };
   });
 
-  // F174 Phase C: refresh-token endpoint — keep tokens alive in long sessions
-  // where猫 has no incidental tool calls. Heartbeat = empty verify (preHandler
-  // slides TTL via Phase B mechanism); we just compute remaining TTL.
+  // F174 Phase C compatibility endpoint. Active credentials no longer expire
+  // with elapsed time; this endpoint validates exact-attempt ownership and
+  // returns lifecycle state without extending an auth deadline.
   //
   // P1 fix (gpt52 review): cooldown MUST run before app-level preHandler.
-  // Otherwise verify() in preHandler已经 slides TTL even on rate-limited
-  // requests → 429 is cosmetic, abuser still extends. Route-level onRequest
+  // Otherwise verify() in preHandler runs even on rate-limited requests.
+  // Route-level onRequest
   // hook fires before plugin-scoped preHandler in Fastify's lifecycle, so we
   // claim the cooldown there and reply.send → preHandler is short-circuited.
   const REFRESH_COOLDOWN_MS = 5 * 60_000;
@@ -4964,6 +5130,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           });
           return;
         }
+        if (rejectCallbackAuthDuringStartupRecovery(registry, reply)) return;
 
         const peeked = await registry.peek(creds.invocationId, creds.callbackToken);
         if (!peeked.ok) {
@@ -4976,11 +5143,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (!cooldownClaimed) {
           reply.status(429).send({ error: 'refresh_rate_limited', retryAfterMs: REFRESH_COOLDOWN_MS });
           // reply.send short-circuits the lifecycle — preHandler/handler skipped,
-          // so verify() never slides TTL for the rate-limited request.
+          // so no callback verification runs for the rate-limited request.
           return;
         }
 
-        // Atomic: verify token + check stale + slide TTL in one backend op.
+        // Atomic: verify token + check stale in one backend op.
         // Replaces global preHandler.verify for this route (we set
         // request.callbackAuth so the preHandler early-returns).
         const result = await registry.verifyLatest(creds.invocationId, creds.callbackToken);
@@ -4996,8 +5163,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             });
             return;
           }
-          // expired / invalid_token / unknown_invocation — race against expiry
-          // or registry mutation between peek and verifyLatest. Surface the
+          // invalid_token / unknown_invocation / terminal disposition — a
+          // registry mutation raced peek and verifyLatest. Surface the
           // structured reason directly (we own the auth path now, preHandler
           // will skip via the request.callbackAuth check).
           reply.status(401).send({
@@ -5015,8 +5182,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const record = requireCallbackAuth(request, reply);
       if (!record) return; // preHandler already 401'd
 
-      // preHandler's verify() already slid the record TTL forward.
-      // Re-fetch to get the new expiresAt without triggering another slide.
+      // Re-fetch the current lifecycle projection without mutating auth state.
       const fresh = await registry.getRecord(record.invocationId);
       if (!fresh) {
         recordCallbackAuthFailure({ reason: 'unknown_invocation', tool: 'refresh-token', catId: record.catId });
@@ -5028,8 +5194,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           hint: '',
         };
       }
-      const ttlRemainingMs = Math.max(0, fresh.expiresAt - Date.now());
-      return { ok: true, expiresAt: fresh.expiresAt, ttlRemainingMs };
+      return { ok: true, expiresAt: null, ttlRemainingMs: null };
     },
   );
 

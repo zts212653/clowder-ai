@@ -17,6 +17,23 @@ const CANDIDATE_SNIPPET = 'Phase C shipped the distillation queue';
 const CLOSED_QUESTION = '要不要把 delivery cursor 拆成两个 store？(PR #1108 已合入两个月)';
 const DECISION = 'cursor 用单 store';
 const STALE_ARTIFACT = '.codex-tmp-pr1108-review.md';
+const CODEX_EXEC = {
+  provider: 'openai',
+  carrier: 'exec_json',
+  reportsRuntimeWindow: true,
+  authoritativeUsage: true,
+  usageTelemetry: 'available',
+  nativeWindowControl: true,
+  nativeCompressionControl: true,
+  observesCompression: false,
+  reason: 'F296 route fixture',
+};
+const KIMI_STREAM = {
+  ...CODEX_EXEC,
+  provider: 'kimi',
+  carrier: 'stream_json',
+  reason: 'F296 unsupported-carrier fixture',
+};
 
 const THREAD_MEMORY = {
   v: 1,
@@ -73,11 +90,35 @@ function mockEvidenceStore() {
 }
 
 /** Fake provider that records exactly what it was asked to run on. */
-function createCapturingService(catId, captured) {
+function createCapturingService(catId, captured, capability = CODEX_EXEC) {
   return {
+    contextCapability: () => capability,
     async *invoke(prompt) {
       captured.push(prompt);
       yield { type: 'text', catId, content: `ok [签名/model🐾]`, timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
+function createStaleThenRecoveringService(catId, captured, capability = CODEX_EXEC) {
+  let invokeCount = 0;
+  return {
+    contextCapability: () => capability,
+    async *invoke(prompt) {
+      captured.push(prompt);
+      invokeCount += 1;
+      if (invokeCount === 1) {
+        yield {
+          type: 'error',
+          catId,
+          error: 'No conversation found with session ID: stale-runtime-session',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId, timestamp: Date.now() };
+        return;
+      }
+      yield { type: 'text', catId, content: `recovered [签名/model🐾]`, timestamp: Date.now() };
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
@@ -107,12 +148,12 @@ function seedColdThread(messageStore, count = 60) {
   });
 }
 
-function createRouteDeps(catIds, captured) {
+function createRouteDeps(catIds, captured, capability = CODEX_EXEC, messageCount = 60) {
   const messageStore = new MessageStore();
-  const currentUserMessage = seedColdThread(messageStore);
+  const currentUserMessage = seedColdThread(messageStore, messageCount);
   let seq = 0;
   const services = {};
-  for (const catId of catIds) services[catId] = createCapturingService(catId, captured);
+  for (const catId of catIds) services[catId] = createCapturingService(catId, captured, capability);
   return {
     currentUserMessageId: currentUserMessage.id,
     services,
@@ -127,12 +168,43 @@ function createRouteDeps(catIds, captured) {
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: mockThreadStore(),
+      contextEpochOwner: {
+        async resolve(input) {
+          return {
+            scopeKey: `user-1::${input.catId}::thread-a4`,
+            contextEpoch: 1,
+            contextMode: 'cold',
+            lastTransitionRef: input.disposition.evidenceRef,
+            consumedCompactionEventIds: [],
+            transition: 'scope_first_seen',
+            normalizedDisposition: input.disposition,
+            healthSignals: [],
+          };
+        },
+      },
       apiUrl: 'http://127.0.0.1:3004',
     },
     messageStore,
     deliveryCursorStore: new DeliveryCursorStore(),
     evidenceStore: mockEvidenceStore(),
   };
+}
+
+function contextBriefingEvents(messages) {
+  return messages.filter((message) => {
+    if (message.type !== 'system_info' || !message.content) return false;
+    try {
+      return JSON.parse(message.content).type === 'context_briefing';
+    } catch {
+      return false;
+    }
+  });
+}
+
+function storedContextBriefings(messageStore) {
+  return messageStore
+    .getByThread('thread-a4', 1_000)
+    .filter((message) => message.origin === 'briefing' && message.extra?.systemKind === 'context_briefing');
 }
 
 /**
@@ -174,8 +246,8 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
 
     assert.equal(captured.length, 1, 'provider was invoked exactly once');
     assertPhaseASparse(captured[0], 'route-serial');
-    // Sparse is not empty: the retrieval entry and the omitted range survive.
-    assert.match(captured[0], /pointer only/, 'route-serial keeps a content-free retrieval pointer');
+    // Sparse is not empty: the exact retrieval entry and omitted range survive.
+    assert.match(captured[0], /search_evidence\(/, 'route-serial keeps an exact retrieval entry');
   });
 
   test('route-parallel: the prompt each provider receives is sparse', async () => {
@@ -190,8 +262,119 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     }
 
     assert.equal(captured.length, 2, 'both providers were invoked');
-    captured.forEach((prompt, i) => assertPhaseASparse(prompt, `route-parallel[${i}]`));
+    for (const [i, prompt] of captured.entries()) {
+      assertPhaseASparse(prompt, `route-parallel[${i}]`);
+    }
   });
+
+  test('route-serial: final prompt consumes the epoch-owned cold decision', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captured = [];
+    const deps = createRouteDeps(['opus'], captured);
+
+    for await (const _ of routeSerial(deps, ['opus'], '@opus 看看这个', 'user-1', 'thread-a4', {
+      currentUserMessageId: deps.currentUserMessageId,
+    })) {
+      // drain
+    }
+
+    assert.match(captured[0], /\[Context Continuity\]/);
+    assert.match(captured[0], /"contextEpoch":1/);
+    assert.match(captured[0], /"contextMode":"cold"/);
+    assert.match(captured[0], /"transition":"scope_first_seen"/);
+    assert.match(captured[0], /"reason":"no_prior_session"/);
+    assert.match(captured[0], /"deltaSize":"large"/);
+  });
+
+  test('route-parallel: every final prompt consumes its own epoch decision', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const captured = [];
+    const deps = createRouteDeps(['opus', 'codex'], captured);
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], '@opus @codex 各自看看', 'user-1', 'thread-a4', {
+      currentUserMessageId: deps.currentUserMessageId,
+    })) {
+      // drain
+    }
+
+    assert.equal(captured.length, 2);
+    for (const prompt of captured) {
+      assert.match(prompt, /\[Context Continuity\]/);
+      assert.match(prompt, /"contextEpoch":1/);
+      assert.match(prompt, /"contextMode":"cold"/);
+      assert.match(prompt, /"transition":"scope_first_seen"/);
+      assert.match(prompt, /"reason":"no_prior_session"/);
+      assert.match(prompt, /"deltaSize":"large"/);
+    }
+  });
+
+  test('route-serial: an unsupported carrier fails closed through the same epoch-owned cold factory', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const captured = [];
+    const deps = createRouteDeps(['kimi'], captured, KIMI_STREAM);
+
+    for await (const _ of routeSerial(deps, ['kimi'], '@kimi 看看这个', 'user-1', 'thread-a4', {
+      currentUserMessageId: deps.currentUserMessageId,
+    })) {
+      // drain
+    }
+
+    assert.equal(captured.length, 1);
+    assert.match(captured[0], /\[Context Continuity\]/);
+    assert.match(captured[0], /"contextMode":"cold"/);
+    assert.match(captured[0], /"reason":"carrier_unsupported"/);
+    assert.doesNotMatch(captured[0], /legacy_volume_path/);
+  });
+
+  for (const [routeName, loadRoute] of [
+    [
+      'route-serial',
+      async () => (await import('../dist/domains/cats/services/agents/routing/route-serial.js')).routeSerial,
+    ],
+    [
+      'route-parallel',
+      async () => (await import('../dist/domains/cats/services/agents/routing/route-parallel.js')).routeParallel,
+    ],
+  ]) {
+    test(`${routeName}: replacement reprojection persists and emits one briefing`, async () => {
+      const captured = [];
+      const deps = createRouteDeps(['opus'], captured);
+      deps.services.opus = createStaleThenRecoveringService('opus', captured);
+      deps.invocationDeps.sessionManager.get = async () => 'stale-runtime-session';
+      deps.invocationDeps.sessionManager.delete = async () => {};
+
+      const messages = [];
+      const route = await loadRoute();
+      for await (const message of route(deps, ['opus'], '@opus 看看这个', 'user-1', 'thread-a4', {
+        currentUserMessageId: deps.currentUserMessageId,
+      })) {
+        messages.push(message);
+      }
+
+      assert.equal(captured.length, 2, 'stale session must exercise both provider generations');
+      assert.equal(storedContextBriefings(deps.messageStore).length, 1, 'factory rerun must not append twice');
+      assert.equal(contextBriefingEvents(messages).length, 1, 'frontend receives one briefing projection');
+    });
+
+    test(`${routeName}: cold + small does not persist a per-turn briefing`, async () => {
+      const captured = [];
+      const deps = createRouteDeps(['opus'], captured, CODEX_EXEC, 3);
+      const messages = [];
+      const route = await loadRoute();
+
+      for await (const message of route(deps, ['opus'], '@opus 看看这个', 'user-1', 'thread-a4', {
+        currentUserMessageId: deps.currentUserMessageId,
+      })) {
+        messages.push(message);
+      }
+
+      assert.equal(captured.length, 1);
+      assert.match(captured[0], /"contextMode":"cold"/);
+      assert.match(captured[0], /"deltaSize":"small"/);
+      assert.equal(storedContextBriefings(deps.messageStore).length, 0, 'cold-first cannot create thread noise');
+      assert.equal(contextBriefingEvents(messages).length, 0, 'no persisted briefing means no briefing event');
+    });
+  }
 
   test('SessionBootstrap: bootstrap text is sparse', async () => {
     const sessions = [
@@ -279,7 +462,7 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     // Scope to the context block the route injects. Static collaboration
     // guidance is not Phase A's surface and is deliberately out of frame.
     const prompt = captured[0];
-    const blockStart = prompt.indexOf('[导航]');
+    const blockStart = prompt.indexOf('[Context Continuity]');
     const blockEnd = prompt.indexOf('[/对话历史]');
     assert.ok(blockStart >= 0 && blockEnd > blockStart, 'cold context block is present');
     const block = prompt.slice(blockStart, blockEnd + '[/对话历史]'.length);
@@ -288,16 +471,12 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     // regression *or* a deliberate addition that has to change this list first —
     // which is exactly the argument AC-A4 wants a future "add a summary back" to have.
     const ACCEPTED_PREFIXES = [
+      '[Context Continuity]',
+      '[/Context Continuity]',
       '[导航]', // baton + truth source + next step
       '[/导航]',
       '[对话历史增量', // window header (N omitted / M detailed)
-      '[Context Coverage Map]', // machine-readable coverage, no candidate bodies
-      '[Thread Memory', // session summary text (no openQuestions)
       '[System: skipped', // tombstone for the omitted range
-      '[Thread opener', // real thread messages selected as anchors
-      '[Anchor ',
-      '[Related evidence — pointer only]', // content-free retrieval entry
-      '[/Related evidence]',
       '[/对话历史]',
     ];
     const MESSAGE_LINE = /^\[\d{16}-\d{6}-[0-9a-f]{8}\]/; // verbatim burst messages
@@ -314,10 +493,11 @@ describe('F296 AC-A4: sparse output is accepted at every entry point', () => {
     // Sparse acceptance, stated positively: these are the things that MUST be there.
     assert.match(block, /真相源: 未定位/, 'no qualified source → say 未定位, do not promote a candidate');
     assert.match(block, /下一步: cat_cafe_get_thread_context/, 'an exact drill entry survives');
-    assert.match(block, /\[Related evidence — pointer only\]/, 'the retrieval entry survives as a pointer');
     assert.match(block, /\[System: skipped 49 messages/, 'the omitted range is stated, not silently dropped');
-    // …and the coverage map still reports the omitted range + a content-free count.
-    assert.match(block, /"recallPointer":\{"candidateCount":1\}/);
+    assert.match(block, /search_evidence\(/, 'the omitted range carries an exact retrieval entry');
+    assert.ok(!block.includes('[Thread Memory'), 'automatic memory summary is not a cold-packet section');
+    assert.ok(!block.includes('[Anchor '), 'unbound historical anchors are not a cold-packet section');
+    assert.ok(!block.includes('[Related evidence'), 'heuristic recall is not eagerly queried into the cold packet');
     assert.ok(!block.includes('"openQuestion'), 'no lifecycle-less questions in the coverage map');
   });
 });

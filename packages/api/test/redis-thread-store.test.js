@@ -76,6 +76,29 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(fetched.createdBy, 'user1');
   });
 
+  it('resolves a user-indexed system thread through the canonical read policy', async () => {
+    const { resolveThreadAccess } = await import('../dist/domains/cats/services/session/thread-access-policy.js');
+    const thread = await store.ensureThread('thread_eval_friction', 'Eval friction');
+    await store.indexForUser(thread.id, 'owner-user');
+
+    const indexed = await resolveThreadAccess({
+      threadStore: store,
+      thread,
+      userId: 'owner-user',
+      request: { resource: 'invocations', action: 'read' },
+    });
+    const foreign = await resolveThreadAccess({
+      threadStore: store,
+      thread,
+      userId: 'other-user',
+      request: { resource: 'invocations', action: 'read' },
+    });
+
+    assert.equal(indexed.status, 200);
+    assert.equal(indexed.scope, 'user');
+    assert.equal(foreign.status, 403);
+  });
+
   it('persists and hydrates the cat_bedroom system kind', async () => {
     const created = await store.create('user1', 'codex-sol 的卧室');
 

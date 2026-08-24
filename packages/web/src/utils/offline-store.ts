@@ -1,5 +1,7 @@
 import { type DBSchema, type IDBPDatabase, openDB } from 'idb';
-import type { ChatMessage, Thread } from '../stores/chat-types';
+import type { WorkspaceMode } from '@/lib/workspace-modes';
+import type { ChatMessage, Thread, WorkspacePreviewState, WorkspaceSurface } from '../stores/chat-types';
+import type { SidebarSnapshotRow } from '../stores/sidebarProjectionStore';
 
 const DB_NAME = 'cat-cafe-offline';
 /**
@@ -9,7 +11,7 @@ const DB_NAME = 'cat-cafe-offline';
  * object store on bump — snapshots are not the source of truth (KD-1, KD-3),
  * so dropping is safe; next hydration rebuilds from API. NEVER decrement.
  */
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 const MAX_SNAPSHOT_MESSAGES = 50;
 
 /** F194 Phase Z10 AC-Z28: persist activeInvocations + hasActiveInvocation
@@ -20,10 +22,28 @@ export interface PersistedThreadActiveState {
   activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
 }
 
+/** Minimum durable Browser Preview context. iframe DOM/history stays runtime
+ * state; exact thread/worktree routing and the user-visible panel survive F5. */
+export interface PersistedThreadWorkspaceState {
+  /** Monotonic causal timestamp; newer live state must beat older async IDB writes. */
+  revision: number;
+  workspaceWorktreeId: string | null;
+  /** Optional for pre-fix v5 records; missing mode is recovered by chatStore. */
+  workspaceMode?: WorkspaceMode;
+  workspaceSurface: WorkspaceSurface;
+  workspacePreview: WorkspacePreviewState;
+  rightPanelMode: 'status' | 'workspace' | 'transcript';
+  rightPanelOpen: boolean;
+}
+
 interface CatCafeOfflineDB extends DBSchema {
   threads: {
     key: string;
     value: { id: string; threads: Thread[]; updatedAt: number };
+  };
+  'sidebar-snapshot': {
+    key: string;
+    value: { id: string; rows: SidebarSnapshotRow[]; updatedAt: number };
   };
   'thread-messages': {
     key: string;
@@ -42,6 +62,10 @@ interface CatCafeOfflineDB extends DBSchema {
       activeInvocations: PersistedThreadActiveState['activeInvocations'];
       updatedAt: number;
     };
+  };
+  'thread-workspace-state': {
+    key: string;
+    value: PersistedThreadWorkspaceState & { threadId: string; updatedAt: number };
   };
 }
 
@@ -63,12 +87,18 @@ function getDB(): Promise<IDBPDatabase<CatCafeOfflineDB>> {
         if (!db.objectStoreNames.contains('threads')) {
           db.createObjectStore('threads', { keyPath: 'id' });
         }
+        if (!db.objectStoreNames.contains('sidebar-snapshot')) {
+          db.createObjectStore('sidebar-snapshot', { keyPath: 'id' });
+        }
         if (!db.objectStoreNames.contains('thread-messages')) {
           db.createObjectStore('thread-messages', { keyPath: 'threadId' });
         }
         // F194 Phase Z10 AC-Z28: persist activeInvocations across F5.
         if (!db.objectStoreNames.contains('thread-active-state')) {
           db.createObjectStore('thread-active-state', { keyPath: 'threadId' });
+        }
+        if (!db.objectStoreNames.contains('thread-workspace-state')) {
+          db.createObjectStore('thread-workspace-state', { keyPath: 'threadId' });
         }
       },
     });
@@ -89,6 +119,27 @@ export async function loadThreads(): Promise<Thread[] | null> {
   const db = await getDB();
   const record = await db.get('threads', 'thread-list');
   return record?.threads ?? null;
+}
+
+export async function saveSidebarSnapshot(rows: readonly SidebarSnapshotRow[]): Promise<void> {
+  const db = await getDB();
+  await db.put('sidebar-snapshot', {
+    id: 'canonical-sidebar',
+    rows: rows.map((row) => ({
+      ...row,
+      participants: [...row.participants],
+      labels: [...row.labels],
+      preferredCats: [...row.preferredCats],
+      presence: { ...row.presence, ...(row.presence.cats ? { cats: [...row.presence.cats] } : {}) },
+    })),
+    updatedAt: Date.now(),
+  });
+}
+
+export async function loadSidebarSnapshot(): Promise<SidebarSnapshotRow[] | null> {
+  const db = await getDB();
+  const record = await db.get('sidebar-snapshot', 'canonical-sidebar');
+  return record?.rows ?? null;
 }
 
 /**
@@ -183,15 +234,56 @@ export async function loadThreadActiveState(threadId: string): Promise<Persisted
   };
 }
 
+export async function saveThreadWorkspaceState(threadId: string, state: PersistedThreadWorkspaceState): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('thread-workspace-state', 'readwrite');
+  const store = tx.objectStore('thread-workspace-state');
+  const existing = await store.get(threadId);
+  const existingRevision = existing ? (existing.revision ?? existing.updatedAt) : -1;
+  if (existingRevision > state.revision) {
+    await tx.done;
+    return;
+  }
+  await store.put({
+    threadId,
+    ...state,
+    workspacePreview: { ...state.workspacePreview },
+    updatedAt: Date.now(),
+  });
+  await tx.done;
+}
+
+export async function loadThreadWorkspaceState(threadId: string): Promise<PersistedThreadWorkspaceState | null> {
+  const db = await getDB();
+  const record = await db.get('thread-workspace-state', threadId);
+  if (!record) return null;
+  return {
+    // Pre-revision v5 records remain readable; their write time is the best
+    // available causal timestamp and prevents a migration-time state loss.
+    revision: record.revision ?? record.updatedAt,
+    workspaceWorktreeId: record.workspaceWorktreeId,
+    workspaceMode: record.workspaceMode,
+    workspaceSurface: record.workspaceSurface,
+    workspacePreview: { ...record.workspacePreview },
+    rightPanelMode: record.rightPanelMode,
+    rightPanelOpen: record.rightPanelOpen,
+  };
+}
+
 /** @internal — only for tests to inject faults */
 export const _getDBForTest = getDB;
 
 export async function clearAll(): Promise<void> {
   const db = await getDB();
-  const tx = db.transaction(['threads', 'thread-messages', 'thread-active-state'], 'readwrite');
+  const tx = db.transaction(
+    ['threads', 'sidebar-snapshot', 'thread-messages', 'thread-active-state', 'thread-workspace-state'],
+    'readwrite',
+  );
   tx.objectStore('threads').clear();
+  tx.objectStore('sidebar-snapshot').clear();
   tx.objectStore('thread-messages').clear();
   tx.objectStore('thread-active-state').clear();
+  tx.objectStore('thread-workspace-state').clear();
   await tx.done;
 }
 

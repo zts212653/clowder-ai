@@ -1334,6 +1334,32 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       executionIds: [],
       executionIdByCatId: {},
     };
+    // The Queue reservation is canonical pre-start ownership. Tracker, record,
+    // and session-lock rows are only secondary witnesses and may all still be
+    // absent in the create→startAll window. Install exact retirement barriers
+    // before this route performs another await, then close the durable group.
+    const prestartRetirement = await queueProcessor.retireThreadPrestartProcessingGroups(threadId, guard.userId);
+    if (prestartRetirement.outcome === 'terminalization_failed') {
+      reply.status(503);
+      return {
+        error: '启动中的队列条目未能写入持久终态，请重试',
+        code: 'PRESTART_TERMINALIZATION_FAILED',
+      };
+    }
+    if (prestartRetirement.outcome === 'state_changed') {
+      reply.status(409);
+      return { error: '启动中的队列状态已变化，请重试', code: 'PRESTART_STATE_CHANGED' };
+    }
+    if (prestartRetirement.retiredCatIds.length > 0) {
+      await emitQueueUpdated(
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        messageStore,
+        'force_reset',
+      );
+    }
     const managedWakeRetirement = await opts
       .getManagedCommandWakeRecovery?.()
       ?.retireThread(threadId, guard.userId, 'force_reset');
@@ -1379,13 +1405,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
 
     // 2+3. Collect EVERY user-owned cat whose processingSlot may still pin hasActiveExecution:
-    //    cancelledCatIds (tracker slots just aborted) ∪ running records' targetCats. The latter
-    //    covers the STALE case codex flagged — when the tracker slot is already gone (so cancelAll
-    //    returned []) but the processingSlot + running record persist, force-reset must still
-    //    release that orphan processingSlot or hasActiveExecution stays true until TTL.
+    //    cancelledCatIds (tracker slots just aborted) ∪ pre-start reservation owners ∪ running
+    //    records' targetCats. The latter two cover both recordless and recorded stale slots after
+    //    the tracker slot is gone, so force-reset does not leave hasActiveExecution pinned until TTL.
     //    Sources are guard.userId-scoped, but QueueProcessor slots are not; the final owner check
     //    below prevents a stale source from colliding with a newer foreign tracker slot.
-    const slotsToRelease = new Set<string>(cancelledCatIds);
+    const slotsToRelease = new Set<string>([...cancelledCatIds, ...prestartRetirement.retiredCatIds]);
     let canceledRecords = 0;
     if (opts.invocationRecordStore) {
       const runningRecords = await opts.invocationRecordStore.listRunningByThread(threadId, guard.userId);

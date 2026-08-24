@@ -248,8 +248,10 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: RepoInboxSignal, _subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: RepoInboxSignal, _subjectKey: string, ctx: ExecuteContext) {
+        ctx.signal?.throwIfAborted();
         const binding = await opts.bindingStore.getByExternal(CONNECTOR_ID, signal.repoFullName);
+        ctx.signal?.throwIfAborted();
         if (!binding) {
           opts.log.warn(`[repo-scan] No inbox thread for ${signal.repoFullName}, skipping`);
           return;
@@ -286,6 +288,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
           sender: { id: signal.authorLogin, name: signal.authorLogin },
         };
 
+        ctx.signal?.throwIfAborted();
         const delivered = await opts.deliverFn(opts.deliveryDeps, {
           threadId: binding.threadId,
           userId: opts.defaultUserId,
@@ -294,6 +297,9 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
           source,
         });
 
+        // Delivery, its dedup marker, event projection, and wake are one bounded
+        // completion group. Cancellation is safe before delivery, never between
+        // the durable message and the marker that suppresses duplicate scans.
         await opts.reconciliationDedup.markNotified(signal.repoFullName, signal.subjectType, signal.number);
 
         // F168 Phase A: emit community event (best-effort — failure never blocks notification)
@@ -326,7 +332,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
         }
 
         try {
-          void Promise.resolve(
+          await Promise.resolve(
             opts.invokeTrigger.trigger(
               binding.threadId,
               opts.inboxCatId as CatId,
@@ -334,7 +340,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
               content,
               delivered.messageId,
             ),
-          ).catch(() => opts.log.warn(`[repo-scan] trigger failed for ${signal.repoFullName}#${signal.number}`));
+          );
         } catch {
           opts.log.warn(`[repo-scan] trigger failed for ${signal.repoFullName}#${signal.number}`);
         }

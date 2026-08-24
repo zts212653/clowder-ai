@@ -27,6 +27,8 @@ import { toCliEvents } from './cli-output/toCliEvents';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
+import { ExternalLinkIcon } from './HubConfigIcons';
+import { describeMessageInvocationTrajectory, InvocationTrajectoryAnchor } from './InvocationTrajectoryAnchor';
 import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { focusTurnAbsorptionSummary, MessageReceiptDock } from './MessageReceiptDock';
@@ -162,6 +164,7 @@ function needsTimelineProjection(message: ChatMessageType): boolean {
     message.extra?.queueReceipt ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
+      (message.source?.connector === 'hold-ball' && typeof message.source.meta?.taskId === 'string') ||
       isSchedulerReplyPreview(message.replyPreview),
   );
 }
@@ -308,6 +311,8 @@ export const ChatMessage = memo(function ChatMessage({
         .filter((invocationId) => terminalSurfaceMessageId(threadMessages, invocationId) === message.id)
         .map((invocationId) => projectTurnAbsorptionSummary(threadMessages, invocationId))
         .filter((projection) => projection !== null);
+  const terminalTrajectory = describeMessageInvocationTrajectory(message);
+  const showTerminalTrajectoryAnchor = terminalTrajectory && terminalTrajectory.status !== 'done';
   const renderTurnAbsorptionDocks = () =>
     turnAbsorptionProjections.map((projection) => (
       <TurnAbsorptionDock
@@ -322,8 +327,13 @@ export const ChatMessage = memo(function ChatMessage({
       />
     ));
   const renderCenteredTerminalSystemSurface = (content: ReactNode) => (
-    <div data-message-id={message.id} className="flex justify-center mb-3">
+    <div data-message-id={message.id} className="group flex justify-center mb-3">
       <div className="max-w-[85%] w-full">
+        {showTerminalTrajectoryAnchor && (
+          <div className="mb-1 flex justify-center">
+            <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />
+          </div>
+        )}
         {content}
         {renderTurnAbsorptionDocks()}
       </div>
@@ -477,41 +487,52 @@ export const ChatMessage = memo(function ChatMessage({
           ? 'text-conn-red-text bg-conn-red-bg rounded-full'
           : 'text-[var(--semantic-info)] bg-conn-blue-bg';
     return (
-      <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
-        <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
-          {isFollowup && <span className="mr-1">🔗</span>}
-          {projectedSystemContent}
-          {freshnessClosureRecordedAt !== undefined && (
-            <span className="ml-2 text-xs opacity-75">
-              {isLegacyFreshnessClosure ? '历史责任 · ' : '记录于 '}
-              <time data-freshness-closure-recorded-at dateTime={new Date(freshnessClosureRecordedAt).toISOString()}>
-                {formatTime(freshnessClosureRecordedAt)}
-              </time>
-              {isLegacyFreshnessClosure ? ' · 等待迁移核销' : ''}
-            </span>
+      <div data-message-id={message.id} className={`group flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
+        <div className="max-w-[85%]">
+          {showTerminalTrajectoryAnchor && (
+            <div className="mb-1 flex justify-center">
+              <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />
+            </div>
           )}
-          {freshnessClosure?.status === 'blocked' && currentThreadId && !isLegacyFreshnessClosure && (
-            <button
-              type="button"
-              disabled={retryingClosureId === freshnessClosure.closureId}
-              className="ml-3 rounded-md border border-default px-2 py-1 text-xs font-semibold text-primary disabled:opacity-50"
-              onClick={() => {
-                setRetryingClosureId(freshnessClosure.closureId);
-                void apiFetch(
-                  `/api/threads/${currentThreadId}/freshness-closures/${freshnessClosure.closureId}/retry`,
-                  { method: 'POST' },
-                ).finally(() => setRetryingClosureId(null));
-              }}
-            >
-              {retryingClosureId === freshnessClosure.closureId ? '重试中…' : '重试'}
-            </button>
-          )}
-          {isFollowup && (
-            <span className="block mt-1 text-xs text-[var(--color-cocreator-primary)]">
-              输入 @猫名 跟进 来发起 follow-up
-            </span>
-          )}
-          {renderTurnAbsorptionDocks()}
+          <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left ${toneClass}`}>
+            {isFollowup && (
+              <span className="mr-1 inline-flex align-text-bottom" aria-hidden="true">
+                <ExternalLinkIcon />
+              </span>
+            )}
+            {projectedSystemContent}
+            {freshnessClosureRecordedAt !== undefined && (
+              <span className="ml-2 text-xs opacity-75">
+                {isLegacyFreshnessClosure ? '历史责任 · ' : '记录于 '}
+                <time data-freshness-closure-recorded-at dateTime={new Date(freshnessClosureRecordedAt).toISOString()}>
+                  {formatTime(freshnessClosureRecordedAt)}
+                </time>
+                {isLegacyFreshnessClosure ? ' · 等待迁移核销' : ''}
+              </span>
+            )}
+            {freshnessClosure?.status === 'blocked' && currentThreadId && !isLegacyFreshnessClosure && (
+              <button
+                type="button"
+                disabled={retryingClosureId === freshnessClosure.closureId}
+                className="ml-3 rounded-md border border-default px-2 py-1 text-xs font-semibold text-primary disabled:opacity-50"
+                onClick={() => {
+                  setRetryingClosureId(freshnessClosure.closureId);
+                  void apiFetch(
+                    `/api/threads/${currentThreadId}/freshness-closures/${freshnessClosure.closureId}/retry`,
+                    { method: 'POST' },
+                  ).finally(() => setRetryingClosureId(null));
+                }}
+              >
+                {retryingClosureId === freshnessClosure.closureId ? '重试中…' : '重试'}
+              </button>
+            )}
+            {isFollowup && (
+              <span className="block mt-1 text-xs text-[var(--color-cocreator-primary)]">
+                输入 @猫名 跟进 来发起 follow-up
+              </span>
+            )}
+            {renderTurnAbsorptionDocks()}
+          </div>
         </div>
       </div>
     );
@@ -521,7 +542,7 @@ export const ChatMessage = memo(function ChatMessage({
     if (isConnectorSystemNotice(message)) {
       return <SystemNoticeBar message={message} />;
     }
-    return <ConnectorBubble message={message} threadId={currentThreadId} />;
+    return <ConnectorBubble message={message} threadId={currentThreadId} timelineMessages={threadMessages} />;
   }
 
   // Zero-exposure recall is an invisible storage tombstone. History filtering
@@ -724,6 +745,7 @@ export const ChatMessage = memo(function ChatMessage({
           </span>
           <span className="text-xs text-cafe-muted shrink-0">{formatTime(message.timestamp)}</span>
           <CopyIdButton messageId={message.id} />
+          <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />
           {message.extra?.recovery?.kind === 'f254_withheld_message' && (
             <span
               className="shrink-0 rounded-full border border-conn-blue-ring bg-conn-blue-bg px-1.5 py-0.5 text-micro font-semibold text-[var(--semantic-info)]"

@@ -14,6 +14,7 @@ import {
 import type { ICommunityEventLog } from '../CommunityEventLog.js';
 import type { ICommunityObjectStore } from '../CommunityObjectStore.js';
 import type { ICommunityRepoConfigStore } from '../CommunityRepoConfigStore.js';
+import type { ExternalPendingVerdictSettlementResult } from './ExternalReviewVerdictService.js';
 import { decideExternalReviewReadiness, type ExternalReviewReadinessDecision } from './external-review-aggregate.js';
 
 interface ExternalReviewProjectorPort {
@@ -46,7 +47,9 @@ export type ExternalReviewCoordinatorResult =
         | ExternalReviewWaitReason
         | 'wake_already_delivered_for_head'
         | 'projection_unavailable'
-        | 'explicit_wait_required';
+        | 'explicit_wait_required'
+        | 'pending_verdict_settled'
+        | 'pending_verdict_settlement_failed';
     };
 
 export interface ExternalReviewCoordinatorOptions {
@@ -54,6 +57,7 @@ export interface ExternalReviewCoordinatorOptions {
   readonly eventLog: ICommunityEventLog;
   readonly projector: ExternalReviewProjectorPort;
   readonly objectStore: Pick<ICommunityObjectStore, 'get'>;
+  readonly settlePendingVerdict?: (subjectKey: string) => Promise<ExternalPendingVerdictSettlementResult>;
   readonly log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'>;
   readonly now?: () => number;
 }
@@ -267,8 +271,33 @@ export class ExternalReviewCoordinator {
     }
     const deliveryReadiness = decideExternalReviewReadiness({ ...aggregate, wake: null });
     if (deliveryReadiness.kind === 'wait') return { kind: 'state_only', reason: deliveryReadiness.reason };
+    const pendingSettlement = await this.settlePendingVerdict(subjectKey, aggregate);
+    if (pendingSettlement) return pendingSettlement;
     // F280: readiness remains durable case truth. Only an explicit typed wait
     // may project it into connector delivery/invocation.
     return { kind: 'state_only', reason: 'explicit_wait_required' };
+  }
+
+  private async settlePendingVerdict(
+    subjectKey: string,
+    aggregate: ExternalReviewAggregate,
+  ): Promise<ExternalReviewCoordinatorResult | null> {
+    if (!aggregate.pendingVerdict || !this.opts.settlePendingVerdict) return null;
+    try {
+      const settlement = await this.opts.settlePendingVerdict(subjectKey);
+      if (settlement.kind === 'settled') {
+        return { kind: 'state_only', reason: 'pending_verdict_settled' };
+      }
+      if (settlement.kind === 'waiting') {
+        this.opts.log.warn(
+          { subjectKey, reason: settlement.reason },
+          '[F168] pending verdict remained fail-closed after canonical readiness',
+        );
+      }
+      return null;
+    } catch (error) {
+      this.opts.log.error({ subjectKey, error }, '[F168] pending verdict auto-settlement failed closed');
+      return { kind: 'state_only', reason: 'pending_verdict_settlement_failed' };
+    }
   }
 }

@@ -109,13 +109,12 @@ function resolveDisposition(
   if (!set('active', 'blocked').has(current)) return reject('invalid_transition');
   const catId = event.payload.catId;
   if (typeof catId !== 'string') return reject('bad_payload');
-  if (snapshot.holder !== catId) return reject('invalid_transition');
-  // clowder-ai#1366: `ball.hold_dispositioned` carries per-wake identity
-  // (sourceMessageId + taskId + invocationId) but historically always drove the
-  // whole subject to `resolved`. Those are two different planes. A retired wake
-  // records its own terminal without touching subject custody, so a newer hold
-  // held by the same cat survives.
+  // Invocation-bound dispositions carry an exact child/wake identity while the
+  // projection describes the whole thread subject. A retired terminal closes
+  // only that exact responsibility and must remain inert even when an unrelated
+  // cat now holds the subject.
   if (event.payload.retired === true) return ok(current);
+  if (snapshot.holder !== catId) return reject('invalid_transition');
   return ok('resolved');
 }
 

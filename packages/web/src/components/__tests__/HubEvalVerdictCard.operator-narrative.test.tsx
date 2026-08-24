@@ -1,25 +1,38 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalHubItem } from '../HubEvalTypes';
+
+const storeMocks = vi.hoisted(() => ({
+  setCurrentThread: vi.fn(),
+  setCurrentProject: vi.fn(),
+  setWorkspaceMode: vi.fn(),
+  setRightPanelOpen: vi.fn(),
+  setWorkspaceOpenFile: vi.fn(),
+  routerPush: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/settings',
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: storeMocks.routerPush }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      currentThreadId: 'thread-current',
-      threads: [{ id: 'thread-current', projectPath: '/repo/cat-cafe' }],
-      setCurrentThread: vi.fn(),
-      setCurrentProject: vi.fn(),
-      setWorkspaceOpenFile: vi.fn(),
-    }),
+  useChatStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        currentThreadId: 'thread-current',
+        threads: [{ id: 'thread-current', projectPath: '/repo/cat-cafe' }],
+        ...storeMocks,
+      }),
+    {
+      getState: () => ({ currentThreadId: 'thread-current', ...storeMocks }),
+    },
+  ),
 }));
 
 import { HubEvalVerdictCard } from '../HubEvalVerdictCard';
+import { decodeTrajectoryOriginRef, restoreTrajectoryOrigin } from '../workspace/trajectory/trajectory-navigation';
 
 const item: EvalHubItem = {
   id: 'anchor-empty-window',
@@ -70,6 +83,19 @@ describe('HubEvalVerdictCard operator narrative', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
 
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/settings?ops=observability&obs=eval');
+    storeMocks.routerPush.mockReset();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   afterAll(() => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
@@ -89,6 +115,48 @@ describe('HubEvalVerdictCard operator narrative', () => {
     expect(machineDetails?.textContent).toContain('The selected window produced no anchor preview events');
     expect(machineDetails?.textContent).toContain('No new code change from eval:anchor-first');
     expect(machineDetails?.textContent).toContain('2026年');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('renders only exact inv refs from other evidence as canonical trajectory actions', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const withInvocation: EvalHubItem = {
+      ...item,
+      evidence: {
+        ...item.evidence,
+        otherRefs: ['inv:inv-hub-17', 'session:session-a/invocation:inv-legacy', 'trace:trace-native'],
+      },
+    };
+
+    await act(async () => root.render(<HubEvalVerdictCard item={withInvocation} />));
+
+    const action = container.querySelector<HTMLButtonElement>('[data-testid="hub-trajectory-evidence"]');
+    expect(action?.dataset.invocationId).toBe('inv-hub-17');
+    expect(container.textContent).toContain('session:session-a/invocation:inv-legacy');
+    expect(container.textContent).toContain('trace:trace-native');
+    expect(container.querySelectorAll('[data-testid="hub-trajectory-evidence"]')).toHaveLength(1);
+
+    const scroll = container;
+    scroll.dataset.trajectoryOriginScroll = '';
+    scroll.scrollTop = 40;
+    scroll.getBoundingClientRect = () => ({ top: 20, bottom: 500 }) as DOMRect;
+    const card = container.querySelector<HTMLElement>('[data-eval-event-id="anchor-empty-window"]');
+    if (card) card.getBoundingClientRect = () => ({ top: 180, bottom: 260 }) as DOMRect;
+    await act(async () => action?.click());
+    const trajectoryUrl = new URL(window.location.href);
+    expect(trajectoryUrl.searchParams.get('inv')).toBe('inv-hub-17');
+    expect(trajectoryUrl.searchParams.get('trajectoryThread')).toBeNull();
+    expect(storeMocks.routerPush).toHaveBeenCalledWith(expect.stringContaining('/thread/thread-current?'));
+    const origin = decodeTrajectoryOriginRef(trajectoryUrl.searchParams.get('origin'));
+    expect(origin).toMatchObject({ kind: 'eval', threadId: 'thread-current', eventId: 'anchor-empty-window' });
+
+    if (origin) restoreTrajectoryOrigin(origin);
+    expect(new URL(window.location.href).searchParams.get('inv')).toBeNull();
+    expect(document.activeElement).toBe(card);
 
     await act(async () => root.unmount());
     container.remove();

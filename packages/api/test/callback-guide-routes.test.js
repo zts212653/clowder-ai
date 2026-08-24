@@ -147,7 +147,7 @@ describe('F155 Guide callback routes', () => {
       assert.equal(broadcasts.length, 0);
     });
 
-    test('returns stale_ignored for non-latest invocation', async () => {
+    test('returns typed replaced for a superseded invocation', async () => {
       const app = await createApp();
       const { invocationId, callbackToken, threadId } = await createCreds();
       // Create a newer invocation to make the first one stale
@@ -161,7 +161,9 @@ describe('F155 Guide callback routes', () => {
       });
 
       const body = JSON.parse(res.body);
-      assert.equal(body.status, 'stale_ignored');
+      assert.equal(res.statusCode, 401);
+      assert.equal(body.error, 'callback_auth_failed');
+      assert.equal(body.reason, 'replaced');
       assert.equal(broadcasts.length, 0);
     });
 

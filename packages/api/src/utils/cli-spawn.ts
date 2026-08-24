@@ -294,7 +294,7 @@ async function waitForIteratorUntil<T>(
 
 export function buildChildEnv(
   overrides?: Record<string, string | null>,
-  options: { bindExecutionOwner?: boolean } = {},
+  options: { bindExecutionOwner?: boolean; workingDirectory?: string } = {},
 ): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
@@ -318,6 +318,12 @@ export function buildChildEnv(
       merged[key] = value;
     }
   }
+  // spawn.cwd and shell cwd env are distinct inputs. Providers such as OpenCode
+  // consult PWD/INIT_CWD during bootstrap, so inherited runtime values must not
+  // override the workspace assigned to the child process.
+  const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
+  merged.PWD = workingDirectory;
+  merged.INIT_CWD = workingDirectory;
   return withVerdictGhGuardEnv(merged, overrides);
 }
 
@@ -353,7 +359,10 @@ export async function* spawnCli(
 
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
-    env: buildChildEnv(options.env, { bindExecutionOwner: options.bindExecutionOwner !== false }),
+    env: buildChildEnv(options.env, {
+      bindExecutionOwner: options.bindExecutionOwner !== false,
+      workingDirectory: options.cwd,
+    }),
     // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
     // provided, open stdin as a pipe so the prompt can be streamed off the command
     // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).

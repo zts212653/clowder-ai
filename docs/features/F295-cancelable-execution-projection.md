@@ -1,9 +1,10 @@
 ---
 feature_ids: [F295]
-related_features: [F167, F173, F194, F277, F280]
-topics: [execution, liveness, cancel, managed-command, hydration, workspace, frontend]
+related_features: [F167, F173, F194, F277, F280, F299]
+topics: [execution, liveness, cancel, managed-command, hydration, workspace, frontend, authorization]
 doc_kind: spec
 created: 2026-08-13
+updated: 2026-08-22
 description: "以具体 execution 为单位统一运行展示、thread 归属、可取消性与精确 Stop，让跨 thread 模型回合和托管命令共享一个可重建读投影。"
 description_source: human
 description_author: codex-sol
@@ -47,6 +48,14 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 - loading / error 不伪装 idle；不可取消 execution 显示明确原因；terminal identity 精确退休，unread 保持独立。
 - 完成四条确定性 journey 回归、Web/API gate 与真实浏览器验收。
 
+### Post-close: Canonical thread admission ✅
+
+- active-execution GET 与 exact live cancel 共用 canonical thread visibility basis：owner、shared
+  default、当前用户 durable index、当前用户 external-runtime anchor。
+- 未索引或 foreign thread 在读取 liveness 前返回 typed 403；`system-created` 本身不是授权。
+- 合法 shared/indexed thread 继续显示 foreign scheduler/system masked occupancy；session record 的
+  per-user filter 不适用于 occupancy，精确取消仍由 execution/principal fence 决定。
+
 ## User Journey
 
 ### Primary Journey: 从“猫在运行”到精确停止
@@ -87,6 +96,12 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 - [x] AC-B4: Web build/typecheck、API contract tests 与风险相称 gate 全绿。
 - [x] AC-B5: 真实浏览器验收逐项覆盖 live Cancel、command Cancel、F5/reconnect、跨 thread 精确性，并留 DOM/截图证据。
 - [x] AC-B6: 非作者 Kimi 对 exact HEAD review，P1/P2=0 后才进入 merge-gate。
+
+### Post-close（thread admission）
+
+- [x] AC-C1: execution read/cancel 只接受 canonical thread visibility basis；未索引 system thread 不能因已知 ID 获得入口授权。
+- [x] AC-C2: thread 拒绝发生在 project scan、liveness resolution 与 exact termination 之前，并返回 typed 403。
+- [x] AC-C3: indexed/default/anchor/owner 的合法访问不削弱 masked occupancy 与 exact-control fence。
 
 ## 需求点 Checklist
 
@@ -130,6 +145,7 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 | KD-1 | execution 是唯一 scope unit，catId 只是属性 | 避免跨 thread/新旧回合误杀 | 2026-08-13 |
 | KD-2 | read projection 组合现有 owner truth，不拥有生命周期 | 解决展示/取消分裂而不造第二账本 | 2026-08-13 |
 | KD-3 | 确定行为契约用 schema/tests/guards；只补必要 conflict log，不挂 Eval Hub | 问题是正确性，不是不确定效用 | 2026-08-13 |
+| KD-4 | liveness 复用 canonical thread admission basis，但不复用 session record filter | thread 可见性是一致边界；occupancy 与 record 内容有不同授权语义 | 2026-08-22 |
 
 ## Review Gate
 

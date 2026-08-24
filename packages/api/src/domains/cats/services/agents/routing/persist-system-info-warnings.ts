@@ -28,6 +28,15 @@ function parseVisibleNotice(
         tone: 'warning',
       };
     }
+    if (parsed.type === 'a2a_multi_target_serialized') {
+      return {
+        content: parsed.message,
+        connector: 'a2a-routing-mode',
+        label: '调度模式',
+        icon: '🔀',
+        tone: 'info',
+      };
+    }
     if (parsed.type === 'cloud_bridge_status') {
       const unavailable = parsed.status === 'unavailable';
       return {

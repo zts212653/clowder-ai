@@ -46,11 +46,13 @@ function scene(generation = 1) {
 
 describe('F276 scheduler re-entry carrier', () => {
   let bind;
+  let bindPresentationRetry;
 
   before(async () => {
-    ({ bindAsrPersonMemoryReentryFromSchedulerMessage: bind } = await import(
-      '../../dist/domains/memory/people/AsrPersonMemoryReentryCarrier.js'
-    ));
+    ({
+      bindAsrPersonMemoryReentryFromSchedulerMessage: bind,
+      bindAsrPersonMemoryPresentationRetryFromSchedulerMessage: bindPresentationRetry,
+    } = await import('../../dist/domains/memory/people/AsrPersonMemoryReentryCarrier.js'));
   });
 
   function messages(overrides = {}) {
@@ -62,7 +64,15 @@ describe('F276 scheduler re-entry carrier', () => {
       mentions: [],
       timestamp: 1,
       threadId: 'thread-1',
-      extra: { dynamicSceneEntries: [scene(1)] },
+      extra: {
+        meetingArtifact: {
+          intakeId: 'intake-1',
+          sourceHandle: 'meeting://source-1',
+          trust: 'untrusted_external',
+          instructionPolicy: 'data_only',
+        },
+        dynamicSceneEntries: [scene(1)],
+      },
       ...overrides.source,
     };
     const trigger = {
@@ -166,6 +176,88 @@ describe('F276 scheduler re-entry carrier', () => {
           extra: {
             ...messages().trigger.extra,
             scheduler: { hiddenTrigger: false },
+          },
+        },
+      }),
+      [],
+    );
+  });
+
+  it('re-presents the exact original generation without copying the scene into the scheduler carrier', async () => {
+    const { source, trigger } = messages({
+      trigger: {
+        content: '[F296 write-opportunity presentation retry]',
+        extra: {
+          scheduler: { hiddenTrigger: true },
+          writeOpportunityPresentationRetry: {
+            v: 1,
+            sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'owner-message-1' },
+            sourceOpportunityId: ORIGINAL_ID,
+          },
+        },
+      },
+    });
+
+    const result = await bindPresentationRetry({
+      triggerMessage: trigger,
+      ownerUserId: 'owner-1',
+      threadId: 'thread-1',
+      targetCatId: 'codex-sol',
+      messageStore: { getById: async () => source },
+    });
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].scene.opportunity.opportunityId, ORIGINAL_ID);
+    assert.equal(result[0].scene.opportunity.generation, 1);
+    assert.equal(JSON.stringify(trigger.extra).includes('Owner-confirmed speaker'), false);
+  });
+
+  it('fails presentation retry closed on forged authority, source drift, or consumer mismatch', async () => {
+    const base = messages({
+      trigger: {
+        content: '[F296 write-opportunity presentation retry]',
+        extra: {
+          scheduler: { hiddenTrigger: true },
+          writeOpportunityPresentationRetry: {
+            v: 1,
+            sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'owner-message-1' },
+            sourceOpportunityId: ORIGINAL_ID,
+          },
+        },
+      },
+    });
+    const resolveRetry = (overrides = {}) =>
+      bindPresentationRetry({
+        triggerMessage: { ...base.trigger, ...overrides.trigger },
+        ownerUserId: 'owner-1',
+        threadId: 'thread-1',
+        targetCatId: overrides.targetCatId ?? 'codex-sol',
+        messageStore: { getById: async () => ({ ...base.source, ...overrides.source }) },
+      });
+
+    assert.deepEqual(await resolveRetry({ trigger: { userId: 'owner-1' } }), []);
+    assert.deepEqual(await resolveRetry({ source: { deletedAt: 3 } }), []);
+    assert.deepEqual(await resolveRetry({ targetCatId: 'other-cat' }), []);
+    assert.deepEqual(
+      await resolveRetry({
+        source: {
+          extra: {
+            ...base.source.extra,
+            meetingArtifact: { ...base.source.extra.meetingArtifact, intakeId: 'other-intake' },
+          },
+        },
+      }),
+      [],
+    );
+    assert.deepEqual(
+      await resolveRetry({
+        trigger: {
+          extra: {
+            ...base.trigger.extra,
+            writeOpportunityPresentationRetry: {
+              ...base.trigger.extra.writeOpportunityPresentationRetry,
+              sourceOpportunityId: `write_opp_${'d'.repeat(32)}`,
+            },
           },
         },
       }),

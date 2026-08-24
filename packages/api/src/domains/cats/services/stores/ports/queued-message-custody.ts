@@ -5,6 +5,7 @@ import type {
   QueueTargetAttempt,
   QueueTargetOutcome,
 } from '@cat-cafe/shared';
+import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../../owner-auth-provenance.js';
 
 export type QueuedMessageCustodyStatus = 'queued' | 'processing' | 'terminal';
@@ -17,6 +18,10 @@ export interface QueueBodyExposure {
 
 export interface QueueTargetCarrierBinding {
   entryId: string;
+  /** Immutable Queue admission identity, including action-successor generation. */
+  idempotencyKey?: string;
+  /** Durable action authority; passive restart must not downgrade this carrier. */
+  actionSuccessorFence?: ActionSuccessorFence;
   source: 'agent';
   sourceCategory: 'a2a';
   callerCatId?: string;
@@ -29,6 +34,34 @@ export interface QueueTargetCarrierBinding {
 export interface QueueTargetCarrierState {
   status: 'queued' | 'processing';
   processingStartedAt?: number;
+}
+
+/**
+ * Durable pre-CAS intent for one persisted A2A fan-out.
+ *
+ * Queue carriers are process-local until full custody is initialized. This
+ * record is written after target policy is decided but before any carrier is
+ * staged. `targetCats` is therefore the accepted subset startup may rebuild;
+ * `requestedTargetCats` also preserves rejected targets so full custody can
+ * terminalize them without making them selectable. Once full custody exists it
+ * atomically replaces this intent as canonical truth.
+ */
+export interface QueueCustodyAdmissionIntent {
+  version: 1;
+  admissionId: string;
+  ownerUserId: string;
+  ownerAuthProvenance: OwnerAuthProvenance;
+  intent: string;
+  /** Targets admitted by depth/dedup/ping-pong policy and safe to reconstruct. */
+  targetCats: CatId[];
+  /** Complete requested fan-out; absent on v1 records written before accepted-subset persistence. */
+  requestedTargetCats?: CatId[];
+  callerCatId?: CatId;
+  a2aParentInvocationId?: string;
+  receiptScope?: 'primary_trigger' | 'cross_thread_delivery';
+  actionSuccessorFence?: ActionSuccessorFence;
+  priority: 'urgent' | 'normal';
+  createdAt: number;
 }
 
 /**
@@ -48,6 +81,8 @@ export interface QueuedMessageCustody {
   version: 1;
   entryId: string;
   revision: number;
+  /** Durable Queue owner principal. Automated message authorship is provenance and may differ. */
+  ownerUserId?: string;
   /** Immutable server-derived authentication fact. Missing only on legacy records. */
   ownerAuthProvenance?: OwnerAuthProvenance;
   /** The message started this invocation; keep custody but suppress the work-period timeline dock. */
@@ -60,7 +95,10 @@ export interface QueuedMessageCustody {
    * exact carrier without cloning the durable message body.
    */
   carrierByTargetCatId?: Record<string, QueueTargetCarrierBinding>;
-  /** Mutable per-carrier runtime state; target-local writes must preserve siblings. */
+  /**
+   * Mutable target-local runtime state. Cross-thread targets use their immutable
+   * carrier binding; standard targets share the immutable top-level entryId.
+   */
   carrierStateByTargetCatId?: Record<string, QueueTargetCarrierState>;
   intent: string;
   status: QueuedMessageCustodyStatus;
@@ -102,12 +140,21 @@ export interface QueueCustodyTransitionInput {
   expectedRevision: number;
   next: QueuedMessageCustody;
   deliveredAt?: number;
+  /** Exact action-authority adoption/advance for an otherwise immutable carrier. */
+  actionSuccessorRebind?: QueueCustodyActionSuccessorRebindProof;
   /**
    * Gate 2: non-persisted proof that one exact queued source is moving from an
    * absent carrier to its verified replacement. Ordinary transitions may not
    * change entryId.
    */
   replacement?: QueueCustodyReplacementProof;
+}
+
+export interface QueueCustodyActionSuccessorRebindProof {
+  readonly kind: 'verified_action_successor';
+  readonly entryId: string;
+  readonly targetCatIds: CatId[];
+  readonly fence: ActionSuccessorFence;
 }
 
 export interface QueueCustodyReplacementProof {
@@ -128,9 +175,88 @@ function assertUniqueTargets(values: readonly string[], field: string): void {
   if (new Set(values).size !== values.length) throw new Error(`${field} must be unique`);
 }
 
+function isValidActionSuccessorFence(fence: ActionSuccessorFence | undefined): boolean {
+  return (
+    !!fence &&
+    !!fence.leaseId &&
+    Number.isInteger(fence.generation) &&
+    fence.generation >= 1 &&
+    !!fence.dispatchId &&
+    (fence.terminalPredicateDigest === undefined || !!fence.terminalPredicateDigest) &&
+    (fence.invocationLineageRef === undefined || !!fence.invocationLineageRef)
+  );
+}
+
+function assertAdmissionTargetPartition(intent: QueueCustodyAdmissionIntent): void {
+  assertUniqueTargets(intent.targetCats, 'queue custody admission targetCats');
+  const requestedTargetCats = intent.requestedTargetCats ?? intent.targetCats;
+  assertUniqueTargets(requestedTargetCats, 'queue custody admission requestedTargetCats');
+  if (requestedTargetCats.length === 0) throw new Error('queue custody admission requires at least one target');
+  if (intent.targetCats.some((catId) => !requestedTargetCats.includes(catId))) {
+    throw new Error('queue custody admission accepted target must belong to requested targets');
+  }
+}
+
+export function assertQueueCustodyAdmissionIntent(intent: QueueCustodyAdmissionIntent): void {
+  if (intent.version !== 1) throw new Error('queue custody admission version must be 1');
+  if (!intent.admissionId) throw new Error('queue custody admission id is required');
+  if (!intent.ownerUserId) throw new Error('queue custody admission owner is required');
+  if (normalizeOwnerAuthProvenance(intent.ownerAuthProvenance) !== intent.ownerAuthProvenance) {
+    throw new Error('invalid queue custody admission ownerAuthProvenance');
+  }
+  if (!intent.intent) throw new Error('queue custody admission intent is required');
+  assertAdmissionTargetPartition(intent);
+  if (
+    intent.receiptScope !== undefined &&
+    intent.receiptScope !== 'primary_trigger' &&
+    intent.receiptScope !== 'cross_thread_delivery'
+  ) {
+    throw new Error(`invalid queue custody admission receipt scope: ${String(intent.receiptScope)}`);
+  }
+  if (intent.priority !== 'urgent' && intent.priority !== 'normal') {
+    throw new Error(`invalid queue custody admission priority: ${String(intent.priority)}`);
+  }
+  assertFiniteNonNegative(intent.createdAt, 'queue custody admission createdAt');
+  const fence = intent.actionSuccessorFence;
+  if (fence && !isValidActionSuccessorFence(fence)) {
+    throw new Error('invalid queue custody admission action successor fence');
+  }
+}
+
+export function cloneQueueCustodyAdmissionIntent(intent: QueueCustodyAdmissionIntent): QueueCustodyAdmissionIntent {
+  assertQueueCustodyAdmissionIntent(intent);
+  return {
+    ...intent,
+    targetCats: [...intent.targetCats],
+    ...(intent.requestedTargetCats ? { requestedTargetCats: [...intent.requestedTargetCats] } : {}),
+    ...(intent.actionSuccessorFence ? { actionSuccessorFence: { ...intent.actionSuccessorFence } } : {}),
+  };
+}
+
+export function parseQueueCustodyAdmissionIntent(raw: string | undefined): QueueCustodyAdmissionIntent | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as QueueCustodyAdmissionIntent;
+    assertQueueCustodyAdmissionIntent(parsed);
+    return cloneQueueCustodyAdmissionIntent(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+export function queueCustodyAdmissionIntentsMatch(
+  actual: QueueCustodyAdmissionIntent | undefined,
+  expected: QueueCustodyAdmissionIntent,
+): boolean {
+  return !!actual && JSON.stringify(actual) === JSON.stringify(expected);
+}
+
 function assertCustodyIdentity(custody: QueuedMessageCustody): void {
   if (custody.version !== 1) throw new Error('queue custody version must be 1');
   if (!custody.entryId) throw new Error('queue custody entryId is required');
+  if (custody.ownerUserId !== undefined && custody.ownerUserId.length === 0) {
+    throw new Error('queue custody ownerUserId must be non-empty');
+  }
   if (
     custody.ownerAuthProvenance !== undefined &&
     normalizeOwnerAuthProvenance(custody.ownerAuthProvenance) !== custody.ownerAuthProvenance
@@ -157,7 +283,7 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
     if (carrierTargets.some((catId) => !custody.allTargetCats.includes(catId as CatId))) {
       throw new Error('queue custody carrier target must belong to allTargetCats');
     }
-    for (const binding of Object.values(carriers)) {
+    for (const [catId, binding] of Object.entries(carriers)) {
       if (
         !binding.entryId ||
         binding.source !== 'agent' ||
@@ -167,12 +293,29 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
       ) {
         throw new Error('invalid cross-thread Queue carrier binding');
       }
+      if (binding.idempotencyKey !== undefined && binding.idempotencyKey.length === 0) {
+        throw new Error('cross-thread Queue carrier idempotency key must be non-empty');
+      }
+      if (binding.actionSuccessorFence) {
+        if (!isValidActionSuccessorFence(binding.actionSuccessorFence)) {
+          throw new Error('invalid cross-thread Queue carrier action successor fence');
+        }
+        const expectedActionKey = `action:${binding.actionSuccessorFence.leaseId}:${binding.actionSuccessorFence.generation}:${catId}`;
+        if (binding.idempotencyKey !== expectedActionKey) {
+          throw new Error('action-successor Queue carrier requires its exact durable idempotency key');
+        }
+      }
       assertFiniteNonNegative(binding.createdAt, 'carrier.createdAt');
     }
   }
   if (custody.carrierStateByTargetCatId) {
     for (const [catId, state] of Object.entries(custody.carrierStateByTargetCatId)) {
-      if (!carriers?.[catId]) throw new Error('queue custody carrier state requires an immutable carrier binding');
+      if (!custody.allTargetCats.includes(catId as CatId) || !custody.pendingTargetCats.includes(catId as CatId)) {
+        throw new Error('queue custody carrier state requires a pending target');
+      }
+      if (carriers && !carriers[catId]) {
+        throw new Error('cross-thread queue custody carrier state requires an immutable carrier binding');
+      }
       if (state.status !== 'queued' && state.status !== 'processing') {
         throw new Error('invalid queue custody carrier state');
       }
@@ -220,6 +363,78 @@ function assertCustodyIdentity(custody: QueuedMessageCustody): void {
       throw new Error('invalid pre-start retirement group identity');
     }
     assertFiniteNonNegative(retirement.startedAt, 'prestartRetirement.startedAt');
+  }
+}
+
+function carrierBindingWithoutActionIdentity(binding: QueueTargetCarrierBinding): object {
+  const { idempotencyKey: _idempotencyKey, actionSuccessorFence: _actionSuccessorFence, ...base } = binding;
+  return base;
+}
+
+function assertSelectedActionSuccessorCarrierRebind(
+  before: QueueTargetCarrierBinding | undefined,
+  after: QueueTargetCarrierBinding | undefined,
+  catId: string,
+  proof: QueueCustodyActionSuccessorRebindProof,
+): void {
+  if (
+    !before ||
+    !after ||
+    before.entryId !== proof.entryId ||
+    after.entryId !== proof.entryId ||
+    JSON.stringify(carrierBindingWithoutActionIdentity(after)) !==
+      JSON.stringify(carrierBindingWithoutActionIdentity(before))
+  ) {
+    throw new Error('action-successor Queue carrier rebind cannot change immutable carrier identity');
+  }
+  const priorFence = before.actionSuccessorFence;
+  if (
+    priorFence &&
+    (priorFence.leaseId !== proof.fence.leaseId ||
+      priorFence.dispatchId !== proof.fence.dispatchId ||
+      proof.fence.generation < priorFence.generation)
+  ) {
+    throw new Error('action-successor Queue carrier rebind cannot replace or rewind authority');
+  }
+  if (JSON.stringify(after.actionSuccessorFence) !== JSON.stringify(proof.fence)) {
+    throw new Error('action-successor Queue carrier rebind must persist the exact verified fence');
+  }
+  const expectedKey = `action:${proof.fence.leaseId}:${proof.fence.generation}:${catId}`;
+  if (after.idempotencyKey !== expectedKey) {
+    throw new Error('action-successor Queue carrier rebind must persist the exact action idempotency key');
+  }
+}
+
+function assertActionSuccessorCarrierRebind(
+  current: QueuedMessageCustody,
+  next: QueuedMessageCustody,
+  proof: QueueCustodyActionSuccessorRebindProof,
+): void {
+  if (!proof.entryId || proof.targetCatIds.length === 0) {
+    throw new Error('action-successor Queue carrier rebind requires an exact carrier and targets');
+  }
+  assertUniqueTargets(proof.targetCatIds, 'action-successor Queue carrier rebind targets');
+  if (!isValidActionSuccessorFence(proof.fence)) {
+    throw new Error('action-successor Queue carrier rebind requires a valid fence');
+  }
+  const selectedTargets = new Set<string>(proof.targetCatIds);
+  const allTargets = new Set([
+    ...Object.keys(current.carrierByTargetCatId ?? {}),
+    ...Object.keys(next.carrierByTargetCatId ?? {}),
+  ]);
+  for (const catId of allTargets) {
+    const before = current.carrierByTargetCatId?.[catId];
+    const after = next.carrierByTargetCatId?.[catId];
+    if (!selectedTargets.has(catId)) {
+      if (JSON.stringify(after) !== JSON.stringify(before)) {
+        throw new Error('action-successor Queue carrier rebind cannot mutate another target binding');
+      }
+      continue;
+    }
+    assertSelectedActionSuccessorCarrierRebind(before, after, catId, proof);
+  }
+  if (proof.targetCatIds.some((catId) => !allTargets.has(catId))) {
+    throw new Error('action-successor Queue carrier rebind target is not custody-bound');
   }
 }
 
@@ -406,10 +621,11 @@ function assertReminderAttempts(custody: QueuedMessageCustody, allTargets: Reado
 const TARGET_ATTEMPT_NEXT_STATES: Readonly<
   Record<QueueTargetAttempt['state'], ReadonlySet<QueueTargetAttempt['state']>>
 > = {
-  queued: new Set(['queued', 'starting', 'appended', 'failed', 'cancelled', 'handled']),
-  starting: new Set(['starting', 'appended', 'failed', 'cancelled', 'handled']),
-  appended: new Set(['appended', 'failed', 'cancelled', 'handled']),
+  queued: new Set(['queued', 'starting', 'appended', 'failed', 'interrupted', 'cancelled', 'handled']),
+  starting: new Set(['starting', 'appended', 'failed', 'interrupted', 'cancelled', 'handled']),
+  appended: new Set(['appended', 'failed', 'interrupted', 'cancelled', 'handled']),
   failed: new Set(['failed']),
+  interrupted: new Set(['interrupted']),
   cancelled: new Set(['cancelled']),
   handled: new Set(['handled']),
 };
@@ -441,12 +657,17 @@ function assertTargetAttempts(custody: QueuedMessageCustody, allTargets: Readonl
     if (attempt.seenAt !== undefined) assertFiniteNonNegative(attempt.seenAt, 'targetAttempt.seenAt');
     if (
       attempt.terminalReason !== undefined &&
-      !['invocation_failed', 'invocation_cancelled', 'source_withdrawn'].includes(attempt.terminalReason)
+      !['invocation_failed', 'runtime_restart', 'invocation_cancelled', 'source_withdrawn'].includes(
+        attempt.terminalReason,
+      )
     ) {
       throw new Error('invalid target attempt terminal reason');
     }
     if (attempt.state === 'failed' && attempt.terminalReason !== 'invocation_failed') {
       throw new Error('failed target attempt requires invocation_failed reason');
+    }
+    if (attempt.state === 'interrupted' && attempt.terminalReason !== 'runtime_restart') {
+      throw new Error('interrupted target attempt requires runtime_restart reason');
     }
     if (
       attempt.state === 'cancelled' &&
@@ -731,7 +952,7 @@ function assertTargetAttemptMonotonicity(current: QueuedMessageCustody, next: Qu
       throw new Error('queue custody target attempts are append-only and monotonic');
     }
     if (
-      ['failed', 'cancelled', 'handled'].includes(attempt.state) &&
+      ['failed', 'interrupted', 'cancelled', 'handled'].includes(attempt.state) &&
       JSON.stringify(successor) !== JSON.stringify(attempt)
     ) {
       throw new Error('terminal target attempts are immutable');
@@ -764,8 +985,16 @@ function normalizePreExposurePersistedCustody(custody: QueuedMessageCustody): Qu
 
 export function assertQueueCustodyMessageBinding(message: {
   queueCustody?: QueuedMessageCustody;
+  queueCustodyAdmission?: QueueCustodyAdmissionIntent;
   deliveryStatus?: 'queued' | 'delivered' | 'canceled';
 }): void {
+  if (message.queueCustodyAdmission) {
+    assertQueueCustodyAdmissionIntent(message.queueCustodyAdmission);
+    if (message.deliveryStatus !== 'queued') {
+      throw new Error('queue custody admission can only be stored on a queued message');
+    }
+    if (message.queueCustody) throw new Error('queue custody admission and full custody are mutually exclusive');
+  }
   if (!message.queueCustody) return;
   assertQueuedMessageCustody(message.queueCustody);
   if (message.deliveryStatus !== 'queued') {
@@ -798,6 +1027,9 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   if (input.next.ownerAuthProvenance !== current.ownerAuthProvenance) {
     throw new Error('queue custody ownerAuthProvenance is immutable');
   }
+  if (input.next.ownerUserId !== current.ownerUserId) {
+    throw new Error('queue custody ownerUserId is immutable');
+  }
   if (input.next.version !== current.version) throw new Error('queue custody version is immutable');
   if (input.next.createdAt !== current.createdAt) throw new Error('queue custody createdAt is immutable');
   if (input.next.intent !== current.intent) throw new Error('queue custody intent is immutable');
@@ -808,7 +1040,12 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
     throw new Error('queue custody allTargetCats is immutable');
   }
   if (JSON.stringify(input.next.carrierByTargetCatId) !== JSON.stringify(current.carrierByTargetCatId)) {
-    throw new Error('queue custody per-target carrier bindings are immutable');
+    if (!input.actionSuccessorRebind) {
+      throw new Error('queue custody per-target carrier bindings are immutable');
+    }
+    assertActionSuccessorCarrierRebind(current, input.next, input.actionSuccessorRebind);
+  } else if (input.actionSuccessorRebind) {
+    throw new Error('action-successor Queue carrier rebind must change durable carrier authority');
   }
   if (
     current.prestartRetirement !== undefined &&

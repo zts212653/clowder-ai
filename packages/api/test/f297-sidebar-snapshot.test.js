@@ -8,8 +8,8 @@
  * 不含任何 presence 字段；presence 的 fold（idle/working/done/error）只存在于浏览器
  * （packages/web/src/components/ThreadCatStatus.tsx）。这两条测试锁住该缺口。
  *
- * C10 的判定优先级（Design Gate 决议）：active execution 优先；
- * active 消失**不得**被推断为 done —— done/error 只能来自 participant activity 的终态证据。
+ * C10 的判定优先级：active execution 优先；active 消失**不得**被推断为 done。
+ * done/error 只能来自 InvocationRecord terminal transition，聊天 activity 不是 lifecycle 证据。
  */
 
 import assert from 'node:assert/strict';
@@ -83,7 +83,7 @@ describe('F297 Sidebar canonical projection', () => {
     const askedFor = [];
     const presenceSource = {
       // OQ-1 决议：只对 active candidate 稀疏对账，不对全表逐 thread 调用
-      async getActivePresence(threadIds) {
+      async getPresence(threadIds) {
         askedFor.push([...threadIds]);
         return new Map([[working.id, { status: 'working', cats: ['opus5'] }]]);
       },

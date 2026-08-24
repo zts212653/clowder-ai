@@ -2,13 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_LABEL_COLOR } from '@/lib/color-defaults';
-import type { Thread } from '@/stores/chat-types';
 import { type ThreadLabel, useLabelStore } from '@/stores/label-store';
+
+interface OrganizableThread {
+  readonly id: string;
+  readonly title: string | null;
+  readonly projectPath: string;
+  readonly labels?: readonly string[];
+}
 
 interface ThreadOrganizerModalProps {
   open: boolean;
   onClose: () => void;
-  threads: Thread[];
+  threads: readonly OrganizableThread[];
   labels: ThreadLabel[];
   onApply: (assignments: Map<string, string[]>) => Promise<{ failedThreadIds: string[] }>;
   onSuggestAll?: () => void;

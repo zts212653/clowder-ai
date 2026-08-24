@@ -20,6 +20,7 @@ export function OpsContent() {
   const searchParams = useSearchParams();
   const opsParam = searchParams.get('ops');
   const obsRaw = searchParams.get('obs');
+  const invocationId = searchParams.get('invocationId') ?? undefined;
   const OBS_VALID: ReadonlySet<string> = new Set(['overview', 'traces', 'health', 'callback-auth', 'eval']);
   const obsParam =
     obsRaw && OBS_VALID.has(obsRaw) ? (obsRaw as 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval') : null;
@@ -58,7 +59,7 @@ export function OpsContent() {
           );
         })}
       </nav>
-      <OpsSubsectionContent subsection={activeTab} obsSubTab={obsParam} nonce={nonce} />
+      <OpsSubsectionContent subsection={activeTab} obsSubTab={obsParam} nonce={nonce} invocationId={invocationId} />
     </div>
   );
 }
@@ -67,10 +68,12 @@ function OpsSubsectionContent({
   subsection,
   obsSubTab,
   nonce,
+  invocationId,
 }: {
   subsection: string;
   obsSubTab?: 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval' | null;
   nonce: number;
+  invocationId?: string;
 }) {
   switch (subsection) {
     case 'usage':
@@ -83,7 +86,13 @@ function OpsSubsectionContent({
     case 'leaderboard':
       return <HubLeaderboardTab />;
     case 'observability':
-      return <HubObservabilityTab initialSubTab={obsSubTab ?? undefined} subTabNonce={nonce} />;
+      return (
+        <HubObservabilityTab
+          initialSubTab={obsSubTab ?? undefined}
+          subTabNonce={nonce}
+          initialInvocationId={invocationId}
+        />
+      );
     case 'agent-sessions':
       return <HubAgentSessionsTab />;
     case 'runtime-sessions':

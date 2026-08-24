@@ -33,6 +33,8 @@ import {
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, ROUTE_CONTROL_TAGS, stripIntentTags } from '../../context/IntentParser.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
+import type { ContextEpochOwner } from '../../session/ContextEpochOwner.js';
+import type { PresentationLedger } from '../../session/PresentationLedger.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
@@ -536,6 +538,10 @@ export interface AgentRouterOptions {
   threadStore?: IThreadStore;
   /** F24: Session chain store for context health tracking */
   sessionChainStore?: ISessionChainStore;
+  /** F296 B3b-1: persistent context epoch and cold/hot mode owner. */
+  contextEpochOwner?: ContextEpochOwner;
+  /** F296 B3b-2: shared provider-presentation delivery ledger. */
+  presentationLedger?: PresentationLedger;
   /** F211 Phase A2: runtime sidecar for provider runtime session metadata */
   runtimeSessionStore?: IRuntimeSessionStore;
   /** F24 Phase C: Transcript writer for event recording */
@@ -642,6 +648,8 @@ export class AgentRouter {
   private deliveryCursorStore: DeliveryCursorStore;
   private threadStore: IThreadStore | null;
   private sessionChainStore: ISessionChainStore | undefined;
+  private contextEpochOwner: ContextEpochOwner | undefined;
+  private presentationLedger: PresentationLedger | undefined;
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
   private transcriptWriter: TranscriptWriter | undefined;
   private transcriptReader: TranscriptReader | undefined;
@@ -800,6 +808,8 @@ export class AgentRouter {
       options.deliveryCursorStore ?? new DeliveryCursorStore(options.sessionStore, canonicalizer);
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
+    this.contextEpochOwner = options.contextEpochOwner;
+    this.presentationLedger = options.presentationLedger;
     this.runtimeSessionStore = options.runtimeSessionStore;
     this.transcriptWriter = options.transcriptWriter;
     this.transcriptReader = options.transcriptReader;
@@ -1461,6 +1471,8 @@ export class AgentRouter {
         ...(this.turnExecutionStore ? { turnExecutionStore: this.turnExecutionStore } : {}),
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
+        ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
+        ...(this.presentationLedger ? { presentationLedger: this.presentationLedger } : {}),
         ...(this.runtimeSessionStore ? { runtimeSessionStore: this.runtimeSessionStore } : {}),
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
         ...(this.transcriptReader ? { transcriptReader: this.transcriptReader } : {}),

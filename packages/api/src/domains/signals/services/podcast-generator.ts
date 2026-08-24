@@ -137,6 +137,63 @@ function parseScriptResponse(raw: string, mode: PodcastRequest['mode']): Podcast
   };
 }
 
+async function prepareThreadPodcastInvocation(
+  request: PodcastRequest,
+  threadId: string,
+  deps: ThreadInvokeDeps,
+  prompt: string,
+  targetCats: CatId[],
+) {
+  const admission = await deps.invocationTracker.acquireExecutionAdmission(threadId, targetCats);
+  if (!admission) {
+    throw new Error('Podcast invocation admission rejected: thread is being deleted');
+  }
+
+  const primaryCat = targetCats[0] ?? 'opus';
+  try {
+    // Write the user message only after any in-process seal activates the replacement
+    // session. The admission lease also keeps a new seal/delete out until tracker
+    // ownership is published below.
+    const userMsg = await deps.messageStore.append({
+      threadId,
+      catId: null,
+      content: prompt,
+      userId: request.requestedBy,
+      mentions: ['opus' as CatId],
+      timestamp: Date.now(),
+    });
+
+    const createResult = await deps.invocationRecordStore.create({
+      threadId,
+      userId: request.requestedBy,
+      targetCats,
+      intent: 'execute',
+      idempotencyKey: `podcast-${request.articleId}-${Date.now()}`,
+      actionLeaseCarrier: { kind: 'none' },
+    });
+
+    // Backfill userMessageId so retry endpoint can find the trigger message.
+    await deps.invocationRecordStore.update(createResult.invocationId, {
+      userMessageId: userMsg.id,
+    });
+
+    const controller = deps.invocationTracker.start(
+      threadId,
+      primaryCat,
+      request.requestedBy,
+      targetCats,
+      createResult.invocationId,
+    );
+    if (controller.signal.aborted) {
+      await deps.invocationRecordStore.update(createResult.invocationId, { status: 'canceled' });
+      throw new Error('Podcast invocation admission was lost before tracker publication');
+    }
+    return { userMsg, createResult, controller, primaryCat };
+  } finally {
+    admission.release();
+  }
+}
+
 /**
  * AC-P6: Generate script by posting a prompt into the study thread.
  * Reuses the existing message pipeline (same as GitHub/connector triggers).
@@ -148,40 +205,12 @@ export async function generateScriptViaThread(
 ): Promise<PodcastScript> {
   const prompt = buildScriptPrompt(request);
   const targetCats: CatId[] = ['opus' as CatId];
-
-  // ① Write user message into thread
-  const userMsg = await deps.messageStore.append({
+  const { userMsg, createResult, controller, primaryCat } = await prepareThreadPodcastInvocation(
+    request,
     threadId,
-    catId: null,
-    content: prompt,
-    userId: request.requestedBy,
-    mentions: ['opus' as CatId],
-    timestamp: Date.now(),
-  });
-
-  // ② Create invocation record
-  const createResult = await deps.invocationRecordStore.create({
-    threadId,
-    userId: request.requestedBy,
+    deps,
+    prompt,
     targetCats,
-    intent: 'execute',
-    idempotencyKey: `podcast-${request.articleId}-${Date.now()}`,
-    actionLeaseCarrier: { kind: 'none' },
-  });
-
-  // ②b Backfill userMessageId so retry endpoint can find the trigger message
-  await deps.invocationRecordStore.update(createResult.invocationId, {
-    userMessageId: userMsg.id,
-  });
-
-  // ③ Track invocation
-  const primaryCat = targetCats[0] ?? 'opus';
-  const controller = deps.invocationTracker.start(
-    threadId,
-    primaryCat,
-    request.requestedBy,
-    targetCats,
-    createResult.invocationId,
   );
 
   // ④ Route execution and collect text response

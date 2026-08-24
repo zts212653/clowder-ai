@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useChatStore } from '../chatStore';
+import { captureThreadWorkspaceState, hydrateThreadWorkspaceState, useChatStore } from '../chatStore';
 
 /**
  * F120 × F284: Browser Preview per-thread restore.
@@ -31,10 +31,26 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
       workspaceOpenFilePath: null,
       workspaceOpenFileLine: null,
       presentationLock: null,
+      workspaceMode: 'dev',
       workspaceSurface: 'home',
       workspacePreview: { port: undefined, path: '/' },
       rightPanelMode: 'status',
+      rightPanelOpen: false,
       pendingPreviewAutoOpen: null,
+    });
+  });
+
+  it('leaves Approval history and reveals the Browser surface before acknowledging an active-thread preview', () => {
+    useChatStore.setState({ workspaceMode: 'approval' });
+
+    useChatStore.getState().setPendingPreviewAutoOpen({ port: 5197, path: '/f120-delivery-probe' });
+
+    expect(useChatStore.getState()).toMatchObject({
+      workspaceMode: 'dev',
+      workspaceSurface: 'browser',
+      workspacePreview: { port: 5197, path: '/f120-delivery-probe' },
+      rightPanelMode: 'workspace',
+      rightPanelOpen: true,
     });
   });
 
@@ -75,6 +91,7 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
   });
 
   it('queueThreadPreview writes browser preview into an inactive thread and reveals it on return', () => {
+    useChatStore.setState({ workspaceMode: 'approval' });
     useChatStore.getState().queueThreadPreview('thread-b', { port: 3000, path: '/settings' });
 
     // Active thread is untouched
@@ -87,6 +104,7 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
     expect(useChatStore.getState().workspaceSurface).toBe('browser');
     expect(useChatStore.getState().workspacePreview).toEqual({ port: 3000, path: '/settings' });
     expect(useChatStore.getState().rightPanelMode).toBe('workspace');
+    expect(useChatStore.getState().workspaceMode).toBe('dev');
   });
 
   it('presentation lock: thread switch keeps the locked view instead of restoring target surface', () => {
@@ -125,6 +143,74 @@ describe('browser preview per-thread restore (F120 × F284)', () => {
     expect(useChatStore.getState().workspaceSurface).toBe('home');
     expect(useChatStore.getState().workspacePreview).toEqual({ port: undefined, path: '/' });
     expect(useChatStore.getState().rightPanelMode).toBe('status');
+  });
+
+  it('hydrates the durable preview snapshot into the active thread after F5', () => {
+    useChatStore.setState({ workspaceMode: 'approval' });
+    const expected = captureThreadWorkspaceState(useChatStore.getState(), 'thread-a');
+    const snapshot = {
+      revision: expected.revision + 1,
+      workspaceWorktreeId: 'wt-a',
+      workspaceMode: 'dev',
+      workspaceSurface: 'browser',
+      workspacePreview: { port: 5196, path: '/dev/monthly-cat-atlas' },
+      rightPanelMode: 'workspace',
+      rightPanelOpen: true,
+    } satisfies Parameters<typeof hydrateThreadWorkspaceState>[1];
+
+    expect(hydrateThreadWorkspaceState('thread-a', snapshot, expected)).toBe(true);
+
+    const restored = useChatStore.getState();
+    expect(restored.workspaceWorktreeId).toBe('wt-a');
+    expect(restored.workspaceMode).toBe('dev');
+    expect(restored.workspaceSurface).toBe('browser');
+    expect(restored.workspacePreview).toEqual({ port: 5196, path: '/dev/monthly-cat-atlas' });
+    expect(restored.rightPanelMode).toBe('workspace');
+    expect(restored.rightPanelOpen).toBe(true);
+  });
+
+  it('does not let a stale IDB snapshot overwrite a newer live preview event', () => {
+    const expected = captureThreadWorkspaceState(useChatStore.getState(), 'thread-a');
+    useChatStore.getState().setPendingPreviewAutoOpen({ port: 7001, path: '/newer' });
+
+    expect(
+      hydrateThreadWorkspaceState(
+        'thread-a',
+        {
+          revision: expected.revision,
+          workspaceWorktreeId: 'wt-old',
+          workspaceSurface: 'browser',
+          workspacePreview: { port: 5196, path: '/stale' },
+          rightPanelMode: 'workspace',
+          rightPanelOpen: true,
+        },
+        expected,
+      ),
+    ).toBe(false);
+    expect(useChatStore.getState().workspacePreview).toEqual({ port: 7001, path: '/newer' });
+  });
+
+  it('does not let an older IDB snapshot overwrite a preview queued before hydration started', () => {
+    useChatStore.getState().queueThreadPreview('thread-b', { port: 7002, path: '/queued-newer' });
+    const expected = captureThreadWorkspaceState(useChatStore.getState(), 'thread-b');
+
+    expect(
+      hydrateThreadWorkspaceState(
+        'thread-b',
+        {
+          revision: expected.revision - 1,
+          workspaceWorktreeId: null,
+          workspaceSurface: 'home',
+          workspacePreview: { port: undefined, path: '/' },
+          rightPanelMode: 'status',
+          rightPanelOpen: false,
+        },
+        expected,
+      ),
+    ).toBe(false);
+
+    useChatStore.getState().setCurrentThread('thread-b');
+    expect(useChatStore.getState().workspacePreview).toEqual({ port: 7002, path: '/queued-newer' });
   });
 });
 

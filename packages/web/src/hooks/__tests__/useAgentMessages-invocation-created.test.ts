@@ -417,6 +417,67 @@ describe('useAgentMessages system_info invocation_created', () => {
     expect(storeState.catStatuses.opus).toBe('spawning');
   });
 
+  // F086/F216 (#1291): a serial dispatch announces EVERY queued leg up front, but only 第 1 棒
+  // actually starts. Migrating ownership on each announced leg made the UI show the LAST target
+  // as active while the runtime was still running the FIRST — two arrows, one invocation.
+  it('serial 第 1 棒 migrates the active slot', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'a2a_handoff',
+        catId: 'codex',
+        content: '缅因猫 → 布偶猫（串行 1/2）',
+        invocationId: 'inv-root',
+        targetCatId: 'opus',
+        routing: { mode: 'serial', index: 1, total: 2 },
+        timestamp: 123999,
+      } as never);
+    });
+
+    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
+    expect(storeState.targetCats).toEqual(['opus']);
+  });
+
+  it('serial 第 2 棒 is announced but must NOT steal the active slot', () => {
+    storeState.activeInvocations = {
+      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
+    };
+    storeState.targetCats = ['codex'];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'a2a_handoff',
+        catId: 'codex',
+        content: '缅因猫 ⇢ 暹罗猫（串行 2/2·排队中）',
+        invocationId: 'inv-root',
+        targetCatId: 'gemini',
+        routing: { mode: 'serial', index: 2, total: 2 },
+        timestamp: 124000,
+      } as never);
+    });
+
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(storeState.activeInvocations['inv-root']).toEqual({
+      catId: 'codex',
+      mode: 'execute',
+      startedAt: 123456,
+    });
+    expect(storeState.targetCats).toEqual(['codex']);
+  });
+
   it('migrates legacy a2a_handoff without invocationId by resolving the current cat active slot', () => {
     storeState.activeInvocations = {
       'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },

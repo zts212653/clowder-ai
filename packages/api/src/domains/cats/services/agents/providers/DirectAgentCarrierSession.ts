@@ -5,8 +5,8 @@ import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervise
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 
-function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  return buildChildEnv(input);
+function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory });
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {
@@ -16,7 +16,8 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
   private readonly abortHandler: () => void;
 
   constructor(private readonly options: AgentCarrierSessionOptions) {
-    const env = normalizeEnv(options.env);
+    const childCwd = options.cwd ?? process.cwd();
+    const env = normalizeEnv(options.env, childCwd);
     const launch =
       process.platform === 'win32'
         ? { command: options.command, args: [...options.args], env }

@@ -225,8 +225,8 @@ describe('POST /api/callbacks/start-vote', () => {
     assert.equal(body.votingState.initiatedByCat, 'opus', 'initiatedByCat should track the cat who started the vote');
   });
 
-  // P1-2: stale invocation must not be allowed to start a vote
-  test('rejects stale invocation with 200 stale_ignored', async () => {
+  // P1-2: a replaced invocation must not be allowed to start a vote
+  test('rejects a replaced invocation with its typed terminal reason', async () => {
     const app = await createApp();
     const thread = threadStore.create('user-1', 'Test');
     const old = await registry.create('user-1', 'opus', thread.id);
@@ -244,9 +244,9 @@ describe('POST /api/callbacks/start-vote', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 401);
     const body = JSON.parse(res.body);
-    assert.equal(body.status, 'stale_ignored', 'stale invocations should be rejected gracefully');
+    assert.equal(body.reason, 'replaced');
   });
 
   // P2: non-existent thread should return 404

@@ -139,5 +139,27 @@ describe('content-fetcher', () => {
       await assert.rejects(() => fetchContent('http://127.0.0.1/secret'), /blocked/i);
       await assert.rejects(() => fetchContent('file:///etc/passwd'), /blocked/i);
     });
+
+    it('composes the scheduler cancellation signal into server fetch', async () => {
+      const originalFetch = globalThis.fetch;
+      let observedSignal;
+      globalThis.fetch = async (_url, options) => {
+        observedSignal = options.signal;
+        return {
+          ok: true,
+          text: async () => '<html><title>ok</title><body>done</body></html>',
+        };
+      };
+      try {
+        const controller = new AbortController();
+        const fetchContent = createFetchContentFn();
+        await fetchContent('https://example.com/article', controller.signal);
+        controller.abort(new Error('scheduler timeout'));
+        assert.equal(observedSignal.aborted, true);
+        assert.equal(observedSignal.reason.message, 'scheduler timeout');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 });

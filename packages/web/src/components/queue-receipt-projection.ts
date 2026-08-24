@@ -127,6 +127,7 @@ export function receiptTargetStateLabel(
   }
   if (target.state === 'queued') return scope === 'cross_thread_delivery' ? '已送达' : '未读 · 排队中';
   if (target.state === 'notified') return scope === 'cross_thread_delivery' ? '已送达' : '已提醒 · 尚未读取';
+  if (target.state === 'interrupted') return '运行因服务重启中断 · 未自动重试';
   if (target.state === 'failed') {
     if (target.seenAt !== undefined) return '已读取 · 未收口，已回队列';
     return target.invocationId ? '已唤醒 · 未收口，已回队列' : '未能唤醒 · 已回队列';
@@ -138,4 +139,13 @@ export function receiptTargetStateLabel(
     return completedWithTurnReceiptLabel(scope);
   }
   return '已处理 · 无可回溯证据';
+}
+
+export function receiptFailureReason(target: QueueReceiptTarget): string {
+  const latest = target.attempts?.at(-1);
+  if (latest?.terminalReason === 'runtime_restart') return '运行已因服务重启中断；系统没有自动重放';
+  if (latest?.terminalReason === 'invocation_cancelled') return '对应回复已停止，消息正文没有完成处理';
+  if (target.seenAt !== undefined) return '消息正文已进入回复，但该回复未完成';
+  if (target.invocationId) return '已创建对应回复，但消息正文未能进入该回复';
+  return '系统未能为该目标启动本次消息处理';
 }

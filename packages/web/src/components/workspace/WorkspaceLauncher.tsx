@@ -1,11 +1,12 @@
 'use client';
 
-import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { ChatVoiceFeatureControls } from '@/components/ChatVoiceFeatureControls';
+import { openTheaterReplay } from '@/components/ThreadSidebar/theater-navigation';
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { WorkspaceSurface } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { RecentTrajectoryRecall } from './RecentTrajectoryRecall';
 
 export type WorkspaceDevSurface = WorkspaceSurface;
 
@@ -27,6 +28,13 @@ type LauncherDestination =
   | {
       kind: 'host';
       id: 'status';
+      label: string;
+      description: string;
+      searchTerms: string;
+    }
+  | {
+      kind: 'action';
+      id: 'theater';
       label: string;
       description: string;
       searchTerms: string;
@@ -78,6 +86,13 @@ const THREAD_DESTINATIONS: LauncherDestination[] = [
     description: '查看 Session、Thread ID 与运行详情',
     searchTerms: 'status activity session thread id diagnostics 状态 状态栏 当前动态 会话 诊断',
   },
+  {
+    kind: 'action',
+    id: 'theater',
+    label: '猫猫大剧院 / 回放',
+    description: '用现有 Theater Overlay 回看这段对话',
+    searchTerms: 'theater story replay 回放 大剧院 剧场',
+  },
 ];
 
 const MODE_GROUPS: Array<{ label: string; destinations: Array<Exclude<WorkspaceMode, 'dev'>> }> = [
@@ -96,8 +111,8 @@ function modeDestination(mode: Exclude<WorkspaceMode, 'dev'>): LauncherDestinati
   };
 }
 
-function ModeMark({ mode }: { mode: WorkspaceMode | 'status' }) {
-  const paths: Record<WorkspaceMode | 'status', ReactNode> = {
+function ModeMark({ mode }: { mode: WorkspaceMode | 'status' | 'theater' }) {
+  const paths: Record<WorkspaceMode | 'status' | 'theater', ReactNode> = {
     dev: <path d="M8 4 3 8l5 4M12 4l5 4-5 4M11 2 9 14" />,
     recall: <path d="M8 3a3 3 0 0 0-3 3 3 3 0 0 0 0 6 3 3 0 0 0 3-3m0-6a3 3 0 0 1 3 3 3 3 0 0 1 0 6 3 3 0 0 1-3-3" />,
     schedule: (
@@ -148,6 +163,12 @@ function ModeMark({ mode }: { mode: WorkspaceMode | 'status' }) {
       <>
         <circle cx="8" cy="8" r="6" />
         <path d="M8 7v4M8 4.5h.01" />
+      </>
+    ),
+    theater: (
+      <>
+        <rect x="2" y="3" width="12" height="10" rx="2" />
+        <path d="m7 6 4 2-4 2V6Z" />
       </>
     ),
   };
@@ -253,8 +274,10 @@ export function WorkspaceLauncher({
       onSelectDevSurface?.(destination.id);
     } else if (destination.kind === 'mode') {
       setWorkspaceMode(destination.id);
-    } else {
+    } else if (destination.kind === 'host') {
       onOpenStatus?.();
+    } else if (threadId) {
+      openTheaterReplay(threadId);
     }
   };
 
@@ -290,6 +313,7 @@ export function WorkspaceLauncher({
       </label>
 
       <div className="space-y-6">
+        {!normalizedQuery && threadId && <RecentTrajectoryRecall threadId={threadId} />}
         {visibleGroups.map((group) => (
           <section key={group.label}>
             <h3 className="mb-2 text-label font-semibold text-cafe-secondary">{group.label}</h3>

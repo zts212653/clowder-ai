@@ -16,6 +16,12 @@ import {
 } from '../eval-lifecycle-display';
 import { HubEvalMetricGlossary } from '../HubEvalMetricGlossary';
 import type { EvalLifecycleRef } from '../HubEvalTypes';
+import { invocationIdFromEvidenceRef } from '../workspace/trajectory/invocation-evidence-ref';
+import {
+  findEvalWorkspaceEvent,
+  findTrajectoryOriginScrollContainer,
+  openInvocationTrajectory,
+} from '../workspace/trajectory/trajectory-navigation';
 import type { EvalWorkspaceEvent, EvalWorkspaceEventKind } from './evalWorkspaceEvents';
 
 const SETTINGS_EVAL_HUB_HREF = '/settings?ops=observability&obs=eval';
@@ -32,6 +38,7 @@ export function EvalWorkspaceEventCard({
   const setCurrentProject = useChatStore((state) => state.setCurrentProject);
   const setWorkspaceOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
+  const currentThreadId = useChatStore((state) => state.currentThreadId);
   const openWorkspaceFile = useCallback(
     (path: string) => {
       if (projectPath) setCurrentProject(projectPath);
@@ -40,9 +47,28 @@ export function EvalWorkspaceEventCard({
     },
     [projectPath, setCurrentProject, setWorkspaceMode, setWorkspaceOpenFile, worktreeId],
   );
+  const openTrajectoryEvidence = useCallback(
+    (invocationId: string) => {
+      if (!currentThreadId) return;
+      const element = findEvalWorkspaceEvent(event.id);
+      const container = findTrajectoryOriginScrollContainer(element);
+      const viewportOffsetPx =
+        element && container ? element.getBoundingClientRect().top - container.getBoundingClientRect().top : 0;
+      openInvocationTrajectory({
+        invocationId,
+        originRef: {
+          kind: 'eval',
+          threadId: currentThreadId,
+          eventId: event.id,
+          viewportOffsetPx,
+        },
+      });
+    },
+    [currentThreadId, event.id],
+  );
 
   return (
-    <article className="rounded-lg bg-cafe-surface-elevated p-4">
+    <article className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={event.id} tabIndex={-1}>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-cafe-muted">
@@ -91,8 +117,8 @@ export function EvalWorkspaceEventCard({
         ) : null}
       </dl>
       <LifecycleNotices event={event} />
-      <LifecycleRefs label="修复证据" refs={event.lifecycle.actionRefs} />
-      <LifecycleRefs label="复评证据" refs={event.lifecycle.reevalRefs} />
+      <LifecycleRefs label="修复证据" refs={event.lifecycle.actionRefs} onOpenInvocation={openTrajectoryEvidence} />
+      <LifecycleRefs label="复评证据" refs={event.lifecycle.reevalRefs} onOpenInvocation={openTrajectoryEvidence} />
       <HubEvalMetricGlossary glossary={event.metricGlossary} />
       <div className="mt-3 flex flex-wrap gap-2">
         <a href={SETTINGS_EVAL_HUB_HREF} className={navClassName}>
@@ -135,14 +161,51 @@ function LifecycleNotices({ event }: { event: EvalWorkspaceEvent }) {
   );
 }
 
-function LifecycleRefs({ label, refs = [] }: { label: string; refs?: EvalLifecycleRef[] }) {
+function invocationIdFromRef(ref: EvalLifecycleRef): string | undefined {
+  if (ref.availability !== 'available') return undefined;
+  return invocationIdFromEvidenceRef(ref.value);
+}
+
+function LifecycleRefs({
+  label,
+  refs = [],
+  onOpenInvocation,
+}: {
+  label: string;
+  refs?: EvalLifecycleRef[];
+  onOpenInvocation?: (invocationId: string) => void;
+}) {
   if (refs.length === 0) return null;
   return (
     <div className="mt-3 text-xs">
       <div className="text-cafe-muted">{label}</div>
       <div className="mt-1 flex flex-wrap gap-1.5">
-        {refs.map((ref, index) =>
-          ref.availability === 'available' && /^https?:\/\//.test(ref.value) ? (
+        {refs.map((ref, index) => {
+          const invocationId = ref.availability === 'available' ? invocationIdFromRef(ref) : undefined;
+          return invocationId && onOpenInvocation ? (
+            <button
+              type="button"
+              key={`${ref.kind}-${index}`}
+              onClick={() => onOpenInvocation(invocationId)}
+              className="inline-flex items-center gap-1 rounded-md border border-cafe bg-cafe-surface px-2 py-1 text-xs font-semibold text-cafe-secondary hover:text-cafe-accent"
+              data-testid="trajectory-evidence-chip"
+              data-invocation-id={invocationId}
+            >
+              <svg
+                aria-hidden="true"
+                className="h-3 w-3"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="4" cy="4" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
+              </svg>
+              Invocation 轨迹
+            </button>
+          ) : ref.availability === 'available' && /^https?:\/\//.test(ref.value) ? (
             <a
               key={`${ref.kind}-${index}`}
               href={ref.value}
@@ -156,8 +219,8 @@ function LifecycleRefs({ label, refs = [] }: { label: string; refs?: EvalLifecyc
             <code key={`${ref.kind}-${index}`} className="break-all rounded bg-cafe-surface px-1.5 py-0.5">
               {lifecycleRefText(ref)}
             </code>
-          ),
-        )}
+          );
+        })}
       </div>
     </div>
   );

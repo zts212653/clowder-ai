@@ -8,10 +8,9 @@
  * - queued   — the event targets another thread; written into that thread's
  *              ThreadState so returning to it reveals the preview.
  * - blocked  — presentation lock freezes the visible workspace.
- * - skipped  — this client is out of scope (worktree mismatch on the apply
- *              path). Skipped answers promptly so a mismatched tab never
- *              stalls the server's ack collection, but it never wins
- *              server-side aggregation.
+ * - skipped  — this client is out of scope (hidden tab or worktree mismatch).
+ *              Skipped answers promptly so an ineligible tab never stalls the
+ *              server's ack collection, but it never wins aggregation.
  */
 
 export interface PreviewAutoOpenEvent {
@@ -22,7 +21,11 @@ export interface PreviewAutoOpenEvent {
   eventId?: string;
 }
 
-export type PreviewAutoOpenReceiptReason = 'thread_inactive' | 'presentation_lock' | 'worktree_mismatch';
+export type PreviewAutoOpenReceiptReason =
+  | 'thread_inactive'
+  | 'presentation_lock'
+  | 'worktree_mismatch'
+  | 'client_inactive';
 
 export interface PreviewAutoOpenReceipt {
   status: 'applied' | 'queued' | 'blocked' | 'skipped';
@@ -49,9 +52,23 @@ export function isPreviewWorktreeScopeAcceptable(
   return !eventWorktreeId;
 }
 
+/** Legacy same-thread + worktree predicate kept as a focused compatibility
+ * surface for callers/tests that only need the scope decision. */
+export function shouldAcceptAutoOpen(
+  sessionWorktreeId: string | null,
+  eventWorktreeId: string | undefined,
+  sessionThreadId: string,
+  eventThreadId: string | undefined,
+): boolean {
+  if (eventThreadId && eventThreadId !== sessionThreadId) return false;
+  return isPreviewWorktreeScopeAcceptable(sessionWorktreeId, eventWorktreeId);
+}
+
 export function deliverPreviewAutoOpenEvent(input: {
   data: PreviewAutoOpenEvent;
   activeThreadId: string | null;
+  /** Only the browser tab visible to the user may apply or accept queue custody. */
+  clientVisible: boolean;
   presentationLocked: boolean;
   sessionWorktreeId: string | null;
   /**
@@ -66,6 +83,10 @@ export function deliverPreviewAutoOpenEvent(input: {
 }): PreviewAutoOpenReceipt {
   const { data } = input;
   const eventId = data.eventId ?? '';
+
+  if (!input.clientVisible) {
+    return { status: 'skipped', eventId, reason: 'client_inactive' };
+  }
 
   if (input.presentationLocked) {
     return { status: 'blocked', eventId, reason: 'presentation_lock' };

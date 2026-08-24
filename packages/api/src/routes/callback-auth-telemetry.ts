@@ -2,8 +2,7 @@
  * F174 Phase D1 — central recorder for callback auth failures.
  *
  * AC-D1: emit OTel counter `cat_cafe.callback_auth.failures{tool, cat, reason}`
- * AC-D2: cover all 5 reasons (expired/invalid_token/unknown_invocation/
- *        missing_creds/stale_invocation)
+ * AC-D2/F298: cover identity, absence, and exact terminal dispositions.
  * AC-D3: feed in-memory snapshot to `/api/debug/callback-auth`
  *
  * F174 Phase D2a — dashboard prep:
@@ -31,11 +30,16 @@ interface FailureSample {
 }
 
 const ZERO_REASON_COUNTS: Record<CallbackAuthFailureReason, number> = {
-  expired: 0,
   invalid_token: 0,
   unknown_invocation: 0,
   missing_creds: 0,
   stale_invocation: 0,
+  completed: 0,
+  failed: 0,
+  interrupted: 0,
+  replaced: 0,
+  revoked: 0,
+  canceled: 0,
   agent_key_expired: 0,
   agent_key_revoked: 0,
   agent_key_unknown: 0,

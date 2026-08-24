@@ -354,4 +354,26 @@ describe('F177-H: Cross-post participant check warning', () => {
     assert.equal(JSON.parse(res.body).kind, 'replace_final_agent_key_unsupported');
     assert.equal(messageStore.size, 0);
   });
+
+  test('agent-key post rejects typed local review settlement before persistence', async () => {
+    const app = await createApp();
+    const targetThread = threadStore.create('user-1', 'Target');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': 'test-agent-secret' },
+      payload: {
+        threadId: targetThread.id,
+        content: 'Readable review verdict.',
+        clientMessageId: 'typed-local-review-agent-key',
+        coordination: { phase: 'terminal' },
+        localReviewVerdict: 'approved',
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).kind, 'local_review_verdict_agent_key_unsupported');
+    assert.equal(messageStore.size, 0);
+  });
 });

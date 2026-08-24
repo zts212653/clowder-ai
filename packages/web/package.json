@@ -8,12 +8,13 @@
     "dev": "node scripts/sync-vendor-assets.mjs --watch -- next dev",
     "prebuild": "pnpm run sync:vendor-assets",
     "build": "next build",
-    "postbuild": "node scripts/write-build-stamp.cjs",
+    "postbuild": "node scripts/write-build-stamp.cjs && pnpm run test:production-cache-policy",
     "prestart": "pnpm run sync:vendor-assets",
     "start": "next start",
     "lint": "next lint",
-    "test": "node scripts/run-with-node-env-test.mjs pnpm exec vitest run && node scripts/run-with-node-env-test.mjs node --test test/next-config.test.cjs test/build-stamp.test.cjs && node --test --test-concurrency=1 test/browser/message-selection-toolbar-layout.test.mjs test/browser/message-actions-density.test.mjs && node eslint-plugins/no-hardcoded-colors.test.js && node ../../scripts/check-no-new-ui-emoji.test.mjs && node ../../scripts/check-no-new-ui-emoji.mjs",
-    "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js"
+    "test": "node scripts/run-with-node-env-test.mjs pnpm exec vitest run && node scripts/run-with-node-env-test.mjs node --test test/next-config.test.cjs test/build-stamp.test.cjs && node --test --test-concurrency=1 test/browser/message-selection-toolbar-layout.test.mjs test/browser/message-actions-density.test.mjs test/browser/html-widget-responsive.test.mjs test/browser/f299-trajectory-visual-parity.test.mjs test/browser/f299-phase-c-evidence.test.mjs && node eslint-plugins/no-hardcoded-colors.test.js && node ../../scripts/check-no-new-ui-emoji.test.mjs && node ../../scripts/check-no-new-ui-emoji.mjs",
+    "test:lint-rules": "node eslint-plugins/no-hardcoded-colors.test.js",
+    "test:production-cache-policy": "node --test test/production-cache-policy.test.cjs"
   },
   "dependencies": {
     "@cat-cafe/shared": "workspace:*",

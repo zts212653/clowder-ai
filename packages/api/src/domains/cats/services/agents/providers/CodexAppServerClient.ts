@@ -3,11 +3,12 @@ import type {
   ActiveInvocationFreshnessController,
   PreparedFreshnessNotice,
 } from '../../freshness/FreshnessNoticeBroker.js';
-import type { AgentCarrierSession } from '../../types.js';
+import type { AgentCarrierSession, ProviderCompactionObservation, ProviderContinuityEvidence } from '../../types.js';
 import {
   asCodexAppServerRecord,
   type CodexAppServerJsonObject,
   codexAppServerErrorMessage,
+  mapCodexAppServerCompactionObservation,
   mapCodexAppServerNotification,
   mapCodexAppServerTokenUsage,
   respondToCodexAppServerRequest,
@@ -18,13 +19,14 @@ import {
   type CodexAppServerLifecycleStage,
 } from './CodexAppServerLifecycle.js';
 import { CodexAppServerNotificationQueue } from './CodexAppServerNotificationQueue.js';
-import { resolveCodexAppServerThread } from './CodexAppServerThreadResolver.js';
+import { type CodexAppServerThreadVerdict, resolveCodexAppServerThread } from './CodexAppServerThreadResolver.js';
 import {
   classifyCodexAppServerToolSurface,
   classifyCodexProtocolItem,
   classifyCodexSafeBoundary,
 } from './codex-app-server-boundary.js';
 import { buildCodexAppServerThreadParams, closeCodexAppServerTransport } from './codex-app-server-client-helpers.js';
+import { CodexAppServerRpcError } from './codex-app-server-rpc-error.js';
 
 export type {
   CodexAppServerLifecycleEvent,
@@ -35,8 +37,32 @@ export type {
 type JsonObject = CodexAppServerJsonObject;
 type RequestId = number;
 
+/**
+ * F296 B4a: how this run obtains the bytes it may send.
+ *
+ * `preflight` deliberately has no prompt field. The adapter can only obtain
+ * bytes by calling `settle` with evidence it minted from a real provider
+ * response, so "freeze the prompt, then notify that we resumed" cannot be
+ * written.
+ */
+export type CodexAppServerPromptSource =
+  | { readonly kind: 'frozen'; readonly prompt: string }
+  | {
+      readonly kind: 'preflight';
+      readonly settle: (input: {
+        readonly evidence: ProviderContinuityEvidence;
+        readonly compactions?: readonly ProviderCompactionObservation[];
+      }) => Promise<{ readonly prompt: string }>;
+    };
+
+/** F296 B4b: a compaction observed mid-turn on the bound runtime. */
+export interface CodexAppServerContextCompactionEvent {
+  readonly type: 'app_server.context_compaction';
+  readonly observation: ProviderCompactionObservation;
+}
+
 export interface CodexAppServerRunInput {
-  prompt: string;
+  prompt: CodexAppServerPromptSource;
   thread: { kind: 'start' } | { kind: 'resume'; threadId: string };
   model?: string;
   cwd?: string;
@@ -75,6 +101,38 @@ const DEFAULT_INTERRUPT_GRACE_MS = 1_500;
 interface PendingRequest {
   resolve(value: unknown): void;
   reject(error: Error): void;
+  /** F296 B4a: lets a JSON-RPC error name the call it rejected. */
+  method: string;
+}
+
+/**
+ * F296 B4a: normalize an adapter-observed thread verdict into provider-agnostic
+ * continuity evidence. `resumed` survives only when the provider echoed back
+ * exactly the requested id; a differing id becomes `mismatched`, never resumed.
+ */
+export function continuityEvidenceFromVerdict(verdict: CodexAppServerThreadVerdict): ProviderContinuityEvidence {
+  switch (verdict.kind) {
+    case 'started':
+      return { kind: 'started', runtimeSessionId: verdict.threadId };
+    case 'resumed':
+      return {
+        kind: 'resumed',
+        requestedRuntimeSessionId: verdict.requestedThreadId,
+        runtimeSessionId: verdict.threadId,
+      };
+    case 'replaced':
+      return {
+        kind: 'replaced',
+        requestedRuntimeSessionId: verdict.requestedThreadId,
+        runtimeSessionId: verdict.threadId,
+      };
+    case 'mismatched':
+      return {
+        kind: 'mismatched',
+        requestedRuntimeSessionId: verdict.requestedThreadId,
+        runtimeSessionId: verdict.threadId,
+      };
+  }
 }
 
 export class CodexAppServerClient {
@@ -128,37 +186,78 @@ export class CodexAppServerClient {
       yield this.lifecycle.event(this.lifecycle.transition('initialized'));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
 
-      const threadResult = asCodexAppServerRecord(
-        await resolveCodexAppServerThread({
-          thread: input.thread,
-          params: buildCodexAppServerThreadParams(
-            input,
-            input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
-          ),
-          localLiveLease: this.deps.wire.reusedSessionHost === true,
-          request: (method, params) => this.request(method, params),
-          now: this.deps.now ?? Date.now,
-        }),
-      );
-      const thread = asCodexAppServerRecord(threadResult?.thread);
-      const threadId = thread?.id;
-      if (typeof threadId !== 'string') throw new Error('Codex app-server did not return a thread id');
+      const verdict = await resolveCodexAppServerThread({
+        thread: input.thread,
+        params: buildCodexAppServerThreadParams(
+          input,
+          input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
+        ),
+        startParams: buildCodexAppServerThreadParams(input),
+        localLiveLease: this.deps.wire.reusedSessionHost === true,
+        request: (method, params) => this.request(method, params),
+        now: this.deps.now ?? Date.now,
+      });
+      const threadId = verdict.threadId;
       activeThreadId = threadId;
       yield this.lifecycle.event(this.lifecycle.transition('thread_ready', { threadId }));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
       yield { type: 'thread.started', thread_id: threadId };
+      yield { type: 'app_server.continuity_verdict', verdict };
+
+      // F296 B4a preflight fence. The provider verdict exists; buffered
+      // compaction for the bound runtime has been drained; only now may the
+      // final prompt bytes come into existence. Everything above this line ran
+      // without ever holding them.
+      //
+      // A capacity-recovery turn is the exception: it sends `input: []` below,
+      // so it has no prompt to build. Settling anyway is not a harmless read —
+      // it drains buffered compactions, rebuilds a cold prompt, exposes new
+      // message ids and reserves a ledger generation, all of which are then
+      // discarded, while the epoch owner still records the cold as consumed
+      // because the provider accepted *a* turn. The next invocation would then
+      // project hot context over a cold rebuild nobody ever saw. Leave the
+      // compaction buffered; the next real turn is the one that must consume it.
+      // One boolean decides both 'do we settle' and 'do we send bytes'. They were
+      // two separate conditions for about a minute, and `'  '` (a whitespace-only
+      // instruction, trimmed to '') already made them disagree: no settle, but a
+      // prompt still sent. Same shape as the required-vs-producible field lists.
+      const isRecoveryTurn = Boolean(recoveryInstruction);
+      // Drain unconditionally. What the provider already told us is not the
+      // recovery turn's to skip: the observation lives in this client's private
+      // queue, and `finally` closes the transport, so anything still buffered
+      // when a turn is rejected dies with the client. A recovery turn skips
+      // *building a generation*, never *recording what happened*.
+      const compactions = this.drainBufferedCompactions(threadId);
+      // On a recovery turn nothing settles, so the drained observations have no
+      // generation to ride along with. Deliver them directly, before turn/start
+      // can fail — exactly once, since settle() will not also receive them.
+      if (isRecoveryTurn) {
+        for (const observation of compactions) {
+          yield { type: 'app_server.context_compaction', observation };
+        }
+      }
+      const promptBytes = isRecoveryTurn
+        ? ''
+        : input.prompt.kind === 'frozen'
+          ? input.prompt.prompt
+          : (
+              await input.prompt.settle({
+                evidence: continuityEvidenceFromVerdict(verdict),
+                ...(compactions.length > 0 ? { compactions } : {}),
+              })
+            ).prompt;
 
       this.lifecycle.patch({ turnStartSent: true });
       const turnResult = asCodexAppServerRecord(
         await this.request('turn/start', {
           threadId,
-          input: recoveryInstruction
+          input: isRecoveryTurn
             ? []
             : [
-                { type: 'text', text: input.prompt },
+                { type: 'text', text: promptBytes },
                 ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
               ],
-          ...(recoveryInstruction
+          ...(isRecoveryTurn && recoveryInstruction
             ? {
                 additionalContext: {
                   'cat-cafe.capacity-recovery': {
@@ -238,6 +337,17 @@ export class CodexAppServerClient {
           latestUsage = mapCodexAppServerTokenUsage(asCodexAppServerRecord(record.params)?.tokenUsage) ?? latestUsage;
         }
 
+        // F296 B4b (kimi review A4): a compaction can also arrive *during* the
+        // turn (auto-compact). The pre-turn drain only covers the gap between
+        // turns, so without this the event would be consumed as an ordinary
+        // item and the epoch would never advance — leaving the next projection
+        // hot when it must be cold. Binding is checked against the runtime we
+        // actually bound; a compaction for any other thread is ignored here.
+        const midTurnCompaction = mapCodexAppServerCompactionObservation(envelope);
+        if (midTurnCompaction && midTurnCompaction.runtimeSessionId === threadId) {
+          yield { type: 'app_server.context_compaction', observation: midTurnCompaction };
+        }
+
         const mapped = mapCodexAppServerNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
@@ -299,6 +409,25 @@ export class CodexAppServerClient {
     }
   }
 
+  /**
+   * F296 B4a/B4b: consume compaction notifications already buffered for the
+   * bound runtime, before the final prompt is built.
+   *
+   * Only events whose envelope threadId equals the runtime we actually bound
+   * are taken; a compaction for some other thread is left in the stream and can
+   * never advance this invocation's epoch.
+   */
+  private drainBufferedCompactions(threadId: string): ProviderCompactionObservation[] {
+    const observations: ProviderCompactionObservation[] = [];
+    this.notifications.takeBuffered((value) => {
+      const observation = mapCodexAppServerCompactionObservation(value);
+      if (!observation || observation.runtimeSessionId !== threadId) return false;
+      observations.push(observation);
+      return true;
+    });
+    return observations;
+  }
+
   private async deliverNotice(notice: PreparedFreshnessNotice, threadId: string): Promise<void> {
     if (!this.deps.freshnessController) return;
     let result: JsonObject | null;
@@ -332,7 +461,7 @@ export class CodexAppServerClient {
     if (this.pumpFailure) return Promise.reject(this.pumpFailure);
     if (this.pumpEnded) return Promise.reject(new Error('Codex app-server stream is already closed'));
     const id = this.nextRequestId++;
-    const promise = new Promise<unknown>((resolve, reject) => this.pending.set(id, { resolve, reject }));
+    const promise = new Promise<unknown>((resolve, reject) => this.pending.set(id, { resolve, reject, method }));
     // The stream can close while the transport write is still in flight. Mark the
     // response promise handled now; the returned write chain still propagates it.
     void promise.catch(() => {});
@@ -358,8 +487,19 @@ export class CodexAppServerClient {
           const pending = this.pending.get(message.id);
           if (!pending) continue;
           this.pending.delete(message.id);
-          if (Object.hasOwn(message, 'error')) pending.reject(new Error(codexAppServerErrorMessage(message.error)));
-          else pending.resolve(message.result);
+          if (Object.hasOwn(message, 'error')) {
+            // F296 B4a: a JSON-RPC error is a provider verdict, not a broken
+            // pipe. Type it so continuity classification never has to guess.
+            const errorRecord = asCodexAppServerRecord(message.error);
+            const code = errorRecord?.code;
+            pending.reject(
+              new CodexAppServerRpcError({
+                message: codexAppServerErrorMessage(message.error),
+                method: pending.method,
+                ...(typeof code === 'number' ? { code } : {}),
+              }),
+            );
+          } else pending.resolve(message.result);
           continue;
         }
         if (typeof message.id === 'number' && typeof message.method === 'string') {

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
@@ -26,6 +27,10 @@ export function digestMessageBundleQuoteProjectionV3(projection: string): string
 
 export function digestMessageBundleCliQuoteProjection(projection: string): string {
   return digest(MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN, projection);
+}
+
+export function digestMessageBundleCliQuoteProjectionV2(projection: string): string {
+  return digest(MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2, projection);
 }
 
 function canonicalJson(value: unknown): string {

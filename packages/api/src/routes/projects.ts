@@ -14,6 +14,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { resolveRecommendedProjectPath } from './project-workspace-recommendation.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -174,10 +175,10 @@ function requireTrustedProjectIdentity(request: FastifyRequest, reply: FastifyRe
 }
 
 export const projectsRoutes: FastifyPluginAsync = async (app) => {
-  // GET /api/projects/cwd - return server's working directory
-  app.get('/api/projects/cwd', async () => {
-    const cwd = process.cwd();
-    return { path: cwd, name: basename(cwd) };
+  // Retain the legacy endpoint name, but recommend workspace truth rather than API process.cwd().
+  app.get('/api/projects/cwd', async (_request, reply) => {
+    const path = await resolveRecommendedProjectPath(reply);
+    if (path) return { path, name: basename(path) };
   });
 
   // POST /api/projects/pick-directory - open native folder picker
@@ -222,7 +223,8 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const prefix = query.prefix;
     const limit = Math.min(Math.max(parseInt(query.limit || '10', 10) || 10, 1), 50);
 
-    const cwd = query.cwd || process.cwd();
+    const cwd = query.cwd || (await resolveRecommendedProjectPath(reply));
+    if (!cwd) return;
     const { parentDir, fragment } = splitProjectCompletePrefix(prefix, cwd);
 
     // Validate parent directory

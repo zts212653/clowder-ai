@@ -13,7 +13,7 @@ import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
-import type { ConflictAutoExecutor } from './ConflictAutoExecutor.js';
+import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
 import type { ConflictRouter, ConflictSignal } from './ConflictRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 
@@ -36,6 +36,21 @@ export interface ConflictCheckTaskSpecOptions {
 interface ConflictWorkItem {
   signal: ConflictSignal;
   task: TaskItem;
+}
+
+async function tryAutoResolveBeforeWake(
+  opts: ConflictCheckTaskSpecOptions,
+  workItem: ConflictWorkItem,
+  signal?: AbortSignal,
+): Promise<AutoResolveResult | null> {
+  if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
+  try {
+    return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
+  } catch (error) {
+    if (!signal?.aborted) throw error;
+    opts.log.warn({ error }, '[conflict-check] cancellation interrupted optional auto-resolution; waking owner');
+    return null;
+  }
 }
 
 export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions): TaskSpec_P1<ConflictWorkItem> {
@@ -84,20 +99,19 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(workItem: ConflictWorkItem, _subjectKey: string, _ctx: ExecuteContext) {
+      async execute(workItem: ConflictWorkItem, _subjectKey: string, ctx: ExecuteContext) {
+        ctx.signal?.throwIfAborted();
         const routeResult = await opts.conflictRouter.route(workItem.signal);
         if (routeResult.kind !== 'notified') return;
 
         // F140 Phase C: try auto-resolve before waking cat
-        if (opts.autoExecutor && workItem.signal.mergeState === 'CONFLICTING') {
-          const result = await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber);
-          if (result.kind === 'resolved') {
-            opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
-            return;
-          }
-          if (result.kind === 'escalated') {
-            opts.log.info(`[conflict-check] Escalating: ${result.files.length} conflict file(s) in ${result.branch}`);
-          }
+        const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
+        if (result?.kind === 'resolved') {
+          opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
+          return;
+        }
+        if (result?.kind === 'escalated') {
+          opts.log.info(`[conflict-check] Escalating: ${result.files.length} conflict file(s) in ${result.branch}`);
         }
 
         if (opts.invokeTrigger) {
@@ -106,7 +120,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             reason: 'github_pr_conflict',
             sourceCategory: 'conflict',
           };
-          void opts.invokeTrigger
+          await opts.invokeTrigger
             .trigger(
               routeResult.threadId,
               routeResult.catId as CatId,

@@ -141,7 +141,6 @@ vi.mock('@/hooks/useCatData', () => ({
   }),
 }));
 vi.mock('@/hooks/useVoiceAutoPlay', () => ({ useVoiceAutoPlay: vi.fn() }));
-vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/usePersistedState', () => ({
   usePersistedState: (key: string, defaultVal: unknown) => [defaultVal, vi.fn(), vi.fn()],
 }));

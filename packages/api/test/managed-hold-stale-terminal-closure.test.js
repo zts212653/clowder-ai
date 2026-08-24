@@ -240,6 +240,10 @@ async function harness() {
       queue.rollbackProcessing(THREAD, entry.id);
       queue.markQueuedFailedForCatAcrossUsers(THREAD, CAT, latestInvocationId, new Set([entry.id]));
       await coordinator.persistEntry(queue.getEntrySnapshot(THREAD, USER, entry.id));
+      assert.ok(
+        queue.retryFailedTarget(THREAD, USER, entry.id, CAT),
+        'successor re-exposure must explicitly reopen the failed target',
+      );
       const successor = queue.markProcessing(THREAD, USER);
       await coordinator.persistEntry(queue.getEntrySnapshot(THREAD, USER, successor.id));
       queue.markProcessingSeen(THREAD, USER, successor.id, [CAT], invocationId, now + 1);

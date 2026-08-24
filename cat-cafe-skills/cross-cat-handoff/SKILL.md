@@ -104,7 +104,10 @@ body SHA 已锁定，且回读到同一 subject 的 review/comment URL，才能�
 review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它的路由权高于任务祖先 thread、旧
 `sourceThreadId` 和继承来的 coordination。开始真实协作链时，同 thread 用
 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final
-verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。完成包必须同时包含：
+verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。持有 invocation-bound local
+review lease 时，同一 terminal post 还必须带显式 `clientMessageId` 和 typed `localReviewVerdict`
+（`approved | changes_requested | commented`）；只发 terminal coordination 会在持久化前得到
+`400 local_review_verdict_required`。公开正文只负责向人解释结论，不承载机器语法。完成包必须同时包含：
 
 1. exact target evidence：commit/PR HEAD、文档 body/content digest 等不可变目标；
 2. 验证证据：targeted test、diff finding 或可复核命令；

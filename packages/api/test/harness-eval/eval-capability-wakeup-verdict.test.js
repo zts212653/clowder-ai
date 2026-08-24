@@ -186,6 +186,8 @@ describe('Capability Wakeup Predicates And Verdicts', () => {
     assert.equal(packet.harnessUnderEval.componentId, 'rich-messaging');
     assert.equal(packet.verdict, 'fix');
     assert.match(packet.ownerAsk.requestedAction, /how-to|rich-messaging/i);
+    assert.ok(packet.evidencePacket.sampleTraceRefs.includes('session:session-cap/invocation:inv-1'));
+    assert.ok(packet.evidencePacket.sampleTraceRefs.includes('inv:inv-1'));
   });
 
   it('builds a keep_observe verdict when trials contain no misses', () => {

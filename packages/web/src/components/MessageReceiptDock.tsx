@@ -12,7 +12,7 @@ import { apiFetch } from '@/utils/api-client';
 import { resolveMessageElements } from '@/utils/scrollToMessage';
 import { CatAvatar } from './CatAvatar';
 import { authorIntentLabel, carrierCapabilityLabel, humanCarrierLabel } from './message-disposition-presentation';
-import { receiptTargetStateLabel } from './queue-receipt-projection';
+import { receiptFailureReason, receiptTargetStateLabel } from './queue-receipt-projection';
 
 const REMINDER_STATE_LABEL: Record<QueueReminderAttempt['state'], string> = {
   requested: '提醒已请求',
@@ -150,7 +150,7 @@ function reminderTitle(attempt: QueueReminderAttempt): string | undefined {
 function attemptStatus(
   target: QueueReceiptTarget,
 ): 'pending' | 'spawning' | 'streaming' | 'done' | 'error' | undefined {
-  if (target.state === 'failed') return 'error';
+  if (target.state === 'failed' || target.state === 'interrupted') return 'error';
   if (target.state === 'handled' || target.state === 'withdrawn') return 'done';
   if (target.state === 'seen') return 'streaming';
   if (target.state === 'awakened' || target.state === 'steering') return 'spawning';
@@ -164,14 +164,6 @@ function latestRetryableAttempt(target: QueueReceiptTarget): QueueTargetAttempt 
     (latest?.state === 'cancelled' && latest.terminalReason === 'invocation_cancelled')
     ? latest
     : undefined;
-}
-
-function failureReason(target: QueueReceiptTarget): string {
-  const latest = target.attempts?.at(-1);
-  if (latest?.terminalReason === 'invocation_cancelled') return '对应回复已停止，消息正文没有完成处理';
-  if (target.seenAt !== undefined) return '消息正文已进入回复，但该回复未完成';
-  if (target.invocationId) return '已创建对应回复，但消息正文未能进入该回复';
-  return '系统未能为该目标启动本次消息处理';
 }
 
 interface MessageReceiptDockProps {
@@ -304,14 +296,14 @@ export function MessageReceiptDock({
                   </button>
                 )}
               </div>
-              {target.state === 'failed' && (
+              {(target.state === 'failed' || target.state === 'interrupted') && (
                 <output
                   className="mt-1 flex items-center gap-1.5 rounded-md border border-semantic-critical/30 bg-semantic-critical-surface/60 px-2 py-1 text-micro text-semantic-critical"
                   data-receipt-failure={target.catId}
                 >
                   <CatAvatar catId={target.catId} size={16} status="error" />
                   <span>
-                    系统：{failureReason(target)}
+                    系统：{receiptFailureReason(target)}
                     {latestAttempt ? ` · 本条消息第 ${latestAttempt.sequence} 次尝试` : ''}
                   </span>
                 </output>

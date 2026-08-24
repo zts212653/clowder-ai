@@ -92,8 +92,9 @@ export const externalReviewVerdictTools = [
       'Atomically record an external PR review verdict together with its delivery custody for the current HEAD. ' +
       'Use when: you were woken to re-review a configured maintainer-owned external PR and have reached a verdict in this turn. ' +
       'NOT for: ordinary PR tracking, cloud-review progress, self-authored PRs, merging/closing a PR, or a verdict that is not ready to be externally delivered. ' +
-      'Output: appends one durable F168 verdict event and returns canonical delivered or pending_delivery state; it never merges or closes GitHub objects. ' +
+      'Output: accepts the typed submission exactly once and returns canonical delivered/pending_delivery, or pending_verification while the existing F168 collector catches up; a later collector tick settles that same submission without a retry call. It never merges or closes GitHub objects. ' +
       'GOTCHA: there is no naked-verdict branch—choose delivered with a same-PR GitHub review/comment URL, or pending_delivery with a concrete reason. ' +
+      'GOTCHA: pending_verification is accepted custody, not an instruction to submit again; persistent failed CI/cloud evidence, stale HEAD, wrong principal, and stale leases remain fail-closed. ' +
       'GOTCHA: set userNudgeRequired=true only for an explicit operator reminder, never from inferred chat tone. ' +
       'GOTCHA: reviewedHeadSha, assigned reviewer identity, repo policy, terminal state, and optional action lease are verified server-side using invocation credentials; stale or agent-key-only calls fail closed.',
     inputSchema: externalReviewVerdictInputSchema,

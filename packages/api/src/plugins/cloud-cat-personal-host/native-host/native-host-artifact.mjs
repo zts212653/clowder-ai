@@ -3,7 +3,9 @@ import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from '
 import { join } from 'node:path';
 
 export const NATIVE_HOST_ARTIFACT_FILES = Object.freeze([
+  'conversation-binding.mjs',
   'native-framing.mjs',
+  'native-host-cli.mjs',
   'native-host.mjs',
   'native-ledger.mjs',
   'native-results.mjs',
@@ -73,5 +75,5 @@ export async function publishNativeHostArtifact(sourceDirectory, artifactsDirect
   if ((await digestNativeHostArtifactDirectory(artifactDirectory)) !== artifactDigest) {
     throw new Error('installed native host artifact digest mismatch');
   }
-  return { artifactDigest, artifactDirectory, artifactEntrypoint: join(artifactDirectory, 'native-host.mjs') };
+  return { artifactDigest, artifactDirectory, artifactEntrypoint: join(artifactDirectory, 'native-host-cli.mjs') };
 }

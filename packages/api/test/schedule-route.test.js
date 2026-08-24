@@ -492,7 +492,7 @@ describe('Schedule Routes', () => {
       assert.equal(body.draft.deliveryThreadId, 'thread-from-callback');
     });
 
-    it('returns 409 stale invocation error for stale callback auth invocation', async () => {
+    it('returns 401 typed replaced error for a superseded callback invocation', async () => {
       const stale = await registry.create('user-1', 'opus', 'thread-from-callback');
       await registry.create('user-1', 'opus', 'thread-from-callback');
 
@@ -508,9 +508,10 @@ describe('Schedule Routes', () => {
         },
       });
 
-      assert.equal(res.statusCode, 409);
+      assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.equal(body.code, 'STALE_INVOCATION');
+      assert.equal(body.error, 'callback_auth_failed');
+      assert.equal(body.reason, 'replaced');
     });
 
     it('returns 401 for invalid callback credentials in preview (fail-closed, #474)', async () => {
@@ -1309,7 +1310,7 @@ describe('Schedule Routes', () => {
       assert.equal(store.getAll().length, 0, 'cat request must not persist a task before approval');
     });
 
-    it('returns 409 stale invocation error and does not persist for stale callback auth invocation', async () => {
+    it('returns 401 typed replaced error and does not persist for a superseded callback invocation', async () => {
       const stale = await registry.create('user-1', 'opus', 'thread-stale');
       await registry.create('user-1', 'opus', 'thread-stale');
 
@@ -1325,9 +1326,10 @@ describe('Schedule Routes', () => {
         },
       });
 
-      assert.equal(res.statusCode, 409);
+      assert.equal(res.statusCode, 401);
       const body = res.json();
-      assert.equal(body.code, 'STALE_INVOCATION');
+      assert.equal(body.error, 'callback_auth_failed');
+      assert.equal(body.reason, 'replaced');
       const stored = store.getAll().find((d) => d.params?.message === 'stale-create');
       assert.equal(stored, undefined);
     });

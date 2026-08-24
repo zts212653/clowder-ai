@@ -4,8 +4,15 @@ import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { resolveContextContinuity } from '../../dist/domains/cats/services/agents/invocation/context-continuity.js';
 import { invokeSingleCat } from '../../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
+import { ContextEpochOwner } from '../../dist/domains/cats/services/session/ContextEpochOwner.js';
+import {
+  InMemoryPresentationLedgerStore,
+  PresentationLedger,
+} from '../../dist/domains/cats/services/session/PresentationLedger.js';
+import { InMemoryContextEpochStore } from '../../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { MemoryContractTrialTraceBuffer } from '../../dist/domains/memory/people/AsrPersonMemoryContractTrial.js';
 import { AsrPersonMemoryOpportunityPromptService } from '../../dist/domains/memory/people/AsrPersonMemoryOpportunityPromptService.js';
+import { estimateTokens } from '../../dist/utils/token-counter.js';
 import { artifact, intake } from './asr-person-memory-contract-fixture.js';
 
 const CODEX_EXEC = {
@@ -93,6 +100,10 @@ function dispositionAuthority() {
   };
 }
 
+function presentationLedger() {
+  return new PresentationLedger(new InMemoryPresentationLedgerStore());
+}
+
 describe('ASR → F276 F296 adapter', () => {
   it('admits a scoped mechanical observation into a bounded judgment prompt', async () => {
     const now = Date.now();
@@ -108,12 +119,57 @@ describe('ASR → F276 F296 adapter', () => {
     });
 
     assert.equal(resolution.deliveryReceipts.length, 1);
+    assert.equal(Object.hasOwn(resolution.deliveryReceipts[0], 'projectionMarker'), false);
     assert.deepEqual(resolution.omittedOpportunityIds, []);
     assert.match(resolution.promptSegment, /proactive-memory-judgment/);
     assert.match(resolution.promptSegment, /message-meeting-1/);
     assert.match(resolution.promptSegment, /mechanical_observation/);
     assert.match(resolution.promptSegment, /propose \| defer \| abstain/);
     assert.doesNotMatch(resolution.promptSegment, /private transcript|importance=true|truth=true/);
+    assert.equal(resolution.presentationEnvelopes.length, 1);
+    assert.deepEqual(resolution.presentationEnvelopes[0].candidate, {
+      subjectKey: `write-opportunity:${scene.opportunity.dedupeLineage}`,
+      asOf: { kind: 'version', value: String(scene.opportunity.generation) },
+      sourceTier: 'T0',
+      requested: 'state',
+      epistemicCeiling: 'mechanical_observation',
+    });
+    assert.equal(resolution.presentationEnvelopes[0].segments.pointer, undefined);
+    assert.match(resolution.presentationEnvelopes[0].segments.state, /mechanical_observation/);
+    assert.deepEqual(resolution.presentationEnvelopes[0].admission, {
+      opportunityId: scene.opportunity.opportunityId,
+      opportunityKind: 'write',
+      producerOwner: 'memory/private-person-relationship',
+      consumerScope: { kind: 'cat', ownerUserId: 'owner-1', threadId: 'thread-1', consumerCatId: 'codex' },
+      entryVersion: 'asr-person-memory:1',
+      subjectKey: `write-opportunity:${scene.opportunity.dedupeLineage}`,
+      asOf: { kind: 'version', value: String(scene.opportunity.generation) },
+      sourceRefs: scene.opportunity.sourceCoordinates.map((coordinate) =>
+        [
+          coordinate.artifactId,
+          coordinate.sourceHandle,
+          coordinate.sourceRevision,
+          `${coordinate.segment.start}-${coordinate.segment.end}`,
+          coordinate.speaker.externalSpeakerId,
+          coordinate.speaker.attributionRevision,
+        ].join('@'),
+      ),
+      eligibleSurfaces: ['dynamic_context'],
+      presentationPolicyRef: 'F296.OpportunityPresentation',
+      tokenBudget: 160,
+      dedupeKey: `${scene.opportunity.dedupeLineage}:${scene.opportunity.generation}`,
+      expiresAt: scene.opportunity.expiresAt,
+      invalidators: ['source_corrected', 'source_forgotten', 'scope_revoked', 'superseded', 'expired'].map((ref) => ({
+        owner: 'memory/private-person-relationship',
+        ref,
+      })),
+      epistemicCeiling: 'mechanical_observation',
+    });
+    assert.ok(
+      estimateTokens(resolution.presentationEnvelopes[0].segments.state) <=
+        resolution.presentationEnvelopes[0].admission.tokenBudget,
+    );
+    assert.doesNotMatch(JSON.stringify(resolution.presentationEnvelopes[0].admission), /disposition|transcript text/);
 
     const deduped = new AsrPersonMemoryOpportunityPromptService().resolve({
       candidates: [boundScene(scene), boundScene(scene)],
@@ -217,6 +273,8 @@ describe('ASR → F276 F296 adapter', () => {
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+      presentationLedger: presentationLedger(),
     };
     const messages = [];
     for await (const message of invokeSingleCat(deps, {
@@ -283,6 +341,8 @@ describe('ASR → F276 F296 adapter', () => {
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+      presentationLedger: presentationLedger(),
     };
     const messages = [];
     for await (const message of invokeSingleCat(deps, {
@@ -346,6 +406,8 @@ describe('ASR → F276 F296 adapter', () => {
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+      presentationLedger: presentationLedger(),
     };
     const messages = [];
     for await (const message of invokeSingleCat(deps, {

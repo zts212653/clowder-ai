@@ -8,7 +8,7 @@ import {
   OfficialPluginHistoryImportError,
   type OfficialPluginHistoryImportPort,
 } from '../domains/plugin/official-plugin-history-import.js';
-import { pluginAccessError, requirePluginWriteAccess } from './plugin-routes.js';
+import { pluginAccessError, requirePluginWriteAccess } from './plugin-access-guards.js';
 
 interface OfficialPluginHistoryRouteOptions {
   readonly inventory: PluginInventoryStore;

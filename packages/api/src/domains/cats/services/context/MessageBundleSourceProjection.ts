@@ -7,7 +7,12 @@ import {
 } from '@cat-cafe/shared';
 import type { StoredMessage, StoredToolEvent } from '../stores/ports/MessageStore.js';
 import type { Thread } from '../stores/ports/ThreadStore.js';
-import { canViewMessage, isTimelinePublished } from '../stores/visibility.js';
+import {
+  canViewMessage,
+  isOwnerVisibleManagedHoldConnector,
+  isOwnerVisibleQueuedManagedHoldConnector,
+  isTimelinePublished,
+} from '../stores/visibility.js';
 import type { MessageSelectionAuth } from './message-selection-types.js';
 
 interface ProjectedCliTool {
@@ -72,6 +77,40 @@ export function projectCliSegment(records: readonly StoredMessage[], segmentId: 
   if (kind === 'tool-label') return tool.label;
   if (kind === 'tool-detail') return tool.detail?.length ? tool.detail : null;
   return null;
+}
+
+/**
+ * Raw Markdown source for the browser-readable stdout v2 plane.
+ *
+ * The browser still supports one R21 rollback cache shape: when a terminal stream group has no
+ * real stdout content, `cliStdout === ''`, and a non-empty cached `speechContent`, that speech is
+ * painted inside `CliOutputBlock` as stdout. Mirror only that retained display contract here.
+ * Legacy v1 continues to call `projectCliSegment` and therefore never treats cached speech as
+ * canonical raw stdout.
+ */
+export function projectCliSegmentReadableSource(records: readonly StoredMessage[], segmentId: string): string | null {
+  if (segmentId !== 'stdout') return null;
+  const rawProjection = projectCliSegment(records, segmentId);
+  if (rawProjection !== null) return rawProjection;
+
+  const sorted = sortSourceRecords(records.slice());
+  // An exact-key callback can turn the cached speech into the ordinary assistant body. In that
+  // shape ChatMessage does not expose a CLI stdout segment, so the server must not invent one.
+  if (sorted.some((record) => record.origin === 'callback')) return null;
+  const firstStream = sorted.find((record) => record.extra?.stream)?.extra?.stream;
+  const cachedSpeech = firstStream?.speechContent;
+  return firstStream?.cliStdout === '' && typeof cachedSpeech === 'string' && cachedSpeech.trim().length > 0
+    ? cachedSpeech
+    : null;
+}
+
+/**
+ * Stdout is painted through MarkdownContent, so browser selections belong to the same
+ * readable-text plane as ordinary rendered Markdown. Raw tool labels/details deliberately do
+ * not use this projection; their stored characters remain the exact v1 plane.
+ */
+export function projectCliSegmentReadable(markdown: string): string {
+  return projectMarkdownReadableText(markdown);
 }
 
 export function sanitizeRichBlock(block: RichBlock): RichBlock {
@@ -234,20 +273,23 @@ export function isAccessibleSourceRecord(
   sourceThreadId: string,
   auth: MessageSelectionAuth,
 ): message is StoredMessage {
+  const ownerAuthored =
+    message?.userId === auth.userId &&
+    message.userId !== 'system' &&
+    message.userId !== 'scheduler' &&
+    message.catId !== 'system' &&
+    message.source === undefined &&
+    message.origin !== 'briefing';
+  const managedHoldConnector = message ? isOwnerVisibleManagedHoldConnector(message, auth.userId) : false;
   return Boolean(
     message &&
       message.threadId === sourceThreadId &&
-      message.userId === auth.userId &&
-      message.userId !== 'system' &&
-      message.userId !== 'scheduler' &&
-      message.catId !== 'system' &&
-      message.source === undefined &&
-      message.origin !== 'briefing' &&
+      (ownerAuthored || managedHoldConnector) &&
       message.deletedAt === undefined &&
       message._tombstone !== true &&
       message.recall === undefined &&
       message.deliveryStatus !== 'canceled' &&
-      isTimelinePublished(message) &&
+      (isTimelinePublished(message) || isOwnerVisibleQueuedManagedHoldConnector(message, auth.userId)) &&
       canViewMessage(message, { type: 'user' }),
   );
 }

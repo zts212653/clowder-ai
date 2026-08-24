@@ -4,7 +4,7 @@ related_features: [F017, F052, F063, F193, F264, F290]
 topics: [message-selection, quote-selection, context-attachments, message-bundle, export, rich-message, cross-thread, lineage]
 doc_kind: spec
 created: 2026-08-11
-updated: 2026-08-18
+updated: 2026-08-19
 description: "让用户从一条 Thread 精确选择整条消息、普通/CLI 文字片段或单个 Rich Block，以同一份有来源的 Message Bundle 导出、留言转发，并安全衔接 Collective 发布。"
 description_source: human
 description_author: codex-sol
@@ -13,7 +13,7 @@ description_updated_at: 2026-08-12T01:28:05Z
 
 # F294: Selective Message Bundles — 消息多选、选择性导出与跨 Thread 富文本转发
 
-> **Status**: in-progress / Phase A and Phase B implementation are merged, including PR #3720's bundle note, exact Rich Block, and exact CLI quote increment; AC-B1–B11 remain pending Alpha UAT, and Phase C remains | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: in-progress / Phase A/B complete and operator Alpha UAT accepted; only Phase C remains, waiting for F290's Collective public-projection implementation | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 
 Architecture cell: `hub-action-surface` + `bubble-pipeline` + `transport`
 
@@ -309,33 +309,37 @@ F294 不新造一套“选中文字”浮层，也不把转发塞进 Composer �
 
 ### Phase B（同 Café 富文本合并转发）
 
-- [ ] AC-B1: TTL=0 Message Bundle 持久化源 Thread、按序 exact refs、可选整包留言、创建者与创建时间；
+> **operator Alpha UAT accepted (2026-08-19):** operator确认此前多轮真实 Alpha dogfood、反馈与修正即为
+> Phase B 验收（`0001787099180174-000132-187f47eb`）。已合入实现的 automated contract/browser
+> evidence 覆盖安全与负向路径；以下 AC-B1–B11 随该明确验收勾选完成。
+
+- [x] AC-B1: TTL=0 Message Bundle 持久化源 Thread、按序 exact refs、可选整包留言、创建者与创建时间；
   重启后卡片仍可展开，完整语义 payload 相同的重复提交由 idempotency key 去重。
-- [ ] AC-B2: 目标 Thread 只新增一张 Message Bundle 富卡；折叠态显示来源/数量/参与者，展开态逐条
+- [x] AC-B2: 目标 Thread 只新增一张 Message Bundle 富卡；折叠态显示来源/数量/参与者，展开态逐条
   显示作者、时间、内容与来源跳转，并有 hydration + socket convergence 测试。
-- [ ] AC-B3: 用户可选择一个目标 Thread 和一到多只目标猫；只有显式选择的猫被唤醒，来源 Thread
+- [x] AC-B3: 用户可选择一个目标 Thread 和一到多只目标猫；只有显式选择的猫被唤醒，来源 Thread
   与 Bundle identity 保留，错误目标或越权目标 fail closed。
-- [ ] AC-B4: 被唤醒猫的 prompt/context 包含所选消息/Quote/Rich Block 的可读内容、Bundle ID、源 Thread、
+- [x] AC-B4: 被唤醒猫的 prompt/context 包含所选消息/Quote/Rich Block 的可读内容、Bundle ID、源 Thread、
   exact refs、逐项 Comment 与独立归属的整包留言；回归 fixture 证明不是只有卡片标题或无来源拼接文本。
-- [ ] AC-B5: hard delete、recall（记录仍存在但 `_tombstone=true` / `deliveryStatus='canceled'`）、权限撤销
+- [x] AC-B5: hard delete、recall（记录仍存在但 `_tombstone=true` / `deliveryStatus='canceled'`）、权限撤销
   及来源消息变得不可见后，所有 Bundle read/export/context 路径均不再泄露对应正文，并以一致
   tombstone 呈现；三类失效闭环有端到端测试。
-- [ ] AC-B6: 消息与稳定 CLI segment 的文字选区复用 F063 Comment 编辑器；浮动入口名为“引用…”，
+- [x] AC-B6: 消息与稳定 CLI segment 的文字选区复用 F063 Comment 编辑器；浮动入口名为“引用…”，
   “加入当前聊天”继续进入当前 Composer，“转发…”进入 F294 目标选择器。component + browser tests
   证明两条动作不会互相改写、自动发送或丢失已有草稿；Workspace/cross-segment/streaming 选区不显示
   无法兑现的“转发…”。
-- [ ] AC-B7: 单 Quote Bundle 渲染为紧凑 Quote 卡，多消息 Bundle 渲染为折叠合并卡；原作者正文、
+- [x] AC-B7: 单 Quote Bundle 渲染为紧凑 Quote 卡，多消息 Bundle 渲染为折叠合并卡；原作者正文、
   转发者 Comment 与来源各自有明确视觉/语义标签。UI screenshot 与 prompt fixture 证明人和猫都不会
   把 Comment 归到原作者名下。
-- [ ] AC-B8: 整消息与 Quote 共用一个 `TransferTargetPicker`；桌面 modal、移动端 bottom sheet 均按
+- [x] AC-B8: 整消息与 Quote 共用一个 `TransferTargetPicker`；桌面 modal、移动端 bottom sheet 均按
   “搜索并选一个 Thread → 选至少一只猫 → 明确确认”推进。成功留在源 Thread 并提供目标跳转；失败
   保留 selection/Comment 且不出生 Bundle。keyboard/a11y component tests + desktop/mobile screenshots 覆盖。
-- [ ] AC-B9: `TransferTargetPicker` 提供可选整包留言；carrier、目标卡与猫 prompt 均把它归属给转发者，
+- [x] AC-B9: `TransferTargetPicker` 提供可选整包留言；carrier、目标卡与猫 prompt 均把它归属给转发者，
   不混入第一项 Comment/原文。留言参与幂等 fingerprint；失败保留，成功/取消清理。
-- [ ] AC-B10: 用户可按 stable `blockId` 单独转发一个 Rich Block；服务端重新解析源消息并保存
+- [x] AC-B10: 用户可按 stable `blockId` 单独转发一个 Rich Block；服务端重新解析源消息并保存
   version + digest 的 refs-only carrier。目标 human/prompt projection 只含该 block；目标 UI 的 Rich
   Block 必须只读，源 action、邻接 block、Thinking、CLI 与正文均不被隐式复制。
-- [ ] AC-B11: 用户可转发同一稳定 CLI segment 内的精确选文。服务端验证 `messageId + segmentId +
+- [x] AC-B11: 用户可转发同一稳定 CLI segment 内的精确选文。服务端验证 `messageId + segmentId +
   offsets + text`，持久化 version + digest + offsets；目标卡/prompt 只含该字符范围。跨 segment、
   streaming、伪造/歧义/漂移、来源撤回或失权均 fail closed，且浏览器回归覆盖真实 CLI Output 选区。
 
@@ -355,14 +359,14 @@ F294 不新造一套“选中文字”浮层，也不把转发塞进 Composer �
 | R1 | “我选择哪几条导出”——支持连续或离散消息多选 | AC-A1 | component test + screenshot | [x] |
 | R2 | “有可能是文本的”——只导出所选消息文本 | AC-A2, AC-A4 | API test + export snapshot | [x] |
 | R3 | “有可能是需要截图的”——只导出所选消息图片 | AC-A3, AC-A4 | screenshot diff | [x] |
-| R4 | “转发给其他线程的猫”——选 Thread、选猫并让猫读到内容 | AC-B3, AC-B4, AC-B8 | integration test + prompt fixture + browser | [ ] |
-| R5 | “肯定是卡片富文本合适”——目标 Thread 显示合并卡而非逐条克隆 | AC-B1, AC-B2 | screenshot + hydration test | [ ] |
-| R6 | 作者、顺序和来源不能在转发中丢失 | AC-B1, AC-B2, AC-B4 | store/renderer/context tests | [ ] |
+| R4 | “转发给其他线程的猫”——选 Thread、选猫并让猫读到内容 | AC-B3, AC-B4, AC-B8 | integration test + prompt fixture + browser | [x] |
+| R5 | “肯定是卡片富文本合适”——目标 Thread 显示合并卡而非逐条克隆 | AC-B1, AC-B2 | screenshot + hydration test | [x] |
+| R6 | 作者、顺序和来源不能在转发中丢失 | AC-B1, AC-B2, AC-B4 | store/renderer/context tests | [x] |
 | R7 | 未来送入 F290 多人多 Agent 协同，但私人原文不直接外流 | AC-C1, AC-C2 | F290 Gate fixture + auth test | [ ] |
-| R8 | “一条消息的某段话 Add to Chat 类型的转发”——复用选区/Comment 并转发到其他 Thread | AC-A4, AC-B6, AC-B7 | browser + API + prompt fixture | [ ] |
-| R9 | “vx 那里的留言”——转发前可写一段属于整包的留言 | AC-B4, AC-B9 | component + API + prompt fixture | [ ] |
-| R10 | “转发一个单独的猫猫执行过程中的富文本”——精确选一个 Rich Block 且不泄露邻接执行态 | AC-B4, AC-B10 | resolver + read-only UI + prompt fixture | [ ] |
-| R11 | “在你的 CLI output 划线几个字然后转发”——只发送用户精确选中的 CLI segment 字符范围 | AC-B6, AC-B11 | resolver negative cases + browser + prompt fixture | [ ] |
+| R8 | “一条消息的某段话 Add to Chat 类型的转发”——复用选区/Comment 并转发到其他 Thread | AC-A4, AC-B6, AC-B7 | browser + API + prompt fixture | [x] |
+| R9 | “vx 那里的留言”——转发前可写一段属于整包的留言 | AC-B4, AC-B9 | component + API + prompt fixture | [x] |
+| R10 | “转发一个单独的猫猫执行过程中的富文本”——精确选一个 Rich Block 且不泄露邻接执行态 | AC-B4, AC-B10 | resolver + read-only UI + prompt fixture | [x] |
+| R11 | “在你的 CLI output 划线几个字然后转发”——只发送用户精确选中的 CLI segment 字符范围 | AC-B6, AC-B11 | resolver negative cases + browser + prompt fixture | [x] |
 
 ### 覆盖检查
 
@@ -417,17 +421,27 @@ F294 不新造一套“选中文字”浮层，也不把转发塞进 Composer �
 | KD-13 | 整包留言与逐项 Comment 分离并进入幂等语义 | “为什么转发”属于转发动作本身；混进第一项会伪造归属并让 retry payload 不完整 | 2026-08-15 |
 | KD-14（修订 KD-10，operator 2026-08-18 纠正） | **不新增 thread 头部入口。**“多选消息”属于原有消息动作组：桌面/指针设备静止时整组不画、不占行，hover 或 focus 时与回复、删除、编辑、更多一起出现；在 `(hover: none) and (pointer: coarse)` 触屏上整组保持常驻可点并保留预留行 | operator 所说“隐藏这个孤立按钮”是让新增的多选按钮遵守原动作组的 hover 规则，不是删除原动作组，也不是把入口搬到 thread 头部。#3757 把这句话误解成 thread 级常驻入口，产生了新的孤立按钮。触屏没有 hover/focus，所以只在明确的触屏媒体条件下保留整组可达；判据必须同时含 `(hover: none)` 与 `(pointer: coarse)`，避免把无指点设备的自动化环境误判成触屏 | 2026-08-18 |
 | KD-15 | Quote 的 canonical plane 从 raw Markdown 改为 **readable-text projection v2**（`sourceProjectionVersion: 2`），匹配前先做 whitespace 归一 | 人在渲染平面选字符，服务端在原始 Markdown 校验——两套坐标系没有双射，凡跨标题/粗体/代码/链接的选区必然 `QUOTE_MISMATCH`。把真相源移到人实际使用的平面，并容忍 DOM 与存储之间的换行漂移；v1 carrier 仍按 v1 平面解析，永不回溯 tombstone | 2026-08-17 |
-| KD-16 | Markdown Quote 平面**完全不读客户端 offset**：唯一匹配才接受，重复一律 `ambiguous_quote`；CLI segment 继续走不做归一的严格坐标路径 | 客户端 offset 量在 DOM 坐标系，投影在 v2 坐标系，两者对不齐——它既不能当最近邻消歧依据，也不能当 `slice === text` 的直通凭据：切片相同只证明这个数字命中了投影里*某一段*同样的字符，不证明命中人选的那一段。实测碰撞（Terra 在 #3757 R2 指出）：source `\n\n\n\nfoo\n\nfoo` 在生产 ReactMarkdown 栈下，人选第二段 Chromium 报 `4..7`，而投影里第一处 `foo` 恰好也在 `4..7`。CLI 在 `<pre>` 渲染，存储字符即渲染字符，坐标本就权威 | 2026-08-17 |
+| KD-16 | Markdown Quote 平面**完全不读客户端 offset**：唯一匹配才接受，重复一律 `ambiguous_quote`；raw CLI tool label/detail 与历史 v1 stdout 继续走不做归一的严格坐标路径 | 客户端 offset 量在 DOM 坐标系，投影在 readable 坐标系，两者对不齐——它既不能当最近邻消歧依据，也不能当 `slice === text` 的直通凭据：切片相同只证明这个数字命中了投影里*某一段*同样的字符，不证明命中人选的那一段。实测碰撞（Terra 在 #3757 R2 指出）：source `\n\n\n\nfoo\n\nfoo` 在生产 ReactMarkdown 栈下，人选第二段 Chromium 报 `4..7`，而投影里第一处 `foo` 恰好也在 `4..7`。只有未经过 Markdown 渲染的 raw CLI 平面才保留权威坐标 | 2026-08-17 |
 | KD-17 | readable projection 从**渲染器同款 remark AST** 导出，而不是正则近似；不认识的节点**保留原文**而不是猜着剥离 | 超集不变量（读者可见的字符序列，投影里出现次数不得少于屏幕上）是唯一性判据成立的前提：丢字 = 假唯一性 = 锚到人没选的那处。正则近似每加一条规则就多一个猜错入口——同一不变量在 #3757 被连破五次（字符引用 / 孤立 `--` / 列数不匹配的 pipe 行 / 无分隔行的 pipe 行 / 无效数字引用 `&#128;`）。remark 是渲染器本身的解析器，这些问题它天然答对；而“认不出就保留”把默认方向从“猜着丢”翻成“多留”，多留只会 mismatch/ambiguous，天然 fail closed | 2026-08-17 |
 | KD-18 | 消息含**渲染器自行生成文本**的构造（脚注角标、KaTeX 公式）时，划线引用整体拒绝（`unsupported_source`），不在该平面做校验；整条消息转发不受影响 | 超集不变量能靠「用同一个解析器」保证的前提是：可见文本在源码里有对应物。脚注角标 `1` 由位置生成、KaTeX 字形替换掉 TeX——它们在源码里**根本不存在**，任何源码派生的投影都不可能携带，于是唯一性判据不是「难保证」而是「不可证」。此时唯一诚实的动作是拒绝校验，而不是拿一张不完整的图去锚定（Terra 在 #3757 R3 用脚注角标 vs 代码 `1` 复现）| 2026-08-17 |
 | KD-19 | **屏幕上的唯一性由浏览器断言，不由服务端推断**：quote 携带客户端实测的 `renderedOccurrences`，admission 要求恰好为 1（缺失即拒）；计数与 `Selection.toString()` 使用同一个保留块级分隔的 layout-text 平面，不能用抹掉段落边界的 `textContent`；同时 UI chrome 子树标 `data-quote-exclude`，选区相交即不提供引用 | 服务端永远看不见渲染平面——脚注角标、KaTeX 字形、组件 loading 文案（Mermaid）都是渲染器凭空生成的，投影再准也数不到它们。KD-17/KD-18 只能覆盖“源码里有对应物”和“能从源码点名”的构造，Mermaid 这类**组件自渲染 chrome** 两者都不属于（Terra 在 #3757 R5 复现）。唯一能看见那个平面的是浏览器，所以让它出具显式断言、服务端只做限制性消费：断言错只会导致拒绝，永远不会放宽锚定；而 `innerText` 与实际 Selection 都把相邻 `<p>` 投影成 `\n\n`，保证跨段选区不会在客户端被误判为零次 | 2026-08-17 |
 | KD-20 | 普通消息 Quote 的新写入统一锚定在**完整 canonical bubble 的 readable projection v3**；carrier 保存 bubble anchor 与 v3 domain digest，历史 v1/v2 carrier 继续按原 row 平面读取 | 浏览器把同一 turn/callback 的多条存储 row 投影成一只气泡，用户选区可以跨 row 边界；逐 row 解析会把屏幕上合法的选区拒成 `source_unavailable` / `quote_mismatch`，也无法忠实重读。服务端必须复建与 Web 同一 ordered group 后只解析一次；bubble 成员或内容变化则由完整投影 digest fail closed 为 `source_changed`，不能回退到某条“最像”的 row | 2026-08-18 |
+| KD-21 | CLI stdout 的 DOM 明确声明 **Markdown readable projection v2**；浏览器提交 v2 + `renderedOccurrences`，服务端按同款 readable projector 唯一锚定并使用独立 digest domain。tool label/detail 与历史 CLI v1 carrier 不变 | `CliOutputBlock` 的 stdout 实际由 `MarkdownContent` 渲染：表格选区是 tab 分隔的可见 cell 文本，raw source 却含 pipe、反引号和链接目标。继续把 stdout 假装成 raw 平面会让未编辑的合法选区稳定报 `quote_mismatch`。显式分版本把两条真实契约拆开；重复文本、生成文本仍 fail closed，不靠放宽匹配补锅 | 2026-08-22 |
 
 ## Tips Contribution（F244）
 
 - 新增一条上下文 tip：从消息 hover/focus 动作组里的「多选消息」进入多选（触屏上动作组常驻可点），可将所选内容导出文本/图片或作为合并卡转发；
   框选消息文字后可从现有 Comment 编辑器选择加入当前聊天或转发到其他 Thread。
 - tip 的 `sourceRef` 指向本 spec 的 Primary Journey，只有多选入口可用时才展示。
+
+## Current Close Gate（2026-08-19 愿景守护）
+
+| 维度 | 真相 | 证据与下一步 |
+|------|------|--------------|
+| Phase A | 完成 | AC-A1–A4 已有合入实现与既有验收。 |
+| Phase B | **完成 / operator Alpha UAT accepted** | PR #3720、#3757、#3767、#3774、#3779 都已合入 main；operator 已确认此前多轮 Alpha dogfood、反馈与修正构成 Phase B 验收。 |
+| Phase C / public boundary | 未完成且有明确依赖 | AC-C1/C2 依赖 F290 public projection。F290 当前仍是 `spec / Experience Design Gate`，且没有 operator signoff 将 Phase C 从 F294 完成范围移除。 |
+| Feature close | **等待 F290** | F294 原始 scope 将 Phase C 列为完成范围；Phase A/B 已完成，待 F290 public handoff 落地并让 AC-C1/C2 有可复核证据后再生成 CloseGateReport 和标记 done。 |
 
 ## Review Gate
 

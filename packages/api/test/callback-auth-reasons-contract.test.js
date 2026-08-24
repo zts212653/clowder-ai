@@ -7,6 +7,7 @@
  * review (reminder #2).
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 describe('CallbackAuthFailureReason contract (F174 Phase A)', () => {
@@ -34,9 +35,37 @@ describe('CallbackAuthFailureReason contract (F174 Phase A)', () => {
 
   test('expected reasons are present (regression guard for accidental deletion)', async () => {
     const { CALLBACK_AUTH_FAILURE_REASONS } = await import('../../shared/dist/types/callback-auth-reasons.js');
-    const expected = ['expired', 'invalid_token', 'unknown_invocation', 'missing_creds', 'stale_invocation'];
+    const expected = [
+      'invalid_token',
+      'unknown_invocation',
+      'missing_creds',
+      'stale_invocation',
+      'completed',
+      'failed',
+      'interrupted',
+      'replaced',
+      'revoked',
+      'canceled',
+    ];
     for (const r of expected) {
       assert.ok(CALLBACK_AUTH_FAILURE_REASONS.includes(r), `missing core reason: ${r}`);
+    }
+    assert.equal(CALLBACK_AUTH_FAILURE_REASONS.includes('expired'), false, 'elapsed time is not terminal state');
+  });
+
+  test('refresh and telemetry contract text names terminal dispositions, not retired sliding expiry', () => {
+    const callbacksSource = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
+    const telemetrySource = readFileSync(
+      new URL('../src/infrastructure/telemetry/instruments.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.doesNotMatch(callbacksSource, /slides? TTL|race against expiry|keep tokens alive/);
+    assert.doesNotMatch(telemetrySource, /callback\.reason:.*expired/);
+    const reasonContract = telemetrySource.match(/callback\.reason:[\s\S]*?\n \* {3}- callback\.tool:/)?.[0];
+    assert.ok(reasonContract, 'callback.reason telemetry contract block must remain discoverable');
+    for (const disposition of ['completed', 'failed', 'interrupted', 'replaced', 'revoked', 'canceled']) {
+      assert.match(reasonContract, new RegExp(disposition));
     }
   });
 });

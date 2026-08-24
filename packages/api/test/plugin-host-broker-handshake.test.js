@@ -16,7 +16,7 @@ import {
 async function harness(options = {}) {
   let now = options.now ?? 5_000;
   const inventory = await readyInventory();
-  const store = new MemoryHostBrokerStore();
+  const store = options.store ?? new MemoryHostBrokerStore();
   const broker = new HostBrokerControlPlane({
     inventory,
     store,
@@ -129,10 +129,139 @@ describe('K-2B Host Broker handshake', () => {
     setNow(19_000);
     await assert.rejects(
       connection.renewRuntimeLease(),
-      (error) => error instanceof HostBrokerError && error.code === 'SESSION_NOT_ACTIVE',
+      (error) =>
+        error instanceof HostBrokerError &&
+        error.code === 'SESSION_NOT_ACTIVE' &&
+        error.sessionCloseReason === 'runtime_lease_expired',
     );
     snapshot = await store.snapshot();
     assert.equal(snapshot.sessions[0].phase, 'closed');
     assert.equal(snapshot.runtimeLeases[0].state, 'closed');
+  });
+
+  it('preserves an authority-change close reason on the heartbeat after the session closes', async () => {
+    const { connection, inventory, store } = await harness();
+    const binding = await connection.hello(candidateHello());
+    await connection.ready({ bindingNonce: binding.bindingNonce });
+    await inventory.transaction((transaction) => {
+      const grants = transaction.grants.get(INSTANCE_ID);
+      transaction.grants.put({ ...grants, grantRevision: grants.grantRevision + 1 });
+    });
+
+    await assert.rejects(
+      connection.renewRuntimeLease(),
+      (error) => error instanceof HostBrokerError && error.code === 'AUTHORITY_CHANGED',
+    );
+    await assert.rejects(
+      connection.renewRuntimeLease(),
+      (error) =>
+        error instanceof HostBrokerError &&
+        error.code === 'SESSION_NOT_ACTIVE' &&
+        error.sessionCloseReason === 'authority_changed',
+    );
+
+    const snapshot = await store.snapshot();
+    assert.equal(snapshot.sessions[0].phase, 'closed');
+    assert.equal(snapshot.sessions[0].closeReason, 'authority_changed');
+    assert.equal(snapshot.runtimeLeases[0].state, 'closed');
+  });
+
+  it('reports the persisted close reason when another close wins the heartbeat race', async () => {
+    const delegate = new MemoryHostBrokerStore();
+    let beforeSnapshotReturn;
+    const store = {
+      transaction: (work) => delegate.transaction(work),
+      snapshot: async () => {
+        const snapshot = await delegate.snapshot();
+        const hook = beforeSnapshotReturn;
+        beforeSnapshotReturn = undefined;
+        if (hook) await hook();
+        return snapshot;
+      },
+    };
+    const { connection, setNow } = await harness({ store });
+    const binding = await connection.hello(candidateHello());
+    await connection.ready({ bindingNonce: binding.bindingNonce });
+    setNow(15_000);
+    beforeSnapshotReturn = () => connection.close('authority_changed');
+
+    await assert.rejects(
+      connection.renewRuntimeLease(),
+      (error) =>
+        error instanceof HostBrokerError &&
+        error.code === 'SESSION_NOT_ACTIVE' &&
+        error.sessionCloseReason === 'authority_changed',
+    );
+
+    const snapshot = await delegate.snapshot();
+    assert.equal(snapshot.sessions[0].phase, 'closed');
+    assert.equal(snapshot.sessions[0].closeReason, 'authority_changed');
+    assert.equal(snapshot.runtimeLeases[0].state, 'closed');
+  });
+
+  for (const closeReason of ['runtime_lease_expired', 'authority_changed']) {
+    it(`reports ${closeReason} when close wins after the heartbeat context read`, async () => {
+      const delegate = new MemoryHostBrokerStore();
+      let beforeTransaction;
+      const store = {
+        snapshot: () => delegate.snapshot(),
+        transaction: async (work) => {
+          const hook = beforeTransaction;
+          beforeTransaction = undefined;
+          if (hook) await hook();
+          return delegate.transaction(work);
+        },
+      };
+      const { connection } = await harness({ store });
+      const binding = await connection.hello(candidateHello());
+      await connection.ready({ bindingNonce: binding.bindingNonce });
+      beforeTransaction = () => connection.close(closeReason);
+
+      await assert.rejects(
+        connection.renewRuntimeLease(),
+        (error) =>
+          error instanceof HostBrokerError &&
+          error.code === 'SESSION_NOT_ACTIVE' &&
+          error.sessionCloseReason === closeReason,
+      );
+
+      const snapshot = await delegate.snapshot();
+      assert.equal(snapshot.sessions[0].phase, 'closed');
+      assert.equal(snapshot.sessions[0].closeReason, closeReason);
+      assert.equal(snapshot.runtimeLeases[0].state, 'closed');
+    });
+  }
+
+  it('does not report lease expiry when the terminal close was not persisted', async () => {
+    const delegate = new MemoryHostBrokerStore();
+    let rejectNextTransaction = false;
+    const store = {
+      snapshot: () => delegate.snapshot(),
+      transaction: (work) => {
+        if (rejectNextTransaction) {
+          rejectNextTransaction = false;
+          throw new Error('simulated Broker store write failure');
+        }
+        return delegate.transaction(work);
+      },
+    };
+    const { connection, setNow } = await harness({ store });
+    const binding = await connection.hello(candidateHello());
+    await connection.ready({ bindingNonce: binding.bindingNonce });
+    setNow(15_000);
+    rejectNextTransaction = true;
+
+    await assert.rejects(
+      connection.renewRuntimeLease(),
+      (error) =>
+        error instanceof HostBrokerError &&
+        error.code === 'SESSION_NOT_ACTIVE' &&
+        error.sessionCloseReason === 'session_not_active',
+    );
+
+    const snapshot = await delegate.snapshot();
+    assert.equal(snapshot.sessions[0].phase, 'active');
+    assert.equal(snapshot.sessions[0].closeReason, undefined);
+    assert.equal(snapshot.runtimeLeases[0].state, 'live');
   });
 });

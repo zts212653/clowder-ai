@@ -25,11 +25,16 @@ describe('callback-auth-telemetry (F174-D1)', () => {
   test('AC-D1: snapshot starts empty', () => {
     const snap = getCallbackAuthFailureSnapshot();
     assert.deepEqual(snap.reasonCounts, {
-      expired: 0,
       invalid_token: 0,
       unknown_invocation: 0,
       missing_creds: 0,
       stale_invocation: 0,
+      completed: 0,
+      failed: 0,
+      interrupted: 0,
+      replaced: 0,
+      revoked: 0,
+      canceled: 0,
       agent_key_expired: 0,
       agent_key_revoked: 0,
       agent_key_unknown: 0,
@@ -39,8 +44,19 @@ describe('callback-auth-telemetry (F174-D1)', () => {
     assert.equal(snap.totalFailures, 0);
   });
 
-  test('AC-D2: all 5 reasons increment correctly', () => {
-    const reasons = ['expired', 'invalid_token', 'unknown_invocation', 'missing_creds', 'stale_invocation'];
+  test('AC-D2: all callback invocation reasons increment correctly', () => {
+    const reasons = [
+      'invalid_token',
+      'unknown_invocation',
+      'missing_creds',
+      'stale_invocation',
+      'completed',
+      'failed',
+      'interrupted',
+      'replaced',
+      'revoked',
+      'canceled',
+    ];
     for (const reason of reasons) {
       recordCallbackAuthFailure({ reason, tool: 'refresh-token', catId: 'opus' });
     }
@@ -48,12 +64,12 @@ describe('callback-auth-telemetry (F174-D1)', () => {
     for (const reason of reasons) {
       assert.equal(snap.reasonCounts[reason], 1, `reason=${reason} count must be 1`);
     }
-    assert.equal(snap.totalFailures, 5);
+    assert.equal(snap.totalFailures, reasons.length);
   });
 
   test('toolCounts tracks per-tool failures', () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     recordCallbackAuthFailure({ reason: 'invalid_token', tool: 'post-message', catId: 'codex' });
     const snap = getCallbackAuthFailureSnapshot();
     assert.equal(snap.toolCounts['refresh-token'], 2);
@@ -62,7 +78,7 @@ describe('callback-auth-telemetry (F174-D1)', () => {
   });
 
   test('recentSamples includes timestamp, reason, tool, catId (last N)', () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     recordCallbackAuthFailure({ reason: 'invalid_token', tool: 'post-message', catId: 'codex' });
     const snap = getCallbackAuthFailureSnapshot();
     assert.ok(Array.isArray(snap.recentSamples));
@@ -76,12 +92,12 @@ describe('callback-auth-telemetry (F174-D1)', () => {
 
   test('recentSamples capped to prevent unbounded growth', () => {
     for (let i = 0; i < 200; i++) {
-      recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+      recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     }
     const snap = getCallbackAuthFailureSnapshot();
     assert.ok(snap.recentSamples.length <= 100, `recentSamples must cap at 100, got ${snap.recentSamples.length}`);
     assert.equal(snap.totalFailures, 200, 'totalFailures still tracks all');
-    assert.equal(snap.reasonCounts.expired, 200, 'reasonCounts not capped');
+    assert.equal(snap.reasonCounts.interrupted, 200, 'reasonCounts not capped');
   });
 
   test('handles missing catId gracefully (panel/anonymous failures)', () => {

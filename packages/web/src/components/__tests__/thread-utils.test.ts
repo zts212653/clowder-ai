@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
+import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import {
   buildSidebarTabContent,
   buildSidebarTabs,
   formatRelativeTime,
   getProjectPaths,
-  mergeLiveActivityIntoThreads,
   naturalTabForThread,
   projectDisplayName,
-  reconcileActiveThreadOrder,
   type SidebarTabId,
   sortAndGroupThreads,
   sortAndGroupThreadsWithWorkspace,
 } from '../ThreadSidebar/thread-utils';
 
-function makeThread(overrides: Partial<Thread> & { id: string }): Thread {
+type TestThread = Thread & Partial<Pick<SidebarSnapshotRow, 'presence'>>;
+
+function makeThread(overrides: Partial<TestThread> & { id: string }): TestThread {
   return {
     projectPath: 'default',
     title: null,
@@ -200,39 +201,42 @@ describe('sortAndGroupThreads', () => {
     expect(pinned.threads[0].id).toBe('new');
   });
 
-  it('keeps concurrently executing threads stable above inactive threads', () => {
+  it('sorts solely by snapshot lastActiveAt, independent of runtime activation order', () => {
     const threads = [
       makeThread({ id: 'active-first', projectPath: '/proj/x', lastActiveAt: 1000 }),
       makeThread({ id: 'active-second', projectPath: '/proj/x', lastActiveAt: 9000 }),
       makeThread({ id: 'inactive', projectPath: '/proj/x', lastActiveAt: 8000 }),
     ];
-    const activeOrder = new Map([
-      ['active-first', 0],
-      ['active-second', 1],
-    ]);
+    const runtimeState = {
+      'active-first': { hasActiveInvocation: true, lastActivity: 99_000 },
+      inactive: { hasActiveInvocation: false, lastActivity: 100_000 },
+    };
 
-    const before = sortAndGroupThreads(mergeLiveActivityIntoThreads(threads, {}, activeOrder), new Set());
-    expect(before[0].threads.map((thread) => thread.id)).toEqual(['active-first', 'active-second', 'inactive']);
+    const before = sortAndGroupThreads(threads, new Set());
+    runtimeState['active-first'].lastActivity = 101_000;
+    const afterRuntimeMutation = sortAndGroupThreads(threads, new Set());
 
-    const afterLiveChunks = sortAndGroupThreads(
-      mergeLiveActivityIntoThreads(
-        threads.map((thread) =>
-          thread.id === 'active-first'
-            ? { ...thread, lastActiveAt: 12_000 }
-            : thread.id === 'active-second'
-              ? { ...thread, lastActiveAt: 13_000 }
-              : thread,
-        ),
-        {},
-        activeOrder,
-      ),
-      new Set(),
-    );
-    expect(afterLiveChunks[0].threads.map((thread) => thread.id)).toEqual([
-      'active-first',
-      'active-second',
-      'inactive',
-    ]);
+    expect(before[0].threads.map((thread) => thread.id)).toEqual(['active-second', 'inactive', 'active-first']);
+    expect(afterRuntimeMutation).toEqual(before);
+  });
+
+  it('orders concurrent working rows by immutable C10 activeSince, not C7 recency', () => {
+    const threads = [
+      {
+        ...makeThread({ id: 'started-first', projectPath: '/proj/x', lastActiveAt: 1000 }),
+        presence: { status: 'working' as const, activeSince: 1000 },
+      },
+      {
+        ...makeThread({ id: 'started-second', projectPath: '/proj/x', lastActiveAt: 9000 }),
+        presence: { status: 'working' as const, activeSince: 8000 },
+      },
+    ];
+
+    const before = sortAndGroupThreads(threads, new Set());
+    const afterElapsedRefresh = sortAndGroupThreads(threads, new Set());
+
+    expect(before[0].threads.map((thread) => thread.id)).toEqual(['started-first', 'started-second']);
+    expect(afterElapsedRefresh).toEqual(before);
   });
 
   it('sorts project groups alphabetically, "default" last', () => {
@@ -320,76 +324,6 @@ describe('getProjectPaths', () => {
       makeThread({ id: 't3', projectPath: '/proj/gamma', lastActiveAt: 300 }),
     ];
     expect(getProjectPaths(threads)).toEqual(['/proj/beta', '/proj/gamma', '/proj/alpha']);
-  });
-});
-
-// ── mergeLiveActivityIntoThreads ─────────────────────
-
-describe('mergeLiveActivityIntoThreads', () => {
-  it('prefers newer live activity from thread state over stale summary timestamp', () => {
-    const threads = [
-      makeThread({ id: 'pinned-stale', pinned: true, lastActiveAt: NOW - 10 * DAY }),
-      makeThread({ id: 'pinned-fresh', pinned: true, lastActiveAt: NOW - 2 * DAY }),
-    ];
-
-    const merged = mergeLiveActivityIntoThreads(threads, {
-      'pinned-stale': { lastActivity: NOW - 1_000 },
-    });
-
-    expect(merged.find((thread) => thread.id === 'pinned-stale')?.lastActiveAt).toBe(NOW - 1_000);
-    expect(merged.find((thread) => thread.id === 'pinned-fresh')?.lastActiveAt).toBe(NOW - 2 * DAY);
-  });
-});
-
-describe('reconcileActiveThreadOrder', () => {
-  it('appends newly active threads without moving threads that are already executing', () => {
-    const threads = [makeThread({ id: 'thread-b' }), makeThread({ id: 'thread-a' }), makeThread({ id: 'thread-c' })];
-
-    const first = reconcileActiveThreadOrder(
-      threads,
-      {
-        'thread-a': { hasActiveInvocation: true },
-        'thread-b': { hasActiveInvocation: false },
-      },
-      new Map(),
-    );
-    expect([...first]).toEqual([['thread-a', 0]]);
-
-    const second = reconcileActiveThreadOrder(
-      threads,
-      {
-        'thread-a': { hasActiveInvocation: true },
-        'thread-b': { hasActiveInvocation: true },
-      },
-      first,
-    );
-    expect([...second]).toEqual([
-      ['thread-a', 0],
-      ['thread-b', 1],
-    ]);
-
-    const afterAStops = reconcileActiveThreadOrder(
-      threads,
-      {
-        'thread-a': { hasActiveInvocation: false },
-        'thread-b': { hasActiveInvocation: true },
-      },
-      second,
-    );
-    expect([...afterAStops]).toEqual([['thread-b', 1]]);
-
-    const afterAReactivates = reconcileActiveThreadOrder(
-      threads,
-      {
-        'thread-a': { hasActiveInvocation: true },
-        'thread-b': { hasActiveInvocation: true },
-      },
-      afterAStops,
-    );
-    expect([...afterAReactivates]).toEqual([
-      ['thread-b', 1],
-      ['thread-a', 2],
-    ]);
   });
 });
 
@@ -486,16 +420,13 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     expect(types).toContain('project');
   });
 
-  it('floats a pinned thread to the top when live sidebar activity is newer than thread summary activity', () => {
-    const threads = mergeLiveActivityIntoThreads(
-      [
-        makeThread({ id: 'pinned-old', pinned: true, lastActiveAt: NOW - 10 * DAY }),
-        makeThread({ id: 'pinned-newer', pinned: true, lastActiveAt: NOW - 2 * DAY }),
-      ],
-      {
-        'pinned-old': { lastActivity: NOW - 500 },
-      },
-    );
+  it('keeps pinned order on canonical snapshot activity when runtime activity is newer', () => {
+    const threads = [
+      makeThread({ id: 'pinned-old', pinned: true, lastActiveAt: NOW - 10 * DAY }),
+      makeThread({ id: 'pinned-newer', pinned: true, lastActiveAt: NOW - 2 * DAY }),
+    ];
+    const runtimeLastActivity = { 'pinned-old': NOW - 500 };
+    expect(runtimeLastActivity['pinned-old']).toBeGreaterThan(threads[1].lastActiveAt);
 
     const groups = sortAndGroupThreadsWithWorkspace(
       threads,
@@ -506,7 +437,7 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     );
 
     const pinned = groups.find((group) => group.type === 'pinned');
-    expect(pinned?.threads.map((thread) => thread.id)).toEqual(['pinned-old', 'pinned-newer']);
+    expect(pinned?.threads.map((thread) => thread.id)).toEqual(['pinned-newer', 'pinned-old']);
   });
 
   // F192 livefix: systemKind-based system section grouping (OQ-19)
@@ -592,12 +523,12 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     expect(project?.threads.map((t) => t.id)).toContain('regular-proj');
   });
 
-  it('groups both connector_hub and eval_domain threads into system section', () => {
+  it('groups presentation-safe connector_hub and eval_domain kinds into the system section', () => {
     const threads = [
       makeThread({
         id: 'hub-thread',
         title: 'IM Hub',
-        connectorHubState: { v: 1, connectorId: 'feishu', externalChatId: '123', createdAt: NOW },
+        systemKind: 'connector_hub',
         lastActiveAt: NOW,
       }),
       makeThread({ id: 'eval-thread', title: 'Memory Eval', systemKind: 'eval_domain', lastActiveAt: NOW - DAY }),
@@ -655,23 +586,30 @@ describe('sidebar tab selectors', () => {
     expect(content.threads.map((thread) => thread.id)).toEqual(['pinned', 'regular-new', 'regular-old', 'fav']);
   });
 
-  it('recent tab keeps active threads in activation order above inactive unread threads', () => {
+  it('recent tab keeps canonical working rows stable above inactive unread rows', () => {
     const threads = [
-      makeThread({ id: 'active-first', lastActiveAt: NOW - DAY }),
-      makeThread({ id: 'active-second', lastActiveAt: NOW }),
-      makeThread({ id: 'inactive-unread', lastActiveAt: NOW - 1_000 }),
+      makeThread({
+        id: 'active-first',
+        pinned: true,
+        lastActiveAt: NOW - DAY,
+        presence: { status: 'working', activeSince: NOW - 10 * 60_000 },
+      }),
+      makeThread({
+        id: 'active-second',
+        pinned: true,
+        lastActiveAt: NOW,
+        presence: { status: 'working', activeSince: NOW - 5 * 60_000 },
+      }),
+      makeThread({
+        id: 'inactive-unread',
+        pinned: true,
+        lastActiveAt: NOW - 1_000,
+        presence: { status: 'idle' },
+      }),
     ];
-    const projected = mergeLiveActivityIntoThreads(
-      threads,
-      {},
-      new Map([
-        ['active-first', 0],
-        ['active-second', 1],
-      ]),
-    );
     const content = buildSidebarTabContent(
       'recent',
-      projected,
+      threads,
       new Set(),
       new Set(['inactive-unread']),
       { activeCutoffMs: 7 * DAY, recentLimit: 8 },
@@ -679,6 +617,26 @@ describe('sidebar tab selectors', () => {
     );
 
     expect(content.threads.map((thread) => thread.id)).toEqual(['active-first', 'active-second', 'inactive-unread']);
+  });
+
+  it('uses thread id as a deterministic tie-breaker when canonical working start time is unavailable', () => {
+    const threads = [
+      makeThread({
+        id: 'working-z',
+        lastActiveAt: NOW,
+        presence: { status: 'working' },
+      }),
+      makeThread({
+        id: 'working-a',
+        lastActiveAt: NOW - DAY,
+        presence: { status: 'working' },
+      }),
+      makeThread({ id: 'idle', lastActiveAt: NOW + 1_000, presence: { status: 'idle' } }),
+    ];
+
+    const content = buildSidebarTabContent('recent', threads, new Set(), new Set());
+
+    expect(content.threads.map((thread) => thread.id)).toEqual(['working-a', 'working-z', 'idle']);
   });
 
   it('recent tab shows all non-pinned non-system threads without truncation (clowder-ai#1305)', () => {

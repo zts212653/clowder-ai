@@ -1973,8 +1973,8 @@ describe(
       );
       assert.match(
         gate,
-        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 NODE_ENV=test/,
-        'API startup acceptance should reuse the same temp-target allow-root so projectPath-based dispatch stays representative',
+        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 CAT_CAFE_INVOCATION_REGISTRY=memory NODE_ENV=test/,
+        'API startup acceptance should reuse the same temp-target allow-root and explicitly select the degraded callback-auth backend used by this Redis-free local test',
       );
     });
 

@@ -4,6 +4,7 @@
  *
  * GET   /api/threads/:threadId/sessions            - List sessions (optional catId filter)
  * GET   /api/sessions/:sessionId                   - Get single session record
+ * POST  /api/sessions/:sessionId/seal              - Safely seal an idle active session
  * POST  /api/sessions/:sessionId/unseal            - Restore historical session as current (#F062)
  * PATCH /api/threads/:threadId/sessions/:catId/bind - Manual bind CLI session ID (#72)
  */
@@ -17,6 +18,13 @@ import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-sess
 import { backfillBoundSessionHistory } from '../domains/cats/services/session/BoundSessionHistoryImporter.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
+import {
+  canReadThreadRecord,
+  filterThreadRecords,
+  resolveThreadAccess,
+  threadAccessDeniedBody,
+  threadRecordAccessDeniedBody,
+} from '../domains/cats/services/session/thread-access-policy.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type {
   ISessionChainStore,
@@ -50,7 +58,18 @@ interface SessionChainRouteOptions extends FastifyPluginOptions {
   transcriptReader?: TranscriptReader;
   sessionSealer?: ISessionSealer;
   runtimeSessionStore?: IRuntimeSessionStore;
+  /** Process-local busy probe: true while the cat has a live invocation or queued work for this user. */
   isSessionSwitchBusy?: (threadId: string, catId: string, userId: string) => boolean;
+  /** Process-local control plane. Any live provider turn for the cat must block a manual seal. */
+  invocationTracker?: {
+    has(threadId: string, catId: string): boolean;
+    guardSessionSeal?(threadId: string, catId: string): { acquired: boolean; release(): void };
+  };
+  /** Canonical durable/provider liveness projection. Incomplete reads fail closed. */
+  resolveSessionSealLiveness?: (
+    threadId: string,
+    ownerUserId: string,
+  ) => Promise<{ catIds: readonly string[]; complete: boolean }>;
 }
 
 interface RuntimeSessionSummary {
@@ -61,6 +80,41 @@ interface RuntimeSessionSummary {
   lastObservedAt: number;
   retryFragment?: RuntimeSessionMetadata['lifecycle']['retryFragment'];
   unexpectedRuntimeSessionSwitch?: RuntimeSessionMetadata['lifecycle']['unexpectedRuntimeSessionSwitch'];
+}
+
+type ManualSealCandidate =
+  | { kind: 'ready'; session: SessionRecord }
+  | { kind: 'error'; status: 403 | 404 | 409; body: Record<string, unknown> };
+
+async function resolveManualSealCandidate(input: {
+  sessionId: string;
+  userId: string;
+  sessionChainStore: ISessionChainStore;
+  threadStore: IThreadStore;
+}): Promise<ManualSealCandidate> {
+  const session = await input.sessionChainStore.get(input.sessionId);
+  if (!session) {
+    return { kind: 'error', status: 404, body: { error: 'Session not found', code: 'SESSION_NOT_FOUND' } };
+  }
+  const thread = await input.threadStore.get(session.threadId);
+  if (!thread) {
+    return { kind: 'error', status: 404, body: { error: 'Thread not found', code: 'THREAD_NOT_FOUND' } };
+  }
+  if (!canAccessSessionRecord(thread, session, input.userId)) {
+    return { kind: 'error', status: 403, body: { error: 'Access denied', code: 'SESSION_ACCESS_DENIED' } };
+  }
+  if (session.status !== 'active') {
+    return {
+      kind: 'error',
+      status: 409,
+      body: {
+        error: 'Only an active session can be sealed',
+        code: 'SESSION_NOT_ACTIVE',
+        currentStatus: session.status,
+      },
+    };
+  }
+  return { kind: 'ready', session };
 }
 
 function canAccessSessionRecord(
@@ -250,9 +304,14 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
 
     const { threadId } = request.params;
     const thread = await threadStore.get(threadId);
-    if (!canAccessThread(thread, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'sessions', action: 'list' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
     }
 
     const { catId } = request.query;
@@ -270,19 +329,15 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       const sessions = await sessionChainStore.getChain(
         effectiveCatId as CatId,
         threadId,
-        isSharedDefaultThread(thread) ? userId : undefined,
+        access.scope === 'user' ? userId : undefined,
       );
-      const visibleSessions = isSharedDefaultThread(thread)
-        ? sessions.filter((session) => session.userId === userId)
-        : sessions;
+      const visibleSessions = filterThreadRecords(access, sessions);
       return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
     }
 
-    // No catId filter at all (hub UI god-view) — default thread stays user-scoped.
+    // No catId filter at all (hub UI god-view) — shared system threads stay user-scoped.
     const sessions = await sessionChainStore.getChainByThread(threadId);
-    const visibleSessions = isSharedDefaultThread(thread)
-      ? sessions.filter((session) => session.userId === userId)
-      : sessions;
+    const visibleSessions = filterThreadRecords(access, sessions);
     return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
   });
 
@@ -307,12 +362,125 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    if (!canAccessSessionRecord(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'sessions', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
     return reply.send(await attachRuntimeSessionSummary(session, runtimeSessionStore));
+  });
+
+  // POST /api/sessions/:sessionId/seal — manual, idle-only session rotation.
+  // The endpoint intentionally has no fallback that writes a replacement session:
+  // successful requestSeal() clears the active pointer and the next real activation
+  // owns creation of its fresh session.
+  app.post<{
+    Params: { sessionId: string };
+  }>('/api/sessions/:sessionId/seal', async (request, reply) => {
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    if (!sessionSealer) {
+      reply.status(503);
+      return { error: 'Session sealing is temporarily unavailable', code: 'SESSION_SEAL_UNAVAILABLE' };
+    }
+
+    const candidate = await resolveManualSealCandidate({
+      sessionId: request.params.sessionId,
+      userId,
+      sessionChainStore,
+      threadStore,
+    });
+    if (candidate.kind === 'error') {
+      reply.status(candidate.status);
+      return candidate.body;
+    }
+    const { session } = candidate;
+
+    let liveness: { catIds: readonly string[]; complete: boolean };
+    try {
+      if (!opts.resolveSessionSealLiveness) throw new Error('session seal liveness resolver missing');
+      liveness = await opts.resolveSessionSealLiveness(session.threadId, session.userId);
+    } catch {
+      reply.status(503);
+      return {
+        error: 'Unable to verify whether this Agent is still running',
+        code: 'SESSION_LIVENESS_UNAVAILABLE',
+      };
+    }
+    if (!liveness.complete) {
+      reply.status(503);
+      return {
+        error: 'Unable to verify whether this Agent is still running',
+        code: 'SESSION_LIVENESS_UNAVAILABLE',
+      };
+    }
+    if (liveness.catIds.includes(session.catId)) {
+      reply.status(409);
+      return { error: '请先停止该 Agent，再封存会话', code: 'SESSION_ACTIVE_INVOCATION', catId: session.catId };
+    }
+
+    // The check and the session-store transition are separated by awaits. Use
+    // the tracker slot guard when available so a local invocation cannot start
+    // and capture this still-active record in that window. It is released as
+    // soon as requestSeal atomically removes the old active pointer.
+    const sealGuard = opts.invocationTracker?.guardSessionSeal
+      ? opts.invocationTracker.guardSessionSeal(session.threadId, session.catId)
+      : {
+          acquired: !opts.invocationTracker?.has(session.threadId, session.catId),
+          release: () => {},
+        };
+    if (!sealGuard.acquired) {
+      reply.status(409);
+      return { error: '请先停止该 Agent，再封存会话', code: 'SESSION_ACTIVE_INVOCATION', catId: session.catId };
+    }
+
+    let seal;
+    try {
+      seal = await sessionSealer.requestSeal({ sessionId: session.id, reason: 'manual' });
+    } finally {
+      sealGuard.release();
+    }
+    if (!seal.accepted) {
+      const latest = await sessionChainStore.get(session.id);
+      reply.status(409);
+      return {
+        error: '会话状态已变化，请刷新后重试',
+        code: 'SESSION_SEAL_RACE',
+        currentStatus: latest?.status ?? seal.status,
+      };
+    }
+
+    // Keep the user-visible response honest: the card may move to sealed only after
+    // transcript/digest finalization has completed. SessionSealer itself retains a
+    // reaper backstop if terminal persistence cannot complete.
+    const finalization = await sessionSealer.finalize({ sessionId: session.id });
+    const sealed = await sessionChainStore.get(session.id);
+    if (!sealed || sealed.status !== 'sealed' || !finalization.sealed) {
+      reply.status(503);
+      return { error: 'Session sealing has not completed yet', code: 'SESSION_SEAL_PENDING' };
+    }
+    if (!finalization.clean) {
+      reply.status(503);
+      return {
+        error: 'Session sealed, but transcript or digest finalization did not complete',
+        code: 'SESSION_SEAL_PARTIAL',
+      };
+    }
+    return reply.send({
+      mode: 'sealed' as const,
+      session: await attachRuntimeSessionSummary(sealed, runtimeSessionStore),
+    });
   });
 
   // POST /api/sessions/:sessionId/unseal — Manual recovery fallback (#F062)

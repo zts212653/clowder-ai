@@ -6,14 +6,15 @@
  *
  * 边界：本模块**不含任何 liveness 规则**。谁在跑由 dispatch owner 的
  * `SidebarPresenceSource` 回答（内部是 F194/F295 的 composition），这里只负责
- * “active 优先、否则回落终态”的呈现合成。
+ * “working 优先、终态只在待用户注意时可见”的呈现合成。
  */
 
-import type {
-  IThreadStore,
-  Thread,
-  ThreadParticipantActivity,
-} from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
+
+type SidebarThreadProjectionInput = Thread & {
+  readonly unreadCount?: number;
+  readonly hasUserMention?: boolean;
+};
 
 /**
  * F297 C10: presentation-ready Sidebar presence.
@@ -24,6 +25,8 @@ import type {
 export interface SidebarPresence {
   readonly status: 'idle' | 'working' | 'done' | 'error';
   readonly cats?: readonly string[];
+  /** C10 execution elapsed authority; C7 lastActiveAt remains recency-only. */
+  readonly activeSince?: number;
 }
 
 /**
@@ -33,58 +36,41 @@ export interface SidebarPresence {
  * 本路由只 join 结果，不复制 F194/F295 的生命周期规则。
  */
 export interface SidebarPresenceSource {
-  getActivePresence(threadIds: readonly string[], userId: string): Promise<Map<string, SidebarPresence>>;
+  getPresence(threadIds: readonly string[], userId: string): Promise<Map<string, SidebarPresence>>;
 }
 
 /**
- * F297 C10 fallback：active execution 缺席时的终态呈现。
+ * F297 C10: working 总是可见；done/error 只表示“有新终态待看”。
  *
- * 铁律（Design Gate 决议）：**active 消失本身不是 done 的证据**。done / error 只能来自
- * participant activity 的正向终态记录；没有任何猫回过话 → idle，绝不 done。
- * 取"最近一次回应"的健康度，对应 doc 里的"最近 done/error"，而不是"历史上出过错就永远 error"。
+ * InvocationRecord 回答“真的结束了吗”；unread/mention 回答“用户还需要看吗”。
+ * 用户进入 thread 并读取后，终态标记消失，但持久 lifecycle 证据仍保留。
  */
-export function terminalPresenceFromActivity(activity: readonly ThreadParticipantActivity[]): SidebarPresence {
-  const responded = activity.filter((entry) => entry.lastMessageAt > 0);
-  if (responded.length === 0) return { status: 'idle' };
-  // getParticipantsWithActivity 已按 lastMessageAt 降序排序
-  const latest = responded[0];
-  if (latest.lastResponseHealthy === false) return { status: 'error', cats: [latest.catId] };
-  return { status: 'done', cats: [latest.catId] };
-}
-
-/** F297 Phase B: 组合 C10 presence —— active 优先，否则回落到 participant activity 终态。 */
 export async function composeSidebarPresence(
-  threads: readonly Thread[],
+  threads: readonly SidebarThreadProjectionInput[],
   userId: string,
-  threadStore: IThreadStore,
   presenceSource: SidebarPresenceSource | undefined,
 ): Promise<Map<string, SidebarPresence>> {
   const composed = new Map<string, SidebarPresence>();
-  // OQ-1：一次批量调用，不 per-thread round trip
-  const active = presenceSource
-    ? await presenceSource.getActivePresence(
-        threads.map((t) => t.id),
-        userId,
-      )
-    : new Map<string, SidebarPresence>();
-
-  // AC-B3：只对没有 active 的行查终态，且一次批量（Redis 侧走 pipeline，非 per-thread 往返）
-  const terminalNeeded = threads.filter((thread) => !active.has(thread.id)).map((thread) => thread.id);
-  // 终态回落的读故障必须**显式** fail-closed：知识不完整时封 idle，而不是 500 掉整个
-  // Sidebar 请求，也不是让 store 静默返回空 hash 冒充"没人回过话"（R10 / cloud R11 P1）。
-  let activityByThread: Map<string, ThreadParticipantActivity[]>;
+  let authoritative = new Map<string, SidebarPresence>();
   try {
-    activityByThread =
-      terminalNeeded.length > 0
-        ? await threadStore.getParticipantsWithActivityBatch(terminalNeeded)
-        : new Map<string, ThreadParticipantActivity[]>();
+    authoritative = presenceSource
+      ? await presenceSource.getPresence(
+          threads.map((thread) => thread.id),
+          userId,
+        )
+      : authoritative;
   } catch {
-    activityByThread = new Map<string, ThreadParticipantActivity[]>();
+    // 生命周期读故障不能 500 整个 Sidebar，也不能推断终态。
   }
 
   for (const thread of threads) {
-    const live = active.get(thread.id);
-    composed.set(thread.id, live ?? terminalPresenceFromActivity(activityByThread.get(thread.id) ?? []));
+    const presence = authoritative.get(thread.id) ?? { status: 'idle' as const };
+    if (presence.status === 'working') {
+      composed.set(thread.id, presence);
+      continue;
+    }
+    const needsAttention = (thread.unreadCount ?? 0) > 0 || thread.hasUserMention === true;
+    composed.set(thread.id, needsAttention ? presence : { status: 'idle' });
   }
   return composed;
 }

@@ -93,6 +93,9 @@ function buildFakeDeps(callLog, responseText = VALID_PODCAST_JSON) {
       },
     },
     invocationTracker: {
+      acquireExecutionAdmission() {
+        return { release() {} };
+      },
       start(_threadId, _userId, _cats) {
         callLog.push({ op: 'tracker.start' });
         return new AbortController();
@@ -130,6 +133,44 @@ function makeRequest(overrides = {}) {
 }
 
 describe('F091 Phase 6: generateScriptViaThread — real production function', () => {
+  it('parks direct podcast admission until a manual session seal releases', async () => {
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const callLog = [];
+    const deps = buildFakeDeps(callLog);
+    const tracker = new InvocationTracker();
+    deps.invocationTracker = tracker;
+
+    const sealGuard = tracker.guardSessionSeal('thread-seal-race', 'opus');
+    assert.equal(sealGuard.acquired, true);
+
+    const generation = generateScriptViaThread(makeRequest(), 'thread-seal-race', deps);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    try {
+      assert.equal(
+        callLog.some((call) => call.op === 'append'),
+        false,
+        'podcast message must be written into the replacement session after seal release',
+      );
+      assert.equal(
+        callLog.some((call) => call.op === 'routeExecution'),
+        false,
+        'podcast execution must wait instead of routing with the seal-rejected controller',
+      );
+    } finally {
+      sealGuard.release();
+    }
+
+    await generation;
+    const routeCall = callLog.find((call) => call.op === 'routeExecution');
+    assert.ok(routeCall, 'podcast execution should resume after the seal releases');
+    assert.equal(routeCall.signalAborted, false);
+    const nextSealGuard = tracker.guardSessionSeal('thread-seal-race', 'opus');
+    assert.equal(nextSealGuard.acquired, true, 'podcast completion must release tracker and admission ownership');
+    nextSealGuard.release();
+  });
+
   it('P1-1: backfills userMessageId into invocation record', async () => {
     const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
     const callLog = [];

@@ -1,15 +1,23 @@
 /**
- * F297 Phase B — Sidebar C10 终态回落语义（participant activity → done/error/idle）。
+ * F297 regression — Sidebar terminal state requires a lifecycle witness.
  *
- * 核心铁律：**active 缺席不得推断为 done**。知识不完整时一律封 idle。
+ * A historical cat response is conversation activity, not proof that an invocation
+ * completed.  Only an authoritative InvocationRecord terminal transition may publish
+ * done/error; incomplete knowledge stays idle.
  */
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { load, realDeps, realPresenceSource, runningManagedCommandTask } from './helpers/f297-presence-fixtures.js';
+import {
+  load,
+  realDeps,
+  realPresenceSource,
+  runningManagedCommandTask,
+  startRunningRecordWithDraft,
+} from './helpers/f297-presence-fixtures.js';
 
-describe('F297 terminal presence semantics (C10 fallback)', () => {
+describe('F297 terminal presence semantics (C10 lifecycle witness)', () => {
   let threadStore;
   let app;
 
@@ -18,13 +26,22 @@ describe('F297 terminal presence semantics (C10 fallback)', () => {
     threadStore = new ThreadStore();
   });
 
-  async function sidebarRows({ activePresence = new Map(), presenceSource } = {}) {
+  async function sidebarRows({ projectedPresence = new Map(), presenceSource, unreadByThread = new Map() } = {}) {
     const { threadsRoutes } = await load('routes/threads.js');
     if (app) await app.close();
     app = Fastify();
     await app.register(threadsRoutes, {
       threadStore,
-      presenceSource: presenceSource ?? { getActivePresence: async () => activePresence },
+      presenceSource: presenceSource ?? { getPresence: async () => projectedPresence },
+      messageStore: {},
+      readStateStore: {
+        getUnreadSummaries: (_userId, threadIds) =>
+          threadIds.map((threadId) => ({
+            threadId,
+            unreadCount: unreadByThread.get(threadId) ?? 0,
+            hasUserMention: false,
+          })),
+      },
     });
     await app.ready();
     const res = await app.inject({
@@ -39,54 +56,178 @@ describe('F297 terminal presence semantics (C10 fallback)', () => {
     return new Map(rows.map((row) => [row.id, row]));
   }
 
-  it('P1-2: a healthy latest response reads as done', async () => {
-    const thread = threadStore.create('alice', 'Finished', '/p');
+  it('regression: a historical healthy response is idle without a terminal invocation witness', async () => {
+    const thread = threadStore.create('alice', 'Historical response', '/p');
     threadStore.updateParticipantActivity(thread.id, 'opus5', true);
 
     const rows = await sidebarRows();
-    assert.equal(rows.get(thread.id).presence.status, 'done');
-    assert.deepEqual(rows.get(thread.id).presence.cats, ['opus5']);
+    assert.equal(rows.get(thread.id).presence.status, 'idle');
   });
 
-  it('P1-2: an unhealthy latest response reads as error', async () => {
-    const thread = threadStore.create('alice', 'Broken', '/p');
+  it('regression: a historical unhealthy response is idle without a terminal invocation witness', async () => {
+    const thread = threadStore.create('alice', 'Historical error', '/p');
     threadStore.updateParticipantActivity(thread.id, 'opus5', false);
 
     const rows = await sidebarRows();
-    assert.equal(rows.get(thread.id).presence.status, 'error');
+    assert.equal(rows.get(thread.id).presence.status, 'idle');
   });
 
-  it('P1-2: the latest response wins — an older error is not sticky', async () => {
-    const thread = threadStore.create('alice', 'Recovered', '/p');
-    threadStore.updateParticipantActivity(thread.id, 'sonnet', false);
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    threadStore.updateParticipantActivity(thread.id, 'opus5', true);
-
-    const rows = await sidebarRows();
-    const presence = rows.get(thread.id).presence;
-    assert.equal(presence.status, 'done', 'a newer healthy response must clear an older error');
-    assert.deepEqual(presence.cats, ['opus5']);
-  });
-
-  it('P1-2: no response at all is idle, never done', async () => {
+  it('no response at all is idle, never done', async () => {
     const thread = threadStore.create('alice', 'Untouched', '/p');
     const rows = await sidebarRows();
     assert.equal(rows.get(thread.id).presence.status, 'idle');
   });
 
-  it('P1-2: active execution overrides terminal history', async () => {
+  it('active execution still overrides historical conversation activity', async () => {
     const thread = threadStore.create('alice', 'Running again', '/p');
     threadStore.updateParticipantActivity(thread.id, 'opus5', false);
 
     const rows = await sidebarRows({
-      activePresence: new Map([[thread.id, { status: 'working', cats: ['opus5'] }]]),
+      projectedPresence: new Map([[thread.id, { status: 'working', cats: ['opus5'] }]]),
     });
     assert.equal(rows.get(thread.id).presence.status, 'working');
   });
 
+  it('an authoritative successful InvocationRecord publishes done for its exact successful cats', async () => {
+    const deps = await realDeps();
+    const created = await deps.recordStore.create({
+      threadId: 'thread_terminal_success',
+      userId: 'alice',
+      targetCats: ['opus5'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await deps.recordStore.update(created.invocationId, { status: 'running' });
+    await deps.recordStore.update(created.invocationId, {
+      status: 'succeeded',
+      successfulCatIds: ['opus5'],
+    });
+    const { source } = await realPresenceSource(deps);
+
+    const presence = await source.getPresence(['thread_terminal_success'], 'alice');
+    assert.deepEqual(presence.get('thread_terminal_success'), { status: 'done', cats: ['opus5'] });
+  });
+
+  it('a new canonical running execution overrides an older successful lifecycle witness', async () => {
+    const deps = await realDeps();
+    const completed = await deps.recordStore.create({
+      threadId: 'thread_running_again',
+      userId: 'alice',
+      targetCats: ['opus5'],
+      intent: 'execute',
+      idempotencyKey: 'older-terminal',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await deps.recordStore.update(completed.invocationId, { status: 'running' });
+    await deps.recordStore.update(completed.invocationId, {
+      status: 'succeeded',
+      successfulCatIds: ['opus5'],
+    });
+    await startRunningRecordWithDraft(deps, {
+      threadId: 'thread_running_again',
+      userId: 'alice',
+      catId: 'codex-sol',
+    });
+    const { source } = await realPresenceSource(deps);
+
+    const presence = await source.getPresence(['thread_running_again'], 'alice');
+    assert.equal(presence.get('thread_running_again')?.status, 'working');
+    assert.deepEqual(presence.get('thread_running_again')?.cats, ['codex-sol']);
+    assert.equal(
+      typeof presence.get('thread_running_again')?.activeSince,
+      'number',
+      'canonical running execution carries elapsed-time authority',
+    );
+  });
+
+  it('a successful terminal is visible only while the thread still needs attention', async () => {
+    const thread = threadStore.create('alice', 'Completed invocation', '/p');
+    const terminal = new Map([[thread.id, { status: 'done', cats: ['opus5'] }]]);
+
+    const unread = await sidebarRows({
+      projectedPresence: terminal,
+      unreadByThread: new Map([[thread.id, 1]]),
+    });
+    assert.deepEqual(unread.get(thread.id).presence, { status: 'done', cats: ['opus5'] });
+
+    const read = await sidebarRows({ projectedPresence: terminal });
+    assert.deepEqual(read.get(thread.id).presence, { status: 'idle' }, 'opening/reading retires the terminal badge');
+  });
+
+  it('working remains visible even when unread is zero', async () => {
+    const thread = threadStore.create('alice', 'Currently running', '/p');
+    const rows = await sidebarRows({
+      projectedPresence: new Map([[thread.id, { status: 'working', cats: ['opus5'] }]]),
+    });
+    assert.deepEqual(rows.get(thread.id).presence, { status: 'working', cats: ['opus5'] });
+  });
+
+  it('failed is lifecycle error, canceled clears terminal presentation', async () => {
+    const deps = await realDeps();
+    const failed = await deps.recordStore.create({
+      threadId: 'thread_terminal_failure',
+      userId: 'alice',
+      targetCats: ['opus5'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-failure',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await deps.recordStore.update(failed.invocationId, { status: 'running' });
+    await deps.recordStore.update(failed.invocationId, { status: 'failed', error: 'boom' });
+    const { source } = await realPresenceSource(deps);
+    assert.deepEqual(
+      await source.getPresence(['thread_terminal_failure'], 'alice'),
+      new Map([['thread_terminal_failure', { status: 'error' }]]),
+    );
+
+    await deps.recordStore.update(failed.invocationId, { status: 'canceled' });
+    assert.deepEqual(
+      await source.getPresence(['thread_terminal_failure'], 'alice'),
+      new Map(),
+      'canceled is an authoritative clear, not success/error',
+    );
+  });
+
+  it('retrying the latest failed invocation clears its terminal witness instead of reviving older history', async () => {
+    const deps = await realDeps();
+    const oldSuccess = await deps.recordStore.create({
+      threadId: 'thread_retry',
+      userId: 'alice',
+      targetCats: ['opus5'],
+      intent: 'execute',
+      idempotencyKey: 'old-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await deps.recordStore.update(oldSuccess.invocationId, { status: 'running' });
+    await deps.recordStore.update(oldSuccess.invocationId, { status: 'succeeded', successfulCatIds: ['opus5'] });
+
+    const retry = await deps.recordStore.create({
+      threadId: 'thread_retry',
+      userId: 'alice',
+      targetCats: ['codex-sol'],
+      intent: 'execute',
+      idempotencyKey: 'retry',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await deps.recordStore.update(retry.invocationId, { status: 'running' });
+    await deps.recordStore.update(retry.invocationId, { status: 'failed', error: 'transient' });
+    assert.equal(
+      (await deps.recordStore.listLatestTerminalByThreadIds(['thread_retry'], 'alice')).get('thread_retry')?.id,
+      retry.invocationId,
+    );
+
+    await deps.recordStore.update(retry.invocationId, { status: 'running', expectedStatus: 'failed' });
+    assert.equal(
+      (await deps.recordStore.listLatestTerminalByThreadIds(['thread_retry'], 'alice')).size,
+      0,
+      'a retry is a new attempt; the older success must not leak back into presentation',
+    );
+  });
+
   it('R3 P1-1 end-to-end: a running managed command reads as working, not done', async () => {
     const thread = threadStore.create('alice', 'Managed command running', '/p');
-    // 历史上回过话 → 终态回落会算成 done。这正是 false terminal 的温床。
+    // 历史上回过话：保留这个反例，确保 working 不会被旧消息覆盖。
     threadStore.updateParticipantActivity(thread.id, 'opus5', true);
 
     const deps = await realDeps();
@@ -139,28 +280,24 @@ describe('F297 terminal presence semantics (C10 fallback)', () => {
     assert.equal(status, 'idle');
   });
 
-  it('R11 P1-2: a terminal-fallback store failure keeps HTTP 200, active rows working, rest idle', async () => {
-    // 锁住 store→composition 的失败链语义（cloud R11 P1 的下游）：
-    // - getParticipantsWithActivityBatch 抛错时整个请求**不得** 500；
-    // - 有 active 的行仍然 working（它不依赖终态回落）；
-    // - 其余行封 idle，绝不是 done/error。
+  it('a lifecycle projection failure keeps HTTP 200 and every row idle', async () => {
     const runningThread = threadStore.create('alice', 'Still running', '/p');
     const historyThread = threadStore.create('alice', 'Has history', '/p');
-    // 历史上回过话 → 正常路径会算成 done，正是 false terminal 的温床
     threadStore.updateParticipantActivity(historyThread.id, 'opus5', true);
 
-    threadStore.getParticipantsWithActivityBatch = async () => {
-      throw new Error('activity pipeline unavailable');
-    };
-
     const rows = await sidebarRows({
-      activePresence: new Map([[runningThread.id, { status: 'working', cats: ['opus5'] }]]),
+      presenceSource: {
+        getPresence: async () => {
+          throw new Error('lifecycle projection unavailable');
+        },
+      },
+      unreadByThread: new Map([
+        [runningThread.id, 1],
+        [historyThread.id, 1],
+      ]),
     });
 
-    assert.equal(rows.get(runningThread.id).presence.status, 'working', 'active rows survive a fallback failure');
-    const degraded = rows.get(historyThread.id).presence.status;
-    assert.equal(degraded, 'idle', 'unknown terminal knowledge must degrade to idle');
-    assert.notEqual(degraded, 'done');
-    assert.notEqual(degraded, 'error');
+    assert.equal(rows.get(runningThread.id).presence.status, 'idle');
+    assert.equal(rows.get(historyThread.id).presence.status, 'idle');
   });
 });

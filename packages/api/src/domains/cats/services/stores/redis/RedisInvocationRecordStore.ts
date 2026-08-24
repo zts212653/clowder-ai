@@ -76,6 +76,8 @@ return {'created', ARGV[1]}
  * KEYS[1] = invocation record hash key
  * KEYS[2] = running set key (invoc:running:{threadId}:{userId}) — derived from JS-side
  *          snapshot of (threadId, userId); guarded inside Lua via ARGV[3]/ARGV[4]
+ * KEYS[3] = per-user running-thread candidate index
+ * KEYS[4] = latest terminal InvocationRecord pointer for (threadId, userId)
  * ARGV[1] = expectedStatus ("" if non-CAS)
  * ARGV[2] = newStatus ("" if no status change)
  * ARGV[3] = expectedThreadId (matches snapshot used to derive KEYS[2])
@@ -173,6 +175,15 @@ if newStatus ~= '' and newStatus ~= current then
       redis.call('SREM', KEYS[3], currentThreadId)
     end
   end
+
+  -- F297: terminal presentation requires a lifecycle witness.  Maintain the newest
+  -- terminal transition in the same atomic operation as the record status.  Retrying a
+  -- failed invocation clears its own pointer so a stale failure cannot survive re-entry.
+  if newStatus == 'succeeded' or newStatus == 'failed' or newStatus == 'canceled' then
+    redis.call('SET', KEYS[4], invocId)
+  elseif newStatus == 'running' and redis.call('GET', KEYS[4]) == invocId then
+    redis.call('DEL', KEYS[4])
+  end
 end
 
 return 1
@@ -193,6 +204,7 @@ return 1
  * KEYS[3] = new running set key (running:{threadId}:{nextUserId})
  * KEYS[4] = old owner candidate index (invoc:running-threads:{oldUserId})
  * KEYS[5] = new owner candidate index (invoc:running-threads:{nextUserId})
+ * KEYS[6] = old owner's latest terminal pointer for this thread
  * ARGV[1] = nextUserId
  * ARGV[2] = nowMs (string)
  * ARGV[3] = invocationId
@@ -220,6 +232,14 @@ if status == 'running' then
   if redis.call('SCARD', KEYS[2]) == 0 then
     redis.call('SREM', KEYS[4], ARGV[4])
   end
+end
+
+
+-- Scheduler ownership repair must not leave a terminal pointer visible to the old owner.
+-- We deliberately do not invent history for the new owner; a future terminal transition
+-- will create its pointer under the repaired ownership.
+if redis.call('GET', KEYS[6]) == ARGV[3] then
+  redis.call('DEL', KEYS[6])
 end
 
 return 1
@@ -308,16 +328,18 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
       if (!before) return null;
       const setKey = InvocationKeys.runningByThread(before.threadId, before.userId);
       const userThreadsKey = InvocationKeys.runningThreadsByUser(before.userId);
+      const latestTerminalKey = InvocationKeys.latestTerminalByThread(before.threadId, before.userId);
       const successfulCatIds = normalizeSuccessfulCatIds(before.targetCats, input);
 
       const pairs = await this.buildUpdatePairs(key, input, successfulCatIds);
 
       const result = (await this.redis.eval(
         ATOMIC_UPDATE_LUA,
-        3,
+        4,
         key,
         setKey,
         userThreadsKey,
+        latestTerminalKey,
         input.expectedStatus ?? '',
         input.status ?? '',
         before.threadId,
@@ -512,6 +534,42 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     return out;
   }
 
+  async listLatestTerminalByThreadIds(
+    threadIds: readonly string[],
+    userId: string,
+  ): Promise<Map<string, InvocationRecord>> {
+    const out = new Map<string, InvocationRecord>();
+    if (threadIds.length === 0) return out;
+
+    const ids = await this.redis.mget(
+      ...threadIds.map((threadId) => InvocationKeys.latestTerminalByThread(threadId, userId)),
+    );
+    const reads = this.redis.pipeline();
+    const requested: Array<{ threadId: string; invocationId: string }> = [];
+    for (const [index, invocationId] of ids.entries()) {
+      if (!invocationId) continue;
+      const threadId = threadIds[index]!;
+      requested.push({ threadId, invocationId });
+      reads.hgetall(InvocationKeys.detail(invocationId));
+    }
+    if (requested.length === 0) return out;
+
+    const results = await reads.exec();
+    for (const [index, request] of requested.entries()) {
+      const decoded = decodeInvocationHash(
+        results?.[index],
+        request.invocationId,
+        `latest terminal invocation ${request.invocationId}`,
+      );
+      if (decoded.kind === 'absent') continue;
+      const record = decoded.record;
+      if (record.threadId !== request.threadId || record.userId !== userId) continue;
+      if (record.status !== 'succeeded' && record.status !== 'failed' && record.status !== 'canceled') continue;
+      out.set(request.threadId, record);
+    }
+    return out;
+  }
+
   /**
    * F194 Phase B (cloud R13 P1): one-time per-process backfill of the running index.
    *
@@ -644,14 +702,16 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     const newSetKey = InvocationKeys.runningByThread(record.threadId, nextUserId);
     const oldUserThreadsKey = InvocationKeys.runningThreadsByUser(record.userId);
     const newUserThreadsKey = InvocationKeys.runningThreadsByUser(nextUserId);
+    const oldLatestTerminalKey = InvocationKeys.latestTerminalByThread(record.threadId, record.userId);
     await this.redis.eval(
       REASSIGN_USERID_LUA,
-      5,
+      6,
       recordKey,
       oldSetKey,
       newSetKey,
       oldUserThreadsKey,
       newUserThreadsKey,
+      oldLatestTerminalKey,
       nextUserId,
       String(Date.now()),
       id,
