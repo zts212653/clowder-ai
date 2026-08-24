@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
@@ -22,6 +22,8 @@ interface ChatInputActionButtonProps {
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
   hasActiveInvocation?: boolean;
+  /** Stable key derived from active execution IDs; changes when the execution set changes. */
+  activeExecutionKey?: string;
   hasText: boolean;
 }
 
@@ -55,18 +57,28 @@ export function ChatInputActionButton({
   disabled,
   sendDisabled,
   hasActiveInvocation,
+  activeExecutionKey,
   hasText,
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
   const [confirmSteer, setConfirmSteer] = useState(false);
+  // Captures the execution identity when the steer modal opens.
+  // If the active execution set changes (A ends → B starts), the key
+  // will differ and we dismiss/reject the stale confirmation.
+  const steerBoundKeyRef = useRef<string | undefined>(undefined);
 
-  // P1 fix: auto-dismiss steer confirmation when the target invocation ends.
-  // If the active reply finishes while the modal is open, dismiss it so the
-  // user cannot accidentally confirm force-send against a different invocation
-  // that may start from the queue.
+  // P1 fix: auto-dismiss steer confirmation when the target invocation ends
+  // OR when the execution identity changes (A→B same-render transition).
   useEffect(() => {
-    if (!hasActiveInvocation) setConfirmSteer(false);
-  }, [hasActiveInvocation]);
+    if (!hasActiveInvocation) {
+      setConfirmSteer(false);
+      return;
+    }
+    // Same-render A→B: hasActiveInvocation stays true but the key changes.
+    if (confirmSteer && steerBoundKeyRef.current !== undefined && activeExecutionKey !== steerBoundKeyRef.current) {
+      setConfirmSteer(false);
+    }
+  }, [hasActiveInvocation, activeExecutionKey, confirmSteer]);
 
   const isSendDisabled = Boolean(disabled || sendDisabled);
   const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
@@ -191,7 +203,10 @@ export function ChatInputActionButton({
           {onForceSend && (
             <button
               type="button"
-              onClick={() => setConfirmSteer(true)}
+              onClick={() => {
+                steerBoundKeyRef.current = activeExecutionKey;
+                setConfirmSteer(true);
+              }}
               disabled={isSendDisabled}
               className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
               aria-label="强制停止并发送此消息"
@@ -234,10 +249,11 @@ export function ChatInputActionButton({
           onCancel={() => setConfirmSteer(false)}
           onConfirm={() => {
             setConfirmSteer(false);
-            // Guard: only force-send if the invocation that prompted the
-            // confirmation is still active (defense-in-depth alongside the
-            // useEffect auto-dismiss above).
-            if (hasActiveInvocation) onForceSend?.();
+            // Guard: only force-send if the execution identity that prompted
+            // confirmation is still current. Catches same-render A→B where
+            // hasActiveInvocation stays true but the execution set changed.
+            const keyMatch = activeExecutionKey === undefined || activeExecutionKey === steerBoundKeyRef.current;
+            if (hasActiveInvocation && keyMatch) onForceSend?.();
           }}
         />
       )}
