@@ -69,14 +69,23 @@ export function ChatInputActionButton({
 
   // P1 fix: auto-dismiss steer confirmation when the target invocation ends
   // OR when the execution identity changes (A→B same-render transition).
+  // Fail closed: undefined key = unverifiable identity → dismiss.
   useEffect(() => {
     if (!hasActiveInvocation) {
       setConfirmSteer(false);
       return;
     }
-    // Same-render A→B: hasActiveInvocation stays true but the key changes.
-    if (confirmSteer && steerBoundKeyRef.current !== undefined && activeExecutionKey !== steerBoundKeyRef.current) {
-      setConfirmSteer(false);
+    if (confirmSteer) {
+      // Bound key is undefined (legacy/unhydrated path) — we cannot verify
+      // identity, so dismiss the modal rather than risk a stale confirm.
+      if (steerBoundKeyRef.current === undefined) {
+        setConfirmSteer(false);
+        return;
+      }
+      // Same-render A→B: hasActiveInvocation stays true but the key changes.
+      if (activeExecutionKey !== steerBoundKeyRef.current) {
+        setConfirmSteer(false);
+      }
     }
   }, [hasActiveInvocation, activeExecutionKey, confirmSteer]);
 
@@ -200,7 +209,7 @@ export function ChatInputActionButton({
           >
             <QueueSendIcon className="w-5 h-5" />
           </button>
-          {onForceSend && (
+          {onForceSend && activeExecutionKey !== undefined && (
             <button
               type="button"
               onClick={() => {
@@ -252,7 +261,7 @@ export function ChatInputActionButton({
             // Guard: only force-send if the execution identity that prompted
             // confirmation is still current. Catches same-render A→B where
             // hasActiveInvocation stays true but the execution set changed.
-            const keyMatch = activeExecutionKey === undefined || activeExecutionKey === steerBoundKeyRef.current;
+            const keyMatch = activeExecutionKey !== undefined && activeExecutionKey === steerBoundKeyRef.current;
             if (hasActiveInvocation && keyMatch) onForceSend?.();
           }}
         />
