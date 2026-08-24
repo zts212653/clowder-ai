@@ -20,6 +20,12 @@ export interface PredicateCommandPattern {
   readonly mustNotMatch?: string;
 }
 
+export interface PredicateDesignGateEvidence {
+  readonly type: 'design_gate_evidence';
+  readonly consumerGlobs: readonly string[];
+  readonly canonicalHelperPattern: string;
+}
+
 export interface PredicateCoCreationDocsLane {
   readonly type: 'co_creation_docs_lane';
   readonly includeGlobs: readonly string[];
@@ -69,6 +75,7 @@ export type SopPredicate =
   | PredicateChangedFilesRequireCommand
   | PredicateCoCreationDocsLane
   | PredicateCommandPattern
+  | PredicateDesignGateEvidence
   | PredicateCommandSequence
   | PredicateShaDedup
   | PredicateEnvCheck

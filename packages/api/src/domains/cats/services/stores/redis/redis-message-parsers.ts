@@ -162,8 +162,86 @@ function parseTurnExecutionProjection(value: unknown): TurnExecutionMessageProje
 
 type StoredMessageExtra = NonNullable<StoredMessage['extra']>;
 
+type ExtraCarrierPersistenceKind = 'parsed' | 'derived';
+
+type ExtraCarrierPersistenceClassification<
+  T extends Record<keyof Required<StoredMessageExtra>, ExtraCarrierPersistenceKind>,
+> = T;
+
+/**
+ * Compile-time exhaustiveness guard for the Redis hydration whitelist.
+ * Every StoredMessage.extra key must be classified when it is introduced.
+ */
+type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  rich: 'parsed';
+  isExplicitPost: 'parsed';
+  stream: 'parsed';
+  causal: 'parsed';
+  proactive: 'parsed';
+  memoryCue: 'parsed';
+  turnExecution: 'parsed';
+  auxiliaryTurnExecutions: 'parsed';
+  crossPost: 'parsed';
+  coordination: 'parsed';
+  localReviewVerdict: 'parsed';
+  callbackDedup: 'parsed';
+  targetCats: 'parsed';
+  messageBundle: 'parsed';
+  meetingArtifact: 'parsed';
+  dynamicSceneEntries: 'parsed';
+  writeOpportunityReentry: 'parsed';
+  writeOpportunityPresentationRetry: 'parsed';
+  freshness: 'parsed';
+  supplement: 'parsed';
+  recovery: 'parsed';
+  scheduler: 'parsed';
+  tracing: 'parsed';
+  systemKind: 'parsed';
+  a2aRouting: 'parsed';
+  queueReceipt: 'derived';
+  pluginMessage: 'parsed';
+}>;
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['localReviewVerdict'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const verdict = candidate.verdict;
+  const carrierlessLeaseFence = candidate.carrierlessLeaseFence as Record<string, unknown> | undefined;
+  if (
+    (verdict !== 'approved' && verdict !== 'changes_requested' && verdict !== 'commented') ||
+    typeof candidate.clientMessageId !== 'string' ||
+    candidate.clientMessageId.length === 0 ||
+    candidate.clientMessageId.length > 200 ||
+    (candidate.reviewedHeadSha !== undefined &&
+      (typeof candidate.reviewedHeadSha !== 'string' ||
+        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha))) ||
+    (candidate.carrierlessLeaseFence !== undefined &&
+      (typeof candidate.carrierlessLeaseFence !== 'object' ||
+        candidate.carrierlessLeaseFence === null ||
+        !isNonEmptyString(carrierlessLeaseFence?.leaseId) ||
+        carrierlessLeaseFence.leaseId.length > 200 ||
+        !Number.isInteger(carrierlessLeaseFence?.generation) ||
+        Number(carrierlessLeaseFence.generation) < 1))
+  ) {
+    return undefined;
+  }
+  return {
+    verdict,
+    clientMessageId: candidate.clientMessageId,
+    ...(typeof candidate.reviewedHeadSha === 'string' ? { reviewedHeadSha: candidate.reviewedHeadSha } : {}),
+    ...(carrierlessLeaseFence
+      ? {
+          carrierlessLeaseFence: {
+            leaseId: carrierlessLeaseFence.leaseId as string,
+            generation: carrierlessLeaseFence.generation as number,
+          },
+        }
+      : {}),
+  };
 }
 
 function parseProactiveCarrier(value: unknown): StoredMessageExtra['proactive'] {
@@ -342,6 +420,14 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const coordination = parseCrossThreadCoordination(parsed.coordination) ?? legacyCoordination;
     if (coordination) {
       result.coordination = coordination;
+      hasField = true;
+    }
+
+    // #1371 PR1b: the typed verdict is the only settlement fact. Public prose
+    // is presentation, so Redis hydration must preserve this carrier exactly.
+    const localReviewVerdict = parseLocalReviewVerdictCarrier(parsed.localReviewVerdict);
+    if (localReviewVerdict) {
+      result.localReviewVerdict = localReviewVerdict;
       hasField = true;
     }
 

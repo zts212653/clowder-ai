@@ -11,6 +11,7 @@ const OVERFLOW_TOLERANCE_PX = 1;
 
 export function useMeasuredOverflow<T extends HTMLElement>({ axis, active = true }: MeasuredOverflowOptions) {
   const ref = useRef<T>(null);
+  const overflowingRef = useRef(false);
   const [overflowing, setOverflowing] = useState(false);
 
   const measure = useCallback(() => {
@@ -21,6 +22,8 @@ export function useMeasuredOverflow<T extends HTMLElement>({ axis, active = true
       axis === 'inline'
         ? element.scrollWidth > element.clientWidth + OVERFLOW_TOLERANCE_PX
         : element.scrollHeight > element.clientHeight + OVERFLOW_TOLERANCE_PX;
+    if (next === overflowingRef.current) return;
+    overflowingRef.current = next;
     setOverflowing(next);
   }, [active, axis]);
 

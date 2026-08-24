@@ -24,6 +24,7 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
 
   return (
     <button
+      data-testid="message-metadata"
       onClick={() => setExpanded((v) => !v)}
       className="mt-1 text-micro text-cafe-muted hover:text-cafe-secondary transition-colors cursor-pointer select-none flex items-center gap-0 flex-wrap"
     >

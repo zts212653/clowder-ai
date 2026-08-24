@@ -42,6 +42,8 @@ export async function sessionTranscriptRoutes(
     transcriptWriter,
     messageStore,
     turnExecutionStore,
+    profileRepository,
+    memoryCueSourceReader,
   } = opts;
 
   async function readActiveSessionEvents(session: ReadableSession) {
@@ -68,9 +70,13 @@ export async function sessionTranscriptRoutes(
   }
 
   registerInvocationTrajectoryRoutes(app, {
-    stores: { invocationRecordStore, sessionChainStore, threadStore },
+    stores: { invocationRecordStore, turnExecutionStore, sessionChainStore, threadStore },
     readSessionEvents,
     readInvocationEvents,
+    ...(messageStore ? { messageStore } : {}),
+    ...(transcriptWriter ? { keyedContentDigest: transcriptWriter.keyedContentDigest.bind(transcriptWriter) } : {}),
+    ...(profileRepository ? { profileRepository } : {}),
+    ...(memoryCueSourceReader ? { memoryCueSourceReader } : {}),
   });
 
   // GET /api/sessions/:sessionId/events — Paginated event read (F98: view modes)

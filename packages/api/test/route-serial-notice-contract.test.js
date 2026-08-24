@@ -45,22 +45,79 @@ function createTextWithWarningService(catId) {
   };
 }
 
-function createCloudBridgeStatusService(catId, status) {
+const cloudBridgeStatusCases = [
+  {
+    name: 'sent',
+    bridgeStatus: 'sent',
+    receiptStatus: 'sent',
+    reason: undefined,
+    transport: 'host',
+    hostMessageId: 'host-message-1',
+    disposition: 'fresh',
+    message: '已发送给 @opus，等待它从 ChatGPT 云端会话回写。',
+    contentPattern: /已发送/,
+    tone: 'info',
+  },
+  {
+    name: 'failed',
+    bridgeStatus: 'unavailable',
+    receiptStatus: 'failed',
+    reason: 'no-adapter',
+    transport: 'none',
+    hostMessageId: undefined,
+    disposition: 'not_attempted',
+    message: '未发送给 @opus：还没有可用的后台 Host Adapter。',
+    contentPattern: /未发送/,
+    tone: 'warning',
+  },
+  {
+    name: 'unknown',
+    bridgeStatus: 'unavailable',
+    receiptStatus: 'unknown',
+    reason: 'host-append-failed',
+    transport: 'host',
+    hostMessageId: 'host-message-1',
+    disposition: 'unknown',
+    message: '投递给 @opus 的结果未知：Host Adapter 返回了不可确认的结果。',
+    contentPattern: /结果未知/,
+    tone: 'warning',
+  },
+];
+
+function createCloudBridgeStatusService(catId, testCase) {
+  const sourceMessageId = `source-cloud-${testCase.name}`;
+  const payload = JSON.stringify({
+    type: 'cloud_bridge_status',
+    catId,
+    status: testCase.bridgeStatus,
+    reason: testCase.reason,
+    outboundReceipt: {
+      v: 1,
+      sourceMessageId,
+      sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
+      dispatchInvocationId: 'inv-1',
+      targetCatId: catId,
+      status: testCase.receiptStatus,
+      transport: testCase.transport,
+      hostMessageId: testCase.hostMessageId,
+      idempotency: {
+        keyKind: 'source_message_id',
+        disposition: testCase.disposition,
+      },
+      conversationId: 'conversation-7',
+      pairingSecret: 'pairing-secret',
+      cookie: 'Cookie: secret',
+      payload: 'full repeated payload',
+      cloudReturnBinding: 'cbr1.private.capability',
+    },
+    message: testCase.message,
+  });
   return {
     async *invoke() {
       yield {
         type: 'system_info',
         catId,
-        content: JSON.stringify({
-          type: 'cloud_bridge_status',
-          catId,
-          status,
-          ...(status === 'unavailable' ? { reason: 'no-adapter' } : {}),
-          message:
-            status === 'sent'
-              ? `已发送给 @${catId}，等待它从 ChatGPT 云端会话回写。`
-              : `未发送给 @${catId}：还没有可用的后台 Host Adapter。`,
-        }),
+        content: payload,
         timestamp: Date.now(),
       };
       yield { type: 'done', catId, timestamp: Date.now() };
@@ -133,6 +190,20 @@ function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
       getByThread: () => [],
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],
+      getById: async (messageId) => {
+        const match = /^source-cloud-(sent|failed|unknown)$/.exec(messageId);
+        if (!match) return null;
+        return {
+          id: messageId,
+          userId: 'user1',
+          catId: 'codex-sol',
+          threadId: `thread-cloud-${match[1]}`,
+          content: `exact ${match[1]} source`,
+          mentions: ['opus'],
+          timestamp: 1,
+          extra: { stream: { invocationId: 'inv-source-1', turnInvocationId: 'inv-source-1' } },
+        };
+      },
     },
     socketManager: {
       broadcastToRoom(room, event, payload) {
@@ -248,13 +319,20 @@ describe('route-serial notice contract', () => {
     );
   });
 
-  for (const status of ['sent', 'unavailable']) {
-    it(`F247 persists one readable cloud bridge ${status} notice without a silent completion duplicate`, async () => {
+  for (const testCase of cloudBridgeStatusCases) {
+    it(`F247 persists one readable cloud bridge ${testCase.name} notice without a silent completion duplicate`, async () => {
       const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
       const appendCalls = [];
-      const deps = createMockDeps({ opus: createCloudBridgeStatusService('opus', status) }, appendCalls, [], []);
+      const deps = createMockDeps({ opus: createCloudBridgeStatusService('opus', testCase) }, appendCalls, [], []);
       const yieldedPayloads = [];
-      for await (const message of routeSerial(deps, ['opus'], 'deliver this', 'user1', `thread-cloud-${status}`)) {
+      for await (const message of routeSerial(
+        deps,
+        ['opus'],
+        'deliver this',
+        'user1',
+        `thread-cloud-${testCase.name}`,
+        { currentUserMessageId: `source-cloud-${testCase.name}` },
+      )) {
         if (message.type === 'system_info' && message.content) yieldedPayloads.push(JSON.parse(message.content));
       }
 
@@ -266,8 +344,24 @@ describe('route-serial notice contract', () => {
       const persisted = appendCalls.filter((message) => message.source?.label === '云端猫投递');
       assert.equal(persisted.length, 1);
       assert.equal(persisted[0].source.connector, 'cloud-bridge-status');
-      assert.match(persisted[0].content, status === 'sent' ? /已发送/ : /未发送/);
-      assert.equal(persisted[0].source.meta.noticeTone, status === 'sent' ? 'info' : 'warning');
+      assert.match(persisted[0].content, testCase.contentPattern);
+      assert.equal(persisted[0].source.meta.noticeTone, testCase.tone);
+      assert.equal(persisted[0].replyTo, `source-cloud-${testCase.name}`);
+      assert.equal(
+        persisted[0].source.meta.cloudBridgeOutboundReceipt.sourceMessageId,
+        `source-cloud-${testCase.name}`,
+      );
+      assert.equal(persisted[0].source.meta.cloudBridgeOutboundReceipt.status, testCase.receiptStatus);
+      const durableAudit = JSON.stringify(persisted[0]);
+      for (const forbidden of [
+        'conversation-7',
+        'pairing-secret',
+        'Cookie:',
+        'full repeated payload',
+        'cbr1.private.capability',
+      ]) {
+        assert.equal(durableAudit.includes(forbidden), false, `durable audit leaked ${forbidden}`);
+      }
     });
   }
 

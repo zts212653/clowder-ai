@@ -121,6 +121,50 @@ class ProtocolWire {
   }
 }
 
+test('F299 app-server awaits durable request evidence before turn/start', async () => {
+  const wire = new ProtocolWire();
+  let recorded;
+  const client = new CodexAppServerClient({ wire });
+  const outputPromise = collect(
+    client.run({
+      prompt: frozenPrompt('app-server-message'),
+      thread: { kind: 'start' },
+      developerInstructions: 'native-l0',
+      prepareRequest: (body) => ({
+        v: 1,
+        message: { body },
+        nativeInstructions: [{ body: 'native-l0' }],
+        runtime: { provider: 'openai', carrier: 'app_server', model: 'gpt-test' },
+        tools: { finalSurface: 'unknown' },
+        providerNativeVisibility: 'unknown',
+      }),
+      beforeProviderLaunch: async (request) => {
+        assert.equal(
+          wire.writes.some((message) => message.method === 'turn/start'),
+          false,
+        );
+        recorded = request;
+        await Promise.resolve();
+        return {
+          requestGenerationId: 'a779c7b0-f305-4e96-af35-f61a79217f30',
+          generationOrdinal: 1,
+          sessionId: 'session-1',
+        };
+      },
+    }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  const turnStart = wire.writes.find((message) => message.method === 'turn/start');
+  assert.equal(recorded.message.body, 'app-server-message');
+  assert.equal(turnStart.params.input[0].text, recorded.message.body);
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await outputPromise;
+});
+
 test('direct app-server carrier frames JSONL on LF only', async () => {
   const childScript = `
     const records = [

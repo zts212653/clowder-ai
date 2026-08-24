@@ -12,6 +12,8 @@ const ENV_KEYS = [
   'FRONTEND_PORT',
   'CAT_CAFE_WEB_BUILD_REVISION',
   'CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED',
+  'CAT_CAFE_WEB_TEST_DIST_DIR',
+  'CAT_CAFE_WEB_TEST_TSCONFIG',
 ];
 
 function withEnv(overrides, run) {
@@ -105,6 +107,30 @@ describe('next.config rewrites', () => {
     withEnv({ CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: '1' }, (config) => {
       assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED, '1');
     });
+  });
+
+  it('isolates a browser test dev server from production build artifacts', () => {
+    withEnv(
+      {
+        CAT_CAFE_WEB_TEST_DIST_DIR: '.next-test-f294-example',
+        CAT_CAFE_WEB_TEST_TSCONFIG: 'tsconfig.next-test-f294-example.json',
+      },
+      (config) => {
+        assert.equal(config.distDir, '.next-test-f294-example');
+        assert.equal(config.typescript?.tsconfigPath, 'tsconfig.next-test-f294-example.json');
+      },
+    );
+  });
+
+  it('rejects an unpaired or unsafe browser test build path', () => {
+    assert.throws(
+      () => withEnv({ CAT_CAFE_WEB_TEST_DIST_DIR: '../shared-next' }, () => {}),
+      /must name an isolated \.next-test-\* directory/,
+    );
+    assert.throws(
+      () => withEnv({ CAT_CAFE_WEB_TEST_DIST_DIR: '.next-test-f294-example' }, () => {}),
+      /must be provided together/,
+    );
   });
 
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {

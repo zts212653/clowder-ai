@@ -134,6 +134,32 @@ export interface EvidenceRoutesOptions {
   catalog?: Pick<LibraryCatalog, 'list' | 'getRoutable'>;
 }
 
+interface VectorCountDb {
+  prepare: (sql: string) => { get: () => Record<string, unknown> };
+}
+
+function readPersistedVectorCount(
+  db: VectorCountDb,
+  virtualTableSql: string,
+  backingRowidsSql: string,
+): { count: number; virtualTableReadable: boolean } {
+  try {
+    const row = db.prepare(virtualTableSql).get() as { c: number };
+    return { count: row.c, virtualTableReadable: true };
+  } catch {
+    // sqlite-vec virtual tables cannot be queried until the extension is
+    // loaded, but their shadow rowid tables remain ordinary SQLite tables.
+    // Count those persisted rows so status never turns "unavailable" into
+    // the much scarier and incorrect "the vector index is empty".
+    try {
+      const row = db.prepare(backingRowidsSql).get() as { c: number };
+      return { count: row.c, virtualTableReadable: false };
+    } catch {
+      return { count: 0, virtualTableReadable: false };
+    }
+  }
+}
+
 export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (app, opts) => {
   app.get('/api/evidence/search', async (request, reply) => {
     const parseResult = searchSchema.safeParse(request.query);
@@ -574,15 +600,14 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // embedding warm-up (passage_vectors < passages means semantic recall is still warming up;
       // passage_fts is complete). `supported` distinguishes "warming up" from "vectors not available
       // at all" (embed off / sqlite-vec missing), so the UI never shows a warm-up that never finishes.
-      let passageVectorCount = 0;
-      let passageVectorsSupported = false;
       const passageEmbeddingReady = (opts.getEmbeddingService?.() ?? opts.embeddingService)?.isReady() === true;
-      try {
-        passageVectorCount = (db.prepare('SELECT count(*) AS c FROM passage_vectors').get() as { c: number }).c;
-        passageVectorsSupported = passageEmbeddingReady;
-      } catch {
-        /* vec0 table may not exist (sqlite-vec unavailable / embedding off) → unsupported, not warming */
-      }
+      const passageVectors = readPersistedVectorCount(
+        db,
+        'SELECT count(*) AS c FROM passage_vectors',
+        'SELECT count(*) AS c FROM passage_vectors_rowids',
+      );
+      const passageVectorCount = passageVectors.count;
+      const passageVectorsSupported = passageVectors.virtualTableReadable && passageEmbeddingReady;
 
       // Embedding model from embedding_meta (VectorStore.initMeta writes embedding_model_id)
       let embeddingModel: string | null = null;
@@ -595,15 +620,11 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         /* table may not exist */
       }
 
-      // Vector index size. If the table query throws, sqlite-vec wasn't
-      // loaded — already blocked at the install dialog via the matrix
-      // 'unsupported' branch, so we just defensively return 0 here.
-      let vectorsCount = 0;
-      try {
-        vectorsCount = (db.prepare('SELECT count(*) AS c FROM evidence_vectors').get() as { c: number }).c;
-      } catch {
-        /* vec0 virtual table missing — install dialog blocked this case */
-      }
+      const vectorsCount = readPersistedVectorCount(
+        db,
+        'SELECT count(*) AS c FROM evidence_vectors',
+        'SELECT count(*) AS c FROM evidence_vectors_rowids',
+      ).count;
 
       // F188 Phase K (AC-K2): build signals → evaluate config warnings →
       // derive functionalStatus. Pure compute, no extra DB / fs cost beyond

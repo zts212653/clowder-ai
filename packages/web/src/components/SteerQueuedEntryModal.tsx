@@ -43,7 +43,23 @@ export function SteerQueuedEntryModal({
 
         <div className="px-6 pb-5">
           <div className="w-full p-4 rounded-xl border border-[var(--conn-amber-ring)] bg-[var(--conn-amber-bg)]">
-            <div className="text-sm font-medium text-[var(--conn-amber-text)]">⚠️ 会停止当前回复后发送此消息</div>
+            <div className="flex items-center gap-2 text-sm font-medium text-[var(--conn-amber-text)]">
+              <svg
+                aria-hidden="true"
+                className="h-4 w-4 flex-shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+                <line x1="12" x2="12" y1="9" y2="13" />
+                <line x1="12" x2="12.01" y1="17" y2="17" />
+              </svg>
+              <span>会停止当前回复后发送此消息</span>
+            </div>
             <div className="text-xs text-cafe-secondary mt-1">
               {isDraft
                 ? '这不是“追加到当前回复”；当前回复会被停止。已经完成的回复仍会保留在聊天记录中。'

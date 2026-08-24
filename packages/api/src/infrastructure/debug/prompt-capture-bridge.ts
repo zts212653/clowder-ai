@@ -1,6 +1,9 @@
 /**
- * F153 Prompt X-Ray: Thin bridge between invoke-single-cat and PromptCaptureStore.
- * Fire-and-forget — never blocks invocation.
+ * F153 Prompt X-Ray legacy bridge.
+ *
+ * F299 Phase D removed every production caller. The export remains only so
+ * existing captures and compatibility tests can be read until the legacy ring
+ * expires; new invocations use transcript-owned request-generation evidence.
  *
  * AC-G10 (Phase G native L0 closure / KD-44): when the caller flags an F203
  * native-L0 provider, this bridge asynchronously fetches the compiled L0 via
@@ -60,6 +63,7 @@ export interface CaptureInput {
   nativeL0Fetcher?: (catId: string, userId: string) => Promise<string>;
 }
 
+/** @deprecated F299 request generations are the sole production writer. */
 export function capturePromptIfEnabled(input: CaptureInput): void {
   if (!isPromptCaptureEnabled(input.catId)) return;
 

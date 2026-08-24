@@ -9,6 +9,7 @@
 import { evaluateChangedFilesRequireCommand } from './sop-changed-files-require-command.js';
 import { evaluateCoCreationDocsLane } from './sop-co-creation-docs-lane.js';
 import { evaluateCommandPattern, evaluateCommandSequence } from './sop-command-predicates.js';
+import { evaluateDesignGateEvidence } from './sop-design-gate-evidence.js';
 import type {
   RuleOwner,
   SopDefinitionInput,
@@ -25,6 +26,7 @@ export type {
   PredicateCoCreationDocsLane,
   PredicateCommandPattern,
   PredicateCommandSequence,
+  PredicateDesignGateEvidence,
   PredicateEnvCheck,
   PredicateGitState,
   PredicateHandleCheck,
@@ -63,6 +65,9 @@ export function evaluatePredicate(
       break;
     case 'command_sequence':
       result = evaluateCommandSequence(ruleId, stageId, kind, severity, predicate, trace);
+      break;
+    case 'design_gate_evidence':
+      result = evaluateDesignGateEvidence(ruleId, stageId, kind, severity, predicate, trace);
       break;
     case 'sha_dedup':
       result = evaluateShaDedup(ruleId, stageId, kind, severity, predicate, trace);

@@ -29,6 +29,7 @@ import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
 import { ExternalLinkIcon } from './HubConfigIcons';
 import { describeMessageInvocationTrajectory, InvocationTrajectoryAnchor } from './InvocationTrajectoryAnchor';
+import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
 import { MessageBundleCard } from './MessageBundleCard';
 import { focusTurnAbsorptionSummary, MessageReceiptDock } from './MessageReceiptDock';
@@ -630,6 +631,7 @@ export const ChatMessage = memo(function ChatMessage({
         )}
         <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
         <CopyIdButton messageId={message.id} />
+        <MessageActionSlot />
         <span className="text-xs font-semibold" style={{ color: 'var(--color-cocreator-primary)' }}>
           {coCreator.name}
         </span>
@@ -733,6 +735,7 @@ export const ChatMessage = memo(function ChatMessage({
     message.extra?.auxiliaryTurnExecutions?.length ? (
       <div
         className="mb-1 flex flex-col gap-1 min-w-0"
+        data-testid="message-header"
         data-turn-execution-owner={message.extra?.turnExecution?.invocationId}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -743,6 +746,7 @@ export const ChatMessage = memo(function ChatMessage({
           >
             {catStyle?.label ?? message.catId}
           </span>
+          <MessageActionSlot />
           <span className="text-xs text-cafe-muted shrink-0">{formatTime(message.timestamp)}</span>
           <CopyIdButton messageId={message.id} />
           <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />

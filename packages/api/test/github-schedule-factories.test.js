@@ -309,6 +309,71 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
     assert.strictEqual(spec.profile, 'poller');
   });
 
+  test('github.cicd-check factory uses one tick batch even when legacy single-reader wiring is present', async () => {
+    const registry = new ScheduleFactoryRegistry();
+    registerGitHubScheduleFactories(registry);
+    const factory = registry.get('github.cicd-check');
+    assert.ok(factory);
+
+    const task = {
+      id: 'task-pr-7',
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#7',
+      threadId: 'thread-7',
+      title: 'PR wait',
+      ownerCatId: 'codex-sol',
+      status: 'doing',
+      createdBy: 'codex-sol',
+      userId: 'user-1',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    let batchCalls = 0;
+    let singleCalls = 0;
+    const routed = [];
+    const spec = factory.createTaskSpec(
+      'schedule:github:cicd-check',
+      makeGitHubDeps({
+        taskStore: { listByKind: async () => [task] },
+        cicdRouter: {
+          route: async (poll) => {
+            routed.push(poll.prNumber);
+            return { kind: 'skipped', reason: 'state-only' };
+          },
+        },
+        // Reproduces the pre-fix production dependency bag. The plugin factory
+        // must not let this legacy seam disable the tick-level batch reader.
+        fetchPrStatus: async () => {
+          singleCalls += 1;
+          return null;
+        },
+        fetchPrStatuses: async (targets) => {
+          batchCalls += 1;
+          return new Map(
+            targets.map((target) => [
+              `${target.repoFullName}#${target.prNumber}`,
+              {
+                ...target,
+                headSha: 'abc123',
+                prState: 'open',
+                aggregateBucket: 'pending',
+                checks: [],
+              },
+            ]),
+          );
+        },
+      }),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    assert.equal(batchCalls, 1, 'production factory must perform one tick-level batch read');
+    assert.equal(singleCalls, 0, 'production factory must not poll each PR separately');
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    assert.equal(singleCalls, 0, 'execute must consume the batch snapshot');
+    assert.deepEqual(routed, [7]);
+  });
+
   test('github.conflict-check factory creates TaskSpec with correct instanceId', () => {
     const registry = new ScheduleFactoryRegistry();
     registerGitHubScheduleFactories(registry);

@@ -22,6 +22,9 @@ evalCat:
   handle: "@opus47"
   model: claude-opus-4-7
 frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
 sourceAdapter: sop-trace-eval
 sourceRefsKind: sop-trace-eval
 threadPolicy:

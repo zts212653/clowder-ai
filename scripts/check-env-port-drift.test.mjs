@@ -688,21 +688,21 @@ describe(
       );
     });
 
-    it('governance tests use sanitized frontend/API fallback ports after sync', () => {
-      const packTest = sanitizeFixture(
-        'packages/api/test/governance/governance-pack.test.js',
-        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-pack.test.js'), 'utf-8'),
+    it('portable workspace staging uses sanitized frontend/API fallback ports after sync', () => {
+      const stagingSource = sanitizeFixture(
+        'packages/api/src/domains/cats/services/context/StagingContent.ts',
+        readFileSync(resolve(ROOT, 'packages/api/src/domains/cats/services/context/StagingContent.ts'), 'utf-8'),
       );
-      const bootstrapTest = sanitizeFixture(
-        'packages/api/test/governance/governance-bootstrap.test.js',
-        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-bootstrap.test.js'), 'utf-8'),
+      const stagingTest = sanitizeFixture(
+        'packages/api/test/staging-content.test.js',
+        readFileSync(resolve(ROOT, 'packages/api/test/staging-content.test.js'), 'utf-8'),
       );
 
-      for (const content of [packTest, bootstrapTest]) {
-        assert.doesNotMatch(content, /frontend 3001 and API 3002/);
-        assert.match(content, /FRONTEND_PORT \?\? '3003'/);
-        assert.match(content, /API_SERVER_PORT \?\? '3004'/);
-      }
+      assert.doesNotMatch(stagingSource, /3001\/3002/);
+      assert.match(stagingSource, /FRONTEND_PORT \?\? '3003'/);
+      assert.match(stagingSource, /API_SERVER_PORT \?\? '3004'/);
+      assert.doesNotMatch(stagingTest, /3001\/3002/);
+      assert.match(stagingTest, /defaultOut\.includes\('3003\/3004'\)/);
     });
 
     it('sync-to-opensource.sh runs sanitizer over CommonJS test files', () => {

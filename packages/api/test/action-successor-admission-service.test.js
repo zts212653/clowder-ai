@@ -1557,6 +1557,7 @@ describe('ActionSuccessorAdmissionService', () => {
     assert.equal(allowed.applicable, true);
     assert.equal(allowed.allow, true);
     assert.equal(allowed.expectedThreadId, 'thread-direct-review-carrier');
+    assert.equal(allowed.predecessorCatId, 'codex-sol');
 
     const ancestorRoute = await service.preflightLocalReviewTerminalRoute({
       leaseId: currentLease.leaseId,

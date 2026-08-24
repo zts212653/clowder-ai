@@ -59,9 +59,6 @@ const mockGovRefetch = vi.fn();
 const mockUseAgentHookHealth = vi.fn();
 const mockAgentHookRefresh = vi.fn();
 let mockGovernanceStatus = {
-  ready: true,
-  needsBootstrap: false,
-  needsConfirmation: false,
   isEmptyDir: false,
   isGitRepo: true,
   gitAvailable: true,
@@ -314,9 +311,6 @@ describe('ChatContainer governance refetch', () => {
     mockGovRefetch.mockReset();
     mockAgentHookRefresh.mockReset();
     mockGovernanceStatus = {
-      ready: true,
-      needsBootstrap: false,
-      needsConfirmation: false,
       isEmptyDir: false,
       isGitRepo: true,
       gitAvailable: true,
@@ -376,9 +370,6 @@ describe('ChatContainer governance refetch', () => {
 
   it('refreshes governance and agent-hook health after project setup completes', async () => {
     mockGovernanceStatus = {
-      ready: false,
-      needsBootstrap: true,
-      needsConfirmation: false,
       isEmptyDir: true,
       isGitRepo: false,
       gitAvailable: true,

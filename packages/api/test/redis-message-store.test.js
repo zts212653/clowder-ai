@@ -443,6 +443,28 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('F167 rehydrates a typed local-review verdict from the real Redis hash', async () => {
+    const localReviewVerdict = {
+      verdict: 'changes_requested',
+      clientMessageId: 'local-review-verdict-redis-1',
+      reviewedHeadSha: 'a'.repeat(40),
+      carrierlessLeaseFence: { leaseId: 'lease-review-redis-1', generation: 7 },
+    };
+    const stored = await store.append({
+      userId: 'user-f167-reviewer',
+      catId: 'opus5',
+      content: 'REQUEST_CHANGES — typed verdict presentation',
+      mentions: ['codex-sol'],
+      timestamp: Date.now(),
+      threadId: 'thread-f167-local-review-verdict',
+      extra: { localReviewVerdict },
+    });
+
+    const hydrated = await store.getById(stored.id);
+
+    assert.deepEqual(hydrated?.extra?.localReviewVerdict, localReviewVerdict);
+  });
+
   it('F287 rehydrates a strict delivery-decision carrier from the real Redis hash', async () => {
     const deliveryDecision = {
       v: 1,

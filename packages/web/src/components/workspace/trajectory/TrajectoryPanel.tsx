@@ -1,6 +1,10 @@
 'use client';
 
-import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
+import type {
+  InvocationTrajectorySummary,
+  RequestGenerationGapV1,
+  RequestGenerationProjectionV1,
+} from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SessionEventsViewer } from '@/components/audit/SessionEventsViewer';
 import { SessionSearchTab } from '@/components/audit/SessionSearchTab';
@@ -26,6 +30,12 @@ import {
 type PanelTab = 'trajectory' | 'sessions' | 'search';
 type InvocationListState = { threadId?: string; items: InvocationTrajectorySummary[] };
 type SessionViewerTarget = { threadId: string; id: string; catId?: string };
+type RequestGenerationsResponse = {
+  invocationId: string;
+  threadId: string;
+  generations: RequestGenerationProjectionV1[];
+  gaps?: RequestGenerationGapV1[];
+};
 
 async function fetchInvocationSummaries(threadId: string): Promise<InvocationTrajectorySummary[]> {
   const response = await apiFetch(`/api/threads/${threadId}/invocations?limit=500`);
@@ -78,6 +88,12 @@ function invocationDetailMatchesTarget(
   );
 }
 
+function requestGenerationsUrl(target: ResolvedTrajectoryTarget, reveal = false): string {
+  const query = new URLSearchParams({ threadId: target.threadId, sessionId: target.sessionId });
+  if (reveal) query.set('reveal', 'exact');
+  return `/api/invocations/${encodeURIComponent(target.invocationId)}/request-generations?${query.toString()}`;
+}
+
 export function TrajectoryPanel({ threadId }: { threadId?: string }) {
   const currentThreadId = useChatStore((state) => state.currentThreadId);
   const catInvocations = useChatStore((state) => state.catInvocations);
@@ -92,10 +108,16 @@ export function TrajectoryPanel({ threadId }: { threadId?: string }) {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState(false);
+  const [requestGenerations, setRequestGenerations] = useState<RequestGenerationProjectionV1[] | null>(null);
+  const [requestGenerationGaps, setRequestGenerationGaps] = useState<RequestGenerationGapV1[]>([]);
+  const [generationsLoading, setGenerationsLoading] = useState(false);
+  const [generationsError, setGenerationsError] = useState(false);
+  const [revealingGenerations, setRevealingGenerations] = useState(false);
   const [detailReload, setDetailReload] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sessionViewer, setSessionViewer] = useState<SessionViewerTarget | null>(null);
   const listRequestIdRef = useRef(0);
+  const generationsRequestIdRef = useRef(0);
   const { resolvedTarget, resolutionError, resolvingTarget, retryResolution } = useCanonicalTrajectoryTarget(
     target,
     activeThreadId,
@@ -201,6 +223,66 @@ export function TrajectoryPanel({ threadId }: { threadId?: string }) {
     };
   }, [detailReload, detailSessionId, scopedTarget]);
 
+  useEffect(() => {
+    const requestId = ++generationsRequestIdRef.current;
+    if (!scopedTarget) {
+      setRequestGenerations(null);
+      setRequestGenerationGaps([]);
+      setGenerationsLoading(false);
+      setGenerationsError(false);
+      return;
+    }
+    setGenerationsLoading(true);
+    setGenerationsError(false);
+    void apiFetch(requestGenerationsUrl(scopedTarget))
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        return response.json() as Promise<RequestGenerationsResponse>;
+      })
+      .then((body) => {
+        if (requestId !== generationsRequestIdRef.current) return;
+        if (body.invocationId !== scopedTarget.invocationId || body.threadId !== scopedTarget.threadId) {
+          throw new Error('request_generation_scope_mismatch');
+        }
+        setRequestGenerations(body.generations);
+        setRequestGenerationGaps(body.gaps ?? []);
+      })
+      .catch(() => {
+        if (requestId !== generationsRequestIdRef.current) return;
+        setRequestGenerations(null);
+        setRequestGenerationGaps([]);
+        setGenerationsError(true);
+      })
+      .finally(() => {
+        if (requestId === generationsRequestIdRef.current) setGenerationsLoading(false);
+      });
+  }, [scopedTarget]);
+
+  const revealRequestGenerations = async () => {
+    if (!scopedTarget) return;
+    const requestId = ++generationsRequestIdRef.current;
+    setRevealingGenerations(true);
+    setGenerationsError(false);
+    try {
+      const response = await apiFetch(requestGenerationsUrl(scopedTarget, true));
+      if (!response.ok) throw new Error();
+      const body = (await response.json()) as RequestGenerationsResponse;
+      if (
+        requestId !== generationsRequestIdRef.current ||
+        body.invocationId !== scopedTarget.invocationId ||
+        body.threadId !== scopedTarget.threadId
+      ) {
+        return;
+      }
+      setRequestGenerations(body.generations);
+      setRequestGenerationGaps(body.gaps ?? []);
+    } catch {
+      if (requestId === generationsRequestIdRef.current) setGenerationsError(true);
+    } finally {
+      if (requestId === generationsRequestIdRef.current) setRevealingGenerations(false);
+    }
+  };
+
   const openSummary = (summary: InvocationTrajectorySummary) => {
     const next = {
       threadId: summary.threadId,
@@ -240,6 +322,12 @@ export function TrajectoryPanel({ threadId }: { threadId?: string }) {
         onBack={back}
         onRetry={() => setDetailReload((value) => value + 1)}
         onOpenPromptMessage={(messageId) => restoreTrajectoryPromptMessage(displayedSummary.threadId, messageId)}
+        requestGenerations={requestGenerations}
+        requestGenerationGaps={requestGenerationGaps}
+        generationsLoading={generationsLoading}
+        generationsError={generationsError}
+        revealingGenerations={revealingGenerations}
+        onRevealGenerations={() => void revealRequestGenerations()}
       />
     );
   if (target && resolutionError) {

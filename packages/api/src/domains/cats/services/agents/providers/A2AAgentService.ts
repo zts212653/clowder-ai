@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import type { A2AAgentConfig, A2AJsonRpcResponse, CatId } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
-import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import type { AgentMessage, AgentService, AgentServiceOptions, PreparedProviderRequestV1 } from '../../types.js';
 import { transformA2ATaskToMessages } from './a2a-event-transform.js';
 
 export interface A2AAgentServiceOptions {
@@ -51,6 +51,16 @@ export class A2AAgentService implements AgentService {
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const taskId = randomUUID();
 
+    const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+      v: 1,
+      message: Object.freeze({ body: prompt }),
+      nativeInstructions: Object.freeze([]),
+      runtime: Object.freeze({ provider: 'a2a', carrier: 'remote', protocol: 'json_rpc' }),
+      tools: Object.freeze({ finalSurface: 'unsupported' as const }),
+      providerNativeVisibility: 'unsupported' as const,
+    });
+    if (!('body' in preparedRequest.message)) throw new Error('a2a_prepared_message_not_exact');
+
     const body = {
       jsonrpc: '2.0' as const,
       id: taskId,
@@ -59,7 +69,7 @@ export class A2AAgentService implements AgentService {
         id: taskId,
         message: {
           role: 'user' as const,
-          parts: [{ type: 'text' as const, text: prompt }],
+          parts: [{ type: 'text' as const, text: preparedRequest.message.body }],
         },
       },
     };
@@ -80,6 +90,7 @@ export class A2AAgentService implements AgentService {
     yield agentMsg('session_init', this.catId);
 
     try {
+      await options?.beforeProviderLaunch?.(preparedRequest);
       const response = await this.fetchFn(this.config.url, {
         method: 'POST',
         headers,

@@ -8,10 +8,22 @@ export interface SynthesizedListenAsset {
   bytes: number;
   durationSec?: number;
   synthesisMs?: number;
+  synthesisFingerprint?: string;
 }
 
 export interface LoadedListenDocument extends ListenDocumentState {
   cache?: { cachedSentences: number; totalSentences: number; totalBytes: number };
+  cacheRun?: { active: boolean; error?: string };
+}
+
+export interface ListenCacheRunRequest {
+  identity: ListenDocumentIdentity;
+  sentences: Array<{ anchor: string; text: string }>;
+  startAnchor?: string;
+}
+
+export interface ListenCacheCancelRequest extends ListenDocumentIdentity {
+  synthesisFingerprint: string;
 }
 
 export type ListenSynthesisEvent =
@@ -26,9 +38,16 @@ export type ListenSynthesisEvent =
 
 export interface ListenModeApi {
   load(identity: Pick<ListenDocumentIdentity, 'projectPath' | 'relativePath'>): Promise<LoadedListenDocument | null>;
-  save(state: ListenDocumentState): Promise<void>;
+  save(state: ListenDocumentState): Promise<LoadedListenDocument>;
   stream(text: string, signal?: AbortSignal): AsyncIterable<ListenSynthesisEvent>;
-  linkAsset(identity: ListenDocumentIdentity, anchor: string, assetId: string): Promise<void>;
+  linkAsset(
+    identity: ListenDocumentIdentity,
+    anchor: string,
+    assetId: string,
+    synthesisFingerprint?: string,
+  ): Promise<boolean>;
+  startCache(input: ListenCacheRunRequest): Promise<LoadedListenDocument>;
+  cancelCache(identity: ListenCacheCancelRequest): Promise<LoadedListenDocument>;
   clearAudio(identity: ListenDocumentIdentity): Promise<void>;
 }
 
@@ -79,11 +98,11 @@ export const listenModeApi: ListenModeApi = {
     const response = await apiFetch(`/api/tts/listen/document?${params}`);
     if (response.status === 404) return null;
     await requireOk(response, '读取听读进度失败');
-    return (await response.json()) as ListenDocumentState;
+    return (await response.json()) as LoadedListenDocument;
   },
 
   async save(state) {
-    await requireOk(
+    const response = await requireOk(
       await apiFetch('/api/tts/listen/document', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -91,6 +110,7 @@ export const listenModeApi: ListenModeApi = {
       }),
       '保存听读进度失败',
     );
+    return (await response.json()) as LoadedListenDocument;
   },
 
   async *stream(text, signal) {
@@ -106,20 +126,47 @@ export const listenModeApi: ListenModeApi = {
     yield* readListenSynthesisEvents(response);
   },
 
-  async linkAsset(identity, anchor, assetId) {
-    await requireOk(
+  async linkAsset(identity, anchor, assetId, synthesisFingerprint) {
+    const response = await requireOk(
       await apiFetch('/api/tts/listen/document/asset', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           projectPath: identity.projectPath,
           relativePath: identity.relativePath,
+          contentDigest: synthesisFingerprint ? identity.contentDigest : undefined,
+          synthesisFingerprint,
           anchor,
           assetId,
         }),
       }),
       '关联听读缓存失败',
     );
+    return ((await response.json()) as { linked?: boolean }).linked !== false;
+  },
+
+  async startCache(input) {
+    const response = await requireOk(
+      await apiFetch('/api/tts/listen/document/cache', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      }),
+      '启动全文缓存失败',
+    );
+    return (await response.json()) as LoadedListenDocument;
+  },
+
+  async cancelCache(identity) {
+    const response = await requireOk(
+      await apiFetch('/api/tts/listen/document/cache', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(identity),
+      }),
+      '取消全文缓存失败',
+    );
+    return (await response.json()) as LoadedListenDocument;
   },
 
   async clearAudio(identity) {

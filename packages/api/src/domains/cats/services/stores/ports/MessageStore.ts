@@ -267,6 +267,10 @@ export interface StoredMessage {
     localReviewVerdict?: {
       verdict: 'approved' | 'changes_requested' | 'commented';
       clientMessageId: string;
+      /** Reviewer-authored exact HEAD fact; required only for carrier-free settlement. */
+      reviewedHeadSha?: string;
+      /** Server-written replay/stale fence; identifies no authority by itself. */
+      carrierlessLeaseFence?: { leaseId: string; generation: number };
     };
     /** Internal callback-dedup provenance; never used as routing authority. */
     callbackDedup?: {
@@ -1952,6 +1956,13 @@ export async function hydrateCrossThreadReplyHint(
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
   /** F167 Phase R: stable coordination projection from the trigger message. */
   coordination?: CrossThreadCoordination;
+  /** #1371 Turn Truth: terminal review handback still carries one predecessor obligation. */
+  localReviewVerdict?: {
+    verdict: 'approved' | 'changes_requested' | 'commented';
+    clientMessageId: string;
+    reviewedHeadSha?: string;
+    carrierlessLeaseFence?: { leaseId: string; generation: number };
+  };
 } | null> {
   const trigger = await store.getById(triggerMessageId);
   if (!trigger) return null;
@@ -1967,5 +1978,6 @@ export async function hydrateCrossThreadReplyHint(
     senderCatId: trigger.catId,
     ...(hasCrossThreadProvenance && crossPost?.effectClass ? { effectClass: crossPost.effectClass } : {}),
     ...(coordination ? { coordination } : {}),
+    ...(trigger.extra?.localReviewVerdict ? { localReviewVerdict: trigger.extra.localReviewVerdict } : {}),
   };
 }

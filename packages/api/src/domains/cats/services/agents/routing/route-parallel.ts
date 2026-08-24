@@ -2203,6 +2203,8 @@ export async function* routeParallel(
         threadId,
         catId: msg.catId,
         contents: catUserFacingSystemInfoContents.get(msg.catId) ?? [],
+        ...(bridgeTriggerMessageId ? { expectedSourceMessageId: bridgeTriggerMessageId } : {}),
+        ...(ownInvId ? { expectedDispatchInvocationId: ownInvId } : {}),
         ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       });
       catUserFacingSystemInfoContents.delete(msg.catId);

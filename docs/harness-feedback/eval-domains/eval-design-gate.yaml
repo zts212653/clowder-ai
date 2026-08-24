@@ -1,0 +1,41 @@
+domainId: eval:design-gate
+displayName: Design Gate Integrity Eval
+descriptionForHuman: 设计门有没有更早拦住规则分叉，同时没有制造不可接受的误报与流程税
+metricGlossaryRef: eval-design-gate.metrics.yaml
+systemThreadId: thread_mt0y0eqoltcf3ryn
+evalCat:
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
+frequency: weekly
+triggerPolicy:
+  mode: threshold_or_time
+  maxDetectionDelayHours: 168
+  cooldownHours: 24
+  eventSource: design-gate-source-map
+  threshold:
+    counter: eligibleEpisodes
+    crossingAt: 20
+sourceAdapter: f303-design-gate-episode
+sourceRefsKind: design-gate-episode-source-map
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F303
+  ownerCatId: codex-sol
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 336
+fixtures:
+  - id: f303-phase-c-pr3901
+    featureId: F303
+    path: docs/harness-feedback/design-gate/source-maps/f303-phase-c-pr3901.yaml
+    signal: complete canonical eligible episode
+enabled: true

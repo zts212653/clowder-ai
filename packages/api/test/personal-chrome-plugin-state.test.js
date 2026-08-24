@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-
+import { parseHealthResult } from '../scripts/f247-personal-chrome-health-probe.mjs';
 import {
   createPersonalChromePluginPort,
   inspectPersonalChromePluginState,
@@ -112,6 +112,65 @@ test('valid Web Store publication and multiple authorizations project only bound
   assert.equal(state.live.status, 'connected');
 });
 
+test('a connected socket with a stale page adapter is never projected as ready', async () => {
+  const expected = {
+    helper: `sha512:${'a'.repeat(128)}`,
+    extension: '0.2.1',
+    pageAdapter: '2026-08-23.1',
+  };
+  const state = await inspectPersonalChromePluginState({
+    platform: 'darwin',
+    projectRoot,
+    extensionId,
+    inspectInstallation: async () => ({ ...readyReceipt(), artifactDigest: expected.helper }),
+    readAuthorizations: async () => collection(),
+    probeLive: async ({ expectedRevisions }) => {
+      assert.deepEqual(expectedRevisions, expected);
+      return {
+        status: 'stale_adapter',
+        errorCode: 'STALE_PAGE_ADAPTER',
+        observedRevisions: { ...expected, pageAdapter: '2026-08-22.1' },
+      };
+    },
+  });
+
+  assert.equal(state.live.status, 'stale_adapter');
+  assert.equal(state.live.errorCode, 'STALE_PAGE_ADAPTER');
+  assert.deepEqual(state.live.expectedRevisions, expected);
+  assert.equal(state.live.observedRevisions.pageAdapter, '2026-08-22.1');
+});
+
+test('an active legacy Helper projects one final extension reload action, not generic degradation', async () => {
+  assert.throws(
+    () => parseHealthResult({ v: 1, kind: 'append_result' }, 'health-legacy'),
+    (error) => error.code === 'STALE_HELPER_PROTOCOL',
+  );
+  const expectedHelper = `sha512:${'a'.repeat(128)}`;
+  const state = await inspectPersonalChromePluginState({
+    platform: 'darwin',
+    projectRoot,
+    extensionId,
+    inspectInstallation: async () => ({ ...readyReceipt(), artifactDigest: expectedHelper }),
+    readAuthorizations: async () => collection(),
+    probeLive: async () => {
+      const error = new Error('legacy protocol');
+      error.code = 'STALE_HELPER_PROTOCOL';
+      throw error;
+    },
+  });
+
+  assert.equal(state.artifact.helper, 'ready');
+  assert.deepEqual(state.live, {
+    status: 'stale_adapter',
+    expectedRevisions: {
+      helper: expectedHelper,
+      extension: '0.2.1',
+      pageAdapter: '2026-08-23.1',
+    },
+    errorCode: 'STALE_HELPER_PROTOCOL',
+  });
+});
+
 test('invalid install, listing, and authorization state are separated without leaking exception detail', async () => {
   let liveProbes = 0;
   const state = await inspectPersonalChromePluginState({
@@ -140,6 +199,39 @@ test('invalid install, listing, and authorization state are separated without le
   assert.equal(state.live.status, 'degraded');
   assert.equal(liveProbes, 0);
   assert.equal(JSON.stringify(state).includes('private'), false);
+});
+
+test('stale but intact Developer Preview artifact is repairable without a Web Store publication', async () => {
+  const actions = [];
+  let authorizationReadOptions;
+  const staleError = new Error('recorded artifact is intact but old');
+  staleError.code = 'NATIVE_HOST_ARTIFACT_STALE';
+  staleError.installation = { socketPath: '/tmp/cat-cafe-f247.sock' };
+  const port = createPersonalChromePluginPort({
+    platform: 'darwin',
+    projectRoot,
+    extensionId,
+    inspectInstallation: async () => {
+      throw staleError;
+    },
+    installHost: async () => actions.push('repair'),
+    readAuthorizations: async (_path, options) => {
+      authorizationReadOptions = options;
+      return collection();
+    },
+    probeLive: async () => true,
+  });
+
+  const before = await port.inspect();
+  assert.equal(before.artifact.helper, 'stale');
+  assert.equal(before.config.status, 'ready');
+  assert.equal(before.live.status, 'restart_required');
+  assert.equal(before.distribution.publication, 'unavailable');
+  assert.deepEqual(authorizationReadOptions, { migrateLegacy: false });
+
+  await port.repair();
+  await assert.rejects(port.install(), (error) => error.code === 'CHROME_WEB_STORE_LISTING_NOT_CONFIGURED');
+  assert.deepEqual(actions, ['repair']);
 });
 
 test('Windows is a stable unsupported state and performs no installation or authorization reads', async () => {
@@ -171,7 +263,7 @@ test('Windows is a stable unsupported state and performs no installation or auth
   assert.equal(state.live.status, 'unsupported');
 });
 
-test('install and repair block before Host mutation when the listing is absent or invalid, while cleanup stays available', async () => {
+test('new install blocks before Host mutation when the listing is absent or invalid, while cleanup stays available', async () => {
   const blockedActions = [];
   const blockedPort = createPersonalChromePluginPort({
     platform: 'darwin',
@@ -191,7 +283,6 @@ test('install and repair block before Host mutation when the listing is absent o
     },
   });
   await assert.rejects(blockedPort.install(), (error) => error.code === 'CHROME_WEB_STORE_LISTING_NOT_CONFIGURED');
-  await assert.rejects(blockedPort.repair(), (error) => error.code === 'CHROME_WEB_STORE_LISTING_NOT_CONFIGURED');
   assert.deepEqual(blockedActions, []);
 
   const invalidListingPort = createPersonalChromePluginPort({
@@ -201,7 +292,7 @@ test('install and repair block before Host mutation when the listing is absent o
     webStoreListingUrl: 'https://attacker.example/extension',
     installHost: async () => blockedActions.push('install'),
   });
-  await assert.rejects(invalidListingPort.repair(), (error) => error.code === 'CHROME_WEB_STORE_LISTING_INVALID');
+  await assert.rejects(invalidListingPort.install(), (error) => error.code === 'CHROME_WEB_STORE_LISTING_INVALID');
   assert.deepEqual(blockedActions, []);
 
   await blockedPort.revoke('conversation-cleanup');

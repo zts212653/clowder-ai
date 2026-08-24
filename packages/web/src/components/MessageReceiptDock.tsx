@@ -250,6 +250,7 @@ export function MessageReceiptDock({
                   target,
                   activeInvocationIds,
                   receipt.scope,
+                  loadedLineage,
                 )}`}</span>
                 {intentLabel && <span data-receipt-author-intent>{intentLabel}</span>}
                 {target.authorIntent?.carrierCapability && (
@@ -271,14 +272,13 @@ export function MessageReceiptDock({
                     {EXECUTION_KIND_LABEL[executionKind]}
                   </span>
                 )}
-                {evidence && (
+                {evidence && loadedLineage && (
                   <button
                     type="button"
                     data-receipt-lineage-link={evidence.invocationId}
-                    disabled={!loadedLineage}
                     onClick={() => focusInvocationLineage(messages, evidence.invocationId)}
-                    className="font-medium text-[var(--color-cocreator-primary)] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                    title={loadedLineage ? '定位并高亮这一轮的全部回复与补充' : '这一轮的回复尚未加载到当前时间线'}
+                    className="font-medium text-[var(--color-cocreator-primary)] hover:underline"
+                    title="定位并高亮这一轮的全部回复与补充"
                     aria-label={`查看 ${getCatLabel(target.catId)} 的完整处理链路`}
                   >
                     {target.outcome?.disposition === 'responded' ? '查看回复 ↑' : '查看本轮 ↑'}

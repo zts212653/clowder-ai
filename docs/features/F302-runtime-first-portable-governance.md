@@ -1,24 +1,25 @@
 ---
 feature_ids: [F302]
-related_features: [F070, F203, F228, F249, F251, F289, F293, F301]
+related_features: [F070, F203, F228, F244, F249, F251, F289, F293, F301]
 topics: [portable-governance, external-workspace, bootstrap, project-hygiene, skills]
 doc_kind: spec
 created: 2026-08-21
 description: "让猫通过 runtime 带着身份、协作与安全契约进入外部项目，并把项目治理收敛为零写入默认、可预览选择、可撤销的一键安装产品。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-22T03:50:00Z
+description_updated_at: 2026-08-22T10:26:08Z
 cvo_signoff: "2026-08-21 — sourceMessageId 0001787329489768-000393-2f9188ad：完成立项；保留一键治理价值，但默认不要向用户项目制造大量文件，docs 等规范应可选。"
-tips_exempt: "Kickoff-only architecture/spec；尚无可使用的新 surface，实现 Project Setup 可选治理时必须补真实操作 tip 后才能 close。"
 ---
 
 # F302: Runtime-First Portable Governance — 零写入出征与可选项目治理
 
-> **Status**: spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done | **Completed**: 2026-08-23 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 
 Architecture cell: `portable-governance`
 
 Map delta: `new cell required`
+
+Evolved from: [F070 Portable Governance](F070-portable-governance.md)
 
 Why: 沿用 F070 Portable Governance 产品域，只拥有 opt-in bootstrap 的 preview / execute / undo 与 legacy cleanup。prompt/L0 delivery 归 F203，Skill mount 归 F228/F301，MCP resolution 归 F249，dispatch/routing 归 F293；F302 不拥有第二份规则发现、capability resolution 或 readiness 系统。
 
@@ -36,7 +37,7 @@ F302 不建新平台，只对 F070 做六个动作：
 
 | 动作 | 改什么 | 复用什么 |
 |------|--------|----------|
-| 搬 | frontend/API 当前保留端口从 external managed block 搬到 Clowder AI 单一 L0 规则源 | F203 L4；端口值继续读 `FRONTEND_PORT` / `API_SERVER_PORT` |
+| 搬 | frontend/API 当前保留端口从 external managed block 搬到 Clowder AI 既有 runtime staging，并与 workspace truth 合成一条随身反射 | ADR-038 staging；端口值继续读 `FRONTEND_PORT` / `API_SERVER_PORT` |
 | 删 | 外部派遣不再因 registry、provider file 或 managed marker 缺失而 `governance_blocked` | 删除 `checkGovernancePreflight` 的 dispatch readiness 职责；路径、权限、sandbox 各守现有 owner |
 | 删 | `/api/projects/setup` 不再无条件执行全量 governance bootstrap | 只有用户确认过的 `BootstrapReport` selection 才 execute；代码中不存在的 dispatch auto-resync 不列工作项 |
 | 改 | F070 bootstrap 从“全量写”改为“先 dry-run，再写所选组” | 扩展既有 `BootstrapOptions` / `BootstrapReport` / `BootstrapAction` |
@@ -49,7 +50,7 @@ F302 不建新平台，只对 F070 做六个动作：
 
 | 入口 | Clowder AI 层 | 项目层 | 是否写目标仓 |
 |------|-------------|--------|----------------|
-| Clowder AI 派遣 | runtime 注入猫身份、家规、协作、安全边界和 mission | carrier 在目标 cwd 按自身原生机制读取该仓 `AGENTS.md`，以及需要时的 `CLAUDE.md` / `GEMINI.md` 薄入口 | 否 |
+| Clowder AI 派遣 | runtime 注入 native L0、ADR-038 shared staging 和 mission | carrier 在目标 cwd 按自身原生机制读取该仓 `AGENTS.md`，以及需要时的 `CLAUDE.md` / `GEMINI.md` 薄入口 | 否 |
 | bare CLI | 没有 Clowder AI runtime L0，也不能声称拥有家里的完整协作能力 | CLI 按自己的 HOME 配置与目标仓规则工作 | 否 |
 | 用户选择安装治理 | runtime 层不复制 | F070 bootstrap 只 materialize preview 中选中的项目产物 | 是，确认后才写 |
 
@@ -57,10 +58,10 @@ F302 不建新平台，只对 F070 做六个动作：
 
 | Carrier | Clowder AI 规则载体 | 项目规则载体 |
 |---------|-------------------|----------------|
-| Claude | compiled L0 → `--system-prompt-file` | 原生读取 `CLAUDE.md`；需要共享指南时由薄文件 `@AGENTS.md` 导入 |
-| Codex | compiled L0 → `developer_instructions` | 原生读取 cwd 向上的 `AGENTS.md` 链 |
-| Gemini | 现有 route `systemPrompt` prompt channel | 默认读取 `GEMINI.md`；薄文件用 `@AGENTS.md` 导入，或由用户自行配置 `context.fileName` |
-| Kimi | compiled L0 → `--agent-file`；legacy CLI 走既有 prompt prepend | 原生读取项目 `AGENTS.md` 链；F302 不生成非原生 `KIMI.md` |
+| Claude | compiled L0 + shared staging → 现有 prompt carrier | 原生读取 `CLAUDE.md`；需要共享指南时由薄文件 `@AGENTS.md` 导入 |
+| Codex | compiled L0 + shared staging → 现有 prompt carrier | 原生读取 cwd 向上的 `AGENTS.md` 链 |
+| Gemini | compiled L0 + shared staging → 现有 prompt carrier | 默认读取 `GEMINI.md`；薄文件用 `@AGENTS.md` 导入，或由用户自行配置 `context.fileName` |
+| Kimi | compiled L0 + shared staging → 现有 prompt carrier；legacy CLI 走既有 prepend | 原生读取项目 `AGENTS.md` 链；F302 不生成非原生 `KIMI.md` |
 
 Skills 继续由 F228/F301 的 HOME/project mount 决定，MCP 继续由 F249 在 invocation 时解析；F302 不复制它们的配置或状态。
 
@@ -70,7 +71,7 @@ Skills 继续由 F228/F301 的 HOME/project mount 决定，MCP 继续由 F249 �
 
 - 外部项目 dispatch 不再调用 governance marker readiness；缺 Clowder AI 文档、registry entry 或 provider managed block 都不阻断。
 - `resolvePersistentProjectPath` / external path allowlist、CLI sandbox、共享状态 preflight 等现有边界保持原 owner，不塞进 `PreflightResult` 换名续命。
-- frontend/API 端口占用是单一 L0 协调规则，不扩展 `.claude/hooks/runtime-sanctuary-guard.sh`。该 hook 继续只保护其现有的 destructive runtime/worktree/Redis kill 边界。
+- frontend/API 端口占用与 workspace truth 合并为 ADR-038 shared staging 的一条协调反射，不扩展 `.claude/hooks/runtime-sanctuary-guard.sh`。该 hook 继续只保护其现有的 destructive runtime/worktree/Redis kill 边界。
 - Redis 6399 保留现有 L0 铁律；F302 不再复制一条“Redis L0 + governance managed block”规则。
 
 ### 2. 一键治理变为显式选择
@@ -102,9 +103,9 @@ preview 和 execute 必须消费同一 selection、返回同一 action 形状；
 
 ### 5. 命令与 Skill 引用只认真实坐标
 
-- bootstrap 直接读目标 repo 的 `package.json.scripts`；不存在的命令写 `unknown`，不得 fallback 到 Clowder AI 的 `pnpm gate` / `pnpm check`。
-- 随身 Skill 中 Clowder AI 专属命令必须写明适用域；外部仓一律查该仓 scripts，没有就停在 unknown。
-- ADR-025/F301 已定义 `.cat-cafe-shared-refs` alias，`sync-skills.sh --user` 也已有 HOME alias 写入逻辑。F302 只把仍裸写 `refs/*.md` 的 legacy Skill 引用统一到既有 `../.cat-cafe-shared-refs/*.md`，并验证 HOME mount 后可达。
+- bootstrap 直接读目标 repo 的 `package.json.scripts`；只有受支持的 `packageManager` + 有效 exact SemVer，或字段缺席时恰好一个可识别 lockfile，才形成 runner。非法显式值与歧义证据均写 `unknown`，不得抛错、fallback 到 lockfile 或 Clowder AI 的 `pnpm gate` / `pnpm check`。
+- 同一 `portable-workspace-reflex` 约束所有随身 Skill：Clowder AI 专属路径/命令只在当前仓实查存在时可用；外部仓一律查自己的 manifest/CI，没有就停在 `unknown`。不再把这句话复制进每个 Skill。
+- ADR-025/F301 已定义 `.cat-cafe-shared-refs` alias，`sync-skills.sh --user` 也已有 HOME alias 写入逻辑。F302 验证四家 HOME mount 后该 alias 可达；Skill 自身的 `refs/*.md` 仍是 Skill-local 引用，不冒充 shared refs。
 
 ## User Journey
 
@@ -112,7 +113,7 @@ preview 和 execute 必须消费同一 selection、返回同一 action 形状；
 
 - **Entry**: operator从 Clowder AI 选择一个已有 repo 并派遣猫。
 - **Flow**:
-  1. runtime 注入 Clowder AI L0 与 mission；carrier 从目标 cwd 读取项目自己的规则。
+  1. runtime 注入 Clowder AI native L0、shared staging 与 mission；carrier 从目标 cwd 读取项目自己的规则。
   2. 系统完成现有路径/权限边界检查后直接启动；不检查治理 marker，不写文件。
   3. 用户若想补治理，主动打开 Project Setup，选择组并查看 `BootstrapReport` exact actions/diff。
   4. 用户确认后才 execute；之后可从同一 action 账本 preview undo。
@@ -128,14 +129,14 @@ preview 和 execute 必须消费同一 selection、返回同一 action 形状；
 
 ## Acceptance Criteria
 
-- [ ] **AC-1 Ownership**: `portable-governance` cell 只 owns bootstrap preview/execute/undo + legacy cleanup；does_not_own 明示 F203 prompt/L0、F228/F301 Skill mount、F249 MCP resolution、F293 dispatch/routing，ownership generator 通过。
-- [ ] **AC-2 Single runtime rule**: 所有 Clowder AI managed carriers 的编译/注入测试证明当前 `FRONTEND_PORT` / `API_SERVER_PORT` 只从 L0 单一规则源到达 invocation；external managed block 不再承载该规则，F302 不新增 PreToolUse guard。
-- [ ] **AC-3 Zero-write dispatch**: 外部 cwd 缺 registry、provider file、managed marker 时不产生 `governance_blocked`；dispatch fixture 前后 `git status --porcelain` byte-for-byte 一致。路径 allowlist、sandbox 与共享状态现有测试继续通过。
-- [ ] **AC-4 Opt-in bootstrap**: `dryRun` preview 与 execute 接收同一 selection；未确认时零写入，确认后 action 只包含所选组；execute 重算出的 actions 若与已确认 preview 不同，则不写入并返回新 preview。`/api/projects/setup` 不再无条件 bootstrap，non-empty/headless/cron negative tests 通过。
-- [ ] **AC-5 Repo truth**: 生成指南与 portable Skills 只引用目标 repo 真实 scripts 或 `unknown`；合并旧 B4/B7 为一组 fixture。全部 legacy `refs/*.md` 改用 ADR-025 alias，HOME/project mount reachability 通过。
-- [ ] **AC-6 Minimal materialization**: canonical `AGENTS.md` + 用户所选的 `CLAUDE.md` / `GEMINI.md` 普通文本薄入口；不生成 `KIMI.md`，不覆盖已有入口；未选 provider/Skill/docs 不产生 action，不写 `.gitignore`，不新建 F302 `.cat-cafe/` state；`isEmptyDir` 仅在 `readdir` 成功且零条目时为 true。
-- [ ] **AC-7 Safe legacy cleanup**: 旧 report 只圈 file/symlink 候选，当前内容/target 不匹配则 skipped；cleanup 后 `.cat-cafe/capabilities.json` byte-for-byte 不变，禁止递归删目录。
-- [ ] **AC-8 Real expedition + public gate**: `clowder-ai-plugins` 完成 zero-write dispatch → minimal opt-in → undo；三阶段 exact diff、目标仓真实 test command、Hub evidence 可复核。随后在 disposable 目录导出 sanitized clowder-ai tree，运行目标仓 build/test 与同一旅程 fixture，证明公开版不解析 Clowder AI 私有 prompt、私有路径或未导出的 refs；公开行为变化附 F251 migration notes。
+- [x] **AC-1 Ownership**: `portable-governance` cell 只 owns bootstrap preview/execute/undo + legacy cleanup；does_not_own 明示 F203 prompt/L0、F228/F301 Skill mount、F249 MCP resolution、F293 dispatch/routing，ownership generator 通过。
+- [x] **AC-2 Single runtime rule**: shared staging 的注入测试证明当前 `FRONTEND_PORT` / `API_SERVER_PORT` 与 workspace truth 只从 `portable-workspace-reflex` 这一条到达 managed invocation；external managed block 不再承载该规则，F302 不新增 PreToolUse guard。L0 编译预算测试保持通过，证明没有为迁就 F302 挤占受保护 L0。
+- [x] **AC-3 Zero-write dispatch**: 外部 cwd 缺 registry、provider file、managed marker 时不产生 `governance_blocked`；dispatch fixture 前后 `git status --porcelain` byte-for-byte 一致。路径 allowlist、sandbox 与共享状态现有测试继续通过。
+- [x] **AC-4 Opt-in bootstrap**: `dryRun` preview 与 execute 接收同一 selection；未确认时零写入，确认后 action 只包含所选组；execute 重算出的 actions 若与已确认 preview 不同，则不写入并返回新 preview。`/api/projects/setup` 不再无条件 bootstrap，non-empty/headless/cron negative tests 通过。
+- [x] **AC-5 Repo truth**: 生成指南与 portable Skills 只引用目标 repo 真实 scripts 或 `unknown`；合并旧 B4/B7 为一组 fixture，不把规则复制进各 Skill。shared refs 的 ADR-025 HOME/project mount reachability 通过，Skill-local `refs/*.md` 保持本地解析。
+- [x] **AC-6 Minimal materialization**: canonical `AGENTS.md` + 用户所选的 `CLAUDE.md` / `GEMINI.md` 普通文本薄入口；不生成 `KIMI.md`，不覆盖已有入口；未选 provider/Skill/docs 不产生 action，不写 `.gitignore`，不新建 F302 `.cat-cafe/` state；`isEmptyDir` 仅在 `readdir` 成功且零条目时为 true。
+- [x] **AC-7 Safe legacy cleanup**: 旧 report 只圈 file/symlink 候选，当前 content/target 不匹配则 skipped；cleanup 后 `.cat-cafe/capabilities.json` byte-for-byte 不变，禁止递归删目录。
+- [x] **AC-8 Real expedition + public gate**: `clowder-ai-plugins` 完成真实 zero-write dispatch、repo-native command discovery 与前后 Git-visible exact diff；minimal opt-in → undo 在 disposable sanitized clowder-ai tree 完成，避免为了验收污染真实用户仓。公开树运行 build/test、同一旅程 fixture 与 startup acceptance，证明公开版不解析 Clowder AI 私有 prompt、私有路径或未导出的 refs；公开行为变化附 F251 migration notes。
 
 ## 需求覆盖
 
@@ -147,6 +148,11 @@ preview 和 execute 必须消费同一 selection、返回同一 action 形状；
 | docs 规范可以有但不默认生成 | AC-4, AC-6 |
 | 没治理过的项目保留一键安装 | AC-4, AC-6 |
 | 旧全量 bootstrap 安全收口 | AC-7, AC-8 |
+
+## Tips Contribution（F244）
+
+- [x] 新增 `feature-f302-portable-governance`：告诉operator外部项目默认可直接开工且不会自动写治理文件；需要治理时，从 Project Setup 先预览再确认所选内容。
+- [x] action 只起草“先预览、不写入”的真实操作请求，不把开启 tip 等同于确认安装。
 
 ## Public Impact / Outbound Sync
 
@@ -163,7 +169,7 @@ Provider 文件契约以各 CLI 的公开文档为准，不复制成 Clowder AI 
 | 风险 | 缓解 |
 |------|------|
 | 删 marker gate 时误删真实安全边界 | 只删 governance readiness；path allowlist、sandbox、shared-state 与 destructive sanctuary guard 各留原 owner |
-| L0 端口值与 runtime 漂移 | 编译测试注入非默认 env 值，证明 emitted L0 使用当前 `FRONTEND_PORT` / `API_SERVER_PORT` |
+| staging 端口值与 runtime 漂移 | staging 注入测试使用非默认 env 值；L0 编译预算测试同时证明 F302 未复制规则或挤占受保护 L0 |
 | preview 与 execute selection 漂移 | 同一 `BootstrapOptions` + action snapshot；execute 前重算并显示冲突 |
 | legacy cleanup 误删用户内容 | report 只圈候选，当前 content/target 必须匹配；配置 JSON 与目录递归删除硬禁止 |
 
@@ -174,7 +180,7 @@ Provider 文件契约以各 CLI 的公开文档为准，不复制成 Clowder AI 
 | KD-1 | 新立 F302，不 reopen F070 | F070 是历史实现真相；F302 是其 zero-write / opt-in 产品演进 | 2026-08-21 |
 | KD-2 | runtime-first、repo-owned、capability-on-demand | 身份/协作不靠复制，项目事实不靠 Clowder AI 模板伪造 | 2026-08-21 |
 | KD-3 | 已有项目默认 zero-write，治理不是 dispatch readiness | 能安全开工与是否采用 Clowder AI docs lifecycle 是两个决定 | 2026-08-21 |
-| KD-4 | 端口保留只进单一 L0 规则源，不造跨 carrier guard | 普通端口占用是协调约定；现有 sanctuary hook 保护的是不同的 destructive 边界 | 2026-08-22 |
+| KD-4 | 端口保留与 workspace truth 合并进既有 ADR-038 shared staging，不造跨 carrier guard | 普通端口占用是协调约定；L0 已无安全余量，现有 sanctuary hook 保护的是不同的 destructive 边界 | 2026-08-22 |
 | KD-5 | legacy cleanup 永不碰 `capabilities.json` | 它已是 F228/F249 活跃共享配置；health 可以暴露失效 mount，删除用户配置不可逆 | 2026-08-22 |
 | KD-6 | 不依赖 F242 读取 repo scripts | `package.json.scripts` 是直接事实，不需要 convention-graph spike | 2026-08-22 |
 | KD-7 | Project guide 正文只写 `AGENTS.md` | Codex/Kimi 原生消费；Claude/Gemini 用薄入口导入，减少重复正文并避免不存在的 `KIMI.md` 契约 | 2026-08-22 |

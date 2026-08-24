@@ -9,8 +9,10 @@ const AUTHORIZATION_FIELDS = new Set(['conversationId', 'chatUrl', 'authorizedAt
 const LEGACY_FIELDS = new Set(['schemaVersion', 'provider', 'conversationId', 'chatUrl', 'boundAt', 'updatedAt']);
 const CONVERSATION_ID = /^[A-Za-z0-9-]{1,200}$/;
 const MAX_COLLECTION_BYTES = 64 * 1024;
-const MUTATION_LOCK_ATTEMPTS = 100;
-const MUTATION_LOCK_RETRY_MS = 10;
+const MUTATION_LOCK_ATTEMPTS = 200;
+const MUTATION_LOCK_RETRY_BASE_MS = 10;
+const MUTATION_LOCK_RETRY_JITTER_MS = 15;
+const processLocalMutationTails = new Map();
 export const PERSONAL_CHROME_AUTHORIZATION_LIMIT = 32;
 
 export class PersonalChromeConversationAuthorizationError extends Error {
@@ -194,16 +196,26 @@ export async function writePersonalChromeConversationAuthorizationsAtomic(path, 
   return collection;
 }
 
-async function withAuthorizationMutation(path, operation) {
-  requireAbsolutePath(path, 'conversationAuthorizationPath');
-  const parent = dirname(path);
-  await mkdir(parent, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') await chmod(parent, 0o700);
-  let lease;
+async function serializeProcessLocalMutation(path, operation) {
+  const predecessor = processLocalMutationTails.get(path);
+  let release;
+  const completion = new Promise((resolveCompletion) => {
+    release = resolveCompletion;
+  });
+  processLocalMutationTails.set(path, completion);
+  try {
+    await predecessor;
+    return await operation();
+  } finally {
+    release();
+    if (processLocalMutationTails.get(path) === completion) processLocalMutationTails.delete(path);
+  }
+}
+
+async function acquireAuthorizationMutationLease(path) {
   for (let attempt = 0; attempt < MUTATION_LOCK_ATTEMPTS; attempt += 1) {
     try {
-      lease = await acquireProcessLease(path, { label: 'conversation authorization mutation' });
-      break;
+      return await acquireProcessLease(path, { label: 'conversation authorization mutation' });
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('already has a live owner')) throw error;
       if (attempt === MUTATION_LOCK_ATTEMPTS - 1) {
@@ -212,24 +224,40 @@ async function withAuthorizationMutation(path, operation) {
           'conversation authorization mutation remained busy',
         );
       }
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, MUTATION_LOCK_RETRY_MS));
+      // Jittered delay reduces thundering-herd contention between processes.
+      // Same-process writers never enter this loop concurrently: they wait on
+      // the per-path queue without consuming the cross-process budget.
+      const delay = MUTATION_LOCK_RETRY_BASE_MS + Math.floor(Math.random() * MUTATION_LOCK_RETRY_JITTER_MS);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
     }
   }
-  try {
-    return await operation();
-  } finally {
-    await lease?.release();
-  }
+  throw new Error('conversation authorization mutation lease attempts were not executed');
 }
 
-export async function readPersonalChromeConversationAuthorizations(path) {
+async function withAuthorizationMutation(path, operation) {
+  const normalizedPath = resolve(requireAbsolutePath(path, 'conversationAuthorizationPath'));
+  return serializeProcessLocalMutation(normalizedPath, async () => {
+    const parent = dirname(normalizedPath);
+    await mkdir(parent, { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await chmod(parent, 0o700);
+    const lease = await acquireAuthorizationMutationLease(normalizedPath);
+    try {
+      return await operation(normalizedPath);
+    } finally {
+      await lease?.release();
+    }
+  });
+}
+
+export async function readPersonalChromeConversationAuthorizations(path, { migrateLegacy = true } = {}) {
   requireAbsolutePath(path, 'conversationAuthorizationPath');
   const snapshot = await readPersistedAuthorizations(path);
   if (!snapshot.legacy) return snapshot.collection;
-  return withAuthorizationMutation(path, async () => {
-    const current = await readPersistedAuthorizations(path);
+  if (!migrateLegacy) return snapshot.collection;
+  return withAuthorizationMutation(path, async (normalizedPath) => {
+    const current = await readPersistedAuthorizations(normalizedPath);
     if (current.legacy) {
-      await writePersonalChromeConversationAuthorizationsAtomic(path, current.collection);
+      await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, current.collection);
     }
     return current.collection;
   });
@@ -237,10 +265,10 @@ export async function readPersonalChromeConversationAuthorizations(path) {
 
 export async function authorizePersonalChromeConversation(path, value) {
   const authorization = validateAuthorization(value);
-  return withAuthorizationMutation(path, async () => {
+  return withAuthorizationMutation(path, async (normalizedPath) => {
     let snapshot;
     try {
-      snapshot = await readPersistedAuthorizations(path);
+      snapshot = await readPersistedAuthorizations(normalizedPath);
     } catch (error) {
       if (!(error instanceof PersonalChromeConversationAuthorizationError) || error.code !== 'NEEDS_AUTHORIZATION') {
         throw error;
@@ -254,7 +282,9 @@ export async function authorizePersonalChromeConversation(path, value) {
       (entry) => entry.conversationId === authorization.conversationId,
     );
     if (existing) {
-      if (snapshot.legacy) await writePersonalChromeConversationAuthorizationsAtomic(path, snapshot.collection);
+      if (snapshot.legacy) {
+        await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, snapshot.collection);
+      }
       return { collection: snapshot.collection, authorization: existing, added: false };
     }
     if (snapshot.collection.conversations.length >= PERSONAL_CHROME_AUTHORIZATION_LIMIT) {
@@ -268,7 +298,7 @@ export async function authorizePersonalChromeConversation(path, value) {
       conversations: [...snapshot.collection.conversations, authorization],
       updatedAt: latestTimestamp(snapshot.collection.updatedAt, authorization.updatedAt),
     };
-    await writePersonalChromeConversationAuthorizationsAtomic(path, collection);
+    await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, collection);
     return { collection, authorization, added: true };
   });
 }
@@ -278,11 +308,13 @@ export async function revokePersonalChromeConversation(path, conversationId, tim
     throw new Error('conversationId has an invalid format');
   }
   const updatedAt = requireIsoTimestamp(timestamp, 'revocation timestamp');
-  return withAuthorizationMutation(path, async () => {
-    const snapshot = await readPersistedAuthorizations(path);
+  return withAuthorizationMutation(path, async (normalizedPath) => {
+    const snapshot = await readPersistedAuthorizations(normalizedPath);
     const conversations = snapshot.collection.conversations.filter((entry) => entry.conversationId !== conversationId);
     if (conversations.length === snapshot.collection.conversations.length) {
-      if (snapshot.legacy) await writePersonalChromeConversationAuthorizationsAtomic(path, snapshot.collection);
+      if (snapshot.legacy) {
+        await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, snapshot.collection);
+      }
       return { collection: snapshot.collection, revoked: false };
     }
     const collection = {
@@ -290,14 +322,14 @@ export async function revokePersonalChromeConversation(path, conversationId, tim
       conversations,
       updatedAt: latestTimestamp(snapshot.collection.updatedAt, updatedAt),
     };
-    await writePersonalChromeConversationAuthorizationsAtomic(path, collection);
+    await writePersonalChromeConversationAuthorizationsAtomic(normalizedPath, collection);
     return { collection, revoked: true };
   });
 }
 
 export async function removePersonalChromeConversationAuthorizations(path) {
-  return withAuthorizationMutation(path, async () => {
-    await unlink(path).catch((error) => {
+  return withAuthorizationMutation(path, async (normalizedPath) => {
+    await unlink(normalizedPath).catch((error) => {
       if (error?.code !== 'ENOENT') throw error;
     });
   });

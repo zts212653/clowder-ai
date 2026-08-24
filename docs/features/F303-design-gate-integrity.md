@@ -7,7 +7,7 @@ created: 2026-08-21
 description: "让新增 consumer、重构与“保持既有行为”声明在现有 Design Gate 中回到同一架构真相源，并在昂贵 review 与 landed Alpha 前获得风险匹配的证据。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-22T02:44:00Z
+description_updated_at: 2026-08-23T19:50:00Z
 cvo_signoff: "2026-08-21 — sourceMessageId 0001787331361033-000441-1574d35e：完成立项，但必须复用已有概念、语言和规则；立项后只请 Fable 做一次审核，不做过度 A2A。"
 tips_exempt: "内部开发治理立项；没有新增用户可调用 surface。若未来实现产生可见操作入口，再按 F244 补指向真实入口的 tip。"
 ---
@@ -131,6 +131,35 @@ targeted self-check / test / lint / guard。重复事故 family 只提高反例�
 
 普通增量仍只写 F191 三行，不画矩阵。重构、迁移与 single-writer 收敛类 eligible change 还必须提供 characterization 或 contract test，加代码级 consumer census；涉及持久化或运行语义迁移时，再补适用的 migration/restart/rollback 证据。
 
+#### Phase B implementation evidence（2026-08-23）
+
+Phase B 没有新建 runner 或 production predicate；它把同一组三项 OR 与 evidence labels 写回
+现有入口，并由 Phase A 已有 fixture 跨文件守住：
+
+- **Canonical source**：
+  `docs/features/F083-design-gate-sop.md#f303-architecture--contract-integrity-admission维护加固`、
+  `cat-cafe-skills/feat-lifecycle/SKILL.md#architecture--contract-integrity-admissionf303`、
+  `docs/SOP.md#architecture--contract-delta-admissionf303`。
+- **Consumer evidence**：
+  `rg -n "F303 trigger set \(three-item OR; no fourth trigger\)" docs/features/F083-design-gate-sop.md cat-cafe-skills/feat-lifecycle/SKILL.md docs/SOP.md`
+  可重跑并只返回 F083:38、feat-lifecycle:207、SOP:94 三个预期入口。这里是 skill/SOP
+  约定面；F242 仅用于其适用的 MCP tool、skill manifest、workflow callback 图，不替代本次
+  显式三入口 references。
+- **Claim guard**：
+  unchanged F083 先以 `F083 must expose the F303 trigger set` 变红；写回三入口后 5 pass / 1
+  browser-only skip。fixture 同时证明 repeated incident family 不能成为第四 trigger、eligible
+  change 缺 canonical/consumer/guard evidence 会红、refactor/migration 缺 characterization 或
+  code-derived census 会红、持久化/运行语义迁移缺 migration/restart/rollback evidence 会红，
+  而未命中三项 OR 的普通增量保持轻量。
+- **F277 boundary**：fixture 只读取当前 canonical
+  `docs/features/F277-thread-attention-navigation.md`，锁住 related-set / attention projection
+  不能创建或推断 `workId`，也不拥有 custody、whole-work lifecycle、completion 或 acceptance。
+  F277 draft PR #3501 的 changed files 已核验；本 Phase 未修改 F277 文件或覆盖其 owner 工作。
+
+在 Phase B checkpoint，Phase C 的 `sop-definitions` production predicate、#3787 diff admission
+checker，以及 Phase D 的 `eval:design-gate` registry/source adapter 均未启动；后续完成证据见下文
+Phase C / Phase D implementation evidence。
+
 ### Phase C: 让现有 predicate 与 review 消费证据
 
 - 在 `harness-eval` 已拥有的 `sop-definitions/development.yaml` / `scripts/sop-definitions.mjs` predicate 路径加固 trigger 与证据形态，不扩展尚未锚入该 cell 的 `check:architecture-ownership`，也不另建 dashboard、gate runner 或控制面。
@@ -139,6 +168,39 @@ targeted self-check / test / lint / guard。重复事故 family 只提高反例�
 - risk claim 命中后，作者在 feature worktree exact HEAD 上完成 targeted self-check；真实入口旅程、contract test、lint/scan 只选覆盖该 claim 的最小集合。
 - 非作者 review 读取 spec、diff、Architecture cell 与 targeted self-check evidence，主要判断残余未知和证据是否支持 claim；它不替作者完成第一次产品启动。
 - 回归 fixture 至少证明一个 #3787/F299 类 diff 会在 review/merge 前失败，同时证明纯文档和不触及 ownership/consumer 的普通增量不会被误拦。
+
+#### Phase C implementation evidence（2026-08-23）
+
+Phase C 沿用 `SopTrace → evaluateSopDefinition`，在 `impl` lane 增加一个
+`design_gate_evidence` blocker；没有扩展 `check:architecture-ownership`，也没有新增 runner、dashboard、
+registry、永久 Matrix、F299 domain lint、`eval:design-gate` 注册或 F192 adapter：
+
+- **Canonical predicate source**：`sop-definitions/development.yaml#impl-design-gate-evidence`。
+  `scripts/sop-definitions.mjs` 校验非空 consumer globs 与 helper regex，并由
+  `pnpm gen:sop-definitions` 同步 checked-in generated truth。
+- **Exact diff input**：`SopTrace.diffContext` 绑定 full base/head Git SHA，并要求
+  `diffContext.files` 与 `changedFiles` 是相同的无重复 path set；每个 file 只提供 added lines。候选
+  route/consumer path 缺 diff context 时 fail closed，added lines 未触及
+  access/auth/policy/resolver/cursor/lifecycle helper 时保持轻量。#3787 replay 使用真实
+  `packages/api/src/routes/session-transcript.ts` + `canAccessSessionThread(...)` 新增调用形态。
+- **Review packet**：`SopTrace.designGateReviewPacket` 绑定 `exactHeadSha`，包含 typed risk claims、
+  canonical source、consumer evidence、claim guard，以及逐 claim 的 targeted self-check receipt。eligible
+  diff 缺 `consumer_delta`、具体 evidence、同 HEAD 的成功 receipt，或 receipt command 不等于 claim guard
+  command 时均 violation；未知 claim receipt 也 fail closed。
+- **MCP contract continuity**：既有 `cat_cafe_publish_verdict` 的 `sop-trace-eval` sourceRefs 镜像相同
+  schema/invariants，eval-cat instructions 暴露新字段；没有新增 tool/source adapter。pre-edit
+  `cat_cafe_publish_verdict` Convention Graph 查询在 `main@fdff7e1452f6` 返回
+  `freshness.stale=false`，生产定义仍由 `publish-verdict-tool.ts` 消费 `sopSourceRefsShape`。
+- **RED→GREEN / ordinary GREEN**：
+  `packages/api/test/harness-eval/sop-design-gate-evidence.test.js` 的 #3787-like fixture 覆盖缺 diff、缺
+  packet、缺 consumer declaration/evidence、wrong HEAD、failed/wrong-command receipt 与 complete GREEN；
+  普通 API implementation、docs/test-only、route without helper added line 三个 fixture 保持 GREEN。
+- **Focused receipt**：`pnpm --filter @cat-cafe/api build`、
+  `pnpm --filter @cat-cafe/mcp-server build`、focused API/MCP predicate/schema/instruction tests
+  `109/109`，`pnpm check:sop-definitions` `8/8` 且 generated truth sync PASS。
+
+在 Phase C checkpoint，Phase D 的 landed Alpha、eligible episode adapter 与独立
+`eval:design-gate` domain 尚未启动；后续完成证据见下节。
 
 ### Phase D: Landed Alpha 与 F192 治理效用闭环
 
@@ -149,6 +211,34 @@ targeted self-check / test / lint / guard。重复事故 family 只提高反例�
 - F303 拥有 episode 定义、指标出生证、有效性边界与决策阈值；F192 只承载 domain registry、调度、结构化 verdict 发布、Eval Hub 展示与 re-eval closure，不反向成为 F303 的业务真相源。
 - Phase C 先产出可追溯的 eligible admission / gate receipt，并证明 source adapter 能从 canonical git/PR、review、Alpha 与 incident refs 重建完整 episode；在此之前不注册或启用空 Eval domain。
 - 观测面有效后，在 F192 现有 registry 中注册独立 `eval:design-gate` domain。它不复用 `eval:sop` 的 source adapter、measurement certificate 或 handoff owner；`eval:sop` 的单条 predicate 结果最多作为 episode 的一项输入证据。
+
+#### Phase D implementation evidence（2026-08-23）
+
+- **实现与 review truth**：PR #3904 的 exact reviewed HEAD
+  `8e8211015f5fdb83cb86bd244b253f5d90760f3c` 经 `pnpm gate` 全量 PASS（896s），Opus 4.8
+  非作者 review message `0001787513299658-000188-df854483` 终态 APPROVED；squash merge
+  `8ae536b96228a8cfd505c82f989906cf79b56233` 已由 GitHub MERGED truth 确认。
+- **earlier self-check 与 landed Alpha 分离**：canonical episode #3901 的
+  `docs/harness-feedback/design-gate/receipts/f303-phase-c-pr3901-alpha.yaml` 将 PR-head
+  `a21fd76826fd38401b44172ce551778ca29fdac0` 的 earlier `pnpm gate` receipt 与 landed Alpha
+  `76184494597686283c0999d6f6166d0096fd6d2e` 明确分开，并记录 3011/3012 HTTP 200、Redis 6398 与
+  `alpha_no_escape` consequence。Phase D 合入后又从最新 `origin/main@8ae536b96228a8cfd505c82f989906cf79b56233`
+  重启隔离 Alpha：worktree clean、ahead/behind 0/0、API 3012 与 Web 3011 均 HTTP 200，API release truth
+  冻结到同一 revision；未观察到 F303 escape，因此没有虚构 incident/fix attribution。
+- **canonical episode adapter**：
+  `docs/harness-feedback/design-gate/source-maps/f303-phase-c-pr3901.yaml` 只保留 admission、exact HEAD / self-check、
+  非作者 review、merge、Alpha consequence 等 canonical refs；
+  `packages/api/src/infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.ts` 逐项回源并
+  fail closed。bootstrap bundle `f303-design-gate-2026-08-23-bootstrap` 已从这些 refs 重建 1/1 complete
+  eligible episode，缺 source、矛盾、沉默或非累计 catalog 均判 invalid。
+- **独立 domain 与 closure**：`docs/harness-feedback/eval-domains/eval-design-gate.yaml` 已启用独立
+  `f303-design-gate-episode` adapter、`design-gate-episode-source-map` kind、F303 owner handoff resolver 与
+  weekly cadence；publish path 复用 F192 的 isolated publisher，但 source/owner/validity 均不复用
+  `eval:sop`。`docs/harness-feedback/bundles/f303-design-gate-2026-08-23-bootstrap/lifecycle-root.json`
+  固定 domain-local caseId 与 2026-08-30 re-eval closure。
+- **观察窗口**：2026-08-23 启动，当前 1 个 eligible episode、validity `insufficient`、observation
+  `observing`。F267 census 保持 `contract_ready`、certificate/result/replay refs 为 null、
+  `actionGate: keep_observe_only`；4 周或 20 episode 均未达到，故 AC-D2 / R5 保持开放。
 
 ## Tracking Contract（仅治理效用 claim）
 
@@ -216,33 +306,33 @@ targeted self-check / test / lint / guard。重复事故 family 只提高反例�
 
 ### Phase B（现有 Design Gate 与风险路由）
 
-- [ ] AC-B1: F083/feat-lifecycle/SOP 在不增加 lifecycle stage 的前提下，能对新增 consumer、重构/迁移及“保持既有行为”声明触发 architecture/contract 风险核验。
-- [ ] AC-B2: eligible spec/plan 的 canonical source 是可机核存在的 `path#symbol` / doc anchor exact ref；受影响 consumer 有可重跑 scan 命令与输出，或附理由的显式 references 清单；每个 claim 指向一个具体会变红的 test/lint/guard/self-check 命令或测试名。普通增量不被要求填写永久矩阵。
-- [ ] AC-B3: F277 文档与实现仍只承载 related-set/attention projection；自动检查或 review fixture 证明它没有获得 work/custody/completion/acceptance 推断职责。
-- [ ] AC-B4: 重构、迁移或 single-writer 收敛类 eligible change 同时提供 characterization/contract test 与代码级 consumer census；涉及持久化或运行语义迁移时补 migration/restart/rollback 证据，且至少一个 fixture 证明缺失任一必需证据时会变红。
+- [x] AC-B1: F083/feat-lifecycle/SOP 在不增加 lifecycle stage 的前提下，能对新增 consumer、重构/迁移及“保持既有行为”声明触发 architecture/contract 风险核验。
+- [x] AC-B2: eligible spec/plan 的 canonical source 是可机核存在的 `path#symbol` / doc anchor exact ref；受影响 consumer 有可重跑 scan 命令与输出，或附理由的显式 references 清单；每个 claim 指向一个具体会变红的 test/lint/guard/self-check 命令或测试名。普通增量不被要求填写永久矩阵。
+- [x] AC-B3: F277 文档与实现仍只承载 related-set/attention projection；自动检查或 review fixture 证明它没有获得 work/custody/completion/acceptance 推断职责。
+- [x] AC-B4: 重构、迁移或 single-writer 收敛类 eligible change 同时提供 characterization/contract test 与代码级 consumer census；涉及持久化或运行语义迁移时补 migration/restart/rollback 证据，且至少一个 fixture 证明缺失任一必需证据时会变红。
 
 ### Phase C（checker 与 review 消费）
 
-- [ ] AC-C1: `harness-eval` 现有 SOP predicate 至少让一个 #3787/F299 类 fixture 因“diff 新增 route/consumer 并触及既有 auth/policy/resolver/cursor/lifecycle helper，但 eligible spec/plan 未声明 consumer delta 与具体证据”而在 review/merge 前变红；补齐声明与证据后变绿，不依赖尚未归属的 domain lint。
-- [ ] AC-C2: 至少两个不触及 ownership/consumer 的普通变更 fixture 保持绿，证明没有把所有 Feature 升级为重型审计。
-- [ ] AC-C3: review packet 可验证绑定 exact HEAD，包含命中的 risk claim 与对应 targeted self-check receipt；不要求 reviewer 重跑作者首次旅程。
+- [x] AC-C1: `harness-eval` 现有 SOP predicate 至少让一个 #3787/F299 类 fixture 因“diff 新增 route/consumer 并触及既有 auth/policy/resolver/cursor/lifecycle helper，但 eligible spec/plan 未声明 consumer delta 与具体证据”而在 review/merge 前变红；补齐声明与证据后变绿，不依赖尚未归属的 domain lint。
+- [x] AC-C2: 至少两个不触及 ownership/consumer 的普通变更 fixture 保持绿，证明没有把所有 Feature 升级为重型审计。
+- [x] AC-C3: review packet 可验证绑定 exact HEAD，包含命中的 risk claim 与对应 targeted self-check receipt；不要求 reviewer 重跑作者首次旅程。
 
 ### Phase D（landed Alpha 与效用裁决）
 
-- [ ] AC-D1: 至少一个 landed change 的 Alpha receipt 与 earlier self-check receipt 可追溯区分，Alpha 逃逸能归因回 owner-specific guard 或 trigger gap。
+- [x] AC-D1: 至少一个 landed change 的 Alpha receipt 与 earlier self-check receipt 可追溯区分，Alpha 逃逸能归因回 owner-specific guard 或 trigger gap。
 - [ ] AC-D2: 到达 4 周或 20 个 eligible episodes 后，Tracking Contract 产出完整向量、有效性声明与 keep/tune/sunset 决策，并映射为 F192 `keep_observe / fix / build / delete_sunset` verdict；缺失 admission/incident 关联时明确判 invalid，不编造结论。
-- [ ] AC-D3: Phase C source adapter 能从 canonical refs 重建至少一个完整 eligible episode 后，F192 既有 registry 注册并启用独立 `eval:design-gate` domain，包含独立 source adapter、F303 owner handoff resolver、publish path 与 re-eval closure；fixture 证明它不复用 `eval:sop` truth/validity，且无完整 episode 时不会产出 actionable verdict。
+- [x] AC-D3: Phase C source adapter 能从 canonical refs 重建至少一个完整 eligible episode 后，F192 既有 registry 注册并启用独立 `eval:design-gate` domain，包含独立 source adapter、F303 owner handoff resolver、publish path 与 re-eval closure；fixture 证明它不复用 `eval:sop` truth/validity，且无完整 episode 时不会产出 actionable verdict。
 
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |---|---|---|---|---|
-| R1 | “不要造出多套概念和原语言和规则” | AC-A2, AC-B1, AC-B2 | 静态术语回归 + spec diff + SOP/checker tests | [ ] |
-| R2 | 方案不能冲突于平等 Agent Team；F277 只负责展示/聚类 | AC-B3 | F277 boundary fixture + non-author review | [ ] |
+| R1 | “不要造出多套概念和原语言和规则” | AC-A2, AC-B1, AC-B2 | 静态术语回归 + spec diff + SOP/checker tests | [x] |
+| R2 | 方案不能冲突于平等 Agent Team；F277 只负责展示/聚类 | AC-B3 | F277 boundary fixture + non-author review | [x] |
 | R3 | 先完成立项，再让 Fable 审核一次，不要过度 A2A | AC-A3 | exact-HEAD 单次 kickoff review receipt | [x] |
-| R4 | 规则分叉应在真实使用和 landed Alpha 前暴露 | AC-C1, AC-C3, AC-D1 | RED→GREEN fixture + self-check/Alpha receipts | [ ] |
+| R4 | 规则分叉应在真实使用和 landed Alpha 前暴露 | AC-C1, AC-C3, AC-D1 | RED→GREEN fixture + self-check/Alpha receipts | [x] |
 | R5 | SOP 要又快、又保证质量，重构不再让返工更久 | AC-B1, AC-B4, AC-C2, AC-D2 | 重构缺证据 RED fixture + false-positive/tax 向量 + keep/tune/sunset verdict | [ ] |
-| R6 | “不要硬和之前的结合”——治理 Eval 复用 F192 控制面，但不能硬塞进 `eval:sop` 或继承它的真相源/owner/有效性 | AC-D3 | domain registry + source adapter/handoff/validity fixtures | [ ] |
+| R6 | “不要硬和之前的结合”——治理 Eval 复用 F192 控制面，但不能硬塞进 `eval:sop` 或继承它的真相源/owner/有效性 | AC-D3 | domain registry + source adapter/handoff/validity fixtures | [x] |
 
 ### 覆盖检查
 

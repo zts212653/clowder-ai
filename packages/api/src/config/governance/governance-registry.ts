@@ -8,7 +8,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
-import type { GovernanceHealthSummary, GovernancePackMeta } from '@cat-cafe/shared';
+import type { BootstrapReport, GovernanceHealthSummary, GovernancePackMeta } from '@cat-cafe/shared';
 import { pathsEqual } from '../../utils/project-path.js';
 import { GOVERNANCE_PACK_VERSION } from './governance-pack.js';
 
@@ -18,6 +18,10 @@ const REGISTRY_FILENAME = 'governance-registry.json';
 interface RegistryEntry extends GovernancePackMeta {
   /** Absolute path to the external project */
   projectPath: string;
+  /** F302: last confirmed install ledger; target repos do not store this state. */
+  lastBootstrapReport?: BootstrapReport;
+  /** F302: last confirmed cleanup ledger. */
+  lastCleanupReport?: BootstrapReport;
 }
 
 interface RegistryData {
@@ -61,12 +65,32 @@ export class GovernanceRegistry {
   async register(projectPath: string, meta: GovernancePackMeta): Promise<void> {
     const data = await this.read();
     const existing = data.entries.findIndex((e) => pathsEqual(e.projectPath, projectPath));
-    const entry: RegistryEntry = { ...meta, projectPath };
+    const entry: RegistryEntry = { ...(existing >= 0 ? data.entries[existing] : {}), ...meta, projectPath };
     if (existing >= 0) {
       data.entries[existing] = entry;
     } else {
       data.entries.push(entry);
     }
+    await this.write(data);
+  }
+
+  async recordBootstrap(projectPath: string, meta: GovernancePackMeta, report: BootstrapReport): Promise<void> {
+    await this.register(projectPath, meta);
+    const data = await this.read();
+    const entry = data.entries.find((candidate) => pathsEqual(candidate.projectPath, projectPath));
+    if (!entry) throw new Error(`Governance registry entry missing after register: ${projectPath}`);
+    entry.lastBootstrapReport = report;
+    await this.write(data);
+  }
+
+  async recordCleanup(projectPath: string, meta: GovernancePackMeta, report: BootstrapReport): Promise<void> {
+    const data = await this.read();
+    let entry = data.entries.find((candidate) => pathsEqual(candidate.projectPath, projectPath));
+    if (!entry) {
+      entry = { ...meta, projectPath };
+      data.entries.push(entry);
+    }
+    entry.lastCleanupReport = report;
     await this.write(data);
   }
 

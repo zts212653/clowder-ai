@@ -226,7 +226,9 @@ export type {
   GovernanceFinding,
   GovernanceHealthSummary,
   GovernancePackMeta,
+  GovernanceProvider,
   GovernanceRule,
+  GovernanceSelection,
   LockVersion,
   McpDeleteParams,
   McpEnvEntry,
@@ -281,6 +283,18 @@ export {
   builtinAccountIdForClient,
   protocolForClient,
 } from './client-routing.js';
+export type {
+  CloudBridgeDomFingerprintV1,
+  CloudBridgeFailureDiagnosticV1,
+  CloudBridgeIdempotencyDisposition,
+  CloudBridgeOutboundReceiptV1,
+  CloudBridgeOutboundStatus,
+  CloudBridgeOutboundTransport,
+} from './cloud-bridge-outbound-receipt.js';
+export {
+  isCloudBridgeFailureDiagnosticV1,
+  isCloudBridgeOutboundReceiptV1,
+} from './cloud-bridge-outbound-receipt.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,
@@ -852,6 +866,7 @@ export {
   judgmentSurfaceEnteredOpportunityV1Schema,
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
+  memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_OPPORTUNITY_V1_PAIRS,
   RECALL_RESOLVER_FAMILIES,
@@ -1197,8 +1212,10 @@ export type {
   QueueTargetAttemptState,
   QueueTargetAttemptTerminalReason,
   QueueTargetOutcome,
+  QueueTargetOutcomeEvidenceRef,
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
+  QueueTurnExecutionEvidenceRef,
 } from './queue-receipt.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {
@@ -1206,6 +1223,8 @@ export type {
   RefluxCategory,
   RefluxPattern,
 } from './reflux.js';
+// F299 Phase D: transcript-owned provider request generations.
+export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
 export type {
   AnswerResolutionInput,

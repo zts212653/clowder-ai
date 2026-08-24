@@ -32,7 +32,6 @@ const RECONCILED_EXCLUSIONS = [
   'projects-setup\\.test',
   'projects-mkdir\\.test',
   'governance-status\\.test',
-  'governance-pack\\.test',
   'pack-integration\\.test',
   'project-setup-flow\\.test',
   'expedition-bootstrap\\.test',
@@ -47,6 +46,7 @@ const RECONCILED_EXCLUSIONS = [
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
+  'harness-eval/design-gate-episode-source-provider-private-evidence\\.test',
   'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
   'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
   'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
@@ -90,20 +90,10 @@ test('registry preserves metadata for reconciled exclusions and drops retired on
     false,
   );
 
-  const governancePack = registry.entries.find((entry) => entry.match === 'governance-pack\\.test');
-  assert.deepEqual(
-    governancePack && {
-      category: governancePack.category,
-      owner: governancePack.owner,
-      introducedBy: governancePack.introducedBy,
-      expiresOn: governancePack.expiresOn,
-    },
-    {
-      category: 'source_only',
-      owner: '@zts212653',
-      introducedBy: '069d0f0fb',
-      expiresOn: '2026-08-31',
-    },
+  assert.equal(
+    registry.entries.some((entry) => entry.match === 'governance-pack\\.test'),
+    false,
+    'retired managed-block tests must not leave a stale public exclusion',
   );
 });
 
@@ -142,6 +132,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     'test/f254-freshness-instruction-private-evidence.test.js',
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
+    'test/harness-eval/design-gate-episode-source-provider-private-evidence.test.js',
     'test/harness-eval/measurement-bundle-census.test.js',
     'test/harness-eval/publish-verdict-memory.test.js',
   ]) {
@@ -151,6 +142,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     'test/cicd-router.test.js',
     'test/embed-runtime-policy.test.js',
     'test/f254-freshness-instruction-surface.test.js',
+    'test/harness-eval/design-gate-episode-source-provider.test.js',
     'test/harness-eval/eval-capability-tips-enable-gate.test.js',
     'test/system-prompt-builder.test.js',
     'test/weixin-mp-path-security.test.js',
@@ -238,7 +230,7 @@ test('validator rejects malformed, expired, or zero-match exclusion entries', as
           entries: [
             {
               id: 'missing-owner',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'missing owner should fail',
               introducedBy: 'deadbeef0',
@@ -259,7 +251,7 @@ test('validator rejects malformed, expired, or zero-match exclusion entries', as
           entries: [
             {
               id: 'expired',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'expired should fail',
               owner: '@zts212653',
@@ -310,7 +302,7 @@ test('validator rejects non-ISO YYYY-MM-DD expiresOn formats (codex #2326 P2)', 
           entries: [
             {
               id: 'loose-format-no-zero-pad',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'YYYY-M-D should fail strict format check',
               owner: '@zts212653',
@@ -334,7 +326,7 @@ test('validator rejects non-ISO YYYY-MM-DD expiresOn formats (codex #2326 P2)', 
           entries: [
             {
               id: 'word-sentinel',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'sentinel like never should fail strict format check',
               owner: '@zts212653',
@@ -357,7 +349,7 @@ test('validator rejects non-ISO YYYY-MM-DD expiresOn formats (codex #2326 P2)', 
           entries: [
             {
               id: 'slash-separator',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'YYYY/MM/DD should fail strict format check',
               owner: '@zts212653',
@@ -381,7 +373,7 @@ test('validator rejects non-ISO YYYY-MM-DD expiresOn formats (codex #2326 P2)', 
           entries: [
             {
               id: 'invalid-calendar-date',
-              match: 'governance-pack\\.test',
+              match: 'governance-status\\.test',
               category: 'source_only',
               reason: 'rolled-over date should fail',
               owner: '@zts212653',

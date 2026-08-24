@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -37,7 +36,7 @@ describe('POST /api/projects/setup', () => {
     await rm(fakeCatCafeRoot, { recursive: true, force: true });
   });
 
-  it('mode=skip calls governance bootstrap only', async () => {
+  it('mode=skip is a zero-write acknowledgement', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/projects/setup',
@@ -47,14 +46,11 @@ describe('POST /api/projects/setup', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
     assert.equal(body.ok, true);
-    // Governance files should be created
-    const entries = await readdir(testRoot, { recursive: true });
-    const entryNames = entries.map(String);
-    // Governance bootstrap must produce at least one artifact
-    assert.ok(entryNames.length > 0, 'skip mode should still create governance files');
+    assert.equal('governanceReport' in body, false);
+    assert.deepStrictEqual(await readdir(testRoot, { recursive: true }), []);
   });
 
-  it('mode=init runs git init then governance bootstrap', async () => {
+  it('mode=init runs git init without governance writes', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/projects/setup',
@@ -142,7 +138,7 @@ describe('POST /api/projects/setup', () => {
     assert.equal(res.statusCode, 400);
   });
 
-  it('default registration writes the governance registry to the persistent workspace', async () => {
+  it('default setup does not write a governance registry in runtime or persistent workspace', async () => {
     const previousCwd = process.cwd();
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
@@ -165,7 +161,7 @@ describe('POST /api/projects/setup', () => {
 
       assert.equal(res.statusCode, 200, res.payload);
       await assert.rejects(() => stat(join(runtimeRoot, '.cat-cafe', 'governance-registry.json')), /ENOENT/);
-      assert.equal((await stat(join(workspaceRoot, '.cat-cafe', 'governance-registry.json'))).isFile(), true);
+      await assert.rejects(() => stat(join(workspaceRoot, '.cat-cafe', 'governance-registry.json')), /ENOENT/);
     } finally {
       await defaultApp.close();
       process.chdir(previousCwd);

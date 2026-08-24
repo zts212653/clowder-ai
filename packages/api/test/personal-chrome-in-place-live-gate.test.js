@@ -55,24 +55,43 @@ describe('F247 zero-focus Personal Chrome live gate', () => {
         },
       },
       readConversationAuthorizations: async () => authorizedConversations('conversation-7'),
-      nonce: 'F247_IN_PLACE_NONCE',
       idempotencyKey: 'f247-in-place-source',
     });
 
     assert.deepEqual(browserForeground, before);
-    assert.deepEqual(calls, [
-      ['conversation-7', 'F247_IN_PLACE_NONCE', 'f247-in-place-source'],
-      ['conversation-7', 'F247_IN_PLACE_NONCE', 'f247-in-place-source'],
-    ]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0][0], 'conversation-7');
+    assert.match(calls[0][1], /^F247_IN_PLACE_LIVE_GATE_[0-9TZ:.-]+_[0-9a-f-]+$/i);
+    assert.equal(calls[1][1], calls[0][1]);
+    assert.equal(calls[0][2], 'f247-in-place-source');
     assert.deepEqual(result, {
+      kind: 'diagnostic_receipt',
       status: 'PASS',
       coverage: 'running-owner-chrome-native-messaging-full-seam',
       browserLifecycle: 'untouched',
       foregroundMutation: 'none-by-construction',
-      conversationId: 'conversation-7',
+      canonicalThreadProjection: false,
       hostMessageId: 'chatgpt-user-message-live-1',
       retryHostMessageId: 'chatgpt-user-message-live-1',
     });
+  });
+
+  it('rejects the former arbitrary-text option instead of injecting operator-provided chat body', async () => {
+    let appendCalls = 0;
+    await assert.rejects(
+      runPersonalChromeInPlaceLiveGate({
+        adapter: {
+          append_message: async () => {
+            appendCalls += 1;
+            return { hostMessageId: 'must-not-send' };
+          },
+        },
+        readConversationAuthorizations: async () => authorizedConversations('conversation-7'),
+        nonce: 'ARBITRARY_CHAT_BODY',
+      }),
+      (error) => error?.reason === 'ARBITRARY_TEXT_UNSUPPORTED',
+    );
+    assert.equal(appendCalls, 0);
   });
 
   it('returns typed needs-binding without append or foreground targeting', async () => {
@@ -90,7 +109,6 @@ describe('F247 zero-focus Personal Chrome live gate', () => {
           error.code = 'NEEDS_AUTHORIZATION';
           throw error;
         },
-        nonce: 'F247_IN_PLACE_NONCE',
         idempotencyKey: 'f247-in-place-source',
       }),
       (error) => error?.reason === 'NEEDS_BINDING',
@@ -111,12 +129,12 @@ describe('F247 zero-focus Personal Chrome live gate', () => {
           },
         },
         readConversationAuthorizations: async () => authorizedConversations('conversation-17'),
-        nonce: 'F247_IN_PLACE_NONCE',
         idempotencyKey: 'f247-in-place-source',
       }),
       (error) => error?.code === 'BOUND_TAB_NOT_FOUND',
     );
-    assert.deepEqual(calls, [['conversation-17', 'F247_IN_PLACE_NONCE', 'f247-in-place-source']]);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0][1], /^F247_IN_PLACE_LIVE_GATE_/);
   });
 
   it('requires an exact choice when multiple conversations are authorized', async () => {
@@ -130,7 +148,6 @@ describe('F247 zero-focus Personal Chrome live gate', () => {
           },
         },
         readConversationAuthorizations: async () => authorizedConversations('conversation-17', 'conversation-18'),
-        nonce: 'F247_IN_PLACE_NONCE',
         idempotencyKey: 'f247-in-place-source',
       }),
       (error) => error?.reason === 'CONVERSATION_REQUIRED',
@@ -149,12 +166,10 @@ describe('F247 zero-focus Personal Chrome live gate', () => {
       },
       readConversationAuthorizations: async () => authorizedConversations('conversation-17', 'conversation-18'),
       conversationId: 'conversation-18',
-      nonce: 'F247_IN_PLACE_NONCE',
       idempotencyKey: 'f247-in-place-source',
     });
-    assert.deepEqual(calls, [
-      ['conversation-18', 'F247_IN_PLACE_NONCE', 'f247-in-place-source'],
-      ['conversation-18', 'F247_IN_PLACE_NONCE', 'f247-in-place-source'],
-    ]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0][0], 'conversation-18');
+    assert.equal(calls[1][1], calls[0][1]);
   });
 });

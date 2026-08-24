@@ -70,7 +70,19 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
     const sessionSealer = new SessionSealer(sessionChainStore, transcriptWriter);
 
     const firstService = {
-      async *invoke() {
+      async *invoke(prompt, options) {
+        await options?.beforeProviderLaunch?.({
+          v: 1,
+          message: { accuracy: 'exact', body: prompt },
+          nativeInstructions: [],
+          runtime: {
+            provider: 'antigravity',
+            model: 'claude-opus-4-6',
+            carrier: 'antigravity_bridge',
+          },
+          tools: { finalSurface: 'unknown' },
+          providerNativeVisibility: 'unknown',
+        });
         yield {
           type: 'session_init',
           catId,
@@ -121,7 +133,19 @@ describe('F211 A2 Antigravity session transcript materialization', () => {
     assert.ok(oldSession, 'first Antigravity session must create an active SessionRecord');
 
     const rotationService = {
-      async *invoke() {
+      async *invoke(prompt, options) {
+        await options?.beforeProviderLaunch?.({
+          v: 1,
+          message: { accuracy: 'exact', body: prompt },
+          nativeInstructions: [],
+          runtime: {
+            provider: 'antigravity',
+            model: 'claude-opus-4-6',
+            carrier: 'antigravity_bridge',
+          },
+          tools: { finalSurface: 'unknown' },
+          providerNativeVisibility: 'unknown',
+        });
         yield {
           type: 'session_init',
           catId,

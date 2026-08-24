@@ -1203,7 +1203,7 @@ describe('QueueProcessor', () => {
       assert.deepEqual(terminal.queueCustody.targetOutcomeByCatId.opus, {
         invocationId: 'child-inv-stub',
         disposition: 'completed_with_turn',
-        evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-inv-stub' },
+        evidenceRef: { kind: 'turn_execution', invocationId: 'child-inv-stub' },
         handledAt: terminal.deliveredAt,
       });
       assert.ok(seenAt < terminal.queueCustody.targetOutcomeByCatId.opus.handledAt);
@@ -1242,6 +1242,53 @@ describe('QueueProcessor', () => {
         ],
       );
       assert.equal(durableDeps.queue.list('t1', 'u1').length, 0);
+    });
+
+    it('does not publish canceled visible output as invocation-lineage receipt evidence', async () => {
+      const durableStore = new MessageStore();
+      const durableDeps = stubDeps({ messageStore: durableStore });
+      const { entry, message } = enqueueCustodiedEntry(durableDeps.queue, durableStore);
+      const coordinator = new QueuedMessageCustodyCoordinator({
+        messageStore: durableStore,
+        now: () => entry.createdAt + 300,
+      });
+      durableDeps.queueCustodyCoordinator = coordinator;
+      const durableProcessor = new QueueProcessor(durableDeps);
+      const invocationId = 'child-output-preflight-rejected';
+
+      assert.equal(
+        durableDeps.queue.markQueuedSeen('t1', 'u1', entry.id, 'opus', invocationId, entry.createdAt + 100),
+        true,
+      );
+      await coordinator.persistEntry(durableDeps.queue.getEntrySnapshot('t1', 'u1', entry.id));
+      const rejectedOutput = durableStore.append({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'opus',
+        content: 'output rejected by the holder fence',
+        mentions: [],
+        timestamp: entry.createdAt + 200,
+        deliveryStatus: 'queued',
+        extra: { stream: { invocationId, turnInvocationId: invocationId } },
+      });
+      assert.equal(durableStore.markCanceled(rejectedOutput.id)?.deliveryTransitioned, true);
+
+      await durableProcessor.onInvocationComplete('t1', 'opus', 'succeeded', invocationId, ['opus']);
+
+      const settled = durableStore.getById(message.id);
+      assert.equal(settled.deliveryStatus, 'delivered');
+      assert.equal(settled.queueCustody.status, 'terminal');
+      assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'completed_with_turn');
+      assert.deepEqual(settled.queueCustody.targetOutcomeByCatId.opus.evidenceRef, {
+        kind: 'turn_execution',
+        invocationId,
+      });
+      assert.equal(
+        durableStore
+          .getByThreadAfter('t1', undefined, undefined, 'u1')
+          .some((candidate) => candidate.id === rejectedOutput.id),
+        false,
+      );
     });
 
     it('delivers only the fully settled message from a coalesced cross-thread target carrier', async () => {
@@ -1977,7 +2024,7 @@ describe('QueueProcessor', () => {
       assert.deepEqual(terminal.queueCustody.targetOutcomeByCatId.opus, {
         invocationId: 'child-ordinary-read',
         disposition: 'completed_with_turn',
-        evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-ordinary-read' },
+        evidenceRef: { kind: 'turn_execution', invocationId: 'child-ordinary-read' },
         handledAt: terminal.deliveredAt,
       });
     });
@@ -2644,6 +2691,10 @@ describe('QueueProcessor', () => {
       assert.deepEqual(settled.queueCustody.withdrawnByCatIds ?? [], []);
       assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.invocationId, childInvocationId);
       assert.equal(settled.queueCustody.targetOutcomeByCatId.opus.disposition, 'completed_with_turn');
+      assert.deepEqual(settled.queueCustody.targetOutcomeByCatId.opus.evidenceRef, {
+        kind: 'turn_execution',
+        invocationId: childInvocationId,
+      });
       const receiptEvent = durableDeps.socketManager.broadcastToRoom.mock.calls.find(
         (call) => call.arguments[1] === 'message_receipt_updated',
       );
@@ -4056,7 +4107,7 @@ describe('QueueProcessor', () => {
         queueEntryId: entry.id,
         messageIds: ['msg-1'],
         disposition: 'completed_with_turn',
-        evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-opus-1' },
+        evidenceRef: { kind: 'turn_execution', invocationId: 'inv-opus-1' },
         remainingTargetCats: [],
       });
       assert.equal(

@@ -1,20 +1,59 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChatMessageRow } from '@/components/ChatMessageRow';
 import { CliOutputBlock } from '@/components/cli-output/CliOutputBlock';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { MessageActions } from '@/components/MessageActions';
 import { RichBlocks } from '@/components/rich/RichBlocks';
+import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
+
+const DENSITY_CAT: CatData = {
+  id: 'codex-sol',
+  displayName: '缅因猫 Sol',
+  variantLabel: 'GPT-5.6 Sol',
+  color: { primary: '#6b8f34', secondary: '#c8d8b5' },
+  mentionPatterns: ['codex-sol'],
+  clientId: 'openai',
+  defaultModel: 'gpt-5.6-sol',
+  avatar: '/avatars/codex.png',
+  roleDescription: '小太阳型攻坚猫',
+  personality: 'warm',
+};
 
 const DENSITY_MESSAGE: ChatMessageData = {
   id: 'f294-density-message',
   type: 'assistant',
   catId: 'codex-sol',
-  content: '静止态不该为每条消息固定占一行动作条。',
+  content: '静止态不该为每条消息固定占一行动作条。[正文链接](https://example.com/f294-body-control)',
   timestamp: 1_786_985_594_484,
   projectionSourceMessageIds: ['f294-density-message'],
+  metadata: { model: 'gpt-5.6-sol', provider: 'openai' },
+  extra: {
+    turnExecution: {
+      invocationId: 'f294-density-invocation',
+      parentInvocationId: 'f294-density-parent',
+      executionKind: 'ordinary',
+    },
+  },
+};
+
+const DENSITY_FOLLOWUP_MESSAGE: ChatMessageData = {
+  id: 'f294-density-followup-message',
+  type: 'assistant',
+  catId: 'codex-sol',
+  content: '下一条长消息在 hover 时也不能把动作条倒着压到上一条消息的模型元数据。',
+  timestamp: 1_786_985_954_484,
+  projectionSourceMessageIds: ['f294-density-followup-message'],
+  metadata: { model: 'gpt-5.6-sol', provider: 'openai' },
+  extra: {
+    turnExecution: {
+      invocationId: 'f294-density-followup-invocation',
+      parentInvocationId: 'f294-density-followup-parent',
+      executionKind: 'ordinary',
+    },
+  },
 };
 
 const CLI_MARKDOWN_TABLE = [
@@ -32,10 +71,20 @@ const CLI_MARKDOWN_TABLE = [
  * that document changes what the other guard observes. One guard, one document.
  */
 export default function F294QuotePlaneFixtures() {
+  const [hydrated, setHydrated] = useState(false);
   const [selectionEnterCount, setSelectionEnterCount] = useState(0);
+  const [selectionEnterMessageId, setSelectionEnterMessageId] = useState('');
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   return (
-    <main className="min-h-screen bg-cafe-surface p-4" data-testid="f294-quote-plane-fixtures">
+    <main
+      className="min-h-screen bg-cafe-surface p-4"
+      data-hydrated={hydrated ? 'true' : 'false'}
+      data-testid="f294-quote-plane-fixtures"
+    >
       {/* Collision fixture: the projection of this source keeps the leading blank lines, so the
           FIRST "foo" sits at 4..7 — exactly where Chromium reports a selection of the SECOND
           paragraph. The browser test measures those offsets so the API fixture stays a fact. */}
@@ -156,19 +205,41 @@ export default function F294QuotePlaneFixtures() {
         <ChatMessageRow
           message={DENSITY_MESSAGE}
           threadId="f294-quote-plane-fixtures"
-          timelineMessages={[DENSITY_MESSAGE]}
-          getCatById={() => undefined}
+          timelineMessages={[DENSITY_MESSAGE, DENSITY_FOLLOWUP_MESSAGE]}
+          getCatById={(id) => (id === DENSITY_CAT.id ? DENSITY_CAT : undefined)}
           onEditCat={() => {}}
           onEditCoCreator={() => {}}
           selectionMode={false}
           selected={false}
           selectionEligible
-          onEnterSelection={() => setSelectionEnterCount((count) => count + 1)}
+          onEnterSelection={(messageId) => {
+            setSelectionEnterCount((count) => count + 1);
+            setSelectionEnterMessageId(messageId);
+          }}
+          onToggleSelection={() => {}}
+          forwardingDisabled={false}
+          eager
+        />
+        <ChatMessageRow
+          message={DENSITY_FOLLOWUP_MESSAGE}
+          threadId="f294-quote-plane-fixtures"
+          timelineMessages={[DENSITY_MESSAGE, DENSITY_FOLLOWUP_MESSAGE]}
+          getCatById={(id) => (id === DENSITY_CAT.id ? DENSITY_CAT : undefined)}
+          onEditCat={() => {}}
+          onEditCoCreator={() => {}}
+          selectionMode={false}
+          selected={false}
+          selectionEligible
+          onEnterSelection={(messageId) => {
+            setSelectionEnterCount((count) => count + 1);
+            setSelectionEnterMessageId(messageId);
+          }}
           onToggleSelection={() => {}}
           forwardingDisabled={false}
           eager
         />
         <output data-testid="f294-density-enter-count">{selectionEnterCount}</output>
+        <output data-testid="f294-density-enter-message">{selectionEnterMessageId}</output>
       </section>
 
       <MessageActions

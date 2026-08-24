@@ -10,6 +10,11 @@ export interface MethodologyTemplate {
   readonly content: string;
 }
 
+export interface ProjectCommand {
+  readonly script: string;
+  readonly command: string;
+}
+
 const BACKLOG_TEMPLATE = `---
 topics: [backlog]
 doc_kind: note
@@ -25,7 +30,13 @@ created: {{DATE}}
 |----|------|--------|-------|------|
 `;
 
-const SOP_TEMPLATE = `---
+function buildSopTemplate(commands: readonly ProjectCommand[]): string {
+  const commandRows =
+    commands.length > 0
+      ? commands.map(({ script, command }) => `| ${script} | \`${command}\` |`).join('\n')
+      : "| unknown | Inspect this repository's manifests and CI configuration before running commands. |";
+
+  return `---
 topics: [sop, workflow]
 doc_kind: note
 created: {{DATE}}
@@ -33,23 +44,20 @@ created: {{DATE}}
 
 # Standard Operating Procedure
 
-## Workflow (6 steps)
+## Workflow
 
-| Step | What | Skill |
-|------|------|-------|
-| 1 | Create worktree | \`worktree\` |
-| 2 | Self-check (spec compliance) | \`quality-gate\` |
-| 3 | Peer review | \`request-review\` / \`receive-review\` |
-| 4 | Merge gate | \`merge-gate\` |
-| 5 | PR + cloud review | (merge-gate handles) |
-| 6 | Merge + cleanup | (SOP steps) |
+1. Read this repository's own instructions and current work item.
+2. Make an isolated, reviewable change.
+3. Run only commands verified below or discovered from the repository.
+4. Review the final diff and use the repository's normal merge process.
 
-## Code Quality
+## Discovered package scripts
 
-- Biome: \`pnpm check\` / \`pnpm check:fix\`
-- Types: \`pnpm lint\`
-- File limits: 200 lines warn / 350 hard cap
+| Script | Command |
+|--------|---------|
+${commandRows}
 `;
+}
 
 const FEATURE_TEMPLATE = `---
 feature_ids: [Fxxx]
@@ -73,13 +81,13 @@ created: {{DATE}}
 ## Open Questions
 `;
 
-export function getMethodologyTemplates(): MethodologyTemplate[] {
+export function getMethodologyTemplates(commands: readonly ProjectCommand[] = []): MethodologyTemplate[] {
   const date = new Date().toISOString().slice(0, 10);
   const fill = (tpl: string) => tpl.replace(/\{\{DATE\}\}/g, date);
 
   return [
     { relativePath: 'BACKLOG.md', content: fill(BACKLOG_TEMPLATE) },
-    { relativePath: 'docs/SOP.md', content: fill(SOP_TEMPLATE) },
+    { relativePath: 'docs/SOP.md', content: fill(buildSopTemplate(commands)) },
     { relativePath: 'docs/features/.gitkeep', content: '' },
     { relativePath: 'docs/decisions/.gitkeep', content: '' },
     { relativePath: 'docs/discussions/.gitkeep', content: '' },

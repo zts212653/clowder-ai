@@ -19,7 +19,7 @@ const controls = vi.hoisted(() => ({
 vi.mock('@/services/DocumentListenController', () => ({ documentListenController: controls }));
 
 import { useChatStore } from '@/stores/chatStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { ListenModePlayer } from '../ListenModePlayer';
 import playerStyles from '../ListenModePlayer.module.css';
 
@@ -72,6 +72,7 @@ describe('ListenModePlayer', () => {
         cacheBytes: 2048,
         error: null,
       },
+      cacheByDocument: {},
     });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -98,7 +99,7 @@ describe('ListenModePlayer', () => {
 
     expect(setCurrentProject).toHaveBeenCalledWith('/repo');
     expect(setWorkspaceOpenFile).toHaveBeenCalledWith('docs/research.md', null, 'cat-cafe');
-    expect(container.textContent).toContain('已缓存 1 句');
+    expect(container.textContent).toContain('缓存 1/1');
   });
 
   it('occupies normal Workspace flow instead of floating over the chat composer', async () => {
@@ -136,15 +137,33 @@ describe('ListenModePlayer', () => {
 
   it('opens cache settings below the top-mounted Workspace player', async () => {
     await act(async () => root.render(<ListenModePlayer />));
-    const cacheButton = [...container.querySelectorAll('button')].find(
-      ({ textContent }) => textContent === '已缓存 1 句',
-    );
+    const cacheButton = [...container.querySelectorAll('button')].find(({ textContent }) => textContent === '缓存 1/1');
 
     await act(async () => cacheButton?.click());
 
     const cacheDialog = container.querySelector('[role="dialog"][aria-label="此文档缓存"]');
     expect(cacheDialog?.className).toContain('top-full');
     expect(cacheDialog?.className).not.toContain('bottom-full');
+  });
+
+  it('uses the same server-projected document cache progress as the toolbar', async () => {
+    const identity = { projectPath: '/repo', relativePath: 'docs/research.md', contentDigest: 'sha' };
+    useListenModeStore.setState({
+      cacheByDocument: {
+        [listenDocumentCacheKey(identity)]: {
+          identity,
+          cachedAnchors: ['sentence-0'],
+          cacheBytes: 2048,
+          totalSentences: 4,
+          active: true,
+          error: null,
+        },
+      },
+    });
+
+    await act(async () => root.render(<ListenModePlayer />));
+
+    expect(container.textContent).toContain('缓存 1/4');
   });
 
   it('shows the synthesis error instead of hiding it behind the current sentence', async () => {

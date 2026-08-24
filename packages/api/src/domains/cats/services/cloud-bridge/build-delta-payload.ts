@@ -4,7 +4,7 @@
  * The bridge inject payload does NOT repeat the cloud cat's persistent
  * Custom Instructions (the 1500-token persona / cat-cafe tool discipline
  * lives in ChatGPT-side Custom Instructions, not in our payload). Instead
- * we ship a small runtime delta — 5 fields — telling the cloud cat which
+ * we ship a small runtime delta telling the cloud cat which
  * thread it's responding in.
  *
  * Treatment: **delta is data, not authority.** All user-controlled fields
@@ -17,7 +17,7 @@
  *
  * Renders as:
  *   <thread-runtime v=1 format=json>
- *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "..."}
+ *   {"threadId": "...", "threadTitle": "...", "participants": [...], "calledBy": "...", "intent": "...", "sourceMessageId": "...", "cloudReturnBinding": "..."}
  *   </thread-runtime>
  *
  *   <intent text rendered separately for the cat to read as its message>
@@ -36,6 +36,54 @@ export const DELTA_PAYLOAD_MAX_CHARS = 2000;
 
 /** Sentinel suffix appended after intent truncation. */
 const TRUNCATE_SUFFIX = '...[truncated]';
+
+function assertExactSourceMessageId(sourceMessageId: string): void {
+  if (!sourceMessageId || sourceMessageId.length > 512) {
+    throw new Error('sourceMessageId must be an exact persisted message ID of at most 512 characters');
+  }
+}
+
+function assertCloudReturnBinding(binding: string): void {
+  if (!binding || binding.length > 800 || !/^cbr1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(binding)) {
+    throw new Error('cloudReturnBinding must be an opaque signed cbr1 token of at most 800 characters');
+  }
+}
+
+function tryFitByDroppingParticipants(params: CloudInvokeDispatchParams): string | null {
+  for (let keepCount = params.participants.length - 1; keepCount >= 0; keepCount--) {
+    const fit = tryFitWithIntentShrink({
+      ...params,
+      participants: params.participants.slice(0, keepCount),
+    });
+    if (fit) return fit;
+  }
+  return null;
+}
+
+function tryFitWithShortTitle(params: CloudInvokeDispatchParams): string | null {
+  if (!params.threadTitle || params.threadTitle.length <= 30) return null;
+  return tryFitWithIntentShrink({
+    ...params,
+    participants: [],
+    threadTitle: `${params.threadTitle.slice(0, 30)}…`,
+  });
+}
+
+function renderAbsoluteFloor(params: CloudInvokeDispatchParams): string {
+  const floorIntent = '[delta over cap]';
+  const absoluteFloor: CloudInvokeDispatchParams = {
+    catId: ((params.catId as string).slice(0, 32) || 'X') as typeof params.catId,
+    threadId: params.threadId.slice(0, 40) || 'X',
+    userId: params.userId.slice(0, 32) || 'X',
+    threadTitle: null,
+    participants: [],
+    calledBy: (params.calledBy as string).slice(0, 32) || 'X',
+    intent: floorIntent,
+    sourceMessageId: params.sourceMessageId,
+    cloudReturnBinding: params.cloudReturnBinding,
+  };
+  return renderEnvelope(absoluteFloor, floorIntent);
+}
 
 /**
  * Build the rendered delta payload for the cloud cat.
@@ -60,6 +108,8 @@ const TRUNCATE_SUFFIX = '...[truncated]';
  * (defense in depth — AC-B1c-10).
  */
 export function buildDeltaPayload(params: CloudInvokeDispatchParams): string {
+  assertExactSourceMessageId(params.sourceMessageId);
+  assertCloudReturnBinding(params.cloudReturnBinding);
   // Attempt 1: full payload as-is.
   const fitFull = tryFitWithIntentShrink(params);
   if (fitFull) return fitFull;
@@ -67,27 +117,12 @@ export function buildDeltaPayload(params: CloudInvokeDispatchParams): string {
   // Attempt 2: drop participants from the end (descending) — keeps "called by" /
   // thread context intact, only loses the participant list (which is best-effort
   // anyway, the cloud cat can call `get_thread_context` for the live roster).
-  if (params.participants.length > 0) {
-    for (let keepCount = params.participants.length - 1; keepCount >= 0; keepCount--) {
-      const trimmed: CloudInvokeDispatchParams = {
-        ...params,
-        participants: params.participants.slice(0, keepCount),
-      };
-      const fit = tryFitWithIntentShrink(trimmed);
-      if (fit) return fit;
-    }
-  }
+  const fitWithoutTrailingParticipants = tryFitByDroppingParticipants(params);
+  if (fitWithoutTrailingParticipants) return fitWithoutTrailingParticipants;
 
   // Attempt 3: also truncate threadTitle to a tight slice.
-  if (params.threadTitle && params.threadTitle.length > 30) {
-    const trimmed: CloudInvokeDispatchParams = {
-      ...params,
-      participants: [],
-      threadTitle: `${params.threadTitle.slice(0, 30)}…`,
-    };
-    const fit = tryFitWithIntentShrink(trimmed);
-    if (fit) return fit;
-  }
+  const fitWithShortTitle = tryFitWithShortTitle(params);
+  if (fitWithShortTitle) return fitWithShortTitle;
 
   // Last-resort: minimal envelope with diagnostic intent. If even this is over
   // cap (e.g. pathologically long `threadId` / `calledBy` / `catId`), we
@@ -108,17 +143,7 @@ export function buildDeltaPayload(params: CloudInvokeDispatchParams): string {
   // every interior field so the envelope wrapper still fits. The cloud cat sees
   // a heavily-clipped delta but with the spec-required envelope shape — which
   // is what the parser contract demands.
-  const ABS_FLOOR_INTENT = '[delta over cap]';
-  const absoluteFloor: CloudInvokeDispatchParams = {
-    catId: ((params.catId as string).slice(0, 32) || 'X') as typeof params.catId,
-    threadId: params.threadId.slice(0, 40) || 'X',
-    userId: params.userId.slice(0, 32) || 'X',
-    threadTitle: null,
-    participants: [],
-    calledBy: (params.calledBy as string).slice(0, 32) || 'X',
-    intent: ABS_FLOOR_INTENT,
-  };
-  return renderEnvelope(absoluteFloor, ABS_FLOOR_INTENT);
+  return renderAbsoluteFloor(params);
 }
 
 /**
@@ -167,6 +192,8 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
     participants: params.participants.map((p) => ({ catId: p.catId, handle: p.handle })),
     calledBy: params.calledBy,
     intent,
+    sourceMessageId: params.sourceMessageId,
+    cloudReturnBinding: params.cloudReturnBinding,
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);

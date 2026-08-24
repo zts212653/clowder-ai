@@ -133,18 +133,27 @@ describe('install scripts do not create HOME-level skill links (ADR-025)', () =>
 });
 
 /**
- * Runtime governance path still creates project-level skill links.
+ * Explicit runtime governance selection can still create project-level skill links.
  * This validates the complement: what install scripts no longer do,
  * GovernanceBootstrapService / skill-sync still does.
  */
 describe('runtime governance creates project-level skill links (ADR-025)', () => {
   const BOOTSTRAP_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-bootstrap.ts');
+  const BOOTSTRAP_PLAN_SRC = join(
+    PROJECT_ROOT,
+    'packages',
+    'api',
+    'src',
+    'config',
+    'governance',
+    'governance-bootstrap-plan.ts',
+  );
   const SKILL_SYNC_ENGINE_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'skills', 'skill-sync-engine.ts');
   const MOUNT_RULES_SRC = join(PROJECT_ROOT, 'packages', 'shared', 'src', 'types', 'mount-rules.ts');
   const PREFLIGHT_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-preflight.ts');
 
   it('GovernanceBootstrapService creates per-skill symlinks at project level', async () => {
-    const content = await readFile(BOOTSTRAP_SRC, 'utf-8');
+    const content = `${await readFile(BOOTSTRAP_SRC, 'utf-8')}\n${await readFile(BOOTSTRAP_PLAN_SRC, 'utf-8')}`;
     assert.ok(content.includes('.claude/skills'), 'governance-bootstrap must reference .claude/skills');
     assert.ok(content.includes('.codex/skills'), 'governance-bootstrap must reference .codex/skills');
     assert.ok(content.includes('.gemini/skills'), 'governance-bootstrap must reference .gemini/skills');
@@ -172,12 +181,8 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
     assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi/skills' }"));
   });
 
-  it('governance preflight does NOT gate on skill symlinks (F228 drift handles that)', async () => {
-    const content = await readFile(PREFLIGHT_SRC, 'utf-8');
-    // After F228, skill deployment is handled by drift detection, not governance.
-    // Preflight should NOT contain lstat/readdir calls on skills directories.
-    assert.ok(!content.includes('PROVIDER_SKILLS_DIR'), 'governance-preflight must not reference PROVIDER_SKILLS_DIR');
-    assert.ok(!content.includes('hasSkillsSetup'), 'governance-preflight must not check hasSkillsSetup');
+  it('governance readiness preflight has been removed instead of repurposed', async () => {
+    await assert.rejects(readFile(PREFLIGHT_SRC, 'utf-8'), { code: 'ENOENT' });
   });
 });
 

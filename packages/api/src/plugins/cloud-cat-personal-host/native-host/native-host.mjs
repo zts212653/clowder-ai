@@ -14,11 +14,19 @@ import {
 } from './conversation-binding.mjs';
 import { encodeNativeMessage, NativeMessageDecoder } from './native-framing.mjs';
 import { hasCapacityForEntry, ledgerKey, loadLedger, textDigest, writeAtomicLedger } from './native-ledger.mjs';
-import { applyTerminalResult, failureFor, safeErrorCode, safeToken, terminalResult } from './native-results.mjs';
+import {
+  applyTerminalResult,
+  failureFor,
+  safeErrorCode,
+  safeRevisions,
+  safeToken,
+  terminalResult,
+} from './native-results.mjs';
 import { acquireSocketLease, prepareSocketPath } from './native-socket-lease.mjs';
 import { readPersonalChromePairingRecord } from './pairing-record.mjs';
 
 const LOCAL_FRAME_LIMIT = 256 * 1024;
+const APPEND_PROTOCOL_VERSION = 2;
 const PROGRESS_ORDER = new Map([
   ['accepted', 0],
   ['extension_received', 1],
@@ -28,20 +36,23 @@ const PROGRESS_ORDER = new Map([
 
 function parseAppendRequest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('INVALID_REQUEST');
-  if (value.v !== 1 || value.kind !== 'append_message') throw new Error('INVALID_REQUEST');
+  if (value.v !== APPEND_PROTOCOL_VERSION || value.kind !== 'append_message') throw new Error('INVALID_REQUEST');
   if (!safeToken(value.requestId, 200)) throw new Error('INVALID_REQUEST');
   if (!safeToken(value.conversationId, 200)) throw new Error('INVALID_REQUEST');
   if (!safeToken(value.idempotencyKey, 512)) throw new Error('INVALID_REQUEST');
   if (typeof value.text !== 'string' || value.text.trim().length === 0 || Buffer.byteLength(value.text) > 128 * 1024) {
     throw new Error('INVALID_REQUEST');
   }
+  const expectedRevisions = safeRevisions(value.expectedRevisions);
+  if (!expectedRevisions) throw new Error('INVALID_REQUEST');
   return {
-    v: 1,
+    v: APPEND_PROTOCOL_VERSION,
     kind: 'append_message',
     requestId: value.requestId,
     conversationId: value.conversationId,
     text: value.text,
     idempotencyKey: value.idempotencyKey,
+    expectedRevisions,
   };
 }
 
@@ -70,11 +81,47 @@ function parseBindingQuery(value) {
   return { v: 1, kind: 'query_binding', requestId: value.requestId };
 }
 
+function parseHealthRequest(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('INVALID_REQUEST');
+  if (value.v !== APPEND_PROTOCOL_VERSION || value.kind !== 'health_check' || !safeToken(value.requestId, 200)) {
+    throw new Error('INVALID_REQUEST');
+  }
+  const expectedRevisions = safeRevisions(value.expectedRevisions);
+  if (!expectedRevisions) throw new Error('INVALID_REQUEST');
+  if (value.conversationId !== undefined && !safeToken(value.conversationId, 200)) throw new Error('INVALID_REQUEST');
+  return {
+    v: APPEND_PROTOCOL_VERSION,
+    kind: 'health_check',
+    requestId: value.requestId,
+    expectedRevisions,
+    ...(value.conversationId === undefined ? {} : { conversationId: value.conversationId }),
+  };
+}
+
 function secretsMatch(expected, received) {
   if (typeof received !== 'string') return false;
   const expectedBuffer = Buffer.from(expected, 'utf8');
   const receivedBuffer = Buffer.from(received, 'utf8');
   return expectedBuffer.length === receivedBuffer.length && timingSafeEqual(expectedBuffer, receivedBuffer);
+}
+
+function revisionsMatch(expected, observed) {
+  return (
+    observed &&
+    observed.helper === expected.helper &&
+    observed.extension === expected.extension &&
+    observed.pageAdapter === expected.pageAdapter
+  );
+}
+
+function projectedHealthStatus(message, exact) {
+  if (exact && message.status === 'ready') return 'ready';
+  return message.status === 'dormant' ? 'dormant' : 'stale_adapter';
+}
+
+function projectedHealthError(message, exact) {
+  if (exact) return undefined;
+  return safeErrorCode(message.errorCode) ? message.errorCode : 'STALE_ADAPTER';
 }
 
 function parsePairedAppendEnvelope(expectedPairingSecret, rawEnvelope) {
@@ -99,11 +146,11 @@ function respondFromExistingAdmission({ socket, request, digest, existing, pendi
     return true;
   }
   if (pending) {
-    pending.responders.push({ socket, requestId: request.requestId });
+    pending.responders.push({ socket, requestId: request.requestId, idempotentReplay: true });
     return true;
   }
   if (existing?.state === 'host_observed' || existing?.state === 'failed') {
-    sendSocketResult(socket, terminalResult(existing, request.requestId));
+    sendSocketResult(socket, terminalResult(existing, request.requestId, true));
     return true;
   }
   return false;
@@ -116,6 +163,9 @@ function validateBridgeOptions(options) {
   if (typeof options.pairingSecret !== 'string' || options.pairingSecret.length < 32) {
     throw new Error('pairingSecret must contain at least 32 characters');
   }
+  if (!/^sha512:[a-f0-9]{128}$/.test(options.helperArtifactRevision)) {
+    throw new Error('helperArtifactRevision must be a lowercase sha512 digest');
+  }
   if (typeof options.sendNative !== 'function') throw new Error('sendNative is required');
   if (options.writeLedger !== undefined && typeof options.writeLedger !== 'function') {
     throw new Error('writeLedger must be a function');
@@ -127,7 +177,11 @@ function validateBridgeOptions(options) {
 
 async function bindingFailureForAppend(path, request) {
   try {
-    const collection = await readPersonalChromeConversationAuthorizations(path);
+    // Read-only authorization check — skip legacy migration to avoid acquiring
+    // the mutation lease on a hot path. Concurrent append checks must not consume
+    // the finite cross-process mutation retry budget or project a valid record
+    // as BINDING_RECORD_INVALID under I/O pressure.
+    const collection = await readPersonalChromeConversationAuthorizations(path, { migrateLegacy: false });
     return collection.conversations.some((entry) => entry.conversationId === request.conversationId)
       ? null
       : 'BOUND_CONVERSATION_MISMATCH';
@@ -145,6 +199,12 @@ function bindingRecordForRequest(path, request, timestamp, authorizeConversation
     authorizedAt: timestamp,
     updatedAt: timestamp,
   });
+}
+
+function bindingWriteFailureCode(error) {
+  return error instanceof PersonalChromeConversationAuthorizationError && error.code === 'AUTHORIZATION_BUSY'
+    ? 'AUTHORIZATION_BUSY'
+    : 'BINDING_WRITE_FAILED';
 }
 
 async function bindingStatusForQuery(path, requestId) {
@@ -207,6 +267,7 @@ export async function createNativeHostBridge(options) {
     throw error;
   }
   const pendingByKey = new Map();
+  const pendingHealthByRequestId = new Map();
   const keyByRequestId = new Map();
   const openSockets = new Set();
   const dispatchWaiters = [];
@@ -240,17 +301,87 @@ export async function createNativeHostBridge(options) {
     pendingByKey.delete(key);
     keyByRequestId.delete(pending.canonicalRequestId);
     for (const responder of pending.responders) {
-      sendSocketResult(responder.socket, terminalResult(entry, responder.requestId));
+      sendSocketResult(responder.socket, terminalResult(entry, responder.requestId, responder.idempotentReplay));
     }
   }
 
+  function healthResult(requestId, status, errorCode, observedRevisions) {
+    return {
+      v: APPEND_PROTOCOL_VERSION,
+      kind: 'health_result',
+      requestId,
+      status,
+      ...(errorCode ? { errorCode } : {}),
+      ...(observedRevisions ? { observedRevisions } : {}),
+    };
+  }
+
+  async function handleHealthEnvelope(socket, rawEnvelope) {
+    if (rawEnvelope?.request?.kind !== 'health_check') return false;
+    if (!secretsMatch(options.pairingSecret, rawEnvelope?.pairingSecret)) {
+      sendSocketResult(socket, healthResult('invalid-request', 'failed', 'PAIRING_REJECTED'));
+      return true;
+    }
+    let request;
+    try {
+      request = parseHealthRequest(rawEnvelope.request);
+    } catch {
+      sendSocketResult(socket, healthResult('invalid-request', 'failed', 'INVALID_REQUEST'));
+      return true;
+    }
+    if (request.expectedRevisions.helper !== options.helperArtifactRevision) {
+      sendSocketResult(
+        socket,
+        healthResult(request.requestId, 'stale_adapter', 'STALE_HELPER', {
+          helper: options.helperArtifactRevision,
+          extension: '0.0.0',
+          pageAdapter: 'unobserved',
+        }),
+      );
+      return true;
+    }
+    const timeout = setTimeout(() => {
+      if (!pendingHealthByRequestId.has(request.requestId)) return;
+      pendingHealthByRequestId.delete(request.requestId);
+      sendSocketResult(socket, healthResult(request.requestId, 'failed', 'HEALTH_TIMEOUT'));
+    }, 1_000);
+    timeout.unref?.();
+    pendingHealthByRequestId.set(request.requestId, {
+      socket,
+      timeout,
+      expectedRevisions: request.expectedRevisions,
+    });
+    try {
+      await options.sendNative(request);
+    } catch {
+      clearTimeout(timeout);
+      pendingHealthByRequestId.delete(request.requestId);
+      sendSocketResult(socket, healthResult(request.requestId, 'failed', 'NATIVE_DISPATCH_FAILED'));
+    }
+    return true;
+  }
+
   async function handleEnvelope(socket, rawEnvelope) {
+    if (await handleHealthEnvelope(socket, rawEnvelope)) return;
     const parsed = parsePairedAppendEnvelope(options.pairingSecret, rawEnvelope);
     if (parsed.failure) {
       sendSocketResult(socket, parsed.failure);
       return;
     }
     const request = parsed.request;
+    if (request.expectedRevisions.helper !== options.helperArtifactRevision) {
+      sendSocketResult(
+        socket,
+        failureFor(request, 'STALE_HELPER', {
+          observedRevisions: {
+            helper: options.helperArtifactRevision,
+            extension: '0.0.0',
+            pageAdapter: 'unobserved',
+          },
+        }),
+      );
+      return;
+    }
     const bindingFailure = await bindingFailureForAppend(options.conversationBindingPath, request);
     if (bindingFailure) {
       sendSocketResult(socket, failureFor(request, bindingFailure));
@@ -275,7 +406,8 @@ export async function createNativeHostBridge(options) {
     ledger.set(key, acceptedEntry);
     pendingByKey.set(key, {
       canonicalRequestId: request.requestId,
-      responders: [{ socket, requestId: request.requestId }],
+      expectedRevisions: request.expectedRevisions,
+      responders: [{ socket, requestId: request.requestId, idempotentReplay: false }],
     });
     keyByRequestId.set(request.requestId, key);
     try {
@@ -352,12 +484,27 @@ export async function createNativeHostBridge(options) {
   }
 
   async function acceptTerminalResult(message) {
-    if (message?.v !== 1 || message?.kind !== 'append_result') return;
+    if (message?.v !== APPEND_PROTOCOL_VERSION || message?.kind !== 'append_result') return;
     const key = keyByRequestId.get(message.requestId);
     if (!key) return;
     const entry = ledger.get(key);
-    if (!entry || message.idempotencyKey !== entry.idempotencyKey) {
+    const pending = pendingByKey.get(key);
+    if (!entry || !pending || message.idempotencyKey !== entry.idempotencyKey) {
       await settle(key, failureFor(message, 'INVALID_HOST_RECEIPT'));
+      return;
+    }
+    const observedRevisions = safeRevisions(message.observedRevisions);
+    if (!revisionsMatch(pending.expectedRevisions, observedRevisions)) {
+      await settle(
+        key,
+        failureFor(message, 'STALE_ADAPTER', {
+          observedRevisions: observedRevisions ?? {
+            helper: options.helperArtifactRevision,
+            extension: '0.0.0',
+            pageAdapter: 'unobserved',
+          },
+        }),
+      );
       return;
     }
     if (message.status === 'host_observed') {
@@ -365,7 +512,43 @@ export async function createNativeHostBridge(options) {
       return;
     }
     const errorCode = safeErrorCode(message.errorCode) ? message.errorCode : 'NATIVE_DELIVERY_FAILED';
-    await settle(key, failureFor(message, errorCode));
+    await settle(
+      key,
+      failureFor(message, errorCode, {
+        observedRevisions,
+        diagnostic: message.diagnostic,
+      }),
+    );
+  }
+
+  function acceptHealthResult(message) {
+    const pending = pendingHealthByRequestId.get(message?.requestId);
+    if (!pending) return message?.kind === 'health_result';
+    clearTimeout(pending.timeout);
+    pendingHealthByRequestId.delete(message.requestId);
+    if (message?.v !== APPEND_PROTOCOL_VERSION || message?.kind !== 'health_result') {
+      sendSocketResult(
+        pending.socket,
+        healthResult(message.requestId, 'stale_adapter', 'STALE_EXTENSION_PROTOCOL', {
+          helper: pending.expectedRevisions.helper,
+          extension: '0.0.0',
+          pageAdapter: 'unobserved',
+        }),
+      );
+      return true;
+    }
+    const observedRevisions = safeRevisions(message.observedRevisions);
+    const exact = revisionsMatch(pending.expectedRevisions, observedRevisions);
+    const errorCode = projectedHealthError(message, exact);
+    sendSocketResult(pending.socket, {
+      v: APPEND_PROTOCOL_VERSION,
+      kind: 'health_result',
+      requestId: message.requestId,
+      status: projectedHealthStatus(message, exact),
+      ...(errorCode ? { errorCode } : {}),
+      ...(observedRevisions ? { observedRevisions } : {}),
+    });
+    return true;
   }
 
   async function acceptBindingRequest(message) {
@@ -392,13 +575,13 @@ export async function createNativeHostBridge(options) {
         timestamp,
         authorizeConversation,
       );
-    } catch {
+    } catch (error) {
       await options.sendNative({
         v: 1,
         kind: 'binding_result',
         requestId: request.requestId,
         status: 'failed',
-        errorCode: 'BINDING_WRITE_FAILED',
+        errorCode: bindingWriteFailureCode(error),
       });
       return true;
     }
@@ -436,6 +619,7 @@ export async function createNativeHostBridge(options) {
     socketPath: options.socketPath,
     ledgerPath: options.ledgerPath,
     async acceptNativeMessage(message) {
+      if (acceptHealthResult(message)) return;
       if (await acceptBindingRequest(message)) return;
       if (await acceptBindingQuery(message)) return;
       if (await acceptProgress(message)) return;
@@ -452,13 +636,15 @@ export async function createNativeHostBridge(options) {
         for (const [key, pending] of pendingByKey) {
           const entry = ledger.get(key);
           for (const responder of pending.responders) {
-            sendSocketResult(
-              responder.socket,
-              failureFor({ requestId: responder.requestId, idempotencyKey: entry?.idempotencyKey }, 'HOST_STOPPED'),
-            );
+            sendSocketResult(responder.socket, {
+              ...failureFor({ requestId: responder.requestId, idempotencyKey: entry?.idempotencyKey }, 'HOST_STOPPED'),
+              idempotentReplay: responder.idempotentReplay,
+            });
           }
         }
         for (const socket of openSockets) socket.destroy();
+        for (const pending of pendingHealthByRequestId.values()) clearTimeout(pending.timeout);
+        pendingHealthByRequestId.clear();
         await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
         await persistenceQueue;
       } finally {
@@ -486,12 +672,14 @@ export async function resolveNativeHostConfiguration({
       ledgerPath: record.ledgerPath,
       conversationBindingPath: resolve(dirname(record.ledgerPath), 'conversation-binding.json'),
       pairingSecret: record.pairingSecret,
+      helperArtifactRevision: record.artifactDigest,
     };
   }
   const socketPath = env.CAT_CAFE_PERSONAL_CHROME_SOCKET;
   const ledgerPath = env.CAT_CAFE_PERSONAL_CHROME_LEDGER;
   const pairingSecret = env.CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET;
-  if (!socketPath || !ledgerPath || !pairingSecret) {
+  const helperArtifactRevision = env.CAT_CAFE_PERSONAL_CHROME_HELPER_ARTIFACT_REVISION;
+  if (!socketPath || !ledgerPath || !pairingSecret || !helperArtifactRevision) {
     throw new Error('required personal Chrome host configuration is missing');
   }
   return {
@@ -499,11 +687,12 @@ export async function resolveNativeHostConfiguration({
     ledgerPath,
     conversationBindingPath: resolve(dirname(ledgerPath), 'conversation-binding.json'),
     pairingSecret,
+    helperArtifactRevision,
   };
 }
 
 export async function runNativeHost(options = {}) {
-  const { socketPath, ledgerPath, conversationBindingPath, pairingSecret } =
+  const { socketPath, ledgerPath, conversationBindingPath, pairingSecret, helperArtifactRevision } =
     await resolveNativeHostConfiguration(options);
   const decoder = new NativeMessageDecoder();
   const bridge = await createNativeHostBridge({
@@ -511,6 +700,7 @@ export async function runNativeHost(options = {}) {
     ledgerPath,
     conversationBindingPath,
     pairingSecret,
+    helperArtifactRevision,
     sendNative: (message) => {
       process.stdout.write(encodeNativeMessage(message));
     },

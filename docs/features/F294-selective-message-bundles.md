@@ -4,7 +4,7 @@ related_features: [F017, F052, F063, F193, F264, F290]
 topics: [message-selection, quote-selection, context-attachments, message-bundle, export, rich-message, cross-thread, lineage]
 doc_kind: spec
 created: 2026-08-11
-updated: 2026-08-19
+updated: 2026-08-22
 description: "让用户从一条 Thread 精确选择整条消息、普通/CLI 文字片段或单个 Rich Block，以同一份有来源的 Message Bundle 导出、留言转发，并安全衔接 Collective 发布。"
 description_source: human
 description_author: codex-sol
@@ -419,7 +419,7 @@ F294 不新造一套“选中文字”浮层，也不把转发塞进 Composer �
 | KD-11 | `cli_output` 是可验证 Quote source，不是产品禁区；只允许稳定 segment 的精确选文 | F063 已有 segment identity，operator 明确要求 CLI Output 划线转发；精确 ref 比禁用或整段复制更符合隐私边界 | 2026-08-15 |
 | KD-12 | 单 Rich Block 用 `messageId + blockId + version/digest`，目标只读 | 既保留富表达，又不复制相邻正文/执行态或把源 action 变成目标 Thread 的新权限 | 2026-08-15 |
 | KD-13 | 整包留言与逐项 Comment 分离并进入幂等语义 | “为什么转发”属于转发动作本身；混进第一项会伪造归属并让 retry payload 不完整 | 2026-08-15 |
-| KD-14（修订 KD-10，operator 2026-08-18 纠正） | **不新增 thread 头部入口。**“多选消息”属于原有消息动作组：桌面/指针设备静止时整组不画、不占行，hover 或 focus 时与回复、删除、编辑、更多一起出现；在 `(hover: none) and (pointer: coarse)` 触屏上整组保持常驻可点并保留预留行 | operator 所说“隐藏这个孤立按钮”是让新增的多选按钮遵守原动作组的 hover 规则，不是删除原动作组，也不是把入口搬到 thread 头部。#3757 把这句话误解成 thread 级常驻入口，产生了新的孤立按钮。触屏没有 hover/focus，所以只在明确的触屏媒体条件下保留整组可达；判据必须同时含 `(hover: none)` 与 `(pointer: coarse)`，避免把无指点设备的自动化环境误判成触屏 | 2026-08-18 |
+| KD-14（修订 KD-10，operator 2026-08-18 纠正；2026-08-22 补充） | **不新增 thread 头部入口。**“多选消息”属于原有消息动作组：桌面/指针设备静止时整组不画、不占行，hover 或 focus 时与回复、删除、编辑、更多一起出现；动作组不得借用上一条消息的 paint 区域。宽窗把动作组放在本消息另一侧空白，窄窗仅在 hover/focus 时打开本消息内的临时动作行；在 `(hover: none) and (pointer: coarse)` 触屏上整组保持常驻可点并保留预留行 | operator 所说“隐藏这个孤立按钮”是让新增的多选按钮遵守原动作组的 hover 规则，不是删除原动作组，也不是把入口搬到 thread 头部。#3757 把这句话误解成 thread 级常驻入口，产生了新的孤立按钮；随后负位移实现又会覆盖相邻消息的 model/provider footer。触屏没有 hover/focus，所以只在明确的触屏媒体条件下保留整组可达；判据必须同时含 `(hover: none)` 与 `(pointer: coarse)`，避免把无指点设备的自动化环境误判成触屏 | 2026-08-18 / 2026-08-22 |
 | KD-15 | Quote 的 canonical plane 从 raw Markdown 改为 **readable-text projection v2**（`sourceProjectionVersion: 2`），匹配前先做 whitespace 归一 | 人在渲染平面选字符，服务端在原始 Markdown 校验——两套坐标系没有双射，凡跨标题/粗体/代码/链接的选区必然 `QUOTE_MISMATCH`。把真相源移到人实际使用的平面，并容忍 DOM 与存储之间的换行漂移；v1 carrier 仍按 v1 平面解析，永不回溯 tombstone | 2026-08-17 |
 | KD-16 | Markdown Quote 平面**完全不读客户端 offset**：唯一匹配才接受，重复一律 `ambiguous_quote`；raw CLI tool label/detail 与历史 v1 stdout 继续走不做归一的严格坐标路径 | 客户端 offset 量在 DOM 坐标系，投影在 readable 坐标系，两者对不齐——它既不能当最近邻消歧依据，也不能当 `slice === text` 的直通凭据：切片相同只证明这个数字命中了投影里*某一段*同样的字符，不证明命中人选的那一段。实测碰撞（Terra 在 #3757 R2 指出）：source `\n\n\n\nfoo\n\nfoo` 在生产 ReactMarkdown 栈下，人选第二段 Chromium 报 `4..7`，而投影里第一处 `foo` 恰好也在 `4..7`。只有未经过 Markdown 渲染的 raw CLI 平面才保留权威坐标 | 2026-08-17 |
 | KD-17 | readable projection 从**渲染器同款 remark AST** 导出，而不是正则近似；不认识的节点**保留原文**而不是猜着剥离 | 超集不变量（读者可见的字符序列，投影里出现次数不得少于屏幕上）是唯一性判据成立的前提：丢字 = 假唯一性 = 锚到人没选的那处。正则近似每加一条规则就多一个猜错入口——同一不变量在 #3757 被连破五次（字符引用 / 孤立 `--` / 列数不匹配的 pipe 行 / 无分隔行的 pipe 行 / 无效数字引用 `&#128;`）。remark 是渲染器本身的解析器，这些问题它天然答对；而“认不出就保留”把默认方向从“猜着丢”翻成“多留”，多留只会 mismatch/ambiguous，天然 fail closed | 2026-08-17 |

@@ -25,7 +25,7 @@
  *   3. JobEventConsumer parses jsonl per-line with try/catch (delegated)
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
@@ -43,7 +43,13 @@ import {
 import { CLI_PROCESS_OWNER_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, ToolExecutionPolicy } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  PreparedProviderRequestV1,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import {
   accumulateUsageFromEntries,
   createUsageAccumulator,
@@ -479,79 +485,115 @@ export class ClaudeBgCarrierService implements AgentService {
       // Supervisor (`claude --bg`) reads stdin synchronously before forking
       // the detached worker, so it's safe to write+close before the daemon
       // backgrounds itself (spike-verified).
-      let child: ReturnType<typeof spawn>;
-      try {
-        child = this.spawnFn(this.claudeCommand, args, {
-          cwd: childCwd,
-          env,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          signal: options?.signal,
+      const launch = async (): Promise<void> => {
+        const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+          v: 1,
+          message: Object.freeze({ body: prompt }),
+          nativeInstructions: Object.freeze([
+            Object.freeze({ body: readFileSync(l0Path, 'utf8'), injectionDecision: 'native_l0_compiled' }),
+            ...(options?.systemPrompt
+              ? [Object.freeze({ body: options.systemPrompt, injectionDecision: 'route_append_system_prompt' })]
+              : []),
+          ]),
+          runtime: Object.freeze({
+            provider: 'anthropic',
+            carrier: 'bg_daemon',
+            ...(effectiveModel ? { model: effectiveModel } : {}),
+            protocol: 'job_jsonl',
+            reasoningEffort: effortLevel,
+            ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+          }),
+          tools: Object.freeze({
+            finalSurface: readOnly ? ('exact' as const) : ('unknown' as const),
+            ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+          }),
+          providerNativeVisibility: 'unknown' as const,
         });
-      } catch (error) {
-        // Synchronous spawn failure proves no dispatcher (and therefore no
-        // native job) was created, so the pending record can be retired.
-        this.retireOwnerAfterNativeTerminal(owner);
-        return reject(new CarrierError(`claude --bg spawn failed: ${(error as Error).message}`, error));
-      }
+        await options?.beforeProviderLaunch?.(preparedRequest);
+        if (!('body' in preparedRequest.message)) throw new Error('claude_bg_prepared_message_not_exact');
 
-      // Write the prompt to the supervisor's stdin, then close. Mirror the
-      // EPIPE guard used in cli-spawn.ts (child may exit before consuming).
-      const childStdin = child.stdin;
-      if (childStdin) {
-        childStdin.on('error', (err: NodeJS.ErrnoException) => {
-          if (err && err.code !== 'EPIPE') {
-            log.warn({ err, pid: child.pid }, 'Unexpected claude --bg stdin write error');
+        let child: ReturnType<typeof spawn>;
+        try {
+          child = this.spawnFn(this.claudeCommand, args, {
+            cwd: childCwd,
+            env,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            signal: options?.signal,
+          });
+        } catch (error) {
+          // Synchronous spawn failure proves no dispatcher (and therefore no
+          // native job) was created, so the pending record can be retired.
+          this.retireOwnerAfterNativeTerminal(owner);
+          return reject(new CarrierError(`claude --bg spawn failed: ${(error as Error).message}`, error));
+        }
+
+        // Write the prompt to the supervisor's stdin, then close. Mirror the
+        // EPIPE guard used in cli-spawn.ts (child may exit before consuming).
+        const childStdin = child.stdin;
+        if (childStdin) {
+          childStdin.on('error', (err: NodeJS.ErrnoException) => {
+            if (err && err.code !== 'EPIPE') {
+              log.warn({ err, pid: child.pid }, 'Unexpected claude --bg stdin write error');
+            }
+          });
+          childStdin.write(preparedRequest.message.body);
+          childStdin.end();
+        }
+
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        const finish = (err: unknown, result?: StartJobResult) => {
+          if (settled) return;
+          settled = true;
+          if (err) reject(err);
+          else if (result) resolve(result);
+        };
+
+        child.on('error', (err) => {
+          // The spawn error is provider-native proof that dispatch never began.
+          this.retireOwnerAfterNativeTerminal(owner);
+          finish(new CarrierError(`claude --bg spawn failed: ${(err as Error).message}`, err));
+        });
+        child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+        child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+
+        child.on('close', (code) => {
+          if (code !== 0) {
+            // A dispatcher may have persisted a job before exiting nonzero. No
+            // short id means no safe stop target, so retain the pending record.
+            return finish(new CarrierError(`claude --bg exited code=${code}: ${stderr.slice(0, 300)}`));
           }
+          const match = SHORT_ID_PATTERN.exec(stdout);
+          if (!match) {
+            // Unknown job identity is intentionally durable and non-actionable;
+            // never guess via process environment or signal a shared daemon.
+            return finish(
+              new CarrierError(`Could not parse short id from claude --bg stdout: ${stdout.slice(0, 300)}`),
+            );
+          }
+          const shortId = match[1];
+          if (owner) {
+            try {
+              activateClaudeBgJobOwner(owner, shortId);
+            } catch (error) {
+              this.bestEffortStop(shortId, owner);
+              return finish(
+                new CarrierError(`claude --bg owner activation failed: ${(error as Error).message}`, error),
+              );
+            }
+          }
+          finish(null, {
+            shortId,
+            consumer: new JobEventConsumer(shortId, { jobsDir: this.jobsDir }),
+            effectiveModel,
+            ...(owner ? { owner } : {}),
+          });
         });
-        childStdin.write(prompt);
-        childStdin.end();
-      }
-
-      let stdout = '';
-      let stderr = '';
-      let settled = false;
-      const finish = (err: unknown, result?: StartJobResult) => {
-        if (settled) return;
-        settled = true;
-        if (err) reject(err);
-        else if (result) resolve(result);
       };
-
-      child.on('error', (err) => {
-        // The spawn error is provider-native proof that dispatch never began.
+      void launch().catch((error) => {
         this.retireOwnerAfterNativeTerminal(owner);
-        finish(new CarrierError(`claude --bg spawn failed: ${(err as Error).message}`, err));
-      });
-      child.stdout?.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-      child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
-
-      child.on('close', (code) => {
-        if (code !== 0) {
-          // A dispatcher may have persisted a job before exiting nonzero. No
-          // short id means no safe stop target, so retain the pending record.
-          return finish(new CarrierError(`claude --bg exited code=${code}: ${stderr.slice(0, 300)}`));
-        }
-        const match = SHORT_ID_PATTERN.exec(stdout);
-        if (!match) {
-          // Unknown job identity is intentionally durable and non-actionable;
-          // never guess via process environment or signal a shared daemon.
-          return finish(new CarrierError(`Could not parse short id from claude --bg stdout: ${stdout.slice(0, 300)}`));
-        }
-        const shortId = match[1];
-        if (owner) {
-          try {
-            activateClaudeBgJobOwner(owner, shortId);
-          } catch (error) {
-            this.bestEffortStop(shortId, owner);
-            return finish(new CarrierError(`claude --bg owner activation failed: ${(error as Error).message}`, error));
-          }
-        }
-        finish(null, {
-          shortId,
-          consumer: new JobEventConsumer(shortId, { jobsDir: this.jobsDir }),
-          effectiveModel,
-          ...(owner ? { owner } : {}),
-        });
+        reject(new CarrierError(`claude --bg request evidence failed: ${(error as Error).message}`, error));
       });
     });
   }

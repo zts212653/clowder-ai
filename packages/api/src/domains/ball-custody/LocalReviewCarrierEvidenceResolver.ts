@@ -46,6 +46,29 @@ export class LocalReviewCarrierEvidenceResolver {
     return null;
   }
 
+  /**
+   * Canonical review identity owns authorization on the carrierless/current
+   * path. The invocation carrier remains authenticated principal provenance,
+   * but an older or unrelated action fence cannot veto the server-resolved
+   * active review generation.
+   */
+  async resolveCanonicalIdentity(message: StoredMessage, input: LocalReviewEvidenceInput): Promise<CarrierFailure> {
+    const carrierInvocationId = message.extra?.stream?.invocationId;
+    if (!carrierInvocationId) {
+      return { status: 'insufficient', reason: 'local review verdict message has no invocation provenance' };
+    }
+    const carrier = await this.invocationRecordStore.get(carrierInvocationId);
+    if (!carrier) {
+      return { status: 'insufficient', reason: 'local review verdict invocation provenance is unavailable' };
+    }
+    return this.carrierMatchesMessagePrincipal(carrier, input)
+      ? null
+      : {
+          status: 'mismatch',
+          reason: 'local review verdict invocation is outside the message principal scope',
+        };
+  }
+
   async resolveRecovery(message: StoredMessage, input: LocalReviewEvidenceInput): Promise<CarrierFailure> {
     const carrierInvocationId = message.extra?.stream?.invocationId;
     if (!carrierInvocationId) {

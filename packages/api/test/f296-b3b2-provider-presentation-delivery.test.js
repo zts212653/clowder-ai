@@ -63,6 +63,22 @@ function reservation(subjectKey, promptGenerationId) {
 }
 
 describe('F296 B3b-2 provider presentation boundary', () => {
+  it('uses an owner-keyed prompt identity factory for every rebuilt generation', async () => {
+    const digested = [];
+    const attempt = await prepareProviderPresentationAttempt({
+      envelopes: [],
+      opportunityContext,
+      buildEffectivePrompt: () => 'private prompt',
+      createPromptGenerationId: async (value) => {
+        digested.push(value);
+        return `hmac-sha256:${'a'.repeat(64)}`;
+      },
+    });
+
+    assert.equal(attempt.promptGenerationId, `hmac-sha256:${'a'.repeat(64)}`);
+    assert.deepEqual(digested, ['private prompt']);
+  });
+
   it('rehashes the exact final prompt after a rejected projection and releases superseded reservations', async () => {
     const calls = [];
     let reserveSequence = 0;

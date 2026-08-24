@@ -206,6 +206,31 @@ describe('L0 Staging Protocol PR-B-impl (ADR-038)', () => {
       assert.match(out, /禁止只填表/);
     });
 
+    sourceOnlyTest('F302 renders one portable workspace reflex with runtime ports and repo truth', () => {
+      const originalFrontendPort = process.env.FRONTEND_PORT;
+      const originalApiPort = process.env.API_SERVER_PORT;
+
+      try {
+        delete process.env.FRONTEND_PORT;
+        delete process.env.API_SERVER_PORT;
+        const defaultOut = buildStagingPrepend('codex');
+        assert.ok(defaultOut.includes('3003/3004'));
+
+        process.env.FRONTEND_PORT = '4311';
+        process.env.API_SERVER_PORT = '4312';
+        const out = buildStagingPrepend('codex');
+        assert.match(out, /外仓随身反射/);
+        assert.match(out, /4311\/4312/);
+        assert.match(out, /repo 路径\/命令仅在当前仓实查存在时可用/);
+        assert.match(out, /查不到.*unknown/);
+      } finally {
+        if (originalFrontendPort === undefined) delete process.env.FRONTEND_PORT;
+        else process.env.FRONTEND_PORT = originalFrontendPort;
+        if (originalApiPort === undefined) delete process.env.API_SERVER_PORT;
+        else process.env.API_SERVER_PORT = originalApiPort;
+      }
+    });
+
     sourceOnlyTest('wipers content rendered for siamese cat (gemini25)', () => {
       const out = buildStagingPrepend('gemini25');
       assert.ok(out.includes('摩擦上报'));

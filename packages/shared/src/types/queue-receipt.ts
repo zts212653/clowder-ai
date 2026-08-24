@@ -65,6 +65,14 @@ export interface QueueLineageEvidenceRef {
   invocationId: string;
 }
 
+/** Durable terminal child truth without a persisted timeline lineage. */
+export interface QueueTurnExecutionEvidenceRef {
+  kind: 'turn_execution';
+  invocationId: string;
+}
+
+export type QueueTargetOutcomeEvidenceRef = QueueLineageEvidenceRef | QueueTurnExecutionEvidenceRef;
+
 export interface QueueTerminalSilentConsumptionWitness {
   kind: 'terminal_silent';
   projectionState: 'covered_empty';
@@ -108,7 +116,7 @@ export type QueueTerminalConsumptionWitness =
 export interface QueueTargetOutcome {
   invocationId: string;
   disposition: QueueHandledDisposition;
-  evidenceRef: QueueLineageEvidenceRef;
+  evidenceRef: QueueTargetOutcomeEvidenceRef;
   handledAt: number;
   consumption?: QueueTerminalConsumptionWitness;
 }

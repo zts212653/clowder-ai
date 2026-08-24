@@ -81,6 +81,7 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  PreparedProviderRequestV1,
   ProviderContinuityPreflight,
   TokenUsage,
   ToolExecutionPolicy,
@@ -623,7 +624,7 @@ function writeCodexMcpEnvWrapper(spec: {
 async function buildCatCafeMcpArgs(
   callbackEnv?: Record<string, string>,
   workingDirectory?: string,
-): Promise<{ args: string[]; bearerEnv: Record<string, string> }> {
+): Promise<{ args: string[]; bearerEnv: Record<string, string>; declaredServerNames?: readonly string[] }> {
   if (!callbackEnv) return { args: [], bearerEnv: {} };
 
   /** Bearer tokens extracted from headers — keyed by env var name, valued by token. */
@@ -892,6 +893,7 @@ async function buildCatCafeMcpArgs(
     for (const [serverName, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
       const serverPath = resolve(mcpDistDir, entrypoint);
       if (!existsSync(serverPath)) continue;
+      enabledServers.push(serverName);
       args.push(
         '--config',
         `mcp_servers.${serverName}.command=${toTomlString(resolveCatCafeNodeCommand())}`,
@@ -924,7 +926,7 @@ async function buildCatCafeMcpArgs(
     },
     '#712: MCP invoke-time injection',
   );
-  return { args, bearerEnv };
+  return { args, bearerEnv, declaredServerNames: [...new Set(enabledServers)].sort() };
 }
 
 export function isGitRepositoryPath(workingDirectory: string): boolean {
@@ -1227,8 +1229,12 @@ export class CodexAgentService implements AgentService {
     const mcpCallbackEnv = usePooledAppServer
       ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
       : options?.callbackEnv;
-    const { args: catCafeMcpArgs, bearerEnv: mcpBearerEnv } = readOnly
-      ? { args: [], bearerEnv: {} }
+    const {
+      args: catCafeMcpArgs,
+      bearerEnv: mcpBearerEnv,
+      declaredServerNames: declaredMcpServerNames,
+    } = readOnly
+      ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[] }
       : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory);
     const gitRepoArgs = readOnly ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
@@ -1577,6 +1583,61 @@ export class CodexAgentService implements AgentService {
         semanticCompletionSignal: semanticCompletionController.signal,
       };
       const useAppServer = this.carrierMode === 'app_server';
+      const prepareProviderRequest = (
+        body: string,
+        carrier: 'exec_json' | 'app_server',
+        boundaryReason?: PreparedProviderRequestV1['boundaryReason'],
+      ): PreparedProviderRequestV1 =>
+        Object.freeze({
+          v: 1,
+          ...(boundaryReason ? { boundaryReason } : {}),
+          message: Object.freeze({ body }),
+          nativeInstructions: Object.freeze([
+            Object.freeze({
+              body: developerInstructions,
+              injectionDecision: 'native_l0_compiled_with_signature_boundary',
+            }),
+          ]),
+          runtime: Object.freeze({
+            provider: 'openai',
+            carrier,
+            ...(cliModel ? { model: cliModel } : {}),
+            protocol: carrier === 'app_server' ? 'json_rpc' : 'exec_json',
+            reasoningEffort: effortLevel,
+            ...(requestedServiceTier ? { serviceTier: requestedServiceTier } : {}),
+            ...(contextWindow ? { contextWindowTokens: contextWindow } : {}),
+            ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+          }),
+          tools: Object.freeze({
+            finalSurface: readOnly
+              ? ('exact' as const)
+              : declaredMcpServerNames
+                ? ('declared_only' as const)
+                : ('unknown' as const),
+            ...(declaredMcpServerNames ? { declaredServerNames: Object.freeze(declaredMcpServerNames) } : {}),
+            ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+          }),
+          providerNativeVisibility: 'unknown' as const,
+        });
+      const prepareRecoveryRequest = (recoveryInstruction: string): PreparedProviderRequestV1 => {
+        const prepared = prepareProviderRequest('', 'app_server', 'provider_fallback');
+        return Object.freeze({
+          ...prepared,
+          message: Object.freeze({ body: '', sourceRefs: Object.freeze([]) }),
+          nativeInstructions: Object.freeze([
+            Object.freeze({
+              body: recoveryInstruction,
+              injectionDecision: 'app_server_capacity_recovery_context',
+              sourceRefs: Object.freeze([
+                Object.freeze({
+                  owner: 'runtime_context' as const,
+                  ref: `capacity-recovery:${options?.invocationId ?? 'unbound'}`,
+                }),
+              ]),
+            }),
+          ]),
+        });
+      };
       const appServerEnv = usePooledAppServer ? withoutSessionScopedHostEnv(codexEnv) : codexEnv;
       let pooledSessionInUse = false;
       let forceDirectAppServer = false;
@@ -1643,6 +1704,9 @@ export class CodexAgentService implements AgentService {
               ...(appServerThreadConfig ? { config: appServerThreadConfig } : {}),
               ...(appServerServiceTier !== undefined ? { serviceTier: appServerServiceTier } : {}),
               imagePaths,
+              prepareRequest: (body, boundaryReason) => prepareProviderRequest(body, 'app_server', boundaryReason),
+              prepareRecoveryRequest,
+              ...(options?.beforeProviderLaunch ? { beforeProviderLaunch: options.beforeProviderLaunch } : {}),
               ...(options?.signal ? { signal: options.signal } : {}),
               timeoutMs: resolveCliTimeoutMs(parseCliTimeoutMs(codexEnv.CLI_TIMEOUT_MS ?? undefined)),
               interruptGraceMs: KILL_GRACE_MS,
@@ -1683,10 +1747,17 @@ export class CodexAgentService implements AgentService {
             if (execStdinInput === undefined) {
               throw new Error('codex_continuity_preflight_requires_app_server');
             }
-            const spawnOpts = { ...cliOpts, stdinInput: execStdinInput };
-            return options?.spawnCliOverride
-              ? options.spawnCliOverride(spawnOpts)
-              : spawnCli(spawnOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+            const serviceSpawnFn = this.spawnFn;
+            return (async function* () {
+              const preparedRequest = prepareProviderRequest(execStdinInput, 'exec_json');
+              await options?.beforeProviderLaunch?.(preparedRequest);
+              if (!('body' in preparedRequest.message)) throw new Error('codex_prepared_message_not_exact');
+              const spawnOpts = { ...cliOpts, stdinInput: preparedRequest.message.body };
+              const spawned = options?.spawnCliOverride
+                ? options.spawnCliOverride(spawnOpts)
+                : spawnCli(spawnOpts, serviceSpawnFn ? { spawnFn: serviceSpawnFn } : undefined);
+              yield* spawned;
+            })();
           })();
 
       // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).

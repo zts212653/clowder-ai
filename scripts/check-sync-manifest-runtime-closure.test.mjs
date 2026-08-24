@@ -127,6 +127,22 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!excluded.has(absorbedScript), `${absorbedScript} must not be excluded from export`);
   });
 
+  it('protects target-local environment configuration from sync deletion', () => {
+    // Production dry-run evidence on 2026-08-24 showed that root `.env.local` is
+    // ignored by Git and absent from the source export, so rsync --delete would
+    // remove it before a public runtime could be started. The sync contract must
+    // carry this deployment-owned file through the same backup → sync → restore
+    // path as every other target-owned artifact.
+    const localEnvironment = '.env.local';
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+
+    assert.ok(
+      targetOwned.has(localEnvironment),
+      `${localEnvironment} is deployment-owned and must be backed up and restored across full sync`,
+    );
+    assert.ok(!isExported(localEnvironment), `${localEnvironment} must never be exported from source`);
+  });
+
   it('exports every direct local import of an exported script', () => {
     const missing = [];
 
@@ -211,6 +227,37 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       `${hook} must be exported with ${contract}, otherwise the public suite cannot exercise the cold-packet boundary`,
     );
     assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
+  });
+
+  it('exports the Alpha runner closure exercised by the public F296 contracts', () => {
+    const contracts = [
+      'packages/api/test/f296-b4c-alpha-uat-runner.test.js',
+      'packages/api/test/f296-b4c-alpha-uat-runner-guards.test.js',
+    ];
+    const runner = 'scripts/f296-alpha-uat.mjs';
+    const helper = 'scripts/lib/f296-alpha-uat-contract.mjs';
+
+    for (const contract of contracts) {
+      const source = readFileSync(resolve(ROOT, contract), 'utf8');
+      assert.match(
+        source,
+        /from '\.\.\/\.\.\/\.\.\/scripts\/f296-alpha-uat\.mjs'/,
+        `${contract} must stay bound to the real Alpha runner`,
+      );
+    }
+
+    assert.match(
+      readFileSync(resolve(ROOT, runner), 'utf8'),
+      /from '\.\/lib\/f296-alpha-uat-contract\.mjs'/,
+      `${runner} must stay bound to its runtime contract`,
+    );
+    for (const path of [runner, helper]) {
+      assert.ok(
+        managedScripts.has(path),
+        `${path} must be exported with the public F296 contracts, otherwise the public suite fails before UAT guards run`,
+      );
+      assert.ok(!excluded.has(path), `${path} must not be excluded from the public filtered tree`);
+    }
   });
 
   it('exports the prompt-hook manifests scanned by PipelinePromptBuilder', () => {

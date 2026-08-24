@@ -207,18 +207,24 @@ test('F153: listByThread filters by userId', async () => {
 
 // ── Source-level tests ──────────────────────────────────────────
 
-test('F153: invoke-single-cat calls capturePromptIfEnabled', () => {
+test('F299: new invocations no longer write the legacy Prompt Capture ring', () => {
   const src = readFileSync(
     join(import.meta.dirname, '../src/domains/cats/services/agents/invocation/invoke-single-cat.ts'),
     'utf8',
   );
-  assert.ok(src.includes('capturePromptIfEnabled'), 'Should call capture function after effectivePrompt assembly');
-  assert.ok(src.includes('prompt-capture-bridge'), 'Should import from prompt-capture-bridge');
+  assert.ok(!src.includes('capturePromptIfEnabled'), 'Canonical request-generation evidence must be the only writer');
+  assert.ok(!src.includes('prompt-capture-bridge'), 'Invocation path must not retain the legacy debug bridge');
 });
 
 test('F153: API routes registered in index.ts', () => {
   const src = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8');
   assert.ok(src.includes('promptCaptureRoutes'), 'Should register prompt capture routes');
+});
+
+test('F299: Prompt Capture status is explicitly legacy read-only', () => {
+  const src = readFileSync(join(import.meta.dirname, '../src/routes/prompt-captures.ts'), 'utf8');
+  assert.ok(src.includes("mode: 'legacy_read_only'"));
+  assert.ok(src.includes('enabled: false'));
 });
 
 // ── AC-G10 (Phase G native L0 closure / KD-44): backward + new field tests ──

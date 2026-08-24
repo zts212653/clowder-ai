@@ -104,6 +104,7 @@ import {
   getTimelineOrderTime,
   isInternalNonQuotableParent,
   isSystemUserMessage,
+  resolveVisibleReplyParent,
 } from '../domains/cats/services/stores/visibility.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -2469,6 +2470,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const { hydrateReplyPreview } = await import('../domains/cats/services/stores/ports/MessageStore.js');
       await Promise.all(
         replyItems.map(async (item) => {
+          const source = item.source as { connector?: string } | undefined;
+          if (source?.connector === 'cloud-bridge-status') {
+            const parent = await resolveVisibleReplyParent(opts.messageStore, item.replyTo as string, {
+              threadId: resolvedThreadId,
+              viewer: { type: 'user' },
+              publicReply: true,
+            });
+            if (!parent) return;
+          }
           const preview = await hydrateReplyPreview(opts.messageStore, item.replyTo as string);
           if (preview) {
             item.replyPreview = preview;

@@ -21,7 +21,13 @@ import type { CapabilitiesConfig, CatId } from '@cat-cafe/shared';
 import { readCapabilitiesConfig } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  PreparedProviderRequestV1,
+} from '../../../types.js';
 import {
   ACP_PROMPT_TIMEOUT_MARGIN_MS,
   type AcpCapacitySignal,
@@ -238,11 +244,16 @@ export class AcpAgentService implements AgentService {
     opts: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
     ctx: Record<string, unknown>,
     signal?: AbortSignal,
-    hooks?: { onAttemptStart?: () => void; onBackoff?: (attempt: number, delayMs: number) => void },
+    hooks?: {
+      beforeAttempt?: (attempt: number) => Promise<void>;
+      onAttemptStart?: () => void;
+      onBackoff?: (attempt: number, delayMs: number) => void;
+    },
   ): AsyncGenerator<AcpSessionUpdate> {
     const delays = this.agentBusyRetryDelaysMs;
     for (let attempt = 0; ; attempt++) {
       let yieldedEvents = 0;
+      await hooks?.beforeAttempt?.(attempt);
       hooks?.onAttemptStart?.();
       try {
         for await (const event of client.promptStream(sessionId, prompt, opts)) {
@@ -584,6 +595,23 @@ export class AcpAgentService implements AgentService {
       // backoff window downgrades to busy_backoff so abort cannot cancel/seal
       // the agent-internal turn we are waiting out.
       const busyRetryHooks = {
+        beforeAttempt: async (busyAttempt: number) => {
+          const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+            v: 1,
+            ...(busyAttempt > 0 ? { boundaryReason: 'provider_busy' as const } : {}),
+            message: Object.freeze({ body: effectivePrompt }),
+            nativeInstructions: Object.freeze([]),
+            runtime: Object.freeze({
+              provider: this.providerName,
+              carrier: 'acp',
+              ...(this.modelName ? { model: this.modelName } : {}),
+              protocol: 'acp',
+            }),
+            tools: Object.freeze({ finalSurface: 'unknown' as const }),
+            providerNativeVisibility: 'unknown' as const,
+          });
+          await options?.beforeProviderLaunch?.(preparedRequest);
+        },
         onAttemptStart: () => {
           promptPhase = 'active_unacknowledged';
         },
@@ -763,7 +791,26 @@ export class AcpAgentService implements AgentService {
             promptStreamOpts,
             ctx,
             options?.signal,
-            busyRetryHooks,
+            {
+              ...busyRetryHooks,
+              beforeAttempt: async (busyAttempt: number) => {
+                const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+                  v: 1,
+                  boundaryReason: busyAttempt > 0 ? 'provider_busy' : 'missing_session',
+                  message: Object.freeze({ body: retryPrompt }),
+                  nativeInstructions: Object.freeze([]),
+                  runtime: Object.freeze({
+                    provider: this.providerName,
+                    carrier: 'acp',
+                    ...(this.modelName ? { model: this.modelName } : {}),
+                    protocol: 'acp',
+                  }),
+                  tools: Object.freeze({ finalSurface: 'unknown' as const }),
+                  providerNativeVisibility: 'unknown' as const,
+                });
+                await options?.beforeProviderLaunch?.(preparedRequest);
+              },
+            },
           )) {
             this.observeUsageTelemetry(event);
             // Skip synthetic events (capacity/idle/tool-wait warnings)

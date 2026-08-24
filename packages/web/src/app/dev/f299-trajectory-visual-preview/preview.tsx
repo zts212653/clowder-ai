@@ -1,6 +1,6 @@
 'use client';
 
-import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
+import type { InvocationTrajectorySummary, RequestGenerationProjectionV1 } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import {
   type InvocationDetailResponse,
@@ -92,6 +92,59 @@ const detail: InvocationDetailResponse = {
   ],
 };
 
+const digest = `hmac-sha256:${'a'.repeat(64)}`;
+const requestGenerations: RequestGenerationProjectionV1[] = [
+  {
+    envelope: {
+      v: 1,
+      invocationId: summary.invocationId,
+      sessionId: summary.sessionId,
+      generationOrdinal: 1,
+      requestGenerationId: '00000000-0000-4000-8000-000000000001',
+      promptGenerationId: digest,
+      assembledAt: 1_000,
+      continuity: {
+        capability: 'exact',
+        mode: 'cold',
+        contextEpoch: 3,
+        compactionRefs: ['compaction:authoritative:1'],
+      },
+      channels: [
+        {
+          channel: 'message',
+          accuracy: 'exact',
+          keyedContentDigest: digest,
+          byteLength: 64,
+          sourceRefs: [{ owner: 'message', ref: 'thread-f299-preview:message-f299-preview' }],
+          state: 'redacted',
+          injectionDecision: 'assembled_after_continuity_settle',
+        },
+        {
+          channel: 'provider_native_hidden',
+          accuracy: 'unknown',
+          sourceRefs: [],
+          state: 'unknown',
+        },
+      ],
+      presentations: [
+        {
+          owner: 'runtime-context',
+          kind: 'runtime_context',
+          sourceRefs: [{ owner: 'runtime_context', ref: 'thread-f299-preview:epoch:3' }],
+          decision: 'admitted',
+          renderedDigest: digest,
+        },
+      ],
+      runtime: {
+        requested: { provider: 'openai', carrier: 'app_server', model: 'gpt-5.6-sol' },
+        providerNativeVisibility: 'unknown',
+      },
+      tools: { finalSurface: 'exact', catCafeSchemaSetHash: digest },
+      retryBoundary: { attempt: 1 },
+    },
+  },
+];
+
 export function F299TrajectoryVisualPreview() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
@@ -127,6 +180,8 @@ export function F299TrajectoryVisualPreview() {
             onBack={() => undefined}
             onRetry={() => undefined}
             onOpenPromptMessage={() => undefined}
+            requestGenerations={requestGenerations}
+            onRevealGenerations={() => undefined}
           />
         </div>
       </section>

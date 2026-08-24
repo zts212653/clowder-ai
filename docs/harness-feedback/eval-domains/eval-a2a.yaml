@@ -490,6 +490,9 @@ evalCat:
   handle: "@codex"
   model: gpt-5.5
 frequency: daily
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 24
 sourceAdapter: f167-runtime-eval
 sourceRefsKind: a2a-snapshot-attribution
 threadPolicy:

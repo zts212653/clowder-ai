@@ -33,6 +33,7 @@ export interface BoundAsrPersonMemoryScene {
 export interface AsrPersonMemoryPresentationReceipt {
   readonly opportunityId: string;
   readonly state: WriteOpportunityLifecycleState;
+  readonly source: BoundAsrPersonMemoryScene['source'];
 }
 
 export type AsrPersonMemoryPresentationEnvelope = ContextPresentationEnvelope<AsrPersonMemoryPresentationReceipt>;
@@ -177,7 +178,7 @@ export class AsrPersonMemoryOpportunityPromptService {
       if (state.status !== 'eligible') continue;
       const opportunityId = state.scene.opportunity.opportunityId;
       seenGenerationKeys.add(`${state.scene.opportunity.dedupeLineage}:${state.scene.opportunity.generation}`);
-      const receipt = { opportunityId, state };
+      const receipt = { opportunityId, state, source: candidate.source };
       admittedOpportunityIds.push(opportunityId);
       presentationReceipts.push(receipt);
       if (!presentationSupported) {

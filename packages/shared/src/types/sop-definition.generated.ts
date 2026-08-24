@@ -132,6 +132,26 @@ export const DEVELOPMENT_SOP_DEFINITION = {
             fullGateMatch: 'pnpm gate',
           },
         },
+        {
+          id: 'impl-design-gate-evidence',
+          kind: 'hard_rule',
+          text: '新增 route/consumer 并触及 canonical helper 时，必须声明 consumer delta 并提供 exact-HEAD review/self-check evidence',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'worktree' },
+          predicate: {
+            type: 'design_gate_evidence',
+            consumerGlobs: [
+              'packages/*/src/routes/*.ts',
+              'packages/*/src/routes/**/*.ts',
+              'packages/*/src/**/*route*.ts',
+              'packages/*/src/**/*consumer*.ts',
+              'packages/*/src/**/*caller*.ts',
+              'packages/*/src/**/*job*.ts',
+            ],
+            canonicalHelperPattern:
+              '\\b(?:canAccess|hasAccess|auth|authoriz|ownership|policy|resolver|cursor|lifecycle)\\w*\\b',
+          },
+        },
       ],
       pitfalls: [
         {

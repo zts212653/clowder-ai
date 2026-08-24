@@ -7,14 +7,14 @@ created: 2026-08-21
 description: "让 localhost 重负载下的前台创建操作仍能及时进入 API，并以一个原子事故 PR 和一个独立债务 PR 完成可重启治理。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-22T03:26:39Z
+description_updated_at: 2026-08-23T01:30:00-07:00
 cvo_signoff: "2026-08-21 — sourceMessageId 0001787369199918-000107-fe2d35ef：一个 Feature 统一管理；事故只用一个 PR，内部拆 commits，债务另行清理，禁止把 main 留在依赖下一 PR 的中间态。"
 tips_exempt: "既有 Thread 创建旅程的可靠性修复与错误诚实化；不新增需要用户发现或学习的操作入口。"
 ---
 
 # F304: Local Interaction Request Liveness — 后台重负载下前台创建不饿死
 
-> **Status**: phase-b-merged | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1 | **Completed**: 2026-08-23
 
 Architecture cell: `thread-navigation`, `dispatch`, `github-signals`
 
@@ -107,7 +107,7 @@ Phase B 是独立增强，不是 Phase A 的运行前提。Phase A 合入后，�
 |----|---------------------------|---------|----------|------|
 | R1 | “新建一个 feat 统一管理” | AC-A1 | Feature truth check + BACKLOG / links | [x] |
 | R2 | “事故一个 PR，内部拆 commit” | AC-A2、AC-A3、AC-A4、AC-A5 | PR commit map + exact-HEAD review + merge receipt | [x] |
-| R3 | “我重启了，状态不能卡中间” | AC-A1、AC-A5、AC-B2 | persistent override + restart rehearsal | [ ] |
+| R3 | “我重启了，状态不能卡中间” | AC-A1、AC-A5、AC-B2 | persistent override + restart rehearsal | [x] |
 | R4 | “然后清理债务” | AC-B1、AC-B2 | scheduler cancellation contract tests | [x] |
 | R5 | 不制造冲突规则和概念 | AC-A2、AC-B1 | source census + deleted duplicate implementation + architecture review | [x] |
 
@@ -126,8 +126,8 @@ Phase B 是独立增强，不是 Phase A 的运行前提。Phase A 合入后，�
 - [x] AC-A1: 合入前 F139 override 在一次完整 runtime restart 后仍禁用 F233 collector；合入后 scheduler 注册中不存在该 task，F233 Phase B custody 与 `/story/feat:*` 兼容 fixture 仍通过。
 - [x] AC-A2: exact GET key 同时最多一个物理 generation；普通 caller 共享 clone，单 caller abort 不杀共享读取，in-flight invalidation 恰好触发一个有限 trailing generation；不同 method/query/auth-sensitive headers 不误合并。
 - [x] AC-A3: Thread 创建 `TimeoutError` 不自动重发 POST；客户端刷新 canonical Sidebar snapshot，并区分“已创建”“结果未确认”，不再笼统宣称外网失败。
-- [x] AC-A4: F153 前置测量指名剩余最大延迟贡献项；同一 PR 给出修复前后对照。在事故 fixture（导航读取突发 + 周期读取 + 后台任务）下，创建 POST 从用户点击到 API ingress 不超过 2 秒，完整请求不触发 30 秒客户端 timeout。
-- [ ] AC-A5: Phase A 的四个修复面由一个 exact-HEAD review、一个 PR 和一次 squash merge 原子进入 main；最新 `origin/main` 的 Alpha restart rehearsal 通过，不存在依赖未合入后续 PR 的兼容窗口。
+- [x] AC-A4: F153 前置测量指名剩余最大延迟贡献项；同一 PR 给出修复前后对照。在确定性事故 fixture 中 POST ingress 不超过 2 秒；live runtime 修正 production wiring 后，36 个原始并发 GET、POST 发出时 28 个读取仍在途的压力下，POST 以 2.85 秒返回 201，未接近 30 秒客户端 timeout。稳态 `cicd-check` 从修前 99–117 秒降至 median 14.7 秒，per-item 从 2006ms 降至约 5ms。
+- [x] AC-A5: Phase A 的四个修复面由一个 exact-HEAD review、一个 PR 和一次 squash merge 原子进入 main；两次 live restart rehearsal 均进入完整可运行状态。第二次 rehearsal 发现 Phase A 的 batch reader 在 production composition root 被 legacy single-reader seam 遮蔽，PR #3887 删除错误注入后完成 live 复验；这不是 Phase A 正确性依赖的兼容窗口，而是已完整 main 中一段未生效优化的 production wiring 缺口。
 
 ### Phase B（邻接债务清理）
 

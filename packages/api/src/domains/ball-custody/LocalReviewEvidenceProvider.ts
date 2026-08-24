@@ -18,6 +18,7 @@ export interface LocalReviewEvidenceInput {
   predecessorCatId?: string;
   predecessorThreadId?: string;
   tenantScope: string;
+  reviewedHeadSha?: string;
 }
 
 export interface LocalReviewEvidenceProvider {
@@ -101,7 +102,7 @@ export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvide
 
   private async resolvePersistedVerdict(
     input: LocalReviewEvidenceInput,
-    carrierMode: 'required' | 'carrierless_recovery',
+    evidenceMode: 'current_settlement' | 'historical_recovery',
   ): Promise<LocalReviewEvidenceResolution> {
     if (!input.predecessorCatId || !input.predecessorThreadId) {
       return { status: 'insufficient', reason: 'local review lease has no structured predecessor route' };
@@ -115,24 +116,40 @@ export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvide
     if (message.catId !== input.reviewerCatId) {
       return { status: 'mismatch', reason: 'local review verdict author is not the lease holder' };
     }
+    const canonicalFence = message.extra?.localReviewVerdict?.carrierlessLeaseFence;
+    if (
+      evidenceMode === 'current_settlement' &&
+      canonicalFence &&
+      (canonicalFence.leaseId !== input.leaseId || canonicalFence.generation !== input.generation)
+    ) {
+      return {
+        status: 'mismatch',
+        reason: 'local review canonical settlement fence does not match the current action lease generation',
+      };
+    }
     const carrierFailure =
-      carrierMode === 'required'
-        ? await this.carrierResolver.resolveRequired(message, input)
-        : await this.carrierResolver.resolveRecovery(message, input);
+      evidenceMode === 'historical_recovery'
+        ? await this.carrierResolver.resolveRecovery(message, input)
+        : canonicalFence
+          ? await this.carrierResolver.resolveCanonicalIdentity(message, input)
+          : await this.carrierResolver.resolveRequired(message, input);
     if (carrierFailure) return carrierFailure;
     const verdict = message.extra?.localReviewVerdict?.verdict;
     if (!verdict || !LOCAL_REVIEW_VERDICTS.includes(verdict)) {
       return { status: 'insufficient', reason: 'local review message has no typed verdict fact' };
+    }
+    if (input.reviewedHeadSha && message.extra?.localReviewVerdict?.reviewedHeadSha !== input.reviewedHeadSha) {
+      return { status: 'mismatch', reason: 'local review message reviewed HEAD does not match the lease predicate' };
     }
     const evidenceRef = localReviewEvidenceRef({ messageId: message.id, generation: input.generation, verdict });
     return verifyPersistedReviewMessage(message, input, input.predecessorCatId, verdict, evidenceRef);
   }
 
   async resolve(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
-    return this.resolvePersistedVerdict(input, 'required');
+    return this.resolvePersistedVerdict(input, 'current_settlement');
   }
 
   async resolveRecovery(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
-    return this.resolvePersistedVerdict(input, 'carrierless_recovery');
+    return this.resolvePersistedVerdict(input, 'historical_recovery');
   }
 }

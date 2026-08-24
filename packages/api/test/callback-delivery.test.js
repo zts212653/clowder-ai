@@ -83,6 +83,30 @@ describe('callback delivery decision helper', () => {
     assert.equal(log.error.mock.calls.length, 1);
   });
 
+  it('keeps a typed obligation queued for replay when enqueue fails', async () => {
+    const log = logger();
+    const markDelivered = mock.fn(async () => null);
+    const result = await MessageDeliveryService.resolveCallbackDeliveryDecision({
+      canEnqueueA2A: true,
+      willEnqueueToQueue: true,
+      messageId: 'typed-review-handback',
+      threadId: 't1',
+      log,
+      enqueueA2A: mock.fn(async () => {
+        throw new Error('temporary queue outage');
+      }),
+      markDelivered,
+      preserveQueuedOnEnqueueFailure: true,
+      zeroEnqueuedWarnMessage: 'zero',
+      enqueueFailureMessage: 'fail',
+    });
+
+    assert.equal(result.shouldBroadcastNow, false);
+    assert.equal(result.enqueueAttempted, true);
+    assert.equal(result.enqueueFailed, true);
+    assert.equal(markDelivered.mock.calls.length, 0, 'the durable typed obligation must remain queued for replay');
+  });
+
   it('still broadcasts non-queued messages after enqueueing A2A targets', async () => {
     const log = logger();
     const enqueueA2A = mock.fn(async () => ({ enqueued: ['opus'] }));

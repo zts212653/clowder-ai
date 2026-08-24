@@ -29,6 +29,57 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
+  it('F167 preserves a typed local-review verdict for settlement and replay', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    for (const verdict of ['approved', 'changes_requested', 'commented']) {
+      const input = {
+        localReviewVerdict: {
+          verdict,
+          clientMessageId: `local-review-verdict-roundtrip-${verdict}`,
+          reviewedHeadSha: 'a'.repeat(40),
+          carrierlessLeaseFence: { leaseId: 'lease-review-roundtrip-1', generation: 3 },
+        },
+      };
+
+      assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+    }
+  });
+
+  it('F167 drops malformed local-review verdicts without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    for (const localReviewVerdict of [
+      { verdict: 'approve', clientMessageId: 'typed-verdict-1' },
+      { verdict: 'approved', clientMessageId: '' },
+      { verdict: 'approved', clientMessageId: 'x'.repeat(201) },
+      { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'ABC1234' },
+      { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'a'.repeat(39) },
+      {
+        verdict: 'approved',
+        clientMessageId: 'typed-verdict-1',
+        carrierlessLeaseFence: { leaseId: '', generation: 1 },
+      },
+      {
+        verdict: 'approved',
+        clientMessageId: 'typed-verdict-1',
+        carrierlessLeaseFence: { leaseId: 'lease-review-1', generation: 0 },
+      },
+    ]) {
+      const parsed = safeParseExtra(
+        serializeExtra({
+          localReviewVerdict,
+          targetCats: ['opus5'],
+        }),
+      );
+
+      assert.deepEqual(parsed?.targetCats, ['opus5']);
+      assert.equal(parsed?.localReviewVerdict, undefined);
+    }
+  });
+
   it('F294 preserves a Message Bundle while tracing metadata is merged', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
@@ -60,7 +111,7 @@ describe('durable message extra carriers survive Redis round-trips', () => {
     assert.equal(parsed?.messageBundle, undefined);
   });
 
-  it('preserves the other typed durable carriers declared by StoredMessage.extra', async () => {
+  it('preserves the F272, F292, and write-opportunity carriers', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
     );

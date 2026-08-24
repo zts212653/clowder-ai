@@ -1,11 +1,12 @@
 'use client';
 
-import { type CSSProperties, useId, useState } from 'react';
+import { type CSSProperties, createElement, useId, useState } from 'react';
 import { useMeasuredOverflow } from './useMeasuredOverflow';
 
 interface ExpandableProseProps {
   text: string;
   lines?: 2 | 3 | 4;
+  as?: 'div' | 'h3' | 'p';
   className?: string;
   contentClassName?: string;
 }
@@ -13,13 +14,14 @@ interface ExpandableProseProps {
 export function ExpandableProse({
   text,
   lines = 3,
+  as: Content = 'div',
   className = '',
   contentClassName = 'text-sm leading-6 text-cafe-secondary',
 }: ExpandableProseProps) {
   const contentId = useId();
   const [expandedText, setExpandedText] = useState<string | null>(null);
   const expanded = expandedText === text;
-  const { ref, overflowing } = useMeasuredOverflow<HTMLDivElement>({
+  const { ref, overflowing } = useMeasuredOverflow<HTMLElement>({
     axis: 'block',
     active: !expanded,
   });
@@ -33,17 +35,21 @@ export function ExpandableProse({
         overflow: 'hidden',
       };
 
+  const content = createElement(
+    Content,
+    {
+      id: contentId,
+      ref,
+      'data-overflow-measure': 'block',
+      className: `whitespace-pre-wrap break-words ${contentClassName}`,
+      style: collapsedStyle,
+    },
+    text,
+  );
+
   return (
     <div className={className}>
-      <div
-        id={contentId}
-        ref={ref}
-        data-overflow-measure="block"
-        className={`whitespace-pre-wrap break-words ${contentClassName}`}
-        style={collapsedStyle}
-      >
-        {text}
-      </div>
+      {content}
       {overflowing && (
         <button
           type="button"

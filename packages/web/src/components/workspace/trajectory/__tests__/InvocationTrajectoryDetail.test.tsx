@@ -29,6 +29,25 @@ const summary = {
   keyMessages: [],
 };
 
+const promptCapture = {
+  captureId: '00000000-0000-0000-0000-000000000017',
+  invocationId: 'inv-b1',
+  catId: 'codex-sol',
+  model: 'gpt-5.6-sol',
+  capturedAt: 1_000,
+  systemPrompt: 'system contract',
+  userPrompt: 'user contract',
+  effectivePrompt: 'system contract\nuser contract',
+  injectionDecision: {
+    isResume: false,
+    canSkipOnResume: false,
+    forceReinjection: false,
+    injected: true,
+  },
+  promptBytes: 29,
+  tokenEstimate: 8,
+};
+
 function event(eventNo: number, payload: Record<string, unknown>) {
   return {
     v: 1,
@@ -39,6 +58,40 @@ function event(eventNo: number, payload: Record<string, unknown>) {
     invocationId: 'inv-b1',
     eventNo,
     event: payload,
+  };
+}
+
+function requestGeneration(state: 'redacted' | 'available' | 'unknown', body?: string) {
+  const digest = `hmac-sha256:${'a'.repeat(64)}`;
+  return {
+    envelope: {
+      v: 1 as const,
+      invocationId: 'inv-b1',
+      sessionId: 'session-f299',
+      generationOrdinal: 1,
+      requestGenerationId: '00000000-0000-4000-8000-000000000001',
+      promptGenerationId: digest,
+      assembledAt: 1_000,
+      continuity: { capability: 'exact' as const, mode: 'cold' as const, contextEpoch: 1, compactionRefs: [] },
+      channels: [
+        {
+          channel: 'message' as const,
+          accuracy: 'exact' as const,
+          keyedContentDigest: digest,
+          byteLength: 20,
+          sourceRefs: [{ owner: 'message' as const, ref: 'thread-f299:message-trigger' }],
+          state,
+          ...(body ? { body } : {}),
+        },
+      ],
+      presentations: [],
+      runtime: {
+        requested: { provider: 'openai', carrier: 'app_server', model: 'gpt-5.6-sol' },
+        providerNativeVisibility: 'unknown' as const,
+      },
+      tools: { finalSurface: 'exact' as const, catCafeSchemaSetHash: digest },
+      retryBoundary: { attempt: 1 },
+    },
   };
 }
 
@@ -170,10 +223,103 @@ describe('F299 B.1 InvocationTrajectoryDetail', () => {
     expect(container.querySelectorAll('pre[data-raw-event-no]')).toHaveLength(8);
   });
 
+  it('shows redacted generation metadata first and reveals only the source-authorized body', async () => {
+    const onRevealGenerations = vi.fn();
+    const render = (state: 'redacted' | 'available', body?: string) => (
+      <InvocationTrajectoryDetail
+        summary={summary}
+        detail={{ invocationId: 'inv-b1', total: 0, events: [], summary }}
+        loading={false}
+        error={false}
+        onBack={vi.fn()}
+        onRetry={vi.fn()}
+        onOpenPromptMessage={vi.fn()}
+        requestGenerations={[requestGeneration(state, body)]}
+        onRevealGenerations={onRevealGenerations}
+      />
+    );
+
+    await act(async () => root.render(render('redacted')));
+    expect(container.textContent).toContain('Input generations');
+    expect(container.textContent).toContain('Generation #1');
+    expect(container.textContent).toContain('openai / app_server');
+    expect(container.textContent).toContain('Clowder AI schemas: aaaaaaaaaa…');
+    expect(container.textContent).toContain('默认遮蔽');
+    expect(container.textContent).not.toContain('private submitted bytes');
+
+    const reveal = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '按来源权限展开',
+    );
+    await act(async () => reveal?.click());
+    expect(onRevealGenerations).toHaveBeenCalledOnce();
+
+    await act(async () => root.render(render('available', 'private submitted bytes')));
+    expect(container.textContent).toContain('可展开');
+    expect(container.textContent).toContain('private submitted bytes');
+  });
+
+  it('keeps intact generations visible beside typed gaps and explains unresolved source owners', async () => {
+    const onRevealGenerations = vi.fn();
+    await act(async () => {
+      root.render(
+        <InvocationTrajectoryDetail
+          summary={summary}
+          detail={{ invocationId: 'inv-b1', total: 0, events: [], summary }}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onRetry={vi.fn()}
+          onOpenPromptMessage={vi.fn()}
+          requestGenerations={[requestGeneration('unknown')]}
+          requestGenerationGaps={[
+            { kind: 'evidence_gap', fromOrdinal: 2, toOrdinal: 3, state: 'unknown', reason: 'ordinal_gap' },
+          ]}
+          onRevealGenerations={onRevealGenerations}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Generation #1');
+    expect(container.textContent).toContain('Generation evidence gap #2–3');
+    expect(container.textContent).toContain('未把缺口猜成“没有发生”');
+    expect(container.textContent).toContain('来源未能核验');
+    expect(container.textContent).toContain('没有猜成可见、已删除或 Provider 未支持');
+    const retry = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '按来源权限展开',
+    );
+    await act(async () => retry?.click());
+    expect(onRevealGenerations).toHaveBeenCalledOnce();
+  });
+
+  it('renders a typed gap even when no surviving generation is readable', async () => {
+    await act(async () => {
+      root.render(
+        <InvocationTrajectoryDetail
+          summary={summary}
+          detail={{ invocationId: 'inv-b1', total: 0, events: [], summary }}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onRetry={vi.fn()}
+          onOpenPromptMessage={vi.fn()}
+          requestGenerationGaps={[
+            { kind: 'evidence_gap', fromOrdinal: 1, toOrdinal: 2, state: 'unknown', reason: 'ordinal_gap' },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Generation evidence gap #1–2');
+    expect(container.textContent).not.toContain('这轮没有 canonical request-generation 证据');
+  });
+
   it('shows only evidence links that their source owners resolve at read time', async () => {
     mocks.apiFetch.mockImplementation(async (input: string) => {
       if (input === '/api/debug/prompt-captures?invocationId=inv-b1') {
-        return { ok: true, json: async () => [{ captureId: '00000000-0000-0000-0000-000000000017' }] };
+        return { ok: true, json: async () => [{ captureId: promptCapture.captureId }] };
+      }
+      if (input === `/api/debug/prompt-captures/${promptCapture.captureId}`) {
+        return { ok: true, json: async () => promptCapture };
       }
       if (input === '/api/telemetry/traces?invocationId=inv-b1&limit=1') {
         return { ok: true, json: async () => ({ spans: [{ traceId: 'trace-17' }], count: 1 }) };
@@ -202,11 +348,56 @@ describe('F299 B.1 InvocationTrajectoryDetail', () => {
     const ownerLinks = container.querySelector('[data-testid="source-owned-evidence-links"]');
     const links = ownerLinks?.querySelectorAll('[data-testid="source-owned-evidence-link"]') ?? [];
     expect(links).toHaveLength(3);
-    expect(container.textContent).toContain('Prompt X-Ray');
+    expect(container.textContent).toContain('Legacy Prompt X-Ray');
     expect(container.textContent).toContain('Trace');
     expect(container.textContent).toContain('Task trajectory');
     expect(ownerLinks?.textContent).not.toContain('不可用');
     expect(ownerLinks?.textContent).not.toContain('缺失');
+
+    const promptChip = ownerLinks?.querySelector<HTMLElement>('[data-evidence-source="prompt"]');
+    expect(promptChip?.tagName).toBe('BUTTON');
+    expect(promptChip?.getAttribute('href')).toBeNull();
+    await act(async () => promptChip?.click());
+    expect(container.querySelector('[data-testid="prompt-capture-inspector"]')).not.toBeNull();
+    expect(container.textContent).toContain('system contract');
+  });
+
+  it.each([403, 404])('omits Prompt X-Ray when capture detail returns %i', async (status) => {
+    mocks.apiFetch.mockImplementation(async (input: string) => {
+      if (input === '/api/debug/prompt-captures?invocationId=inv-b1') {
+        return { ok: true, json: async () => [{ captureId: promptCapture.captureId }] };
+      }
+      if (input === `/api/debug/prompt-captures/${promptCapture.captureId}`) {
+        return { ok: false, status, json: async () => ({ error: status === 403 ? 'Forbidden' : 'Not found' }) };
+      }
+      if (input === '/api/telemetry/traces?invocationId=inv-b1&limit=1') {
+        return { ok: true, json: async () => ({ spans: [{ traceId: 'trace-17' }], count: 1 }) };
+      }
+      if (input === '/api/recall/trajectories?invocationId=inv-b1&limit=1') {
+        return { ok: true, json: async () => ({ trajectories: [{ trajectoryId: 'trajectory-17' }] }) };
+      }
+      throw new Error(`Unexpected owner request: ${input}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <InvocationTrajectoryDetail
+          summary={summary}
+          detail={{ invocationId: 'inv-b1', total: 0, events: [], summary }}
+          loading={false}
+          error={false}
+          onBack={vi.fn()}
+          onRetry={vi.fn()}
+          onOpenPromptMessage={vi.fn()}
+        />,
+      );
+    });
+    await act(async () => {});
+
+    const ownerLinks = container.querySelector('[data-testid="source-owned-evidence-links"]');
+    expect(ownerLinks?.querySelector('[data-evidence-source="prompt"]')).toBeNull();
+    expect(ownerLinks?.textContent).toContain('Trace');
+    expect(ownerLinks?.textContent).toContain('Task trajectory');
   });
 
   it('omits owner sources that are absent or inaccessible without inventing an absent reason', async () => {

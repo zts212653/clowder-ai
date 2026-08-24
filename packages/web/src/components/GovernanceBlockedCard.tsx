@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { GovernanceInstaller } from './GovernanceInstaller';
 import { GovernanceShieldIcon } from './icons/GovernanceShieldIcon';
 
 interface GovernanceBlockedCardProps {
@@ -8,19 +9,13 @@ interface GovernanceBlockedCardProps {
   invocationId?: string;
 }
 
-const REASON_LABELS: Record<string, string> = {
-  needs_bootstrap: '尚未初始化治理',
-  needs_confirmation: '治理初始化待确认',
-  files_missing: '治理文件缺失',
-};
+type CardState = 'idle' | 'retrying' | 'done' | 'error';
 
-type CardState = 'idle' | 'confirming' | 'retrying' | 'done' | 'error';
-
-export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }: GovernanceBlockedCardProps) {
+export function GovernanceBlockedCard({ projectPath, invocationId }: GovernanceBlockedCardProps) {
   const [state, setState] = useState<CardState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
-
   const prevInvIdRef = useRef(invocationId);
+
   useEffect(() => {
     if (prevInvIdRef.current !== invocationId) {
       prevInvIdRef.current = invocationId;
@@ -29,90 +24,59 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
     }
   }, [invocationId]);
 
-  const handleBootstrap = useCallback(async () => {
-    setState('confirming');
+  const handleRetry = useCallback(async () => {
+    if (!invocationId) return;
+    setState('retrying');
     setErrorMsg('');
-
     try {
-      const confirmRes = await apiFetch('/api/governance/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectPath }),
-      });
-
-      if (!confirmRes.ok) {
-        const data = (await confirmRes.json()) as { error?: string };
+      const res = await apiFetch(`/api/invocations/${invocationId}/retry`, { method: 'POST' });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
         setState('error');
-        setErrorMsg(data.error ?? '治理初始化失败');
+        setErrorMsg(data.error ?? '重试失败，请手动重新发送消息');
         return;
       }
-
-      if (invocationId) {
-        setState('retrying');
-        const retryRes = await apiFetch(`/api/invocations/${invocationId}/retry`, {
-          method: 'POST',
-        });
-
-        if (!retryRes.ok) {
-          const data = (await retryRes.json()) as { error?: string };
-          setState('error');
-          setErrorMsg(data.error ?? '重试失败，请手动重新发送消息');
-          return;
-        }
-      }
-
       setState('done');
     } catch {
       setState('error');
       setErrorMsg('网络错误');
     }
-  }, [projectPath, invocationId]);
+  }, [invocationId]);
 
   const dirName = projectPath.split(/[/\\]/).pop() ?? projectPath;
 
   return (
-    <div data-testid="governance-blocked-card" className="flex justify-center mb-3">
+    <div data-testid="governance-blocked-card" className="mb-3 flex justify-center">
       <div className="max-w-[85%] w-full rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-4">
         <div className="flex items-start gap-3">
-          <GovernanceShieldIcon className="w-5 h-5 text-conn-amber-text flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
+          <GovernanceShieldIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-conn-amber-text" />
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-conn-amber-text">
-              项目 <code className="px-1 py-0.5 bg-conn-amber-bg rounded text-xs">{dirName}</code>{' '}
-              {REASON_LABELS[reasonKind] ?? '治理状态异常'}
+              项目 <code className="rounded bg-conn-amber-bg px-1 py-0.5 text-xs">{dirName}</code> 的历史治理阻塞已解除
             </p>
-            <p className="text-xs text-conn-amber-text mt-1">
-              初始化将写入治理规则（CLAUDE.md 等）、Skills 链接和方法论模板到目标项目。已有文件不会被覆盖。
+            <p className="mt-1 text-xs text-conn-amber-text">
+              现在派遣不再要求目标仓先安装治理。可以直接重试；若需要项目文件，请在下方预览后显式确认。
             </p>
-
-            <div className="mt-3">
-              {state === 'idle' && (
-                <button
-                  type="button"
-                  onClick={handleBootstrap}
-                  className="text-sm px-3 py-1.5 rounded-md bg-[var(--semantic-warning)] text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
-                >
-                  初始化治理并继续
-                </button>
-              )}
-              {state === 'confirming' && <span className="text-sm text-conn-amber-text">正在初始化治理...</span>}
-              {state === 'retrying' && <span className="text-sm text-conn-amber-text">治理已就绪，正在重试...</span>}
-              {state === 'done' && (
-                <span className="text-sm text-conn-green-text">治理初始化完成{invocationId ? '，已自动重试' : ''}</span>
-              )}
-              {state === 'error' && (
-                <div className="space-y-2">
-                  <p className="text-sm text-conn-red-text">{errorMsg}</p>
+            {invocationId && (
+              <div className="mt-3">
+                {(state === 'idle' || state === 'error') && (
                   <button
                     type="button"
-                    onClick={handleBootstrap}
-                    className="text-sm px-3 py-1.5 rounded-md bg-[var(--semantic-warning)] text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
+                    onClick={() => void handleRetry()}
+                    className="rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 text-sm text-[var(--cafe-surface)] hover:opacity-90"
                   >
-                    重试
+                    {state === 'error' ? '重试' : '直接重试派遣'}
                   </button>
-                </div>
-              )}
-            </div>
+                )}
+                {state === 'retrying' && <span className="text-sm text-conn-amber-text">正在重试...</span>}
+                {state === 'done' && <span className="text-sm text-conn-green-text">已重试派遣</span>}
+                {state === 'error' && <p className="mt-2 text-sm text-conn-red-text">{errorMsg}</p>}
+              </div>
+            )}
           </div>
+        </div>
+        <div className="mt-4">
+          <GovernanceInstaller projectPath={projectPath} allowCleanup />
         </div>
       </div>
     </div>

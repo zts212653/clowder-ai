@@ -1,14 +1,14 @@
 /**
  * F113 Phase E: ProjectSetupCard
- * Shown when a thread opens with a project that needs governance bootstrap.
- * Three options: clone repo / git init / skip git.
- * Separate from GovernanceBlockedCard (which handles dispatch-failure retry).
+ * Shown for blank repositories as an optional Git/setup aid.
+ * Governance materialization is a separate preview-first choice.
  */
 import Image from 'next/image';
 import { useCallback, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 import { AgentHookHealthNotice, type AgentHookStatusResponse } from './AgentHookHealthNotice';
+import { GovernanceInstaller } from './GovernanceInstaller';
 import { HubIcon } from './hub-icons';
 
 /* Anime-style cat illustrations generated via Gemini */
@@ -96,7 +96,7 @@ export function ProjectSetupCard({
     [projectPath, cloneUrl, onComplete],
   );
 
-  // Processing and done states: full card with icon (matches GovernanceBlockedCard)
+  // Processing and done states: Git/project setup remains separate from governance.
   if (state === 'processing' || state === 'done') {
     return (
       <div data-testid="project-setup-card" className="flex justify-center mb-3">
@@ -121,21 +121,36 @@ export function ProjectSetupCard({
                 >
                   {dirName}
                 </code>{' '}
-                {state === 'done' ? '初始化完成' : '正在初始化'}
+                {state === 'done' ? '工作区已就绪' : '正在设置工作区'}
               </p>
               <p className={`text-xs mt-1 ${state === 'done' ? 'text-semantic-success' : 'text-semantic-warning'}`}>
                 {state === 'done'
-                  ? '协作规则（CLAUDE.md 等）、Skills 链接和方法论模板已就绪。'
-                  : '正在写入协作规则（CLAUDE.md 等）、Skills 链接和方法论模板...'}
+                  ? 'Git/目录设置已完成；没有自动写入治理文件。'
+                  : '只执行你选择的 Git/目录动作，不写治理文件。'}
               </p>
               <div className="mt-2">
                 {state === 'processing' && (
-                  <span className="text-sm text-semantic-warning animate-pulse">正在初始化治理...</span>
+                  <span className="text-sm text-semantic-warning animate-pulse">正在设置...</span>
                 )}
-                {state === 'done' && <span className="text-sm text-semantic-success">治理初始化完成，猫猫已就绪</span>}
+                {state === 'done' && <span className="text-sm text-semantic-success">猫猫可以直接开工</span>}
               </div>
             </div>
           </div>
+          {state === 'done' && (
+            <div className="mt-4 space-y-3">
+              <GovernanceInstaller projectPath={projectPath} recommendedProjectGuide={isEmptyDir} />
+              {onSyncAgentHooks && (
+                <AgentHookHealthNotice
+                  health={agentHookHealth ?? null}
+                  error={agentHookHealthError}
+                  syncing={agentHookSyncing}
+                  synced={agentHookSynced}
+                  syncAttempted={agentHookSyncAttempted}
+                  onSync={onSyncAgentHooks}
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -157,7 +172,7 @@ export function ProjectSetupCard({
             <p className="text-sm font-medium text-cafe-black">发现了一片新大陆！</p>
             <p className="text-xs text-cafe-muted mt-0.5">
               项目 <code className="px-1 py-0.5 bg-cafe-surface rounded text-micro">{dirName}</code>{' '}
-              {isEmptyDir ? '是空目录，' : ''}需要初始化后猫猫才能工作。
+              {isEmptyDir ? '是空目录。' : ''}猫猫已经可以工作；Git 设置是可选的。
             </p>
           </div>
         </div>
@@ -179,17 +194,15 @@ export function ProjectSetupCard({
           <div className="space-y-3">
             {onSyncAgentHooks && (
               <AgentHookHealthNotice
-                health={agentHookHealth ? agentHookHealth : null}
+                health={agentHookHealth ?? null}
                 error={agentHookHealthError}
                 syncing={agentHookSyncing}
                 synced={agentHookSynced}
                 syncAttempted={agentHookSyncAttempted}
-                placement="project-setup"
                 onSync={onSyncAgentHooks}
               />
             )}
-
-            <p className="text-xs text-cafe-muted font-medium">请选择你的开荒方式：</p>
+            <p className="text-xs text-cafe-muted font-medium">需要的话，选择一种开荒方式：</p>
 
             {/* Option 1: Clone (recommended) */}
             {isEmptyDir && gitAvailable && !isGitRepo && (
@@ -240,7 +253,7 @@ export function ProjectSetupCard({
                   <HubIcon name="terminal" className="h-5 w-5 text-cafe-accent" />
                   <div className="flex-1">
                     <span className="text-sm font-semibold text-cafe-black">初始化全新项目</span>
-                    <p className="text-xs text-cafe-muted mt-0.5">从零开始，为你铺设标准的协作规则和猫砂盆。</p>
+                    <p className="text-xs text-cafe-muted mt-0.5">只创建 Git 仓库；治理文件稍后单独预览。</p>
                   </div>
                   <button
                     type="button"
@@ -259,10 +272,10 @@ export function ProjectSetupCard({
                 <HubIcon name="settings" className="h-5 w-5 text-cafe-accent" />
                 <div className="flex-1">
                   <span className="text-sm font-semibold text-cafe-black">
-                    {isGitRepo ? '初始化协作配置' : '跳过 Git，仅初始化协作'}
+                    {isGitRepo ? '保持现有仓库' : '不使用 Git'}
                   </span>
                   <p className="text-xs text-cafe-muted mt-0.5">
-                    {isGitRepo ? '已检测到 Git，仅需铺设协作规则。' : '无版本控制，时光回溯和代码审查功能将不可用。'}
+                    {isGitRepo ? '不改仓库内容，直接进入可选治理预览。' : '直接开工；版本回溯和代码审查能力将不可用。'}
                   </p>
                 </div>
                 <button
@@ -270,14 +283,14 @@ export function ProjectSetupCard({
                   onClick={() => handleSetup('skip')}
                   className="min-w-[6.5rem] px-4 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-[var(--cafe-surface)] text-xs font-medium transition-colors"
                 >
-                  {isGitRepo ? '初始化' : '跳过'}
+                  直接开始
                 </button>
               </div>
             </div>
 
             {/* Explanation */}
             <p className="text-micro text-cafe-muted px-1 mt-1">
-              初始化将写入协作规则（CLAUDE.md 等）、Skills 链接和方法论模板。已有文件不会被覆盖。
+              本步骤只处理克隆或 Git 初始化。项目治理是下一步的独立可选项，先预览、再确认。
             </p>
           </div>
         )}

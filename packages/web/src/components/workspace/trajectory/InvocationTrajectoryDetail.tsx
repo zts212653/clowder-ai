@@ -1,4 +1,9 @@
-import type { InvocationPromptInputProjection, InvocationTrajectorySummary } from '@cat-cafe/shared';
+import type {
+  InvocationPromptInputProjection,
+  InvocationTrajectorySummary,
+  RequestGenerationGapV1,
+  RequestGenerationProjectionV1,
+} from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
 import { InvocationEvidenceLinks } from './InvocationEvidenceLinks';
 import {
@@ -13,6 +18,7 @@ import {
   TRAJECTORY_STATUS_CLASS,
   TRAJECTORY_STATUS_LABEL,
 } from './invocation-trajectory-ui';
+import { RequestGenerationSection } from './request-generation-card';
 import { PromptInputCard } from './trajectory-prompt-input-card';
 import { SemanticTimelineRow } from './trajectory-semantic-cards';
 
@@ -55,6 +61,12 @@ function DetailBody({
   onMoreRaw,
   onToggleExpanded,
   onOpenPromptMessage,
+  requestGenerations,
+  requestGenerationGaps,
+  generationsLoading,
+  generationsError,
+  revealingGenerations,
+  onRevealGenerations,
 }: {
   loading: boolean;
   error: boolean;
@@ -70,6 +82,12 @@ function DetailBody({
   onMoreRaw: () => void;
   onToggleExpanded: () => void;
   onOpenPromptMessage: (messageId: string) => void;
+  requestGenerations: readonly RequestGenerationProjectionV1[] | null;
+  requestGenerationGaps: readonly RequestGenerationGapV1[];
+  generationsLoading: boolean;
+  generationsError: boolean;
+  revealingGenerations: boolean;
+  onRevealGenerations: () => void;
 }) {
   if (loading) return <div className="text-sm text-cafe-muted">读取 canonical transcript…</div>;
   if (error) {
@@ -120,6 +138,14 @@ function DetailBody({
   return (
     <div className="space-y-2">
       <PromptInputCard promptInput={detail?.promptInput} onOpenMessage={onOpenPromptMessage} />
+      <RequestGenerationSection
+        generations={requestGenerations}
+        gaps={requestGenerationGaps}
+        loading={generationsLoading}
+        error={generationsError}
+        revealing={revealingGenerations}
+        onReveal={onRevealGenerations}
+      />
       {rows.map((row) => (
         <SemanticTimelineRow key={row.id} row={row} />
       ))}
@@ -144,6 +170,12 @@ export function InvocationTrajectoryDetail({
   onBack,
   onRetry,
   onOpenPromptMessage,
+  requestGenerations = null,
+  requestGenerationGaps = [],
+  generationsLoading = false,
+  generationsError = false,
+  revealingGenerations = false,
+  onRevealGenerations = () => {},
 }: {
   summary: InvocationTrajectorySummary;
   detail: InvocationDetailResponse | null;
@@ -152,6 +184,12 @@ export function InvocationTrajectoryDetail({
   onBack: () => void;
   onRetry: () => void;
   onOpenPromptMessage: (messageId: string) => void;
+  requestGenerations?: readonly RequestGenerationProjectionV1[] | null;
+  requestGenerationGaps?: readonly RequestGenerationGapV1[];
+  generationsLoading?: boolean;
+  generationsError?: boolean;
+  revealingGenerations?: boolean;
+  onRevealGenerations?: () => void;
 }) {
   const [view, setView] = useState<'timeline' | 'raw'>('timeline');
   const [expanded, setExpanded] = useState(false);
@@ -222,6 +260,12 @@ export function InvocationTrajectoryDetail({
           onMoreRaw={() => setRawLimit((value) => value + 100)}
           onToggleExpanded={() => setExpanded((value) => !value)}
           onOpenPromptMessage={onOpenPromptMessage}
+          requestGenerations={requestGenerations}
+          requestGenerationGaps={requestGenerationGaps}
+          generationsLoading={generationsLoading}
+          generationsError={generationsError}
+          revealingGenerations={revealingGenerations}
+          onRevealGenerations={onRevealGenerations}
         />
       </div>
     </div>

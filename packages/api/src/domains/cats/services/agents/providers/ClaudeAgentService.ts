@@ -44,6 +44,7 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  PreparedProviderRequestV1,
   ToolExecutionPolicy,
 } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
@@ -435,6 +436,7 @@ export class ClaudeAgentService implements AgentService {
     if (readOnly) {
       args.push('--tools', '', '--strict-mcp-config');
     }
+    let declaredMcpServerNames: readonly string[] | undefined = readOnly ? [] : undefined;
 
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -581,6 +583,7 @@ export class ClaudeAgentService implements AgentService {
         args.push('--mcp-config', JSON.stringify({ mcpServers }));
       }
       args.push('--strict-mcp-config');
+      declaredMcpServerNames = Object.keys(mcpServers).sort();
     }
 
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };
@@ -689,11 +692,54 @@ export class ClaudeAgentService implements AgentService {
         if (summary.stderrExcerpt) successfulExitStderr.stderrExcerpt = summary.stderrExcerpt;
       };
 
+      const nativeInstructions: PreparedProviderRequestV1['nativeInstructions'] = [
+        {
+          body: readFileSync(l0Path, 'utf8'),
+          injectionDecision: 'native_l0_compiled',
+        },
+        ...(options?.systemPrompt
+          ? [
+              {
+                body: options.systemPrompt,
+                injectionDecision: 'route_append_system_prompt',
+              },
+            ]
+          : []),
+      ];
+      const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+        v: 1,
+        message: Object.freeze({
+          body: effectivePrompt,
+          ...(imagePaths.length > 0 ? { injectionDecision: 'adapter_image_path_hints_applied' } : {}),
+        }),
+        nativeInstructions: Object.freeze(nativeInstructions.map((instruction) => Object.freeze(instruction))),
+        runtime: Object.freeze({
+          provider: 'anthropic',
+          carrier: 'print_sdk',
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          protocol: 'stream-json',
+          reasoningEffort: effortLevel,
+          ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+        }),
+        tools: Object.freeze({
+          finalSurface: readOnly
+            ? ('exact' as const)
+            : declaredMcpServerNames
+              ? ('declared_only' as const)
+              : ('unknown' as const),
+          ...(declaredMcpServerNames ? { declaredServerNames: Object.freeze(declaredMcpServerNames) } : {}),
+          ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+        }),
+        providerNativeVisibility: 'unknown',
+      });
+      await options?.beforeProviderLaunch?.(preparedRequest);
+      if (!('body' in preparedRequest.message)) throw new Error('claude_prepared_message_not_exact');
+
       const cliOpts = {
         command: claudeCommand,
         args,
         // #840 R2: main prompt moves off argv to stdin (see args comment above).
-        stdinInput: effectivePrompt,
+        stdinInput: preparedRequest.message.body,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: envOverrides,
         onSuccessfulExitStderr,

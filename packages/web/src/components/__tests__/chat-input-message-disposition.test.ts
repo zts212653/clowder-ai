@@ -1,8 +1,9 @@
-import type { MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
+import type { ActiveExecutionProjection, MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({
@@ -56,6 +57,28 @@ function setTextarea(textarea: HTMLTextAreaElement, value: string) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function seedCanonicalExecution(threadId: string): void {
+  const execution: ActiveExecutionProjection = {
+    executionId: 'inv-active',
+    threadId,
+    threadTitle: 'Test thread',
+    catId: 'opus',
+    kind: 'live_invocation',
+    startedAt: Date.now(),
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'live_invocation', threadId, catId: 'opus', executionId: 'inv-active' },
+    },
+  };
+  useActiveExecutionStore.setState({
+    anchorThreadId: threadId,
+    projectPath: '/project/cafe',
+    executionsByKey: { [activeExecutionKey(execution)]: execution },
+    hydration: 'ready',
+    hydrationError: null,
+  });
+}
+
 describe('F264 author message disposition selector', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -91,6 +114,7 @@ describe('F264 author message disposition selector', () => {
         },
       },
     });
+    useActiveExecutionStore.getState().reset();
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       const snapshot =
@@ -186,6 +210,7 @@ describe('F264 author message disposition selector', () => {
 
   it('confirms that draft Steer stops the target reply before sending', async () => {
     const onSend = vi.fn(async () => true);
+    seedCanonicalExecution('thread-3');
     await renderThreadInput({ threadId: 'thread-3', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
