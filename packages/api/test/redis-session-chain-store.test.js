@@ -104,6 +104,81 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.ok(record.createdAt > 0);
   });
 
+  it('#1382 shrinkCapacityPin never lets a delayed larger candidate undo a smaller pin', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const record = await store.create(BASE_INPUT);
+    const pin = (windowTokens, inputCeilingTokens) => ({
+      windowTokens,
+      inputCeilingTokens,
+      source: 'reported',
+      provenance: `Carrier reported ${windowTokens.toLocaleString()} tokens`,
+      actionable: true,
+    });
+
+    // First write lands (no usable pin stored yet).
+    await store.shrinkCapacityPin(record.id, pin(200_000, 184_000));
+    assert.equal((await store.get(record.id))?.capacityPin?.windowTokens, 200_000);
+
+    // Maintainer probe ordering: the 150K constraint lands, then the delayed
+    // 180K candidate must be refused by the Lua compare-and-write.
+    await store.shrinkCapacityPin(record.id, pin(150_000, 134_000));
+    await store.shrinkCapacityPin(record.id, pin(180_000, 164_000));
+    const final = (await store.get(record.id))?.capacityPin;
+    assert.equal(final?.windowTokens, 150_000, 'delayed larger candidate must not overwrite the smaller pin');
+    assert.equal(final?.provenance, 'Carrier reported 150,000 tokens');
+
+    // Equal candidate still lands (refreshes provenance), smaller lands too.
+    await store.shrinkCapacityPin(record.id, pin(150_000, 134_000));
+    await store.shrinkCapacityPin(record.id, pin(120_000, 104_000));
+    assert.equal((await store.get(record.id))?.capacityPin?.windowTokens, 120_000);
+
+    // Missing record → null, and no hash may be created as a side effect.
+    assert.equal(await store.shrinkCapacityPin('missing-session-id', pin(150_000, 134_000)), null);
+    assert.equal(await store.get('missing-session-id'), null);
+  });
+
+  it('#1382 appendCapacityPinProvenance merges onto the current pin and dedups', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const record = await store.create(BASE_INPUT);
+    const note = '; carrier now reports 245,480 tokens — seal the session to recover if this pin was polluted';
+    const pin = (windowTokens, inputCeilingTokens) => ({
+      windowTokens,
+      inputCeilingTokens,
+      source: 'reported',
+      provenance: `Carrier reported ${windowTokens.toLocaleString()} tokens`,
+      actionable: true,
+    });
+
+    // The shrink lands before the delayed note write: the note must merge
+    // onto the CURRENT 150K pin, never restoring the stale 200K object.
+    await store.update(record.id, { capacityPin: pin(200_000, 184_000) });
+    await store.update(record.id, { capacityPin: pin(150_000, 134_000) });
+    await store.appendCapacityPinProvenance(record.id, note);
+    let current = (await store.get(record.id))?.capacityPin;
+    assert.equal(current?.windowTokens, 150_000);
+    assert.ok(current?.provenance?.includes('seal the session to recover'));
+
+    // Dedup: the identical note is not re-appended.
+    await store.appendCapacityPinProvenance(record.id, note);
+    current = (await store.get(record.id))?.capacityPin;
+    assert.equal(current?.provenance?.match(/seal the session to recover/g)?.length, 1);
+
+    // Semantic dedup: a jittered report number replaces the note in place —
+    // one pin carries at most one recovery instruction.
+    const jitteredNote = '; carrier now reports 245,481 tokens — seal the session to recover if this pin was polluted';
+    await store.appendCapacityPinProvenance(record.id, jitteredNote);
+    current = (await store.get(record.id))?.capacityPin;
+    assert.equal(current?.windowTokens, 150_000);
+    assert.equal(current?.provenance?.match(/seal the session to recover/g)?.length, 1);
+    assert.ok(current?.provenance?.includes('245,481'), 'latest report number wins');
+    assert.ok(!current?.provenance?.includes('245,480'), 'stale report number replaced');
+
+    // No stored pin → null, nothing written.
+    const bare = await store.create({ ...BASE_INPUT, cliSessionId: 'cli-sess-bare' });
+    assert.equal(await store.appendCapacityPinProvenance(bare.id, note), null);
+    assert.equal((await store.get(bare.id))?.capacityPin, undefined);
+  });
+
   it('#1329 atomically creates one unbound logical node and binds it later', async () => {
     const input = {
       threadId: 'thread-logical',

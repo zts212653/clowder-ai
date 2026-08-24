@@ -98,6 +98,7 @@ function serializeMessage(message: AppendMessageInput, id: string, threadId: str
           queueCustodyRevision: String(message.queueCustody.revision),
         }
       : {}),
+    ...(message.queueCustodyAdmission ? { queueCustodyAdmission: JSON.stringify(message.queueCustodyAdmission) } : {}),
     ...(message.replyTo ? { replyTo: message.replyTo } : {}),
   };
 }

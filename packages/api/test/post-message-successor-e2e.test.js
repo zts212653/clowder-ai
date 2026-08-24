@@ -62,6 +62,7 @@ async function createHarness({
   incomingTerminal = false,
   incomingActiveSubject,
   reviewCarrier = false,
+  localReviewVerdictService,
 } = {}) {
   const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
   const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -250,6 +251,7 @@ async function createHarness({
     },
     queueProcessor: { async tryAutoExecute() {} },
     actionSuccessorAdmissionService,
+    ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
   });
 
@@ -430,6 +432,59 @@ test('local review terminal verdict fails before persistence when routed to a ta
       .filter((message) => message.content.includes('APPROVE PR 2915')).length,
     0,
   );
+});
+
+test('typed local review terminal post settles once without parsing its human prose', async () => {
+  const settlementCalls = [];
+  const harness = await createHarness({
+    reviewCarrier: true,
+    localReviewVerdictService: {
+      async record(input) {
+        settlementCalls.push(input);
+        return {
+          outcome: 'committed',
+          leaseId: input.leaseId,
+          generation: input.generation,
+          evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
+        };
+      },
+    },
+  });
+
+  const input = {
+    content: '我看完了：这里还有一处会丢失授权边界，修好再叫我。',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-local-review-terminal',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'changes_requested',
+  };
+  const result = await harness.handlePostMessage(input);
+
+  const body = toolJson(result);
+  assert.equal(body.status, 'ok');
+  assert.equal(body.localReviewSettlement.outcome, 'committed');
+  assert.equal(settlementCalls.length, 1);
+  assert.deepEqual(settlementCalls[0], {
+    leaseId: 'lease-review-carrier',
+    generation: 2,
+    messageId: body.messageId,
+    now: settlementCalls[0].now,
+    principal: { catId: 'opus', threadId: harness.thread.id, tenantScope: 'user-1' },
+  });
+  const visible = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
+  assert.equal(visible.length, 1, 'the verdict post is the sole reviewer-visible message');
+  assert.equal(visible[0].content, '我看完了：这里还有一处会丢失授权边界，修好再叫我。');
+  assert.deepEqual(visible[0].extra.localReviewVerdict, {
+    verdict: 'changes_requested',
+    clientMessageId: 'typed-local-review-terminal',
+  });
+
+  const replay = toolJson(await harness.handlePostMessage(input));
+  assert.equal(replay.status, 'duplicate');
+  assert.equal(replay.messageId, body.messageId);
+  assert.equal(replay.localReviewSettlement.outcome, 'committed');
+  assert.equal(settlementCalls.length, 2, 'replay rechecks the same typed fact through the idempotent lease CAS');
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
 });
 
 test('structured successor rejects contradictory terminal coordination before claiming custody', async () => {

@@ -190,6 +190,34 @@ test('an aborted lease is force-reaped when cooperative cleanup is abandoned', a
   }
 });
 
+test('an aborted lease cannot return its host warm when cooperative close wins the grace race', async () => {
+  const { pool, hosts } = createHarness({ abortGraceMs: 60_000 });
+  const abortController = new AbortController();
+  try {
+    const cancelled = await pool.createSession(
+      sessionOptions({ invocationId: 'invocation-cancelled', signal: abortController.signal }),
+    );
+    cancelled.rememberSession('thread-cancelled');
+
+    abortController.abort('user_cancel');
+    await cancelled.close();
+
+    assert.equal(hosts[0].closeCalls, 1, 'an abort-observed lease must evict its exact host immediately on close');
+    assert.equal(pool.getMetrics().warmHostCount, 0, 'the cancelled host must never become a warm candidate');
+
+    const resumed = await pool.createSession(
+      sessionOptions({ invocationId: 'invocation-resumed', sessionId: 'thread-cancelled' }),
+    );
+    assert.equal(hosts.length, 2, 'same-session recovery must acquire a fresh host after cancellation');
+    assert.equal(hosts[0].connections.length, 1, 'the cancelled host must never accept successor work');
+    assert.equal(hosts[1].connections.length, 1, 'the successor must run on the replacement host only');
+    assert.equal(resumed.reusedSessionHost, false, 'the cancelled provider session host must not be reused');
+    await resumed.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
 test('tracker lease-age reads do not abort or reap an active provider host', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 100_000 });
   const { pool, hosts } = createHarness({ abortGraceMs: 5 });

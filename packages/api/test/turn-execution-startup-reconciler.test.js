@@ -59,6 +59,21 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.ok(queueRecovery > childRecovery, 'child recovery must finish before Queue recovery can resume work');
   });
 
+  test('production Redis callback admission opens only after startup recovery succeeds', () => {
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    assert.match(source, /startupRecoveryRequired:\s*true/);
+    const recovery = source.indexOf('await turnExecutionStore.reconcileStartup');
+    const queueRecovery = source.indexOf('await reconciler.reconcileOrphans()');
+    const admissionOpen = source.indexOf('registry.markStartupRecoveryComplete()');
+    const recoveryFailure = source.indexOf('onRecoveryError:');
+
+    assert.ok(recovery >= 0, 'production startup must reconcile callback auth');
+    assert.ok(queueRecovery > recovery, 'Queue/History restart convergence must follow child interruption truth');
+    assert.ok(admissionOpen > queueRecovery, 'callback admission cannot open before accepted Queue results converge');
+    assert.ok(admissionOpen > recovery, 'callback admission cannot open before durable auth recovery succeeds');
+    assert.ok(admissionOpen < recoveryFailure, 'the recovery error path must leave callback admission closed');
+  });
+
   test('marks only pre-process running children interrupted and reports exact ids', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput('ordinary-old', 99));
@@ -84,6 +99,28 @@ describe('TurnExecutionStartupReconciler', () => {
     });
     assert.equal((await store.get('ordinary-exact-process-start')).status, 'interrupted');
     assert.equal((await store.get('ordinary-future')).status, 'running');
+  });
+
+  test('F298 preserves an exact child backed by a live detached process owner', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput('detached-live', 50));
+    await store.createRunning(runningInput('lost-run', 60));
+    const reconciler = new TurnExecutionStartupReconciler({ store, now: () => 200 });
+
+    const result = await reconciler.reconcile({
+      processStartedAt: 100,
+      protectedInvocationIds: ['detached-live'],
+    });
+
+    assert.deepEqual(result.invocationIds, ['lost-run']);
+    assert.equal((await store.get('detached-live')).status, 'running');
+    assert.equal((await store.get('lost-run')).status, 'interrupted');
+  });
+
+  test('production startup obtains exact live process owners before child interruption', () => {
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    assert.match(source, /cliExecutionOwnerService\.listLive\(\)/);
+    assert.match(source, /protectedInvocationIds:\s*liveExecutionOwners\.owners\.map/);
   });
 
   test('is idempotent across duplicate startup calls', async () => {

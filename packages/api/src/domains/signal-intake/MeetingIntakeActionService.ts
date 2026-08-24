@@ -16,6 +16,19 @@ export interface MeetingArtifact {
 
 export interface MeetingArtifactDispatcher {
   deliver(input: { readonly intake: MeetingIntake; readonly artifact: MeetingArtifact }): Promise<void>;
+  retryPresentation(input: {
+    readonly intake: MeetingIntake;
+    readonly clientRequestId: string;
+  }): Promise<MeetingPresentationRetryReceipt>;
+}
+
+export interface MeetingPresentationRetryReceipt {
+  readonly sourceMessageId: string;
+  readonly triggerMessageId: string;
+  readonly queueEntryId: string | null;
+  readonly opportunityId: string;
+  readonly targetCatId: string;
+  readonly deduped: boolean;
 }
 
 export interface MeetingIntakeActionServiceOptions {
@@ -90,7 +103,7 @@ export class MeetingIntakeActionService {
     const current = await this.requireOwner(ownerId, intakeId, expectedRevision);
     if (
       !current.repair ||
-      current.repair.action !== 'retry' ||
+      (current.repair.action !== 'retry' && current.repair.action !== 'regrant') ||
       current.judgmentState !== 'confirmed' ||
       current.executionState !== 'failed'
     ) {
@@ -106,6 +119,36 @@ export class MeetingIntakeActionService {
       updatedAt: this.now(),
     });
     return this.executeFromSource(ownerId, intakeId, queued.revision);
+  }
+
+  async retryPresentation(
+    ownerId: string,
+    intakeId: string,
+    expectedRevision: number,
+    clientRequestId: string,
+  ): Promise<{ readonly intake: MeetingIntake; readonly presentationRetry: MeetingPresentationRetryReceipt }> {
+    const current = await this.requireOwner(ownerId, intakeId, expectedRevision);
+    if (
+      current.judgmentState !== 'confirmed' ||
+      current.executionState !== 'succeeded' ||
+      current.healthState !== 'healthy' ||
+      current.sourceState !== 'ready' ||
+      !current.choices.destinationHandle
+    ) {
+      throw new MeetingIntakeError('INVALID_TRANSITION', 'meeting intake has not completed successfully');
+    }
+    try {
+      const presentationRetry = await this.options.dispatcher.retryPresentation({ intake: current, clientRequestId });
+      return { intake: current, presentationRetry };
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+      throw new MeetingIntakeError(
+        code === 'ROUTE_UNAVAILABLE' ? 'DESTINATION_UNAVAILABLE' : 'EXECUTION_FAILED',
+        code === 'ROUTE_UNAVAILABLE'
+          ? 'meeting write-opportunity presentation is unavailable'
+          : 'meeting write-opportunity presentation retry failed',
+      );
+    }
   }
 
   async markSourceDeleted(ownerId: string, intakeId: string, expectedRevision: number): Promise<MeetingIntake> {

@@ -23,6 +23,7 @@ code_anchors:
   - packages/api/src/domains/cats/services/cloud-bridge/conversation-host-adapter.ts
   - packages/api/src/domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-host-adapter.ts
   - packages/api/src/plugins/cloud-cat-personal-host/native-host/native-host.mjs
+  - packages/api/src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs
   - packages/api/src/plugins/cloud-cat-personal-host/extension/manifest.json
 doc_anchors:
   - docs/features/F202-plugin-framework.md
@@ -37,6 +38,7 @@ cited_by:
   - {feature: F247, date: 2026-08-08, delta: narrow conversation Host Adapter seam with no implicit UI fallback}
   - {feature: F247, date: 2026-08-12, delta: isolated personal Chrome adapter, Native Messaging trust boundary, and receipt-bearing extension spike}
   - {feature: F247, date: 2026-08-12, delta: operator-only socket and pairing-secret composition activates the personal Chrome adapter without implying installation or browser consent}
+  - {feature: F247, date: 2026-08-21, delta: explicit extension-originated exact conversation authorization persisted by Host; route binding remains ThreadStore-owned and all later gates are zero-focus}
   - {feature: F202, date: 2026-08-10, delta: K-2B contract-native Broker sessions, durable call ledger, and typed signal-intake edge}
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
@@ -91,6 +93,14 @@ adapter may be composed explicitly from a validated socket path and pairing
 secret, but that operator-only seam neither installs into a user's normal Chrome
 profile nor makes fixture selectors evidence of the live ChatGPT contract. Missing
 or partial configuration fails closed and cannot silently enable foreground control.
+Clowder AI's owner-only `cloudCatBindings(threadId, catId)` remains route truth; it is
+not copied into the extension/helper. Separately, the extension may authorize one
+exact open conversation only from the user's explicit “绑定此会话” action, and the
+helper persists that authorization in its private Host root. Append admission
+requires the routed ID to match the authorization before ledger/browser effects.
+Missing authorization is typed `NEEDS_BINDING`; health checks, gates, retries, and
+delivery may inspect/reuse Host state but may not select, focus, navigate, reload,
+close, or restore owner tabs/windows.
 
 ## Use This When
 

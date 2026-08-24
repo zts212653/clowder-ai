@@ -141,6 +141,21 @@ export const writeOpportunityReentryCarrierV1Schema = z
   })
   .strict();
 
+/** Server-written, refs-only carrier for re-presenting one unchanged opportunity generation. */
+export const writeOpportunityPresentationRetryCarrierV1Schema = z
+  .object({
+    v: z.literal(1),
+    sourceMessageRef: z
+      .object({
+        kind: z.literal('message'),
+        threadId: bounded(160),
+        messageId: bounded(240),
+      })
+      .strict(),
+    sourceOpportunityId: z.string().regex(/^write_opp_[a-f0-9]{32}$/),
+  })
+  .strict();
+
 const dispositionBase = {
   v: z.literal(1),
   opportunityId: z.string().regex(/^write_opp_[a-f0-9]{32}$/),
@@ -299,5 +314,8 @@ export type AsrTranscriptSourceCoordinateV1 = z.infer<typeof asrTranscriptSource
 export type AsrPersonMemoryWriteOpportunityV1 = z.infer<typeof asrPersonMemoryWriteOpportunityV1Schema>;
 export type AsrPersonMemoryDynamicSceneEntryV1 = z.infer<typeof asrPersonMemoryDynamicSceneEntryV1Schema>;
 export type WriteOpportunityReentryCarrierV1 = z.infer<typeof writeOpportunityReentryCarrierV1Schema>;
+export type WriteOpportunityPresentationRetryCarrierV1 = z.infer<
+  typeof writeOpportunityPresentationRetryCarrierV1Schema
+>;
 export type WriteOpportunityDispositionV1 = z.infer<typeof writeOpportunityDispositionV1Schema>;
 export { deferredWriteOpportunityReceiptV1Schema, type DeferredWriteOpportunityReceiptV1 };

@@ -48,7 +48,7 @@ function SettingsShellInner() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="min-w-0 flex-1 overflow-y-auto" data-trajectory-origin-scroll>
         <div className="space-y-5 px-5 py-5 md:px-8 md:py-7">
           <SettingsContent section={activeSection} initialEditCatId={initialEditCatId} />
         </div>

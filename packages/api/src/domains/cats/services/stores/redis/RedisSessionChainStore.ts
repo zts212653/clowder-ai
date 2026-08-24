@@ -226,6 +226,57 @@ redis.call('HSET', KEYS[1], 'updatedAt', ARGV[1])
 return newCount
 `;
 
+/**
+ * #1382 maintainer P1: atomically merge a provenance note into the stored
+ * capacityPin. The script re-reads the CURRENT pin inside the same Redis
+ * execution, so a delayed writer can never undo a concurrent shrink by
+ * writing back a stale pin object. Dedup lives here: an already-present note
+ * is not re-appended. KEYS[1] = detail key; ARGV[1] = note; ARGV[2] =
+ * updatedAt. Returns 1 when appended, 0 when skipped.
+ */
+const APPEND_CAPACITY_PIN_PROVENANCE_LUA = `
+local data = redis.call('HGET', KEYS[1], 'capacityPin')
+if not data then return 0 end
+local ok, pin = pcall(cjson.decode, data)
+if not ok or type(pin) ~= 'table' or type(pin['provenance']) ~= 'string' then return 0 end
+if string.find(pin['provenance'], ARGV[1], 1, true) then return 0 end
+-- #1382 review P2: semantic dedup — a jittered report number replaces the
+-- previous recovery note in place (one pin carries at most one recovery
+-- instruction) instead of growing provenance unbounded.
+local pattern = "; carrier now reports [%d,]+ tokens .-seal the session to recover if this pin was polluted"
+local replaced, count = string.gsub(pin['provenance'], pattern, ARGV[1], 1)
+if count == 0 then
+  pin['provenance'] = pin['provenance'] .. ARGV[1]
+else
+  pin['provenance'] = replaced
+end
+redis.call('HSET', KEYS[1], 'capacityPin', cjson.encode(pin), 'updatedAt', ARGV[2])
+return 1
+`;
+
+/**
+ * #1382 maintainer P1: atomic shrink-only pin application. The candidate is
+ * written only when no usable pin is stored or its windowTokens is <= the
+ * CURRENT stored pin's — a stored smaller constraint is never overwritten by
+ * a delayed larger candidate. KEYS[1] = detail key; ARGV[1] = candidate JSON;
+ * ARGV[2] = updatedAt. Returns 1 when written, 0 when the stored pin already
+ * constrains harder, -1 when the record is missing.
+ */
+const SHRINK_CAPACITY_PIN_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+local data = redis.call('HGET', KEYS[1], 'capacityPin')
+if data then
+  local ok, current = pcall(cjson.decode, data)
+  local candidate = cjson.decode(ARGV[1])
+  if ok and type(current) == 'table' and type(current['windowTokens']) == 'number'
+     and current['windowTokens'] > 0 and candidate['windowTokens'] > current['windowTokens'] then
+    return 0
+  end
+end
+redis.call('HSET', KEYS[1], 'capacityPin', ARGV[1], 'updatedAt', ARGV[2])
+return 1
+`;
+
 export class RedisSessionChainStore implements ISessionChainStore {
   private readonly redis: RedisClient;
   private threadIndexReady = false;
@@ -728,6 +779,30 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const result = await this.redis.eval(INCR_COMPRESSION_LUA, 1, detailKey, String(Date.now()));
     const code = result as number;
     return code < 0 ? null : code;
+  }
+
+  async appendCapacityPinProvenance(id: string, note: string): Promise<SessionRecord | null> {
+    const detailKey = SessionChainKeys.detail(id);
+    // Lua: atomic read-merge-write against the CURRENT stored pin (see the
+    // script comment) — a concurrent shrink is never undone by stale numerics.
+    const result = await this.redis.eval(APPEND_CAPACITY_PIN_PROVENANCE_LUA, 1, detailKey, note, String(Date.now()));
+    if ((result as number) !== 1) return null;
+    return this.get(id);
+  }
+
+  async shrinkCapacityPin(id: string, candidate: SessionCapacityPin): Promise<SessionRecord | null> {
+    const detailKey = SessionChainKeys.detail(id);
+    // Lua: atomic compare-and-write — the candidate lands only when it does
+    // not expand beyond the CURRENT stored pin (one-way pin invariant).
+    const result = await this.redis.eval(
+      SHRINK_CAPACITY_PIN_LUA,
+      1,
+      detailKey,
+      JSON.stringify(candidate),
+      String(Date.now()),
+    );
+    if ((result as number) < 0) return null;
+    return this.get(id);
   }
 
   async listSealingSessions(): Promise<string[]> {

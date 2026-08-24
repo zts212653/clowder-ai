@@ -33,12 +33,16 @@ pnpm check
 # need this — runtime governance bootstrap (POST /api/projects/setup) creates
 # project-level skill links automatically per ADR-025.
 #
-# Default writes only project-level links across all worktrees.
+# Default writes only project-level links for the invoking worktree.
+# Use --all only when you intentionally need fleet-wide mount repair; use
+# --verbose when you need per-target diagnostics instead of the normal summary.
 # Add `--user` to also mount HOME-level (~/.{claude,codex,gemini,kimi}/skills/)
 # so agent CLIs running outside this repo can find these skills (opt-in per
 # ADR-025 section 3: user-level directories do not carry official skills by default).
-pnpm sync:skills          # project-level only (recommended)
-# pnpm sync:skills --user # also mount HOME-level (opt-in)
+pnpm sync:skills                     # current worktree only (recommended)
+# pnpm sync:skills --all             # explicit fleet-wide project repair
+# pnpm sync:skills --verbose          # expand per-target diagnostics
+# pnpm sync:skills --user             # also mount HOME-level (opt-in)
 
 # 4. Make your changes, then run checks
 pnpm check          # Biome lint

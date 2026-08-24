@@ -27,8 +27,8 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
   });
 
   test('AC-D2a byCat: catId-bearing failures aggregate per cat', () => {
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     recordCallbackAuthFailure({ reason: 'invalid_token', tool: 'post-message', catId: 'codex' });
     const snap = getCallbackAuthFailureSnapshot();
     assert.equal(snap.byCat.opus, 2);
@@ -37,7 +37,7 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
 
   test('AC-D2a byCat: anonymous (no catId) failures do NOT pollute byCat', () => {
     recordCallbackAuthFailure({ reason: 'missing_creds', tool: 'refresh-token' });
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'post-message', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'post-message', catId: 'opus' });
     const snap = getCallbackAuthFailureSnapshot();
     assert.equal(snap.byCat.opus, 1);
     assert.equal(snap.byCat.undefined, undefined, 'anonymous must not become a "undefined" key');
@@ -49,11 +49,16 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
     assert.ok(snap.recent24h, 'snapshot must include recent24h section');
     assert.equal(snap.recent24h.totalFailures, 0);
     assert.deepEqual(snap.recent24h.byReason, {
-      expired: 0,
       invalid_token: 0,
       unknown_invocation: 0,
       missing_creds: 0,
       stale_invocation: 0,
+      completed: 0,
+      failed: 0,
+      interrupted: 0,
+      replaced: 0,
+      revoked: 0,
+      canceled: 0,
       agent_key_expired: 0,
       agent_key_revoked: 0,
       agent_key_unknown: 0,
@@ -72,7 +77,7 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
 
     // 25 hours ago — should be dropped
     __setNowForTest(T0 - 25 * HOUR);
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
 
     // 23 hours ago — should be kept
     __setNowForTest(T0 - 23 * HOUR);
@@ -80,7 +85,7 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
 
     // 1 hour ago — should be kept
     __setNowForTest(T0 - 1 * HOUR);
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
     recordCallbackAuthFailure({ reason: 'stale_invocation', tool: 'post-message', catId: 'opus' });
 
     // Snapshot taken at T0
@@ -92,7 +97,7 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
 
     // 24h window only includes the 3 within last 24h
     assert.equal(snap.recent24h.totalFailures, 3, 'must drop the 25h-ago record');
-    assert.equal(snap.recent24h.byReason.expired, 1, 'only the 1h-ago expired in window');
+    assert.equal(snap.recent24h.byReason.interrupted, 1, 'only the 1h-ago expired in window');
     assert.equal(snap.recent24h.byReason.invalid_token, 1);
     assert.equal(snap.recent24h.byReason.stale_invocation, 1);
     assert.equal(snap.recent24h.byTool['refresh-token'], 1);
@@ -129,7 +134,7 @@ describe('callback-auth-telemetry D2a (F174-D2a)', () => {
 
     // Record at T0 - 23h
     __setNowForTest(T0 - 23 * HOUR);
-    recordCallbackAuthFailure({ reason: 'expired', tool: 'refresh-token', catId: 'opus' });
+    recordCallbackAuthFailure({ reason: 'interrupted', tool: 'refresh-token', catId: 'opus' });
 
     // At T0: still in window
     __setNowForTest(T0);

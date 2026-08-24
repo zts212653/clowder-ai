@@ -94,6 +94,7 @@ function buildDeps() {
       },
     ],
   ]);
+  const indexedThreadIds = new Set();
   const executions = new Map([
     ['thread-a:kimi', { executionId: 'inv-a', startedAt: 100 }],
     ['thread-b:kimi', { executionId: 'inv-b', startedAt: 200 }],
@@ -131,8 +132,21 @@ function buildDeps() {
   return {
     threadStore: {
       get: mock.fn(async (threadId) => threads.get(threadId) ?? null),
+      list: mock.fn(async (userId) =>
+        userId === USER_ID
+          ? [...threads.values()].filter(
+              (thread) => thread.createdBy === userId || thread.id === 'default' || indexedThreadIds.has(thread.id),
+            )
+          : [],
+      ),
       listByProject: mock.fn(async (userId, projectPath) =>
-        userId === USER_ID ? [...threads.values()].filter((thread) => thread.projectPath === projectPath) : [],
+        userId === USER_ID
+          ? [...threads.values()].filter(
+              (thread) =>
+                thread.projectPath === projectPath &&
+                (thread.createdBy === userId || thread.id === 'default' || indexedThreadIds.has(thread.id)),
+            )
+          : [],
       ),
     },
     invocationQueue,
@@ -179,6 +193,8 @@ function buildDeps() {
     _processOwners: processOwners,
     _processOwnerCancelCalls: processOwnerCancelCalls,
     _turnTerminalCalls: turnTerminalCalls,
+    _threads: threads,
+    _indexedThreadIds: indexedThreadIds,
   };
 }
 
@@ -197,12 +213,10 @@ describe('F295 active execution projection', () => {
     await app?.close();
   });
 
-  it('keeps the production execution-owner service wired into queue routes', () => {
+  it('keeps one production execution-owner service wired into queue routes', () => {
     const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
-    assert.match(
-      source,
-      /await app\.register\(queueRoutes, \{[\s\S]*?cliExecutionOwnerService:\s*createCliExecutionOwnerService\(\{ log: app\.log \}\),[\s\S]*?\}\)/,
-    );
+    assert.match(source, /const cliExecutionOwnerService = createCliExecutionOwnerService\(\{ log: app\.log \}\)/);
+    assert.match(source, /await app\.register\(queueRoutes, \{[\s\S]*?\n\s+cliExecutionOwnerService,\n/);
   });
 
   it('cold-discovers same-cat live work in every project thread and a post-invocation managed command', async () => {
@@ -750,26 +764,15 @@ describe('F295 active execution projection', () => {
     assert.deepEqual(deps._turnTerminalCalls, []);
   });
 
-  it('shows but never leaks or cancels a scheduler process on a system thread', async () => {
+  it('shows but never leaks or cancels a scheduler process on an indexed system thread', async () => {
     const systemThread = {
       id: 'thread-system',
       title: 'Shared system thread',
       projectPath: '/project/cafe',
       createdBy: 'system',
     };
-    deps.threadStore.get.mock.mockImplementation(async (threadId) =>
-      threadId === 'thread-system'
-        ? systemThread
-        : threadId === 'thread-a'
-          ? {
-              id: 'thread-a',
-              title: 'Alpha work',
-              projectPath: '/project/cafe',
-              createdBy: USER_ID,
-            }
-          : null,
-    );
-    deps.threadStore.listByProject.mock.mockImplementation(async () => [systemThread]);
+    deps._threads.set(systemThread.id, systemThread);
+    deps._indexedThreadIds.add(systemThread.id);
     deps._processOwners.push({
       executionId: 'inv-system-scheduler',
       invocationId: 'turn-system-scheduler',
@@ -784,6 +787,11 @@ describe('F295 active execution projection', () => {
       url: '/api/threads/thread-system/executions/active',
       headers: { 'x-cat-cafe-user': USER_ID },
     });
+    assert.equal(
+      deps.threadStore.list.mock.callCount() + deps.threadStore.listByProject.mock.callCount(),
+      1,
+      'indexed system admission and projection should share one thread-index enumeration',
+    );
     const processExecution = projection.json().executions.find((execution) => execution.catId === 'opus5');
     assert.equal(processExecution.cancelability.reason, 'foreign_principal');
     assert.match(processExecution.executionId, /^occupied:/);
@@ -796,6 +804,53 @@ describe('F295 active execution projection', () => {
       payload: { catId: 'opus5' },
     });
     assert.equal(cancel.statusCode, 409);
+    assert.deepEqual(deps._processOwnerCancelCalls, []);
+  });
+
+  it('denies an unindexed system thread before resolving liveness for read or cancel', async () => {
+    const systemThread = {
+      id: 'thread-system-private',
+      title: 'Private system thread',
+      projectPath: '/project/private',
+      createdBy: 'system',
+    };
+    deps._threads.set(systemThread.id, systemThread);
+    deps._processOwners.push({
+      executionId: 'inv-private-system',
+      invocationId: 'turn-private-system',
+      threadId: systemThread.id,
+      catId: 'opus5',
+      userId: 'scheduler',
+      startedAt: 510,
+    });
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${systemThread.id}/executions/active`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    const cancel = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${systemThread.id}/executions/live/inv-private-system/cancel`,
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'opus5' },
+    });
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-system-missing/executions/active',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+
+    for (const response of [projection, cancel]) {
+      assert.equal(response.statusCode, 403);
+      assert.equal(response.json().code, 'THREAD_ACCESS_DENIED');
+      assert.equal(response.json().reason, 'not_visible_to_user');
+    }
+    assert.equal(missing.statusCode, 403);
+    assert.equal(missing.json().code, 'THREAD_ACCESS_DENIED');
+    assert.equal(missing.json().reason, 'thread_not_found');
+    assert.equal(deps.threadStore.listByProject.mock.callCount(), 0);
+    assert.equal(deps.cliExecutionOwnerService.listLive.mock.callCount(), 0);
     assert.deepEqual(deps._processOwnerCancelCalls, []);
   });
 

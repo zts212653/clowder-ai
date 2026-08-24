@@ -721,7 +721,7 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     assert.equal(persisted.status, 'completed');
   });
 
-  it('allows exactly one active stale local-review recovery CAS and fences every replay', async () => {
+  it('allows exactly one active stale local-review recovery CAS and returns every identical replay as recovered', async () => {
     const claimed = await store.claim(
       claimInput({
         actionFamily: 'review',
@@ -744,11 +744,18 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     );
 
     assert.equal(attempts.filter((result) => result.outcome === 'recovered').length, 1);
-    assert.equal(attempts.filter((result) => result.outcome === 'lease_not_active').length, 11);
+    assert.equal(attempts.filter((result) => result.outcome === 'replayed').length, 11);
+    assert.equal(attempts.filter((result) => result.outcome === 'lease_not_active').length, 0);
     const persisted = await store.get(claimed.lease.leaseId);
     assert.equal(persisted.status, 'completed');
     assert.equal(persisted.holderOutcomes['codex-terra'].outcome, 'succeeded');
     assert.ok(persisted.evidenceRefs.includes('local-review:message-stale-verdict:g1:changes_requested'));
+
+    const conflictingReplay = await store.recoverLocalReviewVerdict(claimed.lease.leaseId, {
+      ...recovery(12),
+      evidenceRef: 'local-review:another-message:g1:changes_requested',
+    });
+    assert.equal(conflictingReplay.outcome, 'lease_not_active');
 
     const reentry = await store.continueFreshRevision(claimed.lease.leaseId, {
       expectedGeneration: 1,
@@ -844,6 +851,46 @@ describe('RedisActionSuccessorLeaseStore', { skip: redisIsolationSkipReason(REDI
     assert.equal(delivered.outcome, 'delivered');
     assert.equal(delivered.lease.returnDeliveryState, 'delivered');
     assert.deepEqual(delivered.lease.holderCatIds, ['codex-sol']);
+  });
+
+  it('terminalizes a conflicting approved dispatch once and excludes it from recovery', async () => {
+    const claimed = await store.claim(claimInput());
+    const pending = {
+      ...claimed.lease,
+      dispatchDeliveryState: 'pending',
+      dispatchDeliveryAttemptCount: 0,
+    };
+    await redis.set(ActionSuccessorKeys.detail(pending.leaseId), JSON.stringify(pending));
+    assert.equal((await store.get(pending.leaseId)).dispatchDeliveryState, 'pending');
+
+    const input = {
+      expectedGeneration: 1,
+      reason: 'carrier_source_conflict',
+      evidenceRef: 'message:conflicting-approved-carrier',
+      now: 120,
+    };
+    const attempts = await Promise.all([
+      store.markDispatchFailed(claimed.lease.leaseId, input),
+      store.markDispatchFailed(claimed.lease.leaseId, { ...input, now: 121 }),
+    ]);
+
+    assert.deepEqual(new Set(attempts.map((result) => result.outcome)), new Set(['failed', 'dispatch_not_pending']));
+    const persisted = await store.get(claimed.lease.leaseId);
+    assert.equal(persisted.status, 'active', 'transport failure must not masquerade as handled work');
+    assert.equal(persisted.dispatchDeliveryState, 'failed');
+    assert.equal(persisted.dispatchFailureReason, 'carrier_source_conflict');
+    assert.equal(persisted.dispatchFailureEvidenceRef, input.evidenceRef);
+    assert.equal(await redis.ttl(ActionSuccessorKeys.detail(persisted.leaseId)), -1);
+    assert.deepEqual(await store.listPendingDispatches(), []);
+
+    const conflictingReplay = await store.markDispatchFailed(persisted.leaseId, {
+      ...input,
+      reason: 'carrier_receipt_conflict',
+      evidenceRef: 'message:another-carrier',
+      now: 122,
+    });
+    assert.equal(conflictingReplay.outcome, 'dispatch_not_pending');
+    assert.equal(conflictingReplay.lease.dispatchFailureReason, 'carrier_source_conflict');
   });
 
   it('allows exactly one returned-holder reattach and fences every stale replay', async () => {

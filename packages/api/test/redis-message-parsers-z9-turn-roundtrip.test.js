@@ -121,6 +121,24 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
     assert.deepEqual(parsed?.stream, input.stream);
   });
 
+  it('F294: round-trip preserves the retained R21 cached stdout fallback shape', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      stream: {
+        invocationId: 'cached-r21-parent',
+        turnInvocationId: 'cached-r21-turn',
+        cliStdout: '',
+        speechContent: 'CACHED_R21_SPEECH',
+      },
+    };
+
+    const parsed = safeParseExtra(serializeExtra(input));
+
+    assert.deepEqual(parsed?.stream, input.stream);
+  });
+
   it('ADR-042: round-trip preserves supplement reply provenance as a separate field', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

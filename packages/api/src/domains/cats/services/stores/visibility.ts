@@ -3,7 +3,7 @@
  * Pure functions for determining whether a message is visible to a given viewer.
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import { type CatId, isSelectableManagedHoldConnectorSource } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage, ThreadMessageReadOptions } from './ports/MessageStore.js';
 
 /**
@@ -33,6 +33,68 @@ export function isTimelinePublished(msg: StoredMessage): boolean {
 }
 
 /**
+ * A scheduler-authored managed-hold row is user-visible only when its durable
+ * Queue custody binds the exact viewer. Scheduler authorship is provenance,
+ * never access authority. Legacy ownerless records and hidden trigger rows
+ * fail closed.
+ */
+type ManagedHoldConnectorVisibilityMessage = Pick<
+  StoredMessage,
+  'userId' | 'catId' | 'threadId' | 'source' | 'extra' | 'queueCustody'
+>;
+
+/** Classify the protected scheduler namespace before evaluating publication authority. */
+export function isManagedHoldConnectorMessage(msg: ManagedHoldConnectorVisibilityMessage): boolean {
+  return msg.userId === 'scheduler' && msg.catId === null && msg.source?.connector === 'hold-ball';
+}
+
+export function isOwnerVisibleManagedHoldConnector(
+  msg: ManagedHoldConnectorVisibilityMessage,
+  viewerUserId?: string,
+): boolean {
+  return (
+    typeof viewerUserId === 'string' &&
+    viewerUserId.length > 0 &&
+    isManagedHoldConnectorMessage(msg) &&
+    msg.extra?.scheduler?.hiddenTrigger !== true &&
+    msg.queueCustody?.ownerUserId === viewerUserId &&
+    isSelectableManagedHoldConnectorSource(msg.source) &&
+    msg.source?.meta?.threadId === msg.threadId
+  );
+}
+
+/**
+ * Protect every viewer-bound read before generic scheduler/system exemptions.
+ * Internal reads without a human viewer keep their existing execution-history semantics.
+ */
+export function passesManagedHoldViewerBoundary(
+  msg: ManagedHoldConnectorVisibilityMessage,
+  viewerUserId?: string,
+): boolean {
+  return (
+    viewerUserId === undefined ||
+    !isManagedHoldConnectorMessage(msg) ||
+    isOwnerVisibleManagedHoldConnector(msg, viewerUserId)
+  );
+}
+
+/** Queued browser-publication subset of the owner-bound managed-hold contract. */
+export function isOwnerVisibleQueuedManagedHoldConnector(msg: StoredMessage, viewerUserId?: string): boolean {
+  return msg.deliveryStatus === 'queued' && isOwnerVisibleManagedHoldConnector(msg, viewerUserId);
+}
+
+/**
+ * Owner read cursors are durable evidence, not a mirror of what the mutable
+ * timeline can currently paint. Stream speech is intentionally published
+ * while it grows, but only its queued -> delivered transition proves that the
+ * owner had a final result available to read. Complete callback speech keeps
+ * the existing queued-publication contract.
+ */
+export function isDurableOwnerReadEvidence(msg: StoredMessage): boolean {
+  return isTimelinePublished(msg) && !(msg.deliveryStatus === 'queued' && msg.origin === 'stream');
+}
+
+/**
  * A queued user body that was already exposed to one exact child is durable
  * cognition for that target cat. The append-only exposure witness survives
  * child/session replacement, while other cats remain unable to read the body.
@@ -53,14 +115,26 @@ export function isDurablyReadableByCat(msg: StoredMessage, catId: CatId): boolea
 /** Resolve the publication predicate for a thread read in one place. */
 export function resolveThreadMessageVisibility(
   options?: ThreadMessageReadOptions,
+  viewerUserId?: string,
 ): (message: StoredMessage) => boolean {
-  return (message) =>
-    isDeliveredMessage(message) ||
-    (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
-    (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
-    (options?.includeExposedQueuedUserMessagesForCatId !== undefined &&
-      hasDurableQueueBodyExposure(message, options.includeExposedQueuedUserMessagesForCatId)) ||
-    (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message));
+  return (message) => {
+    if (!passesManagedHoldViewerBoundary(message, viewerUserId)) return false;
+    if (viewerUserId !== undefined && isManagedHoldConnectorMessage(message)) {
+      return (
+        isDeliveredMessage(message) ||
+        (options?.includeQueuedUserMessages === true && message.deliveryStatus === 'queued')
+      );
+    }
+
+    return (
+      isDeliveredMessage(message) ||
+      (options?.includeQueuedCatMessages === true && isQueuedCatTimelineMessage(message)) ||
+      (options?.includeQueuedUserMessages === true && isQueuedUserTimelineMessage(message)) ||
+      (options?.includeExposedQueuedUserMessagesForCatId !== undefined &&
+        hasDurableQueueBodyExposure(message, options.includeExposedQueuedUserMessagesForCatId)) ||
+      (options?.includeRecalledUserMessages === true && isOwnerVisibleRecalledUserMessage(message))
+    );
+  };
 }
 
 /**

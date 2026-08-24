@@ -204,6 +204,8 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           sourceCatId: proposal.sourceCatId,
           sourceInvocationId: proposal.sourceInvocationId,
           messageStore,
+          threadStore,
+          socketManager,
           router: opts.router,
           invocationQueue: opts.invocationQueue,
           queueProcessor: opts.queueProcessor,

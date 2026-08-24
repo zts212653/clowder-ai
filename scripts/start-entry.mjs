@@ -39,7 +39,9 @@ if (mode === 'status') {
   if (IS_WINDOWS) {
     runWindowsStatus({ projectRoot });
   } else {
-    const child = spawn('bash', [resolve(__dirname, 'start-dev.sh'), '--status'], {
+    const cmd = resolve(__dirname, 'runtime-worktree.sh');
+    const args = ['daemon-status'];
+    const child = spawn('bash', [cmd, ...args], {
       cwd: projectRoot,
       stdio: 'inherit',
     });

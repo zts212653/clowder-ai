@@ -9,6 +9,7 @@ function makeInput(overrides: Record<string, unknown> = {}) {
   return {
     data: makeEvent(),
     activeThreadId: 'thread-a',
+    clientVisible: true,
     presentationLocked: false,
     sessionWorktreeId: null,
     // Default: target thread has no saved scope (fail-closed for scoped events,
@@ -47,6 +48,17 @@ describe('deliverPreviewAutoOpenEvent', () => {
     expect(receipt).toEqual({ status: 'queued', eventId: 'evt-1', reason: 'thread_inactive' });
     expect(input.apply).not.toHaveBeenCalled();
     expect(input.queueForThread).toHaveBeenCalledWith('thread-b', { port: 5173, path: '/dash' });
+  });
+
+  it('does not let a hidden Hub tab claim custody of an inactive-thread preview', () => {
+    const input = makeInput({
+      data: makeEvent({ threadId: 'thread-b' }),
+      clientVisible: false,
+    });
+    const receipt = deliverPreviewAutoOpenEvent(input);
+    expect(receipt).toEqual({ status: 'skipped', eventId: 'evt-1', reason: 'client_inactive' });
+    expect(input.apply).not.toHaveBeenCalled();
+    expect(input.queueForThread).not.toHaveBeenCalled();
   });
 
   it('inactive target is judged by its OWN worktree: foreground B/wt-b, target A saved wt-a, event A/wt-a → queued', () => {

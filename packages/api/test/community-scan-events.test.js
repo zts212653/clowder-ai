@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { before, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
 // ---------------------------------------------------------------------------
 // In-memory stubs
@@ -110,13 +110,6 @@ async function buildScanSpec(extraOpts = {}) {
 // ---------------------------------------------------------------------------
 
 describe('Task 7b — RepoScan emits community events', () => {
-  let createRepoScanTaskSpec;
-
-  before(async () => {
-    const mod = await import('../dist/infrastructure/connectors/github-repo-event/RepoScanTaskSpec.js');
-    createRepoScanTaskSpec = mod.createRepoScanTaskSpec;
-  });
-
   it('scan discovers a PR → appends pr.opened event with scan sourceEventId', async () => {
     const eventLog = makeInMemoryEventLog();
     const projector = makeInMemoryProjector();
@@ -145,6 +138,36 @@ describe('Task 7b — RepoScan emits community events', () => {
       projector.applied.some((e) => e.kind === 'pr.opened'),
       'projector must be called',
     );
+  });
+
+  it('finishes projection and wake after the scan notification boundary is persisted', async () => {
+    const controller = new AbortController();
+    const applied = [];
+    const triggered = [];
+    const { spec } = await buildScanSpec({
+      eventLog: {
+        append: async (event) => {
+          controller.abort(new Error('scheduler timeout'));
+          return { appended: true, sequence: 1, event };
+        },
+      },
+      projector: { apply: async (event) => applied.push(event.kind) },
+      invokeTrigger: {
+        trigger: async () => {
+          triggered.push('wake');
+          return 'dispatched';
+        },
+      },
+    });
+    const gateResult = await spec.admission.gate({});
+    const prItem = gateResult.workItems.find((item) => item.signal.subjectType === 'pr');
+
+    await spec.run
+      .execute(prItem.signal, prItem.subjectKey, { assignedCatId: null, signal: controller.signal })
+      .catch(() => {});
+
+    assert.deepEqual(applied, ['pr.opened']);
+    assert.deepEqual(triggered, ['wake']);
   });
 
   it('scan discovers an issue → appends issue.opened event with scan sourceEventId', async () => {

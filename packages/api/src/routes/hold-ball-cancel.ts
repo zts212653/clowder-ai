@@ -29,7 +29,7 @@ export type HoldExpectedSignalKey =
   | 'managed_command_complete'
   | 'user_message';
 
-export type HoldLifecycleStatus = 'active' | 'retired_by_event' | 'cancelled_by_user' | 'fired';
+export type HoldLifecycleStatus = 'active' | 'retired_by_event' | 'cancelled_by_user' | 'escalated' | 'fired';
 
 export interface HoldLifecycleProjection {
   readonly mode: 'timer' | 'wake_when';
@@ -209,28 +209,17 @@ export function cancelPendingHoldsForThread(threadId: string, deps: HoldBallCanc
 
   for (const task of pending) {
     const command = readManagedCommandWakeProjection(task);
-    // Once Queue or direct dispatch has accepted this wake, its child invocation
-    // owns the exact source/task pair. Retiring the task here would make the
-    // invocation-bound disposition impossible and requeue already-read work.
-    if (command?.state === 'enqueued' || command?.state === 'dispatched') continue;
+    // Managed commands use an invocation-bound terminal disposition. Ordinary
+    // prose is never authorized to supersede that typed custody, regardless of
+    // whether the command is still running, publishing its receipt, queued, or
+    // already dispatched to its holder.
+    if (command) {
+      userPingBeforeHolderTerminalTotal.add(1);
+      continue;
+    }
 
     deps.taskRunner.unregister(task.id);
     cancelled.push(task);
-    if (command && deps.dynamicTaskStore.updateParams && deps.dynamicTaskStore.setEnabled) {
-      const lifecycle = readHoldLifecycle(task);
-      if (lifecycle) {
-        deps.dynamicTaskStore.updateParams(task.id, {
-          ...task.params,
-          holdLifecycle: {
-            ...lifecycle,
-            status: 'cancelled_by_user',
-          },
-        });
-        deps.dynamicTaskStore.setEnabled(task.id, false);
-        userPingBeforeHolderTerminalTotal.add(1);
-        continue;
-      }
-    }
     deps.dynamicTaskStore.remove(task.id);
   }
   if (cancelled.length > 0) c1HoldCancelCount.add(cancelled.length);

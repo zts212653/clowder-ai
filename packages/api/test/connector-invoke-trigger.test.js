@@ -282,6 +282,7 @@ function mockInvocationTracker() {
   const tryStartThreadCalls = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const completes = /** @type {Array<{threadId: string, catId: string}>} */ ([]);
   const slotCompletes = /** @type {Array<{threadId: string, catId: string, controller: AbortController}>} */ ([]);
+  const allCompletes = /** @type {Array<{threadId: string, catIds: string[], controller: AbortController}>} */ ([]);
   const cancelCalls = /** @type {Array<{threadId: string, catId: string, userId: (string|undefined)}>} */ ([]);
   let aborted = false;
   let cancelDenied = false;
@@ -293,6 +294,7 @@ function mockInvocationTracker() {
     tryStartThreadCalls,
     completes,
     slotCompletes,
+    allCompletes,
     cancelCalls,
     setAborted(val) {
       aborted = val;
@@ -324,6 +326,9 @@ function mockInvocationTracker() {
       },
       completeSlot(threadId, catId, controller) {
         slotCompletes.push({ threadId, catId, controller });
+      },
+      completeAll(threadId, catIds, controller) {
+        allCompletes.push({ threadId, catIds: [...catIds], controller });
       },
       trackExternalSlot() {
         return true;
@@ -591,7 +596,6 @@ describe('ConnectorInvokeTrigger', () => {
 
   it('passes an authoritative A2A slot claim and durable deferral into connector execution', async () => {
     trackerMock.tracker.trackExternalSlot = () => false;
-    trackerMock.tracker.completeSlot = () => {};
     const trigger = createTrigger();
 
     trigger.trigger('thread-a2a-admission', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-review');
@@ -633,6 +637,7 @@ describe('ConnectorInvokeTrigger', () => {
         routeController = options.invocationController;
         assert.equal(options.trackA2ASlot(threadId, 'codex', 'user-1', routeController), true);
         yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+        options.completeA2ASlots(threadId, ['codex'], routeController);
       },
       async ackCollectedCursors() {},
     };
@@ -641,7 +646,7 @@ describe('ConnectorInvokeTrigger', () => {
     trigger.trigger('thread-connector-child', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-child');
     await waitForTrigger();
 
-    const dynamicCompletions = trackerMock.slotCompletes.filter((call) => call.catId === 'codex');
+    const dynamicCompletions = trackerMock.allCompletes.filter((call) => call.catIds.includes('codex'));
     assert.equal(dynamicCompletions.length, 1);
     assert.equal(dynamicCompletions[0].threadId, 'thread-connector-child');
     assert.equal(dynamicCompletions[0].controller, routeController);

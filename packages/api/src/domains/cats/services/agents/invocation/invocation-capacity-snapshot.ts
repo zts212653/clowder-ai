@@ -5,7 +5,18 @@
  * assembly, lifecycle checks, and provider-native controls consume that same
  * snapshot. A trusted carrier report may lower it during the invocation. The
  * active session persists that resolved capacity and may shrink, but cannot
- * expand until session rollover.
+ * expand until session rollover — not even when a later report exceeds the
+ * pin, because that state cannot distinguish a polluted pin (#1381) from a
+ * genuine provider shrink followed by genuine recovery. Polluted pins recover
+ * explicitly via seal/rollover; the recoverable state is surfaced in the pin
+ * provenance and logs.
+ *
+ * #1381: the snapshot carries two distinct quantities. `nativeWindowTokens` is
+ * the raw provider window owned by member configuration and is the only value
+ * a provider may inject as its native window; `capacity` is the effective
+ * usable capacity that carrier reports and the session pin constrain one-way.
+ * Codex reports `native * effective_context_window_percent`, so feeding the
+ * effective value back as native recursed (258400 → 245480 → 233206 → …).
  */
 
 import {
@@ -25,8 +36,10 @@ import {
 } from '../../../../../config/context-capacity.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../config/opencode-model.js';
 import { shouldTakeAction } from '../../../../../config/session-strategy.js';
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
+import { upsertCapacityPinRecoveryNote } from '../../stores/ports/SessionChainStore.js';
 import {
   type AgentContextBinding,
   type AgentContextCapability,
@@ -47,6 +60,8 @@ const UNRESOLVED_CAPABILITY: AgentContextCapability = {
   reason: 'service did not declare a concrete context capability',
 };
 
+const log = createModuleLogger('invocation-capacity-snapshot');
+
 export interface InvocationCapacitySnapshot {
   readonly capacity: ResolvedContextCapacity;
   readonly capability: AgentContextCapability;
@@ -55,6 +70,23 @@ export interface InvocationCapacitySnapshot {
   /** Immutable resolver inputs captured at this invocation boundary. */
   readonly memberWindowTokens: number | null;
   readonly model: string | undefined;
+  /**
+   * #1381: raw/native provider window owned by member configuration (manual or
+   * catalog source), captured before any session pin or carrier report applies.
+   * This is the ONLY value a provider may inject as its native window; the
+   * effective/pinned `capacity.windowTokens` must never feed back as native.
+   * `null` means this invocation has no config-owned native window (capacity is
+   * report-derived or unresolved) and the provider must not inject one.
+   */
+  readonly nativeWindowTokens: number | null;
+  /**
+   * #1381: raw carrier-reported window applied during this invocation, before
+   * any resolver floor adjustment. Used to surface (never auto-expand) a
+   * session pin sitting below the currently reported capacity — that state may
+   * be pre-fix feedback-loop pollution, and recovery stays explicit via
+   * seal/rollover.
+   */
+  readonly lastReportedWindowTokens?: number;
 }
 
 export interface AuthoritativeContextUsage {
@@ -102,6 +134,15 @@ function snapshotWithCapacity(
  * cache. The current invocation may replace it with a smaller resolved value;
  * a larger value remains clamped until the old session is sealed and a new
  * active record is created.
+ *
+ * #1381 recovery semantics: a pin polluted by the pre-fix native/effective
+ * feedback loop is indistinguishable from a genuine provider shrink — in both
+ * cases a later carrier report can exceed the pin — so a larger report must
+ * NEVER auto-expand the pin (that would bypass the rollover gate). Recovery
+ * of polluted pins stays explicit: seal/roll over the session (#1313 manual
+ * seal), after which the fresh session adopts the reported capacity. When a
+ * fresh carrier report does exceed the pin, the state is surfaced observably
+ * (log + provenance) so the operator knows a seal will recover capacity.
  */
 export async function applyActiveSessionCapacityPin(options: {
   snapshot: InvocationCapacitySnapshot;
@@ -134,23 +175,110 @@ export async function applyActiveSessionCapacityPin(options: {
 
   if (!existingPin) {
     if (!resolvedPin) return snapshot;
-    await sessionChainStore.update(active.id, { capacityPin: resolvedPin, updatedAt: Date.now() });
+    // #1382 maintainer P1: even first-pin establishment goes through the
+    // atomic shrink-only write — a concurrent invocation may have landed a
+    // smaller pin between our read and this write.
+    const applied = await sessionChainStore.shrinkCapacityPin(active.id, resolvedPin);
+    const currentPin = applied?.capacityPin;
+    if (currentPin && isUsableCapacityPin(currentPin) && currentPin.windowTokens < snapshot.capacity.windowTokens) {
+      return snapshotWithCapacity(snapshot, {
+        windowTokens: currentPin.windowTokens,
+        inputCeilingTokens: currentPin.inputCeilingTokens,
+        source: currentPin.source,
+        provenance: `${currentPin.provenance}; session-pinned (shrink allowed, expansion requires rollover)`,
+        actionable: currentPin.actionable,
+      });
+    }
     return snapshot;
   }
 
   if (resolvedPin && resolvedPin.windowTokens <= existingPin.windowTokens) {
-    await sessionChainStore.update(active.id, { capacityPin: resolvedPin, updatedAt: Date.now() });
+    // #1382 maintainer P1: the numeric shrink applies atomically against the
+    // CURRENT stored pin — two concurrent shrink candidates must never
+    // reorder into an expansion (delayed 180K must not overwrite a landed
+    // 150K).
+    const applied = await sessionChainStore.shrinkCapacityPin(active.id, resolvedPin);
+    const currentPin = applied?.capacityPin;
+    if (currentPin && isUsableCapacityPin(currentPin) && currentPin.windowTokens < resolvedPin.windowTokens) {
+      // A concurrent smaller shrink won the race — clamp this invocation's
+      // view to the stricter stored pin, not the candidate we prepared.
+      return snapshotWithCapacity(snapshot, {
+        windowTokens: currentPin.windowTokens,
+        inputCeilingTokens: currentPin.inputCeilingTokens,
+        source: currentPin.source,
+        provenance: `${currentPin.provenance}; session-pinned (shrink allowed, expansion requires rollover)`,
+        actionable: currentPin.actionable,
+      });
+    }
     return snapshotWithCapacity(snapshot, snapshot.capacity);
   }
 
-  if (!isUsableCapacityPin(active.capacityPin)) {
-    await sessionChainStore.update(active.id, { capacityPin: existingPin, updatedAt: Date.now() });
+  // #1381: a fresh carrier report above the pin is observable evidence that the
+  // pin may have been polluted by the pre-fix feedback loop — but it is equally
+  // consistent with a genuine provider shrink followed by genuine recovery, so
+  // it must not auto-expand. Surface the recoverable state; expansion still
+  // requires an explicit seal/rollover.
+  const freshReport = snapshot.lastReportedWindowTokens;
+  // #1382 maintainer P1: compare the RAW report against the ACTIVE pin, never
+  // the resolved candidate — KNOWN_MIN floor-raising (or a manual member cap)
+  // can lift resolvedPin above the raw report and silently suppress a
+  // legitimate recovery hint. Strict >: a report equal to the pin agrees with
+  // it and proves nothing recoverable.
+  const pinBelowCarrierReport = freshReport != null && freshReport > existingPin.windowTokens;
+  if (pinBelowCarrierReport) {
+    log.warn(
+      {
+        catId,
+        threadId,
+        sessionId: active.id,
+        pinnedTokens: existingPin.windowTokens,
+        freshReportTokens: freshReport,
+      },
+      'session capacity pin is below the carrier-reported window; if polluted by the pre-#1381 feedback loop, seal the session to recover (expansion requires rollover)',
+    );
   }
+
+  // #1382 maintainer P1: persist the recovery hint on the STORED pin — the
+  // returned snapshot is per-invocation while the Hub and digests read the
+  // session record. The note is merged atomically against the CURRENT stored
+  // pin: writing back this caller's stale pin object could undo a concurrent
+  // shrink (lost-update race). Dedup lives in the store operation.
+  const recoveryNote = pinBelowCarrierReport
+    ? `; carrier now reports ${freshReport.toLocaleString()} tokens — seal the session to recover if this pin was polluted`
+    : '';
+  if (!isUsableCapacityPin(active.capacityPin)) {
+    // Same one-way fence for the upgrade materialization: a concurrent usable
+    // pin that constrains harder must survive.
+    const applied = await sessionChainStore.shrinkCapacityPin(active.id, existingPin);
+    const currentPin = applied?.capacityPin;
+    if (currentPin && isUsableCapacityPin(currentPin) && currentPin.windowTokens < existingPin.windowTokens) {
+      existingPin = currentPin;
+    }
+  }
+  if (recoveryNote !== '') {
+    await sessionChainStore.appendCapacityPinProvenance(active.id, recoveryNote);
+  }
+  // #1382 review P1: build the returned snapshot from the CURRENT stored pin
+  // — the linearization point of the atomic writes above. A concurrent
+  // smaller shrink must shape this invocation's returned view too, not just
+  // the store (probe: stored 150000 while the caller still returned 200000).
+  const currentRecord = await sessionChainStore.get(active.id);
+  const currentPin = currentRecord?.capacityPin;
+  if (currentPin && isUsableCapacityPin(currentPin) && currentPin.windowTokens < existingPin.windowTokens) {
+    existingPin = currentPin;
+  }
+  // Canonical evidence provenance: the recovery note appears exactly once,
+  // whether it was already persisted on the stored pin or is fresh to this
+  // invocation, and a jittered report number replaces the older note in
+  // place. The stored pin (merged atomically above) and the returned
+  // snapshot share this single deduplicated form.
+  const evidenceProvenance =
+    recoveryNote !== '' ? upsertCapacityPinRecoveryNote(existingPin.provenance, recoveryNote) : existingPin.provenance;
   return snapshotWithCapacity(snapshot, {
     windowTokens: existingPin.windowTokens,
     inputCeilingTokens: existingPin.inputCeilingTokens,
     source: existingPin.source,
-    provenance: `${existingPin.provenance}; session-pinned (shrink allowed, expansion requires rollover)`,
+    provenance: `${evidenceProvenance}; session-pinned (shrink allowed, expansion requires rollover)`,
     actionable: existingPin.actionable,
   });
 }
@@ -211,6 +339,10 @@ export function applyReportedWindowToInvocationSnapshot(options: {
   if (!snapshot.capability.reportsRuntimeWindow || reportedWindowSize == null) return snapshot;
   return {
     ...snapshot,
+    // #1381: keep the RAW report as provider evidence for polluted-pin
+    // observability; the resolver may floor-adjust the capacity, but the
+    // pin-below-report check keys on what the carrier actually reported.
+    lastReportedWindowTokens: reportedWindowSize,
     capacity: resolveContextCapacity({
       catId,
       memberWindowTokens: snapshot.memberWindowTokens,
@@ -278,6 +410,14 @@ export function resolveInvocationCapacitySnapshot(options: {
     ...(binding ? { binding } : {}),
     memberWindowTokens,
     model,
+    // #1381: only member configuration (manual/catalog) owns a native window.
+    // A report-derived or unresolved capacity has no raw value to inject —
+    // feeding the effective number back as Codex's native model_context_window
+    // is the recursive shrink this field exists to prevent.
+    nativeWindowTokens:
+      resolvedCapacity.source === 'manual' || resolvedCapacity.source === 'catalog'
+        ? resolvedCapacity.windowTokens
+        : null,
   };
 }
 

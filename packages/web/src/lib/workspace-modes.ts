@@ -72,9 +72,9 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
   },
   trajectory: {
     label: '轨迹',
-    description: '任务路径与协作关系',
+    description: '逐轮查看猫猫 invocation 与工具现场',
     group: 'governance',
-    searchTerms: 'trajectory route graph 轨迹 路由',
+    searchTerms: 'trajectory invocation session tools raw 轨迹 会话 工具 异常',
   },
   eval: {
     label: '评估',

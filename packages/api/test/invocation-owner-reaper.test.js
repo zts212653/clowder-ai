@@ -112,6 +112,66 @@ describe('InvocationOwnerReaper (F118 post-close)', () => {
     assert.equal(controller.signal.aborted, false, 'an absent provider needs no synthetic abort');
   });
 
+  it('releases an exact stale canceled tombstone after durable terminal reconciliation', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const tracker = new InvocationTracker({ maxSlotTtlMs: SHORT_TTL });
+    tracker.start('thread-1', 'codex-sol', 'user-1', ['codex-sol'], 'exec-canceled-zombie');
+    tracker.cancelAll('thread-1', 'user-1', 'cancel_all');
+    const records = new Map([['exec-canceled-zombie', record('exec-canceled-zombie')]]);
+    const reconcileZombie = mock.fn(async () => {
+      records.get('exec-canceled-zombie').status = 'failed';
+      return result({ reconciled: 1 });
+    });
+    const releaseExactOwner = mock.fn((threadId, targetCats, executionId) => {
+      for (const catId of targetCats) tracker.releaseTerminalByExecutionId(threadId, catId, executionId);
+    });
+    t.mock.timers.tick(SHORT_TTL + 1);
+
+    const sweep = await makeReaper({ tracker, records, reconcileZombie, releaseExactOwner }).runOnce();
+
+    assert.equal(sweep.reaped, 1);
+    assert.equal(releaseExactOwner.mock.callCount(), 1);
+    const guard = tracker.guardSessionSeal('thread-1', 'codex-sol');
+    assert.equal(guard.acquired, true, 'reconciled canceled owner must no longer fence manual seal');
+    guard.release();
+  });
+
+  it('releases dynamic A2A slots omitted from the durable invocation target set', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: T0 });
+    const tracker = new InvocationTracker({ maxSlotTtlMs: SHORT_TTL });
+    const controller = tracker.startAll('thread-1', ['opus'], 'user-1', 'exec-a2a-zombie');
+    assert.ok(controller);
+    assert.equal(
+      tracker.trackExternalSlot('thread-1', 'codex-sol', controller, 'user-1', ['codex-sol'], 'exec-a2a-zombie'),
+      true,
+    );
+    tracker.cancelAll('thread-1', 'user-1', 'cancel_all');
+    const records = new Map([['exec-a2a-zombie', record('exec-a2a-zombie', { targetCats: ['opus'] })]]);
+    const reconcileZombie = mock.fn(async () => {
+      records.get('exec-a2a-zombie').status = 'failed';
+      return result({ reconciled: 1 });
+    });
+    const releaseExactOwner = mock.fn((threadId, targetCats, executionId) => {
+      for (const catId of targetCats) tracker.releaseTerminalByExecutionId(threadId, catId, executionId);
+    });
+    t.mock.timers.tick(SHORT_TTL + 1);
+
+    const sweep = await makeReaper({ tracker, records, reconcileZombie, releaseExactOwner }).runOnce();
+
+    assert.equal(sweep.reaped, 1);
+    assert.deepEqual(
+      [...releaseExactOwner.mock.calls[0].arguments[1]].sort(),
+      ['codex-sol', 'opus'],
+      'durable and dynamically tracked target cats must both be released',
+    );
+    const opusGuard = tracker.guardSessionSeal('thread-1', 'opus');
+    const codexGuard = tracker.guardSessionSeal('thread-1', 'codex-sol');
+    assert.equal(opusGuard.acquired, true);
+    assert.equal(codexGuard.acquired, true, 'reaped dynamic A2A owner must no longer fence manual seal');
+    opusGuard.release();
+    codexGuard.release();
+  });
+
   it('reaps a durable zombie even after its process-local tracker projection is absent', async () => {
     const tracker = new InvocationTracker({ maxSlotTtlMs: SHORT_TTL });
     const zombieRecord = record('exec-record-only', {

@@ -531,17 +531,17 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
-  test('POST post-message returns 401 for expired token', async () => {
+  test('POST post-message keeps an active credential valid across elapsed wall time', async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
 
-    // Use very short TTL
+    // The legacy ttlMs option must not expire an active exact-attempt credential.
     registry = new InvocationRegistry({ ttlMs: 1 });
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
-    // Wait for expiry
+    // Elapsed time alone is not a lifecycle transition.
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const response = await app.inject({
@@ -553,7 +553,7 @@ describe('Callback Routes', () => {
       },
     });
 
-    assert.equal(response.statusCode, 401);
+    assert.equal(response.statusCode, 200);
   });
 
   test('POST post-message returns 401 without credentials', async () => {
@@ -3267,9 +3267,9 @@ describe('Callback Routes', () => {
     assert.equal(body.degradeReason, 'marker_queue_error');
   });
 
-  // --- Stale callback freshness guard (cloud Codex P1 + 缅因猫 R3) ---
+  // --- Exact-attempt callback lifecycle guard ---
 
-  test('POST post-message returns stale_ignored for superseded invocation', async () => {
+  test('POST post-message returns typed replaced for a superseded invocation', async () => {
     const app = await createApp();
 
     // Old invocation for opus on thread-1
@@ -3277,7 +3277,7 @@ describe('Callback Routes', () => {
     // New invocation supersedes — same thread+cat
     await registry.create('user-1', 'opus', 'thread-1');
 
-    // Old invocation's callback should be rejected (stale)
+    // Old invocation's callback is terminal and cannot execute tools.
     const response = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
@@ -3287,13 +3287,14 @@ describe('Callback Routes', () => {
       },
     });
 
-    assert.equal(response.statusCode, 200, 'should return 200 (not 401) to avoid retry storms');
+    assert.equal(response.statusCode, 401);
     const body = JSON.parse(response.body);
-    assert.equal(body.status, 'stale_ignored');
+    assert.equal(body.error, 'callback_auth_failed');
+    assert.equal(body.reason, 'replaced');
 
     // Message should NOT be stored
     const recent = messageStore.getRecent(10);
-    assert.equal(recent.length, 0, 'stale callback should not store a message');
+    assert.equal(recent.length, 0, 'replaced callback should not store a message');
   });
 
   test('POST post-message allows latest invocation after stale is rejected', async () => {
@@ -5582,7 +5583,7 @@ describe('Callback Routes', () => {
             outcome: 'committed',
             leaseId: input.leaseId,
             generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:${input.verdict}`,
+            evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
           };
         },
       },
@@ -5594,11 +5595,7 @@ describe('Callback Routes', () => {
       parentInvocationId,
     );
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = {
-      messageId: 'message-verdict-1',
-      reviewedHeadSha: 'a'.repeat(40),
-      verdict: 'changes_requested',
-    };
+    const payload = { messageId: 'message-verdict-1' };
 
     const response = await app.inject({
       method: 'POST',
@@ -5611,8 +5608,6 @@ describe('Callback Routes', () => {
       leaseId: 'lease-review-local-1',
       generation: 3,
       messageId: 'message-verdict-1',
-      headSha: 'a'.repeat(40),
-      verdict: 'changes_requested',
       now: calls[0].now,
       principal: { catId: 'codex-terra', threadId: 'thread-review', tenantScope: 'user-1' },
     });
@@ -5683,17 +5678,13 @@ describe('Callback Routes', () => {
             outcome: 'committed',
             leaseId: input.leaseId,
             generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:${input.verdict}`,
+            evidenceRef: `local-review:${input.messageId}:g${input.generation}:approved`,
           };
         },
       },
     });
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = {
-      messageId: 'message-verdict-exact-1',
-      reviewedHeadSha: 'b'.repeat(40),
-      verdict: 'approved',
-    };
+    const payload = { messageId: 'message-verdict-exact-1' };
 
     const exactCarrier = await app.inject({
       method: 'POST',
@@ -5733,7 +5724,7 @@ describe('Callback Routes', () => {
             outcome: 'committed',
             leaseId: input.leaseId,
             generation: input.generation,
-            evidenceRef: `local-review:${input.messageId}:g${input.generation}:${input.verdict}`,
+            evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
           };
         },
       },
@@ -5742,8 +5733,6 @@ describe('Callback Routes', () => {
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
     const payload = {
       messageId: 'message-verdict-recovery-1',
-      reviewedHeadSha: 'c'.repeat(40),
-      verdict: 'changes_requested',
       actionLeaseRef: { leaseId: 'lease-stale-review-1', generation: 1 },
     };
 
@@ -5758,8 +5747,6 @@ describe('Callback Routes', () => {
       leaseId: 'lease-stale-review-1',
       generation: 1,
       messageId: 'message-verdict-recovery-1',
-      headSha: 'c'.repeat(40),
-      verdict: 'changes_requested',
       now: calls[0].now,
       principal: { catId: 'codex-sol', threadId: 'thread-author', tenantScope: 'user-1' },
     });
@@ -5770,8 +5757,6 @@ describe('Callback Routes', () => {
       headers,
       payload: {
         messageId: payload.messageId,
-        reviewedHeadSha: payload.reviewedHeadSha,
-        verdict: payload.verdict,
       },
     });
     assert.equal(missingFence.statusCode, 400);

@@ -47,6 +47,7 @@ describe('post_message principal-specific public schema', () => {
       false,
       'invocation callers must not be offered a threadId field that the handler rejects',
     );
+    assert.ok(tool.inputSchema.shape.localReviewVerdict, 'invocation callers must receive typed verdict settlement');
     assert.throws(
       () => tool.inputSchema.parse({ content: 'same-thread update', threadId: 'thread-current' }),
       /unrecognized key/i,
@@ -65,6 +66,11 @@ describe('post_message principal-specific public schema', () => {
 
     assert.ok(threadId, 'agent-key callers must be offered threadId');
     assert.equal(threadId.isOptional(), false, 'agent-key callers must see threadId as required');
+    assert.equal(
+      Object.hasOwn(tool.inputSchema.shape, 'localReviewVerdict'),
+      false,
+      'agent-key callers must not be offered invocation-bound local review settlement',
+    );
     assert.match(tool.description, /agent-key-only registration requires threadId/i);
   });
 
@@ -93,6 +99,7 @@ describe('post_message principal-specific public schema', () => {
     assert.ok(postMessageInputSchema.agentKeyCatId.isOptional());
     assert.ok(shapeKeys.includes('action'), 'canonical shape must retain same-thread structured successor action');
     assert.ok(postMessageInputSchema.action.isOptional());
+    assert.ok(shapeKeys.includes('localReviewVerdict'), 'canonical shape must retain typed local verdict settlement');
     assert.ok(
       shapeKeys.includes('streamDisposition'),
       'canonical shape must retain callback/final persistence semantics',

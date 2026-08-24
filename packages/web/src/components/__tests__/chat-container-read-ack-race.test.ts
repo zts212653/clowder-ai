@@ -171,6 +171,7 @@ describe('F069-R5: read ack via POST /read/latest', () => {
   });
 
   beforeEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -326,6 +327,53 @@ describe('F069-R5: read ack via POST /read/latest', () => {
     );
     expect(newCalls.length).toBe(1);
     expect(newCalls[0][0]).toContain('thread-A');
+  });
+
+  it('re-acks when the same mutable bubble reaches final delivery', async () => {
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    mockApiFetch.mockClear();
+
+    storeState = {
+      ...storeState,
+      messages: storeState.messages.map((message) => ({ ...message, deliveredAt: Date.now() })),
+    };
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].includes('/read/latest'),
+    );
+    expect(ackCalls).toHaveLength(1);
+  });
+
+  it('does not ACK while hidden and retries only after the selected document becomes visible', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => {
+      root.render(React.createElement(ChatContainer, { threadId: 'thread-A' }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'))).toHaveLength(0);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    const ackCalls = mockApiFetch.mock.calls.filter((call) => String(call[0]).includes('/read/latest'));
+    expect(ackCalls).toHaveLength(1);
+    expect(ackCalls[0]?.[0]).toContain('thread-A');
   });
 
   it('settles without confirming when read/latest returns caughtUp=false', async () => {

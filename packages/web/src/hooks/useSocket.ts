@@ -14,8 +14,13 @@ import { useGuideStore } from '@/stores/guideStore';
 import { useToastStore } from '@/stores/toastStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { saveThreadActiveState } from '@/utils/offline-store';
-import { refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
+import {
+  deliverPreviewAutoOpenEvent,
+  type PreviewAutoOpenEvent,
+  type PreviewAutoOpenReceipt,
+} from './preview-auto-open-delivery';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
 import { normalizeQueueMessageReceiptProjections } from './queue-message-receipt-normalizer';
 // F173 Phase E: isInvocationReplaced 检查已下沉到 useAgentMessages.handleAgentMessage
@@ -150,6 +155,7 @@ export interface SocketCallbacks {
 const RECONNECT_RECONCILE_DELAY_MS = 2000;
 /** Watchdog: how often to scan threadStates for silent active invocations. */
 const STALE_WATCHDOG_INTERVAL_MS = 30_000;
+const ROOM_MEMBERSHIP_WATCHDOG_INTERVAL_MS = 5_000;
 /** A thread is suspect if hasActiveInvocation but lastActivity is older than this. */
 const STALE_IDLE_THRESHOLD_MS = 3 * 60_000;
 /** Don't re-probe the same thread more often than this (protects server + avoids loop). */
@@ -485,6 +491,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   // events from the old thread can leak into the new thread's state.
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
+  const lastPreviewAutoOpenEventIdRef = useRef<string | null>(null);
 
   // clowder-ai#789: coalesce synchronous agent_message bursts into one microtask flush.
   // callbacksRef.current is always live (updated above on every render), so the closure
@@ -503,6 +510,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   const {
     forgetRoom,
     reconcileDesiredRoomMembership,
+    reconcileNeverAttemptedRoomMembership,
     reconcileUnconfirmedRoomMembership,
     requestRoomJoin,
     resetConfirmedRoomMembership,
@@ -611,7 +619,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       // useChatHistory's Phase C subscription (debounce + retry + ack +
       // Phase D merge filter); see useChatHistory.ts:872 catchUpVersion.
       if (hasConnectedOnceRef.current) {
-        void refreshSidebarThreadSnapshot();
+        void invalidateSidebarProjection();
         const store = useChatStore.getState();
         const bumped = new Set<string>();
         // Active thread always covered.
@@ -657,7 +665,41 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       // clowder-ai#789: buffer into microtask coalescer — prevents React "Maximum update
       // depth exceeded" when 200+ events arrive synchronously in one macrotask.
       agentMessageCoalescerRef.current?.push(msg);
+      if (msg.isFinal === true || msg.type === 'done' || msg.type === 'error') {
+        void invalidateSidebarProjection();
+      }
     });
+
+    // Preview delivery shares the long-lived authenticated chat socket. The
+    // previous dedicated socket was recreated on every thread/worktree change,
+    // leaving an ack/listener gap exactly while users navigated between threads.
+    socket.on(
+      'preview:auto-open',
+      (data: PreviewAutoOpenEvent, acknowledge?: (receipt: PreviewAutoOpenReceipt) => void) => {
+        // A replay carrying an ack must still be answered; fire-and-forget
+        // duplicates can be dropped without repeating the UI mutation.
+        if (!acknowledge && data.eventId && data.eventId === lastPreviewAutoOpenEventIdRef.current) return;
+        if (data.eventId) lastPreviewAutoOpenEventIdRef.current = data.eventId;
+
+        const store = useChatStore.getState();
+        const receipt = deliverPreviewAutoOpenEvent({
+          data,
+          activeThreadId: store.currentThreadId,
+          clientVisible: typeof document === 'undefined' || document.visibilityState === 'visible',
+          presentationLocked: store.presentationLock != null,
+          sessionWorktreeId: store.workspaceWorktreeId,
+          resolveTargetWorktreeId: (targetThreadId) => {
+            const target = useChatStore.getState().threadStates[targetThreadId];
+            return target ? (target.workspaceWorktreeId ?? null) : undefined;
+          },
+          apply: (event) =>
+            useChatStore.getState().setPendingPreviewAutoOpen({ port: event.port, path: event.path ?? '/' }),
+          queueForThread: (targetThreadId, preview) =>
+            useChatStore.getState().queueThreadPreview(targetThreadId, preview),
+        });
+        acknowledge?.(receipt);
+      },
+    );
 
     socket.on(
       'thread_updated',
@@ -668,16 +710,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
         bootcampState?: Record<string, unknown>;
       }) => {
         callbacksRef.current.onThreadUpdated?.(data);
+        void invalidateSidebarProjection();
       },
     );
 
-    // F128: New thread created via MCP callback — prepend to sidebar thread list
-    socket.on('thread_created', (thread: import('../stores/chat-types').Thread) => {
-      const store = useChatStore.getState();
-      const existing = store.threads;
-      if (!existing.some((t) => t.id === thread.id)) {
-        store.setThreads([thread, ...existing]);
-      }
+    // Edge payloads are invalidation hints, never Sidebar state truth.
+    socket.on('thread_created', () => {
+      void invalidateSidebarProjection();
     });
 
     // F128: proposal status changed (approved/rejected/etc) — broadcast to interested cards.
@@ -705,6 +744,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on(
       'intent_mode',
       (data: { threadId: string; mode: string; targetCats: string[]; invocationId?: string }) => {
+        void invalidateSidebarProjection();
         const storeThread = useChatStore.getState().currentThreadId;
         recordInvocationEvent({
           event: 'intent_mode',
@@ -777,6 +817,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     // F118 D2: spawn_started — earliest per-cat spawning signal (fires before intent_mode).
     socket.on('spawn_started', (data: { threadId: string; targetCats: string[]; invocationId: string }) => {
+      void invalidateSidebarProjection();
       const storeThread = useChatStore.getState().currentThreadId;
 
       // F173 KD-4 — single-pointer routing (store as truth source). See agent_message comment.
@@ -901,6 +942,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     socket.on(
       'queue_updated',
       (data: { threadId: string; queue: unknown[]; action: string; messageReceipts?: unknown }) => {
+        void invalidateSidebarProjection();
         const store = useChatStore.getState();
         const queue = normalizeQueueEntries(data.queue);
         const messageReceipts = normalizeQueueMessageReceiptProjections(data.messageReceipts);
@@ -991,6 +1033,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           mentionsUser?: boolean;
         }>;
       }) => {
+        void invalidateSidebarProjection();
         const store = useChatStore.getState();
         for (const message of data.messages) {
           store.addMessageToThread(data.threadId, {
@@ -1036,11 +1079,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
           mentionsUser?: boolean;
         }>;
       }) => {
+        void invalidateSidebarProjection();
         useChatStore.getState().markMessagesDelivered(data.threadId, data.messageIds, data.deliveredAt, data.messages);
       },
     );
 
     socket.on('queue_paused', (data: { threadId: string; reason: 'canceled' | 'failed'; queue: unknown[] }) => {
+      void invalidateSidebarProjection();
       const store = useChatStore.getState();
       store.setQueue(data.threadId, data.queue as import('../stores/chat-types').QueueEntry[]);
       store.setQueuePaused(data.threadId, true, data.reason);
@@ -1250,10 +1295,20 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     // Stale-invocation watchdog: periodic probe to catch missed done(isFinal) events
     // on a still-connected socket (won't trigger reconcile-on-reconnect).
     const watchdogTimer = setInterval(checkForStaleActiveInvocations, STALE_WATCHDOG_INTERVAL_MS);
+    // A fast localhost connection can complete between initial render and
+    // listener/effect setup. If the first join attempt observes disconnected
+    // and the connect callback was missed, desired membership remains correct
+    // but no later event retries it. Confirmed rooms are a no-op here; only a
+    // live-but-unconfirmed generation emits, closing the permanent F5-only gap.
+    const roomMembershipWatchdogTimer = setInterval(
+      reconcileNeverAttemptedRoomMembership,
+      ROOM_MEMBERSHIP_WATCHDOG_INTERVAL_MS,
+    );
     const visibilityHandler =
       typeof document !== 'undefined'
         ? () => {
             if (document.visibilityState === 'visible') {
+              void invalidateSidebarProjection();
               checkForStaleActiveInvocations();
               reconcileUnconfirmedRoomMembership();
             }
@@ -1265,6 +1320,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
 
     return () => {
       clearInterval(watchdogTimer);
+      clearInterval(roomMembershipWatchdogTimer);
       if (visibilityHandler) {
         document.removeEventListener('visibilitychange', visibilityHandler);
       }
@@ -1277,6 +1333,7 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
   }, [
     persistJoinedRooms,
     reconcileDesiredRoomMembership,
+    reconcileNeverAttemptedRoomMembership,
     reconcileUnconfirmedRoomMembership,
     resetConfirmedRoomMembership,
   ]);

@@ -23,6 +23,7 @@ export function useRoomMembershipReconciler(
   const roomJoinInflightRef = useRef<Set<string>>(new Set());
   const roomJoinTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const roomJoinRetryCountRef = useRef<Map<string, number>>(new Map());
+  const roomJoinAttemptedRef = useRef<Set<string>>(new Set());
   const roomMembershipEpochRef = useRef(0);
   const requestRoomJoinRef = useRef<(room: string) => void>(() => {});
 
@@ -42,6 +43,7 @@ export function useRoomMembershipReconciler(
   const resetConfirmedRoomMembership = useCallback(() => {
     cancelPendingRoomJoinAttempts();
     roomJoinRetryCountRef.current.clear();
+    roomJoinAttemptedRef.current.clear();
     confirmedRoomsRef.current.clear();
   }, [cancelPendingRoomJoinAttempts]);
 
@@ -51,6 +53,7 @@ export function useRoomMembershipReconciler(
       clearRoomJoinTimer(room);
       roomJoinInflightRef.current.delete(room);
       roomJoinRetryCountRef.current.delete(room);
+      roomJoinAttemptedRef.current.delete(room);
       confirmedRoomsRef.current.delete(room);
     },
     [clearRoomJoinTimer, desiredRoomsRef],
@@ -87,6 +90,7 @@ export function useRoomMembershipReconciler(
       }
 
       const epoch = roomMembershipEpochRef.current;
+      roomJoinAttemptedRef.current.add(room);
       roomJoinInflightRef.current.add(room);
       let settled = false;
 
@@ -133,12 +137,23 @@ export function useRoomMembershipReconciler(
 
   const reconcileUnconfirmedRoomMembership = useCallback(() => {
     cancelPendingRoomJoinAttempts();
+    roomJoinAttemptedRef.current.clear();
     for (const room of desiredRoomsRef.current) requestRoomJoinRef.current(room);
   }, [cancelPendingRoomJoinAttempts, desiredRoomsRef]);
+
+  /** Repair only the setup gap where a desired room has never emitted in this
+   * connection epoch. Unlike visibility/reconnect reconciliation this does not
+   * reopen permanent rejection or an exhausted bounded retry budget. */
+  const reconcileNeverAttemptedRoomMembership = useCallback(() => {
+    for (const room of desiredRoomsRef.current) {
+      if (!roomJoinAttemptedRef.current.has(room)) requestRoomJoinRef.current(room);
+    }
+  }, [desiredRoomsRef]);
 
   return {
     forgetRoom,
     reconcileDesiredRoomMembership,
+    reconcileNeverAttemptedRoomMembership,
     reconcileUnconfirmedRoomMembership,
     requestRoomJoin,
     resetConfirmedRoomMembership,

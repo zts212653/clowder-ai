@@ -666,12 +666,12 @@ skills:
     sop_step: null
     merged_from: null
 
-  # ── Eval 设计与体检（Eval 纲领操作化，2026-07-17）──
+  # ── Eval 设计与体检（Eval 宪法操作化，2026-08-10 v2.1 对齐）──
   eval-design:
     category: "调研与知识"
     description: >
-      指标出生证（五件套契约）+ 六公理设计自检 + 存量 eval 体检尺（摸鱼/划水/污染）。
-      Use when: 按 ADR-031 v3.4 机制选择判定 eval 该不该建、新增或修改任何指标、审计现有 eval 资产是否摸鱼划水污染。
+      E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
+      Use when: 按 ADR-031 v3.4 机制选择判定 eval 该不该建、新增或修改任何指标、审计现有 eval 资产病灶。
       Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
       Output: 带出生证的指标定义，或带病名+处置建议的体检报告（不输出总分排行榜）。
     triggers:

@@ -42,6 +42,8 @@ export interface AuthoritativeCompactionEvent {
   readonly eventId: string;
   /** Runtime the event was observed on; must match this scope's binding. */
   readonly runtimeSessionId?: string;
+  /** Content-free source coordinate for the provider event. */
+  readonly evidenceRef?: string;
 }
 
 export type ContextEpochTransition =
@@ -51,7 +53,8 @@ export type ContextEpochTransition =
   | 'unknown'
   | 'binding_mismatch'
   | 'resumed'
-  | 'context_compacted';
+  | 'context_compacted'
+  | 'context_compaction_replay';
 
 export interface ContextEpochState {
   readonly scopeKey: string;
@@ -61,6 +64,19 @@ export interface ContextEpochState {
   readonly lastTransitionRef: string;
   /** Bounded FIFO of authoritative compaction event ids already consumed. */
   readonly consumedCompactionEventIds: readonly string[];
+  /**
+   * The epoch whose cold has already been handed to a projection.
+   *
+   * Written only by `confirmColdConsumed`, after a provider actually accepted
+   * the generation built from that cold. Resolving is merely an intent to build:
+   * the invocation can still fail, and a release path explicitly discards
+   * generations that were never handed to a runtime.
+   *
+   * The asymmetry is the whole point — an extra cold rebuild is wasteful but
+   * safe, a missed cold silently projects an unseen delta onto rewritten memory.
+   * Absent (legacy records) therefore reads as "unconsumed".
+   */
+  readonly coldConsumedAtEpoch?: number;
 }
 
 export interface ContextEpochTransitionResult {
@@ -99,6 +115,7 @@ function stateOf(input: {
   boundRuntimeSessionId?: string;
   lastTransitionRef: string;
   consumedCompactionEventIds: readonly string[];
+  coldConsumedAtEpoch?: number;
 }): ContextEpochState {
   return {
     scopeKey: input.scopeKey,
@@ -107,6 +124,7 @@ function stateOf(input: {
     ...(input.boundRuntimeSessionId ? { boundRuntimeSessionId: input.boundRuntimeSessionId } : {}),
     lastTransitionRef: input.lastTransitionRef,
     consumedCompactionEventIds: input.consumedCompactionEventIds,
+    ...(input.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: input.coldConsumedAtEpoch } : {}),
   };
 }
 
@@ -115,6 +133,43 @@ function withConsumedEvent(existing: readonly string[], eventId: string): readon
   const next = existing.filter((id) => id !== eventId);
   next.push(eventId);
   return next.slice(-CONSUMED_COMPACTION_EVENT_LIMIT);
+}
+
+export interface ContextCompactionTransitionResult {
+  readonly state: ContextEpochState;
+  readonly transition: 'context_compacted' | 'context_compaction_replay';
+  readonly replayed: boolean;
+}
+
+/** Pure authoritative compaction edge, independent of any resume disposition. */
+export function applyAuthoritativeCompactionToEpoch(input: {
+  readonly scopeKey: string;
+  readonly previous: ContextEpochState | null;
+  readonly event: AuthoritativeCompactionEvent;
+}): ContextCompactionTransitionResult {
+  const previous = input.previous
+    ? { ...input.previous, consumedCompactionEventIds: input.previous.consumedCompactionEventIds ?? [] }
+    : null;
+  if (previous?.boundRuntimeSessionId && previous.boundRuntimeSessionId !== input.event.runtimeSessionId) {
+    throw new Error(
+      `context_compaction_binding_mismatch:${input.scopeKey}:${previous.boundRuntimeSessionId}:${input.event.runtimeSessionId ?? 'missing'}`,
+    );
+  }
+  if (previous?.consumedCompactionEventIds.includes(input.event.eventId)) {
+    return { state: previous, transition: 'context_compaction_replay', replayed: true };
+  }
+  return {
+    state: stateOf({
+      scopeKey: input.scopeKey,
+      contextEpoch: previous ? previous.contextEpoch + 1 : 1,
+      contextMode: 'cold',
+      ...(previous?.boundRuntimeSessionId ? { boundRuntimeSessionId: previous.boundRuntimeSessionId } : {}),
+      lastTransitionRef: input.event.evidenceRef ?? `context-compaction:${input.event.eventId}`,
+      consumedCompactionEventIds: withConsumedEvent(previous?.consumedCompactionEventIds ?? [], input.event.eventId),
+    }),
+    transition: 'context_compacted',
+    replayed: false,
+  };
 }
 
 /**
@@ -174,6 +229,11 @@ export function applyContinuityToEpoch(input: {
       consumedCompactionEventIds: next.consumedCompactionEventId
         ? withConsumedEvent(previous.consumedCompactionEventIds, next.consumedCompactionEventId)
         : previous.consumedCompactionEventIds,
+      // Deliberately NOT marked consumed here. Resolving is only an intent to
+      // build; the invocation can still fail before the bytes reach a runtime.
+      // Consumption is confirmed by `confirmColdConsumed` after the provider
+      // actually accepted the generation.
+      ...(previous.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: previous.coldConsumedAtEpoch } : {}),
     }),
     transition,
     normalizedDisposition: next.normalizedDisposition ?? disposition,
@@ -213,25 +273,44 @@ export function applyContinuityToEpoch(input: {
       const compaction = input.compaction;
       const compactionAppliesHere =
         compaction !== undefined &&
-        !previous.consumedCompactionEventIds.includes(compaction.eventId) &&
         (compaction.runtimeSessionId === undefined || compaction.runtimeSessionId === previous.boundRuntimeSessionId);
       if (compaction && compactionAppliesHere) {
-        return advance('context_compacted', {
-          boundRuntimeSessionId: previous.boundRuntimeSessionId,
-          consumedCompactionEventId: compaction.eventId,
-        });
+        const compacted = applyAuthoritativeCompactionToEpoch({ scopeKey, previous, event: compaction });
+        return {
+          state: compacted.state,
+          transition: compacted.transition,
+          normalizedDisposition: disposition,
+          healthSignals,
+        };
       }
 
-      // Row: resumed with an exact binding match — hold the epoch, stay hot.
-      // Heuristic signals reach here too, and deliberately change nothing.
+      // Row: resumed with an exact binding match — hold the epoch.
+      //
+      // Mode is NOT unconditionally hot. `observeCompaction` advances the epoch
+      // and commits cold, but it is not a projection: nobody has built a prompt
+      // from that cold yet. Returning hot here would overwrite it and the very
+      // next prompt would be built as an unseen-delta on top of a runtime whose
+      // working memory was just rewritten — which is the exact failure F296
+      // exists to prevent, and it would silently nullify both the pre-turn drain
+      // and the mid-turn compaction route.
+      //
+      // So a cold survives until exactly one projection consumes it. Records
+      // written before this field existed read as "unconsumed", costing at most
+      // one extra cold rebuild — the same conservative default this file already
+      // takes for consumedCompactionEventIds.
+      const coldAwaitingProjection =
+        previous.contextMode === 'cold' && previous.coldConsumedAtEpoch !== previous.contextEpoch;
       return {
         state: stateOf({
           scopeKey,
           contextEpoch: previous.contextEpoch,
-          contextMode: 'hot',
+          contextMode: coldAwaitingProjection ? 'cold' : 'hot',
           boundRuntimeSessionId: previous.boundRuntimeSessionId,
           lastTransitionRef: disposition.evidenceRef,
           consumedCompactionEventIds: previous.consumedCompactionEventIds,
+          // Still not consumed: this resolve only decided to build cold. If the
+          // invocation dies before delivery, the next one must be cold again.
+          ...(previous.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: previous.coldConsumedAtEpoch } : {}),
         }),
         transition: 'resumed',
         normalizedDisposition: disposition,
@@ -294,6 +373,7 @@ export class ContextEpochOwner {
             ...(stored.boundRuntimeSessionId ? { boundRuntimeSessionId: stored.boundRuntimeSessionId } : {}),
             lastTransitionRef: stored.lastTransitionRef,
             consumedCompactionEventIds: stored.consumedCompactionEventIds ?? [],
+            ...(stored.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: stored.coldConsumedAtEpoch } : {}),
           })
         : null;
 
@@ -312,6 +392,9 @@ export class ContextEpochOwner {
         ...(result.state.boundRuntimeSessionId ? { boundRuntimeSessionId: result.state.boundRuntimeSessionId } : {}),
         lastTransitionRef: result.state.lastTransitionRef,
         consumedCompactionEventIds: result.state.consumedCompactionEventIds,
+        ...(result.state.coldConsumedAtEpoch !== undefined
+          ? { coldConsumedAtEpoch: result.state.coldConsumedAtEpoch }
+          : {}),
         version: (stored?.version ?? 0) + 1,
         updatedAt: Date.now(),
       };
@@ -331,6 +414,97 @@ export class ContextEpochOwner {
       // top of their state. Dropping our transition would silently lose it.
     }
 
+    throw new Error(`context_epoch_cas_exhausted:${scopeKey}`);
+  }
+
+  /**
+   * Mark this scope's cold as consumed, after a provider actually accepted the
+   * generation that was built from it.
+   *
+   * Deliberately separate from `resolve`: resolving is only an intent to build.
+   * An invocation can fail between the epoch decision and the provider hand-off,
+   * and the preflight fence explicitly releases generations that were never
+   * handed to a runtime. Marking at resolve time would let those paths swallow a
+   * compaction's cold and project an unseen delta onto rewritten memory.
+   *
+   * No-ops when the epoch has moved on, so a late confirmation from a superseded
+   * generation can never consume a newer cold.
+   */
+  async confirmColdConsumed(input: {
+    readonly userId: string;
+    readonly catId: CatId | string;
+    readonly threadId: string;
+    readonly contextEpoch: number;
+  }): Promise<void> {
+    const scopeKey = contextEpochScopeKey(input);
+    for (let attempt = 0; attempt < this.maxCasAttempts; attempt++) {
+      const stored = await Promise.resolve(this.store.get(scopeKey));
+      if (!stored) return;
+      if (stored.contextEpoch !== input.contextEpoch) return;
+      if (stored.coldConsumedAtEpoch === input.contextEpoch) return;
+      const record: ContextEpochRecord = {
+        ...stored,
+        coldConsumedAtEpoch: input.contextEpoch,
+        version: stored.version + 1,
+        updatedAt: Date.now(),
+      };
+      if (await Promise.resolve(this.store.compareAndPut(record, stored.version))) return;
+    }
+    // Losing this race only costs an extra cold rebuild, so it must never fail
+    // an invocation that already delivered.
+  }
+
+  /**
+   * Commit a provider-authored compaction without manufacturing a `resumed`
+   * handshake. The hook/stream may both report one event; replay is a read-only
+   * result that keeps the already-cold epoch intact.
+   */
+  async observeCompaction(input: {
+    readonly userId: string;
+    readonly catId: CatId | string;
+    readonly threadId: string;
+    readonly event: AuthoritativeCompactionEvent;
+  }): Promise<
+    ContextEpochState & {
+      readonly transition: 'context_compacted' | 'context_compaction_replay';
+      readonly replayed: boolean;
+    }
+  > {
+    const scopeKey = contextEpochScopeKey(input);
+    for (let attempt = 0; attempt < this.maxCasAttempts; attempt++) {
+      const stored = await Promise.resolve(this.store.get(scopeKey));
+      const previous: ContextEpochState | null = stored
+        ? stateOf({
+            scopeKey: stored.scopeKey,
+            contextEpoch: stored.contextEpoch,
+            contextMode: stored.contextMode,
+            ...(stored.boundRuntimeSessionId ? { boundRuntimeSessionId: stored.boundRuntimeSessionId } : {}),
+            lastTransitionRef: stored.lastTransitionRef,
+            consumedCompactionEventIds: stored.consumedCompactionEventIds ?? [],
+            ...(stored.coldConsumedAtEpoch !== undefined ? { coldConsumedAtEpoch: stored.coldConsumedAtEpoch } : {}),
+          })
+        : null;
+      const result = applyAuthoritativeCompactionToEpoch({ scopeKey, previous, event: input.event });
+      if (result.replayed) {
+        return { ...result.state, transition: result.transition, replayed: true };
+      }
+      const record: ContextEpochRecord = {
+        scopeKey: result.state.scopeKey,
+        contextEpoch: result.state.contextEpoch,
+        contextMode: result.state.contextMode,
+        ...(result.state.boundRuntimeSessionId ? { boundRuntimeSessionId: result.state.boundRuntimeSessionId } : {}),
+        lastTransitionRef: result.state.lastTransitionRef,
+        consumedCompactionEventIds: result.state.consumedCompactionEventIds,
+        ...(result.state.coldConsumedAtEpoch !== undefined
+          ? { coldConsumedAtEpoch: result.state.coldConsumedAtEpoch }
+          : {}),
+        version: (stored?.version ?? 0) + 1,
+        updatedAt: Date.now(),
+      };
+      if (await Promise.resolve(this.store.compareAndPut(record, stored?.version ?? 0))) {
+        return { ...result.state, transition: result.transition, replayed: false };
+      }
+    }
     throw new Error(`context_epoch_cas_exhausted:${scopeKey}`);
   }
 }

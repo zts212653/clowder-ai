@@ -21,7 +21,7 @@ async function withMockedCallbackPost(fn) {
       ok: false,
       status: 401,
       headers: new Map(),
-      text: async () => JSON.stringify({ error: 'callback_auth_failed', reason: 'expired' }),
+      text: async () => JSON.stringify({ error: 'callback_auth_failed', reason: 'unknown_invocation' }),
     };
   };
   process.env.CAT_CAFE_API_URL = 'http://localhost:3003';
@@ -68,7 +68,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       assert.ok(result.isError, 'auth failure must propagate');
       const text = result.content[0].text;
       assert.ok(
-        text.includes('[degrade]') && text.includes('reason=expired'),
+        text.includes('[degrade]') && text.includes('reason=unknown_invocation'),
         `expected [degrade] hint with reason: ${text}`,
       );
     });
@@ -79,7 +79,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       const result = await handleUpdateTask({ taskId: 't-1', status: 'done' });
       assert.ok(result.isError);
       const text = result.content[0].text;
-      assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
+      assert.ok(text.includes('[degrade]') && text.includes('reason=unknown_invocation'));
     });
   });
 
@@ -94,7 +94,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       });
       assert.ok(result.isError);
       const text = result.content[0].text;
-      assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
+      assert.ok(text.includes('[degrade]') && text.includes('reason=unknown_invocation'));
     });
   });
 
@@ -127,7 +127,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       const result = await memMod.handleCallbackRetainMemory({ content: 'remember this' });
       assert.ok(result.isError);
       const text = result.content[0].text;
-      assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
+      assert.ok(text.includes('[degrade]') && text.includes('reason=unknown_invocation'));
     });
   });
 

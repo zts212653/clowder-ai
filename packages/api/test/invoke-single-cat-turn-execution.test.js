@@ -159,6 +159,72 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     assert.equal(terminal.terminalReason, undefined);
   });
 
+  test('binds the exact context-factory prompt ids before provider execution', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    let providerCoverage;
+    const contextCapability = {
+      provider: 'anthropic',
+      carrier: 'print_sdk',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: false,
+      nativeCompressionControl: false,
+      observesCompression: true,
+      reason: 'fixture',
+    };
+    const service = {
+      contextCapability: () => contextCapability,
+      async *invoke() {
+        providerCoverage = (await store.get('child-context-factory'))?.causal?.coveredMessageIds;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const contextEpochOwner = {
+      async resolve(input) {
+        return {
+          scopeKey: 'user-1::opus::thread-1',
+          contextEpoch: 1,
+          contextMode: 'cold',
+          lastTransitionRef: input.disposition.evidenceRef,
+          consumedCompactionEventIds: [],
+          transition: 'scope_first_seen',
+          normalizedDisposition: input.disposition,
+          healthSignals: [],
+        };
+      },
+      async observeCompaction() {
+        throw new Error('unexpected compaction');
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(store, 'child-context-factory'), contextEpochOwner },
+        {
+          catId: 'opus',
+          service,
+          prompt: 'placeholder',
+          contextPromptFactory: async () => ({
+            prompt: 'exact prompt',
+            promptMessageIds: ['msg-trigger', 'msg-context'],
+          }),
+          userId: 'user-1',
+          threadId: 'thread-1',
+          invocationOrigin: 'interactive',
+          routeTopology: 'serial',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    assert.deepEqual(providerCoverage, ['msg-trigger', 'msg-context']);
+    assert.deepEqual((await store.get('child-context-factory')).causal.coveredMessageIds, [
+      'msg-trigger',
+      'msg-context',
+    ]);
+  });
+
   test('provider terminal error becomes failed with a canonical reason and no durable error detail copy', async () => {
     const store = new InMemoryTurnExecutionStore();
     const service = {

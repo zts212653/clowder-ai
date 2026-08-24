@@ -37,13 +37,13 @@ describe('apiFetch 401 retry', () => {
       calls.push(url);
       // Session endpoint always succeeds
       if (url.includes('/api/session')) {
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
       // First data call returns 401, second succeeds
       if (calls.filter((c) => c.includes('/api/messages')).length === 1) {
-        return Promise.resolve({ ok: false, status: 401 });
+        return Promise.resolve(new Response('{}', { status: 401 }));
       }
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+      return Promise.resolve(new Response('[]', { status: 200 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -63,9 +63,9 @@ describe('apiFetch 401 retry', () => {
     const mockFetch = vi.fn().mockImplementation((url: string) => {
       calls.push(url);
       if (url.includes('/api/session')) {
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
-      return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve(new Response('{}', { status: 500 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -80,10 +80,10 @@ describe('apiFetch 401 retry', () => {
   it('passes credentials: include on all requests including retry', async () => {
     const mockFetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/session')) {
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
       // Always 401 to trigger retry path
-      return Promise.resolve({ ok: false, status: 401 });
+      return Promise.resolve(new Response('{}', { status: 401 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -102,12 +102,12 @@ describe('apiFetch 401 retry', () => {
     const mockFetch = vi.fn().mockImplementation((url: string) => {
       calls.push(url);
       if (url.includes('/api/session')) {
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
       if (calls.filter((c) => c.includes('/api/messages')).length === 1) {
-        return Promise.resolve({ ok: false, status: 401 });
+        return Promise.resolve(new Response('{}', { status: 401 }));
       }
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+      return Promise.resolve(new Response('[]', { status: 200 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -121,9 +121,9 @@ describe('apiFetch 401 retry', () => {
   it('shows a visible error toast when 401 persists after retry', async () => {
     const mockFetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/session')) {
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
-      return Promise.resolve({ ok: false, status: 401 });
+      return Promise.resolve(new Response('{}', { status: 401 }));
     });
     globalThis.fetch = mockFetch;
 
@@ -147,9 +147,9 @@ describe('apiFetch 401 retry', () => {
         if (sessionAttempts === 1) {
           return Promise.reject(new Error('offline'));
         }
-        return Promise.resolve({ ok: true, status: 200 });
+        return Promise.resolve(new Response('{}', { status: 200 }));
       }
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+      return Promise.resolve(new Response('[]', { status: 200 }));
     });
     globalThis.fetch = mockFetch;
 

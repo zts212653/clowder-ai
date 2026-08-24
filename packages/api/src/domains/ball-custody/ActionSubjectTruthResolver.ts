@@ -12,7 +12,7 @@ import {
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
 import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
 import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
-import type { LocalReviewEvidenceProvider } from './LocalReviewEvidenceProvider.js';
+import { type LocalReviewEvidenceProvider, parseLocalReviewEvidenceRef } from './LocalReviewEvidenceProvider.js';
 
 type TerminalResolution = {
   terminal: true;
@@ -219,11 +219,14 @@ export class ActionSubjectTruthResolver {
         localFailure = { status: 'insufficient', reason: 'local review evidence resolver unavailable' };
       } else {
         for (const evidenceRef of localEvidenceRefs) {
+          const parsedEvidence = parseLocalReviewEvidenceRef(evidenceRef);
+          if (!parsedEvidence) {
+            localFailure = { status: 'mismatch', reason: 'local review evidence ref is malformed' };
+            continue;
+          }
           const localResolution = await this.localReviewEvidenceProvider.resolve({
-            evidenceRef,
+            messageId: parsedEvidence.messageId,
             leaseId: context.leaseId,
-            subjectRef: predicate.subjectRef,
-            headSha: predicate.headSha,
             generation: context.generation,
             reviewerCatId: context.catId,
             holderThreadId: context.holderThreadId,
@@ -232,6 +235,10 @@ export class ActionSubjectTruthResolver {
             tenantScope: context.tenantScope,
           });
           if (localResolution.status === 'verified') {
+            if (localResolution.evidenceRef !== evidenceRef) {
+              localFailure = { status: 'mismatch', reason: 'local review typed verdict does not match evidence ref' };
+              continue;
+            }
             const freshness = await this.resolveFreshness(predicate);
             if (freshness.status === 'verified') {
               return bindActionCompletionVerdict(

@@ -39,6 +39,25 @@ function createMockDeps(services) {
 }
 
 describe('routeSerial A2A tracker bridge', () => {
+  it('uses route-terminal completion to release a canceled dynamic A2A seal fence', async () => {
+    const { createA2ASlotTrackingBridge } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+    const tracker = new InvocationTracker();
+    const parent = tracker.startAll('thread-a2a-cancel', ['opus'], 'user-a', 'inv-a2a');
+    const bridge = createA2ASlotTrackingBridge(tracker, parent, 'inv-a2a');
+    assert.equal(bridge.trackA2ASlot('thread-a2a-cancel', 'codex', 'user-a', parent), true);
+    tracker.cancel('thread-a2a-cancel', 'codex', 'user-a', 'user_cancel');
+    assert.equal(tracker.guardSessionSeal('thread-a2a-cancel', 'codex').acquired, false);
+
+    bridge.completeA2ASlots('thread-a2a-cancel', ['codex'], parent);
+
+    const guard = tracker.guardSessionSeal('thread-a2a-cancel', 'codex');
+    assert.equal(guard.acquired, true, 'route-finally must prove teardown for dynamic A2A tombstones');
+    guard.release();
+  });
+
   it('keeps thread-level invocation tracking active after first cat hands off to A2A target', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');

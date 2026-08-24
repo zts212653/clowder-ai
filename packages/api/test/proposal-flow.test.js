@@ -66,7 +66,7 @@ describe('F128 propose / approve / reject lifecycle', () => {
     });
   });
 
-  test('propose returns stale_ignored when a newer invocation supersedes', async () => {
+  test('propose returns typed replaced when a newer invocation supersedes', async () => {
     const ctx = await createProposalTestContext();
     const source = await ctx.threadStore.create('alice', 'Source');
     const first = await ctx.registry.create('alice', 'opus', source.id);
@@ -77,8 +77,8 @@ describe('F128 propose / approve / reject lifecycle', () => {
       headers: { 'x-invocation-id': first.invocationId, 'x-callback-token': first.callbackToken },
       payload: { title: 't', reason: 'r' },
     });
-    assert.equal(res.statusCode, 200);
-    assert.equal(JSON.parse(res.body).status, 'stale_ignored');
+    assert.equal(res.statusCode, 401);
+    assert.deepEqual(JSON.parse(res.body).reason, 'replaced');
   });
 
   test('propose rejects parentThreadId owned by another user (403)', async () => {

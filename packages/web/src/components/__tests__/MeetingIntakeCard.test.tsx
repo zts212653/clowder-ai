@@ -4,6 +4,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockFetchPending = vi.fn(async () => {});
 const mockApiFetch = vi.fn();
+const mockInvalidateSidebarProjection = vi.fn(async () => true);
+
+const threads = [
+  {
+    id: 'thread-1',
+    title: 'F292 产品讨论',
+    projectPath: '/workspace/cat-cafe',
+    createdBy: 'owner-1',
+    participants: ['codex-sol'],
+    lastActiveAt: 200,
+    createdAt: 100,
+  },
+  ...Array.from({ length: 1_200 }, (_, index) => ({
+    id: `archive-${index}`,
+    title: `历史 Thread ${index}`,
+    projectPath: '/workspace/archive',
+    createdBy: 'owner-1',
+    participants: [],
+    lastActiveAt: 100 - index,
+    createdAt: index,
+  })),
+  {
+    id: 'system-1',
+    title: '系统',
+    projectPath: '/workspace/cat-cafe',
+    createdBy: 'system',
+    participants: [],
+    lastActiveAt: 300,
+    createdAt: 300,
+  },
+];
 
 vi.mock('@/stores/approvalHubStore', () => ({
   useApprovalHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -12,19 +43,20 @@ vi.mock('@/stores/approvalHubStore', () => ({
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      threads: [
-        { id: 'thread-1', title: 'F292 产品讨论', createdBy: 'owner-1', participants: ['codex-sol'] },
-        { id: 'system-1', title: '系统', createdBy: 'system', participants: [] },
-      ],
+      threads,
+      currentProjectPath: '/workspace/cat-cafe',
+      isLoadingThreads: false,
     }),
 }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => mockApiFetch(...args) }));
+vi.mock('@/utils/sidebar-thread-snapshot', () => ({
+  invalidateSidebarProjection: () => mockInvalidateSidebarProjection(),
+}));
 
 import { MeetingIntakeCard } from '../MeetingIntakeCard';
 
-function setNativeValue(element: HTMLTextAreaElement | HTMLSelectElement, value: string): void {
-  const prototype =
-    element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLSelectElement.prototype;
+function setNativeValue(element: HTMLTextAreaElement | HTMLInputElement, value: string): void {
+  const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
   setter?.call(element, value);
 }
@@ -60,6 +92,7 @@ describe('F292 MeetingIntakeCard', () => {
   beforeEach(() => {
     mockApiFetch.mockReset();
     mockFetchPending.mockClear();
+    mockInvalidateSidebarProjection.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -77,10 +110,11 @@ describe('F292 MeetingIntakeCard', () => {
     expect(container.textContent).toContain('Needs Me');
     expect(container.textContent).toContain('Weekly sync');
     expect(container.textContent).not.toContain('系统');
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(8);
 
     const speaker = container.querySelector('[data-testid="meeting-speakers"]') as HTMLTextAreaElement;
     const context = container.querySelector('[data-testid="meeting-context"]') as HTMLTextAreaElement;
-    const destination = container.querySelector('[data-testid="meeting-destination"]') as HTMLSelectElement;
+    const destinationSearch = container.querySelector('[data-testid="meeting-destination-search"]') as HTMLInputElement;
     const output = container.querySelector('[data-testid="meeting-output-minutes"]') as HTMLInputElement;
     await act(async () => {
       setNativeValue(speaker, '1=You');
@@ -91,8 +125,12 @@ describe('F292 MeetingIntakeCard', () => {
       context.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => {
-      setNativeValue(destination, 'host:private-thread:thread-1');
-      destination.dispatchEvent(new Event('change', { bubbles: true }));
+      setNativeValue(destinationSearch, 'F292');
+      destinationSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain('历史 Thread 0');
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-destination-thread-1"]') as HTMLButtonElement).click();
     });
     await act(async () => {
       output.click();
@@ -115,6 +153,45 @@ describe('F292 MeetingIntakeCard', () => {
       }),
     });
     expect(mockFetchPending).toHaveBeenCalled();
+  });
+
+  it('creates a private Thread in place and selects it without navigating away from the approval card', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'thread-created',
+        title: 'Weekly sync 跟进',
+        projectPath: '/workspace/cat-cafe',
+        createdBy: 'owner-1',
+        participants: [],
+        lastActiveAt: 400,
+        createdAt: 400,
+      }),
+    });
+    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item })));
+
+    expect(container.querySelector('select[data-testid="meeting-destination"]')).toBeNull();
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-destination-create-toggle"]') as HTMLButtonElement).click();
+    });
+    const title = container.querySelector('[data-testid="meeting-destination-create-title"]') as HTMLInputElement;
+    expect(title.value).toContain('Weekly sync');
+    await act(async () => {
+      setNativeValue(title, 'Weekly sync 跟进');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-destination-create-confirm"]') as HTMLButtonElement).click();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Weekly sync 跟进', projectPath: '/workspace/cat-cafe' }),
+    });
+    expect(container.textContent).toContain('已选择：Weekly sync 跟进');
+    expect(mockInvalidateSidebarProjection).toHaveBeenCalledTimes(1);
   });
 
   it('renders the typed manual-import repair action without generic approve/reject', async () => {
@@ -147,7 +224,7 @@ describe('F292 MeetingIntakeCard', () => {
         repair: { code: 'transcript_not_ready', action: 'retry', observedAt: 2 },
       },
     };
-    mockApiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ intake: { revision: 6 } }) });
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 6 } }) });
     await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: retryItem })));
     await act(async () => (container.querySelector('[data-testid="meeting-retry"]') as HTMLButtonElement).click());
     expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/retry', {
@@ -168,7 +245,15 @@ describe('F292 MeetingIntakeCard', () => {
     const regrant = container.querySelector<HTMLAnchorElement>('[data-testid="meeting-regrant"]');
     expect(regrant?.href).toContain('/settings?s=plugins');
     expect(regrant?.textContent).toContain('去插件设置连接飞书');
+    await act(async () =>
+      (container.querySelector('[data-testid="meeting-regrant-retry"]') as HTMLButtonElement).click(),
+    );
+    expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 7 }),
+    });
     expect(container.textContent).not.toContain('lark-cli auth login');
-    expect(mockFetchPending).toHaveBeenCalledTimes(1);
+    expect(mockFetchPending).toHaveBeenCalledTimes(2);
   });
 });

@@ -5,6 +5,7 @@ import { chmod, mkdir, readFile, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, win32 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removePersonalChromeConversationAuthorizations } from './conversation-binding.mjs';
 import { digestNativeHostArtifactDirectory, publishNativeHostArtifact } from './native-host-artifact.mjs';
 import {
   pathExists,
@@ -36,6 +37,34 @@ function requireExact(value, label) {
     throw new Error(`${label} must be a non-empty exact string`);
   }
   return value;
+}
+
+function requireAbsolute(value, label) {
+  requireExact(value, label);
+  if (!isAbsolute(value)) throw new Error(`${label} must be absolute`);
+  return value;
+}
+
+function quoteShellArgument(value) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function renderNativeHostLauncher({ nodeExecutable, artifactEntrypoint, pairingRecordPath }) {
+  requireAbsolute(nodeExecutable, 'nodeExecutable');
+  requireAbsolute(artifactEntrypoint, 'artifactEntrypoint');
+  requireAbsolute(pairingRecordPath, 'pairingRecordPath');
+  return `#!/bin/sh\nexec ${quoteShellArgument(nodeExecutable)} ${quoteShellArgument(
+    artifactEntrypoint,
+  )} --pairing-record ${quoteShellArgument(pairingRecordPath)} "$@"\n`;
+}
+
+async function assertNodeRuntimeExecutable(nodeExecutable) {
+  requireAbsolute(nodeExecutable, 'nodeExecutable');
+  const metadata = await stat(nodeExecutable);
+  if (!metadata.isFile()) throw new Error('nodeExecutable must be a regular file');
+  if (process.platform !== 'win32' && (metadata.mode & 0o111) === 0) {
+    throw new Error('nodeExecutable must be executable');
+  }
 }
 
 function manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory }) {
@@ -80,6 +109,7 @@ function installationReceipt({ operation, paths, manifestPath, record, artifactE
     operation,
     rootDirectory: paths.rootDirectory,
     pairingRecordPath: paths.pairingRecordPath,
+    conversationBindingPath: paths.conversationBindingPath,
     launcherPath: paths.launcherPath,
     manifestPath,
     artifactEntrypoint,
@@ -121,12 +151,14 @@ export async function inspectNativeHostInstallation({
   homeDirectory = homedir(),
   localAppData = process.env.LOCALAPPDATA,
   userDataDirectory,
+  nodeExecutable = process.execPath,
 } = {}) {
   assertInstallMutationSupported(platform);
+  await assertNodeRuntimeExecutable(nodeExecutable);
   const paths = resolvePersonalChromeHostPaths(projectRoot);
   const record = await readPersonalChromePairingRecord(paths.pairingRecordPath);
   const artifactDirectory = join(paths.artifactsDirectory, record.artifactDigest.slice('sha512:'.length));
-  const artifactEntrypoint = join(artifactDirectory, 'native-host.mjs');
+  const artifactEntrypoint = join(artifactDirectory, 'native-host-cli.mjs');
   if ((await digestNativeHostArtifactDirectory(artifactDirectory)) !== record.artifactDigest) {
     throw new Error('installed native host artifact digest mismatch');
   }
@@ -145,6 +177,14 @@ export async function inspectNativeHostInstallation({
   if (!launcherMetadata.isFile()) throw new Error('native host launcher must be a regular file');
   if (platform !== 'win32' && (launcherMetadata.mode & 0o111) === 0) {
     throw new Error('native host launcher must be executable');
+  }
+  const expectedLauncher = renderNativeHostLauncher({
+    nodeExecutable,
+    artifactEntrypoint,
+    pairingRecordPath: paths.pairingRecordPath,
+  });
+  if ((await readFile(paths.launcherPath, 'utf8')) !== expectedLauncher) {
+    throw new Error('native host launcher does not match installed runtime');
   }
   return installationReceipt({
     operation: 'inspect',
@@ -195,10 +235,12 @@ async function installNativeHostLocked({
   now = () => new Date(),
   generatePairingSecret = () => randomBytes(32).toString('base64url'),
   writePairingRecord = writePersonalChromePairingRecordAtomic,
+  nodeExecutable = process.execPath,
   paths,
 }) {
   requireExact(extensionId, 'extensionId');
   if (!CHROME_EXTENSION_ID.test(extensionId)) throw new Error('extensionId must be a 32-character Chrome extension ID');
+  await assertNodeRuntimeExecutable(nodeExecutable);
   const existingManifestLocation = manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory });
   await assertManifestOwnedOrAbsent(existingManifestLocation.manifestPath, paths.launcherPath);
   const previousRecord = await readOptionalPairingRecord(paths.pairingRecordPath);
@@ -212,6 +254,7 @@ async function installNativeHostLocked({
     homeDirectory,
     localAppData,
     userDataDirectory,
+    nodeExecutable,
   });
   if (existing && existing.extensionId === extensionId && existing.artifactDigest === artifact.artifactDigest) {
     return { ...existing, operation: 'unchanged' };
@@ -228,7 +271,11 @@ async function installNativeHostLocked({
     installedAt: previousRecord?.installedAt ?? timestamp,
     updatedAt: timestamp,
   };
-  const launcherSource = await readFile(join(sourceDirectory, 'native-host-launcher.mjs'));
+  const launcherSource = renderNativeHostLauncher({
+    nodeExecutable,
+    artifactEntrypoint: artifact.artifactEntrypoint,
+    pairingRecordPath: paths.pairingRecordPath,
+  });
   const plan = buildNativeHostInstallPlan({
     platform,
     homeDirectory,
@@ -311,6 +358,7 @@ async function uninstallNativeHostLocked({
   await unlink(paths.launcherPath).catch((error) => {
     if (error?.code !== 'ENOENT') throw error;
   });
+  await removePersonalChromeConversationAuthorizations(paths.conversationBindingPath);
   return {
     status: 'absent',
     operation: 'uninstalled',
@@ -319,6 +367,7 @@ async function uninstallNativeHostLocked({
     pairingRecordPath: paths.pairingRecordPath,
     launcherPath: paths.launcherPath,
     ledgerRetained: await pathExists(paths.ledgerPath),
+    conversationBindingRemoved: !(await pathExists(paths.conversationBindingPath)),
   };
 }
 export async function uninstallNativeHost(options = {}) {

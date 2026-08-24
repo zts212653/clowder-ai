@@ -76,8 +76,11 @@ const client = new CodexAppServerClient({
 const agentTexts: string[] = [];
 try {
   for await (const event of client.run({
-    prompt:
-      'Run the shell command `sleep 2 && printf ready` now. After that command completes, if you receive a message beginning with "📬 freshness notice", reply exactly F254_NOTICE_SEEN. Otherwise reply exactly F254_NOTICE_MISSED.',
+    prompt: {
+      kind: 'frozen',
+      prompt:
+        'Run the shell command `sleep 2 && printf ready` now. After that command completes, if you receive a message beginning with "📬 freshness notice", reply exactly F254_NOTICE_SEEN. Otherwise reply exactly F254_NOTICE_MISSED.',
+    },
     thread: { kind: 'start' },
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',

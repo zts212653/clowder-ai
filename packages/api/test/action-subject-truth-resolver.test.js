@@ -205,15 +205,13 @@ describe('ActionSubjectTruthResolver', () => {
     );
   });
 
-  it('verifies a durable local-cat verdict message against the exact lease route and HEAD', async () => {
+  it('verifies a durable typed local-cat verdict against the exact lease route and server-owned HEAD', async () => {
     const evidenceRef = 'local-review:message-1:g2:changes_requested';
     const localReviewEvidenceProvider = {
       async resolve(input) {
         assert.deepEqual(input, {
-          evidenceRef,
+          messageId: 'message-1',
           leaseId: 'lease-review-2',
-          subjectRef: 'pr:owner/repo#2868',
-          headSha: HEAD_NEW,
           generation: 2,
           reviewerCatId: 'codex-terra',
           holderThreadId: 'thread-review',
@@ -221,7 +219,7 @@ describe('ActionSubjectTruthResolver', () => {
           predecessorThreadId: 'thread-review',
           tenantScope: 'user-1',
         });
-        return { status: 'verified', evidenceRef };
+        return { status: 'verified', evidenceRef, verdict: 'changes_requested' };
       },
     };
     const { resolver } = harness({

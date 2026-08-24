@@ -1,6 +1,6 @@
 /**
  * Session Transcript Routes — F24 Phase D + F98
- * API endpoints for reading sealed session transcripts.
+ * API endpoints for reading active and sealed session transcripts.
  *
  * GET  /api/sessions/:sessionId/events                    — Paginated events (view=raw|chat|handoff)
  * GET  /api/sessions/:sessionId/digest                    — Extractive digest
@@ -8,60 +8,70 @@
  * GET  /api/threads/:threadId/sessions/search              — Full-text search
  */
 
-import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
-import { z } from 'zod';
+import type { FastifyInstance } from 'fastify';
+import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
+import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
+import { mergeTranscriptEventSources } from '../domains/cats/services/session/TranscriptEventEnvelope.js';
 import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
-import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
-import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
+import {
+  canReadThreadRecord,
+  filterThreadRecords,
+  resolveThreadAccess,
+  threadAccessDeniedBody,
+  threadRecordAccessDeniedBody,
+} from '../domains/cats/services/session/thread-access-policy.js';
 import { resolveUserId } from '../utils/request-identity.js';
-
-const VALID_VIEWS = new Set(['raw', 'chat', 'handoff']);
-
-interface SessionTranscriptRouteOptions extends FastifyPluginOptions {
-  sessionChainStore: ISessionChainStore;
-  threadStore: IThreadStore;
-  transcriptReader: TranscriptReader;
-}
-
-/** Strict integer parse: only pure decimal digit strings (no whitespace, no partial) */
-function strictParseInt(s: string): number {
-  return /^\d+$/.test(s) ? Number(s) : NaN;
-}
-
-const searchSchema = z.object({
-  q: z.string().min(1).max(500),
-  cats: z.string().optional(),
-  sessionIds: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).optional(),
-  scope: z.enum(['digests', 'transcripts', 'both']).optional(),
-});
-
-function checkCatIdAccess(request: { headers: Record<string, unknown> }, sessionCatId: string): string | null {
-  const callerCatId = request.headers['x-cat-id'] as string | undefined;
-  if (callerCatId && sessionCatId !== callerCatId) {
-    return 'Access denied: session belongs to a different cat';
-  }
-  return null;
-}
-
-function canAccessSessionThread(
-  thread: { id: string; createdBy: string; externalRuntimeAnchorState?: { userId: string } | undefined } | null,
-  session: { userId: string },
-  userId: string,
-): boolean {
-  if (!thread) return false;
-  if (thread.createdBy === userId) return true;
-  if (thread.externalRuntimeAnchorState?.userId === userId && session.userId === userId) return true;
-  return isSharedDefaultThread(thread) && session.userId === userId;
-}
+import { registerInvocationTrajectoryRoutes } from './invocation-trajectory-routes.js';
+import {
+  checkTranscriptCatAccess,
+  strictParseTranscriptInteger,
+  transcriptSearchSchema,
+  VALID_TRANSCRIPT_VIEWS,
+} from './session-transcript-route-helpers.js';
+import type { ReadableSession, SessionTranscriptRouteOptions } from './session-transcript-route-types.js';
 
 export async function sessionTranscriptRoutes(
   app: FastifyInstance,
   opts: SessionTranscriptRouteOptions,
 ): Promise<void> {
-  const { sessionChainStore, threadStore, transcriptReader } = opts;
+  const {
+    invocationRecordStore,
+    sessionChainStore,
+    threadStore,
+    transcriptReader,
+    transcriptWriter,
+    messageStore,
+    turnExecutionStore,
+  } = opts;
+
+  async function readActiveSessionEvents(session: ReadableSession) {
+    if (session.status !== 'sealed' && transcriptWriter) {
+      return transcriptWriter.readActiveEvents({
+        sessionId: session.id,
+        threadId: session.threadId,
+        catId: session.catId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        seq: session.seq,
+      });
+    }
+    return [];
+  }
+
+  async function readSessionEvents(session: ReadableSession) {
+    const activeEvents = await readActiveSessionEvents(session);
+    const persistedEvents = await transcriptReader.readAllEvents(session.id, session.threadId, session.catId);
+    return mergeTranscriptEventSources(persistedEvents, activeEvents);
+  }
+
+  async function readInvocationEvents(session: ReadableSession, invocationId: string) {
+    return (await readSessionEvents(session)).filter((event) => event.invocationId === invocationId);
+  }
+
+  registerInvocationTrajectoryRoutes(app, {
+    stores: { invocationRecordStore, sessionChainStore, threadStore },
+    readSessionEvents,
+    readInvocationEvents,
+  });
 
   // GET /api/sessions/:sessionId/events — Paginated event read (F98: view modes)
   app.get<{
@@ -81,32 +91,40 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!canAccessSessionThread(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr = checkCatIdAccess(request, session.catId);
+    const callerCatIdErr = checkTranscriptCatAccess(request, session.catId);
     if (callerCatIdErr) {
       reply.status(403);
       return { error: callerCatIdErr };
     }
 
     const view = (request.query.view ?? 'raw') as string;
-    if (!VALID_VIEWS.has(view)) {
+    if (!VALID_TRANSCRIPT_VIEWS.has(view)) {
       reply.status(400);
       return { error: `Invalid view: must be one of raw, chat, handoff` };
     }
 
     const cursorParam = request.query.cursor;
-    const cursorNum = cursorParam ? strictParseInt(cursorParam) : undefined;
+    const cursorNum = cursorParam ? strictParseTranscriptInteger(cursorParam) : undefined;
     if (cursorNum != null && (Number.isNaN(cursorNum) || cursorNum < 0)) {
       reply.status(400);
       return { error: 'Invalid cursor: must be a non-negative integer' };
     }
 
     const limitParam = request.query.limit;
-    const limitNum = limitParam ? strictParseInt(limitParam) : undefined;
+    const limitNum = limitParam ? strictParseTranscriptInteger(limitParam) : undefined;
     if (limitNum != null && (Number.isNaN(limitNum) || limitNum < 1)) {
       reply.status(400);
       return { error: 'Invalid limit: must be a positive integer' };
@@ -164,12 +182,20 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!canAccessSessionThread(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr2 = checkCatIdAccess(request, session.catId);
+    const callerCatIdErr2 = checkTranscriptCatAccess(request, session.catId);
     if (callerCatIdErr2) {
       reply.status(403);
       return { error: callerCatIdErr2 };
@@ -200,28 +226,36 @@ export async function sessionTranscriptRoutes(
     }
 
     const thread = await threadStore.get(session.threadId);
-    if (!canAccessSessionThread(thread, session, userId)) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'invocations', action: 'read' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
+    }
+    if (!canReadThreadRecord(access, session)) {
+      return reply.status(403).send(threadRecordAccessDeniedBody());
     }
 
-    const callerCatIdErr3 = checkCatIdAccess(request, session.catId);
+    const callerCatIdErr3 = checkTranscriptCatAccess(request, session.catId);
     if (callerCatIdErr3) {
       reply.status(403);
       return { error: callerCatIdErr3 };
     }
 
-    const events = await transcriptReader.readInvocationEvents(
-      sessionId,
-      session.threadId,
-      session.catId,
-      invocationId,
-    );
-    if (!events) {
-      return reply.status(404).send({ error: 'Invocation not found' });
-    }
+    const events = await readInvocationEvents(session, invocationId);
+    if (events.length === 0) return reply.status(404).send({ error: 'Invocation not found' });
 
-    return reply.send({ invocationId, events, total: events.length });
+    const summary = projectInvocationTrajectories(events, session)[0];
+    const promptInput = await projectInvocationPromptInput(
+      { messageStore, turnExecutionStore },
+      session,
+      invocationId,
+      userId,
+    );
+    return reply.send({ invocationId, events, total: events.length, summary, promptInput });
   });
 
   // GET /api/threads/:threadId/sessions/search — Full-text search
@@ -237,12 +271,17 @@ export async function sessionTranscriptRoutes(
 
     const { threadId } = request.params;
     const thread = await threadStore.get(threadId);
-    if (!thread || thread.createdBy !== userId) {
-      reply.status(403);
-      return { error: 'Access denied' };
+    const access = await resolveThreadAccess({
+      threadStore,
+      thread,
+      userId,
+      request: { resource: 'transcript', action: 'search' },
+    });
+    if (access.status === 403) {
+      return reply.status(403).send(threadAccessDeniedBody(access));
     }
 
-    const parseResult = searchSchema.safeParse(request.query);
+    const parseResult = transcriptSearchSchema.safeParse(request.query);
     if (!parseResult.success) {
       reply.status(400);
       return { error: 'Invalid query', details: parseResult.error.issues };
@@ -254,7 +293,14 @@ export async function sessionTranscriptRoutes(
     // Prevents game-playing cats from searching other cats' session content (KD-39)
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
     const catsArr = callerCatId ? [callerCatId] : cats?.split(',').filter(Boolean);
-    const sessionIdsArr = sessionIds?.split(',').filter(Boolean);
+    const requestedSessionIds = sessionIds?.split(',').filter(Boolean);
+    const accessibleSessions = filterThreadRecords(access, await sessionChainStore.getChainByThread(threadId));
+    const accessibleSessionIds = new Set(accessibleSessions.map((session) => session.id));
+    const sessionIdsArr = requestedSessionIds
+      ? requestedSessionIds.filter((sessionId) => accessibleSessionIds.has(sessionId))
+      : access.scope === 'user'
+        ? [...accessibleSessionIds]
+        : undefined;
 
     const hits = await transcriptReader.search(threadId, q, {
       ...(catsArr ? { cats: catsArr } : {}),

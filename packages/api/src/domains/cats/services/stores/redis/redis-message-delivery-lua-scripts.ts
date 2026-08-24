@@ -49,6 +49,13 @@ if status ~= 'queued' then
   return {0, redis.call('HGETALL', hash)}
 end
 
+-- A durable pre-CAS fan-out intent is active Queue work, not legacy speech
+-- whose visibility can be repaired by marking it delivered.
+local admission = redis.call('HGET', hash, 'queueCustodyAdmission')
+if admission and admission ~= '' then
+  return {0, redis.call('HGETALL', hash)}
+end
+
 -- F254: legacy markDelivered must not bypass active execution custody.
 local custody = redis.call('HGET', hash, 'queueCustody')
 if custody and custody ~= '' then
@@ -105,7 +112,7 @@ if status ~= 'queued' then
   return {0, redis.call('HGETALL', hash)}
 end
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
-redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision')
+redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision', 'queueCustodyAdmission')
 return {1, redis.call('HGETALL', hash)}
 `;
 

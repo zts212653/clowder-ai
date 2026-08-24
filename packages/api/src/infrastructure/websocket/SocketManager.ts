@@ -455,7 +455,7 @@ export class SocketManager {
     this.io.to(room).emit('agent_message', { ...message, threadId: tid, seq, seqEpoch });
   }
 
-  broadcastToRoom(room: string, event: string, data: unknown): void {
+  broadcastToRoom(room: string | string[], event: string, data: unknown): void {
     this.io.to(room).emit(event, data);
   }
 

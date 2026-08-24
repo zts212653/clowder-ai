@@ -6,6 +6,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markApiGetGeneration } from '@/utils/api-get-generation';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 // ── Mocks ─────────────────────────────────────────────────────
@@ -66,8 +67,15 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
+let nextMockGetGeneration = 0;
+
 function jsonOk(data: unknown) {
-  return Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(data) });
+  const response = new Response(JSON.stringify(data), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+  markApiGetGeneration(response, ++nextMockGetGeneration);
+  return Promise.resolve(response);
 }
 
 describe('Thread delete confirmation (I-1)', () => {

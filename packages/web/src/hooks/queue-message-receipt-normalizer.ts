@@ -12,11 +12,26 @@ import type {
 
 type UnknownRecord = Record<string, unknown>;
 
-const TARGET_STATES = new Set(['queued', 'notified', 'awakened', 'seen', 'failed', 'steering', 'withdrawn', 'handled']);
+const TARGET_STATES = new Set([
+  'queued',
+  'notified',
+  'awakened',
+  'seen',
+  'failed',
+  'interrupted',
+  'steering',
+  'withdrawn',
+  'handled',
+]);
 const REMINDER_STATES = new Set(['requested', 'delivered', 'seen', 'missed']);
 const REMINDER_MISSED_REASONS = new Set(['invocation_ended_before_delivery', 'delivered_not_read', 'source_withdrawn']);
-const ATTEMPT_STATES = new Set(['queued', 'starting', 'appended', 'failed', 'cancelled', 'handled']);
-const ATTEMPT_TERMINAL_REASONS = new Set(['invocation_failed', 'invocation_cancelled', 'source_withdrawn']);
+const ATTEMPT_STATES = new Set(['queued', 'starting', 'appended', 'failed', 'interrupted', 'cancelled', 'handled']);
+const ATTEMPT_TERMINAL_REASONS = new Set([
+  'invocation_failed',
+  'runtime_restart',
+  'invocation_cancelled',
+  'source_withdrawn',
+]);
 const WORK_DISPOSITIONS = new Set(['continue_current', 'next_work']);
 const HANDLED_DISPOSITIONS = new Set(['responded', 'completed_with_turn', 'managed_hold_disposition']);
 const FALLBACK_REASONS = new Set([

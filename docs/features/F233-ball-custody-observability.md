@@ -1,6 +1,6 @@
 ---
 feature_ids: [F233]
-related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F073, F280]
+related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F073, F280, F304]
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
@@ -188,7 +188,7 @@ Phase A + Phase B + Phase C 各 AC 大部分已 ✅（甚至 Phase C 通过 11+1
 |-------|------|------|
 | **Phase A：值班简报 (duty briefing)** | 🟡 **产品面 sunset，backend 代码保留** | 简报 2026-06-13 上线至 2026-08-17（65 天），operator 记不得 = 触发 doc line 141 sunset signal（"30 天内 operator 介入次数 = 0 → sunset 或重构形态"）。数据源（Phase B custody event log）保留；`duty-briefing` route + cron 短期保留观察，未来由新 Self-Sensing feat 决定是否重塑为 typed-projection 消费面。 |
 | **Phase B：球权事件账本**（`BallCustodyEventLog` / `Projector` / `ProjectionStore` / state-machine / 13 event kinds） | ✅ **代码全保 + 移交新 feat 作 canonical 事实源** | Phase B 是本 feat 唯一有**一手 canonical 账本**的对象——即将成为新 Self-Sensing feat 的核心事实源之一（custody snapshot 的一手账本）。INV-2 rebuild-safe / INV-10 8×16 全枚举 / Lua 幂等 append / 13 event kinds contract 全部保留。 |
-| **Phase C：feat trajectory 全链**（`TrajectoryPanel` + `FeatTrajectoryProjector` + `GitRefSnapshotCollector` + `ThreadSplitCollector` + `CrossPostCollector` + 15min collector cron + backfill 脚本 + `feat-trajectory` routes + `feat-trajectory:*` Redis keys） | 🔴 **方向标记失败；代码 rm 决策交新 invocation trajectory feat** | 拼装 feat 轨迹是**给没有 canonical 账本的对象拼轨迹**——结构性失败（详见 [LL-099](../public-lessons.md#ll-099-给没有-canonical-账本的对象拼轨迹是结构性失败)）。**代码不立即 rm**，两条硬约束：① `TrajectoryPanel` 已被 F252 Story Player 消费（`packages/web/src/components/workspace/trajectory/__tests__/TrajectoryPanel.entry.test.tsx` header 明确写 `F252 Phase C — TrajectoryPanel feat story entry point regression`），rm 会破坏 F252；② `FeatTrajectoryProjector` 部分基础设施（typed reference 模式、`GitRefSnapshot` 契约设计）可能被新 invocation trajectory feat 复用。由新 feat 立项后按 typed-migration 计划决策。 |
+| **Phase C：feat trajectory 全链**（`TrajectoryPanel` + `FeatTrajectoryProjector` + collectors + backfill 脚本 + `feat-trajectory` routes + `feat-trajectory:*` Redis keys） | 🔴 **方向失败；F304 退役 production cron，历史投影冻结可读** | 拼装 feat 轨迹是**给没有 canonical 账本的对象拼轨迹**——结构性失败（详见 [LL-099](../public-lessons.md#ll-099-给没有-canonical-账本的对象拼轨迹是结构性失败)）。F304 删除周期 TaskSpec 与 startup wiring，停止继续制造投影和 `gh` 子进程负载；`TrajectoryPanel`、store/routes、`/story/feat:*` 与手动 backfill 兼容实现继续保留，避免破坏 F252。 |
 | **Phase C pending：C1b/C1c（安乐死 MCP/UI surface）** | ❌ **撤销（不再实现）** | 依赖的 Phase C 方向已标记失败；C1a 安乐死事件 schema（`BallEuthanasiaKind` + 3 builders + state machine +3 rules）保留在 Phase B 账本一侧不做 UI 出口。AC-C1 撤销。 |
 
 ### Phase B 移交清单（给新 Self-Sensing feat）

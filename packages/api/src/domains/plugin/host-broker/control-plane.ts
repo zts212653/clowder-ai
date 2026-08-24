@@ -60,6 +60,14 @@ type CallLedgerDecision =
   | { readonly kind: 'replay'; readonly result: unknown }
   | { readonly kind: 'failed'; readonly error: BrokerCallError };
 
+type RuntimeLeaseRenewalDecision =
+  | { readonly kind: 'renewed' }
+  | {
+      readonly kind: 'lost_authority';
+      readonly closeRequired: boolean;
+      readonly proposedCloseReason: string;
+    };
+
 const DEFAULT_PRE_ACTIVE_TIMEOUT_MS = 10_000;
 const DEFAULT_ACTIVE_LEASE_TTL_MS = 30_000;
 
@@ -301,24 +309,41 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     const context = await this.currentCallContext(connectionId, 'protocol-intrinsic');
     const now = this.now();
     const expiresAt = now + this.activeLeaseTtlMs;
-    await this.options.store.transaction((transaction) => {
+    const decision = await this.options.store.transaction<RuntimeLeaseRenewalDecision>((transaction) => {
       const session = sessionForConnection(transaction, connectionId);
       const lease = transaction.runtimeLeases.get(session.runtimeLeaseId);
+      const leaseExpiredWhileActive =
+        session.phase === 'active' &&
+        ((session.activeLeaseExpiresAt !== undefined && session.activeLeaseExpiresAt <= now) ||
+          (lease !== undefined && lease.expiresAt <= now));
+      const contextStillMatches =
+        session.brokerSessionId === context.brokerSessionId &&
+        session.runtimeLeaseId === context.runtimeLeaseId &&
+        lease?.brokerSessionId === context.brokerSessionId &&
+        lease.pluginInstanceId === context.pluginInstanceId &&
+        lease.packageDigest === context.packageDigest &&
+        lease.grantRevision === context.grantRevision;
       if (
         session.phase !== 'active' ||
         session.activeLeaseExpiresAt === undefined ||
-        session.activeLeaseExpiresAt <= now ||
-        session.brokerSessionId !== context.brokerSessionId ||
-        session.runtimeLeaseId !== context.runtimeLeaseId ||
+        leaseExpiredWhileActive ||
         !lease ||
         lease.state !== 'live' ||
-        lease.expiresAt <= now ||
-        lease.brokerSessionId !== context.brokerSessionId ||
-        lease.pluginInstanceId !== context.pluginInstanceId ||
-        lease.packageDigest !== context.packageDigest ||
-        lease.grantRevision !== context.grantRevision
+        !contextStillMatches
       ) {
-        throw new HostBrokerError('SESSION_NOT_ACTIVE', `${connectionId} lost Broker authority before renewal`);
+        const proposedCloseReason =
+          session.phase === 'closed'
+            ? (session.closeReason ?? 'session_not_active')
+            : leaseExpiredWhileActive
+              ? 'runtime_lease_expired'
+              : !contextStillMatches
+                ? 'authority_changed'
+                : 'session_not_active';
+        return {
+          kind: 'lost_authority',
+          closeRequired: session.phase !== 'closed',
+          proposedCloseReason,
+        };
       }
       transaction.sessions.put({
         ...session,
@@ -330,7 +355,16 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
         expiresAt,
         updatedAt: now,
       });
+      return { kind: 'renewed' };
     });
+    if (decision.kind === 'lost_authority') {
+      await this.throwPersistedInactiveSession(
+        connectionId,
+        decision.proposedCloseReason,
+        decision.closeRequired,
+        `${connectionId} lost Broker authority before renewal`,
+      );
+    }
     return expiresAt;
   }
 
@@ -433,20 +467,34 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     connectionId: string,
     requiredGrant: Capability | 'protocol-intrinsic',
   ): Promise<BrokerCallContext> {
-    const session = await this.readSession(connectionId);
-    const lease = (await this.options.store.snapshot()).runtimeLeases.find(
-      (candidate) => candidate.runtimeLeaseId === session.runtimeLeaseId,
-    );
+    const brokerSnapshot = await this.options.store.snapshot();
+    const session = brokerSnapshot.sessions.find((candidate) => candidate.connectionId === connectionId);
+    if (!session) throw new HostBrokerError('SESSION_NOT_FOUND', `unknown Broker connection ${connectionId}`);
+    const lease = brokerSnapshot.runtimeLeases.find((candidate) => candidate.runtimeLeaseId === session.runtimeLeaseId);
+    const now = this.now();
+    const leaseExpiredWhileActive =
+      session.phase === 'active' &&
+      ((session.activeLeaseExpiresAt !== undefined && session.activeLeaseExpiresAt <= now) ||
+        (lease !== undefined && lease.expiresAt <= now));
     if (
       session.phase !== 'active' ||
       session.activeLeaseExpiresAt === undefined ||
-      session.activeLeaseExpiresAt <= this.now() ||
+      leaseExpiredWhileActive ||
       !lease ||
-      lease.state !== 'live' ||
-      lease.expiresAt <= this.now()
+      lease.state !== 'live'
     ) {
-      await this.close(connectionId, 'runtime_lease_expired').catch(() => undefined);
-      throw new HostBrokerError('SESSION_NOT_ACTIVE', `${connectionId} has no live Broker authority`);
+      const proposedCloseReason =
+        session.phase !== 'active'
+          ? (session.closeReason ?? 'session_not_active')
+          : leaseExpiredWhileActive
+            ? 'runtime_lease_expired'
+            : 'session_not_active';
+      return this.throwPersistedInactiveSession(
+        connectionId,
+        proposedCloseReason,
+        session.phase !== 'closed',
+        `${connectionId} has no live Broker authority`,
+      );
     }
     let authority: CurrentAuthority;
     try {
@@ -480,6 +528,21 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       grantRevision: authority.grants.grantRevision,
       effectiveGrants: [...authority.grants.effectiveGrants],
     };
+  }
+
+  private async throwPersistedInactiveSession(
+    connectionId: string,
+    proposedCloseReason: string,
+    closeRequired: boolean,
+    message: string,
+  ): Promise<never> {
+    if (closeRequired) await this.close(connectionId, proposedCloseReason).catch(() => undefined);
+    const persistedSession = await this.readSession(connectionId);
+    const closeReason =
+      persistedSession.phase === 'closed'
+        ? (persistedSession.closeReason ?? 'session_not_active')
+        : 'session_not_active';
+    throw new HostBrokerError('SESSION_NOT_ACTIVE', message, undefined, closeReason);
   }
 
   private async settleCallSuccess(

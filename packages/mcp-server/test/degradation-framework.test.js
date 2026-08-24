@@ -31,21 +31,26 @@ describe('withDegradation framework (F174-E)', () => {
     assert.ok(!result.isError);
   });
 
-  test('AC-E1: degrades on expired auth failure (degradable reason)', async () => {
+  test('F298: exact terminal disposition never degrades', async () => {
     const { withDegradation } = await import('../dist/tools/degradation.js');
+    let degradeCalled = false;
     const result = await withDegradation({
       toolName: 'test',
       primary: async () => ({
         isError: true,
-        content: [{ type: 'text', text: 'callback_auth_failed reason=expired' }],
+        content: [{ type: 'text', text: 'callback_auth_failed reason=interrupted' }],
       }),
       policy: {
         kind: 'custom',
-        degrade: async () => ({ content: [{ type: 'text', text: 'fallback-success' }] }),
+        degrade: async () => {
+          degradeCalled = true;
+          return { content: [{ type: 'text', text: 'fallback-success' }] };
+        },
       },
     });
-    assert.equal(result.content[0].text.includes('fallback-success'), true);
-    assert.ok(!result.isError);
+    assert.equal(degradeCalled, false);
+    assert.ok(result.isError);
+    assert.equal(result.content[0].text.includes('interrupted'), true);
   });
 
   test('AC-E1: degrades on unknown_invocation auth failure', async () => {
@@ -71,12 +76,12 @@ describe('withDegradation framework (F174-E)', () => {
       toolName: 'test',
       primary: async () => ({
         isError: true,
-        content: [{ type: 'text', text: 'callback_auth_failed reason=expired' }],
+        content: [{ type: 'text', text: 'callback_auth_failed reason=unknown_invocation' }],
       }),
       policy: { kind: 'none' },
     });
     assert.ok(result.isError, 'none policy must surface original error');
-    assert.equal(result.content[0].text.includes('expired'), true);
+    assert.equal(result.content[0].text.includes('unknown_invocation'), true);
   });
 
   test('AC-E3: invalid_token (not degradable) skips degrade — surfaces original', async () => {
@@ -157,7 +162,7 @@ describe('withDegradation framework (F174-E)', () => {
       toolName: 'test-tool',
       primary: async () => ({
         isError: true,
-        content: [{ type: 'text', text: 'callback_auth_failed reason=expired' }],
+        content: [{ type: 'text', text: 'callback_auth_failed reason=unknown_invocation' }],
       }),
       policy: {
         kind: 'custom',
@@ -179,7 +184,7 @@ describe('withDegradation framework (F174-E)', () => {
       toolName: 'test',
       primary: async () => ({
         isError: true,
-        content: [{ type: 'text', text: 'callback_auth_failed reason=expired' }],
+        content: [{ type: 'text', text: 'callback_auth_failed reason=unknown_invocation' }],
       }),
       policy: {
         kind: 'custom',

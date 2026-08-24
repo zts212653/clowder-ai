@@ -27,7 +27,8 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 ## 工作流
 
 ### 基础流程（端口发现 → 预览）
-1. **在 Terminal 启动 dev server**（`pnpm dev` / `npm start` / `vite` 等）
+1. **启动 dev server**：交互 Terminal 可直接跑；猫的 invocation/`-p` 会话必须用仓库的 managed launcher，让服务不随本轮退出：
+   `pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]`
 2. **Hub 自动检测端口** → 弹出 toast 提示"检测到 localhost:xxxx 启动"
 3. **点击 Open Preview** → 自动打开 browser panel 并加载页面
 4. **也可以手动**：切到 workspace 的 Browser tab，输入 `localhost:port` 按 Go
@@ -43,6 +44,10 @@ operator说过："别手动让我输入，你最好打开浏览器，把页面�
 
 ```
 Step 1: 确认目标服务器在跑
+  若由猫启动，先用 managed launcher 启动/查状态：
+  pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]
+  pnpm preview:process status --port PORT --cwd /absolute/project/path --json
+  → 只有 status=running 才进入下步；unavailable/unmanaged/stopped 必须如实报告
   curl -s -o /dev/null -w "%{http_code}" http://localhost:PORT
   → 200/301/304 = 可以继续
   → 000/connection refused = 服务器没起来，先启动再说
@@ -81,6 +86,7 @@ Step 3: 读返回的 deliveryStatus，再决定怎么报告
 |------|------|------|
 | 右侧无反应 | 目标服务器没在跑 / 未认证或 thread 归属不对 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再读工具返回的 `deliveryStatus` / 错误（401=未认证，400/403=thread scope） |
 | `{"error":"Proxy error","message":"socket hang up"}` | 目标服务器已退出 | 重启服务器，再刷新 Browser panel |
+| 猫回复后页面立刻 stopped | dev server 绑在 invocation PTY，回合结束被回收 | 用 `pnpm preview:process start ...` 托管；结束展示时用同一 cwd/port 执行 `stop` |
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
 
@@ -116,6 +122,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - 调样式/布局 → 改代码后在 browser panel 里实时查看
 - operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
+- invocation/`-p` 中启动的 dev server → 必须走 `preview:process`，并在报告中区分 running / unavailable / unmanaged / stopped
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看
 - 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `../.cat-cafe-shared-refs/evidence-output-contract.md`）
@@ -123,6 +130,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 ## 不要做的事
 
 - **不要跳过 Step 1（验证服务器）直接调 `cat_cafe_preview_open`** — 服务器没跑 = proxy error
+- **不要用普通后台 shell/PTY 冒充长期托管** — 回合结束会被回收；用 `preview:process` 并读 status
 - **不要用 Playwright / Chrome MCP / `open` 命令打开系统浏览器** — F120 是 Hub 内嵌预览，走 iframe，不走系统浏览器
 - **不要手写 `/api/preview/auto-open` 的 `curl`** — 主路径是 `cat_cafe_preview_open`
 - 不要手动去构造 gateway URL（让 Hub 前端处理）

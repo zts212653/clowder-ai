@@ -20,6 +20,8 @@ export type GhExecFileAsync = (file: string, args: readonly string[], options: u
 
 export interface FetchPrCiStatusOptions {
   readonly ghToken?: string;
+  /** Scheduler cancellation for every gh process in this poll generation. */
+  readonly signal?: AbortSignal;
   /** Test seam at the real gh JSON boundary; production always uses node:child_process. */
   readonly execFileAsync?: GhExecFileAsync;
 }
@@ -29,12 +31,17 @@ type MinimalLog = {
   debug?: (...args: unknown[]) => void;
 };
 
-async function executeGh(args: readonly string[], options: FetchPrCiStatusOptions): Promise<{ stdout: string }> {
+export async function executeGh(args: readonly string[], options: FetchPrCiStatusOptions): Promise<{ stdout: string }> {
+  options.signal?.throwIfAborted();
   const execute = options.execFileAsync ?? (execFileAsync as unknown as GhExecFileAsync);
   return execute(
     'gh',
     args,
-    withHiddenGhCliWindow({ timeout: GH_TIMEOUT_MS, env: buildGhCliEnv({ token: options.ghToken }) }),
+    withHiddenGhCliWindow({
+      timeout: GH_TIMEOUT_MS,
+      env: buildGhCliEnv({ token: options.ghToken }),
+      signal: options.signal,
+    }),
   );
 }
 
@@ -60,6 +67,7 @@ export async function fetchPrCiStatus(
     );
     prViewJson = stdout;
   } catch (err) {
+    options.signal?.throwIfAborted();
     log.warn(`[ci-status] gh pr view failed for ${repoFullName}#${prNumber}: ${String(err)}`);
     return null;
   }
@@ -117,68 +125,75 @@ async function fetchCheckDetails(
   log: MinimalLog,
   options: FetchPrCiStatusOptions,
 ): Promise<CiCheckDetail[]> {
-  for (const requiredFlag of ['--required', '']) {
+  let checks = await fetchRequiredFailingChecks(repoFullName, prNumber, options);
+  if (!checks) {
     try {
-      const args = [
-        'pr',
-        'checks',
-        String(prNumber),
-        '-R',
-        repoFullName,
-        '--json',
-        'name,bucket,link,workflow,description',
-      ];
-      if (requiredFlag) args.push(requiredFlag);
-
-      const { stdout } = await executeGh(args, options);
-      const parsed: Array<{ name: string; bucket: string; link?: string; workflow?: string; description?: string }> =
-        JSON.parse(stdout);
-
-      if (parsed.length > 0) {
-        const mapped = parsed.map((c) => ({
-          name: c.name,
-          bucket: normalizeBucket(c.bucket),
-          link: c.link,
-          workflow: c.workflow,
-          description: c.description,
-        }));
-        if (requiredFlag && !mapped.some((c) => c.bucket === 'fail')) {
-          continue;
-        }
-        return enrichGitHubExecutionFailures({
-          repoFullName,
-          headSha,
-          checks: mapped,
-          ghApiJson: (path) => ghApiJson(path, options),
-          warn: (message) => log.warn(message),
-        });
-      }
-
-      if (!requiredFlag) {
-        return enrichGitHubExecutionFailures({
-          repoFullName,
-          headSha,
-          checks: parsed.map((c) => ({
-            name: c.name,
-            bucket: normalizeBucket(c.bucket),
-            link: c.link,
-            workflow: c.workflow,
-            description: c.description,
-          })),
-          ghApiJson: (path) => ghApiJson(path, options),
-          warn: (message) => log.warn(message),
-        });
-      }
+      checks = await fetchGhCheckDetails(repoFullName, prNumber, false, options);
     } catch (err) {
-      if (requiredFlag) continue;
+      options.signal?.throwIfAborted();
       log.warn(`[ci-status] gh pr checks failed for ${repoFullName}#${prNumber}: ${String(err)}`);
       return [];
     }
   }
-  return [];
+
+  return enrichGitHubExecutionFailures({
+    repoFullName,
+    headSha,
+    checks,
+    ghApiJson: (path) => ghApiJson(path, options),
+    warn: (message) => log.warn(message),
+  });
 }
 
-async function ghApiJson<T>(path: string, options: FetchPrCiStatusOptions): Promise<T> {
+async function fetchGhCheckDetails(
+  repoFullName: string,
+  prNumber: number,
+  requiredOnly: boolean,
+  options: FetchPrCiStatusOptions,
+): Promise<CiCheckDetail[]> {
+  const args = [
+    'pr',
+    'checks',
+    String(prNumber),
+    '-R',
+    repoFullName,
+    '--json',
+    'name,bucket,link,workflow,description',
+  ];
+  if (requiredOnly) args.push('--required');
+  const { stdout } = await executeGh(args, options);
+  const parsed = JSON.parse(stdout) as Array<{
+    name: string;
+    bucket: string;
+    link?: string;
+    workflow?: string;
+    description?: string;
+  }>;
+  return parsed.map((check) => ({
+    name: check.name,
+    bucket: normalizeBucket(check.bucket),
+    link: check.link,
+    workflow: check.workflow,
+    description: check.description,
+  }));
+}
+
+/** Preserve the historical `gh pr checks --required` failure projection. */
+export async function fetchRequiredFailingChecks(
+  repoFullName: string,
+  prNumber: number,
+  options: FetchPrCiStatusOptions,
+): Promise<CiCheckDetail[] | null> {
+  try {
+    const checks = await fetchGhCheckDetails(repoFullName, prNumber, true, options);
+    return checks.some((check) => check.bucket === 'fail') ? checks : null;
+  } catch {
+    options.signal?.throwIfAborted();
+    return null;
+  }
+}
+
+export async function ghApiJson<T>(path: string, options: FetchPrCiStatusOptions): Promise<T> {
   const { stdout } = await executeGh(['api', path], options);
   return JSON.parse(stdout) as T;
 }

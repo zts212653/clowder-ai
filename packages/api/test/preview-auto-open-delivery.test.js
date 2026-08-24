@@ -65,6 +65,15 @@ describe('preview auto-open delivery contract', () => {
     });
   });
 
+  it('does not let a hidden client receipt win delivery aggregation', () => {
+    assert.deepEqual(
+      aggregatePreviewAutoOpenReceipts('evt-hidden', [
+        { status: 'skipped', eventId: 'evt-hidden', reason: 'client_inactive' },
+      ]),
+      { deliveryStatus: 'unconfirmed', deliveryReason: 'no_matching_client' },
+    );
+  });
+
   it('rejects unsupported receipt reasons before deterministic tie-breaking', () => {
     assert.deepEqual(
       aggregatePreviewAutoOpenReceipts('evt-reason', [

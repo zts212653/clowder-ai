@@ -10,14 +10,14 @@
 import Fastify from 'fastify';
 import './setup-cat-registry.js';
 
-export async function createTestContext() {
+export async function createTestContext(options = {}) {
   const { InvocationRegistry } = await import(
     '../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
   );
   const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
   const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
-  const registry = new InvocationRegistry();
+  const registry = new InvocationRegistry(options);
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
   const socketManager = {

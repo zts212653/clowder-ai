@@ -1,5 +1,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import {
+  assertCoveredMessageIds,
   assertCreateTurnExecutionInput,
   assertTurnExecutionTerminalInput,
   serializeTurnExecutionIdentity,
@@ -11,6 +12,9 @@ import {
 
 export interface RedisTurnExecutionHash {
   immutableIdentity?: string;
+  /** Late-bound coverage stays outside legacy causal so old readers remain valid. */
+  coveredMessageIds?: string;
+  coveredMessageIdsIdentity?: string;
   invocationId?: string;
   parentInvocationId?: string;
   threadId?: string;
@@ -50,6 +54,15 @@ function parseCausal(raw: string | undefined): TurnExecutionCausalRefs | undefin
   return { ...(JSON.parse(raw) as TurnExecutionCausalRefs) };
 }
 
+function parseCoveredMessageIds(raw: string): string[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((value): value is string => typeof value === 'string')) {
+    throw new Error('coveredMessageIds must be a string array');
+  }
+  assertCoveredMessageIds(parsed);
+  return [...parsed];
+}
+
 function hasValidLifecycle(record: TurnExecutionRecord): boolean {
   if (record.status === 'running') {
     return record.endedAt === undefined && record.terminalReason === undefined;
@@ -68,8 +81,8 @@ export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutio
   try {
     if (!['ordinary', 'routing_guard', 'freshness_supplement'].includes(data.executionKind)) return null;
     if (!['running', 'succeeded', 'failed', 'canceled', 'interrupted'].includes(data.status)) return null;
-    const causal = parseCausal(data.causal);
-    const record: TurnExecutionRecord = {
+    const legacyCausal = parseCausal(data.causal);
+    const legacyRecord: TurnExecutionRecord = {
       invocationId: data.invocationId,
       parentInvocationId: data.parentInvocationId,
       threadId: data.threadId,
@@ -77,14 +90,29 @@ export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutio
       catId: data.catId as CatId,
       executionKind: data.executionKind as TurnExecutionKind,
       startedAt: Number(data.startedAt),
-      ...(causal ? { causal } : {}),
+      ...(legacyCausal ? { causal: legacyCausal } : {}),
       status: data.status as TurnExecutionStatus,
       ...(data.endedAt ? { endedAt: Number(data.endedAt) } : {}),
       ...(data.terminalReason ? { terminalReason: data.terminalReason } : {}),
     };
+    assertCreateTurnExecutionInput(legacyRecord);
+    if (data.immutableIdentity !== serializeTurnExecutionIdentity(legacyRecord)) return null;
+    const hasCoverage = data.coveredMessageIds !== undefined;
+    const hasCoverageIdentity = data.coveredMessageIdsIdentity !== undefined;
+    if (hasCoverage !== hasCoverageIdentity) return null;
+    const record = hasCoverage
+      ? {
+          ...legacyRecord,
+          causal: {
+            ...(legacyRecord.causal ?? {}),
+            coveredMessageIds: parseCoveredMessageIds(data.coveredMessageIds!),
+          },
+        }
+      : legacyRecord;
     assertCreateTurnExecutionInput(record);
     if (!hasValidLifecycle(record)) return null;
-    return data.immutableIdentity === serializeTurnExecutionIdentity(record) ? record : null;
+    if (hasCoverageIdentity && data.coveredMessageIdsIdentity !== serializeTurnExecutionIdentity(record)) return null;
+    return record;
   } catch {
     return null;
   }

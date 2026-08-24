@@ -119,6 +119,126 @@ describe('InvocationQueue.findInFlightAgentEntry (F-coalesce)', () => {
   });
 });
 
+describe('PR7 failed A2A target ordinary eligibility', () => {
+  test('dedup, coalescing, auto-execute, and continuation dequeue all skip the failed target', async () => {
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const q = new InvocationQueue();
+    const { entry } = q.enqueue(agentEntryInput({ content: 'failed handoff', messageId: 'message-failed' }));
+    q.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'antig-opus',
+      'invocation-failed',
+      new Set([entry.id]),
+      'invocation_failed',
+      200,
+    );
+
+    assert.equal(q.findInFlightAgentEntry('t1', 'antig-opus', 'opus'), null, 'dedup must ignore failed target');
+    assert.equal(
+      q.coalesceContentIntoQueuedAgent('t1', 'system', entry.id, 'ordinary sibling handoff', 'message-new'),
+      false,
+      'ordinary coalescing must not reopen failed custody',
+    );
+    assert.deepEqual(q.listAutoExecute('t1'), [], 'auto-execute must not replay failed target');
+    assert.equal(q.peekNextQueued('t1', 'system'), null, 'per-user continuation dequeue must skip failed target');
+    assert.equal(q.markProcessingAcrossUsers('t1'), null, 'cross-user continuation dequeue must skip failed target');
+    assert.equal(q.markProcessingById('t1', entry.id), false, 'entry-id auto-execute race guard must recheck failure');
+    assert.equal(q.hasQueuedAgentForCat('t1', 'antig-opus'), false);
+    assert.equal(q.hasActiveOrQueuedAgentForCat('t1', 'antig-opus'), false);
+    assert.equal(q.hasPendingForCat('t1', 'antig-opus'), false);
+    assert.equal(q.hasQueuedOrProcessingForCat('t1', 'antig-opus'), false);
+
+    const stillFailed = q.getEntrySnapshot('t1', 'system', entry.id);
+    assert.deepEqual(stillFailed.queuedFailedByCatIds, ['antig-opus']);
+    assert.equal(stillFailed.content, 'failed handoff');
+
+    const fresh = q.enqueue(
+      agentEntryInput({ content: 'later fresh handoff', messageId: 'message-fresh', targetCats: ['antig-opus'] }),
+    ).entry;
+    const advanced = q.markProcessingAcrossUsers('t1');
+    assert.equal(advanced.id, fresh.id, 'a failed head must not starve later eligible work');
+    assert.deepEqual(q.getEntrySnapshot('t1', 'system', entry.id).queuedFailedByCatIds, ['antig-opus']);
+
+    const retry = q.retryFailedTarget('t1', 'system', entry.id, 'antig-opus');
+    assert.ok(retry, 'the explicit retry transition remains the sole reopening path');
+    assert.deepEqual(
+      q.listAutoExecute('t1').map((candidate) => candidate.id),
+      [entry.id],
+    );
+  });
+
+  test('a failed target cannot hide or re-enter through an eligible same-carrier sibling', async () => {
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const q = new InvocationQueue();
+    const { entry } = q.enqueue(
+      agentEntryInput({
+        content: 'mixed handoff',
+        messageId: 'message-mixed',
+        targetCats: ['antig-opus', 'codex'],
+      }),
+    );
+    q.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'antig-opus',
+      'invocation-failed',
+      new Set([entry.id]),
+      'invocation_failed',
+      200,
+    );
+
+    assert.equal(q.findInFlightAgentEntry('t1', 'antig-opus'), null);
+    assert.equal(
+      q.coalesceContentIntoQueuedAgent(
+        't1',
+        'system',
+        entry.id,
+        'must not reopen opus',
+        'message-opus-repeat',
+        undefined,
+        undefined,
+        undefined,
+        'antig-opus',
+      ),
+      false,
+    );
+    assert.equal(q.findInFlightAgentEntry('t1', 'codex')?.id, entry.id);
+    assert.deepEqual(
+      q.listAutoExecute('t1').map((candidate) => candidate.id),
+      [entry.id],
+    );
+  });
+});
+
+describe('PR7 fan-out custody admission fence', () => {
+  test('keeps staged carriers pending but nonselectable until the full group commits', async () => {
+    const { InvocationQueue } = await import(QUEUE_PATH);
+    const q = new InvocationQueue();
+    const admissionId = 'fanout-admission-1';
+    const { entry } = q.enqueue(
+      agentEntryInput({
+        content: 'staged handoff',
+        messageId: 'message-staged',
+        queueCustodyAdmissionId: admissionId,
+      }),
+    );
+
+    assert.equal(q.countAgentEntriesForThread('t1'), 1, 'depth accounting must retain in-flight admission');
+    assert.equal(q.hasQueuedAgentForCat('t1', 'antig-opus'), true, 'dedup must still see pending ownership');
+    assert.equal(q.hasPendingForCat('t1', 'antig-opus'), true, 'liveness must still see pending ownership');
+    assert.deepEqual(q.listAutoExecute('t1'), [], 'auto-execute must not publish a staged carrier');
+    assert.equal(q.peekNextQueued('t1', 'system'), null, 'continuation dequeue must not publish a staged carrier');
+    assert.equal(q.markProcessingById('t1', entry.id), false, 'entry-id races must recheck the fence');
+    assert.equal(q.commitQueueCustodyAdmission('t1', 'system', 'wrong-admission', [entry.id]), false);
+    assert.equal(q.getEntrySnapshot('t1', 'system', entry.id).queueCustodyAdmissionId, admissionId);
+
+    assert.equal(q.commitQueueCustodyAdmission('t1', 'system', admissionId, [entry.id]), true);
+    assert.deepEqual(
+      q.listAutoExecute('t1').map((candidate) => candidate.id),
+      [entry.id],
+    );
+  });
+});
+
 describe('InvocationQueue.coalesceContentIntoQueuedAgent (F-coalesce sourceCategory guard)', () => {
   // 云端 codex R4 P1 defense-in-depth: even if a caller passes a non-a2a entryId, coalesce must refuse.
   test('refuses to coalesce into a CONTINUATION entry', async () => {

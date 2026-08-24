@@ -41,6 +41,8 @@ export interface SchedulerMessageExtra {
   };
   /** F276: server-written, content-free carrier for one deferred write-opportunity re-entry. */
   writeOpportunityReentry?: import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1;
+  /** F292/F296: server-written, refs-only retry for one unchanged write-opportunity generation. */
+  writeOpportunityPresentationRetry?: import('./memory-write-opportunity.js').WriteOpportunityPresentationRetryCarrierV1;
 }
 
 export type ReplyPreviewKind = 'scheduler_trigger';
@@ -66,6 +68,28 @@ export interface ConnectorSource {
   readonly meta?: Readonly<Record<string, unknown>>;
   /** F134: Original sender info for group chat messages (message-level binding, not thread-level) */
   readonly sender?: { readonly id: string; readonly name?: string };
+}
+
+/**
+ * F167 PR5: immutable identity for the user-visible managed-hold wake/result
+ * rows that Message Bundle may offer. Runtime authorship and owner access are
+ * additional server-side guards; this shared predicate keeps Web affordance
+ * and API source classification on the same connector contract.
+ */
+export function isSelectableManagedHoldConnectorSource(
+  source: Pick<ConnectorSource, 'connector' | 'meta'> | null | undefined,
+): boolean {
+  const meta = source?.meta;
+  return Boolean(
+    source?.connector === 'hold-ball' &&
+      meta?.wakeWhen === true &&
+      typeof meta.taskId === 'string' &&
+      meta.taskId.trim().length > 0 &&
+      typeof meta.threadId === 'string' &&
+      meta.threadId.trim().length > 0 &&
+      typeof meta.catId === 'string' &&
+      meta.catId.trim().length > 0,
+  );
 }
 
 // ── Connector Definition (registry entry) ──

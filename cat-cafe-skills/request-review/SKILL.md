@@ -130,6 +130,10 @@ instructions 中的 no-comment 禁令必须在新 HEAD 复审前清除。
 - 外部作者或 external PR / Issue custody：verdict 必须写回同一 GitHub subject，并绑定精确 PR HEAD / Issue body digest；没有 review/comment URL 就还没完成。
 - 本地猫通过 `@` / handoff 交来的 review：默认走 author cat route。**direct review carrier** 是直接承载本轮 review 请求、并被 lease 记录为 `predecessorThreadId` 的 thread；它压过任务祖先 thread、旧 `sourceThreadId` 与继承 coordination。开始真实 review 链时，同 thread 用 `post_message(coordination.phase=active)`，跨 thread 用 `cross_post_message(coordination.phase=active)`；final verdict 用同一 carrier 的 `coordination.phase=terminal` 回 direct review carrier。结构化 action 失败后的普通消息降级必须留在该 carrier，并显式带 `coordination={phase:"active", subjectRef:"<same subjectRef>"}`；不得裸继承旧链。包内带 final HEAD / content digest 与独立验证证据，不强制 GitHub comment。
 
+  invocation-bound local review lease 的 final post 必须在同一次调用里同时带显式 `clientMessageId` 与 typed
+  `localReviewVerdict`（`approved | changes_requested | commented`）。`coordination.phase=terminal` 只确定返还路由，
+  不能代替 verdict 事实；漏字段会在持久化前返回 `400 local_review_verdict_required`。公开正文格式不参与授权。
+
 两条完成证据不能互相代偿。本地 review 只有在 **merge-gate、repository rule 或 operator** 明确要求时才额外写 GitHub；额外 artifact 不取代回作者猫的 custody。
 
 terminal verdict 是这条 direct review coordination 的最后一次必达投递。作者确认 exact target、`no open items` 后直接进入 merge-gate 或 clean-stop；不再为了“出口必须有 @”回传 courtesy ACK。即使作者补发礼貌 ACK，terminal fence 也只持久化、不再唤醒 reviewer。

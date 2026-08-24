@@ -26,6 +26,58 @@ describe('SummaryCompactionTaskSpec', () => {
     assert.equal(result.run, false);
   });
 
+  it('finishes candidate derivation after the canonical summary commit boundary', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('test-thread', 25, 2000, 0, 'concat');
+    db.prepare(
+      `INSERT INTO evidence_docs (anchor, kind, status, title, summary, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run('thread-test-thread', 'thread', 'active', 'Test', 'old', new Date().toISOString());
+    const controller = new AbortController();
+    const candidates = [];
+    const spec = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
+      getMessagesAfterWatermark: async (_threadId, watermark) =>
+        watermark ? [] : [{ id: 'm1', content: 'hello', timestamp: Date.now() }],
+      generateAbstractive: async () => ({
+        segments: [
+          {
+            summary: 'committed summary',
+            topicKey: 'general',
+            topicLabel: 'General',
+            boundaryReason: 'test',
+            boundaryConfidence: 'high',
+            fromMessageId: 'm1',
+            toMessageId: 'm1',
+            messageCount: 1,
+            candidates: [{ kind: 'lesson', title: 'Keep obligations atomic', claim: 'finish committed effects' }],
+          },
+        ],
+      }),
+      reEmbed: async () => {
+        controller.abort(new Error('scheduler timeout'));
+      },
+      submitCandidate: async (candidate) => candidates.push(candidate),
+      logger: { info() {}, error() {} },
+    });
+    const gate = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+
+    await spec.run
+      .execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {
+        assignedCatId: null,
+        signal: controller.signal,
+      })
+      .catch(() => {});
+
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].title, 'Keep obligations atomic');
+  });
+
   it('gate returns run:true with per-thread workItems when eligible threads exist', async () => {
     const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
 

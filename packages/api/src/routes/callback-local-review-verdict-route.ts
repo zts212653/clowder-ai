@@ -15,8 +15,6 @@ import { getDeletedCallbackThreadGuard } from './callback-scope-helpers.js';
 const localReviewVerdictSchema = z
   .object({
     messageId: z.string().regex(LOCAL_REVIEW_MESSAGE_ID_PATTERN),
-    reviewedHeadSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
-    verdict: z.enum(['approved', 'changes_requested', 'commented']),
     actionLeaseRef: z
       .object({ leaseId: z.string().min(1), generation: z.number().int().positive() })
       .strict()
@@ -27,8 +25,6 @@ const localReviewVerdictSchema = z
 const localReviewRecoverySchema = z
   .object({
     messageId: z.string().regex(LOCAL_REVIEW_MESSAGE_ID_PATTERN),
-    reviewedHeadSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
-    verdict: z.enum(['approved', 'changes_requested', 'commented']),
     actionLeaseRef: z.object({ leaseId: z.string().min(1), generation: z.number().int().positive() }).strict(),
   })
   .strict();
@@ -137,8 +133,6 @@ export function registerCallbackLocalReviewVerdictRoute(
       leaseId: carrier.leaseId,
       generation: carrier.generation,
       messageId: parsed.data.messageId,
-      headSha: parsed.data.reviewedHeadSha,
-      verdict: parsed.data.verdict,
       now: Date.now(),
       principal: { catId: record.catId, threadId: record.threadId, tenantScope: record.userId },
     });
@@ -171,8 +165,6 @@ export function registerCallbackLocalReviewVerdictRoute(
       leaseId: parsed.data.actionLeaseRef.leaseId,
       generation: parsed.data.actionLeaseRef.generation,
       messageId: parsed.data.messageId,
-      headSha: parsed.data.reviewedHeadSha,
-      verdict: parsed.data.verdict,
       now: Date.now(),
       principal: { catId: record.catId, threadId: record.threadId, tenantScope: record.userId },
     });

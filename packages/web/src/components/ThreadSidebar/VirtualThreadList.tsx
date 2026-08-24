@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Thread } from '@/stores/chat-types';
+import type { SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 
 export const VIRTUAL_THREAD_LIST_THRESHOLD = 50;
 const ROW_HEIGHT_PX = 80;
@@ -20,9 +20,9 @@ export interface VirtualThreadListHandle {
 }
 
 interface VirtualThreadListProps {
-  threads: Thread[];
+  threads: SidebarSnapshotRow[];
   scrollContainerRef: RefObject<HTMLDivElement>;
-  renderItem: (thread: Thread) => ReactNode;
+  renderItem: (thread: SidebarSnapshotRow) => ReactNode;
 }
 
 function offsetTopWithin(element: HTMLElement, container: HTMLElement): number {

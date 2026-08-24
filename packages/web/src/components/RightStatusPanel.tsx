@@ -1,12 +1,11 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { catColorVar } from '@/lib/cat-slug';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import { AuditExplorerPanel } from './audit/AuditExplorerPanel';
 import { CatTokenUsage } from './CatTokenUsage';
 import { PlanBoardPanel } from './PlanBoardPanel';
 import { SessionChainPanel } from './SessionChainPanel';
@@ -377,14 +376,6 @@ export function RightStatusPanel({
 
   const { getCatById } = useCatData();
   const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen);
-  const [viewSession, setViewSession] = useState<{ id: string; catId?: string } | null>(null);
-
-  // Clear session viewer when switching threads
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset on threadId change only
-  React.useEffect(() => {
-    setViewSession(null);
-  }, [threadId]);
-
   const copyText = useCallback((value: string) => {
     void navigator.clipboard.writeText(value);
   }, []);
@@ -486,11 +477,7 @@ export function RightStatusPanel({
 
       <PlanBoardPanel threadId={threadId} catInvocations={catInvocations} />
 
-      <SessionChainPanel
-        threadId={threadId}
-        catInvocations={catInvocations}
-        onViewSession={(id, catId) => setViewSession({ id, catId })}
-      />
+      <SessionChainPanel threadId={threadId} catInvocations={catInvocations} activeInvocations={activeInvocations} />
 
       <section className={`${SIDEBAR_CARD} p-2.5`}>
         <h3 className="text-label font-bold text-cafe mb-2">对话信息</h3>
@@ -511,14 +498,6 @@ export function RightStatusPanel({
           <RevealWhispersButton threadId={threadId} />
         </div>
       </section>
-
-      <AuditExplorerPanel
-        key={threadId}
-        threadId={threadId}
-        externalSessionId={viewSession?.id ?? null}
-        externalSessionCatId={viewSession?.catId}
-        onCloseSession={() => setViewSession(null)}
-      />
 
       <RuntimeLogsButton />
     </aside>

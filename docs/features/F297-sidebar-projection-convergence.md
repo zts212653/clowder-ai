@@ -1,6 +1,6 @@
 ---
 feature_ids: [F297]
-related_features: [F069, F081, F095, F164, F183, F194, F277, F295]
+related_features: [F069, F081, F095, F164, F183, F194, F277, F295, F304]
 topics: [sidebar, projection, state-convergence, write-path, authority, thread-list]
 doc_kind: spec
 created: 2026-08-17
@@ -13,13 +13,15 @@ tips_exempt: "内部状态收敛与写入面重构；不新增用户可操作的
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入
 
-> **Status**: in progress / Phase A done + Phase B server slice **merged** (PR #3748 @ `9d19ce085`, 2026-08-18) — Phase B server slice 全部 AC 闭合（AC-B2 规模 fixture + AC-D3 重复读取审计 2026-08-18 收口）；next: **Phase C 前端 authority boundary（用户可见 bug 仍未修复）** | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Phase B 实现**: Ragdoll (@fable5) | **Reviewer**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done | **Completed**: 2026-08-21 | **Evolved from**: F081 | **Renewed CloseGate**: PASS by 小团团·Maine Coon (@codex-terra)，P1 deferred = 0（`0001787371427031-000209-64cae1d3`）；prior Luna verdict remains superseded by the working-order runtime counterexample | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1
 >
 > **operator kickoff**: `0001786949883267-000007-1c4fc745`（“回到数学之美和第一性原理”“可以立项一下”“你主导，他辅助 review”；并授权 F081 AC-B2 处置由 owner 自决）+ `0001786950276392-000031-c800463d`（“立项直接 commit push，不需要提 PR，Maine Coon re 出来的问题当场改”）。
 >
+> **Phase C operator authorization**: `0001787125999181-000083-03fb3f46`（Phase C 改由 @codex-sol 主写；exact-HEAD reviewer 优先 @kimi；Phase D / 合入后 alpha acceptance 另行闭环）。
+>
 > Ownership boundary：独立窄 Sidebar projection store/DTO、刷新/缓存边界与用户侧消费归 `thread-navigation`。运行态输入继续由 `dispatch` 的 F295 active-execution projection 与 F194 liveness classifier 持有；F297 只组合并切断 Sidebar 的 legacy read，不复制或全局禁写其生命周期状态。Map delta: **updated in this AC-A3 review**。
 
-Architecture cell: thread-navigation
+Architecture cell: thread-navigation # Phase C authority-boundary update
 
 ## Why
 
@@ -62,7 +64,7 @@ Architecture cell: thread-navigation
 - F069 已有批量 unread read model。
 - F194 已有单 thread 的 canonical liveness classifier，但其依赖是 per-thread `listRunningByThread/getDrafts/getActiveSlots`，不能循环 1760 个 thread 冒充批量接口。
 - F295 已有 execution-scoped server projection、精确 cancel fence 与前端 snapshot store；当前 project-wide endpoint 仍线性遍历 project threads，每 4 秒刷新。F297 应**抽取并复用这条 server composition service**，而不是在 `thread-navigation` 再写一份 4-store liveness 算法。
-- ThreadStore 已持久化 participants 与 `participantActivity.lastResponseHealthy`，可作为“最近一次猫回复 done/error”摘要；active execution 必须优先覆盖它，active 消失本身不得被推断为 done。
+- ThreadStore 的 `participantActivity.lastResponseHealthy` 只证明“历史上有猫回过话”，**不是 invocation 终态证据**。把它当 done/error 正是 2026-08-19 批量假绿 ✓ 回归的根因；Sidebar 只能从 InvocationRecord lifecycle 取真实 terminal witness。
 - F164 的 IndexedDB 是 first-paint cache，不是 authority。当前代码没有统一规则限制它只能在本轮首次 canonical apply 之前生效。
 
 ### 写入普查是迁移输入，不是定理
@@ -114,7 +116,7 @@ F183 的 `lastSeq/lastSeqEpoch` 证明了一个可复用原则：**ordering auth
 
 - thread identity / title / project / pin / favorite / labels / participants；
 - unread count / mention；
-- per-thread Sidebar presence：active execution（来自 F295/F194）优先，否则使用 ThreadStore participant activity 表达最近 done/error；
+- per-thread Sidebar presence：active execution（来自 F295/F194）优先；done/error 只来自 InvocationRecord 的真实 terminal transition，并仅在 unread/mention 表明“待用户注意”时展示；
 - 可选 opaque `snapshotId/ETag`，仅用于 dedup/cache validation；
 - 不包含 messages、Chat viewport、intent、target cats、tab/collapse/scroll 等非 Sidebar 状态。
 
@@ -125,7 +127,7 @@ F183 的 `lastSeq/lastSeqEpoch` 证明了一个可复用原则：**ordering auth
 1. 把 F295 route-local `buildActiveExecutionList` 抽成 `dispatch` owner 的可复用 service；F297 只 join 结果。
 2. candidate thread 集合来自 canonical owner 的**可重建二级索引**：running InvocationRecord、active Tracker slot、running child execution、running managed command。缺索引的 store 可增加 user-scoped running index，但索引不拥有 lifecycle，必须可由 owner truth rebuild/校验。
 3. 只对 candidate threads 调 F194 classifier；inactive thread 不做 Draft/Tracker/TurnExecution 四路读取。
-4. Thread metadata / participant activity / unread 使用 batch 或 Redis pipeline；禁止 per-thread sequential round trip。
+4. Thread metadata / unread 使用 batch；terminal InvocationRecord pointer 使用 MGET + pipeline；禁止 per-thread sequential round trip。
 5. 结构预算：服务器工作量 `O(T + A)`（T 是本来就要返回的 thread rows；A 是 active candidate threads），liveness reconciliation `O(A)`；Redis round trips 是常数个 pipeline stage，不是 `O(T)`。用 1760 threads / 300 pinned / 20 active fixture 锁调用次数；真实延迟属于运行健康，另记 metrics/traces，不拿任意毫秒阈值冒充设计证明。
 
 ### OQ-2 决议：首期只有 invalidation + full snapshot，不做 delta
@@ -162,10 +164,10 @@ pin / favorite / rename / label 命令进入非持久化 `pendingThreadCommands`
 | C4 | `labels` | filter、label dots、整理器 |
 | C5 | `preferredCats` | 默认猫提示 |
 | C6 | `projectPath` | 搜索、分组、项目排序 |
-| C7 | `lastActiveAt` | 时间与排序；server composition 可合并 active `startedAt` / participant activity，但客户端不再 bump |
+| C7 | `lastActiveAt` | thread/message recency 与排序；客户端不再 bump；working elapsed 不得用无标签 C7 冒充 |
 | C8 | `systemKind` + presentation-safe hub discriminator | system tab / badge；不得把完整 `connectorHubState` 当 Sidebar DTO |
 | C9 | `unreadCount` / `hasUserMention` | badge、tab count、排序 |
-| C10 | presentation-ready `presence` | `idle/working/done/error` + 必要的安全 tooltip；不暴露 raw `activeInvocations/catInvocations` 给 render 再仲裁 |
+| C10 | presentation-ready `presence` | `working` 来自 canonical active classifier，并为执行中文案提供 owner-truth `activeSince`（缺失时只显示“执行中”）；`done/error` 来自 InvocationRecord terminal witness 且受 unread/mention attention gate 约束；不暴露 raw `activeInvocations/catInvocations` 给 render 再仲裁 |
 
 **B. 显式 local decoration（可改变一行，但不是 canonical truth）**
 
@@ -253,9 +255,9 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 
 ### Phase B — 服务端投影
 
-- [x] AC-B1: `SidebarSnapshot` 一次返回 metadata + participants/activity + unread/mention + active execution；active 优先，active 消失不得推断 done。**对账 2026-08-18**：`routes/sidebar-presence-projection.ts` 组合 C10，`threads.ts:391-398` 把 `presence` 并入 `view=sidebar` 投影；unread/mention 沿用 F069 批量 hydration；active 优先 + 终态回落，且 fail-closed（知识不完整封 `idle`，不进终态）。
+- [x] AC-B1: `SidebarSnapshot` 一次返回 metadata + participants + unread/mention + lifecycle presence；working 优先，active 消失不得推断 done。**2026-08-19 纠正**：历史 participant activity 不得进 C10；terminal 只读 edge-maintained InvocationRecord pointer，旧数据不 backfill（缺证据的安全方向是 `idle`）。
 - [x] AC-B2: liveness 组合抽自 F295/F194 owner service；无第二份 classifier；1760/300/20 fixture 证明 liveness 调用随 A 而非 T 增长。**闭合 2026-08-18**：composition 收口到 `active-execution-service.ts`，三 consumer 共用，`getThreadLiveInvocations` 未被复制；`f297-sparse-scale.test.js` 补齐 AC 写死的规模 fixture —— 1760 threads / 300 pinned / 20 active 下断言 **per-thread 定性调用 == 20（非 1760）**、**owner-truth 全局物化 == 1 次**（锁 R4 P1-1 的 O(A²) 回归）。刻意只锁**调用计数**这一确定契约，不设毫秒阈值——真实延迟属运行健康，另记 metrics/traces，不拿任意阈值冒充设计证明。
-- [x] AC-B3: metadata/activity/unread 走 batch/pipeline，无 per-thread sequential Redis round trip。**对账 2026-08-18**：`sidebar-presence-projection.ts:79` 只对无 active 的行调一次 `getParticipantsWithActivityBatch`；Redis 实现为两段 pipeline（`smembers` / `hgetall`），非 2×T 次往返；unread 沿用 `getUnreadSummaries` 批量。
+- [x] AC-B3: metadata/unread/terminal 走 batch/pipeline，无 per-thread sequential Redis round trip。**2026-08-19 纠正**：terminal 从 per-thread+user pointer 一次 MGET，命中 record 一次 pipeline HGETALL；删除 Sidebar 对 participant activity batch 的整条依赖。
 - [x] AC-B4: RED 先行：当前 server endpoint 不能独立回答“所有 Sidebar rows 的参与猫、未读和当前/最近运行呈现”。**对账 2026-08-18**：RED 已实际观察并单独提交（`test(F297): AC-B4 RED` → `row … is missing C10 presence`），GREEN 随后落地；后续多轮又用 mutation 复验测试判别性（把被测逻辑退化后测试转红）。
 
 #### Phase B slice 1 review 收敛（PR #3748，reviewer @codex-sol 三轮）
@@ -335,8 +337,9 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
   判据抽到 `redis-pipeline-reply.ts` 只写一遍，三个 store 共用：
   缺 entry / entry error / `null` / 非 plain object / 非空不可 hydrate → **throw（未知）**；
   plain `{}`（或 SMEMBERS 空数组）→ **权威空**；合法 terminal / scope 不符 → **权威非 live**。
-  终态回落侧由 `composeSidebarPresence` 显式 catch 封 idle——不 500，也不让 store 静默返回空冒充
-  「没人回过话」。两个 store 各有 direct negative table 覆盖全部异常形态，并锁住「未知不得 SREM」。
+  终态投影侧由 `createSidebarPresenceSource` / `composeSidebarPresence` 显式 catch 封 idle——
+  不 500，也不让 store 静默返回空冒充权威生命周期结论。各 store 的 direct negative table
+  覆盖全部异常形态，并锁住「未知不得 SREM」。
 - **「权威」的判据要判到底**（R11 P1-1 / cloud R12 P1）：抽出 helper 还不够——`isPlainObject`
   没查 prototype（`new Date(0)` 被判成权威空）、hash value / set member 没验类型、consumer 又用
   「有没有 id」代替「能否权威 hydrate」（`status="banana"` 被当 stale 并 SREM、`d.id` 与索引不符
@@ -377,28 +380,59 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 
 ### Phase C — 前端 authority boundary + structural guard
 
-- [ ] AC-C1: 新建窄类型 `sidebarProjectionStore`，其 `rows` canonical writer 收敛到 `applySidebarSnapshot`；cache 只在本轮首次 canonical apply 前可用；late cache / late HTTP generation 均被丢弃。旧 `chatStore.threads/threadStates` 不作为 Sidebar fallback。
-- [ ] AC-C2: invalidation single-flight 有 trailing-dirty 语义；测试覆盖 request 乱序、飞行中 invalidation、丢事件后的 reconnect/visibility recovery。
-- [ ] AC-C3: structural guard 保护新 boundary：只有 canonical apply 可写 `sidebarProjectionStore.rows`、只有 canonical apply 可持久化 Sidebar snapshot、Sidebar render/sort tree 不得读取 legacy `chatStore.threads` 或 unread/`lastActivity`/raw liveness。**不得全局禁写 `chatStore.threads/threadStates`**；它们仍有 Chat runtime owner。
-- [ ] AC-C4: guard checker 自带独立 fixture canary：合法 Chat runtime fixture 同时写 `messages + catStatuses` 仍 GREEN；绕过 canonical apply 写 rows 的 fixture RED；Sidebar render path 读取 legacy liveness 的 fixture RED；overlay/draft adapter fixture GREEN。先观察 checker 缺失时的 mutation RED，禁止污染生产源码。
-- [ ] AC-C5: optimistic command overlay 测试覆盖成功确认、失败撤销、并发同字段 last-command-wins、canonical snapshot 不被闭包 rollback 覆盖。
-- [ ] AC-C6: AC-A3 的高危 race 按结构归类为“不可能”或保留 owner contract，并对 authority 边界抽样测试；不再逐对新增 pairwise guard。
-- [ ] AC-C7: **Sidebar legacy liveness consumer 收口**（AC-A3 新发现）。`projectTerminalLiveness` 在 render 时重算状态，`reconcileActiveThreadOrder` 又让 raw `hasActiveInvocation` 改变排序；两条都对 store writer guard 不可见。要求：Sidebar 状态图标和排序只消费 snapshot C10/C7，并有测试证明 legacy runtime state 变化不能改变同一 snapshot 的 Sidebar 输出。selector/action 本身继续归 `dispatch` / Chat runtime，不由 F297 删除或改写其语义。
-- [ ] AC-C8: **`lastActivity` 覆盖服务端排序真相的读路径拆除**（AC-A3 新发现）。`mergeLiveActivityIntoThreads` 让任意本地 `lastActivity` 压过服务端时间，是排序抖动的结构性来源。要求：Sidebar 删除这条 read-side merge，服务端 C7 成为排序权威；21 个 runtime stamp 点可在其 owner 下继续存在，不把“移除 Sidebar consumer”扩大成“删除 Chat runtime writer”。
+- [x] AC-C1: 新建窄类型 `sidebarProjectionStore`，其 `rows` canonical writer 收敛到 `applySidebarSnapshot`；cache 只在本轮首次 canonical apply 前可用；late cache / late HTTP generation 均被丢弃。旧 `chatStore.threads/threadStates` 不作为 Sidebar fallback。
+- [x] AC-C2: invalidation single-flight 有 trailing-dirty 语义；测试覆盖 request 乱序、飞行中 invalidation、丢事件后的 reconnect/visibility recovery。
+- [x] AC-C3: structural guard 保护新 boundary：只有 canonical apply 可写 `sidebarProjectionStore.rows`、只有 canonical apply 可持久化 Sidebar snapshot、Sidebar render/sort tree 不得读取 legacy `chatStore.threads` 或 unread/`lastActivity`/raw liveness。**不得全局禁写 `chatStore.threads/threadStates`**；它们仍有 Chat runtime owner。
+- [x] AC-C4: guard checker 自带独立 fixture canary：合法 Chat runtime fixture 同时写 `messages + catStatuses` 仍 GREEN；绕过 canonical apply 写 rows 的 fixture RED；Sidebar render path 读取 legacy liveness 的 fixture RED；overlay/draft adapter fixture GREEN。先观察 checker 缺失时的 mutation RED，禁止污染生产源码。
+- [x] AC-C5: optimistic command overlay 测试覆盖成功确认、失败撤销、并发同字段 last-command-wins、canonical snapshot 不被闭包 rollback 覆盖。
+- [x] AC-C6: AC-A3 的高危 race 按结构归类为“不可能”或保留 owner contract，并对 authority 边界抽样测试；不再逐对新增 pairwise guard。
+- [x] AC-C8: **`lastActivity` 覆盖服务端排序真相的读路径拆除**（AC-A3 新发现）。`mergeLiveActivityIntoThreads` 让任意本地 `lastActivity` 压过服务端时间，是排序抖动的结构性来源。要求：Sidebar 删除这条 read-side merge，服务端 C7 成为排序权威；21 个 runtime stamp 点可在其 owner 下继续存在，不把“移除 Sidebar consumer”扩大成“删除 Chat runtime writer”。
+
+#### Phase C implementation evidence（2026-08-19，feature worktree）
+
+- **C1 / C2**：`sidebarProjectionStore.test.ts` 与 `sidebar-thread-snapshot-phase-c.test.ts` 锁定 cache bootstrap gate、server generation、single-flight + trailing-dirty；`thread-sidebar-online-recovery.test.ts` 与 `useSocket-reconnect-catchup.test.ts` 锁 online / visibility / Socket reconnect 恢复边界。
+- **C3 / C4**：`check:sidebar-projection-boundary` 同时运行 checker 自测与真实源码检查；除既有 Web writer/read/DTO canary，2026-08-19 起还结构性禁止 API presence projection import `ThreadParticipantActivity` 或调用 `getParticipantsWithActivityBatch`，防止聊天历史再次冒充 lifecycle。
+- **C5**：`sidebar-commands.test.ts` 与 `sidebarProjectionStore.test.ts` 覆盖成功观察后 retire、失败撤销、同字段并发 last-command-wins、timeout 后权威刷新，以及“canonical snapshot 永不被闭包旧值回滚”。Proposal pin 同样改走共享 field command。
+- **C7 / C8**：Sidebar render/sort 完全消费 snapshot `presence` / `lastActiveAt`。固定同一 snapshot 后，任意修改 legacy unread、raw liveness 或 `lastActivity` 均不能改变 row、图标或排序；Chat runtime 的既有 messages / cat status writer 仍保留。
+- **旧 Chromium 自证已被 runtime 反例推翻**：受控 fixture 只验证了 DTO 能显示 `working/done/error`，没有验证 done/error 的**来源真是 lifecycle**。用户现场 `0001787165232870-000010-bdadf699` 证明历史聊天被批量投成绿 ✓；旧证据不得用于 AC-D4/CloseGate。
+- **浏览器反哺的 RED → GREEN**：Chromium 首轮把 snapshot reorder 期间的 `scrollTop 706 → 0` 暴露出来；`use-scroll-anchor.test.tsx` 随后构造“最后一次用户滚动为 200、浏览器瞬时归零、内容偏移 +84”的 RED（实际得到 0），修复后断言恢复到 284，真实浏览器复验保持 `706 → 706`。
+
+#### AC-C6 race disposition（Phase C boundary view）
+
+| # | Phase C 判定 | 结构证据 / owner contract |
+|---|---|---|
+| 1 | **Sidebar 内不可能** | command overlay 与 canonical rows 分离；snapshot 只能 retire 已观察到同字段预期值的 command，不能吞掉在途 intent |
+| 2 | **Sidebar 内不可能** | Sidebar 只有 `GET /api/threads?view=sidebar` 一种 DTO 写入；late response 由 request generation 丢弃 |
+| 3 | **消除绕路** | `ProposalCard` pin 改走与 Sidebar 相同的 `executeSidebarFieldCommand`，不再直接 patch legacy store |
+| 4 | **保留 dispatch owner contract** | invocation timeout 仍归 Chat runtime；Sidebar 不读取其 raw liveness，下一份 server snapshot 才能改变 C10 |
+| 5 | **保留 dispatch owner contract** | queue 不在 C0–C10；`QueuePanel` 语义不计入 Sidebar canonical writer |
+| 6 | **Sidebar 内不可能；Chat runtime contract 保留** | late `syncThreadState` 可继续更新 messages/runtime state，但 Sidebar 已与 `chatStore.threadStates` 解耦 |
+
+以上是 AC-C6 对 authority boundary 的结构归类与抽样证明；Phase D 的全 feature 账目核验仍由 AC-D2 收口，故 AC-D2 不在本阶段提前勾选。
 
 ### Phase D — 收口与账目
 
 - [x] AC-D1: F081 保留历史 provenance，标 `superseded_by: F297`；AC-B2 以“作废（非完成）”结算。
-- [ ] AC-D2: 当前诊断预测的 6 个未报告 race 逐条验证：被新 authority boundary 消除 / 仍属其他 owner；仍存在时不能宣称 writer 收敛完成。
+- [x] AC-D2: 当前诊断预测的 6 个未报告 race 已逐条核验：1/2/3/4/6 由 canonical snapshot、overlay 与 owner boundary 消除或隔离；5 明确归还 dispatch queue owner，不冒充 F297 修复。修复 merge `878181270` 上 boundary guard 7/7、API F297 5 suites / 37 tests、Web 10 files / 82 tests 通过。后续 #1371 PR5 暴露的 restart owner 错配同样按边界收口：producer 在 Queue custody 中持久化 server-derived `ownerUserId`，startup reconstruction 不再把 scheduler message authorship 当 execution owner；F297 的 `ActiveExecutionService` 仍按 user 隔离，未放宽 foreign-user scan。author 在 latest-main `08b6ea756` 重跑 restart discriminating test，owner presence=`working + activeSince`、scheduler/foreign 均无 row；隔离 Redis custody parity 14/14。
 - [x] AC-D3: F295 的现有 4s project scan 与 F297 refresh 做重复读取审计；保留一个 server composition service，不留两份 liveness 算法。**闭合 2026-08-18**：审计结论是「两份**读法**」而非两份算法——`active-execution-routes.ts` 的 project scan 仍 `threads.map(resolveLiveExecutions)`，每 4 秒 O(T)。已改为消费同一个 composition service 的 **live/child candidate view** 收窄候选：O(T) → O(A)；managed-command 不参与 live 定性，仍由完整投影枚举器读取，且同一请求只读一次 SQLite task 表。service 提前创建，queue / active-execution / Sidebar 注入同一实例，但两个 HTTP consumer 各自建立请求内 snapshot，不宣称跨请求共享物化结果。**降级方向与 Sidebar 相反且刻意**：Sidebar 漏报 → 显示 `idle`（用户无损）⇒ fail-closed；本列表漏报 → 正在跑的执行不在可取消列表里、用户停不掉（功能损坏）⇒ **fail-open**，未接线 / 读失败 / `complete=false` 一律退回全量扫描。三种降级路径各有 regression。
-- [ ] AC-D4: alpha 验收——未打开目标 thread 时，participants、working/done/error、unread 正确；F5 前后一致；pin/rename 失败不回滚服务器新值。
+- [x] AC-D4: **终态 attention/read 旅程闭合（#3817 / `c66ded63b`）**。#3798 的 lifecycle witness 与 attention gate 保留；修复归 F069 visibility/read-state owner，F297 未新增 `needsAttention` 或第二份 unread。`read/latest`、mark-all 与 direct `PATCH /read` 都以同一 durable-owner-read predicate 拒绝未 settled 的 mutable stream；最终 delivery 后，仅当前选中且 document visible 的消费面才 ACK。RED→GREEN 覆盖离开后完成 → `unread + done/error`、停留看到完成 → `idle`、hidden document 不提前 ACK，以及同一 bubble 的 final-delivery retry。fresh alpha 用真实 Redis 6398 验证 direct PATCH 在 partial 时为 `{advanced:false,caughtUp:false}`，同一 message final 后为 `{advanced:true,caughtUp:true}`；Memory/Redis parity 4/4，F5/reconnect 前后采用同一 durable evidence 规则。
+
+### CloseGate User Visibility Disclosure（2026-08-21 final）
+
+| Surface | 用户能做什么（达成态） | latest-main 实际行为 | 缺失/退化 | 处置 |
+|---|---|---|---|---|
+| Sidebar 背景行 | 不打开 thread 也能看 participants、working/done/error 与独立 unread/mention；pin 边界内 working 整体越过 idle | C0–C10 由 `GET /api/threads?view=sidebar` 一次返回；真实 Alpha 历史行不再假绿/假红；受控 canonical Alpha 证明 pin idle → working 20m → working 5m → newest unread idle → idle | 无 F297-owned 缺失 | author Alpha + API lifecycle regression + Terra renewed CloseGate PASS |
+| Restart owner visibility | managed hold 在 API restart 后仍只对原 user 显示 working，不泄漏到 scheduler/foreign owner | #3829 将 Queue custody 的 server-derived `ownerUserId` 用于 startup reconstruction；F297 consumer 保持 user-scoped | 无；scheduler 仅保留 authorship/provenance | restart RED→GREEN + 隔离 Redis parity；不在 F297 增加 fallback |
+| 命令即时反馈 | pin/favorite/rename/labels/preferredCats/read 有即时反馈，失败不覆盖较新的 server truth | 非持久化 field overlay；canonical snapshot 仍是唯一 row writer | 无 | Phase C command/overlay regression + boundary guard |
+
+**Out-of-scope disclosure**：Workspace“状态与会话”入口、Session Chain/Session ID 的信息架构属于 F299/F284，不作为 F297 已修或未修的证据；F277 的注意力导航只消费 F297 row，不拥有 C10 lifecycle。F297 没有用户可见 deferred surface。
 
 ## Dependencies
 
 - **Supersedes**: F081（write-path audit；诊断保留，约定式 enforcement 作废）
 - **Reuses**: F295（active execution projection service）、F194（liveness classification）、F069（batch unread）、F164（cache-only contract）、F183（server authority + recovery 原则，不复用 seq 协议）
 - **Related**: F095/F277（Sidebar 导航与注意力消费）
-- **Blocked by**: 无
+- **Previously blocked by — resolved in #3817**: F069 的流式消息 read-evidence 修复（只修既有 visibility cursor/read-state，未扩 F297 C0–C10）
 
 ## Risk
 
@@ -434,9 +468,13 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 | KD-6 | guard 锁新 projection 的 write/persistence/read/DTO boundary，mutation RED 用 fixture | `chatStore.threads/threadStates` 仍承载其他 owner 状态；不能用全局字段禁写越权 | 2026-08-17 |
 | KD-7 | 新建窄类型 `sidebarProjectionStore`，不复用 `chatStore.threads` 作为 canonical 容器 | 分离后 guard 只需约束一个 store；旧 Chat runtime writer 不必被 F297 扫除 | 2026-08-17 |
 | KD-8 | W1–W57 只作为迁移 path nodes，不发布为“57 个 writer” | primitive 与 caller/trigger 不可重复计数；稳定 KPI 是目标 store 的单写边界 | 2026-08-17 |
+| KD-9 | Sidebar terminal 只认 InvocationRecord transition；participant activity / session-open 均不是终态证据 | 聊天历史没有 invocation 边界，会把所有旧 thread 永久染绿/红 | 2026-08-19 |
+| KD-10 | terminal witness 持久，可见性由 unread/mention attention gate 管理；working 不受该 gate 影响 | “真的结束”与“用户还需要看”是两个不可混合的问题；对齐读后徽标消失的产品语义 | 2026-08-19 |
+| KD-11 | C7 thread recency 与 C10 working elapsed 是两个时间轴；不得靠 heartbeat bump C7 伪造“刚刚” | 轮询更新时间会扰乱 canonical 排序；active duration 应由 lifecycle owner truth 显式呈现 | 2026-08-20 |
+| KD-12 | C9/F069 继续是 terminal attention 的唯一真相；不在 F297 新增 completion-unread/needs-attention。流式 placeholder 不能在 final delivery 前充当 durable human-read 证据 | 当前反例不是缺 terminal witness，而是既有 visibility cursor 过早前进；在 Sidebar 再补一层状态只会制造两套未读语义 | 2026-08-20 |
 
 ## Review Gate
 
-- Architecture reviewer: Sol（本 Design Gate）；implementation author 仍为 Opus5。
+- Architecture reviewer: Sol（本 Design Gate）；Phase C implementation author 依 operator 授权改为 Sol，exact-HEAD reviewer 为 Kimi。
 - 实现触及 API/Web、read model 与缓存 authority，必须用隔离 worktree + TDD + 非作者 exact-HEAD review。
 - 性能 claim 分成两类：结构成本用 call-count/load fixture；真实延迟/稳定性用 metrics/traces，不挂 Eval Hub。

@@ -1,7 +1,9 @@
 import {
   findGeneratedTextConstructs,
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
+  MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
@@ -23,6 +25,7 @@ import { getTimelineOrderTime } from '../stores/visibility.js';
 import { resolveMessageBundleCarrier } from './MessageBundleCarrierResolver.js';
 import {
   digestMessageBundleCliQuoteProjection,
+  digestMessageBundleCliQuoteProjectionV2,
   digestMessageBundleQuoteProjection,
   digestMessageBundleQuoteProjectionV2,
   digestMessageBundleQuoteProjectionV3,
@@ -36,6 +39,8 @@ import {
 import {
   canAccessSourceThread,
   projectCliSegment,
+  projectCliSegmentReadable,
+  projectCliSegmentReadableSource,
   projectMessageBundleGroupQuoteSourceV3,
   projectMessageBundleGroupReadableContent,
   projectMessageBundleQuoteSourceV1,
@@ -57,17 +62,20 @@ import type {
 
 export {
   digestMessageBundleCliQuoteProjection,
+  digestMessageBundleCliQuoteProjectionV2,
   digestMessageBundleQuoteProjection,
   digestMessageBundleQuoteProjectionV2,
   digestMessageBundleQuoteProjectionV3,
   digestMessageBundleRichBlockProjection,
   MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V2,
   MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
   MESSAGE_BUNDLE_RICH_BLOCK_DIGEST_DOMAIN,
   projectMessageBundleQuoteSourceV1,
   projectMessageBundleQuoteSourceV2,
+  projectCliSegmentReadable,
   projectMessageBundleReadableContent,
 };
 export type {
@@ -170,9 +178,21 @@ export class MessageSelectionResolver {
   ): Promise<AdmissionCandidateResult> {
     const source = await resolveSourceRecords(item.sourceMessageIds, item.messageId, sourceThreadId, auth);
     if (source.status !== 'resolved') return invalid('source_unavailable', item.messageId);
-    const projection = projectCliSegment(source.records, item.segmentId);
+    const isReadableProjection = item.sourceProjectionVersion === MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2;
+    const projection = isReadableProjection
+      ? projectCliSegmentReadableSource(source.records, item.segmentId)
+      : projectCliSegment(source.records, item.segmentId);
     if (projection === null) return invalid('source_unavailable', item.messageId);
-    const offsets = resolveExactQuoteAnchor(item, projection);
+    if (isReadableProjection && item.renderedOccurrences !== 1) {
+      return invalid('ambiguous_quote', item.messageId);
+    }
+    if (isReadableProjection && findGeneratedTextConstructs(projection).length > 0) {
+      return invalid('unsupported_source', item.messageId);
+    }
+    const canonicalProjection = isReadableProjection ? projectCliSegmentReadable(projection) : projection;
+    const offsets = isReadableProjection
+      ? resolveReadableQuoteAnchor(item, canonicalProjection)
+      : resolveExactQuoteAnchor(item, canonicalProjection);
     if (typeof offsets === 'string') return invalid(offsets, item.messageId);
 
     const carrierItem: MessageBundleItemV1 = {
@@ -181,14 +201,22 @@ export class MessageSelectionResolver {
       sourceMessageIds: source.records.map((record) => record.id),
       segmentId: item.segmentId,
       ...offsets,
-      sourceProjectionVersion: MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
-      sourceProjectionSha256: digestMessageBundleCliQuoteProjection(projection),
+      sourceProjectionVersion: isReadableProjection
+        ? MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2
+        : MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION,
+      sourceProjectionSha256: isReadableProjection
+        ? digestMessageBundleCliQuoteProjectionV2(canonicalProjection)
+        : digestMessageBundleCliQuoteProjection(canonicalProjection),
       ...(item.comment ? { comment: item.comment } : {}),
     };
     return {
       message: source.anchor,
       carrierItem,
-      projectedItem: projectedItem(source.anchor, item, projection.slice(offsets.selectionStart, offsets.selectionEnd)),
+      projectedItem: projectedItem(
+        source.anchor,
+        item,
+        canonicalProjection.slice(offsets.selectionStart, offsets.selectionEnd),
+      ),
     };
   }
 

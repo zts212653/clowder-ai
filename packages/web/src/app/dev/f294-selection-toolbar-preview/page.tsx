@@ -105,6 +105,31 @@ export default function F294SelectionToolbarPreviewPage() {
               ]}
             />
           </section>
+          <section data-testid="f294-rich-group-source">
+            <RichBlocks
+              messageId="f294-rich-group-source-message"
+              sourceThreadId="f294-layout-preview"
+              sourceMessageIds={['f294-rich-group-stream', 'f294-rich-group-source-message']}
+              blocks={[
+                {
+                  id: 'group-choice-primary',
+                  kind: 'interactive',
+                  v: 1,
+                  interactiveType: 'select',
+                  title: '这是一条足够长的分组交互卡标题，用来证明转发动作不会遮住可读内容',
+                  options: [{ id: 'keep-primary', label: '保留首张卡的选项' }],
+                },
+                {
+                  id: 'group-choice-secondary',
+                  kind: 'interactive',
+                  v: 1,
+                  interactiveType: 'select',
+                  title: '第二张分组交互卡',
+                  options: [{ id: 'keep-secondary', label: '保留第二张卡的选项' }],
+                },
+              ]}
+            />
+          </section>
           <section data-testid="f294-rich-target">
             <RichBlocks
               readOnly

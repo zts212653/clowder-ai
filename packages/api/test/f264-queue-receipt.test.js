@@ -378,6 +378,17 @@ describe('F264 queue receipt projection', () => {
     );
   });
 
+  test('storage transition cannot rewrite the durable Queue owner principal', () => {
+    const current = custody({ ownerUserId: 'user-owner' });
+    const next = structuredClone(current);
+    next.revision += 1;
+    next.ownerUserId = 'scheduler';
+    assert.throws(
+      () => assertQueueCustodyTransition(current, { expectedRevision: current.revision, next }),
+      /ownerUserId is immutable/,
+    );
+  });
+
   test('storage transition cannot erase or rewrite an exact body exposure', () => {
     const current = custody();
     const erased = structuredClone(current);

@@ -80,6 +80,9 @@ function buildCapturingDeps(callLog) {
       },
     },
     invocationTracker: {
+      acquireExecutionAdmission() {
+        return { release() {} };
+      },
       start() {
         return new AbortController();
       },

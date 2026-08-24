@@ -115,9 +115,12 @@ export async function processThread(
   state: SummaryStateRow,
   deps: SummaryCompactionDeps,
   config: typeof SUMMARY_CONFIG,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  signal?.throwIfAborted();
   // Full eligibility check (with async lastActivity)
   const lastActivity = await deps.getThreadLastActivity(state.thread_id);
+  signal?.throwIfAborted();
   if (!isEligible(state, lastActivity, config)) return false;
 
   // A prepared true-recall lease means the canonical MessageStore CAS has not
@@ -127,6 +130,7 @@ export async function processThread(
 
   // Get messages after watermark
   const messages = await deps.getMessagesAfterWatermark(state.thread_id, state.last_summarized_message_id, 200);
+  signal?.throwIfAborted();
   if (messages.length === 0) return false;
 
   // Get current summary from evidence_docs (read model)
@@ -140,6 +144,7 @@ export async function processThread(
     messages,
     threadId: state.thread_id,
   });
+  signal?.throwIfAborted();
 
   if (!result) {
     deps.logger.info(`[summary-compaction] thread ${state.thread_id}: Opus returned null (fail-open)`);
@@ -162,6 +167,9 @@ export async function processThread(
   });
   if (!committed) return false;
 
+  // The watermark is now canonical. Derived embedding, candidates and backlog
+  // refresh must settle before terminal truth because the next tick cannot infer
+  // which post-commit effects were skipped.
   await reEmbedSummary(deps, state.thread_id, mergedSummary);
   await submitSummaryCandidates(deps, state.thread_id, result);
   await refreshSummaryBacklog(deps, state.thread_id, lastMsg.id);

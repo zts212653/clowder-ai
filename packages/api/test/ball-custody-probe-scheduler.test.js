@@ -85,7 +85,7 @@ function schedulerDeps({ taskStore, projectionStore, now = 5_000, satisfied = tr
       wakeSender: {
         async send(input) {
           wakeCalls.push(input);
-          return { messageId: 'msg-wake-1' };
+          return { kind: 'admitted', messageId: 'msg-wake-1', outcome: 'dispatched' };
         },
       },
       now: nowFn,
@@ -205,6 +205,30 @@ describe('BallCustodyProbeScheduler', () => {
     assert.equal(second.cooldownSkipped, 1, 'second tick suppresses repeat delivery during cooldown');
     assert.equal(wakeCalls.length, 1, 'owner is not repeatedly woken while wake_sent recording is down');
     assert.equal(recordErrors.length, 1, 'cooldown skip avoids another doomed wake_sent write');
+  });
+
+  it('bounces_back: rejected admission keeps the exact wake retryable without wake_sent or cooldown', async () => {
+    const { BallCustodyProbeScheduler } = await import('../dist/domains/ball-custody/BallCustodyProbeScheduler.js');
+    const { taskStore, taskId } = await setupTask({ resolveMode: 'bounces_back' });
+    const projectionStore = memoryProjectionStore();
+    await projectionStore.save(makeProjection({ subjectKey: `ball:task:${taskId}` }));
+    const { deps, events, wakeCalls } = schedulerDeps({ taskStore, projectionStore });
+    deps.wakeSender.send = async (input) => {
+      wakeCalls.push(input);
+      return { kind: 'not_admitted', messageId: 'msg-wake-1', reason: 'invoke_failed' };
+    };
+    const scheduler = new BallCustodyProbeScheduler(deps);
+
+    const first = await scheduler.tick();
+    const second = await scheduler.tick();
+
+    assert.equal(first.woken, 0);
+    assert.equal(first.failed, 1);
+    assert.equal(second.woken, 0);
+    assert.equal(second.failed, 1);
+    assert.equal(second.cooldownSkipped, 0);
+    assert.equal(wakeCalls.length, 2, 'same blocked episode remains eligible for retry');
+    assert.equal(events.length, 0, 'rejected admission must not write ball.wake_sent');
   });
 
   it('marks long-idle task projections as task.idle_long', async () => {

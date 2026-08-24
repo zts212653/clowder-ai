@@ -3,6 +3,16 @@ import fs from 'node:fs';
 import puppeteer, { type Browser } from 'puppeteer-core';
 import sharp from 'sharp';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import {
+  assertFreshHtmlWidgetExportCapturePlan,
+  type BrowserDocumentSnapshot,
+  captureVerifiedImageExportCandidate,
+  readHtmlWidgetExportLayoutSnapshot,
+  readImageExportCaptureHeight,
+  refreshHtmlWidgetExportLayoutProof,
+} from './html-widget-export-readiness.js';
+
+export { resolveExportCaptureHeight } from './html-widget-export-readiness.js';
 
 const log = createModuleLogger('image-exporter');
 
@@ -10,6 +20,11 @@ const log = createModuleLogger('image-exporter');
 const CHUNK_HEIGHT = 4000;
 const INITIAL_VIEWPORT_HEIGHT = 900;
 const VIEWPORT_WIDTH = 1280;
+
+interface BrowserWindowSnapshot {
+  requestAnimationFrame(callback: () => void): number;
+  scrollTo(x: number, y: number): void;
+}
 
 export interface ImageExportCaptureOptions {
   selectionMessageIds?: readonly string[];
@@ -23,15 +38,6 @@ export function buildImageExportUrl(url: string, userId: string, options?: Image
     exportUrl.searchParams.append('messageId', messageId);
   }
   return exportUrl.toString();
-}
-
-export function resolveExportCaptureHeight(metrics: {
-  documentHeight: number;
-  exportRootHeight: number | null;
-}): number {
-  const candidate =
-    metrics.exportRootHeight && metrics.exportRootHeight > 0 ? metrics.exportRootHeight : metrics.documentHeight;
-  return Math.max(1, Math.ceil(candidate));
 }
 
 export interface ImageExportChunk {
@@ -141,6 +147,7 @@ export class ImageExporter {
    * and stitches them together using Sharp.
    */
   async capture(url: string, userId: string, options?: ImageExportCaptureOptions): Promise<Buffer> {
+    let page: puppeteer.Page | null = null;
     try {
       if (!this.browser) {
         this.browser = await puppeteer.launch({
@@ -150,7 +157,8 @@ export class ImageExporter {
         });
       }
 
-      const page = await this.browser.newPage();
+      page = await this.browser.newPage();
+      const capturePage = page;
 
       await page.setExtraHTTPHeaders({ 'X-Cat-Cafe-User': userId });
       await page.setViewport({ width: VIEWPORT_WIDTH, height: INITIAL_VIEWPORT_HEIGHT });
@@ -168,27 +176,19 @@ export class ImageExporter {
       // It must never become part of a user document, even when dogfooding a dev build.
       await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
 
-      // Wait for React to finish rendering all messages (height stabilizes)
+      // A sandbox iframe's internal document height is invisible to the parent page.
+      // HtmlWidgetBlock bridges it explicitly and marks export expansion readiness.
+      // Fail closed here instead of measuring the still-clipped iframe rectangle.
+      await this.waitForHtmlWidgets(page);
+
+      // Wait for React and responsive iframe reflow to finish changing the parent height.
       await this.waitForStableHeight(page);
 
-      const captureMetrics = await page.evaluate(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => {
-          const document = (globalThis as any).document;
-          const exportRoot = document.querySelector('[data-export-root]');
-          return {
-            documentHeight: document.documentElement.scrollHeight as number,
-            exportRootHeight: exportRoot
-              ? Math.max(exportRoot.scrollHeight, exportRoot.getBoundingClientRect().height)
-              : null,
-          };
-        },
-      );
-      const pageHeight = resolveExportCaptureHeight(captureMetrics);
-      const messageCount = await page.evaluate(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => ((globalThis as any).document.querySelectorAll('[data-message-id]') ?? []).length,
-      );
+      const pageHeight = await readImageExportCaptureHeight(page);
+      const messageCount = await page.evaluate(() => {
+        const { document } = globalThis as unknown as { document: BrowserDocumentSnapshot };
+        return document.querySelectorAll('[data-message-id]').length;
+      });
       if (options?.selectionMessageIds && messageCount !== options.selectionMessageIds.length) {
         throw new Error(
           `Selection DOM count mismatch: expected ${options.selectionMessageIds.length}, rendered ${messageCount}`,
@@ -203,9 +203,11 @@ export class ImageExporter {
       if (pageHeight <= CHUNK_HEIGHT) {
         await page.setViewport({ width: VIEWPORT_WIDTH, height: pageHeight });
         await this.waitForPaint(page);
-        const screenshot = await page.screenshot({ type: 'png' });
+        const screenshot = await captureVerifiedImageExportCandidate(
+          () => assertFreshHtmlWidgetExportCapturePlan(capturePage, pageHeight),
+          () => capturePage.screenshot({ type: 'png' }),
+        );
         log.info({ bytes: screenshot.length }, 'Captured single screenshot');
-        await page.close();
         return screenshot as Buffer;
       }
 
@@ -216,17 +218,15 @@ export class ImageExporter {
       await this.waitForPaint(page);
 
       // Scroll to top first
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await page.evaluate(() => (globalThis as any).window.scrollTo(0, 0));
+      await page.evaluate(() => (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, 0));
       await this.waitForPaint(page);
 
       for (let y = 0; y < pageHeight; y += CHUNK_HEIGHT) {
         const chunkH = Math.min(CHUNK_HEIGHT, pageHeight - y);
 
         // Scroll to this chunk's position
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await page.evaluate((scrollY: number) => {
-          (globalThis as any).window.scrollTo(0, scrollY);
+          (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, scrollY);
         }, y);
         await this.waitForPaint(page);
 
@@ -237,14 +237,16 @@ export class ImageExporter {
           // Re-scroll after resize: with the larger viewport, scrollTo(y) above was
           // clamped to maxScrollTop (= pageHeight - oldViewportHeight). After shrinking
           // the viewport, maxScrollTop increases, so we can now reach y.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await page.evaluate((scrollY: number) => {
-            (globalThis as any).window.scrollTo(0, scrollY);
+            (globalThis as unknown as BrowserWindowSnapshot).scrollTo(0, scrollY);
           }, y);
           await this.waitForPaint(page);
         }
 
-        const chunk = (await page.screenshot({ type: 'png' })) as Buffer;
+        const chunk = await captureVerifiedImageExportCandidate(
+          () => assertFreshHtmlWidgetExportCapturePlan(capturePage, pageHeight),
+          async () => (await capturePage.screenshot({ type: 'png' })) as Buffer,
+        );
         chunks.push({ buffer: chunk, top: y, height: chunkH });
       }
 
@@ -254,10 +256,15 @@ export class ImageExporter {
       const stitched = await stitchImageExportChunks(VIEWPORT_WIDTH, pageHeight, chunks);
 
       log.info({ bytes: stitched.length }, 'Stitched image ready');
-      await page.close();
       return stitched;
     } catch (error) {
       throw new Error(`Screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (page) {
+        await page.close().catch((error) => {
+          log.warn({ error }, 'Failed to close image export page');
+        });
+      }
     }
   }
 
@@ -272,10 +279,7 @@ export class ImageExporter {
     const start = Date.now();
 
     while (Date.now() - start < maxWait) {
-      const height = await page.evaluate(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (globalThis as any).document.documentElement.scrollHeight as number,
-      );
+      const { height } = await refreshHtmlWidgetExportLayoutProof(page);
       if (height === lastHeight && height > 0) {
         stableChecks++;
         if (stableChecks >= requiredStableChecks) {
@@ -288,21 +292,39 @@ export class ImageExporter {
       }
       await new Promise<void>((resolve) => setTimeout(resolve, interval));
     }
-    log.warn({ lastHeight, elapsed: Date.now() - start }, 'Page height did not stabilize within maxWait, proceeding');
+    const elapsed = Date.now() - start;
+    throw new Error(`Page height did not stabilize within maxWait (${elapsed}ms, last height ${lastHeight}px)`);
+  }
+
+  private async waitForHtmlWidgets(page: puppeteer.Page, maxWait = 10_000, interval = 100): Promise<void> {
+    const start = Date.now();
+    let lastPending: string[] = [];
+
+    while (Date.now() - start < maxWait) {
+      const { readiness } = await readHtmlWidgetExportLayoutSnapshot(page);
+      if (readiness.status === 'ready') {
+        await refreshHtmlWidgetExportLayoutProof(page);
+        log.info({ widgets: readiness.widgetIds.length, elapsed: Date.now() - start }, 'HTML widgets export-ready');
+        return;
+      }
+      if (readiness.status === 'error') {
+        throw new Error(`HTML widget layout failed: ${readiness.widgetIds.join(', ')}`);
+      }
+      lastPending = readiness.widgetIds;
+      await new Promise<void>((resolve) => setTimeout(resolve, interval));
+    }
+
+    throw new Error(`HTML widget layout did not become export-ready: ${lastPending.join(', ') || 'unknown'}`);
   }
 
   /** Wait for two animation frames (one paint cycle). */
   private async waitForPaint(page: puppeteer.Page): Promise<void> {
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (globalThis as any).requestAnimationFrame(() =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (globalThis as any).requestAnimationFrame(() => resolve()),
-          ),
-        ),
-    );
+    await page.evaluate(() => {
+      const browserWindow = globalThis as unknown as BrowserWindowSnapshot;
+      return new Promise<void>((resolve) =>
+        browserWindow.requestAnimationFrame(() => browserWindow.requestAnimationFrame(() => resolve())),
+      );
+    });
   }
 
   async close() {

@@ -29,7 +29,7 @@ export function createRuntimeHeartbeatController(options: {
   readonly intervalMs: number;
   readonly ping: () => Promise<void>;
   readonly renewLease: () => Promise<unknown>;
-  readonly onFailure: () => Promise<unknown>;
+  readonly onFailure: (error: unknown) => Promise<unknown>;
 }): RuntimeHeartbeatController {
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
@@ -49,8 +49,8 @@ export function createRuntimeHeartbeatController(options: {
       if (stopped) return;
       await options.renewLease();
       schedule();
-    } catch {
-      await options.onFailure();
+    } catch (error) {
+      await options.onFailure(error);
     }
   };
 

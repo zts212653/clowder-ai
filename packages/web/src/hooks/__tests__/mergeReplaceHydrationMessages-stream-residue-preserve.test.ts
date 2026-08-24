@@ -268,6 +268,49 @@ describe('mergeReplaceHydrationMessages — stream residue preserve cases', () =
     expect(result.stats.preservedLocalCount).toBe(1);
   });
 
+  it('preserves terminal rich residue until authoritative history covers every local block id', () => {
+    const history: ChatMessage[] = [
+      makeMsg({
+        id: '0001787349890966-000041-f848c703',
+        content: 'same text already persisted',
+        toolEvents: [makeToolEvent('tool-server-use')],
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [{ id: 'persisted-card', kind: 'card', v: 1, title: 'Persisted card' }],
+          },
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: HISTORY_TURN_ID,
+          },
+        },
+      }),
+    ];
+    const current: ChatMessage[] = [
+      makeLocalResidue({
+        content: 'same text already persisted',
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [{ id: 'local-only-card', kind: 'card', v: 1, title: 'Not persisted yet' }],
+          },
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: RESIDUE_TURN_ID,
+          },
+        },
+      }),
+    ];
+
+    const result = mergeReplaceHydrationMessages(history, current, {});
+
+    expect(result.messages.map((msg) => msg.id).sort()).toEqual([
+      '0001787349890966-000041-f848c703',
+      `msg-${RESIDUE_TURN_ID}-codex`,
+    ]);
+    expect(result.stats.preservedLocalCount).toBe(1);
+  });
+
   it('preserves contentful residue when text coverage is only manufactured across persisted siblings', () => {
     const firstTool = { detail: 'stdout: first persisted segment' };
     const secondTool = { detail: 'stdout: second persisted segment' };

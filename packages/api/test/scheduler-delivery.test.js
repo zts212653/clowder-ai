@@ -61,6 +61,45 @@ describe('createDeliverFn', () => {
     });
     assert.equal(msgId, 'msg-async');
   });
+
+  it('forwards an idempotency key so producer retries reuse the exact scheduler message', async () => {
+    const messageStore = { append: mock.fn(async (input) => ({ ...input, id: 'msg-idempotent' })) };
+    const socketManager = { broadcastToRoom: mock.fn(), emitToUser: mock.fn() };
+    const deliver = createDeliverFn({ messageStore, socketManager });
+
+    await deliver({
+      threadId: 'thread-1',
+      userId: 'scheduler',
+      content: 'retry the exact wake',
+      idempotencyKey: 'wake:task-1:1000',
+    });
+
+    assert.equal(messageStore.append.mock.calls[0].arguments[0].idempotencyKey, 'wake:task-1:1000');
+  });
+
+  it('broadcasts the canonical persisted body when an idempotent retry reuses an existing message', async () => {
+    const messageStore = {
+      append: mock.fn(async () => ({
+        id: 'msg-existing',
+        threadId: 'thread-1',
+        timestamp: 1234567890,
+        content: 'the first persisted wake body',
+      })),
+    };
+    const socketManager = { broadcastToRoom: mock.fn(), emitToUser: mock.fn() };
+    const deliver = createDeliverFn({ messageStore, socketManager });
+
+    await deliver({
+      threadId: 'thread-1',
+      userId: 'scheduler',
+      content: 'a later retry body that was not persisted',
+      idempotencyKey: 'wake:task-1:1000',
+    });
+
+    const payload = socketManager.broadcastToRoom.mock.calls[0].arguments[2];
+    assert.equal(payload.message.id, 'msg-existing');
+    assert.equal(payload.message.content, 'the first persisted wake body');
+  });
 });
 
 describe('createLifecycleToastFn', () => {

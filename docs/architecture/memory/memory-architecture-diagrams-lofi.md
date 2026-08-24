@@ -18,9 +18,9 @@ related_docs:
 topics: [memory, architecture, diagram, low-fidelity, evidence, navigation, retrieval, write-side, standing-reflex, governance, presentation, outcome]
 created: 2026-08-18
 revised: 2026-08-18
-status: lofi-draft
+status: active
 author: "小太阳·Maine Coon/GPT-5.6 Sol"
-description: "Clowder AI 记忆系统的逐层低保真视觉蓝图：一张总图、六层内部结构和呈现/连续性、真相/派生视图/结果两张横切图；确认后用于生成 EP04 正式精图。"
+description: "Clowder AI 记忆系统正式图集的低保真设计源：保存九张图的信息结构、权力边界、重画提示与失效条件。"
 description_source: human
 description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
@@ -32,8 +32,9 @@ description_updated_at: 2026-08-18T16:20:00Z
 # Memory Architecture Diagram Set｜记忆架构逐层低保真图集
 
 > **这不是又一份架构真相源。** 它是 [Memory Architecture Atlas](./README.md) 的视觉派生稿：
-> 先用固定宽度低保真图确认信息结构，再生成正式 raster PNG。ASCII 图必须在普通 Markdown
-> renderer 中可读；若图与 canonical owner 冲突，以 Atlas 的 claim registry 指向为准。
+> 固定宽度图保存可维护的信息结构，正式 raster PNG 收录在
+> [记忆架构逐层正式图集](./memory-architecture-diagrams.md)。ASCII 图必须在普通 Markdown renderer
+> 中可读；若图与 canonical owner 冲突，以 Atlas 的 claim registry 指向为准。
 
 ## 出图合同
 
@@ -44,7 +45,7 @@ description_updated_at: 2026-08-18T16:20:00Z
 | 内容取舍 | 不删权力边界；运行数字、phase、live/UAT 状态留在各真相源，不复制进图 |
 | 视觉 | 16:9 横版；深蓝工程蓝图底、暖白线稿、琥珀金高亮；错误/失效用铁锈红，健康闭环用灰绿 |
 | 语言 | 主图只用能直接说出口的中文；F 号和代码坐标放图下注释，不塞进画面 |
-| 生成顺序 | 先确认 P1-P9 低保真 → 再逐页 imagegen → 最后把正式图片链接回 Atlas 与 EP04 |
+| 生成顺序 | P1-P9 低保真确认 → 逐页 imagegen → 正式图片链接回 Atlas 与 EP04（v1 已完成） |
 
 ## P1｜全局星图：一栋楼，两个方向，三条横切
 

@@ -42,14 +42,14 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
 
   after(async () => {
     if (redis && connected) {
-      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+      await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-terminal:*', 'idemp:*']);
       await redis.quit();
     }
   });
 
   beforeEach(async (t) => {
     if (!connected) return t.skip('Redis not connected');
-    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'idemp:*']);
+    await cleanupPrefixedRedisKeys(redis, ['invoc:*', 'invoc-terminal:*', 'idemp:*']);
   });
 
   it('rejects an unclassified action-lease carrier before writing Redis state', async () => {
@@ -519,6 +519,72 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
       /successfulCatIds.*succeeded/i,
       'the terminal witness is immutable outside the succeeded transition',
     );
+  });
+
+  it('F297 records the latest terminal lifecycle witness per thread and user', async () => {
+    const succeeded = await store.create({
+      threadId: 'thread-terminal-pointer',
+      userId: 'user-terminal',
+      targetCats: ['opus', 'codex'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-pointer-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(succeeded.invocationId, { status: 'running' });
+    await store.update(succeeded.invocationId, {
+      status: 'succeeded',
+      successfulCatIds: ['opus'],
+    });
+
+    const terminal = await store.listLatestTerminalByThreadIds(
+      ['thread-terminal-pointer', 'thread-unrelated'],
+      'user-terminal',
+    );
+    assert.equal(terminal.size, 1);
+    assert.equal(terminal.get('thread-terminal-pointer').id, succeeded.invocationId);
+    assert.equal(terminal.get('thread-terminal-pointer').status, 'succeeded');
+    assert.deepEqual(terminal.get('thread-terminal-pointer').successfulCatIds, ['opus']);
+    assert.equal(
+      (await store.listLatestTerminalByThreadIds(['thread-terminal-pointer'], 'other-user')).size,
+      0,
+      'terminal presentation is owner-scoped',
+    );
+  });
+
+  it('F297 newer terminal transitions supersede older ones and retry clears its failure', async () => {
+    const oldSuccess = await store.create({
+      threadId: 'thread-terminal-latest',
+      userId: 'user-terminal',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-old-success',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(oldSuccess.invocationId, { status: 'running' });
+    await store.update(oldSuccess.invocationId, { status: 'succeeded', successfulCatIds: ['opus'] });
+
+    const retrying = await store.create({
+      threadId: 'thread-terminal-latest',
+      userId: 'user-terminal',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-new-failure',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(retrying.invocationId, { status: 'running' });
+    await store.update(retrying.invocationId, { status: 'failed', error: 'transient' });
+
+    let terminal = await store.listLatestTerminalByThreadIds(['thread-terminal-latest'], 'user-terminal');
+    assert.equal(terminal.get('thread-terminal-latest').id, retrying.invocationId);
+    assert.equal(terminal.get('thread-terminal-latest').status, 'failed');
+
+    await store.update(retrying.invocationId, { status: 'running', expectedStatus: 'failed' });
+    terminal = await store.listLatestTerminalByThreadIds(['thread-terminal-latest'], 'user-terminal');
+    assert.equal(terminal.size, 0, 'retrying must clear the visible failure instead of resurrecting an older success');
+
+    await store.update(retrying.invocationId, { status: 'canceled', expectedStatus: 'running' });
+    terminal = await store.listLatestTerminalByThreadIds(['thread-terminal-latest'], 'user-terminal');
+    assert.equal(terminal.get('thread-terminal-latest').status, 'canceled');
   });
 
   it('concurrent CAS update: only one wins (Lua atomic)', async () => {
@@ -1106,6 +1172,35 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     const setB = await redis.smembers('invoc:running:thread-drift:user-B');
     assert.equal(setA.includes(r.invocationId), false, 'user-A set must not contain succeeded record');
     assert.equal(setB.includes(r.invocationId), false, 'user-B set must not contain succeeded record');
+  });
+
+  it('F297 ownership repair cannot leave a terminal badge visible to the old user', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+
+    const record = await store.create({
+      threadId: 'thread-terminal-reassign',
+      userId: 'user-A',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'terminal-reassign',
+      actionLeaseCarrier: { kind: 'none' },
+    });
+    await store.update(record.invocationId, { status: 'running' });
+    await store.update(record.invocationId, { status: 'succeeded', successfulCatIds: ['opus'] });
+    assert.equal((await store.listLatestTerminalByThreadIds(['thread-terminal-reassign'], 'user-A')).size, 1);
+
+    await store.reassignUserId(record.invocationId, 'user-B');
+
+    assert.equal(
+      (await store.listLatestTerminalByThreadIds(['thread-terminal-reassign'], 'user-A')).size,
+      0,
+      'the old owner must not retain a badge for a record they no longer own',
+    );
+    assert.equal(
+      (await store.listLatestTerminalByThreadIds(['thread-terminal-reassign'], 'user-B')).size,
+      0,
+      'repair does not invent terminal history for the new owner',
+    );
   });
 
   it('F297 (cloud R7 P2) — listRunningThreadIds is bounded by active threads, not keyspace size', async (t) => {

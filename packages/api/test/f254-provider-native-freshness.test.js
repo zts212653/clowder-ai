@@ -667,7 +667,8 @@ describe('F254 D2 provider-native freshness truth', () => {
 
     const output = [];
     const run = (async () => {
-      for await (const event of client.run({ prompt: 'work', thread: { kind: 'start' } })) output.push(event);
+      for await (const event of client.run({ prompt: { kind: 'frozen', prompt: 'work' }, thread: { kind: 'start' } }))
+        output.push(event);
     })();
 
     while (!wire.writes.some((write) => write.method === 'turn/start'))
@@ -718,7 +719,10 @@ describe('F254 D2 provider-native freshness truth', () => {
       },
     });
     const run = (async () => {
-      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+      for await (const _event of client.run({
+        prompt: { kind: 'frozen', prompt: 'work' },
+        thread: { kind: 'start' },
+      })) {
         /* drain */
       }
     })();
@@ -808,7 +812,10 @@ describe('F254 D2 provider-native freshness truth', () => {
       },
     });
     const run = (async () => {
-      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+      for await (const _event of client.run({
+        prompt: { kind: 'frozen', prompt: 'work' },
+        thread: { kind: 'start' },
+      })) {
         /* drain */
       }
     })();
@@ -848,7 +855,10 @@ describe('F254 D2 provider-native freshness truth', () => {
       },
     });
     const run = (async () => {
-      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+      for await (const _event of client.run({
+        prompt: { kind: 'frozen', prompt: 'work' },
+        thread: { kind: 'start' },
+      })) {
         /* drain */
       }
     })();
@@ -899,7 +909,10 @@ describe('F254 D2 provider-native freshness truth', () => {
       },
     });
     const run = (async () => {
-      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+      for await (const _event of client.run({
+        prompt: { kind: 'frozen', prompt: 'work' },
+        thread: { kind: 'start' },
+      })) {
         /* drain */
       }
     })();
@@ -923,7 +936,10 @@ describe('F254 D2 provider-native freshness truth', () => {
     const wire = new FakeAppServerWire();
     const client = new CodexAppServerClient({ wire });
     const run = (async () => {
-      for await (const _event of client.run({ prompt: 'work', thread: { kind: 'start' } })) {
+      for await (const _event of client.run({
+        prompt: { kind: 'frozen', prompt: 'work' },
+        thread: { kind: 'start' },
+      })) {
         /* drain */
       }
     })();
@@ -981,7 +997,7 @@ describe('F254 D2 provider-native freshness truth', () => {
     };
     const client = new CodexAppServerClient({ wire });
     for await (const _event of client.run({
-      prompt: 'continue',
+      prompt: { kind: 'frozen', prompt: 'continue' },
       thread: { kind: 'resume', threadId: 'thread-existing' },
     })) {
       /* drain */

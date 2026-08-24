@@ -4,6 +4,7 @@ import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { formatInjectionProvenance } from '../../../../memory/injection-provenance.js';
 import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
+import type { ContextSurfaceProjection } from '../../session/context-surface-projection.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
@@ -19,6 +20,8 @@ export interface ContextBriefingBlock {
   anchorSummaries?: string[];
   baton?: BatonContext;
   activeTasks?: TaskSummary[];
+  /** F296 B3b-4: copied from the route projection; the card never re-derives continuity. */
+  contextSurfaceProjection?: ContextSurfaceProjection;
 }
 
 /** Result from formatContextBriefing */
@@ -41,6 +44,7 @@ export function formatContextBriefing(
   coverageMap: CoverageMap,
   threadMemorySummary?: string,
   anchorSummaries?: string[],
+  contextSurfaceProjection?: ContextSurfaceProjection,
 ): ContextBriefingResult {
   const parts: string[] = [];
   parts.push(`看到 ${coverageMap.burst.count} 条`);
@@ -53,6 +57,12 @@ export function formatContextBriefing(
 
   parts.push(`证据指针 ${coverageMap.recallPointer.candidateCount} 条`);
 
+  if (contextSurfaceProjection) {
+    parts.push(`${contextSurfaceProjection.contextMode}/${contextSurfaceProjection.reason}`);
+    const counts = contextSurfaceProjection.presentationCounts;
+    parts.push(`T0 ${counts.T0} · T1 ${counts.T1} · T2 ${counts.T2} · invalid ${counts.invalid}`);
+  }
+
   const summary = parts.join(' · ');
 
   const richBlock: ContextBriefingBlock = {
@@ -60,6 +70,7 @@ export function formatContextBriefing(
     coverageMap,
     ...(threadMemorySummary ? { threadMemorySummary } : {}),
     ...(anchorSummaries?.length ? { anchorSummaries } : {}),
+    ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
   };
 
   return { summary, richBlock };
@@ -91,6 +102,20 @@ function buildNavigationTitle(threadId: string, baton?: BatonContext, sources?: 
   return parts.join(' · ');
 }
 
+function formatContextCoordinate(projection: ContextSurfaceProjection): string {
+  const carrier = projection.coordinate.providerCarrier;
+  return `${carrier.provider}/${carrier.carrier} · ${projection.coordinate.invocationOrigin} · ${projection.coordinate.routeTopology}`;
+}
+
+function formatContextMode(projection: ContextSurfaceProjection): string {
+  return `${projection.contextMode} · ${projection.reason} · epoch ${projection.contextEpoch} · ${projection.deltaSize}`;
+}
+
+function formatPresentationCounts(projection: ContextSurfaceProjection): string {
+  const counts = projection.presentationCounts;
+  return `T0 ${counts.T0} · T1 ${counts.T1} · T2 ${counts.T2} · invalid ${counts.invalid}`;
+}
+
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
   threadMemorySummary?: string;
@@ -99,6 +124,7 @@ interface BriefingMessageOptions {
   activeTasks?: TaskSummary[];
   recentArtifacts?: RecentArtifact[];
   rankedSources?: RankedSource[];
+  contextSurfaceProjection?: ContextSurfaceProjection;
 }
 
 /**
@@ -115,6 +141,7 @@ export function buildBriefingMessage(
     coverageMap,
     options?.threadMemorySummary,
     options?.anchorSummaries,
+    options?.contextSurfaceProjection,
   );
 
   // Build expanded bodyMarkdown for AC-E4
@@ -201,7 +228,31 @@ export function buildBriefingMessage(
         label: '下一步',
         value: formatNextStepField(threadId, options?.rankedSources, coverageMap.semanticSearchTerms),
       },
+      ...(options?.contextSurfaceProjection
+        ? [
+            {
+              label: '坐标',
+              value: formatContextCoordinate(options.contextSurfaceProjection),
+            },
+            {
+              label: '上下文',
+              value: formatContextMode(options.contextSurfaceProjection),
+            },
+            {
+              label: '呈现',
+              value: formatPresentationCounts(options.contextSurfaceProjection),
+            },
+          ]
+        : []),
     ],
+    ...(options?.contextSurfaceProjection
+      ? {
+          meta: {
+            kind: 'context_briefing',
+            contextSurfaceProjection: options.contextSurfaceProjection,
+          },
+        }
+      : {}),
   };
 
   const rich: RichMessageExtra = { v: 1, blocks: [card] };

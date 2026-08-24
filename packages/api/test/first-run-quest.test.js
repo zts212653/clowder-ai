@@ -177,7 +177,7 @@ describe('First-Run Quest Routes', () => {
     assert.equal(body.questState.phase, 'quest-3-task-select');
   });
 
-  test('POST /api/callbacks/update-quest-state ignores stale invocations', async () => {
+  test('POST /api/callbacks/update-quest-state rejects replaced invocations', async () => {
     const app = await createApp();
     const createRes = await app.inject({
       method: 'POST',
@@ -199,8 +199,8 @@ describe('First-Run Quest Routes', () => {
       },
       payload: { threadId: quest.threadId, phase: 'quest-3-task-select' },
     });
-    assert.equal(updateRes.statusCode, 200);
-    assert.deepEqual(JSON.parse(updateRes.body), { status: 'stale_ignored' });
+    assert.equal(updateRes.statusCode, 401);
+    assert.equal(JSON.parse(updateRes.body).reason, 'replaced');
 
     const getRes = await app.inject({
       method: 'GET',

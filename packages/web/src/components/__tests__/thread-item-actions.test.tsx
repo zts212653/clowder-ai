@@ -40,6 +40,7 @@ vi.mock('@/components/icons/PawIcon', () => ({
 
 vi.mock('@/components/ThreadSidebar/thread-utils', () => ({
   formatRelativeTime: () => '1分',
+  formatSidebarStatusTime: () => '1分',
 }));
 
 vi.mock('@/stores/label-store', () => ({
@@ -98,6 +99,9 @@ describe('ThreadItem actions', () => {
           isPinned: false,
           isFavorited: false,
           threadLabels: [],
+          presence: { status: 'idle' },
+          unreadCount: 0,
+          hasUserMention: false,
           ...overrides,
         }),
       );

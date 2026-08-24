@@ -7,6 +7,7 @@ import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-na
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
 import { CafeIcon } from './CafeIcons';
 import {
   displayProposalTitle,
@@ -137,21 +138,20 @@ export function ProposalCard({ block }: ProposalCardProps) {
       setResultThreadId(newThreadId);
       setStatus('approved');
       setEditing(false);
-      // AC-F7: persist pin via PATCH /api/threads/:id (server-side) + sync local store for immediate sidebar UX
+      // AC-F7: persist pin through the shared field-scoped overlay command.
       if (pinOnApprove && newThreadId) {
-        try {
-          const pinRes = await apiFetch(`/api/threads/${newThreadId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pinned: true }),
-          });
-          // Only sync local store if server actually persisted the pin
-          if (pinRes.ok) {
-            useChatStore.getState().updateThreadPin(newThreadId, true);
-          }
-        } catch {
-          // best-effort: pin failure should not block the approve success UX
-        }
+        await executeSidebarFieldCommand({
+          threadId: newThreadId,
+          field: 'pinned',
+          value: true,
+          request: (signal) =>
+            apiFetch(`/api/threads/${newThreadId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pinned: true }),
+              signal,
+            }),
+        });
       }
       if (newThreadId) {
         pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);

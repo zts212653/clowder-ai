@@ -5,11 +5,7 @@ export function normalizePluginInstanceAfterRestart(
   now: number,
 ): PluginInstanceRecord | undefined {
   const interrupted = instance.activationState === 'enabling' || instance.activationState === 'disabling';
-  const activationState = interrupted
-    ? 'error'
-    : instance.activationState === 'enabled'
-      ? 'disabled'
-      : instance.activationState;
+  const activationState = interrupted ? 'error' : instance.activationState;
   if (instance.runtimeState === 'stopped' && activationState === instance.activationState) {
     return undefined;
   }
@@ -17,7 +13,8 @@ export function normalizePluginInstanceAfterRestart(
     ...instance,
     activationState,
     runtimeState: 'stopped',
-    lifecycleRevision: instance.lifecycleRevision + 1,
+    lifecycleRevision:
+      activationState === instance.activationState ? instance.lifecycleRevision : instance.lifecycleRevision + 1,
     updatedAt: now,
   };
 }
