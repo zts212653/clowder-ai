@@ -25,16 +25,6 @@ vi.mock('@/hooks/useVoiceInput', () => ({
 
 import { ChatInputActionButton } from '../ChatInputActionButton';
 
-/**
- * jsdom's querySelector does not reliably match CJK text in attribute
- * selectors. Use querySelectorAll + find as a portable workaround.
- */
-function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label) as
-    | HTMLButtonElement
-    | undefined;
-}
-
 describe('F24: mid-invocation message injection', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -152,10 +142,9 @@ describe('F24: mid-invocation message injection', () => {
       );
     });
 
-    // jsdom querySelector does not reliably match CJK attribute selectors
-    const steerBtn = findButton(container, '强制停止并发送此消息');
+    const steerBtn = container.querySelector('button[aria-label="强制停止并发送此消息"]') as HTMLButtonElement;
     expect(steerBtn).toBeTruthy();
-    act(() => steerBtn!.click());
+    act(() => steerBtn.click());
 
     expect(onForceSend).not.toHaveBeenCalled();
     // Modal content assertions: use actual Unicode chars from SteerQueuedEntryModal
@@ -190,9 +179,9 @@ describe('F24: mid-invocation message injection', () => {
     });
 
     // Open steer modal (bound to inv-a)
-    const steerBtn = findButton(container, '强制停止并发送此消息');
+    const steerBtn = container.querySelector('button[aria-label="强制停止并发送此消息"]') as HTMLButtonElement;
     expect(steerBtn).toBeTruthy();
-    act(() => steerBtn!.click());
+    act(() => steerBtn.click());
 
     // Modal should be open
     expect(container.querySelector('[data-testid="steer-confirm"]')).toBeTruthy();
@@ -239,12 +228,12 @@ describe('F24: mid-invocation message injection', () => {
     });
 
     // Queue send should still be available
-    const queueBtn = findButton(container, '排队发送');
-    expect(queueBtn).toBeTruthy();
+    const queueBtn = container.querySelector('button[aria-label="排队发送"]');
+    expect(queueBtn).not.toBeNull();
 
     // But force-send (Steer) button must NOT be offered — fail closed
-    const steerBtn = findButton(container, '强制停止并发送此消息');
-    expect(steerBtn).toBeUndefined();
+    const steerBtn = container.querySelector('button[aria-label="强制停止并发送此消息"]');
+    expect(steerBtn).toBeNull();
   });
 
   it('only shows full-size Stop when disabled=true (loading state)', () => {
