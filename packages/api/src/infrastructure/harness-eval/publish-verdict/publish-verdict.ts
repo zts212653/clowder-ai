@@ -5,7 +5,7 @@ import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
 import { assertMeasurementVerdictActionAllowed } from '../measurement/measurement-bundle-census.js';
 import {
-  readMeasurementBundleCensusFile,
+  ensureMeasurementBundleCensusFile,
   refreshMeasurementBundleCensusFile,
 } from '../measurement/measurement-bundle-census-file.js';
 import {
@@ -256,7 +256,7 @@ export async function handlePublishVerdict(
         }
         // Freeze reviewed census metadata before the generator receives write access
         // to the isolated harness root; only publisher-derived fields may change.
-        const cleanCensusSource = readMeasurementBundleCensusFile(worktreeRoot);
+        const cleanCensusSource = ensureMeasurementBundleCensusFile(worktreeRoot, packet.createdAt).source;
         assertMeasurementVerdictActionAllowed(parseYaml(cleanCensusSource), packet.domainId, packet.verdict);
         const generatedArtifact = await generator(packet, input.sourceRefs, {
           harnessFeedbackRoot: isolatedHarnessFeedback,
@@ -287,9 +287,9 @@ export async function handlePublishVerdict(
         const policy = computePublishPolicy(packet, attribution);
         const policyFooter =
           policy.mode === 'evidence_only_interim_pr'
-            ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Interim: keep_observe + no actionable findings. Rollup mechanism deferred to future Phase. See docs/SOP.md § artifact-only-pr-merge-gate for cat merge contract.)`
+            ? `\n\n---\n**Cat-owned artifact gate — No CVO merge needed.**\n(Interim: keep_observe + no actionable findings. Rollup mechanism deferred to future Phase. See docs/SOP.md § artifact-only-pr-merge-gate for cat merge contract.)`
             : policy.labels.includes('evidence-only')
-              ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Actionable findings present; eval domain owner cat merges per docs/SOP.md § artifact-only-pr-merge-gate.)`
+              ? `\n\n---\n**Cat-owned artifact gate — No CVO merge needed.**\n(Actionable findings present; eval domain owner cat merges per docs/SOP.md § artifact-only-pr-merge-gate.)`
               : '';
         return {
           // PR-2 R3 P1 (cloud): stage extra paths the generator wrote (cw raw inputs)

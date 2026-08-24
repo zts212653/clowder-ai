@@ -134,6 +134,40 @@ describe('F267 real measurement bundle census', () => {
     assert.notEqual(left.hash, right.hash);
   });
 
+  it('accepts a fully unmigrated public instance only while every active domain remains fail-closed', async () => {
+    const { validateMeasurementBundleCensus } = await moduleUnderTest();
+    const publicBootstrap = loadCensus();
+    const active = publicBootstrap.entries.filter((entry) => entry.classification === 'active_decision_bearing');
+    for (const entry of active) {
+      entry.validityMigration = {
+        ...entry.validityMigration,
+        batch: null,
+        status: 'unmigrated',
+        certificateRef: null,
+        resultRef: null,
+        replayRef: null,
+        actionGate: 'keep_observe_only',
+        hardBlockReason: `Public instance has not certified ${entry.domainId}.`,
+      };
+    }
+
+    assert.doesNotThrow(() => validateMeasurementBundleCensus(publicBootstrap, repoRoot));
+
+    const withoutBlock = structuredClone(publicBootstrap);
+    withoutBlock.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.hardBlockReason = null;
+    assert.throws(() => validateMeasurementBundleCensus(withoutBlock, repoRoot), /hard block reason/i);
+
+    const withPrivateEvidence = structuredClone(publicBootstrap);
+    withPrivateEvidence.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.certificateRef =
+      'docs/harness-feedback/certificates/private.yaml';
+    assert.throws(() => validateMeasurementBundleCensus(withPrivateEvidence, repoRoot), /cannot claim evidence refs/i);
+
+    const withUnsafeAction = structuredClone(publicBootstrap);
+    withUnsafeAction.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.actionGate =
+      'certificate_actions_allowed';
+    assert.throws(() => validateMeasurementBundleCensus(withUnsafeAction, repoRoot), /action gate/i);
+  });
+
   it('rejects stale coverage, duplicate ids, wrong consumers, and false active claims', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
 

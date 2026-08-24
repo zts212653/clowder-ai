@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -315,7 +315,19 @@ async function updateVerdictBranch(
     }
   }
 
-  await git(worktreePath, ['checkout', 'origin/main', '--', MEASUREMENT_BUNDLE_CENSUS_REF]);
+  const mainHasCensus = await gitSucceeds(worktreePath, [
+    'cat-file',
+    '-e',
+    `origin/main:${MEASUREMENT_BUNDLE_CENSUS_REF}`,
+  ]);
+  if (mainHasCensus) {
+    await git(worktreePath, ['checkout', 'origin/main', '--', MEASUREMENT_BUNDLE_CENSUS_REF]);
+  } else if (mergeHadConflict) {
+    await git(worktreePath, ['checkout', '--ours', '--', MEASUREMENT_BUNDLE_CENSUS_REF]);
+  }
+  if (!existsSync(resolve(worktreePath, MEASUREMENT_BUNDLE_CENSUS_REF))) {
+    throw new Error('verdict_pr_census_missing: neither origin/main nor the verdict branch has an instance census');
+  }
   const cleanCensusSource = readFileSync(resolve(worktreePath, MEASUREMENT_BUNDLE_CENSUS_REF), 'utf8');
   const refreshedPath = opts.refreshDerivedCensus(worktreePath, opts.generatedAt, cleanCensusSource);
   await git(worktreePath, ['add', '--', refreshedPath]);

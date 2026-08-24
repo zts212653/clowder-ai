@@ -1,6 +1,6 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-08-16T18:35:29.000Z
+generatedAt: 2026-08-23T00:38:41Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
@@ -25,20 +25,19 @@ entries:
       kind: a2a-snapshot-attribution
     committedVerdictArtifactCount: 2
     functionalEquivalents:
-      - f167-runtime-eval
+      - f167-runtime-eval/a2a-snapshot-attribution public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
       riskRank: 2
-      batch: 2
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-2-eval-a2a
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-2-eval-a2a
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-2-eval-a2a
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Measurement validity accepted only as certified_insufficient on
-        2026-08-10; actionable verdicts remain blocked.
+      hardBlockReason: This public instance has not certified measurement validity for eval:a2a.
   - domainId: eval:anchor-first
     classification: active_decision_bearing
     enabled: true
@@ -55,20 +54,21 @@ entries:
       kind: anchor-telemetry-snapshot
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - f236-anchor-telemetry-rollup
+      - f236-anchor-telemetry-rollup/anchor-telemetry-snapshot public registry
+        contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 7
-      batch: 7
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-7-eval-anchor-first
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-7-eval-anchor-first
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-7-eval-anchor-first
+      riskRank: 3
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Anchor-first measurement validity is certified_insufficient;
-        thin post-restart windows cannot enable intervention.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:anchor-first.
   - domainId: eval:capability-tips
     classification: gated
     enabled: false
@@ -81,7 +81,8 @@ entries:
       kind: capability-tips-usage-window
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - capability-tips-usage
+      - capability-tips-usage/capability-tips-usage-window public registry
+        contract
     evidence:
       domainInstructions: false
       publishInstructions: false
@@ -93,7 +94,7 @@ entries:
       resultRef: null
       replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Capability tips remains disabled behind the F268 enable gate.
+      hardBlockReason: Domain eval:capability-tips is disabled in this public instance.
   - domainId: eval:capability-wakeup
     classification: active_decision_bearing
     enabled: true
@@ -110,20 +111,21 @@ entries:
       kind: capability-wakeup-trial-window
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - capability-wakeup-eval
+      - capability-wakeup-eval/capability-wakeup-trial-window public registry
+        contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
       riskRank: 4
-      batch: 4
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-4-eval-capability-wakeup
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-4-eval-capability-wakeup
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-4-eval-capability-wakeup
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Capability wakeup evidence is source-bound but still
-        certified_insufficient; zero-use windows do not authorize action.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:capability-wakeup.
   - domainId: eval:external-case-closure
     classification: registered_nonoperational
     enabled: true
@@ -136,7 +138,7 @@ entries:
       kind: a2a-snapshot-attribution
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - f168-external-case-eval
+      - f168-external-case-eval/a2a-snapshot-attribution public registry contract
     evidence:
       domainInstructions: false
       publishInstructions: false
@@ -148,8 +150,8 @@ entries:
       resultRef: null
       replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: The registry entry is present, but this domain has no eval-cat
-        instruction or publish wiring.
+      hardBlockReason: Domain eval:external-case-closure has no operational publish
+        path in this public instance.
   - domainId: eval:freshness
     classification: active_decision_bearing
     enabled: true
@@ -166,21 +168,20 @@ entries:
       kind: freshness-closure-replay
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - f254-freshness-replay
+      - f254-freshness-replay/freshness-closure-replay public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
       riskRank: 5
-      batch: 5
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-5-eval-freshness
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-5-eval-freshness
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-5-eval-freshness
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Freshness measurement validity remains certified_insufficient;
-        fixture-only or unsupported-carrier windows cannot authorize
-        intervention.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:freshness.
   - domainId: eval:friction
     classification: active_decision_bearing
     enabled: true
@@ -197,20 +198,20 @@ entries:
       kind: friction-rollup-snapshot
     committedVerdictArtifactCount: 1
     functionalEquivalents:
-      - f245-friction-rollup
+      - f245-friction-rollup/friction-rollup-snapshot public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 8
-      batch: 8
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#eval-friction-certified-insufficient
-      resultRef: docs/features/F267-eval-measurement-validity.md#eval-friction-certified-insufficient
-      replayRef: docs/features/F267-eval-measurement-validity.md#eval-friction-certified-insufficient
+      riskRank: 6
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Friction keeps its certified_insufficient measurement status
-        and cannot drive action enablement.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:friction.
   - domainId: eval:memory
     classification: active_decision_bearing
     enabled: true
@@ -227,20 +228,20 @@ entries:
       kind: memory-recall-snapshot
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - f200-f188-memory-eval
+      - f200-f188-memory-eval/memory-recall-snapshot public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
       riskRank: 1
-      batch: 1
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-1-eval-memory
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-1-eval-memory
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-1-eval-memory
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: Memory search quality completed the first validity batch but
-        remains keep-observe-only.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:memory.
   - domainId: eval:qc
     classification: active_decision_bearing
     enabled: true
@@ -257,20 +258,19 @@ entries:
       kind: qc-metrics-rollup
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - qc-metrics-eval
+      - qc-metrics-eval/qc-metrics-rollup public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 6
-      batch: 6
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-6-eval-qc
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-6-eval-qc
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-6-eval-qc
+      riskRank: 7
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: QC provider windows are still certified_insufficient and stay
-        blocked to keep-observe-only.
+      hardBlockReason: This public instance has not certified measurement validity for eval:qc.
   - domainId: eval:sop
     classification: active_decision_bearing
     enabled: true
@@ -287,21 +287,19 @@ entries:
       kind: sop-trace-eval
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - sop-trace-eval
+      - sop-trace-eval/sop-trace-eval public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 3
-      batch: 3
-      status: certified_insufficient
-      certificateRef: docs/features/F267-eval-measurement-validity.md#batch-3-eval-sop
-      resultRef: docs/features/F267-eval-measurement-validity.md#batch-3-eval-sop
-      replayRef: docs/features/F267-eval-measurement-validity.md#batch-3-eval-sop
+      riskRank: 8
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: SOP trace measurement is source-bound but
-        certified_insufficient; manual rule gaps remain outside the covered
-        population.
+      hardBlockReason: This public instance has not certified measurement validity for eval:sop.
   - domainId: eval:task-outcome
     classification: active_decision_bearing
     enabled: true
@@ -318,17 +316,17 @@ entries:
       kind: task-outcome-snapshot
     committedVerdictArtifactCount: 0
     functionalEquivalents:
-      - task-outcome-eval
+      - task-outcome-eval/task-outcome-snapshot public registry contract
     evidence:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
       riskRank: 9
       batch: null
-      status: blocked_f275
+      status: unmigrated
       certificateRef: null
       resultRef: null
       replayRef: null
       actionGate: keep_observe_only
-      hardBlockReason: F275 keeps eval:task-outcome blocked, so no certified usable
-        measurement bundle exists yet.
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:task-outcome.
