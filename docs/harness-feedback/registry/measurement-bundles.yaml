@@ -1,0 +1,322 @@
+kind: f267-measurement-bundle-census
+schemaVersion: 2
+generatedAt: 2026-08-16T18:40:00.000Z
+sources:
+  registryDir: docs/harness-feedback/eval-domains
+  instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
+  publishMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN
+  verdictDir: docs/harness-feedback/verdicts
+verdictCorpusHash: f7ee57365b6a410f69841c0bfd3c75ece7c7f26c5b0ec37da1094f6daf623dec
+committedVerdictArtifactCount: 3
+entries:
+  - domainId: eval:a2a
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F167
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f167-runtime-eval
+      kind: a2a-snapshot-attribution
+    committedVerdictArtifactCount: 2
+    functionalEquivalents:
+      - A2A Harness Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 2
+      batch: 2
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#a2a-b2-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#a2a-b2-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#a2a-b2-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:anchor-first
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F236
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f236-anchor-telemetry-rollup
+      kind: anchor-telemetry-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Anchor-First Context Entry Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 7
+      batch: 7
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#anchor-first-b7-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#anchor-first-b7-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#anchor-first-b7-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:capability-tips
+    classification: gated
+    enabled: false
+    decisionConsumer:
+      featureId: F244
+      ownerCatId: codex-sol
+      allowedActions: []
+    sourceSelector:
+      adapter: capability-tips-usage
+      kind: capability-tips-usage-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Capability Tips Effectiveness
+    evidence:
+      domainInstructions: false
+      publishInstructions: false
+    validityMigration:
+      riskRank: null
+      batch: null
+      status: gated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Domain is disabled in the eval domain registry.
+  - domainId: eval:capability-wakeup
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F203
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: capability-wakeup-eval
+      kind: capability-wakeup-trial-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Capability Wakeup Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 4
+      batch: 4
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#capability-wakeup-b4-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#capability-wakeup-b4-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#capability-wakeup-b4-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:external-case-closure
+    classification: registered_nonoperational
+    enabled: true
+    decisionConsumer:
+      featureId: F168
+      ownerCatId: opus48
+      allowedActions: []
+    sourceSelector:
+      adapter: f168-external-case-eval
+      kind: a2a-snapshot-attribution
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - External Case Closure Eval
+    evidence:
+      domainInstructions: false
+      publishInstructions: false
+    validityMigration:
+      riskRank: null
+      batch: null
+      status: nonoperational
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Domain is registered but has no live verdict publish wiring.
+  - domainId: eval:freshness
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F254
+      ownerCatId: codex
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f254-freshness-replay
+      kind: freshness-closure-replay
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Freshness Gate Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 5
+      batch: 5
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#freshness-b5-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#freshness-b5-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#freshness-b5-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:friction
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F245
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f245-friction-rollup
+      kind: friction-rollup-snapshot
+    committedVerdictArtifactCount: 1
+    functionalEquivalents:
+      - Friction Signal Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 8
+      batch: 8
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#friction-c1-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#friction-c1-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#friction-c1-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:memory
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F200
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f200-f188-memory-eval
+      kind: memory-recall-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Memory Recall & Library Health Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 1
+      batch: 1
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#memory-b1-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#memory-b1-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#memory-b1-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:qc
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F253
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: qc-metrics-eval
+      kind: qc-metrics-rollup
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - QC Pipeline Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 6
+      batch: 6
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#qc-b6-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#qc-b6-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#qc-b6-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:sop
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F192
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: sop-trace-eval
+      kind: sop-trace-eval
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - SOP Compliance Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 3
+      batch: 3
+      status: certified_insufficient
+      certificateRef: docs/features/F267-eval-measurement-validity.md#sop-b3-certificate
+      resultRef: docs/features/F267-eval-measurement-validity.md#sop-b3-result
+      replayRef: docs/features/F267-eval-measurement-validity.md#sop-b3-replay
+      actionGate: keep_observe_only
+      hardBlockReason: "Certified insufficient evidence: keep_observe remains allowed, but intervention verdicts stay disabled."
+  - domainId: eval:task-outcome
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F192
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: task-outcome-eval
+      kind: task-outcome-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - Task Outcome Eval
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 9
+      batch: null
+      status: blocked_f275
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Blocked on F275 managed-work admission evidence before task-level actions may be enabled.
