@@ -59,6 +59,15 @@ export function ChatInputActionButton({
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
   const [confirmSteer, setConfirmSteer] = useState(false);
+
+  // P1 fix: auto-dismiss steer confirmation when the target invocation ends.
+  // If the active reply finishes while the modal is open, dismiss it so the
+  // user cannot accidentally confirm force-send against a different invocation
+  // that may start from the queue.
+  useEffect(() => {
+    if (!hasActiveInvocation) setConfirmSteer(false);
+  }, [hasActiveInvocation]);
+
   const isSendDisabled = Boolean(disabled || sendDisabled);
   const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
   const showStop = Boolean(hasActiveInvocation && resolvedStopState !== 'hidden');
@@ -225,7 +234,10 @@ export function ChatInputActionButton({
           onCancel={() => setConfirmSteer(false)}
           onConfirm={() => {
             setConfirmSteer(false);
-            onForceSend?.();
+            // Guard: only force-send if the invocation that prompted the
+            // confirmation is still active (defense-in-depth alongside the
+            // useEffect auto-dismiss above).
+            if (hasActiveInvocation) onForceSend?.();
           }}
         />
       )}
