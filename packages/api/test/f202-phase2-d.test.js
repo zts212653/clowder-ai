@@ -198,6 +198,60 @@ describe('AC-D2: IssueCommentRouter', () => {
 // ── AC-D3: IssueCommentTaskSpec ───────────────────────────────────
 
 describe('AC-D3: IssueCommentTaskSpec', () => {
+  test('finishes a persisted routed wake when cancellation arrives at the commit boundary', async () => {
+    assert.ok(createIssueCommentTaskSpec, 'createIssueCommentTaskSpec should be importable');
+    const store = new TaskStore();
+    const task = store.upsertBySubject({
+      kind: 'issue_tracking',
+      threadId: 't1',
+      subjectKey: 'issue:o/r#42',
+      title: 'Issue #42',
+      why: 'track',
+      createdBy: 'cat1',
+      ownerCatId: 'cat1',
+      userId: 'u1',
+    });
+    const controller = new AbortController();
+    const events = [];
+    const spec = createIssueCommentTaskSpec({
+      taskStore: store,
+      issueCommentRouter: {
+        route: async () => ({ kind: 'notified', threadId: 't1', catId: 'cat1', messageId: 'm1', content: 'test' }),
+      },
+      fetchComments: async () => [],
+      fetchIssueState: async () => 'open',
+      invokeTrigger: {
+        trigger: async () => {
+          events.push('triggered');
+          return 'dispatched';
+        },
+      },
+      log: { info() {}, error() {}, warn() {} },
+    });
+
+    await spec.run
+      .execute(
+        {
+          task,
+          repoFullName: 'o/r',
+          issueNumber: 42,
+          newComments: [{ id: 100, author: 'alice', body: 'New comment', createdAt: '2026-01-01T00:00:00Z' }],
+          commitRoutedWake: async () => {
+            events.push('wake-persisted');
+            controller.abort(new Error('scheduler timeout'));
+          },
+          commitWakeAccepted: async () => {
+            events.push('wake-accepted');
+          },
+        },
+        task.subjectKey,
+        { assignedCatId: null, signal: controller.signal },
+      )
+      .catch(() => {});
+
+    assert.deepEqual(events, ['wake-persisted', 'triggered', 'wake-accepted']);
+  });
+
   test('createIssueCommentTaskSpec creates a valid TaskSpec', () => {
     assert.ok(createIssueCommentTaskSpec, 'createIssueCommentTaskSpec should be importable');
     const store = new TaskStore();

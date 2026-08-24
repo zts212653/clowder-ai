@@ -36,6 +36,10 @@ export function projectTurnExecutionMessage(record: TurnExecutionRecord): TurnEx
 
 export interface ITurnExecutionStore {
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult | Promise<CreateTurnExecutionResult>;
+  bindCoveredMessageIds(
+    invocationId: string,
+    messageIds: readonly string[],
+  ): BindCoveredMessageIdsResult | Promise<BindCoveredMessageIdsResult>;
   get(invocationId: string): TurnExecutionRecord | null | Promise<TurnExecutionRecord | null>;
   listByParent(parentInvocationId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   /**
@@ -54,6 +58,22 @@ export interface ITurnExecutionStore {
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,
   ): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+}
+
+export type BindCoveredMessageIdsResult =
+  | { outcome: 'bound' | 'replayed' | 'conflict'; record: TurnExecutionRecord }
+  | { outcome: 'not_found'; record: null };
+
+export function assertCoveredMessageIds(messageIds: readonly string[]): void {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    throw new Error('coveredMessageIds must be a non-empty array');
+  }
+  const seen = new Set<string>();
+  for (const messageId of messageIds) {
+    assertNonEmpty(messageId, 'coveredMessageId');
+    if (seen.has(messageId)) throw new Error('coveredMessageIds must not contain duplicates');
+    seen.add(messageId);
+  }
 }
 
 const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'freshness_supplement']);

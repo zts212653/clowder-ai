@@ -1,8 +1,8 @@
 ---
 cell_id: identity-session
 title: Identity / Session
-summary: Agent identity、connector session binding、bubble identity、runtime session binding、user profile 五个 subcell 的边界。
-canonical_features: [F032, F088, F183, F211, F231, F262, F291]
+summary: Agent identity、connector session binding、bubble identity、runtime session binding、thread access policy、user profile 六个 subcell 的边界。
+canonical_features: [F032, F088, F183, F211, F231, F262, F291, F299]
 code_anchors:
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
@@ -21,6 +21,9 @@ code_anchors:
   - packages/web/src/components/ThreadSidebar/ThreadSpeedSettings.tsx
   - packages/web/src/debug/bubbleIdentity.ts
   - packages/api/src/domains/cats/services/stores/ports/SessionChainStore.ts
+  - packages/api/src/domains/cats/services/session/thread-access-policy.ts
+  - packages/api/src/routes/session-chain.ts
+  - packages/api/src/routes/session-transcript.ts
   - packages/api/src/domains/cats/services/runtime-session/RuntimeSessionMetadata.ts
   - packages/api/src/domains/cats/services/runtime-session/RuntimeSessionStore.ts
   - packages/api/src/domains/cats/services/runtime-session/RedisRuntimeSessionStore.ts
@@ -49,6 +52,7 @@ doc_anchors:
   - docs/features/F231-user-profile-capsule.md
   - docs/features/F262-per-thread-cat-effort-overrides.md
   - docs/features/F291-codex-oauth-fast-mode.md
+  - docs/features/F299-workspace-invocation-trajectory.md
   - feature-discussions/2026-08-08-f291-codex-oauth-fast-mode/README.md
   - feature-discussions/2026-06-13-f231-phase-c-design-gate.md
   - feature-discussions/2026-07-10-f231-profile-topology-convergence.md
@@ -67,6 +71,7 @@ cited_by:
   - {feature: F291, date: 2026-08-08, delta: "identity-agent config extension — OAuth Codex member and thread-scoped speed intent, projected after actual-cat routing and mapped to carrier-specific service-tier wire states"}
   - {feature: F231, date: 2026-06-13, delta: "Phase C write-rule cleanup (codex REQUEST-CHANGES P1) — removed stale 'all changes via operator review' wording that conflicted with KD-12; KD-15 added: low-cost autonomous writes target per-cat layer (primer / user-signal lane) ONLY, NOT shared capsule directly (promotion to shared capsule needs high bar: operator signature or multi-cat corroboration); low-cost writes require provenance (source coords + owner cat + status + correction path)."}
   - {feature: F231, date: 2026-07-10, delta: "Phase D topology repair (KD-18/19) — relationship continuity is per-persona relationshipKey, canonical private truth lives under CAT_CAFE_DATA_DIR/profiles/<userId>, L0 emits cat-cafe-profile://relationship/current, authenticated read/propose/approve share FileProfileRepository, legacy private/profile is migration input only."}
+  - {feature: F299, date: 2026-08-21, delta: "Phase B.2 thread-access-policy authority — Sessions / Transcript / Invocations / Theater share one read decision; user-indexed system threads expose only the current user's session-backed records."}
 ---
 
 # Identity / Session
@@ -75,13 +80,14 @@ Architecture cell: identity-session
 
 ## Canonical Owner
 
-This is a top-level routing cell with five subcells. It exists to prevent identity concerns from becoming a garbage bin.
+This is a top-level routing cell with six subcells. It exists to prevent identity concerns from becoming a garbage bin.
 
 - `identity-agent`: F032 owns dynamic CatId, roster, AgentRegistry, roles, and reviewer matching.
 - `identity-agent config`: F127 owns per-cat runtime defaults and provider/model capability; F262 extends that chain with raw `(threadId, catId)` effort overrides, and F291 adds OAuth Codex speed intent with carrier-specific projection. The thread store owns persistence, but effective effort/speed are derived after actual-cat routing at invocation time and are not navigation or session-strategy state.
 - `identity-connector`: F088 owns connector principal link and external chat/thread binding.
 - `identity-bubble`: F183 / ADR-033 own frontend bubble identity within a thread.
 - `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, hidden external-runtime anchor threads, seal reason, and per-session identity history.
+- `thread-access-policy`: F299 Phase B.2 owns the canonical read decision for session-backed thread resources. Owner threads are thread-scoped; shared default, user-indexed system threads, and matching external-runtime anchors are current-user-scoped. Sessions, Transcript, Invocations, and Theater must consume this authority instead of spelling owner/default checks in each route.
 - `identity-user-profile`: F231 owns the per-user capsule and per-(user×persona) relationship primer. `catId` routes work, F208/model identity describes capability, and `relationshipKey` names stable relationship continuity. Canonical private content lives at `${CAT_CAFE_DATA_DIR}/profiles/<userId>/`; tracked code owns the repository/authentication contract, never the private bytes. L0 keeps the ≤300-char capsule plus `cat-cafe-profile://relationship/current`; the authenticated read surface derives user/persona from its principal. Profile proposals, approvals, provenance, L0 compilation, and cache invalidation share `FileProfileRepository`. Worktree-local `private/profile/` is legacy migration input only, with hash-guarded conflict resolution and rollback backup.
 
 F209's entity registry is adjacent but not canonical for agent identity. Its `entity_id` / aliases are retrievable memory anchors with provenance; they may point to cats, humans, features, or external concepts, but they do not decide roster membership, current model, role, reviewer eligibility, or who a cat is.
@@ -92,6 +98,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - Changing connector user/chat/thread binding, connector permission ownership, or external sender mapping.
 - Changing frontend bubble identity, canonical invocation ID, or bubble kind identity rules.
 - Changing runtime session binding, external conversation registration, cascade/session ownership, runtime-session list/read surfaces, or how `cliSessionId` maps to runtime-specific session IDs.
+- Changing whether an identity may list or read session-backed resources for a thread, or how shared/system threads filter records by user.
 - Changing what cats know about their human at startup: user profile capsule content/injection, relationship primers, or which persona layer (breed/instance/user/relationship) a piece of identity data belongs to.
 
 ## Extend By
@@ -101,6 +108,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - For connector binding, use `ConnectorThreadBindingStore` and connector binding keys instead of ad hoc thread maps.
 - For bubble identity, follow ADR-033 and route through `bubble-pipeline` contracts and tests.
 - For runtime session binding, use Session Chain / runtime-session metadata keyed by Clowder AI session id and runtime session id. IDE-direct registration belongs behind the external runtime registration contract and agent-key authorization, not ad hoc JSON maps.
+- For session-backed thread reads, call `thread-access-policy`; a user index grants current-user-scoped reads, never access to every user's records under that thread id.
 - When a feature touches more than one subcell, declare each one in the feature's Architecture cell note and explain the boundary.
 - If a feature consumes F209 `entity_id`, keep the direction one-way: identity/session truth may be referenced as provenance for entity aliases, but entity aliases must not rewrite roster or connector bindings.
 
@@ -110,6 +118,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - `identity-connector` is not `identity-bubble`. External chat/thread binding does not decide frontend bubble grouping.
 - `identity-bubble` is not `identity-agent`. Bubble identity uses `(catId, canonicalInvocationId, bubbleKind)` inside a thread; it is not the source of roster truth.
 - `identity-runtime-session` is not `identity-agent`. A runtime can switch model/profile inside one cascade; the session records identity history but does not decide roster truth.
+- `thread-access-policy` is not sidebar presentation. The durable user index is one policy input; a route must still apply the returned record scope before reading sessions, transcripts, invocations, or Theater replay data.
 - `identity-runtime-session` is not `memory`. Memory consumes transcript/digest evidence after runtime sessions are materialized; it does not own active cascade/conversation binding.
 - `identity-user-profile` is not `memory`. The capsule is push-mode startup truth; the persona primer is an authenticated profile read, while memory is pull-mode retrievable evidence. Shared capsule promotions are high-gate changes (KD-15); low-cost persona-primer/user-signal updates carry proposer provenance and correction paths (KD-12/18). Memory does not auto-promote into either profile layer (KD-5 data minimization).
 - `identity-user-profile` instance/user/relationship layers must never enter tracked shared assets (cat-template.json, public test baselines, outbound sync). Tracked tests verify the overlay mechanism via fixtures only (F231 KD-6).

@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import ts from 'typescript';
 import { buildWindowsStatus, resolveWindowsStatusPorts } from './lib/platform-status.mjs';
 
 const ROOT = resolve(process.cwd());
 const localRequire = createRequire(import.meta.url);
+const BUILD_CHILD_ENV_INHERITED_CWD_EXCEPTIONS = [
+  // Antigravity never sets spawn.cwd, so its process and shell cwd intentionally inherit together.
+  'packages/api/src/domains/cats/services/agents/providers/GeminiAgentService.ts::buildChildEnv(options.callbackEnv)',
+];
 
 function resolvePackageBin(packageName) {
   const pkgPath = localRequire.resolve(`${packageName}/package.json`);
@@ -36,6 +41,54 @@ function createSandbox(envFile = '') {
   }
 
   return dir;
+}
+
+function listTypeScriptFiles(root) {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name);
+    return entry.isDirectory() ? listTypeScriptFiles(path) : entry.isFile() && entry.name.endsWith('.ts') ? [path] : [];
+  });
+}
+
+function hasWorkingDirectoryOption(call) {
+  const options = call.arguments[1];
+  return (
+    options !== undefined &&
+    ts.isObjectLiteralExpression(options) &&
+    options.properties.some(
+      (property) =>
+        (ts.isShorthandPropertyAssignment(property) && property.name.text === 'workingDirectory') ||
+        (ts.isPropertyAssignment(property) &&
+          ((ts.isIdentifier(property.name) && property.name.text === 'workingDirectory') ||
+            (ts.isStringLiteral(property.name) && property.name.text === 'workingDirectory'))),
+    )
+  );
+}
+
+function collectBuildChildEnvCallsMissingWorkingDirectory() {
+  const sourceRoot = resolve(ROOT, 'packages/api/src');
+  const findings = [];
+
+  for (const path of listTypeScriptFiles(sourceRoot)) {
+    const source = readFileSync(path, 'utf8');
+    const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+    function visit(node) {
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'buildChildEnv' &&
+        !hasWorkingDirectoryOption(node)
+      ) {
+        findings.push(`${relative(ROOT, path).replaceAll('\\', '/')}::${node.getText(sourceFile)}`);
+      }
+      ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+  }
+
+  return findings.sort();
 }
 
 function runSourceOnly({ sandboxDir, env = {}, extraArgs = [], commands }) {
@@ -484,10 +537,18 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
     const tmuxGateway = readFileSync(resolve(ROOT, 'packages/api/src/domains/terminal/tmux-gateway.ts'), 'utf8');
 
-    assert.match(acpClient, /buildChildEnv\(this\.config\.env\)/);
-    assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env\)/);
+    assert.match(acpClient, /buildChildEnv\(this\.config\.env, \{ workingDirectory: this\.config\.cwd \}\)/);
+    assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env, \{ workingDirectory: this\.config\.cwd \}\)/);
     assert.match(tmuxGateway, /'CONNECTOR_GATEWAY_AUTOSTART'/);
     assert.match(tmuxGateway, /'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/);
+  });
+
+  it('requires every buildChildEnv caller to declare its intended working directory or a narrow exception', () => {
+    assert.deepEqual(
+      collectBuildChildEnvCallsMissingWorkingDirectory(),
+      BUILD_CHILD_ENV_INHERITED_CWD_EXCEPTIONS,
+      'new buildChildEnv callers must pass workingDirectory so child PWD/INIT_CWD cannot drift from spawn cwd',
+    );
   });
 
   it('Windows status succeeds only when required API and web PID files are running', () => {

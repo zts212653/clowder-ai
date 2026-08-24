@@ -25,7 +25,7 @@ import { projectFreshnessClosure } from '../domains/cats/services/freshness/glas
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
-import { parseCursor } from '../domains/cats/services/stores/cursor.js';
+import { compareCursors, parseCursor } from '../domains/cats/services/stores/cursor.js';
 import { gateForDurableSlot } from '../domains/cats/services/stores/cursor-activation.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
@@ -34,7 +34,11 @@ import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryS
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
-import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
+import type {
+  IThreadReadStateStore,
+  ThreadReadCoordinate,
+  ThreadReadState,
+} from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
 import type {
   BootcampStateV1,
   ILabelStore,
@@ -42,7 +46,11 @@ import type {
   Thread,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { SYSTEM_USER_IDS } from '../domains/cats/services/stores/visibility.js';
+import {
+  isDurableOwnerReadEvidence,
+  passesManagedHoldViewerBoundary,
+  SYSTEM_USER_IDS,
+} from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { visibilityCursorUnresolvedRepair } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -59,37 +67,224 @@ import {
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
 
+type StoredReadCoordinateAssessment =
+  | { kind: 'valid'; primary: NonNullable<ReturnType<typeof parseCursor>> }
+  | { kind: 'unresolved_legacy'; primary: NonNullable<ReturnType<typeof parseCursor>> }
+  | { kind: 'unresolved_canonical'; primary: NonNullable<ReturnType<typeof parseCursor>> }
+  | { kind: 'invalid' }
+  | { kind: 'blocked' };
+
+type StoredReadPreparation = 'ready' | 'corrected' | 'retry' | 'blocked';
+type ParsedReadPosition = {
+  token: string;
+  parsed: NonNullable<ReturnType<typeof parseCursor>>;
+};
+type ReadPositionAssessment =
+  | 'resolved_legacy'
+  | 'resolved_canonical'
+  | 'unresolved_legacy'
+  | 'unresolved_canonical'
+  | 'invalid'
+  | 'blocked';
+
+function readCoordinateOf(state: ThreadReadState): ThreadReadCoordinate {
+  return {
+    lastReadMessageId: state.lastReadMessageId,
+    ...(state.lastReadVisibilityCursor === undefined
+      ? {}
+      : { lastReadVisibilityCursor: state.lastReadVisibilityCursor }),
+  };
+}
+
+function parseStoredReadPositions(stored: ThreadReadState): ParsedReadPosition[] | null {
+  try {
+    const primary = parseCursor(stored.lastReadMessageId);
+    if (!primary) return null;
+    const positions: ParsedReadPosition[] = [{ token: stored.lastReadMessageId, parsed: primary }];
+    if (stored.lastReadVisibilityCursor === undefined) return positions;
+    const anchor = parseCursor(stored.lastReadVisibilityCursor);
+    if (!anchor || anchor.version !== 2) return null;
+    positions.push({ token: stored.lastReadVisibilityCursor, parsed: anchor });
+    return positions;
+  } catch {
+    return null;
+  }
+}
+
+async function assessReadPosition(
+  messageStore: IMessageStore,
+  userId: string,
+  threadId: string,
+  position: ParsedReadPosition,
+): Promise<ReadPositionAssessment> {
+  let message: Awaited<ReturnType<IMessageStore['getById']>>;
+  try {
+    message = await messageStore.getById(position.parsed.id);
+  } catch {
+    return 'blocked';
+  }
+  if (!message) return position.parsed.version === 2 ? 'unresolved_canonical' : 'unresolved_legacy';
+  if (
+    message.threadId !== threadId ||
+    !isDurableOwnerReadEvidence(message) ||
+    !passesManagedHoldViewerBoundary(message, userId)
+  ) {
+    return 'invalid';
+  }
+  if (position.parsed.version !== 2 || !messageStore.canonicalizeCursor) return 'resolved_legacy';
+  try {
+    const canonical = await messageStore.canonicalizeCursor(position.parsed.id, threadId);
+    return canonical === position.token ? 'resolved_canonical' : 'invalid';
+  } catch {
+    return 'blocked';
+  }
+}
+
+async function assessStoredReadCoordinate(
+  messageStore: IMessageStore,
+  userId: string,
+  threadId: string,
+  stored: ThreadReadState,
+): Promise<StoredReadCoordinateAssessment> {
+  const positions = parseStoredReadPositions(stored);
+  if (!positions?.[0]) return { kind: 'invalid' };
+  const assessments = await Promise.all(
+    positions.map((position) => assessReadPosition(messageStore, userId, threadId, position)),
+  );
+  if (assessments.includes('blocked')) return { kind: 'blocked' };
+  if (assessments.includes('invalid')) return { kind: 'invalid' };
+  if (assessments.includes('unresolved_canonical')) {
+    return { kind: 'unresolved_canonical', primary: positions[0].parsed };
+  }
+  if (assessments.includes('unresolved_legacy') && !assessments.includes('resolved_canonical')) {
+    return { kind: 'unresolved_legacy', primary: positions[0].parsed };
+  }
+  return { kind: 'valid', primary: positions[0].parsed };
+}
+
+async function correctInvalidReadCoordinate(
+  readStateStore: IThreadReadStateStore,
+  userId: string,
+  threadId: string,
+  stored: ThreadReadState,
+  incomingSlotCursor: string,
+  canonicalIncomingCursor: string,
+): Promise<StoredReadPreparation> {
+  const replaceCoordinate = readStateStore.replaceReadCoordinateIfEqual;
+  if (!replaceCoordinate) return 'blocked';
+  const corrected = await replaceCoordinate.call(readStateStore, userId, threadId, readCoordinateOf(stored), {
+    lastReadMessageId: incomingSlotCursor,
+    ...(canonicalIncomingCursor.startsWith('v2:') ? { lastReadVisibilityCursor: canonicalIncomingCursor } : {}),
+  });
+  return corrected ? 'corrected' : 'retry';
+}
+
+async function reconcileStoredReadPrimary(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore,
+  userId: string,
+  threadId: string,
+  stored: ThreadReadState,
+): Promise<StoredReadPreparation> {
+  if (!messageStore.canonicalizeCursor) return 'blocked';
+  let storedV2: string;
+  try {
+    storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, threadId);
+  } catch {
+    return 'blocked';
+  }
+  if (storedV2 === stored.lastReadMessageId) return 'ready';
+
+  const replaceCoordinate = readStateStore.replaceReadCoordinateIfEqual;
+  if (replaceCoordinate) {
+    const canonicalFrontier =
+      stored.lastReadVisibilityCursor && compareCursors(stored.lastReadVisibilityCursor, storedV2) > 0
+        ? stored.lastReadVisibilityCursor
+        : storedV2;
+    const reconciled = await replaceCoordinate.call(readStateStore, userId, threadId, readCoordinateOf(stored), {
+      lastReadMessageId: storedV2,
+      lastReadVisibilityCursor: canonicalFrontier,
+    });
+    return reconciled ? 'ready' : 'retry';
+  }
+  if (stored.lastReadVisibilityCursor !== undefined || !readStateStore.reconcileReadCursor) return 'blocked';
+  const reconciled = await readStateStore.reconcileReadCursor(userId, threadId, stored.lastReadMessageId, storedV2);
+  return reconciled ? 'ready' : 'retry';
+}
+
 /**
- * #1200: Pre-reconcile stored read cursor before CAS ack.
- * Converts stored v1 → v2 atomically so ACK_CAS_LUA can compare same-format.
- * Without this, the CAS correctly fails-closed on cross-format but the ack
- * silently no-ops. Pre-reconcile makes the ack succeed when it should.
+ * Validate the complete stored read coordinate before CAS ack.
  *
- * Best-effort: canonicalization or CAS failure is silent — the Lua script
- * enforces fail-closed at the store boundary, preventing read-state regression.
+ * The rollout primary and canonical visibility anchor are one state object.
+ * Any resolved ineligible position invalidates the whole
+ * coordinate. Correction and v1 → v2 reconciliation CAS both fields so an
+ * anchor-only concurrent change cannot be overwritten.
  */
-async function preReconcileReadCursor(
+async function prepareStoredReadCursorForAck(
   readStateStore: IThreadReadStateStore,
   messageStore: IMessageStore | null | undefined,
   userId: string,
   threadId: string,
-  incomingCursor: string,
-): Promise<void> {
-  if (!incomingCursor.startsWith('v2:')) return;
-  if (!messageStore?.canonicalizeCursor) return;
-  if (!readStateStore.reconcileReadCursor) return;
+  stored: ThreadReadState | null,
+  incomingSlotCursor: string,
+  canonicalIncomingCursor: string,
+): Promise<StoredReadPreparation> {
+  if (!stored) return 'ready';
+  if (!messageStore) return 'blocked';
 
-  const stored = await readStateStore.get(userId, threadId);
-  if (!stored || stored.lastReadMessageId.startsWith('v2:')) return;
-
-  try {
-    const storedV2 = await messageStore.canonicalizeCursor(stored.lastReadMessageId, threadId);
-    if (storedV2 !== stored.lastReadMessageId) {
-      await readStateStore.reconcileReadCursor(userId, threadId, stored.lastReadMessageId, storedV2);
-    }
-  } catch {
-    // Silent: ACK_CAS_LUA will fail-closed on cross-format, preventing regression.
+  const assessment = await assessStoredReadCoordinate(messageStore, userId, threadId, stored);
+  if (assessment.kind === 'blocked') return 'blocked';
+  if (assessment.kind === 'invalid') {
+    return correctInvalidReadCoordinate(
+      readStateStore,
+      userId,
+      threadId,
+      stored,
+      incomingSlotCursor,
+      canonicalIncomingCursor,
+    );
   }
+
+  if (assessment.kind !== 'valid' || !incomingSlotCursor.startsWith('v2:') || assessment.primary.version === 2) {
+    return 'ready';
+  }
+  return reconcileStoredReadPrimary(readStateStore, messageStore, userId, threadId, stored);
+}
+
+async function repairUnresolvedLegacyReadCoordinate(
+  readStateStore: IThreadReadStateStore,
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+  existing: ThreadReadState | null,
+  gated: string,
+  incomingCursor: string,
+): Promise<boolean> {
+  if (!existing || existing.lastReadVisibilityCursor || !messageStore?.canonicalizeCursor) return false;
+  let parsedExisting: ReturnType<typeof parseCursor> = null;
+  try {
+    parsedExisting = parseCursor(existing.lastReadMessageId);
+  } catch {
+    // Malformed persisted tokens have no comparable visibility position.
+  }
+  if (parsedExisting?.version === 2) return false;
+  if (parsedExisting?.version === 1) {
+    try {
+      const storedCanonical = await messageStore.canonicalizeCursor(existing.lastReadMessageId, threadId);
+      if (storedCanonical !== existing.lastReadMessageId) return false;
+    } catch {
+      return false;
+    }
+  }
+
+  const replaceCoordinate = readStateStore.replaceReadCoordinateIfEqual;
+  if (!replaceCoordinate) return false;
+  const repaired = await replaceCoordinate.call(readStateStore, userId, threadId, readCoordinateOf(existing), {
+    lastReadMessageId: gated,
+    lastReadVisibilityCursor: incomingCursor,
+  });
+  if (repaired) visibilityCursorUnresolvedRepair.add(1, { namespace: 'read' });
+  return repaired;
 }
 
 /**
@@ -105,54 +300,51 @@ async function gatedReadStateAck(
   incomingCursor: string,
   options: { repairUnresolvableLegacy?: boolean } = {},
 ): Promise<boolean> {
-  const existing = await readStateStore.get(userId, threadId);
-  const existingCursor = existing?.lastReadMessageId ?? null;
-  const gated = gateForDurableSlot(incomingCursor, existingCursor);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const existing = await readStateStore.get(userId, threadId);
+    const existingCursor = existing?.lastReadMessageId ?? null;
+    const gated = gateForDurableSlot(incomingCursor, existingCursor);
 
-  // Pre-reconcile only when writing v2 — stored may be v1, need same-format for ACK_CAS_LUA
-  if (gated.startsWith('v2:')) {
-    await preReconcileReadCursor(readStateStore, messageStore, userId, threadId, gated);
+    const preparation = await prepareStoredReadCursorForAck(
+      readStateStore,
+      messageStore,
+      userId,
+      threadId,
+      existing,
+      gated,
+      incomingCursor,
+    );
+    if (preparation === 'corrected') return true;
+    if (preparation === 'retry') continue;
+    if (preparation === 'blocked') return false;
+
+    const advanced = await readStateStore.ack(userId, threadId, gated, incomingCursor);
+    if (advanced || !existingCursor || !incomingCursor.startsWith('v2:')) return advanced;
+    if (!options.repairUnresolvableLegacy) return false;
+    return repairUnresolvedLegacyReadCoordinate(
+      readStateStore,
+      messageStore,
+      userId,
+      threadId,
+      existing,
+      gated,
+      incomingCursor,
+    );
   }
-
-  const advanced = await readStateStore.ack(userId, threadId, gated, incomingCursor);
-  if (advanced || !existingCursor || !incomingCursor.startsWith('v2:')) return advanced;
-  if (!options.repairUnresolvableLegacy) return false;
-  // A durable anchor remains ordering evidence when the rollout-gated primary
-  // is pruned. ACK already compared against it, so legacy repair must not
-  // bypass that monotonic verdict.
-  if (existing?.lastReadVisibilityCursor) return false;
-  const replace = readStateStore.replaceReadCursorIfEqual;
-  if (!replace || !messageStore?.canonicalizeCursor) return false;
-
-  let parsedExisting: ReturnType<typeof parseCursor> = null;
-  try {
-    parsedExisting = parseCursor(existingCursor);
-  } catch {
-    // Malformed persisted tokens have no comparable visibility position and
-    // may be replaced by the validated incoming read evidence below.
-  }
-  if (parsedExisting?.version === 2) return false;
-  if (parsedExisting?.version === 1) {
-    try {
-      const storedCanonical = await messageStore.canonicalizeCursor(existingCursor, threadId);
-      if (storedCanonical !== existingCursor) return false;
-    } catch {
-      // Resolver availability is not proof that the stored position is gone.
-      return false;
-    }
-  }
-
-  const repaired = await replace.call(readStateStore, userId, threadId, existingCursor, gated, incomingCursor);
-  if (repaired) visibilityCursorUnresolvedRepair.add(1, { namespace: 'read' });
-  return repaired;
+  return false;
 }
 
-function isReadStateCaughtUp(
+async function isReadStateCaughtUp(
   state: Awaited<ReturnType<IThreadReadStateStore['get']>>,
   targetCursor: string,
   targetMessageId: string,
-): boolean {
-  if (!state) return false;
+  messageStore: IMessageStore | null | undefined,
+  userId: string,
+  threadId: string,
+): Promise<boolean> {
+  if (!state || !messageStore) return false;
+  const assessment = await assessStoredReadCoordinate(messageStore, userId, threadId, state);
+  if (assessment.kind !== 'valid' && assessment.kind !== 'unresolved_canonical') return false;
   if (state.lastReadMessageId === targetCursor || state.lastReadMessageId === targetMessageId) return true;
   const anchor = state.lastReadVisibilityCursor;
   if (!anchor) return false;
@@ -728,7 +920,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // 否则浏览器只能自己 fold runtime 事件——那正是 F5 才恢复真相的根因。
     const presenceByThread =
       view === 'sidebar' && threads.length > 0
-        ? await composeSidebarPresence(threads, userId, threadStore, opts.presenceSource)
+        ? await composeSidebarPresence(threads, userId, opts.presenceSource)
         : undefined;
 
     return {
@@ -1295,10 +1487,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let advancedCount = 0;
 
     for (const thread of threads) {
-      // #1200/#1269: Use visibility-domain latest — single authority.
-      // Timeline-published queued cat speech now has visibilitySeq at append,
-      // so getLatestVisibleCursor covers all visible items without fallback.
-      const latest = await messageStore.getLatestVisibleCursor(thread.id);
+      // F297 AC-D4: stay in visibility order, but require durable owner-read
+      // evidence so a queued mutable stream cannot be acknowledged mid-flight.
+      const latest = await messageStore.getLatestVisibleCursor(thread.id, {
+        evidence: 'durable_owner_read',
+        viewerUserId: userId,
+      });
       if (!latest) continue;
       // #1269: Gated ack — applies durable-slot gate + conditional pre-reconcile
       const advanced = await gatedReadStateAck(opts.readStateStore!, messageStore, userId, thread.id, latest.cursor, {
@@ -1351,6 +1545,18 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         reply.status(400);
         return { error: 'upToMessageId does not belong to this thread' };
       }
+      // INV-PR5-3: a direct message-id ACK is a viewer-bound read. Apply the
+      // same managed-hold owner/hidden boundary as timeline and latest-cursor
+      // reads before canonicalization or legacy cursor repair can advance it.
+      if (!passesManagedHoldViewerBoundary(msg, userId)) {
+        return { advanced: false, caughtUp: false };
+      }
+      // F297 AC-D4: direct message-id ACK is still owner-read evidence.
+      // Mutable stream speech may paint while queued, but cannot advance the
+      // durable cursor until the same message reaches final delivery.
+      if (!isDurableOwnerReadEvidence(msg)) {
+        return { advanced: false, caughtUp: false };
+      }
       if (messageStore.canonicalizeCursor) {
         cursorToken = await messageStore.canonicalizeCursor(parseResult.data.upToMessageId, id);
       }
@@ -1364,7 +1570,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // #1304: caughtUp distinguishes "cursor at/beyond target" from "stale/can't compare"
     // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
     const afterState = await opts.readStateStore.get(userId, id);
-    const caughtUp = advanced || isReadStateCaughtUp(afterState, cursorToken, parseResult.data.upToMessageId);
+    const caughtUp =
+      advanced ||
+      (await isReadStateCaughtUp(afterState, cursorToken, parseResult.data.upToMessageId, messageStore, userId, id));
     return { advanced, caughtUp };
   });
 
@@ -1395,10 +1603,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
-    // #1200/#1269: Use visibility-domain latest — single authority.
-    // Timeline-published queued cat speech now has visibilitySeq at append,
-    // so getLatestVisibleCursor covers all visible items without fallback.
-    const latest = await messageStore.getLatestVisibleCursor(id);
+    // F297 AC-D4: stay in visibility order, but require durable owner-read
+    // evidence so a queued mutable stream cannot be acknowledged mid-flight.
+    const latest = await messageStore.getLatestVisibleCursor(id, {
+      evidence: 'durable_owner_read',
+      viewerUserId: userId,
+    });
     if (!latest) {
       return { advanced: false, caughtUp: true, reason: 'no messages' };
     }
@@ -1410,7 +1620,8 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     // #1304: caughtUp distinguishes "cursor at latest" from "stale/can't compare"
     // Check against both cursor (v2) and raw messageId (v1 fallback when V2 OFF)
     const afterState = await opts.readStateStore.get(userId, id);
-    const caughtUp = advanced || isReadStateCaughtUp(afterState, latest.cursor, latest.messageId);
+    const caughtUp =
+      advanced || (await isReadStateCaughtUp(afterState, latest.cursor, latest.messageId, messageStore, userId, id));
     // #1200 RED #23b: return both raw messageId and canonical v2 cursor
     return { advanced, caughtUp, messageId: latest.messageId, cursor: latest.cursor };
   });

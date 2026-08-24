@@ -496,6 +496,58 @@ describe('F167 A2A replacement Queue preflight', () => {
     );
   });
 
+  test('keeps a post-settlement surviving source live when its retired trigger was replaced', async () => {
+    const queue = new InvocationQueue();
+    const restored = enqueueA2A(queue, 'message-retired-trigger', 1_000);
+    queue.backfillMessageId('thread-1', 'user-1', restored.id, 'message-surviving-source');
+
+    const survivingMessage = {
+      id: 'message-surviving-source',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      catId: 'opus',
+      content: '@codex-sol still-live handoff',
+      mentions: ['codex-sol'],
+      timestamp: 2_000,
+      deliveryStatus: 'queued',
+      queueCustody: createInitialQueuedMessageCustody(restored),
+    };
+    const retiredTriggerMessage = {
+      ...survivingMessage,
+      id: 'message-retired-trigger',
+      content: '@codex-sol retired handoff',
+      timestamp: 1_000,
+    };
+    const inspectHandoff = mock.fn(async ({ sourceMessageId }) =>
+      sourceMessageId === 'message-retired-trigger'
+        ? replacedInspection()
+        : {
+            outcome: 'live',
+            sourceMessageId,
+            fromCatId: 'opus',
+            handoffSourceEventId: `route:${sourceMessageId}:codex-sol`,
+          },
+    );
+    const withdrawEntry = mock.fn(async () => true);
+    const { processor, routeExecution, invocationCreate } = createProcessor({
+      queue,
+      staleMessage: survivingMessage,
+      additionalMessages: [retiredTriggerMessage],
+      inspectHandoff,
+      withdrawEntry,
+    });
+
+    await processor.executeEntry(queue.markProcessing('thread-1', 'user-1'));
+
+    assert.equal(withdrawEntry.mock.calls.length, 0);
+    assert.equal(invocationCreate.mock.calls.length, 1);
+    assert.equal(routeExecution.mock.calls.length, 1);
+    assert.deepEqual(
+      inspectHandoff.mock.calls.map((call) => call.arguments[0].sourceMessageId),
+      ['message-retired-trigger', 'message-surviving-source'],
+    );
+  });
+
   test('retires a replaced carrier when optional successor enrichment throws', async () => {
     const h = await dispositionHarness();
     const successor = h.messageStore.append({

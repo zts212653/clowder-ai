@@ -82,6 +82,8 @@ export interface DeliverOpts {
   threadId: string;
   content: string;
   userId: string;
+  /** Stable producer identity for retrying one exact persisted scheduler item. */
+  idempotencyKey?: string;
   extra?: SchedulerMessageExtra;
 }
 
@@ -110,6 +112,8 @@ export interface ScheduleLifecycleNotice {
 
 export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => void;
 
+export type ScheduleInvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
+
 /** Async cat invocation trigger — callers may detach it, but resolution means durable wake acceptance. */
 export interface ScheduleInvokeTrigger {
   trigger(
@@ -120,11 +124,13 @@ export interface ScheduleInvokeTrigger {
     messageId: string,
     contentBlocks?: readonly unknown[],
     policy?: ScheduleTriggerPolicy,
-  ): void | Promise<unknown>;
+  ): Promise<ScheduleInvokeTriggerOutcome>;
 }
 
 /** Phase 1b+2: context passed to execute — carries actor resolution + context spec */
 export interface ExecuteContext {
+  /** Aborted when this work item's scheduler timeout fires. */
+  signal: AbortSignal;
   /** Cat resolved by ActorResolver, or null if no actor spec / no match */
   assignedCatId: string | null;
   /** Phase 2: session × materialization context, if task declares one */

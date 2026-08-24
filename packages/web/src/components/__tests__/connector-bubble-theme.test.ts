@@ -149,7 +149,7 @@ describe('ConnectorBubble theme', () => {
 
   it('falls back to standalone feedback when hold-ball task is already stale', async () => {
     mockApiFetch
-      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'active', cancelable: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response('{}', { status: 404 }))
       .mockResolvedValueOnce(new Response('{}', { status: 200 }));
     const message: ChatMessage = {

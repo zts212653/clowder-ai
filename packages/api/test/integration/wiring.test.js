@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { after, afterEach, before, beforeEach, describe, mock, test } from 'node:test';
 import Fastify from 'fastify';
-import { migrateRouterOpts } from '../helpers/agent-registry-helpers.js';
+import { migrateRouterOpts as migrateRouterOptsBase } from '../helpers/agent-registry-helpers.js';
 import { fakeL0Compiler } from '../helpers/fake-l0-compiler.js';
 
 // --- Imports (from dist) ---
@@ -33,11 +33,22 @@ const { AgentRouter } = await import('../../dist/domains/cats/services/agents/ro
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { MessageStore } = await import('../../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { ThreadStore } = await import('../../dist/domains/cats/services/stores/ports/ThreadStore.js');
+const { ContextEpochOwner } = await import('../../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { InMemoryContextEpochStore } = await import(
+  '../../dist/domains/cats/services/stores/ports/ContextEpochStore.js'
+);
 const { callbacksRoutes } = await import('../../dist/routes/callbacks.js');
 
 // --- Helpers ---
 
 /** Collect all items from async iterable */
+async function migrateRouterOpts(options) {
+  return migrateRouterOptsBase({
+    ...options,
+    contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
+  });
+}
+
 async function collect(iterable) {
   const items = [];
   for await (const item of iterable) {

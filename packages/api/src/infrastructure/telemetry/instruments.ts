@@ -152,6 +152,40 @@ export const pawFeelReconciliationUnavailable = lazy(() =>
   }),
 );
 
+// --- F296 B4b: continuity / final projection / delivery runtime health ---
+export const contextProjectionTransitionTotal = lazy(() =>
+  meter().createCounter('cat_cafe.context_projection.transition_total', {
+    description: 'Bounded continuity transitions observed at a final provider generation',
+  }),
+);
+
+export const contextProjectionTierCount = lazy(() =>
+  meter().createHistogram('cat_cafe.context_projection.tier_count', {
+    description: 'Mapper-selected final-generation projection count by bounded source tier',
+    unit: '{projection}',
+  }),
+);
+
+export const contextProjectionTierBytes = lazy(() =>
+  meter().createHistogram('cat_cafe.context_projection.tier_bytes', {
+    description: 'UTF-8 bytes of mapper-selected final-generation projections by bounded source tier',
+    unit: 'By',
+  }),
+);
+
+export const contextProjectionDeliveryLatency = lazy(() =>
+  meter().createHistogram('cat_cafe.context_projection.delivery_latency', {
+    description: 'Latency from final-generation construction to the provider receipt',
+    unit: 'ms',
+  }),
+);
+
+export const contextProjectionLedgerOutcomeTotal = lazy(() =>
+  meter().createCounter('cat_cafe.context_projection.ledger_outcome_total', {
+    description: 'Bounded terminal outcome after provider receipt or generation release',
+  }),
+);
+
 export const guideTransitions = lazy(() =>
   meter().createCounter('cat_cafe.guide.transitions', { description: 'Guide lifecycle state transitions' }),
 );
@@ -653,7 +687,8 @@ export const a2aDispatchCount = lazy(() =>
 /**
  * Counter: callback auth failures by reason / tool / cat.
  * Attributes (allowlist-filtered):
- *   - callback.reason: expired | invalid_token | unknown_invocation | missing_creds | stale_invocation
+ *   - callback.reason: invalid_token | unknown_invocation | missing_creds | stale_invocation |
+ *     completed | failed | interrupted | replaced | revoked | canceled
  *   - callback.tool: refresh-token | post-message | register-pr-tracking | retain-memory | ...
  *   - agent.id: cat that experienced the failure (omitted when unknown)
  */
@@ -1310,4 +1345,6 @@ export function warmupCounters(): void {
   externalCaseNoisyWakeDuringCloudReview.add(0);
   externalCaseDuplicateReviewerWakePerHead.add(0);
   externalCaseUserNudgeRequired.add(0);
+  contextProjectionTransitionTotal.add(0);
+  contextProjectionLedgerOutcomeTotal.add(0);
 }

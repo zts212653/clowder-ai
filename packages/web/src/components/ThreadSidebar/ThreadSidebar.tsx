@@ -2,17 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { type Thread, useChatStore } from '@/stores/chatStore';
+import { useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
+import {
+  projectSidebarRows,
+  type SidebarSnapshotRow,
+  useSidebarProjectionStore,
+} from '@/stores/sidebarProjectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
-import { refreshSidebarThreadSnapshot } from '@/utils/sidebar-thread-snapshot';
+import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
+import {
+  bootstrapSidebarThreadSnapshot,
+  invalidateSidebarProjection,
+  refreshSidebarThreadSnapshot,
+} from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
-import { TheaterOverlay } from '../story-player/TheaterOverlay';
-import { TheaterReplayContent } from '../story-player/TheaterReplayContent';
-
 import { readProjectNames, writeProjectNames } from './active-workspace';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
@@ -26,19 +32,17 @@ import {
 } from './sidebar-tab-state';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
+import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import {
   buildSidebarTabContent,
   buildSidebarTabs,
   getProjectPaths,
-  mergeLiveActivityIntoThreads,
   naturalTabForThread,
   projectDisplayName,
-  reconcileActiveThreadOrder,
   type SidebarTabId,
   type ThreadGroup,
 } from './thread-utils';
-import { createToggleWithReconcile } from './toggle-with-reconcile';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
@@ -51,20 +55,41 @@ interface ThreadSidebarProps {
   routeThreadId: string;
 }
 
-function notifyThreadCreateFailure(message: string) {
+interface TrashedThread {
+  id: string;
+  title: string | null;
+}
+
+function notifyThreadCreate(type: 'success' | 'error' | 'info', title: string, message: string) {
   useToastStore.getState().addToast({
-    type: 'error',
-    title: '创建线程失败',
+    type,
+    title,
     message,
     duration: 6000,
   });
 }
 
-function groupKeyForSection(group: ThreadGroup): string {
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError';
+}
+
+function findReconciledThread(beforeThreadIds: ReadonlySet<string>, opts: NewThreadOptions): SidebarSnapshotRow | null {
+  const expectedTitle = opts.title;
+  if (!expectedTitle?.trim()) return null;
+  const expectedProjectPath = opts.projectPath ?? 'default';
+  const candidates = useSidebarProjectionStore
+    .getState()
+    .rows.filter(
+      (row) => !beforeThreadIds.has(row.id) && row.projectPath === expectedProjectPath && row.title === expectedTitle,
+    );
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
+}
+
+function groupKeyForSection(group: ThreadGroup<SidebarSnapshotRow>): string {
   return group.projectPath ?? group.type;
 }
 
-function projectSectionLabel(group: ThreadGroup, projectNames: Map<string, string>): string {
+function projectSectionLabel(group: ThreadGroup<SidebarSnapshotRow>, projectNames: Map<string, string>): string {
   const projectPath = group.projectPath;
   if (!projectPath) return group.label;
   return projectNames.get(projectPath) ?? group.label;
@@ -83,42 +108,35 @@ function forOpenableProject<T>(projectPath: string | undefined, build: (projectP
 
 export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSidebarProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
-  const {
-    threads,
-    currentThreadId,
-    setThreads,
-    setCurrentProject,
-    isLoadingThreads,
-    setLoadingThreads,
-    updateThreadTitle,
-    threadStates,
-  } = useChatStore(
+  const { currentThreadId, setCurrentProject } = useChatStore(
     useShallow((s) => ({
-      threads: s.threads,
       currentThreadId: s.currentThreadId,
-      setThreads: s.setThreads,
       setCurrentProject: s.setCurrentProject,
-      isLoadingThreads: s.isLoadingThreads,
-      setLoadingThreads: s.setLoadingThreads,
-      updateThreadTitle: s.updateThreadTitle,
-      threadStates: s.threadStates,
     })),
   );
-  const [isCreating, setIsCreating] = useState(false);
+  const { rows, pendingThreadCommands, refreshing } = useSidebarProjectionStore(
+    useShallow((state) => ({
+      rows: state.rows,
+      pendingThreadCommands: state.pendingThreadCommands,
+      refreshing: state.refreshing,
+    })),
+  );
+  const threads = useMemo(() => projectSidebarRows({ rows, pendingThreadCommands }), [pendingThreadCommands, rows]);
+  const isLoadingThreads = refreshing;
+  const [creationPhase, setCreationPhase] = useState<'idle' | 'submitting' | 'reconciling'>('idle');
+  const isCreating = creationPhase !== 'idle';
   const [showPicker, setShowPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const [bindWarning, setBindWarning] = useState<string | null>(null);
   // I-1: Thread to confirm deletion (null = no dialog)
-  const [deleteTarget, setDeleteTarget] = useState<Thread | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SidebarSnapshotRow | null>(null);
   // F095 Phase D: Trash bin state
   const [showTrash, setShowTrash] = useState(false);
-  const [trashedThreads, setTrashedThreads] = useState<Thread[]>([]);
+  const [trashedThreads, setTrashedThreads] = useState<TrashedThread[]>([]);
   const [isLoadingTrash, setIsLoadingTrash] = useState(false);
   // F070: governance health by project path
   const [govHealth, setGovHealth] = useState<Record<string, string>>({});
-  // F252 Phase E: Meow Theater replay state
-  const [replayThreadId, setReplayThreadId] = useState<string | null>(null);
   const [tabState, dispatchTabEvent] = useReducer(sidebarTabReducer, null, () => {
     const preference = readBrowserSidebarTabPreference();
     return createSidebarTabState(preference.tab, preference.persisted);
@@ -143,57 +161,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     readProjectNames(typeof localStorage !== 'undefined' ? localStorage : { getItem: () => null, setItem: () => {} }),
   );
 
-  // Shared seq maps — created once, cross-referenced between pin/fav toggle instances
-  const pinSeqMap = useRef(new Map<string, number>());
-  const favSeqMap = useRef(new Map<string, number>());
-
-  // Stable toggle-with-reconcile instances (lazy-init in ref, survive re-renders)
-  const pinToggle = useRef<ReturnType<typeof createToggleWithReconcile>>();
-  const favToggle = useRef<ReturnType<typeof createToggleWithReconcile>>();
-  if (!pinToggle.current) {
-    pinToggle.current = createToggleWithReconcile({
-      fetch: apiFetch,
-      onUpdate: (id, val) => useChatStore.getState().updateThreadPin(id, val),
-      field: 'pinned',
-      seqMap: pinSeqMap.current,
-      siblingSeqMap: favSeqMap.current,
-      onUpdateSibling: (id, val) => useChatStore.getState().updateThreadFavorite(id, val),
-      siblingField: 'favorited',
-    });
-  }
-  if (!favToggle.current) {
-    favToggle.current = createToggleWithReconcile({
-      fetch: apiFetch,
-      onUpdate: (id, val) => useChatStore.getState().updateThreadFavorite(id, val),
-      field: 'favorited',
-      seqMap: favSeqMap.current,
-      siblingSeqMap: pinSeqMap.current,
-      onUpdateSibling: (id, val) => useChatStore.getState().updateThreadPin(id, val),
-      siblingField: 'pinned',
-    });
-  }
-
   const loadThreads = useCallback(async () => {
-    setLoadingThreads(true);
-
-    // F164: Cache-first — show IndexedDB snapshot immediately (skip unread init; API refresh will handle)
-    try {
-      const cached = await loadCachedThreads();
-      if (cached && cached.length > 0) {
-        setThreads(cached);
-      }
-    } catch {
-      // IDB read failure — continue to API
-    }
-
-    // Then replace it with the server's canonical projection. Mount, online,
-    // and Socket.IO reconnect callers share one in-flight full-list request.
-    try {
-      await refreshSidebarThreadSnapshot();
-    } finally {
-      setLoadingThreads(false);
-    }
-  }, [setThreads, setLoadingThreads]);
+    // Run both immediately: a slow IndexedDB read must never delay or overwrite
+    // a newer canonical HTTP snapshot.
+    await Promise.allSettled([bootstrapSidebarThreadSnapshot(), refreshSidebarThreadSnapshot()]);
+  }, []);
 
   useEffect(() => {
     void loadThreads();
@@ -203,12 +175,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   useEffect(() => {
     const handleOnline = () => {
-      void loadThreads();
+      void invalidateSidebarProjection();
       void useChatStore.getState().fetchGlobalBubbleDefaults();
     };
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
-  }, [loadThreads]);
+  }, []);
 
   useEffect(() => {
     const activeButton = tabRefs.current[activeTab];
@@ -241,7 +213,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const createInProject = useCallback(
     async (opts: NewThreadOptions) => {
       console.log('[createInProject] called with opts=', JSON.stringify(opts));
-      setIsCreating(true);
+      const beforeSnapshot = useSidebarProjectionStore.getState();
+      const beforeThreadIds = new Set(beforeSnapshot.rows.map((row) => row.id));
+      const canReconcileByDifference = beforeSnapshot.hasCanonicalSnapshot;
+      let createdThreadId: string | null = null;
+      let navigationCommitted = false;
+      setCreationPhase('submitting');
       setShowPicker(false);
       try {
         const res = await apiFetch(`/api/threads`, {
@@ -258,16 +235,21 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         if (!res.ok) {
           const errBody = await res.text().catch(() => '(no body)');
           console.error('[createInProject] POST /api/threads failed:', res.status, errBody);
-          notifyThreadCreateFailure('这次创建对话没有成功，请稍后重试。');
+          notifyThreadCreate('error', '创建线程失败', '这次创建对话没有成功，请稍后重试。');
           return;
         }
-        const thread: Thread = await res.json();
+        const thread = (await res.json()) as { id?: unknown };
+        if (typeof thread.id !== 'string' || thread.id.length === 0) {
+          notifyThreadCreate('error', '创建线程失败', '服务器没有返回有效的对话标识，请稍后重试。');
+          return;
+        }
+        createdThreadId = thread.id;
 
         // F33: Bind external sessions after thread creation (best-effort, parallel)
         if (opts.sessionBindings?.length) {
           const results = await Promise.allSettled(
             opts.sessionBindings.map(({ catId, cliSessionId }) =>
-              apiFetch(`/api/threads/${thread.id}/sessions/${catId}/bind`, {
+              apiFetch(`/api/threads/${createdThreadId}/sessions/${catId}/bind`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cliSessionId }),
@@ -282,26 +264,46 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         }
 
         if (opts.projectPath) setCurrentProject(opts.projectPath);
-        // Publish the POST response before changing the URL. The header resolves
-        // its title from the thread store, while the sidebar refresh below is
-        // intentionally asynchronous; navigating first creates a visible
-        // "未命名对话" gap for every newly-created thread.
-        const currentThreads = useChatStore.getState().threads;
-        setThreads([thread, ...currentThreads.filter((current) => current.id !== thread.id)]);
-        navigateToThread(thread.id);
+        await invalidateSidebarProjection();
+        navigateToThread(createdThreadId);
+        navigationCommitted = true;
         // Auto-close sidebar on mobile after creating a new conversation
         if (typeof window !== 'undefined' && window.innerWidth < 768) {
           onClose?.();
         }
-        await loadThreads();
       } catch (err) {
         console.error('[createInProject] exception:', err);
-        notifyThreadCreateFailure('网络请求没有完成，创建对话失败。请稍后重试。');
+        if (createdThreadId) {
+          // The POST response is authoritative. A later projection/binding/UI
+          // failure must never turn a known creation into an ambiguous result.
+          if (!navigationCommitted) navigateToThread(createdThreadId);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          setCreationPhase('reconciling');
+          const refreshed = await invalidateSidebarProjection();
+          const reconciledThread =
+            refreshed && canReconcileByDifference ? findReconciledThread(beforeThreadIds, opts) : null;
+          if (reconciledThread) {
+            if (reconciledThread.projectPath !== 'default') setCurrentProject(reconciledThread.projectPath);
+            notifyThreadCreate('success', '创建已确认', '请求虽然超时，但服务器已确认创建完成；没有重复提交。');
+            navigateToThread(reconciledThread.id);
+            if (typeof window !== 'undefined' && window.innerWidth < 768) onClose?.();
+          } else {
+            notifyThreadCreate(
+              'info',
+              '创建结果未确认',
+              '请求已超时；已核对服务器，但仍无法确认是否创建。我们没有自动重试，请先检查侧栏。',
+            );
+          }
+        } else {
+          notifyThreadCreate('error', '创建线程失败', '创建请求没有完成，请稍后重试。');
+        }
       } finally {
-        setIsCreating(false);
+        setCreationPhase('idle');
       }
     },
-    [setCurrentProject, setThreads, navigateToThread, loadThreads, onClose],
+    [setCurrentProject, navigateToThread, onClose],
   );
 
   // F095 Phase D: Load trashed threads
@@ -353,7 +355,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTarget) return;
     const threadId = deleteTarget.id;
-    const isSystem = !!deleteTarget.connectorHubState || !!deleteTarget.systemKind;
+    const isSystem = deleteTarget.isHubThread || !!deleteTarget.systemKind;
     setDeleteTarget(null);
     try {
       // P1-2: System threads require ?force=true (backend enforced)
@@ -371,56 +373,112 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     }
   }, [deleteTarget, currentThreadId, navigateToThread, loadThreads, showTrash, loadTrash]);
 
-  const handleRename = useCallback(
-    async (threadId: string, title: string) => {
-      const nextTitle = title.trim();
-      if (!nextTitle) return;
-      try {
-        const res = await apiFetch(`/api/threads/${threadId}`, {
+  const handleRename = useCallback(async (threadId: string, title: string) => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    const ok = await executeSidebarFieldCommand({
+      threadId,
+      field: 'title',
+      value: nextTitle,
+      request: (signal) =>
+        apiFetch(`/api/threads/${threadId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: nextTitle }),
-        });
-        if (!res.ok) return;
-        const updated = await res.json();
-        updateThreadTitle(threadId, updated.title ?? nextTitle);
-      } catch {
-        // Silently ignore
-      }
-    },
-    [updateThreadTitle],
-  );
+          signal,
+        }),
+    });
+    if (!ok) {
+      useToastStore.getState().addToast({
+        type: 'error',
+        title: '重命名失败',
+        message: '服务器没有接受这次修改，已恢复权威标题。',
+        duration: 5000,
+      });
+    }
+  }, []);
 
   const handleTogglePin = useCallback((threadId: string, pinned: boolean) => {
-    void pinToggle.current?.toggle(threadId, pinned);
+    void executeSidebarFieldCommand({
+      threadId,
+      field: 'pinned',
+      value: pinned,
+      request: (signal) =>
+        apiFetch(`/api/threads/${threadId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pinned }),
+          signal,
+        }),
+    }).then((ok) => {
+      if (!ok) {
+        useToastStore.getState().addToast({
+          type: 'error',
+          title: '置顶失败',
+          message: '服务器没有接受这次修改，已恢复权威状态。',
+          duration: 5000,
+        });
+      }
+    });
   }, []);
 
   const handleToggleFavorite = useCallback((threadId: string, favorited: boolean) => {
-    void favToggle.current?.toggle(threadId, favorited);
+    void executeSidebarFieldCommand({
+      threadId,
+      field: 'favorited',
+      value: favorited,
+      request: (signal) =>
+        apiFetch(`/api/threads/${threadId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ favorited }),
+          signal,
+        }),
+    });
   }, []);
 
   const handleUpdatePreferredCats = useCallback(async (threadId: string, cats: string[]) => {
-    const res = await apiFetch(`/api/threads/${threadId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preferredCats: cats }),
+    const ok = await executeSidebarFieldCommand({
+      threadId,
+      field: 'preferredCats',
+      value: cats,
+      request: (signal) =>
+        apiFetch(`/api/threads/${threadId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferredCats: cats }),
+          signal,
+        }),
     });
-    if (!res.ok) throw new Error('保存失败');
-    useChatStore.getState().updateThreadPreferredCats(threadId, cats);
+    if (!ok) throw new Error('保存失败');
   }, []);
 
   const handleUpdateLabels = useCallback(async (threadId: string, labels: string[]) => {
-    await useChatStore.getState().updateThreadLabels(threadId, labels);
+    const ok = await executeSidebarFieldCommand({
+      threadId,
+      field: 'labels',
+      value: labels,
+      request: (signal) =>
+        apiFetch(`/api/threads/${threadId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ labels }),
+          signal,
+        }),
+    });
+    if (!ok) throw new Error('保存失败');
   }, []);
 
-  // F252 Phase E: open Meow Theater replay for a thread
-  const handleReplay = useCallback((threadId: string) => {
-    setReplayThreadId(threadId);
-  }, []);
+  // F252 Phase E: route replay to the always-mounted AppShell host.
+  const handleReplay = useCallback((threadId: string) => openTheaterReplay(threadId), []);
 
   const handleSelect = useCallback(
     (threadId: string) => {
       // Always clear unread badge — user clicking the thread = "I've seen it"
+      useSidebarProjectionStore.getState().beginSidebarCommand(threadId, 'attention', {
+        unreadCount: 0,
+        hasUserMention: false,
+      });
       useChatStore.getState().clearUnread(threadId);
       if (threadId === currentThreadId) return;
       // Let the new thread restore projectPath after the route switch.
@@ -459,9 +517,9 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   const handleArchiveThreads = useCallback(
     async (path: string) => {
-      // P1-1: Exclude system threads (connectorHubState OR systemKind) — they have separate delete protection
+      // P1-1: Exclude system threads — they have separate delete protection.
       const targets = threads.filter(
-        (t) => t.projectPath === path && t.id !== 'default' && !t.connectorHubState && !t.systemKind,
+        (t) => t.projectPath === path && t.id !== 'default' && !t.isHubThread && !t.systemKind,
       );
       await Promise.allSettled(targets.map((t) => apiFetch(`/api/threads/${t.id}`, { method: 'DELETE' })));
       // P2-1: If current thread was archived, redirect to default
@@ -481,20 +539,8 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     [createInProject],
   );
 
-  const activeThreadOrderRef = useRef<ReadonlyMap<string, number>>(new Map());
-  const activeThreadOrder = useMemo(
-    () => reconcileActiveThreadOrder(threads, threadStates, activeThreadOrderRef.current),
-    [threads, threadStates],
-  );
-  useEffect(() => {
-    activeThreadOrderRef.current = activeThreadOrder;
-  }, [activeThreadOrder]);
-
   const normalizedQuery = searchQuery.trim().toLowerCase();
-  const liveThreads = useMemo(
-    () => mergeLiveActivityIntoThreads(threads, threadStates, activeThreadOrder),
-    [activeThreadOrder, threads, threadStates],
-  );
+  const liveThreads = threads;
   const filteredThreads = useMemo(() => {
     if (!normalizedQuery) return liveThreads;
     return liveThreads.filter((thread) => {
@@ -578,8 +624,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   }, [labels, uncategorizedThreads]);
 
   const findOrCreateOrganizerThread = useCallback(async () => {
-    const store = useChatStore.getState();
-    const existing = store.threads.find((t) => t.title === ORGANIZER_TITLE);
+    const existing = useSidebarProjectionStore.getState().rows.find((thread) => thread.title === ORGANIZER_TITLE);
     if (existing) return existing;
 
     const res = await apiFetch('/api/threads', {
@@ -590,7 +635,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     if (!res.ok) throw new Error(`${res.status}`);
     const created = await res.json();
     await loadThreads();
-    return created as Thread;
+    return created as { id: string };
   }, [loadThreads]);
 
   const parseSuggestionsJson = useCallback(
@@ -719,7 +764,21 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   const handleBatchApplyLabels = useCallback(async (assignments: Map<string, string[]>) => {
     const { batchApplyLabels, createAndResolveLabels } = await import('@/utils/batch-apply-labels');
-    const updateLabels = useChatStore.getState().updateThreadLabels;
+    const updateLabels = async (threadId: string, labels: string[]) => {
+      const ok = await executeSidebarFieldCommand({
+        threadId,
+        field: 'labels',
+        value: labels,
+        request: (signal) =>
+          apiFetch(`/api/threads/${threadId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ labels }),
+            signal,
+          }),
+      });
+      if (!ok) throw new Error(`failed to update labels for ${threadId}`);
+    };
 
     let resolvedAssignments = assignments;
     if (pendingNewLabelsRef.current.length > 0) {
@@ -760,29 +819,38 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const unreadIds = useMemo(() => {
     const ids = new Set<string>();
     for (const thread of threads) {
-      const ts = threadStates[thread.id];
-      if (ts && ts.unreadCount > 0) {
-        ids.add(thread.id);
-      }
+      if (thread.unreadCount > 0) ids.add(thread.id);
     }
     return ids;
-  }, [threads, threadStates]);
+  }, [threads]);
 
   // F072: Mark all threads as read
   const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
   const handleMarkAllRead = useCallback(async () => {
     setIsMarkingAllRead(true);
+    const commandIds = threads
+      .filter((thread) => thread.unreadCount > 0 || thread.hasUserMention)
+      .map((thread) =>
+        useSidebarProjectionStore.getState().beginSidebarCommand(thread.id, 'attention', {
+          unreadCount: 0,
+          hasUserMention: false,
+        }),
+      );
     try {
       const res = await apiFetch('/api/threads/read/mark-all', { method: 'POST' });
       if (res.ok) {
         useChatStore.getState().clearAllUnread();
+        await invalidateSidebarProjection();
+      } else {
+        for (const commandId of commandIds) useSidebarProjectionStore.getState().failSidebarCommand(commandId);
       }
     } catch (err) {
+      for (const commandId of commandIds) useSidebarProjectionStore.getState().failSidebarCommand(commandId);
       console.debug('[F072] mark-all-read failed:', err);
     } finally {
       setIsMarkingAllRead(false);
     }
-  }, []);
+  }, [threads]);
 
   // V9 sidebar tabs: keep grouping derived from filtered thread data.
   const { pinnedProjects, toggleProjectPin } = useProjectPins();
@@ -989,7 +1057,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   ]);
 
   const renderThreadItem = useCallback(
-    (thread: Thread, indented = false) => (
+    (thread: SidebarSnapshotRow, indented = false) => (
       <ThreadItem
         key={thread.id}
         id={thread.id}
@@ -1007,11 +1075,14 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         onReplay={handleReplay}
         isPinned={thread.pinned}
         isFavorited={thread.favorited}
+        presence={thread.presence}
+        unreadCount={thread.unreadCount}
+        hasUserMention={thread.hasUserMention}
         projectPath={thread.projectPath}
         indented={indented}
         preferredCats={thread.preferredCats}
         threadLabels={thread.labels}
-        isHubThread={!!thread.connectorHubState}
+        isHubThread={thread.isHubThread}
         systemKind={thread.systemKind}
       />
     ),
@@ -1029,7 +1100,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   );
 
   const renderProjectSection = useCallback(
-    (group: ThreadGroup) => {
+    (group: ThreadGroup<SidebarSnapshotRow>) => {
       const groupKey = groupKeyForSection(group);
       const projectPath = group.projectPath;
 
@@ -1069,7 +1140,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   );
 
   const renderProjectTabGroup = useCallback(
-    (group: ThreadGroup) => {
+    (group: ThreadGroup<SidebarSnapshotRow>) => {
       const groupKey = groupKeyForSection(group);
       if (group.type !== 'archived-container') return renderProjectSection(group);
 
@@ -1132,7 +1203,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
               className="console-button-primary text-xs disabled:opacity-40"
               data-guide-id="sidebar.new-thread"
             >
-              {isCreating ? '...' : '+ 新对话'}
+              {creationPhase === 'reconciling' ? '请求超时，核对中…' : isCreating ? '...' : '+ 新对话'}
             </button>
           </div>
         </div>
@@ -1473,17 +1544,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           loading={suggestLoading}
         />
       )}
-
-      {/* F252 Phase E: Meow Theater replay overlay */}
-      {replayThreadId && (
-        <TheaterOverlay
-          open={!!replayThreadId}
-          onClose={() => setReplayThreadId(null)}
-          title={threads.find((t) => t.id === replayThreadId)?.title ?? undefined}
-        >
-          <TheaterReplayContent threadId={replayThreadId} />
-        </TheaterOverlay>
-      )}
     </>
   );
 }
@@ -1555,11 +1615,11 @@ function DeleteConfirmDialog({
   onCancel,
   onConfirm,
 }: {
-  thread: Thread;
+  thread: SidebarSnapshotRow;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const isSystem = !!thread.connectorHubState || !!thread.systemKind;
+  const isSystem = thread.isHubThread || !!thread.systemKind;
   const title = thread.title ?? '未命名对话';
   const [typedName, setTypedName] = useState('');
   const confirmed = !isSystem || typedName === title;

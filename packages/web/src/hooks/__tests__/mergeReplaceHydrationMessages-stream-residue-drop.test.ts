@@ -133,6 +133,49 @@ describe('mergeReplaceHydrationMessages — stream residue drop cases', () => {
     expect(result.stats.preservedLocalCount).toBe(0);
   });
 
+  it('drops terminal rich stream residue when the persisted same-parent final covers the whole projection', () => {
+    const richBlock = {
+      id: 'f247-product-gap',
+      kind: 'card' as const,
+      v: 1 as const,
+      title: 'Personal Chrome product gaps',
+      bodyMarkdown: 'Logo, install, and multi-conversation authorization must close together.',
+      tone: 'warning' as const,
+    };
+    const history: ChatMessage[] = [
+      makeMsg({
+        id: '0001787349890966-000041-f848c703',
+        content: '你这三刀都砍中要害了，我不替这个 Developer Preview 找借口。',
+        toolEvents: [makeToolEvent('tool-server-use', { detail: 'rg PersonalChromePluginCard' })],
+        extra: {
+          rich: { v: 1, blocks: [richBlock] },
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: HISTORY_TURN_ID,
+          },
+        },
+      }),
+    ];
+    const current: ChatMessage[] = [
+      makeLocalResidue({
+        content: '你这三刀都砍中要害了',
+        toolEvents: [makeToolEvent('tool-client-use', { detail: 'rg PersonalChromePluginCard' })],
+        extra: {
+          rich: { v: 1, blocks: [richBlock] },
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: RESIDUE_TURN_ID,
+          },
+        },
+      }),
+    ];
+
+    const result = mergeReplaceHydrationMessages(history, current, {});
+
+    expect(result.messages.map((msg) => msg.id)).toEqual(['0001787349890966-000041-f848c703']);
+    expect(result.stats.preservedLocalCount).toBe(0);
+  });
+
   it('drops terminal residue when only another cat claims the shared parent invocation', () => {
     const history: ChatMessage[] = [makeHistoryMessage()];
     const current: ChatMessage[] = [

@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
+import { HostBrokerError } from '../host-broker/types.js';
 import type { PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type { PluginInstanceRecord, PluginPackageRecord, RuntimeState } from '../host-inventory/types.js';
 import { NodeExternalPluginProcessAdapter } from './node-process-adapter.js';
@@ -13,6 +14,7 @@ import {
   type RuntimeHeartbeatPolicy,
   resolveRuntimeHeartbeatPolicy,
 } from './runtime-heartbeat.js';
+import { projectRuntimeReplacementFailure, RuntimeLeaseRecoveryCoordinator } from './runtime-lease-recovery.js';
 import { createExternalStdioBrokerTransport, type ExternalStdioBrokerTransport } from './stdio-broker-transport.js';
 import type {
   ExternalPluginProcess,
@@ -68,6 +70,7 @@ export class ExternalPluginRuntimeSupervisor {
   private readonly now: () => number;
   private readonly heartbeatPolicy: RuntimeHeartbeatPolicy;
   private readonly processes;
+  private readonly recovery: RuntimeLeaseRecoveryCoordinator;
 
   constructor(private readonly options: ExternalPluginRuntimeSupervisorOptions) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
@@ -78,6 +81,12 @@ export class ExternalPluginRuntimeSupervisor {
       options.heartbeatTimeoutMs,
     );
     this.processes = options.processes ?? new NodeExternalPluginProcessAdapter();
+    this.recovery = new RuntimeLeaseRecoveryCoordinator({
+      startReplacement: async (pluginInstanceId) => {
+        await this.start(pluginInstanceId);
+      },
+      projectFailure: (target) => projectRuntimeReplacementFailure(options.inventory, target, this.now),
+    });
   }
 
   start(pluginInstanceId: string): Promise<ExternalPluginRuntimeHandle> {
@@ -109,6 +118,7 @@ export class ExternalPluginRuntimeSupervisor {
   }
 
   async stopAll(reason = 'host_shutdown'): Promise<void> {
+    this.recovery.stopAccepting();
     await Promise.all([...this.active.values()].map((execution) => this.finish(execution, reason, 'stopped', true)));
   }
 
@@ -175,7 +185,7 @@ export class ExternalPluginRuntimeSupervisor {
       intervalMs: this.heartbeatPolicy.intervalMs,
       ping: () => transport.ping(),
       renewLease: () => connection.renewRuntimeLease(),
-      onFailure: () => this.finish(execution, 'heartbeat_failure', 'crashed', true),
+      onFailure: (error) => this.handleHeartbeatFailure(execution, error),
     });
     execution.heartbeat.start();
     return { pluginInstanceId: execution.pluginInstanceId, closed: execution.closed.promise };
@@ -264,7 +274,7 @@ export class ExternalPluginRuntimeSupervisor {
   private finish(
     execution: RuntimeExecution,
     reason: string,
-    terminalState: 'stopped' | 'crashed',
+    terminalState: 'stopped' | 'crashed' | 'restartable',
     terminateProcess: boolean,
   ): Promise<void> {
     if (execution.terminal) return execution.terminal;
@@ -276,7 +286,7 @@ export class ExternalPluginRuntimeSupervisor {
   private async finishOwned(
     execution: RuntimeExecution,
     reason: string,
-    terminalState: 'stopped' | 'crashed',
+    terminalState: 'stopped' | 'crashed' | 'restartable',
     terminateProcess: boolean,
   ): Promise<void> {
     execution.heartbeat?.stop();
@@ -285,16 +295,48 @@ export class ExternalPluginRuntimeSupervisor {
     await this.projectTerminalState(execution, terminalState);
     this.active.delete(execution.pluginInstanceId);
     execution.closed.resolve(undefined);
+    if (terminalState === 'restartable') {
+      this.recovery.request({
+        pluginInstanceId: execution.pluginInstanceId,
+        packageDigest: execution.packageDigest,
+      });
+    }
   }
 
-  private async projectTerminalState(execution: RuntimeExecution, terminalState: 'stopped' | 'crashed'): Promise<void> {
-    if (execution.projected && terminalState === 'crashed') {
-      await projectRuntimeCrash(this.options.inventory, execution, this.now).catch(() => undefined);
+  private async projectTerminalState(
+    execution: RuntimeExecution,
+    terminalState: 'stopped' | 'crashed' | 'restartable',
+  ): Promise<void> {
+    if (execution.projected && (terminalState === 'crashed' || terminalState === 'restartable')) {
+      await projectRuntimeCrash(this.options.inventory, execution, this.now, {
+        preserveActivation: terminalState === 'restartable',
+        suppressExitDiagnostic: terminalState === 'restartable',
+      }).catch(() => undefined);
       return;
     }
     if (execution.projected && !execution.connection) {
       await this.setRuntimeState(execution, 'stopped').catch(() => undefined);
     }
+  }
+
+  private async handleHeartbeatFailure(execution: RuntimeExecution, error: unknown): Promise<void> {
+    let classifiedError = error;
+    if (error instanceof ExternalPluginRuntimeError && error.code === 'HEARTBEAT_TIMEOUT' && execution.connection) {
+      try {
+        await execution.connection.renewRuntimeLease();
+      } catch (leaseError) {
+        classifiedError = leaseError;
+      }
+    }
+    if (
+      classifiedError instanceof HostBrokerError &&
+      classifiedError.code === 'SESSION_NOT_ACTIVE' &&
+      classifiedError.sessionCloseReason === 'runtime_lease_expired'
+    ) {
+      await this.finish(execution, 'runtime_lease_expired', 'restartable', true);
+      return;
+    }
+    await this.finish(execution, 'heartbeat_failure', 'crashed', true);
   }
 
   private assertOpen(execution: RuntimeExecution): void {

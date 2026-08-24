@@ -19,7 +19,10 @@ vi.mock('@/components/CatAvatar', () => ({ CatAvatar: () => React.createElement(
 vi.mock('@/components/ThreadCatStatus', () => ({ ThreadCatStatus: () => null }));
 vi.mock('@/components/icons/HubIcon', () => ({ HubIcon: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
-vi.mock('../thread-utils', () => ({ formatRelativeTime: () => '1分' }));
+vi.mock('../thread-utils', () => ({
+  formatRelativeTime: () => '1分',
+  formatSidebarStatusTime: () => '1分',
+}));
 vi.mock('../ThreadCatSettings', () => ({
   ThreadCatSettingsContent: () => React.createElement('div', { 'data-testid': 'cats-content' }, 'cats'),
 }));
@@ -63,6 +66,9 @@ describe('thread settings end-to-end component flow', () => {
           lastActiveAt={1}
           isActive={false}
           onSelect={onSelect}
+          presence={{ status: 'idle' }}
+          unreadCount={0}
+          hasUserMention={false}
           onUpdatePreferredCats={vi.fn()}
           onUpdateLabels={vi.fn()}
         />,

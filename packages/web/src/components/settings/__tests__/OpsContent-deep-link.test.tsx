@@ -18,8 +18,12 @@ vi.mock('../../HubLeaderboardTab', () => ({
   HubLeaderboardTab: () => <div data-testid="leaderboard">leaderboard</div>,
 }));
 vi.mock('../../HubObservabilityTab', () => ({
-  HubObservabilityTab: (props: { initialSubTab?: string }) => (
-    <div data-testid="observability" data-subtab={props.initialSubTab ?? 'default'}>
+  HubObservabilityTab: (props: { initialSubTab?: string; initialInvocationId?: string }) => (
+    <div
+      data-testid="observability"
+      data-subtab={props.initialSubTab ?? 'default'}
+      data-invocation-id={props.initialInvocationId}
+    >
       observability
     </div>
   ),
@@ -81,6 +85,13 @@ describe('OpsContent URL deep-linking (S-2 P1 fix)', () => {
     const html = renderToStaticMarkup(<OpsContent />);
     expect(html).toContain('data-testid="observability"');
     expect(html).toContain('data-subtab="default"');
+  });
+
+  it('passes an exact invocation deep-link only to the trace owner', () => {
+    mockSearchParams = new URLSearchParams('ops=observability&obs=traces&invocationId=inv-trace-17');
+    const html = renderToStaticMarkup(<OpsContent />);
+    expect(html).toContain('data-subtab="traces"');
+    expect(html).toContain('data-invocation-id="inv-trace-17"');
   });
 
   it('falls back to usage when ops param is an unknown value', () => {

@@ -6,6 +6,7 @@ import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MeetingThreadDestinationPicker } from './MeetingThreadDestinationPicker';
 
 const OUTPUTS: ReadonlyArray<{ id: MeetingIntakeOutput; label: string }> = [
   { id: 'minutes', label: '会议纪要' },
@@ -66,6 +67,8 @@ function errorMessage(body: unknown, status: number): string {
 export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
   const fetchPending = useApprovalHubStore((state) => state.fetchPending);
   const rawThreads = useChatStore((state) => state.threads as Thread[] | unknown);
+  const currentProjectPath = useChatStore((state) => state.currentProjectPath);
+  const isLoadingThreads = useChatStore((state) => state.isLoadingThreads);
   const threads = useMemo(
     () =>
       (Array.isArray(rawThreads) ? rawThreads : []).filter(
@@ -193,22 +196,15 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
               data-testid="meeting-context"
             />
           </label>
-          <label className="block text-micro font-medium">
-            投递到现有私有 Thread
-            <select
-              value={destination}
-              onChange={(event) => setDestination(event.target.value)}
-              className="mt-1 w-full rounded-md border border-[var(--cafe-border)] bg-[var(--cafe-surface)] p-2 text-sm"
-              data-testid="meeting-destination"
-            >
-              <option value="">请选择</option>
-              {threads.map((thread) => (
-                <option key={thread.id} value={`host:private-thread:${thread.id}`}>
-                  {thread.title ?? thread.id}
-                </option>
-              ))}
-            </select>
-          </label>
+          <MeetingThreadDestinationPicker
+            threads={threads}
+            value={destination}
+            suggestedTitle={typeof metadata.title === 'string' ? metadata.title : '会议跟进'}
+            projectPath={currentProjectPath}
+            loading={isLoadingThreads}
+            disabled={busy}
+            onChange={setDestination}
+          />
           <fieldset className="flex flex-wrap gap-2">
             <legend className="mb-1 text-micro font-medium">产物</legend>
             {OUTPUTS.map((output) => (
@@ -253,13 +249,24 @@ export function MeetingIntakeCard({ item }: { item: ApprovalItem }) {
         </button>
       )}
       {repair?.action === 'regrant' && (
-        <a
-          href="/settings?s=plugins"
-          className="inline-block rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 text-micro font-medium text-[var(--cafe-surface)]"
-          data-testid="meeting-regrant"
-        >
-          去插件设置连接飞书
-        </a>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="/settings?s=plugins"
+            className="inline-block rounded-md bg-[var(--semantic-warning)] px-3 py-1.5 text-micro font-medium text-[var(--cafe-surface)]"
+            data-testid="meeting-regrant"
+          >
+            去插件设置连接飞书
+          </a>
+          <button
+            type="button"
+            onClick={() => void action('retry', { expectedRevision: revision })}
+            disabled={busy}
+            className="rounded-md border border-[var(--semantic-warning)] px-3 py-1.5 text-micro font-medium disabled:opacity-50"
+            data-testid="meeting-regrant-retry"
+          >
+            已连接，重试
+          </button>
+        </div>
       )}
       {repair?.action === 'manual_import' && (
         <div className="space-y-2">

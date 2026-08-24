@@ -2,6 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Thread } from '@/stores/chat-types';
 import { STORAGE_KEY } from '../ThreadSidebar/collapse-state';
 import type { ThreadGroup } from '../ThreadSidebar/thread-utils';
 import { useCollapseState } from '../ThreadSidebar/use-collapse-state';
@@ -16,7 +17,7 @@ let container: HTMLDivElement;
 let captured: HookResult | null = null;
 let storage: Storage;
 
-function makeGroups(): ThreadGroup[] {
+function makeGroups(): ThreadGroup<Thread>[] {
   return [
     {
       type: 'pinned',
@@ -56,7 +57,7 @@ function makeGroups(): ThreadGroup[] {
   ];
 }
 
-function makeArchivedGroups(): ThreadGroup[] {
+function makeArchivedGroups(): ThreadGroup<Thread>[] {
   return [
     {
       type: 'archived-container',
@@ -98,7 +99,11 @@ function makeArchivedGroups(): ThreadGroup[] {
   ];
 }
 
-function HookHost(props: { threadGroups: ThreadGroup[]; currentThreadId: string | undefined; searchQuery?: string }) {
+function HookHost(props: {
+  threadGroups: ThreadGroup<Thread>[];
+  currentThreadId: string | undefined;
+  searchQuery?: string;
+}) {
   captured = useCollapseState({
     threadGroups: props.threadGroups,
     searchQuery: props.searchQuery ?? '',

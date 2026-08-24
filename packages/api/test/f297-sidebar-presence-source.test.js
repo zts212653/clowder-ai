@@ -3,7 +3,7 @@
  *
  * 覆盖：三张执行面各自的正向定性、O(A) 候选成本、以及"知识不完整不得产出终态"的
  * fail-closed 铁律。managed command 的判别 parity 见 f297-managed-command-parity.test.js；
- * 终态回落语义见 f297-terminal-presence.test.js。
+ * InvocationRecord terminal witness 语义见 f297-terminal-presence.test.js。
  */
 
 import assert from 'node:assert/strict';
@@ -33,7 +33,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     });
     const { source } = await realPresenceSource(deps);
 
-    const presence = await source.getActivePresence(['thread_live', 'thread_quiet'], 'alice');
+    const presence = await source.getPresence(['thread_live', 'thread_quiet'], 'alice');
     assert.equal(presence.get('thread_live')?.status, 'working');
     assert.deepEqual(presence.get('thread_live')?.cats, ['opus5']);
     assert.equal(presence.has('thread_quiet'), false, 'a thread without any execution must not be reported active');
@@ -44,7 +44,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     await startRunningRecordWithDraft(deps, { threadId: 'thread_record', userId: 'alice', catId: 'opus5' });
     const { source } = await realPresenceSource(deps);
 
-    const presence = await source.getActivePresence(['thread_record'], 'alice');
+    const presence = await source.getPresence(['thread_record'], 'alice');
     assert.equal(
       presence.get('thread_record')?.status,
       'working',
@@ -72,12 +72,10 @@ describe('F297 production presence source (real service, no classifier stub)', (
     const live = await service.resolveActiveInvocations('thread_managed', 'alice');
     assert.deepEqual(live, [], 'precondition: the live-invocation classifier knows nothing about managed commands');
 
-    const presence = await source.getActivePresence(
-      ['thread_managed', 'thread_other_user', 'thread_finished'],
-      'alice',
-    );
+    const presence = await source.getPresence(['thread_managed', 'thread_other_user', 'thread_finished'], 'alice');
     assert.equal(presence.get('thread_managed')?.status, 'working', 'R3 P1-1: managed command must qualify as working');
     assert.deepEqual(presence.get('thread_managed')?.cats, ['opus5'], 'the owning cat comes from managed owner truth');
+    assert.equal(presence.get('thread_managed')?.activeSince, 1000, 'managed startedAt is canonical elapsed truth');
     assert.equal(presence.has('thread_other_user'), false, 'another user’s command must not leak');
     assert.equal(presence.has('thread_finished'), false, 'a non-running command is not working');
   });
@@ -100,11 +98,12 @@ describe('F297 production presence source (real service, no classifier stub)', (
     const live = await service.resolveActiveInvocations('thread_child', 'alice');
     assert.deepEqual(live, [], 'precondition: classifier cannot reach a child whose parent is not a running record');
 
-    const presence = await source.getActivePresence(['thread_child'], 'alice');
+    const presence = await source.getPresence(['thread_child'], 'alice');
     assert.equal(presence.get('thread_child')?.status, 'working', 'R3 P1-2: standalone running child must be working');
     assert.deepEqual(presence.get('thread_child')?.cats, ['sonnet']);
+    assert.equal(presence.get('thread_child')?.activeSince, 2000, 'child startedAt is canonical elapsed truth');
 
-    const otherUser = await source.getActivePresence(['thread_child'], 'mallory');
+    const otherUser = await source.getPresence(['thread_child'], 'mallory');
     assert.equal(otherUser.has('thread_child'), false, 'child ownership is user-scoped');
   });
 
@@ -122,7 +121,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     await deps.turnExecutionStore.transitionTerminal('child_done', { status: 'succeeded', endedAt: 3000 });
     const { source } = await realPresenceSource(deps);
 
-    const presence = await source.getActivePresence(['thread_child'], 'alice');
+    const presence = await source.getPresence(['thread_child'], 'alice');
     assert.equal(presence.has('thread_child'), false, 'a terminal child must not keep the row pinned to working');
   });
 
@@ -149,12 +148,17 @@ describe('F297 production presence source (real service, no classifier stub)', (
     });
     const { source } = await realPresenceSource(deps);
 
-    const presence = await source.getActivePresence(['thread_all'], 'alice');
+    const presence = await source.getPresence(['thread_all'], 'alice');
     assert.equal(presence.get('thread_all')?.status, 'working');
     assert.deepEqual(
       [...presence.get('thread_all').cats].sort(),
       ['gpt52', 'opus5', 'sonnet'],
       'every face contributes its own cats; none is dropped',
+    );
+    assert.equal(
+      presence.get('thread_all')?.activeSince,
+      1000,
+      'multi-face working elapsed begins at the earliest canonical execution start',
     );
   });
 
@@ -168,13 +172,14 @@ describe('F297 production presence source (real service, no classifier stub)', (
         qualified += 1;
         return service.resolveWorkingPresence(threadId, userId, snapshot);
       },
+      listLatestTerminalExecutions: async () => new Map(),
     };
     const { createSidebarPresenceSource } = await load(
       'domains/cats/services/agents/invocation/sidebar-presence-source.js',
     );
     const counted = createSidebarPresenceSource(counting);
 
-    const presence = await counted.getActivePresence(['a', 'b', 'c'], 'alice');
+    const presence = await counted.getPresence(['a', 'b', 'c'], 'alice');
     assert.equal(presence.size, 0);
     assert.equal(qualified, 0, 'nothing is running → zero qualification round-trips');
     assert.ok(source, 'real source builds');
@@ -222,7 +227,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
       },
     });
 
-    const presence = await source.getActivePresence(threads, 'alice');
+    const presence = await source.getPresence(threads, 'alice');
     for (const threadId of threads) {
       assert.equal(presence.get(threadId)?.status, 'working', `${threadId} must still qualify`);
       assert.deepEqual([...presence.get(threadId).cats].sort(), ['gpt52', 'sonnet']);
@@ -257,9 +262,10 @@ describe('F297 production presence source (real service, no classifier stub)', (
       resolveWorkingPresence: async () => {
         throw new Error('qualification exploded');
       },
+      listLatestTerminalExecutions: async () => new Map(),
     });
 
-    const presence = await source.getActivePresence(['thread_boom'], 'alice');
+    const presence = await source.getPresence(['thread_boom'], 'alice');
     // 这一行被提名过 —— 它恰恰是最可能真在跑的行。放它去走终态回落就是 false terminal。
     assert.equal(
       presence.get('thread_boom')?.status,
@@ -299,7 +305,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
     const working = await service.resolveWorkingPresence('thread_x', 'alice');
     assert.equal(working.complete, false, 'a swallowed liveness failure must still be accounted as incomplete');
 
-    const presence = await source.getActivePresence(['thread_x'], 'alice');
+    const presence = await source.getPresence(['thread_x'], 'alice');
     assert.equal(presence.get('thread_x')?.status, 'idle', 'fail closed: idle, never a terminal state');
   });
 

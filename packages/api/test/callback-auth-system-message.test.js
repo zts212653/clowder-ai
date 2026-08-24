@@ -55,12 +55,12 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
     });
   });
 
-  test('AC-D4: notify(expired) appends a system rich block + broadcasts connector_message', async () => {
+  test('AC-D4: notify(interrupted) appends a system rich block + broadcasts connector_message', async () => {
     const sent = await notifier.notify({
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       fallbackOk: true,
     });
@@ -79,7 +79,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
     const block = msg.extra.rich.blocks[0];
     assert.equal(block.kind, 'card', 'uses card kind (system_info absent in current schema)');
     assert.ok(block.id, 'block has stable id');
-    assert.ok(JSON.stringify(block).includes('expired'), 'block body references reason');
+    assert.ok(JSON.stringify(block).includes('interrupted'), 'block body references reason');
     assert.ok(JSON.stringify(block).includes('register_pr_tracking'), 'block body references tool');
 
     assert.equal(socketManager.broadcasts.length, 1, 'one broadcast');
@@ -150,7 +150,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired', // would normally surface (in SURFACEABLE_REASONS)
+      reason: 'interrupted', // would normally surface (in SURFACEABLE_REASONS)
       tool: 'refresh-token', // BUT background heartbeat tool
     });
     assert.equal(sent, false, 'refresh-token failure must NOT surface in-context (alpha #5 fix)');
@@ -167,13 +167,13 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'post_message',
     });
     assert.equal(sent1, true);
     assert.equal(notifier.__getDedupSizeForTest(), 1, 'one dedup entry after first surface');
 
-    // Step 2: advance time past HIDE_WINDOW_MS (24h) so the entry is expired-eligible
+    // Step 2: advance time past HIDE_WINDOW_MS (24h) so the entry is expiry-eligible
     now += 25 * 60 * 60 * 1000; // 25h
 
     // Step 3: trigger a heartbeat-tool failure (would early-return)
@@ -181,7 +181,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't9',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'refresh-token', // heartbeat — early return
     });
     assert.equal(sentHeartbeat, false, 'heartbeat tool skipped (D2b-1 follow-up)');
@@ -203,7 +203,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'post_message',
     });
     assert.equal(sentPost, true, 'post_message remains surfaceable (user-driven)');
@@ -212,7 +212,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't2', // different thread to avoid dedup
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sentPr, true, 'register_pr_tracking remains surfaceable (user-driven)');
@@ -223,7 +223,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent1, true);
@@ -233,11 +233,43 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent2, false, 'duplicate within 5min window suppressed');
     assert.equal(messageStore.appended.length, 1);
+  });
+
+  test('F298: terminal notice dedup follows exact invocationId + disposition across tools', async () => {
+    const first = await notifier.notify({
+      invocationId: 'inv-terminal-1',
+      threadId: 't1',
+      catId: 'opus',
+      userId: 'u1',
+      reason: 'interrupted',
+      tool: 'post_message',
+    });
+    const sameTerminalDifferentTool = await notifier.notify({
+      invocationId: 'inv-terminal-1',
+      threadId: 't1',
+      catId: 'opus',
+      userId: 'u1',
+      reason: 'interrupted',
+      tool: 'register_pr_tracking',
+    });
+    const differentAttempt = await notifier.notify({
+      invocationId: 'inv-terminal-2',
+      threadId: 't1',
+      catId: 'opus',
+      userId: 'u1',
+      reason: 'interrupted',
+      tool: 'post_message',
+    });
+
+    assert.equal(first, true);
+    assert.equal(sameTerminalDifferentTool, false);
+    assert.equal(differentAttempt, true);
+    assert.equal(messageStore.appended.length, 2);
   });
 
   test('AC-D5: dedup window expires — same key after 5min sends again', async () => {
@@ -245,7 +277,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     now += 5 * MIN_MS + 1;
@@ -253,7 +285,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, true);
@@ -265,21 +297,21 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'tool_a',
     });
     await notifier.notify({
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'tool_b',
     });
     await notifier.notify({
       threadId: 't1',
       catId: 'codex',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'tool_a',
     });
     await notifier.notify({
@@ -297,11 +329,11 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     notifier.hideSimilar({
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       catId: 'opus',
       threadId: 't1',
@@ -313,7 +345,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, false, 'hidden suppresses notify within 24h');
@@ -322,7 +354,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
 
   test('AC-D5: hideSimilar expires after 24h', async () => {
     notifier.hideSimilar({
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       catId: 'opus',
       threadId: 't1',
@@ -333,7 +365,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, true);
@@ -345,14 +377,14 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     const sent = await notifier.notify({
       threadId: 't2',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, true, 'dedup MUST NOT cross threads');
@@ -364,14 +396,14 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     const sent = await notifier.notify({
       threadId: 't1',
       catId: 'opus',
       userId: 'u2',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, true, 'dedup MUST NOT cross users');
@@ -380,7 +412,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
 
   test('Cloud P1 #1397: hideSimilar is per-thread (hide in t1 does not suppress t2)', async () => {
     notifier.hideSimilar({
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       catId: 'opus',
       threadId: 't1',
@@ -390,7 +422,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't2',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     assert.equal(sent, true, 'hide in t1 must NOT suppress t2');
@@ -404,7 +436,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
         threadId: `t${i}`,
         catId: 'opus',
         userId: 'u1',
-        reason: 'expired',
+        reason: 'interrupted',
         tool: 'register_pr_tracking',
       });
     }
@@ -416,7 +448,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't-trigger',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     // 3 expired entries pruned, only the 1 fresh entry remains
@@ -425,7 +457,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
 
   test('Cloud P2 #1397: dedup map evicts hidden entries past 24h window', async () => {
     notifier.hideSimilar({
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 't',
       catId: 'opus',
       threadId: 't1',
@@ -439,7 +471,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't2',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 't',
     });
     assert.equal(notifier.__getDedupSizeForTest(), 1, 'hidden expired entry evicted, only fresh remains');
@@ -469,7 +501,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     };
     const [a, b] = await Promise.all([raceNotifier.notify(params), raceNotifier.notify(params)]);
@@ -494,7 +526,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     };
     await assert.rejects(failingNotifier.notify(params), /persistence boom/);
@@ -510,7 +542,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
     });
     const meta = messageStore.appended[0].extra.rich.blocks[0].meta;
@@ -523,7 +555,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
       threadId: 't1',
       catId: 'opus',
       userId: 'u1',
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       fallbackOk: true,
     });
@@ -531,7 +563,7 @@ describe('CallbackAuthSystemMessageNotifier (F174-D2b-1)', () => {
     // Structured fields the D2b-1 frontend will read to render badges/actions
     const meta = block.meta ?? {};
     assert.equal(meta.kind, 'callback_auth_failure', 'meta.kind tags the block as callback-auth surface');
-    assert.equal(meta.reason, 'expired');
+    assert.equal(meta.reason, 'interrupted');
     assert.equal(meta.tool, 'register_pr_tracking');
     assert.equal(meta.catId, 'opus');
     assert.equal(meta.fallbackOk, true);

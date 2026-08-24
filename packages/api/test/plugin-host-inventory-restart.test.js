@@ -92,7 +92,7 @@ describe('K-2A persisted restart normalization', () => {
     );
   });
 
-  it('requires a new explicit activation after restart even when the old runtime was already stopped', async () => {
+  it('preserves explicit enabled intent when restart finds the old runtime already stopped', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-dormant-restart-'));
     const path = join(root, 'inventory.json');
     const store = new FilePluginInventoryStore(path);
@@ -113,11 +113,11 @@ describe('K-2A persisted restart normalization', () => {
 
     const restartedStore = new FilePluginInventoryStore(path);
     const restarted = new HostInventoryControlPlane(restartedStore, { now: () => 4_000 });
-    assert.equal(await restarted.recoverAfterRestart(), 1);
+    assert.equal(await restarted.recoverAfterRestart(), 0);
     const recovered = (await restartedStore.snapshot()).instances[0];
-    assert.equal(recovered.activationState, 'disabled');
+    assert.equal(recovered.activationState, 'enabled');
     assert.equal(recovered.runtimeState, 'stopped');
-    assert.equal(recovered.lifecycleRevision, 2);
+    assert.equal(recovered.lifecycleRevision, 1);
   });
 
   it('rejects persisted grants that were not requested by the referenced package manifest', async () => {

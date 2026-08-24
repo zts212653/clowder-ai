@@ -169,8 +169,11 @@ export function useScrollAnchor(
     const anchor = anchorRef.current;
     const container = containerRef.current;
 
-    // Don't anchor if user is near the top — let natural reorder show newest items
-    if (!anchor || !container || container.scrollTop < ANCHOR_THRESHOLD_PX) return;
+    // Judge user intent from the last observed scroll event, not the live DOM value.
+    // Chromium can transiently reset scrollTop to 0 while reconciling a reordered
+    // list; treating that browser-side adjustment as a deliberate trip to the top
+    // loses the captured anchor and produces the exact reverse jump this hook owns.
+    if (!anchor || !container || lastScrollTopRef.current < ANCHOR_THRESHOLD_PX) return;
 
     const selector = `[data-thread-id="${CSS.escape(anchor.threadId)}"]`;
     const el = container.querySelector(selector);

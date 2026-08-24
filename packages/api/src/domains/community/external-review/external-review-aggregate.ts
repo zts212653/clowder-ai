@@ -4,6 +4,7 @@ import type {
   ExternalCloudReviewStatus,
   ExternalReviewAggregate,
   ExternalReviewMode,
+  PendingExternalReviewVerdict,
   ReviewDeliveryOutcome,
 } from '@cat-cafe/shared';
 
@@ -34,6 +35,7 @@ export type ExternalReviewApplyResult =
         | 'delivery_outcome_required'
         | 'delivery_head_mismatch'
         | 'delivery_regression'
+        | 'verdict_conflict'
         | 'invalid_delivery_outcome'
         | 'observe_only'
         | 'unsupported_event';
@@ -56,6 +58,13 @@ export type ExternalReviewReadinessDecision =
         | 'cloud_review_failed_or_timeout'
         | 'wake_already_requested_for_head';
     };
+
+export const PENDING_VERIFICATION_REASONS: ReadonlySet<PendingExternalReviewVerdict['verificationReason']> = new Set([
+  'ci_not_observed',
+  'ci_pending',
+  'cloud_review_required',
+  'cloud_review_running',
+]);
 
 function decideCloudReadiness(
   state: ExternalReviewAggregate,
@@ -89,10 +98,27 @@ export function createExternalReviewAggregate(input: CreateExternalReviewAggrega
     cloud: null,
     wake: null,
     delivery: null,
+    verdictSubmissionEpoch: 0,
+    pendingVerdict: null,
     reviewerCatId: input.reviewerCatId ?? null,
     reviewerThreadId: input.reviewerThreadId ?? null,
     actionLeaseRef: input.actionLeaseRef ?? null,
   };
+}
+
+export function currentVerdictSubmissionEpoch(state: ExternalReviewAggregate): number {
+  const epoch = state.verdictSubmissionEpoch;
+  return typeof epoch === 'number' && Number.isInteger(epoch) && epoch >= 0 ? epoch : 0;
+}
+
+function invalidatedVerdictSubmissionEpoch(state: ExternalReviewAggregate): number {
+  return currentVerdictSubmissionEpoch(state) + (state.pendingVerdict ? 1 : 0);
+}
+
+function cloudVerdictSubmissionEpoch(state: ExternalReviewAggregate, status: ExternalCloudReviewStatus): number {
+  return status === 'blocking' || status === 'failed_or_timeout'
+    ? invalidatedVerdictSubmissionEpoch(state)
+    : currentVerdictSubmissionEpoch(state);
 }
 
 function currentHeadGeneration(state: ExternalReviewAggregate): number {
@@ -135,6 +161,48 @@ export function decideExternalReviewReadiness(state: ExternalReviewAggregate): E
     return { kind: 'wait', reason: 'wake_already_requested_for_head' };
   }
   return { kind: 'ready', headSha };
+}
+
+export function externalReviewVerdictAuthorizationFailure(
+  state: ExternalReviewAggregate,
+  principal: { readonly catId: string; readonly threadId: string },
+  actionLease?: { readonly leaseId: string; readonly generation: number } | null,
+): {
+  readonly code:
+    | 'observe_only'
+    | 'subject_terminal'
+    | 'wrong_principal'
+    | 'action_lease_required'
+    | 'action_lease_mismatch';
+  readonly message: string;
+} | null {
+  if (state.mode !== 'maintainer_review') {
+    return { code: 'observe_only', message: 'Projected repository policy is observe_only' };
+  }
+  if (state.lifecycle === 'terminal') {
+    return { code: 'subject_terminal', message: 'External PR is already terminal' };
+  }
+  if (state.reviewerCatId !== principal.catId || state.reviewerThreadId !== principal.threadId) {
+    return { code: 'wrong_principal', message: 'Callback principal is not the assigned reviewer' };
+  }
+  const expected = state.actionLeaseRef;
+  if (actionLease !== undefined && expected && !actionLease) {
+    return { code: 'action_lease_required', message: 'Current review responsibility has an action lease' };
+  }
+  if (
+    actionLease !== undefined &&
+    expected &&
+    (actionLease?.leaseId !== expected.leaseId || actionLease.generation !== expected.generation)
+  ) {
+    return { code: 'action_lease_mismatch', message: 'Provided action lease does not match the case' };
+  }
+  return null;
+}
+
+export function isReadyForVerdict(state: ExternalReviewAggregate): boolean {
+  return (
+    state.lifecycle === 'rereview_required' || state.lifecycle === 'pending_delivery' || state.lifecycle === 'delivered'
+  );
 }
 
 function readHeadSha(payload: Record<string, unknown>): string | null {
@@ -240,6 +308,8 @@ function applyHeadObserved(
       cloud: null,
       wake: null,
       delivery: null,
+      verdictSubmissionEpoch: 0,
+      pendingVerdict: null,
     },
   };
 }
@@ -264,6 +334,9 @@ function applyCiObserved(
       ...state,
       lifecycle: status === 'pass' && needsCloud ? 'awaiting_cloud_review' : 'awaiting_ci',
       ci: { headSha, headGeneration: generation, status, observedAt: event.at },
+      verdictSubmissionEpoch:
+        status === 'fail' ? invalidatedVerdictSubmissionEpoch(state) : currentVerdictSubmissionEpoch(state),
+      pendingVerdict: status === 'fail' ? null : state.pendingVerdict,
     },
   };
 }
@@ -306,6 +379,8 @@ function applyCloudObserved(
           : {}),
         observedAt: event.at,
       },
+      verdictSubmissionEpoch: cloudVerdictSubmissionEpoch(state, status),
+      pendingVerdict: status === 'blocking' || status === 'failed_or_timeout' ? null : state.pendingVerdict,
     },
   };
 }
@@ -395,8 +470,102 @@ function applyVerdictRecorded(
       lastDeliveredHeadSha: delivery.kind === 'delivered' ? headSha : state.lastDeliveredHeadSha,
       lastDeliveredHeadGeneration: delivery.kind === 'delivered' ? generation : state.lastDeliveredHeadGeneration,
       delivery,
+      pendingVerdict: null,
     },
   };
+}
+
+function readVerdict(value: unknown): PendingExternalReviewVerdict['verdict'] | null {
+  return value === 'approved' || value === 'changes_requested' || value === 'commented' ? value : null;
+}
+
+function readPendingVerdict(
+  state: ExternalReviewAggregate,
+  event: ExternalReviewAggregateEvent,
+): PendingExternalReviewVerdict | null {
+  const { payload } = event;
+  const fingerprint = typeof payload.fingerprint === 'string' ? payload.fingerprint.trim() : '';
+  const headSha = readHeadSha(payload);
+  const headGeneration = eventHeadGeneration(state, payload);
+  const verdict = readVerdict(payload.verdict);
+  const summary = typeof payload.summary === 'string' ? payload.summary.trim() : '';
+  const delivery = readDeliveryOutcome(payload.delivery);
+  const principal = payload.principal;
+  const actionLeaseRef = payload.actionLeaseRef;
+  const verificationReason = payload.verificationReason;
+  if (
+    !fingerprint ||
+    !headSha ||
+    headGeneration === null ||
+    !verdict ||
+    !summary ||
+    !delivery ||
+    delivery.headSha !== headSha ||
+    !principal ||
+    typeof principal !== 'object' ||
+    Array.isArray(principal) ||
+    typeof (principal as Record<string, unknown>).catId !== 'string' ||
+    !(principal as Record<string, unknown>).catId ||
+    typeof (principal as Record<string, unknown>).threadId !== 'string' ||
+    !(principal as Record<string, unknown>).threadId ||
+    (actionLeaseRef !== null &&
+      (!actionLeaseRef ||
+        typeof actionLeaseRef !== 'object' ||
+        Array.isArray(actionLeaseRef) ||
+        typeof (actionLeaseRef as Record<string, unknown>).leaseId !== 'string' ||
+        !(actionLeaseRef as Record<string, unknown>).leaseId ||
+        readPositiveInteger((actionLeaseRef as Record<string, unknown>).generation) === undefined)) ||
+    !PENDING_VERIFICATION_REASONS.has(verificationReason as PendingExternalReviewVerdict['verificationReason'])
+  ) {
+    return null;
+  }
+  return {
+    fingerprint,
+    headSha,
+    headGeneration,
+    verdict,
+    summary,
+    userNudgeRequired: payload.userNudgeRequired === true,
+    delivery,
+    principal: {
+      catId: (principal as Record<string, unknown>).catId as string,
+      threadId: (principal as Record<string, unknown>).threadId as string,
+    },
+    actionLeaseRef:
+      actionLeaseRef === null
+        ? null
+        : {
+            leaseId: (actionLeaseRef as Record<string, unknown>).leaseId as string,
+            generation: (actionLeaseRef as Record<string, unknown>).generation as number,
+          },
+    verificationReason: verificationReason as PendingExternalReviewVerdict['verificationReason'],
+    submittedAt: event.at,
+  };
+}
+
+function applyVerdictSubmitted(
+  state: ExternalReviewAggregate,
+  event: ExternalReviewAggregateEvent,
+): ExternalReviewApplyResult {
+  const pending = readPendingVerdict(state, event);
+  if (!pending) return { ok: false, reason: 'invalid_payload' };
+  if (pending.headSha !== state.currentHeadSha || pending.headGeneration !== currentHeadGeneration(state)) {
+    return { ok: false, reason: 'stale_head' };
+  }
+  if (state.mode !== 'maintainer_review') return { ok: false, reason: 'observe_only' };
+  const readiness = decideExternalReviewReadiness(state);
+  if (
+    readiness.kind !== 'wait' ||
+    !PENDING_VERIFICATION_REASONS.has(readiness.reason as PendingExternalReviewVerdict['verificationReason'])
+  ) {
+    return { ok: false, reason: 'head_not_ready' };
+  }
+  if (state.pendingVerdict) {
+    return state.pendingVerdict.fingerprint === pending.fingerprint
+      ? { ok: true, value: state }
+      : { ok: false, reason: 'verdict_conflict' };
+  }
+  return { ok: true, value: { ...state, pendingVerdict: pending } };
 }
 
 export function applyExternalReviewEvent(
@@ -414,12 +583,14 @@ export function applyExternalReviewEvent(
       return applyReviewReady(state, event);
     case 'case.reviewer_wake_delivered':
       return applyWakeDelivered(state, event);
+    case 'case.review_verdict_submitted':
+      return applyVerdictSubmitted(state, event);
     case 'case.review_verdict_recorded':
       return applyVerdictRecorded(state, event);
     case 'pr.merged':
     case 'pr.closed':
     case 'case.declined':
-      return { ok: true, value: { ...state, lifecycle: 'terminal', wake: null } };
+      return { ok: true, value: { ...state, lifecycle: 'terminal', wake: null, pendingVerdict: null } };
     default:
       return { ok: false, reason: 'unsupported_event' };
   }

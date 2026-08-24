@@ -30,7 +30,7 @@ describe('ConnectorBubble hold status lifecycle', () => {
   });
 
   beforeEach(() => {
-    mockApiFetch.mockClear();
+    mockApiFetch.mockReset();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -97,5 +97,50 @@ describe('ConnectorBubble hold status lifecycle', () => {
     expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/callbacks/hold-ball/hold-ball-refresh/status');
     expect(container.textContent).toContain('已被事件唤醒');
     expect(container.textContent).not.toContain('取消持球');
+  });
+
+  it('refreshes an older hold bubble when a distinct terminal receipt for the same task arrives', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'active', cancelable: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: 'fired', cancelable: false }), { status: 200 }));
+    const initial = holdMessage();
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message: initial, timelineMessages: [initial] }));
+    });
+    await flushEffects();
+    expect(container.textContent).toContain('取消持球');
+
+    const terminalReceipt = holdMessage({
+      id: 'm-hold-terminal-receipt',
+      content: 'managed hold completed',
+      timestamp: initial.timestamp + 1,
+    });
+    act(() => {
+      root.render(
+        React.createElement(ConnectorBubble, {
+          message: initial,
+          timelineMessages: [initial, terminalReceipt],
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('已完成');
+    expect(container.textContent).not.toContain('取消持球');
+  });
+
+  it('treats a missing status resource as a neutral terminal projection', async () => {
+    mockApiFetch.mockResolvedValueOnce(new Response('{}', { status: 404 }));
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message: holdMessage() }));
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('已结束');
+    expect(container.textContent).not.toContain('取消持球');
+    expect(container.textContent).not.toContain('取消并反馈');
   });
 });

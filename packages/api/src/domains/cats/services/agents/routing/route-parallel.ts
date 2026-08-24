@@ -61,6 +61,7 @@ import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
+import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
@@ -82,7 +83,7 @@ import {
   resolveInvocationCapacitySnapshot,
   sealBeforeInvocationIfNeeded,
 } from '../invocation/invocation-capacity-snapshot.js';
-import { invokeSingleCat } from '../invocation/invoke-single-cat.js';
+import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
@@ -100,17 +101,21 @@ import {
   assembleIncrementalContext,
   collectExactPromptMessageIds,
   computeContextBudget,
+  contextProjectionFromEpochDecision,
+  createIdempotentPendingProjectionQueue,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
   explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
   hydrateVisibleA2ATriggerPromptMessage,
+  isFinalGenerationBriefingBoundary,
   isUserFacingSystemInfoContent,
   judgmentSurfaceCueSeeds,
   mergePersistedPromptMessages,
   routeContentBlocksForCat,
   sanitizeInjectedContent,
+  shouldPersistContextBriefing,
   subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
@@ -655,9 +660,13 @@ export async function* routeParallel(
       }
       const bootstrapSessionChainStore = deps.invocationDeps.sessionChainStore;
       const bootstrapTranscriptReader = deps.invocationDeps.transcriptReader;
+      const defersProjection =
+        incrementalMode &&
+        Boolean(deps.invocationDeps.contextEpochOwner) &&
+        catConfig?.provider !== 'openai-chatgpt-pro';
       const rebuildSessionBootstrap =
         !isParReborn && bootstrapSessionChainStore && bootstrapTranscriptReader
-          ? async () => {
+          ? async (contextProjection?: Parameters<typeof buildSessionBootstrap>[0]['contextProjection']) => {
               const bootstrapDepth = sessionPolicySnapshot.config.handoff?.bootstrapDepth;
               return buildSessionBootstrap(
                 {
@@ -667,13 +676,14 @@ export async function* routeParallel(
                   ...(deps.invocationDeps.taskStore ? { taskStore: deps.invocationDeps.taskStore } : {}),
                   ...(deps.invocationDeps.threadStore ? { threadStore: deps.invocationDeps.threadStore } : {}),
                   ...(bootstrapDepth ? { bootstrapDepth } : {}),
+                  ...(contextProjection ? { contextProjection } : {}),
                 },
                 catId,
                 threadId,
               );
             }
           : undefined;
-      if (rebuildSessionBootstrap) {
+      if (rebuildSessionBootstrap && !defersProjection) {
         try {
           const bootstrap = await rebuildSessionBootstrap();
           if (bootstrap) {
@@ -726,6 +736,51 @@ export async function* routeParallel(
       let incrementallyExposedMessageIds: string[] = [];
       let rebuildPromptWithBootstrap: ((bootstrap: string) => string) | undefined;
       let explicitlyExposedMessageIds: string[] = [];
+      let contextPromptFactory: InvocationParams['contextPromptFactory'];
+      let exactPromptMessageIds: string[] = [];
+      const pendingContextProjectionMessages = createIdempotentPendingProjectionQueue<AgentMessage>();
+      let briefingProjectionMessage: AgentMessage | undefined;
+      let pendingBriefingInput: AppendMessageInput | undefined;
+      let bootstrapPresentationCounts: PresentationCounts | undefined;
+      let proactiveMemoryNudgeFinalized = false;
+      const appendRoutePromptAdditions = (basePrompt: string): string => {
+        let projectedPrompt = basePrompt;
+        if (conciergeSearchContextForCat) projectedPrompt = `${projectedPrompt}\n${conciergeSearchContextForCat}`;
+        if (routeLevelNudgePromptContext) {
+          projectedPrompt = `${projectedPrompt}\n${routeLevelNudgePromptContext}`;
+          if (preparedProactiveMemoryNudge && !proactiveMemoryNudgeFinalized) {
+            deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
+            proactiveMemoryNudgeFinalized = true;
+          }
+        }
+        return projectedPrompt;
+      };
+      const materializeFinalGenerationBriefing = async (): Promise<void> => {
+        if (!pendingBriefingInput || briefingProjectionMessage) return;
+        try {
+          const stored = await deps.messageStore.append(pendingBriefingInput);
+          catBriefingMessageId.set(catId, stored.id);
+          briefingProjectionMessage = {
+            type: 'system_info' as AgentMessageType,
+            catId,
+            content: JSON.stringify({
+              type: 'context_briefing',
+              messageId: stored.id,
+              storedMessage: {
+                id: stored.id,
+                content: stored.content,
+                origin: stored.origin,
+                timestamp: stored.timestamp,
+                extra: stored.extra,
+              },
+            }),
+            timestamp: stored.timestamp,
+          } as AgentMessage;
+          pendingContextProjectionMessages.enqueue(`briefing:${stored.id}`, briefingProjectionMessage);
+        } catch {
+          // fail-open: briefing is a non-critical UI projection
+        }
+      };
       if (incrementalMode) {
         // Deduct fixed prompt parts from the invocation-owned input ceiling.
         const parCatModePromptForBudget = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
@@ -745,95 +800,130 @@ export async function* routeParallel(
           nudgeTokens: parIncNudgeTokens,
         });
 
-        const inc = await assembleIncrementalContext(
-          deps,
-          userId,
-          threadId,
-          catId,
-          currentUserMessageId,
-          thinkingMode,
-          {
-            effectiveMaxContextTokens: parEffectiveContextBudget,
-            canonicalFeatureId: sopStageHint?.featureId,
-            threadTitle: routeThread?.title ?? undefined,
-            projectPath: routeThread?.projectPath,
-            cursorOverlay: options.cursorBoundaries?.get(catId as string),
-          },
-        );
-        boundaryByCat.set(catId, inc.boundaryId);
-        incrementallyExposedMessageIds = inc.exposedMessageIds;
-        if (inc.pushRecallPresentations?.length) {
-          pushRecallPresentationsByCat.set(catId, [
-            ...(pushRecallPresentationsByCat.get(catId) ?? []),
-            ...inc.pushRecallPresentations,
-          ]);
-        }
-
-        // F254 Phase A (AC-A3 seed): Initialize seenCursor from delivery boundary
-        if (inc.boundaryId && deps.deliveryCursorStore) {
-          try {
-            await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, inc.boundaryId);
-          } catch (err) {
-            log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+        const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
+        const buildIncrementalProjection = async (
+          epochInput?: Parameters<NonNullable<InvocationParams['contextPromptFactory']>>[0],
+        ) => {
+          // Provider replacement reruns this factory before its stream becomes
+          // visible. Replace the pending projection instead of accumulating
+          // one notification per attempted generation.
+          pendingContextProjectionMessages.reset();
+          const contextProjection = epochInput
+            ? contextProjectionFromEpochDecision(epochInput.decision, epochInput.handshake.coordinate)
+            : undefined;
+          if (contextProjection && rebuildSessionBootstrap) {
+            try {
+              const bootstrap = await rebuildSessionBootstrap(contextProjection);
+              bootstrapCtx = bootstrap?.text ?? '';
+              bootstrapPresentationCounts = bootstrap?.presentationCounts;
+              if (bootstrap?.pushRecallPresentations?.length) {
+                pushRecallPresentationsByCat.set(catId, [
+                  ...(pushRecallPresentationsByCat.get(catId) ?? []),
+                  ...bootstrap.pushRecallPresentations,
+                ]);
+              }
+            } catch {
+              bootstrapCtx = '';
+              bootstrapPresentationCounts = undefined;
+            }
           }
-        }
-
-        if (inc.degradation) {
-          degradationMsgs.push({
-            type: 'system_info' as AgentMessageType,
+          const inc = await assembleIncrementalContext(
+            deps,
+            userId,
+            threadId,
             catId,
-            content: inc.degradation,
-            timestamp: Date.now(),
-          } as AgentMessage);
-        }
+            currentUserMessageId,
+            thinkingMode,
+            {
+              effectiveMaxContextTokens: parEffectiveContextBudget,
+              canonicalFeatureId: sopStageHint?.featureId,
+              threadTitle: routeThread?.title ?? undefined,
+              projectPath: routeThread?.projectPath,
+              cursorOverlay: options.cursorBoundaries?.get(catId as string),
+              ...(contextProjection ? { contextProjection } : {}),
+            },
+          );
+          boundaryByCat.set(catId, inc.boundaryId);
+          incrementallyExposedMessageIds = inc.exposedMessageIds;
+          if (inc.pushRecallPresentations?.length) {
+            pushRecallPresentationsByCat.set(catId, [
+              ...(pushRecallPresentationsByCat.get(catId) ?? []),
+              ...inc.pushRecallPresentations,
+            ]);
+          }
 
-        // F148 Phase E: Auto-insert context briefing when smart window triggered (AC-E1)
-        if (inc.coverageMap) {
-          const briefingInput = buildBriefingMessage(inc.coverageMap, threadId, inc.briefingContext);
-          try {
-            const stored = await deps.messageStore.append(briefingInput);
-            catBriefingMessageId.set(catId, stored.id);
-            catCoverageMap.set(catId, inc.coverageMap);
-            // P1-3: Include full stored message in payload so frontend can addMessage directly
-            degradationMsgs.push({
+          // F254 Phase A (AC-A3 seed): Initialize seenCursor from delivery boundary.
+          if (inc.boundaryId && deps.deliveryCursorStore) {
+            try {
+              await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, inc.boundaryId);
+            } catch (err) {
+              log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+            }
+          }
+
+          if (inc.degradation) {
+            pendingContextProjectionMessages.enqueue(`degradation:${inc.degradation}`, {
               type: 'system_info' as AgentMessageType,
               catId,
-              content: JSON.stringify({
-                type: 'context_briefing',
-                messageId: stored.id,
-                storedMessage: {
-                  id: stored.id,
-                  content: stored.content,
-                  origin: stored.origin,
-                  timestamp: stored.timestamp,
-                  extra: stored.extra,
-                },
-              }),
-              timestamp: stored.timestamp,
+              content: inc.degradation,
+              timestamp: Date.now(),
             } as AgentMessage);
-          } catch {
-            // fail-open: briefing is non-critical UI enhancement
           }
-        }
 
-        /* @segment R1 — Mode System Prompt */
-        /* @segment R2 — Mode System Prompt (per-cat) */
-        const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
-        // F35/F063: append only persisted Queue bodies without structural exposure ownership.
-        const explicitProjection = explicitPromptForIncrementalContext(
-          inc,
-          message,
-          currentUserMessageId,
-          persistedPromptMessagesForCat,
-        );
-        explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
-        rebuildPromptWithBootstrap = (bootstrap) => {
-          const parts = [invocationContext, parCatModePrompt, bootstrap, mcpInstructions].filter(Boolean);
-          if (inc.contextText) parts.push(inc.contextText);
-          if (explicitProjection.text) parts.push(explicitProjection.text);
-          return parts.join('\n\n---\n\n');
+          // F148 Phase E: Auto-insert context briefing when smart window triggered (AC-E1).
+          if (shouldPersistContextBriefing(inc)) {
+            catCoverageMap.set(catId, inc.coverageMap);
+            const contextSurfaceProjection = inc.surfaceProjection
+              ? {
+                  ...inc.surfaceProjection,
+                  presentationCounts: mergePresentationCounts(
+                    inc.surfaceProjection.presentationCounts,
+                    ...(bootstrapPresentationCounts ? [bootstrapPresentationCounts] : []),
+                  ),
+                }
+              : undefined;
+            pendingBriefingInput = buildBriefingMessage(inc.coverageMap, threadId, {
+              ...inc.briefingContext,
+              ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
+            });
+          } else {
+            pendingBriefingInput = undefined;
+          }
+
+          const explicitProjection = explicitPromptForIncrementalContext(
+            inc,
+            message,
+            currentUserMessageId,
+            persistedPromptMessagesForCat,
+          );
+          explicitlyExposedMessageIds = explicitProjection.exposedMessageIds;
+          rebuildPromptWithBootstrap = (bootstrap) => {
+            const parts = [invocationContext, parCatModePrompt, bootstrap, mcpInstructions].filter(Boolean);
+            if (inc.contextText) parts.push(inc.contextText);
+            if (explicitProjection.text) parts.push(explicitProjection.text);
+            return parts.join('\n\n---\n\n');
+          };
+          const projectedPrompt = appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapCtx));
+          exactPromptMessageIds = collectExactPromptMessageIds(
+            incrementallyExposedMessageIds,
+            explicitlyExposedMessageIds,
+            options.freshnessSupplementRequiredMessageIds ?? [],
+            options.freshnessClosureRequiredMessageIds ?? [],
+          );
+          exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
+          return {
+            prompt: projectedPrompt,
+            promptMessageIds: exactPromptMessageIds,
+            ...(inc.surfaceProjection ? { deltaSize: inc.surfaceProjection.deltaSize } : {}),
+          };
         };
-        prompt = rebuildPromptWithBootstrap(bootstrapCtx);
+        if (defersProjection) {
+          contextPromptFactory = async (epochInput) => buildIncrementalProjection(epochInput);
+          prompt = '[F296 context projection pending provider preflight]';
+        } else {
+          const projection = await buildIncrementalProjection();
+          prompt = projection.prompt;
+        }
       } else {
         // Per-cat context budget (Phase 4.0)
         let catContextHistory = contextHistory;
@@ -887,55 +977,40 @@ export async function* routeParallel(
         prompt = rebuildPromptWithBootstrap(bootstrapCtx);
       }
 
-      // F229 KD-24: budget and inject the same duty-cat context after final assembly.
-      if (conciergeSearchContextForCat) {
-        prompt = `${prompt}\n${conciergeSearchContextForCat}`;
-      }
-
-      // F260 AC-B8: Inject entity nudge context (typed metadata, not stored)
-      if (routeLevelNudgePromptContext) {
-        prompt = `${prompt}\n${routeLevelNudgePromptContext}`;
-        if (preparedProactiveMemoryNudge) {
-          deps.proactiveMemoryNudgeService?.finalize(preparedProactiveMemoryNudge);
-        }
-      }
-      const assemblePromptAfterSeal = rebuildPromptWithBootstrap;
+      if (!incrementalMode) prompt = appendRoutePromptAdditions(prompt);
       const rebuildPromptAfterSessionSeal =
-        rebuildSessionBootstrap && assemblePromptAfterSeal
+        !defersProjection && rebuildSessionBootstrap && (rebuildPromptWithBootstrap || contextPromptFactory)
           ? async () => {
               const refreshed = await rebuildSessionBootstrap();
               if (!refreshed) {
-                // buildSessionBootstrap returns null when the chain has no sealed
-                // prior (Session #1) — a NORMAL condition on cold-rebuild paths
-                // (context-continuity), not a fatal error. Align with the initial
-                // best-effort bootstrap call: degrade to the initial context.
                 log.warn(
                   { catId, threadId },
                   '[routeParallel] session bootstrap rebuild returned no sealed prior; degrading to initial bootstrap context',
                 );
+              } else {
+                bootstrapCtx = refreshed.text;
+                if (refreshed.pushRecallPresentations?.length) {
+                  pushRecallPresentationsByCat.set(catId, [
+                    ...(pushRecallPresentationsByCat.get(catId) ?? []),
+                    ...refreshed.pushRecallPresentations,
+                  ]);
+                }
               }
-              if (refreshed?.pushRecallPresentations?.length) {
-                pushRecallPresentationsByCat.set(catId, [
-                  ...(pushRecallPresentationsByCat.get(catId) ?? []),
-                  ...refreshed.pushRecallPresentations,
-                ]);
-              }
-              let rebuilt = assemblePromptAfterSeal(refreshed?.text ?? bootstrapCtx);
-              if (conciergeSearchContextForCat) rebuilt = `${rebuilt}\n${conciergeSearchContextForCat}`;
-              if (routeLevelNudgePromptContext) rebuilt = `${rebuilt}\n${routeLevelNudgePromptContext}`;
-              return rebuilt;
+              return rebuildPromptWithBootstrap
+                ? appendRoutePromptAdditions(rebuildPromptWithBootstrap(bootstrapCtx))
+                : prompt;
             }
           : undefined;
 
-      const exactPromptMessageIds = collectExactPromptMessageIds(
-        incrementalMode ? [] : (options.persistedPromptMessageIds ?? []),
-        incrementalMode ? [] : [currentUserMessageId, options.a2aTriggerMessageId],
-        incrementallyExposedMessageIds,
-        explicitlyExposedMessageIds,
-        options.freshnessSupplementRequiredMessageIds ?? [],
-        options.freshnessClosureRequiredMessageIds ?? [],
-      );
-      exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
+      if (!incrementalMode) {
+        exactPromptMessageIds = collectExactPromptMessageIds(
+          options.persistedPromptMessageIds ?? [],
+          [currentUserMessageId, options.a2aTriggerMessageId],
+          options.freshnessSupplementRequiredMessageIds ?? [],
+          options.freshnessClosureRequiredMessageIds ?? [],
+        );
+        exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
+      }
 
       // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
       // shared primaryController.signal — canceling one cat must not abort its siblings.
@@ -948,12 +1023,13 @@ export async function* routeParallel(
       if (catSignal?.aborted) {
         return (async function* skipCancelledCat(): AsyncGenerator<AgentMessage> {})();
       }
-      return invokeSingleCat(deps.invocationDeps, {
+      const invocationStream = invokeSingleCat(deps.invocationDeps, {
         catId,
         service,
         capacitySnapshot,
         sessionPolicySnapshot,
         prompt,
+        ...(contextPromptFactory ? { contextPromptFactory } : {}),
         ...(rebuildPromptAfterSessionSeal ? { rebuildPromptAfterSessionSeal } : {}),
         userId,
         ownerAuthProvenance,
@@ -992,6 +1068,20 @@ export async function* routeParallel(
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
         isLastCat: false,
       });
+      return (async function* withContextProjectionMessages(): AsyncGenerator<AgentMessage> {
+        for await (const event of invocationStream) {
+          if (isFinalGenerationBriefingBoundary(event)) await materializeFinalGenerationBriefing();
+          while (pendingContextProjectionMessages.length > 0) {
+            const pendingMessage = pendingContextProjectionMessages.shift();
+            if (pendingMessage) yield pendingMessage;
+          }
+          yield event;
+        }
+        while (pendingContextProjectionMessages.length > 0) {
+          const pendingMessage = pendingContextProjectionMessages.shift();
+          if (pendingMessage) yield pendingMessage;
+        }
+      })();
     }),
   );
 

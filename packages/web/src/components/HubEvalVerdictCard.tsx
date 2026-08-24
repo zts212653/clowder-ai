@@ -8,6 +8,12 @@ import { currentEvalDueAt } from './eval-lifecycle-display';
 import { HubEvalFrictionSections } from './HubEvalFrictionSections';
 import { HubEvalLifecycleSummary } from './HubEvalLifecycleSummary';
 import { type EvalHubItem, type EvalMetricGlossary, VERDICT_LABELS } from './HubEvalTypes';
+import { invocationIdFromEvidenceRef } from './workspace/trajectory/invocation-evidence-ref';
+import {
+  findEvalWorkspaceEvent,
+  findTrajectoryOriginScrollContainer,
+  openInvocationTrajectory,
+} from './workspace/trajectory/trajectory-navigation';
 
 export function HubEvalVerdictCard({
   item,
@@ -62,9 +68,32 @@ export function HubEvalVerdictCard({
       worktreeId,
     ],
   );
+  const openTrajectoryEvidence = useCallback(
+    (invocationId: string) => {
+      if (!currentThreadId) return;
+      const element = findEvalWorkspaceEvent(item.id);
+      const container = findTrajectoryOriginScrollContainer(element);
+      const viewportOffsetPx =
+        element && container ? element.getBoundingClientRect().top - container.getBoundingClientRect().top : 0;
+      openInvocationTrajectory({
+        invocationId,
+        originRef: {
+          kind: 'eval',
+          threadId: currentThreadId,
+          eventId: item.id,
+          viewportOffsetPx,
+        },
+      });
+      if (pathname?.startsWith('/settings') && typeof window !== 'undefined') {
+        const query = new URL(window.location.href).searchParams.toString();
+        router.push(`/thread/${encodeURIComponent(currentThreadId)}?${query}`);
+      }
+    },
+    [currentThreadId, item.id, pathname, router],
+  );
 
   return (
-    <section className="rounded-lg bg-cafe-surface-elevated p-4">
+    <section className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={item.id} tabIndex={-1}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-cafe-muted">
@@ -104,8 +133,14 @@ export function HubEvalVerdictCard({
           <div className="space-y-2">
             <div className="text-xs font-medium text-cafe-muted">证据引用</div>
             <EvidenceList
-              refs={[...item.evidence.snapshotRefs, ...item.evidence.attributionRefs, ...item.evidence.metricRefs]}
+              refs={[
+                ...item.evidence.snapshotRefs,
+                ...item.evidence.attributionRefs,
+                ...item.evidence.metricRefs,
+                ...item.evidence.otherRefs,
+              ]}
               metricGlossary={metricGlossary}
+              onOpenInvocation={openTrajectoryEvidence}
             />
           </div>
         </div>
@@ -165,14 +200,33 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function EvidenceList({ refs, metricGlossary }: { refs: string[]; metricGlossary?: EvalMetricGlossary }) {
+function EvidenceList({
+  refs,
+  metricGlossary,
+  onOpenInvocation,
+}: {
+  refs: string[];
+  metricGlossary?: EvalMetricGlossary;
+  onOpenInvocation: (invocationId: string) => void;
+}) {
   return (
     <ul className="space-y-1">
       {refs.map((ref) => {
         const metric = resolveMetricGlossaryEntry(ref, metricGlossary);
+        const invocationId = invocationIdFromEvidenceRef(ref);
         return (
           <li key={ref} className="break-all rounded-md bg-cafe-surface px-2 py-1 text-xs text-cafe-secondary">
-            {metric ? (
+            {invocationId ? (
+              <button
+                type="button"
+                onClick={() => onOpenInvocation(invocationId)}
+                className="font-semibold text-cafe-secondary underline underline-offset-2 hover:text-cafe-accent"
+                data-testid="hub-trajectory-evidence"
+                data-invocation-id={invocationId}
+              >
+                Invocation 轨迹 · {ref}
+              </button>
+            ) : metric ? (
               <div className="space-y-0.5">
                 <div>
                   <span className="font-medium text-cafe">{metric.label}</span>{' '}

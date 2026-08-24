@@ -92,7 +92,7 @@ describe('useAgentMessages telemetry suppression', () => {
     root = createRoot(container);
     captured = undefined;
     storeState.messages = [];
-    mockAddMessage.mockClear();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -151,5 +151,87 @@ describe('useAgentMessages telemetry suppression', () => {
     });
 
     expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      type: 'context_presentation_receipt',
+      v: 1,
+      outcome: 'presented',
+      invocationId: 'inv-receipt',
+      generationId: 'sha256:receipt',
+      projectionIds: ['cue-1'],
+    },
+    {
+      type: 'context_continuity',
+      v: 1,
+      invocationId: 'inv-continuity',
+      contextEpoch: 1,
+      contextMode: 'cold',
+      transition: 'scope_first_seen',
+    },
+    {
+      type: 'future_internal_protocol_event',
+      v: 1,
+      internalCoordinate: 'must-not-render-raw',
+    },
+  ])('fails closed for unprojected structured protocol $type', (payload) => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        content: JSON.stringify(payload),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a recognized internal projector throws', () => {
+    mockSetCatInvocation.mockImplementationOnce(() => {
+      throw new Error('simulated context-health projection failure');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    try {
+      act(() => {
+        captured?.handleAgentMessage({
+          type: 'system_info',
+          catId: 'codex-sol',
+          content: JSON.stringify({
+            type: 'context_health',
+            health: { usedTokens: 42, windowTokens: 200000 },
+          }),
+        });
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps plain-text system notices visible', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'system',
+        content: '服务连接已恢复',
+      });
+    });
+
+    expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ content: '服务连接已恢复' }));
   });
 });

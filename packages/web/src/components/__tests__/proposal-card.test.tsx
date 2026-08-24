@@ -1,11 +1,3 @@
-/**
- * F128 ProposalCard frontend tests (AC-F6 / AC-F7 / AC-F8).
- *
- * Covers: render, edit-on-approve payload, reject, approved/rejected state flip,
- * the `cat-cafe:proposal-updated` CustomEvent → status sync,
- * pin-on-approve toggle (AC-F7), and auto-navigate to new thread (AC-F8).
- */
-
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,6 +33,9 @@ vi.mock('@/stores/chatStore', () => ({
 
 import { ProposalCard } from '@/components/rich/ProposalCard';
 import type { RichCardBlock } from '@/stores/chat-types';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { __resetSidebarCommandQueuesForTests } from '@/utils/sidebar-commands';
+import { __resetSidebarRefreshForTests } from '@/utils/sidebar-thread-snapshot';
 
 const PROPOSAL_ID = 'proposal_test123';
 
@@ -94,6 +89,9 @@ describe('ProposalCard', () => {
     apiFetchMock.mockReset();
     navigateMock.mockReset();
     pinMock.mockReset();
+    __resetSidebarCommandQueuesForTests();
+    __resetSidebarRefreshForTests();
+    useSidebarProjectionStore.setState(useSidebarProjectionStore.getInitialState());
     // First mount-time GET /api/proposals/:id → 404 by default so each test starts in pending state.
     apiFetchMock.mockImplementation(() => Promise.resolve(jsonResponse(404, { error: 'not found' })));
   });
@@ -285,8 +283,9 @@ describe('ProposalCard', () => {
     );
     const patchBody = readRequestBody(patchCall);
     expect(patchBody.pinned).toBe(true);
-    // P2 fix: local store must also be updated for immediate sidebar UX
-    expect(pinMock).toHaveBeenCalledWith('thread_pin_patch', true);
+    const pending = Object.values(useSidebarProjectionStore.getState().pendingThreadCommands);
+    expect(pending).toEqual([expect.objectContaining({ threadId: 'thread_pin_patch', field: 'pinned', value: true })]);
+    expect(pinMock).not.toHaveBeenCalled();
   });
 
   it('does NOT call updateThreadPin when PATCH pin returns non-2xx', async () => {
@@ -313,6 +312,7 @@ describe('ProposalCard', () => {
       await Promise.resolve();
     });
     expect(pinMock).not.toHaveBeenCalled();
+    expect(Object.values(useSidebarProjectionStore.getState().pendingThreadCommands)).toEqual([]);
   });
 
   // AC-F8: auto-navigate to new thread after approve

@@ -46,7 +46,7 @@ function render(props: RightStatusPanelProps): string {
 }
 
 describe('RightStatusPanel', () => {
-  it('lets the workspace chrome own the status title while rendering mode and active cats', () => {
+  it('preserves persistent session tracking while retiring the permanent audit surface', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['opus', 'codex'],
@@ -71,6 +71,8 @@ describe('RightStatusPanel', () => {
     expect(html).toContain('猫猫状态');
     expect(html).toContain('消息统计');
     expect(html).toContain('Session Chain');
+    expect(html).not.toContain('Audit Explorer');
+    expect(html).toContain('运行日志');
     expect(html).toContain('Thread:');
     expect(html).toContain('test-thread');
     expect(html).toContain('布偶猫');

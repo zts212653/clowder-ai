@@ -23,6 +23,8 @@ export interface A2ADispatchDispositionResult {
   readonly invocationId: string;
   readonly sourceMessageId: string;
   readonly fromCatId: string;
+  /** The exact dispatch ended without advancing an unrelated thread-level holder. */
+  readonly retired: boolean;
 }
 
 export type { A2ADispatchHandoffInspection, A2ADispatchReplacement } from './A2ADispatchReplacementResolver.js';
@@ -85,6 +87,7 @@ export class A2ADispatchDispositionService {
         invocationId: auth.invocationId,
         sourceMessageId: source.sourceMessageId,
         fromCatId: source.fromCatId,
+        retired: prior.payload.retired === true,
       };
     }
 
@@ -92,8 +95,8 @@ export class A2ADispatchDispositionService {
     if (inspection.outcome === 'replaced') {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced', inspection.replacement);
     }
-    await this.assertCurrentHolder(subjectKey, auth.catId);
-    await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length);
+    const retired = await this.resolveRetired(subjectKey, auth.catId);
+    await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length, retired);
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
     );
@@ -104,6 +107,7 @@ export class A2ADispatchDispositionService {
       invocationId: auth.invocationId,
       sourceMessageId: source.sourceMessageId,
       fromCatId: source.fromCatId,
+      retired,
     };
   }
 
@@ -164,11 +168,12 @@ export class A2ADispatchDispositionService {
     );
   }
 
-  private async assertCurrentHolder(subjectKey: string, catId: string): Promise<void> {
+  private async resolveRetired(subjectKey: string, catId: string): Promise<boolean> {
     const projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
-    if ((projection?.state !== 'active' && projection?.state !== 'blocked') || projection.holder !== catId) {
+    if (projection?.state !== 'active' && projection?.state !== 'blocked') {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_holder_mismatch');
     }
+    return projection.holder !== catId;
   }
 
   private async inspectResolvedHandoff(
@@ -217,6 +222,7 @@ export class A2ADispatchDispositionService {
     subjectKey: string,
     eventSourceId: string,
     expectedSequence: number,
+    retired: boolean,
   ): Promise<void> {
     try {
       const result = await this.deps.ballCustody.recordFenced(
@@ -227,6 +233,7 @@ export class A2ADispatchDispositionService {
           invocationId: auth.invocationId,
           sourceMessageId: source.sourceMessageId,
           disposition,
+          retired,
           at: this.now(),
         }),
         expectedSequence,

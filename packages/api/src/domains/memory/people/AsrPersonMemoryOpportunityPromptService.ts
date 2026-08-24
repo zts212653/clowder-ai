@@ -1,9 +1,11 @@
 import {
+  ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
   type AsrPersonMemoryDynamicSceneEntryV1,
   asrPersonMemoryDynamicSceneEntryV1Schema,
   projectDeliveredWriteOpportunityRecord,
 } from '@cat-cafe/shared';
 import { supportsPreProviderContinuityHandshake } from '../../cats/services/agents/invocation/context-continuity.js';
+import type { ContextPresentationEnvelope } from '../../cats/services/session/context-presentation.js';
 import type { ContextContinuityHandshake } from '../../cats/services/types.js';
 import {
   AsrPersonMemoryContractTrial,
@@ -30,9 +32,10 @@ export interface BoundAsrPersonMemoryScene {
 
 export interface AsrPersonMemoryPresentationReceipt {
   readonly opportunityId: string;
-  readonly projectionMarker: string;
   readonly state: WriteOpportunityLifecycleState;
 }
+
+export type AsrPersonMemoryPresentationEnvelope = ContextPresentationEnvelope<AsrPersonMemoryPresentationReceipt>;
 
 export interface AsrPersonMemoryPresentationConfirmation {
   readonly outcome: 'delivered' | 'omitted';
@@ -48,6 +51,7 @@ export interface AsrPersonMemoryPromptResolution {
   readonly omittedOpportunityIds: readonly string[];
   readonly presentationReceipts: readonly AsrPersonMemoryPresentationReceipt[];
   readonly deliveryReceipts: readonly AsrPersonMemoryPresentationReceipt[];
+  readonly presentationEnvelopes: readonly AsrPersonMemoryPresentationEnvelope[];
 }
 
 function f296PresentationVerifier(candidate: unknown) {
@@ -96,19 +100,15 @@ function renderOpportunity(
   source: BoundAsrPersonMemoryScene['source'],
 ): string {
   const opportunity = scene.opportunity;
-  const coordinate = opportunity.sourceCoordinates[0];
   return [
-    `<person-memory-write-opportunity v="1" id="${opportunity.opportunityId}">`,
-    `mechanical_observation: ${opportunity.sourceCoordinates.length} owner-confirmed speaker mapping(s) are present`,
-    `source: owner_message=${escapeXml(source.sourceMessageId)} artifact=${escapeXml(coordinate.artifactId)} revision=${coordinate.sourceRevision} bytes=${coordinate.segment.start}-${coordinate.segment.end}`,
-    'ceiling: mechanical_observation; this does not establish intent, importance, or transcript truth.',
+    '<person-memory-write-opportunity v="1">',
+    `mechanical_observation:${opportunity.sourceCoordinates.length} mappings; not intent/importance/truth; source_message=${escapeXml(source.sourceMessageId)}`,
     // The full identity triple must be printed. dedupeLineage is NOT recoverable from opportunityId
     // -- writeOpportunityGenerationId keeps only the first 24 of its 32 hex chars -- so without this
     // line no cat can construct a valid writeOpportunityRef and every disposition silently falls
     // back to the unattributed path. IDs only, so this stays content-free.
     `writeOpportunityRef: opportunityId=${opportunity.opportunityId} dedupeLineage=${opportunity.dedupeLineage} generation=${opportunity.generation}`,
-    'required judgment: load proactive-memory-judgment, then resolve exactly one disposition: propose | defer | abstain via the existing F276 tools.',
-    'pass the writeOpportunityRef triple above verbatim to propose, defer, or abstain so the disposition is attributable; the server re-derives and rejects anything that does not match its own delivery evidence.',
+    'load proactive-memory-judgment; propose | defer | abstain; pass the writeOpportunityRef triple above verbatim to propose, defer, or abstain.',
     '</person-memory-write-opportunity>',
   ].join('\n');
 }
@@ -150,6 +150,7 @@ export class AsrPersonMemoryOpportunityPromptService {
     const admittedOpportunityIds: string[] = [];
     const omittedOpportunityIds: string[] = [];
     const presentationReceipts: AsrPersonMemoryPresentationReceipt[] = [];
+    const presentationEnvelopes: AsrPersonMemoryPresentationEnvelope[] = [];
     const segments: string[] = [];
     const presentationSupported = supportsPreProviderContinuityHandshake(input.continuity);
     const seenGenerationKeys = new Set(input.terminalGenerationKeys);
@@ -176,15 +177,58 @@ export class AsrPersonMemoryOpportunityPromptService {
       if (state.status !== 'eligible') continue;
       const opportunityId = state.scene.opportunity.opportunityId;
       seenGenerationKeys.add(`${state.scene.opportunity.dedupeLineage}:${state.scene.opportunity.generation}`);
-      const projectionMarker = `person-memory-write-opportunity v="1" id="${opportunityId}"`;
-      const receipt = { opportunityId, projectionMarker, state };
+      const receipt = { opportunityId, state };
       admittedOpportunityIds.push(opportunityId);
       presentationReceipts.push(receipt);
       if (!presentationSupported) {
         omittedOpportunityIds.push(opportunityId);
         continue;
       }
-      segments.push(renderOpportunity(state.scene, candidate.source));
+      const promptSegment = renderOpportunity(state.scene, candidate.source);
+      segments.push(promptSegment);
+      const opportunity = state.scene.opportunity;
+      const subjectKey = `write-opportunity:${opportunity.dedupeLineage}`;
+      const asOf = { kind: 'version' as const, value: String(opportunity.generation) };
+      presentationEnvelopes.push({
+        candidate: {
+          subjectKey,
+          asOf,
+          sourceTier: 'T0',
+          requested: 'state',
+          epistemicCeiling: 'mechanical_observation',
+        },
+        segments: { state: promptSegment },
+        admission: {
+          opportunityId: opportunity.opportunityId,
+          opportunityKind: 'write',
+          producerOwner: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.ownerCell,
+          consumerScope: { kind: 'cat', ...opportunity.scope, consumerCatId: opportunity.consumer.catId },
+          entryVersion: `${opportunity.reflexId}:${opportunity.reflexVersion}`,
+          subjectKey,
+          asOf,
+          sourceRefs: opportunity.sourceCoordinates.map((coordinate) =>
+            [
+              coordinate.artifactId,
+              coordinate.sourceHandle,
+              coordinate.sourceRevision,
+              `${coordinate.segment.start}-${coordinate.segment.end}`,
+              coordinate.speaker.externalSpeakerId,
+              coordinate.speaker.attributionRevision,
+            ].join('@'),
+          ),
+          eligibleSurfaces: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.eligibleSurfaces,
+          presentationPolicyRef: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.presentationPolicyRef,
+          tokenBudget: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.tokenBudget,
+          dedupeKey: `${opportunity.dedupeLineage}:${opportunity.generation}`,
+          expiresAt: opportunity.expiresAt,
+          invalidators: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.invalidators.map((ref) => ({
+            owner: ASR_PERSON_MEMORY_REFLEX_ENTRY_V1.ownerCell,
+            ref,
+          })),
+          epistemicCeiling: opportunity.epistemicCeiling,
+        },
+        receipt,
+      });
     }
 
     const deliveryReceipts = presentationReceipts.filter(
@@ -196,6 +240,7 @@ export class AsrPersonMemoryOpportunityPromptService {
       omittedOpportunityIds,
       presentationReceipts,
       deliveryReceipts,
+      presentationEnvelopes,
     };
   }
 
@@ -232,6 +277,7 @@ export class AsrPersonMemoryOpportunityPromptService {
         promptSegment: '',
         omittedOpportunityIds: omitted.admittedOpportunityIds,
         deliveryReceipts: [],
+        presentationEnvelopes: [],
       };
     }
     // A configured ledger is invalidation authority, not optional bookkeeping. If its read fails,

@@ -15,6 +15,7 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { ContextEpochRecord, IContextEpochStore } from '../ports/ContextEpochStore.js';
 import { ContextEpochKeys } from '../redis-keys/context-epoch-keys.js';
+import { PresentationLedgerKeys } from '../redis-keys/presentation-ledger-keys.js';
 
 const DEFAULT_TTL = 0; // persistent
 
@@ -24,6 +25,7 @@ const DEFAULT_TTL = 0; // persistent
  * runtime we deliberately let go of when we failed closed).
  *
  * KEYS[1] = scope hash
+ * KEYS[2] = exact presentation generation that a sequential advance retires
  * ARGV[1] = expected version ("0" = expect absent)
  * ARGV[2] = JSON fields
  * ARGV[3] = ttl seconds (0 = persistent)
@@ -35,7 +37,12 @@ local currentVersion = tonumber(current) or 0
 if currentVersion ~= expected then
   return 0
 end
+local currentEpoch = tonumber(redis.call('HGET', KEYS[1], 'contextEpoch'))
 local fields = cjson.decode(ARGV[2])
+local nextEpoch = tonumber(fields.contextEpoch)
+if currentEpoch and nextEpoch == currentEpoch + 1 then
+  redis.call('DEL', KEYS[2])
+end
 redis.call('DEL', KEYS[1])
 for field, value in pairs(fields) do
   redis.call('HSET', KEYS[1], field, value)
@@ -68,6 +75,11 @@ export class RedisContextEpochStore implements IContextEpochStore {
         // is an extra cold rebuild, never a missed one.
       }
     }
+    // F296 B4: a cold committed by observeCompaction must survive the round trip.
+    // Dropping this field here would make every production read look like
+    // "cold not yet consumed", which latches the scope permanently cold —
+    // the in-memory store would never show it.
+    const coldConsumedAtEpoch = Number.parseInt(raw.coldConsumedAtEpoch ?? '', 10);
     return {
       scopeKey,
       contextEpoch,
@@ -75,6 +87,7 @@ export class RedisContextEpochStore implements IContextEpochStore {
       ...(raw.boundRuntimeSessionId ? { boundRuntimeSessionId: raw.boundRuntimeSessionId } : {}),
       lastTransitionRef: raw.lastTransitionRef ?? '',
       consumedCompactionEventIds: consumed,
+      ...(Number.isFinite(coldConsumedAtEpoch) && coldConsumedAtEpoch >= 1 ? { coldConsumedAtEpoch } : {}),
       version: Number.parseInt(raw.version ?? '0', 10) || 0,
       updatedAt: Number.parseInt(raw.updatedAt ?? '0', 10) || 0,
     };
@@ -90,11 +103,15 @@ export class RedisContextEpochStore implements IContextEpochStore {
       updatedAt: String(record.updatedAt),
     };
     if (record.boundRuntimeSessionId) fields.boundRuntimeSessionId = record.boundRuntimeSessionId;
+    if (record.coldConsumedAtEpoch !== undefined) {
+      fields.coldConsumedAtEpoch = String(record.coldConsumedAtEpoch);
+    }
 
     const result = await this.redis.eval(
       COMPARE_AND_SET_LUA,
-      1,
+      2,
       ContextEpochKeys.scope(record.scopeKey),
+      PresentationLedgerKeys.generationForScope(record.scopeKey, record.contextEpoch - 1),
       String(expectedVersion),
       JSON.stringify(fields),
       String(this.ttlSeconds),

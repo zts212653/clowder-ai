@@ -1,3 +1,4 @@
+import { isSelectableManagedHoldConnectorSource } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chatStore';
 import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 
@@ -8,8 +9,14 @@ export const MAX_SELECTED_MESSAGES = 50;
  * repeats thread ownership, publication, visibility, and source validation.
  */
 export function isMessageSelectableForBundle(message: ChatMessage): boolean {
-  if (message.type !== 'user' && message.type !== 'assistant') return false;
-  if (message.isStreaming || message.extra?.recall || message.extra?.scheduler) return false;
+  const authoredMessage = message.type === 'user' || message.type === 'assistant';
+  const managedHoldConnector =
+    message.type === 'connector' &&
+    isSelectableManagedHoldConnectorSource(message.source) &&
+    message.extra?.queueReceipt !== undefined &&
+    message.extra.scheduler?.hiddenTrigger !== true;
+  if (!authoredMessage && !managedHoldConnector) return false;
+  if (message.isStreaming || message.extra?.recall || (!managedHoldConnector && message.extra?.scheduler)) return false;
 
   return Boolean(message.content.trim() || message.contentBlocks?.length || message.extra?.rich?.blocks.length);
 }

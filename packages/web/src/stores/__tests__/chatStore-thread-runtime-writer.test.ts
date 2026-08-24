@@ -16,7 +16,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mergeLiveActivityIntoThreads, sortAndGroupThreads } from '@/components/ThreadSidebar/thread-utils';
+import { sortAndGroupThreads } from '@/components/ThreadSidebar/thread-utils';
 import { clearDebugEvents, configureDebug } from '@/debug/invocationEventDebug';
 import type { Thread } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
@@ -276,7 +276,7 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
         },
       ];
       const sidebarOrder = () =>
-        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+        sortAndGroupThreads(sidebarThreads)
           .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
           ?.threads.map((thread) => thread.id);
 
@@ -339,7 +339,7 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       expect(s.threadStates[ACTIVE_TID]?.messages.find((m) => m.id === 'm1')).toBeDefined();
     });
 
-    it('background real message activity still advances its sidebar position', () => {
+    it('background real message activity remains runtime-owned and cannot reorder a fixed Sidebar snapshot', () => {
       const originalBackgroundActivity = Date.now() - 14 * 24 * 60 * 60 * 1000;
       const newerSummaryActivity = Date.now() - 60_000;
       const sidebarThreads: Thread[] = [
@@ -363,7 +363,7 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
         },
       ];
       const sidebarOrder = () =>
-        sortAndGroupThreads(mergeLiveActivityIntoThreads(sidebarThreads, useChatStore.getState().threadStates))
+        sortAndGroupThreads(sidebarThreads)
           .find((group) => group.type === 'project' && group.projectPath === '/projects/history')
           ?.threads.map((thread) => thread.id);
 
@@ -381,7 +381,7 @@ describe('F173 Phase A — ThreadRuntimeWriter mirror invariant', () => {
       });
 
       expect(useChatStore.getState().threadStates[BG_TID]?.lastActivity).toBeGreaterThan(newerSummaryActivity);
-      expect(sidebarOrder()).toEqual([BG_TID, 'thread-recent']);
+      expect(sidebarOrder()).toEqual(['thread-recent', BG_TID]);
     });
   });
 

@@ -59,4 +59,6 @@ export interface TransitionTurnExecutionResult {
 export interface InterruptRunningTurnExecutionsInput {
   endedAt: number;
   terminalReason: string;
+  /** Exact children with a presently live external process owner. */
+  excludedInvocationIds?: string[];
 }

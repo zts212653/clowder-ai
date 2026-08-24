@@ -11,7 +11,7 @@
  *
  *   任何「谁在跑」的查询，其 per-thread 定性调用次数 == |候选 ∩ 查询集|，与查询集大小 T 无关。
  *
- *   - Sidebar（AC-B2）：`getActivePresence(1760 rows)`
+ *   - Sidebar（AC-B2）：`getPresence(1760 rows)`
  *   - project scan（AC-D3）：`GET /executions/active`，F295 每 4 秒一次
  *
  * AC-D3 要求「不留两份读法」。旧实现里 project scan 仍是 `threads.map(resolveLiveExecutions)`，
@@ -101,9 +101,10 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
         qualifyCalls += 1;
         return service.resolveWorkingPresence(threadId, userId, snapshot);
       },
+      listLatestTerminalExecutions: async () => new Map(),
     });
 
-    const presence = await source.getActivePresence([...threads.keys()], USER_ID);
+    const presence = await source.getPresence([...threads.keys()], USER_ID);
 
     assert.equal(qualifyCalls, ACTIVE, `qualification must run A(${ACTIVE}) times, not T(${TOTAL_THREADS})`);
     assert.equal(snapshotBuilds, 1, 'owner-truth must be materialised once per request (R4 P1-1)');

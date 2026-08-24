@@ -138,6 +138,55 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     ]);
   });
 
+  test('atomically binds late prompt coverage across competing store instances', async () => {
+    const input = runningInput();
+    await store.createRunning(input);
+    const competitor = new RedisTurnExecutionStore(redis);
+    const [first, second] = await Promise.all([
+      store.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']),
+      competitor.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']),
+    ]);
+
+    assert.deepEqual([first.outcome, second.outcome].sort(), ['bound', 'replayed']);
+    assert.equal((await competitor.bindCoveredMessageIds('redis-child-1', ['redis-other'])).outcome, 'conflict');
+    assert.deepEqual((await competitor.get('redis-child-1')).causal.coveredMessageIds, [
+      'redis-msg-1',
+      'redis-context-1',
+    ]);
+    assert.equal(
+      (await competitor.bindCoveredMessageIds('redis-child-1', ['redis-context-1', 'redis-msg-1'])).outcome,
+      'replayed',
+    );
+    assert.equal((await competitor.createRunning(input)).outcome, 'replayed');
+  });
+
+  test('late prompt coverage preserves the legacy hash identity for mixed-version readers', async () => {
+    const input = runningInput();
+    await store.createRunning(input);
+    const recordKey = 'turnexec:record:redis-child-1';
+    const legacyCausal = await redis.hget(recordKey, 'causal');
+    const legacyIdentity = await redis.hget(recordKey, 'immutableIdentity');
+
+    assert.equal(
+      (await store.bindCoveredMessageIds(input.invocationId, ['redis-context-1', 'redis-msg-1'])).outcome,
+      'bound',
+    );
+
+    assert.equal(await redis.hget(recordKey, 'causal'), legacyCausal);
+    assert.equal(await redis.hget(recordKey, 'immutableIdentity'), legacyIdentity);
+    assert.equal(await redis.hget(recordKey, 'coveredMessageIds'), '["redis-context-1","redis-msg-1"]');
+    assert.ok(await redis.hget(recordKey, 'coveredMessageIdsIdentity'));
+  });
+
+  test('binds late prompt coverage when the admitted execution had no causal refs', async () => {
+    const input = runningInput({ causal: undefined });
+    await store.createRunning(input);
+
+    assert.equal((await store.bindCoveredMessageIds(input.invocationId, ['redis-msg-1'])).outcome, 'bound');
+    assert.deepEqual((await store.get(input.invocationId)).causal, { coveredMessageIds: ['redis-msg-1'] });
+    assert.equal((await store.createRunning(input)).outcome, 'replayed');
+  });
+
   test('two store instances racing success and cancel produce one immutable terminal', async () => {
     await store.createRunning(runningInput());
     const competitor = new RedisTurnExecutionStore(redis);
@@ -216,6 +265,14 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     await assert.rejects(() => store.listByParent('redis-parent-1'), /corrupt turn execution record: redis-child-1/);
   });
 
+  test('late-bound coverage identity detects tampering without rewriting legacy causal identity', async () => {
+    await store.createRunning(runningInput());
+    await store.bindCoveredMessageIds('redis-child-1', ['redis-msg-1', 'redis-context-1']);
+    await redis.hset('turnexec:record:redis-child-1', 'coveredMessageIds', JSON.stringify(['redis-other']));
+
+    await assert.rejects(() => store.get('redis-child-1'), /corrupt turn execution record: redis-child-1/);
+  });
+
   test('interruptRunningBefore is cutoff-safe and atomically removes running index members', async () => {
     await store.createRunning(runningInput({ invocationId: 'old', startedAt: 99 }));
     await store.createRunning(runningInput({ invocationId: 'boundary', startedAt: 100 }));
@@ -234,6 +291,24 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
     assert.equal((await store.get('boundary')).status, 'interrupted');
     assert.equal((await store.get('new')).status, 'running');
     assert.deepEqual(await redis.smembers('turnexec:running'), ['new']);
+  });
+
+  test('interruptRunningBefore preserves an exact externally-owned child', async () => {
+    await store.createRunning(runningInput({ invocationId: 'detached-live', startedAt: 90 }));
+    await store.createRunning(runningInput({ invocationId: 'lost-run', startedAt: 91 }));
+
+    const interrupted = await store.interruptRunningBefore(100, {
+      endedAt: 200,
+      terminalReason: 'process_restart',
+      excludedInvocationIds: ['detached-live'],
+    });
+
+    assert.deepEqual(
+      interrupted.map((record) => record.invocationId),
+      ['lost-run'],
+    );
+    assert.equal((await store.get('detached-live')).status, 'running');
+    assert.equal((await store.get('lost-run')).status, 'interrupted');
   });
 
   test('F297 P1-2: listRunningByUser scopes to owner, drops terminal, survives restart', async () => {

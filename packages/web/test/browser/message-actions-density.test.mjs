@@ -342,6 +342,112 @@ test(
   },
 );
 
+test('a Markdown-rendered CLI table row keeps the real forwarding affordance', { timeout: 90_000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 720, height: 900 } });
+  try {
+    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    const selectionEvidence = await page.evaluate(() => {
+      const bubble = document.querySelector('[data-testid="f294-cli-markdown-bubble"]');
+      const segment = bubble?.querySelector('[data-context-quote-segment-id="stdout"]');
+      const row = segment?.querySelector('tbody tr');
+      if (!bubble || !segment || !row) throw new Error('Markdown CLI table fixture did not render');
+      const range = document.createRange();
+      range.selectNodeContents(row);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      return {
+        text: selection?.toString().trim() ?? '',
+        projectionVersion: segment.getAttribute('data-context-quote-projection-version'),
+      };
+    });
+
+    assert.equal(
+      selectionEvidence.text,
+      'Hub Browser Preview\tno_matching_client\t不属于本 thread 的修复责任',
+      'the browser evidence must be visible cell text, not raw Markdown pipes/backticks',
+    );
+    assert.equal(selectionEvidence.projectionVersion, '2', 'stdout must explicitly declare its readable plane');
+
+    await page.getByTestId('message-selection-add-to-chat').click();
+    const forward = page.getByTestId('context-annotation-forward');
+    await forward.waitFor({ state: 'visible' });
+    await forward.click();
+    await page.getByRole('dialog', { name: '转发到' }).waitFor({ state: 'visible' });
+  } finally {
+    await page.close();
+  }
+});
+
+test('a Rich Card final paragraph still exposes the quote affordance', { timeout: 90_000 }, async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    const selectionEvidence = await page.evaluate(() => {
+      const bubble = document.querySelector('[data-testid="f294-rich-last-line-bubble"]');
+      const paragraphs = bubble ? Array.from(bubble.querySelectorAll('p')) : [];
+      const paragraph = paragraphs.at(-1);
+      if (!bubble || !paragraph) throw new Error('Rich Card final-paragraph fixture did not render');
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      return {
+        text: selection?.toString() ?? '',
+        excludedIntersections: Array.from(bubble.querySelectorAll('[data-quote-exclude]'))
+          .filter((node) => range.intersectsNode(node))
+          .map((node) => node.getAttribute('data-testid') ?? node.tagName),
+      };
+    });
+
+    assert.equal(selectionEvidence.text, '已执行：最后一行仍然可以引用。');
+    await page.getByTestId('message-selection-add-to-chat').waitFor({ state: 'visible' });
+
+    await page.reload({ waitUntil: 'networkidle' });
+    const boundarySelection = await page.evaluate(() => {
+      const bubble = document.querySelector('[data-testid="f294-rich-last-line-bubble"]');
+      const paragraph = bubble ? Array.from(bubble.querySelectorAll('p')).at(-1) : null;
+      const text = paragraph?.firstChild;
+      if (!bubble || !paragraph || !text) throw new Error('Rich Card boundary fixture did not render');
+      const range = document.createRange();
+      range.setStart(text, 0);
+      // A human drag can finish in the blank area after the final rendered line. Chromium then
+      // keeps the same visible text but places the DOM endpoint after the RichBlocks wrapper,
+      // which also contains the icon-only forwarding dock.
+      range.setEnd(bubble, bubble.childNodes.length);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      return {
+        text: selection?.toString().trim() ?? '',
+        excludedIntersections: Array.from(
+          bubble.closest('[data-context-quote-source="message"]')?.querySelectorAll('[data-quote-exclude]') ?? [],
+        )
+          .filter((node) => range.intersectsNode(node))
+          .map((node) => node.getAttribute('data-testid') ?? node.tagName),
+      };
+    });
+
+    assert.equal(boundarySelection.text, '已执行：最后一行仍然可以引用。');
+    assert.ok(
+      boundarySelection.excludedIntersections.includes('rich-block-forward-actions'),
+      `the platform fixture must retain the boundary-only Range intersection, saw ${JSON.stringify(boundarySelection)}`,
+    );
+    await page.waitForTimeout(200);
+    assert.equal(
+      await page.getByTestId('message-selection-add-to-chat').count(),
+      1,
+      `boundary-only contact with an icon dock must keep the quote affordance: ${JSON.stringify(boundarySelection)}`,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
 test('touch-only devices keep every per-message action reachable', { timeout: 90_000 }, async () => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },

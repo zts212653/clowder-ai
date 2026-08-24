@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { createCatId } from '@cat-cafe/shared';
-import { buildHandedEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
+import { buildHandedEvent, buildHeldEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
 import { TurnCustodyProjectionService } from '../dist/domains/ball-custody/TurnCustodyProjectionService.js';
 import {
   createA2ADispositionAuth as auth,
@@ -68,6 +68,38 @@ describe('F167 ordinary A2A dispatch disposition', () => {
       dispatchDispositionAt: 2_000,
       evidenceRefs: [`dispatch:ball:thread:thread-1`, `route:${h.source.id}:codex-sol`],
     });
+  });
+
+  test('terminalizes the exact dispatch without stealing an unrelated cat hold', async () => {
+    const h = await harness();
+    const gate = new TurnCustodyProjectionService({
+      ballCustodyProjectionStore: h.projectionStore,
+      ballCustodyEventLog: h.eventLog,
+    });
+    const opened = await gate.open(dispatchWake(h));
+    await h.ingest.record(
+      buildHeldEvent({
+        threadId: 'thread-1',
+        catId: 'opus',
+        fireAt: 99_000,
+        at: 1_500,
+      }),
+    );
+
+    const result = await h.service.complete(auth(h), 'completed');
+
+    assert.equal(result.outcome, 'applied');
+    assert.equal(result.retired, true, 'the exact child terminal is inert on the unrelated subject holder');
+    const disposition = (await h.eventLog.read('ball:thread:thread-1')).find(
+      (event) => event.kind === 'ball.dispatch_dispositioned',
+    );
+    assert.equal(disposition.payload.retired, true);
+    const projection = await h.projectionStore.get('ball:thread:thread-1');
+    assert.equal(projection.state, 'active');
+    assert.equal(projection.holder, 'opus');
+    assert.equal(projection.heldUntil, 99_000);
+    assert.equal(projection.lastEventAt, 2_000);
+    assert.equal((await gate.close(opened)).shouldBlock, false, 'the exact dispatch stop gate observes its terminal');
   });
 
   test('concurrent conflicting dispositions linearize to one event and reject the loser', async () => {

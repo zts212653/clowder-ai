@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 await import('tsx/esm');
-const { MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN, MessageSelectionResolver, digestMessageBundleCliQuoteProjection } =
-  await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
+const {
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN,
+  MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2,
+  MessageSelectionResolver,
+  digestMessageBundleCliQuoteProjection,
+  digestMessageBundleCliQuoteProjectionV2,
+  projectCliSegmentReadable,
+} = await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
 
 function makeThread(overrides = {}) {
   return {
@@ -120,10 +126,196 @@ describe('MessageSelectionResolver CLI Quote admission', () => {
     assert.equal(MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN.endsWith('\0'), true);
   });
 
+  it('admits a unique browser-visible row from Markdown-rendered CLI stdout and rereads it in the same plane', async () => {
+    const markdown = [
+      '| Surface | Status | Meaning |',
+      '| --- | --- | --- |',
+      '| Hub Browser Preview | `no_matching_client` | 不属于本 thread 的修复责任 |',
+    ].join('\n');
+    const browserText = 'Hub Browser Preview\tno_matching_client\t不属于本 thread 的修复责任';
+    const message = makeMessage({
+      id: 'message-markdown-table',
+      catId: 'codex-sol',
+      content: markdown,
+      origin: 'stream',
+      isStreaming: false,
+      extra: { stream: { invocationId: 'inv-table', turnInvocationId: 'turn-table' } },
+    });
+    const { resolver } = createResolver({ messages: [message] });
+
+    const result = await resolver.resolveForAdmission(
+      {
+        sourceThreadId: 'thread-source',
+        items: [
+          {
+            kind: 'cli_quote',
+            messageId: message.id,
+            sourceMessageIds: [message.id],
+            segmentId: 'stdout',
+            text: browserText,
+            selectionStart: 23,
+            selectionEnd: 23 + browserText.length,
+            sourceProjectionVersion: 2,
+            renderedOccurrences: 1,
+          },
+        ],
+      },
+      auth,
+    );
+
+    assert.equal(result.status, 'resolved');
+    const readableProjection = projectCliSegmentReadable(markdown);
+    assert.ok(readableProjection);
+    assert.deepEqual(result.carrier.items[0], {
+      kind: 'cli_quote',
+      messageId: message.id,
+      sourceMessageIds: [message.id],
+      segmentId: 'stdout',
+      selectionStart: readableProjection.indexOf('Hub Browser Preview'),
+      selectionEnd: readableProjection.length,
+      sourceProjectionVersion: 2,
+      sourceProjectionSha256: digestMessageBundleCliQuoteProjectionV2(readableProjection),
+    });
+    assert.equal(result.items[0].readableContent, 'Hub Browser Preview no_matching_client 不属于本 thread 的修复责任');
+    assert.equal(MESSAGE_BUNDLE_CLI_QUOTE_DIGEST_DOMAIN_V2.endsWith('\0'), true);
+
+    const reread = await resolver.resolveCarrier(result.carrier, auth);
+    assert.equal(reread.status, 'resolved');
+    assert.equal(reread.items[0].status, 'available');
+    assert.equal(reread.items[0].readableContent, result.items[0].readableContent);
+  });
+
+  it('mirrors the retained R21 cached-speech stdout fallback only in the readable v2 plane', async () => {
+    const message = makeMessage({
+      id: 'cached-r21-stream-only',
+      catId: 'codex-sol',
+      content: '',
+      origin: 'stream',
+      isStreaming: false,
+      extra: {
+        stream: {
+          invocationId: 'inv-cached-r21',
+          turnInvocationId: 'turn-cached-r21',
+          cliStdout: '',
+          speechContent: 'CACHED_R21_SPEECH',
+        },
+      },
+    });
+    const { resolver } = createResolver({ messages: [message] });
+
+    const readable = await resolver.resolveForAdmission(
+      {
+        sourceThreadId: 'thread-source',
+        items: [
+          {
+            kind: 'cli_quote',
+            messageId: message.id,
+            sourceMessageIds: [message.id],
+            segmentId: 'stdout',
+            text: 'CACHED_R21_SPEECH',
+            selectionStart: 0,
+            selectionEnd: 'CACHED_R21_SPEECH'.length,
+            sourceProjectionVersion: 2,
+            renderedOccurrences: 1,
+          },
+        ],
+      },
+      auth,
+    );
+
+    assert.equal(readable.status, 'resolved');
+    assert.equal(readable.items[0].readableContent, 'CACHED_R21_SPEECH');
+    assert.deepEqual(readable.carrier.items[0], {
+      kind: 'cli_quote',
+      messageId: message.id,
+      sourceMessageIds: [message.id],
+      segmentId: 'stdout',
+      selectionStart: 0,
+      selectionEnd: 'CACHED_R21_SPEECH'.length,
+      sourceProjectionVersion: 2,
+      sourceProjectionSha256: digestMessageBundleCliQuoteProjectionV2('CACHED_R21_SPEECH'),
+    });
+
+    const reread = await resolver.resolveCarrier(readable.carrier, auth);
+    assert.equal(reread.status, 'resolved');
+    assert.equal(reread.items[0].status, 'available');
+    assert.equal(reread.items[0].readableContent, 'CACHED_R21_SPEECH');
+
+    const legacy = await resolver.resolveForAdmission(
+      {
+        sourceThreadId: 'thread-source',
+        items: [
+          {
+            kind: 'cli_quote',
+            messageId: message.id,
+            sourceMessageIds: [message.id],
+            segmentId: 'stdout',
+            text: 'CACHED_R21_SPEECH',
+            selectionStart: 0,
+            selectionEnd: 'CACHED_R21_SPEECH'.length,
+          },
+        ],
+      },
+      auth,
+    );
+    assert.deepEqual(legacy, {
+      status: 'invalid',
+      reason: 'source_unavailable',
+      messageId: message.id,
+    });
+  });
+
+  it('keeps Markdown-rendered CLI stdout fail-closed for repeated or renderer-generated text', async () => {
+    const repeated = makeMessage({
+      id: 'message-markdown-repeat',
+      catId: 'codex-sol',
+      content: '| Value |\n| --- |\n| `retry failed` |\n| retry failed |',
+      origin: 'stream',
+      isStreaming: false,
+      extra: { stream: { turnInvocationId: 'turn-markdown-repeat' } },
+    });
+    const generated = makeMessage({
+      id: 'message-markdown-generated',
+      catId: 'codex-sol',
+      content: '正文[^a]\n\n[^a]: 脚注内容',
+      origin: 'stream',
+      isStreaming: false,
+      extra: { stream: { turnInvocationId: 'turn-markdown-generated' } },
+    });
+    const { resolver } = createResolver({ messages: [repeated, generated] });
+
+    const selection = (message, text) => ({
+      sourceThreadId: 'thread-source',
+      items: [
+        {
+          kind: 'cli_quote',
+          messageId: message.id,
+          sourceMessageIds: [message.id],
+          segmentId: 'stdout',
+          text,
+          selectionStart: 0,
+          selectionEnd: text.length,
+          sourceProjectionVersion: 2,
+          renderedOccurrences: 1,
+        },
+      ],
+    });
+
+    assert.deepEqual(await resolver.resolveForAdmission(selection(repeated, 'retry failed'), auth), {
+      status: 'invalid',
+      reason: 'ambiguous_quote',
+      messageId: repeated.id,
+    });
+    assert.deepEqual(await resolver.resolveForAdmission(selection(generated, '正文'), auth), {
+      status: 'invalid',
+      reason: 'unsupported_source',
+      messageId: generated.id,
+    });
+  });
+
   it('keeps CLI ranges strictly canonical: repeated text is only admitted by exact coordinates', async () => {
-    // A CLI segment renders in <pre>, so its stored characters are its rendered characters.
-    // Coordinates are therefore authoritative, and repeated text must never be re-anchored
-    // by a whitespace-normalized guess.
+    // Tool labels/details and legacy CLI clients remain in the raw v1 plane. Their coordinates
+    // are authoritative, and repeated text must never be re-anchored by a normalized guess.
     const bubble = makeMessage({
       id: 'message-repeat',
       catId: 'codex-sol',

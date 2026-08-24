@@ -206,13 +206,20 @@ describe('#1208 concrete Client/carrier capability matrix', () => {
     ['anthropic/pty', call(ClaudeInteractivePtyCarrierService), 'unavailable', false, false, false, false],
     ['openai/exec_json', call(CodexAgentService, { carrierMode: 'exec_json' }), 'available', true, true, true, true],
     [
+      // F296 B4b: observesCompression flipped to true. Earned by the Gate 0
+      // dynamic probe against a real codex app-server (codex-cli 0.147.0,
+      // 2026-08-20), which observed an actual `contextCompaction` item, its
+      // `(threadId, turnId, item.id)` envelope binding, and a consumable window
+      // before the next `turn/start`. Usage telemetry is still unproven, so
+      // every other column stays false.
+      // See docs/features/evidence/F296/gate0-app-server-dynamic-probe.md
       'openai/app_server',
       call(CodexAgentService, { carrierMode: 'app_server' }),
       'unavailable',
       false,
       false,
       false,
-      false,
+      true,
     ],
     ['google/cli', call(GeminiAgentService, { adapter: 'gemini-cli' }), 'available', true, false, false, true],
     [

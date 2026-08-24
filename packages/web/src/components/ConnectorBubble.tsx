@@ -88,9 +88,19 @@ function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpe
   return <span>{fallbackIcon}</span>;
 }
 
+type HoldTerminalStatus = 'retired_by_event' | 'fired' | 'escalated' | 'ended' | null;
+
+function projectHoldTerminalStatus(body: { status?: unknown; cancelable?: unknown } | null): HoldTerminalStatus {
+  if (body?.cancelable !== false) return null;
+  if (body.status === 'retired_by_event') return 'retired_by_event';
+  if (body.status === 'fired') return 'fired';
+  if (body.status === 'escalated') return 'escalated';
+  return 'ended';
+}
+
 function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; threadId?: string; catId?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
-  const [terminalStatus, setTerminalStatus] = useState<'retired_by_event' | 'fired' | null>(null);
+  const [terminalStatus, setTerminalStatus] = useState<HoldTerminalStatus>(null);
   const managedExecution = useActiveExecutionStore((store) => store.executionsByKey[`managed_command:${taskId}`]);
 
   useEffect(() => {
@@ -98,19 +108,14 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
     let cancelled = false;
     void apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/status`)
       .then(async (res) => {
-        if (cancelled || !res.ok) return;
-        const body = (await res.json().catch(() => null)) as { status?: unknown; cancelable?: unknown } | null;
-        if (body?.cancelable !== false) {
-          setTerminalStatus(null);
+        if (cancelled) return;
+        if (res.status === 404) {
+          setTerminalStatus('ended');
           return;
         }
-        if (body.status === 'retired_by_event') {
-          setTerminalStatus('retired_by_event');
-        } else if (body.status === 'fired') {
-          setTerminalStatus('fired');
-        } else {
-          setTerminalStatus(null);
-        }
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => null)) as { status?: unknown; cancelable?: unknown } | null;
+        setTerminalStatus(projectHoldTerminalStatus(body));
       })
       .catch(() => {
         // Status is a read-side affordance. Keep the existing cancel controls if it fails.
@@ -157,6 +162,8 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
     return <span className="text-xs text-cafe-muted">已被事件唤醒</span>;
   }
   if (terminalStatus === 'fired') return <span className="text-xs text-cafe-muted">已完成</span>;
+  if (terminalStatus === 'escalated') return <span className="text-xs text-cafe-muted">已升级处理</span>;
+  if (terminalStatus === 'ended') return <span className="text-xs text-cafe-muted">已结束</span>;
   if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
   if (managedExecution) {
     return (
@@ -189,22 +196,37 @@ function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; thr
   );
 }
 
-function getHoldStatusRefreshKey(message: ChatMessageType): string {
+function getHoldStatusRefreshKey(
+  message: ChatMessageType,
+  timelineMessages: readonly ChatMessageType[] | undefined,
+): string {
   const source = message.source;
   if (source?.connector !== 'hold-ball') return '';
-  return `${message.id}:${message.timestamp}:${message.content}:${JSON.stringify(source.meta ?? {})}`;
+  const taskId = source.meta?.taskId;
+  const related =
+    typeof taskId === 'string'
+      ? (timelineMessages ?? []).filter(
+          (candidate) => candidate.source?.connector === 'hold-ball' && candidate.source.meta?.taskId === taskId,
+        )
+      : [];
+  const latest =
+    [...related, message]
+      .sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
+      .at(-1) ?? message;
+  return `${latest.id}:${latest.timestamp}:${latest.content}:${JSON.stringify(latest.source?.meta ?? {})}`;
 }
 
 interface ConnectorBubbleProps {
   message: ChatMessageType;
   threadId?: string;
+  timelineMessages?: readonly ChatMessageType[];
 }
 
 /**
  * F97: Connector message bubble for external information sources (GitHub Review, etc.)
  * Uses MessageBubble for shared layout; adds connector-specific avatar, header, and actions.
  */
-export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
+export function ConnectorBubble({ message, threadId, timelineMessages }: ConnectorBubbleProps) {
   const source = message.source;
   if (!source) return null;
   if (message.extra?.scheduler?.hiddenTrigger) return null;
@@ -218,7 +240,7 @@ export function ConnectorBubble({ message, threadId }: ConnectorBubbleProps) {
   const rawUrl = source.url;
   const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
-  const holdStatusRefreshKey = getHoldStatusRefreshKey(message);
+  const holdStatusRefreshKey = getHoldStatusRefreshKey(message, timelineMessages);
 
   const avatar = (
     <div

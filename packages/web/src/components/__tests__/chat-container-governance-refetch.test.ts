@@ -236,7 +236,6 @@ vi.mock('@/hooks/useCatData', () => ({
     refresh: async () => [],
   }),
 }));
-vi.mock('@/hooks/usePreviewAutoOpen', () => ({ usePreviewAutoOpen: vi.fn() }));
 vi.mock('@/hooks/useWorkspaceNavigate', () => ({ useWorkspaceNavigate: vi.fn() }));
 vi.mock('@/hooks/useGovernanceStatus', () => ({
   useGovernanceStatus: () => ({

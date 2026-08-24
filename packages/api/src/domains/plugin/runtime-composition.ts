@@ -4,7 +4,7 @@ import type { SignalRouteStore } from '../signal-intake/SignalRouteStore.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.js';
-import type { ExternalPluginProcessAdapter } from './external-runtime/types.js';
+import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import { HostBrokerControlPlane } from './host-broker/control-plane.js';
 import { createEventsPublishBrokerHandler } from './host-broker/events-publish-handler.js';
 import { FileHostBrokerStore } from './host-broker/stores.js';
@@ -23,12 +23,14 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly routes: SignalRouteStore;
   readonly intakes: MeetingIntakeStore;
   readonly processes?: ExternalPluginProcessAdapter;
+  readonly packages?: VerifiedPluginPackageLocator;
   readonly now?: () => number;
 }
 
 export interface DormantPluginRuntimeRecovery {
   readonly brokerSessions: number;
   readonly inventoryInstances: number;
+  readonly resumeRequested: number;
 }
 
 export interface DormantPluginRuntimeComposition {
@@ -39,7 +41,7 @@ export interface DormantPluginRuntimeComposition {
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: ExternalPluginRuntimeSupervisor;
   readonly lifecycle: ExternalPluginLifecycleService;
-  readonly packages: FilesystemVerifiedPluginPackageLocator;
+  readonly packages: VerifiedPluginPackageLocator;
   recoverAfterRestart(): Promise<DormantPluginRuntimeRecovery>;
   shutdown(reason?: string): Promise<void>;
 }
@@ -93,7 +95,7 @@ export function createDormantPluginRuntimeComposition(
     preActiveTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
-  const packages = new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
+  const packages = options.packages ?? new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
   const supervisor = new ExternalPluginRuntimeSupervisor({
     inventory: inventoryStore,
     broker,
@@ -120,8 +122,12 @@ export function createDormantPluginRuntimeComposition(
     async recoverAfterRestart() {
       await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
       const brokerSessions = await supervisor.recoverAfterRestart();
-      const inventoryInstances = await lifecycle.recoverAfterRestart();
-      return { brokerSessions, inventoryInstances };
+      const inventoryRecovery = await lifecycle.recoverAfterRestart();
+      return {
+        brokerSessions,
+        inventoryInstances: inventoryRecovery.recoveredInstances,
+        resumeRequested: inventoryRecovery.resumeRequested,
+      };
     },
     shutdown: (reason = 'host_shutdown') => supervisor.stopAll(reason),
   };

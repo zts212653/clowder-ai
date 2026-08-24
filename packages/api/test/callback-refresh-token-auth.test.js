@@ -2,7 +2,7 @@
  * F174 Phase C: POST /api/callbacks/refresh-token — auth path tests.
  *
  * AC-C1: endpoint落地, header creds, fail-closed 401 (reason from Phase A)
- * AC-C2: response includes expiresAt + ttlRemainingMs
+ * F298: active credentials report null expiry fields (no heartbeat extension contract).
  *
  * Cloud Codex P1 (PR #1368, c5927046): split off from monolithic 403-line
  * callback-refresh-token.test.js to honor 350-line hard cap.
@@ -13,7 +13,7 @@ import { describe, test } from 'node:test';
 import { createTestContext } from './helpers/refresh-token-test-app.js';
 
 describe('POST /api/callbacks/refresh-token — auth (F174-C)', () => {
-  test('returns 200 with ok/expiresAt/ttlRemainingMs on valid creds', async () => {
+  test('returns 200 with explicit null expiry fields on valid creds', async () => {
     const { registry, createApp } = await createTestContext();
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
@@ -27,10 +27,23 @@ describe('POST /api/callbacks/refresh-token — auth (F174-C)', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
-    assert.equal(typeof body.expiresAt, 'number');
-    assert.ok(body.expiresAt > Date.now(), 'expiresAt should be in the future');
-    assert.equal(typeof body.ttlRemainingMs, 'number');
-    assert.ok(body.ttlRemainingMs > 0, 'ttlRemainingMs should be positive');
+    assert.equal(body.expiresAt, null);
+    assert.equal(body.ttlRemainingMs, null);
+  });
+
+  test('fails closed before refresh preValidation can inspect durable credentials', async () => {
+    const { registry, createApp } = await createTestContext({ startupRecoveryRequired: true });
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/refresh-token',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().reason, 'startup_recovery_pending');
   });
 
   test('returns 401 with reason:invalid_token on bad token', async () => {
@@ -88,8 +101,7 @@ describe('POST /api/callbacks/refresh-token — auth (F174-C)', () => {
     assert.equal(JSON.parse(res.body).reason, 'missing_creds');
   });
 
-  // AC-C2 detail: ttlRemainingMs reflects current remaining (not full TTL)
-  test('ttlRemainingMs equals expiresAt - now', async () => {
+  test('refresh does not manufacture a new active deadline', async () => {
     const { registry, createApp } = await createTestContext();
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
@@ -101,8 +113,9 @@ describe('POST /api/callbacks/refresh-token — auth (F174-C)', () => {
     });
 
     const body = JSON.parse(res.body);
-    const computed = body.expiresAt - Date.now();
-    // Allow ~50ms slack for round-trip
-    assert.ok(Math.abs(body.ttlRemainingMs - computed) < 100, `mismatch: ${body.ttlRemainingMs} vs ${computed}`);
+    assert.deepEqual(
+      { expiresAt: body.expiresAt, ttlRemainingMs: body.ttlRemainingMs },
+      { expiresAt: null, ttlRemainingMs: null },
+    );
   });
 });

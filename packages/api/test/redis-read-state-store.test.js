@@ -120,6 +120,29 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(state.lastReadVisibilityCursor, canonical);
   });
 
+  it('replaceReadCoordinateIfEqual() rejects an anchor-only concurrent change', async () => {
+    const tid = uniqueId('t-repair-coordinate-race');
+    const oldAnchor = 'v2:0000000000000040:msg-stale';
+    const concurrentAnchor = 'v2:0000000000000041:msg-concurrent';
+    const repairedAnchor = 'v2:0000000000000042:msg-latest';
+    assert.equal(await store.ack('user1', tid, 'msg-stale', oldAnchor), true);
+    assert.equal(await store.ack('user1', tid, 'msg-stale', concurrentAnchor), false);
+
+    assert.equal(
+      await store.replaceReadCoordinateIfEqual(
+        'user1',
+        tid,
+        { lastReadMessageId: 'msg-stale', lastReadVisibilityCursor: oldAnchor },
+        { lastReadMessageId: 'msg-latest', lastReadVisibilityCursor: repairedAnchor },
+      ),
+      false,
+    );
+
+    const state = await store.get('user1', tid);
+    assert.equal(state.lastReadMessageId, 'msg-stale');
+    assert.equal(state.lastReadVisibilityCursor, concurrentAnchor);
+  });
+
   it('ack() monotonic: rejects older message ID', async () => {
     const tid = uniqueId('t');
     await store.ack('user1', tid, 'msg-002');

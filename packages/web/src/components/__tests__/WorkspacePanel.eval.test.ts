@@ -23,7 +23,9 @@ vi.mock('@/hooks/useFileManagement', () => ({
   useFileManagement: (...args: unknown[]) => mocks.useFileManagement(...args),
 }));
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (sel: (s: Record<string, unknown>) => unknown) => mocks.useChatStore(sel),
+  useChatStore: Object.assign((sel: (s: Record<string, unknown>) => unknown) => mocks.useChatStore(sel), {
+    getState: () => mocks.useChatStore((state: Record<string, unknown>) => state),
+  }),
 }));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3004',
@@ -71,12 +73,16 @@ function setupMocks({
   file = null,
   currentThreadId = 'thread-1',
   preferredWorkspaceMode = 'eval',
+  rightPanelMode = 'workspace',
+  rightPanelOpen = true,
 }: {
   workspaceMode?: string;
   workspaceSurface?: string;
   file?: Record<string, unknown> | null;
   currentThreadId?: string;
   preferredWorkspaceMode?: string;
+  rightPanelMode?: string;
+  rightPanelOpen?: boolean;
 } = {}) {
   mocks.useWorkspace.mockReturnValue({
     worktrees: [{ id: 'cat-cafe-runtime', branch: 'runtime/main-sync', root: '/tmp/repo' }],
@@ -120,6 +126,8 @@ function setupMocks({
       currentWorktree: { id: 'cat-cafe-runtime', branch: 'runtime/main-sync', root: '/tmp/repo' },
       setPendingChatInsert: vi.fn(),
       setRightPanelMode: vi.fn(),
+      rightPanelMode,
+      rightPanelOpen,
       workspaceEditToken: null,
       workspaceEditTokenExpiry: null,
       setWorkspaceEditToken: vi.fn(),
@@ -197,6 +205,24 @@ describe('WorkspacePanel eval mode', () => {
 
     expect(mocks.restoreWorkspaceMode).toHaveBeenCalledWith('tasks');
     expect(mocks.setWorkspaceMode).not.toHaveBeenCalled();
+  });
+
+  it('does not let a delayed preferred mode cover an explicit Browser Preview', async () => {
+    setupMocks({
+      workspaceMode: 'dev',
+      workspaceSurface: 'browser',
+      preferredWorkspaceMode: 'approval',
+      rightPanelMode: 'workspace',
+      rightPanelOpen: true,
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).not.toBeNull();
+    expect(mocks.restoreWorkspaceMode).not.toHaveBeenCalledWith('approval');
   });
 
   it('restores the Files surface on a thread switch without treating it as a request to open Workspace', async () => {

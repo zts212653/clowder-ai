@@ -192,8 +192,8 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
   }
 }
 
-function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  return buildChildEnv(input);
+function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory });
 }
 
 export function createCodexSocketDirectory(): string {
@@ -208,8 +208,9 @@ export async function removeCodexSocketDirectory(path: string): Promise<void> {
 
 export async function spawnCodexAppServerHost(launch: CodexAppServerHostLaunch): Promise<CodexAppServerHostProcess> {
   const stderr: string[] = [];
+  const childCwd = launch.cwd ?? process.cwd();
   const supervised = buildUnixSupervisedSpawnPlan(launch.command, launch.args, {
-    env: normalizeEnv(launch.env),
+    env: normalizeEnv(launch.env, childCwd),
     killGraceMs: Math.max(250, CLOSE_GRACE_MS - 500),
     socketDirectory: launch.socketDirectory,
   });

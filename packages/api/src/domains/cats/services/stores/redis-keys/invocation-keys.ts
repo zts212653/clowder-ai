@@ -30,4 +30,16 @@ export const InvocationKeys = {
    * （漏报 = false terminal，F297 核心禁忌）；残留的多报由读侧 SCARD 校验消除。
    */
   runningThreadsByUser: (userId: string) => `invoc:running-threads:${userId}`,
+
+  /**
+   * Latest terminal InvocationRecord for one thread+user.
+   *
+   * This is an edge-maintained pointer, not a history index: deployments do not backfill
+   * old terminal records.  That direction is intentional — an absent pointer renders idle,
+   * while guessing from historical conversation activity forges done/error.
+   *
+   * The prefix deliberately does not match `invoc:*`; record SCANs must never HGETALL this
+   * string key.
+   */
+  latestTerminalByThread: (threadId: string, userId: string) => `invoc-terminal:latest:${threadId}:${userId}`,
 } as const;

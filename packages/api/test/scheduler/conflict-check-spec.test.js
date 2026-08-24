@@ -47,4 +47,79 @@ describe('conflict scheduler F280 adapter', () => {
     );
     assert.equal(calls.length, 0);
   });
+
+  test('finishes the wake when timeout aborts after the typed wait message is durable', async () => {
+    const controller = new AbortController();
+    const calls = [];
+    const spec = createConflictCheckTaskSpec({
+      taskStore: new TaskStore(),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa' }),
+      conflictRouter: {
+        route: async () => {
+          controller.abort(new DOMException('scheduler timeout', 'AbortError'));
+          return {
+            kind: 'notified',
+            threadId: 'thread_1',
+            catId: 'codex-sol',
+            messageId: 'msg-conflict-1',
+            content: 'conflict detected',
+          };
+        },
+      },
+      invokeTrigger: { trigger: async (...args) => calls.push(args) },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    await assert.doesNotReject(() =>
+      spec.run.execute(
+        {
+          signal: { repoFullName: 'owner/repo', prNumber: 7, headSha: 'aaa', mergeState: 'CONFLICTING' },
+          task: { userId: 'user_1' },
+        },
+        'pr:owner/repo#7',
+        { signal: controller.signal },
+      ),
+    );
+
+    assert.equal(calls.length, 1, 'a durable conflict message must finish its bound wake');
+  });
+
+  test('falls back to waking the cat when cancellation interrupts optional auto-resolution', async () => {
+    const controller = new AbortController();
+    const calls = [];
+    const spec = createConflictCheckTaskSpec({
+      taskStore: new TaskStore(),
+      checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'aaa' }),
+      conflictRouter: {
+        route: async () => ({
+          kind: 'notified',
+          threadId: 'thread_1',
+          catId: 'codex-sol',
+          messageId: 'msg-conflict-2',
+          content: 'conflict detected',
+        }),
+      },
+      autoExecutor: {
+        resolve: async () => {
+          controller.abort(new DOMException('scheduler timeout', 'AbortError'));
+          throw controller.signal.reason;
+        },
+      },
+      invokeTrigger: { trigger: async (...args) => calls.push(args) },
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    await assert.doesNotReject(() =>
+      spec.run.execute(
+        {
+          signal: { repoFullName: 'owner/repo', prNumber: 7, headSha: 'aaa', mergeState: 'CONFLICTING' },
+          task: { userId: 'user_1' },
+        },
+        'pr:owner/repo#7',
+        { signal: controller.signal },
+      ),
+    );
+
+    assert.equal(calls.length, 1, 'cancelled optional remediation must not suppress the already-routed wake');
+  });
 });

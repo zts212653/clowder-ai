@@ -3,11 +3,34 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-
+import {
+  PERSONAL_CHROME_BRAND_ICON_SIZES,
+  renderPersonalChromeBrandIcons,
+} from '../scripts/f247-personal-chrome-brand-assets.mjs';
 import { closeIsolatedBrowser, resolveChromeExecutable } from '../scripts/f247-personal-chrome-host-spike.mjs';
 
 const apiRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const extensionRoot = join(apiRoot, 'src/plugins/cloud-cat-personal-host/extension');
+const forbiddenExtensionBehaviors = [
+  'tabs.update',
+  'tabs.reload',
+  'tabs.create',
+  'tabs.highlight',
+  'tabs.move',
+  'windows.update',
+  'windows.create',
+  '.focus(',
+  'active: true',
+  'fetch(',
+  'XMLHttpRequest',
+  'document.cookie',
+];
+
+function assertNoForbiddenExtensionBehavior(source) {
+  for (const forbidden of forbiddenExtensionBehaviors) {
+    assert.equal(source.includes(forbidden), false, `forbidden extension behavior: ${forbidden}`);
+  }
+}
 
 describe('personal Chrome extension contract', () => {
   it('resolves an explicit override before platform defaults', async () => {
@@ -72,11 +95,31 @@ describe('personal Chrome extension contract', () => {
   it('uses a single ChatGPT conversation host scope and no invasive browser permissions', async () => {
     const manifest = JSON.parse(await readFile(join(extensionRoot, 'manifest.json'), 'utf8'));
     assert.equal(manifest.manifest_version, 3);
+    assert.deepEqual(manifest.icons, {
+      16: 'icons/gpt-pro-16.png',
+      32: 'icons/gpt-pro-32.png',
+      48: 'icons/gpt-pro-48.png',
+      128: 'icons/gpt-pro-128.png',
+    });
+    assert.deepEqual(manifest.action, {
+      default_title: '授权此会话',
+      default_icon: manifest.icons,
+    });
     assert.deepEqual(manifest.permissions.sort(), ['nativeMessaging', 'tabs']);
     assert.deepEqual(manifest.host_permissions, ['https://chatgpt.com/c/*']);
     assert.equal(JSON.stringify(manifest).includes('<all_urls>'), false);
     for (const forbidden of ['cookies', 'debugger', 'webRequest', 'history', 'clipboardRead']) {
       assert.equal(manifest.permissions.includes(forbidden), false, `forbidden permission: ${forbidden}`);
+    }
+  });
+
+  it('checks in deterministic normalized icons derived from the formal gpt-pro repository asset', async () => {
+    const source = await readFile(join(apiRoot, '../web/public/avatars/gpt-pro.png'));
+    const expected = await renderPersonalChromeBrandIcons(source);
+
+    assert.deepEqual([...expected.keys()], PERSONAL_CHROME_BRAND_ICON_SIZES);
+    for (const [size, bytes] of expected) {
+      assert.deepEqual(await readFile(join(extensionRoot, `icons/gpt-pro-${size}.png`)), bytes);
     }
   });
 
@@ -87,19 +130,18 @@ describe('personal Chrome extension contract', () => {
       ),
     );
     const source = sources.join('\n');
-    for (const forbidden of [
-      'tabs.update',
-      'windows.update',
-      '.focus(',
-      'active: true',
-      'fetch(',
-      'XMLHttpRequest',
-      'document.cookie',
-    ]) {
-      assert.equal(source.includes(forbidden), false, `forbidden extension behavior: ${forbidden}`);
-    }
+    assertNoForbiddenExtensionBehavior(source);
     assert.match(sources[0], /TextEncoder/);
     assert.match(sources[0], /128 \* 1024/);
+  });
+
+  it('rejects every tab or window mutation surface named by the zero-focus contract', () => {
+    for (const forbidden of ['tabs.reload', 'tabs.create', 'windows.create', 'tabs.highlight', 'tabs.move']) {
+      assert.throws(
+        () => assertNoForbiddenExtensionBehavior(`chrome.${forbidden}()`),
+        new RegExp(`forbidden extension behavior: ${forbidden.replace('.', '\\.')}`),
+      );
+    }
   });
 
   it('loads the page adapter only on ChatGPT conversation pages', async () => {

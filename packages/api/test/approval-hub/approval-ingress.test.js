@@ -25,6 +25,8 @@ describe('ApprovalIngress', () => {
     assert.deepEqual(store.publication.envelope, envelope);
     assert.equal(harness.messageStore.getByThread('source-thread', 100).length, 2);
     assert.equal(harness.broadcasts.length, 1);
+    assert.deepEqual(harness.broadcasts[0][0], ['thread:source-thread', `user:${ownerUserId}`]);
+    assert.equal(harness.broadcasts[0][1], 'connector_message');
     assert.equal(harness.userEvents.length, 1);
   });
 

@@ -13,6 +13,7 @@
  * reason from Phase A.
  */
 
+import { type CallbackAuthFailureReason, isCallbackAuthFailureReason } from '@cat-cafe/shared';
 import { buildAuthHeaders, getCallbackConfig } from './tools/callback-tools.js';
 
 /**
@@ -33,6 +34,27 @@ const MAX_DELAY_MS = 30 * 60_000;
 const FALLBACK_DELAY_MS = MIN_DELAY_MS; // initial / on-failure back-off
 
 /**
+ * A terminal callback disposition means this MCP process no longer owns a
+ * live invocation, so another refresh cannot succeed. `stale_invocation` is
+ * retained for legacy/race records: it is not a persisted terminal state, but
+ * the server explicitly fences the old invocation from ever refreshing again.
+ */
+const NON_RESCHEDULABLE_REFRESH_REASONS: ReadonlySet<CallbackAuthFailureReason> = new Set([
+  'completed',
+  'failed',
+  'interrupted',
+  'replaced',
+  'revoked',
+  'canceled',
+  'stale_invocation',
+]);
+
+export type RefreshTickResult =
+  | { ok: true; shouldReschedule: true; nextDelayMs: number }
+  | { ok: false; shouldReschedule: true; nextDelayMs: number }
+  | { ok: false; shouldReschedule: false; nextDelayMs: 0; terminalReason: CallbackAuthFailureReason };
+
+/**
  * AC-C3: clamp(ttlRemainingMs/4, 5min, 30min) + ±15% jitter.
  *
  * Pure function — testable without a running timer or HTTP layer.
@@ -45,13 +67,28 @@ export function computeNextRefreshDelay(ttlRemainingMs: number): number {
 }
 
 /**
- * AC-C5: refresh failure does not crash. Returns rescheduling decision so
- * the loop can keep trying. Does not differentiate by error type yet — we
- * back off uniformly to FALLBACK_DELAY_MS. The next real verify() will
- * surface persistent auth failures with structured Phase A reason.
+ * AC-C5: recoverable refresh failures do not crash. They return a
+ * rescheduling decision so the loop can keep trying.
  */
-export function handleRefreshFailure(_err: unknown): { shouldReschedule: boolean; delayMs: number } {
+export function handleRefreshFailure(_err: unknown): { shouldReschedule: true; delayMs: number } {
   return { shouldReschedule: true, delayMs: FALLBACK_DELAY_MS };
+}
+
+function recoverableRefreshTickResult(err: unknown): Extract<RefreshTickResult, { shouldReschedule: true }> {
+  const failure = handleRefreshFailure(err);
+  return { ok: false, shouldReschedule: failure.shouldReschedule, nextDelayMs: failure.delayMs };
+}
+
+function terminalReasonFromRefreshFailure(status: number, body: string): CallbackAuthFailureReason | undefined {
+  if (status !== 401) return undefined;
+
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown; reason?: unknown };
+    if (parsed.error !== 'callback_auth_failed' || !isCallbackAuthFailureReason(parsed.reason)) return undefined;
+    return NON_RESCHEDULABLE_REFRESH_REASONS.has(parsed.reason) ? parsed.reason : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface RefreshLoopHandle {
@@ -74,15 +111,14 @@ const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
  * 5min — retry within seconds always fails). Refresh loop already IS a retry
  * mechanism; doubling is structural duplication.
  *
- * Returns ok+nextDelayMs from server-reported ttlRemainingMs, or
- * ok:false+nextDelayMs from FALLBACK_DELAY_MS on any failure (including timeout).
+ * Returns a typed scheduling decision. Only a typed 401 lifecycle terminal
+ * stops the loop; malformed responses, other 401 reasons, timeouts, 429, and
+ * 5xx remain recoverable and retain the fallback schedule.
  */
-export async function performRefreshTick(
-  options: { timeoutMs?: number } = {},
-): Promise<{ ok: boolean; nextDelayMs: number }> {
+export async function performRefreshTick(options: { timeoutMs?: number } = {}): Promise<RefreshTickResult> {
   const config = getCallbackConfig();
   if (!config) {
-    return { ok: false, nextDelayMs: FALLBACK_DELAY_MS };
+    return recoverableRefreshTickResult(new Error('callback config unavailable'));
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
@@ -97,23 +133,27 @@ export async function performRefreshTick(
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
+      const terminalReason = terminalReasonFromRefreshFailure(response.status, body);
+      if (terminalReason) {
+        return { ok: false, shouldReschedule: false, nextDelayMs: 0, terminalReason };
+      }
       console.warn(`[refresh-loop] refresh failed (${response.status}):`, body.slice(0, 200));
-      return { ok: false, nextDelayMs: FALLBACK_DELAY_MS };
+      return recoverableRefreshTickResult({ status: response.status, body });
     }
 
     const text = await response.text();
     try {
       const parsed = JSON.parse(text);
       if (parsed?.ok && typeof parsed.ttlRemainingMs === 'number') {
-        return { ok: true, nextDelayMs: computeNextRefreshDelay(parsed.ttlRemainingMs) };
+        return { ok: true, shouldReschedule: true, nextDelayMs: computeNextRefreshDelay(parsed.ttlRemainingMs) };
       }
     } catch {
       /* malformed response — fall back */
     }
-    return { ok: false, nextDelayMs: FALLBACK_DELAY_MS };
+    return recoverableRefreshTickResult(new Error('malformed refresh response'));
   } catch (err) {
     console.warn('[refresh-loop] refresh threw:', err);
-    return { ok: false, nextDelayMs: FALLBACK_DELAY_MS };
+    return recoverableRefreshTickResult(err);
   }
 }
 
@@ -180,9 +220,13 @@ export function startRefreshLoop(): RefreshLoopHandle {
 
   const tick = async (): Promise<void> => {
     if (stopped) return;
-    const { nextDelayMs } = await performRefreshTick();
+    const result = await performRefreshTick();
+    if (!result.shouldReschedule) {
+      stopped = true;
+      return;
+    }
     if (!stopped) {
-      timer = setTimeout(tick, nextDelayMs);
+      timer = setTimeout(tick, result.nextDelayMs);
       timer.unref();
     }
   };

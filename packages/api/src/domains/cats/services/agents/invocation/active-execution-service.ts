@@ -125,6 +125,8 @@ export interface RunningChildExecutionProjection {
 /** 定性结果 + 完整性。`complete=false` ⇒ 调用方必须 fail-closed。 */
 export interface WorkingPresence {
   readonly catIds: readonly string[];
+  /** Earliest canonical start across every active execution face. */
+  readonly activeSince?: number;
   readonly complete: boolean;
 }
 
@@ -145,6 +147,8 @@ export interface ActiveExecutionSnapshot {
   readonly ownerTruthComplete: boolean;
   /** 该 thread 上由 owner truth 直接认定为 working 的猫。 */
   ownerTruthCatIds(threadId: string): readonly string[];
+  /** 该 thread 上 owner-truth 执行面的最早 canonical startedAt。 */
+  ownerTruthActiveSince(threadId: string): number | undefined;
 }
 
 /** F295 project scan 只需要 live/child 候选；managed command 会由自己的投影枚举器读取。 */
@@ -202,6 +206,11 @@ async function collect<T>(
   }
 }
 
+function earliestExecutionStart(current: number | undefined, candidate: number): number | undefined {
+  if (!Number.isFinite(candidate) || candidate < 0) return current;
+  return current === undefined ? candidate : Math.min(current, candidate);
+}
+
 export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): ActiveExecutionService {
   // PR #3763 合流：底层枚举器 principal-blind（route 列表要显示 foreign 占用）；
   // service 消费面（Sidebar 定性/候选发现）保持 per-user 语义不变——是否把 foreign
@@ -224,28 +233,27 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       }));
   };
 
-  const liveCatIds = async (threadId: string, userId: string): Promise<string[]> =>
-    (
-      await resolveActiveInvocationsStrict(
-        threadId,
-        userId,
-        deps.invocationTracker,
-        deps.recordStore,
-        deps.draftStore,
-        deps.turnExecutionStore,
-        deps.log,
-        deps.invocationRegistry,
-      )
-    ).map((projection) => projection.catId);
+  const liveExecutions = (threadId: string, userId: string): Promise<ActiveInvocationProjection[]> =>
+    resolveActiveInvocationsStrict(
+      threadId,
+      userId,
+      deps.invocationTracker,
+      deps.recordStore,
+      deps.draftStore,
+      deps.turnExecutionStore,
+      deps.log,
+      deps.invocationRegistry,
+    );
 
   const buildCandidateSnapshot = async (userId: string, includeManaged: boolean): Promise<ActiveExecutionSnapshot> => {
     const union = new Set<string>();
-    const ownerTruth = new Map<string, Set<string>>();
-    const remember = (threadId: string, catId: string) => {
+    const ownerTruth = new Map<string, { catIds: Set<string>; activeSince?: number }>();
+    const remember = (threadId: string, catId: string, startedAt: number) => {
       if (!threadId || !catId) return;
-      const cats = ownerTruth.get(threadId) ?? new Set<string>();
-      cats.add(catId);
-      ownerTruth.set(threadId, cats);
+      const truth = ownerTruth.get(threadId) ?? { catIds: new Set<string>() };
+      truth.catIds.add(catId);
+      truth.activeSince = earliestExecutionStart(truth.activeSince, startedAt);
+      ownerTruth.set(threadId, truth);
     };
     const [trackerOk, recordOk, managedOk, childOk] = await Promise.all([
       collect(
@@ -263,7 +271,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
             union,
             () => listManaged(userId),
             (execution) => {
-              remember(execution.threadId, execution.catId);
+              remember(execution.threadId, execution.catId, execution.startedAt);
               return execution.threadId;
             },
           )
@@ -272,7 +280,7 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
         union,
         () => listRunningChildren(userId),
         (execution) => {
-          remember(execution.threadId, execution.catId);
+          remember(execution.threadId, execution.catId, execution.startedAt);
           return execution.threadId;
         },
       ),
@@ -282,7 +290,8 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       threadIds: [...union],
       complete: trackerOk && recordOk && ownerTruthComplete,
       ownerTruthComplete,
-      ownerTruthCatIds: (threadId) => [...(ownerTruth.get(threadId) ?? [])],
+      ownerTruthCatIds: (threadId) => [...(ownerTruth.get(threadId)?.catIds ?? [])],
+      ownerTruthActiveSince: (threadId) => ownerTruth.get(threadId)?.activeSince,
     };
   };
 
@@ -313,14 +322,23 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
       // 批量路径下 snapshot 已由 buildSnapshot 读好；单 thread 路径才自建。
       const owner = snapshot ?? (await service.buildSnapshot(userId));
       const catIds = new Set<string>(owner.ownerTruthCatIds(threadId));
+      let activeSince = owner.ownerTruthActiveSince(threadId);
       // 脸一：canonical live invocation classifier —— 只有它必须按 thread 提问。
       // 用 strict 版：GET /queue 的 fail-open 降级会把"读失败"伪装成"确实没有 active"。
-      const liveOk = await collect(
-        catIds,
-        () => liveCatIds(threadId, userId),
-        (catId) => catId,
-      );
-      return { catIds: [...catIds], complete: liveOk && owner.ownerTruthComplete };
+      let liveOk = true;
+      try {
+        for (const execution of await liveExecutions(threadId, userId)) {
+          catIds.add(execution.catId);
+          activeSince = earliestExecutionStart(activeSince, execution.startedAt);
+        }
+      } catch {
+        liveOk = false;
+      }
+      return {
+        catIds: [...catIds],
+        ...(catIds.size > 0 && activeSince !== undefined ? { activeSince } : {}),
+        complete: liveOk && owner.ownerTruthComplete,
+      };
     },
   };
 

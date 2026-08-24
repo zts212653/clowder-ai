@@ -57,7 +57,11 @@ export function createRepoActivityTemplate(options: RepoActivityTemplateOptions 
             const githubToken = getGitHubToken()?.trim();
             if (githubToken) headers.Authorization = `Bearer ${githubToken}`;
 
-            const res = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(15_000) });
+            const requestTimeout = AbortSignal.timeout(15_000);
+            const res = await fetch(apiUrl, {
+              headers,
+              signal: ctx.signal ? AbortSignal.any([ctx.signal, requestTimeout]) : requestTimeout,
+            });
             if (!res.ok) throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
 
             type GHIssue = {

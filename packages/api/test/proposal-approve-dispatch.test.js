@@ -80,7 +80,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
       'router input must NOT contain server-injected "## 主 Thread" header',
     );
     assert.equal(resolveCalls[0].threadId, body.threadId);
-    assert.equal(resolveCalls[0].options.persist, true);
+    assert.equal(
+      resolveCalls[0].options.persist,
+      false,
+      'proposal planning is read-only; dispatch persists only its final admitted targets',
+    );
     assert.deepEqual(processCalls, [{ threadId: body.threadId, userId: 'alice' }]);
 
     const entries = invocationQueue.list(body.threadId, 'alice');

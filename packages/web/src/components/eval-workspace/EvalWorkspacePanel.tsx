@@ -66,7 +66,12 @@ export function EvalWorkspacePanel() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4" data-testid="eval-workspace-panel">
+    <div
+      className="flex-1 min-h-0 overflow-y-auto p-4"
+      data-testid="eval-workspace-panel"
+      data-eval-workspace-scroll
+      data-trajectory-origin-scroll
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-cafe">评估</h2>

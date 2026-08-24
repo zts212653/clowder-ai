@@ -198,8 +198,8 @@ test('repair is dormant and restart recovery turns interrupted transitions into 
   assert.deepEqual(calls, ['stop:pi_official:error']);
 });
 
-test('restart recovery makes an enabled runtime explicitly dormant at a new revision', async () => {
-  const { store, lifecycle } = await harness();
+test('restart recovery preserves enabled owner intent and resumes a fresh runtime', async () => {
+  const { store, lifecycle, calls } = await harness();
   await lifecycle.prepare('pi_official', 1);
   await lifecycle.enable('pi_official', 2);
   await store.transaction((transaction) => {
@@ -207,11 +207,25 @@ test('restart recovery makes an enabled runtime explicitly dormant at a new revi
     transaction.instances.put({ ...current, runtimeState: 'healthy' });
   });
 
-  assert.equal(await lifecycle.recoverAfterRestart(), 1);
+  assert.deepEqual(await lifecycle.recoverAfterRestart(), { recoveredInstances: 1, resumeRequested: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  const recovered = (await store.snapshot()).instances[0];
+  assert.equal(recovered.activationState, 'enabled');
+  assert.equal(recovered.runtimeState, 'stopped');
+  assert.equal(recovered.lifecycleRevision, 4);
+  assert.deepEqual(calls, ['start:pi_official', 'start:pi_official']);
+});
+
+test('restart recovery does not create activation intent for a dormant configured instance', async () => {
+  const { store, lifecycle, calls } = await harness();
+  await lifecycle.prepare('pi_official', 1);
+
+  assert.deepEqual(await lifecycle.recoverAfterRestart(), { recoveredInstances: 0, resumeRequested: 0 });
+  await new Promise((resolve) => setImmediate(resolve));
   const recovered = (await store.snapshot()).instances[0];
   assert.equal(recovered.activationState, 'disabled');
   assert.equal(recovered.runtimeState, 'stopped');
-  assert.equal(recovered.lifecycleRevision, 5);
+  assert.deepEqual(calls, []);
 });
 
 test('repair accepts the legacy enabled plus crashed projection and returns dormant', async () => {

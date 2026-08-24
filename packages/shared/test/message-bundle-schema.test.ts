@@ -163,6 +163,32 @@ describe('F294 MessageBundleCarrierV1Schema', () => {
     if (result.success) expect(result.data.note).toBe('why I am forwarding this');
   });
 
+  it('keeps raw CLI carriers on v1 while accepting durable Markdown-readable CLI carriers on v2', () => {
+    const cliQuote = {
+      kind: 'cli_quote',
+      messageId: 'message-cli',
+      sourceMessageIds: ['message-cli'],
+      segmentId: 'stdout',
+      selectionStart: 6,
+      selectionEnd: 10,
+      sourceProjectionVersion: 1,
+      sourceProjectionSha256: digest,
+    };
+
+    expect(MessageBundleCarrierV1Schema.safeParse(carrier([cliQuote])).success).toBe(true);
+    expect(MessageBundleCarrierV1Schema.safeParse(carrier([{ ...cliQuote, sourceProjectionVersion: 2 }])).success).toBe(
+      true,
+    );
+    expect(
+      MessageBundleCarrierV1Schema.safeParse(
+        carrier([{ ...cliQuote, segmentId: 'tool-detail:tool-1', sourceProjectionVersion: 2 }]),
+      ).success,
+    ).toBe(false);
+    expect(MessageBundleCarrierV1Schema.safeParse(carrier([{ ...cliQuote, sourceProjectionVersion: 3 }])).success).toBe(
+      false,
+    );
+  });
+
   it('rejects malformed CLI/Rich refs and copied source payloads', () => {
     const cliQuote = {
       kind: 'cli_quote',
@@ -256,6 +282,47 @@ describe('F294 MessageBundleSelectionSchema', () => {
       MessageBundleSelectionSchema.safeParse({
         ...selection,
         items: [{ ...selection.items[1], block: { title: 'client payload' } }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts an explicit Markdown-readable CLI selection proof without changing legacy raw selections', () => {
+    const base = {
+      kind: 'cli_quote',
+      messageId: 'message-cli',
+      sourceMessageIds: ['message-cli'],
+      segmentId: 'stdout',
+      text: 'visible table row',
+      selectionStart: 2,
+      selectionEnd: 19,
+    };
+
+    expect(MessageBundleSelectionSchema.safeParse({ sourceThreadId: 'thread-source', items: [base] }).success).toBe(
+      true,
+    );
+    expect(
+      MessageBundleSelectionSchema.safeParse({
+        sourceThreadId: 'thread-source',
+        items: [{ ...base, sourceProjectionVersion: 2, renderedOccurrences: 1 }],
+      }).success,
+    ).toBe(true);
+    expect(
+      MessageBundleSelectionSchema.safeParse({
+        sourceThreadId: 'thread-source',
+        items: [
+          {
+            ...base,
+            segmentId: 'tool-detail:tool-1',
+            sourceProjectionVersion: 2,
+            renderedOccurrences: 1,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      MessageBundleSelectionSchema.safeParse({
+        sourceThreadId: 'thread-source',
+        items: [{ ...base, sourceProjectionVersion: 3, renderedOccurrences: 1 }],
       }).success,
     ).toBe(false);
   });

@@ -48,7 +48,21 @@ describe('RichBlocks exact forwarding', () => {
       );
     });
 
-    React.act(() => container.querySelector<HTMLButtonElement>('button[aria-label="转发富块：Decision"]')?.click());
+    const richBlock = container.querySelector('[data-rich-block-id="card-1"]');
+    const actionDock = richBlock?.querySelector('[data-testid="rich-block-forward-actions"]');
+    const forward = richBlock?.querySelector<HTMLButtonElement>('button[aria-label="转发富块：Decision"]');
+
+    expect(richBlock?.className).toContain('group/rich-block');
+    expect(actionDock?.className).toContain('absolute');
+    expect(actionDock?.className).toContain('pointer-events-none');
+    expect(actionDock?.className).toContain('opacity-0');
+    expect(actionDock?.className).toContain('group-hover/rich-block:pointer-events-auto');
+    expect(actionDock?.className).toContain('group-hover/rich-block:opacity-100');
+    expect(actionDock?.className).toContain('group-focus-within/rich-block:opacity-100');
+    expect(actionDock?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:opacity-100');
+    expect(forward?.querySelector('svg')).not.toBeNull();
+
+    React.act(() => forward?.click());
 
     const probe = container.querySelector<HTMLOutputElement>('[data-testid="rich-forward-picker-probe"]');
     expect(JSON.parse(probe?.dataset.items ?? '[]')).toEqual([
@@ -93,6 +107,19 @@ describe('RichBlocks exact forwarding', () => {
     });
 
     const second = container.querySelector<HTMLButtonElement>('button[aria-label="转发富块：Second decision"]');
+    const group = container.querySelector('[data-rich-block-group-id="decisions"]');
+    const actionDock = group?.querySelector('[data-testid="rich-block-forward-actions"]');
+    const actionSurface = group?.querySelector('[data-testid="rich-block-forward-action-dock"]');
+
+    expect(group?.className).toContain('group/rich-block');
+    expect(actionDock?.className).toContain('grid-rows-[0fr]');
+    expect(actionDock?.className).toContain('opacity-0');
+    expect(actionDock?.className).toContain('group-hover/rich-block:grid-rows-[1fr]');
+    expect(actionDock?.className).toContain('group-focus-within/rich-block:grid-rows-[1fr]');
+    expect(actionDock?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:grid-rows-[1fr]');
+    expect(actionSurface?.className).toContain('flex-wrap');
+    expect(actionDock?.querySelectorAll('button')).toHaveLength(2);
+    expect(second?.querySelector('svg')).not.toBeNull();
     expect(second).not.toBeNull();
     React.act(() => second?.click());
 

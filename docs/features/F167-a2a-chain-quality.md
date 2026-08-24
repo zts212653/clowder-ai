@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-15
+updated: 2026-08-21
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -740,6 +740,35 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **锚定偏差 + 任务替换**：锚定在既有 KD-10“默认可发现”抽象约束上，没有先按截图中的具体 referent 核对“这里这个”指的是原消息动作组，擅自把局部显隐调整替换成了入口层级重设计。 |
 | 纠正轮次 | 同一任务 2 次（`0001787047894247-000105-cfa68d95`、`0001787047966930-000108-4ffc8e66`）才完全拉回。纠正后 PR #3774 已 squash merge 为 `cae99d8e3`；真实 Chromium 契约锁定静止零占位、hover/focus 完整动作组与触屏可达。 |
 | 元心智哪条没执行 | Q2 信息验证：没有先用截图和现有 DOM 行为确认代词 referent；Q3 坐标变换：把“同一控件的显隐状态”错误换成了“控件所属层级”的产品架构问题。 |
+
+### Case E10: 把 inbound PR review 截断成对话内报告（2026-08-19，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator说“看看这个插件的 PR”只授权只读审查；由于 PR 作者与当前 invocation 属于同一 `codex-sol` runtime identity、不能充当独立 reviewer，我应把 findings 报回当前对话后停止。 |
+| 实际要求 | Inbound PR review 的终态不止是得出 verdict：明确 finding 要回到 GitHub 原对象；修复球交给作者后，当前 reviewer custody 还要注册 event-backed PR tracking，等待新 HEAD 或新的 review result，不能停在聊天汇报。身份边界只禁止冒充独立批准，不禁止留下 maintainer advisory finding 或承担后续复审等待。 |
+| 偏差根因 | **身份边界过度泛化 + 状态机截断**：把“不能独立 APPROVE”扩大成“不能执行 reviewer 交付动作”，又把“分析完成”误当成任务终态，漏掉 `finding delivery → author custody → typed wait` 两次状态迁移。 |
+| 纠正轮次 | 同一任务 2 次：先由 `0001787132038846-000199-6cf85575` 纠正“要回复 PR”，再由 `0001787137460561-000007-616c60ff` 纠正“要以 reviewer 身份挂 PR tracking”。纠正后 finding 已落到 clowder-ai-plugins#37，tracking task `0001787137554353-000011-63814576` 已绑定新 HEAD / 新 review result。 |
+| 元心智哪条没执行 | Q1 角色确认：当前是有 finding delivery custody 的 maintainer advisory reviewer，不是纯分析者；Q3 坐标变换：没有把 review verdict 转换成公开交付与事件等待两个后续 action family。 |
+
+### Case E11: 把外部 AgentReflex 谱系并入 Clowder AI 自进化主线（2026-08-21，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 高校合作讨论里出现的“元认知、自进化、Multi-Agent”可以作为同一组 Clowder AI 候选课题收束，因此上一轮把伙伴提出的 AgentReflex 元认知进化与家内自进化问题并列后，又用“同时接住”把它们合成一个研究切口。 |
+| 实际要求 | 郭良的 AgentReflex 是伙伴自己的另一条谱系，关注 Gene / Capsule / Lineage、赫胥黎与哥德尔机式元认知进化；Clowder AI 先独立梳理半年真实运行中多 Agent 协同、记忆与自进化遇到的困难。两者以后可以找接口，但不能先合并问题定义或贡献归属。 |
+| 纠正轮次 | 本次 1 次（`0001787296571695-000113-91447bb4`）；跨任务已有 LL-092 同型证据，因此记录。当前任务已先把 AgentReflex 剥离，再从 Clowder AI canonical 文档、真实事故和原始 thread 重建自进化困难谱系。 |
+| 元心智哪条没执行 | Q2 信息验证：未先读已知 canonical 谱系边界；Q3 坐标变换：没有把共享术语投影回“谁提出、解决什么问题、证据属于谁”三维坐标。 |
+
+### Case E12: 把“自进化的总体愿景”替换成 Clowder AI 产品愿景（2026-08-21，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator要求在自进化研究稿中补“我们的总体愿景”，是要补 Clowder AI 的全局产品愿景；因此读取 `docs/VISION.md`，写入“领养长期共生 AI 团队、把想法变成产品”的产品终态。 |
+| 实际要求 | 当前对象是自进化研究稿，“我们的 vision”指 Clowder AI 对自进化本身的理想终态：系统如何发现能力边界、选择更新层、取得独立证据、分级自治，并让改变可追溯、可回滚、可退役。产品愿景不是本节要回答的坐标。 |
+| 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E9 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
+| 纠正轮次 | 本次 1 次（`0001787299710431-000183-7421a9ae`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
+| 元心智哪条没执行 | Q2 信息验证：虽读取了真实 canonical 文档，却选错了 resolver；Q3 坐标变换：把“当前研究对象的 vision”错误升格成“整个产品的 VISION”。 |
 
 ## Review Gate
 

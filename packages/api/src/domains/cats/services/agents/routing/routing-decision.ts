@@ -42,7 +42,7 @@ export interface RoutingContext {
   pendingTail: readonly CatId[];
   /** pendingTail 中属于用户原始选择的 target（这些应回复用户，不应被当成 A2A 重派）。 */
   pendingOriginalTargets: readonly CatId[];
-  /** 该 cat 是否已在 InvocationQueue 中活跃处理（跨路径 dedup）。 */
+  /** 该 cat 是否已有 InvocationQueue 责任；新意图必须 durable defer，不能被当成 dedup 丢弃。 */
   hasActiveAgent: (cat: CatId) => boolean;
   /** 只读 streak 预判（不 mutate；配对 peekStreakOnPush）。 */
   peekStreak: (target: CatId) => { wouldBlock: boolean; count: number };
@@ -51,7 +51,7 @@ export interface RoutingContext {
 /**
  * 纯函数：把一个路由信号解析成有序的决策列表。
  *
- * inline_mention：逐个 cat 走完整 guard 链（abort→queue→depth→dedup→pendingTail→streak→enqueue），
+ * inline_mention：逐个 cat 走完整 guard 链（abort→depth→pendingTail→streak→occupancy/fairness→route），
  *   depth 预算在多 cat 间累计消费（每次 enqueue 占一个 slot）。
  * relay_malformed：恢复路径，只受 depth + pending-only dedup 约束（F215 逐字语义），不碰 streak/fairness。
  * deferred：等同 inline_mention 在 queue-pending 时的形态（全部 defer_queue），c2 接线时复用。
@@ -94,8 +94,6 @@ function resolveInlineCat(cat: CatId, ctx: RoutingContext, depth: number): Routi
   if (ctx.aborted) return { action: 'skip', cat, reason: 'aborted' };
   // Depth (consumed cumulatively across the cat list).
   if (depth >= ctx.maxDepth) return { action: 'skip', cat, reason: 'depth' };
-  // Cross-path dedup: cat already processing via InvocationQueue (callback path).
-  if (ctx.hasActiveAgent(cat)) return { action: 'skip', cat, reason: 'dedup_active' };
   // Already pending in worklist tail.
   if (ctx.pendingTail.includes(cat)) {
     // Original user target → leave it replying to user (no decision).
@@ -106,9 +104,13 @@ function resolveInlineCat(cat: CatId, ctx: RoutingContext, depth: number): Routi
   // Ping-pong breaker (read-only预判; execution layer does the real updateStreakOnPush mutate).
   const streak = ctx.peekStreak(cat);
   if (streak.wouldBlock) return { action: 'block_pingpong', cat, pairCount: streak.count };
-  // F216 c2: queue fairness gate is the LAST check, AFTER depth/dedup/pendingTail/streak. This way the
+  // Queue occupancy is not proof that this source intent is a duplicate. The
+  // execution layer must give the new handoff durable Queue custody and leave
+  // the current owner running; silently skipping here caused clowder-ai#1335.
+  if (ctx.hasActiveAgent(cat)) return { action: 'defer_queue', cat };
+  // F216 c2: queue fairness gate is the LAST check, AFTER depth/pendingTail/streak/occupancy. This way the
   // deferred path (queuedMessagesPending=true) still runs the full guard chain before deferring — it
-  // gets skip:depth / skip:dedup_active / mark_replyto / block_pingpong exactly like inline, then
+  // gets skip:depth / mark_replyto / block_pingpong exactly like inline, then
   // defers a clean enqueue. For the inline path queuedMessagesPending is always false (outer condition
   // `!queuedMessagesPending`), so this check is a no-op there → inline behavior unchanged.
   if (ctx.queuedMessagesPending) return { action: 'defer_queue', cat };

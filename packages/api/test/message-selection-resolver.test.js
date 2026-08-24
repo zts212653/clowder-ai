@@ -36,6 +36,27 @@ function makeMessage(overrides = {}) {
   };
 }
 
+function makeQueueCustody(ownerUserId = 'user-1') {
+  return {
+    version: 1,
+    entryId: `entry-${ownerUserId}`,
+    revision: 1,
+    ownerUserId,
+    intent: 'managed command wake',
+    status: 'queued',
+    allTargetCats: ['opus5'],
+    pendingTargetCats: ['opus5'],
+    notifiedByCatIds: [],
+    seenByCatIds: [],
+    seenInvocationIdByCatId: {},
+    failedByCatIds: [],
+    handledByCatIds: [],
+    priority: 'normal',
+    createdAt: 100,
+    updatedAt: 100,
+  };
+}
+
 function createResolver({ thread = makeThread(), messages = [makeMessage()] } = {}) {
   const messageMap = new Map(messages.map((message) => [message.id, message]));
   let currentThread = thread;
@@ -234,6 +255,107 @@ describe('MessageSelectionResolver admission', () => {
     );
 
     assert.equal(result.status, 'resolved');
+  });
+
+  it('resolves a visible scheduler-authored managed-hold receipt while rejecting other system rows', async () => {
+    const managedReceipt = makeMessage({
+      id: 'managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      content: '[定时任务] 持球唤醒（命令完成）',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody(),
+      source: {
+        connector: 'hold-ball',
+        label: '持球结果',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+      },
+    });
+    const genericScheduler = makeMessage({
+      id: 'generic-scheduler',
+      userId: 'scheduler',
+      catId: null,
+      content: 'internal scheduler notice',
+    });
+    const toolOnlySystem = makeMessage({
+      id: 'tool-only-system',
+      userId: 'system',
+      catId: 'system',
+      content: '',
+      contentBlocks: [{ type: 'tool_call', toolName: 'internal', toolId: 'tool-1', input: {} }],
+    });
+    const { resolver } = createResolver({ messages: [managedReceipt, genericScheduler, toolOnlySystem] });
+
+    const resolved = await resolver.resolveForAdmission(
+      {
+        sourceThreadId: 'thread-source',
+        items: [{ kind: 'message', messageId: managedReceipt.id }],
+      },
+      auth,
+    );
+    assert.equal(resolved.status, 'resolved');
+    assert.equal(resolved.items[0].readableContent, managedReceipt.content);
+
+    for (const denied of [genericScheduler, toolOnlySystem]) {
+      const result = await resolver.resolveForAdmission(
+        {
+          sourceThreadId: 'thread-source',
+          items: [{ kind: 'message', messageId: denied.id }],
+        },
+        auth,
+      );
+      assert.equal(result.status, 'invalid', `${denied.id} must stay fail-closed`);
+    }
+  });
+
+  it('fails closed for hidden, foreign-owner, and legacy ownerless managed-hold rows', async () => {
+    const managedSource = {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+    };
+    const hidden = makeMessage({
+      id: 'hidden-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody(),
+      extra: { scheduler: { hiddenTrigger: true } },
+      source: managedSource,
+    });
+    const foreignOwner = makeMessage({
+      id: 'foreign-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      content: 'owner-A command result',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody('user-owner'),
+      source: managedSource,
+    });
+    const ownerlessLegacy = makeMessage({
+      id: 'ownerless-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      deliveryStatus: 'queued',
+      source: managedSource,
+    });
+    const { resolver } = createResolver({
+      thread: makeThread({ createdBy: 'system' }),
+      messages: [hidden, foreignOwner, ownerlessLegacy],
+    });
+
+    for (const denied of [hidden, foreignOwner, ownerlessLegacy]) {
+      const result = await resolver.resolveForAdmission(
+        {
+          sourceThreadId: 'thread-source',
+          items: [{ kind: 'message', messageId: denied.id }],
+        },
+        auth,
+      );
+      assert.equal(result.status, 'invalid', `${denied.id} must stay fail-closed`);
+    }
   });
 });
 

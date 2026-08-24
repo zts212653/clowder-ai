@@ -124,6 +124,11 @@ describe('durable message extra carriers survive Redis round-trips', () => {
           },
         },
       },
+      writeOpportunityPresentationRetry: {
+        v: 1,
+        sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'message-source-1' },
+        sourceOpportunityId: dynamicScene.opportunity.opportunityId,
+      },
     };
 
     assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
