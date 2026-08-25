@@ -1457,7 +1457,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 9. 让 Agent Client 封装成员内部 session/compact/handoff/re-trigger/cancel，并证明跨这些边界仍保持同一 invocation/callback principal；把现有 DraftStore snapshot 与正式 MessageStore append 收敛为同一 response bubble，completed canonical final 解析 target 并原子创建同 bubble message ref + `assigned` refs，failed/canceled/interrupted 保留 partial body + structured reason，同时按 invocation 提交 typed owner dispositions 与 source ref `settled`；
 10. 接入服务端 exact full-entry action projection 与显式 Append/Steer/Cancel queued/Stop Agent；验证 UI/API 读取并重验同一 Queue revision + 完整 target set + owner/run/capability preconditions，Queue action 先整条 take 后 side effect、对应 refs 同事务迁移，并验证 Stop 只 cancel typed exact Agent Client、绝不命中 managed command/job，由 client 正常回调 canceled terminal，不暂停也不删除 Queue；
 11. 保留 Queue custody 的 exposure/seen/handled/attempt、structured owner、active-execution 与 presentation ledger，以及 Queue 的 `urgent / normal` 两级 priority；删除的只是 category-derived rank、Queue pause、ref 反向裁决和多层 timer/fallback。新增 dispatch-ref reconciler 只修 derived projection，不能改写 canonical owners；
-12. 在隔离环境跑完整验收矩阵后一次切换，不并行运行两套 lifecycle。
+12. 在隔离环境跑完整验收矩阵后执行 quiescent live cutover：先把 content-free `lifecycleWriterEpoch` CAS guard dark-land 到所有 legacy/new writer transaction；语义激活前停止 legacy 新 admission、收敛或持久化在途事务、撤出未受 guard 保护的 binary，再由独占迁移 lease 完成 `legacy → migrating` writer fence、reconciliation 与 `migrating → live` 提交；不得让两套 lifecycle 并行裁决 live work。
 
 ### 13.1 Dark landing 与单次语义激活
 
@@ -1467,11 +1467,19 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 2. **admission cutover**：producer、exact Queue take、immutable owner binding、callback-principal activation、History materialization 与 processing bubble 是一个不可拆的 durable cutover；
 3. **terminal/recovery cutover**：bubble delivery terminal、typed owner disposition、successor/predecessor enqueue、same-generation replay、append-won/apply-crashed compensation 与 startup freshness 是另一个不可拆的 durable cutover。
 
-三个切片可以分别 dark-land，但只有 admission 与 terminal/recovery 都具备并通过 A1–A89 后，live semantics 才一次激活。激活后 legacy resolver 只能保留为 diagnostic/shadow comparison；它不得继续为 live work 重选 current generation、补写 authority 或充当第二 writer。
+三个切片可以分别 dark-land，但只有 admission 与 terminal/recovery 都具备并通过 A1–A89 后，live semantics 才一次激活。dark landing 可以沿用 rolling deployment；**live activation 不能是 rolling writer handoff**。激活前置版本必须先把 content-free、monotonic `lifecycleWriterEpoch` CAS guard 部署到每一条 legacy/new admission、terminal 与 migration write transaction；epoch 只裁决哪代 writer 可提交，不复制 Queue、execution 或责任事实，因此不是第四个 lifecycle ledger。任何没有该 guard 的 binary 都不具备 cutover 资格，必须先从流量与进程集合撤出。随后执行 quiescent writer fence：
+
+1. legacy fleet 先停止接受新的 root ingress/admission，但继续让已接收事务提交 canonical terminal，或留下足以让已 dark-land terminal/recovery reducer 接管 exact callback 的持久 outstanding witness；新 ingress 在 activation 完成前保持 blocked，不绕到新 writer；
+2. 等所有已开启的 legacy lifecycle transaction 退出，并撤出所有未受 epoch guard 保护的 binary；无法证明任一 transaction/binary 已退出时，cutover fail closed；
+3. operator/cutover controller 在 canonical store 取得独占 migration lease，以 expected epoch 原子提交 `legacy → migrating`。从这一刻起，所有仍携带 legacy epoch 的 admission/terminal/migration commit 都 typed conflict，不能在 clean scan 后补写；
+4. controller 在同一 lease 与 `migrating` epoch 下执行下述 invariant reconciliation；只有 clean scan 成功才 CAS 提交 `migrating → live`。失败或 crash 保持 `migrating + ingress blocked`，只能幂等续做同一 reconciliation，不能恢复 legacy writer 或双写；
+5. 只有要求并验证 `live` epoch 的新 fleet 才重新开放 ingress。受 guard 保护但版本陈旧的 binary 即使被误启动，也因 expected epoch 不匹配拒绝 lifecycle write。
+
+因此 scan 与 activation 之间不存在仍有提交权限的 legacy transaction；正确性来自 durable epoch CAS，不依赖进程观察、timer 或周期重扫。激活后 legacy resolver 只能保留为 diagnostic/shadow comparison；它不得继续为 live work 重选 current generation、补写 authority 或充当第二 writer。
 
 迁移不得删除现有 Chat History、Queue custody 或 structured owner truth。旧 Queue 记录若绑定的是已公开 Agent/terminal message，转换为 `kind='message_wake' + message_ref`，并按其 exact targets 在同一迁移事务补 `assigned` refs。现行 user/Connector queued record 虽已写入 MessageStore 并对 owner timeline 可见，但只要仍是 `deliveryStatus='queued'`、没有 cat body exposure、没有外部 message permalink/reference，迁移就保留原 message identity 为 `sourceRecordId`，把正文转入 `kind='conversation_input' + inline`，并撤销 admission 前的 History membership/orderKey；这不是删除用户数据，而是把同一 owner-owned record 从 owner-only timeline 投影迁到 Queue Panel。若 queued record 已被 cat exposure、外部引用或其他公开事实观察到，则不能静默改写历史：保留原 History identity、转为 message-ref wake，或 fail closed 留下迁移诊断。对具有可靠 inputMessageIds/responseMessageId 的旧 live work，可以补指向该 processing bubble 的 `dispatched` refs；无法证明 source、target 与 canonical result 唯一对应时只保留诊断并隐藏 working claim，不伪造 ref。旧裸 sender id 必须结合原字段/transport 迁移进明确 `MessageFrom`；不能确认命名空间或认证强度的记录保留诊断，不猜成 Agent/strict。不能可靠转换的运行投影保留 owner truth 与诊断，但不恢复成 Active Run。
 
-live cutover 前必须另做一次 invariant reconciliation：只把“全部 target 都仍是纯 pre-admission pending，且没有任何 admitted/terminal delivery fact”的 legacy entry 导入新 Queue。若同一 target 同时有 Queue membership 与 processing/failed/completed/canceled/interrupted result，保留 canonical History/owner terminal 并删除其 selectable Queue projection；若一个 legacy multi-target row 混有 terminal 与 pending sibling，或证据不能唯一证明整条 entry 仍可执行，则整条 row 进入 non-selectable migration diagnostic，不自动拆成 per-target Queue 残片。后续 Retry/重发（如产品提供）创建新的 entry/attempt，绝不复活旧 row。API 只有在扫描证明不存在 selectable `terminal + queued` row 后才能激活 live semantics。
+`lifecycleWriterEpoch` 已从 `legacy` CAS 为 `migrating`、且独占 migration lease 生效后，live cutover 才能做 invariant reconciliation：只把“全部 target 都仍是纯 pre-admission pending，且没有任何 admitted/terminal delivery fact”的 legacy entry 导入新 Queue。若同一 target 同时有 Queue membership 与 processing/failed/completed/canceled/interrupted result，保留 canonical History/owner terminal 并删除其 selectable Queue projection；若一个 legacy multi-target row 混有 terminal 与 pending sibling，或证据不能唯一证明整条 entry 仍可执行，则整条 row 进入 non-selectable migration diagnostic，不自动拆成 per-target Queue 残片。后续 Retry/重发（如产品提供）创建新的 entry/attempt，绝不复活旧 row。cutover controller 只有在同一 lease 与 expected `migrating` epoch 下证明不存在 selectable `terminal + queued` row，才能 CAS 提交 `live` epoch；clean scan 不能脱离 writer fence 单独充当激活证据。
 
 ## 14. 已知异常如何闭合
 
@@ -1481,6 +1489,7 @@ live cutover 前必须另做一次 invariant reconciliation：只把“全部 ta
 | 正常消息与 Steer 竞争失败 | 正常推进和用户控制使用不同调度入口 | 全部 Queue mutation 进入同一 per-thread coordinator，只有 exact take winner 产生 side effect |
 | Queue row 可见但 UI 展示了当前不可提交的 Append/Steer | 把可见性或 client capability 误当成 command authority | 服务端从 exact revision、完整 target set、owner verdict、Active Runs 与 capability 导出并消费同一 action projection；stale conflict 使旧确认失效并刷新，不自动重复 |
 | legacy 数据同时出现 terminal/failed 与 Queue pending，或 multi-target row 只有部分 target 仍 pending | 旧补丁把 admission、attempt outcome 与 Queue membership 并成可部分恢复的状态机 | cutover 前 invariant reconciliation 保留 canonical terminal；整条异常 row 不可选，不拆 per-target 残片；明确的 Retry/重发只能创建新 entry/attempt |
+| reconciliation clean scan 后、live activation 前 legacy writer 又写入 selectable terminal-plus-queued row | 把无坏行快照误当成 writer fence，允许 rolling deployment 中旧实例继续提交 | writer transaction 预先 dark-land `lifecycleWriterEpoch` CAS；quiescent cutover 先阻断新 legacy admission、退出未受 guard 保护的 binary/旧 transaction，再在独占 migration lease 内提交 `legacy → migrating`、reconcile、`migrating → live`。旧 epoch commit 一律 conflict |
 | Queue row 被误当作聊天消息 | source identity、Queue visibility 与 History membership 被混成一个事实 | enqueue 持久化 sourceRecordId/Queue payload；conversation input 只在 admission 时获得 History membership/orderKey，并复用同一 identity |
 | `private_input` 被当作 targetless public message | QueueEntry 封装时丢失 entry kind | 原样保留 `private_input + exact target` 并写同一 priority Queue；不 materialize History message，绝不 member fallback |
 | A2A client 已成功但 source 无法 disposition | structured source 没有在 admission 绑定 exact invocation，terminal 又依赖可被无关 hold 改写的 thread holder | action/wait/dispatch owner 保留自己的 typed carrier，admission CAS 建立 exact invocation binding；terminal 以 invocation 找回同一 generation 并让该 owner 按 predicate 提交 disposition，owner namespace 隔离 |
@@ -1608,7 +1617,7 @@ live cutover 前必须另做一次 invariant reconciliation：只把“全部 ta
 | A86 | generation 7 structured source candidate 仍在 Queue，owner 在 admission 前提交 matching `terminalize_only` 或 replacement | owner 的既有 durable post-commit event 触发 requestDrain；coordinator 重读 exact typed fact，以 entry + Queue revision + candidate CAS 整条关闭并写既有 result/diagnostic；不建 bubble、不调用 provider。重复 event no-op，generation 7 event 不能关闭 generation 8 candidate |
 | A87 | structured head 因 `insufficient_evidence` 保持 pending，owner 后来提交足以判为 `admit`、`terminalize_only` 或 `mismatch` 的新证据 | exact evidence-change post-commit signal 触发 requestDrain；新 typed read 只走正常 admission 或 §7.1 exact closure。等待期间它不是可执行 head，不靠 timer/fallback，也不绕过 comparator |
 | A88 | Queue entry 已完成 admission cutover，随后 provider launch/execution failed | 原 Queue entry 在 provider effect 前已经不存在；同一 processing bubble 原位 failed，refs/owner disposition 正常收敛。系统不得生成 `failed + queued` row；Retry/重发若被 owner 授权，只能创建新的 entry/attempt |
-| A89 | migration 扫描到 failed-only legacy Queue row，或同一 multi-target row 中 terminal B + pending C | 保留可证明的 canonical terminal/owner facts；旧 row 整体不可选并删除/隔离 Queue projection，mixed/歧义数据留下 migration diagnostic，不自动拆 target。live semantics 只在不存在 selectable `terminal + queued` row 后激活 |
+| A89 | live cutover 时存在 failed-only legacy Queue row，或同一 multi-target row 中 terminal B + pending C；另一个旧实例试图在 clean scan 后补写 legacy projection | 所有 writer transaction 已带 `lifecycleWriterEpoch` CAS。先阻断新 legacy admission、退出未受 guard 保护的 binary/已开启 transaction，再取得独占 migration lease并提交 `legacy → migrating`。lease 内保留可证明的 canonical terminal/owner facts；旧 row 整体不可选并删除/隔离 Queue projection，mixed/歧义数据留下 migration diagnostic，不自动拆 target。clean scan 后同 lease CAS `migrating → live`；旧实例的 legacy-epoch commit typed conflict。任一 guard/transaction/scan 条件不成立时保持 `migrating + ingress blocked` |
 
 ## 16. 必须保持不可能的状态
 
@@ -1631,6 +1640,7 @@ live cutover 前必须另做一次 invariant reconciliation：只把“全部 ta
 - client side effect 已发生，但 History 中没有固定 response bubble；
 - client side effect 已发生，但 source message 对该 exact target 没有指向固定 response bubble 的 `dispatched` ref；
 - client side effect 已发生，但 structured source owner 尚未绑定 exact entry/target/invocation 与 admission 时冻结的 owner kind、lease/generation、predicate/HEAD、principal/tenant/route；
+- `lifecycleWriterEpoch` 已是 `migrating/live`，legacy-epoch admission/terminal/migration transaction 仍可提交；或 reconciliation clean scan 未受同一 migration lease + expected `migrating` epoch 保护，就被当作激活证据；
 - live cutover 后，同一 `entryId + targetId` delivery attempt 既是 selectable Queue member，又已有 processing/failed/completed/canceled/interrupted bubble；non-selectable migration diagnostic 不属于 Queue member；
 - preflight candidate 与 admission persist 之间 generation 已替换，系统却因 HEAD/carrier 相同而改绑 current generation、take Queue 或调用 provider；
 - callback principal、transport carrier、thread holder 或 current identity 被当作 action/wait lease authority，或 secondary resolver 在 terminal/recovery 重新选择 owner generation；
