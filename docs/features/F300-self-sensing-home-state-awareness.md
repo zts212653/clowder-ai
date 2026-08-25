@@ -310,7 +310,7 @@ type HomeStateDeltaV1 = Readonly<{
 - [x] AC-0.3: `self-sensing-management` ownership cell 与 plugin shared touchpoint 已登记，文档给出 F300、Plugin Manager、F296/F299 与 Dynamic Interaction 的 owner 边界
 - [x] AC-0.4: 文档基于 exact latest-main SHA 标注已有底座、部分能力和未实现缺口
 - [x] AC-0.5: 原 Home-State M1/M2/M3 被保留为 Phase 1，而非继续代表完整 F300
-- [ ] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth
+- [x] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth（R4 APPROVE，exact reviewed HEAD `252723026d6eca3590433adaad9b9206184f03a8`）
 
 ### Phase 1 — Home-State Awareness
 
