@@ -17,8 +17,22 @@ description_updated_at: 2026-08-25T02:34:00Z
 > **Baseline**: `origin/main@dd86a802`（2026-08-25） | **本次变更**: 只刷新概念、边界、现状与分阶段路线，不实现运行时代码
 
 - **operator signoff**: 2026-08-16/17 确认“运行过程中可感知家里整个系统，不是黑盒”；2026-08-25 确认 F300 应描述 Self-Sensing / Self-Management 全貌，按阶段实现，并澄清与插件管理的重合
-- **Architecture cells**: `plugin`（生命周期与运行事实）+ `routing-context`（判断点投影）+ `identity-session`（上下文送达）
-- **原始体验叙事**: 发布源 `longform-008-self-sensing-agent-interaction-v3.md` 及其 `assets/dynamic-ui/agent-proposal-loop.svg`
+- **Canonical product narrative**: 本文的[总体概念](#1-总体概念)、[系统边界](#3-系统边界f300插件管理与-dynamic-interaction-各管什么)与[分阶段路线](#5-分阶段实现路线)
+- **Publishing provenance（非规范源）**: 本次刷新逐段核对外部 publishing archive `longform-008-self-sensing-agent-interaction-v3.md` 与 `assets/dynamic-ui/agent-proposal-loop.svg`（archive commit `ffc81c4b8b10abb6059eb3572d7ffb3f99f46c17`）。该 archive 没有可解析 remote URL，因此不再把本机文件名冒充链接；仓内可访问、可审阅的规范叙事以本文及 ownership cell 为准
+
+## Architecture Ownership & Delta Evidence
+
+Architecture cell: `self-sensing-management`（相邻：`plugin`、`hub-action-surface`、`routing-context`、`identity-session`）
+
+Map delta: new cell required → 新增 [`self-sensing-management`](../architecture/ownership/cells/self-sensing-management.md)，并更新 [`plugin`](../architecture/ownership/cells/plugin.md) 的 F300 shared touchpoint
+
+Why: F300 现在拥有 friction-to-proposal policy、capability-state interpretation 与 Interaction Episode 阶段语义；plugin lifecycle/runtime、route、delivery、authority execution 和 surface rendering 仍由相邻 owner 持有。
+
+Canonical source: [`self-sensing-management#canonical-owner`](../architecture/ownership/cells/self-sensing-management.md#canonical-owner)；[`plugin#canonical-owner`](../architecture/ownership/cells/plugin.md#canonical-owner)；本文[四层责任模型](#31-四层责任模型)
+
+Consumer evidence: `rg -n 'HomeStateDeltaV1|HomeStateSnapshot|InteractionEpisode|affects_current_obligation|affects_next_side_effect' packages -g '*.{ts,tsx,mjs}'` 在 `origin/main@dd86a802` 无匹配，因此当前没有可列举的 runtime consumer；未来 consumers 只存在于本文 Phase 1–5 的未勾 AC，代码 callsite scan 在实现落地前无法表达它们。
+
+Claim guard: “Phase 0 只有架构真相、runtime 尚未实现，且 ownership map 与 feature registration 同步” → `! rg -n 'HomeStateDeltaV1|HomeStateSnapshot|InteractionEpisode|affects_current_obligation|affects_next_side_effect' packages -g '*.{ts,tsx,mjs}'` + `node docs/architecture/ownership/generate-readme.mjs && git diff --exit-code docs/architecture/ownership/README.md` + `node scripts/check-feature-truth.mjs`；出现 runtime symbol 却未更新本节、生成 map 变脏或 feature truth 失配即 red。
 
 ## 一句话定义
 
@@ -272,7 +286,7 @@ type HomeStateDeltaV1 = Readonly<{
 
 - [x] AC-0.1: 文档区分 Self-Sensing 三类感知、Self-Management 两类结果及完整 Interaction Episode
 - [x] AC-0.2: 文档明确 capability 多维状态，禁止用 installed/UI-visible/tool-registered 单点替代 ready/effective
-- [x] AC-0.3: 文档给出 F300、Plugin Manager、F296/F299 与 Dynamic Interaction 的 owner 边界
+- [x] AC-0.3: `self-sensing-management` ownership cell 与 plugin shared touchpoint 已登记，文档给出 F300、Plugin Manager、F296/F299 与 Dynamic Interaction 的 owner 边界
 - [x] AC-0.4: 文档基于 exact latest-main SHA 标注已有底座、部分能力和未实现缺口
 - [x] AC-0.5: 原 Home-State M1/M2/M3 被保留为 Phase 1，而非继续代表完整 F300
 - [x] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth
@@ -355,7 +369,7 @@ Phase 1 生产验收依赖 F296/F298 对 delivery/receipt/durability 的真实�
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | Self-Sensing 固定为 capability、availability、friction 三维；Self-Management 固定为能力管理 + 交互适配的受权闭环 | 维持 longform 原始概念，不让“家况送达”缩窄总愿景 | 2026-08-25 |
+| KD-1 | Self-Sensing 固定为 capability、availability、friction 三维；Self-Management 固定为能力管理 + 交互适配的受权闭环 | 维持原始产品概念，不让“家况送达”缩窄总愿景；本文成为仓内可解析的 canonical narrative | 2026-08-25 |
 | KD-2 | F300 成为 Self-Sensing / Self-Management 总体 feature truth；Home-State Awareness 降为 Phase 1 首纵切 | 文档先描述终态，实现可以分阶段，不再用首切片冒充全貌 | 2026-08-25 |
 | KD-3 | 2026-08-17 的“F300 不做完整闭环”只保留为当时的实现范围判断，在总体文档层面被本决策取代 | 控制实现范围仍正确，但不应继续截断 feature 的概念边界 | 2026-08-25 |
 | KD-4 | Plugin Manager 拥有 lifecycle/runtime/authority execution truth；F300 拥有 friction-to-episode policy，二者以 command/receipt 相接 | 避免两个管理器和两个真相源，同时允许插件系统独立演进 | 2026-08-25 |
