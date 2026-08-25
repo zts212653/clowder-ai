@@ -220,6 +220,12 @@ function loadStagingContent(): ParsedStagingContent {
   return _cachedContent;
 }
 
+function renderRuntimePlaceholders(body: string): string {
+  return body
+    .replaceAll('{{FRONTEND_PORT}}', process.env.FRONTEND_PORT ?? '3003')
+    .replaceAll('{{API_SERVER_PORT}}', process.env.API_SERVER_PORT ?? '3004');
+}
+
 /**
  * Test-only: reset cache so tests can re-load after mutating the file or
  * stubbing the path. NOT exported from index.ts (per cells/skill discipline).
@@ -254,7 +260,7 @@ export function buildStagingPrepend(catId: CatId): string {
     (sum, it) => sum + it.estimated_tokens,
     0,
   )} tokens — outside L0 ${manifest.hard_cap_tokens}-cap)`;
-  return `${header}\n\n${body.trim()}`;
+  return `${header}\n\n${renderRuntimePlaceholders(body).trim()}`;
 }
 
 /**
@@ -268,5 +274,5 @@ export function loadStagingManifest(): StagingManifest {
 
 /** Shared source text for consumers that need staging semantics without a cat-specific header. */
 export function loadStagingBody(): string {
-  return loadStagingContent().body;
+  return renderRuntimePlaceholders(loadStagingContent().body);
 }

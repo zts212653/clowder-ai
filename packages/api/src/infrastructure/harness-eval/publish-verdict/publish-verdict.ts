@@ -5,7 +5,7 @@ import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
 import { assertMeasurementVerdictActionAllowed } from '../measurement/measurement-bundle-census.js';
 import {
-  readMeasurementBundleCensusFile,
+  ensureMeasurementBundleCensusFile,
   refreshMeasurementBundleCensusFile,
 } from '../measurement/measurement-bundle-census-file.js';
 import {
@@ -256,7 +256,7 @@ export async function handlePublishVerdict(
         }
         // Freeze reviewed census metadata before the generator receives write access
         // to the isolated harness root; only publisher-derived fields may change.
-        const cleanCensusSource = readMeasurementBundleCensusFile(worktreeRoot);
+        const cleanCensusSource = ensureMeasurementBundleCensusFile(worktreeRoot, packet.createdAt).source;
         assertMeasurementVerdictActionAllowed(parseYaml(cleanCensusSource), packet.domainId, packet.verdict);
         const generatedArtifact = await generator(packet, input.sourceRefs, {
           harnessFeedbackRoot: isolatedHarnessFeedback,

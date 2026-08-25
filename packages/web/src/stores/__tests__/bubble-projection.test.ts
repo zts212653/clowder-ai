@@ -28,6 +28,12 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     expect(streamBubble.toolEvents?.length).toBeGreaterThan(0);
     // stream identity preserved for downstream dedupe
     expect(streamBubble.extra?.stream?.invocationId).toBe('2fe279aa-255c-4d22-b3e7-a3e718c3b52e');
+    // F294: exact CLI/Rich forwarding retains every raw record behind each visible bubble.
+    expect(streamBubble.projectionSourceMessageIds).toEqual([
+      '0001778467517540-000009-7a9ac742',
+      '0001778467811327-000024-5e55c34c',
+    ]);
+    expect(callbackBubble.projectionSourceMessageIds).toEqual(['0001778468150545-000021-b0d93885']);
   });
 
   it('keeps a recovered withheld stream beside existing callback speech from the same invocation', () => {
@@ -182,6 +188,7 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     expect(bubble.content).toContain('stream answer');
     expect(bubble.content).toContain('callback final');
     expect(bubble.isStreaming).toBe(false);
+    expect(bubble.projectionSourceMessageIds).toEqual(['stream-1']);
   });
 
   it('R1 P1#1 (砚砚): isStreaming = LAST record explicit value when no callback (not ANY)', () => {

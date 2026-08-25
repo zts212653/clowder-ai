@@ -161,7 +161,7 @@ test(
   },
 );
 
-test('startup reaper retains malformed manifests without signalling by guess', async () => {
+test('startup reaper quarantines malformed manifests without signalling by guess', async () => {
   const dataDir = await mkdtemp(join(realpathSync(tmpdir()), 'cat-cafe-owner-invalid-'));
   const ownerDir = join(dataDir, 'cli-process-owners');
   const invalidPath = join(ownerDir, 'not-an-owner.json');
@@ -173,7 +173,8 @@ test('startup reaper retains malformed manifests without signalling by guess', a
 
     assert.equal(result.foundOwners, 0);
     assert.equal(result.invalidManifests, 1);
-    assert.equal(existsSync(invalidPath), true);
+    assert.equal(existsSync(invalidPath), false);
+    assert.equal((await readdir(join(dataDir, 'cli-process-owner-quarantine'))).length, 1);
     assert.equal(result.termSignals, 0);
     assert.equal(result.killSignals, 0);
   } finally {

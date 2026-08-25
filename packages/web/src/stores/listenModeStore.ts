@@ -23,11 +23,26 @@ export interface ListenModeSession extends ListenDocumentDescriptor {
   error: string | null;
 }
 
-interface ListenModeStore {
-  session: ListenModeSession | null;
+export interface ListenDocumentCacheProjection {
+  identity: ListenDocumentIdentity;
+  synthesisFingerprint?: string;
+  cachedAnchors: string[];
+  cacheBytes: number;
+  totalSentences: number;
+  active: boolean;
+  error: string | null;
 }
 
-export const useListenModeStore = create<ListenModeStore>(() => ({ session: null }));
+interface ListenModeStore {
+  session: ListenModeSession | null;
+  cacheByDocument: Record<string, ListenDocumentCacheProjection>;
+}
+
+export const useListenModeStore = create<ListenModeStore>(() => ({ session: null, cacheByDocument: {} }));
+
+export function listenDocumentCacheKey(identity: ListenDocumentIdentity): string {
+  return JSON.stringify([identity.projectPath, identity.relativePath, identity.contentDigest]);
+}
 
 export function isListenDocumentActive(projectPath: string, relativePath: string): boolean {
   const session = useListenModeStore.getState().session;

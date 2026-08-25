@@ -12,6 +12,7 @@ import { ActivityBar } from './ActivityBar';
 import { ConciergeHost } from './concierge/ConciergeHost';
 import { DesktopUpdatePrompt } from './DesktopUpdatePrompt';
 import { ListenModePlayer } from './listen-mode/ListenModePlayer';
+import { TheaterReplayHost } from './story-player/TheaterReplayHost';
 import { ThreadSidebar } from './ThreadSidebar';
 import {
   getBrowserThreadRoutePathname,
@@ -86,6 +87,8 @@ function AppShellContent({ children }: AppShellProps) {
           when navigating to settings without visiting chat first. Returns null;
           30s poll re-render is confined to this leaf. */}
       <CallbackAuthSnapshotMount />
+      {/* F252/F299: replay host is independent of the conditionally mounted sidebar. */}
+      <TheaterReplayHost />
       {showSidebar && (
         <div className="flex items-stretch flex-shrink-0">
           <div style={{ width }} className="flex-shrink-0">

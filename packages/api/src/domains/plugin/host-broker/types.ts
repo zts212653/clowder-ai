@@ -92,6 +92,7 @@ export class HostBrokerError extends Error {
     readonly code: HostBrokerErrorCode,
     message: string,
     readonly reason?: HandshakeRejectReason,
+    readonly sessionCloseReason?: string,
   ) {
     super(message);
     this.name = 'HostBrokerError';
@@ -120,5 +121,6 @@ export interface BrokerMethodHandler<Input = unknown, Result = unknown> {
   dispatch(context: BrokerCallContext, input: Input): Promise<Result>;
   lookupSettlement(context: BrokerCallContext, input: Input): Promise<Result | null>;
   serializePreEffectError(error: unknown): BrokerCallError | null;
+  canRetrySettledErrorAfterAuthorityChange?(error: BrokerCallError): boolean;
   restoreSettledError(error: BrokerCallError): Error;
 }

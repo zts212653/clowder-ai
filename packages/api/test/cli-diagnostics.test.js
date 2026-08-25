@@ -22,6 +22,104 @@ test('AC-A5: unknown stderr → sanitized safeExcerpt (#857), publicSummary fall
   assert.ok(d.publicHint.length > 0);
 });
 
+// clowder-ai#1324 / #848: the harness's argv and the installed CLI version drift apart.
+// Admit only the exact 48x `unknown option '--agent-file'` witness with managed-argv
+// provenance. The 28x `Cannot combine` witness stays unknown because text cannot prove
+// that both conflicting flags were harness-owned.
+test('#1324: exact managed --agent-file rejection classifies instead of falling through to unknown', () => {
+  const rawText = "error: unknown option '--agent-file'";
+  const d = buildCliDiagnostics({
+    rawText,
+    debugRef: baseRef,
+    managedArgvFlags: ['--agent-file'],
+  });
+  assert.strictEqual(d.reasonCode, 'incompatible_cli_arguments');
+  assert.doesNotMatch(d.publicSummary, /未识别/, 'a diagnosable argv error must not read as "unknown"');
+  // KD-1: reasonCode is defined, so the excerpt is admitted through the existing whitelist.
+  assert.ok(d.safeExcerpt, 'classified reasonCode admits safeExcerpt');
+  assert.strictEqual(d.excerptSource, 'classifier');
+
+  // AC-A9 red line: raw stderr must never reach publicSummary/publicHint verbatim.
+  assert.doesNotMatch(d.publicSummary, /--agent-file/, 'no raw argv text in publicSummary');
+  assert.doesNotMatch(d.publicHint, /--agent-file/, 'no raw argv text in publicHint');
+});
+
+test('#1324: ordinary unknown stderr must still fall through (no over-matching)', () => {
+  // Guard against the classifier swallowing unrelated errors just because they contain a dash.
+  const d = buildCliDiagnostics({ rawText: 'some weird thing happened with --verbose enabled', debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined, 'a mere flag mention is not an argv rejection');
+});
+
+// @codex-terra P2 on PR #1325: F127 cliConfigArgs lets an operator pass their own flags.
+// A rejected *user* flag is not a harness/CLI version drift — blaming it on the harness
+// tells the user "this is not your config" (false) and auto-files an issue for their typo.
+test('#1325: a rejected USER flag must NOT be attributed to harness argv drift', () => {
+  const d = buildCliDiagnostics({
+    rawText: "error: unknown option '--definitely-not-a-real-kimi-flag'",
+    debugRef: baseRef,
+  });
+  assert.notStrictEqual(
+    d.reasonCode,
+    'incompatible_cli_arguments',
+    'only MANAGED argv (harness-built flags) counts as version drift',
+  );
+});
+
+test('#1325: incompatible argv classification requires exact managed-flag provenance', () => {
+  const managed = buildCliDiagnostics({
+    rawText: "error: unknown option '--agent-file'",
+    debugRef: { ...baseRef, command: '/usr/local/bin/kimi' },
+    managedArgvFlags: ['--agent-file'],
+  });
+  assert.strictEqual(managed.reasonCode, 'incompatible_cli_arguments');
+
+  for (const [rawText, command] of [
+    ["error: unknown option '--agent-file'", 'gemini'],
+    ["error: unknown option '--agent-file'", 'unknown-cli'],
+    ['error: Cannot combine --agent/--agent-file with --session/--continue', 'gemini'],
+  ]) {
+    const operatorOwned = buildCliDiagnostics({ rawText, debugRef: { ...baseRef, command } });
+    assert.notStrictEqual(
+      operatorOwned.reasonCode,
+      'incompatible_cli_arguments',
+      `${command} without managed argv provenance must fail closed`,
+    );
+  }
+});
+
+test('#1325: incompatible argv witness requires an exact token and excludes unprovable shapes', () => {
+  for (const rawText of [
+    "error: unknown option '--agent-file-extra'",
+    "error: unknown option '--agent'",
+    'error: Cannot combine --agent/--agent-file with --session/--continue',
+    'error: Cannot combine --agent-file-extra with --session/--continue',
+  ]) {
+    const d = buildCliDiagnostics({
+      rawText,
+      debugRef: { ...baseRef, command: 'kimi' },
+      managedArgvFlags: ['--agent-file'],
+    });
+    assert.notStrictEqual(d.reasonCode, 'incompatible_cli_arguments', `must not over-match: ${rawText}`);
+  }
+});
+
+test('#1325: classifier safeExcerpt redacts non-HOME Unix paths before public admission', () => {
+  const d = buildCliDiagnostics({
+    rawText: [
+      "error: unknown option '--agent-file'",
+      'loaded config from /srv/cat-cafe/private/secret.toml',
+      'workspace /workspace/team/notes.txt',
+      'windows D:\\work\\team\\secret.json',
+    ].join('\n'),
+    debugRef: { ...baseRef, command: 'kimi' },
+    managedArgvFlags: ['--agent-file'],
+  });
+  assert.strictEqual(d.reasonCode, 'incompatible_cli_arguments');
+  assert.ok(d.safeExcerpt, 'classified error should retain a bounded public excerpt');
+  assert.doesNotMatch(d.safeExcerpt, /\/srv\/cat-cafe|\/workspace\/team|D:\\work\\team/);
+  assert.match(d.safeExcerpt, /\[PATH_REDACTED\]/);
+});
+
 test('AC-A1 + AC-A5: known reasonCode → safeExcerpt filled, publicSummary/Hint reasonable', () => {
   const d = buildCliDiagnostics({
     rawText:

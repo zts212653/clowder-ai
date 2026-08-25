@@ -232,9 +232,13 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
       : undefined;
   const projectedContent = contentParts.length > 0 ? contentParts.join('\n\n') : (staleR21SpeechContent ?? '');
 
+  const projectionSourceMessageIds = [
+    ...new Set(sorted.flatMap((record) => record.projectionSourceMessageIds ?? [record.id])),
+  ];
   const projected: ChatMessage = {
     ...base,
     id: canonicalId,
+    projectionSourceMessageIds,
     type: 'assistant',
     catId: first.catId,
     content: projectedContent,

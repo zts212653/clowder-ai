@@ -4,6 +4,7 @@ export type QueueReceiptTargetState =
   | 'awakened'
   | 'seen'
   | 'failed'
+  | 'interrupted'
   | 'steering'
   | 'withdrawn'
   | 'handled';
@@ -64,6 +65,14 @@ export interface QueueLineageEvidenceRef {
   invocationId: string;
 }
 
+/** Durable terminal child truth without a persisted timeline lineage. */
+export interface QueueTurnExecutionEvidenceRef {
+  kind: 'turn_execution';
+  invocationId: string;
+}
+
+export type QueueTargetOutcomeEvidenceRef = QueueLineageEvidenceRef | QueueTurnExecutionEvidenceRef;
+
 export interface QueueTerminalSilentConsumptionWitness {
   kind: 'terminal_silent';
   projectionState: 'covered_empty';
@@ -107,7 +116,7 @@ export type QueueTerminalConsumptionWitness =
 export interface QueueTargetOutcome {
   invocationId: string;
   disposition: QueueHandledDisposition;
-  evidenceRef: QueueLineageEvidenceRef;
+  evidenceRef: QueueTargetOutcomeEvidenceRef;
   handledAt: number;
   consumption?: QueueTerminalConsumptionWitness;
 }
@@ -132,8 +141,19 @@ export interface QueueReminderAttempt {
  * A retry always appends a new attempt; it never rewrites the failed one or
  * creates a second user message.
  */
-export type QueueTargetAttemptState = 'queued' | 'starting' | 'appended' | 'failed' | 'cancelled' | 'handled';
-export type QueueTargetAttemptTerminalReason = 'invocation_failed' | 'invocation_cancelled' | 'source_withdrawn';
+export type QueueTargetAttemptState =
+  | 'queued'
+  | 'starting'
+  | 'appended'
+  | 'failed'
+  | 'interrupted'
+  | 'cancelled'
+  | 'handled';
+export type QueueTargetAttemptTerminalReason =
+  | 'invocation_failed'
+  | 'runtime_restart'
+  | 'invocation_cancelled'
+  | 'source_withdrawn';
 
 export interface QueueTargetAttempt {
   id: string;

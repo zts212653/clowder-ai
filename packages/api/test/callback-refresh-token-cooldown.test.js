@@ -39,10 +39,7 @@ describe('POST /api/callbacks/refresh-token — cooldown (F174-C)', () => {
     assert.ok(body.retryAfterMs > 0);
   });
 
-  // F174-C P1 (gpt52 review #1363+): rate-limited request must NOT slide TTL.
-  // Cooldown was previously checked in route handler AFTER preHandler.verify()
-  // which already slid TTL — so 429 was cosmetic, attacker could still extend.
-  test('AC-C4 真防滥用: rate-limited refresh does NOT slide TTL', async () => {
+  test('AC-C4: rate-limited refresh does not alter active durability', async () => {
     const { registry, createApp } = await createTestContext();
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-1');
@@ -53,10 +50,7 @@ describe('POST /api/callbacks/refresh-token — cooldown (F174-C)', () => {
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(res1.statusCode, 200);
-    const expiresAfterFirst = JSON.parse(res1.body).expiresAt;
-
-    // Wait so any TTL slide on the rate-limited request would push expiresAt forward
-    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(JSON.parse(res1.body).expiresAt, null);
 
     const res2 = await app.inject({
       method: 'POST',
@@ -67,10 +61,8 @@ describe('POST /api/callbacks/refresh-token — cooldown (F174-C)', () => {
 
     const recordAfterRateLimit = await registry.getRecord(invocationId);
     assert.ok(recordAfterRateLimit, 'record should still exist');
-    assert.ok(
-      recordAfterRateLimit.expiresAt <= expiresAfterFirst + 5,
-      `rate-limited request slid TTL by ${recordAfterRateLimit.expiresAt - expiresAfterFirst}ms; should be 0`,
-    );
+    assert.equal(recordAfterRateLimit.state, 'active');
+    assert.equal(recordAfterRateLimit.expiresAt, null);
   });
 
   // F174-C P1 #2 (gpt52 review #1368): cooldown must NOT be consumed by

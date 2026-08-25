@@ -2549,6 +2549,15 @@ describe('IndexBuilder indexing version auto-rebuild', () => {
     );
   });
 
+  it('stays at or above 12 to backfill external-knowledge kinds, authority, and tags', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 12,
+      'INDEXING_VERSION must stay at or above 12 so study and teardown metadata is re-indexed',
+    );
+  });
+
   it('re-indexes unchanged files when INDEXING_VERSION increases', async () => {
     const { IndexBuilder, INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
 

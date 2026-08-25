@@ -2,7 +2,7 @@
 
 import type { ListenDocumentState, ListenPlaybackRate, ListenRetention } from '@cat-cafe/shared';
 import type { ListenDocumentDescriptor, ListenModeSession } from '@/stores/listenModeStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
 import { type ListenModeApi, type ListenSynthesisEvent, listenModeApi } from './listenModeApi';
@@ -232,8 +232,15 @@ export class DocumentListenController {
     if (!sentence) return false;
     const asset = await this.consumeSynthesisStream(generation, sentence.text);
     if (!asset || !this.isCurrent(generation)) return false;
-    await this.dependencies.api.linkAsset(descriptor.identity, sentence.anchor, asset.assetId);
+    const linked = await this.dependencies.api.linkAsset(
+      descriptor.identity,
+      sentence.anchor,
+      asset.assetId,
+      asset.synthesisFingerprint,
+    );
+    if (linked === false) return false;
     if (!this.isCurrent(generation)) return false;
+    this.recordLinkedSentence(sentence.anchor, asset.bytes, asset.synthesisFingerprint);
     const enqueueResult = await this.dependencies.getManager().enqueueUrl(asset.audioUrl, this.dependencies.fetchAudio);
     if (!this.isCurrent(generation)) return false;
     if (enqueueResult === 'cancelled') {
@@ -351,6 +358,43 @@ export class DocumentListenController {
     void this.startDocument(session, target);
   }
 
+  private recordLinkedSentence(anchor: string, bytes: number, synthesisFingerprint?: string): void {
+    const descriptor = this.descriptor;
+    if (!descriptor) return;
+    const key = listenDocumentCacheKey(descriptor.identity);
+    useListenModeStore.setState((state) => {
+      const current = state.cacheByDocument[key];
+      const projection = current ?? {
+        identity: descriptor.identity,
+        cachedAnchors: [],
+        cacheBytes: 0,
+        totalSentences: descriptor.sentences.length,
+        active: false,
+        error: null,
+      };
+      if (projection.cachedAnchors.includes(anchor)) {
+        if (!synthesisFingerprint || projection.synthesisFingerprint === synthesisFingerprint) return state;
+        return {
+          cacheByDocument: {
+            ...state.cacheByDocument,
+            [key]: { ...projection, synthesisFingerprint },
+          },
+        };
+      }
+      return {
+        cacheByDocument: {
+          ...state.cacheByDocument,
+          [key]: {
+            ...projection,
+            ...(synthesisFingerprint ? { synthesisFingerprint } : {}),
+            cachedAnchors: [...projection.cachedAnchors, anchor],
+            cacheBytes: projection.cacheBytes + bytes,
+          },
+        },
+      };
+    });
+  }
+
   private updateSession(patch: Partial<ListenModeSession>): void {
     useListenModeStore.setState(({ session }) => ({ session: session ? { ...session, ...patch } : null }));
   }
@@ -359,7 +403,9 @@ export class DocumentListenController {
     const session = useListenModeStore.getState().session;
     if (!session) return;
     const state = documentState(session, this.dependencies.now());
-    const operation = this.persistTail.then(() => this.dependencies.api.save(state));
+    const operation = this.persistTail.then(async () => {
+      await this.dependencies.api.save(state);
+    });
     this.persistTail = operation.catch(() => undefined);
     await operation;
   }

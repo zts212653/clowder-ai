@@ -89,19 +89,12 @@ export const OC_BASE_URL_ENV = 'CAT_CAFE_OC_BASE_URL';
 /**
  * We deliberately emit no `limit` block at all.
  *
- * OpenCode requires `limit.output` whenever `limit` is present and merges
- * `config ?? catalog ?? 0`, so pinning our context window here would also
- * overwrite the catalog's authoritative output for any model OpenCode already
- * knows — mistral/codestral-latest (4_096), openrouter/openai/gpt-4o (16_384),
- * and 18 more under `openai`. #1208 emitted context without output and killed
- * every affected cat at config-parse time; guessing an output instead would
- * silently enlarge those caps. No authoritative per-carrier output source
- * exists at this layer, so we supply neither field.
- *
- * Safe by upstream construction: `isOverflow` returns false when
- * `limit.context` is 0, so auto-compaction simply does not engage — exactly the
- * pre-#1208 behaviour. Re-introducing an invocation-owned window requires
- * authoritative output provenance (carrier-aware capacity slice).
+ * OpenCode requires `limit.output` whenever `limit` is present and resolves
+ * explicit config before its catalog and built-in fallback. Pinning only our
+ * invocation context window here therefore makes the config invalid; guessing
+ * an output would instead overwrite authoritative catalog output limits. This layer has no
+ * carrier-aware output authority, so it supplies neither field. Clowder AI still
+ * retains the invocation window for context health and session handoff.
  */
 
 /**

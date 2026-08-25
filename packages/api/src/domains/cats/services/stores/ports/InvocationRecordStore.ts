@@ -191,6 +191,30 @@ export interface IInvocationRecordStore {
    * crash-safe, no post-Lua best-effort window).
    */
   listRunningByThread(threadId: string, userId: string): InvocationRecord[] | Promise<InvocationRecord[]>;
+
+  /**
+   * F297 OQ-1: user-scoped sparse candidate index — 哪些 thread 现在有 running record。
+   *
+   * 用于 Sidebar 列表规模的 presence 组合：先拿到 O(A) 个候选 thread，再交给 canonical
+   * classifier 定性；不逐 thread 跑四路对账。
+   *
+   * **索引不拥有 lifecycle**：它是 owner truth（records）的派生投影，必须可由 records 重建/校验。
+   * 允许短暂多报（stale candidate），classifier 会把它判成非 active；**不允许漏报**，
+   * 漏报会让真实 working 的 thread 被终态回落误显示成 done/error。
+   */
+  listRunningThreadIds(userId: string): string[] | Promise<string[]>;
+
+  /**
+   * F297 terminal witness: latest terminal record for each requested thread.
+   *
+   * Only real InvocationRecord transitions may enter this projection. Historical messages,
+   * participant activity and session-open state are not terminal evidence. Implementations
+   * may omit pre-index records; absence must render idle rather than infer a terminal state.
+   */
+  listLatestTerminalByThreadIds(
+    threadIds: readonly string[],
+    userId: string,
+  ): Map<string, InvocationRecord> | Promise<Map<string, InvocationRecord>>;
 }
 
 /** Max records in memory store */
@@ -205,6 +229,8 @@ const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
  */
 export class InvocationRecordStore implements IInvocationRecordStore {
   private records = new Map<string, InvocationRecord>();
+  /** Latest terminal transition per (threadId,userId), matching the Redis edge-maintained pointer. */
+  private latestTerminalByScope = new Map<string, string>();
   /** Map: compositeKey → { invocationId, expiresAt } */
   private idempotencyIndex = new Map<string, { invocationId: string; expiresAt: number }>();
   private readonly maxRecords: number;
@@ -215,6 +241,10 @@ export class InvocationRecordStore implements IInvocationRecordStore {
 
   private compositeKey(threadId: string, userId: string, key: string): string {
     return `${threadId}:${userId}:${key}`;
+  }
+
+  private terminalScopeKey(threadId: string, userId: string): string {
+    return `${threadId}:${userId}`;
   }
 
   create(input: CreateInvocationInput): CreateResult {
@@ -251,6 +281,9 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (this.records.size > this.maxRecords) {
       const firstKey = this.records.keys().next().value as string;
       this.records.delete(firstKey);
+      for (const [scope, invocationId] of this.latestTerminalByScope) {
+        if (invocationId === firstKey) this.latestTerminalByScope.delete(scope);
+      }
     }
 
     return { outcome: 'created', invocationId: id };
@@ -312,6 +345,13 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     }
     record.updatedAt = Date.now();
 
+    if (input.status === 'succeeded' || input.status === 'failed' || input.status === 'canceled') {
+      this.latestTerminalByScope.set(this.terminalScopeKey(record.threadId, record.userId), record.id);
+    } else if (input.status === 'running') {
+      const scope = this.terminalScopeKey(record.threadId, record.userId);
+      if (this.latestTerminalByScope.get(scope) === record.id) this.latestTerminalByScope.delete(scope);
+    }
+
     return record;
   }
 
@@ -328,6 +368,28 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       if (r.status === 'running' && r.threadId === threadId && r.userId === userId) out.push(r);
     }
     return out;
+  }
+
+  /** F297 OQ-1: 派生自 records（owner truth），天然与之一致。 */
+  listRunningThreadIds(userId: string): string[] {
+    const threadIds = new Set<string>();
+    for (const r of this.records.values()) {
+      if (r.status === 'running' && r.userId === userId) threadIds.add(r.threadId);
+    }
+    return [...threadIds];
+  }
+
+  listLatestTerminalByThreadIds(threadIds: readonly string[], userId: string): Map<string, InvocationRecord> {
+    const latest = new Map<string, InvocationRecord>();
+    for (const threadId of threadIds) {
+      const invocationId = this.latestTerminalByScope.get(this.terminalScopeKey(threadId, userId));
+      if (!invocationId) continue;
+      const record = this.records.get(invocationId);
+      if (!record || record.threadId !== threadId || record.userId !== userId) continue;
+      if (record.status !== 'succeeded' && record.status !== 'failed' && record.status !== 'canceled') continue;
+      latest.set(threadId, record);
+    }
+    return latest;
   }
 
   /** Current record count (for testing) */

@@ -91,6 +91,8 @@ export const useLabelStore = create<LabelState>((set, get) => ({
           }),
         );
       }
+      const { invalidateSidebarProjection } = await import('@/utils/sidebar-thread-snapshot');
+      void invalidateSidebarProjection();
     } catch {
       /* ignore */
     }

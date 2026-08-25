@@ -2,8 +2,8 @@
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
@@ -60,6 +60,8 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     [effectiveThreadId, executionsByKey],
   );
 
+  const { hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(threadId);
+
   // Build display info from cat-config (dynamic, not hardcoded)
   const catDisplayMap = useMemo(() => {
     const map = new Map<string, { label: string; color: string }>();
@@ -84,18 +86,6 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     return () => clearInterval(interval);
   }, [activeExecutions.length]);
 
-  const handleStopAll = useCallback(async () => {
-    const results = await Promise.allSettled(activeExecutions.map((execution) => cancelProjectedExecution(execution)));
-    if (results.some((result) => result.status === 'rejected')) {
-      useToastStore.getState().addToast({
-        type: 'error',
-        title: '部分执行未能停止',
-        message: '运行状态已重新同步，请按仍显示的精确执行重试。',
-        duration: 5000,
-      });
-    }
-  }, [activeExecutions]);
-
   // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
   const stalled = activeExecutions.some((execution) => {
     if (execution.kind !== 'live_invocation') return false;
@@ -119,6 +109,28 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     }
   }, [effectiveThreadId]);
 
+  // Canonical truth is empty but unsettled while the legacy socket still reports a
+  // live turn. Returning null here used to remove the force-reset entry — the only
+  // escape — at exactly the moment the user needs it, because ChatInput
+  // simultaneously hard-locks Cancel to `unavailable`. Keep a reachable exit.
+  if (activeExecutions.length === 0 && hasUnverifiedLegacyExecution) {
+    return (
+      <div className="console-divider-b" data-testid="execution-unverified-recovery">
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
+          <span className="text-cafe-muted shrink-0" title="本轮没有留下可核对的终态，可能已经结束。">
+            运行状态待确认
+          </span>
+        </div>
+        <ForceResetEntry escalated onClick={() => setResetDialogOpen(true)} />
+        <ForceResetDialog
+          open={resetDialogOpen}
+          busy={resetting}
+          onCancel={() => setResetDialogOpen(false)}
+          onConfirm={handleForceReset}
+        />
+      </div>
+    );
+  }
   if (activeExecutions.length === 0) return null;
 
   return (
@@ -151,15 +163,6 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
             />
           );
         })}
-        {activeExecutions.length > 1 && (
-          <button
-            type="button"
-            onClick={handleStopAll}
-            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
-          >
-            全部停止
-          </button>
-        )}
       </div>
       <ForceResetEntry escalated={stalled} onClick={() => setResetDialogOpen(true)} />
       <ForceResetDialog

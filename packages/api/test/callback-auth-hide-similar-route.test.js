@@ -56,7 +56,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
-      payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
     });
     assert.equal(res.statusCode, 401);
     assert.equal(notifier.calls.length, 0);
@@ -67,7 +67,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'someone-else' },
-      payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
     });
     assert.equal(res.statusCode, 403);
     assert.equal(notifier.calls.length, 0);
@@ -80,7 +80,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'default-user' },
-      payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
     });
     assert.equal(res.statusCode, 200, 'should return 200 in single-user mode');
     await freshApp.close();
@@ -91,7 +91,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'default-user' },
-      payload: { reason: 'expired' }, // missing tool + catId
+      payload: { reason: 'interrupted' }, // missing tool + catId
     });
     assert.equal(res.statusCode, 400);
     assert.equal(notifier.calls.length, 0);
@@ -103,7 +103,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'default-user' },
       payload: {
-        reason: 'expired',
+        reason: 'interrupted',
         tool: 'register_pr_tracking',
         catId: 'opus',
         threadId: 'thread-abc',
@@ -113,7 +113,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
     assert.equal(res.statusCode, 200);
     assert.equal(notifier.calls.length, 1);
     assert.deepEqual(notifier.calls[0], {
-      reason: 'expired',
+      reason: 'interrupted',
       tool: 'register_pr_tracking',
       catId: 'opus',
       threadId: 'thread-abc',
@@ -126,7 +126,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'default-user' },
-      payload: { reason: 'expired', tool: 't', catId: 'opus', userId: 'u1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', userId: 'u1' },
     });
     assert.equal(res.statusCode, 400);
     assert.equal(notifier.calls.length, 0);
@@ -137,7 +137,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
       headers: { 'x-test-session-user': 'default-user' },
-      payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', threadId: 't1' },
     });
     assert.equal(res.statusCode, 400);
     assert.equal(notifier.calls.length, 0);
@@ -154,7 +154,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
     const res = await freshApp.inject({
       method: 'POST',
       url: '/api/debug/callback-auth/hide-similar',
-      payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
+      payload: { reason: 'interrupted', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
     });
     assert.equal(res.statusCode, 404);
     await freshApp.close();

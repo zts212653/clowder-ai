@@ -287,13 +287,18 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     assert.ok(getActiveRunnerCount() >= 0, 'runner should be cleaned up');
   });
 
-  test('T8-terminal: user message retires the wake but lets the independent command reach terminal', async () => {
+  test('T8-terminal: unrelated user mention cannot retire or wake an older managed hold', async () => {
     let triggerCount = 0;
     const deps = makeStubDeps({
       invokeTrigger: {
         async trigger() {
           triggerCount += 1;
           return 'dispatched';
+        },
+      },
+      invocationRecordStore: {
+        getByIdempotencyKey() {
+          return null;
         },
       },
     });
@@ -309,7 +314,7 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
         reason: 'long gate outlives an ordinary user message',
         nextStep: 'inspect the natural terminal result',
         wakeWhen: {
-          command: 'printf "progress-before-user-message\\n"; sleep 0.15; printf "completed-after-user-message\\n"',
+          command: 'printf "progress-before-user-message\\n"; sleep 0.5; printf "completed-after-user-message\\n"',
           timeoutMs: 300_000,
         },
       },
@@ -318,42 +323,44 @@ describe('F167 Phase P: wakeWhen cancel/replace/delivery tests', () => {
     const { taskId } = JSON.parse(response.body);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
+    // POST /api/messages calls this hook after routing any ordinary message;
+    // the hook deliberately receives no mention target. An @ to another cat or
+    // to this holder therefore has identical non-authority here.
     tryAutoCancelPendingHolds(thread.id, deps);
-    const deadline = Date.now() + 2_000;
-    let tombstone = deps.dynamicTaskStore.getById(taskId);
-    while (tombstone?.params.holdLifecycle?.managedCommand?.state !== 'consumed' && Date.now() < deadline) {
+    let managedHold = deps.dynamicTaskStore.getById(taskId);
+    assert.ok(managedHold, 'the managed hold remains durable');
+    assert.equal(managedHold.enabled, true, 'ordinary mention cannot retire the hold');
+    assert.equal(managedHold.params.holdLifecycle.status, 'active');
+    assert.equal(triggerCount, 0, 'ordinary mention cannot dequeue or wake the older holder');
+
+    const deadline = Date.now() + 3_000;
+    while (managedHold?.params.holdLifecycle?.managedCommand?.state !== 'dispatched' && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
-      tombstone = deps.dynamicTaskStore.getById(taskId);
+      managedHold = deps.dynamicTaskStore.getById(taskId);
     }
     await app.close();
 
-    assert.ok(tombstone, 'the cancelled hold must remain queryable by taskId');
-    assert.equal(tombstone.enabled, false, 'user-message cancellation must retire scheduler execution');
-    assert.equal(tombstone.params.holdLifecycle.status, 'cancelled_by_user');
-    assert.equal(tombstone.params.holdLifecycle.managedCommand.state, 'consumed');
+    assert.ok(managedHold, 'the typed wake remains queryable until invocation-bound disposition');
+    assert.equal(managedHold.enabled, true);
+    assert.equal(managedHold.params.holdLifecycle.status, 'active');
+    assert.equal(managedHold.params.holdLifecycle.managedCommand.state, 'dispatched');
     assert.equal(
-      tombstone.params.holdLifecycle.managedCommand.result.cancelled,
+      managedHold.params.holdLifecycle.managedCommand.result.cancelled,
       false,
       'ordinary user activity must not SIGTERM the independent command',
     );
-    assert.match(tombstone.params.holdLifecycle.managedCommand.result.tailOutput, /completed-after-user-message/);
-    assert.equal(triggerCount, 0, 'a superseded hold must not dispatch a wake invocation');
-    const terminalReceipts = deps._appendedMessages.filter((message) =>
-      message.content?.includes('持球唤醒（命令完成）'),
-    );
+    assert.match(managedHold.params.holdLifecycle.managedCommand.result.tailOutput, /completed-after-user-message/);
+    assert.equal(triggerCount, 1, 'only typed command completion dispatches the older holder once');
+    const wakeReceipts = deps._appendedMessages.filter((message) => message.content?.includes('持球唤醒（命令完成）'));
+    assert.equal(wakeReceipts.length, 1, 'natural completion must publish one typed wake carrier');
     assert.equal(
-      terminalReceipts.length,
-      1,
-      'natural completion must remain visible exactly once after carrier retirement',
+      wakeReceipts[0].deliveryStatus,
+      'queued',
+      'the wake remains under Queue custody until invocation-bound disposition',
     );
-    assert.equal(
-      terminalReceipts[0].deliveryStatus,
-      undefined,
-      'the terminal receipt is visible without Queue custody',
-    );
-    assert.equal(terminalReceipts[0].idempotencyKey, `hold-ball-completion:${taskId}`);
-    assert.equal(terminalReceipts[0].source?.meta?.taskId, taskId);
-    assert.match(terminalReceipts[0].content, /completed-after-user-message/);
+    assert.equal(wakeReceipts[0].idempotencyKey, `hold-ball-completion:${taskId}`);
+    assert.equal(wakeReceipts[0].source?.meta?.taskId, taskId);
+    assert.match(wakeReceipts[0].content, /completed-after-user-message/);
   });
 
   test('T8a: a completed command waits behind cancellation reservation until release', async () => {

@@ -1652,6 +1652,88 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
+  it('keeps governance install and cleanup preview-first across the public API', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = findRepoRoot();
+    const workspaceRoot = await makeTmpDir('governance-api-root');
+    const externalProject = await makeTmpDir('governance-api-external');
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const app = Fastify();
+
+    try {
+      await app.register(capabilitiesRoutes);
+      await app.ready();
+      const selection = { projectGuide: { thinEntrypoints: ['claude'] } };
+      const previewRes = await app.inject({
+        method: 'POST',
+        url: '/api/governance/confirm',
+        headers: AUTH_HEADERS,
+        payload: { projectPath: externalProject, dryRun: true, selection },
+      });
+      assert.equal(previewRes.statusCode, 200, previewRes.body);
+      const preview = previewRes.json().report;
+      assert.equal(preview.dryRun, true);
+      assert.equal(await pathExists(join(externalProject, 'AGENTS.md')), false);
+
+      const unconfirmed = await app.inject({
+        method: 'POST',
+        url: '/api/governance/confirm',
+        headers: AUTH_HEADERS,
+        payload: { projectPath: externalProject, dryRun: false, selection },
+      });
+      assert.equal(unconfirmed.statusCode, 409);
+      assert.equal(await pathExists(join(externalProject, 'AGENTS.md')), false);
+
+      const installRes = await app.inject({
+        method: 'POST',
+        url: '/api/governance/confirm',
+        headers: AUTH_HEADERS,
+        payload: {
+          projectPath: externalProject,
+          dryRun: false,
+          selection,
+          expectedPreviewChecksum: preview.previewChecksum,
+        },
+      });
+      assert.equal(installRes.statusCode, 200, installRes.body);
+      assert.equal(await pathExists(join(externalProject, 'AGENTS.md')), true);
+
+      const cleanupPreviewRes = await app.inject({
+        method: 'POST',
+        url: '/api/governance/cleanup',
+        headers: AUTH_HEADERS,
+        payload: { projectPath: externalProject, dryRun: true },
+      });
+      assert.equal(cleanupPreviewRes.statusCode, 200, cleanupPreviewRes.body);
+      const cleanupPreview = cleanupPreviewRes.json().report;
+      assert.ok(cleanupPreview.actions.some((action) => action.action === 'deleted'));
+      const cleanupRes = await app.inject({
+        method: 'POST',
+        url: '/api/governance/cleanup',
+        headers: AUTH_HEADERS,
+        payload: {
+          projectPath: externalProject,
+          dryRun: false,
+          expectedPreviewChecksum: cleanupPreview.previewChecksum,
+        },
+      });
+      assert.equal(cleanupRes.statusCode, 200, cleanupRes.body);
+      assert.equal(await pathExists(join(externalProject, 'AGENTS.md')), false);
+    } finally {
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await app.close();
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(externalProject, { recursive: true, force: true });
+    }
+  });
+
   it('returns only catCafeRoot and projectRoot (not governance registry)', async () => {
     const { buildKnownProjectPaths } = await import('../dist/routes/capabilities.js');
 

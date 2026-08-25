@@ -10,11 +10,14 @@ import type {
   SchedulerMessageExtra,
   TurnExecutionMessageProjection,
 } from '@cat-cafe/shared';
+import type { WorkspaceMode } from '@/lib/workspace-modes';
 import type { EvidenceSourceType } from '@/types/evidence';
 
 // F212 Phase B: re-export so existing web imports (panel + tests) can pull the contract via the
 // canonical chat-types entry point without each consumer reaching into @cat-cafe/shared.
-export type { CliDiagnostics } from '@cat-cafe/shared';
+export type { A2ARoutingMode, A2ARoutingProjection, CliDiagnostics } from '@cat-cafe/shared';
+
+import type { A2ARoutingProjection } from '@cat-cafe/shared';
 
 export type ThreadSystemKind = 'connector_hub' | 'eval_domain' | 'cat_bedroom';
 
@@ -255,6 +258,8 @@ export interface SystemInfoProjection {
 
 export interface ChatMessage {
   id: string;
+  /** Client-only exact persisted records folded into this canonical bubble. */
+  projectionSourceMessageIds?: string[];
   type: 'user' | 'assistant' | 'system' | 'summary' | 'connector';
   /** Visual variant for system messages */
   variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
@@ -374,7 +379,7 @@ export interface ChatMessage {
      */
     systemKind?: 'a2a_routing' | 'context_briefing' | 'freshness_closure';
     /** Machine-readable A2A route metadata. The visible pill text is human-readable; this survives F5. */
-    a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+    a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string; routing?: A2ARoutingProjection };
     /** F254 incident salvage: durable provenance for a message restored at its original time. */
     recovery?: MessageRecoveryExtra;
     /** Original visible system_info payload; content remains the persisted fallback copy. */
@@ -815,6 +820,21 @@ export interface ThreadState {
   workspaceOpenFilePath: string | null;
   /** F063: Scroll-to line per thread */
   workspaceOpenFileLine: number | null;
+  /** F284 × F120: active Workspace surface per thread (browser preview survives
+   * thread switches instead of leaking or vanishing). Optional for fixture
+   * compatibility; restore falls back to 'home'. */
+  workspaceSurface?: WorkspaceSurface;
+  /** F284 × F120: top-level Workspace renderer per thread. A Browser surface
+   * is not visible while another mode (for example Approval history) owns the
+   * viewport, so explicit preview delivery must restore both coordinates. */
+  workspaceMode?: WorkspaceMode;
+  /** F284 × F120: browser preview target (port/path) per thread */
+  workspacePreview?: WorkspacePreviewState;
+  /** F284 × F120: right panel visibility mode per thread */
+  rightPanelMode?: 'status' | 'workspace' | 'transcript';
+  /** F284 × F120 review P1: right panel open/closed per thread — orthogonal to
+   * mode (a visible Status panel ≠ folded). Restore falls back to closed. */
+  rightPanelOpen?: boolean;
 }
 
 /** F284: the object currently occupying the Workspace viewport.
@@ -903,4 +923,9 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   workspaceOpenTabs: [],
   workspaceOpenFilePath: null,
   workspaceOpenFileLine: null,
+  workspaceMode: 'dev',
+  workspaceSurface: 'home',
+  workspacePreview: { port: undefined, path: '/' },
+  rightPanelMode: 'status',
+  rightPanelOpen: false,
 };

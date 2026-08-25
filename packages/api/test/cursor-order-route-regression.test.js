@@ -1,7 +1,7 @@
 /**
  * #1200 R14: Read-state cross-format regression — route-level tests.
  *
- * Exercises preReconcileReadCursor() through the actual HTTP routes
+ * Exercises stored-cursor preparation through the actual HTTP routes
  * (PATCH /read, POST /read/latest, POST /read/mark-all) using a
  * cross-format-aware readStateStore stub that mirrors the Redis
  * ACK_CAS_LUA fail-closed behavior.
@@ -70,6 +70,15 @@ function createCrossFormatAwareStore() {
       if (canonicalCursor) anchors.set(key, canonicalCursor);
       return true;
     },
+    replaceReadCoordinateIfEqual(userId, threadId, expected, replacement) {
+      const key = `${userId}:${threadId}`;
+      if (cursors.get(key) !== expected.lastReadMessageId) return false;
+      if (anchors.get(key) !== expected.lastReadVisibilityCursor) return false;
+      cursors.set(key, replacement.lastReadMessageId);
+      if (replacement.lastReadVisibilityCursor === undefined) anchors.delete(key);
+      else anchors.set(key, replacement.lastReadVisibilityCursor);
+      return true;
+    },
     getUnreadSummaries: async () => [],
     deleteByThread: async () => {},
     /** Test helper: seed a raw cursor value */
@@ -83,6 +92,57 @@ function createCrossFormatAwareStore() {
       return cursors.get(`${userId}:${threadId}`);
     },
   };
+}
+
+function appendTerminalManagedHold(messageStore, threadId, { ownerUserId, hiddenTrigger = false, suffix }) {
+  const custody = {
+    version: 1,
+    entryId: `entry-${suffix}`,
+    revision: 1,
+    ownerUserId,
+    intent: 'managed command wake',
+    status: 'queued',
+    allTargetCats: ['opus5'],
+    pendingTargetCats: ['opus5'],
+    notifiedByCatIds: [],
+    seenByCatIds: [],
+    seenInvocationIdByCatId: {},
+    failedByCatIds: [],
+    handledByCatIds: [],
+    priority: 'normal',
+    createdAt: 2000,
+    updatedAt: 2000,
+  };
+  const message = messageStore.append({
+    userId: 'scheduler',
+    catId: null,
+    content: `managed command ${suffix}`,
+    mentions: [],
+    timestamp: 2000,
+    threadId,
+    deliveryStatus: 'queued',
+    queueCustody: custody,
+    ...(hiddenTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+    source: {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: { taskId: `task-${suffix}`, threadId, catId: 'opus5', wakeWhen: true },
+    },
+  });
+  messageStore.transitionQueueCustody(message.id, {
+    expectedRevision: 1,
+    next: {
+      ...custody,
+      revision: 2,
+      status: 'terminal',
+      pendingTargetCats: [],
+      failedByCatIds: ['opus5'],
+      updatedAt: 2100,
+    },
+    deliveredAt: 2100,
+  });
+  return message;
 }
 
 // ============================================================================
@@ -160,6 +220,40 @@ describe('#1200 R14 route: POST /read/latest cross-format', () => {
     // #1269: restore gate state
     if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
     else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+  });
+
+  it('corrects a hidden stored v1 cursor to the latest owner-visible evidence', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Hidden stored cursor read/latest boundary');
+      const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        suffix: 'read-latest-owner-visible',
+      });
+      const hidden = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        hiddenTrigger: true,
+        suffix: 'read-latest-hidden-stored',
+      });
+      readStateStore._seed('alice', thread.id, hidden.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/threads/${thread.id}/read/latest`,
+        headers: { 'x-cat-cafe-user': 'alice' },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(body.advanced, true, 'Eligible latest evidence must replace the hidden stored cursor');
+      assert.equal(body.caughtUp, true);
+      assert.ok(readStateStore._raw('alice', thread.id)?.includes(ownerVisible.id));
+      assert.ok(!readStateStore._raw('alice', thread.id)?.includes(hidden.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
   });
 
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {
@@ -319,6 +413,38 @@ describe('#1200 R14 route: POST /read/mark-all cross-format', () => {
     else process.env.VISIBILITY_CURSOR_V2 = savedGate;
   });
 
+  it('corrects an ownerless stored v1 cursor during mark-all', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Ownerless stored cursor mark-all boundary');
+      const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        suffix: 'mark-all-owner-visible',
+      });
+      const ownerless = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: undefined,
+        suffix: 'mark-all-ownerless-stored',
+      });
+      readStateStore._seed('alice', thread.id, ownerless.id);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/threads/read/mark-all',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(body.advancedCount, 1, 'Eligible latest evidence must replace the ownerless stored cursor');
+      assert.ok(readStateStore._raw('alice', thread.id)?.includes(ownerVisible.id));
+      assert.ok(!readStateStore._raw('alice', thread.id)?.includes(ownerless.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
+  });
+
   it('stored v1 B, B tombstoned, latest=A (earlier) → no regression', async () => {
     const thread = threadStore.create('alice', 'Thread Y');
 
@@ -414,6 +540,220 @@ describe('#1200 R14 route: PATCH /read cross-format', () => {
     const body = JSON.parse(res.body);
     assert.equal(res.statusCode, 200);
     assert.equal(body.advanced, true, 'Must advance (pre-reconcile enables same-format CAS)');
+  });
+
+  it('corrects a foreign stored v1 cursor before accepting a valid owner PATCH target', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Foreign stored cursor PATCH boundary');
+      const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        suffix: 'patch-owner-visible',
+      });
+      const foreign = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'bob',
+        suffix: 'patch-foreign-stored',
+      });
+      readStateStore._seed('alice', thread.id, foreign.id);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/read`,
+        headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+        payload: { upToMessageId: ownerVisible.id },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(body, { advanced: true, caughtUp: true });
+      assert.ok(readStateStore._raw('alice', thread.id)?.includes(ownerVisible.id));
+      assert.ok(!readStateStore._raw('alice', thread.id)?.includes(foreign.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
+  });
+
+  it('corrects a foreign stored v1 cursor while v2 initiation is off', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    delete process.env.VISIBILITY_CURSOR_V2;
+    try {
+      const thread = threadStore.create('alice', 'Foreign stored rollback cursor PATCH boundary');
+      const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        suffix: 'patch-v1-off-owner-visible',
+      });
+      const foreign = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'bob',
+        suffix: 'patch-v1-off-foreign-stored',
+      });
+      readStateStore._seed('alice', thread.id, foreign.id);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/read`,
+        headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+        payload: { upToMessageId: ownerVisible.id },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(body, { advanced: true, caughtUp: true });
+      assert.equal(readStateStore._raw('alice', thread.id), ownerVisible.id);
+      const afterState = readStateStore.get('alice', thread.id);
+      assert.ok(afterState.lastReadVisibilityCursor?.includes(ownerVisible.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
+  });
+
+  it('corrects a foreign stored canonical v2 cursor before accepting a valid owner PATCH target', async () => {
+    const savedGate = process.env.VISIBILITY_CURSOR_V2;
+    process.env.VISIBILITY_CURSOR_V2 = 'on';
+    try {
+      const thread = threadStore.create('alice', 'Foreign stored canonical cursor PATCH boundary');
+      const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'alice',
+        suffix: 'patch-v2-owner-visible',
+      });
+      const foreign = appendTerminalManagedHold(messageStore, thread.id, {
+        ownerUserId: 'bob',
+        suffix: 'patch-v2-foreign-stored',
+      });
+      const foreignCursor = messageStore.canonicalizeCursor(foreign.id, thread.id);
+      readStateStore._seed('alice', thread.id, foreignCursor, foreignCursor);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/read`,
+        headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+        payload: { upToMessageId: ownerVisible.id },
+      });
+      const body = JSON.parse(res.body);
+
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(body, { advanced: true, caughtUp: true });
+      assert.ok(readStateStore._raw('alice', thread.id)?.includes(ownerVisible.id));
+      assert.ok(!readStateStore._raw('alice', thread.id)?.includes(foreign.id));
+    } finally {
+      if (savedGate === undefined) delete process.env.VISIBILITY_CURSOR_V2;
+      else process.env.VISIBILITY_CURSOR_V2 = savedGate;
+    }
+  });
+
+  it('does not ACK a mutable stream until the same message is finally delivered', async () => {
+    const thread = threadStore.create('alice', 'Mutable stream PATCH boundary');
+    const stream = messageStore.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      content: 'partial stream',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: thread.id,
+      origin: 'stream',
+      deliveryStatus: 'queued',
+    });
+
+    const beforeFinal = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: stream.id },
+    });
+    assert.equal(beforeFinal.statusCode, 200);
+    assert.deepEqual(JSON.parse(beforeFinal.body), { advanced: false, caughtUp: false });
+    assert.equal(readStateStore._raw('alice', thread.id), undefined, 'partial stream must not advance read state');
+
+    messageStore.markDelivered(stream.id, Date.now() + 1);
+
+    const afterFinal = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: stream.id },
+    });
+    assert.equal(afterFinal.statusCode, 200);
+    assert.deepEqual(JSON.parse(afterFinal.body), { advanced: true, caughtUp: true });
+    assert.ok(readStateStore._raw('alice', thread.id)?.includes(stream.id));
+  });
+
+  it('does not ACK a terminal managed-hold message owned by another user', async () => {
+    const thread = threadStore.create('system', 'Shared managed-hold cursor boundary');
+    const foreign = appendTerminalManagedHold(messageStore, thread.id, {
+      ownerUserId: 'bob',
+      suffix: 'foreign-owner',
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: foreign.id },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { advanced: false, caughtUp: false });
+    assert.equal(readStateStore._raw('alice', thread.id), undefined);
+  });
+
+  it('does not ACK a hidden terminal managed-hold message even for its owner', async () => {
+    const thread = threadStore.create('system', 'Hidden managed-hold cursor boundary');
+    const hidden = appendTerminalManagedHold(messageStore, thread.id, {
+      ownerUserId: 'alice',
+      hiddenTrigger: true,
+      suffix: 'hidden-owner',
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: hidden.id },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { advanced: false, caughtUp: false });
+    assert.equal(readStateStore._raw('alice', thread.id), undefined);
+  });
+
+  it('does not ACK a legacy ownerless terminal managed-hold message', async () => {
+    const thread = threadStore.create('system', 'Ownerless managed-hold cursor boundary');
+    const ownerless = appendTerminalManagedHold(messageStore, thread.id, {
+      ownerUserId: undefined,
+      suffix: 'legacy-ownerless',
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: ownerless.id },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { advanced: false, caughtUp: false });
+    assert.equal(readStateStore._raw('alice', thread.id), undefined);
+  });
+
+  it('ACKs an owner-visible terminal managed-hold message for its durable owner', async () => {
+    const thread = threadStore.create('system', 'Owner-visible managed-hold cursor boundary');
+    const ownerVisible = appendTerminalManagedHold(messageStore, thread.id, {
+      ownerUserId: 'alice',
+      suffix: 'owner-visible',
+    });
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}/read`,
+      headers: { 'x-cat-cafe-user': 'alice', 'content-type': 'application/json' },
+      payload: { upToMessageId: ownerVisible.id },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { advanced: true, caughtUp: true });
+    assert.ok(readStateStore._raw('alice', thread.id)?.includes(ownerVisible.id));
   });
 
   it('stored v1 for pruned message → explicit read evidence repairs the slot', async () => {

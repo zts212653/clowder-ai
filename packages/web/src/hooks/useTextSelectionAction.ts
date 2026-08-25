@@ -1,5 +1,6 @@
 'use client';
 
+import { MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 } from '@cat-cafe/shared';
 import { type RefObject, useEffect, useState } from 'react';
 import {
   type FloatingSelectionPosition,
@@ -12,8 +13,16 @@ export interface TextSelectionAction {
   position: FloatingSelectionPosition;
   sourceKind: string | null;
   sourceSegmentId?: string;
+  sourceProjectionVersion?: typeof MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2;
   selectionStart?: number;
   selectionEnd?: number;
+  /**
+   * How many times these characters appear in the rendered source root. The server cannot
+   * compute this: the renderer generates text with no Markdown counterpart (footnote labels,
+   * KaTeX glyphs, component loading states). Admission requires 1, so reporting it honestly
+   * is what keeps a repeated on-screen fragment from being anchored to the wrong occurrence.
+   */
+  renderedOccurrences?: number;
 }
 
 function rectLike(rect: DOMRect | DOMRectReadOnly): RectLike {
@@ -57,15 +66,80 @@ function selectionOffsets(selection: Selection, container: Node): { start: numbe
   }
 }
 
+function rangeSelectsTextWithin(range: Range, candidate: Element): boolean {
+  try {
+    if (typeof range.intersectsNode !== 'function' || !range.intersectsNode(candidate)) return false;
+
+    const candidateRange = document.createRange();
+    candidateRange.selectNodeContents(candidate);
+    const overlap = range.cloneRange();
+    if (overlap.compareBoundaryPoints(Range.START_TO_START, candidateRange) < 0) {
+      overlap.setStart(candidateRange.startContainer, candidateRange.startOffset);
+    }
+    if (overlap.compareBoundaryPoints(Range.END_TO_END, candidateRange) > 0) {
+      overlap.setEnd(candidateRange.endContainer, candidateRange.endOffset);
+    }
+    return !overlap.collapsed && overlap.toString().trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Interface chrome (action toolbars, annotation markers, component loading/error states) is
+ * painted inside the source root but is not message content. Reject selections that actually
+ * contain its rendered text. `Range.intersectsNode()` alone is too broad: Chromium also returns
+ * true when a drag over the final content line ends in trailing blank space before an icon-only
+ * sibling dock, even though `Selection.toString()` contains no chrome.
+ */
+function crossesExcludedChrome(range: Range, root: Element): boolean {
+  const excluded = [
+    ...(root.matches('[data-quote-exclude]') ? [root] : []),
+    ...Array.from(root.querySelectorAll('[data-quote-exclude]')),
+  ];
+  return excluded.some((candidate) => rangeSelectsTextWithin(range, candidate));
+}
+
+function countRenderedOccurrences(root: Element, text: string): number {
+  if (!text) return 0;
+  // Selection.toString() follows the rendered layout: block boundaries contribute newlines.
+  // textContent flattens those boundaries (for example <p>foo</p><p>foo</p> → "foofoo"),
+  // so it cannot attest uniqueness for the exact characters the human selected. innerText is
+  // the matching browser plane; textContent remains only for non-layout DOMs such as jsdom.
+  const rendered =
+    root instanceof HTMLElement && typeof root.innerText === 'string' ? root.innerText : (root.textContent ?? '');
+  return rendered.split(text).length - 1;
+}
+
+function trimSelectionOffsets(
+  offsets: { start: number; end: number } | null,
+  rawText: string,
+): { start: number; end: number } | null {
+  if (!offsets) return null;
+  const leadingWhitespaceLength = rawText.length - rawText.trimStart().length;
+  const trailingWhitespaceLength = rawText.length - rawText.trimEnd().length;
+  return { start: offsets.start + leadingWhitespaceLength, end: offsets.end - trailingWhitespaceLength };
+}
+
+function cliProjectionVersion(segment: Element | null): typeof MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 | null {
+  return segment?.getAttribute('data-context-quote-projection-version') ===
+    String(MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2)
+    ? MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2
+    : null;
+}
+
 function selectionSource(selection: Selection): {
   kind: string | null;
   mixed: boolean;
   coordinateRoot: Element | null;
   segmentId: string | null;
+  projectionVersion: typeof MESSAGE_BUNDLE_CLI_QUOTE_PROJECTION_VERSION_V2 | null;
 } {
   const anchorSource = sourceElement(selection.anchorNode)?.closest('[data-context-quote-source]');
   const focusSource = sourceElement(selection.focusNode)?.closest('[data-context-quote-source]');
-  if (anchorSource !== focusSource) return { kind: null, mixed: true, coordinateRoot: null, segmentId: null };
+  if (anchorSource !== focusSource) {
+    return { kind: null, mixed: true, coordinateRoot: null, segmentId: null, projectionVersion: null };
+  }
 
   const range = selection.getRangeAt(0);
   const commonElement = sourceElement(range.commonAncestorContainer);
@@ -82,7 +156,9 @@ function selectionSource(selection: Selection): {
         return false;
       }
     });
-    if (crossesNestedSource) return { kind: null, mixed: true, coordinateRoot: null, segmentId: null };
+    if (crossesNestedSource) {
+      return { kind: null, mixed: true, coordinateRoot: null, segmentId: null, projectionVersion: null };
+    }
   }
 
   const kind = anchorSource?.getAttribute('data-context-quote-source') ?? null;
@@ -95,6 +171,7 @@ function selectionSource(selection: Selection): {
       mixed: false,
       coordinateRoot: segment,
       segmentId: segment?.getAttribute('data-context-quote-segment-id') ?? null,
+      projectionVersion: cliProjectionVersion(segment),
     };
   }
 
@@ -103,7 +180,17 @@ function selectionSource(selection: Selection): {
     mixed: false,
     coordinateRoot: anchorSource ?? null,
     segmentId: null,
+    projectionVersion: null,
   };
+}
+
+function selectionBelongsToContainer(selection: Selection | null, container: HTMLElement): selection is Selection {
+  return Boolean(
+    selection &&
+      !selection.isCollapsed &&
+      container.contains(selection.anchorNode) &&
+      container.contains(selection.focusNode),
+  );
 }
 
 function projectSelectionAction(
@@ -111,15 +198,10 @@ function projectSelectionAction(
   container: HTMLElement,
   coordinateSpace: 'container' | 'viewport',
 ): TextSelectionAction | null {
-  if (
-    !selection ||
-    selection.isCollapsed ||
-    !selection.toString().trim() ||
-    !container.contains(selection.anchorNode) ||
-    !container.contains(selection.focusNode)
-  ) {
-    return null;
-  }
+  if (!selectionBelongsToContainer(selection, container)) return null;
+  const rawText = selection.toString();
+  const text = rawText.trim();
+  if (!text) return null;
 
   const viewport =
     coordinateSpace === 'container'
@@ -134,15 +216,20 @@ function projectSelectionAction(
         };
   const position = positionSelectionActionForAnchors(selectionAnchorRects(selection), viewport);
   const source = selectionSource(selection);
+  if (source.coordinateRoot && crossesExcludedChrome(selection.getRangeAt(0), source.coordinateRoot)) return null;
   const offsetRoot = source.kind === 'cli_output' ? source.coordinateRoot : (source.coordinateRoot ?? container);
   const offsets = offsetRoot ? selectionOffsets(selection, offsetRoot) : null;
+  const trimmedOffsets = trimSelectionOffsets(offsets, rawText);
   if (!position || source.mixed) return null;
+  const renderedRoot = source.coordinateRoot ?? container;
   return {
-    text: selection.toString().trim(),
+    text,
     position,
     sourceKind: source.kind,
-    ...(offsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
-    ...(offsets ? { selectionStart: offsets.start, selectionEnd: offsets.end } : {}),
+    renderedOccurrences: countRenderedOccurrences(renderedRoot, text),
+    sourceProjectionVersion: source.projectionVersion ?? undefined,
+    ...(trimmedOffsets && source.segmentId ? { sourceSegmentId: source.segmentId } : {}),
+    ...(trimmedOffsets ? { selectionStart: trimmedOffsets.start, selectionEnd: trimmedOffsets.end } : {}),
   };
 }
 

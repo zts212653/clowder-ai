@@ -61,6 +61,7 @@ export const messageBundleRoutes: FastifyPluginAsync<MessageBundleRoutesOptions>
       createdBy: targetMessage.userId,
       createdAt: targetMessage.timestamp,
       sourceThread: resolution.sourceThread,
+      note: resolution.note,
       items: resolution.items,
     };
   });

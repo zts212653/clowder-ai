@@ -36,8 +36,20 @@ export function projectTurnExecutionMessage(record: TurnExecutionRecord): TurnEx
 
 export interface ITurnExecutionStore {
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult | Promise<CreateTurnExecutionResult>;
+  bindCoveredMessageIds(
+    invocationId: string,
+    messageIds: readonly string[],
+  ): BindCoveredMessageIdsResult | Promise<BindCoveredMessageIdsResult>;
   get(invocationId: string): TurnExecutionRecord | null | Promise<TurnExecutionRecord | null>;
   listByParent(parentInvocationId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+  /**
+   * F297 (PR #3748 R3 P1-2): user-scoped running-child enumerator — **owner truth**.
+   *
+   * `listByParent` 只能从一个已知 running parent 往下问，所以 parent 已终态或不在
+   * record store 里的 standalone canonical child 对 liveness classifier 完全不可见。
+   * Sidebar 需要"这个用户此刻有哪些 child 在跑"，这是 child ledger 自己才答得出的问题。
+   */
+  listRunningByUser(userId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   transitionTerminal(
     invocationId: string,
     input: TurnExecutionTerminalInput,
@@ -46,6 +58,22 @@ export interface ITurnExecutionStore {
     cutoffStartedAt: number,
     input: InterruptRunningTurnExecutionsInput,
   ): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
+}
+
+export type BindCoveredMessageIdsResult =
+  | { outcome: 'bound' | 'replayed' | 'conflict'; record: TurnExecutionRecord }
+  | { outcome: 'not_found'; record: null };
+
+export function assertCoveredMessageIds(messageIds: readonly string[]): void {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    throw new Error('coveredMessageIds must be a non-empty array');
+  }
+  const seen = new Set<string>();
+  for (const messageId of messageIds) {
+    assertNonEmpty(messageId, 'coveredMessageId');
+    if (seen.has(messageId)) throw new Error('coveredMessageIds must not contain duplicates');
+    seen.add(messageId);
+  }
 }
 
 const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'freshness_supplement']);

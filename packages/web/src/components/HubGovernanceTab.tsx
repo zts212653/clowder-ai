@@ -3,23 +3,55 @@
 import type { GovernanceHealthSummary } from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { GovernanceInstaller } from './GovernanceInstaller';
 
 interface GovernanceHealthResponse {
   projects: GovernanceHealthSummary[];
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  healthy: { bg: 'bg-conn-green-bg', text: 'text-conn-green-text', label: '正常' },
-  stale: { bg: 'bg-yellow-50', text: 'text-yellow-700', label: '过期' },
-  missing: { bg: 'bg-conn-red-bg', text: 'text-red-700', label: '缺失' },
-  'never-synced': { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: '未同步' },
+  healthy: { bg: 'bg-conn-green-bg', text: 'text-conn-green-text', label: '已安装' },
+  stale: { bg: 'bg-conn-amber-bg', text: 'text-conn-amber-text', label: '旧版本' },
+  missing: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text', label: '安装有缺项' },
+  'never-synced': { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary', label: '未安装' },
 };
+
+function unsyncedSummary(projectPath: string): GovernanceHealthSummary {
+  return { projectPath, status: 'never-synced', packVersion: null, lastSyncedAt: null, findings: [] };
+}
+
+async function discoverUnsynced(known: readonly GovernanceHealthSummary[]): Promise<GovernanceHealthSummary[]> {
+  try {
+    const threadsRes = await apiFetch('/api/threads');
+    if (!threadsRes.ok) return [...known];
+    const { threads } = (await threadsRes.json()) as { threads: { projectPath?: string }[] };
+    const projectPaths = [
+      ...new Set(
+        threads.flatMap((thread) =>
+          thread.projectPath && thread.projectPath !== 'default' ? [thread.projectPath] : [],
+        ),
+      ),
+    ];
+    if (projectPaths.length === 0) return [...known];
+    const discoverRes = await apiFetch('/api/governance/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectPaths }),
+    });
+    if (!discoverRes.ok) return [...known];
+    const { unsynced } = (await discoverRes.json()) as { unsynced: string[] };
+    const knownPaths = new Set(known.map((project) => project.projectPath));
+    return [...known, ...unsynced.filter((path) => !knownPaths.has(path)).map(unsyncedSummary)];
+  } catch {
+    return [...known];
+  }
+}
 
 export function HubGovernanceTab() {
   const [projects, setProjects] = useState<GovernanceHealthSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [expandedProject, setExpandedProject] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
@@ -31,44 +63,7 @@ export function HubGovernanceTab() {
         return;
       }
       const data = (await res.json()) as GovernanceHealthResponse;
-      const known = data.projects;
-
-      // F070 P1-3: Discover historical external projects not yet in registry
-      try {
-        const threadsRes = await apiFetch('/api/threads');
-        if (threadsRes.ok) {
-          const { threads } = (await threadsRes.json()) as { threads: { projectPath?: string }[] };
-          const externalPaths = [
-            ...new Set(threads.map((t) => t.projectPath).filter((p): p is string => !!p && p !== 'default')),
-          ];
-          if (externalPaths.length > 0) {
-            const discoverRes = await apiFetch('/api/governance/discover', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectPaths: externalPaths }),
-            });
-            if (discoverRes.ok) {
-              const { unsynced } = (await discoverRes.json()) as { unsynced: string[] };
-              const knownPaths = new Set(known.map((p) => p.projectPath));
-              for (const path of unsynced) {
-                if (!knownPaths.has(path)) {
-                  known.push({
-                    projectPath: path,
-                    status: 'never-synced',
-                    packVersion: null,
-                    lastSyncedAt: null,
-                    findings: [],
-                  });
-                }
-              }
-            }
-          }
-        }
-      } catch {
-        // Discovery is best-effort; don't block health display
-      }
-
-      setProjects(known);
+      setProjects(await discoverUnsynced(data.projects));
     } catch {
       setError('网络错误');
     } finally {
@@ -79,30 +74,6 @@ export function HubGovernanceTab() {
   useEffect(() => {
     fetchHealth();
   }, [fetchHealth]);
-
-  const handleConfirm = useCallback(
-    async (projectPath: string) => {
-      setConfirming(projectPath);
-      try {
-        const res = await apiFetch('/api/governance/confirm', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectPath }),
-        });
-        if (res.ok) {
-          await fetchHealth();
-        } else {
-          const data = (await res.json()) as { error?: string };
-          setError(data.error ?? '同步失败');
-        }
-      } catch {
-        setError('网络错误');
-      } finally {
-        setConfirming(null);
-      }
-    },
-    [fetchHealth],
-  );
 
   if (loading) {
     return <p className="text-sm text-cafe-muted">加载治理状态中...</p>;
@@ -116,7 +87,7 @@ export function HubGovernanceTab() {
     return (
       <div className="text-center py-8 text-cafe-muted">
         <p className="text-sm">暂无外部项目治理记录</p>
-        <p className="text-xs mt-1">当猫猫首次被派遣到外部项目时，治理规则会自动同步</p>
+        <p className="text-xs mt-1">派遣不会自动写入项目；有需要时可在这里主动安装。</p>
       </div>
     );
   }
@@ -124,7 +95,10 @@ export function HubGovernanceTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-cafe-secondary">外部项目治理状态</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-cafe-secondary">外部项目治理安装</h3>
+          <p className="mt-1 text-xs text-cafe-muted">派遣不会自动写入项目；配置、预览与撤销都由你显式发起。</p>
+        </div>
         <button
           type="button"
           onClick={fetchHealth}
@@ -145,16 +119,17 @@ export function HubGovernanceTab() {
               <th className="px-3 py-2 font-medium text-cafe-secondary">操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-cafe-border">
-            {projects.map((p) => {
-              const fallback = STATUS_STYLES['never-synced'];
-              const style = STATUS_STYLES[p.status] ?? fallback;
-              // display-only: always use forward slash regardless of OS
-              const shortPath = p.projectPath.split(/[/\\]/).slice(-2).join('/');
-              const syncDate = p.lastSyncedAt ? new Date(p.lastSyncedAt).toLocaleDateString('zh-CN') : '—';
+          {projects.map((p) => {
+            const fallback = STATUS_STYLES['never-synced'];
+            const style = STATUS_STYLES[p.status] ?? fallback;
+            // display-only: always use forward slash regardless of OS
+            const shortPath = p.projectPath.split(/[/\\]/).slice(-2).join('/');
+            const syncDate = p.lastSyncedAt ? new Date(p.lastSyncedAt).toLocaleDateString('zh-CN') : '—';
 
-              return (
-                <tr key={p.projectPath} className="hover:bg-cafe-surface-elevated">
+            const expanded = expandedProject === p.projectPath;
+            return (
+              <tbody key={p.projectPath} className="divide-y divide-cafe-border">
+                <tr className="hover:bg-cafe-surface-elevated">
                   <td className="px-3 py-2 font-mono text-xs" title={p.projectPath}>
                     {shortPath}
                   </td>
@@ -166,21 +141,29 @@ export function HubGovernanceTab() {
                   <td className="px-3 py-2 text-xs text-cafe-secondary">{p.packVersion ?? '—'}</td>
                   <td className="px-3 py-2 text-xs text-cafe-secondary">{syncDate}</td>
                   <td className="px-3 py-2">
-                    {(p.status === 'stale' || p.status === 'never-synced') && (
-                      <button
-                        type="button"
-                        onClick={() => handleConfirm(p.projectPath)}
-                        disabled={confirming === p.projectPath}
-                        className="text-xs px-2 py-1 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover disabled:opacity-50"
-                      >
-                        {confirming === p.projectPath ? '同步中...' : '立即同步'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedProject(expanded ? null : p.projectPath)}
+                      className="text-xs px-2 py-1 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent-hover transition-colors"
+                    >
+                      {expanded ? '收起' : '配置'}
+                    </button>
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
+                {expanded && (
+                  <tr>
+                    <td colSpan={5} className="bg-cafe-surface-canvas p-3">
+                      <GovernanceInstaller
+                        projectPath={p.projectPath}
+                        allowCleanup={p.status !== 'never-synced'}
+                        onChanged={fetchHealth}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            );
+          })}
         </table>
       </div>
     </div>

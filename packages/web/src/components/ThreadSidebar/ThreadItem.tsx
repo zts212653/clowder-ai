@@ -1,12 +1,10 @@
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
-import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
-import { DEFAULT_THREAD_STATE, type Thread, type ThreadState } from '@/stores/chat-types';
-import { useChatStore } from '@/stores/chatStore';
 import { useLabelStore } from '@/stores/label-store';
+import type { SidebarPresence, SidebarSystemKind } from '@/stores/sidebarProjectionStore';
 // F174 D2b-2 (rev): per-cat callback-auth dot was rejected (co-creator alpha 反馈
 // "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
 // surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
@@ -16,13 +14,14 @@ import { ExportButton } from '../ExportButton';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
 import { ThreadCatStatus } from '../ThreadCatStatus';
+import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
-import { formatRelativeTime } from './thread-utils';
+import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
 export interface ThreadItemProps {
   id: string;
   title: string | null;
-  participants: string[];
+  participants: readonly string[];
   lastActiveAt: number;
   isActive: boolean;
   onSelect: (id: string) => void;
@@ -36,13 +35,15 @@ export interface ThreadItemProps {
   onReplay?: (id: string) => void;
   isPinned?: boolean;
   isFavorited?: boolean;
-  threadState?: ThreadState;
+  presence: SidebarPresence;
+  unreadCount: number;
+  hasUserMention: boolean;
   projectPath?: string;
   indented?: boolean;
-  preferredCats?: string[];
-  threadLabels?: string[];
+  preferredCats?: readonly string[];
+  threadLabels?: readonly string[];
   isHubThread?: boolean;
-  systemKind?: Thread['systemKind'];
+  systemKind?: SidebarSystemKind | null;
 }
 
 function ThreadItemComponent({
@@ -60,7 +61,9 @@ function ThreadItemComponent({
   onUpdateLabels,
   isPinned,
   isFavorited,
-  threadState,
+  presence,
+  unreadCount,
+  hasUserMention,
   projectPath,
   indented,
   preferredCats,
@@ -69,11 +72,7 @@ function ThreadItemComponent({
   systemKind,
   onReplay,
 }: ThreadItemProps) {
-  const subscribedThreadState = useChatStore(
-    useCallback((state) => state.threadStates[id] ?? DEFAULT_THREAD_STATE, [id]),
-  );
-  const itemThreadState = threadState ?? subscribedThreadState;
-  const itemLiveness = useThreadLiveness(id);
+  const hasDraftDecoration = useSidebarDraftDecoration(id);
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -88,6 +87,13 @@ function ThreadItemComponent({
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const ime = useIMEGuard();
+  const [, refreshWorkingClock] = useState(0);
+
+  useEffect(() => {
+    if (presence.status !== 'working' || presence.activeSince === undefined) return;
+    const timer = window.setInterval(() => refreshWorkingClock((tick) => tick + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, [presence.status, presence.activeSince]);
 
   useEffect(() => {
     if (!isEditing) setDraftTitle(title ?? '');
@@ -146,7 +152,7 @@ function ThreadItemComponent({
 
   // Build hover tooltip: full title + participants + time (clowder-ai#29)
   const displayTitle = title ?? (id === 'default' ? '大厅' : '未命名对话');
-  const hasDraft = !isActive && itemThreadState.hasDraft;
+  const hasDraft = !isActive && hasDraftDecoration;
   const participantNames = participants.map((catId) => resolveCatDisplayName(catId, getCatById)).join(', ');
   const tooltipLines = [displayTitle];
   if (participantNames) tooltipLines.push(`参与: ${participantNames}`);
@@ -154,6 +160,7 @@ function ThreadItemComponent({
   tooltipLines.push(formatRelativeTime(lastActiveAt, false));
   const tooltip = tooltipLines.join('\n');
   const hasMoreActions = id !== 'default' && !isEditing;
+  const compactStatusTime = formatSidebarStatusTime(presence, lastActiveAt);
 
   const startRename = useCallback(() => {
     setIsMoreOpen(false);
@@ -345,60 +352,62 @@ function ThreadItemComponent({
         </div>
       </div>
       {/* Bottom row: avatars + status + compact time */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {participants.length > 0 ? (
-            participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
-          ) : id !== 'default' ? (
-            <>
-              <PawIcon className="text-xs" />
-              <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
-            </>
-          ) : null}
-          {preferredCats && preferredCats.length > 0 && (
-            <div
-              className="flex items-center gap-0.5 ml-1"
-              title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-2.5 w-2.5 text-cafe-muted shrink-0"
+      <div className="flex min-w-0 items-center justify-between">
+        <div className="flex min-w-0 items-center gap-1">
+          {/* ring-2 paints 2px beyond each avatar box; keep that paint inside the horizontal clip boundary. */}
+          <div
+            data-testid="thread-participant-metadata"
+            className="flex min-w-0 items-center gap-1 overflow-x-clip overflow-y-visible px-0.5"
+          >
+            {participants.length > 0 ? (
+              participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
+            ) : id !== 'default' ? (
+              <>
+                <PawIcon className="text-xs" />
+                <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
+              </>
+            ) : null}
+            {preferredCats && preferredCats.length > 0 && (
+              <div
+                className="ml-1 flex items-center gap-0.5"
+                title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
               >
-                <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
-              </svg>
-              {preferredCats.map((catId) => (
-                <span
-                  key={catId}
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: catColorVar(catId, 'primary') }}
-                />
-              ))}
-            </div>
-          )}
-          <LabelDots labels={threadLabels} />
-          <ThreadCatStatus
-            liveness={itemLiveness}
-            unreadCount={itemThreadState.unreadCount}
-            hasUserMention={itemThreadState.hasUserMention}
-          />
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-2.5 w-2.5 shrink-0 text-cafe-muted"
+                >
+                  <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+                </svg>
+                {preferredCats.map((catId) => (
+                  <span
+                    key={catId}
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: catColorVar(catId, 'primary') }}
+                  />
+                ))}
+              </div>
+            )}
+            <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
+          </div>
+          <ThreadCatStatus presence={presence} unreadCount={unreadCount} hasUserMention={hasUserMention} />
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
-          <span className="text-micro text-cafe-muted">{formatRelativeTime(lastActiveAt, true)}</span>
+          <span className="text-micro text-cafe-muted">{compactStatusTime}</span>
         </div>
       </div>
       <ThreadSettingsPanel
         open={isSettingsOpen}
         threadId={id}
         threadTitle={displayTitle}
-        currentCats={preferredCats ?? []}
-        currentLabels={threadLabels ?? []}
+        currentCats={[...(preferredCats ?? [])]}
+        currentLabels={[...(threadLabels ?? [])]}
         onSavePreferredCats={onUpdatePreferredCats}
         onSaveLabels={onUpdateLabels}
         onClose={() => setIsSettingsOpen(false)}

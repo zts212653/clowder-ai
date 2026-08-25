@@ -16,6 +16,12 @@ export interface CliSpawnOptions {
   command: string;
   /** Arguments to pass to the CLI */
   args: readonly string[];
+  /**
+   * Exact flag names injected by the harness itself for this invocation.
+   * Never populate this from operator cliConfigArgs: diagnostics use it as
+   * provenance before attributing an argv rejection to harness/CLI drift.
+   */
+  managedArgvFlags?: readonly string[];
   /** stdout parser mode. Defaults to NDJSON for existing CLI providers. */
   outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
@@ -26,6 +32,8 @@ export interface CliSpawnOptions {
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** False for probes/non-invocation commands that must never create an execution-owner manifest. */
+  bindExecutionOwner?: boolean;
   /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
   invocationId?: string;
   /** F118: CLI session ID for diagnostic enrichment of __cliTimeout */
@@ -112,5 +120,6 @@ export type SpawnFn = (
     cwd?: string | undefined;
     env?: NodeJS.ProcessEnv | undefined;
     stdio: ['ignore' | 'pipe', 'pipe', 'pipe'];
+    bindExecutionOwner?: boolean | undefined;
   },
 ) => ChildProcessLike;

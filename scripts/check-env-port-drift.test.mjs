@@ -186,7 +186,7 @@ function buildExportedRootScripts(sourceScripts) {
   scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
   scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
   scripts['check:pre-merge-gate'] =
-    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
   if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }
@@ -688,21 +688,21 @@ describe(
       );
     });
 
-    it('governance tests use sanitized frontend/API fallback ports after sync', () => {
-      const packTest = sanitizeFixture(
-        'packages/api/test/governance/governance-pack.test.js',
-        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-pack.test.js'), 'utf-8'),
+    it('portable workspace staging uses sanitized frontend/API fallback ports after sync', () => {
+      const stagingSource = sanitizeFixture(
+        'packages/api/src/domains/cats/services/context/StagingContent.ts',
+        readFileSync(resolve(ROOT, 'packages/api/src/domains/cats/services/context/StagingContent.ts'), 'utf-8'),
       );
-      const bootstrapTest = sanitizeFixture(
-        'packages/api/test/governance/governance-bootstrap.test.js',
-        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-bootstrap.test.js'), 'utf-8'),
+      const stagingTest = sanitizeFixture(
+        'packages/api/test/staging-content.test.js',
+        readFileSync(resolve(ROOT, 'packages/api/test/staging-content.test.js'), 'utf-8'),
       );
 
-      for (const content of [packTest, bootstrapTest]) {
-        assert.doesNotMatch(content, /frontend 3001 and API 3002/);
-        assert.match(content, /FRONTEND_PORT \?\? '3003'/);
-        assert.match(content, /API_SERVER_PORT \?\? '3004'/);
-      }
+      assert.doesNotMatch(stagingSource, /3001\/3002/);
+      assert.match(stagingSource, /FRONTEND_PORT \?\? '3003'/);
+      assert.match(stagingSource, /API_SERVER_PORT \?\? '3004'/);
+      assert.doesNotMatch(stagingTest, /3001\/3002/);
+      assert.match(stagingTest, /defaultOut\.includes\('3003\/3004'\)/);
     });
 
     it('sync-to-opensource.sh runs sanitizer over CommonJS test files', () => {
@@ -1973,8 +1973,8 @@ describe(
       );
       assert.match(
         gate,
-        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 NODE_ENV=test/,
-        'API startup acceptance should reuse the same temp-target allow-root so projectPath-based dispatch stays representative',
+        /PROJECT_ALLOWED_ROOTS_APPEND=true[\s\\]+PROJECT_ALLOWED_ROOTS="\$gate_target_real"[\s\\]+API_SERVER_PORT=\$accept_api_port MEMORY_STORE=1 CAT_CAFE_INVOCATION_REGISTRY=memory NODE_ENV=test/,
+        'API startup acceptance should reuse the same temp-target allow-root and explicitly select the degraded callback-auth backend used by this Redis-free local test',
       );
     });
 

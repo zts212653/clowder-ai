@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { FileData } from '@/hooks/useWorkspace';
 import { extractListenSentences } from '@/lib/listen-mode/markdown-sentences';
+import { documentCacheController } from '@/services/DocumentCacheController';
 import { documentListenController } from '@/services/DocumentListenController';
 import { useChatStore } from '@/stores/chatStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 
 interface WorkspaceListenModeInput {
   file: FileData;
@@ -36,17 +37,41 @@ export function useWorkspaceListenMode({ file, openFilePath, worktreeId, enabled
   );
   const active =
     listenSession?.identity.projectPath === currentProjectPath && listenSession.identity.relativePath === openFilePath;
+  const cacheKey = descriptor ? listenDocumentCacheKey(descriptor.identity) : '';
+  const cachedProjection = useListenModeStore((state) => (cacheKey ? state.cacheByDocument[cacheKey] : undefined));
+  useEffect(() => {
+    if (!descriptor) return;
+    void documentCacheController.refresh(descriptor);
+    return () => documentCacheController.release(descriptor);
+  }, [descriptor]);
   const start = useCallback(
     (index?: number) => {
       if (descriptor) void documentListenController.startDocument(descriptor, index);
     },
     [descriptor],
   );
+  const startCache = useCallback(() => {
+    if (descriptor) void documentCacheController.start(descriptor).catch(() => undefined);
+  }, [descriptor]);
+  const cancelCache = useCallback(() => {
+    if (descriptor) void documentCacheController.cancel(descriptor).catch(() => undefined);
+  }, [descriptor]);
+
+  const cache = cachedProjection ?? {
+    cachedAnchors: [],
+    cacheBytes: 0,
+    totalSentences: sentences.length,
+    active: false,
+    error: null,
+  };
 
   return {
     sentences,
     active,
     activeAnchor: active ? listenSession?.sentences[listenSession.currentIndex]?.anchor : undefined,
     start,
+    startCache,
+    cancelCache,
+    cache,
   };
 }

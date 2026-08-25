@@ -61,6 +61,16 @@ redis.call('SET', KEYS[1], ARGV[1])
 return 1
 `;
 
+export const DEFERRED_RECEIPT_REARM_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local current = cjson.decode(raw)
+if current.state ~= 'claimed' or current.claimId ~= ARGV[2]
+  or tonumber(current.claimUntil or 0) <= tonumber(ARGV[3]) then return 0 end
+redis.call('SET', KEYS[1], ARGV[1])
+return 1
+`;
+
 export const DEFERRED_RECEIPT_WITHDRAW_LUA = `
 ${TYPE_GUARD_LUA}
 if not allowed_type(KEYS[1], 'string') or not allowed_type(KEYS[2], 'zset')

@@ -44,7 +44,10 @@ import { getThreadLiveInvocations } from '../domains/cats/services/agents/invoca
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { PerCatTerminalDispositionCollector } from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import {
+  isTerminalDispositionEvent,
+  PerCatTerminalDispositionCollector,
+} from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import { createInitialQueuedMessageCustody } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type {
   QueueProcessor,
@@ -101,6 +104,7 @@ import {
   getTimelineOrderTime,
   isInternalNonQuotableParent,
   isSystemUserMessage,
+  resolveVisibleReplyParent,
 } from '../domains/cats/services/stores/visibility.js';
 import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -108,6 +112,8 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { persistA2ARoutingMessage } from './a2a-routing-projection.js';
+import { admitThreadParticipants } from './thread-participant-admission.js';
 
 /** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
 interface OutboundDeliveryHookLike {
@@ -189,12 +195,33 @@ function buildMessageBundleSummary(admission: ResolvedBundleAdmission): string {
   return `转发了 ${admission.items.length} ${unit} · 来自「${sourceTitle}」`;
 }
 
-function bundleAdmissionErrorStatus(
-  reason: Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'],
-): number {
+type MessageBundleAdmissionFailureReason = Exclude<MessageSelectionAdmissionResult, { status: 'resolved' }>['reason'];
+
+function bundleAdmissionErrorStatus(reason: MessageBundleAdmissionFailureReason): number {
   if (reason === 'not_authorized') return 403;
   if (reason === 'source_unavailable') return 409;
   return 400;
+}
+
+/**
+ * A rejected forward must tell the human which of their own actions to redo. A single
+ * generic string turns every distinct cause into "it just failed".
+ */
+function bundleAdmissionErrorMessage(reason: MessageBundleAdmissionFailureReason): string {
+  switch (reason) {
+    case 'quote_mismatch':
+      return '选中的内容和原消息对不上，可能原消息已被编辑。请重新划选后再转发。';
+    case 'ambiguous_quote':
+      return '选中的文字在这条消息里出现了多次，无法确定是哪一处。请多选一些上下文再转发。';
+    case 'source_unavailable':
+      return '来源消息已不可用（被删除、撤回或权限变更）。请重新选择要转发的内容。';
+    case 'not_authorized':
+      return '无权读取来源对话的内容。';
+    case 'unsupported_source':
+      return '这条消息包含脚注或公式，划线引用暂不支持；可以改为转发整条消息。';
+    case 'invalid_selection':
+      return '这次选择无法解析，请取消选择后重新选一次。';
+  }
 }
 
 /**
@@ -267,7 +294,7 @@ export interface MessagesRoutesOptions {
 
 const log = createModuleLogger('routes/messages');
 
-function acquireRouteExecutionOwner(
+async function acquireRouteExecutionOwner(
   opts: Pick<MessagesRoutesOptions, 'invocationTracker' | 'queueProcessor'>,
   threadId: string,
   targetCats: string[],
@@ -277,8 +304,8 @@ function acquireRouteExecutionOwner(
     executionId?: string;
     onOwnershipValidated?: () => void;
   },
-): AbortController | null | undefined {
-  const coordinated = opts.queueProcessor?.acquireExternalExecution?.(threadId, targetCats, userId, options);
+): Promise<AbortController | null | undefined> {
+  const coordinated = await opts.queueProcessor?.acquireExternalExecution?.(threadId, targetCats, userId, options);
   if (coordinated !== undefined) return coordinated;
   const tracker = opts.invocationTracker;
   if (!tracker) return undefined;
@@ -393,36 +420,6 @@ export function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancel
     }
   } catch (err) {
     log.warn({ threadId, err }, 'F167 Phase J: failed to auto-cancel pending holds');
-  }
-}
-
-async function persistA2ARoutingMessage(
-  messageStore: IMessageStore,
-  msg: { catId?: string; content?: string; invocationId?: string; targetCatId?: string; timestamp: number },
-  threadId: string,
-): Promise<string | undefined> {
-  if (!msg.content) return undefined;
-  try {
-    const stored = await messageStore.append({
-      userId: 'system',
-      catId: null,
-      content: msg.content,
-      mentions: [],
-      timestamp: msg.timestamp,
-      threadId,
-      extra: {
-        systemKind: 'a2a_routing',
-        a2aRouting: {
-          fromCatId: msg.catId,
-          targetCatId: msg.targetCatId,
-          invocationId: msg.invocationId,
-        },
-      },
-    });
-    return stored.id;
-  } catch (err) {
-    log.warn({ err, threadId }, 'Failed to persist a2a_handoff');
-    return undefined;
   }
 }
 
@@ -686,6 +683,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const admission = await selectionResolver.resolveForAdmission(
         {
           sourceThreadId: messageBundleRequest.sourceThreadId,
+          ...(messageBundleRequest.note ? { note: messageBundleRequest.note } : {}),
           items: messageBundleRequest.items,
         },
         { userId },
@@ -693,7 +691,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (admission.status !== 'resolved') {
         reply.status(bundleAdmissionErrorStatus(admission.reason));
         return {
-          error: 'Message Bundle source validation failed',
+          error: bundleAdmissionErrorMessage(admission.reason),
           code: `MESSAGE_BUNDLE_${admission.reason.toUpperCase()}`,
           ...(admission.messageId ? { messageId: admission.messageId } : {}),
         };
@@ -912,15 +910,20 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // event through the user's always-joined room. This makes an unopened
     // thread update immediately without inventing another event or room.
     const publishSidebarParticipants = async () => {
-      let sidebarParticipants = [...targetCats];
       if (opts.threadStore?.addParticipants) {
-        await opts.threadStore.addParticipants(resolvedThreadId, targetCats);
-        const storedParticipants = (await opts.threadStore.get(resolvedThreadId))?.participants ?? [];
-        sidebarParticipants = [...new Set([...storedParticipants, ...targetCats])];
+        await admitThreadParticipants({
+          userId,
+          threadId: resolvedThreadId,
+          targetCats,
+          threadStore: opts.threadStore,
+          socketManager: opts.socketManager,
+          emitPolicy: 'always',
+        });
+        return;
       }
       opts.socketManager.emitToUser(userId, 'thread_updated', {
         threadId: resolvedThreadId,
-        participants: sidebarParticipants,
+        participants: [...targetCats],
       });
     };
     const publishAdmittedBundleParticipants = async () => {
@@ -1153,7 +1156,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (mode !== 'force' && opts.invocationTracker) {
         // F122 AC-A8: Atomic thread-level busy gate + slot registration.
         // If thread became busy since initial has() check at line 306, degrade to queue.
-        const tryResult = acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
+        const tryResult = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
           mode: 'non_preemptive',
         });
         if (tryResult === null) {
@@ -1298,7 +1301,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       // Force path: the joint acquisition owns validation, scoped cancellation, and replacement install.
       if (!controller) {
-        const acquiredController = acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
+        const acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
           mode: 'replacement',
           executionId: createResult.invocationId,
           onOwnershipValidated: cancelValidatedForceOwner,
@@ -1705,7 +1708,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               governanceErrorCode = msg.errorCode;
             }
             terminalDispositions.observe(msg);
-            if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+            if (isTerminalDispositionEvent(msg) && msg.catId) {
               opts.invocationTracker?.completeSlot?.(resolvedThreadId, msg.catId, controller);
             }
 
@@ -1763,7 +1766,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             };
 
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, broadcastPayload, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(
+                opts.messageStore,
+                broadcastPayload,
+                resolvedThreadId,
+                log,
+              );
               if (storedId) broadcastPayload.messageId = storedId;
             }
 
@@ -2111,11 +2119,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // TODO(F122 Phase B): Remove this legacy root-admission path.
       let acquiredController: AbortController | null | undefined;
       if (mode !== 'force' && opts.invocationTracker) {
-        acquiredController =
-          acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, { mode: 'non_preemptive' }) ??
-          acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, { mode: 'replacement' });
+        acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
+          mode: 'non_preemptive',
+        });
+        if (acquiredController == null) {
+          acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
+            mode: 'replacement',
+          });
+        }
       } else {
-        acquiredController = acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
+        acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
           mode: 'replacement',
           onOwnershipValidated: cancelValidatedForceOwner,
         });
@@ -2197,12 +2210,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               });
               intentModeBroadcast = true;
             }
-            if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+            if (isTerminalDispositionEvent(msg) && msg.catId) {
               opts.invocationTracker?.completeSlot?.(resolvedThreadId, msg.catId, controller);
             }
             const legacyPayload = { ...msg };
             if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId);
+              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId, log);
               if (storedId) legacyPayload.messageId = storedId;
             }
             opts.socketManager.broadcastAgentMessage(legacyPayload, resolvedThreadId);
@@ -2457,6 +2470,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const { hydrateReplyPreview } = await import('../domains/cats/services/stores/ports/MessageStore.js');
       await Promise.all(
         replyItems.map(async (item) => {
+          const source = item.source as { connector?: string } | undefined;
+          if (source?.connector === 'cloud-bridge-status') {
+            const parent = await resolveVisibleReplyParent(opts.messageStore, item.replyTo as string, {
+              threadId: resolvedThreadId,
+              viewer: { type: 'user' },
+              publicReply: true,
+            });
+            if (!parent) return;
+          }
           const preview = await hydrateReplyPreview(opts.messageStore, item.replyTo as string);
           if (preview) {
             item.replyPreview = preview;

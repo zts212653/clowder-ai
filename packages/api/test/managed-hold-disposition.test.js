@@ -371,14 +371,21 @@ describe('F167 × F254 managed hold disposition', () => {
       }),
     );
 
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => error instanceof ManagedHoldDispositionError && error.code === 'managed_hold_disposition_replaced',
+    // clowder-ai#1366 contract change: a replaced wake used to be a bare 409 with
+    // NO custody event, which left the F167 stop gate with nothing to recognize
+    // and made it reinject the same wake forever. It now reaches a durable
+    // *retired* terminal that is inert on the subject plane.
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.retired, true);
+    const dispositioned = (await h.eventLog.read('ball:thread:thread-1')).filter(
+      (event) => event.kind === 'ball.hold_dispositioned',
     );
-    assert.equal(
-      (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
-      false,
-    );
+    assert.equal(dispositioned.length, 1);
+    assert.equal(dispositioned[0].payload.retired, true);
+    // The replacement holder keeps the ball; retiring the old wake must not resolve it.
+    const projection = await h.projectionStore.get('ball:thread:thread-1');
+    assert.equal(projection.holder, 'codex-sol');
+    assert.notEqual(projection.state, 'resolved');
   });
 
   test('only the fenced producer writes one receipt + terminal event and releases the real stop gate', async () => {
@@ -542,6 +549,29 @@ describe('F167 × F254 managed hold disposition', () => {
     assert.deepEqual(failed, [{ entryId: entry.id, userId: 'user-1' }]);
     await h.coordinator.persistEntry(h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id));
 
+    const failedEntry = h.queue.getEntrySnapshot('thread-1', 'user-1', entry.id);
+    const failedAttempt = h.messageStore
+      .getById(h.stored.id)
+      .queueCustody.targetAttempts.find((attempt) => attempt.targetCatId === 'codex-sol' && attempt.state === 'failed');
+    assert.ok(failedAttempt);
+    const retried = await h.coordinator.retryFailedTarget(
+      failedEntry,
+      'codex-sol',
+      failedAttempt.id,
+      async (transitions) => {
+        for (const transition of transitions) {
+          const result = h.messageStore.transitionQueueCustody(transition.messageId, {
+            expectedRevision: transition.current.revision,
+            next: transition.next,
+          });
+          assert.equal(result.kind, 'updated');
+        }
+        return { outcome: 'committed' };
+      },
+    );
+    assert.equal(retried.outcome, 'retried');
+    assert.ok(h.queue.retryFailedTarget('thread-1', 'user-1', entry.id, 'codex-sol'));
+
     const successor = h.queue.markProcessing('thread-1', 'user-1');
     assert.equal(successor.id, entry.id);
     assert.equal(successor.messageId, h.stored.id);
@@ -549,7 +579,14 @@ describe('F167 × F254 managed hold disposition', () => {
     const receipt = h.messageStore.getById(h.stored.id).queueCustody;
     assert.deepEqual(receipt.handledByCatIds, []);
     assert.equal(receipt.seenInvocationIdByCatId['codex-sol'], undefined);
-    assert.equal(receipt.failedByCatIds.includes('codex-sol'), true);
+    assert.equal(receipt.failedByCatIds.includes('codex-sol'), false);
+    assert.deepEqual(
+      receipt.targetAttempts.map((attempt) => ({ id: attempt.id, state: attempt.state })),
+      [
+        { id: `${entry.id}:codex-sol:1`, state: 'failed' },
+        { id: `${entry.id}:codex-sol:2`, state: 'queued' },
+      ],
+    );
     assert.equal(
       (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
       false,
@@ -579,10 +616,11 @@ describe('F167 × F254 managed hold disposition', () => {
       (await h.eventLog.read('ball:thread:thread-1')).some((event) => event.kind === 'ball.hold_dispositioned'),
       false,
     );
-    await assert.rejects(
-      () => h.service.complete(auth(h), 'completed'),
-      (error) => error instanceof ManagedHoldDispositionError && error.code === 'managed_hold_disposition_replaced',
-    );
-    assert.deepEqual(h.messageStore.getById(h.stored.id).queueCustody.handledByCatIds, []);
+    // clowder-ai#1366: the re-held ball is a *newer* obligation. Retiring the old
+    // wake gives it a terminal without advancing the new hold to resolved.
+    const result = await h.service.complete(auth(h), 'completed');
+    assert.equal(result.retired, true);
+    assert.equal((await h.projectionStore.get('ball:thread:thread-1')).heldUntil, 199_000);
+    assert.notEqual((await h.projectionStore.get('ball:thread:thread-1')).state, 'resolved');
   });
 });

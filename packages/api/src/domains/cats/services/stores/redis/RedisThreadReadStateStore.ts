@@ -5,7 +5,12 @@
 
 import { type RedisClient, VISIBILITY_RESOLVE_SEQ_LUA } from '@cat-cafe/shared/utils';
 import type { IMessageStore } from '../ports/MessageStore.js';
-import type { IThreadReadStateStore, ThreadReadState, ThreadUnreadSummary } from '../ports/ThreadReadStateStore.js';
+import type {
+  IThreadReadStateStore,
+  ThreadReadCoordinate,
+  ThreadReadState,
+  ThreadUnreadSummary,
+} from '../ports/ThreadReadStateStore.js';
 import { ReadStateKeys } from '../redis-keys/read-state-keys.js';
 
 /**
@@ -91,6 +96,28 @@ end
 return 0
 `;
 
+/**
+ * Atomic replacement of the complete durable read coordinate.
+ * Both primary and canonical-anchor presence/value are CAS inputs.
+ */
+const REPLACE_READ_COORDINATE_IF_EQUAL_LUA = `
+local cur = redis.call('HGET', KEYS[1], 'lastReadMessageId')
+local anchor = redis.call('HGET', KEYS[1], 'lastReadVisibilityCursor')
+if cur ~= ARGV[1] then return 0 end
+if ARGV[2] == '1' then
+  if anchor ~= ARGV[3] then return 0 end
+elseif anchor then
+  return 0
+end
+redis.call('HSET', KEYS[1], 'lastReadMessageId', ARGV[4], 'updatedAt', ARGV[7])
+if ARGV[5] == '1' then
+  redis.call('HSET', KEYS[1], 'lastReadVisibilityCursor', ARGV[6])
+else
+  redis.call('HDEL', KEYS[1], 'lastReadVisibilityCursor')
+end
+return 1
+`;
+
 export class RedisThreadReadStateStore implements IThreadReadStateStore {
   private readonly keyPrefix: string;
 
@@ -172,6 +199,28 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     return result === 1;
   }
 
+  async replaceReadCoordinateIfEqual(
+    userId: string,
+    threadId: string,
+    expected: ThreadReadCoordinate,
+    replacement: ThreadReadCoordinate,
+  ): Promise<boolean> {
+    const key = ReadStateKeys.cursor(userId, threadId);
+    const result = await this.redis.eval(
+      REPLACE_READ_COORDINATE_IF_EQUAL_LUA,
+      1,
+      key,
+      expected.lastReadMessageId,
+      expected.lastReadVisibilityCursor === undefined ? '0' : '1',
+      expected.lastReadVisibilityCursor ?? '',
+      replacement.lastReadMessageId,
+      replacement.lastReadVisibilityCursor === undefined ? '0' : '1',
+      replacement.lastReadVisibilityCursor ?? '',
+      String(Date.now()),
+    );
+    return result === 1;
+  }
+
   async getUnreadSummaries(
     userId: string,
     threadIds: string[],
@@ -201,7 +250,15 @@ export class RedisThreadReadStateStore implements IThreadReadStateStore {
     if (messageStore.getUnreadSummaryProjection) {
       const cursors = states.flatMap((state, index) => {
         const threadId = threadIds[index];
-        return state && threadId ? [{ threadId, afterId: this.readPosition(state) }] : [];
+        return state && threadId
+          ? [
+              {
+                threadId,
+                afterId: this.readPosition(state),
+                ...(state.lastReadVisibilityCursor ? { fallbackAfterId: state.lastReadMessageId } : {}),
+              },
+            ]
+          : [];
       });
       const projected = await messageStore.getUnreadSummaryProjection(cursors, userId);
       const projectedByThread = new Map(projected.map((summary) => [summary.threadId, summary]));

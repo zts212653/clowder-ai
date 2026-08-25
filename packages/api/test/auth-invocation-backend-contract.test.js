@@ -153,14 +153,14 @@ for (const [name, factory] of backends) {
       }
     });
 
-    test('verify after TTL expiry returns reason:expired', async () => {
+    test('active credentials do not expire after elapsed time', async () => {
       const { backend, cleanup } = await factory();
       try {
         await backend.create(fixture('inv-3', 'tok-3'), 10);
         await new Promise((r) => setTimeout(r, 30));
         const result = await backend.verify('inv-3', 'tok-3', 10);
-        assert.equal(result.ok, false);
-        assert.equal(result.reason, 'expired');
+        assert.equal(result.ok, true);
+        assert.equal(result.record.expiresAt, null);
       } finally {
         await cleanup();
       }
@@ -189,7 +189,7 @@ for (const [name, factory] of backends) {
         await backend.create(fixture('inv-new', 'tok-new'), 60_000); // supersedes inv-old
         const stale = await backend.verifyLatest('inv-old', 'tok-old', 60_000);
         assert.equal(stale.ok, false);
-        assert.equal(stale.reason, 'stale_invocation');
+        assert.equal(stale.reason, 'replaced');
         const fresh = await backend.verifyLatest('inv-new', 'tok-new', 60_000);
         assert.equal(fresh.ok, true);
         assert.equal(fresh.record?.invocationId, 'inv-new');
@@ -221,21 +221,16 @@ for (const [name, factory] of backends) {
 
     // F174 Phase B P1 (gpt52 review #1363) — symptom check that survives
     // even with 60s grace: after a slide window, the latest pointer must
-    // not have drifted relative to the record. The detailed PTTL check
-    // lives in auth-invocation-redis-ttl-slide.test.js (Redis-only).
-    test('verify() does not let latest pointer drift behind record TTL (P1: gpt52 #1363)', async () => {
+    // Active record and latest pointer must remain aligned without wall-clock TTLs.
+    test('verify() keeps the durable latest pointer aligned with the active record', async () => {
       const { backend, cleanup } = await factory();
       try {
         await backend.create(fixture('drift-test', 'tok-drift'), 60_000);
-        // Wait then slide multiple times.
         await new Promise((r) => setTimeout(r, 50));
         await backend.verify('drift-test', 'tok-drift', 60_000);
         await new Promise((r) => setTimeout(r, 50));
         await backend.verify('drift-test', 'tok-drift', 60_000);
 
-        // After repeated slides, isLatest must still report the slot.
-        // (Real symptom kicks in after TTL drift > grace; covered by the PTTL
-        // assertion in the Redis-specific suite.)
         assert.equal(await backend.isLatest('drift-test'), true);
       } finally {
         await cleanup();

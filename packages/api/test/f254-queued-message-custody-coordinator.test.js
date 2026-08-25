@@ -4,6 +4,7 @@ import { describe, test } from 'node:test';
 import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
   createInitialCrossThreadQueuedMessageCustody,
+  createInitialFanoutQueuedMessageCustody,
   createInitialQueuedMessageCustody,
   QueuedMessageCustodyCoordinator,
 } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
@@ -52,6 +53,289 @@ function appendCustodiedMessage(store, queue, entry) {
 }
 
 describe('F254 queued message custody coordinator', () => {
+  test('PR7 refuses to persist an action fence under a different Queue idempotency identity', () => {
+    const queue = new InvocationQueue();
+    const entry = queue.enqueue({
+      idempotencyKey: 'queue-custody:wrong-action-source:codex',
+      ownerAuthProvenance: 'strict',
+      threadId: 'thread-action-identity',
+      userId: 'user-1',
+      content: 'fenced action',
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      a2aTriggerMessageId: 'message-action-identity',
+      actionSuccessorFence: {
+        leaseId: 'lease-action-identity',
+        generation: 3,
+        dispatchId: 'cross-post:action-identity',
+      },
+    }).entry;
+
+    assert.throws(
+      () => createInitialFanoutQueuedMessageCustody('message-action-identity', [entry]),
+      /action-successor Queue carrier has mismatched idempotency/,
+    );
+  });
+
+  test('PR7 converges a fan-out sibling after more than three custody CAS conflicts', async () => {
+    const queue = new InvocationQueue();
+    const store = new MessageStore();
+    const entries = ['opus', 'codex'].map((catId) => {
+      const result = queue.enqueue({
+        ownerAuthProvenance: 'unknown',
+        threadId: 'thread-fanout',
+        userId: 'user-1',
+        content: 'same-thread fan-out',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [catId],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'codex-sol',
+        a2aParentInvocationId: 'parent-fanout',
+        a2aTriggerMessageId: 'message-fanout',
+      });
+      assert.equal(result.outcome, 'enqueued');
+      return result.entry;
+    });
+    const message = store.append({
+      id: 'message-fanout',
+      threadId: 'thread-fanout',
+      userId: 'user-1',
+      catId: 'codex-sol',
+      content: 'same-thread fan-out',
+      mentions: ['opus', 'codex'],
+      timestamp: 100,
+      deliveryStatus: 'queued',
+      queueCustody: createInitialFanoutQueuedMessageCustody('message-fanout', entries, {
+        requestedTargetCats: ['opus', 'codex'],
+        createdAt: 100,
+      }),
+    });
+    for (const entry of entries) {
+      queue.backfillMessageId(entry.threadId, entry.userId, entry.id, message.id);
+    }
+    assert.equal(queue.markProcessingById('thread-fanout', entries[0].id, 'opus'), true);
+    const processing = queue.getEntrySnapshot('thread-fanout', 'user-1', entries[0].id);
+    let transitionCalls = 0;
+    const contendedStore = {
+      getById: (messageId) => store.getById(messageId),
+      transitionQueueCustody(messageId, input) {
+        transitionCalls += 1;
+        if (transitionCalls <= 3) {
+          return { kind: 'revision_mismatch', actualRevision: input.expectedRevision };
+        }
+        return store.transitionQueueCustody(messageId, input);
+      },
+    };
+    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: contendedStore });
+
+    assert.deepEqual(await coordinator.persistEntry(processing), [message.id]);
+    assert.equal(transitionCalls, 4, 'the fourth linearization attempt must remain reachable');
+    assert.deepEqual(store.getById(message.id).queueCustody.carrierStateByTargetCatId, {
+      opus: { status: 'processing', processingStartedAt: processing.processingStartedAt },
+      codex: { status: 'queued' },
+    });
+  });
+
+  test('replay fence treats terminal truth in any coalesced source as a no-reentry boundary', async () => {
+    const queue = new InvocationQueue();
+    const store = new MessageStore();
+    const entry = enqueueUser(queue, ['opus']);
+    const appendSource = (content) =>
+      store.append({
+        threadId: entry.threadId,
+        userId: entry.userId,
+        catId: 'codex-sol',
+        content,
+        mentions: ['opus'],
+        timestamp: entry.createdAt,
+        deliveryStatus: 'queued',
+        queueCustody: createInitialQueuedMessageCustody(entry),
+      });
+    const first = appendSource('first source');
+    const second = appendSource('second source');
+    const secondCustody = store.getById(second.id).queueCustody;
+    const partiallyCommittedMessages = new Map([
+      [first.id, store.getById(first.id)],
+      [
+        second.id,
+        {
+          ...store.getById(second.id),
+          deliveryStatus: 'delivered',
+          queueCustody: {
+            ...secondCustody,
+            revision: secondCustody.revision + 1,
+            status: 'terminal',
+            pendingTargetCats: [],
+            handledByCatIds: ['opus'],
+            seenByCatIds: ['opus'],
+            seenInvocationIdByCatId: { opus: 'turn-already-finished' },
+            bodyExposures: [
+              {
+                targetCatId: 'opus',
+                invocationId: 'turn-already-finished',
+                seenAt: entry.createdAt + 50,
+              },
+            ],
+            targetOutcomeByCatId: {
+              opus: {
+                invocationId: 'turn-already-finished',
+                disposition: 'responded',
+                handledAt: entry.createdAt + 100,
+                evidenceRef: { kind: 'invocation_lineage', invocationId: 'turn-already-finished' },
+              },
+            },
+          },
+        },
+      ],
+    ]);
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: { getById: async (messageId) => partiallyCommittedMessages.get(messageId) ?? null },
+    });
+
+    const result = await coordinator.inspectTargetReplayFence({
+      entry: { ...entry, messageId: first.id, mergedMessageIds: [second.id] },
+      targetCatId: 'opus',
+    });
+
+    assert.deepEqual(result, {
+      disposition: 'terminalized',
+      invocationId: 'turn-already-finished',
+      sourceMessageIds: [first.id, second.id],
+    });
+  });
+
+  test('replay fence defers missing or legacy custody to the canonical attempt classifier', async () => {
+    const queue = new InvocationQueue();
+    const store = new MessageStore();
+    const entry = enqueueUser(queue, ['opus']);
+    const source = store.append({
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId: 'codex-sol',
+      content: 'unverified source',
+      mentions: ['opus'],
+      timestamp: entry.createdAt,
+      deliveryStatus: 'queued',
+    });
+    const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: store });
+
+    assert.deepEqual(
+      await coordinator.inspectTargetReplayFence({
+        entry: { ...entry, messageId: source.id, mergedMessageIds: [] },
+        targetCatId: 'opus',
+      }),
+      { disposition: 'dispatchable', sourceMessageIds: [source.id] },
+    );
+  });
+
+  test('replay fence still fails closed when source truth cannot be read', async () => {
+    const queue = new InvocationQueue();
+    const entry = enqueueUser(queue, ['opus']);
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: {
+        getById: async () => {
+          throw new Error('message store unavailable');
+        },
+      },
+    });
+
+    await assert.rejects(
+      coordinator.inspectTargetReplayFence({
+        entry: { ...entry, messageId: 'message-unavailable', mergedMessageIds: [] },
+        targetCatId: 'opus',
+      }),
+      /message store unavailable/,
+    );
+  });
+
+  test('carrier retirement fence refuses a partially canceled source group without withdrawing live siblings', async () => {
+    const queue = new InvocationQueue();
+    const entry = enqueueUser(queue, ['opus']);
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: {
+        getById: async (messageId) =>
+          messageId === 'message-retired'
+            ? { id: messageId, deliveryStatus: 'canceled' }
+            : { id: messageId, deliveryStatus: 'queued' },
+      },
+    });
+
+    await assert.rejects(
+      coordinator.inspectCarrierRetirementFence({
+        entries: [{ ...entry, messageId: 'message-retired', mergedMessageIds: ['message-live'] }],
+      }),
+      /partially terminalized/,
+    );
+  });
+
+  test('replay fence terminalizes an entry superseded by another exact target carrier', async () => {
+    const queue = new InvocationQueue();
+    const entry = enqueueUser(queue, ['opus']);
+    const custody = createInitialQueuedMessageCustody(entry);
+    const source = {
+      id: 'message-superseded-carrier',
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId: 'codex-sol',
+      content: 'superseded carrier',
+      mentions: ['opus'],
+      timestamp: entry.createdAt,
+      deliveryStatus: 'queued',
+      queueCustody: {
+        ...custody,
+        carrierByTargetCatId: {
+          opus: { entryId: 'replacement-entry' },
+        },
+      },
+    };
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: { getById: async (messageId) => (messageId === source.id ? source : null) },
+    });
+
+    assert.deepEqual(
+      await coordinator.inspectTargetReplayFence({
+        entry: { ...entry, messageId: source.id, mergedMessageIds: [] },
+        targetCatId: 'opus',
+      }),
+      { disposition: 'terminalized', sourceMessageIds: [source.id] },
+    );
+  });
+
+  test('replay fence rejects a mismatched entry when the exact target carrier is missing', async () => {
+    const queue = new InvocationQueue();
+    const entry = enqueueUser(queue, ['opus']);
+    const source = {
+      id: 'message-mismatched-carrier',
+      threadId: entry.threadId,
+      userId: entry.userId,
+      catId: 'codex-sol',
+      content: 'mismatched carrier',
+      mentions: ['opus'],
+      timestamp: entry.createdAt,
+      deliveryStatus: 'queued',
+      queueCustody: {
+        ...createInitialQueuedMessageCustody(entry),
+        entryId: 'replacement-entry',
+      },
+    };
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: { getById: async (messageId) => (messageId === source.id ? source : null) },
+    });
+
+    await assert.rejects(
+      coordinator.inspectTargetReplayFence({
+        entry: { ...entry, messageId: source.id, mergedMessageIds: [] },
+        targetCatId: 'opus',
+      }),
+      /entry mismatch/,
+    );
+  });
+
   test('updates one cross-thread target carrier without overwriting its sibling', async () => {
     const queue = new InvocationQueue();
     const store = new MessageStore();
@@ -121,6 +405,7 @@ describe('F254 queued message custody coordinator', () => {
       version: 1,
       entryId: entry.id,
       revision: 1,
+      ownerUserId: 'user-1',
       intent: 'implement',
       ownerAuthProvenance: 'strict',
       status: 'queued',
@@ -390,6 +675,31 @@ describe('F254 queued message custody coordinator', () => {
       processingStartedAt: processing.processingStartedAt,
       updatedAt: persistedAt,
     });
+  });
+
+  test('persists the restart-stable pre-start retirement group before destructive terminalization', async () => {
+    const queue = new InvocationQueue();
+    const store = new MessageStore();
+    const entry = enqueueUser(queue, ['opus']);
+    const message = appendCustodiedMessage(store, queue, entry);
+    assert.equal(queue.markProcessingById(entry.threadId, entry.id), true);
+    const processing = queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    const intent = {
+      id: `prestart-retirement:${entry.id}`,
+      primaryEntryId: entry.id,
+      entryIds: [entry.id, 'sibling-entry'],
+      targetCatId: 'opus',
+      startedAt: processing.processingStartedAt,
+    };
+    const coordinator = new QueuedMessageCustodyCoordinator({
+      messageStore: store,
+      now: () => entry.createdAt + 1_000,
+    });
+
+    await coordinator.persistEntry({ ...processing, prestartRetirement: intent });
+
+    assert.deepEqual(store.getById(message.id)?.queueCustody?.prestartRetirement, intent);
+    assert.equal(store.getById(message.id)?.queueCustody?.status, 'processing');
   });
 
   test('serializes concurrent projections so an older notified snapshot cannot overwrite seen', async () => {

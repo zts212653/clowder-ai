@@ -216,6 +216,14 @@ if status ~= 'queued' then
   return 0
 end
 
+
+-- Pre-CAS fan-out admission is durable pending execution and must never be
+-- converted into delivered-only visibility by legacy orphan recovery.
+local admission = redis.call('HGET', hash, 'queueCustodyAdmission')
+if admission and admission ~= '' then
+  return 0
+end
+
 -- F254: custody guard — non-terminal custody blocks legacy markDelivered
 local custody = redis.call('HGET', hash, 'queueCustody')
 if custody and custody ~= '' then
@@ -325,7 +333,7 @@ local msgId = redis.call('HGET', hash, 'id')
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
 -- #1269 R8 P1-2: clear custody fields so restart/reconciliation cannot treat
 -- canceled work as still owned. Parity with CANCEL_LUA in delivery scripts.
-redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision')
+redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision', 'queueCustodyAdmission')
 
 -- #1200: Remove from visibility index if present (backfilled legacy queued)
 if threadId and msgId then

@@ -6,7 +6,15 @@ const { describe, it } = require('node:test');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
-const ENV_KEYS = ['NEXT_PUBLIC_API_URL', 'API_SERVER_PORT', 'FRONTEND_PORT'];
+const ENV_KEYS = [
+  'NEXT_PUBLIC_API_URL',
+  'API_SERVER_PORT',
+  'FRONTEND_PORT',
+  'CAT_CAFE_WEB_BUILD_REVISION',
+  'CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED',
+  'CAT_CAFE_WEB_TEST_DIST_DIR',
+  'CAT_CAFE_WEB_TEST_TSCONFIG',
+];
 
 function withEnv(overrides, run) {
   const snapshot = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -86,6 +94,43 @@ describe('next.config rewrites', () => {
       const rewrites = await config.rewrites();
       assert.equal(rewrites[0].destination, 'http://localhost:5001/api/:path*');
     });
+  });
+
+  it('embeds the exact Web bundle revision into client code', () => {
+    const revision = 'a'.repeat(40);
+    withEnv({ CAT_CAFE_WEB_BUILD_REVISION: revision }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_BUILD_REVISION, revision);
+    });
+  });
+
+  it('can require document/server revision verification in the browser regression harness', () => {
+    withEnv({ CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED: '1' }, (config) => {
+      assert.equal(config.env?.NEXT_PUBLIC_CAT_CAFE_DEPLOYMENT_REVISION_REQUIRED, '1');
+    });
+  });
+
+  it('isolates a browser test dev server from production build artifacts', () => {
+    withEnv(
+      {
+        CAT_CAFE_WEB_TEST_DIST_DIR: '.next-test-f294-example',
+        CAT_CAFE_WEB_TEST_TSCONFIG: 'tsconfig.next-test-f294-example.json',
+      },
+      (config) => {
+        assert.equal(config.distDir, '.next-test-f294-example');
+        assert.equal(config.typescript?.tsconfigPath, 'tsconfig.next-test-f294-example.json');
+      },
+    );
+  });
+
+  it('rejects an unpaired or unsafe browser test build path', () => {
+    assert.throws(
+      () => withEnv({ CAT_CAFE_WEB_TEST_DIST_DIR: '../shared-next' }, () => {}),
+      /must name an isolated \.next-test-\* directory/,
+    );
+    assert.throws(
+      () => withEnv({ CAT_CAFE_WEB_TEST_DIST_DIR: '.next-test-f294-example' }, () => {}),
+      /must be provided together/,
+    );
   });
 
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {

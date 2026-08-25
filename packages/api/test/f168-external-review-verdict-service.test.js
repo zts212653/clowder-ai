@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 import { canonicalizeActionTerminalPredicate } from '../dist/domains/ball-custody/ActionTerminalPredicateCatalog.js';
 import { CommunityProjector } from '../dist/domains/community/community-projector.js';
+import { ExternalReviewCoordinator } from '../dist/domains/community/external-review/ExternalReviewCoordinator.js';
 import {
   ExternalReviewVerdictError,
   ExternalReviewVerdictService,
@@ -136,6 +137,7 @@ describe('F168 ExternalReviewVerdictService', () => {
   let userNudgeCount;
   let completions;
   let completionResult;
+  let currentHeadFetches;
   let service;
 
   beforeEach(async () => {
@@ -157,13 +159,17 @@ describe('F168 ExternalReviewVerdictService', () => {
     userNudgeCount = 0;
     completions = [];
     completionResult = { outcome: 'committed' };
+    currentHeadFetches = 0;
     await objectStore.save(projection());
     service = new ExternalReviewVerdictService({
       repoConfigStore: { getByRepo: async () => config },
       eventLog,
       projector,
       objectStore,
-      fetchCurrentHead: async () => currentHead,
+      fetchCurrentHead: async () => {
+        currentHeadFetches += 1;
+        return currentHead;
+      },
       preflightLease: async (leaseId, generation, catId, predicateDigest) => {
         preflightCalls.push({ leaseId, generation, catId, terminalPredicateDigest: predicateDigest });
         return preflightResult;
@@ -178,6 +184,49 @@ describe('F168 ExternalReviewVerdictService', () => {
       now: () => 10_000,
     });
   });
+
+  async function createLogAheadSubmission(inputOverrides = {}) {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    const tracking = { ...principal, userId: 'user-1' };
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      now: () => 11_000,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    let failFirstSubmittedApply = true;
+    const repairingService = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector: {
+        async apply(event) {
+          if (event.kind === 'case.review_verdict_submitted' && failFirstSubmittedApply) {
+            failFirstSubmittedApply = false;
+            throw new Error('simulated pending projection crash');
+          }
+          await projector.apply(event);
+        },
+        rebuild: (key) => projector.rebuild(key),
+      },
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => ({ ok: true, reason: 'active' }),
+      completeActionLease: async () => ({ outcome: 'committed' }),
+      now: () => 10_000,
+    });
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      tracking,
+    );
+    await assert.rejects(
+      () => repairingService.record(deliveredInput(inputOverrides)),
+      /simulated pending projection crash/,
+    );
+    return repairingService;
+  }
 
   it('records a delivered proof atomically and retries idempotently', async () => {
     const first = await service.record(deliveredInput());
@@ -219,6 +268,634 @@ describe('F168 ExternalReviewVerdictService', () => {
     const stored = await objectStore.get(subjectKey);
     assert.equal(stored.externalReview.lifecycle, 'pending_delivery');
     assert.equal(stored.externalReview.lastDeliveredHeadSha, null);
+  });
+
+  it('accepts one typed verdict during bounded canonical lag and settles it on the next collector tick', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    await objectStore.save(
+      projection({
+        cloudPolicy: 'optional',
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'pending', observedAt: 9_000 },
+        cloud: null,
+        wake: null,
+      }),
+    );
+
+    const first = await service.record(deliveredInput());
+
+    assert.equal(first.lifecycle, 'pending_verification');
+    assert.deepEqual(first.verification, {
+      status: 'pending',
+      reason: 'ci_pending',
+      submittedAt: 10_000,
+    });
+    assert.equal(
+      eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length,
+      1,
+      'one external submission must create one durable pending fact',
+    );
+    assert.equal(
+      eventLog.events.some((event) => event.kind === 'case.review_verdict_recorded'),
+      false,
+    );
+
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      settlePendingVerdict: (key) => service.settlePending(key),
+      now: () => 10_100,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const collectorResult = await coordinator.recordCi(
+      {
+        repoFullName: 'acme/widgets',
+        prNumber: 7,
+        headSha,
+        prState: 'open',
+        aggregateBucket: 'pass',
+        checks: [],
+      },
+      { ...principal, userId: 'user-1' },
+    );
+
+    assert.deepEqual(collectorResult, { kind: 'state_only', reason: 'pending_verdict_settled' });
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_recorded').length, 1);
+    assert.equal(currentHeadFetches, 1, 'collector settlement must not perform a live GitHub readiness readback');
+    const stored = await objectStore.get(subjectKey);
+    assert.equal(stored.externalReview.lifecycle, 'delivered');
+    assert.equal(stored.externalReview.pendingVerdict, null);
+  });
+
+  it('deduplicates an identical transport replay while canonical verification is pending', async () => {
+    await objectStore.save(
+      projection({
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'pending', observedAt: 9_000 },
+        wake: null,
+      }),
+    );
+
+    const first = await service.record(deliveredInput());
+    const duplicate = await service.record(deliveredInput());
+
+    assert.deepEqual(duplicate, first);
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+  });
+
+  it('invalidates a pending verdict when CI fails so a later rerun cannot settle stale reviewer intent', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    await objectStore.save(
+      projection({
+        cloudPolicy: 'optional',
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'pending', observedAt: 9_000 },
+        cloud: null,
+        wake: null,
+        actionLeaseRef: { leaseId: 'lease-1', generation: 3 },
+      }),
+    );
+    await service.record(deliveredInput({ actionLeaseRef: { leaseId: 'lease-1', generation: 3 } }));
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      settlePendingVerdict: (key) => service.settlePending(key),
+      now: () => 10_100,
+      log: { info() {}, warn() {}, error() {} },
+    });
+
+    const result = await coordinator.recordCi(
+      {
+        repoFullName: 'acme/widgets',
+        prNumber: 7,
+        headSha,
+        prState: 'open',
+        aggregateBucket: 'fail',
+        checks: [],
+      },
+      { ...principal, userId: 'user-1' },
+    );
+
+    assert.deepEqual(result, { kind: 'state_only', reason: 'ci_failed' });
+    assert.equal(
+      eventLog.events.some((event) => event.kind === 'case.review_verdict_recorded'),
+      false,
+    );
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+
+    const rerun = await coordinator.recordCi(
+      {
+        repoFullName: 'acme/widgets',
+        prNumber: 7,
+        headSha,
+        prState: 'open',
+        aggregateBucket: 'pass',
+        checks: [],
+      },
+      { ...principal, userId: 'user-1' },
+    );
+
+    assert.deepEqual(rerun, { kind: 'state_only', reason: 'explicit_wait_required' });
+    assert.equal(
+      eventLog.events.some((event) => event.kind === 'case.review_verdict_recorded'),
+      false,
+    );
+    assert.deepEqual(completions, []);
+  });
+
+  it('persists a post-invalidation resubmission so restart rebuild can settle it', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    let collectorClock = 11_000;
+    const makeCoordinator = () =>
+      new ExternalReviewCoordinator({
+        repoConfigStore: { getByRepo: async () => config },
+        eventLog,
+        projector,
+        objectStore,
+        settlePendingVerdict: (key) => service.settlePending(key),
+        now: () => ++collectorClock,
+        log: { info() {}, warn() {}, error() {} },
+      });
+    const tracking = { ...principal, userId: 'user-1' };
+    const ci = (aggregateBucket) => ({
+      repoFullName: 'acme/widgets',
+      prNumber: 7,
+      headSha,
+      prState: 'open',
+      aggregateBucket,
+      checks: [],
+    });
+
+    const coordinator = makeCoordinator();
+    assert.deepEqual(
+      await coordinator.recordCloud(
+        {
+          repoFullName: 'acme/widgets',
+          prNumber: 7,
+          headSha,
+          status: 'clean',
+          reviewId: 71,
+        },
+        tracking,
+      ),
+      { kind: 'state_only', reason: 'ci_not_observed' },
+    );
+
+    assert.equal((await service.record(deliveredInput())).lifecycle, 'pending_verification');
+    assert.deepEqual(await coordinator.recordCi(ci('fail'), tracking), { kind: 'state_only', reason: 'ci_failed' });
+    assert.equal((await objectStore.get(subjectKey)).externalReview.verdictSubmissionEpoch, 1);
+    assert.deepEqual(await coordinator.recordCi(ci('pending'), tracking), {
+      kind: 'state_only',
+      reason: 'ci_pending',
+    });
+    assert.equal((await service.record(deliveredInput())).lifecycle, 'pending_verification');
+
+    const submitted = eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted');
+    assert.equal(submitted.length, 2, 'the accepted resubmission must append after the invalidating CI fact');
+    assert.notEqual(submitted[0].sourceEventId, submitted[1].sourceEventId);
+    assert.match(submitted[1].sourceEventId, /:e1:/);
+
+    const restarted = makeCoordinator();
+    assert.deepEqual(await restarted.recordCi(ci('pending'), tracking), {
+      kind: 'state_only',
+      reason: 'ci_pending',
+    });
+    assert.equal(
+      (await objectStore.get(subjectKey)).externalReview.pendingVerdict?.fingerprint.length,
+      24,
+      'the first post-restart collector pass must rebuild the accepted resubmission',
+    );
+
+    assert.deepEqual(await restarted.recordCi(ci('pass'), tracking), {
+      kind: 'state_only',
+      reason: 'pending_verdict_settled',
+    });
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_recorded').length, 1);
+  });
+
+  it('rebuilds a log-ahead submission before resubmitting after invalidation', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    let collectorClock = 12_000;
+    let failFirstSubmittedApply = true;
+    const repairingService = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector: {
+        async apply(event) {
+          if (event.kind === 'case.review_verdict_submitted' && failFirstSubmittedApply) {
+            failFirstSubmittedApply = false;
+            throw new Error('simulated pending projection crash');
+          }
+          await projector.apply(event);
+        },
+        rebuild: (key) => projector.rebuild(key),
+      },
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => ({ ok: true, reason: 'active' }),
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return { outcome: 'committed' };
+      },
+      now: () => 10_000,
+    });
+    const makeCoordinator = () =>
+      new ExternalReviewCoordinator({
+        repoConfigStore: { getByRepo: async () => config },
+        eventLog,
+        projector,
+        objectStore,
+        settlePendingVerdict: (key) => repairingService.settlePending(key),
+        now: () => ++collectorClock,
+        log: { info() {}, warn() {}, error() {} },
+      });
+    const tracking = { ...principal, userId: 'user-1' };
+    const ci = (aggregateBucket) => ({
+      repoFullName: 'acme/widgets',
+      prNumber: 7,
+      headSha,
+      prState: 'open',
+      aggregateBucket,
+      checks: [],
+    });
+    const coordinator = makeCoordinator();
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      tracking,
+    );
+
+    await assert.rejects(() => repairingService.record(deliveredInput()), /simulated pending projection crash/);
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+
+    await coordinator.recordCi(ci('fail'), tracking);
+    await coordinator.recordCi(ci('pending'), tracking);
+    assert.equal((await repairingService.record(deliveredInput())).lifecycle, 'pending_verification');
+
+    const submitted = eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted');
+    assert.equal(submitted.length, 2, 'repair must append the post-invalidation submission after the old durable fact');
+    assert.match(submitted[1].sourceEventId, /:e1:/);
+
+    const restarted = makeCoordinator();
+    await restarted.recordCi(ci('pending'), tracking);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict?.fingerprint.length, 24);
+    assert.deepEqual(await restarted.recordCi(ci('pass'), tracking), {
+      kind: 'state_only',
+      reason: 'pending_verdict_settled',
+    });
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_recorded').length, 1);
+  });
+
+  it('revalidates canonical reviewer, mode, and lifecycle before repairing a log-ahead submission', async (t) => {
+    const cases = [
+      {
+        name: 'reviewer reassigned',
+        expectedCode: 'wrong_principal',
+        event: {
+          kind: 'case.external_review_assigned',
+          payload: {
+            mode: 'maintainer_review',
+            cloudPolicy: 'optional',
+            reviewerCatId: 'opus5',
+            reviewerThreadId: 'thread-opus5',
+          },
+        },
+      },
+      {
+        name: 'policy changed to observe-only',
+        expectedCode: 'observe_only',
+        event: {
+          kind: 'case.external_review_assigned',
+          payload: {
+            mode: 'observe_only',
+            cloudPolicy: 'optional',
+            reviewerCatId: principal.catId,
+            reviewerThreadId: principal.threadId,
+          },
+        },
+      },
+      {
+        name: 'subject became terminal',
+        expectedCode: 'subject_terminal',
+        event: { kind: 'pr.closed', classification: 'state-changing', payload: {} },
+      },
+    ];
+
+    for (const testCase of cases) {
+      await t.test(testCase.name, async () => {
+        eventLog = new MemoryEventLog();
+        objectStore = new MemoryObjectStore();
+        projector = new CommunityProjector(eventLog, objectStore);
+        const repairingService = await createLogAheadSubmission();
+        await eventLog.append({
+          sourceEventId: `f168:probe:authorization:${testCase.expectedCode}`,
+          subjectKey,
+          classification: 'informational',
+          at: 11_500,
+          ...testCase.event,
+        });
+
+        await assert.rejects(() => repairingService.record(deliveredInput()), errorCode(testCase.expectedCode));
+        assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+        assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+      });
+    }
+  });
+
+  it('revalidates canonical action-lease custody before repairing a log-ahead submission', async (t) => {
+    const oldLease = { leaseId: 'lease-1', generation: 1 };
+    for (const testCase of [
+      { name: 'new canonical fence is required', initialLease: undefined, expectedCode: 'action_lease_required' },
+      {
+        name: 'changed canonical fence rejects stale input',
+        initialLease: oldLease,
+        expectedCode: 'action_lease_mismatch',
+      },
+    ]) {
+      await t.test(testCase.name, async () => {
+        eventLog = new MemoryEventLog();
+        objectStore = new MemoryObjectStore();
+        projector = new CommunityProjector(eventLog, objectStore);
+        const inputOverrides = testCase.initialLease ? { actionLeaseRef: testCase.initialLease } : {};
+        const repairingService = await createLogAheadSubmission(inputOverrides);
+        await eventLog.append({
+          sourceEventId: `f168:probe:authorization:${testCase.expectedCode}`,
+          subjectKey,
+          kind: 'case.external_review_assigned',
+          classification: 'informational',
+          payload: {
+            mode: 'maintainer_review',
+            cloudPolicy: 'optional',
+            reviewerCatId: principal.catId,
+            reviewerThreadId: principal.threadId,
+            actionLeaseRef: { leaseId: 'lease-2', generation: 2 },
+          },
+          at: 11_500,
+        });
+
+        await assert.rejects(
+          () => repairingService.record(deliveredInput(inputOverrides)),
+          errorCode(testCase.expectedCode),
+        );
+        assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+        assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+      });
+    }
+  });
+
+  it('fails closed when an ambiguous duplicate pending submission cannot rebuild', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      now: () => 13_000,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      { ...principal, userId: 'user-1' },
+    );
+
+    let failFirstSubmittedApply = true;
+    const unavailableRepairService = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector: {
+        async apply(event) {
+          if (event.kind === 'case.review_verdict_submitted' && failFirstSubmittedApply) {
+            failFirstSubmittedApply = false;
+            throw new Error('simulated pending projection crash');
+          }
+          await projector.apply(event);
+        },
+        async rebuild() {
+          throw new Error('projection rebuild unavailable');
+        },
+      },
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => ({ ok: true, reason: 'active' }),
+      completeActionLease: async () => ({ outcome: 'committed' }),
+      now: () => 10_000,
+    });
+
+    await assert.rejects(() => unavailableRepairService.record(deliveredInput()), /simulated pending projection crash/);
+    await assert.rejects(() => unavailableRepairService.record(deliveredInput()), errorCode('projection_unavailable'));
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+  });
+
+  it('does not report pending verification when apply returns without projecting the durable event', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      now: () => 14_000,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      { ...principal, userId: 'user-1' },
+    );
+    const nonProjectingService = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector: {
+        async apply() {},
+        rebuild: (key) => projector.rebuild(key),
+      },
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => ({ ok: true, reason: 'active' }),
+      completeActionLease: async () => ({ outcome: 'committed' }),
+      now: () => 10_000,
+    });
+
+    await assert.rejects(() => nonProjectingService.record(deliveredInput()), errorCode('projection_unavailable'));
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict, null);
+  });
+
+  it('converges concurrent identical resubmissions on one event or a typed retry', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    let collectorClock = 15_000;
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      settlePendingVerdict: (key) => service.settlePending(key),
+      now: () => ++collectorClock,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    const tracking = { ...principal, userId: 'user-1' };
+    const ci = (aggregateBucket) => ({
+      repoFullName: 'acme/widgets',
+      prNumber: 7,
+      headSha,
+      prState: 'open',
+      aggregateBucket,
+      checks: [],
+    });
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      tracking,
+    );
+    await service.record(deliveredInput());
+    await coordinator.recordCi(ci('fail'), tracking);
+    await coordinator.recordCi(ci('pending'), tracking);
+
+    const outcomes = await Promise.allSettled([service.record(deliveredInput()), service.record(deliveredInput())]);
+
+    const accepted = outcomes.filter((outcome) => outcome.status === 'fulfilled');
+    const retryable = outcomes.filter((outcome) => outcome.status === 'rejected');
+    assert.equal(accepted.length >= 1, true);
+    assert.equal(
+      accepted.every((outcome) => outcome.value.lifecycle === 'pending_verification'),
+      true,
+    );
+    assert.equal(
+      retryable.every(
+        (outcome) =>
+          outcome.reason instanceof ExternalReviewVerdictError && outcome.reason.code === 'projection_unavailable',
+      ),
+      true,
+    );
+    const submitted = eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted');
+    assert.equal(submitted.length, 2, 'the concurrent retry pair must share one post-invalidation event');
+    assert.match(submitted[1].sourceEventId, /:e1:/);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict?.fingerprint.length, 24);
+  });
+
+  it('keeps a stale pending-verdict lease as diagnosable waiting instead of an error loop', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    await objectStore.save(
+      projection({
+        cloudPolicy: 'optional',
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'pending', observedAt: 9_000 },
+        cloud: null,
+        wake: null,
+        actionLeaseRef: { leaseId: 'lease-1', generation: 3 },
+      }),
+    );
+    await service.record(deliveredInput({ actionLeaseRef: { leaseId: 'lease-1', generation: 3 } }));
+    preflightResult = { ok: false, reason: 'stale_generation' };
+    const warnings = [];
+    const errors = [];
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      settlePendingVerdict: (key) => service.settlePending(key),
+      now: () => 10_100,
+      log: {
+        info() {},
+        warn(fields, message) {
+          warnings.push({ fields, message });
+        },
+        error(fields, message) {
+          errors.push({ fields, message });
+        },
+      },
+    });
+
+    const result = await coordinator.recordCi(
+      {
+        repoFullName: 'acme/widgets',
+        prNumber: 7,
+        headSha,
+        prState: 'open',
+        aggregateBucket: 'pass',
+        checks: [],
+      },
+      { ...principal, userId: 'user-1' },
+    );
+
+    assert.deepEqual(result, { kind: 'state_only', reason: 'explicit_wait_required' });
+    assert.equal(errors.length, 0);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].fields.reason, 'stale_action_lease');
+    assert.equal(
+      eventLog.events.some((event) => event.kind === 'case.review_verdict_recorded'),
+      false,
+    );
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict.fingerprint.length > 0, true);
+  });
+
+  it('rejects a conflicting second verdict while one typed submission awaits verification', async () => {
+    await objectStore.save(
+      projection({
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'pending', observedAt: 9_000 },
+        wake: null,
+      }),
+    );
+    await service.record(deliveredInput());
+
+    await assert.rejects(
+      () => service.record(deliveredInput({ verdict: 'changes_requested', summary: 'A conflicting decision.' })),
+      errorCode('verdict_conflict'),
+    );
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+  });
+
+  it('repairs a pending-verdict projection when the event append won but projection apply crashed', async () => {
+    config = { ...config, cloudReviewPolicy: 'optional' };
+    objectStore.values.clear();
+    const coordinator = new ExternalReviewCoordinator({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      now: () => 9_000,
+      log: { info() {}, warn() {}, error() {} },
+    });
+    await coordinator.recordCloud(
+      { repoFullName: 'acme/widgets', prNumber: 7, headSha, status: 'clean', reviewId: 71 },
+      { ...principal, userId: 'user-1' },
+    );
+    let failOnce = true;
+    const repairingService = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector: {
+        async apply(event) {
+          if (event.kind === 'case.review_verdict_submitted' && failOnce) {
+            failOnce = false;
+            throw new Error('simulated pending projection crash');
+          }
+          await projector.apply(event);
+        },
+        rebuild: (key) => projector.rebuild(key),
+      },
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => ({ ok: true, reason: 'active' }),
+      completeActionLease: async () => ({ outcome: 'committed' }),
+      now: () => 10_000,
+    });
+
+    await assert.rejects(() => repairingService.record(deliveredInput()), /simulated pending projection crash/);
+    const replay = await repairingService.record(deliveredInput());
+
+    assert.equal(replay.lifecycle, 'pending_verification');
+    assert.equal(eventLog.events.filter((event) => event.kind === 'case.review_verdict_submitted').length, 1);
+    assert.equal((await objectStore.get(subjectKey)).externalReview.pendingVerdict.fingerprint.length, 24);
   });
 
   it('records explicit operator reminder provenance and increments the user-nudge metric once', async () => {
@@ -447,6 +1124,20 @@ describe('F168 ExternalReviewVerdictService', () => {
 
     await objectStore.save(projection({ lifecycle: 'awaiting_ci' }));
     await assert.rejects(() => service.record(deliveredInput()), errorCode('head_not_ready'));
+  });
+
+  it('rejects a submission when canonical CI already proves the HEAD insufficient', async () => {
+    await objectStore.save(
+      projection({
+        lifecycle: 'awaiting_ci',
+        ci: { headSha, headGeneration: 1, status: 'fail', observedAt: 9_000 },
+        cloud: null,
+        wake: null,
+      }),
+    );
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('head_not_ready'));
+    assert.equal(eventLog.events.length, 0);
   });
 });
 

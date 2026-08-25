@@ -14,8 +14,20 @@ export interface BallCustodyProbeEvaluator {
 }
 
 export interface BallCustodyWakeSender {
-  send(input: { task: TaskItem; projection: BallCustodyProjection; at: number }): Promise<{ messageId: string }>;
+  send(input: {
+    task: TaskItem;
+    projection: BallCustodyProjection;
+    at: number;
+  }): Promise<BallCustodyWakeAdmissionReceipt>;
 }
+
+export type BallCustodyWakeAdmissionReceipt =
+  | { readonly kind: 'admitted'; readonly messageId: string; readonly outcome: 'dispatched' | 'enqueued' }
+  | {
+      readonly kind: 'not_admitted';
+      readonly messageId: string;
+      readonly reason: 'persisted_message_unavailable' | 'trigger_unavailable' | 'queue_full' | 'invoke_failed';
+    };
 
 export interface BallCustodyProbeSchedulerOptions {
   readonly projectionStore: IBallCustodyProjectionStore;
@@ -162,7 +174,15 @@ export class BallCustodyProbeScheduler {
     }
 
     try {
-      await this.opts.wakeSender.send({ task, projection, at });
+      const admission = await this.opts.wakeSender.send({ task, projection, at });
+      if (admission.kind !== 'admitted') {
+        result.failed++;
+        this.opts.logger?.warn?.(
+          { taskId, messageId: admission.messageId, reason: admission.reason },
+          'F298: wake persisted but runtime admission was rejected; exact item remains retryable',
+        );
+        return;
+      }
       this.rememberDeliveredWake(task.id, blockedSinceAt, at);
       result.woken++;
     } catch (err) {

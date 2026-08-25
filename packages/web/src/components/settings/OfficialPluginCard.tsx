@@ -7,6 +7,7 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
+import { OfficialPluginHistoryImport } from './OfficialPluginHistoryImport';
 import {
   OfficialPluginOwnerAuthAction,
   OfficialPluginOwnerAuthDetails,
@@ -102,6 +103,24 @@ function guidance(plugin: OfficialPluginInfo, auth: OwnerAuthState | null): stri
   return '正在连接飞书会议纪要服务…';
 }
 
+function historyImportTarget(plugin: OfficialPluginInfo, ownerAuthConnected: boolean) {
+  const instance = plugin.instance;
+  if (
+    plugin.catalogId !== 'feishu-meeting-intake' ||
+    !instance ||
+    plugin.updateAvailable ||
+    !ownerAuthConnected ||
+    instance.activationState !== 'enabled' ||
+    instance.runtimeState !== 'healthy'
+  ) {
+    return undefined;
+  }
+  return {
+    instanceId: instance.pluginInstanceId,
+    expectedRevision: instance.lifecycleRevision,
+  };
+}
+
 export function OfficialPluginCard({
   plugin,
   busy,
@@ -134,6 +153,7 @@ export function OfficialPluginCard({
     ['stopped', 'crashed'].includes(plugin.instance.runtimeState) &&
     activation !== 'enabling' &&
     activation !== 'disabling';
+  const historyImport = historyImportTarget(plugin, ownerAuth.connected);
   return (
     <article className={settingsResourceCardClass}>
       <div className={`${settingsResourceRowClass} w-full`}>
@@ -207,6 +227,7 @@ export function OfficialPluginCard({
             {guidance(plugin, ownerAuth.auth)}
           </SettingsText>
           {plugin.ownerAuthAvailable && <OfficialPluginOwnerAuthDetails auth={ownerAuth.auth} />}
+          {historyImport && <OfficialPluginHistoryImport {...historyImport} />}
           {failed && !plugin.ownerAuthAvailable && !eventBusConflict && (
             <SettingsText as="p" tone="muted" className="mt-1">
               请确认飞书账号授权有效，再点“修复”。

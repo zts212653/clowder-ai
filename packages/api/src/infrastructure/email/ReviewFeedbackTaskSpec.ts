@@ -887,15 +887,21 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: ReviewFeedbackSignal, subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: ReviewFeedbackSignal, subjectKey: string, ctx: ExecuteContext) {
+        ctx.signal?.throwIfAborted();
         const { repairedTask } = signal;
 
         if (signal.validateRoutingRepairFresh && !(await signal.validateRoutingRepairFresh())) {
           return;
         }
+        ctx.signal?.throwIfAborted();
 
         const repairCommitted = await signal.commitRoutingRepair?.();
         if (repairCommitted === false) return;
+        ctx.signal?.throwIfAborted();
+        // Once the persist-first cursor advances, routing and durable wake admission
+        // are obligations of that cursor. Do not insert cancellation points until
+        // those effects settle or the feedback can be lost permanently.
         await signal.commitCursor();
         const routeResult = await opts.reviewFeedbackRouter.route(
           {
@@ -935,8 +941,8 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             sourceCategory: 'review',
             coalesceKey: `${subjectKey}:wait:${routeResult.catId || 'unassigned'}`,
           };
-          void Promise.resolve(
-            opts.invokeTrigger.trigger(
+          try {
+            await opts.invokeTrigger.trigger(
               routeResult.threadId,
               routeResult.catId as CatId,
               repairedTask.userId ?? '',
@@ -944,19 +950,20 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               routeResult.messageId,
               undefined,
               policy,
-            ),
-          ).catch((err) =>
+            );
+          } catch (err) {
             opts.log.warn(
               { err },
               `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
-            ),
-          );
+            );
+          }
         }
 
         // F208 AC-E2: distillation checkpoint on review-complete (best-effort, all approvals)
         if (opts.distillationCheckpoint) {
           const approvals = signal.newDecisions.filter((d) => d.state === 'APPROVED');
           for (const approver of approvals) {
+            ctx.signal?.throwIfAborted();
             try {
               await opts.distillationCheckpoint.onReviewComplete({
                 prNumber: signal.prNumber,
@@ -965,7 +972,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                 authorCatId: (repairedTask.ownerCatId ?? 'unknown') as string,
                 threadId: repairedTask.threadId,
               });
+              ctx.signal?.throwIfAborted();
             } catch {
+              ctx.signal?.throwIfAborted();
               opts.log.warn(
                 `[review-feedback] distillation checkpoint (review) failed for ${signal.repoFullName}#${signal.prNumber} reviewer=${approver.author}`,
               );

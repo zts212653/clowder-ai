@@ -285,6 +285,136 @@ Ball drop friction sample for scanner regression test.
     );
   });
 
+  it('normalizes external-knowledge dialects without rewriting legacy study files', async () => {
+    mkdirSync(join(docsDir, 'study'), { recursive: true });
+    mkdirSync(join(docsDir, 'discussions'), { recursive: true });
+    mkdirSync(join(docsDir, 'plans'), { recursive: true });
+    mkdirSync(join(docsDir, 'custom'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'study', 'memory-systems.md'),
+      `---
+doc_kind: study-note
+category: study
+topics: [Memory-Systems]
+tags: [memory-systems, Study, TencentDB-Agent-Memory]
+---
+
+# Memory Systems Study
+
+External memory system comparison notes.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'study', 'source-ledger.md'),
+      `---
+doc_kind: source-ledger
+tags: [source-audit]
+---
+
+# Source Ledger
+
+Primary-source ledger for a study package.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'discussions', 'openclaw-teardown.md'),
+      `---
+doc_kind: teardown
+topics: [OpenClaw]
+tags: [openclaw, external-project]
+---
+
+# OpenClaw Teardown
+
+Source-level external project teardown.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'discussions', 'retrieval-note.md'),
+      `---
+doc_kind: research-note
+topics: [retrieval]
+---
+
+# Retrieval Research Note
+
+Research stored alongside its discussion thread.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'plans', 'canonical-precedence.md'),
+      `---
+doc_kind: plan
+category: study
+tags: [compatibility-precedence]
+---
+
+# Canonical Plan
+
+Canonical doc_kind must win over the transitional category field.
+`,
+    );
+    writeFileSync(
+      join(docsDir, 'custom', 'legacy-study.md'),
+      `---
+category: study
+tags: [category-fallback]
+---
+
+# Legacy Study
+
+Compatibility category should work outside a recognized study path.
+`,
+    );
+
+    const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const store = new SqliteEvidenceStore(':memory:');
+    await store.initialize();
+    const builder = new IndexBuilder(store, docsDir);
+    await builder.rebuild();
+
+    const study = await store.getByAnchor('doc:study/memory-systems');
+    assert.ok(study, 'legacy study dialect should be indexed');
+    assert.equal(study.kind, 'research');
+    assert.equal(study.authority, 'candidate');
+    assert.ok(study.keywords?.includes('Memory-Systems'));
+    assert.ok(study.keywords?.includes('Study'));
+    assert.ok(study.keywords?.includes('TencentDB-Agent-Memory'));
+    assert.equal(
+      study.keywords?.filter((keyword) => keyword.toLowerCase() === 'memory-systems').length,
+      1,
+      'topics and tags should deduplicate case-insensitively',
+    );
+
+    const sourceLedger = await store.getByAnchor('doc:study/source-ledger');
+    assert.equal(sourceLedger?.kind, 'research', 'source-ledger is an external-knowledge artifact role');
+    assert.equal((await store.getByAnchor('doc:discussions/openclaw-teardown'))?.kind, 'research');
+    assert.equal((await store.getByAnchor('doc:discussions/retrieval-note'))?.kind, 'research');
+    assert.equal(
+      (await store.getByAnchor('doc:custom/legacy-study'))?.kind,
+      'research',
+      'category: study should remain a read-compatibility fallback',
+    );
+    assert.equal(
+      (await store.getByAnchor('doc:plans/canonical-precedence'))?.kind,
+      'plan',
+      'recognized doc_kind must win over compatibility category',
+    );
+
+    const results = await store.search('TencentDB-Agent-Memory Study', {
+      mode: 'lexical',
+      scope: 'docs',
+      limit: 5,
+    });
+    assert.ok(
+      results.some((result) => result.anchor === 'doc:study/memory-systems'),
+      'study tags should participate in lexical recall',
+    );
+
+    store.close();
+  });
+
   it('indexes architecture maps as architecture kind with path anchor', async () => {
     mkdirSync(join(docsDir, 'architecture'), { recursive: true });
     writeFileSync(

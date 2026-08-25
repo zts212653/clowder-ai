@@ -269,9 +269,14 @@ describe('TaskRunnerV2', () => {
     assert.equal(rows[0].outcome, 'RUN_FAILED');
   });
 
-  it('timeout does not cause concurrent reentry — overlap guard holds until execute settles', async () => {
-    let maxActive = 0;
-    let active = 0;
+  it('timeout aborts execute and holds overlap until cancellation cleanup settles', async () => {
+    let executionCount = 0;
+    let postTimeoutExternalIo = 0;
+    let abortObserved = false;
+    let releaseCancellationCleanup;
+    const cancellationCleanup = new Promise((resolve) => {
+      releaseCancellationCleanup = resolve;
+    });
     runner.register({
       id: 'reentry-test',
       profile: 'poller',
@@ -282,11 +287,25 @@ describe('TaskRunnerV2', () => {
       run: {
         overlap: 'skip',
         timeoutMs: 30,
-        execute: async () => {
-          active++;
-          if (active > maxActive) maxActive = active;
-          await new Promise((r) => setTimeout(r, 200));
-          active--;
+        execute: async (_signal, _subjectKey, ctx) => {
+          executionCount++;
+          if (!ctx.signal) {
+            await new Promise((r) => setTimeout(r, 80));
+            postTimeoutExternalIo++;
+            return;
+          }
+          await new Promise((resolve) => {
+            ctx.signal.addEventListener(
+              'abort',
+              () => {
+                abortObserved = true;
+                void cancellationCleanup.then(resolve);
+              },
+              { once: true },
+            );
+          });
+          ctx.signal.throwIfAborted();
+          postTimeoutExternalIo++;
         },
       },
       state: { runLedger: 'sqlite' },
@@ -294,18 +313,200 @@ describe('TaskRunnerV2', () => {
       enabled: () => true,
     });
 
-    // First trigger: will timeout after 30ms but execute runs for 200ms
+    // Timeout should abort the underlying execute, but the task-level overlap
+    // lock and terminal ledger must wait for its cancellation cleanup.
     const p1 = runner.triggerNow('reentry-test');
-    // Wait just past timeout but before execute finishes
-    await new Promise((r) => setTimeout(r, 60));
-    // Second trigger: should be blocked by overlap guard (execute still running)
-    const p2 = runner.triggerNow('reentry-test');
-    await Promise.all([p1, p2]);
+    await new Promise((r) => setTimeout(r, 45));
+    assert.equal(abortObserved, true, 'execute should observe the timeout abort');
+    assert.equal(ledger.query('reentry-test', 10).length, 0, 'timeout must not become terminal before cleanup');
 
-    assert.equal(maxActive, 1, 'should never have >1 concurrent execute for same task');
+    const p2 = runner.triggerNow('reentry-test');
+    await p2;
+    releaseCancellationCleanup();
+    await p1;
+
+    assert.equal(postTimeoutExternalIo, 0, 'aborted execute must not perform external I/O after timeout');
     const rows = ledger.query('reentry-test', 10);
     const skipRows = rows.filter((r) => r.outcome === 'SKIP_OVERLAP');
     assert.equal(skipRows.length, 1, 'second trigger should get SKIP_OVERLAP');
+    assert.equal(rows.filter((r) => r.outcome === 'RUN_FAILED').length, 1);
+
+    await runner.triggerNow('reentry-test');
+    assert.equal(executionCount, 2, 'next tick may run after cancellation cleanup settles');
+  });
+
+  it('records timeout failure when execute resolves gracefully from its abort handler', async () => {
+    runner.register({
+      id: 'graceful-abort-test',
+      profile: 'poller',
+      trigger: { type: 'interval', ms: 999999 },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'go', subjectKey: 'k' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 20,
+        execute: async (_signal, _subjectKey, ctx) =>
+          new Promise((resolve) => ctx.signal.addEventListener('abort', resolve, { once: true })),
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    await runner.triggerNow('graceful-abort-test');
+    const rows = ledger.query('graceful-abort-test', 10);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outcome, 'RUN_FAILED');
+    assert.match(rows[0].error_summary, /timed out after 20ms/);
+  });
+
+  it('lets completed side effects return and finishes the trigger bound to a delivered message after timeout', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const completed = [];
+    const settleAfterTimeout = async (value) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return value;
+    };
+    runner = new TaskRunnerV2({
+      logger: silentLogger,
+      ledger,
+      deliver: async ({ content }) => settleAfterTimeout(`msg:${content}`),
+      invokeTrigger: {
+        trigger: async () => settleAfterTimeout('dispatched'),
+      },
+    });
+    runner.setManagedCommandWakeRecovery(async () => settleAfterTimeout('recovered'));
+    runner.register({
+      id: 'completed-effect-timeout-test',
+      profile: 'poller',
+      trigger: { type: 'interval', ms: 999999 },
+      admission: {
+        gate: async () => ({
+          run: true,
+          workItems: ['deliver', 'trigger', 'wake', 'chain', 'unbound', 'detached'].map((subjectKey) => ({
+            signal: subjectKey,
+            subjectKey,
+          })),
+        }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 10,
+        execute: async (_signal, subjectKey, ctx) => {
+          if (subjectKey === 'deliver') {
+            completed.push(await ctx.deliver({ threadId: 'thread-1', content: subjectKey, userId: 'scheduler' }));
+            return;
+          }
+          if (subjectKey === 'trigger') {
+            completed.push(await ctx.invokeTrigger.trigger('thread-1', 'codex', 'user-1', 'wake', 'msg-existing'));
+            return;
+          }
+          if (subjectKey === 'wake') {
+            completed.push(await ctx.managedCommandWakeRecovery('managed-task-1'));
+            return;
+          }
+          if (subjectKey === 'detached') {
+            void ctx.invokeTrigger
+              .trigger('thread-1', 'codex', 'user-1', 'wake', 'msg-existing')
+              .then((outcome) => completed.push(`detached:${outcome}`))
+              .catch(() => {});
+            return;
+          }
+          const messageId = await ctx.deliver({
+            threadId: 'thread-1',
+            content: subjectKey,
+            userId: 'scheduler',
+          });
+          if (subjectKey === 'unbound') {
+            await assert.rejects(
+              () => ctx.invokeTrigger.trigger('thread-1', 'codex', 'user-1', 'wake', 'msg-from-another-item'),
+              /timed out/,
+            );
+            completed.push('unbound-trigger-blocked');
+            return;
+          }
+          const triggerOutcome = await ctx.invokeTrigger.trigger('thread-1', 'codex', 'user-1', 'wake', messageId);
+          completed.push(`${messageId}:${triggerOutcome}`);
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    });
+
+    await runner.triggerNow('completed-effect-timeout-test');
+
+    assert.deepEqual(completed, [
+      'msg:deliver',
+      'dispatched',
+      'recovered',
+      'msg:chain:dispatched',
+      'unbound-trigger-blocked',
+      'detached:dispatched',
+    ]);
+    assert.equal(
+      ledger.query('completed-effect-timeout-test', 10).filter((row) => row.outcome === 'RUN_FAILED').length,
+      6,
+      'timeout remains terminal truth even when the completed effect returns normally',
+    );
+  });
+
+  it('restart after timeout does not leave a zombie execution beside the new runner', async () => {
+    let oldRunnerIo = 0;
+    const oldTask = {
+      id: 'restart-timeout-test',
+      profile: 'poller',
+      trigger: { type: 'interval', ms: 999999 },
+      admission: {
+        gate: async () => ({ run: true, workItems: [{ signal: 'old', subjectKey: 'k' }] }),
+      },
+      run: {
+        overlap: 'skip',
+        timeoutMs: 25,
+        execute: async (_signal, _subjectKey, ctx) => {
+          const timer = setInterval(() => oldRunnerIo++, 5);
+          await new Promise((resolve) => {
+            ctx.signal.addEventListener(
+              'abort',
+              () => {
+                clearInterval(timer);
+                setTimeout(resolve, 10);
+              },
+              { once: true },
+            );
+          });
+          ctx.signal.throwIfAborted();
+        },
+      },
+      state: { runLedger: 'sqlite' },
+      outcome: { whenNoSignal: 'drop' },
+      enabled: () => true,
+    };
+    runner.register(oldTask);
+    await runner.triggerNow(oldTask.id);
+    runner.stop();
+
+    const ioAfterOldRunnerStopped = oldRunnerIo;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(oldRunnerIo, ioAfterOldRunnerStopped, 'cancelled execution must stay stopped across restart');
+
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    runner = new TaskRunnerV2({ logger: silentLogger, ledger });
+    let newRunnerExecutions = 0;
+    runner.register({
+      ...oldTask,
+      run: {
+        ...oldTask.run,
+        timeoutMs: 5_000,
+        execute: async () => {
+          newRunnerExecutions++;
+        },
+      },
+    });
+    await runner.triggerNow(oldTask.id);
+    assert.equal(newRunnerExecutions, 1);
+    assert.equal(oldRunnerIo, ioAfterOldRunnerStopped, 'new runner must not revive old execution work');
   });
 
   it('actor resolver sets assigned_cat_id in ledger when task has actor spec', async () => {

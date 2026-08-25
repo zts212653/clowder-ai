@@ -300,6 +300,9 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.match(sop.instructions, /sop-trace-eval/, 'sop selector kind');
     assert.match(sop.instructions, /sopDefinitionId/, 'sop sopDefinitionId field');
     assert.match(sop.instructions, /trace/, 'sop trace field');
+    assert.match(sop.instructions, /diffContext/, 'sop exact diff context field');
+    assert.match(sop.instructions, /designGateReviewPacket/, 'sop design-gate review packet field');
+    assert.match(sop.instructions, /targetedSelfCheckReceipts/, 'sop exact-HEAD self-check receipt field');
     assert.doesNotMatch(sop.instructions, /snapshotName.*attributionName/s, 'sop does NOT mention a2a refs');
     assert.doesNotMatch(sop.instructions, /capability-wakeup-trial-window/, 'sop does NOT mention cw selector');
     assert.doesNotMatch(sop.instructions, /memory-recall-snapshot/, 'sop does NOT mention memory selector');

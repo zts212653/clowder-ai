@@ -41,6 +41,7 @@ import {
 } from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
+import { readAuthoritativeHash, readAuthoritativeMembers } from './redis-pipeline-reply.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
 const CLI_EFFORT_VALUE_SET = new Set<string>(CLI_EFFORT_VALUES);
@@ -432,6 +433,55 @@ export class RedisThreadStore implements IThreadStore {
 
     // Sort by lastMessageAt descending (most recent first)
     result.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    return result;
+  }
+
+  /**
+   * F297 AC-B3: pipeline 批量读，把 2×T 次串行往返压成 2 个 pipeline stage。
+   * 排序契约与单条版本一致（lastMessageAt 降序）—— F297 的 done/error 依赖 `[0]` 是最近一次回应。
+   */
+  async getParticipantsWithActivityBatch(
+    threadIds: readonly string[],
+  ): Promise<Map<string, ThreadParticipantActivity[]>> {
+    const result = new Map<string, ThreadParticipantActivity[]>();
+    if (threadIds.length === 0) return result;
+
+    const participantsPipeline = this.redis.pipeline();
+    for (const threadId of threadIds) participantsPipeline.smembers(ThreadKeys.participants(threadId));
+    const participantsReplies = (await participantsPipeline.exec()) ?? [];
+
+    // R10 / cloud R11 P1：两段 pipeline 以前都用 `[, x] = replies[i] ?? []` 丢掉 entry error，
+    // 短 reply 也静默变成空。读失败当时**碰巧**产出 idle（安全方向），但那是碰巧安全不是
+    // 显式安全：一次读故障会让真实回过话的行被显示成 idle，且上层无从得知知识不完整。
+    // 判据统一到 readAuthoritative*，让故障显式抛出，由 composeSidebarPresence 封 idle。
+    const withParticipants: Array<{ threadId: string; participants: CatId[] }> = [];
+    threadIds.forEach((threadId, index) => {
+      const members = readAuthoritativeMembers(participantsReplies[index], `thread participants ${threadId}`);
+      const participants = members as CatId[];
+      if (participants.length === 0) result.set(threadId, []);
+      else withParticipants.push({ threadId, participants });
+    });
+    if (withParticipants.length === 0) return result;
+
+    const activityPipeline = this.redis.pipeline();
+    for (const { threadId } of withParticipants) activityPipeline.hgetall(ThreadKeys.activity(threadId));
+    const activityReplies = (await activityPipeline.exec()) ?? [];
+
+    withParticipants.forEach(({ threadId, participants }, index) => {
+      // 权威空 hash（从未记录过 activity）→ 所有 cat lastMessageAt=0 → idle，这是正确的。
+      const activityData = readAuthoritativeHash(activityReplies[index], `thread activity ${threadId}`) ?? {};
+      const entries: ThreadParticipantActivity[] = participants.map((catId) => {
+        const healthyRaw = activityData[`${catId}:healthy`];
+        return {
+          catId,
+          lastMessageAt: parseInt(activityData[`${catId}:lastMessageAt`] ?? '0', 10),
+          messageCount: parseInt(activityData[`${catId}:messageCount`] ?? '0', 10),
+          lastResponseHealthy: healthyRaw === undefined ? undefined : healthyRaw === '1',
+        };
+      });
+      entries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+      result.set(threadId, entries);
+    });
     return result;
   }
 

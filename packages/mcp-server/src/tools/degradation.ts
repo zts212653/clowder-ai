@@ -5,8 +5,8 @@
  *        declaratively, with same behavior.
  * AC-E2: every write-class callback tool declares an explicit policy
  *        (`none` is allowed; explicitness > silent default).
- * AC-E3: degradation only fires on 401 with degradable reason (expired /
- *        unknown_invocation). 5xx and other transient errors stay with
+ * AC-E3: degradation only fires on 401 unknown_invocation. Exact terminal
+ *        dispositions are authoritative and never route through fallback. 5xx and other transient errors stay with
  *        the callback-retry layer.
  * AC-E4: successful fallback marks its JSON payload with DEGRADED:true so
  *        callers / dashboards can detect fallback mode.
@@ -21,12 +21,12 @@ import type { ToolResult } from './file-tools.js';
 const KNOWN_REASONS: ReadonlySet<CallbackAuthFailureReason> = new Set(CALLBACK_AUTH_FAILURE_REASONS);
 
 /**
- * Degradable reasons: token has stopped working through expiry/registry loss.
+ * Degradable reasons: registry loss means no authoritative lifecycle state is available.
  * Distinct from `invalid_token` (likely client bug) and `stale_invocation`
  * (succeeded but superseded — fallback would re-create stale state).
  * Mirrors the set previously hardcoded in callback-tools.ts.
  */
-const DEGRADABLE_AUTH_REASONS: ReadonlySet<CallbackAuthFailureReason> = new Set(['expired', 'unknown_invocation']);
+const DEGRADABLE_AUTH_REASONS: ReadonlySet<CallbackAuthFailureReason> = new Set(['unknown_invocation']);
 
 function parseAuthFailureReason(errorText: string): CallbackAuthFailureReason | undefined {
   const match = errorText.match(/reason\s*[:=]\s*([a-z_]+)/i);
@@ -57,7 +57,7 @@ export interface WithDegradationOptions {
  *   primary success                            → return as-is
  *   primary fail, non-auth (5xx etc.)          → return as-is (callback-retry layer's domain)
  *   primary fail, auth but non-degradable      → return as-is (invalid_token, stale_invocation)
- *   primary fail, degradable (expired/unknown) →
+ *   primary fail, degradable (unknown only)    →
  *     policy.kind = 'none'   → return original (caller surfaces 401)
  *     policy.kind = 'custom' → run degrade, mark DEGRADED:true on success
  */

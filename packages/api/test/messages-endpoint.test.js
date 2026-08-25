@@ -76,6 +76,87 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('F247 F5 hydrates a durable cloud outbound receipt from its exact source without copying the body', async () => {
+    const source = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex-sol',
+      content: 'Please inspect the source-bound transport behavior',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+      threadId: 'thread-cloud-audit',
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
+      mentions: [],
+      timestamp: 1_100,
+      threadId: 'thread-cloud-audit',
+      replyTo: source.id,
+      source: {
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: '☁️',
+        meta: {
+          presentation: 'system_notice',
+          noticeTone: 'info',
+          cloudBridgeOutboundReceipt: {
+            v: 1,
+            sourceMessageId: source.id,
+            sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
+            dispatchInvocationId: 'inv-cloud-1',
+            targetCatId: 'gpt-pro',
+            status: 'sent',
+            transport: 'host',
+            hostMessageId: 'host-message-1',
+            idempotency: { keyKind: 'source_message_id', disposition: 'fresh' },
+          },
+        },
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-cloud-audit' });
+    const body = JSON.parse(res.body);
+    const receipt = body.messages.find((message) => message.source?.connector === 'cloud-bridge-status');
+    assert.equal(receipt.replyTo, source.id);
+    assert.deepEqual(receipt.replyPreview, {
+      senderCatId: 'codex-sol',
+      content: 'Please inspect the source-bound transport behavior',
+    });
+    assert.equal(receipt.content.includes('Please inspect the source-bound transport behavior'), false);
+  });
+
+  it('F247 F5 never hydrates a reply preview from another thread even if a legacy receipt is malformed', async () => {
+    const privateSource = messageStore.append({
+      userId: 'default-user',
+      catId: 'codex-sol',
+      content: 'private thread body must never cross the preview boundary',
+      mentions: [],
+      timestamp: 1_000,
+      threadId: 'thread-private-source',
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'legacy malformed cloud receipt',
+      mentions: [],
+      timestamp: 1_100,
+      threadId: 'thread-public-receipt',
+      replyTo: privateSource.id,
+      source: {
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: '☁️',
+        meta: { presentation: 'system_notice', noticeTone: 'info' },
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-public-receipt' });
+    const receipt = res.json().messages.find((message) => message.source?.connector === 'cloud-bridge-status');
+    assert.equal(receipt.replyPreview, undefined);
+    assert.equal(JSON.stringify(receipt).includes('private thread body'), false);
+  });
+
   it('renders an authored queued cat seed without exposing queued user or system work', async () => {
     messageStore.append({
       userId: 'default-user',

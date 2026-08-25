@@ -31,6 +31,35 @@ async function waitForState(probe, expectedState, { timeoutMs = 5_000, settleMs 
   return false;
 }
 
+function waitForMarker(stream, marker, timeoutMs = 5_000) {
+  return new Promise((resolve, reject) => {
+    let buffered = '';
+    const cleanup = () => {
+      clearTimeout(timeout);
+      stream.off('data', onData);
+      stream.off('close', onClose);
+    };
+    const onData = (chunk) => {
+      buffered += chunk.toString();
+      if (buffered.includes(marker)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error(`stream closed before marker: ${marker}`));
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`timed out waiting for marker: ${marker}`));
+    }, timeoutMs);
+
+    stream.on('data', onData);
+    stream.once('close', onClose);
+  });
+}
+
 test('new probe starts in active state', () => {
   const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
   assert.equal(probe.getState(), 'active');
@@ -159,38 +188,50 @@ test(
   { skip: process.platform === 'win32' && 'child CPU detection requires ps (Unix only)' },
   async () => {
     const { spawn } = await import('node:child_process');
-    // Spawn a parent that is idle but has a CPU-busy child.
-    // Parent: just waits (idle CPU). Child: infinite loop (busy CPU).
+    // Start with an idle parent and establish a flat CPU baseline before asking
+    // it to spawn the busy child. Starting both processes before the probe made
+    // the first sample compare cumulative startup CPU against zero: the test
+    // could pass on parent startup alone, or miss the 50ms growth threshold when
+    // the child was CPU-starved by the full gate.
     // LL-055: child carries its own deadline so it can't outlive the test
     // even if parent is SIGKILL'd before its SIGTERM handler fires.
     // macOS lacks PR_SET_PDEATHSIG, so a parent's death does not auto-kill the child;
     // without this self-suicide, every aborted test run leaks a CPU-burning orphan.
     const parent = spawn(
-      'node',
+      process.execPath,
       [
         '-e',
         `const { spawn } = require('child_process');
-       const c = spawn('node', ['-e', 'const end=Date.now()+10000;while(Date.now()<end){}'], { stdio: 'ignore' });
-       process.on('SIGTERM', () => { c.kill(); process.exit(0); });
+       let c = null;
+       process.stdin.once('data', () => {
+         c = spawn(process.execPath, ['-e', 'const end=Date.now()+12000;while(Date.now()<end){}'], { stdio: 'ignore' });
+         process.stdout.write('child-started\\n');
+       });
+       process.on('SIGTERM', () => { c?.kill(); process.exit(0); });
        setInterval(() => {}, 60000);`,
       ],
-      { stdio: 'ignore' },
+      { stdio: ['pipe', 'pipe', 'ignore'] },
     );
 
     let probe = null;
     try {
-      // Give child time to start burning CPU
-      await new Promise((r) => setTimeout(r, 300));
-
-      probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
+      probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 500 });
       probe.start();
 
-      const reachedBusySilent = await waitForState(probe, 'busy-silent');
+      const reachedIdleSilent = await waitForState(probe, 'idle-silent');
+      assert.ok(reachedIdleSilent, `idle parent should establish a flat baseline, got ${probe.getState()}`);
+
+      const childStarted = waitForMarker(parent.stdout, 'child-started');
+      parent.stdin.write('start-child\n');
+      await childStarted;
+
+      const reachedBusySilent = await waitForState(probe, 'busy-silent', { timeoutMs: 8_000 });
       const state = probe.getState();
       assert.ok(reachedBusySilent, `parent with busy child should reach busy-silent, got ${state}`);
       assert.equal(state, 'busy-silent', `parent with busy child should be busy-silent, got ${state}`);
     } finally {
       probe?.stop();
+      parent.stdin.destroy();
       parent.kill('SIGTERM');
     }
   },

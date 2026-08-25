@@ -14,13 +14,17 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
 import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
 import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput, IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
-import type { InvocationQueue } from './InvocationQueue.js';
-import { QueuedMessageCustodyStartupReconciler } from './QueuedMessageCustodyStartupReconciler.js';
+import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import {
+  type QueueCustodyResumeScope,
+  QueuedMessageCustodyStartupReconciler,
+} from './QueuedMessageCustodyStartupReconciler.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
 export interface StartupSweepResult {
@@ -33,6 +37,8 @@ export interface StartupSweepResult {
   notifiedThreads: number;
   queueEntriesRestored: number;
   queueEntriesResumed: number;
+  /** Durable Queue scopes that remain eligible after reconciliation, whether resumed here or by the caller. */
+  queueResumeScopes: QueueCustodyResumeScope[];
   queueMessagesBackfilled: number;
   queueMessagesTerminalized: number;
   durationMs: number;
@@ -67,7 +73,7 @@ const RECONCILER_SOURCE: ConnectorSource = {
 
 export interface StartupReconcilerDeps {
   invocationRecordStore: IInvocationRecordStore;
-  /** Durable child lifecycle truth used after callback-auth state has expired. */
+  /** Durable child lifecycle truth used to reconcile callback-auth projection state. */
   turnExecutionStore?: ITurnExecutionStore;
   taskProgressStore: TaskProgressStore;
   log: ReconcilerLog;
@@ -81,8 +87,12 @@ export interface StartupReconcilerDeps {
   ballCustody?: IBallCustodyIngest;
   /** F254: exact in-memory projection rebuilt from durable queued-message custody. */
   invocationQueue?: InvocationQueue;
+  /** F298: exact A2A replacement fence shared with live Queue admission. */
+  a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
   /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
   resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
+  /** Resume a durable exact-group retirement before any later entry in that scope may dispatch. */
+  resumePrestartRetirement?: (entries: readonly QueueEntry[]) => Promise<boolean>;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
@@ -112,6 +122,7 @@ export class StartupReconciler {
         notifiedThreads: 0,
         queueEntriesRestored: 0,
         queueEntriesResumed: 0,
+        queueResumeScopes: [],
         queueMessagesBackfilled: 0,
         queueMessagesTerminalized: 0,
         durationMs: Date.now() - start,
@@ -135,9 +146,27 @@ export class StartupReconciler {
           new Set(queueCustodyRecovery.legacyVisibilityFallbackMessageIds),
         ))
       : await this.recoverOrphanedQueuedMessages(affectedThreads);
+    const blockedResumeScopes = new Set<string>();
+    for (const entries of queueCustodyRecovery?.prestartRetirements ?? []) {
+      const first = entries[0];
+      if (!first) continue;
+      const scopeKey = `${first.threadId}\u0000${first.userId}`;
+      try {
+        const retired = (await this.deps.resumePrestartRetirement?.(entries)) ?? false;
+        if (!retired) blockedResumeScopes.add(scopeKey);
+      } catch (err) {
+        blockedResumeScopes.add(scopeKey);
+        this.deps.log.warn(
+          `[startup-reconciler] Failed to resume durable pre-start retirement ${first.prestartRetirement?.id}: ${String(err)}`,
+        );
+      }
+    }
+    const queueResumeScopes = (queueCustodyRecovery?.resumeScopes ?? []).filter(
+      (scope) => !blockedResumeScopes.has(`${scope.threadId}\u0000${scope.userId}`),
+    );
     let queueEntriesResumed = 0;
-    if (queueCustodyRecovery && this.deps.resumeQueue) {
-      for (const scope of queueCustodyRecovery.resumeScopes) {
+    if (this.deps.resumeQueue) {
+      for (const scope of queueResumeScopes) {
         try {
           await this.deps.resumeQueue(scope.threadId, scope.userId);
           queueEntriesResumed += 1;
@@ -171,6 +200,7 @@ export class StartupReconciler {
       notifiedThreads,
       queueEntriesRestored: queueCustodyRecovery?.entriesRestored ?? 0,
       queueEntriesResumed,
+      queueResumeScopes,
       queueMessagesBackfilled: queueCustodyRecovery?.messagesBackfilled ?? 0,
       queueMessagesTerminalized: queueCustodyRecovery?.messagesTerminalized ?? 0,
       durationMs,
@@ -380,6 +410,9 @@ export class StartupReconciler {
     const reconciler = new QueuedMessageCustodyStartupReconciler({
       invocationRecordStore: this.deps.invocationRecordStore,
       ...(this.deps.turnExecutionStore ? { turnExecutionStore: this.deps.turnExecutionStore } : {}),
+      ...(this.deps.a2aDispatchDispositionService
+        ? { a2aDispatchDispositionService: this.deps.a2aDispatchDispositionService }
+        : {}),
       invocationQueue,
       messageStore: messageStore as IMessageStore,
       log: this.deps.log,

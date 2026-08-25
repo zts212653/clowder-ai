@@ -4,7 +4,7 @@ import type { SignalRouteStore } from '../signal-intake/SignalRouteStore.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.js';
-import type { ExternalPluginProcessAdapter } from './external-runtime/types.js';
+import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import { HostBrokerControlPlane } from './host-broker/control-plane.js';
 import { createEventsPublishBrokerHandler } from './host-broker/events-publish-handler.js';
 import { FileHostBrokerStore } from './host-broker/stores.js';
@@ -23,12 +23,14 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly routes: SignalRouteStore;
   readonly intakes: MeetingIntakeStore;
   readonly processes?: ExternalPluginProcessAdapter;
+  readonly packages?: VerifiedPluginPackageLocator;
   readonly now?: () => number;
 }
 
 export interface DormantPluginRuntimeRecovery {
   readonly brokerSessions: number;
   readonly inventoryInstances: number;
+  readonly resumeRequested: number;
 }
 
 export interface DormantPluginRuntimeComposition {
@@ -39,10 +41,16 @@ export interface DormantPluginRuntimeComposition {
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: ExternalPluginRuntimeSupervisor;
   readonly lifecycle: ExternalPluginLifecycleService;
-  readonly packages: FilesystemVerifiedPluginPackageLocator;
+  readonly packages: VerifiedPluginPackageLocator;
   recoverAfterRestart(): Promise<DormantPluginRuntimeRecovery>;
   shutdown(reason?: string): Promise<void>;
 }
+
+// External runtimes must finish their own bounded source-readiness checks before
+// broker.ready. The published Feishu intake can spend up to 30 seconds on each
+// event source and lark-cli read command, so the Host policy must cover that
+// honest startup path while remaining bounded.
+export const EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS = 4 * 60_000;
 
 export function resolvePluginRuntimePersistencePaths(projectRoot: string): PluginRuntimePersistencePaths {
   const root = resolve(projectRoot, '.cat-cafe', 'plugin-host');
@@ -84,13 +92,15 @@ export function createDormantPluginRuntimeComposition(
         ...(options.now === undefined ? {} : { now: options.now }),
       }),
     ],
+    preActiveTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
-  const packages = new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
+  const packages = options.packages ?? new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot);
   const supervisor = new ExternalPluginRuntimeSupervisor({
     inventory: inventoryStore,
     broker,
     packages,
+    handshakeTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.processes === undefined ? {} : { processes: options.processes }),
     ...(options.now === undefined ? {} : { now: options.now }),
   });
@@ -112,8 +122,12 @@ export function createDormantPluginRuntimeComposition(
     async recoverAfterRestart() {
       await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
       const brokerSessions = await supervisor.recoverAfterRestart();
-      const inventoryInstances = await lifecycle.recoverAfterRestart();
-      return { brokerSessions, inventoryInstances };
+      const inventoryRecovery = await lifecycle.recoverAfterRestart();
+      return {
+        brokerSessions,
+        inventoryInstances: inventoryRecovery.recoveredInstances,
+        resumeRequested: inventoryRecovery.resumeRequested,
+      };
     },
     shutdown: (reason = 'host_shutdown') => supervisor.stopAll(reason),
   };

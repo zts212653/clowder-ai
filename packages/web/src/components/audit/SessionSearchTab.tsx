@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
 
@@ -18,7 +18,13 @@ interface SearchHit {
 
 export interface SessionSearchTabProps {
   threadId: string;
-  onViewSession?: (sessionId: string) => void;
+  onViewSession?: (sessionId: string, sourceThreadId: string) => void;
+  onViewInvocation?: (sessionId: string, invocationId: string, sourceThreadId: string) => void;
+}
+
+interface SearchResultSet {
+  threadId: string;
+  hits: SearchHit[];
 }
 
 const KIND_BADGE: Record<string, { bg: string; text: string }> = {
@@ -26,33 +32,53 @@ const KIND_BADGE: Record<string, { bg: string; text: string }> = {
   event: { bg: 'bg-cafe-surface-elevated', text: 'text-cafe-secondary' },
 };
 
-export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabProps) {
+export function SessionSearchTab({ threadId, onViewSession, onViewInvocation }: SessionSearchTabProps) {
   const ime = useIMEGuard();
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'both' | 'digests' | 'transcripts'>('both');
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [resultSet, setResultSet] = useState<SearchResultSet | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const activeThreadIdRef = useRef(threadId);
+  const requestGenerationRef = useRef(0);
+  activeThreadIdRef.current = threadId;
+
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+    setResultSet(null);
+    setLoading(false);
+    setError(false);
+    return () => {
+      requestGenerationRef.current += 1;
+    };
+  }, [threadId]);
 
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;
+    const requestThreadId = threadId;
+    const requestGeneration = requestGenerationRef.current + 1;
+    requestGenerationRef.current = requestGeneration;
+    const isCurrentRequest = () =>
+      activeThreadIdRef.current === requestThreadId && requestGenerationRef.current === requestGeneration;
     setLoading(true);
     setError(false);
     try {
       const q = encodeURIComponent(query.trim());
-      const res = await apiFetch(`/api/threads/${threadId}/sessions/search?q=${q}&scope=${scope}`);
+      const res = await apiFetch(`/api/threads/${requestThreadId}/sessions/search?q=${q}&scope=${scope}`);
       if (!res.ok) {
-        setError(true);
+        if (isCurrentRequest()) setError(true);
         return;
       }
       const data = (await res.json()) as { hits: SearchHit[] };
-      setHits(data.hits);
+      if (isCurrentRequest()) setResultSet({ threadId: requestThreadId, hits: data.hits });
     } catch {
-      setError(true);
+      if (isCurrentRequest()) setError(true);
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [threadId, query, scope]);
+
+  const visibleResultSet = resultSet?.threadId === threadId ? resultSet : null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,14 +126,14 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
       {loading && <div className="text-xs text-cafe-muted py-2">搜索中...</div>}
       {error && <div className="text-xs text-conn-red-text py-2">搜索失败</div>}
 
-      {hits !== null &&
+      {visibleResultSet !== null &&
         !loading &&
         !error &&
-        (hits.length === 0 ? (
+        (visibleResultSet.hits.length === 0 ? (
           <div className="text-xs text-cafe-muted py-2">无匹配结果</div>
         ) : (
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {hits.map((hit, i) => {
+            {visibleResultSet.hits.map((hit, i) => {
               const badge = KIND_BADGE[hit.kind] ?? KIND_BADGE.event;
               return (
                 <div
@@ -121,7 +147,13 @@ export function SessionSearchTab({ threadId, onViewSession }: SessionSearchTabPr
                     <button
                       type="button"
                       data-testid="search-result-session"
-                      onClick={() => onViewSession?.(hit.sessionId)}
+                      onClick={() => {
+                        if (hit.pointer.invocationId && onViewInvocation) {
+                          onViewInvocation(hit.sessionId, hit.pointer.invocationId, visibleResultSet.threadId);
+                        } else {
+                          onViewSession?.(hit.sessionId, visibleResultSet.threadId);
+                        }
+                      }}
                       className="font-mono text-conn-blue-text hover:text-conn-blue-text hover:underline"
                     >
                       {hit.sessionId}

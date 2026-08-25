@@ -1,6 +1,8 @@
 'use client';
 
 import { type ConnectorSource, isPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
+import { useState } from 'react';
+import { TransferTargetPicker } from '@/components/TransferTargetPicker';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
 import { AudioBlock } from './AudioBlock';
 import { CallbackAuthFailureBlock } from './CallbackAuthFailureBlock';
@@ -18,7 +20,54 @@ import { InteractiveBlockGroup } from './InteractiveBlockGroup';
 import { MediaGalleryBlock } from './MediaGalleryBlock';
 import { PersonMemoryProposalCard } from './PersonMemoryProposalCard';
 import { isProposalCardBlock, ProposalCard } from './ProposalCard';
+import { RichBlockForwardButton } from './RichBlockForwardButton';
 import { isScheduleMutationProposalCardBlock, ScheduleMutationProposalCard } from './ScheduleMutationProposalCard';
+
+const RICH_BLOCK_OVERLAY_ACTIONS_CLASS =
+  'pointer-events-none absolute right-2 top-2 z-20 flex translate-y-1 gap-0.5 rounded-lg border border-cafe bg-cafe-surface/90 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-150 group-hover/rich-block:pointer-events-auto group-hover/rich-block:translate-y-0 group-hover/rich-block:opacity-100 group-focus-within/rich-block:pointer-events-auto group-focus-within/rich-block:translate-y-0 group-focus-within/rich-block:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:translate-y-0 [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
+
+const RICH_BLOCK_FLOW_ACTIONS_CLASS =
+  'pointer-events-none grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-150 group-hover/rich-block:pointer-events-auto group-hover/rich-block:grid-rows-[1fr] group-hover/rich-block:opacity-100 group-focus-within/rich-block:pointer-events-auto group-focus-within/rich-block:grid-rows-[1fr] group-focus-within/rich-block:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:grid-rows-[1fr] [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
+
+function RichBlockForwardActions({
+  blocks,
+  onForward,
+  layout = 'overlay',
+}: {
+  blocks: readonly RichBlock[];
+  onForward: (blockId: string) => void;
+  layout?: 'overlay' | 'flow';
+}) {
+  const actions = blocks.map((block, index) => (
+    <RichBlockForwardButton
+      key={block.id}
+      block={block}
+      groupedIndex={blocks.length > 1 ? index : undefined}
+      onForward={onForward}
+    />
+  ));
+
+  if (layout === 'flow') {
+    return (
+      <div data-testid="rich-block-forward-actions" data-quote-exclude className={RICH_BLOCK_FLOW_ACTIONS_CLASS}>
+        <div className="min-h-0 overflow-hidden">
+          <div
+            data-testid="rich-block-forward-action-dock"
+            className="ml-auto mt-1 flex w-fit max-w-full flex-wrap justify-end gap-0.5 rounded-lg border border-cafe bg-cafe-surface/90 p-0.5 shadow-sm backdrop-blur-sm"
+          >
+            {actions}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="rich-block-forward-actions" data-quote-exclude className={RICH_BLOCK_OVERLAY_ACTIONS_CLASS}>
+      {actions}
+    </div>
+  );
+}
 
 function RichCardRenderer({
   block,
@@ -101,6 +150,41 @@ function RichBlockRenderer({
         </div>
       );
   }
+}
+
+/** A forwarded Rich Block is evidence, not a new execution surface. */
+function ReadOnlyRichBlockRenderer({ block }: { block: RichBlock }) {
+  if (block.kind === 'card') {
+    return <CardBlock block={{ ...block, actions: undefined, meta: undefined }} />;
+  }
+  if (block.kind === 'interactive') {
+    return (
+      <CardBlock
+        block={{
+          id: block.id,
+          kind: 'card',
+          v: 1,
+          title: block.title ?? '交互选项',
+          bodyMarkdown: block.description,
+          fields: block.options.map((option) => ({ label: option.label, value: option.description ?? '' })),
+        }}
+      />
+    );
+  }
+  if (block.kind === 'html_widget') {
+    return (
+      <CardBlock
+        block={{
+          id: block.id,
+          kind: 'card',
+          v: 1,
+          title: block.title ?? 'HTML 小组件',
+          bodyMarkdown: '这是转发的只读副本，不会运行原小组件。',
+        }}
+      />
+    );
+  }
+  return <RichBlockRenderer block={block} />;
 }
 
 type GroupedItem = { grouped: true; groupId: string; blocks: RichInteractiveBlock[] };
@@ -186,13 +270,19 @@ export function RichBlocks({
   blocks,
   catId,
   messageId,
+  sourceThreadId,
+  sourceMessageIds,
   messageSource,
   confirmations,
   sendContext,
+  readOnly = false,
+  forwardingEnabled = true,
 }: {
   blocks: RichBlock[];
   catId?: string;
   messageId?: string;
+  sourceThreadId?: string;
+  sourceMessageIds?: readonly string[];
   /**
    * F174 D2b-1 cloud P2 #1397: trusted-provenance gate for sub-renderers.
    * The callback-auth-failure renderer requires `messageSource.connector ===
@@ -204,31 +294,64 @@ export function RichBlocks({
   /** F229 Bug 2 fix: context tag for interactive-send events (e.g. 'concierge').
    *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
   sendContext?: string;
+  /** Forwarded blocks are inert evidence: no callbacks, specialised actions, or HTML execution. */
+  readOnly?: boolean;
+  /** The source must be terminal and the browser document admitted before forwarding can begin. */
+  forwardingEnabled?: boolean;
 }) {
+  const [forwardBlockId, setForwardBlockId] = useState<string | null>(null);
   if (blocks.length === 0) return null;
-  const items = groupBlocks(blocks);
+  const items = readOnly ? blocks : groupBlocks(blocks);
+  const forwardBlock = forwardBlockId ? blocks.find((block) => block.id === forwardBlockId) : undefined;
   return (
-    <div className="mt-2 space-y-2">
-      {items.map((item) =>
-        'grouped' in item ? (
-          <InteractiveBlockGroup
-            key={item.groupId}
-            blocks={item.blocks}
-            messageId={messageId}
-            sendContext={sendContext}
-          />
-        ) : (
-          <RichBlockRenderer
-            key={item.id}
-            block={item}
-            catId={catId}
-            messageId={messageId}
-            messageSource={messageSource}
-            confirmations={confirmations}
-            sendContext={sendContext}
-          />
-        ),
-      )}
-    </div>
+    <>
+      <div className="mt-2 space-y-2">
+        {items.map((item) =>
+          'grouped' in item ? (
+            <div key={item.groupId} data-rich-block-group-id={item.groupId} className="group/rich-block relative">
+              <InteractiveBlockGroup blocks={item.blocks} messageId={messageId} sendContext={sendContext} />
+              {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
+                <RichBlockForwardActions blocks={item.blocks} layout="flow" onForward={setForwardBlockId} />
+              ) : null}
+            </div>
+          ) : (
+            <div key={item.id} data-rich-block-id={item.id} className="group/rich-block relative">
+              {readOnly ? (
+                <ReadOnlyRichBlockRenderer block={item} />
+              ) : (
+                <RichBlockRenderer
+                  block={item}
+                  catId={catId}
+                  messageId={messageId}
+                  messageSource={messageSource}
+                  confirmations={confirmations}
+                  sendContext={sendContext}
+                />
+              )}
+              {!readOnly && forwardingEnabled && messageId && sourceThreadId ? (
+                <RichBlockForwardActions blocks={[item]} onForward={setForwardBlockId} />
+              ) : null}
+            </div>
+          ),
+        )}
+      </div>
+      {forwardingEnabled && forwardBlock && messageId && sourceThreadId ? (
+        <TransferTargetPicker
+          open
+          admissionBlocked={!forwardingEnabled}
+          sourceThreadId={sourceThreadId}
+          items={[
+            {
+              kind: 'rich_block',
+              messageId,
+              sourceMessageIds: sourceMessageIds ? [...sourceMessageIds] : [messageId],
+              blockId: forwardBlock.id,
+            },
+          ]}
+          onClose={() => setForwardBlockId(null)}
+          onSuccess={() => setForwardBlockId(null)}
+        />
+      ) : null}
+    </>
   );
 }

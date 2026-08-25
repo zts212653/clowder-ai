@@ -114,7 +114,16 @@ function toolLabel(item: Record<string, unknown>): string {
 }
 
 export class CodexCapacityRecoveryCheckpoint {
-  private readonly anchor: CodexCapacityRecoveryAnchor | undefined;
+  /**
+   * F296 B4 (Sol review #5): the RAW anchor, normalized on read rather than in
+   * the constructor.
+   *
+   * A preflight carrier only learns its prompt message ids inside `settle`, which
+   * runs after this checkpoint is constructed. Normalizing eagerly snapshotted an
+   * empty array, so app_server capacity recovery could never resume the exact
+   * invocation no matter what the final generation knew.
+   */
+  private readonly rawAnchor: CodexCapacityRecoveryAnchor | undefined;
   private nativeThreadId: string | undefined;
   private latestPlan: CodexCapacityPlanSnapshot | undefined;
   private readonly tools = new Map<string, CodexCapacityToolSnapshot>();
@@ -122,7 +131,12 @@ export class CodexCapacityRecoveryCheckpoint {
   private anonymousToolSequence = 0;
 
   constructor(anchor?: CodexCapacityRecoveryAnchor) {
-    this.anchor = normalizeAnchor(anchor);
+    this.rawAnchor = anchor;
+  }
+
+  /** Normalized at the moment of use, so late-arriving ids are still seen. */
+  private get anchor(): CodexCapacityRecoveryAnchor | undefined {
+    return normalizeAnchor(this.rawAnchor);
   }
 
   setNativeThreadId(threadId: string | undefined): void {

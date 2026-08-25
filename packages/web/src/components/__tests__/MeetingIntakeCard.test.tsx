@@ -4,6 +4,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockFetchPending = vi.fn(async () => {});
 const mockApiFetch = vi.fn();
+const mockInvalidateSidebarProjection = vi.fn(async () => true);
+
+const threads = [
+  {
+    id: 'thread-1',
+    title: 'F292 产品讨论',
+    projectPath: '/workspace/cat-cafe',
+    createdBy: 'owner-1',
+    participants: ['codex-sol'],
+    lastActiveAt: 200,
+    createdAt: 100,
+  },
+  ...Array.from({ length: 1_200 }, (_, index) => ({
+    id: `archive-${index}`,
+    title: `历史 Thread ${index}`,
+    projectPath: '/workspace/archive',
+    createdBy: 'owner-1',
+    participants: [],
+    lastActiveAt: 100 - index,
+    createdAt: index,
+  })),
+  {
+    id: 'system-1',
+    title: '系统',
+    projectPath: '/workspace/cat-cafe',
+    createdBy: 'system',
+    participants: [],
+    lastActiveAt: 300,
+    createdAt: 300,
+  },
+];
 
 vi.mock('@/stores/approvalHubStore', () => ({
   useApprovalHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -12,19 +43,52 @@ vi.mock('@/stores/approvalHubStore', () => ({
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      threads: [
-        { id: 'thread-1', title: 'F292 产品讨论', createdBy: 'owner-1', participants: ['codex-sol'] },
-        { id: 'system-1', title: '系统', createdBy: 'system', participants: [] },
-      ],
+      threads,
+      currentProjectPath: '/workspace/cat-cafe',
+      isLoadingThreads: false,
     }),
 }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => mockApiFetch(...args) }));
+vi.mock('@/utils/sidebar-thread-snapshot', () => ({
+  invalidateSidebarProjection: () => mockInvalidateSidebarProjection(),
+}));
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string }) => cat.displayName,
+  useCatData: () => ({
+    cats: [
+      {
+        id: 'codex-sol',
+        displayName: '小太阳·砚砚',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.6-sol',
+        avatar: '',
+        roleDescription: '',
+        personality: '',
+        color: { primary: '#000000', secondary: '#ffffff' },
+        mentionPatterns: [],
+        roster: { family: 'maine-coon', roles: [], lead: true, available: true, evaluation: '' },
+      },
+      {
+        id: 'disabled-cat',
+        displayName: '暂不可用猫猫',
+        clientId: 'test',
+        defaultModel: 'test',
+        avatar: '',
+        roleDescription: '',
+        personality: '',
+        color: { primary: '#000000', secondary: '#ffffff' },
+        mentionPatterns: [],
+        roster: { family: 'test', roles: [], lead: false, available: false, evaluation: '' },
+      },
+    ],
+    isLoading: false,
+  }),
+}));
 
 import { MeetingIntakeCard } from '../MeetingIntakeCard';
 
-function setNativeValue(element: HTMLTextAreaElement | HTMLSelectElement, value: string): void {
-  const prototype =
-    element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLSelectElement.prototype;
+function setNativeValue(element: HTMLTextAreaElement | HTMLInputElement, value: string): void {
+  const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
   setter?.call(element, value);
 }
@@ -60,6 +124,7 @@ describe('F292 MeetingIntakeCard', () => {
   beforeEach(() => {
     mockApiFetch.mockReset();
     mockFetchPending.mockClear();
+    mockInvalidateSidebarProjection.mockClear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -74,13 +139,29 @@ describe('F292 MeetingIntakeCard', () => {
     mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 4 } }) });
     await act(async () => root.render(React.createElement(MeetingIntakeCard, { item })));
 
-    expect(container.textContent).toContain('Needs Me');
+    expect(container.textContent).toContain('等你确认');
+    expect(container.textContent).toContain('为什么需要我');
+    expect(container.textContent).toContain('会议记录已经准备好了');
     expect(container.textContent).toContain('Weekly sync');
+    expect(container.textContent).toContain('发言人称呼');
+    expect(container.textContent).toContain('保存位置');
+    expect(container.textContent).not.toContain('Needs Me');
+    expect(container.textContent).not.toContain('rev 1');
+    expect(container.textContent).not.toContain('说话人映射');
+    expect(container.textContent).not.toContain('投递到私有 Thread');
+    expect(container.textContent).not.toContain('/workspace/cat-cafe');
     expect(container.textContent).not.toContain('系统');
+    expect(container.querySelector('[data-testid="approval-action-reason"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="approval-recommendation"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="approval-current-decision"]')).not.toBeNull();
+    const sourceDetails = container.querySelector<HTMLDetailsElement>('[data-testid="meeting-source-details"]');
+    expect(sourceDetails?.open).toBe(false);
+    expect(sourceDetails?.textContent).toContain('feishu://meeting-artifacts/minute/om_1?revision=1');
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(8);
 
     const speaker = container.querySelector('[data-testid="meeting-speakers"]') as HTMLTextAreaElement;
     const context = container.querySelector('[data-testid="meeting-context"]') as HTMLTextAreaElement;
-    const destination = container.querySelector('[data-testid="meeting-destination"]') as HTMLSelectElement;
+    const destinationSearch = container.querySelector('[data-testid="meeting-destination-search"]') as HTMLInputElement;
     const output = container.querySelector('[data-testid="meeting-output-minutes"]') as HTMLInputElement;
     await act(async () => {
       setNativeValue(speaker, '1=You');
@@ -91,8 +172,12 @@ describe('F292 MeetingIntakeCard', () => {
       context.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => {
-      setNativeValue(destination, 'host:private-thread:thread-1');
-      destination.dispatchEvent(new Event('change', { bubbles: true }));
+      setNativeValue(destinationSearch, 'F292');
+      destinationSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).not.toContain('历史 Thread 0');
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-destination-thread-1"]') as HTMLButtonElement).click();
     });
     await act(async () => {
       output.click();
@@ -115,6 +200,158 @@ describe('F292 MeetingIntakeCard', () => {
       }),
     });
     expect(mockFetchPending).toHaveBeenCalled();
+  });
+
+  it('creates an explicitly cat-bound private Thread, then confirms it as a deliverable destination', async () => {
+    mockApiFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'thread-created',
+        title: 'Weekly sync 跟进',
+        projectPath: '/workspace/cat-cafe',
+        createdBy: 'owner-1',
+        participants: [],
+        preferredCats: ['codex-sol'],
+        lastActiveAt: 400,
+        createdAt: 400,
+      }),
+    });
+    mockApiFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ intake: { revision: 4 } }) });
+    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item })));
+
+    expect(container.querySelector('select[data-testid="meeting-destination"]')).toBeNull();
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-destination-create-toggle"]') as HTMLButtonElement).click();
+    });
+    const title = container.querySelector('[data-testid="meeting-destination-create-title"]') as HTMLInputElement;
+    expect(title.value).toContain('Weekly sync');
+    const createButton = container.querySelector(
+      '[data-testid="meeting-destination-create-confirm"]',
+    ) as HTMLButtonElement;
+    expect(createButton.disabled).toBe(true);
+    expect(container.textContent).not.toContain('暂不可用猫猫');
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-workflow-cat-codex-sol"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      setNativeValue(title, 'Weekly sync 跟进');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      createButton.click();
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Weekly sync 跟进',
+        projectPath: '/workspace/cat-cafe',
+        preferredCats: ['codex-sol'],
+      }),
+    });
+    expect(container.textContent).toContain('已选择：Weekly sync 跟进');
+    expect(mockInvalidateSidebarProjection).toHaveBeenCalledTimes(1);
+
+    const speaker = container.querySelector('[data-testid="meeting-speakers"]') as HTMLTextAreaElement;
+    const context = container.querySelector('[data-testid="meeting-context"]') as HTMLTextAreaElement;
+    const output = container.querySelector('[data-testid="meeting-output-minutes"]') as HTMLInputElement;
+    await act(async () => {
+      setNativeValue(speaker, '1=You');
+      speaker.dispatchEvent(new Event('input', { bubbles: true }));
+      setNativeValue(context, 'Architecture review');
+      context.dispatchEvent(new Event('input', { bubbles: true }));
+      output.click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-confirm"]') as HTMLButtonElement).click();
+    });
+    expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/confirm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        choices: {
+          speakerMap: { 1: 'You' },
+          context: 'Architecture review',
+          destinationHandle: 'host:private-thread:thread-created',
+          outputs: ['minutes'],
+        },
+      }),
+    });
+  });
+
+  it('binds a cat to a confirmed no-cat destination and retries without resubmitting saved choices', async () => {
+    const repairItem = {
+      ...item,
+      detail: {
+        ...item.detail,
+        revision: 4,
+        judgmentState: 'confirmed',
+        executionState: 'failed',
+        healthState: 'degraded',
+        choices: {
+          speakerMap: { 1: 'You' },
+          context: 'Saved context',
+          destinationHandle: 'host:private-thread:archive-0',
+          outputs: ['minutes', 'decisions'],
+        },
+        repair: { code: 'route_unavailable', action: 'retry', observedAt: 2 },
+      },
+    };
+    mockApiFetch
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ preferredCats: ['codex-sol'] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ intake: { revision: 7 } }) });
+
+    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: repairItem })));
+
+    expect(container.textContent).toContain('保存位置还没有负责整理的猫猫');
+    expect(container.textContent).toContain('已经填写的内容会保留');
+    expect(container.querySelector('[data-testid="meeting-retry"]')).toBeNull();
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-workflow-cat-codex-sol"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-bind-cat-retry"]') as HTMLButtonElement).click();
+    });
+
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/api/threads/archive-0', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferredCats: ['codex-sol'] }),
+    });
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/meeting-intakes/intake-1/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 4 }),
+    });
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/meeting-intakes/intake-1/confirm')).toBe(false);
+  });
+
+  it('keeps the primary decision above the fold when the suggested choices are complete', async () => {
+    const readyItem = {
+      ...item,
+      detail: {
+        ...item.detail,
+        choices: {
+          speakerMap: { 1: 'You' },
+          context: 'Architecture review',
+          destinationHandle: 'host:private-thread:thread-1',
+          outputs: ['minutes'],
+        },
+      },
+    };
+    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: readyItem })));
+
+    expect(container.querySelector('[data-testid="meeting-confirm"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="meeting-speakers"]')).toBeNull();
+    expect(container.textContent).toContain('F292 产品讨论');
+
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-edit-toggle"]') as HTMLButtonElement).click();
+    });
+    expect(container.querySelector('[data-testid="meeting-speakers"]')).not.toBeNull();
   });
 
   it('renders the typed manual-import repair action without generic approve/reject', async () => {
@@ -147,7 +384,7 @@ describe('F292 MeetingIntakeCard', () => {
         repair: { code: 'transcript_not_ready', action: 'retry', observedAt: 2 },
       },
     };
-    mockApiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ intake: { revision: 6 } }) });
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 6 } }) });
     await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: retryItem })));
     await act(async () => (container.querySelector('[data-testid="meeting-retry"]') as HTMLButtonElement).click());
     expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/retry', {
@@ -167,8 +404,16 @@ describe('F292 MeetingIntakeCard', () => {
     await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: regrantItem })));
     const regrant = container.querySelector<HTMLAnchorElement>('[data-testid="meeting-regrant"]');
     expect(regrant?.href).toContain('/settings?s=plugins');
-    expect(regrant?.textContent).toContain('去插件设置连接飞书');
+    expect(regrant?.textContent).toContain('重新连接飞书');
+    await act(async () =>
+      (container.querySelector('[data-testid="meeting-regrant-retry"]') as HTMLButtonElement).click(),
+    );
+    expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 7 }),
+    });
     expect(container.textContent).not.toContain('lark-cli auth login');
-    expect(mockFetchPending).toHaveBeenCalledTimes(1);
+    expect(mockFetchPending).toHaveBeenCalledTimes(2);
   });
 });

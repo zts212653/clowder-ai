@@ -43,6 +43,13 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
+// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
+export {
+  A2A_INLINE_MENTION_MODE,
+  type A2ARoutingMode,
+  type A2ARoutingProjection,
+  isRoutingProjectionStartingNow,
+} from './a2a-routing-mode.js';
 // F167 Phase S: action-scoped A2A successor single-flight contract
 export {
   ACTION_SUBJECT_REF_DESCRIPTION,
@@ -219,7 +226,9 @@ export type {
   GovernanceFinding,
   GovernanceHealthSummary,
   GovernancePackMeta,
+  GovernanceProvider,
   GovernanceRule,
+  GovernanceSelection,
   LockVersion,
   McpDeleteParams,
   McpEnvEntry,
@@ -274,6 +283,18 @@ export {
   builtinAccountIdForClient,
   protocolForClient,
 } from './client-routing.js';
+export type {
+  CloudBridgeDomFingerprintV1,
+  CloudBridgeFailureDiagnosticV1,
+  CloudBridgeIdempotencyDisposition,
+  CloudBridgeOutboundReceiptV1,
+  CloudBridgeOutboundStatus,
+  CloudBridgeOutboundTransport,
+} from './cloud-bridge-outbound-receipt.js';
+export {
+  isCloudBridgeFailureDiagnosticV1,
+  isCloudBridgeOutboundReceiptV1,
+} from './cloud-bridge-outbound-receipt.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,
@@ -299,6 +320,7 @@ export type {
   GitHubAuthorAssociation,
   IssueCommentSuppressionReason,
   IssueFixEvidence,
+  PendingExternalReviewVerdict,
   ReviewDeliveryOutcome,
 } from './community-event.js';
 export type {
@@ -414,6 +436,7 @@ export type {
 export {
   getAllConnectorDefinitions,
   getConnectorDefinition,
+  isSelectableManagedHoldConnectorSource,
   isStaticConnectorId,
   registerConnectorDefinition,
   SCHEDULER_TRIGGER_PREFIX,
@@ -717,6 +740,16 @@ export type {
   TriageIntentCardInput,
   TriageResult,
 } from './intent-card.js';
+// F299: invocation-first trajectory projection and typed source navigation.
+export type {
+  InvocationPromptInputProjection,
+  InvocationPromptMessageProjection,
+  InvocationTrajectoryListResponse,
+  InvocationTrajectoryStatus,
+  InvocationTrajectorySummary,
+  InvocationTrajectoryTokens,
+  TrajectoryOriginRef,
+} from './invocation-trajectory.js';
 // Leaderboard types (F075 排行榜)
 export type {
   Achievement,
@@ -833,6 +866,7 @@ export {
   judgmentSurfaceEnteredOpportunityV1Schema,
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
+  memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_OPPORTUNITY_V1_PAIRS,
   RECALL_RESOLVER_FAMILIES,
@@ -844,6 +878,28 @@ export {
   type SubjectSeenOpportunityV1,
   subjectSeenOpportunityV1Schema,
 } from './memory-cue.js';
+export {
+  ASR_PERSON_MEMORY_REFLEX_ENTRY_V1,
+  type AsrPersonMemoryDynamicSceneEntryV1,
+  type AsrPersonMemoryWriteOpportunityV1,
+  type AsrTranscriptSourceCoordinateV1,
+  asrPersonMemoryDynamicSceneEntryV1Schema,
+  asrPersonMemoryWriteOpportunityV1Schema,
+  asrTranscriptSourceCoordinateV1Schema,
+  type DeliveredWriteOpportunityRecordV1,
+  deliveredWriteOpportunityRecordV1Schema,
+  MAX_WRITE_OPPORTUNITY_GENERATION,
+  projectDeliveredWriteOpportunityRecord,
+  WRITE_OPPORTUNITY_DISPOSITIONS,
+  WRITE_OPPORTUNITY_INVALIDATORS,
+  type WriteOpportunityDispositionV1,
+  type WriteOpportunityPresentationRetryCarrierV1,
+  type WriteOpportunityReentryCarrierV1,
+  writeOpportunityDispositionV1Schema,
+  writeOpportunityGenerationId,
+  writeOpportunityPresentationRetryCarrierV1Schema,
+  writeOpportunityReentryCarrierV1Schema,
+} from './memory-write-opportunity.js';
 // Message types
 export type {
   AgentStreamMessage,
@@ -1056,11 +1112,18 @@ export {
   type DeferredPersonMemoryReceipt,
   type DeferredPersonMemoryResolvedSource,
   type DeferredPersonMemorySourceInput,
+  type DeferredWriteOpportunityReceiptV1,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   deferredPersonMemoryReceiptSchema,
   deferredPersonMemoryResolvedSourceSchema,
   deferredPersonMemorySourceInputSchema,
+  deferredWriteOpportunityReceiptV1Schema,
+  deferredWriteOpportunitySourceRefV1Schema,
+  type WriteOpportunityLineageV1,
+  type WriteOpportunityRefV1,
+  writeOpportunityLineageV1Schema,
+  writeOpportunityRefV1Schema,
 } from './proactive-memory-deferred-receipt.js';
 // F282 Phase D: opaque opportunity episode and calibrated-abstention contract
 export {
@@ -1149,8 +1212,10 @@ export type {
   QueueTargetAttemptState,
   QueueTargetAttemptTerminalReason,
   QueueTargetOutcome,
+  QueueTargetOutcomeEvidenceRef,
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
+  QueueTurnExecutionEvidenceRef,
 } from './queue-receipt.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {
@@ -1158,6 +1223,8 @@ export type {
   RefluxCategory,
   RefluxPattern,
 } from './reflux.js';
+// F299 Phase D: transcript-owned provider request generations.
+export * from './request-generation-envelope.js';
 // Resolution types (F076 Phase 2 — 风险消解)
 export type {
   AnswerResolutionInput,

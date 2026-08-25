@@ -532,13 +532,6 @@ describe('callback-limb-routes (Fastify injection)', () => {
   });
 
   it('refuses embodiment binding from A2A or a user who did not approve the body', async () => {
-    const a2aCreds = await invocationRegistry.create(
-      'user-1',
-      'opus',
-      'thread-1',
-      'parent-inv-1',
-      'a2a-trigger-message',
-    );
     const payload = {
       nodeId: 'iphone-1',
       expressionRef: 'yanyan:happy',
@@ -563,6 +556,13 @@ describe('callback-limb-routes (Fastify injection)', () => {
     });
     assert.equal(wrongOwner.statusCode, 403);
 
+    const a2aCreds = await invocationRegistry.create(
+      'user-1',
+      'opus',
+      'thread-1',
+      'parent-inv-1',
+      'a2a-trigger-message',
+    );
     const a2a = await app.inject({
       method: 'POST',
       url: '/api/callback/limb/embodiment/bind',

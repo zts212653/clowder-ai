@@ -1,16 +1,16 @@
 ---
 doc_kind: architecture
-description: "猫咖 Eval 纲领 v2.1（七公理 E0–E6，一门一链六护栏）：E0 资格公理（外部新鲜 bit 不可约/裁判射程/calibration runway 分级停止）+ 六公理承接 + 二十日思辨增量 + Maine Coon思辨轮红队收敛（E0 精确化/折旧句收窄/五病分治）。status: draft-v2.1-pending-cvo-signoff。"
+description: "猫咖 Eval 纲领 v2.1（七公理 E0–E6，一门一链六护栏）：E0 资格公理（外部新鲜 bit 不可约/裁判射程/calibration runway 分级停止）+ 六公理承接 + 二十日思辨增量 + 跨模型红队思辨轮收敛（E0 精确化/折旧句收窄/五病分治）。status: ratified。"
 description_source: human
-description_author: fable-5
-description_updated_at: 2026-08-10T15:55:00-07:00
+description_author: codex-sol
+description_updated_at: 2026-08-20T20:25:00-07:00
 feature_ids: []
 related_features: [F192, F263, F234]
 related_decisions: [ADR-031]
 topics: [eval-philosophy, eval-charter, gt-yardstick, judge-economics, goodhart, anti-gaming, burden-of-proof-chain, living-bench]
 created: 2026-08-10
-updated: 2026-08-10
-status: draft-v2.1-pending-cvo-signoff   # 思辨轮已收敛（分歧=0）→ operator signoff → ratified
+updated: 2026-08-20
+status: ratified   # operator signoff: [thread-id] / 0001787282733166-000287-cb1eabb5
 authors:
   - "Ragdoll/claude-fable-5（v1 六公理起草 + v2 增补 + v2.1 修订采纳）"
   - "You（GT 标尺提出、三阶段信号供应链、方向拍板）"
@@ -345,6 +345,26 @@ v2 新增四问（5–8）已于Maine Coon思辨轮收敛并落入正文，结�
 3. E4 代谢率的量化定义（新题入库/旧题退役速度的健康区间）；
 4. 沉默窗口抽样率（太低 FN 不可见，太高裁决带宽爆炸）。
 
+### 附 C 补遗：野外实证测试集与修正案候选（2026-08-17 冷读轮登记）
+
+平行 session 三次野外尸检（Prime Agent / Memento-Skills / DeepSeek Harness，
+源 [thread-id]）对本宪法做了首轮实证对撞，两条**独立时间线**命中：
+DSH"五分界点"（先找到谁依据什么真实结果允许哪次变异成为下一代默认）与 E0
+自治上限独立同构；Prime `expectedOutcome→outcome`（commit d1b0726，愿望以
+结果身份每轮回流、全仓无回填）为**干预失证教科书标本**，并实证资产/流程分治
+非分类洁癖——该 bug 每轮自我强化，周期体检必然迟到，唯当轮牌照拦有效（附 E
+"不等坏死"在此是字面意义）。附 B-8"红队未找到真反例"自此有野外证据支撑。
+
+同轮产出两条**修正案候选**（ratify 后走修正案流程，不动当前 signoff 版本）：
+
+9. **E5 射程窗口（第一修正案候选）**：Prime 标本显示"未经验证的自评断言以
+   事实身份回流上下文"字面落在 E5 否决句（verdict 分数注入）之外、机理正中
+   且更阴险（分数至少真发生过，愿望连裁决都没发生）。候选扩写：否决"任何
+   未经独立验证的自评断言以事实身份进入被测者上下文"；
+10. **runway 记账员的工资（E0 递归自检）**：三账自身的记账成本没有付薪方条款
+    ——E0 三问应用于自己的仪表。推论：个人/小团队场景多数 judge 优化环因
+    记账成本不可负担而不该建；轻量裁决路径由此获得宪法级正当性。
+
 ## 附 D · 落地层同步清单（转正后一个 skill PR 收口，不预先动）
 
 1. `eval-design` skill"若选 eval"入口前加 **E0 资格门**（GT 域 / 新鲜信号来源 /
@@ -379,9 +399,9 @@ v2 新增四问（5–8）已于Maine Coon思辨轮收敛并落入正文，结�
 ## 转正路径
 
 ~~Maine Coon思辨轮~~ **已完成（2026-08-10）**：红队四刀 + 结构改名全部收敛入正文
-（附 B-8 delta），核心公理零推翻、零存留分歧。当前步：**operator signoff** →
-status 转 `ratified` → 附 D 同步清单一个 skill PR 落地 → F192/F263 的 AC
-开始引用条款号（如 "per E4 代谢条款"）。
+（附 B-8 delta），核心公理零推翻、零存留分歧。**operator signoff 已完成
+（2026-08-20）**，status 已转 `ratified`；附 D 同步清单由 PR #3559 落地，随后
+F192/F263 的 AC 开始引用条款号（如 "per E4 代谢条款"）。
 
 *v2 增补 + v2.1 修订：Ragdoll/claude-fable-5 · 2026-08-10 · 方向：You（"补完
 eval-philosophy 然后让Maine Coon一起头脑风暴"）· 思辨轮红队：Maine Coon/GPT-5.6 Sol ·

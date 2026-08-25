@@ -3,9 +3,21 @@
 import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, win32 } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removePersonalChromeConversationAuthorizations } from './conversation-binding.mjs';
 import { digestNativeHostArtifactDirectory, publishNativeHostArtifact } from './native-host-artifact.mjs';
+import {
+  assertInstallMutationSupported,
+  assertNodeRuntimeExecutable,
+  buildNativeHostInstallPlan,
+  installationReceipt,
+  manifestLocation,
+  PERSONAL_CHROME_NATIVE_HOST_NAME,
+  PersonalChromeNativeHostInstallationError,
+  renderNativeHostLauncher,
+  requireExact,
+} from './native-host-install-contract.mjs';
 import {
   pathExists,
   readManifest,
@@ -16,104 +28,14 @@ import {
 import { acquireProcessLease } from './native-socket-lease.mjs';
 import {
   readPersonalChromePairingRecord,
-  redactPersonalChromePairingRecord,
   resolvePersonalChromeHostPaths,
   writePersonalChromePairingRecordAtomic,
 } from './pairing-record.mjs';
 
-export const PERSONAL_CHROME_NATIVE_HOST_NAME = 'ai.catcafe.personal_cloud_cat_host';
 const CHROME_EXTENSION_ID = /^[a-p]{32}$/;
 const sourceDirectoryDefault = dirname(fileURLToPath(import.meta.url));
 
-function assertInstallMutationSupported(platform) {
-  if (platform === 'win32') {
-    throw new Error('Windows Native Messaging install requires registry activation and is not implemented');
-  }
-}
-
-function requireExact(value, label) {
-  if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
-    throw new Error(`${label} must be a non-empty exact string`);
-  }
-  return value;
-}
-
-function manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory }) {
-  if (userDataDirectory && platform !== 'win32') {
-    requireExact(userDataDirectory, 'userDataDirectory');
-    if (!isAbsolute(userDataDirectory)) throw new Error('userDataDirectory must be absolute');
-    return {
-      manifestPath: join(userDataDirectory, 'NativeMessagingHosts', `${PERSONAL_CHROME_NATIVE_HOST_NAME}.json`),
-    };
-  }
-  if (platform === 'darwin') {
-    return {
-      manifestPath: join(
-        homeDirectory,
-        'Library/Application Support/Google/Chrome/NativeMessagingHosts',
-        `${PERSONAL_CHROME_NATIVE_HOST_NAME}.json`,
-      ),
-    };
-  }
-  if (platform === 'linux') {
-    return {
-      manifestPath: join(
-        homeDirectory,
-        '.config/google-chrome/NativeMessagingHosts',
-        `${PERSONAL_CHROME_NATIVE_HOST_NAME}.json`,
-      ),
-    };
-  }
-  if (platform === 'win32') {
-    const dataRoot = requireExact(localAppData, 'localAppData');
-    return {
-      manifestPath: win32.join(dataRoot, 'CatCafe', 'NativeMessagingHosts', `${PERSONAL_CHROME_NATIVE_HOST_NAME}.json`),
-      registryKey: `HKEY_CURRENT_USER\\Software\\Google\\Chrome\\NativeMessagingHosts\\${PERSONAL_CHROME_NATIVE_HOST_NAME}`,
-    };
-  }
-  throw new Error(`unsupported platform: ${platform}`);
-}
-
-function installationReceipt({ operation, paths, manifestPath, record, artifactEntrypoint }) {
-  return {
-    status: 'ready',
-    operation,
-    rootDirectory: paths.rootDirectory,
-    pairingRecordPath: paths.pairingRecordPath,
-    launcherPath: paths.launcherPath,
-    manifestPath,
-    artifactEntrypoint,
-    ...redactPersonalChromePairingRecord(record),
-  };
-}
-
-export function buildNativeHostInstallPlan({
-  platform,
-  homeDirectory,
-  localAppData,
-  userDataDirectory,
-  extensionId,
-  nativeHostPath,
-}) {
-  requireExact(homeDirectory, 'homeDirectory');
-  requireExact(extensionId, 'extensionId');
-  requireExact(nativeHostPath, 'nativeHostPath');
-  if (!CHROME_EXTENSION_ID.test(extensionId)) {
-    throw new Error('extensionId must be a 32-character Chrome extension ID');
-  }
-  const absolutePath = platform === 'win32' ? win32.isAbsolute(nativeHostPath) : isAbsolute(nativeHostPath);
-  if (!absolutePath) throw new Error('nativeHostPath must be absolute');
-  return {
-    ...manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory }),
-    manifest: {
-      name: PERSONAL_CHROME_NATIVE_HOST_NAME,
-      description: 'Clowder AI personal cloud cat Native Messaging host',
-      path: nativeHostPath,
-      type: 'stdio',
-      allowed_origins: [`chrome-extension://${extensionId}/`],
-    },
-  };
-}
+export { buildNativeHostInstallPlan, PERSONAL_CHROME_NATIVE_HOST_NAME };
 
 export async function inspectNativeHostInstallation({
   platform = process.platform,
@@ -121,12 +43,15 @@ export async function inspectNativeHostInstallation({
   homeDirectory = homedir(),
   localAppData = process.env.LOCALAPPDATA,
   userDataDirectory,
+  nodeExecutable = process.execPath,
+  sourceDirectory = sourceDirectoryDefault,
 } = {}) {
   assertInstallMutationSupported(platform);
+  await assertNodeRuntimeExecutable(nodeExecutable);
   const paths = resolvePersonalChromeHostPaths(projectRoot);
   const record = await readPersonalChromePairingRecord(paths.pairingRecordPath);
   const artifactDirectory = join(paths.artifactsDirectory, record.artifactDigest.slice('sha512:'.length));
-  const artifactEntrypoint = join(artifactDirectory, 'native-host.mjs');
+  const artifactEntrypoint = join(artifactDirectory, 'native-host-cli.mjs');
   if ((await digestNativeHostArtifactDirectory(artifactDirectory)) !== record.artifactDigest) {
     throw new Error('installed native host artifact digest mismatch');
   }
@@ -146,13 +71,30 @@ export async function inspectNativeHostInstallation({
   if (platform !== 'win32' && (launcherMetadata.mode & 0o111) === 0) {
     throw new Error('native host launcher must be executable');
   }
-  return installationReceipt({
+  const expectedLauncher = renderNativeHostLauncher({
+    nodeExecutable,
+    artifactEntrypoint,
+    pairingRecordPath: paths.pairingRecordPath,
+  });
+  if ((await readFile(paths.launcherPath, 'utf8')) !== expectedLauncher) {
+    throw new Error('native host launcher does not match installed runtime');
+  }
+  const receipt = installationReceipt({
     operation: 'inspect',
     paths,
     manifestPath: plan.manifestPath,
     record,
     artifactEntrypoint,
   });
+  const expectedArtifactDigest = await digestNativeHostArtifactDirectory(sourceDirectory);
+  if (record.artifactDigest !== expectedArtifactDigest) {
+    throw new PersonalChromeNativeHostInstallationError(
+      'NATIVE_HOST_ARTIFACT_STALE',
+      'installed native host artifact is intact but does not match the current runtime artifact',
+      { ...receipt, status: 'stale', expectedArtifactDigest },
+    );
+  }
+  return receipt;
 }
 
 async function assertManifestOwnedOrAbsent(manifestPath, launcherPath) {
@@ -184,59 +126,7 @@ async function readOptionalPairingRecord(pairingRecordPath) {
   }
 }
 
-async function installNativeHostLocked({
-  platform = process.platform,
-  projectRoot,
-  homeDirectory = homedir(),
-  localAppData = process.env.LOCALAPPDATA,
-  userDataDirectory,
-  extensionId,
-  sourceDirectory = sourceDirectoryDefault,
-  now = () => new Date(),
-  generatePairingSecret = () => randomBytes(32).toString('base64url'),
-  writePairingRecord = writePersonalChromePairingRecordAtomic,
-  paths,
-}) {
-  requireExact(extensionId, 'extensionId');
-  if (!CHROME_EXTENSION_ID.test(extensionId)) throw new Error('extensionId must be a 32-character Chrome extension ID');
-  const existingManifestLocation = manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory });
-  await assertManifestOwnedOrAbsent(existingManifestLocation.manifestPath, paths.launcherPath);
-  const previousRecord = await readOptionalPairingRecord(paths.pairingRecordPath);
-  if (previousRecord && previousRecord.extensionId !== extensionId) {
-    throw new Error('installed extension identity is immutable; uninstall before changing extension ID');
-  }
-  const artifact = await publishNativeHostArtifact(sourceDirectory, paths.artifactsDirectory);
-  const existing = await inspectOptionalInstallation({
-    platform,
-    projectRoot,
-    homeDirectory,
-    localAppData,
-    userDataDirectory,
-  });
-  if (existing && existing.extensionId === extensionId && existing.artifactDigest === artifact.artifactDigest) {
-    return { ...existing, operation: 'unchanged' };
-  }
-
-  const timestamp = now().toISOString();
-  const record = {
-    schemaVersion: 1,
-    extensionId,
-    socketPath: paths.socketPath,
-    ledgerPath: paths.ledgerPath,
-    pairingSecret: previousRecord?.pairingSecret ?? generatePairingSecret(),
-    artifactDigest: artifact.artifactDigest,
-    installedAt: previousRecord?.installedAt ?? timestamp,
-    updatedAt: timestamp,
-  };
-  const launcherSource = await readFile(join(sourceDirectory, 'native-host-launcher.mjs'));
-  const plan = buildNativeHostInstallPlan({
-    platform,
-    homeDirectory,
-    localAppData,
-    userDataDirectory,
-    extensionId,
-    nativeHostPath: paths.launcherPath,
-  });
+async function commitActivationGeneration({ paths, plan, launcherSource, record, writePairingRecord }) {
   const launcherSnapshot = await readOptionalFileSnapshot(paths.launcherPath);
   const manifestSnapshot = await readOptionalFileSnapshot(plan.manifestPath);
   try {
@@ -259,6 +149,70 @@ async function installNativeHostLocked({
     }
     throw error;
   }
+}
+
+async function installNativeHostLocked({
+  platform = process.platform,
+  projectRoot,
+  homeDirectory = homedir(),
+  localAppData = process.env.LOCALAPPDATA,
+  userDataDirectory,
+  extensionId,
+  sourceDirectory = sourceDirectoryDefault,
+  now = () => new Date(),
+  generatePairingSecret = () => randomBytes(32).toString('base64url'),
+  writePairingRecord = writePersonalChromePairingRecordAtomic,
+  nodeExecutable = process.execPath,
+  paths,
+}) {
+  requireExact(extensionId, 'extensionId');
+  if (!CHROME_EXTENSION_ID.test(extensionId)) throw new Error('extensionId must be a 32-character Chrome extension ID');
+  await assertNodeRuntimeExecutable(nodeExecutable);
+  const existingManifestLocation = manifestLocation({ platform, homeDirectory, localAppData, userDataDirectory });
+  await assertManifestOwnedOrAbsent(existingManifestLocation.manifestPath, paths.launcherPath);
+  const previousRecord = await readOptionalPairingRecord(paths.pairingRecordPath);
+  if (previousRecord && previousRecord.extensionId !== extensionId) {
+    throw new Error('installed extension identity is immutable; uninstall before changing extension ID');
+  }
+  const artifact = await publishNativeHostArtifact(sourceDirectory, paths.artifactsDirectory);
+  const existing = await inspectOptionalInstallation({
+    platform,
+    projectRoot,
+    homeDirectory,
+    localAppData,
+    userDataDirectory,
+    nodeExecutable,
+    sourceDirectory,
+  });
+  if (existing && existing.extensionId === extensionId && existing.artifactDigest === artifact.artifactDigest) {
+    return { ...existing, operation: 'unchanged' };
+  }
+
+  const timestamp = now().toISOString();
+  const record = {
+    schemaVersion: 1,
+    extensionId,
+    socketPath: paths.socketPath,
+    ledgerPath: paths.ledgerPath,
+    pairingSecret: previousRecord?.pairingSecret ?? generatePairingSecret(),
+    artifactDigest: artifact.artifactDigest,
+    installedAt: previousRecord?.installedAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+  const launcherSource = renderNativeHostLauncher({
+    nodeExecutable,
+    artifactEntrypoint: artifact.artifactEntrypoint,
+    pairingRecordPath: paths.pairingRecordPath,
+  });
+  const plan = buildNativeHostInstallPlan({
+    platform,
+    homeDirectory,
+    localAppData,
+    userDataDirectory,
+    extensionId,
+    nativeHostPath: paths.launcherPath,
+  });
+  await commitActivationGeneration({ paths, plan, launcherSource, record, writePairingRecord });
   return installationReceipt({
     operation: previousRecord ? 'repaired' : 'installed',
     paths,
@@ -311,6 +265,7 @@ async function uninstallNativeHostLocked({
   await unlink(paths.launcherPath).catch((error) => {
     if (error?.code !== 'ENOENT') throw error;
   });
+  await removePersonalChromeConversationAuthorizations(paths.conversationBindingPath);
   return {
     status: 'absent',
     operation: 'uninstalled',
@@ -319,6 +274,7 @@ async function uninstallNativeHostLocked({
     pairingRecordPath: paths.pairingRecordPath,
     launcherPath: paths.launcherPath,
     ledgerRetained: await pathExists(paths.ledgerPath),
+    conversationBindingRemoved: !(await pathExists(paths.conversationBindingPath)),
   };
 }
 export async function uninstallNativeHost(options = {}) {

@@ -2,7 +2,7 @@
 cell_id: transport
 title: Transport Plane
 summary: Raw transport 规范化之后的平台/设备消息入口、出口与对话语义；F254 在此边界保证 completed original 立即交付，supplement 作为后续 additive reply，未完成 legacy closure 才使用 catching-up/blocked。
-canonical_features: [F088, F124, F254]
+canonical_features: [F088, F124, F247, F254]
 code_anchors:
   - packages/api/src/infrastructure/connectors/ConnectorRouter.ts
   - packages/api/src/infrastructure/connectors/ConnectorMessageFormatter.ts
@@ -10,7 +10,10 @@ code_anchors:
   - packages/api/src/infrastructure/connectors/ConnectorThreadBindingStore.ts
   - packages/api/src/infrastructure/connectors/OutboundDeliveryHook.ts
   - packages/api/src/infrastructure/connectors/StreamingOutboundHook.ts
+  - packages/api/src/domains/cats/services/cloud-bridge/cloud-bridge-fallback.ts
+  - packages/api/src/domains/cats/services/agents/routing/persist-system-info-warnings.ts
   - packages/shared/src/types/connector.ts
+  - packages/shared/src/types/cloud-bridge-outbound-receipt.ts
   - packages/shared/src/types/cross-thread-coordination.ts
   - packages/api/src/routes/cross-thread-coordination.ts
   - packages/api/src/routes/callbacks.ts
@@ -21,6 +24,8 @@ doc_anchors:
   - docs/features/F088-multi-platform-chat-gateway.md
   - docs/features/assets/F124/f124-f088-architecture-unification-draft.md
   - docs/features/F254-side-effect-freshness-gate.md
+  - docs/features/F247-cloud-cat-family.md
+  - docs/features/F264-per-target-message-receipt.md
   - docs/decisions/041-freshness-catch-closure-output-commit.md
   - docs/decisions/042-glass-box-delivery-semantics.md
 static_scan_hints: [ConnectorRouter, MessageEnvelope, Adapter, BindingStore, OutboundDeliveryHook, StreamingOutboundHook, onClosureCatchingUp, onClosureBlocked, published_with_unseen, supplement_declined, OutputCommitDecision]
@@ -32,6 +37,7 @@ cited_by:
   - {feature: F167-Phase-R, date: 2026-07-10, delta: cross_post_message carries stable coordination identity and explicit terminal phase; direct terminal ACK is persisted without A2A enqueue}
   - {feature: F254-v1.2, date: 2026-07-11, delta: reject unattributed/duplicate cancel packets and stratify cross-thread freshness by typed causal overlap instead of destination unseen alone}
   - {feature: F254-ADR-042, date: 2026-07-12, delta: committed_fresh, degraded_unknown, and published_with_unseen are all deliverable; freshness never turns a completed connector answer back into a receipt/catching-up placeholder}
+  - {feature: F247-v11, date: 2026-08-23, delta: cloud dispatch persists a refs-only outbound receipt in the source thread; Remote MCP return reuses exact replyTo instead of introducing a cloud-specific reply protocol}
 ---
 
 # Transport Plane
@@ -48,6 +54,8 @@ F254 v1.2 also owns two transport attribution guards: browser cancel must carry 
 
 F167 Phase R owns the internal cross-thread coordination lifecycle at this boundary: invocation-token relays may carry `{id, phase, hop}` in message provenance. Active hops inherit identity; terminal is delivered once; a direct courtesy ACK after terminal is stored without creating another A2A invocation. This guard is structural and must not infer Claim/Release/ACK from free text.
 
+F247 owns the cloud Host append, while this cell owns how its result becomes thread truth: one typed, refs-only outbound receipt is persisted as a connector system notice with `replyTo=sourceMessageId` only after same-thread/public-source plus sender/dispatch/target validation. The receipt may retain sender/dispatch/target IDs, `sent | failed | unknown`, transport, host message ID, and idempotent replay truth; it must not retain conversation IDs, credentials, cookies, or a duplicate body. Remote MCP responses use the existing F264 `replyTo` source witness and an opaque server-signed capability that binds the gpt-pro agent-key return to its exact owner/thread/source/dispatch/target scope.
+
 ## Use This When
 
 - Adding or changing an IM connector such as Feishu, Telegram, WeChat, Slack, or a similar external chat platform.
@@ -56,6 +64,7 @@ F167 Phase R owns the internal cross-thread coordination lifecycle at this bound
 - Changing connector receipt/catching-up/blocked projection, published-with-unseen delivery, supplement reply delivery, or filtering by `OutputCommitDecision`.
 - Changing `cross_post_message` coordination identity, terminal transition, or terminal ACK enqueue suppression.
 - Changing cancel provenance/dedup or cross-thread effect-class freshness behavior.
+- Changing cloud outbound receipt persistence/hydration or the source-bound Remote MCP return projection.
 
 ## Extend By
 
@@ -66,6 +75,7 @@ F167 Phase R owns the internal cross-thread coordination lifecycle at this bound
 - Keep incomplete provider output receipt-only. Deliver every completed published decision; reserve `onClosureCatchingUp` / `onClosureBlocked` for unfinished legacy closure work, never for `published_with_unseen`.
 - Emit browser cancel only from an explicit connected-client action with stable action/client IDs; do not rely on reconnect-buffered Socket.IO delivery as user intent.
 - Use typed causal identity for cross-thread catch-up. Keyword/entity similarity may inform a warning but cannot decide HOLD.
+- Keep cloud audit refs-only and hydrate its body preview only through the same-thread/public-safe source resolver. Reuse `replyTo`; the signed return capability authorizes that existing linkage but does not become a provider-specific reply protocol.
 
 ## Do NOT Unify With
 
@@ -76,6 +86,7 @@ F167 Phase R owns the internal cross-thread coordination lifecycle at this bound
 - Do not regenerate an answer after a committed message merely because transport delivery failed; F088 retries delivery of the existing message truth.
 - Do not suppress a completed original while waiting for, declining, or failing an automatic supplement.
 - Do not use free-text intent classification to decide whether a cross-thread relay is terminal; callers select phase explicitly and the server reads persisted provenance.
+- Do not persist a cloud conversation ID, pairing secret, Cookie, or full rendered prompt in a thread receipt.
 
 ## Static Scan Hints
 

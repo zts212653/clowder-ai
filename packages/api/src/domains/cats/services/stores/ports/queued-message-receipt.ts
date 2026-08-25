@@ -48,6 +48,13 @@ function targetAttempts(custody: QueuedMessageCustody, catId: string) {
   return attempts.length > 0 ? { attempts } : {};
 }
 
+function latestTargetAttempt(custody: QueuedMessageCustody, catId: string) {
+  return (custody.targetAttempts ?? [])
+    .filter((attempt) => attempt.targetCatId === catId)
+    .sort((left, right) => left.sequence - right.sequence)
+    .at(-1);
+}
+
 function projectQueueReceiptTarget(
   custody: QueuedMessageCustody,
   catId: string,
@@ -103,18 +110,22 @@ function projectQueueReceiptTarget(
     const exposure = latestExposure(custody, catId);
     const awakenedInvocationId = custody.awakenedInvocationIdByCatId?.[catId];
     const awakenedAt = custody.awakenedAtByCatId?.[catId];
+    const interruptedAttempt = latestTargetAttempt(custody, catId);
+    const interrupted = interruptedAttempt?.state === 'interrupted';
     const retryable = !custody.carrierByTargetCatId || custody.carrierByTargetCatId[catId] !== undefined;
     return {
       catId,
-      state: 'failed',
+      state: interrupted ? 'interrupted' : 'failed',
       ...authorIntentProjection,
       ...attemptsProjection,
-      ...(retryable ? {} : { retryable: false }),
+      ...(interrupted || retryable ? {} : { retryable: false }),
       ...(exposure
         ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt }
-        : awakenedInvocationId
-          ? { invocationId: awakenedInvocationId, ...(awakenedAt !== undefined ? { awakenedAt } : {}) }
-          : {}),
+        : interruptedAttempt?.invocationId
+          ? { invocationId: interruptedAttempt.invocationId }
+          : awakenedInvocationId
+            ? { invocationId: awakenedInvocationId, ...(awakenedAt !== undefined ? { awakenedAt } : {}) }
+            : {}),
     };
   }
   if (state.seen.has(catId)) {

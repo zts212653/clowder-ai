@@ -58,7 +58,18 @@ function checkOwnerGate(request: FastifyRequest, reply: FastifyReply): { error: 
 }
 
 const hideSimilarBodySchema = z.object({
-  reason: z.enum(['expired', 'invalid_token', 'unknown_invocation', 'stale_invocation', 'missing_creds']),
+  reason: z.enum([
+    'invalid_token',
+    'unknown_invocation',
+    'stale_invocation',
+    'completed',
+    'failed',
+    'interrupted',
+    'replaced',
+    'revoked',
+    'canceled',
+    'missing_creds',
+  ]),
   tool: z.string().min(1),
   catId: z.string().min(1),
   // Cloud Codex P1 #1397: scoped to thread + user so a hide doesn't

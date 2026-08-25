@@ -41,7 +41,10 @@ export class TurnExecutionStartupReconciler {
     this.now = deps.now ?? Date.now;
   }
 
-  async reconcile(input: { processStartedAt: number }): Promise<TurnExecutionStartupReconcileResult> {
+  async reconcile(input: {
+    processStartedAt: number;
+    protectedInvocationIds?: readonly string[];
+  }): Promise<TurnExecutionStartupReconcileResult> {
     if (!Number.isFinite(input.processStartedAt) || input.processStartedAt < 0) {
       throw new Error('processStartedAt must be a finite non-negative number');
     }
@@ -53,6 +56,9 @@ export class TurnExecutionStartupReconciler {
     const interrupted = await this.store.interruptRunningBefore(exclusiveCutoffStartedAt, {
       endedAt: reconciledAt,
       terminalReason: 'process_restart',
+      ...(input.protectedInvocationIds?.length
+        ? { excludedInvocationIds: [...new Set(input.protectedInvocationIds)] }
+        : {}),
     });
     return {
       interruptedCount: interrupted.length,

@@ -28,7 +28,14 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, TokenUsage, ToolExecutionPolicy } from '../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  PreparedProviderRequestV1,
+  TokenUsage,
+  ToolExecutionPolicy,
+} from '../../types.js';
 import {
   cleanupSessionFiles,
   ingestEvalEntries,
@@ -322,13 +329,36 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
 
       let sessionId: string;
       try {
+        const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+          v: 1,
+          message: Object.freeze({
+            body: effectivePrompt,
+            ...(imagePaths.length > 0 ? { injectionDecision: 'adapter_image_path_hints_applied' } : {}),
+          }),
+          nativeInstructions: Object.freeze([]),
+          runtime: Object.freeze({
+            provider: 'anthropic',
+            carrier: 'interactive_pty',
+            ...(effectiveModel ? { model: effectiveModel } : {}),
+            protocol: 'pty_hooks',
+            reasoningEffort: effortLevel,
+            ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+          }),
+          tools: Object.freeze({
+            finalSurface: readOnly ? ('exact' as const) : ('unknown' as const),
+            ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+          }),
+          providerNativeVisibility: 'unknown' as const,
+        });
+        await options?.beforeProviderLaunch?.(preparedRequest);
+        if (!('body' in preparedRequest.message)) throw new Error('claude_pty_prepared_message_not_exact');
         // F230 R10 root-cause fix (2026-06-11): PtyDriver uses watchForTranscriptFile to
         // discover the transcript — Claude generates its own UUID per session. For resume
         // sessions the path is deterministic (resumeSessionId.jsonl). No serialization gate
         // needed — each concurrent invocation operates on Claude's independently-generated UUID.
         // B-hook: transcriptPath/initialLines no longer used for tailing (hook sidecar replaces),
         // but injectPrompt still discovers transcript for sessionId.
-        ({ sessionId } = await driver.injectPrompt(effectivePrompt, transcriptDir));
+        ({ sessionId } = await driver.injectPrompt(preparedRequest.message.body, transcriptDir));
       } catch (err) {
         yield {
           type: 'error',

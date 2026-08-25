@@ -1,0 +1,363 @@
+kind: f267-measurement-bundle-census
+schemaVersion: 2
+generatedAt: 2026-08-24T22:14:10Z
+sources:
+  registryDir: docs/harness-feedback/eval-domains
+  instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
+  publishMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN
+  verdictDir: docs/harness-feedback/verdicts
+verdictCorpusHash: f7ee57365b6a410f69841c0bfd3c75ece7c7f26c5b0ec37da1094f6daf623dec
+committedVerdictArtifactCount: 3
+entries:
+  - domainId: eval:a2a
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F167
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f167-runtime-eval
+      kind: a2a-snapshot-attribution
+    committedVerdictArtifactCount: 2
+    functionalEquivalents:
+      - f167-runtime-eval/a2a-snapshot-attribution public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 2
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for eval:a2a.
+  - domainId: eval:anchor-first
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F236
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f236-anchor-telemetry-rollup
+      kind: anchor-telemetry-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f236-anchor-telemetry-rollup/anchor-telemetry-snapshot public registry
+        contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 3
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:anchor-first.
+  - domainId: eval:capability-tips
+    classification: gated
+    enabled: false
+    decisionConsumer:
+      featureId: F244
+      ownerCatId: codex-sol
+      allowedActions: []
+    sourceSelector:
+      adapter: capability-tips-usage
+      kind: capability-tips-usage-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - capability-tips-usage/capability-tips-usage-window public registry
+        contract
+    evidence:
+      domainInstructions: false
+      publishInstructions: false
+    validityMigration:
+      riskRank: null
+      batch: null
+      status: gated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Domain eval:capability-tips is disabled in this public instance.
+  - domainId: eval:capability-wakeup
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F203
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: capability-wakeup-eval
+      kind: capability-wakeup-trial-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - capability-wakeup-eval/capability-wakeup-trial-window public registry
+        contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 4
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:capability-wakeup.
+  - domainId: eval:design-gate
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F303
+      ownerCatId: codex-sol
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f303-design-gate-episode
+      kind: design-gate-episode-source-map
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f303-design-gate-episode/design-gate-episode-source-map public registry
+        contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 5
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:design-gate.
+  - domainId: eval:external-case-closure
+    classification: registered_nonoperational
+    enabled: true
+    decisionConsumer:
+      featureId: F168
+      ownerCatId: opus48
+      allowedActions: []
+    sourceSelector:
+      adapter: f168-external-case-eval
+      kind: a2a-snapshot-attribution
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f168-external-case-eval/a2a-snapshot-attribution public registry contract
+    evidence:
+      domainInstructions: false
+      publishInstructions: false
+    validityMigration:
+      riskRank: null
+      batch: null
+      status: nonoperational
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: Domain eval:external-case-closure has no operational publish
+        path in this public instance.
+  - domainId: eval:freshness
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F254
+      ownerCatId: codex
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f254-freshness-replay
+      kind: freshness-closure-replay
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f254-freshness-replay/freshness-closure-replay public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 6
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:freshness.
+  - domainId: eval:friction
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F245
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f245-friction-rollup
+      kind: friction-rollup-snapshot
+    committedVerdictArtifactCount: 1
+    functionalEquivalents:
+      - f245-friction-rollup/friction-rollup-snapshot public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 7
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:friction.
+  - domainId: eval:memory
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F200
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f200-f188-memory-eval
+      kind: memory-recall-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f200-f188-memory-eval/memory-recall-snapshot public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 1
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:memory.
+  - domainId: eval:qc
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F253
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: qc-metrics-eval
+      kind: qc-metrics-rollup
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - qc-metrics-eval/qc-metrics-rollup public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 8
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for eval:qc.
+  - domainId: eval:sop
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F192
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: sop-trace-eval
+      kind: sop-trace-eval
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - sop-trace-eval/sop-trace-eval public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 9
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for eval:sop.
+  - domainId: eval:task-outcome
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F192
+      ownerCatId: opus
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: task-outcome-eval
+      kind: task-outcome-snapshot
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - task-outcome-eval/task-outcome-snapshot public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 10
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:task-outcome.

@@ -3,8 +3,10 @@
 # 解决 Wave 2 欠债：手工 symlink 反复遗漏
 #
 # 同步目标（默认 — project-level）：
-#   1. main worktree  .{claude,codex,gemini,kimi}/skills/  （git tracked）
-#   2. 所有 worktree   .{claude,codex,gemini,kimi}/skills/  （runtime 等）
+#   1. 调用命令所在的 worktree  .{claude,codex,gemini,kimi}/skills/
+#
+# 同步目标（--all — 显式 fleet repair）：
+#   2. 每个 eligible worktree  .{claude,codex,gemini,kimi}/skills/
 #
 # 同步目标（--user opt-in — HOME-level，per ADR-025 第 3 条）：
 #   3. HOME 级  ~/.claude/skills/          （Claude Code 全局）
@@ -15,7 +17,7 @@
 # 注：ADR-025 第 3 条规定用户级目录不默认承载官方 skills；
 #     contributor 想全局共享 cat-cafe-skills/ 需显式 `--user` opt-in。
 #
-# 用法: pnpm sync:skills [--dry-run] [--user]
+# 用法: pnpm sync:skills [--dry-run] [--user] [--all] [--verbose]
 
 set -euo pipefail
 
@@ -33,7 +35,12 @@ if [ -z "$MAIN_REPO" ]; then
   printf "ERROR: failed to resolve main worktree from git worktree list\n" >&2
   exit 1
 fi
-SKILLS_SRC="$MAIN_REPO/cat-cafe-skills"
+HOME_SKILLS_SRC="$MAIN_REPO/cat-cafe-skills"
+CURRENT_REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$CURRENT_REPO" ] || [ ! -d "$CURRENT_REPO/cat-cafe-skills" ]; then
+  printf "ERROR: run sync:skills from a Clowder AI worktree with cat-cafe-skills/\n" >&2
+  exit 1
+fi
 
 # HOME-level uses absolute symlinks (check-skills-mount.sh expects this)
 HOME_CLAUDE="$HOME/.claude/skills"
@@ -43,20 +50,26 @@ HOME_KIMI="$HOME/.kimi/skills"
 
 DRY_RUN=false
 USER_MODE=false
+ALL_MODE=false
+VERBOSE=false
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --user) USER_MODE=true ;;
+    --all) ALL_MODE=true ;;
+    --verbose) VERBOSE=true ;;
     -h|--help)
-      printf "Usage: pnpm sync:skills [--dry-run] [--user]\n"
+      printf "Usage: pnpm sync:skills [--dry-run] [--user] [--all] [--verbose]\n"
       printf "  --dry-run   Show what would change without writing.\n"
       printf "  --user      Also mount HOME-level symlinks at ~/.{claude,codex,gemini,kimi}/skills/.\n"
       printf "              Default: project-level only (ADR-025 第 3 条).\n"
+      printf "  --all       Repair every eligible worktree instead of only the invoking one.\n"
+      printf "  --verbose   Print individual mount actions in addition to the summary.\n"
       exit 0
       ;;
     *)
       printf "Unknown flag: %s\n" "$arg" >&2
-      printf "Usage: pnpm sync:skills [--dry-run] [--user]\n" >&2
+      printf "Usage: pnpm sync:skills [--dry-run] [--user] [--all] [--verbose]\n" >&2
       exit 1
       ;;
   esac
@@ -73,159 +86,34 @@ skipped=0
 errors=0
 dir_mounted=0  # providers where .{provider}/skills is a valid directory-level
                # symlink (legacy mount, already valid) — skipped wholesale
+worktrees_scanned=0
+provider_targets=0
+state_writes=0
 SHARED_REFS_ALIAS=".cat-cafe-shared-refs"
 
-# Canonicalize a path to its physical (symlink-resolved) location. macOS
-# readlink lacks -f; using `cd && pwd -P` is a builtin and avoids spawning
-# python3 thousands of times across the worktree × provider matrix.
-# Returns empty on resolution failure so callers can treat that as invalid.
-canon_path() {
-  local p="$1"
-  if [ -d "$p" ]; then
-    (cd "$p" 2>/dev/null && pwd -P) || true
-  elif [ -e "$p" ] || [ -L "$p" ]; then
-    local dir base
-    dir="$(dirname "$p")"
-    base="$(basename "$p")"
-    if [ -d "$dir" ]; then
-      printf "%s/%s\n" "$(cd "$dir" 2>/dev/null && pwd -P)" "$base"
-    fi
-  fi
+log_action() {
+  $VERBOSE || return 0
+  printf "  [action] %s\n" "$*"
 }
 
-# Mirror skill-sync.ts shouldSkipDirectoryLevelSkillsSymlink: classify a
-# provider's skills directory before per-skill loop.
-#
-# Accepts one or more expected source paths — caller passes worktree-local
-# AND main-repo sources so a legacy dir-level symlink targeting either is
-# treated as valid (cloud P2 round 2 on PR #2325: worktrees may have dir-
-# level mounts pointing at the main source even when worktree-local
-# cat-cafe-skills/ exists).
-#
-# Echoes one of:
-#   skip      $skills_dir is a valid directory-level symlink to any of the
-#             provided expected sources. Caller MUST skip per-skill writes
-#             (would re-enter source tree).
-#   loop      $skills_dir is not a symlink; per-skill loop is appropriate.
-#   invalid   $skills_dir is a symlink but resolves to none of the provided
-#             expected sources. Caller MUST NOT write through it.
-classify_provider_dir() {
-  local skills_dir="$1"
-  shift
-  if [ ! -L "$skills_dir" ]; then
-    echo loop
-    return 0
-  fi
-  local mounted_root
-  mounted_root="$(canon_path "$skills_dir")"
-  if [ -z "$mounted_root" ]; then
-    echo invalid
-    return 0
-  fi
-  local src expected_root
-  for src in "$@"; do
-    expected_root="$(canon_path "$src")"
-    if [ -n "$expected_root" ] && [ "$mounted_root" = "$expected_root" ]; then
-      echo skip
-      return 0
-    fi
-  done
-  echo invalid
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/sync-skills-helpers.sh
+source "$SCRIPT_DIR/lib/sync-skills-helpers.sh"
 
-sync_link() {
-  local skill_name="$1"
-  local target_dir="$2"
-  local link_target="$3"  # absolute or relative path to skill dir
-  local link_path="$target_dir/$skill_name"
-
-  # Skip if correct symlink already exists
-  if [ -L "$link_path" ]; then
-    local existing
-    existing="$(readlink "$link_path")"
-    if [ "$existing" = "$link_target" ]; then
-      skipped=$((skipped + 1))
-      return 0
-    fi
-    # Wrong target — remove and recreate
-    if $DRY_RUN; then
-      printf "  ${YELLOW}[dry-run]${NC} would replace %s → %s\n" "$link_path" "$link_target"
-      created=$((created + 1))
-      return 0
-    fi
-    rm "$link_path"
-  elif [ -e "$link_path" ]; then
-    # Not a symlink but something exists. Surface as a real error: directory-
-    # level legacy mounts are handled by classify_provider_dir upstream, so any
-    # path hitting this branch is genuinely unexpected (corrupted state, hand-
-    # created file, etc.) and shouldn't silently pass.
-    printf "  ${RED}SKIP${NC} %s (exists but not a symlink)\n" "$link_path"
-    errors=$((errors + 1))
-    return 0
-  fi
-
-  # Ensure target dir exists
-  if [ ! -d "$target_dir" ]; then
-    if $DRY_RUN; then
-      printf "  ${YELLOW}[dry-run]${NC} would mkdir %s\n" "$target_dir"
-    else
-      mkdir -p "$target_dir"
-    fi
-  fi
-
-  if $DRY_RUN; then
-    printf "  ${YELLOW}[dry-run]${NC} would create %s → %s\n" "$link_path" "$link_target"
-  else
-    ln -s "$link_target" "$link_path"
-    printf "  ${GREEN}✓${NC} %s → %s\n" "$skill_name" "$target_dir/"
-  fi
-  created=$((created + 1))
-}
-
-sync_shared_refs() {
-  local target_dir="$1"
-  local link_target="$2"
-  local link_path="$target_dir/$SHARED_REFS_ALIAS"
-
-  if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "$link_target" ]; then
-    skipped=$((skipped + 1))
-    return 0
-  fi
-  if [ -e "$link_path" ] || [ -L "$link_path" ]; then
-    printf "  ${RED}SKIP${NC} %s (reserved shared refs coordinate is occupied)\n" "$link_path"
-    errors=$((errors + 1))
-    return 0
-  fi
-  if [ ! -d "$target_dir" ]; then
-    if $DRY_RUN; then
-      printf "  ${YELLOW}[dry-run]${NC} would mkdir %s\n" "$target_dir"
-    else
-      mkdir -p "$target_dir"
-    fi
-  fi
-  if $DRY_RUN; then
-    printf "  ${YELLOW}[dry-run]${NC} would create %s → %s\n" "$link_path" "$link_target"
-  else
-    ln -s "$link_target" "$link_path"
-    printf "  ${GREEN}✓${NC} %s → %s/\n" "$SHARED_REFS_ALIAS" "$target_dir"
-  fi
-  created=$((created + 1))
-}
-
-# Collect all skill names
-skill_names=()
-for skill_dir in "$SKILLS_SRC"/*/; do
-  [ -d "$skill_dir" ] || continue
-  skill_name="$(basename "$skill_dir")"
-  [ -f "$skill_dir/SKILL.md" ] || continue
-  skill_names+=("$skill_name")
-done
+SKILLS_SRC="$CURRENT_REPO/cat-cafe-skills"
+collect_skill_names "$SKILLS_SRC"
 
 printf "\n${BOLD}Clowder AI Skills Sync${NC}\n"
-printf "源: %s (%d skills)\n" "$SKILLS_SRC" "${#skill_names[@]}"
+if $ALL_MODE; then
+  printf "Scope: all eligible worktrees\n"
+  printf "Source: each worktree's cat-cafe-skills/\n"
+else
+  printf "Scope: current worktree\n"
+  printf "Source: %s (%d skills)\n" "$SKILLS_SRC" "${#skill_names[@]}"
+fi
 $DRY_RUN && printf "${YELLOW}[DRY RUN MODE]${NC}\n"
 
-# ─── Part 1: All worktrees (project-level, relative symlinks) ───
+# ─── Part 1: Project-level targets (current by default; --all for fleet) ───
 
 # Collect worktree paths
 worktree_paths=()
@@ -238,7 +126,13 @@ while IFS= read -r line; do
   esac
 done <<< "$WORKTREE_LIST"
 
-printf "\n${BOLD}[Worktrees]${NC} %d 个 × 4 providers (claude/codex/gemini/kimi)\n" "${#worktree_paths[@]}"
+if ! $ALL_MODE; then
+  worktree_paths=("$CURRENT_REPO")
+fi
+
+if $VERBOSE; then
+  printf "\n${BOLD}[Worktrees]${NC} %d selected × 4 providers (claude/codex/gemini/kimi)\n" "${#worktree_paths[@]}"
+fi
 for wt in "${worktree_paths[@]}"; do
   # Skip prunable / stale worktree entries — `git worktree list` may still list
   # a path that has been deleted on disk before `git worktree prune` ran. Writing
@@ -255,6 +149,7 @@ for wt in "${worktree_paths[@]}"; do
     continue
   fi
 
+  worktrees_scanned=$((worktrees_scanned + 1))
   wt_label="$(basename "$wt")"
   [ "$wt" = "$MAIN_REPO" ] && wt_label="main"
 
@@ -264,27 +159,33 @@ for wt in "${worktree_paths[@]}"; do
   # OR the main repo's source — classify_provider_dir accepts a list of expected
   # sources, so we pass both candidates and any match counts as valid.
   wt_skills_src="$wt/cat-cafe-skills"
-  [ -d "$wt_skills_src" ] || wt_skills_src="$SKILLS_SRC"
+  if [ -d "$wt_skills_src" ]; then
+    collect_skill_names "$wt_skills_src"
+  else
+    wt_skills_src="$HOME_SKILLS_SRC"
+    skill_names=()
+  fi
 
   # ADR-025: project-level mount covers all 4 providers (claude/codex/gemini/kimi),
   # aligned with governance-bootstrap. .codex/ .gemini/ .kimi/ are gitignored at
   # repo root so generated symlinks won't dirty git status; .claude/skills is tracked.
   for provider in claude codex gemini kimi; do
     wt_skills="$wt/.${provider}/skills"
+    provider_targets=$((provider_targets + 1))
 
     # Provider-dir guard (mirrors skill-sync.ts shouldSkipDirectoryLevelSkillsSymlink):
     # If $wt_skills itself is a symlink to a cat-cafe-skills/ source, the provider
     # is already mounted at the directory level. Descending into it would re-enter
     # the source tree and report bogus per-skill anomalies — skip wholesale.
     # Accept either worktree-local OR main-repo source as a valid dir-mount target.
-    case "$(classify_provider_dir "$wt_skills" "$wt_skills_src" "$SKILLS_SRC")" in
+    case "$(classify_provider_dir "$wt_skills" "$wt_skills_src" "$HOME_SKILLS_SRC")" in
       skip)
         dir_mounted=$((dir_mounted + 1))
-        printf "  ${GREEN}%s${NC} (.${provider}): dir-level mount OK (skip per-skill)\n" "$wt_label"
+        log_action "$wt_label (.${provider}): dir-level mount OK (skip per-skill)"
         continue
         ;;
       invalid)
-        printf "  ${RED}ERROR${NC} %s is a symlink with unexpected target (expected one of: %s, %s)\n" "$wt_skills" "$wt_skills_src" "$SKILLS_SRC"
+        printf "  ${RED}ERROR${NC} %s is a symlink with unexpected target (expected one of: %s, %s)\n" "$wt_skills" "$wt_skills_src" "$HOME_SKILLS_SRC"
         errors=$((errors + 1))
         continue
         ;;
@@ -330,8 +231,8 @@ for wt in "${worktree_paths[@]}"; do
       sync_link "$skill_name" "$wt_skills" "../../cat-cafe-skills/$skill_name"
       [ "$created" -gt "$before" ] && synced=$((synced + 1))
     done
-    if [ "$synced" -gt 0 ]; then
-      printf "  ${GREEN}%s${NC} (.${provider}): %d 修复\n" "$wt_label" "$synced"
+    if $VERBOSE && [ "$synced" -gt 0 ]; then
+      log_action "$wt_label (.${provider}): $synced repaired"
     fi
   done
 done
@@ -339,16 +240,18 @@ done
 # ─── Part 2: HOME-level (absolute symlinks) — opt-in via --user (ADR-025 第 3 条) ───
 
 if $USER_MODE; then
+  collect_skill_names "$HOME_SKILLS_SRC"
   printf "\n${BOLD}[HOME]${NC} ~/.{claude,codex,gemini,kimi}/skills/ (--user opt-in)\n"
-  sync_shared_refs "$HOME_CLAUDE" "$SKILLS_SRC/refs"
-  sync_shared_refs "$HOME_CODEX" "$SKILLS_SRC/refs"
-  sync_shared_refs "$HOME_GEMINI" "$SKILLS_SRC/refs"
-  sync_shared_refs "$HOME_KIMI" "$SKILLS_SRC/refs"
+  printf "HOME targets: %s, %s, %s, %s\n" "$HOME_CLAUDE" "$HOME_CODEX" "$HOME_GEMINI" "$HOME_KIMI"
+  sync_shared_refs "$HOME_CLAUDE" "$HOME_SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_CODEX" "$HOME_SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_GEMINI" "$HOME_SKILLS_SRC/refs"
+  sync_shared_refs "$HOME_KIMI" "$HOME_SKILLS_SRC/refs"
   for skill_name in "${skill_names[@]}"; do
-    sync_link "$skill_name" "$HOME_CLAUDE" "$SKILLS_SRC/$skill_name"
-    sync_link "$skill_name" "$HOME_CODEX"  "$SKILLS_SRC/$skill_name"
-    sync_link "$skill_name" "$HOME_GEMINI" "$SKILLS_SRC/$skill_name"
-    sync_link "$skill_name" "$HOME_KIMI"   "$SKILLS_SRC/$skill_name"
+    sync_link "$skill_name" "$HOME_CLAUDE" "$HOME_SKILLS_SRC/$skill_name"
+    sync_link "$skill_name" "$HOME_CODEX"  "$HOME_SKILLS_SRC/$skill_name"
+    sync_link "$skill_name" "$HOME_GEMINI" "$HOME_SKILLS_SRC/$skill_name"
+    sync_link "$skill_name" "$HOME_KIMI"   "$HOME_SKILLS_SRC/$skill_name"
   done
 else
   printf "\n${BOLD}[HOME]${NC} skipped (default project-level only)\n"
@@ -364,7 +267,15 @@ fi
 # Legacy: skills-state.json kept for backward compatibility
 
 if ! $DRY_RUN && [ "$errors" -eq 0 ]; then
-  STATE_DIR="$MAIN_REPO/.cat-cafe"
+  STATE_REPO="$CURRENT_REPO"
+  STATE_SOURCE="$CURRENT_REPO/cat-cafe-skills"
+  if $ALL_MODE; then
+    STATE_REPO="$MAIN_REPO"
+    STATE_SOURCE="$HOME_SKILLS_SRC"
+  fi
+  collect_skill_names "$STATE_SOURCE"
+
+  STATE_DIR="$STATE_REPO/.cat-cafe"
   mkdir -p "$STATE_DIR"
 
   # Compute manifest hash: SHA-256 of sorted skill names
@@ -372,9 +283,8 @@ if ! $DRY_RUN && [ "$errors" -eq 0 ]; then
   MANIFEST_HASH="sha256:$(printf '%s\n' "${skill_names[@]}" | sort | shasum -a 256 | cut -c1-16)"
   SYNCED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  # sourceRoot: relative path from project root to skills source
-  # For main repo: SKILLS_SRC is $MAIN_REPO/cat-cafe-skills → relative = "cat-cafe-skills"
-  SOURCE_ROOT="${SKILLS_SRC#"$MAIN_REPO"/}"
+  # sourceRoot is always relative to the worktree receiving this state update.
+  SOURCE_ROOT="${STATE_SOURCE#"$STATE_REPO"/}"
 
   # v2: merge skillsSync into capabilities.json (source of truth for API staleness)
   CAP_FILE="$STATE_DIR/capabilities.json"
@@ -388,7 +298,8 @@ config.skillsSync = syncState;
 writeFileSync(capFile, JSON.stringify(config, null, 2) + '\n');
 " "$CAP_FILE" "{\"sourceRoot\":\"$SOURCE_ROOT\",\"sourceManifestHash\":\"$MANIFEST_HASH\",\"lastSyncedAt\":\"$SYNCED_AT\"}"
 
-  printf "${BOLD}[State]${NC} ${GREEN}✓${NC} %s#skillsSync (hash: %s)\n" "$CAP_FILE" "$MANIFEST_HASH"
+  state_writes=$((state_writes + 1))
+  log_action "updated $CAP_FILE#skillsSync ($MANIFEST_HASH)"
 
   # Legacy: skills-state.json (backward compat — will be removed in a future cleanup)
   STATE_FILE="$STATE_DIR/skills-state.json"
@@ -404,11 +315,13 @@ ${SORTED_NAMES}
 }
 EOJSON
 
-  printf "${BOLD}[State]${NC} ${GREEN}✓${NC} %s (legacy, hash: %s)\n" "$STATE_FILE" "$MANIFEST_HASH"
+  state_writes=$((state_writes + 1))
+  log_action "updated $STATE_FILE ($MANIFEST_HASH)"
 fi
 
 # ─── Summary ───
 
+printf "\nTargets: %d provider surfaces across %d worktrees\n" "$provider_targets" "$worktrees_scanned"
 printf "\n${BOLD}结果${NC}: "
 if [ "$created" -gt 0 ]; then
   printf "${GREEN}%d 新建/修复${NC} " "$created"
@@ -416,6 +329,9 @@ fi
 printf "%d 已正确 " "$skipped"
 if [ "$dir_mounted" -gt 0 ]; then
   printf "${GREEN}%d providers dir-level mount${NC} " "$dir_mounted"
+fi
+if [ "$state_writes" -gt 0 ]; then
+  printf "%d state files updated " "$state_writes"
 fi
 if [ "$errors" -gt 0 ]; then
   printf "${RED}%d 错误${NC}" "$errors"

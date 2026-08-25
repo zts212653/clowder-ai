@@ -168,6 +168,34 @@ describe('ActionSubjectTruthResolver', () => {
       predicate: { kind: 'review_delivered', headSha: HEAD_OLD },
     });
     assert.equal((await resolver.resolveCompletion(oldPredicate, snapshot)).status, 'mismatch');
+    assert.deepEqual(await resolver.resolveFreshness(oldPredicate), {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the server-observed current HEAD',
+      evidenceRef: `community:pr:owner/repo#2868:head:${HEAD_NEW}`,
+    });
+  });
+
+  it('rejects terminal PR projections even when they retain the frozen current HEAD', async () => {
+    const predicate = canonicalizeActionTerminalPredicate({
+      actionFamily: 'review',
+      subjectRef: 'pr:owner/repo#2868',
+      predicate: { kind: 'review_delivered', headSha: HEAD_NEW },
+    });
+    for (const object of [
+      projection('fixed', {
+        externalReview: { lifecycle: 'terminal', currentHeadSha: HEAD_NEW },
+      }),
+      projection('in_progress', {
+        externalReview: { lifecycle: 'terminal', currentHeadSha: HEAD_NEW },
+      }),
+    ]) {
+      const { resolver } = harness({ object });
+      assert.deepEqual(await resolver.resolveFreshness(predicate), {
+        status: 'mismatch',
+        reason: 'PR is already terminal',
+        evidenceRef: `community:pr:owner/repo#2868:${object.state}:200`,
+      });
+    }
   });
 
   it('verifies a subject-bound GitHub review proof before the community verdict event is projected', async () => {
@@ -205,15 +233,13 @@ describe('ActionSubjectTruthResolver', () => {
     );
   });
 
-  it('verifies a durable local-cat verdict message against the exact lease route and HEAD', async () => {
+  it('verifies a durable typed local-cat verdict against the exact lease route and server-owned HEAD', async () => {
     const evidenceRef = 'local-review:message-1:g2:changes_requested';
     const localReviewEvidenceProvider = {
       async resolve(input) {
         assert.deepEqual(input, {
-          evidenceRef,
+          messageId: 'message-1',
           leaseId: 'lease-review-2',
-          subjectRef: 'pr:owner/repo#2868',
-          headSha: HEAD_NEW,
           generation: 2,
           reviewerCatId: 'codex-terra',
           holderThreadId: 'thread-review',
@@ -221,7 +247,7 @@ describe('ActionSubjectTruthResolver', () => {
           predecessorThreadId: 'thread-review',
           tenantScope: 'user-1',
         });
-        return { status: 'verified', evidenceRef };
+        return { status: 'verified', evidenceRef, verdict: 'changes_requested' };
       },
     };
     const { resolver } = harness({
@@ -447,6 +473,11 @@ describe('ActionSubjectTruthResolver', () => {
     const doneTask = { ...task, status: 'done', updatedAt: 240 };
     const done = harness({ task: doneTask }).resolver;
     const snapshot = candidate(['task:task-1:done:240']);
+    assert.deepEqual(await done.resolveFreshness(predicate), {
+      status: 'mismatch',
+      reason: 'task is already done',
+      evidenceRef: 'task:task-1:done:240',
+    });
     assert.deepEqual(await done.resolveCompletion(predicate, snapshot), {
       status: 'verified',
       evidenceRef: 'task:task-1:done:240',
@@ -570,6 +601,7 @@ describe('ActionSubjectTruthResolver', () => {
     assert.deepEqual(await resolver.resolveFreshness(predicate), {
       status: 'mismatch',
       reason: 'predicate HEAD is not the tracking-observed current HEAD',
+      evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_OLD}`,
     });
   });
 
@@ -586,6 +618,7 @@ describe('ActionSubjectTruthResolver', () => {
     assert.deepEqual(await resolver.resolveFreshness(predicate), {
       status: 'mismatch',
       reason: 'predicate HEAD is not the tracking-observed current HEAD',
+      evidenceRef: `tracking:pr:owner/repo#2868:head:${HEAD_OLD}`,
     });
   });
 
@@ -651,6 +684,7 @@ describe('ActionSubjectTruthResolver', () => {
     assert.deepEqual(await stale.resolveFreshness(predicate), {
       status: 'mismatch',
       reason: 'predicate HEAD is not the bootstrap-observed current HEAD',
+      evidenceRef: `github:pr:owner/repo#2868:head:${HEAD_OLD}`,
     });
 
     for (const prState of ['merged', 'closed']) {
@@ -658,6 +692,7 @@ describe('ActionSubjectTruthResolver', () => {
       assert.deepEqual(await terminal.resolveFreshness(predicate), {
         status: 'mismatch',
         reason: 'bootstrap observation reports a terminal PR',
+        evidenceRef: `github:pr:owner/repo#2868:state:${prState}`,
       });
     }
   });

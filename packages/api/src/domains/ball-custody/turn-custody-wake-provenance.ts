@@ -28,6 +28,11 @@ export function buildCrossThreadNoObligationWake(input: unknown): TurnCustodyWak
     record.coordination && typeof record.coordination === 'object' && !Array.isArray(record.coordination)
       ? (record.coordination as Record<string, unknown>)
       : undefined;
+  const hasTypedLocalReviewVerdict =
+    record.localReviewVerdict !== null &&
+    typeof record.localReviewVerdict === 'object' &&
+    !Array.isArray(record.localReviewVerdict);
+  if (hasTypedLocalReviewVerdict) return undefined;
   if (coordination?.phase === 'terminal') {
     return { kind: 'non_obligation', source: 'coordination_terminal' };
   }

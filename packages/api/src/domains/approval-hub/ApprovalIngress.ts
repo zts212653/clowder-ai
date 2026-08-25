@@ -2,6 +2,7 @@ import type { ApprovalEnvelope, ApprovalOriginRef, ApprovalProducerId, CatId, Ri
 import { approvalProducerMeta, validateApprovalEnvelope, validateApprovalOriginRef } from '@cat-cafe/shared';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { isSystemUserMessage } from '../cats/services/stores/visibility.js';
 import { approvalCardIdempotencyKey, buildApprovalCardBlock } from './buildApprovalCardBlock.js';
 import type { ApprovalPublicationStore } from './ports/ApprovalPublicationStore.js';
 
@@ -182,7 +183,7 @@ export class ApprovalIngress {
 
   private fanOutAnchoredPublication(draft: ApprovalPublishDraft, stored: StoredMessage | null): void {
     // R4 P1-2: Each fanout channel is independently isolated.  One failing
-    // must NOT short-circuit the other — broadcastToRoom (room participants)
+    // must NOT short-circuit the other — broadcastToRoom (chat projection)
     // and emitToUser (Hub sync trigger) serve different consumers.
     if (stored) {
       try {
@@ -218,7 +219,60 @@ export class ApprovalIngress {
     const origin = await this.deps.messageStore.getById(draft.originRef.messageId);
     if (!origin || origin.deletedAt || origin._tombstone) throw new Error('Approval origin message not found');
     if (origin.threadId !== draft.originRef.threadId) throw new Error('Approval origin message thread mismatch');
-    if (origin.userId !== draft.ownerUserId) throw new Error('Approval origin message owner mismatch');
+    // Cross-tenant isolation here is a CONJUNCTION of two parts, and neither part
+    // is sufficient on its own (@codex-luna's review, rounds 2-4):
+    //
+    //   (1) CALLER: originRef.threadId / .messageId and ownerUserId must be bound
+    //       to an authenticated record. This class CANNOT verify that binding.
+    //   (2) THIS CLASS: the assertion above checks that the origin message really
+    //       does live in the thread the draft names.
+    //
+    // (2) alone proves nothing about tenancy — a draft naming a thread of its own
+    // choosing satisfies the comparison trivially. It carries weight only because
+    // (1) fixes which thread may be named. On the F225 session-handoff path (1)
+    // holds: that producer derives all three from an authenticated
+    // InvocationRecord, and a request body cannot rewrite them.
+    //
+    // ApprovalIngress serves several producers, so (1) is a property of a PATH and
+    // never of this class. An earlier revision only documented that and let the
+    // exemption apply to every message-origin producer — which made the exemption
+    // as wide as the shared ingress while the argument for it covered one caller
+    // (maintainer review, PR #1347 gate 2).
+    //
+    // So the exemption is no longer global: it is gated per producer by
+    // `systemOriginExemption` in the producer catalog, and a required field means a
+    // new producer cannot inherit it by omission.
+    //
+    // Be precise about what that gate is (@codex-luna, PR #1349 P2). It is a
+    // CAPABILITY GATE over a DECLARATION — the catalog says which producers claim
+    // the binding of (1). It is NOT a runtime proof that the named adapter really
+    // binds: this class cannot verify that, and a wrong `server_attested` value
+    // would not be caught here. The proof lives in the per-entry audit trail plus
+    // route-level coverage. So the gate narrows the blast radius from "every
+    // message-origin producer" to "the ones someone audited and signed for" — which
+    // is a real reduction, not a verification.
+    //
+    // Given (1) AND (2), what the comparison below still decides is narrower: who
+    // may have authored a row inside an already-verified thread — and a system
+    // pseudo-user speaking in that thread is not another tenant.
+    //
+    // Without the exemption this rejected precisely the sessions that need it most.
+    // A session-handoff proposal anchors on the message that triggered the
+    // invocation, and for any long-running session that message IS the scheduler's
+    // wake row ("持球唤醒"), persisted as userId='scheduler' / catId=null. So a
+    // timer-woken cat could never hand off, while the same proposal from an
+    // A2A-triggered turn (authored by the real owner) went through — the failure
+    // was invisible except as a 500 with no actionable text.
+    //
+    // isSystemUserMessage is the store layer's existing predicate for exactly this
+    // distinction, and it is deliberately reused rather than re-derived here: it
+    // requires BOTH a system userId AND a system/null catId, so a cat-authored row
+    // wearing a system userId stays rejected. A second, private definition of "is
+    // this the system" is how the two drift apart.
+    const systemOriginExempt = approvalProducerMeta(draft.producerId).systemOriginExemption === 'server_attested';
+    if (origin.userId !== draft.ownerUserId && !(systemOriginExempt && isSystemUserMessage(origin))) {
+      throw new Error('Approval origin message owner mismatch');
+    }
   }
 
   private async findPersistedCard(
@@ -234,17 +288,26 @@ export class ApprovalIngress {
   }
 
   private broadcastCard(draft: ApprovalPublishDraft, stored: StoredMessage): void {
-    this.deps.socketManager.broadcastToRoom(`thread:${draft.cardThreadId}`, 'connector_message', {
-      threadId: draft.cardThreadId,
-      message: {
-        id: stored.id,
-        type: 'cat',
-        catId: draft.requesterCatId,
-        content: stored.content,
-        timestamp: stored.timestamp,
-        extra: stored.extra,
+    // A reconnecting socket joins its durable user room synchronously, while
+    // desired thread rooms are reconciled asynchronously by the client. Fan
+    // the same committed card to the UNION of both rooms so a proposal created
+    // in that window still reaches the source-thread projection. Socket.IO's
+    // multi-room operator emits once per socket even when it belongs to both.
+    this.deps.socketManager.broadcastToRoom(
+      [`thread:${draft.cardThreadId}`, `user:${draft.ownerUserId}`],
+      'connector_message',
+      {
+        threadId: draft.cardThreadId,
+        message: {
+          id: stored.id,
+          type: 'cat',
+          catId: draft.requesterCatId,
+          content: stored.content,
+          timestamp: stored.timestamp,
+          extra: stored.extra,
+        },
       },
-    });
+    );
   }
 }
 

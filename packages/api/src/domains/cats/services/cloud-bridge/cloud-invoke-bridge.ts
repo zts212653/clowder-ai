@@ -9,7 +9,7 @@
  *  - AC-B1c-2: service skeleton + non-throwing transport-outcome contract
  *  - AC-B1c-4: fallback notification on adapter unavailable / inject failure
  *  - AC-B1c-10: eval-boundary JSON.stringify safety (delegated to build-delta-payload + adapter)
- *  - AC-B1c-12: 5-field delta payload format (delegated to build-delta-payload)
+ *  - AC-B1c-12: source-bound delta payload format (delegated to build-delta-payload)
  *
  * PR-D (B1c hardening, this PR) adds:
  *  - AC-B1c-9: (threadId, catId) singleflight lock-first ordering —
@@ -41,7 +41,7 @@ export type { BridgeLogger, CloudInvokeBridgeDeps, EmitFallbackFn } from './clou
  *
  * Awaited by `invokeSingleCat` only through the bounded transport outcome. The
  * `dispatch()` method:
- *   1. Builds the 5-field delta payload (AC-B1c-12).
+ *   1. Builds the source-bound delta payload (AC-B1c-12 + exact source return capability).
  *   2. Reads the existing chat URL binding (if any) from thread metadata.
  *   3. If no adapter or adapter not ready → emits fallback + returns a typed
  *      outcome (no exception escapes the transport boundary).
@@ -108,6 +108,11 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
    * to the bound chat instead of opening a duplicate.
    */
   async dispatchInternal(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
+    if (!params.sourceMessageId || params.sourceMessageId.length > 512) {
+      const detail = 'Cloud dispatch requires one exact persisted source message ID';
+      await this.fallback(params, 'missing-source-message-id', detail);
+      return { kind: 'fallback', reason: 'missing-source-message-id', detail };
+    }
     const lockKey = `${params.threadId}:${params.catId}`;
 
     // AC-B1c-9: Wait for any in-flight dispatch on the same (threadId, catId).

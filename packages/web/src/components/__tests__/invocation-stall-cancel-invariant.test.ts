@@ -1,20 +1,11 @@
 /**
  * Red tests: Cancel invariant for invocation stall scenarios.
  *
- * Bug: "猫猫正在回复中" displayed for 30+ minutes with no cancel button.
- *
- * Root cause (frontend):
- * 1. ChatInput shows "猫猫正在回复中" based on hasActiveInvocation alone
- *    but has no cancel entry point in that banner.
- * 2. ThinkingIndicator's alive_but_silent state (2min+) shows warning
- *    but has no cancel button — only suspected_stall (5min+) has cancel.
- * 3. showThinkingIndicator has extra gates (intentMode / activeInvocationCount)
- *    that can prevent it from rendering even when hasActiveInvocation=true,
- *    creating a UX dead zone where the user sees "replying" but has no control.
- *
+ * Historical bug: "猫猫正在回复中" displayed for 30+ minutes with no cancel button.
  * Invariant to lock:
- * - alive_but_silent MUST have a cancel button
- * - ChatInput "猫猫正在回复中" banner MUST include cancel affordance
+ * - alive_but_silent remains exactly cancelable beside its projected execution
+ * - diagnostic status banners do not duplicate that execution-scoped control
+ * - whole-thread Stop remains a separate composer action
  */
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
@@ -28,8 +19,9 @@ const { mockApiFetch } = vi.hoisted(() => ({ mockApiFetch: vi.fn() }));
 vi.mock('@/utils/api-client', () => ({ apiFetch: mockApiFetch }));
 
 vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName?: string; id: string }) => cat.displayName ?? cat.id,
   useCatData: () => ({
-    getCatById: (id: string) => (id === 'codex' ? { displayName: '缅因猫 (Codex)', catId: 'codex' } : null),
+    getCatById: (id: string) => (id === 'codex' ? { displayName: '缅因猫 (Codex)', id: 'codex' } : null),
   }),
 }));
 
@@ -39,6 +31,7 @@ const storeState: Record<string, unknown> = {
   catStatuses: {},
   catInvocations: {},
   currentThreadId: 'thread-1',
+  threads: [{ id: 'thread-1', projectPath: '/project/cafe' }],
 };
 
 function liveExecution(): ActiveExecutionProjection {
@@ -105,6 +98,7 @@ describe('Invocation stall cancel invariant', () => {
     storeState.catStatuses = {};
     storeState.catInvocations = {};
     storeState.currentThreadId = 'thread-1';
+    storeState.threads = [{ id: 'thread-1', projectPath: '/project/cafe' }];
     useActiveExecutionStore.getState().reset();
     seedExecutionProjection();
   });
@@ -117,9 +111,9 @@ describe('Invocation stall cancel invariant', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // RED TEST 1: alive_but_silent MUST have cancel button
+  // RED TEST 1: one exact member control, no duplicate diagnostic control
   // ─────────────────────────────────────────────────────────────────────────
-  it('alive_but_silent state shows cancel button (not just suspected_stall)', async () => {
+  it('alive_but_silent keeps one exact execution cancel beside the projected member', async () => {
     storeState.catStatuses = { codex: 'alive_but_silent' };
     storeState.catInvocations = {
       codex: {
@@ -134,15 +128,24 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const { ThinkingIndicator } = await import('../ThinkingIndicator');
+    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
+      import('../ThinkingIndicator'),
+      import('../ThreadExecutionBar'),
+    ]);
     act(() => {
-      root.render(React.createElement(ThinkingIndicator));
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(ThinkingIndicator),
+          React.createElement(ThreadExecutionBar),
+        ),
+      );
     });
 
-    // Invariant: alive_but_silent MUST have a cancel button
-    const cancelBtn = container.querySelector('[aria-label="Stop codex live_invocation inv-1"]');
-    expect(cancelBtn).toBeTruthy();
-    expect(cancelBtn?.textContent).toContain('取消');
+    const cancelButtons = container.querySelectorAll('[aria-label="Stop codex live_invocation inv-1"]');
+    expect(cancelButtons).toHaveLength(1);
+    expect(cancelButtons[0]?.textContent).toBe('×');
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -163,9 +166,19 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const { ThinkingIndicator } = await import('../ThinkingIndicator');
+    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
+      import('../ThinkingIndicator'),
+      import('../ThreadExecutionBar'),
+    ]);
     act(() => {
-      root.render(React.createElement(ThinkingIndicator));
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(ThinkingIndicator),
+          React.createElement(ThreadExecutionBar),
+        ),
+      );
     });
 
     const cancelBtn = container.querySelector('[aria-label="Stop codex live_invocation inv-1"]') as HTMLButtonElement;
@@ -181,56 +194,5 @@ describe('Invocation stall cancel invariant', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ catId: 'codex' }),
     });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────
-// ChatInput "猫猫正在回复中" banner cancel invariant (structural contract)
-//
-// P1-1 from review: ChatInput banner shows "猫猫正在回复中" but had no
-// cancel affordance. ChatInput is too complex to render in isolation (many
-// hooks), so we verify the contract structurally: when hasActiveInvocation
-// renders the banner, it MUST contain a cancel/stop button.
-// ─────────────────────────────────────────────────────────────────────────
-describe('ChatInput active invocation banner cancel invariant (structural)', () => {
-  it('banner block contains a cancel button gated on onStop', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(join(import.meta.dirname, '..', 'ChatInput.tsx'), 'utf-8');
-
-    // Find the hasActiveInvocation banner block
-    const bannerIdx = source.indexOf('hasActiveInvocation && (');
-    expect(bannerIdx).toBeGreaterThan(-1);
-
-    // Extract through the banner's cancel button. The click handler itself may contain `)}`.
-    const afterBanner = source.slice(bannerIdx);
-    const closingIdx = afterBanner.indexOf('</button>');
-    expect(closingIdx).toBeGreaterThan(-1);
-    const bannerBlock = afterBanner.slice(0, closingIdx + '</button>'.length);
-
-    // INVARIANT: banner MUST have a testid for identification
-    expect(bannerBlock).toContain('data-testid="active-invocation-banner"');
-
-    // INVARIANT: banner MUST contain a cancel button gated on onStop
-    expect(bannerBlock).toContain('data-testid="banner-cancel-btn"');
-    expect(bannerBlock).toContain('onStop');
-    expect(bannerBlock).toContain("createExplicitStopIntent(event, 'chat_input_banner')");
-    expect(bannerBlock).toContain('取消');
-  });
-
-  it('banner cancel button is gated on onStop (not always visible)', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const source = await readFile(join(import.meta.dirname, '..', 'ChatInput.tsx'), 'utf-8');
-
-    // Find the cancel button inside the banner
-    const bannerIdx = source.indexOf('hasActiveInvocation && (');
-    const afterBanner = source.slice(bannerIdx);
-    const cancelIdx = afterBanner.indexOf('banner-cancel-btn');
-    expect(cancelIdx).toBeGreaterThan(-1);
-
-    // The cancel button must be gated — look for {onStop && before it
-    const beforeCancel = afterBanner.slice(0, cancelIdx);
-    expect(beforeCancel).toContain('{onStop && (');
   });
 });

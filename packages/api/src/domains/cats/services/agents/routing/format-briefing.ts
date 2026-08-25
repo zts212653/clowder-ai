@@ -4,11 +4,12 @@ import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { formatInjectionProvenance } from '../../../../memory/injection-provenance.js';
 import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
+import type { ContextSurfaceProjection } from '../../session/context-surface-projection.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 import type { CoverageMap } from './context-transport.js';
 import type { BatonContext, TaskSummary } from './navigation-context.js';
-import type { RankedSource } from './source-ranking.js';
+import { type RankedSource, selectDirectiveSources } from './source-ranking.js';
 import { formatThreadDrill } from './thread-drill-pointer.js';
 
 /** Rich block payload for frontend rendering */
@@ -19,6 +20,8 @@ export interface ContextBriefingBlock {
   anchorSummaries?: string[];
   baton?: BatonContext;
   activeTasks?: TaskSummary[];
+  /** F296 B3b-4: copied from the route projection; the card never re-derives continuity. */
+  contextSurfaceProjection?: ContextSurfaceProjection;
 }
 
 /** Result from formatContextBriefing */
@@ -41,6 +44,7 @@ export function formatContextBriefing(
   coverageMap: CoverageMap,
   threadMemorySummary?: string,
   anchorSummaries?: string[],
+  contextSurfaceProjection?: ContextSurfaceProjection,
 ): ContextBriefingResult {
   const parts: string[] = [];
   parts.push(`看到 ${coverageMap.burst.count} 条`);
@@ -51,7 +55,13 @@ export function formatContextBriefing(
     parts.push(`记忆 ${coverageMap.threadMemory.sessionsIncorporated} sessions`);
   }
 
-  parts.push(`证据 ${coverageMap.retrievalHints.length} 条`);
+  parts.push(`证据指针 ${coverageMap.recallPointer.candidateCount} 条`);
+
+  if (contextSurfaceProjection) {
+    parts.push(`${contextSurfaceProjection.contextMode}/${contextSurfaceProjection.reason}`);
+    const counts = contextSurfaceProjection.presentationCounts;
+    parts.push(`T0 ${counts.T0} · T1 ${counts.T1} · T2 ${counts.T2} · invalid ${counts.invalid}`);
+  }
 
   const summary = parts.join(' · ');
 
@@ -60,6 +70,7 @@ export function formatContextBriefing(
     coverageMap,
     ...(threadMemorySummary ? { threadMemorySummary } : {}),
     ...(anchorSummaries?.length ? { anchorSummaries } : {}),
+    ...(contextSurfaceProjection ? { contextSurfaceProjection } : {}),
   };
 
   return { summary, richBlock };
@@ -74,14 +85,13 @@ function formatBatonField(baton?: BatonContext): string {
 }
 
 function formatSourceField(sources: RankedSource[] | undefined, threadId: string): string {
-  if (!sources?.length) return `未定位（threadId=${threadId}）`;
-  const top = sources[0];
-  const label = top.provenance === 'regex' ? `${top.label} (推断)` : top.label;
-  return `${label} — ${top.ref}`;
+  const top = sources ? selectDirectiveSources(sources)[0] : undefined;
+  return top ? `${top.label} — ${top.ref}` : `未定位（threadId=${threadId}）`;
 }
 
 function formatNextStepField(threadId: string, sources?: RankedSource[], semanticSearchTerms?: string[]): string {
-  if (sources?.length) return `先看 ${sources[0].label}: ${sources[0].ref}`;
+  const top = sources ? selectDirectiveSources(sources)[0] : undefined;
+  if (top) return `先看 ${top.label}: ${top.ref}`;
   return formatThreadDrill(threadId, semanticSearchTerms);
 }
 
@@ -92,6 +102,20 @@ function buildNavigationTitle(threadId: string, baton?: BatonContext, sources?: 
   return parts.join(' · ');
 }
 
+function formatContextCoordinate(projection: ContextSurfaceProjection): string {
+  const carrier = projection.coordinate.providerCarrier;
+  return `${carrier.provider}/${carrier.carrier} · ${projection.coordinate.invocationOrigin} · ${projection.coordinate.routeTopology}`;
+}
+
+function formatContextMode(projection: ContextSurfaceProjection): string {
+  return `${projection.contextMode} · ${projection.reason} · epoch ${projection.contextEpoch} · ${projection.deltaSize}`;
+}
+
+function formatPresentationCounts(projection: ContextSurfaceProjection): string {
+  const counts = projection.presentationCounts;
+  return `T0 ${counts.T0} · T1 ${counts.T1} · T2 ${counts.T2} · invalid ${counts.invalid}`;
+}
+
 /** Options for buildBriefingMessage */
 interface BriefingMessageOptions {
   threadMemorySummary?: string;
@@ -100,6 +124,7 @@ interface BriefingMessageOptions {
   activeTasks?: TaskSummary[];
   recentArtifacts?: RecentArtifact[];
   rankedSources?: RankedSource[];
+  contextSurfaceProjection?: ContextSurfaceProjection;
 }
 
 /**
@@ -116,6 +141,7 @@ export function buildBriefingMessage(
     coverageMap,
     options?.threadMemorySummary,
     options?.anchorSummaries,
+    options?.contextSurfaceProjection,
   );
 
   // Build expanded bodyMarkdown for AC-E4
@@ -146,17 +172,10 @@ export function buildBriefingMessage(
         .join('\n')}`,
     );
   }
-  if (coverageMap.threadMemory?.openQuestions?.length) {
-    const top2 = coverageMap.threadMemory.openQuestions.slice(0, 2);
-    bodyParts.push(
-      `**待决问题**:\n${top2
-        .map((question, index) => {
-          const ref = coverageMap.threadMemory?.openQuestionRefs?.[index] ?? { threadId };
-          return `- ${question} ${formatInjectionProvenance(ref)}`;
-        })
-        .join('\n')}`,
-    );
-  }
+  // F296 AC-A2: no 待决问题 block. The regex/summary openQuestions have no
+  // canonical lifecycle state and no invalidator, so a closed question would keep
+  // presenting itself as current work — on the card and, since the briefing is
+  // persisted as a thread message, in later prompts too.
   if (options?.baton) {
     const b = options.baton;
     const timeStr = formatPromptTime(b.timestamp, { timeZone: getCoCreatorConfig().timeZone });
@@ -176,15 +195,16 @@ export function buildBriefingMessage(
     const artifactLines = options.recentArtifacts.map((a) => `- [${a.type}] ${a.label} (${a.updatedBy})`);
     bodyParts.push(`**最近产物**:\n${artifactLines.join('\n')}`);
   }
-  if (options?.rankedSources?.length) {
-    const sourceLines = options.rankedSources.map((s) => {
-      const tag = s.provenance === 'regex' ? ' (推断)' : '';
-      return `- [${s.type}] ${s.label}${tag} — ${s.ref}`;
-    });
+  const directiveSources = options?.rankedSources ? selectDirectiveSources(options.rankedSources) : [];
+  if (directiveSources.length) {
+    const sourceLines = directiveSources.map((s) => `- [${s.type}] ${s.label} — ${s.ref}`);
     bodyParts.push(`**真相源**:\n${sourceLines.join('\n')}`);
   }
-  if (coverageMap.retrievalHints.length > 0) {
-    bodyParts.push(`**证据召回**:\n${coverageMap.retrievalHints.map((h) => `- ${h}`).join('\n')}`);
+  if (coverageMap.recallPointer.candidateCount > 0) {
+    // F296 AC-A1: pointer only — the card mirrors what the cat actually got.
+    bodyParts.push(
+      `**证据召回**: ${coverageMap.recallPointer.candidateCount} 条启发式候选未展开正文，需要时用 \`cat_cafe_search_evidence\` 自行检索`,
+    );
   }
   if (coverageMap.searchSuggestions?.length) {
     bodyParts.push(
@@ -208,7 +228,31 @@ export function buildBriefingMessage(
         label: '下一步',
         value: formatNextStepField(threadId, options?.rankedSources, coverageMap.semanticSearchTerms),
       },
+      ...(options?.contextSurfaceProjection
+        ? [
+            {
+              label: '坐标',
+              value: formatContextCoordinate(options.contextSurfaceProjection),
+            },
+            {
+              label: '上下文',
+              value: formatContextMode(options.contextSurfaceProjection),
+            },
+            {
+              label: '呈现',
+              value: formatPresentationCounts(options.contextSurfaceProjection),
+            },
+          ]
+        : []),
     ],
+    ...(options?.contextSurfaceProjection
+      ? {
+          meta: {
+            kind: 'context_briefing',
+            contextSurfaceProjection: options.contextSurfaceProjection,
+          },
+        }
+      : {}),
   };
 
   const rich: RichMessageExtra = { v: 1, blocks: [card] };

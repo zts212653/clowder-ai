@@ -1,16 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 
-function normalizeEnv(input?: Record<string, string | null>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const [key, value] of Object.entries(input ?? {})) {
-    if (value === null) delete env[key];
-    else env[key] = value;
-  }
-  return env;
+function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
+  return buildChildEnv(input, { workingDirectory });
 }
 
 class DirectAgentCarrierSession implements AgentCarrierSession {
@@ -20,7 +16,8 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
   private readonly abortHandler: () => void;
 
   constructor(private readonly options: AgentCarrierSessionOptions) {
-    const env = normalizeEnv(options.env);
+    const childCwd = options.cwd ?? process.cwd();
+    const env = normalizeEnv(options.env, childCwd);
     const launch =
       process.platform === 'win32'
         ? { command: options.command, args: [...options.args], env }

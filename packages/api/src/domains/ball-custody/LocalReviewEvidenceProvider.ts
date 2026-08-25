@@ -6,20 +6,19 @@ export const LOCAL_REVIEW_VERDICTS = ['approved', 'changes_requested', 'commente
 export type LocalReviewVerdict = (typeof LOCAL_REVIEW_VERDICTS)[number];
 
 export type LocalReviewEvidenceResolution =
-  | { status: 'verified'; evidenceRef: string }
+  | { status: 'verified'; evidenceRef: string; verdict: LocalReviewVerdict }
   | { status: 'mismatch' | 'insufficient'; reason: string };
 
 export interface LocalReviewEvidenceInput {
-  evidenceRef: string;
+  messageId: string;
   leaseId: string;
-  subjectRef: string;
-  headSha: string;
   generation: number;
   reviewerCatId: string;
   holderThreadId: string;
   predecessorCatId?: string;
   predecessorThreadId?: string;
   tenantScope: string;
+  reviewedHeadSha?: string;
 }
 
 export interface LocalReviewEvidenceProvider {
@@ -59,56 +58,9 @@ export function parseLocalReviewEvidenceRef(value: string): ParsedLocalReviewEvi
   return { messageId, generation, verdict: verdict as LocalReviewVerdict };
 }
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function routesToPredecessor(message: StoredMessage, predecessorCatId: string): boolean {
   if (message.extra?.targetCats?.includes(predecessorCatId)) return true;
-  return new RegExp(`(?:^|\\n)@${escapeRegex(predecessorCatId)}(?:\\s|$)`, 'u').test(message.content);
-}
-
-function containsExactHead(content: string, headSha: string): boolean {
-  return new RegExp(`(?:^|[^0-9a-f])${escapeRegex(headSha)}(?:[^0-9a-f]|$)`, 'i').test(content);
-}
-
-function containsSubject(content: string, subjectRef: string): boolean {
-  const match = /^pr:([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(subjectRef);
-  if (!match) return false;
-  const [, owner, repo, number] = match;
-  if (!owner || !repo || !number) return false;
-  const anchors = [
-    subjectRef,
-    `${owner}/${repo}#${number}`,
-    `${repo} #${number}`,
-    `github.com/${owner}/${repo}/pull/${number}`,
-  ];
-  return anchors.some((anchor) =>
-    new RegExp(`(?:^|[^\\p{L}\\p{N}_.-])${escapeRegex(anchor)}(?![\\p{L}\\p{N}_])`, 'iu').test(content),
-  );
-}
-
-function containsLegacyRecoverySubject(content: string, subjectRef: string): boolean {
-  const match = /^pr:([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(subjectRef);
-  if (!match) return false;
-  const number = match[3];
-  if (!number) return false;
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}_.-])PR #${escapeRegex(number)}(?=\\s|$)`, 'iu').test(content);
-}
-
-function containsVerdict(content: string, verdict: LocalReviewVerdict): boolean {
-  const token =
-    verdict === 'approved'
-      ? 'APPROVE(?:D)?'
-      : verdict === 'changes_requested'
-        ? '(?:REQUEST_CHANGES|CHANGES_REQUESTED)'
-        : 'COMMENT(?:ED)?';
-  return new RegExp(`(?:^|\\n)${token}(?:\\s|$|[-—:])`, 'i').test(content);
-}
-
-function containsLegacyRecoveryVerdict(content: string, verdict: LocalReviewVerdict): boolean {
-  if (verdict !== 'changes_requested') return false;
-  return /(?:^|\n)\*{0,2}Verdict:\s*\*{0,2}BLOCK(?=\s|$)/i.test(content);
+  return message.mentions.some((catId) => catId === predecessorCatId);
 }
 
 function verifyPersistedReviewMessage(
@@ -116,7 +68,7 @@ function verifyPersistedReviewMessage(
   input: LocalReviewEvidenceInput,
   predecessorCatId: string,
   verdict: LocalReviewVerdict,
-  grammar: 'canonical' | 'historical_recovery',
+  evidenceRef: string,
 ): LocalReviewEvidenceResolution {
   if (message.threadId !== input.predecessorThreadId) {
     return { status: 'mismatch', reason: 'local review verdict was not returned to the predecessor thread' };
@@ -130,28 +82,13 @@ function verifyPersistedReviewMessage(
   ) {
     return { status: 'mismatch', reason: 'local review cross-post does not originate from the holder thread' };
   }
-  if (!containsExactHead(message.content, input.headSha)) {
-    return { status: 'mismatch', reason: 'local review verdict does not bind the exact HEAD' };
-  }
-  const subjectMatches =
-    containsSubject(message.content, input.subjectRef) ||
-    (grammar === 'historical_recovery' && containsLegacyRecoverySubject(message.content, input.subjectRef));
-  if (!subjectMatches) {
-    return { status: 'mismatch', reason: 'local review verdict does not bind the action subject' };
-  }
-  const verdictMatches =
-    containsVerdict(message.content, verdict) ||
-    (grammar === 'historical_recovery' && containsLegacyRecoveryVerdict(message.content, verdict));
-  if (!verdictMatches) {
-    return { status: 'mismatch', reason: 'local review message does not contain the declared verdict' };
-  }
-  return { status: 'verified', evidenceRef: input.evidenceRef };
+  return { status: 'verified', evidenceRef, verdict };
 }
 
 /**
  * Re-resolves a local review verdict from the canonical message store. The
- * evidence ref is only a locator; every lease-route and verdict claim is
- * checked again against persisted message truth.
+ * message id is only a locator; typed verdict metadata plus every carrier and
+ * lease-route dimension is checked again without parsing public prose.
  */
 export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvidenceProvider {
   private readonly carrierResolver: LocalReviewCarrierEvidenceResolver;
@@ -165,18 +102,13 @@ export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvide
 
   private async resolvePersistedVerdict(
     input: LocalReviewEvidenceInput,
-    carrierMode: 'required' | 'carrierless_recovery',
+    evidenceMode: 'current_settlement' | 'historical_recovery',
   ): Promise<LocalReviewEvidenceResolution> {
-    const parsed = parseLocalReviewEvidenceRef(input.evidenceRef);
-    if (!parsed) return { status: 'mismatch', reason: 'local review evidence ref is malformed' };
-    if (parsed.generation !== input.generation) {
-      return { status: 'mismatch', reason: 'local review evidence generation does not match lease' };
-    }
     if (!input.predecessorCatId || !input.predecessorThreadId) {
       return { status: 'insufficient', reason: 'local review lease has no structured predecessor route' };
     }
 
-    const message = await this.messageStore.getById(parsed.messageId);
+    const message = await this.messageStore.getById(input.messageId);
     if (!message) return { status: 'insufficient', reason: 'local review verdict message is unavailable' };
     if (message.userId !== input.tenantScope) {
       return { status: 'mismatch', reason: 'local review verdict tenant does not match lease' };
@@ -184,25 +116,40 @@ export class MessageStoreLocalReviewEvidenceProvider implements LocalReviewEvide
     if (message.catId !== input.reviewerCatId) {
       return { status: 'mismatch', reason: 'local review verdict author is not the lease holder' };
     }
+    const canonicalFence = message.extra?.localReviewVerdict?.carrierlessLeaseFence;
+    if (
+      evidenceMode === 'current_settlement' &&
+      canonicalFence &&
+      (canonicalFence.leaseId !== input.leaseId || canonicalFence.generation !== input.generation)
+    ) {
+      return {
+        status: 'mismatch',
+        reason: 'local review canonical settlement fence does not match the current action lease generation',
+      };
+    }
     const carrierFailure =
-      carrierMode === 'required'
-        ? await this.carrierResolver.resolveRequired(message, input)
-        : await this.carrierResolver.resolveRecovery(message, input);
+      evidenceMode === 'historical_recovery'
+        ? await this.carrierResolver.resolveRecovery(message, input)
+        : canonicalFence
+          ? await this.carrierResolver.resolveCanonicalIdentity(message, input)
+          : await this.carrierResolver.resolveRequired(message, input);
     if (carrierFailure) return carrierFailure;
-    return verifyPersistedReviewMessage(
-      message,
-      input,
-      input.predecessorCatId,
-      parsed.verdict,
-      carrierMode === 'carrierless_recovery' ? 'historical_recovery' : 'canonical',
-    );
+    const verdict = message.extra?.localReviewVerdict?.verdict;
+    if (!verdict || !LOCAL_REVIEW_VERDICTS.includes(verdict)) {
+      return { status: 'insufficient', reason: 'local review message has no typed verdict fact' };
+    }
+    if (input.reviewedHeadSha && message.extra?.localReviewVerdict?.reviewedHeadSha !== input.reviewedHeadSha) {
+      return { status: 'mismatch', reason: 'local review message reviewed HEAD does not match the lease predicate' };
+    }
+    const evidenceRef = localReviewEvidenceRef({ messageId: message.id, generation: input.generation, verdict });
+    return verifyPersistedReviewMessage(message, input, input.predecessorCatId, verdict, evidenceRef);
   }
 
   async resolve(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
-    return this.resolvePersistedVerdict(input, 'required');
+    return this.resolvePersistedVerdict(input, 'current_settlement');
   }
 
   async resolveRecovery(input: LocalReviewEvidenceInput): Promise<LocalReviewEvidenceResolution> {
-    return this.resolvePersistedVerdict(input, 'carrierless_recovery');
+    return this.resolvePersistedVerdict(input, 'historical_recovery');
   }
 }

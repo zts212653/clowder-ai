@@ -1,9 +1,9 @@
 ---
-feature_ids: [F042]
+feature_ids: [F042, F083, F303]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-07-27
+updated: 2026-08-23
 ---
 
 # Clowder AI 开发 SOP
@@ -85,6 +85,44 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 | 不可逆 | 删除、force push、合第三方 PR、close feat、圣域 | 先拿 operator 授权；机器门禁仍照常 |
 
 **元风险强制升档**：diff 触碰 `merge-gate`、风险 classifier、门禁脚本或 Harness Diet 公约自身时，直接进入 high-assurance，由非作者跨族 reviewer 覆盖最终实质内容（exact HEAD 或 continuityProof）。松绑机制不得静默松绑自己；在这条语义边界机器化前，如实标为 manual 守卫，不能由改门者自判 light。
+
+### Architecture / contract delta admission（F303）
+
+五轴入口遇到 canonical policy 被新 consumer 复用、owner/read path 被迁移，或 preservation
+claim 覆盖到了真实边界时，复用 F083 Design Gate 与 F191 三行，不新开 stage。
+
+F303 trigger set (three-item OR; no fourth trigger):
+
+- `consumer_delta`: 新增或搬动 route、surface、后台 job 或 caller，并复用既有 auth、policy、resolver、cursor 或 lifecycle 语义。
+- `authority_delta`: 重构、迁移或 single-writer 收敛改变 canonical owner、writer 或 read path。
+- `preservation_boundary_delta`: 出现“保持既有行为”“不改变鉴权”“Map delta: none”“只做 projection”等 preservation claim，且 diff 触及对应 consumer 或 authority boundary。
+
+重复事故 family 与 route-local 分叉只作为 admission 后的证据深度 prior，不是第四个
+trigger。普通增量仍只写 `Architecture cell / Map delta / Why`，不要求永久 consumer Matrix。
+
+命中任一 trigger 后，在 F191 三行后追加可被后续门禁和 reviewer 消费的 exact evidence：
+
+```markdown
+Canonical source: {repo-relative path#symbol | doc path#anchor}
+Consumer evidence: {rerunnable LSP/rg command + relevant output | explicit references + why automatic scan cannot express the boundary}
+Claim guard: {claim} → {test/lint/guard/self-check command or test name} → red when {input or condition}
+```
+
+代码符号用可重跑的 LSP find-references / `rg` census。只有 MCP tool、skill、workflow callback
+等约定面适用 F242；自动扫描无法表达语义边界时，列出显式 references 并解释原因。三项
+evidence 缺一，eligible change 停在 Design Gate，不把首次验证转嫁给 reviewer。
+
+重构、迁移或 single-writer eligible change 还必须提供：
+
+```markdown
+Characterization/contract test: {command or test name}
+Code-derived consumer census: {rerunnable command + relevant output}
+Migration/restart/rollback evidence: {only when persistence or runtime semantics migrate}
+```
+
+前两项缺一即停；只有持久化或运行语义迁移时才要求第三项。change-local evidence 不落永久
+Matrix，不注册新 runner/dashboard。F277 related-set / attention projection 也不能替代
+work、custody、completion 或 acceptance 的 canonical truth。
 
 五轴都未命中且改动可逆、无外部副作用 → 最小安全动作。信息不足不等于自动全套：先补查缺失事实，再按真实风险选车道。
 

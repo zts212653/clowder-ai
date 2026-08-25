@@ -1344,4 +1344,26 @@ describe('F194 Phase Z — namespace-aware (parent recordStore vs child registry
     assert.equal(result.active[0].invocationId, 'inv-legacy');
     assert.equal(result.active[0].source, 'record+draft');
   });
+
+  it('Cloud R5 P1-A: a transient registry bridge failure must propagate, not read as "no fresh child"', async () => {
+    // 病理链：running parent 超过 record-only grace（唯一 live 证明是 fresh child draft）
+    // → getTurnInvocation 瞬时抛错被 resolveDraftToTurn 吞成 null（"draft 不存在"）
+    // → strict 路径**权威空**而非抛错 → presence complete:true → sidebar 落历史 done/error。
+    // 语义边界：getRecord 返回 null 是权威"无 turn info"（合法 skip，Z 系列已锁）；
+    // **抛错是未知**，必须传播——未知不得当成否定（F297 语义铁律）。
+    const now = 1_000_000;
+    const record = makeRecord({ id: 'parent-bridge', updatedAt: now - 600_000, createdAt: now - 600_000 });
+    const draft = makeDraft({ invocationId: 'child-bridge', catId: 'opus', updatedAt: now - 100 });
+    const deps = {
+      ...makeDeps({ records: [record], drafts: [draft] }),
+      getTurnInvocation: () => {
+        throw new Error('transient registry read failure');
+      },
+    };
+    await assert.rejects(
+      () => getThreadLiveInvocations(THREAD_ID, USER_ID, deps, { now }),
+      /transient registry read failure/,
+      'a bridge read failure is unknown, not an authoritative "draft has no turn"',
+    );
+  });
 });

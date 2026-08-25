@@ -13,6 +13,7 @@ import {
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
 import { OfficialPluginsPanel } from './OfficialPluginsPanel';
+import { PersonalChromePluginPanel } from './PersonalChromePluginPanel';
 import { PluginConfigPanel } from './PluginConfigPanel';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
@@ -91,6 +92,7 @@ export function PluginsContent() {
   if (loading) {
     return (
       <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+        <PersonalChromePluginPanel />
         <OfficialPluginsPanel />
         <SettingsText as="p" variant="sm" tone="muted">
           加载本地插件中...
@@ -102,6 +104,7 @@ export function PluginsContent() {
   if (plugins.length === 0) {
     return (
       <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+        <PersonalChromePluginPanel />
         <OfficialPluginsPanel />
         <div
           className="flex flex-col items-center justify-center"
@@ -128,6 +131,7 @@ export function PluginsContent() {
 
   return (
     <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+      <PersonalChromePluginPanel />
       <OfficialPluginsPanel />
       {toggleError && (
         <div className="rounded-md bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{toggleError}</div>

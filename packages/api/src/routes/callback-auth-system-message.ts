@@ -9,7 +9,7 @@
  * surfaced where it happens.
  *
  * Surface decision (per `cat-cafe-skills/refs/in-context-observability-checklist.md`):
- *  - `expired` / `invalid_token` → surface (record still queryable for catId/threadId)
+ *  - actionable terminal dispositions / `invalid_token` → surface
  *  - `stale_invocation` → skip (just got replaced by a newer invocation, no user action needed)
  *  - `unknown_invocation` → skip (record gone, no reliable metadata to attach)
  *  - `missing_creds` → skip (no invocationId means no thread context at all)
@@ -20,7 +20,8 @@
  *    refresh-token 心跳触发的"幽灵失败"。
  *
  * Dedup (anti-noise per checklist):
- *  - Same (reason, tool, catId, threadId, userId) within 5min → suppressed
+ *  - Terminal notices: same (invocationId, disposition) within 5min → suppressed
+ *  - Identity failures: same (reason, tool, catId, threadId, userId) → suppressed
  *  - "Hide similar" opt-out: 24h suppression for that key
  *  - Cloud Codex P1 #1397: dedup MUST include threadId/userId — process-global
  *    notifier without those would cross-suppress unrelated threads/tenants.
@@ -55,7 +56,21 @@ export const CALLBACK_AUTH_SOURCE: ConnectorSource = {
 const DEDUP_WINDOW_MS = 5 * 60 * 1000;
 const HIDE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-const SURFACEABLE_REASONS = new Set<AuthFailureReason | 'missing_creds'>(['expired', 'invalid_token']);
+const SURFACEABLE_REASONS = new Set<AuthFailureReason | 'missing_creds'>([
+  'invalid_token',
+  'failed',
+  'interrupted',
+  'revoked',
+  'canceled',
+]);
+const TERMINAL_NOTICE_REASONS = new Set<AuthFailureReason>([
+  'completed',
+  'failed',
+  'interrupted',
+  'replaced',
+  'revoked',
+  'canceled',
+]);
 
 /**
  * F174 D2b-1 follow-up: tools that are SYSTEM-DRIVEN background heartbeats,
@@ -76,14 +91,21 @@ const SURFACEABLE_REASONS = new Set<AuthFailureReason | 'missing_creds'>(['expir
 const BACKGROUND_HEARTBEAT_TOOLS = new Set<string>(['refresh-token']);
 
 const REASON_DESCRIPTIONS: Record<AuthFailureReason | 'missing_creds', string> = {
-  expired: 'callback token 已过期',
   invalid_token: 'callback token 不匹配',
-  unknown_invocation: 'invocation 未找到（可能已过期清理）',
+  unknown_invocation: 'invocation 从未存在或终态 tombstone 已清理',
   stale_invocation: '已被新 invocation 顶替',
+  completed: 'exact TurnExecution 已完成',
+  failed: 'exact TurnExecution 已失败',
+  interrupted: 'exact TurnExecution 已中断',
+  replaced: 'callback credential 已被同 slot 新 attempt 替换',
+  revoked: 'callback credential 已被显式吊销',
+  canceled: 'exact TurnExecution 已取消',
   missing_creds: '请求未携带 callback 凭证',
 };
 
 export interface NotifyParams {
+  /** Exact callback principal; terminal notice identity and dedup anchor. */
+  invocationId?: string;
   threadId: string;
   catId: CatId;
   userId: string;
@@ -117,11 +139,18 @@ interface DedupState {
   hiddenAt?: number;
 }
 
-function dedupKey(p: { reason: string; tool: string; catId: string; threadId: string; userId: string }): string {
+function suppressionKey(p: { reason: string; tool: string; catId: string; threadId: string; userId: string }): string {
   // Cloud Codex P1 #1397: include threadId + userId so a hide/dedup in one
   // thread doesn't silently suppress the same (cat, tool, reason) tuple in
   // an unrelated thread or tenant.
   return `${p.reason}:${p.tool}:${p.catId}:${p.threadId}:${p.userId}`;
+}
+
+function eventDedupKey(params: NotifyParams): string {
+  if (params.invocationId && TERMINAL_NOTICE_REASONS.has(params.reason as AuthFailureReason)) {
+    return `terminal:${params.invocationId}:${params.reason}`;
+  }
+  return suppressionKey(params);
 }
 
 export class CallbackAuthSystemMessageNotifier {
@@ -179,16 +208,18 @@ export class CallbackAuthSystemMessageNotifier {
     // counts toward D2b-3 panel + HubButton badge.
     if (BACKGROUND_HEARTBEAT_TOOLS.has(params.tool)) return false;
 
-    const key = dedupKey({
+    const hideKey = suppressionKey({
       reason: params.reason,
       tool: params.tool,
       catId: params.catId,
       threadId: params.threadId,
       userId: params.userId,
     });
+    const key = eventDedupKey(params);
+    const hidden = this.dedup.get(hideKey);
     const state = this.dedup.get(key);
 
-    if (state?.hiddenAt !== undefined && now - state.hiddenAt < HIDE_WINDOW_MS) {
+    if (hidden?.hiddenAt !== undefined && now - hidden.hiddenAt < HIDE_WINDOW_MS) {
       return false;
     }
     if (state && state.hiddenAt === undefined && now - state.lastSentAt < DEDUP_WINDOW_MS) {
@@ -248,13 +279,14 @@ export class CallbackAuthSystemMessageNotifier {
    * (reason, tool, catId, threadId, userId) tuple for 24h.
    */
   hideSimilar(params: HideSimilarParams): void {
-    const key = dedupKey(params);
+    const key = suppressionKey(params);
     const now = this.now();
     this.dedup.set(key, { lastSentAt: now, hiddenAt: now });
   }
 }
 
 interface BlockParams {
+  invocationId?: string;
   reason: AuthFailureReason | 'missing_creds';
   tool: string;
   catId: CatId;
@@ -285,6 +317,7 @@ function buildAuthFailureBlock(params: BlockParams) {
       reason: params.reason,
       tool: params.tool,
       catId: params.catId,
+      ...(params.invocationId ? { invocationId: params.invocationId } : {}),
       threadId: params.threadId,
       userId: params.userId,
       failedAt: params.failedAt,

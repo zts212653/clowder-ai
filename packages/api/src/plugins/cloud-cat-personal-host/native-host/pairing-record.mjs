@@ -49,6 +49,7 @@ export function resolvePersonalChromeHostPaths(projectRoot, { platform = process
     rootDirectory,
     artifactsDirectory: resolve(rootDirectory, 'artifacts'),
     pairingRecordPath: resolve(rootDirectory, 'pairing.json'),
+    conversationBindingPath: resolve(rootDirectory, 'conversation-binding.json'),
     launcherPath: resolve(rootDirectory, 'native-host-launcher.mjs'),
     socketPath,
     ledgerPath: resolve(rootDirectory, 'delivery-ledger.json'),

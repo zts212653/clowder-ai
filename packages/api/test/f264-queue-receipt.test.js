@@ -251,7 +251,7 @@ describe('F264 queue receipt projection', () => {
       },
     });
 
-    assert.throws(() => parseQueuedMessageCustody(JSON.stringify(legacy)), /matching invocation lineage evidence/);
+    assert.throws(() => parseQueuedMessageCustody(JSON.stringify(legacy)), /matching invocation evidence/);
   });
 
   test('keeps current-format outcomes strict when exact exposure evidence is absent', () => {
@@ -351,7 +351,7 @@ describe('F264 queue receipt projection', () => {
             },
           }),
         ),
-      /matching invocation lineage evidence/,
+      /matching invocation evidence/,
     );
   });
 
@@ -375,6 +375,17 @@ describe('F264 queue receipt projection', () => {
     assert.throws(
       () => assertQueueCustodyTransition(current, { expectedRevision: current.revision, next }),
       /target outcomes are append-only/,
+    );
+  });
+
+  test('storage transition cannot rewrite the durable Queue owner principal', () => {
+    const current = custody({ ownerUserId: 'user-owner' });
+    const next = structuredClone(current);
+    next.revision += 1;
+    next.ownerUserId = 'scheduler';
+    assert.throws(
+      () => assertQueueCustodyTransition(current, { expectedRevision: current.revision, next }),
+      /ownerUserId is immutable/,
     );
   });
 

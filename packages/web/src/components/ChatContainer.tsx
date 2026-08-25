@@ -19,10 +19,8 @@ import { useGovernanceStatus } from '@/hooks/useGovernanceStatus';
 import { useIndexState } from '@/hooks/useIndexState';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { usePreviewAutoOpen } from '@/hooks/usePreviewAutoOpen';
 import { useSendMessage } from '@/hooks/useSendMessage';
 import { useSocket } from '@/hooks/useSocket';
-import type { ExplicitStopIntent } from '@/hooks/useSocket-cancel-provenance';
 import { useSplitPaneKeys } from '@/hooks/useSplitPaneKeys';
 import { useTeleport } from '@/hooks/useTeleport';
 import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
@@ -33,11 +31,13 @@ import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import { useSidebarStore } from '@/stores/sidebarStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
+import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AuthorizationCard } from './AuthorizationCard';
@@ -78,6 +78,7 @@ import { derivePendingMemberInvocations } from './pending-member-projection';
 import { QueuePanel } from './QueuePanel';
 import { collectExactLiveInvocationIds } from './queue-receipt-projection';
 import { RightStatusPanel } from './RightStatusPanel';
+import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { SplitPaneView } from './SplitPaneView';
 import { ThinkingIndicator } from './ThinkingIndicator';
@@ -93,6 +94,7 @@ import { ContextualWorkspaceChrome } from './workspace/ContextualWorkspaceChrome
 import { FloatingTranscriptContainer } from './workspace/FloatingTranscriptContainer';
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { TranscriptPanel } from './workspace/TranscriptPanel';
+import { hydrateInvocationTrajectoryFromCurrentUrl } from './workspace/trajectory/trajectory-navigation';
 
 interface ChatContainerProps {
   threadId: string;
@@ -153,6 +155,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F264: the timeline is the durable authoring history. QueuePanel presents
   // custody/actions for the same message, but must not erase its user bubble.
   const messages = allMessages;
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState === 'visible',
+  );
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(() => new Set());
   const [selectionForwardOpen, setSelectionForwardOpen] = useState(false);
@@ -266,12 +271,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { clearTasks } = useTaskStore();
   const { cats, getCatById, refresh: refreshCats, isLoading, hasFetched } = useCatData();
   const workspaceWorktreeId = useChatStore((s) => s.workspaceWorktreeId);
-  usePreviewAutoOpen(workspaceWorktreeId, threadId);
   useTeleport(); // F227: drive the Hub to a teleport target message (thread:teleport)
   const { isOpen: sidebarOpen, open: openSidebar, close: closeSidebar, toggle: toggleSidebar } = useSidebarStore();
   // F284: Chat is the calm default. Typed workspace/transcript actions still
   // open the contextual shell through the existing rightPanelMode effect.
-  const [statusPanelOpen, setStatusPanelOpen] = useState(false);
+  // F284 × F120 review P1: panel visibility is canonical per-thread store
+  // state (snapshotted in ThreadState), not route-local component state.
+  const statusPanelOpen = useChatStore((s) => s.rightPanelOpen);
+  const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
@@ -335,32 +342,32 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // F063/F195: auto-open panel when workspace or transcript mode is set
   useEffect(() => {
     if ((rightPanelMode === 'workspace' || rightPanelMode === 'transcript') && !statusPanelOpen) {
-      setStatusPanelOpen(true);
+      setRightPanelOpen(true);
     }
     if (rightPanelMode === 'workspace') setWorkspacePanelMounted(true);
     if (rightPanelMode === 'status' && statusPanelOpen) setActivityPanelMounted(true);
-  }, [rightPanelMode, statusPanelOpen]);
+  }, [rightPanelMode, statusPanelOpen, setRightPanelOpen]);
 
   // F232 P2（云端 round 5）：显式关闭右侧 panel——先退出 workspace/transcript mode（否则上面的 auto-open
   // effect 立即重开，关不掉），再关闭。所有 close 入口（header toggle / ResizeHandle 折叠）统一走这里。
+  // F284 × F120: closeRightPanel 同时退出 mode 并关闭 canonical visibility。
   const closeStatusPanel = useCallback(() => {
     closeRightPanel();
-    setStatusPanelOpen(false);
   }, [closeRightPanel]);
 
   const openStatusPanel = useCallback(() => {
     setActivityPanelMounted(true);
     setRightPanelMode('status');
-    setStatusPanelOpen(true);
-  }, [setRightPanelMode]);
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setRightPanelOpen]);
 
   const openWorkspaceLauncher = useCallback(() => {
     setWorkspacePanelMounted(true);
     setWorkspaceMode('dev');
     setWorkspaceSurface('home');
     setRightPanelMode('workspace');
-    setStatusPanelOpen(true);
-  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface]);
+    setRightPanelOpen(true);
+  }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
 
   const isDesktop = useIsDesktop();
 
@@ -382,7 +389,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [isDesktop, openSidebar]);
 
-  const { handleAgentMessage, handleStop: stopHandler, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
+  const { handleAgentMessage, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const {
@@ -467,6 +474,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // setCurrentThread saves old thread state to map, restores new thread state.
   const setCurrentProject = useChatStore((s) => s.setCurrentProject);
   const storeThreads = useChatStore((s) => s.threads);
+  const sidebarRows = useSidebarProjectionStore((state) => state.rows);
   const setThreads = useChatStore((s) => s.setThreads);
   const handleSkipFirstRunQuest = useCallback(() => {
     // #707: Persist skip to localStorage so refreshing doesn't re-trigger
@@ -695,27 +703,27 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setCurrentThread,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // B1.1: Restore projectPath when thread or storeThreads change.
-  // storeThreads is populated by ThreadSidebar.loadThreads shortly after mount,
-  // so this covers both page refresh (threads arrive async) and thread switch.
   useEffect(() => {
-    const cached = storeThreads?.find((t) => t.id === threadId);
+    hydrateInvocationTrajectoryFromCurrentUrl();
+  }, []);
+
+  // Restore projectPath from the canonical Sidebar projection; the legacy store
+  // remains only as a compatibility fallback for non-Sidebar flows.
+  useEffect(() => {
+    const cached = sidebarRows.find((row) => row.id === threadId) ?? storeThreads?.find((t) => t.id === threadId);
     if (cached) {
       setCurrentProject(cached.projectPath || 'default');
     }
-  }, [threadId, storeThreads, setCurrentProject]);
+  }, [threadId, sidebarRows, storeThreads, setCurrentProject]);
 
-  // F113-E: Fetch governance status for the current project (drives ProjectSetupCard)
+  // F302: read project facts; governance is never a readiness gate.
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
   const { status: govStatus, refetch: govRefetch } = useGovernanceStatus(currentProjectPath);
   const isProjectThread = !!currentProjectPath && currentProjectPath !== 'default' && currentProjectPath !== 'lobby';
   const agentHookHealth = useAgentHookHealth({ enabled: isProjectThread, projectPath: currentProjectPath });
   const [setupDone, setSetupDone] = useState(false);
-  // Show card when: needs setup (idle) OR just completed setup (done) — only in empty threads
-  const showSetupCard = !!(
-    (govStatus?.needsBootstrap || govStatus?.needsConfirmation || setupDone) &&
-    messages.length === 0
-  );
+  // Only blank repos get the automatic setup offer. Existing repos stay zero-write and quiet.
+  const showSetupCard = !!((govStatus?.isEmptyDir || setupDone) && messages.length === 0);
   // Reset setupDone on thread switch. Governance status already auto-refetches
   // when projectPath changes inside useGovernanceStatus; same-project thread switches
   // should not trigger an extra network round-trip.
@@ -760,6 +768,18 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     onNavigateToThread: navigateToThread,
     onIndexEvent: handleIndexSocketEvent,
   });
+  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
+  const socketThreadIds = useMemo(
+    () =>
+      viewMode === 'split' && splitPaneThreadIds.length > 0
+        ? [...new Set([...splitPaneThreadIds, threadId])]
+        : [threadId],
+    [viewMode, splitPaneThreadIds, threadId],
+  );
+  const { socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
+  useActiveExecutionProjection(threadId, socketConnected);
+  const connectionStatus = useConnectionStatus(socketConnected);
+  const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
   const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
@@ -800,6 +820,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           selectionEligible={selectionEligible}
           onEnterSelection={enterMessageSelection}
           onToggleSelection={toggleMessageSelection}
+          forwardingDisabled={connectionStatus.forwardingBlocked}
           eager={mountPolicy.eager}
           backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
         />
@@ -818,21 +839,9 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       selectedMessageIds,
       selectionMode,
       toggleMessageSelection,
+      connectionStatus.forwardingBlocked,
     ],
   );
-
-  const splitPaneThreadIds = useChatStore((s) => s.splitPaneThreadIds);
-  const socketThreadIds = useMemo(
-    () =>
-      viewMode === 'split' && splitPaneThreadIds.length > 0
-        ? [...new Set([...splitPaneThreadIds, threadId])]
-        : [threadId],
-    [viewMode, splitPaneThreadIds, threadId],
-  );
-  const { cancelInvocation, socketConnected } = useSocket(socketCallbacks, threadId, socketThreadIds);
-  useActiveExecutionProjection(threadId, socketConnected);
-  const connectionStatus = useConnectionStatus(socketConnected);
-  const hasProjectedExecution = useActiveExecutionStore((state) => Object.keys(state.executionsByKey).length > 0);
 
   const pendingInvocations = useMemo(
     () => (hasActiveInvocation ? derivePendingMemberInvocations(activeInvocations, messages, threadId) : []),
@@ -884,6 +893,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     clearUnread(threadId);
   }, [threadId, clearUnread]);
 
+  useEffect(() => {
+    const syncVisibility = () => setDocumentVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', syncVisibility);
+    return () => document.removeEventListener('visibilitychange', syncVisibility);
+  }, []);
+
   const disconnectBottomChromeObserver = useCallback(() => {
     bottomChromeObserverRef.current?.disconnect();
     bottomChromeObserverRef.current = null;
@@ -927,11 +942,17 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   // F069-R5: Ack read cursor server-side. The backend finds the latest real message
   // and acks it atomically — no frontend ID guessing, no timing races with fetchHistory.
-  // Fires on thread entry AND when new messages arrive (messages.length changes),
-  // so switching away after receiving new messages still acks to the latest.
+  // Fires on visible thread entry, new bubbles, and queued -> delivered
+  // transitions. A mutable stream keeps one bubble, so message count alone
+  // cannot observe its final delivery boundary.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _messageCount = messages.length;
+  const _deliveredMessageCount = messages.reduce(
+    (count, message) => count + (message.deliveredAt === undefined ? 0 : 1),
+    0,
+  );
   useEffect(() => {
+    if (!documentVisible) return;
     armUnreadSuppression(threadId);
     apiFetch(`/api/threads/${encodeURIComponent(threadId)}/read/latest`, {
       method: 'POST',
@@ -941,24 +962,21 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       .then(async (res) => {
         if (!res.ok) {
           settleUnreadAck(threadId, false);
+          useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
           return;
         }
         const payload = (await res.json()) as { caughtUp?: unknown };
-        settleUnreadAck(threadId, payload.caughtUp === true);
+        const caughtUp = payload.caughtUp === true;
+        settleUnreadAck(threadId, caughtUp);
+        if (!caughtUp) useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
+        void invalidateSidebarProjection();
       })
       .catch((err) => {
         settleUnreadAck(threadId, false);
+        useSidebarProjectionStore.getState().clearSidebarCommand(threadId, 'attention');
         console.debug('[F069] read ack failed:', err);
       });
-  }, [threadId, _messageCount, settleUnreadAck, armUnreadSuppression]);
-
-  const handleStop = useCallback(
-    (intent: ExplicitStopIntent, overrideThreadId?: unknown) => {
-      const targetThreadId = typeof overrideThreadId === 'string' ? overrideThreadId : threadId;
-      stopHandler(cancelInvocation, targetThreadId, intent);
-    },
-    [stopHandler, cancelInvocation, threadId],
-  );
+  }, [threadId, _messageCount, _deliveredMessageCount, documentVisible, settleUnreadAck, armUnreadSuppression]);
 
   const handleZoomToThread = useCallback(
     (tid: string) => {
@@ -980,6 +998,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       } catch {
         // Ignore refresh errors — navigation is the priority
       }
+      void invalidateSidebarProjection();
       navigateToThread(questThreadId);
     },
     [navigateToThread, setThreads],
@@ -998,9 +1017,10 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   if (viewMode === 'split') {
     return (
       <>
+        {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
         <SplitPaneView
+          isReadonly={connectionStatus.isReadonly}
           onSend={handleSend}
-          onStop={handleStop}
           uploadStatus={uploadStatus}
           uploadError={uploadError}
           onZoomToThread={handleZoomToThread}
@@ -1039,6 +1059,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 onEditCoCreator={handleEditCoCreator}
                 hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
                 dedupCount={dedupInfo?.dedupCount}
+                forwardingDisabled
               />
             );
           })}
@@ -1049,6 +1070,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
 
   return (
     <div ref={containerRef} className="flex h-screen h-dvh">
+      {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
         <>
@@ -1086,12 +1108,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             } else {
               setWorkspacePanelMounted(true);
               setRightPanelMode('workspace');
-              setStatusPanelOpen(true);
+              setRightPanelOpen(true);
             }
           }}
         />
 
-        {intentMode === 'ideate' && <ParallelStatusBar onStop={handleStop} threadId={threadId} />}
+        {intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
         <ThinkingIndicator threadId={threadId} />
 
         <div className="flex-1 relative overflow-hidden">
@@ -1172,9 +1194,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                         summary={bootstrapSummary}
                         durationMs={bootstrapDurationMs}
                         isNewProject={setupDone}
-                        governanceDone={
-                          setupDone || !!(govStatus && !govStatus.needsBootstrap && !govStatus.needsConfirmation)
-                        }
+                        governanceDone={setupDone}
                         onStartBootstrap={startBootstrap}
                         onSnooze={snoozeBootstrap}
                         onSearchKnowledge={handleSearchKnowledge}
@@ -1281,6 +1301,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
               selectedMessageIds={normalizedSelectedMessageIds}
               onCancel={clearMessageSelection}
               onExportSuccess={clearMessageSelection}
+              forwardingDisabled={connectionStatus.forwardingBlocked}
               onForward={() => setSelectionForwardOpen(true)}
             />
           ) : (
@@ -1315,7 +1336,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     contextAttachments,
                   )
                 }
-                onStop={handleStop}
                 disabled={connectionStatus.isReadonly}
                 hasActiveInvocation={hasActiveInvocation}
                 uploadStatus={uploadStatus}
@@ -1334,7 +1354,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             </button>
           )}
           <TransferTargetPicker
-            open={selectionForwardOpen}
+            open={selectionForwardOpen && !connectionStatus.forwardingBlocked}
+            admissionBlocked={connectionStatus.forwardingBlocked}
             sourceThreadId={threadId}
             items={selectedBundleItems}
             onClose={() => setSelectionForwardOpen(false)}

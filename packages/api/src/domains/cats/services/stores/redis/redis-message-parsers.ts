@@ -5,16 +5,22 @@
  */
 
 import type {
+  AsrPersonMemoryDynamicSceneEntryV1,
   CatId,
   ConnectorSource,
   CrossThreadCoordination,
   MessageContent,
   RichMessageExtra,
+  WriteOpportunityPresentationRetryCarrierV1,
+  WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
+  asrPersonMemoryDynamicSceneEntryV1Schema,
   deliveryDecisionCueCarrierV1Schema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  writeOpportunityPresentationRetryCarrierV1Schema,
+  writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
 import type { MessageMetadata } from '../../types.js';
@@ -24,7 +30,7 @@ import type {
   StoredPluginMessage,
   StoredToolEvent,
 } from '../ports/MessageStore.js';
-import { parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
+import { parseQueueCustodyAdmissionIntent, parseQueuedMessageCustody } from '../ports/queued-message-custody.js';
 import type { TurnExecutionMessageProjection } from '../ports/TurnExecutionStore.js';
 import { parseRecoveryMarker } from './redis-message-recovery-parser.js';
 
@@ -73,6 +79,7 @@ export function safeParseContentBlocks(raw: string | undefined): readonly Messag
 }
 
 export const safeParseQueueCustody = parseQueuedMessageCustody;
+export const safeParseQueueCustodyAdmission = parseQueueCustodyAdmissionIntent;
 
 export function safeParseMessageRecall(raw: string | undefined): MessageRecallMarker | undefined {
   if (!raw) return undefined;
@@ -155,8 +162,86 @@ function parseTurnExecutionProjection(value: unknown): TurnExecutionMessageProje
 
 type StoredMessageExtra = NonNullable<StoredMessage['extra']>;
 
+type ExtraCarrierPersistenceKind = 'parsed' | 'derived';
+
+type ExtraCarrierPersistenceClassification<
+  T extends Record<keyof Required<StoredMessageExtra>, ExtraCarrierPersistenceKind>,
+> = T;
+
+/**
+ * Compile-time exhaustiveness guard for the Redis hydration whitelist.
+ * Every StoredMessage.extra key must be classified when it is introduced.
+ */
+type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  rich: 'parsed';
+  isExplicitPost: 'parsed';
+  stream: 'parsed';
+  causal: 'parsed';
+  proactive: 'parsed';
+  memoryCue: 'parsed';
+  turnExecution: 'parsed';
+  auxiliaryTurnExecutions: 'parsed';
+  crossPost: 'parsed';
+  coordination: 'parsed';
+  localReviewVerdict: 'parsed';
+  callbackDedup: 'parsed';
+  targetCats: 'parsed';
+  messageBundle: 'parsed';
+  meetingArtifact: 'parsed';
+  dynamicSceneEntries: 'parsed';
+  writeOpportunityReentry: 'parsed';
+  writeOpportunityPresentationRetry: 'parsed';
+  freshness: 'parsed';
+  supplement: 'parsed';
+  recovery: 'parsed';
+  scheduler: 'parsed';
+  tracing: 'parsed';
+  systemKind: 'parsed';
+  a2aRouting: 'parsed';
+  queueReceipt: 'derived';
+  pluginMessage: 'parsed';
+}>;
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['localReviewVerdict'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const verdict = candidate.verdict;
+  const carrierlessLeaseFence = candidate.carrierlessLeaseFence as Record<string, unknown> | undefined;
+  if (
+    (verdict !== 'approved' && verdict !== 'changes_requested' && verdict !== 'commented') ||
+    typeof candidate.clientMessageId !== 'string' ||
+    candidate.clientMessageId.length === 0 ||
+    candidate.clientMessageId.length > 200 ||
+    (candidate.reviewedHeadSha !== undefined &&
+      (typeof candidate.reviewedHeadSha !== 'string' ||
+        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha))) ||
+    (candidate.carrierlessLeaseFence !== undefined &&
+      (typeof candidate.carrierlessLeaseFence !== 'object' ||
+        candidate.carrierlessLeaseFence === null ||
+        !isNonEmptyString(carrierlessLeaseFence?.leaseId) ||
+        carrierlessLeaseFence.leaseId.length > 200 ||
+        !Number.isInteger(carrierlessLeaseFence?.generation) ||
+        Number(carrierlessLeaseFence.generation) < 1))
+  ) {
+    return undefined;
+  }
+  return {
+    verdict,
+    clientMessageId: candidate.clientMessageId,
+    ...(typeof candidate.reviewedHeadSha === 'string' ? { reviewedHeadSha: candidate.reviewedHeadSha } : {}),
+    ...(carrierlessLeaseFence
+      ? {
+          carrierlessLeaseFence: {
+            leaseId: carrierlessLeaseFence.leaseId as string,
+            generation: carrierlessLeaseFence.generation as number,
+          },
+        }
+      : {}),
+  };
 }
 
 function parseProactiveCarrier(value: unknown): StoredMessageExtra['proactive'] {
@@ -231,6 +316,38 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (Array.isArray(parsed.dynamicSceneEntries)) {
+      const scenes: AsrPersonMemoryDynamicSceneEntryV1[] = [];
+      let valid = parsed.dynamicSceneEntries.length > 0;
+      for (const candidate of parsed.dynamicSceneEntries as unknown[]) {
+        const scene = asrPersonMemoryDynamicSceneEntryV1Schema.safeParse(candidate);
+        if (!scene.success) {
+          valid = false;
+          break;
+        }
+        scenes.push(scene.data);
+      }
+      if (valid) {
+        result.dynamicSceneEntries = scenes;
+        hasField = true;
+      }
+    }
+
+    const writeOpportunityReentry = writeOpportunityReentryCarrierV1Schema.safeParse(parsed.writeOpportunityReentry);
+    if (writeOpportunityReentry.success) {
+      result.writeOpportunityReentry = writeOpportunityReentry.data as WriteOpportunityReentryCarrierV1;
+      hasField = true;
+    }
+
+    const writeOpportunityPresentationRetry = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
+      parsed.writeOpportunityPresentationRetry,
+    );
+    if (writeOpportunityPresentationRetry.success) {
+      result.writeOpportunityPresentationRetry =
+        writeOpportunityPresentationRetry.data as WriteOpportunityPresentationRetryCarrierV1;
+      hasField = true;
+    }
+
     // Validate stream sub-field shape (#80: draft dedup key)
     // F194 Phase Z9 hotfix: preserve turnInvocationId (per-cat-turn id, written
     // by Z9 backend stamping). Pre-hotfix parser rebuilt only { invocationId },
@@ -238,6 +355,9 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     // to parent → multi-turn same-cat under shared parent collapsed (R13/R14).
     // F254 Phase E: parallelBatchId is an independent freshness identity. It must
     // survive Redis even if invocation metadata is absent or unavailable.
+    // F294/F194 R21 compatibility: cached split stdout/speech fields are legacy
+    // presentation evidence. Preserve them verbatim so v2 admission and durable
+    // reread see the same retained shape as Web hydration.
     if (parsed.stream && typeof parsed.stream === 'object') {
       const stream = {
         ...(typeof parsed.stream.invocationId === 'string' ? { invocationId: parsed.stream.invocationId } : {}),
@@ -247,6 +367,8 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
         ...(typeof parsed.stream.parallelBatchId === 'string'
           ? { parallelBatchId: parsed.stream.parallelBatchId }
           : {}),
+        ...(typeof parsed.stream.cliStdout === 'string' ? { cliStdout: parsed.stream.cliStdout } : {}),
+        ...(typeof parsed.stream.speechContent === 'string' ? { speechContent: parsed.stream.speechContent } : {}),
       };
       if (Object.keys(stream).length > 0) {
         result.stream = stream;
@@ -298,6 +420,14 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     const coordination = parseCrossThreadCoordination(parsed.coordination) ?? legacyCoordination;
     if (coordination) {
       result.coordination = coordination;
+      hasField = true;
+    }
+
+    // #1371 PR1b: the typed verdict is the only settlement fact. Public prose
+    // is presentation, so Redis hydration must preserve this carrier exactly.
+    const localReviewVerdict = parseLocalReviewVerdictCarrier(parsed.localReviewVerdict);
+    if (localReviewVerdict) {
+      result.localReviewVerdict = localReviewVerdict;
       hasField = true;
     }
 

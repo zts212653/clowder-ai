@@ -7,12 +7,12 @@ created: 2026-07-28
 description: "让用户在 Workspace Markdown 中从任意句开始听读，并以可见、可复用、可清理的本地音频缓存持续续听。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-14T21:00:00-07:00
+description_updated_at: 2026-08-23T01:37:00-07:00
 ---
 
 # F279: Workspace Listen Mode — 正文听读与可复用音频缓存
 
-> **Status**: in-progress / Phase A passed; Phase B complete; Phase C implementation landed with full Workspace UAT pending; Phase D background full-document cache Design Gate draft pending operator signoff
+> **Status**: in-progress / Phase A passed; Phase B complete; Phase C implementation landed with full Workspace UAT pending; Phase D lean full-document cache Design Gate passed and ready for implementation
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **Created**: 2026-07-28
@@ -21,16 +21,16 @@ description_updated_at: 2026-08-14T21:00:00-07:00
 > `0001785254502978-000008-67e5f9fd` — 确认可以采用 7 天清理，并询问是否应按完整 Feature 设计；
 > `0001785313307088-000072-a543a12d` — “我觉得对于design gate 我感觉ok了”；
 > `0001786603237557-000040-5b8645f4` — 反馈边听边缓存卡顿、暂停会让缓存停止，并提出一键缓存能力；
-> `0001786765382711-000136-e263f5dc` — 再次反馈逐句听读“一卡一卡”。
+> `0001786765382711-000136-e263f5dc` — 再次反馈逐句听读“一卡一卡”；
+> `0001787371703269-000188-2063f5a8` — 要求以第一性原理和数学之美复核 Phase D，避免制造冲突规则与概念；
+> `0001787474277593-000070-9989c234` — 同意服务重启后保留进度但不自动恢复，并授权更新 feature truth 后继续实施。
 > **Owner verdict**: 是；这是一条跨 Workspace、播放与缓存生命周期的独立用户旅程，正式立项为 F279。
 
-Architecture cell: `hub-action-surface` + `transport`
+Architecture cell: `hub-action-surface`
 
 Map delta: `none`
 
-Why: 播放条仍属于既有 Workspace 用户动作面；TTS capability identity 扩展既有 sidecar 生命周期契约，不新增 Store、Queue、Router 或服务边界。
-
-Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 继续拥有共享播放队列。F279 只拥有“文档 → 可听句段 → 播放/续听/缓存状态”的编排与用户状态，不新建第二套播放器或平台级存储。
+Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成与内容寻址，F112 继续拥有共享播放队列。F279 只编排“文档 → 可听句段 → 播放/续听/缓存进度”，不新建 Store、Queue、Router、transport 或平台服务边界。
 
 ## Why
 
@@ -38,7 +38,7 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 
 
 家里已经分别拥有 Markdown 渲染、TTS 合成、流式分句和播放队列，却还没有把这些能力接成一个用户能直接使用的“听正文”旅程。F279 的目标不是再造 TTS，而是让operator在 Workspace 打开一篇 Markdown 后，**从任意句开始、按自己舒服的速度听下去；听过的内容可以立即重播，缓存何时清理一眼可见。**
 
-## Current State（updated 2026-08-14）
+## Current State（updated 2026-08-23）
 
 - F063 已支持 Workspace Markdown 渲染、文本选择和媒体预览，但没有“听读”入口。
 - F066 提供本地 TTS；F111 提供流式分句；F112 提供 pause/resume/skip/interrupt 的共享 PlaybackManager。
@@ -56,7 +56,8 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 
 - 生产实现已接入 F284：rendered Markdown 工具栏/inline sentence span、Workspace 内嵌播放器、逐句预取、句内位置节流持久化、语音自动播放抑制、缓存状态/清理 UI 均已落代码。Python 原生模型流 → Node provider NDJSON → API SSE 继续提供合成进度和最终完整资产，但浏览器不再逐块播放独立 WAV。
 - 2026-08-14 的真实运行时证据推翻了“原生 chunk 可直接连续播放”的假设：每个约 `0.5s` chunk 都触发一次 `HTMLAudioElement.src` 重载，Chromium 实测单次空档约 `55ms`；真实完整句资产另带 `302–594ms` 的模型启动静音。当前修复让播放器只入队完整句资产，并在听读专用、独立版本的 cache 写入前把句首静音裁到约 `14–25ms`。原生 chunk 仍可留在 SSE 作为进度信号，不再成为可听播放单元。
 - TTS SSE 使用 raw Node response 时必须保留 Fastify hook 已批准的 CORS 与安全响应头；浏览器跨源失败显示真实 `session.error`，不能用当前句正文遮蔽。
-- 当前客户端预取窗口只有 4 句，窗口只在播放 item 结束后向前推进；pause 不会直接 abort 正在生成的一句，但会阻断后续窗口推进。缓存和播放仍由同一个 `DocumentListenController` 编排，也没有开播前可达的“只缓存全文”动作。2026-08-12 operator 的真实使用反馈据此追加 Phase D：文档级后台缓存任务必须与播放器状态解耦。
+- 当前客户端预取窗口只有 4 句，窗口只在播放 item 结束后向前推进；pause 不会直接 abort 正在生成的一句，但会阻断后续窗口推进。缓存和播放仍由同一个 `DocumentListenController` 编排，也没有开播前可达的“只缓存全文”动作。2026-08-12 operator 的真实使用反馈据此追加 Phase D：文档级后台缓存推进必须与播放器状态解耦。
+- 2026-08-23 Phase D 通过第一性原理/数学之美复核并获 operator 签字：持久真相只使用现有 document manifest 与 sentence→asset 链接；运行中状态只在 API 进程内持有。删除原草案的持久 job 表、`runEpoch`、六态终态、`failedAnchors`、attach/recovery 与第二套 queue。服务重启保留真实缓存进度但不自动恢复，由用户点“继续缓存”。
 - F289 的 one-shot production migration 已 NO-GO；F279 已从该 stack 脱离并直接重落 current main。可清理音频继续遵循现有 `TTS_CACHE_DIR`，续听位置、倍速、retention 与 manifest 由 F279 自己的窄 resolver 落在用户数据根，不能把 TTL=0 用户状态藏进可清理 cache 目录。
 
 ## Product Boundary
@@ -68,7 +69,7 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 
 - 播放/暂停、上一句/下一句、`0.75× / 1× / 1.25× / 1.5× / 2×`。
 - 当前句高亮、自动跟随与手动滚动后的温和恢复。
 - 分句预取、内容寻址复用、重开文档续听。
-- 开播前显式“缓存全文”；缓存任务独立于播放 pause/stop，并在文件工具栏与播放器中显示同一进度。
+- 开播前显式“缓存全文”；缓存推进独立于播放 pause/stop，并在文件工具栏与播放器中显示同一份 manifest-derived 进度。
 - 缓存状态、清理当前文档、7 天/30 天/永久保留选项。
 - Workspace 顶部内嵌完整 player：不覆盖聊天输入；关闭 Workspace、切文件或切 thread 时播放会话继续，并保留位于输入框上方的紧凑暂停/返回入口（KD-10）。
 - 听读进行中抑制猫猫实时语音自动朗读，并保留手动播入口（KD-9）。
@@ -132,16 +133,15 @@ Why: Workspace 是用户入口；F066/F111 继续拥有 TTS 合成能力，F112 
 - sidecar 的原生 chunk 只用于合成进度与最终资产生产；API 的 raw SSE 响应必须继承 Fastify 已批准的 CORS/安全头，完整资产到达前不得向播放器暴露不连续的可听片段。
 - 切换文档或关闭 Workspace 时，不自动丢弃持久续听位置。
 
-### 5. 文档级后台缓存任务
+### 5. 文档级全文缓存收敛
 
-- job ownership 从认证 principal 取得 `userId`，不接受客户端自报 owner；start/status/cancel/attach 都按 `userId + projectPath + relativePath` 隔离。
-- logical job identity 为 `userId + document identity + content digest + synthesis fingerprint`；每次 start/continue/retry 都持有单调递增的 `runEpoch`。同一 logical identity 同时最多一个 active run，重复启动幂等并跳过 cache hit。
-- cache job 不把音频 chunk 注入 PlaybackManager；播放 pause/resume/stop 与 cache job 生命周期正交。切文件、切 thread、Workspace 折叠或页面重开后仍可重新附着进度。
-- 正在听的 cache miss 在句子边界优先于 background remaining；同一 asset 的进行中请求合并，不建立第二套全局合成 queue。
-- durable status 明确区分 `queued/running/completed/cancelled/interrupted/failed`：显式取消为不自动恢复的 cancelled；服务重启把遗留 active run 变为可继续的 interrupted；failed 持久化失败 anchors 与去正文 error summary，让“重试剩余”有精确目标。
-- 取消原子撤销 current epoch，只停止剩余工作并保留已缓存资产；active job 下“清除此文档音频”必须在同一事务中先撤销 epoch，再按既有引用语义回收。
-- worker link asset 必须是条件写：仅当 `userId/document/runEpoch/status=running/expected digest/fingerprint/anchor membership` 全部仍匹配才提交。clear、cancel、内容 digest 或 voice fingerprint 改变后的晚到结果必须被忽略，不得复活 link/progress；无引用 asset 交给既有 cleaner。
-- current job state 与 `runEpoch` 进入既有 listen-mode SQLite，TTL=0，不跟随音频资产过期；只保留 current run projection，不要求另建无限增长的 job history。terminal state 不原地复活，continue/retry 一律创建新 epoch。
+- 唯一持久真相是现有 document manifest 的有效 sentence→asset 链接；`cached/total`、部分缓存与完成都从当前合成指纹下真实存在的资产推导，不持久化第二份状态。
+- start/status/cancel 从认证 principal 取得 `userId`，按 `userId + projectPath + relativePath` 隔离。浏览器提交 expected digest 与临时 `{anchor,text}`；服务端必须与当前 manifest 核对，正文不持久化、不记录日志。
+- API 进程内为同一 `user + document + digest + synthesis fingerprint` 最多持有一个 active run；重复 start 幂等，cache hit 跳过。active run 只需要 current identity 与 `AbortController`，不需要持久 `runEpoch`。
+- 播放和全文缓存复用同一个 server-side get-or-create asset 路径；按 asset hash singleflight。后台每次只提交一句并等待完成，正在听的 miss 在现有单 worker 的句子边界先于下一条后台提交；不建立第二套全局 queue。
+- cache run 不把音频注入 PlaybackManager。播放 pause/resume/stop、切文件、切 thread、Workspace 折叠和页面重开不取消它；服务重启会自然结束 run，界面按 manifest 显示真实部分进度与“继续缓存”，不自动恢复。
+- 显式取消先撤销 current run 并 abort 后续工作，保留已完成链接；清理先同步取消再解除引用。写链接前必须确认 user/document、expected digest、anchor membership 与 current run 都仍匹配，阻止 clear、cancel、编辑或 voice 变化后的晚到结果复活链接。
+- 合成失败只保留当次运行的可见 error；已完成链接不回滚。继续缓存重新扫描真实 miss，不持久化 `failedAnchors` 或 cancelled/interrupted/failed 终态。
 
 ## Phases
 
@@ -187,10 +187,11 @@ TTS、缓存或生产 Workspace 集成已经实现。
 
 ### Phase D — Background Full-Document Cache
 
-- rendered Markdown 工具栏提供开播前可达的“缓存全文”；播放器 cache chip 复用同一 job 状态；
-- cache job 从 PlaybackManager 状态机中拆出，拥有 user-scoped、run-epoch fenced 的幂等 start/status/cancel 与恢复语义；
+- rendered Markdown 工具栏提供开播前可达的“缓存全文”；播放器 cache chip 复用同一份 manifest-derived progress；
+- API 进程持有独立于 PlaybackManager 的 user-scoped active run；start/status/cancel 幂等，digest/anchor/current-run 条件写阻止晚到结果；
 - 单模型调度在句子边界优先服务播放 miss，再继续 background remaining；
-- 真实 Workspace 原型先取得 operator Design Gate signoff，再进入生产实现。
+- 服务重启保留已完成链接但不自动恢复，由用户点“继续缓存”；
+- **Gate result（2026-08-23）**：**PASSED**。operator 已确认入口、独立性、文案与重启取舍；实现必须遵守 lean manifest-convergence 设计，不重新引入持久 job lifecycle。
 
 ## Acceptance Criteria
 
@@ -231,13 +232,13 @@ TTS、缓存或生产 Workspace 集成已经实现。
 ### Phase D — Background Full-Document Cache
 
 - [ ] **AC-D1**: 未开始听读时，rendered Markdown 工具栏可一键启动全文缓存。
-- [ ] **AC-D2**: 播放 pause/stop、切文件、切 thread、Workspace 折叠都不会停止 active cache job；服务持续运行期间只有显式取消/清理会停止。
-- [ ] **AC-D3**: 文件工具栏与播放器显示同一份 `cached/total` 与 `queued/running/completed/cancelled/interrupted/failed` 状态；cancel → reload 保持 cancelled，服务重启 → reload 显示 interrupted 且可继续；failed anchors/error summary 可恢复并精确驱动“重试剩余”。
-- [ ] **AC-D4**: start/status/cancel/attach 均从认证 principal 绑定 `userId`；同一 logical job 重复启动幂等，新的 continue/retry 使用新 `runEpoch`；cache hit 跳过，同一 asset 不重复并发合成。
+- [ ] **AC-D2**: 在文档版本不变期间，播放 pause/stop、切文件、切 thread、Workspace 折叠和页面重开都不会停止 active cache run；显式取消/清理会停止，正文版本变化会安全失效旧 run。
+- [ ] **AC-D3**: 文件工具栏与播放器显示同一份 manifest-derived `cached/total`；运行中原地更新，失败保留已完成链接并可继续。服务重启后显示真实部分进度与“继续缓存”，不自动恢复、不谎报运行中。
+- [ ] **AC-D4**: start/status/cancel 从认证 principal 绑定 `userId`；同一 active run 重复启动幂等，cache hit 跳过，同一 asset 通过共享 get-or-create/singleflight 不重复并发合成；临时正文不持久化、不记录日志。
 - [ ] **AC-D5**: 边缓存边听时，播放 miss 在句子边界优先，后台任务不会破坏顺序、重复播放或误报播放器失败。
-- [ ] **AC-D6**: 取消保留已完成资产；active job 下清理在同一事务中撤销 current epoch 再按引用语义回收。集成竞态测试 hold synthesis → clear/cancel → release result，证明晚到结果不能复活 link/progress；cancel → reload 不得自动恢复。
-- [ ] **AC-D7**: 文档编辑/voice fingerprint 变化不会把旧 job 结果误连到新 manifest；集成竞态测试 hold synthesis → 更新 digest → release result，证明旧结果被 fence；两个 user 使用相同 path/digest 时 job/status/link 完全隔离。未变化资产仍可内容寻址复用。
-- [ ] **AC-D8**: operator 在真实 Workspace 原型确认入口、文案、状态与窄屏退化后，才进入生产实现。
+- [ ] **AC-D6**: 取消保留已完成资产；active run 下清理先同步取消再按引用语义回收。集成竞态测试 hold synthesis → clear/cancel → release result，证明晚到结果不能复活 link/progress；reload 只显示真实部分进度，不自动恢复。
+- [ ] **AC-D7**: 文档编辑/voice fingerprint 变化不会把旧 run 结果误连或误计入新 manifest；集成竞态测试 hold synthesis → 更新 digest → release result，证明旧结果被 fence；两个 user 使用相同 path/digest 时 run/status/link 完全隔离。未变化且指纹一致的资产仍可内容寻址复用。
+- [x] **AC-D8**: operator 基于真实 Workspace 工具栏检查与在地文字原型确认入口、文案、状态及窄屏退化，并签署瘦身版 Design Gate（`0001787474277593-000070-9989c234`）。
 
 ## Mechanism Selection
 
@@ -252,7 +253,7 @@ TTS、缓存或生产 Workspace 集成已经实现。
 - `tts_synthesis_rtf`；
 - `cache_hit` / `cache_miss` 及 miss reason；
 - `prefetch_buffer_segments`、`buffer_underrun_count`；
-- cache job 的 `queued/running/completed/cancelled/interrupted/failed`、已完成/总句数、queue wait、失败句 anchor 与去正文 error summary（不记录正文）；
+- cache run 的 active/error、manifest-derived 已完成/总句数与等待时间；不记录正文，不持久化运行终态；
 - document identity 只记录稳定 digest/受控 ID，不记录正文内容。
 
 ## Requirements Traceability
@@ -268,7 +269,7 @@ TTS、缓存或生产 Workspace 集成已经实现。
 | R7 | “自己清理 / 几天清理” | 7d/30d/永久 + 单文档清理 | AC-A5, AC-B5/B6 |
 | R8 | 2× 是否跟得上 | 预取、buffer 指标、显式缓冲 | AC-A4, AC-C4/C5 |
 | R9 | 用户状态默认持久化 | manifest/position/settings TTL=0 | AC-B7, AC-C6 |
-| R10 | “暂停又暂停缓存；需要一键缓存” | 播放/缓存生命周期解耦 + 显式全文 cache job | AC-D1..D8 |
+| R10 | “暂停又暂停缓存；需要一键缓存” | 播放/缓存生命周期解耦 + 显式全文 cache convergence | AC-D1..D8 |
 
 ## Key Decisions
 
@@ -313,8 +314,8 @@ TTS、缓存或生产 Workspace 集成已经实现。
 | F279 继续依赖旧 Workspace 坐标 | 新壳中入口、返回正文或折叠续播失效 | 入口挂 F284 Files/detail 的 `WorkspaceFileViewer`；完整 player 挂 `WorkspacePanel` 的非覆盖布局；AppShell 持有全局播放寿命与紧凑 away control；返回正文只走 `setWorkspaceOpenFile` canonical transition |
 | 把 TTL=0 文档状态放进音频 cache | 用户清缓存时丢失续听位置/倍速/retention | F279 用独立 SQLite + 窄路径 resolver 持久化用户状态；`TTS_CACHE_DIR` 只放可替换音频，清音频只解除 asset link |
 | 每句重新加载 Qwen 或等待整句 WAV | 首句慢、预取吞吐不足，UI 虽有 loading 但不可日用 | sidecar 启动时加载并复用模型；`mlx-audio >=0.4.7` 原生模型流；API 逐块转发且最终完整资产落 cache；版本不满足时 fail closed |
-| 后台全文缓存与前台听读争抢单模型 | 冷听更卡，新增按钮反而放大 underrun | 不并发重复合成；播放 miss 在句子边界优先，后台任务继续剩余 miss；产品明确“一键缓存”主要支持先缓存后听，不承诺提升单模型吞吐 |
-| clear/编辑后旧 worker 晚到 | 已清理音频或新 manifest 被旧 run 重新写回；跨用户同路径串状态 | user-scoped logical identity + 单调 run epoch；clear/cancel 原子撤销，asset link 只接受仍匹配 user/document/epoch/digest/fingerprint/anchor 的条件写；竞态与双用户隔离测试阻塞 Design Gate |
+| 后台全文缓存与前台听读争抢单模型 | 冷听更卡，新增按钮反而放大 underrun | 同一 asset singleflight；后台一次只提交一句，播放 miss 在现有单 worker 的句子边界先于下一条后台提交；不建立第二套 queue；产品明确“一键缓存”主要支持先缓存后听，不承诺提升单模型吞吐 |
+| clear/编辑后旧 worker 晚到 | 已清理音频或新 manifest 被旧 run 重新写回；跨用户同路径串状态 | current run 先失效/abort；asset link 只接受仍匹配 user/document/digest/fingerprint/anchor/current-run 的条件写；竞态与双用户隔离测试阻塞合入 |
 
 ## Tips Contribution（F244）
 
@@ -336,4 +337,5 @@ TTS、缓存或生产 Workspace 集成已经实现。
 - 稳定音频根目录 PR #3589 由非作者 reviewer `@opus5` 在 source `0001786500824471-000357-e2ffee7e` 对 exact HEAD `8a89a0419` 给出 terminal APPROVE；最终 rebase HEAD `89a280998` 的两笔 patch-id 与已审版本相同，且在 `origin/main@3ce86ca19` 上重新通过完整 `pnpm gate` 与 GitHub CI。GitHub squash merge 为 `162111510`；runtime 仍未启动，AC-B4b 保持等待跨 checkout cache-hit UAT。
 - 行为改动需非作者独立验证，并覆盖最终 HEAD。
 - 路径安全、共享资产回收、持久状态和 PlaybackManager 互斥是阻塞项。
+- Phase D lean Design Gate 由 operator 在 `0001787474277593-000070-9989c234` 签署；当前 thread 的 `@codex-sol` 负责实现后的独立 coding review，不参与 child thread 代码作者身份。
 - 完成只在 AC 有测试、指标或真实 Workspace UAT 证据后声明。

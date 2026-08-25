@@ -46,6 +46,9 @@ code_anchors:
   - packages/api/src/domains/memory/people/PersonMemoryInformedEvidence.ts
   - packages/api/src/domains/memory/people/person-memory-provenance.ts
   - packages/api/src/domains/memory/people/person-memory-proposal-forget.ts
+  - packages/api/src/domains/memory/people/AsrPersonMemoryContractTrial.ts
+  - packages/api/src/domains/memory/people/AsrPersonMemoryOpportunityPromptService.ts
+  - packages/shared/src/types/memory-write-opportunity.ts
   - packages/mcp-server/src/tools/person-memory-lifecycle-tools.ts
   - packages/api/src/routes/person-memory-proposal-preflight.ts
   - packages/api/src/scripts/f282-proactive-memory-phase-d-replay.ts
@@ -100,6 +103,7 @@ cited_by:
   - {feature: F271, date: 2026-07-20, delta: "session-close and F139 daily typed-delta producers, owner-day supply ledger, exact source anchors, and pull-only public candidates; downstream lane truth remains with each lane owner"}
   - {feature: F276, date: 2026-07-25, delta: "new private-person-relationship subcell proposal — per-user third-party person claims, first-class You↔person relationships, append-only interaction truth, and bounded authorized relationship cards; physical substrate remains open until Design Gate census"}
   - {feature: F276, date: 2026-07-27, delta: "identity-root amendment — F260 workspace person Entity remains the single shared identity root; F276 materializes only an owner-private extension with server-derived one-way linkage, owner/entity reverse uniqueness, convergent recall, and private-only forget"}
+  - {feature: F276, date: 2026-08-15, delta: "ASR contract trial consumes signal-intake mechanical observations through a shared WriteOpportunity contract; memory owns disposition, deferred lineage, destination outcome, and fail-closed invalidation"}
   - {feature: F281, date: 2026-07-30, delta: "F276 exact-proposal lifecycle closes the pure-unbound terminal deletion gap without inventing a hidden person identity; person-bound proposals continue to require whole-person forget"}
   - {feature: F282, date: 2026-07-30, delta: "lane-neutral cross-thread detection, typed server-resolved F276 source bundles, same-request preflight, informed source-to-field cards, and immutable complete-snapshot pending replacement"}
   - {feature: F282, date: 2026-07-30, delta: "versioned cold-start constraint vector, opaque invocation-derived opportunity refs, ToolEventLog proposal/abstention projection, proactive-memory judgment skill, and compact L0 wakeup"}
@@ -242,6 +246,13 @@ score, acceptance KPI, cat ranking, automatic tuning, or prompt feedback loop.
   source reader. Keep server-owned scope binding, strict payload admission, zero-cue as a normal
   result, per-family budgets, invocation dedupe, source revision revalidation, and append-only
   content-free episodes. New source truth or write-side correction belongs to the source lane.
+
+## Shared Touchpoints
+
+- `signal-intake` owns admitted meeting truth, mechanical ASR scene construction, and binding to an
+  exact live owner message. `memory` consumes only the shared typed WriteOpportunity, owns its
+  disposition/defer/destination lifecycle, and never lets the producer decide intent, importance,
+  transcript truth, or canonical person-memory truth.
 
 ## Do NOT Unify With
 

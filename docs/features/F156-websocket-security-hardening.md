@@ -5,12 +5,12 @@ topics: [security, websocket, cswsh, origin-validation, auth]
 doc_kind: spec
 created: 2026-04-10
 reopened: 2026-04-16
-updated: 2026-04-16
+updated: 2026-08-19
 ---
 
 # F156: Security Hardening — 实时通道 + 本机信任边界加固
 
-> **Status**: spec (Phase E planned) | **Owner**: Ragdoll | **Priority**: P0 | **Completed**: 2026-04-12 (Phase A~D) | **Reopened**: 2026-04-16 (Phase E)
+> **Status**: spec (Phase E design) | **Owner**: Ragdoll | **Priority**: P0 | **Completed**: 2026-04-12 (Phase A~D) | **Reopened**: 2026-04-16 (Phase E)
 
 **重新打开原因**：2026-04-16 对 relay-claw `issue #20` 做反向审计时确认：我们家已经没有 F156 A/B/D 修掉的那条“恶意网页直连 WebSocket/terminal → 后台 shell”攻击链，但同一条本机信任边界下，`resolveUserId()` 的 non-browser header/body fallback 仍留下了一批 **敏感 API 身份入口残余债**。按 feat 归属，这不是新 feature，而是 F156 的后续 Phase E。
 
@@ -106,6 +106,104 @@ updated: 2026-04-16
 1. 新增负向测试，证明 header/query/body spoof 不能在 Clowder AI 重现 relay-claw #20 那类攻击链
 2. 重点覆盖：authorization、terminal、配置写入口，以及所有保留 `X-Cat-Cafe-User` 的敏感 API
 
+**E-5: Remote Owner Pairing（远端设备 owner 配对）** _(2026-08-19 追加)_
+
+> **触发**：Tailscale/LAN 用户能打开 Hub 但进入 `unpaired-user` namespace，历史对话看起来"消失"了——用户影响 P1。
+> clowder-ai#1357 试图用 `CORS_ALLOW_PRIVATE_NETWORK=true` + IP 范围直接当 owner 资格，**方向已被拒绝**：CORS opt-in 只证明连接来源，不是 owner 身份。
+> #1357 的 PWA cache 半边已由 #1385 source-first 合入 public main；owner-session 半边在此解决。
+
+**设计终态**：
+
+| 角色 | 身份 | 配对方式 |
+|------|------|----------|
+| 本机浏览器（loopback） | `ownerUserId` | 零配置，`isDirectLoopbackRequest` 自动判定 |
+| 远端设备（LAN/Tailscale） | 初始 `unpaired-user` → 配对后 `ownerUserId` | 一次性 pairing code 兑换 |
+| 公网/代理 | fail-closed | 不可配对 |
+
+**组件**：
+
+1. **`PairingCodeStore`** — 进程内短时单用途 code 池
+   - `generate(ownerUserId): { code, expiresAt }` — 生成 code，TTL 5 min
+   - `redeem(code): ownerUserId | null` — 兑换成功立即销毁（单次有效）
+   - 最大同时未兑换 code 数 = 5（防枚举）
+   - Code 格式：8 位 URL-safe alphanumeric，显示为 `XXXX-XXXX`（~2.8T 组合空间）
+   - 进程内 Map，不持久化（server restart 自然失效）
+
+2. **`POST /api/pairing/generate`** — 生成配对码（**loopback-only**）
+   - Guard: `isDirectLoopbackRequest(request)` — 仅本机 operator 可生成
+   - 已有 session 且为 owner 才放行
+   - 返回 `{ code: "ABCD-EF12", expiresAt: <unix-ms> }`
+   - 超出 max outstanding → 409
+
+3. **`POST /api/pairing/redeem`** — 兑换配对码（**任何已连接 caller**）
+   - Input: `{ code: "ABCD-EF12" }`
+   - 验证 code → valid: 创建 owner session, set cookie, 销毁 code
+   - Invalid/expired/已用 → 401
+   - Rate limit: 每 IP 每 5 min 最多 3 次尝试（防暴力）
+
+4. **`DELETE /api/pairing/sessions/:token`** — 撤销远端 session（**loopback-only**）
+   - Owner 可按 token 撤销特定远端 session
+   - `DELETE /api/pairing/sessions` — 批量撤销所有远端 session
+
+**F077 seam**：PairingCodeStore 是 F156 范围内的最简实现（进程内 Map，单用户）。F077 上线后由 Redis-backed session + OAuth 替代；`/api/pairing/*` 路由届时 sunset。SessionStore 接口不变。
+
+**不做**：
+- 不采用 clowder-ai#1357 的"IP 范围 = owner"策略
+- 不引入 OAuth/GitHub 登录（F077 scope）
+- 不把 pairing code 持久化到磁盘/Redis
+- 不自动基于 IP 范围配对
+
+#### E-5 Threat Model
+
+| 威胁 | 缓解 |
+|------|------|
+| 远端暴力枚举 pairing code | 8 字符 alphanumeric = ~2.8T 组合；每 IP 每 5 min 限 3 次；code TTL 5 min |
+| Code 兑换后重放 | 单次有效：首次成功兑换即销毁 |
+| 过期 code 重放 | TTL 到期后从 store 清除，验证时检查 |
+| Code 传输被窃听 | Code 通过带外渠道传递（口头/物理/消息），不走 HTTP；LAN 环境建议 HTTPS |
+| 代理伪造 loopback 生成 code | `isDirectLoopbackRequest` 检查 8 种 proxy header，有任一非空即拒绝 |
+| 公网/CGNAT 外设备尝试兑换 | CORS 阶段已拦截（`CORS_ALLOW_PRIVATE_NETWORK` 默认 off）；即使 CORS 放行，code 仍需有效 |
+| 窃取已配对 session cookie | HttpOnly + SameSite=Strict 阻止 JS 和跨站攻击；HTTPS 环境加 Secure flag |
+| Server restart 后旧 session | 进程内 Map 随 restart 清空——所有 session（含已配对）失效，需重新配对（单用户模式可接受） |
+| Code 泄漏到日志 | generate 端点仅在 response body 返回 code，不写日志；pairing store 内部不 log code 值 |
+| Owner 想撤销特定远端 | `DELETE /api/pairing/sessions/:token` 或批量 `DELETE /api/pairing/sessions`（loopback-only） |
+
+#### E-5 State Machine
+
+```
+Remote device lifecycle:
+
+  [Connect]
+      │
+      ▼
+  UNPAIRED ──── GET /api/session ──→ cookie(unpaired-user)
+      │                                    │
+      │  POST /api/pairing/redeem          │ (sees empty namespace)
+      │  { code: "XXXX-XXXX" }             │
+      ▼                                    ▼
+  ┌─────────┐   code valid?   ┌──────────────────┐
+  │ PAIRING │───── yes ──────→│ PAIRED (owner)   │
+  │ ATTEMPT │                 │ cookie(ownerUserId)│
+  └─────────┘                 └──────────────────┘
+      │                                    │
+      │ code invalid/expired               │ DELETE /api/pairing/sessions
+      ▼                                    ▼
+  UNPAIRED (retry)                    REVOKED → UNPAIRED
+```
+
+```
+Pairing code lifecycle:
+
+  [Generate (loopback-only)]
+      │
+      ▼
+  ACTIVE ────── TTL expires ──→ EXPIRED (purged)
+      │
+      │ redeem(code)
+      ▼
+  CONSUMED (purged)
+```
+
 ### ~~Phase C: OfficeClaw 修复~~ → 已拆出
 
 > **2026-04-10 operator决定**：OfficeClaw 安全加固是"外出务工"，不属于我们家的 feat，拆为独立 feature/任务。
@@ -172,12 +270,27 @@ updated: 2026-04-16
 
 **逃生口**：如果故意要让本地浏览器走云端链路（调试 nginx/CDN），改用非 `localhost`/`127.0.0.1` 的 hostname 访问（如 `192.168.x.x` 或自定义 hosts），mismatch 判定就不触发，env 照旧。
 
-### Phase E（非浏览器身份入口收口） 🔲
+### Phase E（非浏览器身份入口收口 + 远端 owner 配对） 🔲
+
+_E-1~E-4 identity residual cleanup:_
 - [ ] AC-E1: relay-claw 反向审计清单落盘到本 spec，明确 sensitive route ledger（session-only / trusted browser fallback / non-browser automation）
 - [ ] AC-E2: `/api/authorization/*` 不再把 `X-Cat-Cafe-User` / fallback 作为充分身份来源；敏感审批与规则写入必须走更窄的身份语义
-- [ ] AC-E3: terminal 非 WS 敏感 REST 入口完成复核并收口，不再留下“先伪造身份拿 session 列表/创建，再走别的入口扩大影响”的残余链
+- [ ] AC-E3: terminal 非 WS 敏感 REST 入口完成复核并收口，不再留下”先伪造身份拿 session 列表/创建，再走别的入口扩大影响”的残余链
 - [ ] AC-E4: 新增负向回归测试，证明 header/query/body spoof 不能在 Clowder AI 的 sensitive routes 上复现 relay-claw #20 同类问题
 - [ ] AC-E5: 对仍保留 `X-Cat-Cafe-User` 的 automation-only route 建立显式 allowlist + 注释证据，不再靠隐式约定
+
+_E-5 remote owner pairing (2026-08-19):_
+- [ ] AC-E6: Loopback caller 可通过 `POST /api/pairing/generate` 生成 pairing code；返回 code + expiresAt
+- [ ] AC-E7: 非 loopback caller 尝试 generate → 403
+- [ ] AC-E8: 任何已连接 caller 可通过 `POST /api/pairing/redeem` 兑换有效 code → 获得 owner session cookie
+- [ ] AC-E9: 已兑换 code 单次有效——第二次兑换 → 401
+- [ ] AC-E10: 过期 code 兑换 → 401
+- [ ] AC-E11: 配对后的远端设备看到的数据与 loopback owner 完全一致
+- [ ] AC-E12: Rate limit — 每 IP 每 5 min 最多 3 次兑换尝试；超出 → 429
+- [ ] AC-E13: Proxy-forwarded 请求不能 generate pairing code（`isDirectLoopbackRequest` 拦截）
+- [ ] AC-E14: Pairing code 不出现在 server 日志中
+- [ ] AC-E15: Server restart 使所有已配对 session 失效（进程内 store，可接受）
+- [ ] AC-E16: Loopback owner 可通过 `DELETE /api/pairing/sessions` 撤销远端 session
 
 ### ~~Phase C（OfficeClaw）~~ → 已拆出为独立任务
 

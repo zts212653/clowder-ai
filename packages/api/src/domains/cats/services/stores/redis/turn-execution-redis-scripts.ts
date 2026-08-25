@@ -37,3 +37,20 @@ redis.call('HSET', KEYS[1],
 redis.call('SREM', KEYS[2], ARGV[4])
 return 1
 `;
+
+export const BIND_TURN_EXECUTION_COVERAGE_LUA = `
+local immutableIdentity = redis.call('HGET', KEYS[1], 'immutableIdentity')
+if not immutableIdentity then return -1 end
+local currentCoverage = redis.call('HGET', KEYS[1], 'coveredMessageIds')
+local currentCoverageIdentity = redis.call('HGET', KEYS[1], 'coveredMessageIdsIdentity')
+if currentCoverage then
+  if currentCoverageIdentity == ARGV[2] and currentCoverage == ARGV[1] then return 2 end
+  return 0
+end
+if currentCoverageIdentity then return -1 end
+
+redis.call('HSET', KEYS[1],
+  'coveredMessageIds', ARGV[1],
+  'coveredMessageIdsIdentity', ARGV[2])
+return 1
+`;

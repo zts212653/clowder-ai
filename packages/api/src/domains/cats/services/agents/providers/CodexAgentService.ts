@@ -54,6 +54,7 @@ import { estimateCostFromTokens } from '../../../../../config/model-pricing.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildActiveWriterRecoveryDiagnostic, buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
+import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
   isCliError,
@@ -80,6 +81,8 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  PreparedProviderRequestV1,
+  ProviderContinuityPreflight,
   TokenUsage,
   ToolExecutionPolicy,
 } from '../../types.js';
@@ -97,7 +100,11 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
-import type { CodexAppServerLifecycleEvent, CodexAppServerLifecycleSnapshot } from './CodexAppServerClient.js';
+import type {
+  CodexAppServerLifecycleEvent,
+  CodexAppServerLifecycleSnapshot,
+  CodexAppServerPromptSource,
+} from './CodexAppServerClient.js';
 import type { CodexAppServerHostPool } from './CodexAppServerHostPool.js';
 import { recordCodexAppServerLifecycle } from './CodexAppServerLifecycleRegistry.js';
 import {
@@ -173,6 +180,13 @@ function isCodexAppServerLifecycleEvent(value: unknown): value is CodexAppServer
   return (value as { type?: unknown }).type === 'app_server.lifecycle';
 }
 
+function isCodexAppServerContextCompactionEvent(
+  value: unknown,
+): value is import('./CodexAppServerClient.js').CodexAppServerContextCompactionEvent {
+  if (!value || typeof value !== 'object') return false;
+  return (value as { type?: unknown }).type === 'app_server.context_compaction';
+}
+
 function isCodexAppServerRecoveryEvent(value: unknown): value is CodexAppServerRecoveryEvent {
   if (typeof value !== 'object' || value === null) return false;
   return (value as { type?: unknown }).type === 'app_server.recovery';
@@ -194,6 +208,8 @@ function withoutFrozenInvocationCredentials(
 ): Record<string, string> | undefined {
   if (!env) return undefined;
   const safe = { ...env };
+  delete safe[CLI_EXECUTION_ID_ENV];
+  delete safe[CLI_EXECUTION_OWNER_BINDING_ENV];
   delete safe.CAT_CAFE_INVOCATION_ID;
   delete safe.CAT_CAFE_CALLBACK_TOKEN;
   return safe;
@@ -202,6 +218,8 @@ function withoutFrozenInvocationCredentials(
 function withoutSessionScopedHostEnv(env: Record<string, string | null>): Record<string, string | null> {
   const safe = { ...env };
   for (const key of [...MCP_CALLBACK_ENV_KEYS, ...MCP_SESSION_ENV_KEYS]) delete safe[key];
+  delete safe[CLI_EXECUTION_ID_ENV];
+  delete safe[CLI_EXECUTION_OWNER_BINDING_ENV];
   return safe;
 }
 
@@ -606,7 +624,7 @@ function writeCodexMcpEnvWrapper(spec: {
 async function buildCatCafeMcpArgs(
   callbackEnv?: Record<string, string>,
   workingDirectory?: string,
-): Promise<{ args: string[]; bearerEnv: Record<string, string> }> {
+): Promise<{ args: string[]; bearerEnv: Record<string, string>; declaredServerNames?: readonly string[] }> {
   if (!callbackEnv) return { args: [], bearerEnv: {} };
 
   /** Bearer tokens extracted from headers — keyed by env var name, valued by token. */
@@ -875,6 +893,7 @@ async function buildCatCafeMcpArgs(
     for (const [serverName, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
       const serverPath = resolve(mcpDistDir, entrypoint);
       if (!existsSync(serverPath)) continue;
+      enabledServers.push(serverName);
       args.push(
         '--config',
         `mcp_servers.${serverName}.command=${toTomlString(resolveCatCafeNodeCommand())}`,
@@ -907,7 +926,7 @@ async function buildCatCafeMcpArgs(
     },
     '#712: MCP invoke-time injection',
   );
-  return { args, bearerEnv };
+  return { args, bearerEnv, declaredServerNames: [...new Set(enabledServers)].sort() };
 }
 
 export function isGitRepositoryPath(workingDirectory: string): boolean {
@@ -1047,8 +1066,13 @@ export class CodexAgentService implements AgentService {
           usageTelemetry: 'unavailable',
           nativeWindowControl: false,
           nativeCompressionControl: false,
-          observesCompression: false,
-          reason: 'Codex app-server context telemetry is not yet proven end-to-end',
+          // F296 B4b: earned by dynamic proof, not by a schema enum. Gate 0
+          // (2026-08-20, codex-cli 0.147.0) observed a real `contextCompaction`
+          // item with binding `(threadId, turnId, item.id)` and a consumable
+          // window before the next `turn/start`. See
+          // docs/features/evidence/F296/gate0-app-server-dynamic-probe.md.
+          observesCompression: true,
+          reason: 'Codex app-server compaction observed dynamically (F296 B4 Gate 0); usage telemetry still unproven',
         }
       : {
           provider: 'openai',
@@ -1099,9 +1123,49 @@ export class CodexAgentService implements AgentService {
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    yield* this.invokeInternal({ kind: 'frozen', prompt }, options);
+  }
+
+  /**
+   * F296 B4a: app-server invocation whose prompt bytes are minted only after the
+   * provider continuity verdict.
+   *
+   * Declared because Gate 0 (2026-08-20, codex-cli 0.147.0) dynamically proved
+   * that `thread/start` / `thread/resume` return a trustworthy runtime id
+   * strictly before `turn/start`. Any other carrier has no such seam, so it is
+   * rejected here rather than silently degraded to a frozen prompt.
+   */
+  async *invokeWithContinuityPreflight(
+    preflight: ProviderContinuityPreflight,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage> {
+    yield* this.invokeInternal({ kind: 'preflight', settle: (input) => preflight.settle(input) }, options);
+  }
+
+  private async *invokeInternal(
+    promptSource: CodexAppServerPromptSource,
+    options?: AgentServiceOptions,
+  ): AsyncIterable<AgentMessage> {
+    // The preflight seam exists only on app_server. Fail closed instead of
+    // quietly falling back to a prompt frozen before the provider verdict.
+    if (promptSource.kind === 'preflight' && this.carrierMode !== 'app_server') {
+      throw new Error('codex_continuity_preflight_requires_app_server');
+    }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
-    // Codex CLI has no system prompt flag; prepend identity to prompt text
-    const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+    // Codex CLI has no system prompt flag; prepend identity to prompt text.
+    // In preflight mode the identity prepend has to ride along inside `settle`,
+    // because the bytes do not exist until the verdict is in.
+    const applyIdentity = (text: string): string =>
+      options?.systemPrompt ? `${options.systemPrompt}\n\n${text}` : text;
+    const effectivePromptSource: CodexAppServerPromptSource =
+      promptSource.kind === 'frozen'
+        ? { kind: 'frozen', prompt: applyIdentity(promptSource.prompt) }
+        : {
+            kind: 'preflight',
+            settle: async (input) => ({ prompt: applyIdentity((await promptSource.settle(input)).prompt) }),
+          };
+    /** exec_json can only carry frozen bytes; undefined means "preflight, app_server only". */
+    const execStdinInput = effectivePromptSource.kind === 'frozen' ? effectivePromptSource.prompt : undefined;
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? this.model;
     const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
@@ -1118,9 +1182,23 @@ export class CodexAgentService implements AgentService {
     const reasoningArgs = buildCodexReasoningArgs(effortLevel);
     const sandboxConfigArgs = ['--config', `sandbox_mode=${toTomlString(sandboxMode)}`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
-    const contextWindow = this.carrierMode === 'exec_json' ? options?.contextCapacity?.windowTokens : undefined;
+    // #1381: inject the config-owned RAW/NATIVE window, never the
+    // effective/pinned capacity — Codex reports back
+    // `native * effective_context_window_percent`, so injecting the pinned
+    // value recursed (258400 → 245480 → 233206 → …). An explicit null means
+    // this invocation has no config-owned window (report/pin-derived) and
+    // nothing may be injected; undefined is a legacy caller without an
+    // invocation snapshot and keeps the pre-#1381 contextCapacity behavior.
+    const nativeWindowTokens =
+      options?.contextNativeWindowTokens !== undefined
+        ? options.contextNativeWindowTokens
+        : options?.contextCapacity?.windowTokens;
+    const contextWindow =
+      this.carrierMode === 'exec_json' && nativeWindowTokens != null && nativeWindowTokens > 0
+        ? nativeWindowTokens
+        : undefined;
     const contextWindowArgs: string[] =
-      contextWindow && contextWindow > 0
+      contextWindow != null
         ? [
             '--config',
             `model_context_window=${contextWindow}`,
@@ -1151,8 +1229,12 @@ export class CodexAgentService implements AgentService {
     const mcpCallbackEnv = usePooledAppServer
       ? withoutFrozenInvocationCredentials(pooledCredentialEnv?.env ?? options?.callbackEnv)
       : options?.callbackEnv;
-    const { args: catCafeMcpArgs, bearerEnv: mcpBearerEnv } = readOnly
-      ? { args: [], bearerEnv: {} }
+    const {
+      args: catCafeMcpArgs,
+      bearerEnv: mcpBearerEnv,
+      declaredServerNames: declaredMcpServerNames,
+    } = readOnly
+      ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[] }
       : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory);
     const gitRepoArgs = readOnly ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
@@ -1477,7 +1559,8 @@ export class CodexAgentService implements AgentService {
         args,
         // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
         // 传入，不进 argv —— 防 `ps -o command=` / /proc/<pid>/cmdline 跨进程泄露。
-        stdinInput: effectivePrompt,
+        // F296 B4a: stdinInput is injected at the spawn site so a preflight-mode
+        // invocation can never reach a CLI spawn with empty or premature bytes.
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -1500,6 +1583,61 @@ export class CodexAgentService implements AgentService {
         semanticCompletionSignal: semanticCompletionController.signal,
       };
       const useAppServer = this.carrierMode === 'app_server';
+      const prepareProviderRequest = (
+        body: string,
+        carrier: 'exec_json' | 'app_server',
+        boundaryReason?: PreparedProviderRequestV1['boundaryReason'],
+      ): PreparedProviderRequestV1 =>
+        Object.freeze({
+          v: 1,
+          ...(boundaryReason ? { boundaryReason } : {}),
+          message: Object.freeze({ body }),
+          nativeInstructions: Object.freeze([
+            Object.freeze({
+              body: developerInstructions,
+              injectionDecision: 'native_l0_compiled_with_signature_boundary',
+            }),
+          ]),
+          runtime: Object.freeze({
+            provider: 'openai',
+            carrier,
+            ...(cliModel ? { model: cliModel } : {}),
+            protocol: carrier === 'app_server' ? 'json_rpc' : 'exec_json',
+            reasoningEffort: effortLevel,
+            ...(requestedServiceTier ? { serviceTier: requestedServiceTier } : {}),
+            ...(contextWindow ? { contextWindowTokens: contextWindow } : {}),
+            ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+          }),
+          tools: Object.freeze({
+            finalSurface: readOnly
+              ? ('exact' as const)
+              : declaredMcpServerNames
+                ? ('declared_only' as const)
+                : ('unknown' as const),
+            ...(declaredMcpServerNames ? { declaredServerNames: Object.freeze(declaredMcpServerNames) } : {}),
+            ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+          }),
+          providerNativeVisibility: 'unknown' as const,
+        });
+      const prepareRecoveryRequest = (recoveryInstruction: string): PreparedProviderRequestV1 => {
+        const prepared = prepareProviderRequest('', 'app_server', 'provider_fallback');
+        return Object.freeze({
+          ...prepared,
+          message: Object.freeze({ body: '', sourceRefs: Object.freeze([]) }),
+          nativeInstructions: Object.freeze([
+            Object.freeze({
+              body: recoveryInstruction,
+              injectionDecision: 'app_server_capacity_recovery_context',
+              sourceRefs: Object.freeze([
+                Object.freeze({
+                  owner: 'runtime_context' as const,
+                  ref: `capacity-recovery:${options?.invocationId ?? 'unbound'}`,
+                }),
+              ]),
+            }),
+          ]),
+        });
+      };
       const appServerEnv = usePooledAppServer ? withoutSessionScopedHostEnv(codexEnv) : codexEnv;
       let pooledSessionInUse = false;
       let forceDirectAppServer = false;
@@ -1554,7 +1692,7 @@ export class CodexAgentService implements AgentService {
               ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
             },
             runInput: {
-              prompt: effectivePrompt,
+              prompt: effectivePromptSource,
               thread: options?.sessionId
                 ? { kind: 'resume' as const, threadId: options.sessionId }
                 : { kind: 'start' as const },
@@ -1566,6 +1704,9 @@ export class CodexAgentService implements AgentService {
               ...(appServerThreadConfig ? { config: appServerThreadConfig } : {}),
               ...(appServerServiceTier !== undefined ? { serviceTier: appServerServiceTier } : {}),
               imagePaths,
+              prepareRequest: (body, boundaryReason) => prepareProviderRequest(body, 'app_server', boundaryReason),
+              prepareRecoveryRequest,
+              ...(options?.beforeProviderLaunch ? { beforeProviderLaunch: options.beforeProviderLaunch } : {}),
               ...(options?.signal ? { signal: options.signal } : {}),
               timeoutMs: resolveCliTimeoutMs(parseCliTimeoutMs(codexEnv.CLI_TIMEOUT_MS ?? undefined)),
               interruptGraceMs: KILL_GRACE_MS,
@@ -1602,9 +1743,22 @@ export class CodexAgentService implements AgentService {
                 : {}),
             },
           })
-        : options?.spawnCliOverride
-          ? options.spawnCliOverride(cliOpts)
-          : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
+        : (() => {
+            if (execStdinInput === undefined) {
+              throw new Error('codex_continuity_preflight_requires_app_server');
+            }
+            const serviceSpawnFn = this.spawnFn;
+            return (async function* () {
+              const preparedRequest = prepareProviderRequest(execStdinInput, 'exec_json');
+              await options?.beforeProviderLaunch?.(preparedRequest);
+              if (!('body' in preparedRequest.message)) throw new Error('codex_prepared_message_not_exact');
+              const spawnOpts = { ...cliOpts, stdinInput: preparedRequest.message.body };
+              const spawned = options?.spawnCliOverride
+                ? options.spawnCliOverride(spawnOpts)
+                : spawnCli(spawnOpts, serviceSpawnFn ? { spawnFn: serviceSpawnFn } : undefined);
+              yield* spawned;
+            })();
+          })();
 
       // F212 Phase H: item-tracking boolean deleted (see delete-block comment above).
       // cli-spawn / tmux-agent-spawner decide via `finalSemanticDone` (see delete-block
@@ -1643,6 +1797,23 @@ export class CodexAgentService implements AgentService {
               },
             },
             timestamp: event.lifecycle.lastActivityAt,
+          };
+          continue;
+        }
+        if (isCodexAppServerContextCompactionEvent(event)) {
+          // F296 B4b: hand the wire-minted event to the invocation so the epoch
+          // owner advances. Kept on the status channel — this is carrier state,
+          // not something a user should see as a bubble.
+          yield {
+            type: 'status' as const,
+            catId: this.catId,
+            content: 'thinking',
+            metadata,
+            contextCompaction: {
+              eventSource: 'codex_app_server_context_compaction' as const,
+              event: event.observation,
+            },
+            timestamp: Date.now(),
           };
           continue;
         }

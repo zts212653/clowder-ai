@@ -1,9 +1,20 @@
-export const PERSONAL_CHROME_PROTOCOL_VERSION = 1 as const;
+import { type CloudBridgeFailureDiagnosticV1, isCloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
+
+export const PERSONAL_CHROME_PROTOCOL_VERSION = 2 as const;
+export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.1' as const;
+export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-08-23.1' as const;
 export const PERSONAL_CHROME_MAX_TEXT_BYTES = 128 * 1024;
 export const PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES = 256 * 1024;
 
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/;
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
+const HELPER_ARTIFACT_REVISION = /^sha512:[a-f0-9]{128}$/;
+
+export interface PersonalChromeRevisions {
+  readonly helper: string;
+  readonly extension: string;
+  readonly pageAdapter: string;
+}
 
 export interface PersonalChromeAppendRequest {
   readonly v: typeof PERSONAL_CHROME_PROTOCOL_VERSION;
@@ -12,6 +23,7 @@ export interface PersonalChromeAppendRequest {
   readonly conversationId: string;
   readonly text: string;
   readonly idempotencyKey: string;
+  readonly expectedRevisions: PersonalChromeRevisions;
 }
 
 export interface PersonalChromeAppendSuccess {
@@ -21,6 +33,8 @@ export interface PersonalChromeAppendSuccess {
   readonly idempotencyKey: string;
   readonly status: 'host_observed';
   readonly hostMessageId: string;
+  readonly observedRevisions: PersonalChromeRevisions;
+  readonly idempotentReplay?: boolean;
 }
 
 export interface PersonalChromeAppendFailure {
@@ -30,6 +44,9 @@ export interface PersonalChromeAppendFailure {
   readonly idempotencyKey: string;
   readonly status: 'failed';
   readonly errorCode: string;
+  readonly observedRevisions?: PersonalChromeRevisions;
+  readonly diagnostic?: CloudBridgeFailureDiagnosticV1;
+  readonly idempotentReplay?: boolean;
 }
 
 export type PersonalChromeAppendResult = PersonalChromeAppendSuccess | PersonalChromeAppendFailure;
@@ -63,6 +80,27 @@ function requireString(
   return value;
 }
 
+function parseRevisions(value: unknown, label: string): PersonalChromeRevisions {
+  const record = asRecord(value, label);
+  if (Object.keys(record).some((field) => !['helper', 'extension', 'pageAdapter'].includes(field))) {
+    throw new Error(`${label} contains an unknown field`);
+  }
+  return {
+    helper: requireString(record.helper, `${label}.helper`, {
+      maxLength: 135,
+      pattern: HELPER_ARTIFACT_REVISION,
+    }),
+    extension: requireString(record.extension, `${label}.extension`, {
+      maxLength: 32,
+      pattern: /^\d+\.\d+\.\d+$/,
+    }),
+    pageAdapter: requireString(record.pageAdapter, `${label}.pageAdapter`, {
+      maxLength: 32,
+      pattern: SAFE_TOKEN,
+    }),
+  };
+}
+
 export function parsePersonalChromeAppendRequest(value: unknown): PersonalChromeAppendRequest {
   const record = asRecord(value, 'append request');
   if (record.v !== PERSONAL_CHROME_PROTOCOL_VERSION || record.kind !== 'append_message') {
@@ -88,6 +126,7 @@ export function parsePersonalChromeAppendRequest(value: unknown): PersonalChrome
       maxLength: 512,
       pattern: SAFE_TOKEN,
     }),
+    expectedRevisions: parseRevisions(record.expectedRevisions, 'expectedRevisions'),
   };
 }
 
@@ -119,11 +158,13 @@ export function parsePersonalChromeAppendResult(value: unknown): PersonalChromeA
   if (record.status === 'host_observed') {
     return {
       ...base,
+      observedRevisions: parseRevisions(record.observedRevisions, 'observedRevisions'),
       status: 'host_observed',
       hostMessageId: requireString(record.hostMessageId, 'hostMessageId', {
         maxLength: 512,
         pattern: SAFE_TOKEN,
       }),
+      ...(typeof record.idempotentReplay === 'boolean' ? { idempotentReplay: record.idempotentReplay } : {}),
     };
   }
   if (record.status === 'failed') {
@@ -131,6 +172,11 @@ export function parsePersonalChromeAppendResult(value: unknown): PersonalChromeA
       ...base,
       status: 'failed',
       errorCode: requireString(record.errorCode, 'errorCode', { maxLength: 64, pattern: SAFE_ERROR_CODE }),
+      ...(record.observedRevisions === undefined
+        ? {}
+        : { observedRevisions: parseRevisions(record.observedRevisions, 'observedRevisions') }),
+      ...(isCloudBridgeFailureDiagnosticV1(record.diagnostic) ? { diagnostic: record.diagnostic } : {}),
+      ...(typeof record.idempotentReplay === 'boolean' ? { idempotentReplay: record.idempotentReplay } : {}),
     };
   }
   throw new Error('append result status must be host_observed or failed');

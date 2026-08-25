@@ -72,6 +72,25 @@ describe('F222: shouldTrigger — CLI error', () => {
     );
   });
 
+  // clowder-ai#1325 (@codex-terra P2): shouldTrigger's final gate is the TRIGGERING
+  // allowlist, not the EXCLUDED denylist — so "deliberately left out of EXCLUDED"
+  // silently produced the OPPOSITE of the intended auto-file behaviour. An argv/CLI
+  // version drift is our own bug, so it must auto-file; this assertion is what makes
+  // that claim checkable instead of asserted in a PR body.
+  it('triggers on incompatible_cli_arguments (harness argv drift is OUR bug → auto-file)', () => {
+    assert.equal(
+      shouldTrigger({
+        type: 'cli_error',
+        diagnostics: {
+          reasonCode: 'incompatible_cli_arguments',
+          publicSummary: 'CLI 参数与当前 CLI 版本不兼容',
+          publicHint: 'hint',
+        },
+      }),
+      true,
+    );
+  });
+
   it('does NOT trigger on server_overloaded (transient)', () => {
     assert.equal(
       shouldTrigger({

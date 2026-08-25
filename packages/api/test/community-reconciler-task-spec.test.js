@@ -26,6 +26,127 @@ describe('CommunityReconcilerTaskSpec', () => {
   // -----------------------------------------------------------------------
 
   describe('baseline + fetch failures (cloud P2-1)', () => {
+    it('projects an appended reconciliation event even when cancellation arrives at the append boundary', async () => {
+      const controller = new AbortController();
+      const applied = [];
+      const projection = {
+        repo: 'acme/repo',
+        type: 'issue',
+        number: 1,
+        subjectKey: 'issue:acme/repo#1',
+        state: 'new',
+        ownerThreadId: null,
+        ownerRole: null,
+        nextOwner: 'none',
+        lastExternalActivityAt: null,
+        lastPublicCommentAt: null,
+        linkedIssues: [],
+        linkedPrs: [],
+        closureWaiver: null,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        deliveryCursor: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      };
+      const taskSpec = createCommunityReconcilerTaskSpec({
+        objectStore: {
+          get: async () => projection,
+          listSubjectKeys: async () => [projection.subjectKey],
+        },
+        eventLog: {
+          append: async () => {
+            controller.abort(new Error('scheduler timeout'));
+            return { appended: true, sequence: 1 };
+          },
+        },
+        projector: { apply: async (event) => applied.push(event.kind) },
+        findingStore: { upsert: async () => {}, resolveAbsent: async () => {} },
+        fetchIssueState: async () => ({
+          state: 'closed',
+          closedAt: '2026-08-22T00:00:00.000Z',
+          mergedAt: null,
+        }),
+        fetchPrState: async () => null,
+        log: { info() {}, warn() {} },
+        isBaselineEstablished: async () => true,
+        markBaselineEstablished: async () => {},
+      });
+
+      await taskSpec.run
+        .execute({ subjectKeys: [projection.subjectKey] }, 'community:reconciler:batch', {
+          assignedCatId: null,
+          signal: controller.signal,
+        })
+        .catch(() => {});
+
+      assert.deepEqual(applied, ['issue.closed']);
+    });
+
+    it('stops the batch loop before starting another GitHub fetch after cancellation', async () => {
+      const controller = new AbortController();
+      const fetched = [];
+      let persisted = false;
+      const taskSpec = createCommunityReconcilerTaskSpec({
+        objectStore: {
+          get: async (sk) => ({
+            repo: 'acme/repo',
+            type: 'issue',
+            number: Number(sk.at(-1)),
+            subjectKey: sk,
+            state: 'new',
+            ownerThreadId: null,
+            ownerRole: null,
+            nextOwner: 'none',
+            lastExternalActivityAt: null,
+            lastPublicCommentAt: null,
+            linkedIssues: [],
+            linkedPrs: [],
+            closureWaiver: null,
+            appliedEventCount: 1,
+            lastRejectedEvent: null,
+            deliveryCursor: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+          }),
+          listSubjectKeys: async () => [],
+        },
+        eventLog: { append: async () => ({ appended: false }) },
+        projector: { apply: async () => {} },
+        findingStore: {
+          upsert: async () => {
+            persisted = true;
+          },
+          resolveAbsent: async () => {
+            persisted = true;
+          },
+        },
+        fetchIssueState: async (_repo, number, signal) => {
+          assert.equal(signal, controller.signal);
+          fetched.push(number);
+          controller.abort(new Error('scheduler timeout'));
+          return { state: 'open', closedAt: null, mergedAt: null };
+        },
+        fetchPrState: async () => null,
+        log: { info() {}, warn() {} },
+        isBaselineEstablished: async () => false,
+        markBaselineEstablished: async () => {
+          persisted = true;
+        },
+      });
+
+      await assert.rejects(
+        taskSpec.run.execute(
+          { subjectKeys: ['issue:acme/repo#1', 'issue:acme/repo#2'] },
+          'community:reconciler:batch',
+          { assignedCatId: null, signal: controller.signal },
+        ),
+        /scheduler timeout/,
+      );
+      assert.deepEqual(fetched, [1]);
+      assert.equal(persisted, false);
+    });
+
     it('does NOT mark baseline when some subjects have fetch failures', async () => {
       let baselineMarked = false;
       const logs = [];

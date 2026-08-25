@@ -362,6 +362,32 @@ describe('RepoScanTaskSpec', () => {
       assert.equal(await reconciliationDedup.isNotified('owner/repo', 'pr', 10), true);
     });
 
+    it('records the dedup marker when timeout aborts immediately after durable delivery', async () => {
+      const controller = new AbortController();
+      const { opts, reconciliationDedup } = createOpts({
+        deliverFn: async (_deps, input) => {
+          controller.abort(new DOMException('scheduler timeout', 'AbortError'));
+          return { messageId: 'msg-delivered-before-timeout', content: input.content };
+        },
+      });
+      const spec = createRepoScanTaskSpec(opts);
+      const gateResult = await spec.admission.gate(gateCtx());
+      const workItem = gateResult.workItems[0];
+
+      await assert.doesNotReject(() =>
+        spec.run.execute(workItem.signal, workItem.subjectKey, {
+          assignedCatId: null,
+          signal: controller.signal,
+        }),
+      );
+
+      assert.equal(
+        await reconciliationDedup.isNotified('owner/repo', 'pr', 10),
+        true,
+        'a delivered inbox message must always record its dedup marker',
+      );
+    });
+
     it('triggers cat after delivery', async () => {
       const { opts, triggerCalls } = createOpts();
       const spec = createRepoScanTaskSpec(opts);

@@ -65,6 +65,7 @@ export async function createA2ADispositionHarness({
   sourceCatId = 'fable5',
   crossPostSourceThreadId,
   deliveryStatus,
+  registry,
 } = {}) {
   const eventLog = new MemoryEventLog();
   const projectionStore = new MemoryProjectionStore();
@@ -113,7 +114,7 @@ export async function createA2ADispositionHarness({
       }
     : ingest;
   const service = new A2ADispatchDispositionService({
-    registry: { isLatest: async (invocationId) => latest && invocationId === 'inv-1' },
+    registry: registry ?? { isLatest: async (invocationId) => latest && invocationId === 'inv-1' },
     messageStore,
     ballCustodyEventLog: eventLog,
     ballCustodyProjectionStore: projectionStore,

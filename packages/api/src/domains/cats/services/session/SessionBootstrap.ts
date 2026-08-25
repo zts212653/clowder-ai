@@ -13,10 +13,17 @@
 import type { CatId } from '@cat-cafe/shared';
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import type { PushRecallPresentation } from '../../../memory/f200-types.js';
+import { formatRecallPointer } from '../agents/routing/context-transport.js';
 import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
+import { mapToPresentation } from './context-presentation.js';
+import {
+  type ContextModeProjection,
+  countPresentedTiers,
+  type PresentationCounts,
+} from './context-surface-projection.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
@@ -89,6 +96,8 @@ export interface BootstrapContext {
   hasThreadMemory: boolean;
   /** F263: only presentations whose rendered section survived the token cap. */
   pushRecallPresentations?: PushRecallPresentation[];
+  /** F296 B3b-4: actual mapper-selected bootstrap sections, summarized content-free. */
+  presentationCounts?: PresentationCounts;
 }
 
 export interface SessionBootstrapOptions {
@@ -102,6 +111,12 @@ export interface SessionBootstrapOptions {
   threadStore?: IThreadStore;
   /** F065 Phase C: 'generative' prefers handoff digest, 'extractive' uses extractive only */
   bootstrapDepth?: 'extractive' | 'generative';
+  /**
+   * F296 B3b-4: provider/epoch-owned verdict. When present, bootstrap is no
+   * longer allowed to infer continuity from chain depth or read historical
+   * summary producers on its own.
+   */
+  contextProjection?: ContextModeProjection;
 }
 
 /**
@@ -114,6 +129,10 @@ export async function buildSessionBootstrap(
   catId: CatId,
   threadId: string,
 ): Promise<BootstrapContext | null> {
+  // A proven hot runtime already holds the previous working context. Reading
+  // the session chain here would make bootstrap a second continuity judge.
+  if (opts.contextProjection?.contextMode === 'hot') return null;
+
   const { sessionChainStore, transcriptReader } = opts;
 
   // Get full chain — works regardless of whether active session exists yet
@@ -170,6 +189,50 @@ export async function buildSessionBootstrap(
     handoffNoteSection = noteLines.join('\n');
   }
 
+  if (opts.contextProjection) {
+    const presentations = [
+      ...(handoffNoteSection
+        ? [
+            mapToPresentation({
+              subjectKey: `session-handoff:${prevSession.id}`,
+              asOf: { kind: 'version' as const, value: prevSession.id },
+              sourceTier: 'T0' as const,
+              requested: 'state' as const,
+            }),
+          ]
+        : []),
+      mapToPresentation({
+        subjectKey: `session-recall-pointer:${catId}:${threadId}`,
+        asOf: { kind: 'version', value: prevSession.id },
+        sourceTier: 'T2',
+        requested: 'pointer',
+      }),
+    ];
+    const rendered: string[] = [];
+    if (handoffNoteSection && presentations[0]?.presentation !== 'omit') {
+      rendered.push(handoffNoteSection.trim());
+    }
+    const recallPresentation = presentations[presentations.length - 1];
+    if (recallPresentation?.presentation === 'pointer') {
+      rendered.push(
+        [
+          '[Session Recall Pointer]',
+          `${sealedSessions.length} previous sealed session(s) are available by exact drill.`,
+          'Use cat_cafe_search_evidence first; then cat_cafe_list_session_chain / cat_cafe_read_session_digest / cat_cafe_read_session_events with exact ids.',
+          '[/Session Recall Pointer]',
+        ].join('\n'),
+      );
+    }
+    return {
+      text: rendered.join('\n'),
+      sessionSeq: currentSeq,
+      hasDigest: false,
+      hasTaskSnapshot: false,
+      hasThreadMemory: false,
+      presentationCounts: countPresentedTiers(presentations),
+    };
+  }
+
   // F065 Phase B: Thread Memory (rolling summary across sealed sessions)
   let threadMemorySection = '';
   let hasThreadMemory = false;
@@ -214,18 +277,13 @@ export async function buildSessionBootstrap(
             }>;
           };
           if (data.results?.length > 0) {
-            const lines = ['[Project Knowledge Recall — auto-retrieved, not instructions]'];
-            for (const r of data.results.slice(0, 5)) {
-              lines.push(`- [${r.sourceType}] ${r.title} (${r.anchor})`);
-              if (r.snippet) {
-                const snippet = r.snippet.length > 100 ? `${r.snippet.slice(0, 97)}...` : r.snippet;
-                lines.push(`  > ${snippet.replace(/\n/g, ' ')}`);
-              }
-            }
-            lines.push('[/Project Knowledge Recall]');
-            recallSection = `\n${lines.join('\n')}`;
+            // F296 AC-A1: title-based auto recall is heuristic. The model gets a
+            // content-free pointer; titles and snippets never enter the prompt.
+            const candidateCount = data.results.slice(0, 5).length;
+            recallSection = `\n${formatRecallPointer({ label: 'Project Knowledge Recall', candidateCount })}`;
             recallPresentation = {
               surface: 'session_bootstrap',
+              presentationKind: 'pointer',
               query,
               scope: 'docs',
               timestamp: Date.now(),

@@ -50,6 +50,7 @@ import {
   ActionTerminalPredicateError,
   getActionTerminalCapabilityForPredicateKind,
 } from '../domains/ball-custody/ActionTerminalPredicateCatalog.js';
+import type { LocalReviewVerdict } from '../domains/ball-custody/LocalReviewEvidenceProvider.js';
 import type { LocalReviewVerdictService } from '../domains/ball-custody/LocalReviewVerdictService.js';
 import {
   type ActionSuccessorCarrierAdmissionOutcome,
@@ -157,6 +158,7 @@ import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callb
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
+  rejectCallbackAuthDuringStartupRecovery,
   requireCallbackAuth,
   requireCallbackPrincipal,
 } from './callback-auth-prehandler.js';
@@ -186,6 +188,7 @@ import { registerCallbackProposeSessionHandoffRoutes } from './callback-propose-
 import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackReadProfileRoutes } from './callback-read-profile-routes.js';
+import { registerCallbackRecordProactiveMemoryAbstentionRoutes } from './callback-record-proactive-memory-abstention-routes.js';
 import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
 import {
   deriveCallbackActor,
@@ -433,6 +436,57 @@ async function getRecentCallbackDuplicateCandidates(
   return messageStore.getByThread(threadId, 20, userId);
 }
 
+async function findTypedLocalReviewMessage(
+  messageStore: IMessageStore,
+  input: {
+    threadId: string;
+    userId: string;
+    catId: string;
+    clientMessageId: string;
+    verdict: LocalReviewVerdict;
+    reviewedHeadSha?: string;
+    invocationId: string;
+  },
+): Promise<StoredMessage | undefined> {
+  const recent = await getRecentCallbackDuplicateCandidates(messageStore, input.threadId, input.userId);
+  return [...recent]
+    .reverse()
+    .find(
+      (message) =>
+        message.origin === 'callback' &&
+        message.catId === input.catId &&
+        message.extra?.stream?.turnInvocationId === input.invocationId &&
+        message.extra?.coordination?.phase === 'terminal' &&
+        message.extra.localReviewVerdict?.clientMessageId === input.clientMessageId &&
+        message.extra.localReviewVerdict.verdict === input.verdict &&
+        (message.extra.localReviewVerdict.reviewedHeadSha ?? undefined) === input.reviewedHeadSha,
+    );
+}
+
+/** Permanent mismatch/stale compensation only; retryable insufficient facts keep their queued row for same-ID replay. */
+async function cancelPermanentlyRejectedLocalReviewMessage(
+  messageStore: IMessageStore,
+  messageId: string,
+  outcome: 'mismatch' | 'stale',
+): Promise<boolean> {
+  const canceled = await messageStore.markCanceled(messageId);
+  if (!canceled) return true;
+  if (canceled.deliveryTransitioned || canceled.deliveryStatus === 'canceled') return true;
+  if (canceled.deliveryStatus !== 'queued') return true;
+  log.error(
+    { messageId, outcome, deliveryStatus: canceled?.deliveryStatus },
+    '[F167] permanently rejected local-review message could not be canceled',
+  );
+  return false;
+}
+
+function requireLocalReviewVerdictService(
+  service: CallbackRoutesOptions['localReviewVerdictService'],
+): NonNullable<CallbackRoutesOptions['localReviewVerdictService']> {
+  if (!service) throw new Error('typed local review settlement reached without its configured service');
+  return service;
+}
+
 function isExactCallbackDuplicate(
   msg: StoredMessage,
   input: {
@@ -445,6 +499,8 @@ function isExactCallbackDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
+    reviewedHeadSha?: string | undefined;
   },
 ): boolean {
   if (msg.origin !== 'callback') return false;
@@ -454,6 +510,8 @@ function isExactCallbackDuplicate(
   if (Boolean(msg.extra?.isExplicitPost) !== Boolean(input.isExplicitPost)) return false;
   if (Boolean(msg.mentionsUser) !== Boolean(input.mentionsUser)) return false;
   if (!sameStringArray(msg.mentions, input.mentions)) return false;
+  if ((msg.extra?.localReviewVerdict?.verdict ?? undefined) !== input.localReviewVerdict) return false;
+  if ((msg.extra?.localReviewVerdict?.reviewedHeadSha ?? undefined) !== input.reviewedHeadSha) return false;
   return sameCoordinationForCallbackDedup(msg, input.coordination, input.coordinationDedupKey);
 }
 
@@ -471,6 +529,8 @@ async function findRecentExactCallbackDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
+    reviewedHeadSha?: string | undefined;
     now: number;
   },
 ): Promise<StoredMessage | undefined> {
@@ -503,6 +563,8 @@ function buildCallbackContentDedupFingerprint(input: {
   isExplicitPost?: boolean | undefined;
   coordination?: CrossThreadCoordination | undefined;
   coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+  localReviewVerdict?: LocalReviewVerdict | undefined;
+  reviewedHeadSha?: string | undefined;
 }): string {
   const parts = [
     input.threadId,
@@ -514,6 +576,8 @@ function buildCallbackContentDedupFingerprint(input: {
     [...input.mentions].join(','),
     input.content,
     richBlocksFingerprintPart(input.richBlocks),
+    input.localReviewVerdict ?? '',
+    input.reviewedHeadSha ?? '',
     input.coordinationDedupKey === 'action-active-root'
       ? ''
       : (input.coordinationDedupKey ??
@@ -553,6 +617,8 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost?: boolean | undefined;
     coordination?: CrossThreadCoordination | undefined;
     coordinationDedupKey?: CallbackCoordinationDedupKey | undefined;
+    localReviewVerdict?: LocalReviewVerdict | undefined;
+    reviewedHeadSha?: string | undefined;
     clientMessageId?: string | undefined;
     now: number;
     hasRoutingWarnings: boolean;
@@ -571,6 +637,8 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
+    ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+    ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
   });
   const claimed = await messageStore.claimContentDedupKey(fingerprint, CALLBACK_EXACT_DUPLICATE_WINDOW_MS);
   if (claimed) return null;
@@ -586,6 +654,8 @@ async function claimCallbackContentOrDuplicate(
     isExplicitPost: Boolean(input.isExplicitPost),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.coordinationDedupKey ? { coordinationDedupKey: input.coordinationDedupKey } : {}),
+    ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+    ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
     now: input.now,
   });
   return {
@@ -631,14 +701,14 @@ async function recoverQueuedDuplicateCallbackMessage(input: {
   zeroEnqueuedWarnMessage: string;
   enqueueFailureMessage: string;
   broadcastNow: () => Promise<void> | void;
+  preserveQueuedOnEnqueueFailure?: boolean;
 }): Promise<boolean> {
   if (input.duplicateMsg.deliveryStatus !== 'queued') return false;
   if (!input.willEnqueueToQueue) return false;
   if (hasQueuedA2AEntryForMessage(input.invocationQueue, input.threadId, input.duplicateMsg.id)) {
-    return Boolean(
-      input.actionFence &&
-        hasQueuedActionSuccessorFence(input.invocationQueue, input.threadId, input.userId, input.actionFence),
-    );
+    return input.actionFence
+      ? hasQueuedActionSuccessorFence(input.invocationQueue, input.threadId, input.userId, input.actionFence)
+      : true;
   }
 
   const deliveryDecision = await MessageDeliveryService.resolveCallbackDeliveryDecision({
@@ -651,6 +721,7 @@ async function recoverQueuedDuplicateCallbackMessage(input: {
     markDelivered: input.markDelivered,
     zeroEnqueuedWarnMessage: input.zeroEnqueuedWarnMessage,
     enqueueFailureMessage: input.enqueueFailureMessage,
+    ...(input.preserveQueuedOnEnqueueFailure ? { preserveQueuedOnEnqueueFailure: true } : {}),
   });
 
   if (
@@ -659,12 +730,20 @@ async function recoverQueuedDuplicateCallbackMessage(input: {
   ) {
     await input.broadcastNow();
   }
-  return deliveryDecision.enqueued.length > 0;
+  return (
+    deliveryDecision.enqueued.length > 0 ||
+    hasQueuedA2AEntryForMessage(input.invocationQueue, input.threadId, input.duplicateMsg.id)
+  );
 }
 
 export interface CallbackRoutesOptions {
   registry: InvocationRegistry;
   agentKeyRegistry?: import('../domains/cats/services/agents/agent-key/AgentKeyRegistry.js').AgentKeyRegistry;
+  /** F247: verifies opaque exact-source capabilities on cloud agent-key returns. */
+  cloudReturnBindingSigner?: Pick<
+    import('../domains/cats/services/cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner,
+    'verify'
+  >;
   messageStore: IMessageStore;
   socketManager: SocketManager;
   /** F174 D2b-1: in-context surface for callback auth failures (optional — back-compat). */
@@ -693,6 +772,8 @@ export interface CallbackRoutesOptions {
   personMemoryStore?: import('../domains/memory/people/PersonMemoryStore.js').PersonMemoryStore;
   /** F276: content-free known-person delta receipts. */
   deferredPersonMemoryReceiptStore?: import('../domains/memory/DeferredPersonMemoryReceiptStore.js').DeferredPersonMemoryReceiptStore;
+  writeOpportunityDeliveryStore?: import('../domains/memory/people/WriteOpportunityDeliveryStore.js').WriteOpportunityDeliveryStore;
+  writeOpportunityTerminalLedger?: import('../domains/memory/people/WriteOpportunityTerminalLedger.js').WriteOpportunityTerminalLedger;
   /** F276/F282: exact workspace/private person registry convergence. */
   proactiveCandidateRegistryResolver?: import('../domains/memory/ProactiveCandidateRegistryResolver.js').ProactiveCandidateRegistryResolver;
   /** F276 KD-12: read-only workspace person identity root resolver. */
@@ -745,8 +826,11 @@ export interface CallbackRoutesOptions {
   waitLifecycleHolder?: { current?: Pick<GitHubWaitLifecycleService, 'recordOutcomeEvent'> };
   /** F168 F-Step3: invocation-bound atomic verdict + delivery-custody recorder. */
   externalReviewVerdictService?: Pick<ExternalReviewVerdictService, 'record'>;
-  /** F167: invocation-bound local verdict message completion producer. */
-  localReviewVerdictService?: Pick<LocalReviewVerdictService, 'record' | 'recover'>;
+  /** F167: local verdict message completion producer; carrier is a fast path, not the sole authority. */
+  localReviewVerdictService?: Pick<
+    LocalReviewVerdictService,
+    'record' | 'preflightCarrierless' | 'recordCarrierless' | 'recover'
+  >;
   /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F280 Phase C: server-owned issue baseline; author/cursor never come from the caller. */
@@ -826,6 +910,12 @@ const postMessageSchema = z.object({
   streamDisposition: z.enum(['independent', 'replace_final']).optional().default('independent'),
   threadId: z.string().min(1).optional(),
   replyTo: z.string().optional(),
+  cloudReturnBinding: z
+    .string()
+    .min(1)
+    .max(800)
+    .regex(/^cbr1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/)
+    .optional(),
   clientMessageId: z.string().min(1).max(200).optional(),
   targetCats: z.array(z.string().min(1)).optional(),
   // F246 Phase B: effect-class for cross-thread dispatch (assign_work → Approval Hub)
@@ -842,6 +932,12 @@ const postMessageSchema = z.object({
         .optional(),
       subjectRef: z.string().trim().min(1).max(240).optional(),
     })
+    .optional(),
+  // #1371 PR1b: one typed local-review fact rides the terminal message.
+  localReviewVerdict: z.enum(['approved', 'changes_requested', 'commented']).optional(),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional(),
   // F254 Phase A: acknowledge held — escape hatch to force-send despite unseen messages
   acknowledgeHeld: z.boolean().optional(),
@@ -1156,6 +1252,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           message: 'streamDisposition="replace_final" requires invocation-token provenance.',
         };
       }
+      if (parsed.data.localReviewVerdict) {
+        reply.status(400);
+        return {
+          kind: 'local_review_verdict_agent_key_unsupported',
+          message: 'localReviewVerdict requires invocation-token review-carrier provenance.',
+        };
+      }
+      if (parsed.data.reviewedHeadSha) {
+        reply.status(400);
+        return {
+          kind: 'reviewed_head_sha_agent_key_unsupported',
+          message: 'reviewedHeadSha is valid only with invocation-token localReviewVerdict.',
+        };
+      }
       if (parsed.data.coordination) {
         reply.status(400);
         return {
@@ -1183,7 +1293,38 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         reply.status(deletedThreadGuard.statusCode);
         return deletedThreadGuard.body;
       }
-      const { content, replyTo, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
+      const { content, replyTo, cloudReturnBinding, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
+      const requiresCloudReturnBinding = principal.catId === createCatId('gpt-pro');
+      if (requiresCloudReturnBinding) {
+        if (!replyTo || !cloudReturnBinding) {
+          reply.status(400);
+          return {
+            kind: 'cloud_return_binding_required',
+            message: 'gpt-pro Remote MCP returns require replyTo plus cloudReturnBinding from the runtime delta.',
+          };
+        }
+        if (!opts.cloudReturnBindingSigner) {
+          reply.status(503);
+          return {
+            kind: 'cloud_return_binding_unavailable',
+            message: 'Cloud return binding verification is unavailable; no unbound message was persisted.',
+          };
+        }
+        const bindingVerdict = opts.cloudReturnBindingSigner.verify(cloudReturnBinding, {
+          threadId: effectiveThreadId,
+          userId: principal.userId,
+          sourceMessageId: replyTo,
+          targetCatId: String(principal.catId),
+        });
+        if (!bindingVerdict.ok) {
+          reply.status(403);
+          return {
+            kind: 'cloud_return_binding_mismatch',
+            reason: bindingVerdict.reason,
+            message: 'Cloud return binding does not authorize this source, thread, user, or cloud cat.',
+          };
+        }
+      }
 
       if (clientMessageId && agentKeyRegistry) {
         const isFirst = await agentKeyRegistry.claimClientMessageId(principal.agentKeyId, clientMessageId);
@@ -1259,6 +1400,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           publicReply: true,
         });
         if (parent) validatedReplyTo = replyTo;
+      }
+      if (requiresCloudReturnBinding && !validatedReplyTo) {
+        reply.status(403);
+        return {
+          kind: 'cloud_return_source_ineligible',
+          message: 'The bound source is not a published, public-safe message in the authorized thread.',
+        };
       }
 
       const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
@@ -1537,11 +1685,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       targetCats: explicitTargetCats,
       effectClass,
       coordination: explicitCoordination,
+      localReviewVerdict,
+      reviewedHeadSha,
       acknowledgeHeld,
       action,
       proposedAction,
       streamDisposition,
     } = parsed.data;
+    const localReviewVerdictService = opts.localReviewVerdictService;
     const isStandaloneExplicitPost = streamDisposition === 'independent';
     const standaloneExplicitPostExtra = isStandaloneExplicitPost ? { isExplicitPost: true as const } : {};
     const { invocationId } = actor;
@@ -1683,7 +1834,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     if (isCrossThread) {
       const hasRawLineStartMention = hasPlausibleLineStartMention(content);
       const hasRawTargetCats = (explicitTargetCats?.length ?? 0) > 0;
-      if (!hasRawLineStartMention && !hasRawTargetCats) {
+      if (!hasRawLineStartMention && !hasRawTargetCats && !localReviewVerdict) {
         reply.status(400);
         return {
           kind: 'cross_post_no_routing',
@@ -1725,6 +1876,31 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         kind: 'action_with_terminal_coordination',
         message: 'action successor dispatch starts substantive work and cannot use terminal coordination.',
       };
+    }
+    if (localReviewVerdict && explicitCoordination?.phase !== 'terminal') {
+      reply.status(400);
+      return {
+        kind: 'local_review_verdict_requires_terminal_coordination',
+        message: 'localReviewVerdict is valid only on coordination.phase="terminal".',
+      };
+    }
+    if (localReviewVerdict && !clientMessageId) {
+      reply.status(400);
+      return {
+        kind: 'local_review_verdict_client_message_id_required',
+        message: 'localReviewVerdict requires an explicit clientMessageId for replay-safe settlement.',
+      };
+    }
+    if (reviewedHeadSha && !localReviewVerdict) {
+      reply.status(400);
+      return {
+        kind: 'reviewed_head_sha_without_local_review_verdict',
+        message: 'reviewedHeadSha is valid only with localReviewVerdict.',
+      };
+    }
+    if (localReviewVerdict && !localReviewVerdictService) {
+      reply.status(503);
+      return { kind: 'local_review_verdict_service_unavailable' };
     }
     if (
       action &&
@@ -1787,16 +1963,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       };
     }
 
+    let terminalActionLeaseRef: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
+    let typedLocalReviewContinuationTarget: CatId | undefined;
+    let carrierlessLocalReviewSubjectRef: string | undefined;
+    let carrierlessLocalReviewFence: { leaseId: string; generation: number } | undefined;
     if (explicitCoordination?.phase === 'terminal') {
-      let terminalActionLeaseRef: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
+      let terminalActionLeaseCandidate: Awaited<ReturnType<typeof resolveCallbackActionLeaseRef>>;
       try {
-        terminalActionLeaseRef = await resolveCallbackActionLeaseRef(record, invocationRecordStore);
+        terminalActionLeaseCandidate = await resolveCallbackActionLeaseRef(record, invocationRecordStore);
       } catch (err) {
         app.log.error({ err, invocationId }, '[F167] local review terminal route preflight carrier read failed');
         reply.status(503);
         return { kind: 'local_review_terminal_route_preflight_unavailable' };
       }
-      if (terminalActionLeaseRef) {
+      if (terminalActionLeaseCandidate) {
         if (!opts.actionSuccessorAdmissionService) {
           reply.status(503);
           return { kind: 'local_review_terminal_route_preflight_unavailable' };
@@ -1806,8 +1986,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         >;
         try {
           preflight = await opts.actionSuccessorAdmissionService.preflightLocalReviewTerminalRoute({
-            leaseId: terminalActionLeaseRef.leaseId,
-            generation: terminalActionLeaseRef.generation,
+            leaseId: terminalActionLeaseCandidate.leaseId,
+            generation: terminalActionLeaseCandidate.generation,
             reviewerCatId: actor.catId,
             holderThreadId: actor.threadId,
             targetThreadId: effectiveThreadId,
@@ -1817,7 +1997,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           reply.status(503);
           return { kind: 'local_review_terminal_route_preflight_unavailable' };
         }
-        if (preflight.applicable && !preflight.allow) {
+        if (preflight.applicable && !preflight.allow && !localReviewVerdict) {
           reply.status(409);
           return {
             kind: 'local_review_terminal_route_mismatch',
@@ -1826,6 +2006,24 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             targetThreadId: effectiveThreadId,
           };
         }
+        if (preflight.applicable && preflight.allow && !localReviewVerdict) {
+          reply.status(400);
+          return {
+            kind: 'local_review_verdict_required',
+            message: 'A local review terminal post must include localReviewVerdict.',
+          };
+        }
+        if (preflight.applicable && preflight.allow && localReviewVerdict) {
+          terminalActionLeaseRef = terminalActionLeaseCandidate;
+          typedLocalReviewContinuationTarget = createCatId(preflight.predecessorCatId);
+        }
+      }
+      if (localReviewVerdict && !terminalActionLeaseRef && !reviewedHeadSha) {
+        reply.status(400);
+        return {
+          kind: 'local_review_verdict_reviewed_head_required',
+          message: 'A carrier-free localReviewVerdict requires the reviewer-authored exact reviewedHeadSha.',
+        };
       }
     }
 
@@ -2112,6 +2310,45 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : { suppressRouting: false, coordination: undefined };
     const coordinationDedupKey: CallbackCoordinationDedupKey | undefined =
       action && !explicitCoordination ? 'action-active-root' : coordinationResult.contentDedupCoordinationKey;
+    if (localReviewVerdict && !terminalActionLeaseRef) {
+      const carrierlessVerdictService = requireLocalReviewVerdictService(localReviewVerdictService);
+      const inheritedSubjectRef = incomingCrossThreadHint?.coordination?.subjectRef;
+      const resolvedSubjectRef = coordinationResult.coordination?.subjectRef;
+      if (!inheritedSubjectRef || resolvedSubjectRef !== inheritedSubjectRef || !reviewedHeadSha) {
+        reply.status(409);
+        return {
+          kind: 'local_review_verdict_identity_unavailable',
+          message:
+            'Carrier-free localReviewVerdict requires an inherited coordination subjectRef and exact reviewedHeadSha.',
+        };
+      }
+      let carrierlessPreflight: Awaited<ReturnType<typeof carrierlessVerdictService.preflightCarrierless>>;
+      try {
+        carrierlessPreflight = await carrierlessVerdictService.preflightCarrierless({
+          subjectRef: inheritedSubjectRef,
+          reviewedHeadSha,
+          targetThreadId: effectiveThreadId,
+          principal: { catId: actor.catId, threadId: actor.threadId, tenantScope: actor.userId },
+        });
+      } catch (err) {
+        app.log.error(
+          { err, invocationId, subjectRef: inheritedSubjectRef },
+          '[F167] carrier-free local review identity preflight failed',
+        );
+        reply.status(503);
+        return { kind: 'local_review_terminal_route_preflight_unavailable' };
+      }
+      if (carrierlessPreflight.outcome !== 'resolved') {
+        reply.status(carrierlessPreflight.outcome === 'insufficient' ? 422 : 409);
+        return { kind: 'local_review_verdict_identity_mismatch', preflight: carrierlessPreflight };
+      }
+      carrierlessLocalReviewSubjectRef = inheritedSubjectRef;
+      carrierlessLocalReviewFence = {
+        leaseId: carrierlessPreflight.leaseId,
+        generation: carrierlessPreflight.generation,
+      };
+      typedLocalReviewContinuationTarget = createCatId(carrierlessPreflight.predecessorCatId);
+    }
     // The combined Redis script preserves the F167 identity ordering: an
     // existing dispatch replays or safely waits before broad lineage or
     // full-key canonical authority can deny a genuinely new claim.
@@ -2135,7 +2372,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       explicitTargetCats,
       action,
       coordinationSubjectRef: coordinationResult.coordination?.subjectRef,
-      suppressRouting: coordinationResult.suppressRouting,
+      suppressRouting: coordinationResult.suppressRouting && !typedLocalReviewContinuationTarget,
       effectClass,
       clientMessageId,
       dispatchProposalStore: opts.dispatchProposalStore,
@@ -2393,6 +2630,99 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    const settleTypedLocalReviewMessage = async (messageId: string) => {
+      if (!localReviewVerdict) return undefined;
+      if (!opts.localReviewVerdictService) {
+        throw new Error('typed local review settlement reached without its configured service');
+      }
+      if (terminalActionLeaseRef) {
+        return opts.localReviewVerdictService.record({
+          leaseId: terminalActionLeaseRef.leaseId,
+          generation: terminalActionLeaseRef.generation,
+          messageId,
+          now: Date.now(),
+          ...(reviewedHeadSha ? { reviewedHeadSha } : {}),
+          principal: { catId: actor.catId, threadId: actor.threadId, tenantScope: actor.userId },
+        });
+      }
+      if (carrierlessLocalReviewSubjectRef && reviewedHeadSha) {
+        const persistedFence = (await messageStore.getById(messageId))?.extra?.localReviewVerdict
+          ?.carrierlessLeaseFence;
+        if (!persistedFence) {
+          return { outcome: 'insufficient' as const, reason: 'carrierless_verdict_lease_fence_unavailable' };
+        }
+        return opts.localReviewVerdictService.recordCarrierless({
+          subjectRef: carrierlessLocalReviewSubjectRef,
+          reviewedHeadSha,
+          targetThreadId: effectiveThreadId,
+          leaseId: persistedFence.leaseId,
+          generation: persistedFence.generation,
+          messageId,
+          now: Date.now(),
+          principal: { catId: actor.catId, threadId: actor.threadId, tenantScope: actor.userId },
+        });
+      }
+      throw new Error('typed local review settlement reached without carrier or canonical identity');
+    };
+
+    const recoverTypedLocalReviewContinuation = async (duplicateMsg: StoredMessage): Promise<boolean> => {
+      if (!typedLocalReviewContinuationTarget) return false;
+      if (!opts.invocationQueue) return false;
+      return recoverQueuedDuplicateCallbackMessage({
+        duplicateMsg,
+        willEnqueueToQueue: true,
+        invocationQueue: opts.invocationQueue,
+        threadId: effectiveThreadId,
+        userId: actor.userId,
+        log: app.log,
+        preserveQueuedOnEnqueueFailure: true,
+        enqueueA2A: () =>
+          enqueueA2ATargets(
+            {
+              router: router!,
+              invocationRecordStore: invocationRecordStore!,
+              socketManager,
+              messageStore,
+              ...(invocationTracker ? { invocationTracker } : {}),
+              ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
+              ...(queueProcessor ? { queueProcessor } : {}),
+              invocationQueue: opts.invocationQueue!,
+              ...(opts.ballCustody ? { ballCustody: opts.ballCustody } : {}),
+              log: app.log,
+            },
+            {
+              targetCats: [typedLocalReviewContinuationTarget],
+              content: duplicateMsg.content,
+              userId: actor.userId,
+              threadId: effectiveThreadId,
+              triggerMessage: duplicateMsg,
+              callerCatId: senderCatId,
+              parentInvocationId: record.parentInvocationId,
+              ownerAuthProvenance: record.ownerAuthProvenance,
+              callerTraceContext: record.traceContext,
+            },
+          ),
+        markDelivered: (deliveredAt) => messageStore.markDelivered?.(duplicateMsg.id, deliveredAt),
+        zeroEnqueuedWarnMessage: '[F167] typed local-review continuation recovery found no Queue target',
+        enqueueFailureMessage: '[F167] typed local-review continuation recovery failed closed',
+        broadcastNow: () => {},
+      });
+    };
+
+    // A retryable infrastructure rejection must happen before the idempotency
+    // claim. Otherwise restoring Queue wiring cannot make the same client ID
+    // usable again, even though no verdict message was persisted.
+    if (
+      localReviewVerdict &&
+      (!typedLocalReviewContinuationTarget || !opts.invocationQueue || !router || !invocationRecordStore)
+    ) {
+      reply.status(503);
+      return {
+        kind: 'local_review_continuation_unavailable',
+        message: 'Typed local review settlement requires the durable author-continuation queue.',
+      };
+    }
+
     // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
     if (clientMessageId) {
       const isFirstSeen = await registry.claimClientMessageId(invocationId, clientMessageId);
@@ -2418,6 +2748,55 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             evidenceRef: `callback:${invocationId}:${clientMessageId}:duplicate`,
             now: Date.now(),
           });
+        }
+        if (localReviewVerdict) {
+          const persisted = await findTypedLocalReviewMessage(messageStore, {
+            threadId: effectiveThreadId,
+            userId: actor.userId,
+            catId: actor.catId,
+            clientMessageId,
+            verdict: localReviewVerdict,
+            ...(reviewedHeadSha ? { reviewedHeadSha } : {}),
+            invocationId,
+          });
+          if (!persisted) {
+            reply.status(503);
+            return {
+              kind: 'local_review_verdict_persistence_pending',
+              message: 'The typed terminal message is not yet readable; retry the same clientMessageId.',
+              clientMessageId,
+            };
+          }
+          const settlement = await settleTypedLocalReviewMessage(persisted.id);
+          if (settlement?.outcome !== 'committed') {
+            if (
+              settlement &&
+              settlement.outcome !== 'insufficient' &&
+              !(await cancelPermanentlyRejectedLocalReviewMessage(messageStore, persisted.id, settlement.outcome))
+            ) {
+              reply.status(503);
+              return { kind: 'local_review_rejection_compensation_failed', messageId: persisted.id };
+            }
+            reply.status(settlement?.outcome === 'insufficient' ? 422 : 409);
+            return { kind: 'local_review_settlement_failed', settlement, clientMessageId };
+          }
+          if (persisted.deliveryStatus === 'queued' && !(await recoverTypedLocalReviewContinuation(persisted))) {
+            reply.status(503);
+            return {
+              kind: 'local_review_continuation_pending',
+              message: 'The typed review verdict is durable; retry this clientMessageId to restore its continuation.',
+              messageId: persisted.id,
+              clientMessageId,
+            };
+          }
+          return {
+            status: 'duplicate',
+            threadId: effectiveThreadId,
+            messageId: persisted.id,
+            replyTo,
+            clientMessageId,
+            localReviewSettlement: settlement,
+          };
         }
         return { status: 'duplicate', replyTo, clientMessageId };
       }
@@ -2450,21 +2829,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const contentAnalysis = analyzeA2AMentions(storedContent, isCrossThread ? undefined : senderCatId);
     // Action-scoped dispatch uses explicit targetCats as the authoritative holder set.
     // Text mentions remain presentation only and cannot silently mutate lease cardinality.
-    const contentTargets = action ? [] : contentAnalysis.mentions;
+    const contentTargets = action ? [] : typedLocalReviewContinuationTarget ? [] : contentAnalysis.mentions;
     // F098-C1: Merge explicit targetCats with content-parsed mentions (deduped)
     // F182: use resolveCatTarget to distinguish disabled vs unknown — collect routing_warnings
     const validExplicitTargets: CatId[] = [];
     const routing_warnings: CatRoutingError[] = [...contentAnalysis.routing_warnings];
-    for (const id of explicitTargetCats ?? []) {
-      const resolved = resolveCatTarget(id);
-      if ('ok' in resolved) {
-        validExplicitTargets.push(createCatId(resolved.ok));
-      } else {
-        routing_warnings.push(resolved.error);
-        app.log.warn(
-          { droppedId: id, catId: actor.catId, invocationId, reason: resolved.error.kind },
-          '[callbacks/post-message] Dropped unavailable catId from targetCats',
-        );
+    if (typedLocalReviewContinuationTarget) {
+      validExplicitTargets.push(typedLocalReviewContinuationTarget);
+    } else if (explicitTargetCats) {
+      for (const id of explicitTargetCats) {
+        const resolved = resolveCatTarget(id);
+        if ('ok' in resolved) {
+          validExplicitTargets.push(createCatId(resolved.ok));
+        } else {
+          routing_warnings.push(resolved.error);
+          app.log.warn(
+            { droppedId: id, catId: actor.catId, invocationId, reason: resolved.error.kind },
+            '[callbacks/post-message] Dropped unavailable catId from targetCats',
+          );
+        }
       }
     }
     const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
@@ -2516,7 +2899,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         );
       }
     }
-    if (coordinationResult.suppressRouting && mergedTargets.size > 0) {
+    const suppressTerminalRouting = coordinationResult.suppressRouting && !typedLocalReviewContinuationTarget;
+    if (suppressTerminalRouting && mergedTargets.size > 0) {
       routing_warnings.push({
         kind: 'suppressed_by_terminal_ack',
         droppedMentions: [...mergedTargets],
@@ -2525,7 +2909,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const hasDedupBlockingRoutingWarnings = routing_warnings.some(
       (warning) => warning.kind !== 'suppressed_by_terminal_ack',
     );
-    const mentions: CatId[] = coordinationResult.suppressRouting ? [] : [...mergedTargets];
+    const mentions: CatId[] = suppressTerminalRouting ? [] : [...mergedTargets];
     if (contentTargets.length > 0 || validExplicitTargets.length > 0) {
       app.log.info(
         {
@@ -2552,10 +2936,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
       : {};
     const coordinationExtra = coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {};
+    const localReviewVerdictExtra = localReviewVerdict
+      ? {
+          localReviewVerdict: {
+            verdict: localReviewVerdict,
+            clientMessageId: clientMessageId!,
+            ...(reviewedHeadSha ? { reviewedHeadSha } : {}),
+            ...(carrierlessLocalReviewFence ? { carrierlessLeaseFence: carrierlessLocalReviewFence } : {}),
+          },
+        }
+      : {};
     const callbackDedupExtra = coordinationDedupKey ? { callbackDedup: { coordinationKey: coordinationDedupKey } } : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra =
-      !coordinationResult.suppressRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
+      !suppressTerminalRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
     // #814: independent post_message callbacks remain standalone. #1332:
     // replace_final deliberately omits this marker so the existing frontend
     // callback replacement path converges the live stream with durable history.
@@ -2564,6 +2958,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...richExtra,
       ...crossPostExtra,
       ...coordinationExtra,
+      ...localReviewVerdictExtra,
       ...callbackDedupExtra,
       ...targetCatsExtra,
     };
@@ -2653,6 +3048,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           isExplicitPost: isStandaloneExplicitPost,
           ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
           ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
+          ...(localReviewVerdict ? { localReviewVerdict } : {}),
+          ...(reviewedHeadSha ? { reviewedHeadSha } : {}),
           now,
         })
       : undefined;
@@ -2698,6 +3095,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           markDelivered: (deliveredAt) => messageStore.markDelivered?.(duplicateMsg.id, deliveredAt),
           zeroEnqueuedWarnMessage: '[callbacks/post-message] queued duplicate had no A2A entry — broadcasting anyway',
           enqueueFailureMessage: '[callbacks/post-message] queued duplicate recovery failed — broadcasting anyway',
+          ...(typedLocalReviewContinuationTarget ? { preserveQueuedOnEnqueueFailure: true } : {}),
           broadcastNow: async () => {
             const replyPreview = validatedReplyTo
               ? await hydrateReplyPreview(messageStore, validatedReplyTo)
@@ -2721,7 +3119,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                       }
                     : {}),
                   ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
-                  ...(!coordinationResult.suppressRouting && validExplicitTargets.length
+                  ...(!suppressTerminalRouting && validExplicitTargets.length
                     ? { targetCats: validExplicitTargets }
                     : {}),
                 },
@@ -2751,12 +3149,29 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           now: Date.now(),
         });
       }
+      const localReviewSettlement = await settleTypedLocalReviewMessage(duplicateMsg.id);
+      if (localReviewSettlement && localReviewSettlement.outcome !== 'committed') {
+        if (
+          localReviewSettlement.outcome !== 'insufficient' &&
+          !(await cancelPermanentlyRejectedLocalReviewMessage(
+            messageStore,
+            duplicateMsg.id,
+            localReviewSettlement.outcome,
+          ))
+        ) {
+          reply.status(503);
+          return { kind: 'local_review_rejection_compensation_failed', messageId: duplicateMsg.id };
+        }
+        reply.status(localReviewSettlement.outcome === 'insufficient' ? 422 : 409);
+        return { kind: 'local_review_settlement_failed', settlement: localReviewSettlement };
+      }
       return {
         status: 'duplicate',
         threadId: effectiveThreadId,
         messageId: duplicateMsg.id,
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
         ...(clientMessageId ? { clientMessageId } : {}),
+        ...(localReviewSettlement ? { localReviewSettlement } : {}),
       };
     }
     // Race-safe backstop: the exact-duplicate scan above is check-then-act, so an atomic content
@@ -2773,6 +3188,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       isExplicitPost: isStandaloneExplicitPost,
       ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
       ...(coordinationDedupKey ? { coordinationDedupKey } : {}),
+      ...(localReviewVerdict ? { localReviewVerdict } : {}),
+      ...(reviewedHeadSha ? { reviewedHeadSha } : {}),
       ...(clientMessageId ? { clientMessageId } : {}),
       now,
       hasRoutingWarnings: hasDedupBlockingRoutingWarnings,
@@ -2786,7 +3203,34 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           now: Date.now(),
         });
       }
-      return contentDuplicate;
+      if (!localReviewVerdict) return contentDuplicate;
+      if (!contentDuplicate.messageId) {
+        reply.status(503);
+        return {
+          kind: 'local_review_verdict_persistence_pending',
+          message:
+            'The typed terminal message is still winning its content-dedup race; retry the same clientMessageId.',
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+      const localReviewSettlement = await settleTypedLocalReviewMessage(contentDuplicate.messageId);
+      if (localReviewSettlement?.outcome !== 'committed') {
+        if (
+          localReviewSettlement &&
+          localReviewSettlement.outcome !== 'insufficient' &&
+          !(await cancelPermanentlyRejectedLocalReviewMessage(
+            messageStore,
+            contentDuplicate.messageId,
+            localReviewSettlement.outcome,
+          ))
+        ) {
+          reply.status(503);
+          return { kind: 'local_review_rejection_compensation_failed', messageId: contentDuplicate.messageId };
+        }
+        reply.status(localReviewSettlement?.outcome === 'insufficient' ? 422 : 409);
+        return { kind: 'local_review_settlement_failed', settlement: localReviewSettlement };
+      }
+      return { ...contentDuplicate, localReviewSettlement };
     }
     const storedMsg = await messageStore.append({
       userId: actor.userId,
@@ -2801,6 +3245,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
       ...(willEnqueueToQueue ? { deliveryStatus: 'queued' as const } : {}),
     });
+    const localReviewSettlement = await settleTypedLocalReviewMessage(storedMsg.id);
+    if (localReviewSettlement && localReviewSettlement.outcome !== 'committed') {
+      if (
+        localReviewSettlement.outcome !== 'insufficient' &&
+        !(await cancelPermanentlyRejectedLocalReviewMessage(messageStore, storedMsg.id, localReviewSettlement.outcome))
+      ) {
+        reply.status(503);
+        return { kind: 'local_review_rejection_compensation_failed', messageId: storedMsg.id };
+      }
+      reply.status(localReviewSettlement.outcome === 'insufficient' ? 422 : 409);
+      return {
+        kind: 'local_review_settlement_failed',
+        messageId: storedMsg.id,
+        settlement: localReviewSettlement,
+      };
+    }
     if (coordinationResult.coordination?.phase === 'active') {
       coordinationActiveDispatchCount.add(1);
     } else if (coordinationResult.coordination?.phase === 'terminal') {
@@ -2849,7 +3309,19 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       markDelivered: (deliveredAt) => messageStore.markDelivered?.(storedMsg.id, deliveredAt),
       zeroEnqueuedWarnMessage: '[AC-B6-P1] Failed to recover ghost message — broadcasting anyway',
       enqueueFailureMessage: '[invocation-callback] enqueueA2ATargets failed — falling back to broadcast',
+      ...(typedLocalReviewContinuationTarget ? { preserveQueuedOnEnqueueFailure: true } : {}),
     });
+
+    if (typedLocalReviewContinuationTarget && deliveryDecision.enqueueFailed) {
+      reply.status(503);
+      return {
+        kind: 'local_review_continuation_pending',
+        message: 'The typed review verdict is durable; retry this clientMessageId to restore its continuation.',
+        messageId: storedMsg.id,
+        ...(clientMessageId ? { clientMessageId } : {}),
+        ...(localReviewSettlement ? { localReviewSettlement } : {}),
+      };
+    }
 
     const enqueuedActionHolders = new Set(deliveryDecision.enqueued);
     await reconcileActionSuccessorEnqueue({
@@ -2886,9 +3358,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                 }
               : {}),
             ...(coordinationResult.coordination ? { coordination: coordinationResult.coordination } : {}),
-            ...(!coordinationResult.suppressRouting && validExplicitTargets.length
-              ? { targetCats: validExplicitTargets }
-              : {}),
+            ...(!suppressTerminalRouting && validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
           },
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -2969,7 +3439,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // FreshnessGateService handles the "don't hold on own messages" case.
 
     return {
-      status: coordinationResult.suppressRouting ? 'terminal_ack_recorded' : 'ok',
+      status: suppressTerminalRouting ? 'terminal_ack_recorded' : 'ok',
       threadId: effectiveThreadId,
       messageId: storedMsg.id,
       routed: routingOutcome.routed,
@@ -2995,7 +3465,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             },
           }
         : {}),
-      message: coordinationResult.suppressRouting
+      ...(localReviewSettlement ? { localReviewSettlement } : {}),
+      message: suppressTerminalRouting
         ? 'Terminal coordination ACK recorded without routing a new invocation.'
         : buildPostMessageRoutingMessage(routingOutcome.routed, routing_warnings, routingOutcome.notEnqueued),
     };
@@ -4919,13 +5390,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     return { status: 'ok', deleted: { id: task.id, subjectKey: parsed.data.subjectKey } };
   });
 
-  // F174 Phase C: refresh-token endpoint — keep tokens alive in long sessions
-  // where猫 has no incidental tool calls. Heartbeat = empty verify (preHandler
-  // slides TTL via Phase B mechanism); we just compute remaining TTL.
+  // F174 Phase C compatibility endpoint. Active credentials no longer expire
+  // with elapsed time; this endpoint validates exact-attempt ownership and
+  // returns lifecycle state without extending an auth deadline.
   //
   // P1 fix (gpt52 review): cooldown MUST run before app-level preHandler.
-  // Otherwise verify() in preHandler已经 slides TTL even on rate-limited
-  // requests → 429 is cosmetic, abuser still extends. Route-level onRequest
+  // Otherwise verify() in preHandler runs even on rate-limited requests.
+  // Route-level onRequest
   // hook fires before plugin-scoped preHandler in Fastify's lifecycle, so we
   // claim the cooldown there and reply.send → preHandler is short-circuited.
   const REFRESH_COOLDOWN_MS = 5 * 60_000;
@@ -4961,6 +5432,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           });
           return;
         }
+        if (rejectCallbackAuthDuringStartupRecovery(registry, reply)) return;
 
         const peeked = await registry.peek(creds.invocationId, creds.callbackToken);
         if (!peeked.ok) {
@@ -4973,11 +5445,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         if (!cooldownClaimed) {
           reply.status(429).send({ error: 'refresh_rate_limited', retryAfterMs: REFRESH_COOLDOWN_MS });
           // reply.send short-circuits the lifecycle — preHandler/handler skipped,
-          // so verify() never slides TTL for the rate-limited request.
+          // so no callback verification runs for the rate-limited request.
           return;
         }
 
-        // Atomic: verify token + check stale + slide TTL in one backend op.
+        // Atomic: verify token + check stale in one backend op.
         // Replaces global preHandler.verify for this route (we set
         // request.callbackAuth so the preHandler early-returns).
         const result = await registry.verifyLatest(creds.invocationId, creds.callbackToken);
@@ -4993,8 +5465,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             });
             return;
           }
-          // expired / invalid_token / unknown_invocation — race against expiry
-          // or registry mutation between peek and verifyLatest. Surface the
+          // invalid_token / unknown_invocation / terminal disposition — a
+          // registry mutation raced peek and verifyLatest. Surface the
           // structured reason directly (we own the auth path now, preHandler
           // will skip via the request.callbackAuth check).
           reply.status(401).send({
@@ -5012,8 +5484,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       const record = requireCallbackAuth(request, reply);
       if (!record) return; // preHandler already 401'd
 
-      // preHandler's verify() already slid the record TTL forward.
-      // Re-fetch to get the new expiresAt without triggering another slide.
+      // Re-fetch the current lifecycle projection without mutating auth state.
       const fresh = await registry.getRecord(record.invocationId);
       if (!fresh) {
         recordCallbackAuthFailure({ reason: 'unknown_invocation', tool: 'refresh-token', catId: record.catId });
@@ -5025,8 +5496,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           hint: '',
         };
       }
-      const ttlRemainingMs = Math.max(0, fresh.expiresAt - Date.now());
-      return { ok: true, expiresAt: fresh.expiresAt, ttlRemainingMs };
+      return { ok: true, expiresAt: null, ttlRemainingMs: null };
     },
   );
 
@@ -5334,10 +5804,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       socketManager,
       ...(opts.approvalIngress ? { approvalIngress: opts.approvalIngress } : {}),
       ...(opts.deferredPersonMemoryReceiptStore ? { deferredReceiptStore: opts.deferredPersonMemoryReceiptStore } : {}),
+      ...(opts.writeOpportunityDeliveryStore
+        ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+        : {}),
+      ...(opts.writeOpportunityTerminalLedger
+        ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+        : {}),
     });
     registerCallbackPersonMemoryRoutes(app, {
       store: opts.personMemoryStore,
       workspacePersonResolver: opts.workspacePersonResolver,
+      ...(opts.writeOpportunityDeliveryStore
+        ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+        : {}),
+      ...(opts.writeOpportunityTerminalLedger
+        ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+        : {}),
     });
     if (opts.deferredPersonMemoryReceiptStore && opts.proactiveCandidateRegistryResolver) {
       registerCallbackDeferPersonMemoryRoutes(app, {
@@ -5345,9 +5827,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         messageStore: opts.messageStore,
         receiptStore: opts.deferredPersonMemoryReceiptStore,
         registryResolver: opts.proactiveCandidateRegistryResolver,
+        ...(opts.writeOpportunityDeliveryStore
+          ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+          : {}),
+        ...(opts.writeOpportunityTerminalLedger
+          ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+          : {}),
       });
     }
   }
+
+  registerCallbackRecordProactiveMemoryAbstentionRoutes(app, {
+    registry,
+    ...(opts.writeOpportunityDeliveryStore
+      ? { writeOpportunityDeliveryStore: opts.writeOpportunityDeliveryStore }
+      : {}),
+    ...(opts.writeOpportunityTerminalLedger
+      ? { writeOpportunityTerminalLedger: opts.writeOpportunityTerminalLedger }
+      : {}),
+  });
 
   if (opts.memoryCueDeps) {
     registerCallbackMemoryCueRoutes(app, opts.memoryCueDeps);

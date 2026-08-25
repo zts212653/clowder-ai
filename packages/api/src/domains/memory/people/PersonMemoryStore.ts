@@ -21,6 +21,7 @@ import type {
   PersonMemorySourceRef,
   PersonMemorySuppressionToken,
   PersonRelationship,
+  WriteOpportunityLineageV1,
 } from '@cat-cafe/shared';
 
 export interface StagePersonMemoryCandidateInput {
@@ -38,6 +39,8 @@ export interface StagePersonMemoryCandidateInput {
   deferredReceiptClaimId?: string;
   deltaFingerprint?: string;
   replacesProposalId?: CaptureCandidateId;
+  /** IDs-only lineage for proposals created from a delivered Standing Reflex opportunity. */
+  writeOpportunityLineage?: WriteOpportunityLineageV1;
   remainingDraftIds: CandidateClaimDraftId[];
   retention: 'owner_controlled_no_ttl';
   createdAt: number;
@@ -242,6 +245,7 @@ export interface PersonMemoryStore {
   withdrawCandidate(ownerUserId: string, candidateId: string, decidedAt: number): Promise<StoredPersonMemoryCandidate>;
   rejectCandidate(input: RejectPersonMemoryCandidateInput): Promise<PersonMemoryRejectResult>;
   getPerson(ownerUserId: string, personId: PersonId): Promise<PersonIdentity | null>;
+  listCandidateIdsForPerson(ownerUserId: string, personId: PersonId): Promise<CaptureCandidateId[]>;
   resolveActivePersonByAlias(ownerUserId: string, alias: string): Promise<PersonAliasResolution>;
   resolveActivePersonByWorkspaceEntityRef(ownerUserId: string, entityRef: string): Promise<PersonAliasResolution>;
   listClaims(ownerUserId: string, personId: PersonId): Promise<PersonClaimVersion[]>;

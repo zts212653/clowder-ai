@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type { TaskTrajectory } from './f200-types.js';
 
 interface ListOptions {
+  invocationId?: string;
   limit?: number;
   days?: number;
   catId?: string;
@@ -56,6 +57,10 @@ export class TrajectoryQueryService {
       const cutoff = Date.now() - opts.days * 86_400_000;
       conditions.push('created_at >= ?');
       params.push(cutoff);
+    }
+    if (opts.invocationId) {
+      conditions.push('invocation_id = ?');
+      params.push(opts.invocationId);
     }
     if (opts.catId) {
       conditions.push('cat_id = ?');

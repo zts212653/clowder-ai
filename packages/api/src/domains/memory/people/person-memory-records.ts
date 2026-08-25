@@ -13,6 +13,7 @@ import {
   personIdSchema,
   personRelationshipIdSchema,
   personRelationshipSchema,
+  writeOpportunityLineageV1Schema,
 } from '@cat-cafe/shared';
 import type { StoredPersonMemoryCandidate } from './PersonMemoryStore.js';
 
@@ -26,6 +27,9 @@ export function parseStoredCandidate(raw: string | null): StoredPersonMemoryCand
     candidate.humanDispositionLedgerEntry = humanDispositionLedgerEntrySchema.parse(
       candidate.humanDispositionLedgerEntry,
     );
+  }
+  if (candidate.writeOpportunityLineage) {
+    candidate.writeOpportunityLineage = writeOpportunityLineageV1Schema.parse(candidate.writeOpportunityLineage);
   }
   if (
     candidate.dispositionLineageBindingKey !== undefined &&

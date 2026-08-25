@@ -68,6 +68,34 @@ describe('Callback Auth PreHandler (#476)', () => {
     await app.close();
   });
 
+  it('fails invocation callback auth closed while durable startup recovery is incomplete', async () => {
+    let verifyCalls = 0;
+    const registry = {
+      isStartupRecoveryComplete: () => false,
+      async verify() {
+        verifyCalls += 1;
+        return { ok: true, record: VALID_RECORD };
+      },
+    };
+    const app = await buildApp(registry);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/test/require-auth',
+      headers: { 'x-invocation-id': 'inv-001', 'x-callback-token': 'tok-001' },
+    });
+
+    assert.equal(res.statusCode, 503);
+    assert.deepEqual(res.json(), {
+      error: 'callback_auth_startup_recovery_pending',
+      reason: 'startup_recovery_pending',
+      message: 'Callback authentication is temporarily unavailable while durable state is recovered',
+      retryable: true,
+    });
+    assert.equal(verifyCalls, 0, 'no invocation credential may reach verification before recovery completes');
+    await app.close();
+  });
+
   it('returns 401 with reason:unknown_invocation when handler requires auth but no preHandler decoration', async () => {
     // Headers absent → preHandler is no-op → callbackAuth undefined → requireCallbackAuth 401s.
     // The reason emitted by requireCallbackAuth is `unknown_invocation` (we don't actually

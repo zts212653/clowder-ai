@@ -25,6 +25,14 @@ import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.j
 import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
+import { mapToPresentation } from '../../session/context-presentation.js';
+import {
+  type ContextModeProjection,
+  type ContextSurfaceProjection,
+  countPresentedTiers,
+  projectContextMode,
+  withSurfaceShape,
+} from '../../session/context-surface-projection.js';
 import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
@@ -43,6 +51,7 @@ import {
   buildTombstone,
   detectRecentBurst,
   formatAnchors,
+  formatRecallPointer,
   formatTombstone,
   recallEvidenceWithProvenance,
   scrubToolPayloads,
@@ -51,7 +60,8 @@ import {
 } from './context-transport.js';
 import type { HumanDispositionInvocationOrigin } from './human-disposition-invocation-origin.js';
 import { extractBatonContext, formatNavigationHeader, summarizeActiveTasks } from './navigation-context.js';
-import { rankArtifactSources } from './source-ranking.js';
+import { projectRankedSource, rankArtifactSources, selectDirectiveSources } from './source-ranking.js';
+import { resolveReachableArtifactRefs } from './source-reachability.js';
 
 /**
  * P1 R7 fix: Shared pure helper for context budget calculation.
@@ -243,6 +253,8 @@ export interface RouteOptions {
   promptTags?: readonly string[] | undefined;
   /** Trusted server-owned Cue seeds supplied by connector/workflow ingress. */
   memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[] | undefined;
+  /** F276 trial: source-only ASR scenes from exact persisted Queue messages. */
+  asrPersonMemoryScenes?: readonly import('../../../../memory/people/AsrPersonMemoryOpportunityPromptService.js').BoundAsrPersonMemoryScene[];
   /** Pre-assembled context (deprecated: use history for per-cat budget) */
   contextHistory?: string | undefined;
   /** Raw thread history for per-cat context assembly */
@@ -483,7 +495,7 @@ export function createA2ASlotTrackingBridge(
   invocationTracker:
     | {
         trackExternalSlot?: InvocationTracker['trackExternalSlot'];
-        completeSlot?: InvocationTracker['completeSlot'];
+        completeAll?: InvocationTracker['completeAll'];
       }
     | undefined,
   invocationController: AbortController,
@@ -492,16 +504,16 @@ export function createA2ASlotTrackingBridge(
   return {
     invocationController,
     trackA2ASlot: (threadId, catId, userId, controller) => {
-      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeSlot) {
+      if (!invocationTracker?.trackExternalSlot || !invocationTracker.completeAll) {
         throw new Error('A2A slot admission unavailable: InvocationTracker bridge missing');
       }
       return invocationTracker.trackExternalSlot(threadId, catId, controller, userId, [catId], executionId);
     },
     completeA2ASlots: (threadId, catIds, controller) => {
-      if (!invocationTracker?.completeSlot) {
+      if (!invocationTracker?.completeAll) {
         throw new Error('A2A slot cleanup unavailable: InvocationTracker bridge missing');
       }
-      for (const catId of catIds) invocationTracker.completeSlot(threadId, catId, controller);
+      invocationTracker.completeAll(threadId, [...catIds], controller);
     },
   };
 }
@@ -525,6 +537,8 @@ function canonicalDeferredBoundary(
 
 export interface IncrementalContextResult {
   contextText: string;
+  /** F296 B3b-4: one typed projection shared by prompt, bootstrap, briefing, and receipt surfaces. */
+  surfaceProjection?: ContextSurfaceProjection;
   boundaryId?: CanonicalVisibilityCursor;
   /** Message ids with a retained per-message safe projection in the final prompt. */
   projectedMessageIds: string[];
@@ -552,6 +566,68 @@ export interface IncrementalContextResult {
   navigationHeader?: string;
   /** F263: only cold-context evidence lines that survived final token trimming. */
   pushRecallPresentations?: import('../../../../memory/f200-types.js').PushRecallPresentation[];
+}
+
+/**
+ * A continuity verdict may force a cold packet even for a small unread delta.
+ * The persisted briefing is a volume-shaping surface, not a per-cold-turn
+ * receipt, so epoch-aware callers keep the original large-delta admission.
+ * Legacy smart-window callers have no typed mode/size and remain admitted.
+ */
+export function shouldPersistContextBriefing(
+  result: IncrementalContextResult,
+): result is IncrementalContextResult & { coverageMap: CoverageMap } {
+  if (!result.coverageMap) return false;
+  return (
+    result.surfaceProjection === undefined ||
+    (result.surfaceProjection.contextMode === 'cold' && result.surfaceProjection.deltaSize === 'large')
+  );
+}
+
+/**
+ * Provider replacement can rebuild a projection after an earlier generation
+ * has already emitted its pre-provider notices. Reset replaces notifications
+ * that are still pending; emitted keys are never yielded twice.
+ */
+export function createIdempotentPendingProjectionQueue<T>(): {
+  readonly length: number;
+  reset(): void;
+  enqueue(key: string, value: T): void;
+  shift(): T | undefined;
+} {
+  const pending: Array<{ key: string; value: T }> = [];
+  const emittedKeys = new Set<string>();
+  return {
+    get length() {
+      return pending.length;
+    },
+    reset() {
+      pending.length = 0;
+    },
+    enqueue(key, value) {
+      if (!emittedKeys.has(key)) pending.push({ key, value });
+    },
+    shift() {
+      const entry = pending.shift();
+      if (!entry) return undefined;
+      emittedKeys.add(entry.key);
+      return entry.value;
+    },
+  };
+}
+
+/**
+ * Internal retry/replacement events never escape invokeSingleCat. The first
+ * substantive output (or the final done) is therefore the earliest route seam
+ * that can safely persist a final-generation briefing.
+ */
+export function isFinalGenerationBriefingBoundary(message: Pick<AgentMessage, 'type' | 'content'>): boolean {
+  return (
+    message.type === 'done' ||
+    message.type === 'tool_use' ||
+    message.type === 'tool_result' ||
+    (message.type === 'text' && Boolean(message.content))
+  );
 }
 
 /**
@@ -812,6 +888,9 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
 
 const USER_FACING_SYSTEM_INFO_TYPES = new Set([
   'a2a_followup_available',
+  // F086/F216: "your N line-start @ were scheduled SERIALLY" — the whole point is that the cat
+  // and the reader both see it, so it must survive refresh like any other user-facing notice.
+  'a2a_multi_target_serialized',
   'cloud_bridge_status',
   'governance_blocked',
   'invocation_preempted',
@@ -1156,6 +1235,8 @@ export interface IncrementalContextOptions {
   recentFilesTouched?: Array<{ path: string; ops: string[] }>;
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Canonical workspace used to verify local artifact reachability. */
+  projectPath?: string;
   /** Invocation wall-clock for stale-age rendering in prompt timestamps. */
   nowMs?: number;
   /** Route-scoped deferred boundary from an earlier invocation of this same cat. */
@@ -1164,6 +1245,57 @@ export interface IncrementalContextOptions {
   sameRouteOutputMessageIds?: ReadonlySet<string>;
   /** A directly addressed same-route A2A trigger remains visible despite that isolation. */
   exactA2ATriggerMessageId?: string;
+  /**
+   * F296 B3b-1: provider/epoch-owned continuity decision. Production routes
+   * pass this only from InvocationParams.contextPromptFactory, after preflight.
+   */
+  contextProjection?: ContextModeProjection;
+}
+
+/** One mapper for every route surface consuming an epoch-owner decision. */
+export function contextProjectionFromEpochDecision(
+  decision: Parameters<typeof projectContextMode>[0]['decision'],
+  coordinate: Parameters<typeof projectContextMode>[0]['coordinate'],
+): ContextModeProjection {
+  return projectContextMode({ decision, coordinate });
+}
+
+function formatContextProjection(
+  projection: NonNullable<IncrementalContextOptions['contextProjection']>,
+  deltaSize: 'small' | 'large',
+): string {
+  return [
+    '[Context Continuity]',
+    JSON.stringify({
+      contextEpoch: projection.contextEpoch,
+      contextMode: projection.contextMode,
+      transition: projection.transition,
+      reason: projection.reason,
+      deltaSize,
+    }),
+    '[/Context Continuity]',
+  ].join('\n');
+}
+
+function projectSurfaceShape(
+  projection: ContextModeProjection | undefined,
+  deltaSize: 'small' | 'large',
+  presentations: Parameters<typeof countPresentedTiers>[0] = [],
+): Pick<IncrementalContextResult, 'surfaceProjection'> {
+  return projection
+    ? { surfaceProjection: withSurfaceShape(projection, deltaSize, countPresentedTiers(presentations)) }
+    : {};
+}
+
+function projectVisibleMessages(messages: readonly StoredMessage[]) {
+  return messages.map((message) =>
+    mapToPresentation({
+      subjectKey: `message:${message.id}`,
+      asOf: { kind: 'as_of' as const, value: message.timestamp },
+      sourceTier: 'T0' as const,
+      requested: 'state' as const,
+    }),
+  );
 }
 
 type SameRouteBoundaryCap = { active: false } | { active: true; boundary: CanonicalVisibilityCursor | undefined };
@@ -1348,7 +1480,7 @@ export async function assembleIncrementalContext(
   // G1→G2 bridge: read stored ledger from threadMemory to merge with current-invocation artifacts
   let storedLedgerArtifacts: import('./artifact-tracking.js').RecentArtifact[] = [];
   const threadStore = deps.invocationDeps.threadStore;
-  if (threadStore) {
+  if (threadStore && !options?.contextProjection) {
     try {
       const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
       if (mem && Array.isArray(mem.recentArtifacts) && mem.recentArtifacts.length > 0) {
@@ -1359,19 +1491,26 @@ export async function assembleIncrementalContext(
     }
   }
   const mergedLedger = mergeLedger(storedLedgerArtifacts, recentArtifacts);
+  const reachableArtifactRefs = await resolveReachableArtifactRefs(options?.projectPath, mergedLedger);
 
   const rankedSources = rankArtifactSources(
     mergedLedger,
     allThreadTasks.map((t) => ({ kind: t.kind, subjectKey: t.subjectKey ?? null, title: t.title, status: t.status })),
-    { canonicalFeatureId: options?.canonicalFeatureId, threadTitle: options?.threadTitle },
+    {
+      canonicalFeatureId: options?.canonicalFeatureId,
+      threadTitle: options?.threadTitle,
+      reachableArtifactRefs,
+    },
   );
-  const topSource = rankedSources[0] ?? null;
+  const topSource = selectDirectiveSources(rankedSources)[0] ?? null;
   const bestNextSource = topSource ? `先看 ${topSource.label}: ${topSource.ref}` : undefined;
   const navigationHeader = formatNavigationHeader({
     threadId,
     baton,
     tasks: activeTasks,
-    artifacts: recentArtifacts,
+    // Epoch-owned packets admit only a validated truth source. A recency-only
+    // artifact list is not canonical state and must wait for the B3b mapper.
+    artifacts: options?.contextProjection ? [] : recentArtifacts,
     truthSource: topSource ? { label: topSource.label, ref: topSource.ref, provenance: topSource.provenance } : null,
     bestNextSource,
   });
@@ -1389,7 +1528,8 @@ export async function assembleIncrementalContext(
     batonCandidateCount: batonCandidates.length,
   });
 
-  // F148: Smart window — cold mention detection
+  // F296: unread volume owns only delta shaping. It cannot prove whether the
+  // provider still holds working memory.
   // P1-review: short-circuit on count first — avoid O(n) tokenize when count already triggers
   const hcConfig = DEFAULT_HIERARCHICAL_CONTEXT;
   const countTrigger = relevant.length > hcConfig.coldMentionThreshold;
@@ -1397,7 +1537,9 @@ export async function assembleIncrementalContext(
   const tokenTrigger =
     !countTrigger &&
     relevant.reduce((sum, m) => sum + estimateTokens(m.content), 0) > hcConfig.coldMentionTokenThreshold;
-  const isColdMention = countTrigger || tokenTrigger;
+  const deltaSize: 'small' | 'large' = countTrigger || tokenTrigger ? 'large' : 'small';
+  const contextMode = options?.contextProjection?.contextMode;
+  const projectionOutput = projectSurfaceShape(options?.contextProjection, deltaSize);
 
   // F148 OQ-3 telemetry: warm/cold path decision
   log.info({
@@ -1405,13 +1547,14 @@ export async function assembleIncrementalContext(
     threadId,
     catId,
     messageCount: relevant.length,
-    isColdMention,
+    contextMode: contextMode ?? 'legacy',
+    deltaSize,
     trigger: countTrigger ? 'count' : tokenTrigger ? 'token' : 'none',
     thresholds: { count: hcConfig.coldMentionThreshold, token: hcConfig.coldMentionTokenThreshold },
   });
 
-  if (isColdMention) {
-    return assembleSmartWindowContext(
+  if (contextMode === 'cold' || deltaSize === 'large') {
+    const shaped = await assembleSmartWindowContext(
       deps,
       relevant,
       catId,
@@ -1430,7 +1573,10 @@ export async function assembleIncrementalContext(
       storedLedgerArtifacts,
       viewer,
       sameRouteBoundaryCap,
+      contextMode ?? 'cold',
+      deltaSize,
     );
+    return shaped;
   }
 
   // --- Warm path: existing behavior unchanged ---
@@ -1444,7 +1590,10 @@ export async function assembleIncrementalContext(
   if (capped.length === 0) {
     return cursor
       ? {
-          contextText: navigationHeader,
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
           boundaryId: clampToSameRouteBoundaryCap(
             canonicalDeferredBoundary(cursor, 'warm-empty-cursor'),
             sameRouteBoundaryCap,
@@ -1456,7 +1605,10 @@ export async function assembleIncrementalContext(
           navigationHeader,
         }
       : {
-          contextText: navigationHeader,
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
           projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage,
@@ -1523,7 +1675,10 @@ export async function assembleIncrementalContext(
       sameRouteBoundaryCap,
     );
     return {
-      contextText: navigationHeader,
+      ...projectionOutput,
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : navigationHeader,
       boundaryId: zeroBoundaryId,
       projectedMessageIds: [],
       exposedMessageIds: [],
@@ -1567,7 +1722,10 @@ export async function assembleIncrementalContext(
   if (finalCapped.length === 0) {
     return cursor
       ? {
-          contextText: navigationHeader,
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
           boundaryId: clampToSameRouteBoundaryCap(
             canonicalDeferredBoundary(cursor, 'warm-trimmed-empty-cursor'),
             sameRouteBoundaryCap,
@@ -1579,7 +1737,10 @@ export async function assembleIncrementalContext(
           navigationHeader,
         }
       : {
-          contextText: navigationHeader,
+          ...projectionOutput,
+          contextText: options?.contextProjection
+            ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+            : navigationHeader,
           projectedMessageIds: [],
           exposedMessageIds: [],
           includesCurrentUserMessage: false,
@@ -1601,7 +1762,13 @@ export async function assembleIncrementalContext(
     sameRouteBoundaryCap,
   );
   return {
-    contextText: `${navigationHeader}\n[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    ...projectionOutput,
+    ...projectSurfaceShape(options?.contextProjection, deltaSize, projectVisibleMessages(finalCapped)),
+    contextText: [
+      ...(options?.contextProjection ? [formatContextProjection(options.contextProjection, deltaSize)] : []),
+      navigationHeader,
+      `[对话历史增量 - 未发送过 ${finalCapped.length} 条]\n${finalLines.join('\n')}\n[/对话历史]`,
+    ].join('\n'),
     boundaryId,
     projectedMessageIds: finalCapped.map((message) => message.id),
     exposedMessageIds: exactBodyMessageIds(finalCapped, truncateLimit),
@@ -1635,8 +1802,13 @@ async function assembleSmartWindowContext(
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
   sameRouteBoundaryCap: SameRouteBoundaryCap,
+  contextMode: 'cold' | 'hot',
+  deltaSize: 'small' | 'large',
 ): Promise<IncrementalContextResult> {
   const truncateLimit = PROMPT_MESSAGE_SAFETY_CHAR_LIMIT;
+  const hasEpochProjection = options?.contextProjection !== undefined;
+  const isCanonicalCold = hasEpochProjection && contextMode === 'cold';
+  const usesLegacyRecall = !hasEpochProjection;
 
   // 1. Burst detection
   const { burst, omitted } = detectRecentBurst(relevant, hcConfig);
@@ -1658,7 +1830,7 @@ async function assembleSmartWindowContext(
   // 2. Thread title for tombstone + evidence (fail-open like recallEvidence)
   const threadStore = deps.invocationDeps.threadStore;
   let threadTitle = '';
-  if (threadStore) {
+  if ((isCanonicalCold || usesLegacyRecall) && threadStore) {
     try {
       threadTitle = (await Promise.resolve(threadStore.get(threadId)))?.title ?? '';
     } catch {
@@ -1694,7 +1866,8 @@ async function assembleSmartWindowContext(
     .filter((w) => w.length >= 3);
   const anchors = selectAnchors(sanitizedOmitted, compositeQueryTerms, hcConfig.maxAnchors);
   const omittedById = new Map(omitted.map((message) => [message.id, message]));
-  const promptAnchors = anchors.map((anchor) => {
+  const eligibleAnchors = isCanonicalCold ? [] : anchors;
+  const promptAnchors = eligibleAnchors.map((anchor) => {
     const original = omittedById.get(anchor.message.id);
     if (!original) return anchor;
     return {
@@ -1715,10 +1888,8 @@ async function assembleSmartWindowContext(
     sessionsIncorporated: number;
     decisions?: string[];
     decisionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
-    openQuestions?: string[];
-    openQuestionRefs?: import('../../stores/ports/ThreadStore.js').ThreadMemorySourceRef[];
   } | null = null;
-  if (threadStore) {
+  if (usesLegacyRecall && threadStore) {
     try {
       const mem = await Promise.resolve(threadStore.getThreadMemory(threadId));
       if (mem) {
@@ -1747,10 +1918,8 @@ async function assembleSmartWindowContext(
           sessionsIncorporated: mem.sessionsIncorporated,
           ...(Array.isArray(mem.decisions) && mem.decisions.length ? { decisions: mem.decisions } : {}),
           ...(Array.isArray(mem.decisionRefs) && mem.decisionRefs.length ? { decisionRefs: mem.decisionRefs } : {}),
-          ...(Array.isArray(mem.openQuestions) && mem.openQuestions.length ? { openQuestions: mem.openQuestions } : {}),
-          ...(Array.isArray(mem.openQuestionRefs) && mem.openQuestionRefs.length
-            ? { openQuestionRefs: mem.openQuestionRefs }
-            : {}),
+          // F296 AC-A2: mem.openQuestions stays in the store but never enters the
+          // model-facing projection — it has no lifecycle state and no invalidator.
         };
       }
     } catch {
@@ -1761,21 +1930,25 @@ async function assembleSmartWindowContext(
   // 3.8 Evidence recall (fail-open) — must run before coverage map so hints are populated
   const currentMsg = currentUserMessageId ? burst.find((m) => m.id === currentUserMessageId) : undefined;
   const nonSystemRecent = burst.filter((m) => m.catId === null && m.userId !== 'system').slice(-2);
-  const recalledEvidence = await recallEvidenceWithProvenance(
-    deps.evidenceStore,
-    threadTitle,
-    currentMsg?.content ?? '',
-    nonSystemRecent,
-    hcConfig,
-  );
-  const evidenceLines = recalledEvidence.evidence.map((item) => item.line);
+  const recalledEvidence = usesLegacyRecall
+    ? await recallEvidenceWithProvenance(
+        deps.evidenceStore,
+        threadTitle,
+        currentMsg?.content ?? '',
+        nonSystemRecent,
+        hcConfig,
+      )
+    : { query: '', candidates: [] };
+  // F296 AC-A1: recall is presented as a content-free pointer, never as
+  // candidate titles/snippets. The candidates themselves stay in the F263 trace.
+  const recallCandidates = recalledEvidence.candidates;
+  const recallPointerText =
+    recallCandidates.length > 0
+      ? formatRecallPointer({ label: 'Related evidence', candidateCount: recallCandidates.length })
+      : '';
 
-  // 3.9 Phase D: Build coverage map (AC-D2) — VG-1: only evidence recall titles (not tombstone search hints)
+  // 3.9 Phase D: Build coverage map (AC-D2)
   const participants = [...new Set(omitted.map((m) => m.catId ?? m.userId).filter(Boolean))] as string[];
-  const retrievalHints = evidenceLines.map((line) => {
-    const match = line.match(/^\[Evidence:\s*(.+?)\]/);
-    return match ? match[1] : line.slice(0, 80);
-  });
   const coverageMap = buildCoverageMap({
     omitted: {
       count: omitted.length,
@@ -1788,9 +1961,9 @@ async function assembleSmartWindowContext(
       from: burst[0]?.timestamp ?? 0,
       to: burst[burst.length - 1]?.timestamp ?? 0,
     },
-    anchorIds: anchors.map((a) => a.message.id),
-    threadMemory: threadMemoryMeta,
-    retrievalHints,
+    anchorIds: eligibleAnchors.map((a) => a.message.id),
+    threadMemory: usesLegacyRecall ? threadMemoryMeta : null,
+    recallPointer: { candidateCount: recallCandidates.length },
     searchSuggestions: tombstone?.retrievalHints ?? [],
     semanticSearchTerms: tombstone?.keywords.length ? [tombstone.keywords.slice(0, 2).join(' ')] : [],
   });
@@ -1850,10 +2023,34 @@ async function assembleSmartWindowContext(
     canonicalDeferredBoundary(lastRelevantMsg ? cursorFor(lastRelevantMsg) : undefined, 'cold-visible-tail'),
     sameRouteBoundaryCap,
   );
+  const directiveSource = selectDirectiveSources(rankedSources)[0];
+  const navigationPresentations = [
+    ...(baton
+      ? [
+          mapToPresentation({
+            subjectKey: `baton:${baton.fromSpeakerDisplay}:${baton.timestamp}`,
+            asOf: { kind: 'as_of' as const, value: baton.timestamp },
+            sourceTier: 'T0' as const,
+            requested: 'directive' as const,
+          }),
+        ]
+      : []),
+    directiveSource
+      ? projectRankedSource(directiveSource)
+      : mapToPresentation({
+          subjectKey: `thread-drill:${threadId}`,
+          asOf: { kind: 'as_of' as const, value: Date.now() },
+          sourceTier: 'T2' as const,
+          requested: 'pointer' as const,
+        }),
+  ];
 
   if (effectiveTokenBudget <= 0) {
     return {
-      contextText: '',
+      ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '',
       boundaryId,
       projectedMessageIds: [],
       exposedMessageIds: [],
@@ -1864,17 +2061,17 @@ async function assembleSmartWindowContext(
   }
 
   // Token trim with graduated degradation:
-  // evidence → coverageMap+threadMemory → anchors → tombstone → burst
+  // recall pointer → coverageMap+threadMemory → anchors → tombstone → burst
   let finalBurstLines = burstLines;
   let finalBurstMsgs = scrubbedBurst;
-  const finalEvidenceLines = [...evidenceLines];
-  const finalEvidenceCandidates = recalledEvidence.evidence.map((item) => item.candidate);
+  let finalRecallPointerText = recallPointerText;
+  let finalRecallCandidates = [...recallCandidates];
   const finalAnchorLines = [...anchorLines];
   const finalAnchors = [...promptAnchors];
-  const anchorScores = anchors.map((a) => a.score);
+  const anchorScores = eligibleAnchors.map((a) => a.score);
   let finalTombstoneText = tombstoneText;
-  let finalCoverageMapText = coverageMapText;
-  let finalThreadMemoryText = threadMemoryText;
+  let finalCoverageMapText = usesLegacyRecall ? coverageMapText : '';
+  let finalThreadMemoryText = usesLegacyRecall ? threadMemoryText : '';
   let tokenDegradation: string | undefined;
 
   const totalTokens = () =>
@@ -1884,7 +2081,7 @@ async function assembleSmartWindowContext(
         finalThreadMemoryText,
         finalTombstoneText,
         ...finalAnchorLines,
-        ...finalEvidenceLines,
+        finalRecallPointerText,
         ...finalBurstLines,
       ]
         .filter(Boolean)
@@ -1892,10 +2089,11 @@ async function assembleSmartWindowContext(
     );
 
   if (totalTokens() > effectiveTokenBudget) {
-    // Stage 1: Drop evidence lines from oldest
-    while (finalEvidenceLines.length > 0 && totalTokens() > effectiveTokenBudget) {
-      finalEvidenceLines.shift();
-      finalEvidenceCandidates.shift();
+    // Stage 1: Drop the recall pointer as one unit (it is content-free and
+    // cheapest to re-acquire via an explicit drill).
+    if (finalRecallPointerText) {
+      finalRecallPointerText = '';
+      finalRecallCandidates = [];
     }
 
     // Stage 1.3: Drop coverage map + thread memory together
@@ -1931,6 +2129,7 @@ async function assembleSmartWindowContext(
     // Stage 4: Hard cap — if envelope + 1 burst still exceeds budget, return empty
     if (totalTokens() > effectiveTokenBudget) {
       return {
+        ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
         contextText: '',
         boundaryId,
         projectedMessageIds: [],
@@ -1941,18 +2140,16 @@ async function assembleSmartWindowContext(
       };
     }
 
-    tokenDegradation = `⚠️ 增量上下文 token 预算截断: evidence ${evidenceLines.length} → ${finalEvidenceLines.length}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
+    tokenDegradation = `⚠️ 增量上下文 token 预算截断: recall pointer ${recallPointerText ? 1 : 0} → ${finalRecallPointerText ? 1 : 0}, anchors ${anchorLines.length} → ${finalAnchorLines.length}, burst ${burstLines.length} → ${finalBurstLines.length}`;
   }
 
   // 8. Assemble context packet
   const sections: string[] = [];
-  if (finalCoverageMapText) sections.push(finalCoverageMapText);
-  if (finalThreadMemoryText) sections.push(finalThreadMemoryText);
+  if (usesLegacyRecall && finalCoverageMapText) sections.push(finalCoverageMapText);
+  if (usesLegacyRecall && finalThreadMemoryText) sections.push(finalThreadMemoryText);
   if (finalTombstoneText) sections.push(finalTombstoneText);
   if (finalAnchorLines.length > 0) sections.push(...finalAnchorLines);
-  if (finalEvidenceLines.length > 0) {
-    sections.push(`[Related evidence]\n${finalEvidenceLines.join('\n')}\n[/Related evidence]`);
-  }
+  if (usesLegacyRecall && finalRecallPointerText) sections.push(finalRecallPointerText);
   sections.push(...finalBurstLines);
 
   const includesCurrentUserMessage = Boolean(
@@ -1961,13 +2158,18 @@ async function assembleSmartWindowContext(
 
   const contextText =
     sections.length > 0
-      ? `${navigationHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
-      : '';
+      ? `${options?.contextProjection ? `${formatContextProjection(options.contextProjection, deltaSize)}\n` : ''}${navigationHeader}\n[对话历史增量 - 智能窗口: ${omitted.length} 条已摘要, ${finalBurstMsgs.length} 条详细]\n${sections.join('\n')}\n[/对话历史]`
+      : options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '';
 
   // Final hard cap: envelope overhead may push total over budget
   if (contextText && estimateTokens(contextText) > effectiveTokenBudget) {
     return {
-      contextText: '',
+      ...projectSurfaceShape(options?.contextProjection, deltaSize, navigationPresentations),
+      contextText: options?.contextProjection
+        ? `${formatContextProjection(options.contextProjection, deltaSize)}\n${navigationHeader}`
+        : '',
       boundaryId,
       projectedMessageIds: [],
       exposedMessageIds: [],
@@ -1978,6 +2180,31 @@ async function assembleSmartWindowContext(
   }
 
   return {
+    ...projectSurfaceShape(options?.contextProjection, deltaSize, [
+      ...navigationPresentations,
+      ...(finalTombstoneText
+        ? [
+            mapToPresentation({
+              subjectKey: `omitted-range:${threadId}:${omitted[0]?.id ?? 'empty'}:${omitted.at(-1)?.id ?? 'empty'}`,
+              asOf: { kind: 'as_of' as const, value: omitted.at(-1)?.timestamp ?? 0 },
+              sourceTier: 'T0' as const,
+              requested: 'state' as const,
+            }),
+          ]
+        : []),
+      ...projectVisibleMessages(finalAnchors.map(({ message }) => message)),
+      ...projectVisibleMessages(finalBurstMsgs),
+      ...(usesLegacyRecall && finalRecallPointerText
+        ? [
+            mapToPresentation({
+              subjectKey: `evidence-drill:${threadId}`,
+              asOf: { kind: 'as_of' as const, value: Date.now() },
+              sourceTier: 'T2' as const,
+              requested: 'pointer' as const,
+            }),
+          ]
+        : []),
+    ]),
     contextText,
     boundaryId,
     projectedMessageIds: [
@@ -1992,28 +2219,30 @@ async function assembleSmartWindowContext(
     includesCurrentUserMessage,
     currentMessageFilteredOut,
     degradation: tokenDegradation,
-    coverageMap,
+    ...(isCanonicalCold || usesLegacyRecall ? { coverageMap } : {}),
     briefingContext: {
-      ...(threadMemorySummary ? { threadMemorySummary } : {}),
+      ...(usesLegacyRecall && threadMemorySummary ? { threadMemorySummary } : {}),
       ...(finalAnchorLines.length > 0 ? { anchorSummaries: finalAnchorLines } : {}),
       ...(baton ? { baton } : {}),
       ...(activeTasks.length > 0 ? { activeTasks } : {}),
       ...(() => {
+        if (hasEpochProjection) return {};
         const merged = mergeLedger(storedFileArtifacts, recentArtifacts);
         return merged.length > 0 ? { recentArtifacts: merged } : {};
       })(),
       ...(rankedSources.length > 0 ? { rankedSources } : {}),
     },
     navigationHeader,
-    ...(finalEvidenceCandidates.length > 0
+    ...(usesLegacyRecall && finalRecallCandidates.length > 0
       ? {
           pushRecallPresentations: [
             {
               surface: 'cold_context' as const,
+              presentationKind: 'pointer' as const,
               query: recalledEvidence.query,
               scope: 'docs',
               timestamp: Date.now(),
-              candidates: finalEvidenceCandidates,
+              candidates: finalRecallCandidates,
             },
           ],
         }

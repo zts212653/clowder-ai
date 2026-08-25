@@ -50,7 +50,7 @@ describe('MessageActions position', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('floats user-message toolbar above the bubble, clearing the avatar', async () => {
+  it('keeps the user fallback dock inside its own row without vertical reservation', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
@@ -72,11 +72,16 @@ describe('MessageActions position', () => {
 
     const toolbar = container.querySelector('div.absolute.right-10');
     expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('-top-1');
-    expect(toolbar?.className).toContain('-translate-y-full');
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).toContain('sm:right-auto');
+    expect(toolbar?.className).toContain('sm:left-10');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    const host = container.querySelector('[data-context-quote-source="message"]');
+    expect(host?.className).not.toContain('hover:pt-8');
+    expect(host?.className).not.toContain('focus-within:pt-8');
   });
 
-  it('floats assistant toolbar above the bubble, aligned left past avatar', async () => {
+  it('keeps the assistant fallback dock beside the author edge without vertical reservation', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
@@ -99,7 +104,13 @@ describe('MessageActions position', () => {
 
     const toolbar = container.querySelector('div.absolute.left-10');
     expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('-top-1');
-    expect(toolbar?.className).toContain('-translate-y-full');
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).not.toContain('sm:left-auto');
+    expect(toolbar?.className).not.toContain('sm:right-10');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    const host = container.querySelector('[data-context-quote-source="message"]');
+    expect(host?.className).not.toContain('hover:pt-8');
+    expect(host?.className).not.toContain('focus-within:pt-8');
+    expect(host?.className).not.toContain('sm:hover:pt-0');
   });
 });

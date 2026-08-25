@@ -5,6 +5,7 @@
  */
 
 import {
+  CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH,
   type ContextAttachment,
   ContextAttachmentsSchema,
   catIdSchema,
@@ -13,6 +14,7 @@ import {
   MESSAGE_BUNDLE_MAX_ITEMS,
   MessageBundleSelectionItemSchema,
   type MessageContent,
+  messageBundleItemIdentity,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -22,6 +24,7 @@ const MESSAGE_BUNDLE_MAX_TARGET_CATS = 10;
 export const messageBundleForwardSchema = z
   .object({
     sourceThreadId: boundedBundleId,
+    note: z.string().trim().min(1).max(CONTEXT_ATTACHMENT_COMMENT_MAX_LENGTH).optional(),
     items: z.array(MessageBundleSelectionItemSchema).min(1).max(MESSAGE_BUNDLE_MAX_ITEMS),
     // Shape validation lives here; AgentRouter is the runtime source of truth for
     // whether every requested cat exists and is currently routable.
@@ -29,16 +32,17 @@ export const messageBundleForwardSchema = z
   })
   .strict()
   .superRefine((bundle, ctx) => {
-    const seenMessageIds = new Set<string>();
+    const seenItems = new Set<string>();
     bundle.items.forEach((item, index) => {
-      if (seenMessageIds.has(item.messageId)) {
+      const identity = messageBundleItemIdentity(item);
+      if (seenItems.has(identity)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['items', index, 'messageId'],
-          message: 'Message Bundle items must have unique messageId values',
+          path: ['items', index],
+          message: 'Message Bundle items must have unique identities',
         });
       }
-      seenMessageIds.add(item.messageId);
+      seenItems.add(identity);
     });
 
     const seenCats = new Set<string>();

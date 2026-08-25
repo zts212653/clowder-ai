@@ -99,6 +99,22 @@ describe('InMemoryTurnExecutionStore', () => {
     );
   });
 
+  test('binds factory-owned prompt coverage exactly once after child admission', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    const input = runningInput();
+    await store.createRunning(input);
+
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-1', 'msg-context'])).outcome, 'bound');
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-context', 'msg-1'])).outcome, 'replayed');
+    assert.equal((await store.bindCoveredMessageIds('child-1', ['msg-1', 'msg-other'])).outcome, 'conflict');
+    assert.equal((await store.bindCoveredMessageIds('missing', ['msg-1'])).outcome, 'not_found');
+    assert.deepEqual((await store.get('child-1')).causal, {
+      triggerMessageId: 'msg-1',
+      coveredMessageIds: ['msg-1', 'msg-context'],
+    });
+    assert.equal((await store.createRunning(input)).outcome, 'replayed');
+  });
+
   test('success-vs-cancel race produces one immutable terminal winner', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput());
@@ -172,5 +188,37 @@ describe('InMemoryTurnExecutionStore', () => {
     assert.throws(() => store.transitionTerminal('child-1', { status: 'failed', endedAt: 200 }), /terminalReason/);
     assert.throws(() => store.transitionTerminal('child-1', { status: 'succeeded', endedAt: 99 }), /endedAt/);
     assert.equal(store.transitionTerminal('missing', { status: 'succeeded', endedAt: 200 }).outcome, 'not_found');
+  });
+
+  test('F297 P1-2: listRunningByUser scopes to the owner and excludes terminal children', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput({ invocationId: 'mine-1', userId: 'alice', startedAt: 100 }));
+    await store.createRunning(
+      runningInput({ invocationId: 'mine-2', userId: 'alice', threadId: 'thread-2', startedAt: 200 }),
+    );
+    await store.createRunning(runningInput({ invocationId: 'theirs', userId: 'bob', startedAt: 150 }));
+    await store.createRunning(runningInput({ invocationId: 'mine-done', userId: 'alice', startedAt: 50 }));
+    await store.transitionTerminal('mine-done', { status: 'succeeded', endedAt: 300 });
+
+    const running = await store.listRunningByUser('alice');
+    assert.deepEqual(
+      running.map((record) => record.invocationId),
+      ['mine-1', 'mine-2'],
+      'user scoping is the store\u2019s own responsibility, not a caller-side re-filter',
+    );
+    assert.deepEqual(await store.listRunningByUser('carol'), []);
+  });
+
+  test('F297 P1-2: listRunningByUser reaches a child whose parent was never a running record', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput({ invocationId: 'orphan', parentInvocationId: 'parent-absent' }));
+
+    assert.deepEqual(await store.listByParent('parent-absent'), await store.listByParent('parent-absent'));
+    const running = await store.listRunningByUser('user-1');
+    assert.deepEqual(
+      running.map((record) => record.invocationId),
+      ['orphan'],
+      'the enumerator must not depend on parent-side reachability',
+    );
   });
 });

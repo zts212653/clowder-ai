@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -40,6 +41,37 @@ describe('check-skill-reference-integrity', () => {
     const runtimeSkillFile = join(runtimeSkills, 'sample', 'SKILL.md');
     const runtimeTarget = resolve(dirname(runtimeSkillFile), `../${SHARED_SKILL_REFS_ALIAS}/guide.md`);
     assert.equal(realpathSync(runtimeTarget), realpathSync(join(skillsRoot, 'refs', 'guide.md')));
+  });
+
+  it('mounts the shared coordinate into every opt-in HOME provider', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'skill-home-ref-integrity-'));
+    const sharedRefs = join(repoRoot, 'shared-refs');
+    const fakeHome = join(repoRoot, 'home');
+    mkdirSync(sharedRefs, { recursive: true });
+    writeFileSync(join(sharedRefs, 'guide.md'), '# shared guide\n');
+
+    const helper = resolve('scripts/lib/sync-skills-helpers.sh');
+    const script = [
+      'source "$1"',
+      'created=0; skipped=0; errors=0; DRY_RUN=false',
+      `SHARED_REFS_ALIAS="${SHARED_SKILL_REFS_ALIAS}"`,
+      'RED=""; NC=""',
+      'log_action() { :; }',
+      'for provider in claude codex gemini kimi; do',
+      '  sync_shared_refs "$2/.$provider/skills" "$3"',
+      'done',
+      '[ "$errors" -eq 0 ]',
+    ].join('\n');
+    const result = spawnSync('bash', ['-c', script, 'bash', helper, fakeHome, sharedRefs], {
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const mountedGuide = join(fakeHome, `.${provider}`, 'skills', SHARED_SKILL_REFS_ALIAS, 'guide.md');
+      assert.equal(realpathSync(mountedGuide), realpathSync(join(sharedRefs, 'guide.md')));
+      assert.equal(readFileSync(mountedGuide, 'utf8'), '# shared guide\n');
+    }
   });
 
   it('rejects a stable coordinate whose target file is missing', () => {

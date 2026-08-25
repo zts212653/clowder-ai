@@ -82,3 +82,32 @@ describe('messages ContextAttachment request contract', () => {
     assert.deepEqual(buildMessageContentBlocks('', [attachment]), [{ type: 'context_attachment', attachment }]);
   });
 });
+
+describe('F294 Message Bundle item identity validation', () => {
+  it('accepts distinct Rich Blocks from one projected message but rejects an exact duplicate', () => {
+    const first = {
+      kind: 'rich_block',
+      messageId: 'source-message',
+      sourceMessageIds: ['source-message'],
+      blockId: 'block-a',
+    };
+    const request = {
+      content: '',
+      threadId: 'target-thread',
+      messageBundle: {
+        sourceThreadId: 'source-thread',
+        targetCats: ['opus'],
+        items: [first, { ...first, blockId: 'block-b' }],
+      },
+    };
+
+    assert.equal(sendMessageSchema.safeParse(request).success, true);
+    assert.equal(
+      sendMessageSchema.safeParse({
+        ...request,
+        messageBundle: { ...request.messageBundle, items: [first, first] },
+      }).success,
+      false,
+    );
+  });
+});

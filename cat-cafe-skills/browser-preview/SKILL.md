@@ -27,7 +27,9 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 ## 工作流
 
 ### 基础流程（端口发现 → 预览）
-1. **在 Terminal 启动 dev server**（`pnpm dev` / `npm start` / `vite` 等）
+1. **启动 dev server**：交互 Terminal 可直接前台跑；要把页面交给operator跨回合查看时，猫的 invocation/`-p` 会话必须用仓库的 managed launcher：
+   `pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]`
+   macOS 上它会把目标直接注册为一次性 user LaunchAgent；普通 detached child、`nohup`、`setsid` 或 PTY 都不算独立托管。
 2. **Hub 自动检测端口** → 弹出 toast 提示"检测到 localhost:xxxx 启动"
 3. **点击 Open Preview** → 自动打开 browser panel 并加载页面
 4. **也可以手动**：切到 workspace 的 Browser tab，输入 `localhost:port` 按 Go
@@ -43,6 +45,12 @@ operator说过："别手动让我输入，你最好打开浏览器，把页面�
 
 ```
 Step 1: 确认目标服务器在跑
+  若由猫启动，先用 managed launcher 启动/查状态：
+  pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]
+  pnpm preview:process status --port PORT --cwd /absolute/project/path --json
+  → 只有 status=running 才进入下步；unavailable/unmanaged/stopped 必须如实报告
+  → macOS 跨回合展示还必须有 origin=launchd；origin=detached 只证明 launcher 已退出，
+    没证明脱离 invocation supervisor，不得承诺“回复后还会活着”
   curl -s -o /dev/null -w "%{http_code}" http://localhost:PORT
   → 200/301/304 = 可以继续
   → 000/connection refused = 服务器没起来，先启动再说
@@ -55,9 +63,16 @@ Step 2: 调用 typed MCP
     threadId: "当前 threadId（有就传）"
   })
 
-Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
-  → 如果没反应，检查 Step 1 是否真的返回了 200
+Step 3: 读返回的 deliveryStatus，再决定怎么报告
+  → applied     = Hub 前端真实接收并应用了（面板已打开）——只有这时才能说"已打开"
+  → queued      = 目标 thread 不在前台，已写入其 ThreadState；切到该 thread 自动揭示
+  → blocked     = presentation lock 等阻止了展示（看 deliveryReason）
+  → unconfirmed = 没有任何 Hub 客户端确认送达（没连接 / 无匹配 client）——必须如实说"未能确认打开"
 ```
+
+> **admission ≠ visible**：`allowed: true` 只证明服务端受理了请求。报告"已打开"之前必须看到 `deliveryStatus: "applied"`。
+
+> **running ≠ durable**：同一 invocation 内的 `status: "running"` 只证明当前可达。macOS 只有 `origin: "launchd"` 才证明已经交给用户会话级服务管理；“确实跨回合存活”必须由后续 invocation 的 status/HTTP 探针或operator现场画面确认。
 
 #### 工具参数
 
@@ -65,7 +80,8 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 |------|------|------|
 | `port` | **是** | dev server 端口号 |
 | `path` | 否 | 页面路径，默认 `/` |
-| `worktreeId` | **建议传** | 传了保证精确送达；不传也能工作（走 global broadcast），但多 tab 场景可能误触其他 session |
+| `threadId` | invocation 免传 / agent-key **必传** | invocation 调用由服务端从 invocation 记录推导；持久 agent-key 必须显式传，缺失直接报错。传了保证精确送达到该 thread |
+| `worktreeId` | 建议传 | 精确到 worktree；不传走 user-scope 送达，同用户其他 tab 会按 thread 归属 queue |
 
 > **怎么获取 worktreeId**：就是你当前工作的 worktree 目录名。例如你在 `cat-cafe-f120-fix` 目录里工作，worktreeId 就是 `cat-cafe-f120-fix`。如果你在主仓库 `cat-cafe` 里，就不需要传。
 
@@ -73,8 +89,9 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 
 | 现象 | 原因 | 修法 |
 |------|------|------|
-| 右侧无反应 | 目标服务器没在跑 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再看工具返回错误 |
+| 右侧无反应 | 目标服务器没在跑 / 未认证或 thread 归属不对 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再读工具返回的 `deliveryStatus` / 错误（401=未认证，400/403=thread scope） |
 | `{"error":"Proxy error","message":"socket hang up"}` | 目标服务器已退出 | 重启服务器，再刷新 Browser panel |
+| 猫回复后页面立刻 stopped | 服务仍在 invocation 的 PTY/进程监督域；`detached`/PPID=1 也可能被 supervisor 按 coalition 回收 | macOS 用 `pnpm preview:process start ...` 并确认 `status=running, origin=launchd`；结束展示时用同一 cwd/port 执行 `stop` |
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
 
@@ -101,8 +118,9 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 | **审计** | 每次 open/close/navigate 都有审计日志 |
 | **Console 面板** | bridge script 注入到 iframe，捕获 console.log/warn/error，在面板展示 |
 | **一键截图** | SVG foreignObject + canvas 截图，上传后端，toast 展示 |
-| **多 Tab** | 同时预览多个 localhost 页面，Tab 切换独立状态 |
-| **Socket room 隔离** | preview 事件按 worktree room 定向发送，不会全局广播 |
+| **送达契约** | 认证 + exact-thread：anonymous → 401；invocation 推导 thread；agent-key 必传 threadId 且校验归属。事件只发射一次到 caller 的 user room（tenant scope，无 preview:global/worktree 广播），回执同房间收集 |
+| **多 Tab** | 同时预览多个 localhost 页面，Tab 切换独立状态；同一事件多 tab 各自回执，服务端聚合取最优（applied > blocked > queued，skipped 不参评） |
+| **进程来源** | `preview:process status --json` 返回 `origin`。macOS 的 `launchd` 是跨 invocation 托管；其他平台的 `detached` 只保证 launcher 退出后继续运行，宿主 supervisor 是否回收仍需外部 service manager 证明 |
 
 ## 什么时候主动用
 
@@ -110,6 +128,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - 调样式/布局 → 改代码后在 browser panel 里实时查看
 - operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
+- invocation/`-p` 中启动的 dev server → 必须走 `preview:process`，并在报告中同时给出 status 与 origin；不能把 `running/detached` 写成跨回合已存活
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看
 - 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `../.cat-cafe-shared-refs/evidence-output-contract.md`）
@@ -117,6 +136,8 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 ## 不要做的事
 
 - **不要跳过 Step 1（验证服务器）直接调 `cat_cafe_preview_open`** — 服务器没跑 = proxy error
+- **不要用普通后台 shell/PTY、`nohup`、`setsid` 或普通 detached child 冒充长期托管** — PPID=1 仍可能被 invocation supervisor 按进程族回收
+- **不要用 `launchctl submit` 包裹会立即退出的 launcher** — inferred keepalive 会反复重启 launcher 形成自旋；macOS 直接用 `preview:process` 生成的一次性 LaunchAgent
 - **不要用 Playwright / Chrome MCP / `open` 命令打开系统浏览器** — F120 是 Hub 内嵌预览，走 iframe，不走系统浏览器
 - **不要手写 `/api/preview/auto-open` 的 `curl`** — 主路径是 `cat_cafe_preview_open`
 - 不要手动去构造 gateway URL（让 Hub 前端处理）

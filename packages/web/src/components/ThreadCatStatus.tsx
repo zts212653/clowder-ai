@@ -1,7 +1,7 @@
 'use client';
 
-import type { ThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import type { CatStatusType } from '@/stores/chat-types';
+import type { SidebarPresence } from '@/stores/sidebarProjectionStore';
 import { PawIcon } from './icons/PawIcon';
 
 /**
@@ -9,37 +9,16 @@ import { PawIcon } from './icons/PawIcon';
  * Shows ᓚᘏᗢ with CSS animation + color based on aggregate thread state.
  */
 
-type SidebarLiveness = Pick<ThreadLiveness, 'hasActive' | 'catStatuses' | 'catStatusDetails'>;
-
-function aggregateStatus(liveness: SidebarLiveness): 'idle' | 'working' | 'done' | 'error' {
-  const statuses = Object.values(liveness.catStatuses);
-  if (statuses.some((s) => s === 'error')) return 'error';
-  if (statuses.some((s) => s === 'streaming' || s === 'pending' || s === 'spawning') || liveness.hasActive) {
-    return 'working';
-  }
-  if (statuses.some((s) => s === 'done')) return 'done';
-  return 'idle';
-}
-
-function getDaemonDetailTooltip(liveness: SidebarLiveness, status: string): string {
-  if (status !== 'working') return status;
-  const workingCats = Object.entries(liveness.catStatuses)
-    .filter(([, s]) => s === 'streaming' || s === 'pending' || s === 'spawning')
-    .map(([catId]) => catId);
-  const details = workingCats.map((catId) => liveness.catStatusDetails?.[catId]).filter(Boolean);
-  return details.length > 0 ? (details[0] as string) : status;
-}
-
 export function ThreadCatStatus({
-  liveness,
+  presence,
   unreadCount,
   hasUserMention,
 }: {
-  liveness: SidebarLiveness;
+  presence: SidebarPresence;
   unreadCount: number;
   hasUserMention?: boolean;
 }) {
-  const status = aggregateStatus(liveness);
+  const status = presence.status;
 
   if (status === 'idle' && unreadCount === 0 && !hasUserMention) return null;
 
@@ -50,7 +29,7 @@ export function ThreadCatStatus({
     error: 'text-conn-red-text animate-cat-shake',
   };
 
-  const tooltip = getDaemonDetailTooltip(liveness, status);
+  const tooltip = presence.cats?.length ? `${status}: ${presence.cats.join(', ')}` : status;
 
   return (
     <span className="inline-flex items-center gap-0.5 flex-shrink-0">

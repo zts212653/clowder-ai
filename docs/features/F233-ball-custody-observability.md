@@ -1,6 +1,6 @@
 ---
 feature_ids: [F233]
-related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F073, F280]
+related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F073, F280, F304]
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
@@ -10,7 +10,7 @@ user_journey_exempt: harness-internal observability — ball custody events/proj
 
 # F233: Ball Custody Observability — 球权保管链可观测（值班简报 + 轨迹下钻）
 
-> **Status**: in-progress（Phase A ✅ + Phase B ✅ 2026-06-18 收口 · Phase C **轨迹全链 ✅** 2026-06-21：C1a ✅ + C2a ✅ + **C2b/C2c/C3 ✅** merged · C1b C1c pending — 安乐死 MCP/UI surface 留待下个迭代）| **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1
+> **Status**: **failed-close (partial-value-preserved) 2026-08-17** — Phase A ✅ 简报 sunset（65 天 operator 无消费）+ Phase B ✅ 球权事件账本**保留**（移交新 Self-Sensing feat 作 canonical 事实源）· Phase C **方向标记失败 2026-08-17**：C1a ✅ + C2a/C2b/C2c/C3 AC ✅ 但 operator 从未消费，属 **"无账本对象拼轨迹"** 结构性失败（详 LL-099）；C1b/C1c 撤销；代码 rm 决策交新 invocation trajectory feat（注意 F252 已依赖 `TrajectoryPanel`，不能直接 rm）· 传承给两个新 feat："猫的视野快照" 处交汇 | **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1（close 后进入 archived 状态，不再驱动开发）
 >
 > **Phase B 收口**（2026-06-18）：PR #2364（B1 骨架）+ #2374（cross-post alias）+ #2380（PR4 ProbeScheduler/WakeSender + 简报切源，AC-B1/B2/B3 端到端）+ #2378（callback-routing state contract，consumer×cell matrix 终止 LL-072 saga）全 merge。13/13 event wired + 状态机 INV-10 全覆盖。opus-47 整体收口愿景守护 PASS。**Follow-up status**（2026-06-18 同日）：LL-082 hard-layer dirty-diff ledger ✅ merged 经 cloud R1→R5 + 5 真 P 修复（PR [#2392](https://github.com/zts212653/clowder-ai/pull/2392), merge commit `58b6cdbe3`，opus-48 → opus-47 handoff，merge-gate dirty-diff ledger 硬层落地 + sentinel never-silent-clean）。B1 redis 测试并发 race ✅ merged（PR [#2390](https://github.com/zts212653/clowder-ai/pull/2390), merge commit `447cc20b5`，cloud-clean + `pnpm gate` on latest main）。
 Architecture cell: `ball-custody`
@@ -166,6 +166,47 @@ operator experience（2026-06-12，球权流转图 thread）：
 | KD-4 | 只读观测先行，不做 workflow engine；给数据不给结论 | F073 告示牌原则 + KD-8 家规；自动转派/升级留给人和猫的判断力 | 2026-06-12 |
 | KD-5 | blocked 必须声明 on-resolve 二态（completes / bounces-back-to-owner） | operator 2026-06-12 原话区分两种等待语义；睡美人球（30 天 Repo Inbox task）为实证 | 2026-06-12 |
 | KD-6 | **卡面交互诚实原则**：凡出现在简报卡上的控件必须当期真实可用，禁止占位按钮。Phase A 交互面 = 条目锚点跳转 + on-demand 呼出；动作类控件（催醒/转派/补传提醒）随 Phase B 事件流上线。按钮语义边界：催醒 = 真实唤醒投递；转派 = operator 显式仲裁改派 + 双方通知 + 入事件流；补传 = 提醒原猫自己补 @，**系统不代猫传球**（球权是言语行为、只有第一人称，系统催促但不伪造） | Design Gate operator问"卡都是可交互式的吗"逼出；F225 "按钮点不动"教训——点不动的控件比没有控件伤害更大 | 2026-06-12 |
+
+## Close Summary (2026-08-17)
+
+**Status transition**: `in-progress` → **`failed-close (partial-value-preserved)`**
+
+**operator 签字原话**（`[thread-id]`, message `0001786950943499`, 2026-08-17 07:15 UTC）：
+
+> "f233 我觉得可以关闭了 我同意你的 failed-close 切割"
+
+### 为什么是 failed-close 而不是 complete
+
+Phase A + Phase B + Phase C 各 AC 大部分已 ✅（甚至 Phase C 通过 11+13 轮 cloud + 本地 review、有 F188 提包球 regression fixture 兜底），但**产品旅程失败**：
+
+- operator 2026-08-16 原话："我感觉我们没做好的最重要的是那层可展示层，我们的可观测性丢到了 config 页面，无人发现和注意"
+- operator 2026-08-17 原话："我们之前其实有个轨迹，但是做的非常失败……感觉需要 failed-close 一下"
+
+### 保留 vs 撤退 vs 移交（切割方案）
+
+| Phase | 处置 | 理由 |
+|-------|------|------|
+| **Phase A：值班简报 (duty briefing)** | 🟡 **产品面 sunset，backend 代码保留** | 简报 2026-06-13 上线至 2026-08-17（65 天），operator 记不得 = 触发 doc line 141 sunset signal（"30 天内 operator 介入次数 = 0 → sunset 或重构形态"）。数据源（Phase B custody event log）保留；`duty-briefing` route + cron 短期保留观察，未来由新 Self-Sensing feat 决定是否重塑为 typed-projection 消费面。 |
+| **Phase B：球权事件账本**（`BallCustodyEventLog` / `Projector` / `ProjectionStore` / state-machine / 13 event kinds） | ✅ **代码全保 + 移交新 feat 作 canonical 事实源** | Phase B 是本 feat 唯一有**一手 canonical 账本**的对象——即将成为新 Self-Sensing feat 的核心事实源之一（custody snapshot 的一手账本）。INV-2 rebuild-safe / INV-10 8×16 全枚举 / Lua 幂等 append / 13 event kinds contract 全部保留。 |
+| **Phase C：feat trajectory 全链**（`TrajectoryPanel` + `FeatTrajectoryProjector` + collectors + backfill 脚本 + `feat-trajectory` routes + `feat-trajectory:*` Redis keys） | 🔴 **方向失败；F304 退役 production cron，历史投影冻结可读** | 拼装 feat 轨迹是**给没有 canonical 账本的对象拼轨迹**——结构性失败（详见 [LL-099](../public-lessons.md#ll-099-给没有-canonical-账本的对象拼轨迹是结构性失败)）。F304 删除周期 TaskSpec 与 startup wiring，停止继续制造投影和 `gh` 子进程负载；`TrajectoryPanel`、store/routes、`/story/feat:*` 与手动 backfill 兼容实现继续保留，避免破坏 F252。 |
+| **Phase C pending：C1b/C1c（安乐死 MCP/UI surface）** | ❌ **撤销（不再实现）** | 依赖的 Phase C 方向已标记失败；C1a 安乐死事件 schema（`BallEuthanasiaKind` + 3 builders + state machine +3 rules）保留在 Phase B 账本一侧不做 UI 出口。AC-C1 撤销。 |
+
+### Phase B 移交清单（给新 Self-Sensing feat）
+
+- **代码**：`packages/api/src/domains/cats/services/ball-custody/`（EventLog / Projector / ProjectionStore / state-machine）
+- **types**：`packages/shared/src/types/ball-custody.ts`（含 INV-10 8×16 grid）
+- **Redis keys**：`ball-custody:*`
+- **13 event kinds**：8 ball-shaped（handed / held / hold_expired / handed_cvo / wake_sent / void_pass / idle_long / …）+ 3 euthanasia（frozen / degraded / abandoned）+ 2 lifecycle（task / invocation）
+- **不变量**：INV-2 rebuild-safe / INV-10 全 state×event enumeration / Lua 幂等 append / per-subjectKey chain 串行化
+- **消费契约**：新 feat 按 typed-reference contract 消费（**不复制 payload、不第二真相**——LL-099 家规）
+
+### 传承到新 feat（Fable 5 charter 骨架 in-flight）
+
+operator 2026-08-17 定位：**"新结构：两个 feat，一条愿景，在'猫的视野快照'处交汇"**：
+
+**F 号最终由 Fable 5 charter 骨架时定**（她已声明"号段惯例我们自查"）；close report 只提示：现役最高 F297，两候选自然落 F298/F299。
+
+**新 feat 第一条家规（LL-099 派生）**：sense/trajectory 只做 canonical 账本的**投影和送达**，不做第二真相、不拼接推断。
 
 ## Review Gate
 

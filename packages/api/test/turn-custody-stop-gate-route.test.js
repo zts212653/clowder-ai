@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
 const { TurnCustodyAdoptionRegistry, turnCustodyAdoptionRegistry } = await import(
@@ -225,7 +226,8 @@ async function runRoute(
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     catRegistry.reset();
-    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig()))) {
+    const canonicalTemplatePath = fileURLToPath(new URL('../../../cat-template.json', import.meta.url));
+    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(canonicalTemplatePath)))) {
       catRegistry.register(id, config);
     }
     beforeRoute?.();
@@ -1255,6 +1257,79 @@ describe('F167 Phase T route custody stop gate', () => {
       projectionState: 'covered_empty',
       wake: 'coordination_terminal',
     });
+  });
+
+  test('typed local-review terminal handback retains the exact structured dispatch obligation', async () => {
+    const threadId = 'thread-typed-review-handback';
+    const triggerMessage = {
+      id: 'msg-typed-review-handback',
+      threadId,
+      catId: 'opus',
+      content: 'Exact-HEAD review approved.',
+      extra: {
+        crossPost: {
+          sourceThreadId: 'thread-source',
+          senderCatId: 'opus',
+          effectClass: 'coordinate',
+          coordination: { id: 'coord-review-1', phase: 'terminal', hop: 2 },
+        },
+        localReviewVerdict: { verdict: 'approved', clientMessageId: 'typed-review-handback-1' },
+      },
+    };
+    const projection = createProjectionService({
+      state: 'covered_active',
+      closeDecisions: [
+        {
+          shouldBlock: false,
+          transitionObserved: true,
+          structuredTransitionKind: 'dispatch_dispositioned',
+          dispatchDisposition: 'completed',
+          dispatchDispositionEventId: 'dispatch-disposition:codex-inv-1:msg-typed-review-handback',
+          dispatchDispositionAt: 2_000,
+        },
+      ],
+    });
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'tool_use',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'complete-review-handback',
+          toolInput: { disposition: 'completed' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'mcp:cat-cafe/complete_a2a_dispatch',
+          toolUseId: 'complete-review-handback',
+          toolResultStatus: 'ok',
+          content: '{"outcome":"applied","disposition":"completed"}',
+        },
+      ],
+    ]);
+
+    const { yielded } = await runRoute(service, threadId, {
+      projectionService: projection,
+      triggerMessage,
+      routeOptions: {
+        currentUserMessageId: triggerMessage.id,
+        turnCustodyWake: {
+          kind: 'structured',
+          protocol: 'dispatch',
+          subjectKey: `ball:thread:${threadId}`,
+          holderCatId: 'codex',
+          handoff: {
+            sourceEventId: 'message:msg-typed-review-handback:to:codex',
+            messageId: triggerMessage.id,
+            fromCatId: 'opus',
+          },
+        },
+      },
+    });
+
+    assert.equal(service.calls.length, 1);
+    assert.equal(projection.opens[0].kind, 'structured');
+    assert.equal(projection.opens[0].protocol, 'dispatch');
+    assert.equal(yielded.find((message) => message.type === 'done')?.turnCustodyTerminalWitness, undefined);
   });
 
   test('ordinary and stop-gate remedial invocations retain separate durable child truth', async () => {

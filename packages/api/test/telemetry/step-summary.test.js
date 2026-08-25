@@ -482,22 +482,35 @@ test('Full coverage: agent_loop_partial is false when all invocations have the a
 // ── Frontend wiring (AC-I1, AC-I4) ─────────────────────────────────
 
 test('F153 Phase I: HubTraceTree renders StepSummaryPanel with route scope', () => {
-  const src = readFileSync(resolve(__dirname, '../../../web/src/components/HubTraceTree.tsx'), 'utf8');
-  assert.ok(src.includes('StepSummaryPanel'), 'Should define StepSummaryPanel component');
-  assert.ok(src.includes('/api/telemetry/step-summary'), 'Should fetch step-summary endpoint');
-  assert.ok(src.includes("n === null ? '—'"), "Null sub-counts must render '—' (non-degradation, AC-I4)");
-  assert.ok(src.includes('Restored (history)'), 'Should badge restored traces');
-  assert.ok(src.includes('selectedRouteSpanId'), 'Should derive selected route span id from the trace tree selection');
+  const treeSrc = readFileSync(resolve(__dirname, '../../../web/src/components/HubTraceTree.tsx'), 'utf8');
+  const panelSrc = readFileSync(resolve(__dirname, '../../../web/src/components/StepSummaryPanel.tsx'), 'utf8');
   assert.ok(
-    src.includes('routeSpanId={selectedRouteSpanId}'),
+    treeSrc.includes("import { StepSummaryPanel } from './StepSummaryPanel'"),
+    'HubTraceTree should use the canonical StepSummaryPanel component',
+  );
+  assert.ok(panelSrc.includes('/api/telemetry/step-summary'), 'Should fetch step-summary endpoint');
+  assert.ok(panelSrc.includes("count === null ? '—'"), "Null sub-counts must render '—' (non-degradation, AC-I4)");
+  assert.ok(panelSrc.includes('Restored (history)'), 'Should badge restored traces');
+  assert.ok(
+    treeSrc.includes('selectedRouteSpanId'),
+    'Should derive selected route span id from the trace tree selection',
+  );
+  assert.ok(
+    treeSrc.includes('routeSpanId={selectedRouteSpanId}'),
     'Should pass the selected route span id into StepSummaryPanel, not only define the prop',
   );
   assert.ok(
-    src.includes("selectedSpanData?.name === 'cat_cafe.route'"),
+    treeSrc.includes("selectedSpanData?.name === 'cat_cafe.route'"),
     'Only selected cat_cafe.route spans should scope the Step Summary panel',
   );
-  assert.ok(src.includes('setLoading(true);'), 'Route/trace changes should reset loading before refetching');
-  assert.ok(src.includes('setData(null);'), 'Route/trace changes should clear stale summary data before refetching');
-  assert.ok(src.includes('if (!res.ok)'), 'Non-OK step-summary responses must not keep stale metrics rendered');
-  assert.ok(src.includes('agent_loop_partial'), 'Should handle partial coverage indicator');
+  assert.ok(panelSrc.includes('setLoading(true);'), 'Route/trace changes should reset loading before refetching');
+  assert.ok(
+    panelSrc.includes('setData(null);'),
+    'Route/trace changes should clear stale summary data before refetching',
+  );
+  assert.ok(
+    panelSrc.includes('if (!response.ok)'),
+    'Non-OK step-summary responses must not keep stale metrics rendered',
+  );
+  assert.ok(panelSrc.includes('agent_loop_partial'), 'Should handle partial coverage indicator');
 });

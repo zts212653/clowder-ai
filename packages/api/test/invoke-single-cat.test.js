@@ -18,7 +18,8 @@ const hasSourceStagingContent = existsSync(
 
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
-import { GovernanceBootstrapService } from '../dist/config/governance/governance-bootstrap.js';
+import { ContextEpochOwner } from '../dist/domains/cats/services/session/ContextEpochOwner.js';
+import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 
 function assertStagingPromptContract(prompt, mode) {
   if (hasSourceStagingContent) {
@@ -284,6 +285,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       },
       threadStore: null,
       apiUrl: 'http://127.0.0.1:3004',
+      contextEpochOwner: new ContextEpochOwner(new InMemoryContextEpochStore()),
     };
   }
 
@@ -483,6 +485,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         prompt: 'test',
         userId: 'user-git-attr',
         threadId: 'thread-git-attr',
+        parentInvocationId: 'parent-execution-wiring',
         isLastCat: true,
       }),
     );
@@ -495,6 +498,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Email is intentionally NOT set — it inherits git config (contribution graph stays on one account).
     assert.equal('GIT_AUTHOR_EMAIL' in callbackEnv, false);
     assert.equal('GIT_COMMITTER_EMAIL' in callbackEnv, false);
+    assert.equal(
+      callbackEnv.CAT_CAFE_EXECUTION_ID,
+      'parent-execution-wiring',
+      'owner manifests must bind the parent control-plane identity, never the child turn id',
+    );
+    assert.notEqual(callbackEnv.CAT_CAFE_INVOCATION_ID, callbackEnv.CAT_CAFE_EXECUTION_ID);
   });
 
   it('F262 reads and passes the thread member effort override on every invocation', async () => {
@@ -3750,6 +3759,31 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
+  it('isTransientCliExitCode1: argv/CLI-version incompatibility must NOT be retried (deterministic)', async () => {
+    const { isTransientCliExitCode1 } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-helpers.js'
+    );
+
+    // Real shape after formatCliExitError appends the classified reasonCode.
+    // Witnessed 76x in runtime logs 2026-08-06..08-10 (48x "unknown option
+    // '--agent-file'" + 28x "Cannot combine --agent/--agent-file with
+    // --session/--continue") — every one of them retried once for nothing,
+    // which is where the user-visible "未识别的 CLI 错误 ×2" came from.
+    const argvMsg = 'Kimi CLI: CLI 异常退出 (code: 1, signal: none) [incompatible_cli_arguments]';
+    assert.equal(
+      isTransientCliExitCode1(argvMsg),
+      false,
+      'a CLI that rejected our argv rejects the identical argv again — retrying only doubles the failure',
+    );
+
+    // Regression guard: vanilla transient exit still retries
+    assert.equal(
+      isTransientCliExitCode1('Kimi CLI: CLI 异常退出 (code: 1, signal: none)'),
+      true,
+      'untagged transient exit must stay retryable',
+    );
+  });
+
   it('session self-heal: retries once without --resume when Claude reports missing conversation', async () => {
     let invokeCount = 0;
     const sessionDeletes = [];
@@ -4020,6 +4054,228 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       msgs.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'session_not_found'),
       false,
       'stale-session error should be suppressed when retry succeeds',
+    );
+  });
+
+  // F296 B4 (kimi review P2): the identity belongs to exactly ONE channel.
+  // When a carrier has a target continuity handshake, the self-heal retry
+  // rebuilds the prompt with injectSystemPrompt=true, so the identity is
+  // already inside the bytes. Also putting it on the options channel makes the
+  // provider prepend it a second time. This predates B4 (it already affected
+  // codex/exec_json) but B4 widens the set of carriers that reach it.
+  // Sol review #7: the P2-3 fix (preflight carriers must not eagerly rebuild a
+  // generation on the retry paths) shipped without a regression test. Reverting
+  // it would advance the epoch twice for one retry, leave an ownerless
+  // reservation and double-count metrics — with nothing going red.
+  // Sol review #5: with a preflight carrier the prompt message ids only exist
+  // once `settle` has run, long after baseOptions was built — so the recovery
+  // anchor used to be omitted entirely and app_server model-capacity recovery
+  // could never resume the exact invocation.
+  it('F296 #5: a preflight carrier still receives an exact recovery anchor', async () => {
+    let anchorAtSettle;
+    let anchorAtOutput;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'app_server',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke() {
+        throw new Error('preflight carrier must not fall back to invoke()');
+      },
+      async *invokeWithContinuityPreflight(preflight, options) {
+        anchorAtSettle = options?.recoveryAnchor;
+        await preflight.settle({ evidence: { kind: 'started', runtimeSessionId: 'rt-1' } });
+        // Read again after settle: this is when a capacity retry would look.
+        anchorAtOutput = {
+          threadId: options?.recoveryAnchor?.threadId,
+          invocationId: options?.recoveryAnchor?.invocationId,
+          promptMessageIds: [...(options?.recoveryAnchor?.promptMessageIds ?? [])],
+        };
+        yield { type: 'text', catId: 'opus', content: 'ok', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-preflight-anchor',
+        isLastCat: true,
+        contextPromptFactory: async () => ({
+          prompt: 'projected',
+          promptMessageIds: ['msg-a', 'msg-b'],
+        }),
+      }),
+    );
+
+    assert.ok(anchorAtSettle, 'a preflight carrier must be given an anchor even before settle');
+    assert.equal(anchorAtOutput.threadId, 'thread-preflight-anchor');
+    assert.ok(anchorAtOutput.invocationId, 'the anchor carries the invocation id');
+    assert.deepEqual(
+      anchorAtOutput.promptMessageIds,
+      ['msg-a', 'msg-b'],
+      'and after settle it holds the ids of the generation that was actually built',
+    );
+  });
+
+  it('F296 P2-3: a preflight retry builds exactly one generation, not two', async () => {
+    let resolveCalls = 0;
+    let factoryCalls = 0;
+    let settleCalls = 0;
+    const owner = new ContextEpochOwner(new InMemoryContextEpochStore());
+    const countingOwner = {
+      resolve: (input) => {
+        resolveCalls += 1;
+        return owner.resolve(input);
+      },
+      observeCompaction: (input) => owner.observeCompaction(input),
+      confirmColdConsumed: (input) => owner.confirmColdConsumed(input),
+    };
+
+    let invokeCount = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'app_server',
+        reportsRuntimeWindow: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable',
+        nativeWindowControl: false,
+        nativeCompressionControl: false,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke() {
+        throw new Error('preflight carrier must not fall back to invoke()');
+      },
+      async *invokeWithContinuityPreflight(preflight) {
+        invokeCount += 1;
+        settleCalls += 1;
+        await preflight.settle({ evidence: { kind: 'started', runtimeSessionId: `rt-${invokeCount}` } });
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.contextEpochOwner = countingOwner;
+    deps.sessionManager = { get: async () => 'stale-sess', store: async () => {}, delete: async () => {} };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-preflight-retry',
+        isLastCat: true,
+        contextPromptFactory: async () => {
+          factoryCalls += 1;
+          return { prompt: 'projected', promptMessageIds: [] };
+        },
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'the retry happened');
+    assert.equal(settleCalls, 2, 'one settle per attempt');
+    assert.equal(
+      resolveCalls,
+      settleCalls,
+      `a preflight carrier must resolve the epoch exactly once per attempt — got ${resolveCalls} resolves ` +
+        `for ${settleCalls} settles, so the retry path rebuilt a generation eagerly`,
+    );
+    assert.equal(
+      factoryCalls,
+      settleCalls,
+      'and the context prompt factory must run exactly once per attempt for the same reason',
+    );
+  });
+
+  it('F296 P2: self-heal retry does not double-inject identity when the prompt already carries it', async () => {
+    const optionsSeen = [];
+    const promptsSeen = [];
+    let invokeCount = 0;
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      contextCapability: () => ({
+        provider: 'openai',
+        carrier: 'exec_json',
+        reportsRuntimeWindow: true,
+        authoritativeUsage: true,
+        usageTelemetry: 'available',
+        nativeWindowControl: true,
+        nativeCompressionControl: true,
+        observesCompression: true,
+        reason: 'test',
+      }),
+      async *invoke(prompt, options) {
+        optionsSeen.push({ ...options });
+        promptsSeen.push(prompt);
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'No conversation found with session ID: stale-sess',
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'opus', sessionId: 'fresh-sess', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = { get: async () => 'stale-sess', store: async () => {}, delete: async () => {} };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        systemPrompt: 'IDENTITY-MARKER',
+        userId: 'u1',
+        threadId: 'thread-selfheal-no-double',
+        isLastCat: true,
+        contextPromptFactory: async () => ({ prompt: 'rebuilt prompt', promptMessageIds: [] }),
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'should retry once');
+    const retryPrompt = promptsSeen[1];
+    const retryOptions = optionsSeen[1];
+    const inPrompt = retryPrompt.includes('IDENTITY-MARKER');
+    const inOptions = retryOptions.systemPrompt === 'IDENTITY-MARKER';
+    assert.ok(inPrompt || inOptions, 'the identity must reach the retry through one channel');
+    assert.ok(
+      !(inPrompt && inOptions),
+      'identity must not ride BOTH the prompt bytes and the options channel — the provider would prepend it twice',
     );
   });
 
@@ -5303,6 +5559,57 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
 
     assert.equal(sessionRecordCreated, true, 'should create SessionRecord when sessionChain enabled');
+  });
+
+  it('F299 rejects substantive output when a provider bypasses the durable request-generation fence', async () => {
+    const activeRecord = {
+      id: 'sr-f299-bypass',
+      seq: 0,
+      status: 'active',
+      catId: 'opus',
+      threadId: 'thread-f299-bypass',
+      userId: 'u1',
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'must not escape', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        get: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+      transcriptWriter: {
+        appendEvent: () => {},
+        appendDurableEvent: async () => {},
+        keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-f299-bypass',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(
+      messages.some((message) => message.type === 'text'),
+      false,
+    );
+    const error = messages.find((message) => message.type === 'error');
+    assert.match(error?.error ?? '', /request_generation_commit_unavailable/);
   });
 
   // --- F-BLOAT: Resume skips systemPrompt injection ---
@@ -7451,7 +7758,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
   });
 
-  it('#1329/#1359: bare OpenCode native subscription binds the window at the Cat Cafe layer and supplies no limit block', async () => {
+  it('#1329/#1359: bare OpenCode native subscription binds the window at the Clowder AI layer and supplies no limit block', async () => {
     const root = await mkdtemp(join(tmpdir(), 'context-binding-native-oc-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
@@ -7561,20 +7868,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
       assert.ok(seenRuntimeConfig, 'provider must observe a per-invocation runtime config');
       assert.equal(seenRuntimeConfig.model, 'anthropic/claude-opus-4-6');
-      // Boundary change (#1359): Cat Cafe no longer pushes its window into the
-      // OpenCode config. OpenCode requires `limit.output` whenever `limit`
-      // exists and merges `config ?? catalog ?? 0`, so any value we invent here
-      // would override the catalog's own authoritative — and sometimes smaller —
-      // output limit. With no per-carrier output source at this layer we supply
-      // neither field and leave OpenCode's catalog authoritative for both.
       const nativeEntry = seenRuntimeConfig.provider?.anthropic?.models?.['claude-opus-4-6'];
       assert.ok(nativeEntry, 'the native model must still be registered in the runtime config');
       assert.equal(nativeEntry.name, 'claude-opus-4-6');
       assert.equal(nativeEntry.limit, undefined, 'no limit block may be supplied at this layer');
       assert.equal(seenRuntimeConfig.$schema, 'https://opencode.ai/config.json');
-      // The invocation window is still bound — at the Cat Cafe layer, where it
-      // drives context health and session handoff. Only the propagation into
-      // OpenCode's own config is gone.
+      // The invocation window is still bound at the Clowder AI layer, where it
+      // drives context health and session handoff.
       assert.equal(optionsSeen[0]?.contextCapacity?.windowTokens, 1_000_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.inputCeilingTokens, 984_000);
       assert.equal(optionsSeen[0]?.contextCapacity?.actionable, true);
@@ -7754,16 +8054,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
     assert.ok(callbackEnv.OPENCODE_CONFIG);
     assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, undefined);
-    // Boundary change (#1359): the provider-native compaction limit is no longer
-    // supplied from here. #1208 wrote `limit: { context }` without the
-    // `limit.output` OpenCode's schema requires, which killed every affected cat
-    // at config-parse time; completing it instead would clobber the catalog's
-    // authoritative output for catalog-backed models. This layer has no
-    // authoritative per-carrier output, so it supplies neither field.
     const knownEntry = seenRuntimeConfig?.provider?.anthropic?.models?.['claude-opus-4-6'];
     assert.ok(knownEntry, 'the known native model must still be registered');
     assert.equal(knownEntry.limit, undefined, 'no limit block may be supplied at this layer');
-    // Still a schema-valid config — that is the whole point of the fix.
     assert.equal(seenRuntimeConfig?.$schema, 'https://opencode.ai/config.json');
     assert.ok(seenRuntimeConfig?.provider?.anthropic?.options, 'provider options must survive');
   });
@@ -8798,7 +9091,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
   });
 
-  it('reads external-project governance from the persistent workspace when invoked from a runtime checkout', async () => {
+  it('invokes an uninitialized external project from a runtime checkout without writing governance files', async () => {
     const previousCwd = process.cwd();
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
@@ -8813,8 +9106,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
     process.chdir(runtimeRoot);
 
-    const bootstrap = new GovernanceBootstrapService(workspaceRoot);
-    await bootstrap.bootstrap(externalProject, { dryRun: false });
+    const beforeEntries = await readdir(externalProject);
 
     let invokedService = false;
     const service = {
@@ -8844,12 +9136,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }),
       );
 
-      assert.equal(invokedService, true, 'the initialized external project should reach the agent service');
+      assert.equal(invokedService, true, 'an uninitialized external project should reach the agent service');
       assert.equal(
         msgs.some((m) => m.type === 'system_info' && m.content?.includes('governance_blocked')),
         false,
-        'dispatch must read the registry written under the persistent workspace',
+        'governance installation is not a dispatch readiness gate',
       );
+      assert.deepStrictEqual(await readdir(externalProject), beforeEntries, 'dispatch must not materialize governance');
     } finally {
       process.chdir(previousCwd);
       if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -9288,8 +9581,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('bug-fix: account resolution uses runtime root (process.cwd()), not thread.projectPath', async () => {
-    // Regression: thread.projectPath points to dev worktree which lacks runtime-only accounts.
+  it('F302: sidecar-free external project resolves bound accounts from the runtime root', async () => {
+    // Regression: thread.projectPath points to an external repository with no Clowder AI sidecar.
     // Account resolution must always use process.cwd() (the runtime root).
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
 
@@ -9299,16 +9592,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await mkdir(runtimeApiDir, { recursive: true });
     await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
-    // devRoot = where thread.projectPath points (missing the custom account)
+    // devRoot = where thread.projectPath points (no .cat-cafe directory at all)
     const devRoot = await mkdtemp(join(tmpdir(), 'account-dev-root-'));
     const devApiDir = join(devRoot, 'packages', 'api');
     await mkdir(devApiDir, { recursive: true });
     await writeFile(join(devRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
-    // Write a minimal catalog in devRoot WITHOUT the custom account
-    const devCatCafe = join(devRoot, '.cat-cafe');
-    await mkdir(devCatCafe, { recursive: true });
-    await writeFile(join(devCatCafe, 'cat-catalog.json'), JSON.stringify({ accounts: {} }), 'utf-8');
-
     // Create the custom account only in runtimeRoot
     const customProfile = await createProviderProfile(runtimeRoot, {
       provider: 'openai',

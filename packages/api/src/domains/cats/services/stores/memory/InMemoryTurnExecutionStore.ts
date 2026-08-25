@@ -1,12 +1,14 @@
 import {
+  assertCoveredMessageIds,
   assertCreateTurnExecutionInput,
   assertTurnExecutionTerminalInput,
+  type BindCoveredMessageIdsResult,
   type CreateTurnExecutionInput,
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
-  sameTurnExecutionIdentity,
+  serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
   type TurnExecutionRecord,
   type TurnExecutionTerminalInput,
@@ -20,6 +22,7 @@ function sortRecords(records: TurnExecutionRecord[]): TurnExecutionRecord[] {
 
 export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   private readonly records = new Map<string, TurnExecutionRecord>();
+  private readonly immutableIdentities = new Map<string, string>();
   private readonly parentIndex = new Map<string, Set<string>>();
 
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult {
@@ -27,17 +30,37 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     const existing = this.records.get(input.invocationId);
     if (existing) {
       return {
-        outcome: sameTurnExecutionIdentity(existing, input) ? 'replayed' : 'conflict',
+        outcome:
+          this.immutableIdentities.get(input.invocationId) === serializeTurnExecutionIdentity(input)
+            ? 'replayed'
+            : 'conflict',
         record: cloneTurnExecutionRecord(existing),
       };
     }
 
     const record = cloneTurnExecutionRecord({ ...input, status: 'running' });
     this.records.set(input.invocationId, record);
+    this.immutableIdentities.set(input.invocationId, serializeTurnExecutionIdentity(input));
     const childIds = this.parentIndex.get(input.parentInvocationId) ?? new Set<string>();
     childIds.add(input.invocationId);
     this.parentIndex.set(input.parentInvocationId, childIds);
     return { outcome: 'created', record: cloneTurnExecutionRecord(record) };
+  }
+
+  bindCoveredMessageIds(invocationId: string, messageIds: readonly string[]): BindCoveredMessageIdsResult {
+    assertCoveredMessageIds(messageIds);
+    const record = this.records.get(invocationId);
+    if (!record) return { outcome: 'not_found', record: null };
+    const existing = record.causal?.coveredMessageIds;
+    if (existing) {
+      const requested = [...messageIds].sort();
+      const same =
+        existing.length === requested.length &&
+        [...existing].sort().every((messageId, index) => messageId === requested[index]);
+      return { outcome: same ? 'replayed' : 'conflict', record: cloneTurnExecutionRecord(record) };
+    }
+    record.causal = { ...(record.causal ?? {}), coveredMessageIds: [...messageIds] };
+    return { outcome: 'bound', record: cloneTurnExecutionRecord(record) };
   }
 
   get(invocationId: string): TurnExecutionRecord | null {
@@ -51,6 +74,14 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       [...childIds]
         .map((invocationId) => this.records.get(invocationId))
         .filter((record): record is TurnExecutionRecord => record !== undefined)
+        .map(cloneTurnExecutionRecord),
+    );
+  }
+
+  listRunningByUser(userId: string): TurnExecutionRecord[] {
+    return sortRecords(
+      [...this.records.values()]
+        .filter((record) => record.status === 'running' && record.userId === userId)
         .map(cloneTurnExecutionRecord),
     );
   }
@@ -73,8 +104,11 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       throw new Error('cutoffStartedAt must be a finite non-negative number');
     }
     const interrupted: TurnExecutionRecord[] = [];
+    const excluded = new Set(input.excludedInvocationIds ?? []);
     for (const record of this.records.values()) {
-      if (record.status !== 'running' || record.startedAt >= cutoffStartedAt) continue;
+      if (record.status !== 'running' || record.startedAt >= cutoffStartedAt || excluded.has(record.invocationId)) {
+        continue;
+      }
       const result = this.transitionTerminal(record.invocationId, {
         status: 'interrupted',
         endedAt: input.endedAt,

@@ -81,6 +81,7 @@ function source(overrides = {}) {
     summary: 'The source can be drilled without preselecting a conclusion.',
     anchor: 'person:alden',
     revision: 'revision-1',
+    asOf: 1_000,
     visibility: 'owner_private',
     drillFamily: 'person_memory',
     ...overrides,
@@ -281,6 +282,32 @@ describe('F287 MemoryCuePlaneService', () => {
       );
       assert.equal(Object.hasOwn(result.cues[0], 'globalScore'), false);
       assert.equal(Object.hasOwn(result.cues[0], 'conclusion'), false);
+      const pointer = result.presentationEnvelopes[0].segments.pointer;
+      assert.match(pointer, /<recall-opportunity-pointer/);
+      assert.match(pointer, /Drill:/);
+      assert.doesNotMatch(pointer, new RegExp(result.cues[0].title));
+      assert.doesNotMatch(pointer, new RegExp(result.cues[0].summary));
+      assert.deepEqual(result.presentationEnvelopes[0].admission, {
+        opportunityId: candidate.opportunityId,
+        opportunityKind: 'recall',
+        producerOwner: candidate.producer,
+        consumerScope: { kind: 'invocation', ...scope },
+        entryVersion: `recall-catalog:1:${candidate.kind}:${candidate.producer}`,
+        subjectKey: `memory-cue:${expectedFamily}:${result.cues[0].source.anchor}`,
+        asOf: { kind: 'version', value: result.cues[0].source.revision },
+        sourceRefs: [result.cues[0].source.anchor],
+        eligibleSurfaces: ['dynamic_context', 'pointer'],
+        presentationPolicyRef: 'F296.OpportunityPresentation',
+        tokenBudget: getRecallOpportunityCatalogEntry(candidate).maxPromptTokens,
+        dedupeKey: getRecallOpportunityCatalogEntry(candidate).dedupeKey(candidate),
+        expiresAt: result.cues[0].expiresAt,
+        invalidators: result.cues[0].invalidators.map((ref) => ({ owner: candidate.producer, ref })),
+        epistemicCeiling: 'pointer',
+      });
+      assert.doesNotMatch(
+        JSON.stringify(result.presentationEnvelopes[0].admission),
+        new RegExp(`${result.cues[0].title}|${result.cues[0].summary}`),
+      );
     }
   });
 
@@ -301,6 +328,13 @@ describe('F287 MemoryCuePlaneService', () => {
     });
 
     assert.equal(result.cues.length, 1);
+    assert.deepEqual(appended, []);
+    assert.equal(result.deliveryReceipts.length, 1);
+    assert.equal(Object.hasOwn(result.deliveryReceipts[0], 'projectionMarker'), false);
+    await service.recordPresented(result.deliveryReceipts, {
+      generationId: 'sha256:final-provider-prompt',
+      evidenceRef: 'context-delivery:invocation-1:sha256:final-provider-prompt',
+    });
     assert.deepEqual(appended, [
       {
         eventId: appended[0].eventId,

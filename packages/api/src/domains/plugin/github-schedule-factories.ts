@@ -24,6 +24,7 @@ import type { ConflictAutoExecutor } from '../../infrastructure/email/ConflictAu
 import { createConflictCheckTaskSpec } from '../../infrastructure/email/ConflictCheckTaskSpec.js';
 import type { ConflictRouter } from '../../infrastructure/email/ConflictRouter.js';
 import type { ConnectorInvokeTrigger } from '../../infrastructure/email/ConnectorInvokeTrigger.js';
+import type { PrCiStatusTarget } from '../../infrastructure/email/ci-status-batch-fetcher.js';
 import type {
   ConnectorDeliveryDeps,
   ConnectorDeliveryInput,
@@ -72,7 +73,10 @@ interface IFactoryProjectorMin {
 export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   taskStore: ITaskStore;
   cicdRouter: CiCdRouter;
-  fetchPrStatus?: (repoFullName: string, prNumber: number) => Promise<CiPollResult | null>;
+  fetchPrStatuses?: (
+    targets: readonly PrCiStatusTarget[],
+    signal?: AbortSignal,
+  ) => Promise<ReadonlyMap<string, CiPollResult | null>>;
   conflictRouter: ConflictRouter;
   reviewFeedbackRouter: ReviewFeedbackRouter;
   /** F140/#949 correction + F167 R2: `get` lets ReviewFeedbackTaskSpec repair already-rotated
@@ -178,7 +182,7 @@ const cicdCheckFactory: ScheduleFactory = {
       id: instanceId,
       taskStore: d.taskStore,
       cicdRouter: d.cicdRouter,
-      fetchPrStatus: d.fetchPrStatus,
+      fetchPrStatuses: d.fetchPrStatuses,
       invokeTrigger: d.invokeTrigger,
       isSelfMerge: d.isSelfMerge,
       log: d.log,

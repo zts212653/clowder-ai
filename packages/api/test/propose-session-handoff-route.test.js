@@ -6,87 +6,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
-import Fastify from 'fastify';
+import { describe, it } from 'node:test';
+import { ACTIVE, buildCtx, createHandoffStore, createMessageStore } from './propose-session-handoff-route-fixtures.js';
 
 describe('propose-session-handoff route (F225 ②a)', () => {
-  let InvocationRegistry;
-  let MessageStore;
-  let InMemorySessionHandoffProposalStore;
-  let callbacksRoutes;
-
-  beforeEach(async () => {
-    ({ InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'));
-    ({ MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js'));
-    ({ InMemorySessionHandoffProposalStore } = await import(
-      '../dist/domains/cats/services/stores/ports/SessionHandoffProposalStore.js'
-    ));
-    ({ callbacksRoutes } = await import('../dist/routes/index.js'));
-  });
-
-  const ACTIVE = { id: 'sess_active', status: 'active', catId: 'opus', threadId: 'thread_1', userId: 'user_1' };
-
-  async function buildCtx({ messageStoreOverride, sessionChainStoreOverride, handoffStoreOverride } = {}) {
-    const registry = new InvocationRegistry();
-    const messageStore = messageStoreOverride ?? new MessageStore();
-    const handoffStore = handoffStoreOverride ?? new InMemorySessionHandoffProposalStore();
-    const sessionChainStore = sessionChainStoreOverride ?? {
-      getActive: async (catId, threadId) => (catId === ACTIVE.catId && threadId === ACTIVE.threadId ? ACTIVE : null),
-    };
-    const socketEvents = [];
-    const socketManager = {
-      emitToUser(userId, event, data) {
-        socketEvents.push({ kind: 'user', userId, event, data });
-      },
-      broadcastToRoom(room, event, data) {
-        socketEvents.push({ kind: 'room', room, event, data });
-      },
-    };
-    const app = Fastify();
-    await app.register(callbacksRoutes, {
-      registry,
-      messageStore,
-      socketManager,
-      handoffProposalStore: handoffStore,
-      sessionChainStore,
-      evidenceStore: {
-        ingestRaw() {},
-        search() {
-          return [];
-        },
-      },
-      markerQueue: { enqueue() {} },
-      reflectionService: { reflect() {} },
-    });
-
-    const originByRequest = new Map();
-    async function propose({ userId = 'user_1', catId = 'opus', threadId = 'thread_1', body } = {}) {
-      const payload = body ?? { done: 'wrote A1 store', nextSteps: 'wire route' };
-      const key = payload.clientRequestId ? `${userId}:${catId}:${threadId}:${payload.clientRequestId}` : undefined;
-      let origin = key ? originByRequest.get(key) : undefined;
-      if (!origin) {
-        origin = await messageStore.append({
-          userId,
-          catId: null,
-          content: 'Please hand off this session',
-          mentions: [],
-          timestamp: Date.now(),
-          threadId,
-        });
-        if (key) originByRequest.set(key, origin);
-      }
-      const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
-      return app.inject({
-        method: 'POST',
-        url: '/api/callbacks/propose-session-handoff',
-        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-        payload,
-      });
-    }
-
-    return { app, registry, messageStore, handoffStore, socketEvents, propose };
-  }
-
   it('happy path: creates pending proposal + appends card + records cardMessageId + broadcasts', async () => {
     const ctx = await buildCtx();
     const res = await ctx.propose();
@@ -105,9 +28,13 @@ describe('propose-session-handoff route (F225 ②a)', () => {
     assert.ok(card, 'card message appended to source thread');
     assert.equal(card.extra?.rich?.blocks?.[0]?.id, `handoff-${json.proposalId}`, 'confirmation card block present');
 
-    assert.ok(
-      ctx.socketEvents.some((e) => e.kind === 'room' && e.room === 'thread:thread_1'),
-      'broadcast to thread room',
+    const cardBroadcast = ctx.socketEvents.find(
+      (event) => event.kind === 'room' && event.event === 'connector_message' && event.data.threadId === 'thread_1',
+    );
+    assert.deepEqual(
+      cardBroadcast?.room,
+      ['thread:thread_1', 'user:user_1'],
+      'broadcast to the source thread and its owner user room',
     );
   });
 
@@ -216,7 +143,7 @@ describe('propose-session-handoff route (F225 ②a)', () => {
   });
 
   it('envelope commit failure leaves staged card recoverable by an idempotent retry', async () => {
-    const handoffStore = new InMemorySessionHandoffProposalStore();
+    const handoffStore = await createHandoffStore();
     const commitEnvelope = handoffStore.commitEnvelope.bind(handoffStore);
     let failCommit = true;
     handoffStore.commitEnvelope = (id, envelope) => {
@@ -268,7 +195,7 @@ describe('propose-session-handoff route (F225 ②a)', () => {
   });
 
   it('card-append failure → phantom proposal deleted (frees A4 slot, not pinned)', async () => {
-    const failingMessageStore = new MessageStore();
+    const failingMessageStore = await createMessageStore();
     const append = failingMessageStore.append.bind(failingMessageStore);
     failingMessageStore.append = async (input) => {
       if (input.idempotencyKey) throw new Error('append boom');

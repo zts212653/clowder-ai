@@ -127,6 +127,19 @@ describe('legacy service config migration (#863)', () => {
 
 describe('legacy env bridge fallback (#863)', () => {
   const whisperManifest = SERVICE_MANIFESTS.find((s) => s.id === 'whisper-stt');
+  const embeddingManifest = SERVICE_MANIFESTS.find((s) => s.id === 'embedding-model');
+
+  it('backfills the manifest default for persisted embedding config without selectedModel', () => {
+    const persisted = { installed: true, enabled: true };
+
+    const effective = resolveEffectiveServiceConfig(embeddingManifest, persisted, {});
+
+    assert.deepEqual(effective, {
+      installed: true,
+      enabled: true,
+      selectedModel: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ',
+    });
+  });
 
   it('derives whisper-stt config from QWEN3_ASR_ENABLED env var', () => {
     const env = { QWEN3_ASR_ENABLED: '1', QWEN3_ASR_MODEL: 'mlx-community/Qwen3-ASR-1.7B-8bit' };

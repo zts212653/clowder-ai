@@ -552,7 +552,8 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
     run: {
       overlap: 'skip',
       timeoutMs: 30_000,
-      async execute(signal: IssueCommentSignal, subjectKey: string, _ctx: ExecuteContext) {
+      async execute(signal: IssueCommentSignal, subjectKey: string, ctx: ExecuteContext) {
+        ctx?.signal?.throwIfAborted();
         const { task } = signal;
 
         // Guard: ownerCatId and userId must be present — auto-registered tasks always
@@ -593,6 +594,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             },
             ...(signal.issueState === 'closed' ? { subjectState: 'closed' as const } : {}),
           });
+          ctx?.signal?.throwIfAborted();
           return;
         }
 
@@ -610,6 +612,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               userId: task.userId,
             },
           );
+          ctx?.signal?.throwIfAborted();
 
           if (routeResult.kind !== 'notified') return;
           wake = {
@@ -621,6 +624,8 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               signal.deliveredCursor ??
               (signal.newComments.length > 0 ? Math.max(...signal.newComments.map((comment) => comment.id)) : 0),
           };
+          // Persisting pendingWake transfers retry ownership to this execute call.
+          // Trigger admission + acknowledgement must settle as one obligation group.
           await signal.commitRoutedWake?.(wake);
         }
 

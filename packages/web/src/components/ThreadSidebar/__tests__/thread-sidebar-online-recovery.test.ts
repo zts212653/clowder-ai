@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markApiGetGeneration } from '@/utils/api-get-generation';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 const mockPush = vi.fn();
@@ -10,6 +11,11 @@ const mockApiFetch = vi.fn();
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
   API_URL: 'http://localhost:3102',
+}));
+
+vi.mock('@/utils/offline-store', () => ({
+  loadSidebarSnapshot: () => Promise.resolve(null),
+  saveSidebarSnapshot: () => Promise.resolve(),
 }));
 
 const TEST_THREADS = [
@@ -27,15 +33,10 @@ const TEST_THREADS = [
   },
 ];
 
-let storeThreads = [] as typeof TEST_THREADS;
 const mockStore: Record<string, unknown> = {
-  get threads() {
-    return storeThreads;
-  },
+  threads: [],
   currentThreadId: 'default',
-  setThreads: vi.fn((threads: typeof TEST_THREADS) => {
-    storeThreads = threads;
-  }),
+  setThreads: vi.fn(),
   setCurrentProject: vi.fn(),
   isLoadingThreads: false,
   setLoadingThreads: vi.fn(),
@@ -64,8 +65,15 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
+import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
+import { __resetSidebarRefreshForTests } from '@/utils/sidebar-thread-snapshot';
+
+let nextMockGetGeneration = 0;
+
 function jsonOk(data: unknown) {
-  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
+  const response = new Response(JSON.stringify(data), { status: 200 });
+  markApiGetGeneration(response, ++nextMockGetGeneration);
+  return Promise.resolve(response);
 }
 
 describe('ThreadSidebar online recovery', () => {
@@ -79,13 +87,19 @@ describe('ThreadSidebar online recovery', () => {
   });
 
   beforeEach(() => {
-    storeThreads = [];
+    __resetSidebarRefreshForTests();
+    nextMockGetGeneration = 0;
+    useSidebarProjectionStore.setState({
+      rows: [],
+      appliedGeneration: 0,
+      hasCanonicalSnapshot: false,
+      pendingThreadCommands: {},
+      refreshing: false,
+    });
     threadsFetchCount = 0;
     mockPush.mockReset();
     mockApiFetch.mockReset();
-    mockStore.setThreads = vi.fn((threads: typeof TEST_THREADS) => {
-      storeThreads = threads;
-    });
+    mockStore.setThreads = vi.fn();
     mockStore.fetchGlobalBubbleDefaults = vi.fn();
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/threads?view=sidebar') {
@@ -154,14 +168,16 @@ describe('ThreadSidebar online recovery', () => {
     });
     await flush();
 
-    expect(mockStore.setThreads).not.toHaveBeenCalled();
+    expect(useSidebarProjectionStore.getState().rows).toEqual([]);
 
     await act(async () => {
       window.dispatchEvent(new Event('online'));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(mockStore.setThreads).toHaveBeenCalledWith(TEST_THREADS);
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads?view=sidebar');
+    expect(useSidebarProjectionStore.getState().rows).toEqual([
+      expect.objectContaining({ id: 'thread-1', title: '恢复线程' }),
+    ]);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads?view=sidebar', undefined, { afterCurrentGet: true });
   });
 });

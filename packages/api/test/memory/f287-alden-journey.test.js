@@ -2,6 +2,10 @@ import '../../test/helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 import Database from 'better-sqlite3';
+import {
+  InMemoryPresentationLedgerStore,
+  PresentationLedger,
+} from '../../dist/domains/cats/services/session/PresentationLedger.js';
 
 const databases = [];
 
@@ -15,6 +19,17 @@ function createCapturingService(catId) {
   const prompts = [];
   return {
     prompts,
+    contextCapability: () => ({
+      provider: 'openai',
+      carrier: 'exec_json',
+      reportsRuntimeWindow: true,
+      authoritativeUsage: true,
+      usageTelemetry: 'available',
+      nativeWindowControl: true,
+      nativeCompressionControl: true,
+      observesCompression: true,
+      reason: 'fixture',
+    }),
     async *invoke(prompt) {
       prompts.push(prompt);
       yield { type: 'text', catId, content: 'done', timestamp: Date.now() };
@@ -74,6 +89,21 @@ function createRouteDeps(service, evidenceDb, memoryCuePromptService) {
       },
       apiUrl: 'http://127.0.0.1:3102',
       memoryCuePromptService,
+      contextEpochOwner: {
+        async resolve({ disposition }) {
+          return {
+            scopeKey: 'owner-1::opus::thread-current',
+            contextEpoch: 7,
+            contextMode: 'cold',
+            lastTransitionRef: 'fixture:fixed-epoch',
+            consumedCompactionEventIds: [],
+            transition: 'fresh',
+            normalizedDisposition: disposition,
+            healthSignals: [],
+          };
+        },
+      },
+      presentationLedger: new PresentationLedger(new InMemoryPresentationLedgerStore()),
     },
     messageStore: createMessageStore(),
     socketManager: { broadcastToRoom: () => {} },
@@ -111,7 +141,7 @@ function seedAlden() {
 }
 
 function extractCueSegment(prompt) {
-  return prompt.match(/<memory-cue[\s\S]*?<\/memory-cue>/)?.[0] ?? '';
+  return prompt.match(/<recall-opportunity-pointer[\s\S]*?<\/recall-opportunity-pointer>/)?.[0] ?? '';
 }
 
 describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
@@ -148,6 +178,7 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
             summary: 'Relationship and interaction memory are available.',
             anchor: 'person-memory:person-alden',
             revision: 'sha256:alden-v1',
+            asOf: 1_785_600_000_000,
             visibility: 'owner_private',
             drillFamily: 'person_memory',
           };
@@ -188,9 +219,14 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     assert.match(resolution.promptSegment, /Alden/);
     assert.match(resolution.promptSegment, /handle:invocation-real:person-memory:person-alden/);
     assert.equal(resolution.admittedOpportunityIds.length, 1);
+    assert.match(
+      resolution.presentationEnvelopes[0].segments.pointer,
+      /handle:invocation-real:person-memory:person-alden/,
+    );
+    assert.doesNotMatch(resolution.presentationEnvelopes[0].segments.pointer, /Alden|Relationship and interaction/);
   });
 
-  test('serial and parallel consume one typed Entity result and emit the same cue segment without legacy duplication', async () => {
+  test('serial and parallel consume one typed Entity result and emit the same T2 pointer without legacy duplication', async () => {
     const [{ routeSerial }, { routeParallel }] = await Promise.all([
       import('../../dist/domains/cats/services/agents/routing/route-serial.js'),
       import('../../dist/domains/cats/services/agents/routing/route-parallel.js'),
@@ -213,8 +249,81 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
             ? {
                 promptSegment: `<memory-cue v="1" cue-id="cue-alden" why-now="subject seen">\nTitle: ${seed.payload.matchedAlias}\nSource: ${seed.payload.entityId}\nDrill: person_memory handle-alden\n</memory-cue>`,
                 admittedOpportunityIds: [memoryCueOpportunityId(seed, input.serverScope)],
+                omittedOpportunityIds: [],
+                deliveryReceipts: [
+                  {
+                    cueId: 'cue-alden',
+                    event: {
+                      cueId: 'cue-alden',
+                      opportunityId: memoryCueOpportunityId(seed, input.serverScope),
+                      scope: input.serverScope,
+                      resolverFamily: 'person_entity',
+                      sourceAnchor: 'person-memory:person-alden',
+                      sourceRevision: 'revision-1',
+                      axis: 'consumption',
+                      consumptionOutcome: 'presented',
+                      catalogVersion: 1,
+                      resolverVersion: 1,
+                      occurredAt: seed.occurredAt,
+                    },
+                  },
+                ],
+                presentationEnvelopes: [
+                  {
+                    candidate: {
+                      subjectKey: 'memory-cue:person_entity:person-memory:person-alden',
+                      asOf: { kind: 'version', value: 'revision-1' },
+                      sourceTier: 'T2',
+                      requested: 'pointer',
+                      epistemicCeiling: 'pointer',
+                    },
+                    segments: {
+                      pointer:
+                        '<recall-opportunity-pointer v="1" opportunity-id="opportunity-alden">\nDrill: person_memory handle-alden\n</recall-opportunity-pointer>',
+                    },
+                    admission: {
+                      opportunityId: memoryCueOpportunityId(seed, input.serverScope),
+                      opportunityKind: 'recall',
+                      producerOwner: 'entity_nudge',
+                      consumerScope: { kind: 'invocation', ...input.serverScope },
+                      entryVersion: 'recall-catalog:1:subject_seen:entity_nudge',
+                      subjectKey: 'memory-cue:person_entity:person-memory:person-alden',
+                      asOf: { kind: 'version', value: 'revision-1' },
+                      sourceRefs: ['person-memory:person-alden'],
+                      eligibleSurfaces: ['dynamic_context', 'pointer'],
+                      presentationPolicyRef: 'F296.OpportunityPresentation',
+                      tokenBudget: 300,
+                      dedupeKey: `subject_seen\0${seed.payload.entityId}`,
+                      expiresAt: input.now + 60_000,
+                      invalidators: [{ owner: 'entity_nudge', ref: 'source_corrected' }],
+                      epistemicCeiling: 'pointer',
+                    },
+                    receipt: {
+                      cueId: 'cue-alden',
+                      event: {
+                        cueId: 'cue-alden',
+                        opportunityId: memoryCueOpportunityId(seed, input.serverScope),
+                        scope: input.serverScope,
+                        resolverFamily: 'person_entity',
+                        sourceAnchor: 'person-memory:person-alden',
+                        sourceRevision: 'revision-1',
+                        axis: 'consumption',
+                        consumptionOutcome: 'presented',
+                        catalogVersion: 1,
+                        resolverVersion: 1,
+                        occurredAt: seed.occurredAt,
+                      },
+                    },
+                  },
+                ],
               }
-            : { promptSegment: '', admittedOpportunityIds: [] };
+            : {
+                promptSegment: '',
+                admittedOpportunityIds: [],
+                omittedOpportunityIds: [memoryCueOpportunityId(seed, input.serverScope)],
+                deliveryReceipts: [],
+                presentationEnvelopes: [],
+              };
         },
       };
       const deps = createRouteDeps(capturing, evidenceDb, memoryCuePromptService);
@@ -250,17 +359,18 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
         threadId: 'thread-current',
         invocationId: 'invocation-1',
       });
-      assert.ok(result.prompt.includes('<memory-cue v="1"'));
+      assert.ok(result.prompt.includes('<recall-opportunity-pointer v="1"'));
+      assert.equal(result.prompt.includes('<memory-cue v="1"'), false, 'T2 candidate body must not bypass the mapper');
       assert.equal(result.prompt.includes('[entity-nudge]'), false, 'legacy nudge must not duplicate the Cue');
       assert.equal(result.nudgeEventCount, 1, 'typed Entity result must be produced once, including side effects');
-      assert.equal(result.prompt.split('person:alden').length - 1, 1, 'the same entity must appear once in the prompt');
+      assert.equal(result.prompt.includes('Title: Alden'), false, 'T2 pointer must not inline the candidate title');
     }
 
     assert.equal(extractCueSegment(serial.prompt), extractCueSegment(parallel.prompt));
 
     const unresolved = await run(routeSerial, false);
-    assert.equal(unresolved.prompt.includes('<memory-cue v="1"'), false);
-    assert.equal(unresolved.prompt.includes('[entity-nudge]'), true, 'zero cue preserves the existing F260 nudge');
+    assert.equal(unresolved.prompt.includes('<recall-opportunity-pointer'), false);
+    assert.equal(unresolved.prompt.includes('[entity-nudge]'), false, 'untyped fallback must remain withheld');
     assert.equal(unresolved.nudgeEventCount, 1);
   });
 });

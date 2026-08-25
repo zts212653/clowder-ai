@@ -3,7 +3,7 @@
 import type { ListenDocumentState } from '@cat-cafe/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListenDocumentDescriptor } from '@/stores/listenModeStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { DocumentListenController } from '../DocumentListenController';
 import type { EnqueueUrlResult, PlaybackSnapshot } from '../PlaybackManager';
@@ -97,6 +97,8 @@ function harness(saved: ListenDocumentState | null = null) {
       })();
     }),
     linkAsset: vi.fn().mockResolvedValue(undefined),
+    startCache: vi.fn(),
+    cancelCache: vi.fn(),
     clearAudio: vi.fn().mockResolvedValue(undefined),
   };
   const controller = new DocumentListenController({
@@ -121,7 +123,7 @@ function harness(saved: ListenDocumentState | null = null) {
 }
 
 describe('DocumentListenController', () => {
-  beforeEach(() => useListenModeStore.setState({ session: null }));
+  beforeEach(() => useListenModeStore.setState({ session: null, cacheByDocument: {} }));
 
   it('queues one complete sentence asset and never exposes streamed WAV chunks as audible seams', async () => {
     let releaseAsset: (() => void) | undefined;
@@ -152,6 +154,50 @@ describe('DocumentListenController', () => {
     await vi.waitFor(() => expect(api.linkAsset).toHaveBeenCalled());
     await vi.waitFor(() => expect(manager.enqueueUrl).toHaveBeenCalledWith('/audio/buffered.wav', expect.anything()));
     expect(manager.enqueueBase64).not.toHaveBeenCalled();
+  });
+
+  it('advances the existing shared cache projection as soon as a foreground asset links', async () => {
+    const value = descriptor();
+    const { api, controller, manager } = harness();
+    api.linkAsset.mockResolvedValue(true);
+    manager.enqueueUrl.mockResolvedValueOnce('failed');
+    api.stream.mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          type: 'asset' as const,
+          audioUrl: '/audio/foreground.wav',
+          assetId: `${'a'.repeat(64)}.wav`,
+          cached: false,
+          bytes: 100,
+          synthesisFingerprint: 'fingerprint',
+        };
+      })(),
+    );
+    useListenModeStore.setState({
+      cacheByDocument: {
+        [listenDocumentCacheKey(value.identity)]: {
+          identity: value.identity,
+          synthesisFingerprint: 'fingerprint',
+          cachedAnchors: [],
+          cacheBytes: 0,
+          totalSentences: value.sentences.length,
+          active: true,
+          error: null,
+        },
+      },
+    });
+
+    await controller.startDocument(value);
+
+    await vi.waitFor(() =>
+      expect(useListenModeStore.getState().cacheByDocument[listenDocumentCacheKey(value.identity)]).toMatchObject({
+        cachedAnchors: ['sentence-0'],
+        cacheBytes: 100,
+        active: true,
+        error: null,
+      }),
+    );
+    await vi.waitFor(() => expect(useListenModeStore.getState().session?.phase).toBe('error'));
   });
 
   it('restores the stable saved anchor and only fills a bounded look-ahead window', async () => {

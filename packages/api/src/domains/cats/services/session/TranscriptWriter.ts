@@ -13,6 +13,7 @@
  *   { v:1, t:number, threadId, catId, sessionId, cliSessionId?, invocationId?, eventNo, event }
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -20,6 +21,8 @@ import {
   extractContinuityCapsuleFromSystemInfo,
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
+import type { TranscriptEvent } from './TranscriptReader.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -35,6 +38,41 @@ interface BufferedEvent {
   timestamp: number;
   invocationId?: string;
   event: Record<string, unknown>;
+}
+
+function bufferedEventFingerprint(event: BufferedEvent): string {
+  return transcriptEventFingerprint({
+    t: event.timestamp,
+    ...(event.invocationId !== undefined ? { invocationId: event.invocationId } : {}),
+    event: event.event,
+  });
+}
+
+/**
+ * Merge crash-recovered disk events with the authoritative in-memory suffix.
+ * Counts matter: identical events can legitimately occur more than once, and
+ * invocation identity is part of the canonical event identity.
+ */
+function mergeLiveAndBufferedEvents(liveEvents: BufferedEvent[], bufferedEvents: BufferedEvent[]): BufferedEvent[] {
+  const bufferedCounts = new Map<string, number>();
+  for (const event of bufferedEvents) {
+    const key = bufferedEventFingerprint(event);
+    bufferedCounts.set(key, (bufferedCounts.get(key) ?? 0) + 1);
+  }
+
+  const diskOnly: BufferedEvent[] = [];
+  for (const event of liveEvents) {
+    const key = bufferedEventFingerprint(event);
+    const remaining = bufferedCounts.get(key) ?? 0;
+    if (remaining > 0) {
+      if (remaining === 1) bufferedCounts.delete(key);
+      else bufferedCounts.set(key, remaining - 1);
+    } else {
+      diskOnly.push(event);
+    }
+  }
+
+  return [...diskOnly, ...bufferedEvents].map((event, eventNo) => ({ ...event, eventNo }));
 }
 
 export interface ExtractiveDigestV1 {
@@ -120,14 +158,47 @@ export class TranscriptWriter {
   private buffers = new Map<string, BufferedEvent[]>();
   /** Serialized disk write chains per session for incremental crash-recovery append. */
   private diskWriteQueue = new Map<string, Promise<void>>();
+  private contentDigestKey?: Promise<Buffer>;
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
     this.indexStride = opts.indexStride ?? 100;
   }
 
-  /** Append a raw event to the in-memory buffer for a session. */
-  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+  private async loadContentDigestKey(): Promise<Buffer> {
+    const keyPath = join(this.dataDir, '.request-envelope-hmac-key');
+    try {
+      const existing = await readFile(keyPath);
+      if (existing.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return existing;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await mkdir(this.dataDir, { recursive: true });
+    const created = randomBytes(32);
+    try {
+      await writeFile(keyPath, created, { flag: 'wx', mode: 0o600 });
+      return created;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const winner = await readFile(keyPath);
+      if (winner.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return winner;
+    }
+  }
+
+  /** Stable owner-local digest for sensitive transcript content. */
+  async keyedContentDigest(content: string): Promise<string> {
+    this.contentDigestKey ??= this.loadContentDigestKey();
+    const key = await this.contentDigestKey;
+    return `hmac-sha256:${createHmac('sha256', key).update(content).digest('hex')}`;
+  }
+
+  private bufferEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): BufferedEvent {
     let buf = this.buffers.get(session.sessionId);
     if (!buf) {
       buf = [];
@@ -140,11 +211,54 @@ export class TranscriptWriter {
       event,
     };
     buf.push(entry);
+    return entry;
+  }
+
+  private rollbackBufferedEvent(sessionId: string, entry: BufferedEvent): void {
+    const buf = this.buffers.get(sessionId);
+    if (!buf) return;
+    const index = buf.indexOf(entry);
+    if (index < 0) return;
+    buf.splice(index, 1);
+    for (let cursor = index; cursor < buf.length; cursor += 1) {
+      const buffered = buf[cursor];
+      if (buffered) buffered.eventNo = cursor;
+    }
+    if (buf.length === 0) this.buffers.delete(sessionId);
+  }
+
+  /** Append a raw event to the in-memory buffer for a session. */
+  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+    const entry = this.bufferEvent(session, event, invocationId);
 
     // Incremental disk append for crash recovery (F232 disk fallback).
     // Fire-and-forget: buffer is the primary source during normal operation;
     // disk copy only matters when the process restarts and buffer is lost.
-    this.enqueueDiskAppend(session, entry);
+    void this.enqueueDiskAppend(session, entry).catch(() => {
+      // Best-effort: buffer is the primary source for ordinary transcript events.
+    });
+  }
+
+  /**
+   * Append an event only after its active-session JSONL record is durable.
+   *
+   * F299 request generations call this before provider launch. The event is
+   * reserved in the buffer to preserve process-local ordering, but a failed
+   * disk write rolls that reservation back and rejects the caller. Unlike
+   * ordinary transcript output, this path must never degrade to best-effort.
+   */
+  async appendDurableEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): Promise<void> {
+    const entry = this.bufferEvent(session, event, invocationId);
+    try {
+      await this.enqueueDiskAppend(session, entry);
+    } catch (error) {
+      this.rollbackBufferedEvent(session.sessionId, entry);
+      throw error;
+    }
   }
 
   /** Get buffered events for a session (for testing). */
@@ -158,29 +272,31 @@ export class TranscriptWriter {
   }
 
   /** Enqueue a single event append to disk. Writes are serialized per session. */
-  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): void {
+  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): Promise<void> {
     const prev = this.diskWriteQueue.get(session.sessionId) ?? Promise.resolve();
-    const next = prev
-      .then(async () => {
-        const dir = this.sessionDir(session);
-        await mkdir(dir, { recursive: true });
-        const envelope = {
-          v: 1,
-          t: entry.timestamp,
-          threadId: session.threadId,
-          catId: session.catId,
-          sessionId: session.sessionId,
-          ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-          invocationId: entry.invocationId,
-          eventNo: entry.eventNo,
-          event: entry.event,
-        };
-        await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
-      })
-      .catch(() => {
-        // Best-effort: buffer is the primary source; disk append is crash-recovery insurance.
-      });
-    this.diskWriteQueue.set(session.sessionId, next);
+    const attempt = prev.then(async () => {
+      const dir = this.sessionDir(session);
+      await mkdir(dir, { recursive: true });
+      const envelope = {
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        invocationId: entry.invocationId,
+        eventNo: entry.eventNo,
+        event: entry.event,
+      };
+      await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
+    });
+    // Keep the queue usable after a failed durable append. Individual callers
+    // still receive the original rejection through `attempt`.
+    this.diskWriteQueue.set(
+      session.sessionId,
+      attempt.catch(() => {}),
+    );
+    return attempt;
   }
 
   /** Wait for all pending incremental disk writes to complete. Primarily for testing. */
@@ -190,6 +306,31 @@ export class TranscriptWriter {
     } else {
       await Promise.all([...this.diskWriteQueue.values()]);
     }
+  }
+
+  /**
+   * Read an active session through the same merge rule used by seal.
+   *
+   * The in-memory buffer remains primary; `events.live.jsonl` contributes only
+   * crash-recovered events which are no longer present in memory. This is a
+   * read projection — it neither clears the buffer nor promotes the live file
+   * into a second canonical transcript.
+   */
+  async readActiveEvents(session: TranscriptSessionInfo): Promise<TranscriptEvent[]> {
+    await this.drainPendingWrites(session.sessionId);
+    const liveEvents = await this.readEventsFromLiveFile(this.sessionDir(session));
+    const bufferedEvents = [...(this.buffers.get(session.sessionId) ?? [])];
+    return mergeLiveAndBufferedEvents(liveEvents, bufferedEvents).map((entry) => ({
+      v: 1,
+      t: entry.timestamp,
+      threadId: session.threadId,
+      catId: session.catId,
+      sessionId: session.sessionId,
+      ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+      ...(entry.invocationId ? { invocationId: entry.invocationId } : {}),
+      eventNo: entry.eventNo,
+      event: entry.event,
+    }));
   }
 
   /**
@@ -232,7 +373,8 @@ export class TranscriptWriter {
       for (const line of content.split('\n')) {
         if (!line.trim()) continue;
         try {
-          const envelope = JSON.parse(line);
+          const envelope = normalizeTranscriptEvent(JSON.parse(line));
+          if (!envelope) continue;
           events.push({
             eventNo: events.length,
             timestamp: envelope.t,
@@ -272,16 +414,7 @@ export class TranscriptWriter {
     // events.live.jsonl has all pre-restart events.
     const liveEvents = await this.readEventsFromLiveFile(sessionDir);
     if (liveEvents.length > 0) {
-      // Content-based dedup: fingerprint each buffer event so we can identify
-      // which live-file events are disk-only (pre-restart) vs duplicates of
-      // buffer events that also made it to disk.
-      const bufKeys = new Set(buf.map((e) => `${e.timestamp}:${JSON.stringify(e.event)}`));
-      const diskOnly = liveEvents.filter((e) => !bufKeys.has(`${e.timestamp}:${JSON.stringify(e.event)}`));
-      buf = [...diskOnly, ...buf];
-      // Re-number eventNo sequentially after merge.
-      for (let i = 0; i < buf.length; i++) {
-        buf[i] = { ...buf[i], eventNo: i };
-      }
+      buf = mergeLiveAndBufferedEvents(liveEvents, buf);
       this.buffers.set(session.sessionId, buf);
     }
 

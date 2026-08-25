@@ -83,4 +83,30 @@ describe('F167 successor runtime wiring', () => {
     assert.match(queueWiring, /runActionSuccessorRecovery\(\)/);
     assert.match(queueWiring, /setInterval\(runActionSuccessorRecovery, 30_000\)/);
   });
+
+  it('admits the exact approved carrier into durable Queue custody before reporting delivery', () => {
+    const deliveryWiring = block(
+      'const deliverApprovedActionCarrier = async (',
+      'if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {',
+    );
+    assert.match(deliveryWiring, /deliveryStatus: 'queued'/);
+    assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, storedMsg\)/);
+    assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, admittedMessage\)/);
+    const custodyProof = deliveryWiring.indexOf("if (admittedState.outcome !== 'admitted')");
+    const visibleBroadcast = deliveryWiring.indexOf('actionSocketManager.broadcastAgentMessage(');
+    const deliverySuccess = deliveryWiring.lastIndexOf(
+      "return { outcome: 'enqueued', deliveredMessageId: storedMsg.id }",
+    );
+    assert.ok(custodyProof >= 0 && custodyProof < visibleBroadcast);
+    assert.ok(visibleBroadcast < deliverySuccess);
+  });
+
+  it('revalidates frozen dispatch truth through the canonical resolver before recovery delivery', () => {
+    const recoveryWiring = block(
+      'if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {',
+      'const onReconciledZombie =',
+    );
+    assert.match(recoveryWiring, /dispatch:\s*{[\s\S]*truthResolver: actionSubjectTruthResolver/);
+    assert.match(recoveryWiring, /deliver: deliverApprovedActionCarrier/);
+  });
 });

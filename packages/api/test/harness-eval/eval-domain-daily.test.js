@@ -127,6 +127,9 @@ describe('eval-domain-daily task spec', () => {
     assert.equal(deliverCall.threadId, 'thread_eval_a2a');
     assert.equal(deliverCall.userId, 'scheduler');
     assert.ok(deliverCall.content.includes('eval:a2a'), 'content should mention domain');
+    assert.match(deliverCall.content, /Trigger channel: time/);
+    assert.match(deliverCall.content, /Invocation is only a wake attempt/);
+    assert.match(deliverCall.idempotencyKey, /^eval-domain-trigger:eval:a2a:daily:/);
     // P1-2: legacyCleanup status must be accurate, not hardcoded 'not_checked'
     assert.ok(
       deliverCall.content.includes('"status": "disabled"'),

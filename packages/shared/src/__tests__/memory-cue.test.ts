@@ -4,6 +4,7 @@ import {
   cueEnvelopeV1Schema,
   deliveryDecisionCueCarrierV1Schema,
   isRecallOpportunityV1,
+  memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_OPPORTUNITY_V1_PAIRS,
   recallOpportunityV1Schema,
@@ -67,6 +68,16 @@ const fixtures = {
 } as const;
 
 describe('F287 memory cue shared contract', () => {
+  it('keeps resolver and drill family vocabularies on one canonical mapping', () => {
+    expect([
+      memoryCueDrillFamilyForResolver('person_entity'),
+      memoryCueDrillFamilyForResolver('operational_precedent'),
+      memoryCueDrillFamilyForResolver('taste'),
+      memoryCueDrillFamilyForResolver('profile'),
+      memoryCueDrillFamilyForResolver('project_knowledge'),
+    ]).toEqual(['person_memory', 'evidence', 'taste', null, null]);
+  });
+
   it('admits only the three versioned producer/kind pairs', () => {
     expect(RECALL_OPPORTUNITY_CATALOG_VERSION).toBe(1);
     expect(RECALL_OPPORTUNITY_V1_PAIRS).toEqual([
@@ -110,6 +121,7 @@ describe('F287 memory cue shared contract', () => {
       source: {
         anchor: 'person:alden',
         revision: 'revision-1',
+        asOf: 1_700_000_000_000,
         visibility: 'owner_private',
       },
       drill: {

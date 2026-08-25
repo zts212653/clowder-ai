@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 await import('tsx/esm');
-const { MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN, MessageSelectionResolver, digestMessageBundleQuoteProjection } =
-  await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
+const {
+  MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3,
+  MessageSelectionResolver,
+  digestMessageBundleQuoteProjection,
+  digestMessageBundleQuoteProjectionV3,
+} = await import('../src/domains/cats/services/context/MessageSelectionResolver.ts');
 
 function makeThread(overrides = {}) {
   return {
@@ -32,6 +36,27 @@ function makeMessage(overrides = {}) {
   };
 }
 
+function makeQueueCustody(ownerUserId = 'user-1') {
+  return {
+    version: 1,
+    entryId: `entry-${ownerUserId}`,
+    revision: 1,
+    ownerUserId,
+    intent: 'managed command wake',
+    status: 'queued',
+    allTargetCats: ['opus5'],
+    pendingTargetCats: ['opus5'],
+    notifiedByCatIds: [],
+    seenByCatIds: [],
+    seenInvocationIdByCatId: {},
+    failedByCatIds: [],
+    handledByCatIds: [],
+    priority: 'normal',
+    createdAt: 100,
+    updatedAt: 100,
+  };
+}
+
 function createResolver({ thread = makeThread(), messages = [makeMessage()] } = {}) {
   const messageMap = new Map(messages.map((message) => [message.id, message]));
   let currentThread = thread;
@@ -49,6 +74,13 @@ function createResolver({ thread = makeThread(), messages = [makeMessage()] } = 
       messageStore: {
         async getById(messageId) {
           return messageMap.get(messageId) ?? null;
+        },
+        // Whole-message admission resolves the canonical bubble group, so the store must expose
+        // the same timeline the browser projected from.
+        async getByThreadAfter(threadId) {
+          return [...messageMap.values()]
+            .filter((message) => message.threadId === threadId)
+            .sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id));
         },
       },
     }),
@@ -85,7 +117,7 @@ describe('MessageSelectionResolver admission', () => {
     assert.deepEqual(result.items[1].author, { kind: 'cat', catId: 'codex-sol' });
   });
 
-  it('anchors an exact Quote and stores a domain-separated digest of the full projection', async () => {
+  it('anchors an exact Quote and stores a domain-separated digest of the full bubble projection', async () => {
     const message = makeMessage({ content: 'alpha beta gamma' });
     const { resolver } = createResolver({ messages: [message] });
 
@@ -97,6 +129,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: message.id,
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 6,
             selectionEnd: 10,
             comment: 'focus here',
@@ -112,11 +145,11 @@ describe('MessageSelectionResolver admission', () => {
       messageId: message.id,
       selectionStart: 6,
       selectionEnd: 10,
-      sourceProjectionVersion: 1,
-      sourceProjectionSha256: digestMessageBundleQuoteProjection(message.content),
+      sourceProjectionVersion: 3,
+      sourceProjectionSha256: digestMessageBundleQuoteProjectionV3(message.content),
       comment: 'focus here',
     });
-    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN.endsWith('\0'), true);
+    assert.equal(MESSAGE_BUNDLE_QUOTE_DIGEST_DOMAIN_V3.endsWith('\0'), true);
     assert.equal('text' in result.carrier.items[0], false);
     assert.equal(result.items[0].readableContent, 'beta');
   });
@@ -131,7 +164,7 @@ describe('MessageSelectionResolver admission', () => {
     const result = await resolver.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology' }],
+        items: [{ kind: 'quote', messageId: message.id, text: 'queue topology', renderedOccurrences: 1 }],
       },
       auth,
     );
@@ -140,7 +173,7 @@ describe('MessageSelectionResolver admission', () => {
     assert.equal(result.items[0].readableContent, 'queue topology');
     assert.equal(
       result.carrier.items[0].sourceProjectionSha256,
-      digestMessageBundleQuoteProjection('[图片: queue topology]'),
+      digestMessageBundleQuoteProjectionV3('[图片: queue topology]'),
     );
   });
 
@@ -154,6 +187,7 @@ describe('MessageSelectionResolver admission', () => {
             kind: 'quote',
             messageId: 'message-1',
             text: 'beta',
+            renderedOccurrences: 1,
             selectionStart: 0,
             selectionEnd: 4,
           },
@@ -169,7 +203,7 @@ describe('MessageSelectionResolver admission', () => {
     const rejected = await ambiguous.resolveForAdmission(
       {
         sourceThreadId: 'thread-source',
-        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta' }],
+        items: [{ kind: 'quote', messageId: 'message-1', text: 'beta', renderedOccurrences: 1 }],
       },
       auth,
     );
@@ -221,6 +255,107 @@ describe('MessageSelectionResolver admission', () => {
     );
 
     assert.equal(result.status, 'resolved');
+  });
+
+  it('resolves a visible scheduler-authored managed-hold receipt while rejecting other system rows', async () => {
+    const managedReceipt = makeMessage({
+      id: 'managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      content: '[定时任务] 持球唤醒（命令完成）',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody(),
+      source: {
+        connector: 'hold-ball',
+        label: '持球结果',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+      },
+    });
+    const genericScheduler = makeMessage({
+      id: 'generic-scheduler',
+      userId: 'scheduler',
+      catId: null,
+      content: 'internal scheduler notice',
+    });
+    const toolOnlySystem = makeMessage({
+      id: 'tool-only-system',
+      userId: 'system',
+      catId: 'system',
+      content: '',
+      contentBlocks: [{ type: 'tool_call', toolName: 'internal', toolId: 'tool-1', input: {} }],
+    });
+    const { resolver } = createResolver({ messages: [managedReceipt, genericScheduler, toolOnlySystem] });
+
+    const resolved = await resolver.resolveForAdmission(
+      {
+        sourceThreadId: 'thread-source',
+        items: [{ kind: 'message', messageId: managedReceipt.id }],
+      },
+      auth,
+    );
+    assert.equal(resolved.status, 'resolved');
+    assert.equal(resolved.items[0].readableContent, managedReceipt.content);
+
+    for (const denied of [genericScheduler, toolOnlySystem]) {
+      const result = await resolver.resolveForAdmission(
+        {
+          sourceThreadId: 'thread-source',
+          items: [{ kind: 'message', messageId: denied.id }],
+        },
+        auth,
+      );
+      assert.equal(result.status, 'invalid', `${denied.id} must stay fail-closed`);
+    }
+  });
+
+  it('fails closed for hidden, foreign-owner, and legacy ownerless managed-hold rows', async () => {
+    const managedSource = {
+      connector: 'hold-ball',
+      label: '持球结果',
+      icon: '🏓',
+      meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+    };
+    const hidden = makeMessage({
+      id: 'hidden-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody(),
+      extra: { scheduler: { hiddenTrigger: true } },
+      source: managedSource,
+    });
+    const foreignOwner = makeMessage({
+      id: 'foreign-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      content: 'owner-A command result',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueueCustody('user-owner'),
+      source: managedSource,
+    });
+    const ownerlessLegacy = makeMessage({
+      id: 'ownerless-managed-receipt',
+      userId: 'scheduler',
+      catId: null,
+      deliveryStatus: 'queued',
+      source: managedSource,
+    });
+    const { resolver } = createResolver({
+      thread: makeThread({ createdBy: 'system' }),
+      messages: [hidden, foreignOwner, ownerlessLegacy],
+    });
+
+    for (const denied of [hidden, foreignOwner, ownerlessLegacy]) {
+      const result = await resolver.resolveForAdmission(
+        {
+          sourceThreadId: 'thread-source',
+          items: [{ kind: 'message', messageId: denied.id }],
+        },
+        auth,
+      );
+      assert.equal(result.status, 'invalid', `${denied.id} must stay fail-closed`);
+    }
   });
 });
 

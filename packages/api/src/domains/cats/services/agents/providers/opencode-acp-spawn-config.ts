@@ -23,7 +23,6 @@ export interface OpenCodeAcpSpawnConfigOptions {
   clientId: string;
   providerName?: string | null;
   defaultModel?: string | null;
-  /** Invocation resolver output applied to the long-lived ACP process config. */
   account?: OpenCodeAcpSpawnAccount | null;
 }
 

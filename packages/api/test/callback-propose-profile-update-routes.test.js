@@ -141,7 +141,7 @@ describe('callback propose-profile-update route', () => {
     assert.equal(res.statusCode, 400);
   });
 
-  it('stale invocation → stale_ignored (no proposal created)', async () => {
+  it('replaced invocation → typed auth failure (no proposal created)', async () => {
     seedPrimer('OLD');
     const first = await registry.create('alice', 'opus', 'thread_1');
     await registry.create('alice', 'opus', 'thread_1'); // supersede first
@@ -160,8 +160,8 @@ describe('callback propose-profile-update route', () => {
         sourceMessageId: 'unused-for-stale-invocation',
       },
     });
-    assert.equal(res.statusCode, 200);
-    assert.equal(JSON.parse(res.body).status, 'stale_ignored');
+    assert.equal(res.statusCode, 401);
+    assert.equal(JSON.parse(res.body).reason, 'replaced');
   });
 
   it('idempotent on clientRequestId (same proposalId, deduped)', async () => {

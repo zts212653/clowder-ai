@@ -230,7 +230,7 @@ describe('Callback Bootcamp State', () => {
     assert.equal(after.bootcampState.phase, 'phase-1-intro');
   });
 
-  test('P2: ignores stale invocation (superseded by newer invocation)', async () => {
+  test('P2: rejects a replaced invocation (superseded by newer invocation)', async () => {
     const app = await createApp();
     const thread = await threadStore.create('user-1', '🎓 训练营');
     await threadStore.updateBootcampState(thread.id, {
@@ -255,9 +255,9 @@ describe('Callback Bootcamp State', () => {
       },
     });
 
-    assert.equal(response.statusCode, 200);
+    assert.equal(response.statusCode, 401);
     const body = JSON.parse(response.body);
-    assert.equal(body.status, 'stale_ignored');
+    assert.equal(body.reason, 'replaced');
 
     // Verify state was NOT modified
     const after = await threadStore.get(thread.id);

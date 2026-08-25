@@ -65,10 +65,31 @@ export function isolatedLiveGateProjectRoot(userDataDir) {
   return join(resolve(userDataDir), 'cat-cafe-host-root');
 }
 
+export async function verifyBoundDelivery({ adapter, conversationId, text, idempotencyKey }) {
+  const first = await adapter.append_message(conversationId, text, idempotencyKey);
+  const retry = await adapter.append_message(conversationId, text, idempotencyKey);
+  if (!first?.hostMessageId || retry?.hostMessageId !== first.hostMessageId) {
+    throw new Error('retry receipt did not match the first DOM-observed host message ID');
+  }
+  return {
+    hostMessageId: first.hostMessageId,
+    retryHostMessageId: retry.hostMessageId,
+  };
+}
+
 export async function verifyLiveDelivery({ adapter, conversationId, text, idempotencyKey, readActiveTabId }) {
   const activeTabBefore = await readActiveTabId();
-  if (!Number.isInteger(activeTabBefore)) throw new Error('active tab was not observable before delivery');
+  if (
+    !Number.isInteger(activeTabBefore) &&
+    !(typeof activeTabBefore === 'string' && activeTabBefore.length > 0 && activeTabBefore.length <= 200)
+  ) {
+    throw new Error('active tab was not observable before delivery');
+  }
   const first = await adapter.append_message(conversationId, text, idempotencyKey);
+  const activeTabBeforeRetry = await readActiveTabId();
+  if (activeTabBeforeRetry !== activeTabBefore) {
+    throw new Error('active tab changed before background delivery retry');
+  }
   const retry = await adapter.append_message(conversationId, text, idempotencyKey);
   if (!first?.hostMessageId || retry?.hostMessageId !== first.hostMessageId) {
     throw new Error('retry receipt did not match the first DOM-observed host message ID');

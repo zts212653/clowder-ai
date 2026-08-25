@@ -14,6 +14,9 @@ evalCat:
 # F245 PR2: 本家 3-day cadence — N-day infra landed.
 # Community default remains `weekly` in community eval-domains/ copies.
 frequency: every-3d
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 72
 sourceAdapter: f245-friction-rollup
 sourceRefsKind: friction-rollup-snapshot
 threadPolicy:

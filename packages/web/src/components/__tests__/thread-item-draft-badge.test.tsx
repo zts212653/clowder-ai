@@ -49,6 +49,7 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 
 vi.mock('@/components/ThreadSidebar/thread-utils', () => ({
   formatRelativeTime: () => '1分',
+  formatSidebarStatusTime: () => '1分',
 }));
 
 vi.mock('@/utils/api-client', () => ({
@@ -91,8 +92,6 @@ function typeInto(textarea: HTMLTextAreaElement, value: string) {
 
 function Host({ onSend }: { onSend: OnSend }) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
-  const thread1State = useChatStore((s) => s.getThreadState('thread-1'));
-  const thread2State = useChatStore((s) => s.getThreadState('thread-2'));
 
   return React.createElement(
     React.Fragment,
@@ -104,7 +103,9 @@ function Host({ onSend }: { onSend: OnSend }) {
       lastActiveAt: 1,
       isActive: currentThreadId === 'thread-1',
       onSelect: (id: string) => useChatStore.getState().setCurrentThread(id),
-      threadState: thread1State,
+      presence: { status: 'idle' },
+      unreadCount: 0,
+      hasUserMention: false,
     }),
     React.createElement(ThreadItem, {
       id: 'thread-2',
@@ -113,7 +114,9 @@ function Host({ onSend }: { onSend: OnSend }) {
       lastActiveAt: 1,
       isActive: currentThreadId === 'thread-2',
       onSelect: (id: string) => useChatStore.getState().setCurrentThread(id),
-      threadState: thread2State,
+      presence: { status: 'idle' },
+      unreadCount: 0,
+      hasUserMention: false,
     }),
     React.createElement(ChatInput, { key: currentThreadId, threadId: currentThreadId, onSend }),
   );
@@ -178,7 +181,10 @@ describe('ThreadItem draft badge', () => {
     return container.querySelector(`[data-thread-id="${threadId}"]`) as HTMLDivElement;
   }
 
-  it('shows draft badge from threadState.hasDraft', () => {
+  it('shows draft badge from the named local draft decoration', () => {
+    useChatStore.setState({
+      threadStates: { 'thread-1': { ...DEFAULT_THREAD_STATE, hasDraft: true } },
+    });
     act(() => {
       root.render(
         React.createElement(ThreadItem, {
@@ -188,7 +194,9 @@ describe('ThreadItem draft badge', () => {
           lastActiveAt: Date.now(),
           isActive: false,
           onSelect: vi.fn(),
-          threadState: { ...DEFAULT_THREAD_STATE, hasDraft: true },
+          presence: { status: 'idle' },
+          unreadCount: 0,
+          hasUserMention: false,
         }),
       );
     });

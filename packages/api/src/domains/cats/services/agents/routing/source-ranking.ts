@@ -1,8 +1,11 @@
+import { type ContextPresentation, mapToPresentation } from '../../session/context-presentation.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 
 export interface ThreadMeta {
   canonicalFeatureId?: string;
   threadTitle?: string;
+  /** Local artifact refs whose current existence was verified against the thread workspace. */
+  reachableArtifactRefs?: ReadonlySet<string>;
 }
 
 export interface RankedSource {
@@ -10,6 +13,10 @@ export interface RankedSource {
   ref: string;
   label: string;
   provenance: 'canonical' | 'regex' | 'recency';
+  /** Only exact current subjects may drive command-like 真相源 / 下一步 UI. */
+  directiveEligible: boolean;
+  /** Producer content revision used by the presentation identity. */
+  updatedAt?: number;
 }
 
 interface ActiveTask {
@@ -70,11 +77,23 @@ export function rankArtifactSources(
   const tier3: { source: RankedSource; updatedAt: number }[] = [];
 
   for (const a of ledger) {
-    const entry: RankedSource = { type: a.type, ref: a.ref, label: a.label, provenance };
+    const entry: RankedSource = {
+      type: a.type,
+      ref: a.ref,
+      label: a.label,
+      provenance,
+      directiveEligible: false,
+      updatedAt: a.updatedAt,
+    };
 
     if (matchedFeatureId && a.type === 'feature-doc' && extractFeatureIdFromRef(a.ref) === matchedFeatureId) {
+      entry.directiveEligible = provenance === 'canonical' && Boolean(threadMeta.reachableArtifactRefs?.has(a.ref));
       tier1.push(entry);
     } else if (a.type === 'pr' && activePrRefs.has(a.ref)) {
+      // An exact, unfinished pr_tracking subject is typed current state. It must not
+      // inherit regex/recency provenance from the surrounding thread metadata.
+      entry.provenance = 'canonical';
+      entry.directiveEligible = true;
       tier2.push(entry);
     } else {
       entry.provenance = 'recency';
@@ -84,4 +103,26 @@ export function rankArtifactSources(
 
   tier3.sort((a, b) => b.updatedAt - a.updatedAt);
   return [...tier1, ...tier2, ...tier3.map((t) => t.source)];
+}
+
+/**
+ * Turn ranking metadata into the canonical presentation contract.
+ *
+ * `directiveEligible` is only a producer observation. The mapper still owns the
+ * final ceiling: regex/recency sources are T2 even if a buggy caller flips the
+ * boolean, while a typed/current canonical source may become T0.
+ */
+export function projectRankedSource(source: RankedSource): ContextPresentation {
+  const isCurrentCanonical = source.provenance === 'canonical' && source.directiveEligible;
+  return mapToPresentation({
+    subjectKey: `artifact:${source.type}:${source.ref}`,
+    asOf: { kind: 'as_of', value: source.updatedAt ?? 0 },
+    sourceTier: isCurrentCanonical ? 'T0' : 'T2',
+    requested: isCurrentCanonical ? 'directive' : 'pointer',
+  });
+}
+
+/** Keep ranking useful for history while fail-closing command-like navigation through the mapper. */
+export function selectDirectiveSources(sources: readonly RankedSource[]): RankedSource[] {
+  return sources.filter((source) => projectRankedSource(source).presentation === 'directive');
 }

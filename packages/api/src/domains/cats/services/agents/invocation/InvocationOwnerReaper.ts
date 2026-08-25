@@ -221,9 +221,7 @@ export class InvocationOwnerReaper {
     );
     result.replacements += replacements.length;
 
-    const targetCats = probe.record?.targetCats.length
-      ? probe.record.targetCats
-      : ([...candidate.targetCats] as CatId[]);
+    const targetCats = [...new Set([...(probe.record?.targetCats ?? []), ...candidate.targetCats])];
     const zombie: ZombieRecord = {
       invocationId: candidate.executionId,
       catId: (targetCats[0] as CatId | undefined) ?? null,

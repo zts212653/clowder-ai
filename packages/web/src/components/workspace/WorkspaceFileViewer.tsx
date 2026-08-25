@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
-import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
 import { createQuoteContextAttachment } from '../chat-context-reference';
@@ -9,43 +8,9 @@ import { FileContentRenderer } from './FileContentRenderer';
 import { FileIcon } from './FileIcons';
 import { type MarkdownSelectionAction, useMarkdownSelectionAction } from './useMarkdownSelectionAction';
 import { useWorkspaceListenMode } from './useWorkspaceListenMode';
+import type { WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
+import { WorkspaceListenActions } from './WorkspaceListenActions';
 import { WorkspaceToolbarButton as ToolbarBtn } from './WorkspaceToolbarButton';
-
-interface WorkspaceFileViewerProps {
-  file: FileData;
-  openFilePath: string | null;
-  openTabs: string[];
-  canEdit: boolean;
-  editMode: boolean;
-  isMarkdown: boolean;
-  isHtml: boolean;
-  isJsx: boolean;
-  markdownRendered: boolean;
-  htmlPreview: boolean;
-  jsxPreview: boolean;
-  saveError: string | null;
-  scrollToLine: number | null;
-  worktreeId: string | null;
-  currentWorktree?: WorktreeEntry;
-  setOpenFile: (path: string) => void;
-  closeTab: (path: string) => void;
-  onCloseCurrentTab: () => void;
-  onToggleEdit: () => void;
-  onToggleMarkdownRendered: () => void;
-  onToggleHtmlPreview: () => void;
-  onToggleJsxPreview: () => void;
-  onSave: (content: string) => Promise<void>;
-  onDirtyChange?: (dirty: boolean) => void;
-  pendingExternalSha?: string | null;
-  onApplyExternalChange?: () => void;
-  onDismissExternalChange?: () => void;
-  revealInFinder: (path: string) => void;
-  onFocusMode?: () => void;
-  focusDisabled?: boolean;
-  restoreScrollTop?: number | null;
-  restoreKey?: string;
-  onScrollTopChange?: (scrollTop: number) => void;
-}
 
 const CloseIcon = () => (
   <svg
@@ -58,12 +23,6 @@ const CloseIcon = () => (
     aria-hidden="true"
   >
     <path d="M1 1l8 8M9 1l-8 8" />
-  </svg>
-);
-
-const PlayIcon = () => (
-  <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 12 14" fill="currentColor">
-    <path d="M1 1l10 6-10 6V1z" />
   </svg>
 );
 
@@ -224,18 +183,14 @@ export function WorkspaceFileViewer({
               </ToolbarBtn>
             )}
             {isMarkdown && markdownRendered && !editMode && (
-              <ToolbarBtn
+              <WorkspaceListenActions
                 active={listenMode.active}
-                activeClass="bg-cafe-accent text-[var(--cafe-accent-foreground)] hover:bg-cafe-interactive"
-                onClick={() => listenMode.start()}
-                title={listenMode.sentences.length > 0 ? '从上次位置开始听读' : '这份 Markdown 没有可听正文'}
-                disabled={listenMode.sentences.length === 0}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <PlayIcon />
-                  听读
-                </span>
-              </ToolbarBtn>
+                cache={listenMode.cache}
+                hasSentences={listenMode.sentences.length > 0}
+                onCancelCache={listenMode.cancelCache}
+                onStartCache={listenMode.startCache}
+                onStartListen={() => listenMode.start()}
+              />
             )}
             {isHtml && !editMode && (
               <ToolbarBtn

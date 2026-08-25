@@ -12,7 +12,7 @@ import {
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
 import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
 import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
-import type { LocalReviewEvidenceProvider } from './LocalReviewEvidenceProvider.js';
+import { type LocalReviewEvidenceProvider, parseLocalReviewEvidenceRef } from './LocalReviewEvidenceProvider.js';
 
 type TerminalResolution = {
   terminal: true;
@@ -37,7 +37,8 @@ export type ActionFreshnessResolution =
       holderThreadId?: string;
       tenantScope?: string;
     }
-  | { status: 'mismatch' | 'insufficient'; reason: string };
+  | { status: 'mismatch'; reason: string; evidenceRef: string }
+  | { status: 'insufficient'; reason: string };
 
 /**
  * Narrow snapshot of the PR tracking task that observed a HEAD SHA. Freshness
@@ -219,11 +220,14 @@ export class ActionSubjectTruthResolver {
         localFailure = { status: 'insufficient', reason: 'local review evidence resolver unavailable' };
       } else {
         for (const evidenceRef of localEvidenceRefs) {
+          const parsedEvidence = parseLocalReviewEvidenceRef(evidenceRef);
+          if (!parsedEvidence) {
+            localFailure = { status: 'mismatch', reason: 'local review evidence ref is malformed' };
+            continue;
+          }
           const localResolution = await this.localReviewEvidenceProvider.resolve({
-            evidenceRef,
+            messageId: parsedEvidence.messageId,
             leaseId: context.leaseId,
-            subjectRef: predicate.subjectRef,
-            headSha: predicate.headSha,
             generation: context.generation,
             reviewerCatId: context.catId,
             holderThreadId: context.holderThreadId,
@@ -232,6 +236,10 @@ export class ActionSubjectTruthResolver {
             tenantScope: context.tenantScope,
           });
           if (localResolution.status === 'verified') {
+            if (localResolution.evidenceRef !== evidenceRef) {
+              localFailure = { status: 'mismatch', reason: 'local review typed verdict does not match evidence ref' };
+              continue;
+            }
             const freshness = await this.resolveFreshness(predicate);
             if (freshness.status === 'verified') {
               return bindActionCompletionVerdict(
@@ -264,10 +272,16 @@ export class ActionSubjectTruthResolver {
     const capability = getActionTerminalCapabilityForPredicateKind(predicate.kind);
     if (capability.freshnessResolver === 'task_active_owner') {
       const taskId = taskIdFromSubject(predicate.subjectRef);
-      if (!taskId) return { status: 'mismatch', reason: 'task subject unavailable' };
+      if (!taskId) return { status: 'insufficient', reason: 'task subject unavailable' };
       const task = await this.taskActionTruthProvider?.get(taskId);
       if (!task) return { status: 'insufficient', reason: 'task unavailable' };
-      if (task.status === 'done') return { status: 'mismatch', reason: 'task is already done' };
+      if (task.status === 'done') {
+        return {
+          status: 'mismatch',
+          reason: 'task is already done',
+          evidenceRef: taskEvidenceRef(task, 'done'),
+        };
+      }
       if (!task.ownerCatId) return { status: 'insufficient', reason: 'task has no named owner' };
       if (!task.userId) return { status: 'insufficient', reason: 'task has no tenant owner' };
       return {
@@ -283,12 +297,30 @@ export class ActionSubjectTruthResolver {
       throw new Error(`unsupported action freshness resolver: ${capability.freshnessResolver}`);
     }
     const projection = await this.communityStore.get(predicate.subjectRef);
+    const projectionIsTerminal =
+      projection?.type === 'pr' &&
+      (projection.state === 'fixed' ||
+        projection.state === 'reported' ||
+        projection.state === 'closed' ||
+        projection.state === 'declined' ||
+        projection.externalReview?.lifecycle === 'terminal');
+    if (projectionIsTerminal) {
+      return {
+        status: 'mismatch',
+        reason: 'PR is already terminal',
+        evidenceRef: `community:${predicate.subjectRef}:${projection.state}:${projection.updatedAt}`,
+      };
+    }
     const communityHead = projection?.externalReview?.currentHeadSha;
 
     // Primary source: community projection (ExternalReviewCoordinator → case.head_observed)
     if (communityHead) {
       if (communityHead !== predicate.headSha) {
-        return { status: 'mismatch', reason: 'predicate HEAD is not the server-observed current HEAD' };
+        return {
+          status: 'mismatch',
+          reason: 'predicate HEAD is not the server-observed current HEAD',
+          evidenceRef: `community:${predicate.subjectRef}:head:${communityHead}`,
+        };
       }
       return {
         status: 'verified',
@@ -304,7 +336,11 @@ export class ActionSubjectTruthResolver {
       const trackingHead = durableTrackingHead(await this.trackingFreshnessProvider.getBySubject(predicate.subjectRef));
       if (trackingHead) {
         if (trackingHead !== predicate.headSha) {
-          return { status: 'mismatch', reason: 'predicate HEAD is not the tracking-observed current HEAD' };
+          return {
+            status: 'mismatch',
+            reason: 'predicate HEAD is not the tracking-observed current HEAD',
+            evidenceRef: `tracking:${predicate.subjectRef}:head:${trackingHead}`,
+          };
         }
         return {
           status: 'verified',

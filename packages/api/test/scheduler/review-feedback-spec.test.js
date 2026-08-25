@@ -51,6 +51,45 @@ function options(taskStore, router, overrides = {}) {
 }
 
 describe('review scheduler F280 adapter', () => {
+  test('finishes routing after a persisted cursor even when cancellation arrives at the commit boundary', async () => {
+    const taskStore = new TaskStore();
+    const task = await createTracked(taskStore);
+    const controller = new AbortController();
+    const events = [];
+    const spec = createReviewFeedbackTaskSpec(
+      options(taskStore, {
+        route: async () => {
+          events.push('routed');
+          return { kind: 'skipped', reason: 'test' };
+        },
+      }),
+    );
+
+    await spec.run
+      .execute(
+        {
+          repairedTask: task,
+          repoFullName: 'owner/repo',
+          prNumber: 7,
+          newComments: [],
+          newDecisions: [],
+          headSha: 'aaa',
+          inlineCommentCursor: 10,
+          conversationCommentCursor: 20,
+          decisionCursor: 31,
+          commitCursor: async () => {
+            events.push('cursor-persisted');
+            controller.abort(new Error('scheduler timeout'));
+          },
+        },
+        task.subjectKey,
+        { assignedCatId: null, signal: controller.signal },
+      )
+      .catch(() => {});
+
+    assert.deepEqual(events, ['cursor-persisted', 'routed']);
+  });
+
   test('current facts are evaluated even when no raw source body is deliverable', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);
