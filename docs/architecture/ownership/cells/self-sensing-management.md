@@ -3,14 +3,14 @@ cell_id: self-sensing-management
 title: Self-Sensing / Self-Management
 doc_kind: architecture
 created: 2026-08-25
-summary: F300-owned evidence admission, operational/capability-state interpretation, authority-bounded management/proposal policy, episode coordination, and feedback semantics across existing capability and interaction owners.
+summary: F300-owned provider-neutral member/environment state projections, member-private and team-shared visibility semantics, and authority-bounded self-management policy over existing domain owners.
 canonical_features: [F300]
 code_anchors: []
 doc_anchors:
   - docs/features/F300-self-sensing-home-state-awareness.md
-static_scan_hints: [HomeStateDeltaV1, HomeStateSnapshot, InteractionEpisode, capability-match, friction-evidence, affects_current_obligation, affects_next_side_effect, first-successful-action]
+static_scan_hints: [SelfStateProjection, MemberSelfView, MemberPublicProjection, TeamSharedView, EnvironmentStateView, HomeStateDeltaV1, affects_current_obligation, affects_next_side_effect]
 cited_by:
-  - {feature: F300, date: 2026-08-25, delta: "new architecture-truth cell before runtime implementation; source facts, delivery, execution, authorization, and surface rendering stay with adjacent owners"}
+  - {feature: F300, date: 2026-08-25, delta: "provider-neutral self/team/environment sensing contract before runtime implementation; all source facts and mutations stay with adjacent owners"}
 ---
 
 # Self-Sensing / Self-Management
@@ -19,115 +19,165 @@ Architecture cell: self-sensing-management
 
 ## Canonical Owner
 
-F300 owns the policy that turns bounded, provenance-bearing capability,
-operational-state, availability, and user-friction evidence into one governed
-Interaction Episode.
-That policy includes evidence admission and relevance, multi-axis operational and
-capability-state interpretation, in-envelope management decisions,
-friction-to-capability matching, proposal and user-decision stage semantics,
-receipt-gated episode transitions, and the feedback meanings
-`retained | edited | dismissed | reverted`.
+F300 owns the semantics through which an Agent forms a grounded working model of:
+
+- itself: identity, capability and limits, activity and responsibility,
+  availability, memory/context, authority and health;
+- team-shareable member state: who can collaborate, who is working, what
+  obligation or public result is current, and which limitations are safe to
+  disclose;
+- the shared environment: threads, artifacts, knowledge surfaces, capability
+  providers, runtime resources and other team-usable objects.
+
+F300 defines two visibility planes:
+
+1. MemberSelfView, available only to the exact member under the source owners'
+   authority rules;
+2. TeamSharedView, composed of MemberPublicProjection and EnvironmentStateView.
+
+It also owns the policy that compares those projections with a current
+obligation, chooses an authority-bounded management intent, calls the canonical
+owner, verifies its receipt/terminal, and then refreshes the projections.
 
 This cell currently registers architecture truth only. F300 has no runtime code
-anchors at `origin/main@dd86a802`; later phases must add their concrete anchors as
-they land. The absence of code is not permission to infer state from model
-introspection, UI visibility, a plugin manifest, or a stale message.
+anchors at origin/main@dd86a802. The absence of code is not permission to
+infer state from model introspection, chat summaries, UI visibility, plugin
+manifests, or stale success.
+
+## What F300 Unifies
+
+F300 unifies the **projection vocabulary and management loop**, not the domain
+stores or mutation APIs. A projection identifies:
+
+- a subject (member, capability, obligation, thread, memory, context, resource);
+- a facet (identity, capability, activity, availability, memory_context,
+  authority, health);
+- visibility (member_private or team_shared);
+- canonical source refs, revision, observation time, expiry/invalidators and
+  known, unknown, stale, conflicted or unavailable.
+
+The projection may reference an owner-held value. It does not copy raw messages,
+memory/context bodies, plugin ledgers, thread records, credentials or runtime
+state into an F300 shadow store.
 
 ## Adjacent Ownership Boundaries
 
-- `plugin` owns plugin/package discovery, installation, configuration, grants,
-  Host Broker/runtime readiness, audit, mutation commands, and their receipts.
-  F300 consumes those facts and receipts; it does not copy their ledger or gain
-  a second mutation path.
-- F223 / `hub-action-surface` owns the capability-surface registry and typed
-  first-party Hub presentation actions. F300 may select an appropriate surface
-  for an episode, but a rendered surface is not capability, authority, readiness,
-  or effectiveness truth.
-- F283 retains the frozen experience-runtime hypothesis for resolving runtime
-  objects and judgment points into UI states. If that work resumes, it consumes
-  F300 episode/capability refs; it does not own the episode policy.
-- `routing-context` and F293 own route/preflight truth. F300 may require an
-  authoritative preflight before a relevant side effect, but cannot rewrite the
-  route owner or derive availability from a previous attempt.
-- F296 owns context epoch, presentation, dedupe, and provider-minted receipt.
-  F300 owns whether a delta is relevant to the current obligation; it does not
-  create a second delivery channel or equate persistence with model visibility.
-- F233, F220, F153, and runtime-specific domains retain custody,
-  execution/liveness, health, and recovery truth. F299 retains durable
-  request-generation and trajectory evidence. F300 references their source IDs
-  and freshness; it does not absorb their state machines.
-- Authority owners execute installation, configuration, permission, and external
-  side effects. F300 may form an authority envelope and route an approved intent,
-  but only the owning domain's receipt may advance an execution-dependent stage.
+- identity-session, membership and thread owners retain member identity,
+  membership, session and collaboration-space lifecycle. F300 creates scoped
+  views over those facts; it does not create/delete members or threads.
+- Agent Client, TurnExecution/InvocationRecord and execution owners retain exact
+  run, Stop, terminal, liveness and recovery truth. F300 may project that a
+  member no longer runs an obligation; it never invents a generic cat_stopped
+  terminal.
+- F233 and structured protocol owners retain custody, obligation, generation,
+  predecessor and responsibility disposition. F300 does not infer holder or
+  responsibility completion from History presentation.
+- memory and context/session owners retain content, access, coverage, retention,
+  compaction, retrieval and budget truth. F296 retains presentation, epoch,
+  dedupe and provider-minted visibility receipt. F300 exposes only an
+  authority-filtered access/coverage/freshness/limit projection.
+- plugin owns plugin/package discovery, installation, configuration, grants,
+  Host Broker/runtime readiness, audit, mutation commands and receipts. A plugin
+  is one capability provider; F300 does not make non-plugin capabilities pass
+  through Plugin Manager.
+- F223 / hub-action-surface retains capability-surface and verification
+  registration. F300 associates those entries with provider-neutral capability
+  identities; a rendered surface or registered tool is not readiness truth.
+- routing-context, F293, F153 and runtime/quota owners retain route, health,
+  availability and resource truth. F300 consumes freshness-aware reads at
+  judgment points.
+- message/history/delivery owners retain public result and dispatch projections.
+  F300 decides whether a state projection is relevant; it does not create a
+  second delivery channel or equate persistence with model visibility.
+- Dynamic Interaction and other surfaces consume F300 projections. An
+  Interaction Episode is an optional higher-level consumer, not the canonical
+  self-state object.
+- All authority owners retain installation, configuration, permission, thread,
+  memory, runtime and external-side-effect mutations. F300 routes intents and
+  consumes receipts; it gains no universal write authority.
 
 ## Durable Invariants
 
-1. Every sensing claim names a canonical source, observation time, freshness or
-   invalidator, and scope. `unknown`, `stale`, and `conflicted` remain first-class.
-2. `installed`, `configured`, `authorized`, `ready`, `applicable`, and
-   `effective` are distinct axes; no UI, manifest, registry entry, or prior
-   success may collapse them into one `enabled` claim.
-3. Routine recovery, rerouting, degradation, or safe stop may proceed without a
-   new confirmation only inside an existing policy/scope/budget envelope. Any
-   new authority, wider data/effect scope, durable preference change, or value
-   choice requires a rejectable proposal and explicit user decision.
-4. No episode crosses an execution stage without the canonical owner's receipt;
-   an in-envelope action intent cannot silently widen its authority.
-5. A proposal, install, render, or tool registration is not a successful
-   outcome. `first-successful-action` plus later friction evidence determine
-   whether the change is retained, edited, dismissed, or reverted.
-6. F300 stores orchestration refs and policy state only. Source-domain facts,
-   user-visible message bodies, plugin lifecycle, delivery custody, and surface
-   state remain single-owned by their existing cells.
+1. Every projection names a canonical source, subject, facet, visibility,
+   revision, observation time, freshness/invalidator and scope. Unknown, stale,
+   conflicted and unavailable remain first-class.
+2. member_private facts never enter team_shared merely because they are useful.
+   Sharing requires an owner-approved public projection and receiver authority.
+3. team_shared means queryable/subscribable within team scope, not broadcast
+   into every Agent prompt. Relevance and context budget still apply.
+4. An action request, its canonical receipt/terminal and a derived state
+   projection are distinct. F300 cannot manufacture the latter to compensate
+   for a missing owner result.
+5. A Stop/cancel projection is scoped to the exact run or obligation. It cannot
+   mark a member permanently unavailable or contaminate a newer run.
+6. Capability identity is provider-neutral. Builtin/member-native,
+   memory/context, thread/workspace, plugin, limb/tool, remote and composite
+   providers are peers; plugin lifecycle is not capability truth for all of
+   them.
+7. Provisioning, configuration, authority, readiness, applicability,
+   effectiveness and visibility stay separate. No enabled boolean, UI,
+   manifest, registration or prior success may collapse them.
+8. Routine recovery, rerouting, degradation or safe stop may proceed without a
+   new confirmation only inside an existing policy/scope/budget envelope. New
+   authority, wider data/effect scope, irreversible action, durable preference
+   or value choice requires explicit user decision.
+9. No mutation-dependent projection advances without the canonical owner's
+   receipt/terminal. F300 caches references and policy state only; it does not
+   become a second writer.
+10. Memory/context awareness never authorizes storage of chain-of-thought,
+    credentials, unbounded raw context or another owner's private contents.
 
 ## Use This When
 
-- Adding or changing `HomeStateDeltaV1`, `HomeStateSnapshot`, a capability graph
-  projection, friction evidence admission, capability matching, or Interaction
-  Episode transitions.
-- Deciding whether a capability or availability fact is relevant to the current
-  obligation or next side effect.
-- Coordinating either an in-envelope management action or a rejectable proposal,
-  then owner command/receipt, interaction adaptation, first use, and feedback as
-  one auditable episode.
-- Auditing a claim that an Agent “knows what it can do” or “managed itself” and
-  determining which canonical facts and authority receipts actually support it.
+- Adding or changing SelfStateProjection, MemberSelfView,
+  MemberPublicProjection, TeamSharedView or EnvironmentStateView.
+- Making an Agent answer “what can I do, what am I doing, what did I do, what
+  do I remember, what is missing, and what does the team environment offer?”
+- Projecting a member's public activity/availability after exact execution,
+  Stop, terminal, restart or responsibility changes.
+- Reflecting thread creation, capability activation, plugin removal,
+  memory/context degradation or shared-resource changes into Agent judgment.
+- Deciding whether the Agent may manage a state within existing authority or
+  must form a rejectable proposal.
 
 ## Extend By
 
-- Add typed read projections over existing owner APIs; do not enumerate UI,
-  parse prompt prose, or introduce a central shadow copy of household state.
-- Carry source refs, freshness, scope, uncertainty, authority decision, and owner
-  receipt through every episode transition.
-- Bind user configuration and interaction preference to stable capability
-  identity while keeping provider lifecycle and migration checks with their
-  canonical owners.
-- Add a surface adapter only after the episode contract can express why the
-  surface is relevant and which stable route lets the user recall, edit, or
-  revert it.
-- Update `code_anchors`, consumer evidence, and claim guards in the same change
+- Add typed read adapters over canonical owner APIs. Do not enumerate UI or parse
+  prompt prose to discover household state.
+- Keep member-private and team-shared schemas explicit; test every new facet for
+  disclosure and authority boundaries.
+- Carry source refs, revision, freshness, uncertainty and invalidators through
+  projection delivery and cache invalidation.
+- Validate the abstraction with heterogeneous slices: exact Agent Stop, thread
+  lifecycle, plugin/provider change and memory/context change.
+- Use owner command + receipt for management, then re-read the actual state
+  rather than treating command acceptance as completion.
+- Update code_anchors, consumer evidence and claim guards in the same change
   that lands each runtime phase.
 
 ## Do NOT Unify With
 
-- Do not turn F300 into a second Plugin Manager, capability registry, route
-  store, delivery ledger, permission center, runtime supervisor, telemetry
-  platform, or UI state machine.
+- Do not turn F300 into a household state database, second Plugin Manager,
+  second memory/context store, thread registry, route store, delivery ledger,
+  permission center, runtime supervisor, telemetry platform or universal
+  mutation controller.
+- Do not expose member-private memory/context bodies, credentials, internal
+  reasoning, unpublished drafts or unrelated user data through team state.
+- Do not model shared state as all-member prompt broadcast.
 - Do not infer readiness from installation, availability from a previous call,
-  user need from catalog presence, or effectiveness from exposure/click/install
-  counts.
-- Do not auto-install, auto-authorize, widen scope, or perform external effects
-  because the Agent formed a high-confidence hypothesis.
-- Do not build an unbounded monitoring or user-profile pipeline. Friction evidence
-  is task-scoped, provenance-bearing, and subject to explicit retention owners.
-- Do not require Dynamic UI for the episode; conversation, CLI, voice, and future
-  surfaces must project the same capability, authority, and receipt truth.
+  responsibility completion from a public bubble, or capability from catalog
+  presence.
+- Do not auto-install, auto-authorize, widen scope or perform irreversible or
+  external effects because an Agent formed a high-confidence hypothesis.
+- Do not require Dynamic UI or an Interaction Episode; conversation, CLI, voice
+  and future surfaces must consume the same state and authority truth.
 
 ## Static Scan Hints
 
-Watch for `HomeStateDeltaV1`, `HomeStateSnapshot`, `InteractionEpisode`,
-`capability-match`, `friction-evidence`, `affects_current_obligation`,
-`affects_next_side_effect`, `first-successful-action`, or any new store/controller
-that combines plugin, route, custody, delivery, authority, or surface truth. New
-runtime anchors require an ownership-map update and a claim guard proving that
-adjacent canonical owners were consumed rather than copied.
+Watch for SelfStateProjection, MemberSelfView, MemberPublicProjection,
+TeamSharedView, EnvironmentStateView, HomeStateDeltaV1,
+affects_current_obligation, affects_next_side_effect, or any new store that
+combines identity, execution, custody, memory/context, plugin, thread, delivery,
+authority or surface truth. New runtime anchors require an ownership-map update
+and a claim guard proving that adjacent canonical owners were read rather than
+copied.

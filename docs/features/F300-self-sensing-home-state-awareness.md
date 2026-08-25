@@ -1,408 +1,408 @@
 ---
 feature_ids: [F300]
 related_features: [F153, F220, F223, F233, F293, F296, F298, F299]
-topics: [self-sensing, self-management, capability, operational-state, availability, user-friction, interaction-adaptation, plugin-management, feedback-loop]
+topics: [self-sensing, self-management, member-state, team-state, environment-state, capability, memory, context, availability, plugin-management]
 doc_kind: spec
 created: 2026-08-17
-description: "成熟 Agent 如何有依据地感知自己能做什么、不能做什么与当前运行状态，在权限边界内自我管理，并让用户退出能力发现、状态轮询和日常运维席位"
+description: "成长型 Agent 如何有依据地认识自己、其他成员的公开状态与团队环境，在权限边界内管理自身能力和运行状态"
 description_source: human
 description_author: lang
-description_updated_at: 2026-08-25T03:28:54Z
+description_updated_at: 2026-08-25T04:06:00Z
 ---
 
-# F300: Agent Self-Sensing & Self-Management — 成熟 Agent 的自感知与自管理
+# F300: Agent Self-Sensing & Self-Management — 成长型协作伙伴的自我与团队环境认知
 
-> **Status**: spec（总体架构已刷新；运行时实现尚未开始） | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
+> **Status**: spec（概念重新校准；运行时实现尚未开始） | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
 >
 > **Baseline**: `origin/main@dd86a802`（2026-08-25） | **本次变更**: 只刷新概念、边界、现状与分阶段路线，不实现运行时代码
 
-- **operator signoff**: 2026-08-16/17 确认“运行过程中可感知家里整个系统，不是黑盒”；2026-08-25 确认 F300 应描述 Self-Sensing / Self-Management 全貌，按阶段实现，并澄清与插件管理的重合
-- **operator direction（`0001787628299553-000287-d2731687`）**: 成熟 Agent 应自行感知能做什么、不能做什么、当前运行到哪里与出了什么问题，并管理自己的能力和运行状态；用户不应承担能力发现、状态追问和日常运维。F300 尚无对应 runtime 实现，因此总体合同可以重写，原 Home-State 内容只保留为一个实现切片
-- **Canonical product narrative**: 本文的[总体概念](#1-总体概念)、[系统边界](#3-系统边界f300插件管理与-dynamic-interaction-各管什么)与[分阶段路线](#5-分阶段实现路线)
-- **Publishing provenance（非规范源）**: 本次刷新逐段核对外部 publishing archive `longform-008-self-sensing-agent-interaction-v3.md` 与 `assets/dynamic-ui/agent-proposal-loop.svg`（archive commit `ffc81c4b8b10abb6059eb3572d7ffb3f99f46c17`）。该 archive 没有可解析 remote URL，因此不再把本机文件名冒充链接；仓内可访问、可审阅的规范叙事以本文及 ownership cell 为准
+- **operator direction（`0001787628299553-000287-d2731687`）**: 成熟 Agent 应自行感知能做什么、不能做什么、当前运行到哪里与出了什么问题；用户不应承担能力发现、状态追问和日常运维。F300 尚无对应 runtime 实现，因此总体合同可以重写，原 Home-State 内容只保留为一个实现切片。
+- **operator correction（`0001787630815635-000364-84224743`）**: F300 最关心的是 Agent 自身能力与状态边界的统一抽象；Plugin 只覆盖插件式 provider，memory、context、thread、成员运行等大量能力并不是插件。Self-Sensing / Self-Management 必须同时包含成员自己的私有认知，以及所有成员可用的团队共享认知，让成长型协作伙伴知道自己具有什么、做过什么、能做什么，也知道团队环境里有什么可用。
+- **design reference**: PR [#1356](https://github.com/zts212653/clowder-ai/pull/1356) exact HEAD [`5ebc9058a`](https://github.com/zts212653/clowder-ai/blob/5ebc9058a83ab0293716c26feed30cb561e669f0/docs/architecture/message-delivery-handling-handoff-audit.md) 提供 Stop Agent、exact Agent Client、terminal、Active Run 与公开投影的 owner 边界。它仍是 open RFC，且明确有三项产品语义等待 maintainer/product decision；F300 不把它冒充 `main` 已实现事实，只复用“动作、canonical terminal、共享投影必须分层”的设计原则。
+- **Canonical product narrative**: 本文的[两种可见性平面](#1-两种可见性平面成员自己的与团队共享的)、[统一状态模型](#2-统一的-member--environment-state-model)与[分阶段路线](#6-分阶段实现路线)
 
 ## Architecture Ownership & Delta Evidence
 
-Architecture cell: `self-sensing-management`（相邻：`plugin`、`hub-action-surface`、`routing-context`、`identity-session`）
+Architecture cell: `self-sensing-management`（相邻：`plugin`、`routing-context`、`identity-session`、`dispatch`、`message-history`）
 
-Map delta: new cell required → 新增 [`self-sensing-management`](../architecture/ownership/cells/self-sensing-management.md)，并更新 [`plugin`](../architecture/ownership/cells/plugin.md) 的 F300 shared touchpoint
+Map delta: 更新 [`self-sensing-management`](../architecture/ownership/cells/self-sensing-management.md) 的 canonical contract，并保持 [`plugin`](../architecture/ownership/cells/plugin.md) 仅为 provider/lifecycle owner。
 
-Why: F300 现在拥有 evidence-to-management policy、operational/capability-state interpretation 与 Interaction Episode 阶段语义；plugin lifecycle/runtime、route、delivery、authority execution 和 surface rendering 仍由相邻 owner 持有。
+Why: F300 拥有 provider-neutral 的 Member/Environment State Model、私有与团队共享投影语义，以及从 grounded state 到 authority-bounded management 的协调政策；每个事实和动作仍由原 canonical domain 持有。
 
-Canonical source: [`self-sensing-management#canonical-owner`](../architecture/ownership/cells/self-sensing-management.md#canonical-owner)；[`plugin#canonical-owner`](../architecture/ownership/cells/plugin.md#canonical-owner)；本文[四层责任模型](#31-四层责任模型)
+Consumer evidence: `rg -n 'MemberSelfView|TeamSharedView|EnvironmentStateView|SelfStateProjection' packages -g '*.{ts,tsx,mjs}'` 在 `origin/main@dd86a802` 无匹配，因此当前没有 F300 runtime consumer。
 
-Consumer evidence: `rg -n 'HomeStateDeltaV1|HomeStateSnapshot|InteractionEpisode|affects_current_obligation|affects_next_side_effect' packages -g '*.{ts,tsx,mjs}'` 在 `origin/main@dd86a802` 无匹配，因此当前没有可列举的 runtime consumer；未来 consumers 只存在于本文 Phase 1–5 的未勾 AC，代码 callsite scan 在实现落地前无法表达它们。
-
-Claim guard: “Phase 0 只有架构真相、runtime 尚未实现，且 ownership map 与 feature registration 同步” → `! rg -n 'HomeStateDeltaV1|HomeStateSnapshot|InteractionEpisode|affects_current_obligation|affects_next_side_effect' packages -g '*.{ts,tsx,mjs}'` + `node docs/architecture/ownership/generate-readme.mjs && git diff --exit-code docs/architecture/ownership/README.md` + `node scripts/check-feature-truth.mjs`；出现 runtime symbol 却未更新本节、生成 map 变脏或 feature truth 失配即 red。
+Claim guard: “F300 只有架构真相、runtime 尚未实现，且没有复制相邻 owner 状态” → runtime symbol absence + ownership generator clean + feature truth check；出现 symbol 却未登记 owner/callsite，或出现跨 plugin/memory/context/thread/runtime 的中心影子账本即 red。
 
 ## 一句话定义
 
-**Self-Sensing** 是成熟 Agent 对“我能做什么、不能做什么、此刻运行到哪里、哪里异常、当前协作哪里产生了摩擦”的有依据认知；**Self-Management** 是它在权限边界内据此选择下一步、恢复或调整自身，并只在需要价值判断或授权时把决定交给用户的治理闭环。
+**Self-Sensing** 是 Agent 对“我是谁、我有什么、我在做什么、我做过什么、我能做与不能做什么”以及“团队成员和共享环境现在提供什么”的有依据认知；**Self-Management** 是它在既有权限内据此管理自己的能力、责任和运行状态，并把需要新增授权或价值判断的决定交给用户。
 
-目标不是让 Agent 永不求助，而是让用户退出 Agent 的能力目录、运行监控与日常运维席位。它不是 Agent 自己给自己扩权，也不是一个更大的插件管理器。
+F300 的目标不是一张更大的状态页，也不是让一只猫收到更多广播。它要让每个成员拥有一份持续更新、分清私有与共享、能指回 canonical owner 的工作模型，从而成为会认识自己、理解团队环境并能自我调整的成长型协作伙伴。
 
-## Why：用户不应充当 Agent 的监控器、能力目录与运行管理员
+## Why：成长型伙伴不能靠用户充当外置自我意识
 
-用户把目标交给 Agent，不等于接管 Agent 的内部运维。可在当前系统里，关键事实、能力和界面分散在 custody、route、plugin runtime、limb registry 与各类 surface；Agent 往往只能在动作失败后拼出局部真相，甚至要等用户把变化重新告诉它。
+当前系统已经有很多局部真相：Agent Client 知道 exact run，custody 知道责任，Plugin Manager 知道插件生命周期，memory/context owner 知道可访问范围，thread owner 知道协作空间，runtime owner 知道健康与资源。但这些事实没有形成 Agent 可查询、可解释、可用于决策的统一认知。
 
-这让本应由 Agent 承担的工作倒置给了用户：
+结果是本应由 Agent 承担的工作倒置给了用户：
 
 | 用户被迫承担的工作 | 成熟 Agent 应承担的责任 |
 |--------------------|------------------------|
-| 反复追问“你跑到哪儿了” | 知道当前 obligation、阶段、最近进展、阻塞点与下一判断点，并在相关变化时主动解释 |
-| 先发现“你出问题了”再回来报错 | 感知失败、降级、依赖异常与状态冲突，给出证据、影响范围和可执行恢复路径 |
-| 逐项询问或偶然发现“你还能做什么” | 维护有边界、有来源、带当前可用性的能力认知，同时明确自己不能做什么 |
-| 替 Agent 管理安装、额度、运行节点和交互方式 | 在既有权限内自行选择、组合、恢复或降级；只有新增授权、外部副作用或价值取舍才交给用户 |
+| 反复问“你现在跑到哪儿了、是不是停了” | 知道自己的 exact obligation、活动状态、最近结果、阻塞与下一判断点 |
+| 先发现某个成员已经停止，再提醒其他成员 | 从共享成员投影知道谁可用、谁在工作、谁已终局，不向已失效运行继续交付 |
+| 偶然发现“原来你有/没有这项能力” | 认识自身能力、限制、authority、当前 readiness 与替代 provider |
+| 替 Agent 记住 memory/context 是否存在、够不够、还新不新 | 知道自己可访问哪些记忆与上下文、覆盖范围、预算、freshness 和缺口 |
+| 替团队盘点有哪些 thread、工具、插件、成员和共享资源 | 读取团队环境的可用对象、能力、状态和边界 |
+| 替 Agent 安装、启停、恢复或降级 | 在已有 authority 内调用 owner 完成管理并核对 receipt；需要扩权时再提案 |
 
-因此，F300 不是“增加一张状态快照”，而是为 Agent 建立一份持续更新、可追溯的 grounded self-model：它既包含能力与限制，也包含当前执行、依赖、授权、资源、健康和不确定性；它还能把这些事实变成权限内的自我调整、必要时的用户提案，以及完成后的验证和反馈。
+这不是“让 Agent 看见所有东西”。真正的团队里，成员既有只有自己可见的工作记忆和局部状态，也有团队共同依赖的公开状态。F300 必须把两者分开，否则不是泄漏私有认知，就是让协作伙伴互相成为黑盒。
 
-> 成熟 Agent 应该自己知道“我能不能做、现在做到哪、哪里出了问题、接下来该怎么处理”；用户只负责目标、价值选择与必要授权，而不是替 Agent 发现能力、轮询状态、诊断内部故障。
+## 1. 两种可见性平面：成员自己的与团队共享的
 
-先前的取消感知、猫粮拓扑和语音 readiness 三例，证明的是这个总体问题确实存在。它们是路线中的首批实现切片与验收场景，不是 F300 的概念边界。
+### 1.1 Member Self View：成员自己的自我模型
 
-## 1. 总体概念
+每个 Agent 对自己的认知可以比团队共享投影更细，但仍必须来自 owner truth，而不是模型凭感觉自报：
 
-### 1.1 Self-Sensing：三类感知，不是无界监控
+| Facet | 成员需要知道什么 | 典型事实来源 |
+|-------|------------------|--------------|
+| Identity & membership | 我是谁、属于哪个家庭/团队/线程、当前角色和责任边界 | identity/session、membership、thread owners |
+| Capability & limits | 我会什么、不会什么、有哪些 provider、输入输出与风险边界 | builtin contracts、F223、plugin/limb/tool owners |
+| Activity & responsibility | 我正在做什么、接过什么、完成/失败/取消了什么、下一责任是什么 | obligation/custody、InvocationRecord、TurnExecution、F299 trajectory |
+| Availability & health | 当前是否可运行，依赖、route、quota、runtime 是否满足 | execution/liveness、route/preflight、runtime/quota owners |
+| Memory & context | 我能访问哪些记忆/上下文，覆盖到哪里、是否 compact/stale、还缺什么 | memory owner、context/session owner、F296 presentation receipt |
+| Authority & policy | 我能自行采取哪些动作，哪些需要新增授权或价值判断 | grants/policy/authority owners |
 
-| 感知维度 | 回答的问题 | 事实来源 | 不允许的替代物 |
-|----------|------------|----------|----------------|
-| **Self-Capability Management** | 我具备哪些能力、明确不具备哪些能力？边界、输入输出、风险、提供者是什么？ | capability contract、F223 surface registry、builtin/plugin/tool provider manifest | “界面上有按钮”“工具名存在” |
-| **Self-Operational State & Availability** | 我当前在做什么、进展到哪里、是否阻塞或降级？所需能力与依赖此刻是否真的可用？ | obligation/custody、execution/liveness、plugin/runtime、limb readiness、route/quota、runtime health | 安装成功、manifest 声明、旧缓存或一句“正在处理”单独充当当前状态 |
-| **User-Friction Sense** | 用户此刻在哪个任务、动作或交互上遇到了可观察阻力？ | 当前对话、失败/重试/取消、显式反馈、受范围约束的 interaction evidence | 持续监视、人格画像、跨场景臆测意图 |
+“成员自己的”不等于把 chain-of-thought、凭据或无界原始数据存成 F300 资产。F300 只定义可用于任务判断的 typed view；内容读取、保留、压缩和权限继续归 memory/context owner。
 
-三类感知必须保持证据来源、观察时间、新鲜度和不确定性。`unknown`、`stale`、`conflicted` 都是一等状态；系统不能为了“显得聪明”把缺失事实补成确定结论。
+### 1.2 Team Shared View：所有成员可依赖的团队认知
 
-Self-Sensing 也不是把全家的全部状态广播给每只猫。它只在当前 obligation、下一次副作用或用户明确查看时，投影与该判断相关的最小事实。
+团队共享平面包含两类东西：
 
-### 1.2 Self-Management：既能自行处理，也知道何时必须问用户
+1. **Member Public Projection**：成员身份、可协作能力、当前 availability、公开 obligation/活动阶段、已发布结果与显式阻塞；
+2. **Environment State View**：团队空间中可用的 thread、共享 artifact、memory/knowledge surface、builtin/plugin/limb/tool、connector、runtime、额度与其他资源。
 
-Self-Management 产生三个彼此耦合的结果：
+“共享”表示在同一团队和 authority 范围内可查询、可订阅或被投影，不等于把全部事实广播进每只猫的 prompt。成员只在接受任务、选择协作者、执行副作用、处理状态变化或显式查看时获取相关投影；共享投影可以比 owner truth 粗，但不能与 owner truth 矛盾。
 
-- **运行与状态管理**：跟踪当前 obligation 和进展，在既有策略与授权内刷新事实、重试、改道、恢复、降级或停止不安全动作，并主动解释关键变化。
-- **能力构建与管理**：发现、匹配、组合、安装或启用、配置、授权、验证、停用与恢复能力。
-- **交互适配**：决定应该怎样解释、呈现、调用和管理这项能力；必要时改变 Dynamic UI、CLI、语音或其他 surface。
+团队共享平面禁止暴露：成员私有 memory/context 正文、凭据、未发布草稿、内部推理、无关用户数据，或超出接收者 authority 的资源细节。它可以表达“memory capability 当前不可用”或“共享知识库含某 artifact”，不能因此公开私有内容。
 
-Self-Management 不是把所有变化都变成一次用户审批。它先判断动作是否仍在现有 authority envelope 内，再走两条不同路径：
-
-```text
-STATE CHANGE / FRICTION
-  → SENSE
-  → INTERPRET
-  → MANAGEMENT DECISION
-      ├─ WITHIN EXISTING AUTHORITY
-      │    → RETRY / REROUTE / RECOVER / DEGRADE / STOP UNSAFE ACTION
-      └─ NEEDS NEW AUTHORITY OR VALUE CHOICE
-           → MATCH → PROPOSE → USER DECISION → ACTIVATE / CONFIGURE
-  → OWNER COMMAND + RECEIPT
-  → INTERACTION ADAPTATION / STATUS EXPLANATION
-  → REAL USE
-  → FEEDBACK
-  → RETAIN / EDIT / DISMISS / REVERT
-```
-
-其中：
-
-- 既有授权范围内的例行恢复、改道、降级和安全停止不应反复询问用户，但必须有 policy、scope、预算、可解释原因与 owner receipt。
-- 新增权限、扩大数据/副作用 scope、不可替代的价值取舍或持久改变用户偏好时，Agent **不能把推断当成用户授权**，必须形成可拒绝提案。
-- 安装、授权、外部副作用及高风险配置仍由各 authority owner 执行，并返回可验证 receipt；F300 只协调，不绕过 owner。
-- “能力可用了”不是闭环终点；第一次成功动作以及后续摩擦是否降低，才决定这项变化是保留、调整还是回滚。
-- 用户始终拥有拒绝、编辑、撤回授权、停止自动管理和恢复原状的权利。
-
-### 1.3 Interaction Episode：最小可追责单元
-
-F300 不以“发出一条建议”或“自动做了一个动作”作为成功。一个可追责 episode 至少包含：
+### 1.3 两个平面的关系
 
 ```text
-state-or-friction-evidence
-  → hypothesis
-  → management-decision
-      ├─ within-authority-action-intent
-      └─ capability-match → proposal → user-decision
-  → owner-command-and-receipt
-  → capability-and-interaction-ready-or-safe-degradation
-  → first-successful-action
-  → friction-feedback
-  → retained | edited | dismissed | reverted
+CANONICAL DOMAIN FACTS
+  ├─ member-private projection ──→ exact member's Self View
+  └─ team-shareable projection ─→ Member Public Projection
+                                 + Environment State View
+
+JUDGMENT POINT
+  → query relevant private + shared projections
+  → decide within current authority
+  → canonical owner command
+  → owner receipt / terminal
+  → projections update
 ```
 
-每个阶段都必须能指回证据、适用的 authority envelope、用户决定（若需要）或执行 receipt。既有授权内的动作不得静默扩大 scope；进入 `proposal` 分支后，没有用户决定不得继续；没有成功动作，不能把 `activated` 记成效果成立。
+同一个变化可能只更新私有平面，也可能产生团队共享投影；选择由事实 owner、visibility policy 与当前 authority 共同决定，不能由 F300 猜测。
 
-## 2. 能力状态：不能压成一个 `enabled` 布尔值
+## 2. 统一的 Member / Environment State Model
 
-目标状态模型必须把下列维度分开：
+### 2.1 统一的是语义，不是把全家状态复制进一张表
 
-| 维度 | 示例问题 |
-|------|----------|
-| Identity | 这是哪一种稳定能力？即使 provider 从 builtin 迁到 plugin，它是否仍是同一用户能力？ |
-| Provider | 当前由 builtin、plugin、generated、local limb、remote connector 或组合提供？ |
-| Provisioning | provider 是否存在、已安装或可取得？ |
-| Configuration | 必填配置是否完整、版本是否兼容？ |
-| Authority | 用户是否授权了当前 scope、数据与副作用？授权是否仍有效？ |
-| Runtime readiness | 依赖是否可达、健康、未熔断且满足资源/额度约束？ |
-| Context applicability | 这项能力是否适用于当前任务、主体和时刻？ |
-| Effectiveness | 是否发生过成功动作？真实使用后摩擦降低了吗？ |
-
-因此 `installed ≠ configured ≠ authorized ≠ ready ≠ applicable ≠ effective`。Dynamic UI 可见、插件 manifest 声明、tool 被注册，也都不能单独证明能力此刻可用。
-
-## 3. 系统边界：F300、插件管理与 Dynamic Interaction 各管什么
-
-### 3.1 四层责任模型
-
-| 层 | 真相与职责 | 典型 owner | F300 如何使用 |
-|----|------------|------------|----------------|
-| **L1 能力与运行事实** | 能力 identity/contract；插件发现、安装、启停、升级、配置、授权、Host Broker、runtime health、审计与恢复 | plugin cell、Capability Surface Registry、limb/runtime owners | 只消费 canonical fact/command/receipt，不复制账本 |
-| **L2 感知与判断点接入** | 聚合与当前判断相关的 capability/operational-state/availability/friction evidence；校验 freshness、scope、relevance | F300 + routing-context；F296 承担 presentation/delivery | 形成 grounded sensing view；不从 UI 或旧消息反推事实 |
-| **L3 自管理协调器** | grounded management decision、既有授权内的例行恢复、需要时的 proposal/用户决定、调用 owner command、核对 receipt、episode 状态与反馈 | F300 | 拥有闭环政策与阶段转换，不取得底层系统的越权写权限 |
-| **L4 交互投影** | 根据 episode 与能力状态生成/调整对话、Dynamic UI、CLI、voice 等 surface | Dynamic Interaction / surface owners | 呈现解释、决定与可用动作；不是能力或授权真相源 |
-
-### 3.2 与插件管理的重合边界
-
-插件管理是 Self-Management 的一个关键执行域，但两者不等价：
-
-| 问题 | Plugin Manager / plugin cell | F300 Self-Sensing / Self-Management |
-|------|------------------------------|------------------------------------|
-| 哪些插件可发现、已安装、启用、需升级？ | **拥有 canonical lifecycle truth** | 读取并解释与当前 episode 有关的事实 |
-| 配置、权限、Host Broker、runtime 是否健康？ | **拥有状态、命令、审计与 receipt** | 在动作前校验；`unknown/stale` 不得冒充 ready |
-| 什么时候值得建议新增或调整能力？ | 提供候选与约束，不决定用户当前需要 | **基于 friction + capability match 形成 proposal** |
-| 谁能安装、启用、授权或回滚插件？ | **在用户授权和系统策略内执行** | 发出带 authority envelope 的 intent；不得直接绕过 owner 改状态 |
-| 安装后如何与用户交互？ | 提供 UI contribution/contract 候选 | **结合当前 episode 选择 Dynamic UI/CLI/voice 投影** |
-| 实际效果是否值得保留？ | 提供运行与审计证据 | **关联 first successful action 与 friction feedback** |
-
-硬边界：
-
-1. F300 不建设第二个插件目录、安装器、授权中心或 runtime supervisor。
-2. Plugin Manager 不根据 plugin catalog 的存在擅自推断用户需求，也不自行定义完整 Interaction Episode。
-3. F300 的状态转换必须消费 Plugin Manager 的 canonical receipt；proposal 卡片、toast 或消息写入都不能冒充执行成功。
-4. 能力 identity 高于 provider identity。用户配置和交互偏好应绑定稳定能力身份，而非永久绑死某个实现插件；迁移是否安全由显式 contract 与验证决定。
-
-### 3.3 Dynamic UI 的位置
-
-Dynamic UI 是 Self-Sensing / Self-Management 的一种可视化实现，不是概念总和，也不是先决条件。
-
-- 没有 Dynamic UI，episode 仍可通过对话、CLI 或语音完成。
-- 有 Dynamic UI，也不能仅凭组件出现就宣称能力 ready 或已授权。
-- UI 应投影同一份 capability、authority、receipt 与 episode truth，而不是建立平行状态机。
-- 合适的界面不是事先固定模板，也不是模型随意画布；它由当前任务、可用能力、权限与 surface contract 共同约束。
-
-## 4. 最新 `main` 的真实状态
-
-以下是对 `origin/main@dd86a802` 的代码与 feature truth 审计。它描述“已经存在什么”，不把相邻能力包装成 F300 已实现。
-
-| 能力块 | 当前状态 | 已有证据 | 距离 F300 终态的缺口 |
-|--------|----------|----------|----------------------|
-| Promise durability | **已完成基础** | F298 done；principal、admission/result、wake 等承诺具备持久化边界 | 只保证承诺活着，不产生 self-sensing 或 episode policy |
-| Context presentation/delivery | **部分落地** | F296 Phase A/B foundations、B3/B4 多项已落地，仍有 AC 未完成 | 可承担相关事实送达，但 F300 producer、relevance 与 home-state contract 尚不存在 |
-| Invocation trajectory/evidence | **in-progress，A–D 已有明确交付** | F299 Phase A/B/B.1/B.2/C/D 的 AC 已勾，Phase E `AC-E1` 未勾；request-generation envelope 已有 `home_state` source kind | 当前 `home_state` 仅标注 profile/thread-mission 证据来源，不是 F300 HomeStateSnapshot 或感知闭环 |
-| Plugin management runtime | **已有实质基础并持续演进** | plugin domain 已有 host inventory/broker、official catalog/installer、auth/history/signals、external runtime；Web 有插件设置面 | 尚未形成跨 builtin/plugin/generated provider 的统一 capability state，也没有 F300 grounded management controller |
-| Capability surface registry | **已完成 registry 基础** | F223 提供 trigger/execution/verification/eval registry | 它描述能力入口和验证面，不等于完整 capability ontology/readiness graph |
-| Route/custody/execution/runtime facts | **分散存在** | F233 custody ledger、F293 route/preflight、F220 execution/liveness、F153 runtime health 等各有 owner | 仍缺面向当前 obligation 的统一、typed、freshness-aware sensing view |
-| F300 Home-State Awareness | **未实现** | 代码中不存在 `HomeStateDeltaV1`、`HomeStateSnapshot`、`affects_current_obligation` 或 `affects_next_side_effect` | 原 Phase A/B 的 producer、preflight、snapshot、receipt UI 与红绿验收均未开始 |
-| Self-Management episode | **未实现** | 无 state/friction→management decision→in-envelope action 或 proposal/user decision→owner receipt→feedback controller | 这是后续阶段主体，不能由插件页或单次 tool call 代替 |
-
-结论：你对当前差距的理解是对的。最新代码已经有若干必要底座，尤其是插件运行、持久化、上下文送达和轨迹证据；但完整 Self-Sensing / Self-Management 仍处于**架构定义期**。现有能力之间还没有被一个可信、受权、可反馈的 episode 串起来。
-
-## 5. 分阶段实现路线
-
-阶段表达依赖与可验收纵切，不要求所有工作严格串行。Plugin Manager 与 capability contract 可以独立演进；任何阶段进入生产闭环前，都必须满足其列出的 truth/authority gate。
-
-### Phase 0 — 总体概念与现状真相源（本次文档）
-
-- 冻结 Self-Sensing、Self-Management、Interaction Episode 和能力多维状态的语义。
-- 明确 F300 与 Plugin Manager、F296、F299、Dynamic Interaction 的所有权边界。
-- 记录 latest-main 已有底座与真实缺口。
-- 保留 Home-State Awareness 为首个实现纵切，而非把它冒充完整愿景。
-
-### Phase 1 — Home-State Awareness：先让错误动作在发生前停下
-
-延续原 F300 的三个机制，首个 Aha 仍为“取消后不再唤醒同一 subject 的原目标”：
-
-- **M1 authoritative preflight**：在同一 obligation 的 @/dispatch 等副作用前，按 exact `subjectRef` 回源；冲突时最新 authoritative state 获胜，`unknown` fail closed。
-- **M2 relevant canonical delta**：F300 负责 admission/relevance，F296 负责 context epoch、presentation、dedupe 与 provider-minted receipt；不新建第二 delivery channel。
-- **M3 typed HomeStateSnapshot**：只引用 custody、execution/liveness、route、runtime、plugin/limb 等 canonical owner，携带 `observedAt`、expiry/invalidator 和 source ref，不复制中心账本。
-
-后续扩到额度拓扑与 plugin/limb readiness，验证“调用前可知”，而不是失败后归纳。
-
-Phase 1 的 provisional delivery contract 保留如下，实施设计时可在不破坏上述语义的前提下细化：
+F300 需要 provider-neutral 的 typed projection，使 Agent 能用同一种语言询问 member、capability、obligation、memory/context 与 environment，而不把这些 owner 的状态机合并：
 
 ```ts
-type HomeStateDeltaV1 = Readonly<{
-  subjectKey: string;
-  revision: string;
-  claimKind: 'custody' | 'route_availability' | 'runtime_health' | 'capability_readiness';
-  consumerScope: { threadId: string; catIds: readonly string[] };
-  whyNow: 'affects_current_obligation' | 'affects_next_side_effect';
+type SelfStateProjection = Readonly<{
+  subject: {
+    kind: 'member' | 'capability' | 'obligation' | 'thread' | 'memory' | 'context' | 'resource';
+    ref: string;
+  };
+  facet: 'identity' | 'capability' | 'activity' | 'availability' | 'memory_context' | 'authority' | 'health';
+  visibility: 'member_private' | 'team_shared';
+  state: 'known' | 'unknown' | 'stale' | 'conflicted' | 'unavailable';
+  valueRef?: string;
   sourceRefs: readonly string[];
+  revision: string;
   observedAt: number;
   expiresAt?: number;
   invalidators: readonly { owner: string; ref: string }[];
 }>;
 ```
 
-### Phase 2 — Capability Graph：统一“能力是什么”与“现在能否用”
+这是方向性 contract，不是已经获批的数据结构。`valueRef` 指向 owner-owned fact 或受权 projection；F300 不把原始 message、memory body、plugin ledger、thread record 或 runtime state 复制进中心 store。
 
-- 以稳定 capability identity 关联 builtin、plugin、generated、local/remote tool 与可组合 provider。
-- 把 contract、provider、provisioning、configuration、authority、readiness、applicability、effectiveness 分轴建模。
-- Plugin Manager 保持 lifecycle/runtime canonical owner；F223 registry 继续拥有 capability surface/verification 描述。
-- 为 F300 提供 typed query，不用枚举 UI、猜 tool 名或扫描 prompt。
-- 对 provider 迁移、降级、冲突与 `unknown` 建立明确规则。
+### 2.2 Capability 不能等同于 Plugin，也不能压成 `enabled`
 
-### Phase 3 — Grounded Decision & Proposal：能自己处理，也知道何时该问
+能力 provider 至少包括：Agent-native/builtin、memory、context、thread/workspace operation、plugin、local limb/tool、remote connector，以及这些 provider 的组合。Plugin Manager 只拥有 plugin/package 这一类 provider 的生命周期。
 
-- 只从有 provenance 的 operational/interaction evidence 形成 state 或 friction hypothesis。
-- 先分类当前 authority envelope：例行恢复、改道、降级与安全停止可在既有 scope 内执行；新增权限、扩大副作用或价值取舍必须转入 proposal。
-- 将需要用户决定的摩擦与 capability graph 匹配，显式展示“为什么现在建议、需要什么权限、会改变什么、如何撤回”。
-- 生成 authority envelope；需要新增授权的分支没有用户决定不得进入 activation。
-- proposal 支持 accept / edit / dismiss，并记录选择而非把沉默当同意。
-- 对反复误报、噪音与错误归因建立 episode-level evaluation。
+每项能力至少分开：
 
-### Phase 4 — Capability Activation + Interaction Adaptation
+| 维度 | 回答的问题 |
+|------|------------|
+| Identity | 这是哪一种稳定能力？provider 更换后是否仍是同一能力？ |
+| Provider | builtin、member-native、memory/context、thread、plugin、limb、remote 或组合？ |
+| Provisioning | provider 是否存在、安装或可取得？ |
+| Configuration | 配置是否完整、版本是否兼容？ |
+| Authority | 当前成员是否获准在这个 scope 使用或改变它？ |
+| Runtime readiness | 依赖、健康、route、quota 与资源此刻是否满足？ |
+| Applicability | 是否适用于当前任务、成员、环境和时刻？ |
+| Effectiveness | 是否真实完成过目标，结果是否仍可信？ |
+| Visibility | 仅成员自己可知，还是团队可依赖？共享到什么粒度？ |
 
-- 把通过 authority classification 的 intent 交给 Plugin Manager、Host Broker 或对应 capability owner 执行。
-- 以 canonical receipt 进入 installed/configured/authorized/ready 状态，失败可解释、可恢复。
-- 同一 episode 内生成或调整合适的 Dynamic UI、CLI、voice surface，并立即尝试首个真实动作。
-- surface 只投影 owner truth；安装完成、组件渲染和工具注册均不能冒充 first successful action。
+因此 `installed ≠ configured ≠ authorized ≠ ready ≠ applicable ≠ effective`；“我能创建 thread”“我能查询某类 memory”“团队有语音能力”和“某插件已安装”是不同事实。
 
-### Phase 5 — Feedback-Governed Self-Management
+### 2.3 动作、事实与投影必须分开
 
-- 关联真实动作结果与后续 friction evidence，决定 retained / edited / dismissed / reverted。
-- 保存用户可见、可追责、可恢复的 episode 历史，不保存无界用户画像。
-- 支持权限撤回、provider 迁移、能力降级和交互恢复。
-- 在多场景、多 surface、跨重启条件下验证闭环是否确实降低摩擦，而非只提高提案数量。
+| 用户/Agent 动作 | Canonical owner 产生的事实 | F300 可形成的认知 |
+|-----------------|--------------------------|-------------------|
+| Stop 某成员的 exact run | Agent Client terminal、bubble/result、Active Run 释放、owner disposition | 自己知道 run 已取消；其他成员在相关判断读取“该成员不再执行该 obligation” |
+| 新建 thread | thread owner 的新 thread、membership 与 authority receipt | 团队环境出现一个可用协作空间；受邀成员知道其可访问性 |
+| 启动/启用一项能力 | capability owner 的 activation/readiness receipt | 成员私有或团队共享 capability projection 更新 |
+| 卸载一个 plugin | Plugin Manager lifecycle receipt；受影响 provider 失效 | 由该 plugin 提供的能力变为 degraded/unavailable，其他 provider 不被误伤 |
+| memory/context compact、缺失或恢复 | memory/context owner 的 coverage、budget、freshness 与 access fact | 成员知道自己还记得/可读什么、哪里有缺口；团队只见允许共享的 capability/status |
+
+F300 统一这些变化的读模型与管理闭环，不统一它们的写 API。动作请求、canonical outcome 和 derived projection 是三个不同对象。
+
+## 3. 成员停止后，团队如何正确感知
+
+当前文档先前把“取消一只猫，全家在相关判断点知道”写成 Primary journey，这是错误坐标：它暗示 cancellation delta 是 F300 的中心机制，并容易退化为一次全家广播。
+
+PR #1356 给出更合理的分层：
+
+1. Stop 只选择操作边界上仍 live 的 exact Agent Client run；
+2. Agent Client 产生唯一 canonical `canceled` terminal，原位终局公开 bubble，并释放 exact Active Run；
+3. delivery/history/execution/custody owner 各自维护事实，F300 不另写一个 `cat_stopped` 真相；
+4. 其他成员在任务接续、选择 target、查看团队状态或副作用前，从 Team Shared View 读取由这些事实组成的粗粒度公开投影；
+5. 投影只说明可证明的含义，例如“B 不再执行 obligation X”或“B 当前无 live Agent run”，不能越级声称 provider 已读、责任已完成或成员永久不可用。
+
+这也解释了 F300 与 #1356 的关系：#1356 负责消息/运行如何 canonical 收敛，F300 负责 Agent 在自己的判断中如何认识这个结果。若 #1356 的产品提案尚未获批，F300 只能依赖最终落地的 owner contract，不能复制它的候选状态机。
+
+## 4. Self-Management：管理自己，不取得所有系统的写权限
+
+Self-Management 的核心循环是状态校准，而不是以 Interaction Episode 或插件安装为中心：
+
+```text
+SENSE private + shared state
+  → compare obligation / desired state / constraints
+  → choose management action
+      ├─ within existing authority
+      │    → continue / retry / reroute / recover / degrade / stop / compose capability
+      └─ needs new authority or value choice
+           → rejectable proposal → explicit user decision
+  → canonical owner command
+  → receipt / terminal
+  → verify actual state and update projections
+```
+
+- 既有 policy/scope/budget 内的例行恢复、改道、降级和安全停止不应反复询问用户。
+- 新增权限、扩大数据或副作用 scope、不可逆动作、持久偏好和价值取舍必须进入可拒绝提案。
+- F300 可以决定“现在需要什么变化”，但安装、授权、thread mutation、memory mutation、runtime cancel 等仍由各 canonical owner 执行。
+- Interaction Episode 是“用户摩擦触发能力变化”时的一种上层 journey；Dynamic Interaction 是一种投影与验证 surface。两者都不是 F300 的基础状态模型。
+
+## 5. 系统边界与最新 `main` 真相
+
+### 5.1 Owner 边界
+
+| 领域 | Canonical owner | F300 责任 |
+|------|-----------------|-----------|
+| Member identity/membership/session | identity/session、thread membership owners | 形成受权的 member-private / team-shared projection |
+| Exact execution, Stop, terminal, liveness | Agent Client、TurnExecution/InvocationRecord、execution owners | 解释活动/availability；不另写 execution 状态机 |
+| Custody/obligation/handoff | F233 与 structured protocol owners | 解释当前责任与历史；不从聊天猜 holder |
+| Memory/context | memory、context/session、F296 owners | 表达 access/coverage/freshness/limit；不复制正文或 ledger |
+| Thread/artifact/team environment | thread、workspace、artifact owners | 构造环境可用性投影；不接管 CRUD |
+| Plugin/package | plugin cell / Plugin Manager | 把 plugin 视为 capability provider；生命周期和 receipt 仍归 plugin |
+| Capability surface/verification | F223 / surface registry | 关联 provider-neutral capability identity；不以 UI 存在证明可用 |
+| Route/runtime/quota/health | F293、F153 与 runtime owners | 在判断点查询 freshness-aware fact |
+| Presentation/delivery | F296、message/history/surface owners | 决定哪些 F300 projection 与当前判断相关；不造第二 delivery channel |
+
+### 5.2 `origin/main@dd86a802` 现状
+
+| 能力块 | 当前状态 | 与 F300 的关系 |
+|--------|----------|---------------|
+| Promise durability / custody / trajectory | 已有多项基础 | 提供 obligation、responsibility 与历史事实，不等于 Agent 已形成自我模型 |
+| Context presentation/delivery | 部分落地 | 可承载相关投影；仍没有 Member Self / Team Shared contract |
+| Plugin management runtime | 已有实质基础 | 只覆盖 plugin provider，不能代表 builtin、memory、context、thread 或 member-native 能力 |
+| Capability surface registry | 已有 registry 基础 | 描述入口和验证面，不是完整 capability/state graph |
+| Route/execution/runtime facts | 分散存在 | 缺 provider-neutral、visibility-aware、freshness-aware 的查询投影 |
+| PR #1356 lifecycle RFC | open proposal，非 `main` truth | 可作为 exact Stop/terminal/projection 边界参考，不能宣称已实现 |
+| F300 runtime | **未实现** | 没有 Member Self View、Team Shared View、Environment State View 或 self-management coordinator |
+
+## 6. 分阶段实现路线
+
+### Phase 0 — 冻结概念与 owner map（本次文档）
+
+- 冻结成员私有 / 团队共享两个可见性平面。
+- 冻结 provider-neutral Member / Environment State Model 与动作/事实/投影分离原则。
+- 明确 Plugin、memory/context、thread、runtime、delivery 等 owner 边界。
+- 将旧 Home-State、Interaction Episode 与 cancellation journey 降为实现切片或消费者。
+
+### Phase 1 — Projection Contract & Owner Adapters
+
+- 定义 subject/facet/visibility/provenance/freshness/invalidator 的 typed projection contract。
+- 为 identity、execution、custody、memory/context、thread/environment、capability provider 建立只读 owner adapters。
+- 不建立中心 shadow ledger；query 结果可缓存，但必须由 revision/expiry/invalidator 约束。
+- 先证明同一事实不会被 F300、Plugin、History 或 UI 多头写入。
+
+### Phase 2 — Member Self View
+
+- 让成员在接任务和关键判断点知道自己的 identity、capability、limits、obligation、activity、availability、memory/context 与 authority。
+- 支持“我不知道 / 已过期 / 相互冲突”的明确表达与回源。
+- 让成员能说明自己做过什么、当前在做什么、为什么能/不能继续，而不是靠模型复述聊天。
+
+### Phase 3 — Team Shared View & Environment State
+
+- 形成成员公开投影与团队环境投影：谁可协作、谁在工作、共享空间/能力/资源有哪些、当前是否可用。
+- 以相关 query/subscription/context projection 替代全家广播。
+- 先落地 Stop exact run 后其他成员读取更新状态、新 thread 对受权成员可见、provider 卸载导致共享能力降级三类跨 owner 纵切。
+
+### Phase 4 — Authority-Bounded Self-Management
+
+- 从 private + shared state 选择继续、恢复、组合、降级、停止或提案。
+- 所有 mutation 交给 canonical owner，并以 receipt/terminal 校准实际状态。
+- 新 authority/value choice 走可拒绝提案；现有 authority 内动作不让用户代运维。
+
+### Phase 5 — Growing Partner Feedback
+
+- 用任务结果、恢复质量、误判、协作可见性和用户负担变化验证自管理效果。
+- 学到的稳定能力/偏好只经其 retention/authority owner 保存；不建立无界人格或行为画像。
+- 支持 provider 迁移、权限撤回、memory/context 恢复和状态模型纠错。
 
 ## User Journey
 
-### North Star：任务中途出现异常，Agent 先自行处理
+以下异质切片共同验证同一套 Member / Environment State Model，而不是各自建立状态机。
 
-1. Agent 接受目标时建立当前 obligation、可用能力、依赖、权限与下一判断点的 grounded view，并能说明自己明确不能做什么。
-2. 执行中某依赖降级或进展停滞；Agent 从 execution/liveness 与 runtime owner 获得带 freshness 的异常证据，而不是等用户追问“你跑到哪儿了”。
-3. 若重试、改道、降级或安全停止仍在既有 authority envelope 内，Agent 自行调用 canonical owner、核对 receipt，并向用户简明说明影响和恢复结果。
-4. 若继续需要新 provider、新权限、扩大外部副作用或用户价值取舍，Agent 才给出可拒绝提案，说明原因、范围、风险和撤回路径。
-5. 首个真实动作成功后，Agent 用结果与后续摩擦验证调整是否有效；无效则编辑或回滚，而不是把“已安装”“已渲染”当成完成。
+### Slice A — 成员停止，其他成员在相关判断中知道
 
-### Phase 1 首纵切：Home-State Awareness
+1. 用户 Stop B 的 exact run；execution owner 走 canonical cancel/terminal。
+2. B 的 Member Self View 反映该 obligation 已 canceled/terminal。
+3. A 在准备 handoff、选 target 或承接任务时查询 Team Shared View，得到“B 不再执行 obligation X”的 source-backed projection。
+4. A 不向旧 run 继续交付；若 B 有新 run 或仍可接受新工作，不能被旧 cancel 污染。
+5. 不向全家广播 raw cancel payload，不由 F300 伪造 terminal。
 
-### Primary: 取消一只猫，全家在相关判断点知道
+### Slice B — 新 thread / capability / plugin 变化进入团队环境
 
-- **Scope unit**: thread + exact obligation/action subject
-- **Actors**: 用户、当前协作 Agent、被取消 invocation 的 custody owner
-- **Entry**: 用户在 Hub 取消 invocation，并要求当前协作换目标
-- **Flow**:
+1. canonical owner 创建 thread、启动能力或卸载 plugin，并返回 receipt。
+2. Environment State View 更新相应对象、visibility 与 readiness。
+3. 受权成员能发现新 thread/能力；无权成员看不到敏感细节。
+4. plugin 卸载只使其 provider 失效；稳定 capability identity 可切到其他 provider，不能把所有能力等同于 plugin。
 
-1. 用户取消某 invocation，并要求当前协作改换目标；custody owner 写 canonical event。
-2. 原动作位置呈现 `recorded → pending_delivery → presented | failed_or_unknown`；只有 provider receipt 能表示目标 Agent 看见。
-3. 等球或新 invocation 通过 F296 收到相关 delta，不再尝试同一 subject 的旧目标。
-4. 若 delta 尚未送达，Agent 在真正 @/dispatch 前执行 M1 preflight，最新取消状态阻止副作用。
-5. 新 subject 不继承旧取消；需要追责时从 source ref 下钻 F299 invocation trajectory。
+### Slice C — Memory / Context 自感知
 
-### Supporting
+1. Agent 在任务开始和 context 变化后知道可访问 memory/context 的范围、freshness、预算和缺口。
+2. compact、session rollover 或 retrieval failure 后不假装仍完整记得；必要时回源、降级或向用户解释。
+3. 团队共享平面只投影允许共享的 knowledge artifact/capability/status，不公开成员私有正文。
 
-| 场景 | 期望 |
-|------|------|
-| 共享额度池耗尽 | 一次返回 pool topology 与 freshness，避免对同 family 逐只试错 |
-| 用户提出语音输入 | 调用前返回 capability/plugin/limb readiness；stale/unknown 不冒充可用 |
+### Slice D — 旧 Home-State Awareness（窄切片）
 
-## 7. Acceptance Criteria
+旧 F300 的 M1/M2/M3 保留为“某个 canonical state 影响当前 obligation/下一副作用”时的 delivery/preflight 机制，不再代表 F300 全貌：
+
+- **M1 authoritative preflight**：副作用前按 exact subject 回源；`unknown` 在高风险动作上 fail closed。
+- **M2 relevant canonical delta**：F300 判 relevance，F296 负责 presentation/dedupe/receipt；不新建第二 delivery channel。
+- **M3 typed snapshot**：引用 owner fact、revision、freshness 与 invalidator，不复制中心账本。
+
+`HomeStateDeltaV1` 若继续实现，应成为 `SelfStateProjection` 的一种 delivery envelope，而不是 cancellation 专用状态机。
+
+### Slice E — Interaction adaptation（上层消费者）
+
+当用户摩擦需要能力或交互变化时，Dynamic Interaction 可以消费同一 private/shared state，形成可拒绝 proposal、选择 surface 并验证真实动作；proposal/install/UI 数量都不是 F300 成功标准。
+
+## 8. Acceptance Criteria
 
 ### Phase 0 — Architecture truth
 
-- [x] AC-0.1: 文档区分 Self-Sensing 三类感知、Self-Management 三类结果、两条 authority 路径及完整 Interaction Episode
-- [x] AC-0.2: 文档明确 capability 多维状态，禁止用 installed/UI-visible/tool-registered 单点替代 ready/effective
-- [x] AC-0.3: `self-sensing-management` ownership cell 与 plugin shared touchpoint 已登记，文档给出 F300、Plugin Manager、F296/F299 与 Dynamic Interaction 的 owner 边界
-- [x] AC-0.4: 文档基于 exact latest-main SHA 标注已有底座、部分能力和未实现缺口
-- [x] AC-0.5: 原 Home-State M1/M2/M3 被保留为 Phase 1，而非继续代表完整 F300
-- [x] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth（R4 APPROVE，exact reviewed HEAD `252723026d6eca3590433adaad9b9206184f03a8`）
+- [x] AC-0.1: 文档区分 Member Self View 与 Team Shared View，并把成员公开投影和团队环境放入共享平面
+- [x] AC-0.2: 文档覆盖 plugin 之外的 builtin、member-native、memory、context、thread/workspace、limb/tool 与 remote provider
+- [x] AC-0.3: 文档区分动作、canonical fact/terminal 与 derived projection；Stop 例不再依赖全家广播
+- [x] AC-0.4: 文档明确统一的是 provider-neutral projection 语义，不是中心 shadow ledger 或统一 mutation API
+- [x] AC-0.5: 旧 Home-State 与 Interaction Episode 已降为实现切片/上层消费者
+- [ ] AC-0.6: 新方向由非作者完成内容审阅；先前 R4 approval 仅覆盖旧 HEAD/旧坐标，不可复用
 
-### Phase 1 — Home-State Awareness
+### Phase 1 — Projection contract
 
-- [ ] AC-1.1: cancellation event 只有在 exact recipient、subject/revision、why-now、source refs、freshness/invalidators 完整时才能 admission 为 typed delta
-- [ ] AC-1.2: F296 在安全 invocation/tool-result boundary 呈现 delta；不做未经 provider 证明的 mid-token prompt mutation
-- [ ] AC-1.3: 同一 obligation/action subject 的 @/dispatch 前按 exact `subjectRef` 回源；cancelled 阻止动作，stale/unavailable 返回 typed `unknown` 并 fail closed
-- [ ] AC-1.4: 同一 `subjectKey + revision + contextEpoch + presentation` 不重复；expired/superseded 不在新 epoch 复活
-- [ ] AC-1.5: `presented` 只由 provider-minted receipt 铸造；message persisted、toast 或 queue admission 不冒充 model-visible
-- [ ] AC-1.6: 取消动作原位呈现 recorded/pending/presented/failed-or-unknown，绑定 exact cat、receipt 与 source ref
-- [ ] AC-1.7: 非作者完成红绿验收，同时覆盖 M2 已送达与 M2 未达但 M1 拦截；无关新 subject 不被旧取消污染
-- [ ] AC-1.8: quota preflight 返回 shared-pool topology 与 freshness；plugin/limb preflight 在调用前返回 typed readiness，过期均为 `unknown`
-- [ ] AC-1.9: `HomeStateSnapshot` 每项引用 canonical owner，无中心化复制存储；F153 可诊断 delivery latency/failure 与 stale/unknown 命中
+- [ ] AC-1.1: projection 明确 subject、facet、visibility、source refs、revision、observedAt、expiry/invalidator 与 known/unknown/stale/conflicted/unavailable
+- [ ] AC-1.2: 每个 facet 只有一个 canonical owner；F300 cache 失效后回源，不成为第二真相
+- [ ] AC-1.3: private projection 不进入 team-shared surface；team-shared projection 不泄漏 memory/context body、凭据或无关数据
+- [ ] AC-1.4: contract tests 覆盖 owner mismatch、stale revision、authority change 与 conflicting facts
 
-### Phase 2 — Capability Graph
+### Phase 2 — Member Self View
 
-- [ ] AC-2.1: builtin/plugin/generated/local/remote provider 通过稳定 capability identity 查询，provider 更换不会静默丢失用户配置或权限边界
-- [ ] AC-2.2: provisioning/configuration/authority/readiness/applicability/effectiveness 可分别表达，并带 source/freshness
-- [ ] AC-2.3: Plugin Manager、F223 registry 与 F300 对每个字段只有一个 canonical owner，contract test 阻止第二真相
+- [ ] AC-2.1: Agent 能查询自己的 capability/limits、obligation/activity、availability、memory/context 与 authority
+- [ ] AC-2.2: “做过什么”来自 durable trajectory/result，不从聊天摘要或模型自述伪造
+- [ ] AC-2.3: context compact/retrieval failure 后投影显式降为 incomplete/stale/unknown，并给出回源或降级路径
 
-### Phase 3 — Grounded Decision & Proposal
+### Phase 3 — Team Shared View
 
-- [ ] AC-3.1: 每个 management decision 指回 state/friction evidence、适用 policy、authority scope、预期改变、风险与恢复路径
-- [ ] AC-3.2: 既有授权内的例行恢复、改道、降级或安全停止可以免新增确认，但必须受 policy/scope/budget 约束并核对 owner receipt
-- [ ] AC-3.3: 新增权限、扩大数据/副作用 scope 或价值取舍必须进入 proposal；accept/edit/dismiss 为显式用户决定，沉默或打开卡片不能被解释成授权
-- [ ] AC-3.4: 未获所需 authority envelope 的 episode 无法产生 install/configure/permission/external-side-effect command
+- [ ] AC-3.1: Stop exact run 的 canonical terminal 可使相关成员读到更新后的 member public projection；不广播 raw event，不污染新 run
+- [ ] AC-3.2: 新 thread、共享 artifact、capability/provider 和资源按 visibility/authority 出现在 Environment State View
+- [ ] AC-3.3: 相关 query/subscription 只在任务接续、target 选择、副作用或显式查看时投影，不把全部 team state 注入所有 prompt
+- [ ] AC-3.4: member-private 与 team-shared 对同一公开事实不矛盾；粗粒度 shared view 不越级宣称 seen/handled/responsibility complete
 
-### Phase 4 — Activation + Interaction Adaptation
+### Phase 4 — Self-Management
 
-- [ ] AC-4.1: lifecycle/permission/runtime 变更只经 canonical owner command 执行，并以 owner receipt 推进 episode
-- [ ] AC-4.2: Dynamic UI/CLI/voice 投影同一 episode/capability truth，不建立 surface-local 平行状态机
-- [ ] AC-4.3: episode 只有在首个真实动作成功后进入 `first-successful-action`，安装或渲染成功不足以通过
+- [ ] AC-4.1: 每个 management decision 指回 private/shared state、policy、authority scope、风险与期望变化
+- [ ] AC-4.2: 既有 authority 内动作可自主完成，但必须经 owner command + receipt/terminal 验证
+- [ ] AC-4.3: 新权限、扩大数据/副作用 scope、不可逆动作或价值取舍必须进入可拒绝提案
+- [ ] AC-4.4: plugin uninstall、thread mutation、memory mutation、runtime Stop 均不能由 F300 绕过 canonical owner 直写
 
-### Phase 5 — Feedback loop
+### Phase 5 — Growing partner feedback
 
-- [ ] AC-5.1: 后续 friction evidence 可使 episode 进入 retained/edited/dismissed/reverted，并保留可见因果链
-- [ ] AC-5.2: 用户可撤回授权、回滚交互与替换 provider；恢复流程经 canonical owner 验证
-- [ ] AC-5.3: 评价以任务成功、摩擦变化、误报与可恢复性为核心，不以提案数、插件安装数或 UI 生成数作为代理成功
+- [ ] AC-5.1: 评价覆盖任务成功、恢复质量、状态误判、团队协作可见性、用户追问/代运维负担与可恢复性
+- [ ] AC-5.2: provider 迁移、权限撤回、memory/context 恢复和 projection correction 都保留可追溯 receipt
+- [ ] AC-5.3: 不以 projection 数、广播数、proposal 数、plugin 安装数或 UI 生成数作为代理成功
 
-## 8. 非目标与安全边界
+## 9. 非目标与安全边界
 
-- 本次刷新**不实现代码**，也不承诺某一后续 phase 的排期。
-- 不新建第二个 Plugin Manager、capability registry、permission store、delivery channel 或 episode 外业务账本。
-- 不允许 Agent 静默安装、启用、授权、扩大 scope 或产生外部副作用。
-- 不做无界后台扫描、持续用户监控、人格画像或跨场景隐式意图推断。
-- 不以 Dynamic UI 为起点倒推能力；先有 grounded truth 与 authority，再选择 surface。
-- 不把“系统知道”写成“模型已经看见”，不把“模型看见”写成“事实仍然新鲜”。
-- 不一次建设超级系统；每个 phase 都必须有独立纵切、失败语义、回滚路径与现场证据。
+- 本次刷新不实现代码，也不承诺后续 phase 排期。
+- 不新建全家状态数据库、第二 Plugin Manager、第二 memory/context store、第二 execution/custody ledger 或统一 mutation super-controller。
+- 不把 member-private 事实、chain-of-thought、凭据、私有 memory/context body 或无关用户数据公开到 Team Shared View。
+- 不把 team-shared 等同于广播；默认使用 scoped query、subscription 和判断点投影。
+- 不允许 Agent 静默扩权、扩大数据/副作用 scope、执行不可逆动作或把推断当成用户授权。
+- 不以 Plugin、Dynamic UI、History message、manifest 或单次成功调用替代完整能力/状态真相。
+- 不把 #1356 的 open RFC 写成 `main` 已实现或已获产品授权。
 
-## 9. 依赖与所有权地图
+## 10. 依赖与所有权地图
 
 | 依赖 | 为 F300 提供 | 不由 F300 接管 |
 |------|-------------|----------------|
+| identity/session/thread owners | member identity、membership、session/thread availability | identity、membership、thread CRUD 与 session lifecycle |
 | F223 | capability surface trigger/execution/verification/eval registry | registry owner 与验证契约 |
-| F233 | custody canonical ledger 与 cancellation source | custody 状态机 |
-| F220 | invocation execution/liveness 与协作恢复事实 | execution lifecycle、liveness 收敛与恢复动作 |
-| F293 | route snapshot/preflight 与 routing fact | route decision owner |
-| F296 | context presentation、epoch、dedupe、provider receipt | delivery ledger 与 presentation semantics |
+| F233 | custody/obligation canonical fact | custody 状态机与 structured handoff |
+| F220 + execution owners | invocation execution/liveness、terminal 与恢复事实 | Agent Client / execution lifecycle、Stop 与 recovery |
+| F293 | route snapshot/preflight | route decision owner |
+| F296 | context presentation、epoch、dedupe、provider receipt | context body、delivery ledger 与 presentation semantics |
+| memory/context owners | access、coverage、freshness、retention、compaction、budget | memory/context body 与 lifecycle |
 | F298 | principal/admission/result/wake 的持久承诺 | durability infrastructure |
 | F299 | request-generation evidence、trajectory 与诊断下钻 | invocation history/trajectory truth |
-| Plugin cell + plugin repository | discovery/install/config/auth/runtime/audit contract 与事实 | plugin lifecycle、Host Broker、插件 SDK/实现 |
-| Dynamic Interaction | episode 的 UI/CLI/voice 投影与交互验证 | capability、authority 或 runtime truth |
+| Plugin cell / Plugin Manager | plugin discovery/install/config/auth/runtime/audit fact + receipt | plugin/package lifecycle、Host Broker、SDK/实现 |
+| F153/runtime/quota owners | health、resource、quota 与 availability facts | runtime supervision 与 resource mutation |
+| Dynamic Interaction / surfaces | private/shared state 的用户与 Agent 投影 | capability、authority、state 或 receipt truth |
 
-Phase 1 生产验收依赖 F296/F298 对 delivery/receipt/durability 的真实证据；Phase 2 可以与 Plugin Manager 演进并行，但不得在 canonical owner 未冻结时先造 F300 shadow state。
-
-## 10. 风险与防线
+## 11. 风险与防线
 
 | 风险 | 防线 |
 |------|------|
-| 感知变成 prompt 噪音或全家广播 | exact subject/recipient/why-now；只在当前 obligation、下一副作用或显式查看时投影 |
-| 把局部线索拼成确定事实 | provenance + freshness + typed unknown/stale/conflicted；副作用前 authoritative preflight |
-| 与插件管理重复建设 | Plugin Manager 拥有 lifecycle/runtime command 与 receipt；F300 只协调 episode |
-| “安装了”被误报成“解决了” | capability 多轴状态；first successful action + friction feedback 才能证明效果 |
-| Agent 借自管理扩大权限 | explicit user decision + authority envelope + canonical owner execution + rollback |
-| Dynamic UI 形成第二状态机 | 所有 surface 只投影同一 capability/episode truth；receipt 只能由执行 owner 铸造 |
-| 过度平台化导致迟迟没有真实价值 | Phase 1 从已发生的取消 bug 做红绿纵切；后续每 phase 都绑定一条完整用户旅程 |
+| Self-Sensing 退化成全家广播 | 两种 visibility + scoped query/subscription + relevance gate |
+| 中心模型复制所有 owner 状态 | projection refs + revision/expiry/invalidator；owner command/receipt 单写 |
+| Plugin 再次吞掉能力概念 | provider-neutral identity；memory/context/thread/member-native 与 plugin 同级建模 |
+| 团队共享泄漏成员私有认知 | public projection schema + authority filter + body/credential/thought exclusion |
+| Stop event 被误写成永久成员状态 | exact run/obligation subject；canonical terminal；新 run 不继承旧 cancel |
+| Agent 自我报告替代事实 | provenance + typed unknown/stale/conflicted + authoritative preflight |
+| Self-Management 变成扩权 controller | authority classification + rejectable proposal + canonical owner mutation |
+| 抽象过重迟迟无真实价值 | Phase 1 contract 后立即用 Stop/thread/plugin/memory 四类异质纵切验证 |
 
-## 11. Key Decisions
+## 12. Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | Self-Sensing 固定为 capability、operational-state/availability、friction 三维；Self-Management 覆盖运行管理、能力管理与交互适配，并区分既有授权内自主处理和需用户决定的提案分支 | 成熟 Agent 应承担自身能力发现、运行感知与日常管理，用户只保留目标、价值选择和必要授权；本文成为仓内可解析的 canonical narrative | 2026-08-25 |
-| KD-2 | F300 成为 Self-Sensing / Self-Management 总体 feature truth；Home-State Awareness 降为 Phase 1 首纵切 | F300 尚无对应 runtime 实现，可以按终态重写总体合同，再分阶段落地；不再用首切片冒充全貌（operator direction `0001787628299553-000287-d2731687`） | 2026-08-25 |
-| KD-3 | 2026-08-17 的“F300 不做完整闭环”只保留为当时的实现范围判断，在总体文档层面被本决策取代 | 控制实现范围仍正确，但不应继续截断 feature 的概念边界 | 2026-08-25 |
-| KD-4 | Plugin Manager 拥有 lifecycle/runtime/authority execution truth；F300 拥有 evidence-to-management/episode policy，二者以 command/receipt 相接 | 避免两个管理器和两个真相源，同时允许插件系统独立演进 | 2026-08-25 |
-| KD-5 | Dynamic UI 是交互投影，不是 Self-Sensing 本身，也不证明能力 ready/effective | 防止从可见界面反推不可见能力与授权状态 | 2026-08-25 |
-| KD-6 | `unknown/stale/conflicted` 是一等状态；高风险或下一副作用前不能乐观降级 | 自感知的可信度比“总能给答案”更重要 | 2026-08-25 |
-| KD-7 | 成功单位是完整 Interaction Episode，不是 proposal、install、tool call 或 surface 数量 | 只有真实使用与反馈才能证明自管理降低了摩擦 | 2026-08-25 |
-| KD-8 | execution/liveness 继续作为 Phase 1 HomeStateSnapshot 输入；F220 保持 lifecycle/recovery owner，F300 只做相关判断点投影 | 防止总体刷新时遗漏“当前动作是否仍在执行”，同时不把 F220 状态机搬进 F300 | 2026-08-25 |
+| KD-1 | F300 基础模型固定为 Member Self View 与 Team Shared View；后者由 Member Public Projection + Environment State View 组成 | 成长型伙伴既需要自己的认知，也需要团队共同认知；两者不能因共享或隐私要求互相吞并 | 2026-08-25 |
+| KD-2 | 统一对象是 provider-neutral state projection 与 management loop，不是中心状态库或统一 mutation API | 让 Agent 用同一种语言理解异质能力，同时保持 canonical owner 单一真相 | 2026-08-25 |
+| KD-3 | Plugin 是 capability provider/lifecycle owner 之一，不是 F300 能力边界 | memory、context、thread、member runtime 等关键能力不会也不应都插件化 | 2026-08-25 |
+| KD-4 | 动作、canonical result/terminal 与 shared projection 分离；成员 Stop 复用 #1356 owner 边界，不建立 cancel broadcast | 其他成员需要知道的是当前可依赖状态，不是复制一条动作事件 | 2026-08-25 |
+| KD-5 | 旧 Home-State M1/M2/M3 是 projection delivery/preflight 的窄切片；Interaction Episode 是上层消费者 | 避免具体取消 bug和 Dynamic Interaction journey 反向定义 Self-Sensing 全貌 | 2026-08-25 |
+| KD-6 | memory/context 是 Self-Sensing 的一等 facet，但内容、retention、compaction 与权限仍归其 owner | Agent 必须知道自己记得什么和缺什么，同时不能建立第二 memory/context store | 2026-08-25 |
+| KD-7 | team-shared 表示受权可依赖，不等于注入所有 prompt 或向全家广播 | 团队认知需要共同事实，也需要 relevance、隐私和 context budget 边界 | 2026-08-25 |
+| KD-8 | 先前 R4 approval 仅覆盖旧 HEAD 的 Interaction Episode/Home-State-first 坐标；本次 operator correction 后必须重新审阅 | 新方向改变了 feature 的核心对象、可见性模型与 phase 顺序，不能用机械 continuity 复用 | 2026-08-25 |
 
-## 12. Review / Delivery Gate
+## 13. Review / Delivery Gate
 
-- 本次 docs-only 变更：`co-creation-docs` 分类 + frontmatter/feature-truth 校验 + 非作者内容审阅。
-- Phase 0 内容审阅重点：概念是否完整、现状是否诚实、plugin ownership 是否清晰、阶段是否没有偷带实现承诺。
-- 后续任何实现必须另立执行 thread，在同一 feature worktree 内做红绿测试、跨个体 review 与 merge gate。
-- Dynamic UI 视觉实现进入 Phase 4 前，需要在真实宿主中做 interaction/design gate；本 spec 不凭空冻结视觉皮肤。
+- 本次 docs-only 变更继续走既有 PR #1391；新实质内容需要非作者内容 review。
+- Review 重点：两种可见性是否完整；Plugin 是否只是 provider；memory/context 是否一等但不被复制；#1356 Stop 例是否保持 owner 边界；是否仍有 broadcast/Interaction-first 残留。
+- 校验：strict-delta frontmatter + feature truth + ownership generator idempotence + runtime-symbol absence。
+- 后续实现另立执行 thread，按 owner adapter 与异质纵切逐步落地；本 spec 不直接授权 runtime mutation。
