@@ -1,6 +1,6 @@
 ---
 feature_ids: [F300]
-related_features: [F153, F223, F233, F293, F296, F298, F299]
+related_features: [F153, F220, F223, F233, F293, F296, F298, F299]
 topics: [self-sensing, self-management, capability, availability, user-friction, interaction-adaptation, plugin-management, feedback-loop]
 doc_kind: spec
 created: 2026-08-17
@@ -166,10 +166,10 @@ Dynamic UI 是 Self-Sensing / Self-Management 的一种可视化实现，不是�
 |--------|----------|----------|----------------------|
 | Promise durability | **已完成基础** | F298 done；principal、admission/result、wake 等承诺具备持久化边界 | 只保证承诺活着，不产生 self-sensing 或 episode policy |
 | Context presentation/delivery | **部分落地** | F296 Phase A/B foundations、B3/B4 多项已落地，仍有 AC 未完成 | 可承担相关事实送达，但 F300 producer、relevance 与 home-state contract 尚不存在 |
-| Invocation trajectory/evidence | **大部分落地** | F299 A–D 大部分完成；request-generation envelope 已有 `home_state` source kind | 当前 `home_state` 仅标注 profile/thread-mission 证据来源，不是 F300 HomeStateSnapshot 或感知闭环 |
+| Invocation trajectory/evidence | **in-progress，A–D 已有明确交付** | F299 Phase A/B/B.1/B.2/C/D 的 AC 已勾，Phase E `AC-E1` 未勾；request-generation envelope 已有 `home_state` source kind | 当前 `home_state` 仅标注 profile/thread-mission 证据来源，不是 F300 HomeStateSnapshot 或感知闭环 |
 | Plugin management runtime | **已有实质基础并持续演进** | plugin domain 已有 host inventory/broker、official catalog/installer、auth/history/signals、external runtime；Web 有插件设置面 | 尚未形成跨 builtin/plugin/generated provider 的统一 capability state，也没有由 friction 驱动的 F300 controller |
 | Capability surface registry | **已完成 registry 基础** | F223 提供 trigger/execution/verification/eval registry | 它描述能力入口和验证面，不等于完整 capability ontology/readiness graph |
-| Route/custody/runtime facts | **分散存在** | F233 custody ledger、F293 route/preflight、F153 runtime health 等各有 owner | 仍缺面向当前 obligation 的统一、typed、freshness-aware sensing view |
+| Route/custody/execution/runtime facts | **分散存在** | F233 custody ledger、F293 route/preflight、F220 execution/liveness、F153 runtime health 等各有 owner | 仍缺面向当前 obligation 的统一、typed、freshness-aware sensing view |
 | F300 Home-State Awareness | **未实现** | 代码中不存在 `HomeStateDeltaV1`、`HomeStateSnapshot`、`affects_current_obligation` 或 `affects_next_side_effect` | 原 Phase A/B 的 producer、preflight、snapshot、receipt UI 与红绿验收均未开始 |
 | Self-Management episode | **未实现** | 无 friction→proposal→decision→activation→interaction adaptation→feedback controller | 这是后续阶段主体，不能由插件页或单次 tool call 代替 |
 
@@ -192,7 +192,7 @@ Dynamic UI 是 Self-Sensing / Self-Management 的一种可视化实现，不是�
 
 - **M1 authoritative preflight**：在同一 obligation 的 @/dispatch 等副作用前，按 exact `subjectRef` 回源；冲突时最新 authoritative state 获胜，`unknown` fail closed。
 - **M2 relevant canonical delta**：F300 负责 admission/relevance，F296 负责 context epoch、presentation、dedupe 与 provider-minted receipt；不新建第二 delivery channel。
-- **M3 typed HomeStateSnapshot**：只引用 custody、route、runtime、plugin/limb 等 canonical owner，携带 `observedAt`、expiry/invalidator 和 source ref，不复制中心账本。
+- **M3 typed HomeStateSnapshot**：只引用 custody、execution/liveness、route、runtime、plugin/limb 等 canonical owner，携带 `observedAt`、expiry/invalidator 和 source ref，不复制中心账本。
 
 后续扩到额度拓扑与 plugin/limb readiness，验证“调用前可知”，而不是失败后归纳。
 
@@ -275,7 +275,7 @@ type HomeStateDeltaV1 = Readonly<{
 - [x] AC-0.3: 文档给出 F300、Plugin Manager、F296/F299 与 Dynamic Interaction 的 owner 边界
 - [x] AC-0.4: 文档基于 exact latest-main SHA 标注已有底座、部分能力和未实现缺口
 - [x] AC-0.5: 原 Home-State M1/M2/M3 被保留为 Phase 1，而非继续代表完整 F300
-- [ ] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth
+- [x] AC-0.6: 非作者完成内容审阅，确认没有把愿景写成已实现、没有制造第二能力/plugin truth
 
 ### Phase 1 — Home-State Awareness
 
@@ -329,6 +329,7 @@ type HomeStateDeltaV1 = Readonly<{
 |------|-------------|----------------|
 | F223 | capability surface trigger/execution/verification/eval registry | registry owner 与验证契约 |
 | F233 | custody canonical ledger 与 cancellation source | custody 状态机 |
+| F220 | invocation execution/liveness 与协作恢复事实 | execution lifecycle、liveness 收敛与恢复动作 |
 | F293 | route snapshot/preflight 与 routing fact | route decision owner |
 | F296 | context presentation、epoch、dedupe、provider receipt | delivery ledger 与 presentation semantics |
 | F298 | principal/admission/result/wake 的持久承诺 | durability infrastructure |
@@ -361,6 +362,7 @@ Phase 1 生产验收依赖 F296/F298 对 delivery/receipt/durability 的真实�
 | KD-5 | Dynamic UI 是交互投影，不是 Self-Sensing 本身，也不证明能力 ready/effective | 防止从可见界面反推不可见能力与授权状态 | 2026-08-25 |
 | KD-6 | `unknown/stale/conflicted` 是一等状态；高风险或下一副作用前不能乐观降级 | 自感知的可信度比“总能给答案”更重要 | 2026-08-25 |
 | KD-7 | 成功单位是完整 Interaction Episode，不是 proposal、install、tool call 或 surface 数量 | 只有真实使用与反馈才能证明自管理降低了摩擦 | 2026-08-25 |
+| KD-8 | execution/liveness 继续作为 Phase 1 HomeStateSnapshot 输入；F220 保持 lifecycle/recovery owner，F300 只做相关判断点投影 | 防止总体刷新时遗漏“当前动作是否仍在执行”，同时不把 F220 状态机搬进 F300 | 2026-08-25 |
 
 ## 12. Review / Delivery Gate
 
