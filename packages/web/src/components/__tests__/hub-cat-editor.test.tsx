@@ -159,6 +159,10 @@ describe('HubCatEditor', () => {
     defaultModel = 'test-model',
     patch: Partial<HubCatEditorFormState> = {},
     speed: { visible?: boolean; fastSupported?: boolean } = {},
+    runtime: {
+      cat?: CatData | null;
+      strategyForm?: Parameters<typeof AdvancedRuntimeSection>[0]['strategyForm'];
+    } = {},
   ) {
     const form: HubCatEditorFormState = {
       catId: `runtime-${clientId}`,
@@ -195,9 +199,9 @@ describe('HubCatEditor', () => {
     await act(async () => {
       root.render(
         React.createElement(AdvancedRuntimeSection, {
-          cat: null,
+          cat: runtime.cat ?? null,
           form,
-          strategyForm: null,
+          strategyForm: runtime.strategyForm ?? null,
           loadingStrategy: false,
           strategyError: null,
           codexSettings: null,
@@ -215,6 +219,315 @@ describe('HubCatEditor', () => {
     });
     return onChange;
   }
+
+  it('keeps Context Window focused on the Auto or Manual choice', async () => {
+    await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-5.6-sol',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-openai',
+          displayName: 'Runtime openai',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.6-sol',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-openai'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: {
+            ...actionableContextProjection,
+            source: 'reported',
+            provenance: 'internal carrier provenance',
+          },
+        },
+      },
+    );
+
+    const input = queryField<HTMLInputElement>(container, 'input[aria-label="Context Window"]');
+    expect(input.placeholder).toBe('留空或 0 = Auto；正整数 = Manual');
+    expect(document.body.textContent).toContain(
+      '填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。',
+    );
+    expect(document.body.textContent).not.toContain('解析值');
+    expect(document.body.textContent).not.toContain('模型目录');
+    expect(document.body.textContent).not.toContain('internal carrier provenance');
+  });
+
+  it('shows a concise action only when the selected client cannot resolve or apply Context Window', async () => {
+    const baseCat: CatData = {
+      id: 'runtime-antigravity',
+      displayName: 'Runtime antigravity',
+      clientId: 'antigravity',
+      defaultModel: 'test-model',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-antigravity'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'runtime config',
+      personality: 'test',
+    };
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+            capabilityReason: 'Concrete carrier capability unavailable',
+          },
+        },
+      },
+    );
+
+    const contextWindowInput = queryField<HTMLInputElement>(container, 'input[aria-label="Context Window"]');
+    const compatibilityNotice = document.body.querySelector<HTMLOutputElement>('output#context-window-compat-notice');
+    expect(compatibilityNotice?.textContent).toBe('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+    expect(contextWindowInput.getAttribute('aria-describedby')).toBe(compatibilityNotice?.id);
+    expect(compatibilityNotice?.className).toContain('border-conn-amber-ring');
+    expect(compatibilityNotice?.className).toContain('bg-conn-amber-bg');
+    expect(compatibilityNotice?.className).toContain('text-conn-amber-text');
+    expect(document.body.textContent).not.toContain('Concrete carrier capability unavailable');
+    expect(document.body.textContent).not.toContain('未能解析 Context Window');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      { contextWindow: '128000' },
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            reportsRuntimeWindow: true,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'conditional',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+    expect(document.body.textContent).not.toContain('未能解析 Context Window');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...baseCat,
+          resolvedContext: {
+            source: 'catalog',
+            windowTokens: 128_000,
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('derives Context Window compatibility from the edited client instead of the saved member', async () => {
+    const savedAntigravity = {
+      id: 'runtime-antigravity',
+      displayName: 'Runtime antigravity',
+      clientId: 'antigravity',
+      defaultModel: 'test-model',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-antigravity'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'runtime config',
+      personality: 'test',
+      resolvedContext: {
+        reportsRuntimeWindow: false,
+        nativeWindowControl: false,
+        authoritativeUsage: false,
+        usageTelemetry: 'unavailable' as const,
+        nativeCompressionControl: false,
+        observesCompression: false,
+      },
+    } satisfies CatData;
+
+    await renderAdvancedRuntimeSection('antigravity');
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', {}, {}, { cat: savedAntigravity });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          ...savedAntigravity,
+          clientId: 'openai',
+          resolvedContext: {
+            ...actionableContextProjection,
+            reportsRuntimeWindow: true,
+            nativeWindowControl: true,
+          },
+        },
+      },
+    );
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'app_server' });
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口');
+
+    await renderAdvancedRuntimeSection('openai', 'gpt-5.6-sol', { codexCarrier: 'exec_json' });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('suppresses the Context Window warning for Google drafts when the model has a catalog entry', async () => {
+    // gemini-2.5-pro is in the shared catalog → Auto mode resolves via catalog
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro');
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+
+    // Catalog resolution is Auto-only; Manual still needs the carrier warning.
+    await renderAdvancedRuntimeSection('google', 'gemini-2.5-pro', { contextWindow: '128000' });
+    expect(document.body.textContent).toContain(
+      '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。',
+    );
+
+    // Unknown model with no catalog entry → warning fires
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom');
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+
+    // ACP bypasses the carrier entirely — no warning regardless of model
+    await renderAdvancedRuntimeSection('google', 'gemini-unknown-custom', { acpEnabled: true });
+    expect(document.body.textContent).not.toContain('当前 Client 无法自动探测上下文窗口');
+  });
+
+  it('does not reuse a saved Manual source after the editor switches Context Window to Auto', async () => {
+    await renderAdvancedRuntimeSection(
+      'antigravity',
+      'test-model',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-antigravity',
+          displayName: 'Runtime antigravity',
+          clientId: 'antigravity',
+          defaultModel: 'test-model',
+          contextWindow: 128_000,
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-antigravity'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: {
+            source: 'manual',
+            windowTokens: 128_000,
+            reportsRuntimeWindow: false,
+            nativeWindowControl: false,
+            authoritativeUsage: false,
+            usageTelemetry: 'unavailable',
+            nativeCompressionControl: false,
+            observesCompression: false,
+          },
+        },
+      },
+    );
+
+    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+  });
+
+  it.each([
+    'handoff',
+    'compress',
+    'hybrid',
+  ] as const)('renders Session State / Chain as a heading directly above the %s strategy controls', async (strategy) => {
+    await renderAdvancedRuntimeSection(
+      'openai',
+      'gpt-5.6-sol',
+      {},
+      {},
+      {
+        cat: {
+          id: 'runtime-openai',
+          displayName: 'Runtime openai',
+          clientId: 'openai',
+          defaultModel: 'gpt-5.6-sol',
+          color: { primary: '#16a34a', secondary: '#bbf7d0' },
+          mentionPatterns: ['@runtime-openai'],
+          avatar: '/avatars/default.png',
+          roleDescription: 'runtime config',
+          personality: 'test',
+          resolvedContext: actionableContextProjection,
+        },
+        strategyForm: {
+          strategy,
+          statusStrategy: strategy,
+          warnThreshold: '0.75',
+          actionThreshold: '0.85',
+          maxCompressions: '2',
+          source: 'runtime_override',
+          revision: 'test',
+          changedAt: 0,
+          executionStatus: { status: 'unavailable', missingCapabilities: ['authoritative_usage'] },
+        },
+      },
+    );
+
+    const heading = document.body.querySelector('h5');
+    const strategySelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Session Strategy"]');
+    expect(heading?.textContent).toBe('Session State / Chain');
+    expect(heading?.nextElementSibling?.contains(strategySelect)).toBe(true);
+    expect(strategySelect.value).toBe(strategy);
+    expect(Array.from(strategySelect.options, (option) => option.value)).toEqual(['handoff', 'compress', 'hybrid']);
+    expect(document.body.textContent).not.toContain('能力预检');
+    expect(document.body.textContent).not.toContain('来源：');
+    expect(document.body.textContent).not.toContain('缺少权威 usage');
+  });
 
   it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
     for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'opencode'] as const) {
@@ -3481,7 +3794,11 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).toContain('展开后可配置 TTS clone 参考音频和文本。');
     expect(document.body.textContent).toContain('别名与 @ 路由');
     expect(document.body.textContent).toContain('认证与模型');
-    expect(document.body.textContent).toContain('Session State / Chain 始终记录并可见');
+    expect(
+      Array.from(document.body.querySelectorAll('h5')).some(
+        (heading) => heading.textContent === 'Session State / Chain',
+      ),
+    ).toBe(true);
     expect(document.body.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
     expect(document.body.textContent).toContain('Codex Sandbox (Codex)');
     expect(document.body.textContent).toContain('Codex Approval (Codex)');
@@ -3504,8 +3821,8 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Team Strengths"]'), '代码审查、找 bug、深度思考');
     await changeField(queryField(container, 'input[aria-label="Strengths"]'), 'security, testing, debugging');
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
-    expect(document.body.textContent).toContain('已保存 compress 策略的能力预检');
-    expect(document.body.textContent).toContain('保存后会重新预检 handoff');
+    expect(document.body.textContent).not.toContain('能力预检');
+    expect(document.body.textContent).not.toContain('保存后会重新预检 handoff');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
@@ -3731,7 +4048,11 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(document.body.textContent).toContain('Session State / Chain 始终记录并可见');
+    expect(
+      Array.from(document.body.querySelectorAll('h5')).some(
+        (heading) => heading.textContent === 'Session State / Chain',
+      ),
+    ).toBe(true);
     expect(document.body.textContent).not.toContain('Session Chain 未开启');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Session Strategy"]').value).toBe('compress');
     expect(document.body.querySelector('input[aria-label="Session Observe Threshold"]')).toBeTruthy();

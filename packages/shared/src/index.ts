@@ -34,6 +34,8 @@ export {
   PET_STATE_PROJECTION_V1,
   projectToPetState,
 } from './concierge/pet-skin-projection.js';
+// #1343: Context window catalog (API Auto-mode fallback + Web draft preview)
+export * from './context-window-catalog.js';
 export { CORE_COMMANDS } from './core-commands.js';
 // Export Eval Hub metric reference normalization (F248 B3)
 export * from './eval-metric-ref.js';

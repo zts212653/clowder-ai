@@ -327,10 +327,10 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('0 compress observed');
   });
 
-  it('shows the applied policy and exact execution status on the active session node', async () => {
+  it('keeps applied policy details out of active cards and sealed summaries', async () => {
     mockSessionsResponse([
       {
-        id: 'policy-node',
+        id: 'active-policy-node',
         catId: 'opus',
         seq: 0,
         status: 'active',
@@ -348,16 +348,51 @@ describe('F24: SessionChainPanel', () => {
           },
         },
       },
+      {
+        id: 'sealed-policy-node',
+        catId: 'codex',
+        seq: 1,
+        status: 'sealed',
+        messageCount: 12,
+        compressionCount: 2,
+        contextHealth: {
+          usedTokens: 94_720,
+          windowTokens: 128_000,
+          fillRatio: 0.74,
+          source: 'exact',
+        },
+        sealReason: 'threshold',
+        createdAt: Date.now() - 60_000,
+        sealedAt: Date.now() - 30_000,
+        appliedPolicy: {
+          config: { strategy: 'handoff', thresholds: { warn: 0.8, action: 0.9 } },
+          source: 'runtime_override',
+          revision: 'runtime:handoff:1',
+          changedAt: 1,
+          execution: {
+            status: 'unavailable',
+            missingCapabilities: ['authoritative_usage'],
+          },
+        },
+      },
     ]);
 
     renderPanel('thread-policy-state');
     await flushFetch();
 
-    const policyState = container.querySelector('[data-testid="session-policy-state"]');
-    expect(policyState?.textContent).toContain('hybrid');
-    expect(policyState?.textContent).toContain('degraded');
-    expect(policyState?.textContent).toContain('compression_signal');
-    expect(policyState?.textContent).toContain('session_rotation');
+    expect(container.querySelector('[data-testid="session-policy-state"]')).toBeNull();
+    expect(container.textContent).not.toContain('compression_signal');
+    expect(container.textContent).not.toContain('session_rotation');
+
+    expandSealed();
+    const sealedSummary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
+    await act(async () => sealedSummary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
+    expect(sealedSummary?.textContent).toContain('74%');
+    expect(sealedSummary?.textContent).toContain('2 compress');
+    expect(sealedSummary?.textContent).toContain('threshold');
+    expect(sealedSummary?.textContent).not.toContain('handoff');
+    expect(sealedSummary?.textContent).not.toContain('unavailable');
+    expect(sealedSummary?.textContent).not.toContain('authoritative_usage');
   });
 
   it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
