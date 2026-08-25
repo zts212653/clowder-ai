@@ -312,7 +312,7 @@ SENSE private + shared state
 - [x] AC-0.3: 文档区分动作、canonical fact/terminal 与 derived projection；Stop 例不再依赖全家广播
 - [x] AC-0.4: 文档明确统一的是 provider-neutral projection 语义，不是中心 shadow ledger 或统一 mutation API
 - [x] AC-0.5: 旧 Home-State 与 Interaction Episode 已降为实现切片/上层消费者
-- [ ] AC-0.6: 新方向由非作者完成内容审阅；先前 R4 approval 仅覆盖旧 HEAD/旧坐标，不可复用
+- [x] AC-0.6: 新方向由非作者完成内容审阅；先前 R4 approval 仅覆盖旧 HEAD/旧坐标，不可复用
 
 ### Phase 1 — Projection contract
 
