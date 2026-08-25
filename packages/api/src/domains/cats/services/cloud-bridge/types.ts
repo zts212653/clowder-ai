@@ -6,12 +6,12 @@
  * subsequent PR-C).
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, CloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
 
 /**
  * Parameters passed to the bridge when a local cat @ mentions a cloud cat.
  *
- * The bridge uses these to build a 5-field thread runtime delta payload
+ * The bridge uses these to build a source-bound thread runtime delta payload
  * (KD-21 / AC-B1c-12) and inject it into the cloud cat's ChatGPT chat.
  */
 export interface CloudInvokeDispatchParams {
@@ -37,8 +37,10 @@ export interface CloudInvokeDispatchParams {
    * builder, not by the caller).
    */
   readonly intent: string;
-  /** Persisted source message ID used as the host append idempotency key. */
-  readonly idempotencyKey?: string;
+  /** Exact persisted source message ID: return anchor and Host idempotency key. */
+  readonly sourceMessageId: string;
+  /** Opaque server-signed capability binding a Remote MCP return to the exact source. */
+  readonly cloudReturnBinding: string;
 }
 
 /**
@@ -92,13 +94,21 @@ export type BridgeDispatchOutcome =
       readonly capturedUrl: string;
       readonly transport?: 'host' | 'legacy-pinchtab';
       readonly hostMessageId?: string;
+      readonly idempotentReplay?: boolean;
     }
-  | { readonly kind: 'fallback'; readonly reason: BridgeFallbackReason; readonly detail?: string }
+  | {
+      readonly kind: 'fallback';
+      readonly reason: BridgeFallbackReason;
+      readonly detail?: string;
+      readonly idempotentReplay?: boolean;
+    }
   | {
       readonly kind: 'error';
       readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'inject-failed'>;
       readonly message: string;
       readonly detail?: string;
+      readonly idempotentReplay?: boolean;
+      readonly failureDiagnostic?: CloudBridgeFailureDiagnosticV1;
     };
 
 export type BridgeFallbackReason =
@@ -107,13 +117,15 @@ export type BridgeFallbackReason =
   | 'invalid-captured-url'
   | 'inject-failed'
   | 'host-append-failed'
-  | 'missing-idempotency-key';
+  | 'missing-source-message-id'
+  | 'incomplete-dispatch-provenance'
+  | 'legacy-delivery-unverified';
 
 /**
  * The cloud invoke bridge — awaited by `invokeSingleCat` only until a bounded
  * transport receipt/failure is known. Implementation is responsible for:
  *
- *  1. Building the 5-field delta payload (AC-B1c-12) with JSON.stringify
+ *  1. Building the source-bound delta payload (AC-B1c-12) with JSON.stringify
  *     safety (AC-B1c-10).
  *  2. Reading the binding from the thread metadata.
  *  3. Invoking the PinchTab adapter (if ready) — AC-B1c-3 in PR-C.

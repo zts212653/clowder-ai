@@ -506,10 +506,10 @@ function assertTargetOutcomes(
     }
     if (
       !outcome.invocationId ||
-      outcome.evidenceRef?.kind !== 'invocation_lineage' ||
+      (outcome.evidenceRef?.kind !== 'invocation_lineage' && outcome.evidenceRef?.kind !== 'turn_execution') ||
       outcome.evidenceRef.invocationId !== outcome.invocationId
     ) {
-      throw new Error('target outcome must carry matching invocation lineage evidence');
+      throw new Error('target outcome must carry matching invocation evidence');
     }
     if (
       outcome.disposition !== 'responded' &&

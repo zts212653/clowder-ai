@@ -172,7 +172,7 @@ function normalizeOutcome(value: unknown): QueueTargetOutcome | undefined {
     typeof candidate.disposition !== 'string' ||
     !HANDLED_DISPOSITIONS.has(candidate.disposition) ||
     !evidenceRef ||
-    evidenceRef.kind !== 'invocation_lineage' ||
+    (evidenceRef.kind !== 'invocation_lineage' && evidenceRef.kind !== 'turn_execution') ||
     !isNonEmptyString(evidenceRef.invocationId) ||
     !isFiniteNumber(candidate.handledAt)
   ) {
@@ -183,7 +183,7 @@ function normalizeOutcome(value: unknown): QueueTargetOutcome | undefined {
   return {
     invocationId: candidate.invocationId,
     disposition: candidate.disposition as QueueTargetOutcome['disposition'],
-    evidenceRef: { kind: 'invocation_lineage', invocationId: evidenceRef.invocationId },
+    evidenceRef: { kind: evidenceRef.kind, invocationId: evidenceRef.invocationId },
     handledAt: candidate.handledAt,
     ...(consumption ? { consumption } : {}),
   };

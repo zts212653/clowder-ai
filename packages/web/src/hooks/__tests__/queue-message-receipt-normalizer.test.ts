@@ -3,6 +3,37 @@ import { describe, expect, it } from 'vitest';
 import { normalizeQueueMessageReceiptProjections } from '../queue-message-receipt-normalizer';
 
 describe('normalizeQueueMessageReceiptProjections', () => {
+  it('preserves terminal TurnExecution evidence without upgrading it to visible lineage', () => {
+    const projections = normalizeQueueMessageReceiptProjections([
+      {
+        messageId: 'message-terminal-no-lineage',
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-terminal-no-lineage',
+          targets: [
+            {
+              catId: 'codex-sol',
+              state: 'handled',
+              invocationId: 'turn-terminal-no-lineage',
+              outcome: {
+                invocationId: 'turn-terminal-no-lineage',
+                disposition: 'completed_with_turn',
+                evidenceRef: { kind: 'turn_execution', invocationId: 'turn-terminal-no-lineage' },
+                handledAt: 2_000,
+              },
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    ]);
+
+    expect(projections[0]?.queueReceipt.targets[0]?.outcome?.evidenceRef).toEqual({
+      kind: 'turn_execution',
+      invocationId: 'turn-terminal-no-lineage',
+    });
+  });
+
   it('preserves the typed runtime-restart interruption receipt from Queue History', () => {
     const projections = normalizeQueueMessageReceiptProjections([
       {

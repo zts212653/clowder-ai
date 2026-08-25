@@ -14,6 +14,9 @@ evalCat:
 # the latest 24h in-memory snapshot (EVICTION_TTL_MS in anchor-telemetry.ts).
 # The eval window covers the most recent 24h, not the full week (Maine Coon R1 P2).
 frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
 sourceAdapter: f236-anchor-telemetry-rollup
 sourceRefsKind: anchor-telemetry-snapshot
 threadPolicy:

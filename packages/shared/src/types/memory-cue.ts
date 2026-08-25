@@ -184,6 +184,20 @@ export type CueEnvelopeV1 = z.infer<typeof cueEnvelopeV1Schema>;
 export type RecallResolverFamily = (typeof RECALL_RESOLVER_FAMILIES)[number];
 export type MemoryCueInvalidator = (typeof MEMORY_CUE_INVALIDATORS)[number];
 
+const MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER = Object.freeze({
+  person_entity: 'person_memory' as const,
+  operational_precedent: 'evidence' as const,
+  taste: 'taste' as const,
+  profile: null,
+  project_knowledge: null,
+});
+
+export function memoryCueDrillFamilyForResolver(
+  resolverFamily: RecallResolverFamily,
+): CueEnvelopeV1['drill']['family'] | null {
+  return MEMORY_CUE_DRILL_FAMILY_BY_RESOLVER[resolverFamily];
+}
+
 export function isRecallOpportunityV1(value: unknown): value is RecallOpportunityV1 {
   return recallOpportunityV1Schema.safeParse(value).success;
 }

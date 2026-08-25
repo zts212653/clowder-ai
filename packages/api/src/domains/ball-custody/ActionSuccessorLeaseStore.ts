@@ -16,6 +16,7 @@ import type {
   RecordActionSuccessorReturnDeliveryAttemptResult,
   ReplaceActionSuccessorInput,
   ReplaceActionSuccessorResult,
+  RetirePendingDispatchForFreshnessMismatchResult,
   ReturnActionSuccessorResult,
 } from './action-successor-state-machine.js';
 
@@ -52,17 +53,50 @@ export type ActionSuccessorReturnStoreResult =
   | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
 
 export type ActionSuccessorDispatchAttemptResult = {
-  outcome: 'recorded' | 'subject_terminal' | 'stale_generation' | 'dispatch_not_pending';
+  outcome:
+    | 'recorded'
+    | 'subject_terminal'
+    | 'stale_generation'
+    | 'stale_revision'
+    | 'predicate_mismatch'
+    | 'dispatch_not_pending'
+    | 'lease_not_active'
+    | 'holder_terminal';
   lease: ActionSuccessorLease;
 };
 
+export type ActionSuccessorDispatchReservationResult = {
+  outcome:
+    | 'reserved'
+    | 'subject_terminal'
+    | 'stale_generation'
+    | 'stale_revision'
+    | 'predicate_mismatch'
+    | 'dispatch_not_pending'
+    | 'dispatch_reserved'
+    | 'lease_not_active'
+    | 'holder_terminal'
+    | 'attempt_missing';
+  lease: ActionSuccessorLease;
+};
+
+export type ActionSuccessorFreshnessMismatchRetirementResult =
+  | RetirePendingDispatchForFreshnessMismatchResult
+  | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
+
 export type ActionSuccessorDispatchDeliveredResult = {
-  outcome: 'delivered' | 'stale_generation' | 'dispatch_not_pending';
+  outcome:
+    | 'delivered'
+    | 'stale_generation'
+    | 'stale_revision'
+    | 'predicate_mismatch'
+    | 'dispatch_not_pending'
+    | 'reservation_mismatch';
   lease: ActionSuccessorLease;
 };
 
 export type ActionSuccessorDispatchFailedResult = {
-  outcome: 'failed' | 'stale_generation' | 'dispatch_not_pending';
+  outcome: 'failed' | 'stale_generation' | 'stale_revision' | 'predicate_mismatch' | 'dispatch_not_pending';
   lease: ActionSuccessorLease;
 };
 
@@ -144,16 +178,52 @@ export interface ActionSuccessorLeaseStore {
   ): Promise<RecordActionSuccessorReturnDeliveryAttemptResult>;
   recordDispatchDeliveryAttempt(
     leaseId: string,
-    input: { expectedGeneration: number; now: number },
+    input: {
+      expectedGeneration: number;
+      expectedRevision: number;
+      expectedPredicateDigest: string;
+      freshnessEvidenceRef: string;
+      now: number;
+    },
   ): Promise<ActionSuccessorDispatchAttemptResult>;
+  reserveDispatchDelivery(
+    leaseId: string,
+    input: {
+      expectedGeneration: number;
+      expectedRevision: number;
+      expectedPredicateDigest: string;
+      freshnessEvidenceRef: string;
+      now: number;
+    },
+  ): Promise<ActionSuccessorDispatchReservationResult>;
+  retirePendingDispatchForFreshnessMismatch(
+    leaseId: string,
+    input: {
+      expectedGeneration: number;
+      expectedRevision: number;
+      expectedPredicateDigest: string;
+      evidenceRef: string;
+      now: number;
+    },
+  ): Promise<ActionSuccessorFreshnessMismatchRetirementResult>;
   markDispatchDelivered(
     leaseId: string,
-    input: { expectedGeneration: number; deliveredMessageId: string; evidenceRef: string; now: number },
+    input: {
+      expectedGeneration: number;
+      expectedRevision: number;
+      expectedPredicateDigest: string;
+      freshnessEvidenceRef: string;
+      deliveredMessageId: string;
+      evidenceRef: string;
+      now: number;
+    },
   ): Promise<ActionSuccessorDispatchDeliveredResult>;
   markDispatchFailed(
     leaseId: string,
     input: {
       expectedGeneration: number;
+      expectedRevision: number;
+      expectedPredicateDigest: string;
       reason: ActionSuccessorDispatchFailureReason;
       evidenceRef: string;
       now: number;

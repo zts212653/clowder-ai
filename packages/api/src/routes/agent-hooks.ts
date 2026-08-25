@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { getAgentHookStatus, syncAgentHooks } from '../agent-hooks/index.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
@@ -77,7 +75,7 @@ function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
 
 /**
  * Validate an explicit project path using the shared project-path validator
- * (canonicalization, symlink resolution, denylist) and verify .cat-cafe/ exists.
+ * (canonicalization, symlink resolution, denylist).
  *
  * @returns `{ ok: true, path }` when valid, `{ ok: false, error }` when invalid.
  *          Returns `{ ok: true, path: null }` when no explicit path was supplied
@@ -85,10 +83,7 @@ function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
  */
 async function validateExplicitProjectPath(
   rawPath: string | null,
-): Promise<
-  | { ok: true; path: string | null }
-  | { ok: false; code: 'INVALID_PROJECT_PATH' | 'PROJECT_NOT_INITIALIZED'; error: string }
-> {
+): Promise<{ ok: true; path: string | null } | { ok: false; code: 'INVALID_PROJECT_PATH'; error: string }> {
   if (!rawPath) return { ok: true, path: null };
 
   const validated = await resolvePersistentProjectPath(rawPath);
@@ -97,16 +92,6 @@ async function validateExplicitProjectPath(
       ok: false,
       code: 'INVALID_PROJECT_PATH',
       error: `Invalid project path: not found, denied, or not a directory: ${rawPath}`,
-    };
-  }
-
-  if (!existsSync(join(validated, '.cat-cafe'))) {
-    // An uninitialised project must never inherit host capabilities. The stable
-    // code lets clients present this expected setup state without parsing text.
-    return {
-      ok: false,
-      code: 'PROJECT_NOT_INITIALIZED',
-      error: `Project not initialized (missing .cat-cafe/): ${validated}`,
     };
   }
 

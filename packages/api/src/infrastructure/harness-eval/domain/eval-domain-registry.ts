@@ -35,79 +35,146 @@ const evalDomainFixtureSchema = z.object({
   signal: z.string().min(1).optional(),
 });
 
-const evalDomainRegistryEntrySchema = z.object({
-  domainId: evalDomainIdSchema,
-  displayName: z.string().min(1),
-  /**
-   * F248 Phase A — one-line human-readable explanation of what this eval
-   * domain observes, surfaced in the Eval Hub so the human (not just cats/
-   * tools) can read it.
-   *
-   * OPTIONAL at the schema level on purpose: this is a display-surface field,
-   * not a functional constraint. Making it parse-required would couple every
-   * registry fixture — including description-irrelevant functional tests — to
-   * this field (23 such tests broke when it was required). Production
-   * completeness is enforced instead by a focused guard test over the shipped
-   * `docs/harness-feedback/eval-domains/*.yaml` (ADR-031 hard layer, scoped to
-   * production), not by failing unrelated unit fixtures.
-   */
-  descriptionForHuman: z.string().min(1).optional(),
-  metricGlossary: metricGlossarySchema.optional(),
-  metricGlossaryRef: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]*\.metrics\.yaml$/, 'metricGlossaryRef must be a local *.metrics.yaml filename')
-    .optional(),
-  systemThreadId: z.string().min(1, 'systemThreadId is required'),
-  evalCat: z.object({
-    catId: z.string().min(1),
-    handle: z.string().min(1),
-    model: z.string().min(1),
-  }),
-  frequency: z.union([
-    z.enum(['daily', 'weekly']),
-    z
+const timeOnlyTriggerPolicySchema = z
+  .object({
+    mode: z.literal('time_only'),
+    maxDetectionDelayHours: z.number().int().positive(),
+  })
+  .strict();
+
+const thresholdOrTimeTriggerPolicySchema = z
+  .object({
+    mode: z.literal('threshold_or_time'),
+    maxDetectionDelayHours: z.number().int().positive(),
+    cooldownHours: z.number().int().positive(),
+    eventSource: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'eventSource must be a lowercase slug-like id'),
+    threshold: z
+      .object({
+        counter: z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/, 'counter must be a named metric id'),
+        crossingAt: z.number().int().positive(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const evalDomainTriggerPolicySchema = z.discriminatedUnion('mode', [
+  timeOnlyTriggerPolicySchema,
+  thresholdOrTimeTriggerPolicySchema,
+]);
+
+export type EvalDomainTriggerPolicy = z.infer<typeof evalDomainTriggerPolicySchema>;
+
+export function detectionDelayHoursForFrequency(frequency: string): number {
+  if (frequency === 'daily') return 24;
+  if (frequency === 'weekly') return 168;
+  const match = /^every-([1-9]\d*)d$/.exec(frequency);
+  if (!match) throw new Error(`unsupported eval domain frequency: ${frequency}`);
+  return Number.parseInt(match[1], 10) * 24;
+}
+
+const evalDomainRegistryEntrySchema = z
+  .object({
+    domainId: evalDomainIdSchema,
+    displayName: z.string().min(1),
+    /**
+     * F248 Phase A — one-line human-readable explanation of what this eval
+     * domain observes, surfaced in the Eval Hub so the human (not just cats/
+     * tools) can read it.
+     *
+     * OPTIONAL at the schema level on purpose: this is a display-surface field,
+     * not a functional constraint. Making it parse-required would couple every
+     * registry fixture — including description-irrelevant functional tests — to
+     * this field (23 such tests broke when it was required). Production
+     * completeness is enforced instead by a focused guard test over the shipped
+     * `docs/harness-feedback/eval-domains/*.yaml` (ADR-031 hard layer, scoped to
+     * production), not by failing unrelated unit fixtures.
+     */
+    descriptionForHuman: z.string().min(1).optional(),
+    metricGlossary: metricGlossarySchema.optional(),
+    metricGlossaryRef: z
       .string()
-      .regex(/^every-[1-9]\d*d$/, 'N-day frequency must match every-{N}d with N >= 1 (e.g. every-3d, every-7d)'),
-  ]),
-  sourceAdapter: sourceAdapterSchema,
-  sourceRefsKind: sourceRefsKindSchema,
-  threadPolicy: z.object({
-    role: z.literal('working-home'),
-    stateSot: z.literal('registry'),
-    allowedContent: z.array(z.enum(['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'])).min(1),
-  }),
-  legacyScheduledTaskIds: z.array(z.string().min(1)),
-  handoffTargetResolver: z.object({
-    featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
-    ownerCatId: z.string().min(1),
-    threadLookup: z.literal('feature-thread'),
-  }),
-  sla: z.object({
-    acknowledgeHours: z.number().int().positive('acknowledgeHours must be positive'),
-    reevalWithinHours: z.number().int().positive('reevalWithinHours must be positive'),
-  }),
-  fixtures: z.array(evalDomainFixtureSchema).default([]),
-  /**
-   * Sunset flag. When `false`, `loadRegisteredDomains` skips this domain
-   * from scheduled eval cron pickup (no invocation message lands in the
-   * domain thread). Default `true`.
-   *
-   * Use this to silently retire a domain's auto-schedule without deleting
-   * the registry entry — preserves SLA / handoffTargetResolver / threadPolicy
-   * config for future re-enable (just remove the field or set `true`).
-   *
-   * Set to `false` when:
-   * - The domain's verdict generator isn't wired (cron fires would produce
-   *   empty invocations with no verdict — silent-broken).
-   * - The domain is being intentionally paused while rules / wiring are reworked.
-   *
-   * Set on 2026-06-06 for `eval:sop` (silent-fire root cause: missing
-   * sourceAdapter trace producer + missing publish_verdict generator wiring
-   * — F192 doc §323 "需先加 file-writer 层 ~100-150 行"). Re-enable when
-   * those gaps are closed.
-   */
-  enabled: z.boolean().default(true),
-});
+      .regex(/^[a-z0-9][a-z0-9-]*\.metrics\.yaml$/, 'metricGlossaryRef must be a local *.metrics.yaml filename')
+      .optional(),
+    systemThreadId: z.string().min(1, 'systemThreadId is required'),
+    evalCat: z.object({
+      catId: z.string().min(1),
+      handle: z.string().min(1),
+      model: z.string().min(1),
+    }),
+    frequency: z.union([
+      z.enum(['daily', 'weekly']),
+      z
+        .string()
+        .regex(/^every-[1-9]\d*d$/, 'N-day frequency must match every-{N}d with N >= 1 (e.g. every-3d, every-7d)'),
+    ]),
+    triggerPolicy: evalDomainTriggerPolicySchema.optional(),
+    sourceAdapter: sourceAdapterSchema,
+    sourceRefsKind: sourceRefsKindSchema,
+    threadPolicy: z.object({
+      role: z.literal('working-home'),
+      stateSot: z.literal('registry'),
+      allowedContent: z.array(z.enum(['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'])).min(1),
+    }),
+    legacyScheduledTaskIds: z.array(z.string().min(1)),
+    handoffTargetResolver: z.object({
+      featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
+      ownerCatId: z.string().min(1),
+      threadLookup: z.literal('feature-thread'),
+    }),
+    sla: z.object({
+      acknowledgeHours: z.number().int().positive('acknowledgeHours must be positive'),
+      reevalWithinHours: z.number().int().positive('reevalWithinHours must be positive'),
+    }),
+    fixtures: z.array(evalDomainFixtureSchema).default([]),
+    /**
+     * Sunset flag. When `false`, `loadRegisteredDomains` skips this domain
+     * from scheduled eval cron pickup (no invocation message lands in the
+     * domain thread). Default `true`.
+     *
+     * Use this to silently retire a domain's auto-schedule without deleting
+     * the registry entry — preserves SLA / handoffTargetResolver / threadPolicy
+     * config for future re-enable (just remove the field or set `true`).
+     *
+     * Set to `false` when:
+     * - The domain's verdict generator isn't wired (cron fires would produce
+     *   empty invocations with no verdict — silent-broken).
+     * - The domain is being intentionally paused while rules / wiring are reworked.
+     *
+     * Set on 2026-06-06 for `eval:sop` (silent-fire root cause: missing
+     * sourceAdapter trace producer + missing publish_verdict generator wiring
+     * — F192 doc §323 "需先加 file-writer 层 ~100-150 行"). Re-enable when
+     * those gaps are closed.
+     */
+    enabled: z.boolean().default(true),
+  })
+  .superRefine((entry, ctx) => {
+    if (entry.triggerPolicy?.mode === 'threshold_or_time' && !['daily', 'weekly'].includes(entry.frequency)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['triggerPolicy', 'mode'],
+        message: 'threshold_or_time requires a daily or weekly time fallback',
+      });
+    }
+    if (
+      entry.triggerPolicy &&
+      entry.triggerPolicy.maxDetectionDelayHours !== detectionDelayHoursForFrequency(entry.frequency)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['triggerPolicy', 'maxDetectionDelayHours'],
+        message: 'maxDetectionDelayHours must match the declared frequency',
+      });
+    }
+  })
+  .transform((entry) => ({
+    ...entry,
+    triggerPolicy:
+      entry.triggerPolicy ??
+      ({
+        mode: 'time_only',
+        maxDetectionDelayHours: detectionDelayHoursForFrequency(entry.frequency),
+      } as const),
+  }));
 
 export type EvalDomainRegistryEntry = z.infer<typeof evalDomainRegistryEntrySchema>;
 export type EvalMetricGlossary = z.infer<typeof metricGlossarySchema>;

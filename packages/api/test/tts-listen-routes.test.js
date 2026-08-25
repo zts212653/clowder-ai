@@ -6,6 +6,7 @@ import { after, before, describe, it } from 'node:test';
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { DocumentListenRepository } from '../dist/domains/cats/services/tts/DocumentListenRepository.js';
+import { ListenAssetService } from '../dist/domains/cats/services/tts/ListenAssetService.js';
 import { TtsRegistry } from '../dist/domains/cats/services/tts/TtsRegistry.js';
 import { securityHeadersPlugin } from '../dist/infrastructure/security-headers.js';
 import { ttsRoutes } from '../dist/routes/tts.js';
@@ -92,10 +93,11 @@ describe('F279 TTS listen routes', () => {
     assert.equal(response.json().cached, false);
     assert.equal(response.json().durationSec, 1);
     assert.equal(typeof response.json().synthesisMs, 'number');
-    assert.equal(synthesisRequests.at(-1).speed, 1);
+    assert.equal(streamRequests.at(-1).speed, 1);
   });
 
   it('streams a cold listen sentence immediately, persists the complete asset, then serves the cache', async () => {
+    const streamRequestCount = streamRequests.length;
     const request = {
       method: 'POST',
       url: '/api/tts/listen/stream',
@@ -135,7 +137,7 @@ describe('F279 TTS listen routes', () => {
     );
     assert.equal(secondEvents[0].cached, true);
     assert.equal(secondEvents[0].assetId, firstEvents[1].assetId);
-    assert.equal(streamRequests.length, 1, 'cache hit must not invoke the model stream twice');
+    assert.equal(streamRequests.length, streamRequestCount + 1, 'cache hit must not invoke the model stream twice');
   });
 
   it('preserves shared CORS and security headers on both real SSE responses', async () => {
@@ -214,6 +216,56 @@ describe('F279 TTS listen routes', () => {
     assert.equal(aborted, true, 'socket close must abort the provider stream');
   });
 
+  it('does not start or orphan a producer when a listener aborts during its cache probe', async () => {
+    const cacheDir = await mkdtemp(path.join(tmpdir(), 'tts-listen-probe-abort-'));
+    const registry = new TtsRegistry();
+    let streamCalls = 0;
+    registry.register({
+      id: 'probe-abort-tts',
+      model: 'test-model',
+      synthesize: async () => ({ audio: Buffer.from('unused'), format: 'wav' }),
+      stream: async function* (_request, options) {
+        streamCalls++;
+        options?.signal?.throwIfAborted();
+        yield { type: 'final', result: { audio: Buffer.from('unused'), format: 'wav' } };
+      },
+    });
+    const assets = new ListenAssetService(registry, cacheDir);
+    const abortReason = new Error('listener aborted during cache probe');
+    let aborted = false;
+    const signal = {
+      get aborted() {
+        return aborted;
+      },
+      get reason() {
+        return abortReason;
+      },
+      throwIfAborted() {
+        if (aborted) throw abortReason;
+        queueMicrotask(() => {
+          aborted = true;
+        });
+      },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const unhandled = [];
+    const onUnhandledRejection = (reason) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      const pending = assets.getOrCreate('缓存探测期间断开的听读请求。', { signal });
+
+      await assert.rejects(pending, /listener aborted during cache probe/);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal(unhandled.length, 0, 'the aborted producer must not leak an unhandled rejection');
+      assert.equal(streamCalls, 0, 'an abort during the cache probe must not start a producer');
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+      await assets.close();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
   it('persists a manifest and clears audio references without clearing user state', async () => {
     const identity = { projectPath: '/repo', relativePath: 'paper.md', contentDigest: 'digest' };
     const state = {
@@ -273,6 +325,84 @@ describe('F279 TTS listen routes', () => {
     assert.deepEqual(loaded.json().cache, { cachedSentences: 0, totalSentences: 1, totalBytes: 0 });
   });
 
+  it('preserves eligible cache links through provider unavailability and an edit that retains an anchor', async () => {
+    const cacheDir = await mkdtemp(path.join(tmpdir(), 'tts-listen-fingerprint-unavailable-'));
+    const repository = new DocumentListenRepository(path.join(cacheDir, 'listen-mode.sqlite'));
+    await repository.initialize();
+    const registry = new TtsRegistry();
+    const registeredDefault = registry.getDefault.bind(registry);
+    let providerAvailable = true;
+    registry.getDefault = () => {
+      if (!providerAvailable) throw new Error('TTS provider temporarily unavailable');
+      return registeredDefault();
+    };
+    registry.register({
+      id: 'flaky-tts',
+      model: 'test-model',
+      synthesize: async () => ({ audio: Buffer.from('unused'), format: 'wav' }),
+    });
+    const flakyApp = Fastify({ logger: false });
+    await flakyApp.register(ttsRoutes, { ttsRegistry: registry, cacheDir, documentListenRepository: repository });
+    const headers = { 'x-cat-cafe-user': 'you', 'content-type': 'application/json' };
+    const identity = { projectPath: '/repo', relativePath: 'fingerprint-unavailable.md', contentDigest: 'digest-a' };
+    const state = {
+      identity,
+      sentences: [{ anchor: 'sentence-a' }],
+      position: { anchor: 'sentence-a', offsetSeconds: 0 },
+      playbackRate: 1,
+      retention: '7d',
+      updatedAt: 100,
+    };
+    const assetId = `${'e'.repeat(64)}.wav`;
+    try {
+      const initial = await flakyApp.inject({
+        method: 'PUT',
+        url: '/api/tts/listen/document',
+        headers,
+        payload: state,
+      });
+      assert.equal(initial.statusCode, 200, initial.body);
+      const fingerprint = initial.json().synthesisFingerprint;
+      assert.equal(typeof fingerprint, 'string');
+      repository.setSentenceAsset(
+        { userId: 'you', projectPath: identity.projectPath, relativePath: identity.relativePath },
+        'sentence-a',
+        assetId,
+      );
+
+      providerAvailable = false;
+      const unavailableSave = await flakyApp.inject({
+        method: 'PUT',
+        url: '/api/tts/listen/document',
+        headers,
+        payload: { ...state, position: { anchor: 'sentence-a', offsetSeconds: 7 }, updatedAt: 101 },
+      });
+      assert.equal(unavailableSave.statusCode, 200, unavailableSave.body);
+      assert.equal(unavailableSave.json().synthesisFingerprint, fingerprint);
+      assert.deepEqual(unavailableSave.json().sentences, [{ anchor: 'sentence-a', assetId }]);
+      assert.equal(unavailableSave.json().position.offsetSeconds, 7);
+
+      providerAvailable = true;
+      const editedSave = await flakyApp.inject({
+        method: 'PUT',
+        url: '/api/tts/listen/document',
+        headers,
+        payload: {
+          ...state,
+          identity: { ...identity, contentDigest: 'digest-b' },
+          sentences: [{ anchor: 'sentence-a' }, { anchor: 'replacement' }],
+          updatedAt: 102,
+        },
+      });
+      assert.equal(editedSave.statusCode, 200, editedSave.body);
+      assert.deepEqual(editedSave.json().sentences, [{ anchor: 'sentence-a', assetId }, { anchor: 'replacement' }]);
+    } finally {
+      await flakyApp.close();
+      repository.close();
+      await rm(cacheDir, { recursive: true, force: true });
+    }
+  });
+
   it('auth-gates document state and rejects malformed asset identifiers', async () => {
     assert.equal(
       (
@@ -319,6 +449,12 @@ describe('F279 TTS listen routes', () => {
     const responses = await Promise.all([
       app.inject({ method: 'PUT', url: '/api/tts/listen/document', headers, payload: state }),
       app.inject({
+        method: 'POST',
+        url: '/api/tts/listen/document/cache',
+        headers,
+        payload: { identity: state.identity, sentences: [{ anchor: 'sentence', text: '临时正文。' }] },
+      }),
+      app.inject({
         method: 'PUT',
         url: '/api/tts/listen/document/asset',
         headers,
@@ -331,6 +467,12 @@ describe('F279 TTS listen routes', () => {
       }),
       app.inject({
         method: 'DELETE',
+        url: '/api/tts/listen/document/cache',
+        headers,
+        payload: { ...state.identity, synthesisFingerprint: 'fingerprint' },
+      }),
+      app.inject({
+        method: 'DELETE',
         url: '/api/tts/listen/document/audio',
         headers,
         payload: { projectPath: '/repo', relativePath: 'browser-write.md' },
@@ -339,7 +481,7 @@ describe('F279 TTS listen routes', () => {
 
     assert.deepEqual(
       responses.map((response) => response.statusCode),
-      [401, 401, 401],
+      [401, 401, 401, 401, 401],
     );
   });
 

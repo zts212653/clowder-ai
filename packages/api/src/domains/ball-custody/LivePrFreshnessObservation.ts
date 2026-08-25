@@ -20,7 +20,8 @@ export interface LivePrFreshnessProvider {
 
 export type LivePrFreshnessResolution =
   | { status: 'verified'; evidenceRef: string }
-  | { status: 'mismatch' | 'insufficient'; reason: string };
+  | { status: 'mismatch'; reason: string; evidenceRef: string }
+  | { status: 'insufficient'; reason: string };
 
 function parseLivePrFreshnessObservation(subjectRef: string): LivePrFreshnessObservationInput | null {
   const match = /^pr:([^/\s]+)\/([^#\s]+)#([1-9]\d*)$/.exec(subjectRef);
@@ -52,13 +53,21 @@ export async function resolveLivePrFreshnessObservation(
     return { status: 'insufficient', reason: 'bootstrap PR observation subject mismatch' };
   }
   if (livePr.prState !== 'open') {
-    return { status: 'mismatch', reason: 'bootstrap observation reports a terminal PR' };
+    return {
+      status: 'mismatch',
+      reason: 'bootstrap observation reports a terminal PR',
+      evidenceRef: `github:${subjectRef}:state:${livePr.prState}`,
+    };
   }
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(livePr.headSha)) {
     return { status: 'insufficient', reason: 'bootstrap PR HEAD unavailable' };
   }
   if (livePr.headSha !== expectedHeadSha) {
-    return { status: 'mismatch', reason: 'predicate HEAD is not the bootstrap-observed current HEAD' };
+    return {
+      status: 'mismatch',
+      reason: 'predicate HEAD is not the bootstrap-observed current HEAD',
+      evidenceRef: `github:${subjectRef}:head:${livePr.headSha}`,
+    };
   }
   return { status: 'verified', evidenceRef: `github:${subjectRef}:head:${livePr.headSha}` };
 }

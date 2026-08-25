@@ -29,7 +29,10 @@ import {
 } from '../../domains/ball-custody/wait-continuation-carrier.js';
 import type { InvocationQueue, QueueEntry } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { PerCatTerminalDispositionCollector } from '../../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import {
+  isTerminalDispositionEvent,
+  PerCatTerminalDispositionCollector,
+} from '../../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import {
   createInitialQueuedMessageCustody,
   type QueuedMessageCustodyCoordinator,
@@ -923,7 +926,7 @@ export class ConnectorInvokeTrigger {
         // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
         if (controller?.signal.aborted) break;
         terminalDispositions.observe(msg);
-        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+        if (isTerminalDispositionEvent(msg) && msg.catId) {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
         if (msg.type === 'done' && msg.catId) {

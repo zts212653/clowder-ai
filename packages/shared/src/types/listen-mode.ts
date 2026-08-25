@@ -15,6 +15,8 @@ export interface ListenSentenceState {
 export interface ListenDocumentState {
   identity: ListenDocumentIdentity;
   sentences: ListenSentenceState[];
+  /** Server-derived voice/model/processing identity for the currently valid links. */
+  synthesisFingerprint?: string;
   position: { anchor: string | null; offsetSeconds: number };
   playbackRate: ListenPlaybackRate;
   retention: ListenRetention;

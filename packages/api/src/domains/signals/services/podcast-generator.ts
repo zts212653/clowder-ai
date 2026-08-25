@@ -2,7 +2,10 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CatId, StudyArtifact } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../infrastructure/logger.js';
-import { PerCatTerminalDispositionCollector } from '../../cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import {
+  isTerminalDispositionEvent,
+  PerCatTerminalDispositionCollector,
+} from '../../cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import type { QueueProcessor } from '../../cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../../cats/services/agents/invocation/require-invocation-record-update.js';
 import { ClaudeAgentService } from '../../cats/services/agents/providers/ClaudeAgentService.js';
@@ -249,7 +252,7 @@ export async function generateScriptViaThread(
       },
     )) {
       terminalDispositions.observe(msg);
-      if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+      if (isTerminalDispositionEvent(msg) && msg.catId) {
         deps.invocationTracker.completeSlot?.(threadId, msg.catId, controller);
       }
       if (msg.type === 'text' && msg.content) {

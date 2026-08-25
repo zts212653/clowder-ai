@@ -2121,6 +2121,12 @@ async function main(): Promise<void> {
     env: process.env,
     logger: bridgeLogger,
   });
+  const { CloudReturnBindingSigner, loadOrCreateCloudReturnBindingSigner } = await import(
+    './domains/cats/services/cloud-bridge/cloud-return-binding.js'
+  );
+  const cloudReturnBindingSigner = redis
+    ? await loadOrCreateCloudReturnBindingSigner(redis)
+    : new CloudReturnBindingSigner();
   const cloudInvokeBridge = new CloudInvokeBridge({
     hostAdapter: personalChromeHostAdapter,
     pinchTabAdapter,
@@ -2326,6 +2332,7 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeTriagePlanStore,
     cloudInvokeBridge,
+    cloudReturnBindingSigner,
     ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
     turnExecutionStore,
@@ -2339,6 +2346,7 @@ async function main(): Promise<void> {
       messageStore,
     ),
     memoryCuePromptService: memoryCueRuntime.promptService,
+    profileRepository,
     ...(writeOpportunityTerminalLedger ? { writeOpportunityTerminalLedger } : {}),
     ...(writeOpportunityDeliveryStore ? { writeOpportunityDeliveryStore } : {}),
   });
@@ -2510,7 +2518,7 @@ async function main(): Promise<void> {
     );
     return { outcome: 'enqueued', deliveredMessageId: storedMsg.id };
   };
-  if (actionSuccessorLeaseStore) {
+  if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {
     const { ActionSuccessorRecoverySweep } = await import('./domains/ball-custody/ActionSuccessorRecoverySweep.js');
     actionSuccessorRecovery = new ActionSuccessorRecoverySweep({
       leaseStore: actionSuccessorLeaseStore,
@@ -2561,6 +2569,7 @@ async function main(): Promise<void> {
       },
       dispatch: {
         leaseStore: actionSuccessorLeaseStore,
+        truthResolver: actionSubjectTruthResolver,
         loadProposal: (proposalId) => dispatchProposalStore.get(proposalId),
         loadOwnerAuthProvenance: (proposalId) => dispatchProposalStore.getApprovalOwnerAuthProvenance(proposalId),
         recordProposalDelivery: (proposalId, deliveredMessageId) =>
@@ -3092,6 +3101,27 @@ async function main(): Promise<void> {
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
     'eval:qc': createQcGeneratorAdapter(),
   };
+  let designGateEpisodeSourceProvider:
+    | import('./infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.js').DesignGateEpisodeSourceProviderImpl
+    | undefined;
+  {
+    const { createDesignGateGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/design-gate-generator-adapter.js'
+    );
+    const { DesignGateEpisodeSourceProviderImpl } = await import(
+      './infrastructure/harness-eval/design-gate/design-gate-episode-source-provider.js'
+    );
+    const { GhDesignGatePullRequestReader, GitDesignGateTruth } = await import(
+      './infrastructure/harness-eval/design-gate/design-gate-gh-evidence-reader.js'
+    );
+    designGateEpisodeSourceProvider = new DesignGateEpisodeSourceProviderImpl({
+      repoRoot,
+      pullRequestReader: new GhDesignGatePullRequestReader(),
+      reviewMessageReader: messageStore,
+      gitTruth: new GitDesignGateTruth(repoRoot),
+    });
+    verdictGenerators['eval:design-gate'] = createDesignGateGeneratorAdapter(designGateEpisodeSourceProvider);
+  }
   if (freshnessClosureStore) {
     const { createFreshnessGeneratorAdapter } = await import(
       './infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js'
@@ -3951,6 +3981,7 @@ async function main(): Promise<void> {
   const callbackOpts = {
     registry,
     agentKeyRegistry,
+    cloudReturnBindingSigner,
     messageStore,
     socketManager,
     callbackAuthNotifier,
@@ -5028,6 +5059,8 @@ async function main(): Promise<void> {
     transcriptWriter,
     messageStore,
     turnExecutionStore,
+    profileRepository,
+    memoryCueSourceReader: memoryCueRuntime.sourceReader,
   });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
   const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
@@ -5426,6 +5459,11 @@ async function main(): Promise<void> {
       managedCommandWakeRecoveryTimer = null;
     }
   });
+
+  // F192 Phase I: the observer is created after listen alongside the scheduler
+  // delivery boundary, so register cleanup now and late-bind its handle below.
+  let designGateThresholdObserver: { close(): void } | null = null;
+  app.addHook('onClose', async () => designGateThresholdObserver?.close());
 
   // #603: Preload governance overlay (.local / .local-override)
   // Start listening
@@ -6219,7 +6257,6 @@ async function main(): Promise<void> {
         taskStore,
         threadStore,
         cicdRouter,
-        fetchPrStatus: (repo: string, pr: number) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
         conflictRouter,
         reviewFeedbackRouter,
         invokeTrigger,
@@ -6374,6 +6411,7 @@ async function main(): Promise<void> {
   // F253 Phase C: eval:qc provider is unconditionally wired (pure ctor, zero-baseline
   // metrics, no runtime deps). Phase C bootstrap → keep_observe verdicts.
   wiredPublishDomains.add('eval:qc');
+  wiredPublishDomains.add('eval:design-gate');
   if (freshnessClosureStore) {
     wiredPublishDomains.add('eval:freshness');
   }
@@ -6423,11 +6461,50 @@ async function main(): Promise<void> {
     redis: redisClient ?? undefined,
     wiredPublishDomains,
     publishPrereqProbe,
+    triggerStore: redisClient
+      ? new (
+          await import('./infrastructure/harness-eval/domain/eval-domain-trigger-store.js')
+        ).RedisEvalDomainTriggerStore(redisClient)
+      : undefined,
   };
   taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
   taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));
   // F245 PR2: N-day cadence — eval:friction runs every-3d (not weekly)
   taskRunnerV2.register(createEvalDomainNDaySpec(evalScheduleOpts));
+
+  // F192 Phase I: replay the current F303 cumulative source map at startup and observe
+  // later durable YAML revisions through the same dispatcher/receipt plane as weekly cron.
+  // A missed/degraded watch is recovered by startup replay and the weekly time fallback.
+  const designGateTriggerProvider = designGateEpisodeSourceProvider;
+  const evalDomainTriggerStore = evalScheduleOpts.triggerStore;
+  if (designGateTriggerProvider && evalDomainTriggerStore) {
+    const { loadDesignGateThresholdDomain, observeDesignGateThresholdTrigger, startDesignGateThresholdObserver } =
+      await import('./infrastructure/harness-eval/design-gate/design-gate-threshold-trigger.js');
+    const designGateDomain = loadDesignGateThresholdDomain(evalScheduleOpts.harnessFeedbackRoot);
+    if (designGateDomain) {
+      designGateThresholdObserver = startDesignGateThresholdObserver({
+        sourceMapRoot: resolve(evalScheduleOpts.harnessFeedbackRoot, 'design-gate', 'source-maps'),
+        observe: () =>
+          observeDesignGateThresholdTrigger({
+            provider: designGateTriggerProvider,
+            domain: designGateDomain,
+            store: evalDomainTriggerStore,
+            deliver: schedulerDeliver,
+            invokeTrigger,
+            defaultUserId: evalScheduleOpts.defaultUserId,
+            wiredPublishDomains,
+            threadStore,
+            redis: redisClient ?? undefined,
+          }),
+        logger: {
+          info: (details, message) => app.log.info(details, message),
+          warn: (details, message) => app.log.warn(details, message),
+        },
+      });
+    } else {
+      app.log.info('[api] F192 Phase I: design-gate threshold observer disabled by domain registry');
+    }
+  }
 
   // F266: lifecycle reconciliation is Redis-gated. It only appends canonical
   // lifecycle facts; projections stay pure and no Git/GitHub mutation port is wired.

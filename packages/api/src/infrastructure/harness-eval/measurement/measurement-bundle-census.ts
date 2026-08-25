@@ -13,7 +13,7 @@ import {
 import { hasEvalDomainInstructions, hasEvalDomainPublishInstructions } from '../eval-cat-invocation.js';
 import { scanMeasurementVerdictCorpus } from './measurement-bundle-census-corpus.js';
 
-const ACTIVE_ACTIONS = ['keep_observe', 'fix', 'build', 'delete_sunset'] as const;
+export const MEASUREMENT_BUNDLE_ACTIVE_ACTIONS = ['keep_observe', 'fix', 'build', 'delete_sunset'] as const;
 const MIGRATION_STATUSES = [
   'unmigrated',
   'contract_ready',
@@ -46,7 +46,7 @@ export const MeasurementBundleCensusEntrySchema = z
       .object({
         featureId: z.string().regex(/^F\d{3}$/),
         ownerCatId: z.string().min(1),
-        allowedActions: z.array(z.enum(ACTIVE_ACTIONS)),
+        allowedActions: z.array(z.enum(MEASUREMENT_BUNDLE_ACTIVE_ACTIONS)),
       })
       .strict(),
     sourceSelector: z
@@ -95,7 +95,7 @@ export type MeasurementBundleCensus = z.infer<typeof MeasurementBundleCensusSche
 export function assertMeasurementVerdictActionAllowed(
   input: unknown,
   domainId: string,
-  verdict: (typeof ACTIVE_ACTIONS)[number],
+  verdict: (typeof MEASUREMENT_BUNDLE_ACTIVE_ACTIONS)[number],
 ): void {
   if (verdict === 'keep_observe') return;
   const census = MeasurementBundleCensusSchema.parse(input);
@@ -106,6 +106,7 @@ export function assertMeasurementVerdictActionAllowed(
       `measurement_validity_gate: ${domainId} is ${entry.validityMigration.actionGate} (${entry.validityMigration.status}); ${entry.validityMigration.hardBlockReason ?? 'certified usable evidence is required'}`,
     );
   }
+  assertMigrationActionGate(entry, entry.validityMigration);
 }
 
 function assertUnique(values: readonly string[]): void {
@@ -163,6 +164,9 @@ function assertMigrationActionGate(entry: CensusEntry, migration: ValidityMigrat
     return;
   }
 
+  if (migration.batch === null) {
+    throw new Error(`measurement action gate requires an assigned migration batch for ${entry.domainId}`);
+  }
   const hasAllRefs = [migration.certificateRef, migration.resultRef, migration.replayRef].every((ref) => ref !== null);
   if (migration.status !== 'certified_usable' || !hasAllRefs) {
     throw new Error(`measurement action gate requires certified usable evidence for ${entry.domainId}`);
@@ -190,21 +194,22 @@ function assertMigrationCoverage(census: MeasurementBundleCensus): void {
   if (JSON.stringify(ranks) !== JSON.stringify(expectedRanks)) {
     throw new Error('validity migration risk ranks must be unique and contiguous across active bundles');
   }
-  const firstBatch = active.filter((entry) => entry.validityMigration.batch === 1);
-  if (firstBatch.length !== 1 || firstBatch[0]?.domainId !== 'eval:memory') {
-    throw new Error('validity migration batch 1 must contain only eval:memory');
-  }
   const assignedBatches = active
     .map((entry) => entry.validityMigration.batch)
     .filter((batch): batch is number => batch !== null)
     .sort((left, right) => left - right);
+  if (assignedBatches.length === 0) return;
+  const firstBatch = active.filter((entry) => entry.validityMigration.batch === 1);
+  if (firstBatch.length !== 1 || firstBatch[0]?.domainId !== 'eval:memory') {
+    throw new Error('validity migration batch 1 must contain only eval:memory');
+  }
   const expectedBatches = Array.from({ length: assignedBatches.at(-1) ?? 0 }, (_, index) => index + 1);
   if (JSON.stringify(assignedBatches) !== JSON.stringify(expectedBatches)) {
     throw new Error('validity migration batches must be unique and contiguous in risk order');
   }
 }
 
-function loadRegistry(repoRoot: string): EvalDomainRegistryEntry[] {
+export function loadMeasurementBundleRegistry(repoRoot: string): EvalDomainRegistryEntry[] {
   const registryDir = join(repoRoot, 'docs/harness-feedback/eval-domains');
   return readdirSync(registryDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && isEvalDomainRegistryYamlFile(entry.name))
@@ -212,7 +217,7 @@ function loadRegistry(repoRoot: string): EvalDomainRegistryEntry[] {
     .sort((left, right) => left.domainId.localeCompare(right.domainId));
 }
 
-function expectedClassification(
+export function classifyMeasurementBundleDomain(
   domain: EvalDomainRegistryEntry,
 ): MeasurementBundleCensus['entries'][number]['classification'] {
   if (!domain.enabled) return 'gated';
@@ -229,7 +234,7 @@ function assertEntryMatchesRegistry(
 ): void {
   const expectedDomainInstructions = hasEvalDomainInstructions(domain.domainId);
   const expectedPublishInstructions = hasEvalDomainPublishInstructions(domain.domainId);
-  if (entry.classification !== expectedClassification(domain)) {
+  if (entry.classification !== classifyMeasurementBundleDomain(domain)) {
     throw new Error(`classification mismatch for ${domain.domainId}`);
   }
   if (entry.enabled !== domain.enabled) throw new Error(`enabled mismatch for ${domain.domainId}`);
@@ -239,7 +244,7 @@ function assertEntryMatchesRegistry(
   ) {
     throw new Error(`decision consumer mismatch for ${domain.domainId}`);
   }
-  const expectedActions = entry.classification === 'active_decision_bearing' ? ACTIVE_ACTIONS : [];
+  const expectedActions = entry.classification === 'active_decision_bearing' ? MEASUREMENT_BUNDLE_ACTIVE_ACTIONS : [];
   if (JSON.stringify(entry.decisionConsumer.allowedActions) !== JSON.stringify(expectedActions)) {
     throw new Error(`allowed actions mismatch for ${domain.domainId}`);
   }
@@ -262,7 +267,7 @@ export function validateMeasurementBundleCensus(input: unknown, repoRoot: string
   const ids = census.entries.map((entry) => entry.domainId);
   assertUnique(ids);
 
-  const registry = loadRegistry(repoRoot);
+  const registry = loadMeasurementBundleRegistry(repoRoot);
   const registryIds = registry.map((domain) => domain.domainId);
   if (JSON.stringify([...ids].sort()) !== JSON.stringify(registryIds)) {
     throw new Error('measurement bundle census registry coverage mismatch');

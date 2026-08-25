@@ -1,3 +1,21 @@
+import {
+  composerSnapshot,
+  composerTextResult,
+  insertComposerText,
+  restoreAfterNoSend,
+} from './chatgpt-composer-transaction.mjs';
+import {
+  ChatGptPageAdapterError,
+  composerDomFingerprint,
+  contentEditableText,
+  conversationIdFromLocation,
+  firstMatch,
+  requireContentString,
+  requireExactString,
+  requireTimeout,
+  SAFE_CONVERSATION_ID,
+} from './chatgpt-page-contract.mjs';
+
 const COMPOSER_SELECTORS = [
   '#prompt-textarea[contenteditable="true"]',
   'div[contenteditable="true"][data-virtualkeyboard="true"]',
@@ -9,66 +27,58 @@ const SEND_BUTTON_SELECTORS = [
   'button[aria-label="发送提示"]',
 ];
 const USER_MESSAGE_SELECTOR = '[data-message-author-role="user"][data-message-id]';
-const SAFE_CONVERSATION_ID = /^[A-Za-z0-9-]+$/;
 
-export class ChatGptPageAdapterError extends Error {
-  constructor(code, message) {
-    super(message);
-    this.name = 'ChatGptPageAdapterError';
-    this.code = code;
-  }
+export { ChatGptPageAdapterError };
+
+function sendButtonIsDisabled(button) {
+  return button.disabled === true || button.getAttribute('aria-disabled') === 'true';
 }
 
-function requireExactString(value, label, maximum) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > maximum || value.trim() !== value) {
-    throw new ChatGptPageAdapterError('INVALID_REQUEST', `${label} must be a non-empty exact string`);
-  }
-  return value;
-}
-
-function requireContentString(value) {
-  if (
-    typeof value !== 'string' ||
-    value.trim().length === 0 ||
-    new TextEncoder().encode(value).byteLength > 128 * 1024
-  ) {
-    throw new ChatGptPageAdapterError('INVALID_REQUEST', 'text must contain at most 131072 bytes');
-  }
-  return value;
-}
-
-function conversationIdFromLocation(location) {
-  if (location.protocol !== 'https:' || location.hostname !== 'chatgpt.com') return null;
-  const match = location.pathname.match(/^\/c\/([A-Za-z0-9-]+)\/?$/);
-  return match?.[1] ?? null;
-}
-
-function firstMatch(document, selectors) {
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element) return element;
-  }
-  return null;
-}
-
-function insertComposerText(document, composer, text) {
-  if (composer instanceof document.defaultView.HTMLTextAreaElement) {
-    const descriptor = Object.getOwnPropertyDescriptor(document.defaultView.HTMLTextAreaElement.prototype, 'value');
-    descriptor?.set?.call(composer, text);
-  } else {
-    composer.replaceChildren(document.createTextNode(text));
-  }
-  const inputEvent = new document.defaultView.InputEvent('input', {
-    bubbles: true,
-    composed: true,
-    inputType: 'insertText',
-    data: text,
+function waitForSendButton({ document, MutationObserver, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let sawDisabledButton = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      observer.disconnect();
+      callback();
+    };
+    const scan = () => {
+      const button = firstMatch(document, SEND_BUTTON_SELECTORS);
+      if (!button) return;
+      if (typeof button.click !== 'function' || !button.isConnected) {
+        finish(() =>
+          reject(new ChatGptPageAdapterError('SEND_BUTTON_INVALID', 'ChatGPT send button is not safely clickable')),
+        );
+        return;
+      }
+      if (sendButtonIsDisabled(button)) {
+        sawDisabledButton = true;
+        return;
+      }
+      finish(() => resolve(button));
+    };
+    const observer = new MutationObserver(scan);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['disabled', 'aria-disabled'],
+    });
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(
+          new ChatGptPageAdapterError(
+            sawDisabledButton ? 'SEND_BUTTON_DISABLED' : 'SEND_BUTTON_NOT_FOUND',
+            sawDisabledButton ? 'ChatGPT send button remained disabled' : 'ChatGPT send button was not found',
+          ),
+        ),
+      );
+    }, timeoutMs);
+    scan();
   });
-  composer.dispatchEvent(inputEvent);
-  const inserted = composer instanceof document.defaultView.HTMLTextAreaElement ? composer.value : composer.textContent;
-  if (inserted !== text) {
-    throw new ChatGptPageAdapterError('COMPOSER_INSERT_FAILED', 'composer did not retain the exact append text');
-  }
 }
 
 function observeHostMessage({ document, MutationObserver, existingIds, text, timeoutMs }) {
@@ -85,7 +95,7 @@ function observeHostMessage({ document, MutationObserver, existingIds, text, tim
       for (const message of document.querySelectorAll(USER_MESSAGE_SELECTOR)) {
         const messageId = message.getAttribute('data-message-id');
         if (!messageId || existingIds.has(messageId)) continue;
-        if (message.textContent !== text) continue;
+        if (contentEditableText(message) !== text) continue;
         finish(() => resolve({ hostMessageId: messageId }));
         return;
       }
@@ -106,19 +116,175 @@ function observeHostMessage({ document, MutationObserver, existingIds, text, tim
   });
 }
 
+function requireMatchingConversation(location, conversationId, message) {
+  if (conversationIdFromLocation(location) !== conversationId) {
+    throw new ChatGptPageAdapterError('CONVERSATION_MISMATCH', message);
+  }
+}
+
+function unsupportedComposerError({ code, message, composer, phase, adapterRevision, artifactRevision, path }) {
+  const fingerprint = composerDomFingerprint(composer, {
+    phase,
+    adapterRevision,
+    artifactRevision,
+    firstUnsupportedPath: path,
+  });
+  return new ChatGptPageAdapterError(code, message, {
+    v: 1,
+    errorCode: code,
+    fingerprint,
+    nextAction: 'inspect_bound_tab',
+  });
+}
+
+function requireEmptyComposer(document, revisions) {
+  const composer = firstMatch(document, COMPOSER_SELECTORS);
+  if (!composer) throw new ChatGptPageAdapterError('COMPOSER_NOT_FOUND', 'ChatGPT composer was not found');
+  const current = composerTextResult(document, composer);
+  if (current.status === 'unsupported') {
+    throw unsupportedComposerError({
+      code: 'COMPOSER_DOM_UNSUPPORTED',
+      message: `ChatGPT composer contains an unsupported node at ${current.path}`,
+      composer,
+      phase: 'empty_check',
+      ...revisions,
+      path: current.path,
+    });
+  }
+  if (current.text !== '') {
+    throw new ChatGptPageAdapterError('COMPOSER_NOT_EMPTY', 'ChatGPT composer contains an owner draft');
+  }
+  return composer;
+}
+
+function existingUserMessageIds(document) {
+  return new Set(
+    [...document.querySelectorAll(USER_MESSAGE_SELECTOR)]
+      .map((message) => message.getAttribute('data-message-id'))
+      .filter(Boolean),
+  );
+}
+
+function requireSafeSubmissionState({
+  document,
+  location,
+  composer,
+  sendButton,
+  conversationId,
+  text,
+  adapterRevision,
+  artifactRevision,
+}) {
+  requireMatchingConversation(location, conversationId, 'bound conversation changed before ChatGPT submission');
+  const current = composerTextResult(document, composer);
+  if (current.status === 'unsupported') {
+    throw unsupportedComposerError({
+      code: 'COMPOSER_DOM_UNSUPPORTED',
+      message: `ChatGPT composer contains an unsupported node at ${current.path}`,
+      composer,
+      phase: 'before_submit',
+      adapterRevision,
+      artifactRevision,
+      path: current.path,
+    });
+  }
+  if (current.text !== text) {
+    throw new ChatGptPageAdapterError('COMPOSER_CHANGED_BEFORE_SUBMIT', 'ChatGPT composer changed before submission');
+  }
+  if (!sendButton.isConnected || sendButtonIsDisabled(sendButton)) {
+    throw new ChatGptPageAdapterError(
+      sendButtonIsDisabled(sendButton) ? 'SEND_BUTTON_DISABLED' : 'SEND_BUTTON_INVALID',
+      'ChatGPT send button changed before submission',
+    );
+  }
+}
+
+async function submitPageMessage({
+  document,
+  location,
+  MutationObserver,
+  onProgress,
+  observationTimeoutMs,
+  sendButtonTimeoutMs,
+  requestId,
+  conversationId,
+  text,
+  idempotencyKey,
+  adapterRevision,
+  artifactRevision,
+}) {
+  requireMatchingConversation(location, conversationId, 'bound conversation does not match the current ChatGPT tab');
+  const composer = requireEmptyComposer(document, { adapterRevision, artifactRevision });
+  const snapshot = composerSnapshot(document, composer);
+  const existingIds = existingUserMessageIds(document);
+  let clicked = false;
+  let mutated = false;
+  try {
+    insertComposerText(document, composer, text, () => {
+      mutated = true;
+    });
+    await onProgress('inserted', { requestId, conversationId, idempotencyKey });
+    const sendButton = await waitForSendButton({ document, MutationObserver, timeoutMs: sendButtonTimeoutMs });
+    requireSafeSubmissionState({
+      document,
+      location,
+      composer,
+      sendButton,
+      conversationId,
+      text,
+      adapterRevision,
+      artifactRevision,
+    });
+    sendButton.click();
+    clicked = true;
+  } catch (error) {
+    if (error instanceof ChatGptPageAdapterError && error.diagnostic === undefined) {
+      error.diagnostic = {
+        v: 1,
+        errorCode: error.code,
+        fingerprint: composerDomFingerprint(composer, {
+          phase: 'failed_before_submit',
+          adapterRevision,
+          artifactRevision,
+        }),
+        nextAction: 'inspect_bound_tab',
+      };
+    }
+    if (!clicked && mutated) restoreAfterNoSend(document, composer, snapshot);
+    throw error;
+  }
+  await onProgress('submitted', { requestId, conversationId, idempotencyKey });
+  const receipt = await observeHostMessage({
+    document,
+    MutationObserver,
+    existingIds,
+    text,
+    timeoutMs: observationTimeoutMs,
+  });
+  await onProgress('host_observed', {
+    requestId,
+    conversationId,
+    idempotencyKey,
+    hostMessageId: receipt.hostMessageId,
+  });
+  return receipt;
+}
+
 export function createChatGptPageAdapter({
   document,
   location,
   MutationObserver,
   onProgress = () => undefined,
   observationTimeoutMs = 10_000,
+  sendButtonTimeoutMs = 2_000,
+  adapterRevision = 'unversioned',
+  artifactRevision = 'unversioned',
 }) {
   if (!document?.querySelector || !location || typeof MutationObserver !== 'function') {
     throw new ChatGptPageAdapterError('INVALID_ENVIRONMENT', 'document, location, and MutationObserver are required');
   }
-  if (!Number.isInteger(observationTimeoutMs) || observationTimeoutMs < 10 || observationTimeoutMs > 60_000) {
-    throw new ChatGptPageAdapterError('INVALID_ENVIRONMENT', 'observationTimeoutMs must be between 10 and 60000');
-  }
+  requireTimeout(observationTimeoutMs, 10, 60_000, 'observationTimeoutMs');
+  requireTimeout(sendButtonTimeoutMs, 10, 10_000, 'sendButtonTimeoutMs');
   const completedByKey = new Map();
   const inFlightByKey = new Map();
   let appendTail = Promise.resolve();
@@ -139,39 +305,19 @@ export function createChatGptPageAdapter({
       if (inFlight) return inFlight;
 
       const runAppend = async () => {
-        if (conversationIdFromLocation(location) !== conversationId) {
-          throw new ChatGptPageAdapterError(
-            'CONVERSATION_MISMATCH',
-            'bound conversation does not match the current ChatGPT tab',
-          );
-        }
-        const composer = firstMatch(document, COMPOSER_SELECTORS);
-        if (!composer) throw new ChatGptPageAdapterError('COMPOSER_NOT_FOUND', 'ChatGPT composer was not found');
-        const sendButton = firstMatch(document, SEND_BUTTON_SELECTORS);
-        if (!sendButton)
-          throw new ChatGptPageAdapterError('SEND_BUTTON_NOT_FOUND', 'ChatGPT send button was not found');
-        const existingIds = new Set(
-          [...document.querySelectorAll(USER_MESSAGE_SELECTOR)]
-            .map((message) => message.getAttribute('data-message-id'))
-            .filter(Boolean),
-        );
-        const observed = observeHostMessage({
+        const receipt = await submitPageMessage({
           document,
+          location,
           MutationObserver,
-          existingIds,
-          text,
-          timeoutMs: observationTimeoutMs,
-        });
-        insertComposerText(document, composer, text);
-        await onProgress('inserted', { requestId, conversationId, idempotencyKey });
-        sendButton.click();
-        await onProgress('submitted', { requestId, conversationId, idempotencyKey });
-        const receipt = await observed;
-        await onProgress('host_observed', {
+          onProgress,
+          observationTimeoutMs,
+          sendButtonTimeoutMs,
           requestId,
           conversationId,
+          text,
           idempotencyKey,
-          hostMessageId: receipt.hostMessageId,
+          adapterRevision,
+          artifactRevision,
         });
         completedByKey.set(dedupeKey, receipt);
         return receipt;

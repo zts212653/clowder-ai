@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+const HEAD_SHA = 'a'.repeat(40);
+
 const lease = {
   leaseId: 'lease-action-1',
   key: 'user-1\u001fpr:owner/repo#42\u001freview\u001freviewer',
@@ -22,13 +24,30 @@ const lease = {
   completionCandidates: {},
   evidenceRefs: ['approval:dp-action-1'],
   terminalPredicateState: { kind: 'predicate_backed' },
-  terminalPredicate: { digest: 'predicate-digest' },
+  terminalPredicate: {
+    kind: 'review_delivered',
+    subjectRef: 'pr:owner/repo#42',
+    identityKey: 'review_delivered\u001fpr:owner/repo#42',
+    freshnessKey: `head:${HEAD_SHA}`,
+    digest: 'predicate-digest',
+    headSha: HEAD_SHA,
+  },
   returnTransitions: [],
   dispatchDeliveryState: 'pending',
   dispatchDeliveryAttemptCount: 0,
   revision: 1,
   createdAt: 1_000,
   updatedAt: 1_000,
+};
+
+const verifiedTruthResolver = {
+  async resolveFreshness(predicate) {
+    return {
+      status: 'verified',
+      evidenceRef: `community:${predicate.subjectRef}:head:${HEAD_SHA}`,
+      freshnessKey: predicate.freshnessKey,
+    };
+  },
 };
 
 const proposal = {
@@ -82,6 +101,7 @@ test('message append and enqueue faults retry one exact fenced carrier without f
       return { outcome: 'unavailable' };
     },
     dispatch: {
+      truthResolver: verifiedTruthResolver,
       leaseStore: {
         async listPendingDispatches() {
           return current.dispatchDeliveryState === 'pending' ? [current] : [];
@@ -89,6 +109,8 @@ test('message append and enqueue faults retry one exact fenced carrier without f
         async recordDispatchDeliveryAttempt(id, input) {
           assert.equal(id, current.leaseId);
           assert.equal(input.expectedGeneration, current.generation);
+          assert.equal(input.expectedPredicateDigest, current.terminalPredicate.digest);
+          assert.equal(input.freshnessEvidenceRef, `community:${current.subjectRef}:head:${HEAD_SHA}`);
           if (current.dispatchDeliveryState !== 'pending') {
             return { outcome: 'dispatch_not_pending', lease: current };
           }
@@ -101,10 +123,29 @@ test('message append and enqueue faults retry one exact fenced carrier without f
           };
           return { outcome: 'recorded', lease: current };
         },
-        async markDispatchDelivered(id, input) {
+        async reserveDispatchDelivery(id, input) {
           assert.equal(id, current.leaseId);
+          assert.equal(input.expectedRevision, current.revision);
+          assert.equal(input.expectedPredicateDigest, current.terminalPredicate.digest);
           current = {
             ...current,
+            dispatchDeliveryReservation: {
+              predicateDigest: input.expectedPredicateDigest,
+              freshnessEvidenceRef: input.freshnessEvidenceRef,
+              reservedAt: input.now,
+            },
+            revision: current.revision + 1,
+            updatedAt: input.now,
+          };
+          return { outcome: 'reserved', lease: current };
+        },
+        async markDispatchDelivered(id, input) {
+          assert.equal(id, current.leaseId);
+          assert.equal(input.expectedRevision, current.revision);
+          assert.equal(input.freshnessEvidenceRef, current.dispatchDeliveryReservation.freshnessEvidenceRef);
+          const { dispatchDeliveryReservation: _reservation, ...withoutReservation } = current;
+          current = {
+            ...withoutReservation,
             dispatchDeliveryState: 'delivered',
             dispatchDeliveredMessageId: input.deliveredMessageId,
             revision: current.revision + 1,
@@ -146,7 +187,7 @@ test('message append and enqueue faults retry one exact fenced carrier without f
 
   assert.deepEqual(await sweep.runDispatchesOnce(), { scanned: 1, delivered: 1, pending: 0, failed: 0 });
   assert.equal(current.dispatchDeliveryState, 'delivered');
-  assert.equal(current.dispatchDeliveryAttemptCount, 3);
+  assert.equal(current.dispatchDeliveryAttemptCount, 1);
   assert.equal(recordedMessages.length, 1);
   assert.equal(deliveries.length, 3);
   assert.deepEqual(deliveries[0], deliveries[1]);
@@ -187,6 +228,7 @@ test('persisted proposal receipt is revalidated idempotently after lease deliver
       return { outcome: 'unavailable' };
     },
     dispatch: {
+      truthResolver: verifiedTruthResolver,
       leaseStore: {
         async listPendingDispatches() {
           return current.dispatchDeliveryState === 'pending' ? [current] : [];
@@ -201,11 +243,25 @@ test('persisted proposal receipt is revalidated idempotently after lease deliver
           };
           return { outcome: 'recorded', lease: current };
         },
+        async reserveDispatchDelivery(_id, input) {
+          current = {
+            ...current,
+            dispatchDeliveryReservation: {
+              predicateDigest: input.expectedPredicateDigest,
+              freshnessEvidenceRef: input.freshnessEvidenceRef,
+              reservedAt: input.now,
+            },
+            revision: current.revision + 1,
+            updatedAt: input.now,
+          };
+          return { outcome: 'reserved', lease: current };
+        },
         async markDispatchDelivered(_id, input) {
           markAttempts += 1;
           if (markAttempts === 1) throw new Error('fault: lease delivery mark');
+          const { dispatchDeliveryReservation: _reservation, ...withoutReservation } = current;
           current = {
-            ...current,
+            ...withoutReservation,
             dispatchDeliveryState: 'delivered',
             dispatchDeliveredMessageId: input.deliveredMessageId,
             revision: current.revision + 1,
@@ -240,6 +296,7 @@ test('persisted proposal receipt is revalidated idempotently after lease deliver
   await assert.rejects(() => sweep.recoverDispatch(current), /fault: lease delivery mark/);
   assert.equal(currentProposal.deliveredMessageId, 'msg-1');
   assert.equal(current.dispatchDeliveryState, 'pending');
+  assert.ok(current.dispatchDeliveryReservation);
 
   assert.deepEqual(await sweep.recoverDispatch(current), {
     outcome: 'delivered',
@@ -563,6 +620,7 @@ test('recovery terminalizes a proposal whose persisted fence identity does not m
       return { outcome: 'unavailable' };
     },
     dispatch: {
+      truthResolver: verifiedTruthResolver,
       leaseStore: {
         async listPendingDispatches() {
           return current.dispatchDeliveryState === 'pending' ? [current] : [];

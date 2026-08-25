@@ -9,6 +9,7 @@ import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
+const PROMPT_CAPTURE_ID = '00000000-0000-0000-0000-000000000017';
 const summary = {
   invocationId: 'inv-cross',
   threadId: 'thread-canonical',
@@ -27,6 +28,24 @@ const summary = {
   errorCount: 0,
   toolNames: [],
   keyMessages: ['canonical evidence'],
+};
+const promptCapture = {
+  captureId: PROMPT_CAPTURE_ID,
+  invocationId: 'inv-cross',
+  catId: 'codex-sol',
+  model: 'gpt-5.6-sol',
+  capturedAt: 1_000,
+  systemPrompt: 'browser system contract',
+  userPrompt: 'browser user contract',
+  effectivePrompt: 'browser system contract\nbrowser user contract',
+  injectionDecision: {
+    isResume: false,
+    canSkipOnResume: false,
+    forceReinjection: false,
+    injected: true,
+  },
+  promptBytes: 45,
+  tokenEstimate: 12,
 };
 
 async function findFreePort() {
@@ -106,7 +125,8 @@ const API_FIXTURES = new Map([
       200,
     ],
   ],
-  ['/api/debug/prompt-captures', [[{ captureId: 'capture-cross' }], 200]],
+  ['/api/debug/prompt-captures', [[{ captureId: PROMPT_CAPTURE_ID }], 200]],
+  [`/api/debug/prompt-captures/${PROMPT_CAPTURE_ID}`, [promptCapture, 200]],
   ['/api/telemetry/traces', [{ spans: [{}] }, 200]],
   ['/api/recall/trajectories', [{ trajectories: [{}] }, 200]],
 ]);
@@ -143,10 +163,19 @@ after(async () => {
 test('Hub evidence resolves canonically, exposes owner links, restores origin, and fails closed', async () => {
   const page = await browser.newPage({ viewport: { width: 1180, height: 900 } });
   const detailRequests = [];
+  const promptDetailRequests = [];
+  const rejectedWebPromptDetailRequests = [];
   const apiRequests = [];
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     apiRequests.push(`${route.request().method()} ${url.pathname}${url.search}`);
+    if (url.pathname === `/api/debug/prompt-captures/${PROMPT_CAPTURE_ID}`) {
+      if (url.origin === new URL(baseUrl).origin) {
+        rejectedWebPromptDetailRequests.push(route.request().url());
+        return json(route, { error: 'Forbidden' }, 403);
+      }
+      promptDetailRequests.push(route.request().url());
+    }
     const fixture = API_FIXTURES.get(url.pathname);
     if (fixture) {
       if (url.pathname === '/api/sessions/session-canonical/invocations/inv-cross') detailRequests.push(url.pathname);
@@ -176,10 +205,46 @@ test('Hub evidence resolves canonically, exposes owner links, restores origin, a
     assert.equal(new URL(page.url()).pathname, '/thread/thread-canonical');
     assert.equal(detailRequests.length, 1, 'detail must load only after canonical resolution');
     assert.deepEqual(await page.getByTestId('source-owned-evidence-link').allTextContents(), [
-      'Prompt X-Ray',
+      'Legacy Prompt X-Ray',
       'Trace',
       'Task trajectory',
     ]);
+    const promptChip = page.getByTestId('source-owned-evidence-link').filter({ hasText: 'Prompt X-Ray' });
+    const trajectoryUrl = page.url();
+    await promptChip.click();
+    await page
+      .getByTestId('prompt-capture-inspector')
+      .waitFor({ timeout: 5_000 })
+      .catch(async () => {
+        throw new Error(
+          `Prompt Inspector did not open at ${page.url()}\ndirect detail: ${promptDetailRequests.join(', ') || 'none'}\nWeb detail rejected: ${rejectedWebPromptDetailRequests.join(', ') || 'none'}\nbody: ${(await page.locator('body').innerText()).slice(0, 1_000)}`,
+        );
+      });
+    assert.equal(await promptChip.evaluate((element) => element.tagName), 'BUTTON');
+    assert.equal(
+      page.url(),
+      trajectoryUrl,
+      'Prompt X-Ray must stay in the first-party viewer instead of raw navigation',
+    );
+    assert.match((await page.getByTestId('prompt-capture-inspector').textContent()) ?? '', /browser system contract/);
+    assert.equal(promptDetailRequests.length, 1, 'readability probe should fetch prompt detail exactly once');
+    assert.equal(
+      rejectedWebPromptDetailRequests.length,
+      0,
+      'click must never fall through the Web origin to the privileged raw detail route',
+    );
+    const webUrl = new URL(baseUrl);
+    const expectedApiOrigin = `${webUrl.protocol}//${webUrl.hostname}:${Number(webUrl.port) + 1}`;
+    assert.equal(
+      new URL(promptDetailRequests[0]).origin,
+      expectedApiOrigin,
+      'prompt detail must use API_URL direct transport',
+    );
+    assert.notEqual(
+      new URL(promptDetailRequests[0]).origin,
+      webUrl.origin,
+      'prompt detail must not navigate through the Web relative/proxy origin',
+    );
     await page.getByRole('button', { name: '← 返回' }).click();
     await page.waitForFunction(() => !new URL(window.location.href).searchParams.has('inv'));
     assert.equal(new URL(page.url()).pathname, '/thread/thread-origin');

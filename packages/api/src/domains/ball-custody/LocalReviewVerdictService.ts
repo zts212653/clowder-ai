@@ -3,14 +3,27 @@ import type { ActionSuccessorCompletionResult } from './ActionSuccessorCompletio
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
 import type { CanonicalActionTerminalPredicate } from './ActionTerminalPredicateCatalog.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import {
+  type CarrierlessLocalReviewFence,
+  type CarrierlessLocalReviewInput,
+  type CarrierlessLocalReviewPreflightResult,
+  hasStructuredPredecessor,
+  resolveCarrierlessLocalReview,
+} from './CarrierlessLocalReviewResolver.js';
 import { type LocalReviewEvidenceProvider } from './LocalReviewEvidenceProvider.js';
+
+export type {
+  CarrierlessLocalReviewFence,
+  CarrierlessLocalReviewInput,
+  CarrierlessLocalReviewPreflightResult,
+} from './CarrierlessLocalReviewResolver.js';
 
 export type LocalReviewVerdictRecordResult =
   | { outcome: 'committed'; leaseId: string; generation: number; evidenceRef: string }
   | { outcome: 'mismatch' | 'insufficient' | 'stale'; reason: string };
 
 export interface LocalReviewVerdictServiceDeps {
-  leaseStore: Pick<ActionSuccessorLeaseStore, 'get' | 'recoverLocalReviewVerdict'>;
+  leaseStore: Pick<ActionSuccessorLeaseStore, 'get' | 'getByIdentity' | 'recoverLocalReviewVerdict'>;
   evidenceProvider: LocalReviewEvidenceProvider;
   truthResolver: Pick<ActionSubjectTruthResolver, 'resolveFreshness'>;
   completeActionLease(input: {
@@ -51,15 +64,6 @@ function isUntouchedRecoveryGeneration(lease: ActionSuccessorLease): boolean {
 
 function hasRecoverableReviewStatus(lease: ActionSuccessorLease): boolean {
   return lease.status === 'active' || lease.status === 'completed';
-}
-
-type StructuredPredecessorLease = ActionSuccessorLease & {
-  predecessorCatId: string;
-  predecessorThreadId: string;
-};
-
-function hasStructuredPredecessor(lease: ActionSuccessorLease): lease is StructuredPredecessorLease {
-  return Boolean(lease.claimOrigin === 'structured_transfer' && lease.predecessorCatId && lease.predecessorThreadId);
 }
 
 function preflightLocalReviewRecovery(
@@ -140,6 +144,7 @@ export class LocalReviewVerdictService {
     generation: number;
     messageId: string;
     now: number;
+    reviewedHeadSha?: string;
     principal: { catId: string; threadId: string; tenantScope: string };
   }): Promise<LocalReviewVerdictRecordResult> {
     const lease = await this.deps.leaseStore.get(input.leaseId);
@@ -157,6 +162,9 @@ export class LocalReviewVerdictService {
     if (lease.terminalPredicate?.kind !== 'review_delivered' || !lease.terminalPredicate.headSha) {
       return { outcome: 'insufficient', reason: 'review delivery predicate unavailable' };
     }
+    if (input.reviewedHeadSha && input.reviewedHeadSha !== lease.terminalPredicate.headSha) {
+      return { outcome: 'stale', reason: 'reviewed_head_mismatch' };
+    }
     const evidence = await this.deps.evidenceProvider.resolve({
       messageId: input.messageId,
       leaseId: lease.leaseId,
@@ -166,6 +174,7 @@ export class LocalReviewVerdictService {
       predecessorCatId: lease.predecessorCatId,
       predecessorThreadId: lease.predecessorThreadId,
       tenantScope: lease.tenantScope,
+      ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
     });
     if (evidence.status !== 'verified') return { outcome: evidence.status, reason: evidence.reason };
     const { evidenceRef } = evidence;
@@ -173,6 +182,51 @@ export class LocalReviewVerdictService {
     const completion = await this.deps.completeActionLease({
       leaseId: input.leaseId,
       generation: input.generation,
+      catId: input.principal.catId,
+      evidenceRefs: [evidenceRef],
+      now: input.now,
+    });
+    return completion.outcome === 'committed' ? { ...completion, evidenceRef } : completion;
+  }
+
+  async preflightCarrierless(input: CarrierlessLocalReviewInput): Promise<CarrierlessLocalReviewPreflightResult> {
+    const resolved = await resolveCarrierlessLocalReview(this.deps.leaseStore, input);
+    if (resolved.outcome !== 'resolved') return resolved;
+    const { lease: _lease, ...preflight } = resolved;
+    return preflight;
+  }
+
+  async recordCarrierless(
+    input: CarrierlessLocalReviewInput & CarrierlessLocalReviewFence & { messageId: string; now: number },
+  ): Promise<LocalReviewVerdictRecordResult> {
+    const resolved = await resolveCarrierlessLocalReview(this.deps.leaseStore, input, {
+      leaseId: input.leaseId,
+      generation: input.generation,
+    });
+    if (resolved.outcome !== 'resolved') return resolved;
+    const { lease } = resolved;
+    const evidence = await this.deps.evidenceProvider.resolve({
+      messageId: input.messageId,
+      leaseId: lease.leaseId,
+      generation: lease.generation,
+      reviewerCatId: input.principal.catId,
+      holderThreadId: lease.holderThreadId,
+      predecessorCatId: lease.predecessorCatId,
+      predecessorThreadId: lease.predecessorThreadId,
+      tenantScope: lease.tenantScope,
+      reviewedHeadSha: input.reviewedHeadSha,
+    });
+    if (evidence.status !== 'verified') return { outcome: evidence.status, reason: evidence.reason };
+    const { evidenceRef } = evidence;
+    if (lease.status === 'completed') {
+      const settled = lease.holderOutcomes[input.principal.catId];
+      return settled?.outcome === 'succeeded' && settled.evidenceRef === evidenceRef
+        ? { outcome: 'committed', leaseId: lease.leaseId, generation: lease.generation, evidenceRef }
+        : { outcome: 'stale', reason: 'lease_not_active' };
+    }
+    const completion = await this.deps.completeActionLease({
+      leaseId: lease.leaseId,
+      generation: lease.generation,
       catId: input.principal.catId,
       evidenceRefs: [evidenceRef],
       now: input.now,

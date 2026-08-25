@@ -3,10 +3,17 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { pluginAccessError, requirePluginOwnerLocalAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
 
 export type PersonalChromePlatformSupport = 'supported' | 'unsupported';
-export type PersonalChromeHelperStatus = 'absent' | 'ready' | 'invalid' | 'unsupported';
+export type PersonalChromeHelperStatus = 'absent' | 'ready' | 'stale' | 'invalid' | 'unsupported';
 export type PersonalChromeConfigStatus = 'absent' | 'ready' | 'invalid' | 'unsupported';
 export type PersonalChromeAuthorizationStatus = 'empty' | 'authorized' | 'invalid' | 'unsupported';
-export type PersonalChromeLiveStatus = 'dormant' | 'connected' | 'degraded' | 'unsupported';
+export type PersonalChromeLiveStatus =
+  | 'dormant'
+  | 'connected'
+  | 'stale_adapter'
+  | 'restart_required'
+  | 'degraded'
+  | 'failed'
+  | 'unsupported';
 
 export interface PersonalChromeAuthorizedConversation {
   readonly conversationId: string;
@@ -44,6 +51,17 @@ export interface PersonalChromePluginState {
   };
   readonly live: {
     readonly status: PersonalChromeLiveStatus;
+    readonly expectedRevisions?: {
+      readonly helper: string;
+      readonly extension: string;
+      readonly pageAdapter: string;
+    };
+    readonly observedRevisions?: {
+      readonly helper: string;
+      readonly extension: string;
+      readonly pageAdapter: string;
+    };
+    readonly errorCode?: string;
   };
 }
 
@@ -71,6 +89,14 @@ function operationError(reply: FastifyReply, error: unknown): { error: string; c
   if (code === 'HELPER_ACTIVE') {
     reply.status(409);
     return { error: 'Close Chrome before uninstalling Personal ChatGPT Pro', code };
+  }
+  if (code === 'HELPER_RESTART_REQUIRED') {
+    reply.status(409);
+    return { error: 'Prepare the repaired Helper, then reload the Chrome extension once', code };
+  }
+  if (code === 'NATIVE_HOST_NOT_INSTALLED') {
+    reply.status(409);
+    return { error: 'Install Personal ChatGPT Pro before requesting repair', code };
   }
   if (code === 'UNSUPPORTED_PLATFORM') {
     reply.status(409);

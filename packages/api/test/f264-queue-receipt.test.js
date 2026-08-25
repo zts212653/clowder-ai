@@ -251,7 +251,7 @@ describe('F264 queue receipt projection', () => {
       },
     });
 
-    assert.throws(() => parseQueuedMessageCustody(JSON.stringify(legacy)), /matching invocation lineage evidence/);
+    assert.throws(() => parseQueuedMessageCustody(JSON.stringify(legacy)), /matching invocation evidence/);
   });
 
   test('keeps current-format outcomes strict when exact exposure evidence is absent', () => {
@@ -351,7 +351,7 @@ describe('F264 queue receipt projection', () => {
             },
           }),
         ),
-      /matching invocation lineage evidence/,
+      /matching invocation evidence/,
     );
   });
 

@@ -6,6 +6,12 @@ export interface LiveVerdictMarkdownDomain {
   topic?: string;
 }
 
+export interface LiveVerdictDiscoveryProfile {
+  description: string;
+  descriptionAuthor: string;
+  descriptionUpdatedAt: string;
+}
+
 /**
  * Canonical markdown contract consumed by the Eval Hub read model.
  * Domain generators may add detail bullets, but must not replace these fields.
@@ -16,6 +22,7 @@ export function formatLiveVerdictMarkdown(
   sourceSnapshotRef: string,
   domain: LiveVerdictMarkdownDomain,
   detailBullets: readonly string[] = [],
+  discoveryProfile?: LiveVerdictDiscoveryProfile,
 ): string {
   const topic = domain.topic ?? domain.domainId.replace(':', '-');
   return [
@@ -24,6 +31,14 @@ export function formatLiveVerdictMarkdown(
     `topics: [harness-eval, ${topic}, live-verdict]`,
     'doc_kind: harness-feedback',
     'feedback_type: live-verdict',
+    ...(discoveryProfile
+      ? [
+          `description: ${JSON.stringify(discoveryProfile.description)}`,
+          'description_source: human',
+          `description_author: ${discoveryProfile.descriptionAuthor}`,
+          `description_updated_at: ${discoveryProfile.descriptionUpdatedAt}`,
+        ]
+      : []),
     `domain_id: ${domain.domainId}`,
     `packet_id: ${packet.id}`,
     `source_snapshot: "${sourceSnapshotRef}"`,

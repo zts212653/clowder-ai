@@ -71,6 +71,7 @@ export function MessageBubble({
       <div className={`${resolvedMaxWidth} min-w-0`}>
         {header}
         <div
+          data-testid="message-bubble"
           className={`px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${bubbleRadius} ${bubbleClassName}`.trim()}
           style={bubbleStyle}
         >

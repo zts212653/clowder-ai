@@ -4,7 +4,7 @@
 - 改前端 UI 想说"开浏览器看看" → `browser-preview` 渲染到 Hub panel
 - 需要图（架构 / mock / 真实场景） → `image-generation` AI 生图
 - 想说"文件在 X 路径" → `workspace-navigator` 程式打开
-- 改 UI 视觉 / 设计界面 → `pencil-design` 在 .pen 里探索
+- 改 UI 视觉 / 设计界面 → Clowder AI repo 内以 F056 + `design-in-context` 为视觉真相，`pencil-design` 探索、`console-dev` 落地；不加载通用 `frontend-design` 改写本地风格。外部项目按其本地约定选择
 - co-creator问"怎么用 / 怎么配置" → `guide-interaction` 场景式引导
 - 架构决定 / bug 死磕 / 多视角 → `expert-panel` 多猫辩论；多猫表决用 `cat_cafe_start_vote`（不无限互 @）
 - 新 thread/F128 → `cat_cafe_propose_thread`；clowder-ai PR：加载 `opensource-ops` 答 maintainer 五问，外部作者修复球不派家猫

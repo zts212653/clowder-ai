@@ -129,6 +129,8 @@ function makeDispatchParams(overrides = {}) {
     threadTitle: 'Test Thread',
     participants: [],
     calledBy: 'opus',
+    sourceMessageId: 'source-message-1',
+    cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
     intent: 'test intent',
     ...overrides,
   };

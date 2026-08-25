@@ -716,17 +716,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     }
   }, [threadId, sidebarRows, storeThreads, setCurrentProject]);
 
-  // F113-E: Fetch governance status for the current project (drives ProjectSetupCard)
+  // F302: read project facts; governance is never a readiness gate.
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
   const { status: govStatus, refetch: govRefetch } = useGovernanceStatus(currentProjectPath);
   const isProjectThread = !!currentProjectPath && currentProjectPath !== 'default' && currentProjectPath !== 'lobby';
   const agentHookHealth = useAgentHookHealth({ enabled: isProjectThread, projectPath: currentProjectPath });
   const [setupDone, setSetupDone] = useState(false);
-  // Show card when: needs setup (idle) OR just completed setup (done) — only in empty threads
-  const showSetupCard = !!(
-    (govStatus?.needsBootstrap || govStatus?.needsConfirmation || setupDone) &&
-    messages.length === 0
-  );
+  // Only blank repos get the automatic setup offer. Existing repos stay zero-write and quiet.
+  const showSetupCard = !!((govStatus?.isEmptyDir || setupDone) && messages.length === 0);
   // Reset setupDone on thread switch. Governance status already auto-refetches
   // when projectPath changes inside useGovernanceStatus; same-project thread switches
   // should not trigger an extra network round-trip.
@@ -1197,9 +1194,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                         summary={bootstrapSummary}
                         durationMs={bootstrapDurationMs}
                         isNewProject={setupDone}
-                        governanceDone={
-                          setupDone || !!(govStatus && !govStatus.needsBootstrap && !govStatus.needsConfirmation)
-                        }
+                        governanceDone={setupDone}
                         onStartBootstrap={startBootstrap}
                         onSnooze={snoozeBootstrap}
                         onSearchKnowledge={handleSearchKnowledge}

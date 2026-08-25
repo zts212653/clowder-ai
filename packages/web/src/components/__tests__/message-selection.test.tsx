@@ -145,15 +145,17 @@ describe('MessageActions selection entry', () => {
     expect(toolbar?.className).toContain('opacity-0');
     expect(toolbar?.className).toContain('pointer-events-none');
     expect(toolbar?.className).toContain('group-hover:opacity-100');
-    expect(toolbar?.className).toContain('group-focus-within:opacity-100');
-    expect(toolbar?.className).toContain('-translate-y-full');
-    // The reserved row is media-gated, not unconditional: pointer devices get no row at all,
-    // while touch-only devices keep one because they have no hover to reveal the toolbar.
+    expect(toolbar?.className).not.toContain('group-focus-within:opacity-100');
+    expect(toolbar?.className).toContain('focus-within:opacity-100');
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    // Display state must never create a vertical action row. Pointer layouts keep the complete
+    // dock in a header-owned horizontal slot; narrow/touch layouts use a compact entry there.
     const hostTokens = classTokens(container.querySelector('[data-context-quote-source="message"]'));
     expect(hostTokens).not.toContain('pt-8');
-    expect(hostTokens).toContain('[@media(hover:none)_and_(pointer:coarse)]:pt-8');
-    expect(toolbar?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:opacity-100');
-    expect(toolbar?.className).toContain('[@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto');
+    expect(hostTokens).not.toContain('hover:pt-8');
+    expect(hostTokens).not.toContain('focus-within:pt-8');
+    expect(hostTokens).not.toContain('[@media(hover:none)_and_(pointer:coarse)]:!pt-8');
     const secondaryActions = toolbar?.querySelector('[data-testid="message-secondary-actions"]');
     // Selection joins the existing message actions: the whole group is revealed together,
     // with no second collapse animation and no displaced reply/delete/more controls.
@@ -174,7 +176,7 @@ describe('MessageActions selection entry', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
-  it('keeps the assistant-side toolbar clear of the avatar without reserving layout', () => {
+  it('keeps the assistant-side toolbar clear of the avatar without resting layout', () => {
     React.act(() => {
       root.render(
         <MessageActions
@@ -193,12 +195,18 @@ describe('MessageActions selection entry', () => {
 
     expect(toolbar?.className).toContain('opacity-0');
     expect(toolbar?.className).toContain('left-10');
-    expect(toolbar?.className).not.toContain('right-10');
-    expect(toolbar?.className).toContain('-translate-y-full');
-    expect(classTokens(container.querySelector('[data-context-quote-source="message"]'))).not.toContain('pt-8');
+    expect(toolbar?.className).not.toContain('sm:left-auto');
+    expect(toolbar?.className).not.toContain('sm:right-10');
+    expect(toolbar?.className).toContain('top-0');
+    expect(toolbar?.className).not.toContain('-translate-y-full');
+    const hostTokens = classTokens(container.querySelector('[data-context-quote-source="message"]'));
+    expect(hostTokens).not.toContain('pt-8');
+    expect(hostTokens).not.toContain('hover:pt-8');
+    expect(hostTokens).not.toContain('focus-within:pt-8');
+    expect(hostTokens).not.toContain('sm:hover:pt-0');
   });
 
-  it('reveals the toolbar for keyboard users when focus enters the message', () => {
+  it('reveals the toolbar for keyboard users when the toolbar itself receives focus', () => {
     React.act(() => {
       root.render(
         <MessageActions message={message()} threadId="thread-1" selectionEligible onEnterSelection={vi.fn()}>
@@ -214,8 +222,10 @@ describe('MessageActions selection entry', () => {
 
     expect(document.activeElement).toBe(select);
     expect(toolbar?.matches(':focus-within')).toBe(true);
-    expect(toolbar?.className).toContain('group-focus-within:pointer-events-auto');
-    expect(toolbar?.className).toContain('group-focus-within:opacity-100');
+    expect(toolbar?.className).not.toContain('group-focus-within:pointer-events-auto');
+    expect(toolbar?.className).not.toContain('group-focus-within:opacity-100');
+    expect(toolbar?.className).toContain('focus-within:pointer-events-auto');
+    expect(toolbar?.className).toContain('focus-within:opacity-100');
   });
 
   it('places every selection checkbox in a sender-independent leading gutter', () => {

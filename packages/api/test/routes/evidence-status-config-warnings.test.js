@@ -20,7 +20,7 @@ import { before, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 // Per-SQL canned responses for the mocked sqlite db.
-function makeMockDb(counts) {
+function makeMockDb(counts, { virtualTablesUnavailable = false } = {}) {
   const responses = new Map([
     ['SELECT count(*) AS c FROM evidence_docs', { c: counts.docs_count }],
     ["SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'", { c: counts.threads_count }],
@@ -29,16 +29,24 @@ function makeMockDb(counts) {
     ['SELECT max(updated_at) AS t FROM evidence_docs', { t: '2026-06-09T00:00:00Z' }],
     ['SELECT count(*) AS c FROM evidence_passages', { c: counts.passages_count }],
     ['SELECT count(*) AS c FROM passage_vectors', { c: counts.passage_vectors_count }],
+    ['SELECT count(*) AS c FROM passage_vectors_rowids', { c: counts.passage_vectors_count }],
     [
       "SELECT value FROM embedding_meta WHERE key = 'embedding_model_id'",
       counts.embedding_model === null ? undefined : { value: counts.embedding_model },
     ],
     ['SELECT count(*) AS c FROM evidence_vectors', { c: counts.vectors_count }],
+    ['SELECT count(*) AS c FROM evidence_vectors_rowids', { c: counts.vectors_count }],
   ]);
   return {
     prepare(sql) {
       return {
         get() {
+          if (
+            virtualTablesUnavailable &&
+            (sql.includes('FROM passage_vectors') || sql.includes('FROM evidence_vectors'))
+          ) {
+            if (!sql.includes('_rowids')) throw new Error('no such module: vec0');
+          }
           if (!responses.has(sql)) throw new Error(`unmocked sql: ${sql}`);
           return responses.get(sql);
         },
@@ -186,6 +194,35 @@ describe('GET /api/evidence/status — F188 Phase K config warnings', () => {
     const after = (await app.inject({ method: 'GET', url: '/api/evidence/status' })).json();
     assert.equal(after.passage_vectors_supported, true);
     assert.ok(!after.configWarnings.some((warning) => warning.code === 'embedding_disabled'));
+  });
+
+  it('reports persisted vector rows when sqlite-vec is not loaded instead of claiming the index is empty', async () => {
+    const app = Fastify();
+    const db = makeMockDb(
+      {
+        docs_count: 5933,
+        threads_count: 100,
+        edges_count: 100,
+        passages_count: 302951,
+        passage_vectors_count: 290739,
+        vectors_count: 4017,
+        embedding_model: 'mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ',
+      },
+      { virtualTablesUnavailable: true },
+    );
+    await app.register(evidenceRoutes, {
+      evidenceStore: makeMockEvidenceStore(db),
+      embeddingService: { isReady: () => false },
+    });
+    await app.ready();
+
+    const body = (await app.inject({ method: 'GET', url: '/api/evidence/status' })).json();
+
+    assert.equal(body.vectors_count, 4017);
+    assert.equal(body.passage_vectors_count, 290739);
+    assert.equal(body.passage_vectors_supported, false);
+    assert.ok(!body.configWarnings.some((warning) => warning.code === 'vectors_empty'));
+    assert.ok(body.configWarnings.some((warning) => warning.code === 'vec_table_missing'));
   });
 
   it('no-catalog scenario → docs_root_suspicious skipped, other detectors still active', async () => {

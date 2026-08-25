@@ -58,6 +58,7 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  PreparedProviderRequestV1,
   TokenUsage,
   ToolExecutionPolicy,
 } from '../../types.js';
@@ -664,6 +665,32 @@ export class GeminiAgentService implements AgentService {
       let fullAssistantText = '';
       const childEnv = { ...(options?.callbackEnv ?? {}), ...(options?.accountEnv ?? {}) };
       if (readOnly) childEnv.CAT_CAFE_READONLY = 'true';
+      const promptIndex = args.lastIndexOf('-p');
+      const submittedPrompt = promptIndex >= 0 ? args[promptIndex + 1] : undefined;
+      if (typeof submittedPrompt !== 'string') throw new Error('gemini_request_prompt_unavailable');
+      const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+        v: 1,
+        message: Object.freeze({
+          body: submittedPrompt,
+          ...(submittedPrompt !== effectivePrompt ? { injectionDecision: 'member_cli_prompt_override' } : {}),
+        }),
+        nativeInstructions: Object.freeze([]),
+        runtime: Object.freeze({
+          provider: 'google',
+          carrier: 'gemini_cli',
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          protocol: 'stream-json',
+          ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+        }),
+        tools: Object.freeze({
+          finalSurface: readOnly ? ('exact' as const) : ('unknown' as const),
+          ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+        }),
+        providerNativeVisibility: 'unknown',
+      });
+      await options?.beforeProviderLaunch?.(preparedRequest);
+      if (!('body' in preparedRequest.message)) throw new Error('gemini_prepared_message_not_exact');
+      args[promptIndex + 1] = preparedRequest.message.body;
       const cliOpts = {
         command: geminiCommand,
         args,
@@ -1032,6 +1059,32 @@ export class GeminiAgentService implements AgentService {
               ...(readOnly ? { CAT_CAFE_READONLY: 'true' } : {}),
             }
           : undefined;
+      const promptIndex = args.lastIndexOf('--print');
+      const submittedPrompt = promptIndex >= 0 ? args[promptIndex + 1] : undefined;
+      if (typeof submittedPrompt !== 'string') throw new Error('antigravity_cli_request_prompt_unavailable');
+      const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+        v: 1,
+        message: Object.freeze({
+          body: submittedPrompt,
+          ...(submittedPrompt !== effectivePrompt ? { injectionDecision: 'member_cli_prompt_override' } : {}),
+        }),
+        nativeInstructions: Object.freeze([]),
+        runtime: Object.freeze({
+          provider: 'google',
+          carrier: 'antigravity_cli',
+          ...(agyModel ? { model: agyModel } : {}),
+          protocol: 'plain_text',
+          ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+        }),
+        tools: Object.freeze({
+          finalSurface: readOnly ? ('exact' as const) : ('unknown' as const),
+          ...(readOnly ? { catCafeSchemas: Object.freeze([]) } : {}),
+        }),
+        providerNativeVisibility: 'unknown',
+      });
+      await options?.beforeProviderLaunch?.(preparedRequest);
+      if (!('body' in preparedRequest.message)) throw new Error('antigravity_cli_prepared_message_not_exact');
+      args[promptIndex + 1] = preparedRequest.message.body;
       let stdout = '';
       let stderr = '';
       let timeoutEvent: CliTimeoutEvent | undefined;
@@ -1594,7 +1647,23 @@ export class GeminiAgentService implements AgentService {
       // then merge callbackEnv overrides. Preserves API keys etc. from parent env.
       const childEnv = buildChildEnv(options.callbackEnv);
 
-      const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', prompt], {
+      const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+        v: 1,
+        message: Object.freeze({ body: prompt }),
+        nativeInstructions: Object.freeze([]),
+        runtime: Object.freeze({
+          provider: 'google',
+          carrier: 'antigravity_adapter',
+          ...(this.model ? { model: this.model } : {}),
+          protocol: 'detached_cli',
+        }),
+        tools: Object.freeze({ finalSurface: 'unknown' as const }),
+        providerNativeVisibility: 'unknown',
+      });
+      await options.beforeProviderLaunch?.(preparedRequest);
+      if (!('body' in preparedRequest.message)) throw new Error('antigravity_prepared_message_not_exact');
+
+      const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', preparedRequest.message.body], {
         detached: true,
         stdio: 'ignore',
         env: childEnv as Record<string, string>,

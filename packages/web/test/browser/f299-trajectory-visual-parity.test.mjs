@@ -91,6 +91,12 @@ test(
     try {
       await page.goto(baseUrl, { waitUntil: 'networkidle' });
       const light = await semanticSurfaces(page);
+      await assert.doesNotReject(async () => {
+        await page.getByRole('heading', { name: 'Input generations' }).waitFor();
+        await page.getByRole('button', { name: '按来源权限展开' }).waitFor();
+      });
+      assert.match(await page.locator('[data-testid="request-generation-section"]').innerText(), /Generation #1/);
+      assert.match(await page.locator('[data-testid="request-generation-section"]').innerText(), /默认遮蔽/);
       const byRole = new Map(light.map((surface) => [surface.role, surface]));
       for (const role of ['user', 'assistant', 'system', 'context', 'tool', 'error']) {
         const surface = byRole.get(role);

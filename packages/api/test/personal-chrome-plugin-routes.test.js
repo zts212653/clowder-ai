@@ -355,3 +355,29 @@ test('Personal Chrome operation errors are typed and redact internal details', a
     code: 'HELPER_ACTIVE',
   });
 });
+
+test('Personal Chrome repair returns actionable stale-helper and missing-install states', async () => {
+  for (const [code, expectedError] of [
+    ['HELPER_RESTART_REQUIRED', 'Prepare the repaired Helper, then reload the Chrome extension once'],
+    ['NATIVE_HOST_NOT_INSTALLED', 'Install Personal ChatGPT Pro before requesting repair'],
+  ]) {
+    const { app } = await harness({
+      port: {
+        repair: async () => {
+          const error = new Error('private host path and process detail');
+          error.code = code;
+          throw error;
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/personal-chrome/repair',
+      headers: writeHeaders,
+    });
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(response.json(), { error: expectedError, code });
+    assert.equal(response.payload.includes('private'), false);
+  }
+});

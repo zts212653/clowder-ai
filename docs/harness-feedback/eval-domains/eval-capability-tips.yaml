@@ -34,6 +34,9 @@ evalCat:
   handle: "@codex-sol"
   model: gpt-5.6-sol
 frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
 sourceAdapter: capability-tips-usage
 sourceRefsKind: capability-tips-usage-window
 threadPolicy:

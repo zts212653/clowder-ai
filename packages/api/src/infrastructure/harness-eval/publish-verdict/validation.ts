@@ -1,4 +1,5 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
+import type { DesignGateEpisodeSourceSelector } from '../design-gate/design-gate-types.js';
 import type { FreshnessReplaySelector } from '../freshness/freshness-replay-types.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
@@ -60,6 +61,12 @@ export function isFreshnessReplaySourceRefs(refs: VerdictSourceRefs | undefined)
   return refs.kind === 'freshness-closure-replay';
 }
 
+export function isDesignGateSourceRefs(refs: VerdictSourceRefs | undefined): refs is DesignGateEpisodeSourceSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'design-gate-episode-source-map';
+}
+
 /**
  * F253 Phase C — structural validator for QC metrics selector.
  * Returns user-facing error detail; handler maps to 400 invalid_source_ref.
@@ -90,6 +97,7 @@ export const KNOWN_SOURCE_REFS_KINDS = [
   'task-outcome-snapshot',
   'friction-rollup-snapshot',
   'freshness-closure-replay',
+  'design-gate-episode-source-map',
 ] as const;
 
 export function isKnownSourceRefsKind(kind: string): kind is (typeof KNOWN_SOURCE_REFS_KINDS)[number] {
@@ -113,6 +121,7 @@ export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string
   if (isFrictionSourceRefs(refs)) return 'friction-rollup-snapshot';
   if (isQcMetricsSourceRefs(refs)) return 'qc-metrics-rollup';
   if (isFreshnessReplaySourceRefs(refs)) return 'freshness-closure-replay';
+  if (isDesignGateSourceRefs(refs)) return 'design-gate-episode-source-map';
   if (isA2aSourceRefs(refs)) return 'a2a-snapshot-attribution';
   if (refs && typeof refs === 'object' && 'kind' in refs && typeof refs.kind === 'string') {
     return refs.kind;

@@ -14,6 +14,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
   let redis;
   let proposalStore;
   let leaseStore;
+  let truthResolver;
   let admissionService;
   let approvalService;
   let DispatchActionApprovalService;
@@ -48,7 +49,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     }
     proposalStore = new RedisDispatchProposalStore(redis);
     leaseStore = new RedisActionSuccessorLeaseStore(redis);
-    const truthResolver = {
+    truthResolver = {
       async resolve() {
         return { terminal: false, source: 'community_projection', state: 'active' };
       },
@@ -295,6 +296,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       },
       dispatch: {
         leaseStore,
+        truthResolver,
         loadProposal: (proposalId) => proposalStore.get(proposalId),
         loadOwnerAuthProvenance: (proposalId) => proposalStore.getApprovalOwnerAuthProvenance(proposalId),
         recordProposalDelivery: (proposalId, deliveredMessageId) =>
@@ -320,15 +322,30 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
     const approved = await approvalService.approve(proposal, 'user-1', 'strict');
     assert.equal(approved.approved, true);
     const { actionLease, actionFence } = approved.value;
-    await leaseStore.recordDispatchDeliveryAttempt(actionLease.leaseId, {
+    const attempt = await leaseStore.recordDispatchDeliveryAttempt(actionLease.leaseId, {
       expectedGeneration: actionFence.generation,
+      expectedRevision: actionLease.revision,
+      expectedPredicateDigest: actionLease.terminalPredicate.digest,
+      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
       now: 10_001,
     });
+    assert.equal(attempt.outcome, 'recorded');
+    const reservation = await leaseStore.reserveDispatchDelivery(actionLease.leaseId, {
+      expectedGeneration: actionFence.generation,
+      expectedRevision: attempt.lease.revision,
+      expectedPredicateDigest: actionLease.terminalPredicate.digest,
+      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
+      now: 10_002,
+    });
+    assert.equal(reservation.outcome, 'reserved');
     await leaseStore.markDispatchDelivered(actionLease.leaseId, {
       expectedGeneration: actionFence.generation,
+      expectedRevision: reservation.lease.revision,
+      expectedPredicateDigest: actionLease.terminalPredicate.digest,
+      freshnessEvidenceRef: `community:${actionLease.subjectRef}:head:${HEAD_SHA}`,
       deliveredMessageId: 'msg-action-carrier',
       evidenceRef: 'message:msg-action-carrier',
-      now: 10_002,
+      now: 10_003,
     });
 
     const { ActionSuccessorCompletionService } = await import(
@@ -351,7 +368,7 @@ describe('F246 approval atomically acquires F167 custody', { skip: redisIsolatio
       generation: actionFence.generation,
       catId: 'codex-terra',
       evidenceRefs: ['community:pr:owner/repo#42:review:terra'],
-      now: 10_003,
+      now: 10_004,
     });
 
     assert.deepEqual(result, {

@@ -85,7 +85,10 @@ describe('F167 successor runtime wiring', () => {
   });
 
   it('admits the exact approved carrier into durable Queue custody before reporting delivery', () => {
-    const deliveryWiring = block('const deliverApprovedActionCarrier = async (', 'if (actionSuccessorLeaseStore) {');
+    const deliveryWiring = block(
+      'const deliverApprovedActionCarrier = async (',
+      'if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {',
+    );
     assert.match(deliveryWiring, /deliveryStatus: 'queued'/);
     assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, storedMsg\)/);
     assert.match(deliveryWiring, /classifyApprovedActionCarrier\(proposal, admittedMessage\)/);
@@ -96,5 +99,14 @@ describe('F167 successor runtime wiring', () => {
     );
     assert.ok(custodyProof >= 0 && custodyProof < visibleBroadcast);
     assert.ok(visibleBroadcast < deliverySuccess);
+  });
+
+  it('revalidates frozen dispatch truth through the canonical resolver before recovery delivery', () => {
+    const recoveryWiring = block(
+      'if (actionSuccessorLeaseStore && actionSubjectTruthResolver) {',
+      'const onReconciledZombie =',
+    );
+    assert.match(recoveryWiring, /dispatch:\s*{[\s\S]*truthResolver: actionSubjectTruthResolver/);
+    assert.match(recoveryWiring, /deliver: deliverApprovedActionCarrier/);
   });
 });

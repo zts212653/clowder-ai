@@ -1,6 +1,5 @@
 /**
- * F113 Phase E: Hook to fetch governance status for a project path.
- * Used by ChatContainer to decide whether to show ProjectSetupCard.
+ * F302: read-only project facts used to offer optional setup for blank repos.
  *
  * Uses a ref for projectPath so `refetch` always reads the latest value,
  * solving the first-create timing issue where storeThreads → projectPath
@@ -10,9 +9,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../utils/api-client';
 
 export interface GovernanceStatus {
-  ready: boolean;
-  needsBootstrap: boolean;
-  needsConfirmation: boolean;
   isEmptyDir: boolean;
   isGitRepo: boolean;
   gitAvailable: boolean;

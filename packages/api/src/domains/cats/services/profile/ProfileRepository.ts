@@ -47,6 +47,12 @@ export class FileProfileRepository {
     return resolve(this.dataDir, ...profileUserRelativePath(userId).split('/'));
   }
 
+  readCapsule(userId: string): { content: string; path: string } | null {
+    const path = resolve(this.profileDir(userId), 'landy-capsule.md');
+    if (!existsSync(path)) return null;
+    return { content: readFileSync(path, 'utf8'), path };
+  }
+
   scope(userId: string, catId: string): ProfileScope {
     profileUserRelativePath(userId);
     assertProfilePathSegment('catId', catId);

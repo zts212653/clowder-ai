@@ -1118,20 +1118,20 @@
       "anchor": "## User Journey"
     },
     "structureSource": {
-      "path": "docs/features/F279-workspace-listen-mode.md",
-      "anchor": "### Phase C — Workspace Player Integration + UAT"
+      "path": "docs/discussions/2026-08-12-f279-background-document-cache/README.md",
+      "anchor": "## 推荐交互（operator 已签）"
     },
     "bodySource": {
-      "path": "docs/features/F279-workspace-listen-mode.md",
-      "anchor": "从任意句开始、按自己舒服的速度听下去"
+      "path": "docs/discussions/2026-08-12-f279-background-document-cache/README.md",
+      "anchor": "打开 Markdown → 点“缓存全文”"
     },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo"],
-    "body": "长 Markdown 看不进去时，在 Workspace 打开渲染正文，点顶部“听读”；也可点任意一句从这里开始，随后暂停、跳句或切换倍速。",
+    "body": "长 Markdown 看不进去时，在 Workspace 打开渲染正文：点“缓存全文”可先把整篇准备好，暂停、切文件或切 thread 也会继续；想马上听可点“听读”或任意一句。",
     "action": {
       "type": "open_concierge_draft",
       "label": "帮我打开长文",
-      "draftPrompt": "请帮我在 Workspace 打开一篇 Markdown 长文，我想用听读模式从指定句子开始。"
+      "draftPrompt": "请帮我在 Workspace 打开一篇 Markdown 长文，先缓存全文，再用听读模式从指定句子开始。"
     },
     "owner": "codex-sol"
   },
@@ -1335,6 +1335,56 @@
       "type": "open_concierge_draft",
       "label": "怎么看这轮轨迹",
       "draftPrompt": "请打开当前对话的 Workspace 轨迹，带我从触发输入开始检查语义时间线、工具来源和结果，再看 Raw 事件并回到原消息。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f299-request-envelope",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "Phase D: P3 durable request envelope"
+    },
+    "structureSource": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "Phase D（P3 request envelope）"
+    },
+    "bodySource": {
+      "path": "docs/features/F299-workspace-invocation-trajectory.md",
+      "anchor": "按需展开"
+    },
+    "contexts": ["thinking", "long_running"],
+    "audience": ["cvo", "developer"],
+    "body": "想确认猫这轮真正提交了什么？打开消息轨迹里的 Input generations；摘要默认可见，正文会按原来源权限逐段展开。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "检查本轮模型输入",
+      "draftPrompt": "请打开当前消息的 Workspace 轨迹，带我检查 Input generations 的 provider、模型、连续性、工具面与重试边界；需要正文时再按来源权限展开。"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f302-portable-governance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F302-runtime-first-portable-governance.md",
+      "anchor": "Product Contract"
+    },
+    "structureSource": {
+      "path": "docs/features/F302-runtime-first-portable-governance.md",
+      "anchor": "User Journey"
+    },
+    "bodySource": {
+      "path": "docs/features/F302-runtime-first-portable-governance.md",
+      "anchor": "默认零写入"
+    },
+    "contexts": ["thinking", "feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "进入外部项目可直接开工，不会自动写治理文件；想补项目指南、Skills 或文档时，在 Project Setup 先预览，再确认所选内容。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "预览项目治理",
+      "draftPrompt": "请检查当前项目是否需要可选治理；先只打开 Project Setup 并预览建议，不要写入文件。"
     },
     "owner": "codex-sol"
   }

@@ -23,7 +23,13 @@ import { normalizeModel } from '../../../../../../infrastructure/telemetry/model
 import type { RuntimeSessionMetadata } from '../../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../../runtime-session/RuntimeSessionStore.js';
 import type { TranscriptReader } from '../../../session/TranscriptReader.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
+import type {
+  AgentMessage,
+  AgentService,
+  AgentServiceOptions,
+  MessageMetadata,
+  PreparedProviderRequestV1,
+} from '../../../types.js';
 import { appendLocalImagePathHints, buildImageMediaItems } from '../image-cli-bridge.js';
 import { extractImagePaths } from '../image-paths.js';
 import {
@@ -927,6 +933,7 @@ export class AntigravityAgentService implements AgentService {
       // first send so cascade retries / rotation continuations (which resend prompt text) don't
       // re-deliver the image bytes.
       let pendingMediaItems = imageMediaItems.length > 0 ? imageMediaItems : undefined;
+      let providerLaunchCount = 0;
       // F211 REG-followup: invocation-scoped so the deferred-terminal nudge cap
       // survives across the send/poll loop iterations (anti-loop: at most one nudge).
       let deferredNudgeCount = 0;
@@ -942,9 +949,31 @@ export class AntigravityAgentService implements AgentService {
         // F211-REG8: sendMessage reports whether the cascade was RUNNING at send (busy-reuse). When
         // it was, the follow-up queues behind the current turn, so the FIRST pollForSteps must wait
         // for the follow-up's own turn instead of terminating at the old turn's IDLE (expectFollowUpTurn).
+        providerLaunchCount += 1;
+        const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+          v: 1,
+          ...(providerLaunchCount > 1 ? { boundaryReason: 'provider_continuation' as const } : {}),
+          message: Object.freeze({
+            body: promptForCurrentCascade,
+            ...(pendingMediaItems
+              ? { injectionDecision: `text_exact_media_items_unprojected:${pendingMediaItems.length}` }
+              : {}),
+          }),
+          nativeInstructions: Object.freeze([]),
+          runtime: Object.freeze({
+            provider: 'antigravity',
+            carrier: 'cdp_bridge',
+            ...(this.model ? { model: this.model } : {}),
+            protocol: 'connect_rpc',
+          }),
+          tools: Object.freeze({ finalSurface: 'unknown' as const }),
+          providerNativeVisibility: 'unknown' as const,
+        });
+        await options?.beforeProviderLaunch?.(preparedRequest);
+        if (!('body' in preparedRequest.message)) throw new Error('antigravity_bridge_message_not_exact');
         const { stepsBefore, wasBusy } = await this.bridge.sendMessage(
           cascadeId,
-          promptForCurrentCascade,
+          preparedRequest.message.body,
           this.model,
           pendingMediaItems,
         );

@@ -5,13 +5,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const startDocument = vi.hoisted(() => vi.fn());
+const cacheControls = vi.hoisted(() => ({
+  start: vi.fn().mockResolvedValue(undefined),
+  cancel: vi.fn().mockResolvedValue(undefined),
+  refresh: vi.fn().mockResolvedValue(undefined),
+  release: vi.fn(),
+}));
 vi.mock('@/services/DocumentListenController', () => ({
   documentListenController: { startDocument },
 }));
+vi.mock('@/services/DocumentCacheController', () => ({ documentCacheController: cacheControls }));
 
 import { extractListenSentences } from '@/lib/listen-mode/markdown-sentences';
 import { useChatStore } from '@/stores/chatStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { WorkspaceFileViewer } from '../WorkspaceFileViewer';
 
 describe('WorkspaceFileViewer listen mode', () => {
@@ -21,8 +28,9 @@ describe('WorkspaceFileViewer listen mode', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     startDocument.mockReset();
+    Object.values(cacheControls).forEach((control) => control.mockClear?.());
     useChatStore.setState({ currentProjectPath: '/repo', currentThreadId: 'thread-1' });
-    useListenModeStore.setState({ session: null });
+    useListenModeStore.setState({ session: null, cacheByDocument: {} });
     container = document.createElement('div');
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     document.body.appendChild(container);
@@ -111,6 +119,42 @@ describe('WorkspaceFileViewer listen mode', () => {
       }),
       undefined,
     );
+  });
+
+  it('starts full-document caching from the rendered Markdown toolbar before listen playback exists', async () => {
+    await renderViewer();
+    const button = [...container.querySelectorAll('button')].find(({ textContent }) => textContent === '缓存全文');
+
+    await act(async () => button?.click());
+
+    expect(cacheControls.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: { projectPath: '/repo', relativePath: 'docs/research.md', contentDigest: 'sha-1' },
+        sentences: expect.arrayContaining([expect.objectContaining({ text: '第一句。' })]),
+      }),
+    );
+    expect(startDocument).not.toHaveBeenCalled();
+  });
+
+  it('shows the server-projected partial cache as a resumable toolbar action', async () => {
+    await renderViewer();
+    await act(async () => {
+      const identity = { projectPath: '/repo', relativePath: 'docs/research.md', contentDigest: 'sha-1' };
+      useListenModeStore.setState({
+        cacheByDocument: {
+          [listenDocumentCacheKey(identity)]: {
+            identity,
+            cachedAnchors: ['heading-0'],
+            cacheBytes: 100,
+            totalSentences: 3,
+            active: false,
+            error: null,
+          },
+        },
+      });
+    });
+
+    expect(container.textContent).toContain('继续缓存 1/3');
   });
 
   it('starts from the exact inline sentence clicked by the user', async () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -13,6 +13,7 @@ import {
   validatePersonalChromeConversationAuthorizations,
   writePersonalChromeConversationAuthorizationsAtomic,
 } from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
+import { acquireProcessLease } from '../src/plugins/cloud-cat-personal-host/native-host/native-socket-lease.mjs';
 
 const roots = new Set();
 
@@ -102,6 +103,18 @@ describe('Personal Chrome conversation authorization collection', () => {
     assert.equal((await stat(path)).mode & 0o777, 0o600);
   });
 
+  it('can project schema-v1 without migrating while an incompatible stale helper is active', async () => {
+    const root = await testRoot();
+    const path = join(root, 'conversation-binding.json');
+    const legacy = legacyBinding();
+    await writeFile(path, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+
+    const projected = await readPersonalChromeConversationAuthorizations(path, { migrateLegacy: false });
+
+    assert.deepEqual(projected, collection());
+    assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), legacy);
+  });
+
   it('appends two conversations, preserves both, and makes duplicate authorization retries byte-idempotent', async () => {
     const root = await testRoot();
     const path = join(root, 'conversation-binding.json');
@@ -124,6 +137,114 @@ describe('Personal Chrome conversation authorization collection', () => {
     assert.equal(await readFile(path, 'utf8'), beforeRetry);
     assert.equal((await stat(path)).mode & 0o777, 0o600);
     assert.deepEqual(await readdir(root), ['conversation-binding.json']);
+  });
+
+  it('serializes same-process writers before a slow durable authorization write can exhaust the filesystem lease', async () => {
+    const root = await testRoot();
+    const path = join(root, 'conversation-binding.json');
+    await mkdir(join(root, 'alias-segment'));
+    const aliasedPath = `${root}/alias-segment/../conversation-binding.json`;
+    const probe = await open(join(root, 'file-handle-prototype-probe'), 'wx', 0o600);
+    const fileHandlePrototype = Object.getPrototypeOf(probe);
+    const originalSync = fileHandlePrototype.sync;
+    await probe.close();
+    let delayedFirstSync = false;
+    let markFirstSyncStarted;
+    const firstSyncStarted = new Promise((resolveStarted) => {
+      markFirstSyncStarted = resolveStarted;
+    });
+    fileHandlePrototype.sync = async function delayedAuthorizationSync() {
+      if (!delayedFirstSync) {
+        delayedFirstSync = true;
+        markFirstSyncStarted();
+        await new Promise((resolve) => setTimeout(resolve, 6_500));
+      }
+      return originalSync.call(this);
+    };
+
+    try {
+      const first = authorization('conversation-7', '2026-08-21T07:00:00.000Z');
+      const second = authorization('conversation-8', '2026-08-21T07:01:00.000Z');
+      const firstWrite = authorizePersonalChromeConversation(path, first);
+      await firstSyncStarted;
+      const results = await Promise.allSettled([firstWrite, authorizePersonalChromeConversation(aliasedPath, second)]);
+
+      assert.deepEqual(
+        results.map((result) => result.status),
+        ['fulfilled', 'fulfilled'],
+      );
+      assert.deepEqual(
+        (await readPersonalChromeConversationAuthorizations(path)).conversations.map((entry) => entry.conversationId),
+        ['conversation-7', 'conversation-8'],
+      );
+    } finally {
+      fileHandlePrototype.sync = originalSync;
+    }
+  });
+
+  it('keeps different normalized authorization paths concurrent', async () => {
+    const root = await testRoot();
+    const firstPath = join(root, 'first', 'conversation-binding.json');
+    const secondPath = join(root, 'second', 'conversation-binding.json');
+    const probe = await open(join(root, 'file-handle-prototype-probe'), 'wx', 0o600);
+    const fileHandlePrototype = Object.getPrototypeOf(probe);
+    const originalSync = fileHandlePrototype.sync;
+    await probe.close();
+    let syncCalls = 0;
+    let markFirstSyncStarted;
+    let releaseFirstSync;
+    const firstSyncStarted = new Promise((resolveStarted) => {
+      markFirstSyncStarted = resolveStarted;
+    });
+    const firstSyncRelease = new Promise((resolveRelease) => {
+      releaseFirstSync = resolveRelease;
+    });
+    fileHandlePrototype.sync = async function gateFirstAuthorizationSync() {
+      syncCalls += 1;
+      if (syncCalls === 1) {
+        markFirstSyncStarted();
+        await firstSyncRelease;
+      }
+      return originalSync.call(this);
+    };
+
+    let firstWrite;
+    let secondWrite;
+    try {
+      firstWrite = authorizePersonalChromeConversation(firstPath, authorization('conversation-7'));
+      await firstSyncStarted;
+      secondWrite = authorizePersonalChromeConversation(secondPath, authorization('conversation-8'));
+      const second = await Promise.race([
+        secondWrite,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('distinct path was globally serialized')), 1_000)),
+      ]);
+
+      assert.equal(second.authorization.conversationId, 'conversation-8');
+    } finally {
+      releaseFirstSync();
+      await Promise.allSettled([firstWrite, secondWrite].filter(Boolean));
+      fileHandlePrototype.sync = originalSync;
+    }
+  });
+
+  it('retains the filesystem lease boundary for a live external authorization writer', async () => {
+    const root = await testRoot();
+    const path = join(root, 'conversation-binding.json');
+    const externalLease = await acquireProcessLease(path, { label: 'external authorization writer' });
+
+    try {
+      await assert.rejects(
+        authorizePersonalChromeConversation(path, authorization()),
+        (error) => error?.code === 'AUTHORIZATION_BUSY',
+      );
+    } finally {
+      await externalLease.release();
+    }
+
+    await assert.rejects(
+      readPersonalChromeConversationAuthorizations(path),
+      (error) => error?.code === 'NEEDS_AUTHORIZATION',
+    );
   });
 
   it('keeps collection time monotonic when the local clock moves backward', async () => {

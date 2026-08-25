@@ -522,16 +522,44 @@ test('the checkpoint still normalizes and bounds a late-filled anchor', async ()
 // without ever reaching the provider, and the next invocation would project hot
 // context over a cold rebuild that nobody ever saw. That is the precise failure
 // this feature exists to prevent, reintroduced through the retry path.
-test('a capacity-recovery turn settles nothing, because it sends no prompt', async () => {
+test('a capacity-recovery turn settles no presentation but records its exact application context before launch', async () => {
   const wire = new PreflightWire({ knownThreadIds: ['thread-known'] });
   const client = new CodexAppServerClient({ wire });
   const record = { calls: [] };
+  const recordedRequests = [];
 
   await drain(
     client.run({
       prompt: preflightPrompt('BYTES-THAT-WOULD-BE-DISCARDED', record),
       thread: { kind: 'resume', threadId: 'thread-known' },
       recoveryInstruction: 'resend the last turn under a smaller window',
+      prepareRecoveryRequest: (instruction) => ({
+        v: 1,
+        boundaryReason: 'provider_fallback',
+        message: { body: '', sourceRefs: [] },
+        nativeInstructions: [
+          {
+            body: instruction,
+            injectionDecision: 'app_server_capacity_recovery_context',
+            sourceRefs: [{ owner: 'runtime_context', ref: 'capacity-recovery:inv-1' }],
+          },
+        ],
+        runtime: { provider: 'openai', carrier: 'app_server' },
+        tools: { finalSurface: 'unknown' },
+        providerNativeVisibility: 'unknown',
+      }),
+      beforeProviderLaunch: async (request) => {
+        assert.equal(
+          wire.writes.some((message) => message.method === 'turn/start'),
+          false,
+        );
+        recordedRequests.push(request);
+        return {
+          requestGenerationId: '00000000-0000-4000-8000-000000000001',
+          generationOrdinal: 2,
+          sessionId: 'session-1',
+        };
+      },
     }),
   );
 
@@ -544,6 +572,8 @@ test('a capacity-recovery turn settles nothing, because it sends no prompt', asy
     'settle must not run for a turn whose bytes are discarded — settling reserves a generation ' +
       'and consumes buffered compactions, so running it here marks work delivered that never left the process',
   );
+  assert.equal(recordedRequests.length, 1);
+  assert.equal(recordedRequests[0].nativeInstructions[0].body, 'resend the last turn under a smaller window');
 });
 
 test('a whitespace-only recovery instruction is a normal turn, consistently on both sides', async () => {

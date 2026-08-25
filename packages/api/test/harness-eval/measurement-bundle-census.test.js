@@ -24,13 +24,13 @@ function loadCensus() {
 }
 
 describe('F267 real measurement bundle census', () => {
-  it('covers each real registry entry once and derives the exact 9/1/1 classification', async () => {
+  it('covers each real registry entry once and derives the exact 10/1/1 classification', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
     const { scanMeasurementVerdictCorpus } = await corpusModuleUnderTest();
     const census = validateMeasurementBundleCensus(loadCensus(), repoRoot);
     const corpus = scanMeasurementVerdictCorpus(repoRoot);
 
-    assert.equal(census.entries.length, 11);
+    assert.equal(census.entries.length, 12);
     assert.equal(census.schemaVersion, 2);
     assert.deepEqual(
       census.entries
@@ -41,6 +41,7 @@ describe('F267 real measurement bundle census', () => {
         'eval:a2a',
         'eval:anchor-first',
         'eval:capability-wakeup',
+        'eval:design-gate',
         'eval:freshness',
         'eval:friction',
         'eval:memory',
@@ -63,7 +64,7 @@ describe('F267 real measurement bundle census', () => {
     const active = census.entries.filter((entry) => entry.classification === 'active_decision_bearing');
     assert.deepEqual(
       active.map((entry) => entry.validityMigration.riskRank).sort((left, right) => left - right),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     );
     assert.deepEqual(
       active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),
@@ -132,6 +133,40 @@ describe('F267 real measurement bundle census', () => {
     assert.equal(left.total, right.total);
     assert.deepEqual([...left.counts], [...right.counts]);
     assert.notEqual(left.hash, right.hash);
+  });
+
+  it('accepts a fully unmigrated public instance only while every active domain remains fail-closed', async () => {
+    const { validateMeasurementBundleCensus } = await moduleUnderTest();
+    const publicBootstrap = loadCensus();
+    const active = publicBootstrap.entries.filter((entry) => entry.classification === 'active_decision_bearing');
+    for (const entry of active) {
+      entry.validityMigration = {
+        ...entry.validityMigration,
+        batch: null,
+        status: 'unmigrated',
+        certificateRef: null,
+        resultRef: null,
+        replayRef: null,
+        actionGate: 'keep_observe_only',
+        hardBlockReason: `Public instance has not certified ${entry.domainId}.`,
+      };
+    }
+
+    assert.doesNotThrow(() => validateMeasurementBundleCensus(publicBootstrap, repoRoot));
+
+    const withoutBlock = structuredClone(publicBootstrap);
+    withoutBlock.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.hardBlockReason = null;
+    assert.throws(() => validateMeasurementBundleCensus(withoutBlock, repoRoot), /hard block reason/i);
+
+    const withPrivateEvidence = structuredClone(publicBootstrap);
+    withPrivateEvidence.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.certificateRef =
+      'docs/harness-feedback/certificates/private.yaml';
+    assert.throws(() => validateMeasurementBundleCensus(withPrivateEvidence, repoRoot), /cannot claim evidence refs/i);
+
+    const withUnsafeAction = structuredClone(publicBootstrap);
+    withUnsafeAction.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.actionGate =
+      'certificate_actions_allowed';
+    assert.throws(() => validateMeasurementBundleCensus(withUnsafeAction, repoRoot), /action gate/i);
   });
 
   it('rejects stale coverage, duplicate ids, wrong consumers, and false active claims', async () => {

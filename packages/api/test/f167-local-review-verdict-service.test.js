@@ -5,7 +5,9 @@ const { LocalReviewVerdictService } = await import('../dist/domains/ball-custody
 const { MessageStoreLocalReviewEvidenceProvider } = await import(
   '../dist/domains/ball-custody/LocalReviewEvidenceProvider.js'
 );
-const { claimActionSuccessor } = await import('../dist/domains/ball-custody/action-successor-state-machine.js');
+const { claimActionSuccessor, recordActionSuccessorOutcome } = await import(
+  '../dist/domains/ball-custody/action-successor-state-machine.js'
+);
 const { recoverActiveLocalReviewVerdict } = await import(
   '../dist/domains/ball-custody/action-successor-local-review-recovery-state-machine.js'
 );
@@ -299,6 +301,298 @@ describe('F167 local review verdict completion producer', () => {
       reason: 'local review lease has no structured predecessor route',
     });
     assert.equal(completeActionLease.mock.calls.length, 0);
+  });
+});
+
+function carrierlessHarness({
+  lease = createLease(),
+  message = verdictMessage({
+    extra: {
+      targetCats: ['codex-sol'],
+      crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+      stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+      localReviewVerdict: {
+        verdict: 'changes_requested',
+        clientMessageId: 'typed-verdict-carrierless-1',
+        reviewedHeadSha: HEAD,
+        carrierlessLeaseFence: { leaseId: lease.leaseId, generation: lease.generation },
+      },
+    },
+  }),
+  carrierRecordOverrides = {},
+} = {}) {
+  let current = lease;
+  const getByIdentityCalls = [];
+  const completeActionLease = mock.fn(async (completion) => {
+    current = recordActionSuccessorOutcome(current, {
+      generation: completion.generation,
+      catId: completion.catId,
+      outcome: 'succeeded',
+      evidenceRef: completion.evidenceRefs[0],
+      now: completion.now,
+    });
+    return {
+      outcome: 'committed',
+      leaseId: completion.leaseId,
+      generation: completion.generation,
+    };
+  });
+  const leaseStore = {
+    async getByIdentity(identity) {
+      getByIdentityCalls.push(identity);
+      return current;
+    },
+  };
+  const messageStore = {
+    async getById(messageId) {
+      return message?.id === messageId ? message : null;
+    },
+  };
+  const invocationRecordStore = {
+    async get(invocationId) {
+      if (invocationId !== 'parent-inv-review-1') return null;
+      return {
+        id: invocationId,
+        threadId: 'thread-review',
+        userId: 'user-1',
+        targetCats: ['codex-terra'],
+        actionLeaseCarrier: { kind: 'none' },
+        ...carrierRecordOverrides,
+      };
+    },
+  };
+  return {
+    completeActionLease,
+    getByIdentityCalls,
+    setLease(next) {
+      current = next;
+    },
+    service: new LocalReviewVerdictService({
+      leaseStore,
+      evidenceProvider: new MessageStoreLocalReviewEvidenceProvider(messageStore, invocationRecordStore),
+      completeActionLease,
+    }),
+  };
+}
+
+function carrierlessInput(overrides = {}) {
+  return {
+    subjectRef: 'pr:owner/repo#3333',
+    reviewedHeadSha: HEAD,
+    targetThreadId: 'thread-author',
+    messageId: 'message-verdict-1',
+    now: 250,
+    principal: { catId: 'codex-terra', threadId: 'thread-review', tenantScope: 'user-1' },
+    ...overrides,
+  };
+}
+
+describe('F167 carrier-free current local-review settlement', () => {
+  it('resolves one canonical active review lease by subject and reviewer identity, then settles once', async () => {
+    const { service, completeActionLease, getByIdentityCalls } = carrierlessHarness();
+
+    assert.deepEqual(await service.preflightCarrierless(carrierlessInput()), {
+      outcome: 'resolved',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-author',
+    });
+    assert.deepEqual(await service.recordCarrierless(carrierlessInput({ leaseId: 'lease-review-1', generation: 1 })), {
+      outcome: 'committed',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      evidenceRef: 'local-review:message-verdict-1:g1:changes_requested',
+    });
+    assert.deepEqual(getByIdentityCalls, [
+      {
+        tenantScope: 'user-1',
+        subjectRef: 'pr:owner/repo#3333',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+      },
+      {
+        tenantScope: 'user-1',
+        subjectRef: 'pr:owner/repo#3333',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+      },
+    ]);
+    assert.deepEqual(completeActionLease.mock.calls[0].arguments[0], {
+      leaseId: 'lease-review-1',
+      generation: 1,
+      catId: 'codex-terra',
+      evidenceRefs: ['local-review:message-verdict-1:g1:changes_requested'],
+      now: 250,
+    });
+  });
+
+  it('treats a stale transport carrier as provenance after canonical identity resolves the active generation', async () => {
+    const staleCarrier = {
+      actionLeaseCarrier: { kind: 'action_successor', leaseId: 'lease-old-review', generation: 7 },
+    };
+    const canonical = carrierlessHarness({ carrierRecordOverrides: staleCarrier });
+
+    assert.deepEqual(
+      await canonical.service.recordCarrierless(carrierlessInput({ leaseId: 'lease-review-1', generation: 1 })),
+      {
+        outcome: 'committed',
+        leaseId: 'lease-review-1',
+        generation: 1,
+        evidenceRef: 'local-review:message-verdict-1:g1:changes_requested',
+      },
+    );
+    assert.equal(canonical.completeActionLease.mock.calls.length, 1);
+
+    const wrongPrincipalCarrier = carrierlessHarness({
+      carrierRecordOverrides: { ...staleCarrier, targetCats: ['opus'] },
+    });
+    assert.deepEqual(
+      await wrongPrincipalCarrier.service.recordCarrierless(
+        carrierlessInput({ leaseId: 'lease-review-1', generation: 1 }),
+      ),
+      {
+        outcome: 'mismatch',
+        reason: 'local review verdict invocation is outside the message principal scope',
+      },
+    );
+    assert.equal(wrongPrincipalCarrier.completeActionLease.mock.calls.length, 0);
+  });
+
+  it('rejects a persisted canonical fence for another lease generation before completion', async () => {
+    const message = verdictMessage({
+      extra: {
+        targetCats: ['codex-sol'],
+        crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+        stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+        localReviewVerdict: {
+          verdict: 'changes_requested',
+          clientMessageId: 'typed-verdict-wrong-canonical-fence',
+          reviewedHeadSha: HEAD,
+          carrierlessLeaseFence: { leaseId: 'lease-review-1', generation: 2 },
+        },
+      },
+    });
+    const { service, completeActionLease } = carrierlessHarness({ message });
+
+    assert.deepEqual(await service.recordCarrierless(carrierlessInput({ leaseId: 'lease-review-1', generation: 1 })), {
+      outcome: 'mismatch',
+      reason: 'local review canonical settlement fence does not match the current action lease generation',
+    });
+    assert.equal(completeActionLease.mock.calls.length, 0);
+  });
+
+  it('replays the same persisted carrier-free verdict after its single-holder lease completes', async () => {
+    const { service, completeActionLease } = carrierlessHarness();
+    const fencedInput = carrierlessInput({ leaseId: 'lease-review-1', generation: 1 });
+
+    assert.equal((await service.recordCarrierless(fencedInput)).outcome, 'committed');
+    assert.deepEqual(await service.preflightCarrierless(carrierlessInput()), {
+      outcome: 'resolved',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      predecessorCatId: 'codex-sol',
+      predecessorThreadId: 'thread-author',
+    });
+    assert.deepEqual(await service.recordCarrierless(fencedInput), {
+      outcome: 'committed',
+      leaseId: 'lease-review-1',
+      generation: 1,
+      evidenceRef: 'local-review:message-verdict-1:g1:changes_requested',
+    });
+    assert.equal(completeActionLease.mock.calls.length, 1, 'replay must reuse the committed holder evidence');
+  });
+
+  it('rejects a reissued generation when the reviewer fact names the old HEAD, with zero completion side effects', async () => {
+    const { service, setLease, completeActionLease } = carrierlessHarness();
+    assert.equal((await service.preflightCarrierless(carrierlessInput())).outcome, 'resolved');
+
+    setLease({
+      ...createLease(),
+      generation: 2,
+      terminalPredicate: canonicalizeActionTerminalPredicate({
+        actionFamily: 'review',
+        subjectRef: 'pr:owner/repo#3333',
+        predicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
+      }),
+    });
+
+    assert.deepEqual(await service.recordCarrierless(carrierlessInput({ leaseId: 'lease-review-1', generation: 1 })), {
+      outcome: 'stale',
+      reason: 'stale_generation',
+    });
+    assert.equal(completeActionLease.mock.calls.length, 0);
+  });
+
+  it('rejects a same-HEAD reissue that replaces the preflight generation before persistence', async () => {
+    const { service, setLease, completeActionLease } = carrierlessHarness();
+    const preflight = await service.preflightCarrierless(carrierlessInput());
+    assert.equal(preflight.outcome, 'resolved');
+
+    setLease({ ...createLease(), generation: 2 });
+
+    assert.deepEqual(
+      await service.recordCarrierless(
+        carrierlessInput({ leaseId: preflight.leaseId, generation: preflight.generation }),
+      ),
+      { outcome: 'stale', reason: 'stale_generation' },
+    );
+    assert.equal(completeActionLease.mock.calls.length, 0);
+  });
+
+  it('fails closed for subject, reviewer, thread, tenant, route, and review-slot mismatches', async () => {
+    const cases = [
+      carrierlessInput({ subjectRef: 'pr:owner/repo#9999' }),
+      carrierlessInput({
+        principal: { catId: 'opus', threadId: 'thread-review', tenantScope: 'user-1' },
+      }),
+      carrierlessInput({
+        principal: { catId: 'codex-terra', threadId: 'thread-other', tenantScope: 'user-1' },
+      }),
+      carrierlessInput({
+        principal: { catId: 'codex-terra', threadId: 'thread-review', tenantScope: 'user-2' },
+      }),
+      carrierlessInput({ targetThreadId: 'thread-other' }),
+    ];
+
+    for (const candidate of cases) {
+      const { service, completeActionLease } = carrierlessHarness();
+      assert.equal((await service.preflightCarrierless(candidate)).outcome, 'mismatch');
+      assert.equal(completeActionLease.mock.calls.length, 0);
+    }
+
+    const { service, completeActionLease } = carrierlessHarness({
+      lease: { ...createLease(), actionFamily: 'implement', successorSlot: 'implementer' },
+    });
+    assert.equal((await service.preflightCarrierless(carrierlessInput())).outcome, 'mismatch');
+    assert.equal(completeActionLease.mock.calls.length, 0);
+  });
+
+  it('requires the persisted typed reviewer HEAD fact instead of trusting the request body alone', async () => {
+    for (const localReviewVerdict of [
+      { verdict: 'changes_requested', clientMessageId: 'typed-verdict-no-head' },
+      {
+        verdict: 'changes_requested',
+        clientMessageId: 'typed-verdict-wrong-head',
+        reviewedHeadSha: 'b'.repeat(40),
+      },
+    ]) {
+      const { service, completeActionLease } = carrierlessHarness({
+        message: verdictMessage({
+          extra: {
+            targetCats: ['codex-sol'],
+            crossPost: { sourceThreadId: 'thread-review', effectClass: 'coordinate' },
+            stream: { invocationId: 'parent-inv-review-1', turnInvocationId: 'turn-inv-review-1' },
+            localReviewVerdict,
+          },
+        }),
+      });
+      assert.equal(
+        (await service.recordCarrierless(carrierlessInput({ leaseId: 'lease-review-1', generation: 1 }))).outcome,
+        'mismatch',
+      );
+      assert.equal(completeActionLease.mock.calls.length, 0);
+    }
   });
 });
 

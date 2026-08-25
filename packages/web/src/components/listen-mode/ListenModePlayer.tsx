@@ -1,25 +1,15 @@
 'use client';
 
-import type { ListenPlaybackRate, ListenRetention } from '@cat-cafe/shared';
+import type { ListenPlaybackRate } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { documentListenController } from '@/services/DocumentListenController';
 import { useChatStore } from '@/stores/chatStore';
-import { useListenModeStore } from '@/stores/listenModeStore';
+import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { HubIcon } from '../hub-icons';
+import { ListenCachePopover } from './ListenCachePopover';
 import styles from './ListenModePlayer.module.css';
 
 const PLAYBACK_RATES: ListenPlaybackRate[] = [0.75, 1, 1.25, 1.5, 2];
-const RETENTION_OPTIONS: Array<{ value: ListenRetention; label: string; hint: string }> = [
-  { value: '7d', label: '7 天', hint: '默认 · 按最近使用时间' },
-  { value: '30d', label: '30 天', hint: '适合近期反复听' },
-  { value: 'forever', label: '永久', hint: '除非你主动清理' },
-];
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function statusText(phase: string, position: number): string {
   switch (phase) {
@@ -70,69 +60,6 @@ function TransportIcon({ kind }: { kind: 'play' | 'pause' | 'previous' | 'next' 
   );
 }
 
-function CachePopover({ onClose }: { onClose: () => void }) {
-  const session = useListenModeStore((state) => state.session);
-  const [confirmClear, setConfirmClear] = useState(false);
-  if (!session) return null;
-
-  return (
-    <aside
-      role="dialog"
-      aria-label="此文档缓存"
-      className="absolute top-full right-0 z-50 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-cafe bg-[var(--console-card-bg)] p-4 shadow-lg"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-cafe">此文档缓存</h3>
-          <p className="mt-1 text-xs text-cafe-secondary">
-            已缓存 {session.cachedAnchors.length}/{session.sentences.length} 句 · {formatBytes(session.cacheBytes)}
-          </p>
-        </div>
-        <button type="button" onClick={onClose} aria-label="关闭缓存设置" className="text-cafe-muted">
-          <HubIcon name="x" className="h-4 w-4" />
-        </button>
-      </div>
-      <fieldset className="mt-4 space-y-2">
-        <legend className="text-micro font-bold uppercase tracking-[0.12em] text-cafe-muted">保留音频</legend>
-        {RETENTION_OPTIONS.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={session.retention === option.value}
-            onClick={() => documentListenController.setRetention(option.value)}
-            className={`mt-2 flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
-              session.retention === option.value
-                ? 'border-cafe-accent [background:color-mix(in_oklch,var(--cafe-accent)_10%,transparent)]'
-                : 'border-cafe hover:bg-cafe-surface-elevated'
-            }`}
-          >
-            <span className="text-xs font-semibold text-cafe">{option.label}</span>
-            <span className="text-right text-micro text-cafe-muted">{option.hint}</span>
-          </button>
-        ))}
-      </fieldset>
-      <button
-        type="button"
-        onClick={() => {
-          if (!confirmClear) {
-            setConfirmClear(true);
-            return;
-          }
-          void documentListenController.clearAudio().then(() => {
-            setConfirmClear(false);
-            onClose();
-          });
-        }}
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--semantic-critical)] bg-[var(--semantic-critical-surface)] px-3 py-2 text-xs font-semibold text-conn-red-text"
-      >
-        <HubIcon name="trash" className="h-4 w-4" />
-        {confirmClear ? '确认清理此文档音频' : '清除此文档的音频'}
-      </button>
-      <p className="mt-2 text-micro leading-4 text-cafe-muted">不会删除原文、上次听到的位置或倍速设置。</p>
-    </aside>
-  );
-}
-
 interface ListenModePlayerProps {
   variant?: 'workspace' | 'mini';
   /** The full Workspace control is currently visible, so the fallback can stand down. */
@@ -141,6 +68,7 @@ interface ListenModePlayerProps {
 
 export function ListenModePlayer({ variant = 'workspace', workspaceVisible = false }: ListenModePlayerProps = {}) {
   const session = useListenModeStore((state) => state.session);
+  const cacheByDocument = useListenModeStore((state) => state.cacheByDocument);
   const currentProjectPath = useChatStore((state) => state.currentProjectPath);
   const openFilePath = useChatStore((state) => state.workspaceOpenFilePath);
   const openWorktreeId = useChatStore((state) => state.workspaceWorktreeId);
@@ -159,6 +87,13 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
   }, [cacheOpen]);
 
   if (!session) return null;
+  const cache = cacheByDocument[listenDocumentCacheKey(session.identity)] ?? {
+    cachedAnchors: session.cachedAnchors,
+    cacheBytes: session.cacheBytes,
+    totalSentences: session.sentences.length,
+    active: false,
+    error: null,
+  };
   const currentSentence = session.sentences[session.currentIndex];
   const detailText = session.phase === 'error' ? session.error : currentSentence?.text;
   const currentPosition = session.currentIndex + 1;
@@ -317,9 +252,9 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
               onClick={() => setCacheOpen((open) => !open)}
               className="h-8 whitespace-nowrap rounded-lg border border-cafe px-2 text-xs font-semibold text-cafe-secondary hover:border-cafe-accent hover:text-cafe"
             >
-              已缓存 {session.cachedAnchors.length} 句
+              缓存 {cache.cachedAnchors.length}/{cache.totalSentences}
             </button>
-            {cacheOpen && <CachePopover onClose={() => setCacheOpen(false)} />}
+            {cacheOpen && <ListenCachePopover cache={cache} onClose={() => setCacheOpen(false)} session={session} />}
           </div>
           <button
             type="button"

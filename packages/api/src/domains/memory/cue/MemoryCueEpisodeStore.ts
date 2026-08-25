@@ -1,4 +1,5 @@
 import {
+  memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
   RECALL_RESOLVER_FAMILIES,
   type RecallResolverFamily,
@@ -205,13 +206,7 @@ export class MemoryCueEpisodeStore {
       )
       .get(scope.ownerUserId, scope.threadId, scope.invocationId, cueId) as MemoryCueEventRow | undefined;
     if (!row) return null;
-    const drillFamily = {
-      person_entity: 'person_memory' as const,
-      operational_precedent: 'evidence' as const,
-      taste: 'taste' as const,
-      profile: null,
-      project_knowledge: null,
-    }[row.resolver_family];
+    const drillFamily = memoryCueDrillFamilyForResolver(row.resolver_family);
     if (!drillFamily || row.catalog_version !== RECALL_OPPORTUNITY_CATALOG_VERSION) return null;
     return {
       cueId: row.cue_id,

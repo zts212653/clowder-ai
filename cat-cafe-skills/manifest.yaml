@@ -19,8 +19,8 @@ skills:
     category: "开发流程"
     description: >
       Feature 立项、讨论、完成的全生命周期管理。
-      Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求。
-      Not for: 代码实现、review、merge（那些有专门的 skill）。
+      Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求，或operator说“先看真页面”要求恢复既有 F083 Design Gate。
+      Not for: 不涉及 Feature/Design Gate 真相更新的纯代码实现、review、merge（那些有专门的 skill）。
       Output: Feature 聚合文件 + BACKLOG 索引 + 真相源同步。
     triggers:
       - "开个新功能"
@@ -31,6 +31,7 @@ skills:
       - "F0xx done"
       - "验收通过"
       - "讨论新功能需求"
+      - "先看真页面"
     not_for:
       - "写代码"
       - "review"

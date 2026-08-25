@@ -30,6 +30,12 @@ export function PersonalChromePluginPanel() {
     void load();
   }, [load]);
 
+  const refresh = useCallback(async () => {
+    setBusy(true);
+    await load();
+    setBusy(false);
+  }, [load]);
+
   const mutate = useCallback(async (action: PersonalChromePluginAction) => {
     if (action === 'uninstall' && !window.confirm('确认卸载 Personal ChatGPT Pro 本机组件？全部会话授权也会移除。')) {
       return;
@@ -82,6 +88,7 @@ export function PersonalChromePluginPanel() {
           onToggleDetails={() => setExpanded((current) => !current)}
           onAction={(action) => void mutate(action)}
           onRevoke={(conversationId) => void revoke(conversationId)}
+          onRefresh={() => void refresh()}
         />
       )}
     </section>

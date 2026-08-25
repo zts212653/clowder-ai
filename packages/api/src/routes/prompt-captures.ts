@@ -5,7 +5,6 @@
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { getPromptCaptureStore } from '../infrastructure/debug/prompt-capture-bridge.js';
-import { isPromptCaptureEnabled } from '../infrastructure/debug/prompt-capture-store.js';
 import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
 
 const PROMPT_CAPTURE_GATE = {
@@ -23,8 +22,8 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
     if (!gate.ok) return gate.response;
     const store = getPromptCaptureStore();
     return {
-      enabled: isPromptCaptureEnabled(),
-      mode: process.env.PROMPT_CAPTURE ?? 'off',
+      enabled: false,
+      mode: 'legacy_read_only',
       catFilter: process.env.PROMPT_CAPTURE_CATS ?? null,
       ...store.stats(),
     };

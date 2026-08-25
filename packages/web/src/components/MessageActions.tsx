@@ -19,6 +19,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { createQuoteContextAttachment } from './chat-context-reference';
 import { describeMessageInvocationTrajectory, openMessageInvocationTrajectory } from './InvocationTrajectoryAnchor';
 import { LiveSelectionAnnotationAction } from './LiveSelectionAnnotationAction';
+import { MessageActionSlotProvider } from './MessageActionSlot';
 import { SelectionAnnotationAction } from './SelectionAnnotationAction';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { TransferTargetPicker } from './TransferTargetPicker';
@@ -53,6 +54,22 @@ interface MessageActionsProps {
   onToggleSelection?: (messageId: string) => void;
   /** Blocks network forwarding while this browser document is not admitted to write. */
   forwardingDisabled?: boolean;
+}
+
+const COMPACT_ACTIONS_QUERY = '(max-width: 767px), (hover: none) and (pointer: coarse)';
+
+function useCompactMessageActions(): boolean {
+  // Keep the server and first client tree identical; media state takes over after hydration.
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(COMPACT_ACTIONS_QUERY);
+    const update = (event: MediaQueryListEvent) => setCompact(event.matches);
+    setCompact(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return compact;
 }
 
 function selectionCoordinates(action: TextSelectionAction): { selectionStart?: number; selectionEnd?: number } {
@@ -149,6 +166,8 @@ export function MessageActions({
 }: MessageActionsProps) {
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [compactOpen, setCompactOpen] = useState(false);
+  const [actionSlot, setActionSlot] = useState<HTMLDivElement | null>(null);
   const [forwardSelection, setForwardSelection] = useState<{
     items: MessageBundleSelectionItem[];
   } | null>(null);
@@ -157,6 +176,7 @@ export function MessageActions({
   const annotationMarkers = useMessageAnnotationMarkers(messageRef, threadId, message.id);
   const removeThreadMessage = useChatStore((s) => s.removeThreadMessage);
   const isDesktop = useIsDesktop();
+  const compactActions = useCompactMessageActions();
 
   const isUser = message.type === 'user' && !message.catId;
   const isAssistant = message.type === 'assistant' || (message.type === 'user' && !!message.catId);
@@ -166,44 +186,36 @@ export function MessageActions({
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming && !isRecalled;
   const hasSelectionShortcut = canAct && selectionEligible && Boolean(onEnterSelection);
-  /* Message actions are a low-frequency capability, so on a pointer device they take no layout
-   * at all at rest: no reserved row above the bubble and no permanently painted toolbar. They
-   * surface on hover or keyboard focus.
-   *
-   * A touch-only device has neither, so hiding the toolbar there would make selection, reply,
-   * delete, edit/branch and the overflow actions unreachable. On touch the complete action
-   * group therefore stays visible and keeps its own reserved row.
-   *
-   * The query needs both halves: `(hover: none)` alone also matches an environment with no
-   * pointing device at all (a headless browser), which would switch every automated pointer
-   * check into the touch layout. `(pointer: coarse)` is what actually says “a finger”.
-   * left-10/right-10 clears the avatar (w-8 + gap-2 ≈ 40px). */
-  const touchReachable =
-    '[@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:opacity-100';
-  const touchPosition =
-    '[@media(hover:none)_and_(pointer:coarse)]:top-0 [@media(hover:none)_and_(pointer:coarse)]:translate-y-0';
-  const toolbarPositionClass = `${isUser ? '-top-1 -translate-y-full right-10' : '-top-1 -translate-y-full left-10'} ${touchPosition}`;
-  const toolbarVisibilityClass = overflowOpen
-    ? 'opacity-100'
-    : `pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${touchReachable}`;
-  const touchReservedRowClass = canReply && !selectionMode ? '[@media(hover:none)_and_(pointer:coarse)]:pt-8' : '';
+  /* The author row owns a stable horizontal slot. Painting that slot on message hover cannot
+   * move the message, and toolbar-local focus keeps unrelated body controls from summoning it.
+   * Narrow/coarse layouts retain the same slot but put one 44px entry in it; the full dock opens
+   * as a sheet, so touch reachability does not cost every message a permanent vertical row. */
+  const toolbarPositionClass = isUser ? 'top-0 right-10 sm:right-auto sm:left-10' : 'top-0 left-10';
+  const actionsExpanded = compactOpen ? true : overflowOpen;
+  const desktopOverflowOpen = overflowOpen && isDesktop && !compactActions;
+  const useOverflowSheet = !(isDesktop && !compactActions);
+  const toolbarVisibilityClass = actionsExpanded
+    ? 'pointer-events-auto opacity-100'
+    : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100';
 
   useEffect(() => {
-    if (!overflowOpen) return;
+    if (!overflowOpen && !compactOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOverflowOpen(false);
+      if (event.key !== 'Escape') return;
+      setOverflowOpen(false);
+      setCompactOpen(false);
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [overflowOpen]);
+  }, [compactOpen, overflowOpen]);
   useEffect(() => {
-    if (!overflowOpen || !isDesktop) return;
+    if (!desktopOverflowOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!messageRef.current?.contains(event.target as Node)) setOverflowOpen(false);
     };
     document.addEventListener('pointerdown', closeOnOutsidePointer);
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, [isDesktop, overflowOpen]);
+  }, [desktopOverflowOpen]);
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
@@ -381,7 +393,7 @@ export function MessageActions({
       <button
         type="button"
         role="menuitem"
-        className="w-full px-3 py-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+        className="min-h-11 w-full px-3 py-2 text-left text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
         onClick={() => {
           setOverflowOpen(false);
           handleBranchDirect();
@@ -392,7 +404,7 @@ export function MessageActions({
       <button
         type="button"
         role="menuitem"
-        className="w-full px-3 py-2 text-left text-sm text-conn-red-text transition-colors hover:bg-cafe-surface-elevated"
+        className="min-h-11 w-full px-3 py-2 text-left text-sm text-conn-red-text transition-colors hover:bg-cafe-surface-elevated"
         onClick={() => {
           setOverflowOpen(false);
           handleHardDelete();
@@ -403,15 +415,191 @@ export function MessageActions({
     </>
   );
 
+  const actionToolbar = (compactPresentation: boolean) => (
+    <div
+      data-quote-exclude
+      data-testid="message-actions-toolbar"
+      role="toolbar"
+      aria-label="消息操作"
+      className={`${toolbarVisibilityClass} ${actionSlot ? 'relative' : `absolute ${toolbarPositionClass}`} z-30 flex transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe ${
+        compactPresentation
+          ? 'w-full justify-center gap-1 p-2 [&_button]:min-h-11 [&_button]:min-w-11'
+          : 'gap-0.5 px-1 py-0.5'
+      }`}
+      onClick={compactPresentation ? () => setCompactOpen(false) : undefined}
+      onKeyUp={
+        compactPresentation
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') setCompactOpen(false);
+            }
+          : undefined
+      }
+    >
+      {hasSelectionShortcut && (
+        <button
+          type="button"
+          onClick={() => onEnterSelection?.(message.id)}
+          className={`rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary ${
+            isUser ? 'order-2' : ''
+          }`}
+          title="多选消息"
+          aria-label="多选消息"
+        >
+          <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m4.5 7 1.25 1.25L8 6" />
+            <rect x="3" y="14" width="6" height="6" rx="1" strokeWidth={2} />
+            <path strokeLinecap="round" strokeWidth={2} d="M13 7h8M13 17h8" />
+          </svg>
+        </button>
+      )}
+      <div data-testid="message-secondary-actions" className={`${isUser ? 'order-1' : ''} flex gap-0.5`.trim()}>
+        <button
+          type="button"
+          onClick={() => {
+            useChatStore.getState().setReplyTo({
+              id: message.id,
+              content: message.content,
+              senderCatId: message.catId === undefined ? null : message.catId,
+              threadId,
+            });
+          }}
+          className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-primary transition-colors"
+          title="引用回复"
+          aria-label="引用回复"
+        >
+          <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M3 10h10a5 5 0 015 5v6M3 10l6-6M3 10l6 6"
+            />
+          </svg>
+        </button>
+        {invocationTrajectory && (
+          <button
+            type="button"
+            onClick={() => openMessageInvocationTrajectory(message, threadId)}
+            className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-accent"
+            title="查看这轮轨迹"
+            aria-label="查看这轮 invocation 轨迹"
+            data-testid="message-action-invocation-trajectory"
+          >
+            <svg
+              aria-hidden="true"
+              className="h-3.5 w-3.5"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <circle cx="4" cy="4" r="1.5" />
+              <circle cx="12" cy="12" r="1.5" />
+              <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
+            </svg>
+          </button>
+        )}
+        {canAct && (
+          <>
+            <button
+              type="button"
+              onClick={handleSoftDelete}
+              className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
+              title="删除"
+              aria-label="删除"
+            >
+              <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </button>
+            {isUser && (
+              <>
+                <TrueRecallActionButton message={message} threadId={threadId} />
+                <button
+                  type="button"
+                  onClick={handleEdit}
+                  className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
+                  title="编辑 (创建分支)"
+                  aria-label="编辑并创建分支"
+                >
+                  <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                    />
+                  </svg>
+                </button>
+              </>
+            )}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOverflowOpen((open) => !open)}
+                className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
+                title="更多消息操作"
+                aria-label="更多消息操作"
+                aria-haspopup="menu"
+                aria-expanded={overflowOpen}
+              >
+                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="5" cy="12" r="1.8" />
+                  <circle cx="12" cy="12" r="1.8" />
+                  <circle cx="19" cy="12" r="1.8" />
+                </svg>
+              </button>
+              {overflowOpen && isDesktop && !compactActions && (
+                <div
+                  role="menu"
+                  aria-label="更多消息操作"
+                  className={`absolute top-full z-40 mt-1 w-40 rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg ${
+                    isUser ? 'right-0' : 'left-0'
+                  }`}
+                >
+                  {overflowMenuItems}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const compactEntry = (
+    <button
+      type="button"
+      data-quote-exclude
+      data-testid="message-actions-compact-trigger"
+      aria-label="打开消息操作"
+      aria-expanded={compactOpen}
+      onClick={() => setCompactOpen(true)}
+      className={`${actionSlot ? '' : `absolute ${toolbarPositionClass}`} pointer-events-none grid min-h-11 min-w-11 place-items-center rounded-lg border border-cafe bg-cafe-surface/90 text-cafe-muted opacity-0 shadow-sm transition-[background-color,color,opacity] group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:opacity-100`}
+    >
+      <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.8" />
+        <circle cx="12" cy="12" r="1.8" />
+        <circle cx="19" cy="12" r="1.8" />
+      </svg>
+    </button>
+  );
+
   return (
     <div
       ref={messageRef}
       data-context-quote-source="message"
       data-message-selection={selectionMode ? (selected ? 'selected' : 'available') : undefined}
       data-selection-layout={selectionMode ? 'leading-gutter' : undefined}
-      className={`group relative ${selectionMode ? 'pl-12' : ''} ${touchReservedRowClass}`.trimEnd()}
+      className={`group relative ${selectionMode ? 'pl-12' : ''}`.trimEnd()}
     >
-      {children}
+      <MessageActionSlotProvider register={setActionSlot}>{children}</MessageActionSlotProvider>
 
       {selectionMode && selectionEligible && (
         <button
@@ -464,146 +652,34 @@ export function MessageActions({
           />
         ))}
 
-      {canReply && !selectionMode && (
-        <div
-          data-quote-exclude
-          className={`${toolbarVisibilityClass} absolute ${toolbarPositionClass} z-30 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
-        >
-          {hasSelectionShortcut && (
+      {canReply && !selectionMode && !actionSlot && (compactActions ? compactEntry : actionToolbar(false))}
+      {canReply && !selectionMode && actionSlot && !compactActions && createPortal(actionToolbar(false), actionSlot)}
+      {canReply && !selectionMode && actionSlot && compactActions && createPortal(compactEntry, actionSlot)}
+
+      {compactOpen &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[75] flex items-end"
+            role="presentation"
+            data-testid="message-actions-compact-sheet"
+          >
             <button
               type="button"
-              onClick={() => onEnterSelection?.(message.id)}
-              className={`rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary ${
-                isUser ? 'order-2' : ''
-              }`}
-              title="多选消息"
-              aria-label="多选消息"
-            >
-              <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <rect x="3" y="4" width="6" height="6" rx="1" strokeWidth={2} />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m4.5 7 1.25 1.25L8 6" />
-                <rect x="3" y="14" width="6" height="6" rx="1" strokeWidth={2} />
-                <path strokeLinecap="round" strokeWidth={2} d="M13 7h8M13 17h8" />
-              </svg>
-            </button>
-          )}
-          <div data-testid="message-secondary-actions" className={`${isUser ? 'order-1' : ''} flex gap-0.5`.trim()}>
-            {/* #699: Reply (quote) button — available for all message types */}
-            <button
-              onClick={() => {
-                useChatStore.getState().setReplyTo({
-                  id: message.id,
-                  content: message.content,
-                  senderCatId: message.catId ?? null,
-                  threadId,
-                });
-              }}
-              className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-cafe-primary transition-colors"
-              title="引用回复"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 10h10a5 5 0 015 5v6M3 10l6-6M3 10l6 6"
-                />
-              </svg>
-            </button>
-            {invocationTrajectory && (
-              <button
-                type="button"
-                onClick={() => openMessageInvocationTrajectory(message, threadId)}
-                className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-accent"
-                title="查看这轮轨迹"
-                aria-label="查看这轮 invocation 轨迹"
-                data-testid="message-action-invocation-trajectory"
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <circle cx="4" cy="4" r="1.5" />
-                  <circle cx="12" cy="12" r="1.5" />
-                  <path d="M4 5.5v3A3.5 3.5 0 0 0 7.5 12h3" />
-                </svg>
-              </button>
-            )}
-            {canAct && (
-              <>
-                <button
-                  onClick={handleSoftDelete}
-                  className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-red-text transition-colors"
-                  title="删除"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-                {isUser && (
-                  <>
-                    <TrueRecallActionButton message={message} threadId={threadId} />
-                    <button
-                      onClick={handleEdit}
-                      className="p-1 rounded hover:bg-cafe-surface-elevated text-cafe-muted hover:text-conn-blue-text transition-colors"
-                      title="编辑 (创建分支)"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                        />
-                      </svg>
-                    </button>
-                  </>
-                )}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setOverflowOpen((open) => !open)}
-                    className="rounded p-1 text-cafe-muted transition-colors hover:bg-cafe-surface-elevated hover:text-cafe-primary"
-                    title="更多消息操作"
-                    aria-label="更多消息操作"
-                    aria-haspopup="menu"
-                    aria-expanded={overflowOpen}
-                  >
-                    <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <circle cx="5" cy="12" r="1.8" />
-                      <circle cx="12" cy="12" r="1.8" />
-                      <circle cx="19" cy="12" r="1.8" />
-                    </svg>
-                  </button>
-                  {overflowOpen && isDesktop && (
-                    <div
-                      role="menu"
-                      aria-label="更多消息操作"
-                      className={`absolute top-full z-40 mt-1 w-40 rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg ${
-                        isUser ? 'right-0' : 'left-0'
-                      }`}
-                    >
-                      {overflowMenuItems}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+              className="absolute inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
+              aria-label="关闭消息操作"
+              onClick={() => setCompactOpen(false)}
+            />
+            <div className="relative m-2 w-[calc(100%-1rem)] rounded-2xl border border-cafe bg-cafe-surface p-2 shadow-2xl">
+              <p className="px-3 pb-2 pt-1 text-xs font-semibold text-cafe-muted">消息操作</p>
+              {actionToolbar(true)}
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {overflowOpen &&
-        !isDesktop &&
+        useOverflowSheet &&
         typeof document !== 'undefined' &&
         createPortal(
           <div className="fixed inset-0 z-[80] flex items-end" role="presentation">

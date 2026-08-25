@@ -1038,9 +1038,13 @@ export async function* routeSerial(
             // F246 Phase B: carry effectClass to SystemPromptBuilder for behavior constraints
             ...(crossThreadReplyHintRaw.effectClass ? { effectClass: crossThreadReplyHintRaw.effectClass } : {}),
             ...(crossThreadReplyHintRaw.coordination ? { coordination: crossThreadReplyHintRaw.coordination } : {}),
+            ...(crossThreadReplyHintRaw.localReviewVerdict
+              ? { localReviewVerdict: crossThreadReplyHintRaw.localReviewVerdict }
+              : {}),
           }
         : undefined;
-      const hasTerminalCoordinationExit = crossThreadReplyHint?.coordination?.phase === 'terminal';
+      const hasTerminalCoordinationExit =
+        crossThreadReplyHint?.coordination?.phase === 'terminal' && !crossThreadReplyHint.localReviewVerdict;
       let mentionRoutingFeedback = null;
       if (deps.invocationDeps.threadStore) {
         try {
@@ -4928,6 +4932,8 @@ export async function* routeSerial(
         threadId,
         catId: catId as string,
         contents: userFacingSystemInfoContents,
+        ...(turnTriggerMessageId ? { expectedSourceMessageId: turnTriggerMessageId } : {}),
+        ...(ownInvocationId ? { expectedDispatchInvocationId: ownInvocationId } : {}),
         ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       });
 

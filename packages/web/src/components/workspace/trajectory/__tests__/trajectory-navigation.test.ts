@@ -112,4 +112,56 @@ describe('F299 typed trajectory origin navigation', () => {
     expect(useChatStore.getState().workspaceMode).toBe('eval');
     expect(document.activeElement).toBe(card);
   });
+
+  it('focuses an already-mounted Eval origin before the next animation frame', () => {
+    vi.mocked(window.requestAnimationFrame).mockImplementation(() => 1);
+    const scroll = document.createElement('div');
+    scroll.dataset.evalWorkspaceScroll = '';
+    scroll.getBoundingClientRect = () => ({ top: 0, bottom: 500 }) as DOMRect;
+    const card = document.createElement('article');
+    card.dataset.evalEventId = 'eval-mounted';
+    card.tabIndex = -1;
+    card.getBoundingClientRect = () => ({ top: 40, bottom: 120 }) as DOMRect;
+    scroll.appendChild(card);
+    document.body.appendChild(scroll);
+
+    restoreTrajectoryOrigin({
+      kind: 'eval',
+      threadId: 'thread-a',
+      eventId: 'eval-mounted',
+      viewportOffsetPx: 40,
+    });
+
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('refocuses the current Eval origin if a render replaces the first focused node', () => {
+    let nextFrame: FrameRequestCallback | undefined;
+    vi.mocked(window.requestAnimationFrame).mockImplementation((callback) => {
+      nextFrame = callback;
+      return 1;
+    });
+    const scroll = document.createElement('div');
+    scroll.dataset.evalWorkspaceScroll = '';
+    scroll.getBoundingClientRect = () => ({ top: 0, bottom: 500 }) as DOMRect;
+    const card = document.createElement('article');
+    card.dataset.evalEventId = 'eval-replaced';
+    card.tabIndex = -1;
+    card.getBoundingClientRect = () => ({ top: 40, bottom: 120 }) as DOMRect;
+    scroll.appendChild(card);
+    document.body.appendChild(scroll);
+
+    restoreTrajectoryOrigin({
+      kind: 'eval',
+      threadId: 'thread-a',
+      eventId: 'eval-replaced',
+      viewportOffsetPx: 40,
+    });
+    const replacement = card.cloneNode(true) as HTMLElement;
+    replacement.getBoundingClientRect = card.getBoundingClientRect;
+    card.replaceWith(replacement);
+    nextFrame?.(0);
+
+    expect(document.activeElement).toBe(replacement);
+  });
 });

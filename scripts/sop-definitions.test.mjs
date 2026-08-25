@@ -23,6 +23,7 @@ const EXPECTED_PORTED_RULE_TEXTS = [
   '实现前未按行为面 / 数据 / 安全 / 契约 / 不可逆五轴判断风险，就机械套用或机械跳过流程',
   '用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）',
   '共创型 docs-only 可自决直推；进入 worktree / PR / cloud / full gate 前才必须用 classifier 证明风险，且不得越过结果支付代码级流程税',
+  '新增 route/consumer 并触及 canonical helper 时，必须声明 consumer delta 并提供 exact-HEAD review/self-check evidence',
   '压缩后忘了当前在做什么',
   '改 MCP tool / skill manifest 等当前已索引约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
   '自检报告必须包含愿景覆盖度',
@@ -52,6 +53,7 @@ const EXPECTED_PREDICATE_TYPES = new Set([
   'handle_check',
   'manual_only',
   'co_creation_docs_lane',
+  'design_gate_evidence',
 ]);
 
 describe('SOP definition catalog', () => {
@@ -68,7 +70,7 @@ describe('SOP definition catalog', () => {
     );
   });
 
-  it('ports all 24 development SOP rules into development.yaml with predicates', () => {
+  it('ports all 25 development SOP rules into development.yaml with predicates', () => {
     const { runtimeDefinitions } = loadSopDefinitionCatalog();
     const development = runtimeDefinitions[0];
 
@@ -82,7 +84,7 @@ describe('SOP definition catalog', () => {
     assert.equal(development.stages.find((stage) => stage.id === 'impl')?.suggestedSkill, 'worktree');
 
     const rules = development.stages.flatMap((stage) => [...stage.hardRules, ...stage.pitfalls]);
-    assert.equal(rules.length, 24);
+    assert.equal(rules.length, 25);
     assert.deepEqual(
       rules.map((rule) => rule.text),
       EXPECTED_PORTED_RULE_TEXTS,
@@ -135,6 +137,11 @@ describe('SOP definition catalog', () => {
     assert.ok(coCreationDocsRule?.predicate.classifierRequiredGlobs?.includes('docs/SOP.md'));
     assert.ok(coCreationDocsRule?.predicate.classifierRequiredGlobs?.includes('docs/decisions/**'));
     assert.deepEqual(coCreationDocsRule?.owner, { type: 'skill', skill: 'co-creation-docs' });
+
+    const designGateRule = rules.find((rule) => rule.id === 'impl-design-gate-evidence');
+    assert.equal(designGateRule?.predicate.type, 'design_gate_evidence');
+    assert.ok(designGateRule?.predicate.consumerGlobs?.includes('packages/*/src/routes/**/*.ts'));
+    assert.match(designGateRule?.predicate.canonicalHelperPattern ?? '', /ownership/);
   });
 
   it('rejects invalid owner and predicate shapes loudly', () => {
@@ -146,6 +153,31 @@ describe('SOP definition catalog', () => {
     assert.throws(
       () => validateSopDefinition(invalid, { sourcePath: 'inline-invalid.yaml', includeRuntimeOnlyRules: true }),
       /owner.*feature_owner|predicate.*command/i,
+    );
+  });
+
+  it('rejects design-gate predicates that disable their own admission surface', () => {
+    const { runtimeDefinitions } = loadSopDefinitionCatalog();
+    const emptyGlobs = structuredClone(runtimeDefinitions[0]);
+    const emptyRule = emptyGlobs.stages
+      .flatMap((stage) => [...stage.hardRules, ...stage.pitfalls])
+      .find((rule) => rule.id === 'impl-design-gate-evidence');
+    emptyRule.predicate.consumerGlobs = [];
+
+    assert.throws(
+      () => validateSopDefinition(emptyGlobs, { sourcePath: 'inline-empty-design-gate.yaml' }),
+      /non-empty consumer_globs/,
+    );
+
+    const invalidPattern = structuredClone(runtimeDefinitions[0]);
+    const invalidRule = invalidPattern.stages
+      .flatMap((stage) => [...stage.hardRules, ...stage.pitfalls])
+      .find((rule) => rule.id === 'impl-design-gate-evidence');
+    invalidRule.predicate.canonicalHelperPattern = '(';
+
+    assert.throws(
+      () => validateSopDefinition(invalidPattern, { sourcePath: 'inline-invalid-design-gate.yaml' }),
+      /valid regular expression/,
     );
   });
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SidebarPresence } from '@/stores/sidebarProjectionStore';
+import { projectSidebarRows, type SidebarPresence, type SidebarSnapshotRow } from '@/stores/sidebarProjectionStore';
 import { getCatStatusType, ThreadCatStatus } from '../ThreadCatStatus';
 
 function presence(status: SidebarPresence['status'], cats?: readonly string[]): SidebarPresence {
@@ -49,6 +49,47 @@ describe('ThreadCatStatus', () => {
     expect(html).toContain('ᓚᘏᗢ');
     expect(html).toContain('text-conn-emerald-text');
     expect(html).toContain('✓');
+  });
+
+  it('does not render a terminal cat after the render overlay clears its attention', () => {
+    const canonical: SidebarSnapshotRow = {
+      id: 'thread-1',
+      title: 'Thread 1',
+      participants: ['opus'],
+      pinned: false,
+      favorited: false,
+      labels: [],
+      preferredCats: [],
+      projectPath: 'default',
+      lastActiveAt: 1,
+      systemKind: null,
+      isHubThread: false,
+      unreadCount: 1,
+      hasUserMention: false,
+      presence: presence('done', ['opus']),
+    };
+    const [projected] = projectSidebarRows({
+      rows: [canonical],
+      pendingThreadCommands: {
+        attention: {
+          id: 'attention-1',
+          threadId: canonical.id,
+          field: 'attention',
+          value: { unreadCount: 0, hasUserMention: false },
+        },
+      },
+    });
+
+    const html = renderToStaticMarkup(
+      React.createElement(ThreadCatStatus, {
+        presence: projected.presence,
+        unreadCount: projected.unreadCount,
+        hasUserMention: projected.hasUserMention,
+      }),
+    );
+
+    expect(html).toBe('');
+    expect(html).not.toContain('✓');
   });
 
   it('shows red shaking cat on error', () => {

@@ -109,6 +109,7 @@ export function receiptTargetStateLabel(
   target: QueueReceiptTarget,
   activeInvocationIds: ReadonlySet<string>,
   scope?: QueueMessageReceipt['scope'],
+  hasLoadedLineage = false,
 ): string {
   if (target.outcome?.consumption?.kind === 'terminal_silent') {
     return '已消费 · terminal 静默结束';
@@ -136,6 +137,9 @@ export function receiptTargetStateLabel(
   if (target.state === 'withdrawn') return '已撤出待处理 · 历史保留';
   if (target.outcome?.disposition === 'responded') return '已由回复明确处理';
   if (target.outcome?.disposition === 'completed_with_turn') {
+    if (target.outcome.evidenceRef.kind === 'turn_execution' && !hasLoadedLineage) {
+      return '本轮已结束，无可见回复';
+    }
     return completedWithTurnReceiptLabel(scope);
   }
   return '已处理 · 无可回溯证据';

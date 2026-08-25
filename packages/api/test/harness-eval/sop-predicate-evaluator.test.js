@@ -677,8 +677,8 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 24 total rules in development.yaml (including post-merge runtime activation truth)
-    assert.equal(results.length, 24, `expected 24 rules, got ${results.length}`);
+    // 25 total rules in development.yaml (including F303 design-gate evidence)
+    assert.equal(results.length, 25, `expected 25 rules, got ${results.length}`);
 
     // 11 manual_only rules -> skipped (runtime activation truth requires external live-state evidence)
     assert.equal(skipped.length, 11, `expected 11 skipped (manual_only), got ${skipped.length}`);

@@ -135,7 +135,7 @@ describe('QueuePanel steer (F047)', () => {
     expect(callArgs.body).toBeUndefined();
   });
 
-  it('shows the single Steer contract as cancel current then restart from this exact message', () => {
+  it('shows the single Steer contract as stop current then restart from this exact message', () => {
     useChatStore.setState({ queue: [QUEUED_ENTRY] });
     act(() => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
@@ -145,9 +145,10 @@ describe('QueuePanel steer (F047)', () => {
     expect(steerBtn).not.toBeNull();
     act(() => steerBtn?.click());
 
-    expect(container.textContent).toContain('取消当前回合');
-    expect(container.textContent).toContain('以这条消息立即重新启动');
-    expect(container.textContent).toContain('取消前已经完成的回复仍会发表');
+    expect(container.textContent).toContain('停止目标当前回复');
+    expect(container.textContent).toContain('立即发送这条排队消息');
+    expect(container.textContent).toContain('已经完成的回复仍会保留');
+    expect(container.querySelector('[data-testid="steer-confirm"]')?.textContent).toBe('停止并发送');
     expect(container.textContent).not.toContain('提到队首');
   });
 

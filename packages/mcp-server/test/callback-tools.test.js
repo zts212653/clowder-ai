@@ -82,6 +82,25 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handlePostMessage forwards the exact F247 source binding fields', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handlePostMessage({
+      content: 'source-bound cloud return',
+      replyTo: 'source-message-7',
+      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.replyTo, 'source-message-7');
+    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+  });
+
   test('handlePostMessage rejects an invalid action subjectRef before sending or queueing a callback', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     let attempts = 0;
@@ -240,6 +259,7 @@ describe('MCP Callback Tools', () => {
         subjectRef: 'pr:owner/repo#3515',
       },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
     });
 
     assert.equal(result.isError, undefined);
@@ -249,6 +269,7 @@ describe('MCP Callback Tools', () => {
       subjectRef: 'pr:owner/repo#3515',
     });
     assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+    assert.equal(JSON.parse(capturedOptions.body).reviewedHeadSha, 'a'.repeat(40));
   });
 
   test('handlePostMessage rejects a typed local verdict without invocation credentials', async () => {
@@ -268,10 +289,29 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-local-review-agent-key',
       coordination: { phase: 'terminal' },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'b'.repeat(40),
     });
 
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /localReviewVerdict.*invocation-token/i);
+    assert.equal(attempts, 0);
+  });
+
+  test('handlePostMessage rejects reviewedHeadSha without a typed local verdict before transport', async () => {
+    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    const result = await handlePostMessage({
+      content: 'HEAD alone is not a review fact.',
+      reviewedHeadSha: 'c'.repeat(40),
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /reviewedHeadSha requires localReviewVerdict/);
     assert.equal(attempts, 0);
   });
 
@@ -654,6 +694,28 @@ describe('MCP Callback Tools', () => {
     assert.equal(body.content, 'hello from another thread');
   });
 
+  test('handleCrossPostMessage forwards the exact F247 source binding fields', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+
+    await handleCrossPostMessage({
+      threadId: 'thread-source-bound',
+      content: '@codex-sol source-bound cloud return',
+      targetCats: ['codex-sol'],
+      replyTo: 'source-message-8',
+      cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.threadId, 'thread-source-bound');
+    assert.equal(body.replyTo, 'source-message-8');
+    assert.equal(body.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
+  });
+
   test('handleCrossPostMessage forwards a typed local verdict with its terminal delivery', async () => {
     const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
     let capturedOptions;
@@ -669,10 +731,12 @@ describe('MCP Callback Tools', () => {
       clientMessageId: 'typed-cross-thread-local-review',
       coordination: { phase: 'terminal' },
       localReviewVerdict: 'approved',
+      reviewedHeadSha: 'b'.repeat(40),
     });
 
     assert.equal(result.isError, undefined);
     assert.equal(JSON.parse(capturedOptions.body).localReviewVerdict, 'approved');
+    assert.equal(JSON.parse(capturedOptions.body).reviewedHeadSha, 'b'.repeat(40));
   });
 
   test('handleCrossPostMessage forwards action identity with the caller idempotency key', async () => {

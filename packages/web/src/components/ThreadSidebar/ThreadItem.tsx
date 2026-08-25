@@ -352,43 +352,49 @@ function ThreadItemComponent({
         </div>
       </div>
       {/* Bottom row: avatars + status + compact time */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {participants.length > 0 ? (
-            participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
-          ) : id !== 'default' ? (
-            <>
-              <PawIcon className="text-xs" />
-              <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
-            </>
-          ) : null}
-          {preferredCats && preferredCats.length > 0 && (
-            <div
-              className="flex items-center gap-0.5 ml-1"
-              title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-2.5 w-2.5 text-cafe-muted shrink-0"
+      <div className="flex min-w-0 items-center justify-between">
+        <div className="flex min-w-0 items-center gap-1">
+          {/* ring-2 paints 2px beyond each avatar box; keep that paint inside the horizontal clip boundary. */}
+          <div
+            data-testid="thread-participant-metadata"
+            className="flex min-w-0 items-center gap-1 overflow-x-clip overflow-y-visible px-0.5"
+          >
+            {participants.length > 0 ? (
+              participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
+            ) : id !== 'default' ? (
+              <>
+                <PawIcon className="text-xs" />
+                <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
+              </>
+            ) : null}
+            {preferredCats && preferredCats.length > 0 && (
+              <div
+                className="ml-1 flex items-center gap-0.5"
+                title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
               >
-                <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
-              </svg>
-              {preferredCats.map((catId) => (
-                <span
-                  key={catId}
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: catColorVar(catId, 'primary') }}
-                />
-              ))}
-            </div>
-          )}
-          <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-2.5 w-2.5 shrink-0 text-cafe-muted"
+                >
+                  <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+                </svg>
+                {preferredCats.map((catId) => (
+                  <span
+                    key={catId}
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: catColorVar(catId, 'primary') }}
+                  />
+                ))}
+              </div>
+            )}
+            <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
+          </div>
           <ThreadCatStatus presence={presence} unreadCount={unreadCount} hasUserMention={hasUserMention} />
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">

@@ -1,8 +1,9 @@
-import type { MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
+import type { ActiveExecutionProjection, MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
+import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('next/navigation', () => ({
@@ -56,6 +57,28 @@ function setTextarea(textarea: HTMLTextAreaElement, value: string) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function seedCanonicalExecution(threadId: string): void {
+  const execution: ActiveExecutionProjection = {
+    executionId: 'inv-active',
+    threadId,
+    threadTitle: 'Test thread',
+    catId: 'opus',
+    kind: 'live_invocation',
+    startedAt: Date.now(),
+    cancelability: {
+      state: 'cancelable',
+      target: { kind: 'live_invocation', threadId, catId: 'opus', executionId: 'inv-active' },
+    },
+  };
+  useActiveExecutionStore.setState({
+    anchorThreadId: threadId,
+    projectPath: '/project/cafe',
+    executionsByKey: { [activeExecutionKey(execution)]: execution },
+    hydration: 'ready',
+    hydrationError: null,
+  });
+}
+
 describe('F264 author message disposition selector', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -91,6 +114,7 @@ describe('F264 author message disposition selector', () => {
         },
       },
     });
+    useActiveExecutionStore.getState().reset();
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       const snapshot =
@@ -184,14 +208,26 @@ describe('F264 author message disposition selector', () => {
     expect(trigger.textContent).toContain('接着当前工作');
   });
 
-  it('keeps Steer as a distinct primary-trigger action without author disposition', async () => {
+  it('confirms that draft Steer stops the target reply before sending', async () => {
     const onSend = vi.fn(async () => true);
+    seedCanonicalExecution('thread-3');
     await renderThreadInput({ threadId: 'thread-3', onSend, hasActiveInvocation: true });
     const trigger = await chooseContinueCurrent();
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     act(() => setTextarea(textarea, '现在就换轨'));
     await act(async () => {
-      (container.querySelector('[aria-label="强制发送"]') as HTMLButtonElement).click();
+      (container.querySelector('[aria-label="强制停止并发送此消息"]') as HTMLButtonElement).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('停止目标当前回复');
+    expect(container.textContent).toContain('立即发送当前输入的消息');
+    expect(container.textContent).toContain('这不是“追加到当前回复”');
+
+    await act(async () => {
+      (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
       await Promise.resolve();
       await Promise.resolve();
     });

@@ -58,6 +58,9 @@ evalCat:
   handle: "@gpt52"
   model: gpt-5.4
 frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
 sourceAdapter: f254-freshness-replay
 sourceRefsKind: freshness-closure-replay
 threadPolicy:

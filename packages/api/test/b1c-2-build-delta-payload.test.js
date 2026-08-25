@@ -2,7 +2,7 @@
  * F247 AC-B1c-12 + AC-B1c-10: thread runtime delta payload builder tests.
  *
  * Pins:
- *  - 5 required fields (threadId / threadTitle / participants / calledBy / intent)
+ *  - 6 required fields (threadId / threadTitle / participants / calledBy / intent / sourceMessageId)
  *  - JSON.stringify safety against delimiter injection (delimiter / "ignore prev" / quotes)
  *  - Payload length cap (DELTA_PAYLOAD_MAX_CHARS); intent truncated when over
  *  - Envelope shape: <thread-runtime v=1 format=json>{...}</thread-runtime> + intent
@@ -30,6 +30,8 @@ function baseParams(overrides = {}) {
     ],
     calledBy: 'opus-47',
     intent: 'Help me audit this auth flow',
+    sourceMessageId: 'source-message-123',
+    cloudReturnBinding: 'cbr1.aW52LWNsb3Vk.signature',
     ...overrides,
   };
 }
@@ -42,7 +44,7 @@ describe('F247 AC-B1c-12: buildDeltaPayload — envelope shape', () => {
     assert.ok(out.endsWith('Help me audit this auth flow'), 'must append raw intent after envelope');
   });
 
-  it('embeds JSON with all 5 required fields', () => {
+  it('embeds the exact return anchor plus its opaque server-signed binding', () => {
     const out = buildDeltaPayload(baseParams());
     const jsonMatch = out.match(/<thread-runtime[^>]*>\n([\s\S]+?)\n<\/thread-runtime>/);
     assert.ok(jsonMatch, 'must find JSON inside envelope');
@@ -55,6 +57,8 @@ describe('F247 AC-B1c-12: buildDeltaPayload — envelope shape', () => {
     ]);
     assert.equal(delta.calledBy, 'opus-47');
     assert.equal(delta.intent, 'Help me audit this auth flow');
+    assert.equal(delta.sourceMessageId, 'source-message-123');
+    assert.equal(delta.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
   });
 
   it('allows null threadTitle (un-named thread)', () => {
@@ -145,6 +149,7 @@ describe('F247 AC-B1c-12: buildDeltaPayload — length cap', () => {
     const delta = JSON.parse(jsonMatch[1]);
     assert.ok(delta.intent.endsWith('...[truncated]'));
     assert.equal(delta.threadId, 'thread_t1');
+    assert.equal(delta.sourceMessageId, 'source-message-123');
   });
 });
 

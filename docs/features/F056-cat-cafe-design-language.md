@@ -9,7 +9,7 @@ tips_exempt: visual design correction and lint enforcement; no new discoverable 
 
 # F056: Clowder AI 设计语言 — 猫猫化不是猫化
 
-> **Status**: doing（Phase E 11/12 done + Phase E Sweep 2026-05-25~28 完成：bubble routing 统一 / variant slug 补齐 / 350-line split / clowder-ai#784 review-response — AC-E12 Playwright baseline deferred 到集成验证） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向
+> **Status**: doing（Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred；Phase E Sweep 2026-05-25~28 的 bubble routing / variant slug / 350-line split / clowder-ai#784 review-response 已完成） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向
 > **Priority**: P1
 > **Evolved from**: F051（猫粮看板猫爪导航概念）、F052 Phase C（跨线程气泡设计打样）
 
@@ -109,7 +109,7 @@ Maine Coon发散了 5 个方向后收敛为一套：
 3. **猫咖隐喻 (Cafe Metaphors)** — 可解释的隐喻（邮戳/肉垫/香气），不堆砌猫 emoji
 4. **温润色彩 (Cozy Palette)** — 奶油白/软蓝/暖棕，single accent discipline
 
-**实践规则**（F154 事故后补充）：
+##### 实践规则（F154 事故后补充）：
 - **在地设计 (Design in Context)** — 新交互必须先放回真实页面结构中验证。先看现场，再决定放哪里、替代什么、会不会挤、对现有效率是增益还是负担。猫咖感来自"和环境自然相处"，不是把新元素硬塞进每个角落。
 
 **三猫打样竞赛结果**（operator评选）：
@@ -404,8 +404,8 @@ Dark mode 不能简单把黑阴影换成白阴影——业界标准是 **inset �
 #### E7：视觉回归 + WCAG 自检
 
 - Playwright 截图基线：light + dark 全套关键页面（≥10 页面） — **AC-E12 实施 plan 见下**
-- WCAG 对比度自动测试：所有 `text-on-bg` 组合 ≥ 4.5:1（脚本扫 oklch 派生对） — ✅ commit `a71b5e949`
-- ESLint 规则升级：`cafe/no-hardcoded-colors` 同时禁止 `oklch(...)` 行内字面值（必须经 token） — ✅ commit `a71b5e949`
+- WCAG 对比度自动测试：所有 `text-on-bg` 组合 ≥ 4.5:1（当前实现：`packages/web/src/lib/__tests__/f056-wcag-contrast.test.ts`）
+- ESLint 规则升级：`cafe/no-hardcoded-colors` 同时禁止 `oklch(...)` 行内字面值（当前实现：`packages/web/eslint-plugins/no-hardcoded-colors.js`）
 
 #### E12 实施 Plan（deferred）
 
@@ -536,18 +536,18 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 - [ ] AC-D3: next-intl 接入 + 术语词表独立文件，fork 改一张表即可换术语
 - [ ] AC-D4: tenant.config 可配品牌资产（logo/favicon/themeColor/配色 preset）
 
-### Phase E（OKLCH 系统化升级 — 2026-05-21 reopened，本 branch 实施进度 11/12）
+### Phase E（OKLCH 系统化升级 — 2026-05-21 reopened，当前实施进度 10/12）
 - [x] AC-E1: theme-tokens.css 重写为 OKLCH 派生公式，七类色 token 完整落地（Neutral 11 档 / App Accent 9 档 / Cat Persona 4 档 / Semantic 5 色 / Code 7-8 色 / Chart 12 色 / Avatar Fallback 8 色） — commit `7dbaddd61`
-- [x] AC-E2: Surface 三档 light mode L 跨度 3 个点、dark mode L 跨度 6 个点（0.18/0.24/0.12，AC-E10 测试驱动校准） — commit `7dbaddd61` + `a71b5e949`
+- [x] AC-E2: Surface 三档 light mode L 跨度 3 个点、dark mode L 跨度 6 个点（0.18/0.24/0.12，AC-E10 测试驱动校准） — current truth: `packages/web/src/app/theme-tokens.css` + `f056-wcag-contrast.test.ts`
 - [x] AC-E3: Elevation 阴影双层 token（light 单层黑阴影 / dark inset 高光 + 深阴影） — commit `7dbaddd61` 落 token，commit `bb5a56b47` Tailwind boxShadow utility 覆盖让全站 54 处 `shadow-{sm/md/lg/xl}` zero-touch 吃 elevation
 - [x] AC-E4: Cat hue/chroma 注入 :root（最小路径：保留 schema `{primary, secondary}` 不变，CatHueInjector 用 `hexToOklch` 反推 hue/chroma 注入；用户改 primary hex → 全应用自动适配，无需双字段同步） — commit `f4b642f16` + `2283d4b4a`
 - [x] AC-E5: Tailwind 内置色硬编码扫荡（HubTraceTree 4 处 + SkillsContent 1 处顺手清；audit test 已 0 hit，spec 早期估的 15 处随增量 token 化已清理完毕） — commit `7dbaddd61`
 - [x] AC-E6: 12 处未读色收口（已迁 `bg-conn-amber-bg` / `bg-conn-red-bg` 等 conn-* tokens；ThreadCatStatus regression test 验证；audit test 0 hit） — 早期已落 + commit `7dbaddd61` ESLint 同步
 - [x] AC-E7: Brand alias 分层（`--brand-cat-cafe-pink` 永远不变 + `--accent-hue/chroma` 暂时 = brand） — commit `7dbaddd61`
 - [x] AC-E8: Scrim 三档 token / Chart palette 12 色 / Avatar fallback 8 色 — commit `7dbaddd61`
-- [x] AC-E9: console-dev skill Gate 2 Design-System 章节追加 OKLCH 派生 + WCAG ≥4.5:1 自检 + Cat Persona 使用边界 — commit `a71b5e949`
-- [x] AC-E10: WCAG 对比度自动测试脚本（`oklchContrast` 纯函数 + 25 个测试覆盖 Cat Persona / Neutral / Cafe Surface / Accent button / Semantic icon / Surface 三档 L 跨度） — commit `a71b5e949`
-- [x] AC-E11: ESLint `cafe/no-hardcoded-colors` 升级，禁止 className `bg-[oklch(...)]` arbitrary value + style prop 行内 `oklch()` 字面值 — commit `a71b5e949`
+- [/] AC-E9: console-dev skill Gate 2 Design-System 当前仅覆盖 token-first；OKLCH 派生、WCAG ≥4.5:1 自检与 Cat Persona 使用边界尚未完整投影，原 completion receipt 无对应仓内 commit，保持 partial
+- [x] AC-E10: WCAG 对比度自动测试脚本（`oklchContrast` 纯函数 + 25 个测试覆盖 Cat Persona / Neutral / Cafe Surface / Accent button / Semantic icon / Surface 三档 L 跨度） — current truth: `packages/web/src/lib/__tests__/f056-wcag-contrast.test.ts`
+- [x] AC-E11: ESLint `cafe/no-hardcoded-colors` 升级，禁止 className `bg-[oklch(...)]` arbitrary value + style prop 行内 `oklch()` 字面值 — current truth: `packages/web/eslint-plugins/no-hardcoded-colors.js`
 - [/] AC-E12: Playwright 截图基线 light + dark ≥10 页面 — **deferred to 阶段 2 集成验证或 maintainer 接 PR 时**（理由：worktree 阶段 1 无 .env / 无 .cat-cafe runtime data / dev server 起不起 cat-catalog API；Playwright 引入新 dev dependency 需 maintainer 一并决策；详见下方 "E12 实施 Plan"）
 
 ## 需求点 Checklist

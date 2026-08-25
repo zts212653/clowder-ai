@@ -61,8 +61,13 @@ async function createHarness({
   livePrSnapshot,
   incomingTerminal = false,
   incomingActiveSubject,
+  carrierlessReviewSubject,
   reviewCarrier = false,
+  reviewCarrierGeneration = 2,
+  reviewCarrierOuterChild = false,
+  reviewCarrierPreflight = 'allow',
   localReviewVerdictService,
+  invocationQueueInstalled = true,
 } = {}) {
   const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
   const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -73,7 +78,7 @@ async function createHarness({
     '../dist/domains/ball-custody/ActionSuccessorAdmissionService.js'
   );
   const { ActionSubjectTruthResolver } = await import('../dist/domains/ball-custody/ActionSubjectTruthResolver.js');
-  const { handlePostMessage } = await import('../../mcp-server/dist/tools/callback-tools.js');
+  const { handleCrossPostMessage, handlePostMessage } = await import('../../mcp-server/dist/tools/callback-tools.js');
 
   const registry = new InvocationRegistry();
   const invocationQueue = new InvocationQueue();
@@ -81,6 +86,9 @@ async function createHarness({
   const threadStore = new ThreadStore();
   const thread = await threadStore.create('user-1', 'MCP successor E2E');
   const ancestorThread = reviewCarrier ? await threadStore.create('user-1', 'Old task ancestor') : undefined;
+  const reviewPredecessorThread = carrierlessReviewSubject
+    ? await threadStore.create('user-1', 'Carrier-free review predecessor')
+    : undefined;
   const coordinationTrigger = incomingTerminal
     ? await messageStore.append({
         userId: 'user-1',
@@ -94,27 +102,47 @@ async function createHarness({
           coordination: { id: 'coord-review-terminal', phase: 'terminal', hop: 2 },
         },
       })
-    : incomingActiveSubject
+    : carrierlessReviewSubject
       ? await messageStore.append({
           userId: 'user-1',
           catId: 'codex',
-          content: 'An older cross-thread task coordination reached this owner thread',
+          content: 'Review this exact PR HEAD and return one typed terminal verdict.',
           mentions: ['opus'],
           timestamp: Date.now(),
           threadId: thread.id,
           extra: {
-            crossPost: { sourceThreadId: 'thread-ancestor' },
+            crossPost: { sourceThreadId: reviewPredecessorThread.id },
             coordination: {
-              id: 'coord-task-ancestor',
+              id: 'coord-carrierless-review',
               phase: 'active',
-              hop: 4,
-              subjectRef: incomingActiveSubject,
+              hop: 1,
+              subjectRef: carrierlessReviewSubject,
             },
           },
         })
-      : undefined;
-  const auth = await registry.create('user-1', 'opus', thread.id, undefined, coordinationTrigger?.id);
+      : incomingActiveSubject
+        ? await messageStore.append({
+            userId: 'user-1',
+            catId: 'codex',
+            content: 'An older cross-thread task coordination reached this owner thread',
+            mentions: ['opus'],
+            timestamp: Date.now(),
+            threadId: thread.id,
+            extra: {
+              crossPost: { sourceThreadId: 'thread-ancestor' },
+              coordination: {
+                id: 'coord-task-ancestor',
+                phase: 'active',
+                hop: 4,
+                subjectRef: incomingActiveSubject,
+              },
+            },
+          })
+        : undefined;
+  const outerInvocationId = reviewCarrierOuterChild ? 'outer-review-invocation' : undefined;
+  const auth = await registry.create('user-1', 'opus', thread.id, outerInvocationId, coordinationTrigger?.id);
   const admissionCalls = [];
+  const autoExecuteCalls = [];
   const terminalPreflightCalls = [];
   const unavailableCalls = [];
   const state = { admit: null };
@@ -204,6 +232,14 @@ async function createHarness({
           },
           async preflightLocalReviewTerminalRoute(input) {
             terminalPreflightCalls.push(input);
+            if (reviewCarrierPreflight === 'generation_mismatch') {
+              return {
+                applicable: true,
+                allow: false,
+                reason: 'generation_mismatch',
+                expectedThreadId: thread.id,
+              };
+            }
             if (input.targetThreadId !== thread.id) {
               return {
                 applicable: true,
@@ -212,14 +248,14 @@ async function createHarness({
                 expectedThreadId: thread.id,
               };
             }
-            return { applicable: true, allow: true, expectedThreadId: thread.id };
+            return { applicable: true, allow: true, expectedThreadId: thread.id, predecessorCatId: 'codex' };
           },
         };
 
   app = Fastify();
   await app.register(callbacksRoutes, {
     registry,
-    invocationQueue,
+    ...(invocationQueueInstalled ? { invocationQueue } : {}),
     messageStore,
     threadStore,
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
@@ -235,7 +271,9 @@ async function createHarness({
       },
       update() {},
       get(invocationId) {
-        if (!reviewCarrier || invocationId !== auth.invocationId) return null;
+        if (!reviewCarrier) return null;
+        const carrierInvocationId = reviewCarrierOuterChild ? 'outer-review-invocation' : auth.invocationId;
+        if (invocationId !== carrierInvocationId) return null;
         return {
           invocationId,
           threadId: thread.id,
@@ -244,12 +282,16 @@ async function createHarness({
           actionLeaseCarrier: {
             kind: 'action_successor',
             leaseId: 'lease-review-carrier',
-            generation: 2,
+            generation: reviewCarrierGeneration,
           },
         };
       },
     },
-    queueProcessor: { async tryAutoExecute() {} },
+    queueProcessor: {
+      async tryAutoExecute(...args) {
+        autoExecuteCalls.push(args);
+      },
+    },
     actionSuccessorAdmissionService,
     ...(localReviewVerdictService ? { localReviewVerdictService } : {}),
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
@@ -263,14 +305,19 @@ async function createHarness({
 
   return {
     admissionCalls,
+    autoExecuteCalls,
     ancestorThread,
     auth,
+    handleCrossPostMessage,
     handlePostMessage,
     invocationQueue,
     messageStore,
+    outerInvocationId,
+    registry,
     state,
     terminalPreflightCalls,
     thread,
+    reviewPredecessorThread,
     unavailableCalls,
   };
 }
@@ -434,10 +481,11 @@ test('local review terminal verdict fails before persistence when routed to a ta
   );
 });
 
-test('typed local review terminal post settles once without parsing its human prose', async () => {
+test('typed local review terminal post settles once and admits one replay-safe author continuation', async () => {
   const settlementCalls = [];
   const harness = await createHarness({
     reviewCarrier: true,
+    reviewCarrierOuterChild: true,
     localReviewVerdictService: {
       async record(input) {
         settlementCalls.push(input);
@@ -445,18 +493,18 @@ test('typed local review terminal post settles once without parsing its human pr
           outcome: 'committed',
           leaseId: input.leaseId,
           generation: input.generation,
-          evidenceRef: `local-review:${input.messageId}:g${input.generation}:changes_requested`,
+          evidenceRef: `local-review:${input.messageId}:g${input.generation}:approved`,
         };
       },
     },
   });
 
   const input = {
-    content: '我看完了：这里还有一处会丢失授权边界，修好再叫我。',
-    targetCats: ['codex'],
+    content: '我已经完成 exact-HEAD 审阅，这次可以继续。',
+    targetCats: ['opus'],
     clientMessageId: 'typed-local-review-terminal',
     coordination: { phase: 'terminal' },
-    localReviewVerdict: 'changes_requested',
+    localReviewVerdict: 'approved',
   };
   const result = await harness.handlePostMessage(input);
 
@@ -473,11 +521,17 @@ test('typed local review terminal post settles once without parsing its human pr
   });
   const visible = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
   assert.equal(visible.length, 1, 'the verdict post is the sole reviewer-visible message');
-  assert.equal(visible[0].content, '我看完了：这里还有一处会丢失授权边界，修好再叫我。');
+  assert.equal(visible[0].content, '我已经完成 exact-HEAD 审阅，这次可以继续。');
   assert.deepEqual(visible[0].extra.localReviewVerdict, {
-    verdict: 'changes_requested',
+    verdict: 'approved',
     clientMessageId: 'typed-local-review-terminal',
   });
+  assert.deepEqual(visible[0].mentions, ['codex'], 'the lease predecessor, not caller prose, owns the continuation');
+  assert.equal(visible[0].deliveryStatus, 'queued');
+  const [authorContinuation] = harness.invocationQueue.list(harness.thread.id, 'user-1');
+  assert.deepEqual(authorContinuation.targetCats, ['codex']);
+  assert.equal(authorContinuation.a2aTriggerMessageId, visible[0].id);
+  assert.equal(harness.autoExecuteCalls.length, 1);
 
   const replay = toolJson(await harness.handlePostMessage(input));
   assert.equal(replay.status, 'duplicate');
@@ -485,6 +539,437 @@ test('typed local review terminal post settles once without parsing its human pr
   assert.equal(replay.localReviewSettlement.outcome, 'committed');
   assert.equal(settlementCalls.length, 2, 'replay rechecks the same typed fact through the idempotent lease CAS');
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+  assert.equal(harness.autoExecuteCalls.length, 1);
+
+  const [lostInMemoryCarrier] = harness.invocationQueue.list(harness.thread.id, 'user-1');
+  assert.equal(harness.invocationQueue.removeEntrySnapshotIfUnchanged(lostInMemoryCarrier), true);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
+  const recoveredReplay = toolJson(await harness.handlePostMessage(input));
+  assert.equal(recoveredReplay.status, 'duplicate');
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+  assert.equal(harness.autoExecuteCalls.length, 2, 'durable typed carrier replay must restore its one lost Queue row');
+
+  const concurrentReplays = await Promise.all(Array.from({ length: 8 }, () => harness.handlePostMessage(input)));
+  assert.equal(
+    concurrentReplays.every((candidate) => toolJson(candidate).status === 'duplicate'),
+    true,
+  );
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
+  assert.equal(harness.autoExecuteCalls.length, 2, 'concurrent replay must not admit another author continuation');
+});
+
+test('stale outer invocation carrier cannot obscure the canonical active review generation', async () => {
+  const reviewedHeadSha = 'f'.repeat(40);
+  const preflightCalls = [];
+  const settlementCalls = [];
+  const fastPathSettlementCalls = [];
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    reviewCarrier: true,
+    reviewCarrierGeneration: 2,
+    reviewCarrierOuterChild: true,
+    reviewCarrierPreflight: 'generation_mismatch',
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        preflightCalls.push(input);
+        return {
+          outcome: 'resolved',
+          leaseId: 'lease-current-review',
+          generation: 3,
+          predecessorCatId: 'codex',
+          predecessorThreadId: input.targetThreadId,
+        };
+      },
+      async record(input) {
+        fastPathSettlementCalls.push(input);
+        return { outcome: 'mismatch', reason: 'stale carrier must not reach the fast-path settlement' };
+      },
+      async recordCarrierless(input) {
+        settlementCalls.push(input);
+        return {
+          outcome: 'committed',
+          leaseId: 'lease-current-review',
+          generation: 3,
+          evidenceRef: `local-review:${input.messageId}:g3:approved`,
+        };
+      },
+    },
+  });
+
+  const body = toolJson(
+    await harness.handleCrossPostMessage({
+      threadId: harness.reviewPredecessorThread.id,
+      content: '@codex\n\nThe inherited review subject at this exact HEAD is approved.',
+      targetCats: ['codex'],
+      clientMessageId: 'typed-stale-outer-carrier-review-terminal',
+      coordination: { phase: 'terminal' },
+      localReviewVerdict: 'approved',
+      reviewedHeadSha,
+    }),
+  );
+
+  assert.equal(body.status, 'ok');
+  assert.equal(body.localReviewSettlement.outcome, 'committed');
+  assert.deepEqual(harness.terminalPreflightCalls, [
+    {
+      leaseId: 'lease-review-carrier',
+      generation: 2,
+      reviewerCatId: 'opus',
+      holderThreadId: harness.thread.id,
+      targetThreadId: harness.reviewPredecessorThread.id,
+    },
+  ]);
+  assert.deepEqual(preflightCalls, [
+    {
+      subjectRef: 'pr:owner/repo#2915',
+      reviewedHeadSha,
+      targetThreadId: harness.reviewPredecessorThread.id,
+      principal: { catId: 'opus', threadId: harness.thread.id, tenantScope: 'user-1' },
+    },
+  ]);
+  assert.equal(fastPathSettlementCalls.length, 0);
+  assert.equal(settlementCalls.length, 1);
+  const visible = harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1');
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].extra.stream.invocationId, harness.outerInvocationId);
+  assert.deepEqual(visible[0].extra.localReviewVerdict.carrierlessLeaseFence, {
+    leaseId: 'lease-current-review',
+    generation: 3,
+  });
+  assert.equal(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1').length, 1);
+});
+
+test('stale outer invocation carrier still fails before persistence when canonical review identity mismatches', async () => {
+  const settlementCalls = [];
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    reviewCarrier: true,
+    reviewCarrierGeneration: 2,
+    reviewCarrierOuterChild: true,
+    reviewCarrierPreflight: 'generation_mismatch',
+    localReviewVerdictService: {
+      async preflightCarrierless() {
+        return { outcome: 'mismatch', reason: 'holder_thread_mismatch' };
+      },
+      async recordCarrierless(input) {
+        settlementCalls.push(input);
+        return { outcome: 'committed' };
+      },
+    },
+  });
+
+  const result = await harness.handleCrossPostMessage({
+    threadId: harness.reviewPredecessorThread.id,
+    content: '@codex\n\nThis stale carrier must not bypass canonical identity.',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-stale-carrier-canonical-mismatch',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'f'.repeat(40),
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.content.length, 1);
+  assert.match(result.content[0].text, /local_review_verdict_identity_mismatch/);
+  assert.equal(settlementCalls.length, 0);
+  assert.equal(
+    harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1').length,
+    0,
+  );
+  assert.equal(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1').length, 0);
+  assert.equal(harness.autoExecuteCalls.length, 0);
+});
+
+test('carrier-free later invocation inherits the review subject and settles one typed exact-HEAD verdict', async () => {
+  const reviewedHeadSha = 'f'.repeat(40);
+  const preflightCalls = [];
+  const settlementCalls = [];
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        preflightCalls.push(input);
+        return {
+          outcome: 'resolved',
+          leaseId: 'lease-carrierless-review',
+          generation: 3,
+          predecessorCatId: 'codex',
+          predecessorThreadId: input.targetThreadId,
+        };
+      },
+      async recordCarrierless(input) {
+        settlementCalls.push(input);
+        return {
+          outcome: 'committed',
+          leaseId: 'lease-carrierless-review',
+          generation: 3,
+          evidenceRef: `local-review:${input.messageId}:g3:approved`,
+        };
+      },
+    },
+  });
+
+  const input = {
+    threadId: harness.reviewPredecessorThread.id,
+    content: '@codex\n\nExact HEAD reviewed; this revision is approved.',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-carrierless-review-terminal',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha,
+  };
+  const body = toolJson(await harness.handleCrossPostMessage(input));
+
+  assert.equal(body.status, 'ok');
+  assert.equal(body.localReviewSettlement.outcome, 'committed');
+  assert.deepEqual(preflightCalls[0], {
+    subjectRef: 'pr:owner/repo#2915',
+    reviewedHeadSha,
+    targetThreadId: harness.reviewPredecessorThread.id,
+    principal: { catId: 'opus', threadId: harness.thread.id, tenantScope: 'user-1' },
+  });
+  assert.deepEqual(settlementCalls[0], {
+    subjectRef: 'pr:owner/repo#2915',
+    reviewedHeadSha,
+    targetThreadId: harness.reviewPredecessorThread.id,
+    leaseId: 'lease-carrierless-review',
+    generation: 3,
+    messageId: body.messageId,
+    now: settlementCalls[0].now,
+    principal: { catId: 'opus', threadId: harness.thread.id, tenantScope: 'user-1' },
+  });
+  const visible = harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1');
+  assert.equal(visible.length, 1);
+  assert.deepEqual(visible[0].extra.localReviewVerdict, {
+    verdict: 'approved',
+    clientMessageId: 'typed-carrierless-review-terminal',
+    reviewedHeadSha,
+    carrierlessLeaseFence: { leaseId: 'lease-carrierless-review', generation: 3 },
+  });
+  assert.deepEqual(visible[0].mentions, ['codex']);
+  assert.equal(visible[0].deliveryStatus, 'queued');
+  assert.deepEqual(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1')[0].targetCats, ['codex']);
+
+  const replay = toolJson(await harness.handleCrossPostMessage(input));
+  assert.equal(replay.status, 'duplicate');
+  assert.equal(replay.messageId, body.messageId);
+  assert.equal(
+    harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1').length,
+    1,
+  );
+  assert.equal(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1').length, 1);
+});
+
+test('carrier-free replay reports terminal stale when its persisted verdict is already delivered', async () => {
+  let settlementOutcome = 'committed';
+  const reviewedHeadSha = 'e'.repeat(40);
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        return {
+          outcome: 'resolved',
+          leaseId: 'lease-carrierless-review',
+          generation: 3,
+          predecessorCatId: 'codex',
+          predecessorThreadId: input.targetThreadId,
+        };
+      },
+      async recordCarrierless(input) {
+        return settlementOutcome === 'committed'
+          ? {
+              outcome: 'committed',
+              leaseId: input.leaseId,
+              generation: input.generation,
+              evidenceRef: `local-review:${input.messageId}:g${input.generation}:approved`,
+            }
+          : { outcome: 'stale', reason: 'stale_generation' };
+      },
+    },
+  });
+  const input = {
+    threadId: harness.reviewPredecessorThread.id,
+    content: '@codex\n\nThe durable verdict was delivered before the generation changed.',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-delivered-carrierless-review-terminal',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha,
+  };
+  const first = toolJson(await harness.handleCrossPostMessage(input));
+  const persisted = await harness.messageStore.getById(first.messageId);
+  delete persisted.queueCustody;
+  delete persisted.queueCustodyAdmission;
+  assert.equal(harness.messageStore.markDelivered(first.messageId, Date.now()).deliveryTransitioned, true);
+  settlementOutcome = 'stale';
+
+  const replay = await harness.handleCrossPostMessage(input);
+  assert.equal(replay.isError, true);
+  assert.match(replay.content[0]?.text ?? '', /local_review_settlement_failed/);
+  assert.doesNotMatch(replay.content[0]?.text ?? '', /local_review_rejection_compensation_failed/);
+  assert.equal((await harness.messageStore.getById(first.messageId)).deliveryStatus, 'delivered');
+});
+
+test('carrier-free verdict fails before persistence when no continuation queue is installed', async () => {
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    invocationQueueInstalled: false,
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        return {
+          outcome: 'resolved',
+          leaseId: 'lease-carrierless-review',
+          generation: 3,
+          predecessorCatId: 'codex',
+          predecessorThreadId: input.targetThreadId,
+        };
+      },
+      async recordCarrierless() {
+        return { outcome: 'stale', reason: 'stale_generation' };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/callbacks/post-message',
+    headers: {
+      'x-invocation-id': harness.auth.invocationId,
+      'x-callback-token': harness.auth.callbackToken,
+    },
+    payload: {
+      threadId: harness.reviewPredecessorThread.id,
+      content: '@codex\n\nThis verdict cannot be made durable without its continuation queue.',
+      targetCats: ['codex'],
+      clientMessageId: 'typed-no-queue-carrierless-review-terminal',
+      coordination: { phase: 'terminal' },
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'd'.repeat(40),
+    },
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().kind, 'local_review_continuation_unavailable');
+  assert.equal(
+    harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1').length,
+    0,
+  );
+  assert.equal(
+    await harness.registry.claimClientMessageId(
+      harness.auth.invocationId,
+      'typed-no-queue-carrierless-review-terminal',
+    ),
+    true,
+    'a pre-persistence 503 must not consume the retry identity',
+  );
+});
+
+test('carrier-free local review rejects an explicit-only subject before persistence', async () => {
+  const preflightCalls = [];
+  const settlementCalls = [];
+  const harness = await createHarness({
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        preflightCalls.push(input);
+        return { outcome: 'mismatch', reason: 'should_not_be_called' };
+      },
+      async recordCarrierless(input) {
+        settlementCalls.push(input);
+        return { outcome: 'committed' };
+      },
+    },
+  });
+
+  const result = await harness.handlePostMessage({
+    content: 'A caller-authored subject cannot replace inherited review identity.',
+    clientMessageId: 'typed-explicit-only-review-terminal',
+    coordination: { phase: 'terminal', subjectRef: 'pr:owner/repo#2915' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'e'.repeat(40),
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /local_review_verdict_identity_unavailable/);
+  assert.equal(preflightCalls.length, 0);
+  assert.equal(settlementCalls.length, 0);
+  assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 0);
+  assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
+});
+
+test('carrier-free local review rejects a stale inherited HEAD before persistence', async () => {
+  const settlementCalls = [];
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    localReviewVerdictService: {
+      async preflightCarrierless() {
+        return { outcome: 'stale', reason: 'reviewed_head_mismatch' };
+      },
+      async recordCarrierless(input) {
+        settlementCalls.push(input);
+        return { outcome: 'committed' };
+      },
+    },
+  });
+
+  const result = await harness.handleCrossPostMessage({
+    threadId: harness.reviewPredecessorThread.id,
+    content: '@codex\n\nThis verdict belongs to the replaced review generation.',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-stale-carrierless-review-terminal',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha: 'd'.repeat(40),
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /reviewed_head_mismatch/);
+  assert.equal(settlementCalls.length, 0);
+  assert.equal(
+    harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1').length,
+    0,
+  );
+  assert.equal(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1').length, 0);
+});
+
+test('carrier-free local review cancels a verdict that becomes stale after preflight', async () => {
+  const reviewedHeadSha = 'c'.repeat(40);
+  const harness = await createHarness({
+    carrierlessReviewSubject: 'pr:owner/repo#2915',
+    localReviewVerdictService: {
+      async preflightCarrierless(input) {
+        return {
+          outcome: 'resolved',
+          leaseId: 'lease-carrierless-review',
+          generation: 3,
+          predecessorCatId: 'codex',
+          predecessorThreadId: input.targetThreadId,
+        };
+      },
+      async recordCarrierless() {
+        return { outcome: 'stale', reason: 'reviewed_head_mismatch' };
+      },
+    },
+  });
+
+  const result = await harness.handleCrossPostMessage({
+    threadId: harness.reviewPredecessorThread.id,
+    content: '@codex\n\nThis review generation was replaced while the terminal fact was being stored.',
+    targetCats: ['codex'],
+    clientMessageId: 'typed-raced-carrierless-review-terminal',
+    coordination: { phase: 'terminal' },
+    localReviewVerdict: 'approved',
+    reviewedHeadSha,
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0]?.text ?? '', /reviewed_head_mismatch/);
+  assert.equal(
+    harness.messageStore.getByThreadIncludingQueued(harness.reviewPredecessorThread.id, 20, 'user-1').length,
+    0,
+  );
+  assert.equal(harness.invocationQueue.list(harness.reviewPredecessorThread.id, 'user-1').length, 0);
 });
 
 test('structured successor rejects contradictory terminal coordination before claiming custody', async () => {

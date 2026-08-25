@@ -363,6 +363,11 @@ function parseEnabledEnv(value: string | undefined): boolean | null {
   return null;
 }
 
+function getDefaultServiceModel(service: ServiceManifest): string | undefined {
+  const models = service.prerequisites?.models;
+  return (models?.find((model) => model.isDefault) ?? models?.[0])?.name;
+}
+
 export function deriveLegacyServiceConfig(
   service: ServiceManifest,
   env: NodeJS.ProcessEnv = process.env,
@@ -421,8 +426,8 @@ export function deriveLegacyServiceConfig(
     // instead of a "MODEL required" startup failure.  The manifest's
     // isDefault model is the single source of truth for defaults (see
     // b29c04d05 — hardcoded script defaults were removed intentionally).
-    const defaultModel = service.prerequisites?.models?.find((m) => m.isDefault) ?? service.prerequisites?.models?.[0];
-    if (defaultModel) config.selectedModel = defaultModel.name;
+    const defaultModel = getDefaultServiceModel(service);
+    if (defaultModel) config.selectedModel = defaultModel;
   }
   const portKey = PORT_ENV_VARS[service.id];
   const port = parseServicePort(portKey ? env[portKey]?.trim() : undefined);
@@ -448,7 +453,15 @@ export function resolveEffectiveServiceConfig(
   ) {
     return { ...config, enabled: legacy.enabled, selectedModel: legacy.selectedModel };
   }
-  return config ?? legacy;
+  const effective = config === undefined ? legacy : config;
+  if (effective === undefined) return undefined;
+  if (effective.selectedModel?.trim()) return effective;
+
+  // Older services.json rows predate explicit model selection. Start scripts
+  // now require their MODEL env, so project the manifest default into the
+  // effective config instead of repeatedly launching a guaranteed failure.
+  const defaultModel = getDefaultServiceModel(service);
+  return defaultModel ? { ...effective, selectedModel: defaultModel } : effective;
 }
 
 function replaceEndpointPort(endpoint: string | null, port: number): string | null {

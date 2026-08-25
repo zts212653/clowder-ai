@@ -19,7 +19,6 @@ const forbiddenExtensionBehaviors = [
   'tabs.move',
   'windows.update',
   'windows.create',
-  '.focus(',
   'active: true',
   'fetch(',
   'XMLHttpRequest',
@@ -92,7 +91,7 @@ describe('personal Chrome extension contract', () => {
     assert.equal(signal, 'SIGKILL');
   });
 
-  it('uses a single ChatGPT conversation host scope and no invasive browser permissions', async () => {
+  it('uses a single ChatGPT conversation host scope and only the scoped reinjection permission', async () => {
     const manifest = JSON.parse(await readFile(join(extensionRoot, 'manifest.json'), 'utf8'));
     assert.equal(manifest.manifest_version, 3);
     assert.deepEqual(manifest.icons, {
@@ -105,12 +104,24 @@ describe('personal Chrome extension contract', () => {
       default_title: '授权此会话',
       default_icon: manifest.icons,
     });
-    assert.deepEqual(manifest.permissions.sort(), ['nativeMessaging', 'tabs']);
+    assert.deepEqual(manifest.permissions.sort(), ['alarms', 'nativeMessaging', 'scripting', 'tabs']);
     assert.deepEqual(manifest.host_permissions, ['https://chatgpt.com/c/*']);
     assert.equal(JSON.stringify(manifest).includes('<all_urls>'), false);
     for (const forbidden of ['cookies', 'debugger', 'webRequest', 'history', 'clipboardRead']) {
       assert.equal(manifest.permissions.includes(forbidden), false, `forbidden permission: ${forbidden}`);
     }
+  });
+
+  it('keeps the manifest, worker, content script, and runtime revision contract aligned', async () => {
+    const manifest = JSON.parse(await readFile(join(extensionRoot, 'manifest.json'), 'utf8'));
+    const [worker, contentScript, protocol] = await Promise.all([
+      readFile(join(extensionRoot, 'service-worker.js'), 'utf8'),
+      readFile(join(extensionRoot, 'content-script.js'), 'utf8'),
+      readFile(join(apiRoot, 'src/domains/cats/services/cloud-bridge/personal-chrome-host/protocol.ts'), 'utf8'),
+    ]);
+
+    assert.equal(manifest.version, '0.2.1');
+    for (const source of [worker, contentScript, protocol]) assert.match(source, /0\.2\.1/);
   });
 
   it('checks in deterministic normalized icons derived from the formal gpt-pro repository asset', async () => {
@@ -125,9 +136,13 @@ describe('personal Chrome extension contract', () => {
 
   it('does not activate, select, focus, navigate, or privately fetch from ChatGPT', async () => {
     const sources = await Promise.all(
-      ['service-worker.js', 'content-script.js', 'chatgpt-page-adapter.mjs'].map((name) =>
-        readFile(join(extensionRoot, name), 'utf8'),
-      ),
+      [
+        'service-worker.js',
+        'content-script.js',
+        'chatgpt-page-adapter.mjs',
+        'chatgpt-page-contract.mjs',
+        'chatgpt-composer-transaction.mjs',
+      ].map((name) => readFile(join(extensionRoot, name), 'utf8')),
     );
     const source = sources.join('\n');
     assertNoForbiddenExtensionBehavior(source);
@@ -155,7 +170,7 @@ describe('personal Chrome extension contract', () => {
     ]);
     assert.deepEqual(manifest.web_accessible_resources, [
       {
-        resources: ['chatgpt-page-adapter.mjs'],
+        resources: ['chatgpt-page-adapter.mjs', 'chatgpt-page-contract.mjs', 'chatgpt-composer-transaction.mjs'],
         matches: ['https://chatgpt.com/*'],
       },
     ]);

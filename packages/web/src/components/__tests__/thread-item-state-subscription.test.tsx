@@ -11,9 +11,6 @@ vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({ getCatById: () => null, cats: [] }),
 }));
 
-vi.mock('@/components/CatAvatar', () => ({
-  CatAvatar: ({ catId }: { catId: string }) => React.createElement('span', { 'data-cat-id': catId }, 'avatar'),
-}));
 vi.mock('@/components/ThreadCatStatus', () => ({
   ThreadCatStatus: ({ unreadCount, presence }: { unreadCount: number; presence: unknown }) => {
     statusRender(unreadCount, presence);
@@ -107,6 +104,38 @@ describe('ThreadItem snapshot authority', () => {
     expect(statusRender).toHaveBeenLastCalledWith(0, { status: 'done', cats: ['codex-sol'] });
   });
 
+  it('reserves inline paint inset before clipping crowded participant avatar rings', () => {
+    act(() => {
+      root.render(
+        React.createElement(ThreadItem, {
+          id: 'thread-1',
+          title: 'Crowded thread',
+          participants: Array.from({ length: 12 }, (_, index) => `cat-${index}`),
+          preferredCats: ['codex-sol'],
+          lastActiveAt: 100,
+          isActive: false,
+          onSelect: vi.fn(),
+          presence: { status: 'done', cats: ['codex-sol'] },
+          unreadCount: 2,
+          hasUserMention: false,
+        }),
+      );
+    });
+
+    const metadataRail = container.querySelector('[data-testid="thread-participant-metadata"]');
+    const status = container.querySelector('[data-testid="unread"]');
+
+    expect(metadataRail).not.toBeNull();
+    expect(metadataRail?.className).toContain('min-w-0');
+    expect(metadataRail?.className).toContain('overflow-x-clip');
+    expect(metadataRail?.className).toContain('overflow-y-visible');
+    expect(metadataRail?.className).toContain('px-0.5');
+    expect(metadataRail?.className).not.toContain('overflow-hidden');
+    expect(metadataRail?.querySelector('.ring-2')).not.toBeNull();
+    expect(metadataRail?.contains(status)).toBe(false);
+    expect(metadataRail?.parentElement?.contains(status)).toBe(true);
+  });
+
   it('renders and refreshes working elapsed from activeSince, never C7 lastActiveAt', () => {
     vi.useFakeTimers();
     const now = new Date('2026-08-20T12:00:00.000Z').getTime();
@@ -172,11 +201,11 @@ describe('ThreadItem snapshot authority', () => {
       });
 
     act(() => root.render(render('working')));
-    expect(container.querySelector('[data-cat-id="kimi"]')).not.toBeNull();
+    expect(container.querySelector('img[src="/avatars/kimi.png"]')).not.toBeNull();
     expect(container.textContent).not.toContain('还没有猫猫加入');
 
     act(() => root.render(render('idle')));
-    expect(container.querySelector('[data-cat-id="kimi"]')).not.toBeNull();
+    expect(container.querySelector('img[src="/avatars/kimi.png"]')).not.toBeNull();
     expect(container.textContent).not.toContain('还没有猫猫加入');
   });
 });

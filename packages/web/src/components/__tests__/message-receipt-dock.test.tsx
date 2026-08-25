@@ -345,6 +345,82 @@ describe('MessageReceiptDock', () => {
     expect(container.textContent).not.toContain('处理完成');
   });
 
+  it('renders terminal TurnExecution truth without a broken lineage claim and converges after lineage hydration', () => {
+    const terminalWithoutLineage = {
+      version: 1,
+      entryId: 'cross-thread:message-output-rejected',
+      scope: 'cross_thread_delivery',
+      targets: [
+        {
+          catId: 'codex-sol',
+          state: 'handled',
+          invocationId: 'child-output-rejected',
+          seenAt: 700,
+          outcome: {
+            invocationId: 'child-output-rejected',
+            disposition: 'completed_with_turn',
+            evidenceRef: { kind: 'turn_execution', invocationId: 'child-output-rejected' },
+            handledAt: 800,
+          },
+        },
+      ],
+      reminderAttempts: [],
+    } as unknown as QueueMessageReceipt;
+
+    act(() => {
+      root.render(<MessageReceiptDock receipt={terminalWithoutLineage} messages={[]} getCatLabel={() => '砚砚'} />);
+    });
+
+    expect(container.textContent).toContain('砚砚 · 本轮已结束，无可见回复');
+    expect(container.querySelector('[data-receipt-lineage-link]')).toBeNull();
+    expect(container.textContent).not.toContain('查看本轮');
+
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          receipt={structuredClone(terminalWithoutLineage)}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+    expect(container.textContent).toContain('砚砚 · 本轮已结束，无可见回复');
+    expect(container.querySelector('[data-receipt-lineage-link]')).toBeNull();
+
+    const repairedLineage: ChatMessage[] = [
+      {
+        id: 'authorized-lineage-repair',
+        type: 'assistant',
+        catId: 'codex-sol',
+        content: 'authorized persisted repair',
+        timestamp: 900,
+        extra: {
+          turnExecution: {
+            invocationId: 'child-output-rejected',
+            parentInvocationId: 'parent-output-rejected',
+            executionKind: 'ordinary',
+          },
+        },
+      },
+    ];
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          receipt={structuredClone(terminalWithoutLineage)}
+          messages={repairedLineage}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('砚砚 · 正文已由本轮消费');
+    expect(container.textContent).not.toContain('本轮已结束，无可见回复');
+    const lineageLinks = container.querySelectorAll<HTMLButtonElement>('[data-receipt-lineage-link]');
+    expect(lineageLinks).toHaveLength(1);
+    expect(lineageLinks[0]?.disabled).toBe(false);
+    expect(lineageLinks[0]?.textContent).toBe('查看本轮 ↑');
+  });
+
   it('distinguishes failure before child creation from invoked-but-unsettled', () => {
     const base: QueueMessageReceipt = {
       version: 1,

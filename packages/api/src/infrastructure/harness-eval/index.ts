@@ -42,6 +42,16 @@ export type {
   GenerateCapabilityWakeupLiveVerdictInput,
 } from './capability-wakeup/eval-capability-wakeup-live-verdict.js';
 export { generateCapabilityWakeupLiveVerdict } from './capability-wakeup/eval-capability-wakeup-live-verdict.js';
+export {
+  DesignGateEpisodeSourceProviderImpl,
+  validateDesignGateEpisodeSelector,
+} from './design-gate/design-gate-episode-source-provider.js';
+export type {
+  DesignGateEpisodeBundle,
+  DesignGateEpisodeMetricVector,
+  DesignGateEpisodeSourceSelector,
+} from './design-gate/design-gate-types.js';
+export { generateDesignGateLiveVerdict } from './design-gate/eval-design-gate-live-verdict.js';
 export type { CommunityEvalDomainEntry } from './domain/community-eval-domain.js';
 export { loadCommunityDomains, parseCommunityEvalDomainEntry } from './domain/community-eval-domain.js';
 // Community path (AC-E14 / AC-E15)
@@ -126,8 +136,10 @@ export type {
 } from './sop/sop-predicate-evaluator.js';
 export { evaluatePredicate, evaluateSopDefinition } from './sop/sop-predicate-evaluator.js';
 export type {
+  DesignGateReviewPacket,
   SopTrace,
   SopTraceCommand,
+  SopTraceDiffContext,
   SopTraceGitState,
   SopTraceHandles,
   SopTraceInput,

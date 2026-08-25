@@ -7,9 +7,6 @@
  * per-page mode (100 items, 2MB maxBuffer each). Each page has bounded
  * size so buffer overflow is structurally impossible.
  *
- * NOTE: computePackChecksum() in governance-pack.ts is env-sensitive —
- * same git SHA with different env vars produces different checksums.
- *
  * Performance note: GitHub returns oldest-first and not all endpoints
  * support `since`/`direction` params, so we still scan all pages
  * client-side. A future optimization could use GraphQL `last:N`.
