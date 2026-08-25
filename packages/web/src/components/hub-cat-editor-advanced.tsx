@@ -73,6 +73,7 @@ export function AdvancedRuntimeSection({
           inputMode="numeric"
           tone="success"
           placeholder="留空或 0 = Auto；正整数 = Manual"
+          ariaDescribedBy="context-window-compat-notice"
         />
         <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
           填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
@@ -235,10 +236,13 @@ function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null;
   if (hasCurrentAutoResolution || hasCatalogAutoResolution) return null;
 
   return (
-    <p className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-[var(--cafe-accent)]">
+    <output
+      id="context-window-compat-notice"
+      className="block rounded-[10px] border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs leading-5 text-conn-amber-text"
+    >
       {isManual
         ? '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。'
         : '当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。'}
-    </p>
+    </output>
   );
 }

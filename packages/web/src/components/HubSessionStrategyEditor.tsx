@@ -16,7 +16,7 @@ export function HubSessionStrategyEditor({
 }) {
   return (
     <section className="space-y-3 rounded-[14px] bg-[var(--console-runtime-group-bg)] p-[14px]">
-      <h3 className="text-sm font-semibold text-cafe">Session State / Chain</h3>
+      <h5 className="text-sm font-semibold text-cafe">Session State / Chain</h5>
       {loading ? <p className="text-sm text-cafe-secondary">Session 策略加载中...</p> : null}
       {error ? (
         <p className="rounded-[20px] border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">

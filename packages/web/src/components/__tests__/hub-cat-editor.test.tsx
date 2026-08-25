@@ -512,7 +512,7 @@ describe('HubCatEditor', () => {
       },
     );
 
-    const heading = document.body.querySelector('h3');
+    const heading = document.body.querySelector('h5');
     const strategySelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Session Strategy"]');
     expect(heading?.textContent).toBe('Session State / Chain');
     expect(heading?.nextElementSibling?.contains(strategySelect)).toBe(true);
@@ -3789,7 +3789,7 @@ describe('HubCatEditor', () => {
     expect(document.body.textContent).toContain('别名与 @ 路由');
     expect(document.body.textContent).toContain('认证与模型');
     expect(
-      Array.from(document.body.querySelectorAll('h3')).some(
+      Array.from(document.body.querySelectorAll('h5')).some(
         (heading) => heading.textContent === 'Session State / Chain',
       ),
     ).toBe(true);
@@ -4043,7 +4043,7 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     expect(
-      Array.from(document.body.querySelectorAll('h3')).some(
+      Array.from(document.body.querySelectorAll('h5')).some(
         (heading) => heading.textContent === 'Session State / Chain',
       ),
     ).toBe(true);
