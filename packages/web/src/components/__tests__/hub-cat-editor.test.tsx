@@ -290,7 +290,13 @@ describe('HubCatEditor', () => {
       },
     );
 
-    expect(document.body.textContent).toContain('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+    const contextWindowInput = queryField<HTMLInputElement>(container, 'input[aria-label="Context Window"]');
+    const compatibilityNotice = document.body.querySelector<HTMLOutputElement>('output#context-window-compat-notice');
+    expect(compatibilityNotice?.textContent).toBe('当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。');
+    expect(contextWindowInput.getAttribute('aria-describedby')).toBe(compatibilityNotice?.id);
+    expect(compatibilityNotice?.className).toContain('border-conn-amber-ring');
+    expect(compatibilityNotice?.className).toContain('bg-conn-amber-bg');
+    expect(compatibilityNotice?.className).toContain('text-conn-amber-text');
     expect(document.body.textContent).not.toContain('Concrete carrier capability unavailable');
     expect(document.body.textContent).not.toContain('未能解析 Context Window');
 
