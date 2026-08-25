@@ -15,7 +15,7 @@ import {
 
 async function harness(options = {}) {
   let now = options.now ?? 5_000;
-  const inventory = await readyInventory();
+  const inventory = await readyInventory(options.inventoryOptions);
   const store = options.store ?? new MemoryHostBrokerStore();
   const broker = new HostBrokerControlPlane({
     inventory,
@@ -60,6 +60,24 @@ describe('K-2B Host Broker handshake', () => {
     assert.equal(snapshot.runtimeLeases[0].brokerSessionId, 'bs-1');
     const inventorySnapshot = await inventory.snapshot();
     assert.equal(inventorySnapshot.instances[0].runtimeState, 'healthy');
+  });
+
+  it('treats reordered effective grants as the same Host authority', async () => {
+    const { connection, inventory, store } = await harness({
+      inventoryOptions: { effectiveGrants: ['events.publish', 'message.event.subscribe'] },
+    });
+
+    const binding = await connection.hello(candidateHello());
+    await inventory.transaction((transaction) => {
+      const grants = transaction.grants.get(INSTANCE_ID);
+      transaction.grants.put({
+        ...grants,
+        effectiveGrants: ['message.event.subscribe', 'events.publish'],
+      });
+    });
+
+    assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
+    assert.equal((await store.snapshot()).sessions[0].phase, 'active');
   });
 
   it('fails closed when candidate identity differs from the exact installed package', async () => {

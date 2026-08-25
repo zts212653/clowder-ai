@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { validateEventsPublishInput, validateEventsPublishResult } from '@clowder-ai/plugin-contract';
+import {
+  DEADLINE_EXPIRED_CODE,
+  DEADLINE_EXPIRED_MESSAGE,
+  validateEventsPublishInput,
+  validateEventsPublishResult,
+} from '@clowder-ai/plugin-contract';
 import { MAX_NDJSON_FRAME_BYTES } from '@clowder-ai/plugin-contract/conformance';
 import { ExternalPluginRuntimeSupervisor } from '../dist/domains/plugin/external-runtime/index.js';
 import { MemoryHostBrokerStore } from '../dist/domains/plugin/host-broker/index.js';
@@ -98,7 +103,24 @@ test('stdio hello/ready and events.publish use the existing Broker session and l
   await harness.supervisor.stop(EXTERNAL_INSTANCE_ID);
 });
 
-test('reserved rows receive the contract classifier response and never dispatch', async () => {
+test('expired call metadata rejects before Broker dispatch with the published deadline error', async () => {
+  const harness = await runningHarness();
+
+  sendFrame(harness.child, wireRequest('publish-expired', 'events.publish', externalPublishInput(), Date.now() - 1));
+  const response = await readFrame(harness.child);
+  assert.equal(response.id, 'publish-expired');
+  assert.equal(response.error.code, DEADLINE_EXPIRED_CODE);
+  assert.equal(response.error.message, DEADLINE_EXPIRED_MESSAGE);
+  assert.deepEqual(response.error.data, {});
+  assert.equal(harness.dispatches.length, 0, 'expired calls must have zero business effects');
+
+  const snapshot = await harness.brokerStore.snapshot();
+  assert.equal(snapshot.sessions[0].phase, 'active', 'deadline rejection does not destroy valid authority');
+  assert.equal(snapshot.calls.length, 0, 'deadline rejection must happen before the durable call ledger');
+  await harness.supervisor.stop(EXTERNAL_INSTANCE_ID);
+});
+
+test('malformed messaging rows receive the contract classifier response and never dispatch', async () => {
   const harness = await runningHarness();
   sendFrame(harness.child, wireRequest('reserved-1', 'messaging.send', {}));
   const response = await readFrame(harness.child);

@@ -2596,10 +2596,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
         if (resolvedAccount.apiKey) callbackEnv.CAT_CAFE_ANTHROPIC_API_KEY = resolvedAccount.apiKey;
-        if (resolvedAccount.models?.length && provider !== 'opencode') {
-          // #1086: account.models is an allowed-model list, not an implicit default.
-          // Prefer cat's defaultModel when present; fall back to account.models[0].
-          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel ?? resolvedAccount.models[0];
+        // #1086: account.models is an allowed-model list, never a runtime default.
+        // The member-selected model remains authoritative even if that list is absent.
+        if (defaultModel && provider !== 'opencode') {
+          callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE = defaultModel;
         }
         if (resolvedAccount.baseUrl) {
           const proxyPortStr = process.env.ANTHROPIC_PROXY_PORT || '9877';

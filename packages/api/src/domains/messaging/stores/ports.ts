@@ -8,7 +8,7 @@
  * machines; stores only persist. No bypass APIs (no generic list/delete).
  */
 
-import type { MessageOutputEvent } from '@clowder-ai/plugin-contract';
+import type { MessageEnvelope, MessageOutputEvent } from '@clowder-ai/plugin-contract';
 import type { HandleScope, MessageOutputEventInput } from '../contract/host-types.js';
 
 /** Single source for the per-thread event log trim depth (send/append/facade all import this). */
@@ -142,7 +142,51 @@ export interface SubscriptionRecord {
   readonly ackedSequence: number;
   /** Highest sequence handed out by read() — bounds valid ack tokens. */
   readonly lastDeliveredSequence: number;
+  /** Frozen M0-C snapshot projection, stored beside the authoritative cursor. */
+  readonly snapshotView?: SnapshotViewRecord;
+  /** Last consumed entitlement retained solely to make ack retries idempotent. */
+  readonly lastSnapshotCompletion?: SnapshotCompletionRecord;
   readonly revokedAt?: number;
+}
+
+export interface SnapshotViewRecord {
+  readonly snapshotId: string;
+  readonly headSequence: number;
+  /** Frozen item count; payload rows live in page-addressable storage. */
+  readonly itemCount: number;
+  readonly createdAt: number;
+  /** Exact next page entitlement; undefined only for the initial page. */
+  readonly nextPageTokenId?: string;
+  readonly nextOffset: number;
+  /** Start offset of the last committed page, retained for response replay. */
+  readonly lastPageOffset?: number;
+  /** Final ack is invalid until every frozen page has been consumed. */
+  readonly traversalComplete: boolean;
+}
+
+/** Unpublished capture lease. Partial rows are never visible to readers. */
+export interface SnapshotCaptureCandidate {
+  readonly snapshotId: string;
+  readonly headSequence: number;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
+export type SnapshotCaptureStart =
+  | { readonly status: 'started' }
+  | { readonly status: 'busy' }
+  | { readonly status: 'existing'; readonly snapshot: SnapshotViewRecord };
+
+export interface SnapshotCaptureCommit {
+  readonly snapshotId: string;
+  readonly expectedItemCount: number;
+  readonly nextOffset: number;
+  readonly traversalComplete: boolean;
+}
+
+export interface SnapshotCompletionRecord {
+  readonly snapshotId: string;
+  readonly headSequence: number;
 }
 
 export interface CursorStore {
@@ -154,6 +198,54 @@ export interface CursorStore {
   advanceAck(pluginInstanceId: string, subscriptionId: string, sequence: number): Promise<void>;
   /** Monotonic max advance of lastDeliveredSequence. */
   advanceDelivered(pluginInstanceId: string, subscriptionId: string, sequence: number): Promise<void>;
+  /** Claim a restart-safe unpublished capture slot, or return the committed view. */
+  beginSnapshotCapture(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    capture: SnapshotCaptureCandidate,
+  ): Promise<SnapshotCaptureStart | null>;
+  /** Append one bounded chunk at the exact staged offset. */
+  appendSnapshotCapture(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    expectedOffset: number,
+    items: readonly MessageEnvelope[],
+  ): Promise<boolean>;
+  /** Atomically publish a fully staged capture as the active frozen view. */
+  commitSnapshotCapture(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    capture: SnapshotCaptureCommit,
+  ): Promise<SnapshotViewRecord | null>;
+  /** Discard only the named unpublished capture; committed state is untouched. */
+  abortSnapshotCapture(pluginInstanceId: string, subscriptionId: string, snapshotId: string): Promise<void>;
+  /** Read only the requested frozen page; null means the view is unavailable. */
+  readSnapshotPage(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    offset: number,
+    limit: number,
+  ): Promise<readonly MessageEnvelope[] | null>;
+  /** Consume exactly one issued page entitlement and publish its successor atomically. */
+  consumeSnapshotPage(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    expected: { readonly offset: number; readonly tokenId?: string },
+    next: { readonly offset: number; readonly tokenId?: string; readonly traversalComplete: boolean },
+  ): Promise<boolean>;
+  /**
+   * Consume the final snapshot entitlement atomically: validate the exact
+   * frozen view, max-advance ack+delivered together, and retain a replay marker.
+   */
+  ackSnapshot(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    headSequence: number,
+  ): Promise<'applied' | 'replayed' | 'rejected'>;
   /**
    * Atomically create a subscription and its (instance, handle) index, or
    * return the existing live record. No partially-indexed record is exposed.

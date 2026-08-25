@@ -71,11 +71,11 @@ async function activeHarness(handler, options = {}) {
 }
 
 describe('K-2B durable Broker call ledger', () => {
-  it('rejects reserved and unregistered rows before any durable claim', async () => {
+  it('rejects ready-but-unregistered and handshake rows before any durable claim', async () => {
     const handler = fakeEventsHandler();
     const { connection, store } = await activeHarness(handler);
 
-    await assert.rejects(connection.call('messaging.send', {}), isBrokerError('METHOD_NOT_READY'));
+    await assert.rejects(connection.call('messaging.send', {}), isBrokerError('METHOD_NOT_REGISTERED'));
     await assert.rejects(connection.call('broker.hello', {}), isBrokerError('METHOD_NOT_REGISTERED'));
     assert.equal((await store.snapshot()).calls.length, 0);
     assert.equal(handler.dispatchCount(), 0);

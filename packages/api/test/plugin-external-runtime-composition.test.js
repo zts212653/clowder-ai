@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
-
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   createDormantPluginRuntimeComposition,
   EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
@@ -26,6 +26,7 @@ async function composition(projectRoot, processes = new FakePluginProcessAdapter
       projectRoot,
       routes: new MemorySignalRouteStore(),
       intakes: new MemoryMeetingIntakeStore(),
+      messageStore: new MessageStore(),
       processes,
       ...(packages === undefined ? {} : { packages }),
       now: () => 5_000,
@@ -52,6 +53,7 @@ test('current-main compatibility paths are explicit, project-scoped, and replace
     paths: injected,
     routes: new MemorySignalRouteStore(),
     intakes: new MemoryMeetingIntakeStore(),
+    messageStore: new MessageStore(),
   });
   assert.deepEqual(runtime.paths, injected);
   assert.equal(runtime.inventoryStore.path, injected.inventorySnapshotPath);
@@ -121,6 +123,66 @@ test('composition recovers both durable stores and resumes enabled owner intent 
   await restarted.runtime.shutdown();
 });
 
+test('dormant composition binds messaging routes to its single K-1 domain', async () => {
+  const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-m0-composition-messaging-'));
+  const manifest = externalManifest();
+  const grants = ['messaging.send', 'messaging.appendElements', 'message.event.subscribe'];
+  manifest.features[0].capabilities = grants;
+  const runtime = createDormantPluginRuntimeComposition({
+    projectRoot,
+    routes: new MemorySignalRouteStore(),
+    intakes: new MemoryMeetingIntakeStore(),
+    messageStore: new MessageStore(),
+    now: () => 5_000,
+  });
+  const installed = await runtime.inventory.installPackage({
+    manifest,
+    computedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    expectedPackageDigest: EXTERNAL_PACKAGE_DIGEST,
+    packagePluginId: externalCandidate().pluginId,
+    effectiveGrants: grants,
+    signalSchemas: {
+      'schemas/external.signal.v1.schema.json': {
+        type: 'object',
+        properties: { payload: { type: 'object' }, source: { type: 'object' } },
+        required: ['payload', 'source'],
+      },
+    },
+  });
+  await runtime.inventoryStore.transaction((transaction) => {
+    const instance = transaction.instances.get(installed.pluginInstanceId);
+    transaction.instances.put({
+      ...instance,
+      configReadiness: 'ready',
+      activationState: 'enabled',
+      runtimeState: 'stopped',
+      updatedAt: 5_001,
+    });
+  });
+  const connection = await runtime.broker.openExternalConnection(installed.pluginInstanceId);
+  const binding = await connection.hello(externalCandidate());
+  await connection.ready({ bindingNonce: binding.bindingNonce });
+  const { handleId } = await runtime.messaging.issueThreadHandle({
+    pluginInstanceId: installed.pluginInstanceId,
+    threadId: 'thread-1',
+    userId: 'user-1',
+    scope: { canSend: true, canSubscribe: true },
+  });
+
+  const subscription = await connection.call('messaging.subscribe', { handle: handleId });
+  const receipt = await connection.call('messaging.send', {
+    address: { kind: 'thread_handle', handle: handleId },
+    idempotencyKey: 'composition-send-1',
+    payload: {
+      provenance: { epistemicStatus: 'inference' },
+      elements: [{ elementId: 'element-1', kind: 'text', payload: { text: 'composition' } }],
+    },
+  });
+  assert.equal(typeof subscription.subscriptionId, 'string');
+  assert.equal(receipt.messageHandle.kind, 'message');
+  assert.equal((await runtime.brokerStore.snapshot()).calls.length, 0, 'K-1 owns messaging settlement');
+});
+
 test('production handshake policy covers verified external source readiness without budget drift', async () => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), 'cat-cafe-k2d-composition-readiness-'));
   let now = 5_000;
@@ -128,6 +190,7 @@ test('production handshake policy covers verified external source readiness with
     projectRoot,
     routes: new MemorySignalRouteStore(),
     intakes: new MemoryMeetingIntakeStore(),
+    messageStore: new MessageStore(),
     processes: new FakePluginProcessAdapter(),
     now: () => now,
   });
@@ -164,6 +227,7 @@ test('production handshake policy covers verified external source readiness with
   assert.equal(EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS, 4 * 60_000);
   assert.equal(runtime.broker.preActiveTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
   assert.equal(runtime.supervisor.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.ok(runtime.messaging, 'composition must expose the single K-1 messaging domain used by Broker routes');
 });
 
 test('production composition constructs and recovers K-2D but exposes no startup activation', () => {
@@ -173,6 +237,7 @@ test('production composition constructs and recovers K-2D but exposes no startup
   const runtimeCompositionIndex = source.indexOf('createDormantPluginRuntimeComposition({');
 
   assert.match(source, /createDormantPluginRuntimeComposition/);
+  assert.match(source, /messageStore,\s*\.\.\.\(redis \? \{ redis \} : \{\}\)/);
   assert.match(source, /routes: signalRouteStore,\s*ownerId: privateUserId/);
   assert.ok(routeBootstrapIndex >= 0, 'production must provision official Host signal routes');
   assert.ok(

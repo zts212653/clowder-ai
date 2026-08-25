@@ -93,7 +93,7 @@ async function expectCode(promise, code) {
 describe('AppendService — happy path (AC-4)', () => {
   test('append bumps revision, persists elements, emits append event', async () => {
     const sent = await sendMessage();
-    const receipt = await service.appendElements(CTX, appendInput(sent.handle));
+    const receipt = await service.appendElements(CTX, appendInput(sent.messageHandle));
 
     assert.equal(receipt.messageId, sent.messageId);
     assert.equal(receipt.revision, 2);
@@ -115,7 +115,7 @@ describe('AppendService — happy path (AC-4)', () => {
 
   test('appended elements default to inference (no silent inheritance of message-level status)', async () => {
     const sent = await sendMessage(); // message-level provenance: user_intent
-    await service.appendElements(CTX, appendInput(sent.handle));
+    await service.appendElements(CTX, appendInput(sent.messageHandle));
     const stored = messageStore.getById(sent.messageId);
     const appended = stored.extra.pluginMessage.elements.find((e) => e.elementId === 'el-2');
     assert.equal(appended.epistemicStatus, 'inference');
@@ -123,18 +123,18 @@ describe('AppendService — happy path (AC-4)', () => {
 
   test('INV-12: same operationId replays to the same receipt without duplicating elements', async () => {
     const sent = await sendMessage();
-    const first = await service.appendElements(CTX, appendInput(sent.handle));
-    const replay = await service.appendElements(CTX, appendInput(sent.handle));
+    const first = await service.appendElements(CTX, appendInput(sent.messageHandle));
+    const replay = await service.appendElements(CTX, appendInput(sent.messageHandle));
     assert.deepEqual(replay, first);
     assert.equal(messageStore.getById(sent.messageId).extra.pluginMessage.elements.length, 2);
   });
 
   test('sequential appends serialize: revisions 2 then 3', async () => {
     const sent = await sendMessage();
-    const r1 = await service.appendElements(CTX, appendInput(sent.handle, { operationId: 'op-1' }));
+    const r1 = await service.appendElements(CTX, appendInput(sent.messageHandle, { operationId: 'op-1' }));
     const r2 = await service.appendElements(
       CTX,
-      appendInput(sent.handle, {
+      appendInput(sent.messageHandle, {
         operationId: 'op-2',
         elements: [{ elementId: 'el-3', kind: 'text', payload: { text: 'third' } }],
       }),
@@ -151,7 +151,7 @@ describe('AppendService — happy path (AC-4)', () => {
     const sent = await sendMessage();
     const receipt = await service.appendElements(
       CTX,
-      appendInput(sent.handle, {
+      appendInput(sent.messageHandle, {
         elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'summary' }, derivedFromElementId: 'el-1' }],
       }),
     );
@@ -165,7 +165,7 @@ describe('AppendService — INV-7 provenance whitewash guard', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'x' }, epistemicStatus: 'observation' }],
         }),
       ),
@@ -177,7 +177,7 @@ describe('AppendService — INV-7 provenance whitewash guard', () => {
     const sent = await sendMessage(); // el-1 inherits message-level user_intent
     const ok = await service.appendElements(
       CTX,
-      appendInput(sent.handle, {
+      appendInput(sent.messageHandle, {
         operationId: 'op-eq',
         elements: [
           {
@@ -194,7 +194,7 @@ describe('AppendService — INV-7 provenance whitewash guard', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           operationId: 'op-elevate',
           elements: [
             {
@@ -233,7 +233,7 @@ describe('AppendService — validation and lock guards (§4d)', () => {
       }));
       await service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           operationId: `op-batch-${batch}`,
           elements: batchElements,
         }),
@@ -244,7 +244,7 @@ describe('AppendService — validation and lock guards (§4d)', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           operationId: 'op-overflow',
           elements: [{ elementId: 'el-overflow', kind: 'text', payload: { text: 'overflow' } }],
         }),
@@ -266,7 +266,7 @@ describe('AppendService — validation and lock guards (§4d)', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           elements: [{ elementId: 'el-overflow', kind: 'text', payload: { text: 'y'.repeat(20 * 1024) } }],
         }),
       ),
@@ -280,7 +280,7 @@ describe('AppendService — validation and lock guards (§4d)', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'x' }, derivedFromElementId: 'el-404' }],
         }),
       ),
@@ -290,7 +290,10 @@ describe('AppendService — validation and lock guards (§4d)', () => {
 
   test('cross-instance append → PERMISSION', async () => {
     const sent = await sendMessage();
-    await expectCode(service.appendElements({ pluginInstanceId: 'inst-b' }, appendInput(sent.handle)), 'PERMISSION');
+    await expectCode(
+      service.appendElements({ pluginInstanceId: 'inst-b' }, appendInput(sent.messageHandle)),
+      'PERMISSION',
+    );
   });
 
   test('a raw non-plugin message id is not an issued message handle', async () => {
@@ -309,15 +312,15 @@ describe('AppendService — validation and lock guards (§4d)', () => {
     await expectCode(service.appendElements(CTX, appendInput('msg-missing')), 'NOT_FOUND');
     const sent = await sendMessage();
     messageStore.softDelete(sent.messageId, 'user-1');
-    await expectCode(service.appendElements(CTX, appendInput(sent.handle)), 'NOT_FOUND');
+    await expectCode(service.appendElements(CTX, appendInput(sent.messageHandle)), 'NOT_FOUND');
   });
 
   test('lock contention → RETRYABLE_INFLIGHT; released claim allows retry', async () => {
     const sent = await sendMessage();
     const token = await appendLock.acquire(sent.messageId, 60_000); // foreign lock holder
-    await expectCode(service.appendElements(CTX, appendInput(sent.handle)), 'RETRYABLE_INFLIGHT');
+    await expectCode(service.appendElements(CTX, appendInput(sent.messageHandle)), 'RETRYABLE_INFLIGHT');
     await appendLock.release(sent.messageId, token);
-    const receipt = await service.appendElements(CTX, appendInput(sent.handle));
+    const receipt = await service.appendElements(CTX, appendInput(sent.messageHandle));
     assert.equal(receipt.revision, 2);
   });
 
@@ -336,7 +339,7 @@ describe('AppendService — validation and lock guards (§4d)', () => {
 describe('AppendService — whisper boundary (v0)', () => {
   test('append to a whisper message applies but is not event-streamed', async () => {
     const sent = await sendMessage({ draftAudience: { kind: 'whisper', targets: ['opus'] } });
-    const receipt = await service.appendElements(CTX, appendInput(sent.handle));
+    const receipt = await service.appendElements(CTX, appendInput(sent.messageHandle));
     assert.equal(receipt.revision, 2);
     assert.equal(receipt.appendSequence, undefined);
     const logged = await events.readAfter('thread-1', 0, 10);

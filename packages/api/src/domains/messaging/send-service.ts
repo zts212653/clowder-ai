@@ -216,7 +216,7 @@ export class SendService {
         messageId: stored.id,
         threadId: handle.threadId,
         revision: 1,
-        handle: { kind: 'message' as const, token: msgHandle.handleId },
+        messageHandle: { kind: 'message' as const, token: msgHandle.handleId },
         ...(publishSequence !== undefined ? { publishSequence } : {}),
       };
       const result = await this.deps.ledger.settleSend(

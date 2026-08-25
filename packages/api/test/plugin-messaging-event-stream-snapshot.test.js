@@ -92,6 +92,39 @@ async function expectCode(promise, code) {
 }
 
 describe('EventStreamService — stale + snapshot (INV-9)', () => {
+  test('invalid historical payload fails before snapshot entitlement or cursor movement', async () => {
+    const handleId = await issueHandle();
+    const { subscriptionId } = await stream.subscribe(CTX, handleId);
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: '[rich_block:el-invalid]',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread-1',
+      extra: {
+        pluginMessage: {
+          instanceId: CTX.pluginInstanceId,
+          revision: 1,
+          provenance: {
+            origin: { kind: 'plugin', instanceId: CTX.pluginInstanceId },
+            epistemicStatus: 'inference',
+          },
+          elements: [{ elementId: 'el-invalid', kind: 'rich_block', payload: { value: Number.NaN } }],
+          outputRevision: 1,
+          outputSequence: 1,
+          appendOps: [],
+        },
+      },
+    });
+    const before = await cursors.get(CTX.pluginInstanceId, subscriptionId);
+
+    await expectCode(stream.snapshotPage(CTX, { subscriptionId, maxItems: 1 }), 'VALIDATION');
+
+    const after = await cursors.get(CTX.pluginInstanceId, subscriptionId);
+    assert.deepEqual(after, before, 'invalid history cannot publish a view or move live cursor watermarks');
+  });
+
   test('snapshot refuses a persisted plugin message until its publish event is inside the fence', async () => {
     const handleId = await issueHandle();
     const { subscriptionId } = await stream.subscribe(CTX, handleId);
@@ -214,7 +247,7 @@ describe('EventStreamService — stale + snapshot (INV-9)', () => {
       appendLock: new memory.MemoryAppendLock(),
     });
     const pendingAppend = append.appendElements(CTX, {
-      handle: sent.handle,
+      handle: sent.messageHandle,
       operationId: 'snapshot-pending-append',
       elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'pending append' } }],
     });

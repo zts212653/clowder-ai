@@ -115,6 +115,8 @@ export type BrokerValidationResult<Value> = { readonly valid: true; readonly val
 
 export interface BrokerMethodHandler<Input = unknown, Result = unknown> {
   readonly method: WireMethodName;
+  /** K-1 already owns messaging settlement; bypass the generic Broker call ledger. */
+  readonly settlementAuthority?: 'broker' | 'domain';
   validateInput(value: unknown): BrokerValidationResult<Input>;
   validateResult(value: unknown): value is Result;
   settlementKey(context: BrokerCallContext, input: Input): string;

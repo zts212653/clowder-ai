@@ -10,11 +10,13 @@
  */
 
 import type {
+  M0CReadResult,
+  M0CSubscribeResult,
   MessageElementsAppendEvent,
-  MessageEnvelope,
-  MessageOutputEvent,
   MessagePublishEvent,
   MessagingErrorCode,
+  SnapshotResponse,
+  SnapshotUnavailableReason,
 } from '@clowder-ai/plugin-contract';
 
 // ── Re-export MessagingErrorCode so consumers can import from one place ──
@@ -38,23 +40,9 @@ export interface HandleScope {
 
 // ── Host-internal response shapes ──
 
-export interface SubscribeResult {
-  readonly subscriptionId: string;
-}
-
-export interface ReadResult {
-  readonly events: readonly MessageOutputEvent[];
-  /** Opaque, subscription-local (INV-5). Null when no events were delivered. */
-  readonly ackToken: string | null;
-  /** Cursor fell behind the retention window — resync via snapshot (INV-9). */
-  readonly stale: boolean;
-}
-
-export interface SnapshotResult {
-  readonly envelopes: readonly MessageEnvelope[];
-  /** Cursor position after catch-up; subsequent reads resume from here. */
-  readonly resumeSequence: number;
-}
+export type SubscribeResult = M0CSubscribeResult;
+export type ReadResult = M0CReadResult;
+export type SnapshotResult = SnapshotResponse;
 
 // ── Derived event type (store-side; sequence assigned atomically by EventLogStore) ──
 
@@ -74,5 +62,13 @@ export class MessagingError extends Error {
     this.name = 'MessagingError';
     this.code = code;
     if (details !== undefined) this.details = details;
+  }
+}
+
+/** Dedicated Host throw convention for the public SNAPSHOT_UNAVAILABLE wire arm. */
+export class SnapshotUnavailableHostError extends Error {
+  constructor(readonly reason: SnapshotUnavailableReason) {
+    super(`snapshot unavailable: ${reason}`);
+    this.name = 'SnapshotUnavailableHostError';
   }
 }

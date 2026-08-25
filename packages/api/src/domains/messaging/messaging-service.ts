@@ -8,7 +8,7 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { AppendReceipt, SendReceipt } from '@clowder-ai/plugin-contract';
+import type { AppendReceipt, M0CSnapshotInput, M0CSnapshotResult, SendReceipt } from '@clowder-ai/plugin-contract';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import { AppendService } from './append-service.js';
 import type { PluginCallContext, ReadResult, SnapshotResult, SubscribeResult } from './contract/host-types.js';
@@ -98,6 +98,10 @@ export class MessagingService {
 
   snapshot(ctx: PluginCallContext, subscriptionId: string): Promise<SnapshotResult> {
     return this.stream.snapshot(ctx, subscriptionId);
+  }
+
+  snapshotPage(ctx: PluginCallContext, input: M0CSnapshotInput): Promise<M0CSnapshotResult> {
+    return this.stream.snapshotPage(ctx, input);
   }
 }
 

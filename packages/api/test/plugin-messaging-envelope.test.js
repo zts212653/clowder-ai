@@ -269,4 +269,28 @@ describe('projectEnvelope — host-relayed messages (snapshot support)', () => {
     };
     assert.ok(envelope.parsePluginMessageExtra(pluginMessage));
   });
+
+  test('beta.11 JSON scalar tree rejects lone surrogates before historical projection', () => {
+    const base = pluginStoredMessage().extra.pluginMessage;
+    const pluginMessage = {
+      ...base,
+      revision: 1,
+      elements: [{ elementId: 'el-invalid-text', kind: 'text', payload: { text: '\ud800' } }],
+      appendOps: [],
+    };
+    assert.equal(envelope.parsePluginMessageExtra(pluginMessage), null);
+  });
+
+  test('beta.11 JSON scalar tree rejects non-finite values inside open payloads', () => {
+    const base = pluginStoredMessage().extra.pluginMessage;
+    for (const kind of ['media_ref', 'rich_block']) {
+      const pluginMessage = {
+        ...base,
+        revision: 1,
+        elements: [{ elementId: `el-invalid-${kind}`, kind, payload: { nested: { value: Number.NaN } } }],
+        appendOps: [],
+      };
+      assert.equal(envelope.parsePluginMessageExtra(pluginMessage), null, kind);
+    }
+  });
 });
