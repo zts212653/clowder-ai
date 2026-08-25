@@ -29,7 +29,6 @@ doc_anchors:
   - docs/features/F202-plugin-framework.md
   - docs/features/F285-stackchan-physical-limb-plugin.md
   - docs/features/F247-cloud-cat-family.md
-  - docs/features/F300-self-sensing-home-state-awareness.md
 static_scan_hints: [PluginRegistry, PluginResourceActivator, ScheduleFactoryRegistry, PluginInventoryStore, HostBrokerControlPlane, HostBrokerStore, BrokerMethodHandler, IConversationHostAdapter, append_message, plugin.yaml, pluginId, plugin-owned, factoryId, schedule, PluginConfigPanel]
 cited_by:
   - {feature: F202, date: 2026-05-31, delta: new cell}
@@ -43,7 +42,6 @@ cited_by:
   - {feature: F202, date: 2026-08-10, delta: K-2B contract-native Broker sessions, durable call ledger, and typed signal-intake edge}
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
-  - {feature: F300, date: 2026-08-25, delta: Self-Sensing consumes plugin lifecycle/runtime facts and receipt-bearing commands without moving plugin authority or creating a second inventory}
 ---
 
 # Plugin Framework
@@ -166,16 +164,6 @@ close, or restore owner tabs/windows.
   Physical observations may enter only through a typed, grant-checked Host seam;
   raw sensor media and plugin-originated user identity are not admissible.
 
-## Shared Touchpoints
-
-- `self-sensing-management` / F300 may read plugin identity, provisioning,
-  configuration, grants, readiness, health, and receipt-bearing execution facts
-  when they are relevant to an Interaction Episode. It owns friction-to-proposal
-  policy and episode coordination, not plugin discovery, lifecycle mutation,
-  authorization, supervision, audit, or settlement. Catalog presence, manifest
-  declaration, Settings visibility, and an installed package never prove that a
-  capability is currently ready, applicable, authorized, or effective.
-
 ## Do NOT Unify With
 
 - Do not merge this cell into `action-plane`: plugin activation may expose
@@ -192,10 +180,6 @@ close, or restore owner tabs/windows.
   bypass F126 for actions, or turn device observations directly into cat intent.
 - Do not absorb K-3a routes, `MeetingIntake`, source-resolution authority, or
   Needs Me state into plugin activation merely because the producer is a plugin.
-- Do not absorb F300 friction sensing, proposal policy, Interaction Episode, or
-  feedback semantics into plugin lifecycle merely because a matched provider is
-  a plugin. Conversely, F300 must not write plugin state except through this
-  cell's authorized commands and receipts.
 - Do not treat ChatGPT conversation visibility in a desktop host as proof of an
   arbitrary-conversation append API, and do not use private endpoints to fill
   a missing official adapter.
