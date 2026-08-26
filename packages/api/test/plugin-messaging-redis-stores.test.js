@@ -231,6 +231,80 @@ describe('Plugin messaging Redis stores', { skip: redisIsolationSkipReason(REDIS
       assert.equal(await store.findByHandle('inst-a', handleId), null, 'live lookup excludes revoked');
     });
 
+    it('atomically revokes a subscription added at the cascade linearization point', async () => {
+      const rawStore = new RedisCursorStore(redis);
+      const handleId = nextId('th_revoke_race');
+      const first = {
+        subscriptionId: nextId('sub-before-revoke'),
+        pluginInstanceId: 'inst-a',
+        handleId,
+        threadId: 'thread-1',
+        ackedSequence: 0,
+        lastDeliveredSequence: 0,
+      };
+      const concurrent = {
+        ...first,
+        subscriptionId: nextId('sub-during-revoke'),
+        pluginInstanceId: 'inst-b',
+      };
+      await rawStore.put(first);
+
+      let injected = false;
+      const injectConcurrentSubscription = async () => {
+        if (injected) return;
+        injected = true;
+        await rawStore.put(concurrent);
+      };
+      const racingRedis = new Proxy(redis, {
+        get(target, property) {
+          if (property === 'smembers') {
+            return async (...args) => {
+              const members = await target.smembers(...args);
+              await injectConcurrentSubscription();
+              return members;
+            };
+          }
+          if (property === 'eval') {
+            return async (script, ...args) => {
+              if (script.includes("redis.call('SMEMBERS', KEYS[1])")) {
+                await injectConcurrentSubscription();
+              }
+              return target.eval(script, ...args);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const racingStore = new RedisCursorStore(racingRedis);
+
+      assert.equal(await racingStore.revokeByHandle(handleId, 77), 2);
+      assert.equal(injected, true);
+      assert.equal((await rawStore.get('inst-a', first.subscriptionId)).revokedAt, 77);
+      assert.equal((await rawStore.get('inst-b', concurrent.subscriptionId)).revokedAt, 77);
+    });
+
+    it('replaces an indexed revoked subscription like the memory store', async () => {
+      const store = new RedisCursorStore(redis);
+      const handleId = nextId('th_resubscribe');
+      const first = {
+        subscriptionId: nextId('sub-revoked'),
+        pluginInstanceId: 'inst-a',
+        handleId,
+        threadId: 'thread-1',
+        ackedSequence: 0,
+        lastDeliveredSequence: 0,
+      };
+      const replacement = { ...first, subscriptionId: nextId('sub-replacement') };
+      await store.put(first);
+      assert.equal(await store.revokeByHandle(handleId, 77), 1);
+
+      const winner = await store.createOrGet(replacement);
+      assert.equal(winner.subscriptionId, replacement.subscriptionId);
+      assert.equal(winner.revokedAt, undefined);
+      assert.equal((await store.findByHandle('inst-a', handleId)).subscriptionId, replacement.subscriptionId);
+    });
+
     it('parallel createOrGet calls atomically converge on one subscription', async () => {
       const store = new RedisCursorStore(redis);
       const handleId = nextId('th_parallel');

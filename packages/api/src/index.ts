@@ -4290,6 +4290,8 @@ async function main(): Promise<void> {
     projectRoot: resolveActiveProjectRoot(),
     routes: signalRouteStore,
     intakes: meetingIntakeStore,
+    messageStore,
+    ...(redis ? { redis } : {}),
   });
   const externalPluginRecovery = await externalPluginRuntime.recoverAfterRestart();
   app.log.info(

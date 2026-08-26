@@ -1,4 +1,7 @@
 import { resolve } from 'node:path';
+import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
+import { createMessagingDomain, type MessagingService } from '../messaging/messaging-service.js';
 import type { MeetingIntakeStore } from '../signal-intake/MeetingIntakeStore.js';
 import type { SignalRouteStore } from '../signal-intake/SignalRouteStore.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
@@ -7,6 +10,7 @@ import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.j
 import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
 import { HostBrokerControlPlane } from './host-broker/control-plane.js';
 import { createEventsPublishBrokerHandler } from './host-broker/events-publish-handler.js';
+import { createMessagingBrokerHandlers } from './host-broker/messaging-handler.js';
 import { FileHostBrokerStore } from './host-broker/stores.js';
 import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { FilePluginInventoryStore } from './host-inventory/stores.js';
@@ -22,6 +26,8 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly paths?: PluginRuntimePersistencePaths;
   readonly routes: SignalRouteStore;
   readonly intakes: MeetingIntakeStore;
+  readonly messageStore: IMessageStore;
+  readonly redis?: RedisClient;
   readonly processes?: ExternalPluginProcessAdapter;
   readonly packages?: VerifiedPluginPackageLocator;
   readonly now?: () => number;
@@ -40,6 +46,7 @@ export interface DormantPluginRuntimeComposition {
   readonly inventory: HostInventoryControlPlane;
   readonly broker: HostBrokerControlPlane;
   readonly supervisor: ExternalPluginRuntimeSupervisor;
+  readonly messaging: MessagingService;
   readonly lifecycle: ExternalPluginLifecycleService;
   readonly packages: VerifiedPluginPackageLocator;
   recoverAfterRestart(): Promise<DormantPluginRuntimeRecovery>;
@@ -80,6 +87,10 @@ export function createDormantPluginRuntimeComposition(
   const inventory = new HostInventoryControlPlane(inventoryStore, {
     ...(options.now === undefined ? {} : { now: options.now }),
   });
+  const messaging = createMessagingDomain({
+    messageStore: options.messageStore,
+    ...(options.redis === undefined ? {} : { redis: options.redis }),
+  });
   const broker = new HostBrokerControlPlane({
     inventory: inventoryStore,
     store: brokerStore,
@@ -91,6 +102,7 @@ export function createDormantPluginRuntimeComposition(
         intakes: options.intakes,
         ...(options.now === undefined ? {} : { now: options.now }),
       }),
+      ...createMessagingBrokerHandlers({ messaging }),
     ],
     preActiveTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.now === undefined ? {} : { now: options.now }),
@@ -117,6 +129,7 @@ export function createDormantPluginRuntimeComposition(
     inventory,
     broker,
     supervisor,
+    messaging,
     lifecycle,
     packages,
     async recoverAfterRestart() {

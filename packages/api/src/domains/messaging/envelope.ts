@@ -17,8 +17,9 @@ import type {
   MessageEnvelope,
   MessageProvenance,
 } from '@clowder-ai/plugin-contract';
-import { MESSAGING_BOUNDS } from '@clowder-ai/plugin-contract';
+import { isWireUInt53, MESSAGING_BOUNDS, validateMessagingRowResult } from '@clowder-ai/plugin-contract';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { isBoundedScalarString } from './contract/source-admission.js';
 
 /** One applied append operation — the INV-12 replay guard AND replay reconstruction source. */
 export interface AppendOpRecord {
@@ -57,7 +58,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
 }
 
 function isBoundedString(value: unknown, maxLength: number): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
+  return isBoundedScalarString(value, maxLength);
 }
 
 function isOptionalBoundedString(value: unknown, maxLength: number): boolean {
@@ -140,8 +141,7 @@ function isAppendOp(value: unknown): boolean {
     return false;
   }
   return (
-    value.baseRevision === undefined ||
-    (typeof value.baseRevision === 'number' && Number.isInteger(value.baseRevision) && value.baseRevision > 0)
+    value.baseRevision === undefined || (typeof value.baseRevision === 'number' && isWireUInt53(value.baseRevision, 1))
   );
 }
 
@@ -153,12 +153,10 @@ function hasValidOutputWatermark(raw: Record<string, unknown>, revision: number)
   }
   return (
     typeof outputRevision === 'number' &&
-    Number.isInteger(outputRevision) &&
-    outputRevision >= 1 &&
+    isWireUInt53(outputRevision, 1) &&
     outputRevision <= revision &&
     typeof outputSequence === 'number' &&
-    Number.isInteger(outputSequence) &&
-    outputSequence >= 1
+    isWireUInt53(outputSequence, 1)
   );
 }
 
@@ -260,18 +258,49 @@ function hasValidOptionalMetadata(raw: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * Reuse the published beta.11 result validator as the canonical JSON-scalar
+ * tree boundary for historical payloads. This intentionally validates a
+ * snapshot envelope rather than a send draft: persisted messages may contain
+ * up to 128 cumulative elements, while one send operation is capped at 32.
+ */
+function hasContractValidPayload(raw: Record<string, unknown>): boolean {
+  const validation = validateMessagingRowResult('messaging.snapshot', {
+    items: [
+      {
+        messageId: 'historical-validation',
+        revision: raw.revision,
+        threadId: 'historical-validation',
+        actor: { kind: 'plugin', id: raw.instanceId },
+        audience: { kind: 'public' },
+        occurredAt: '2026-01-01T00:00:00.000Z',
+        payload: {
+          provenance: raw.provenance,
+          elements: raw.elements,
+          ...(raw.correlationId === undefined ? {} : { correlationId: raw.correlationId }),
+          ...(raw.causationId === undefined ? {} : { causationId: raw.causationId }),
+        },
+      },
+    ],
+    nextPageToken: null,
+    snapshotAckToken: 'historical-validation',
+  });
+  return validation.valid;
+}
+
 /** Single strict parser shared by memory projection and Redis hydration. */
 export function parsePluginMessageExtra(raw: unknown): PluginMessageExtra | null {
   if (!isRecord(raw)) return null;
   if (!hasOnlyKeys(raw, PLUGIN_MESSAGE_EXTRA_KEYS)) return null;
   if (!isBoundedString(raw.instanceId, 256)) return null;
-  if (typeof raw.revision !== 'number' || !Number.isInteger(raw.revision) || raw.revision < 1) return null;
+  if (typeof raw.revision !== 'number' || !isWireUInt53(raw.revision, 1)) return null;
   if (!isProvenance(raw.provenance)) return null;
   if (!hasValidElements(raw)) return null;
   const messageStatus = (raw.provenance as Record<string, unknown>).epistemicStatus as EpistemicStatus;
   if (!hasValidAppendHistory(raw, raw.revision, raw.elements, messageStatus)) return null;
   if (!hasValidOptionalMetadata(raw)) return null;
   if (!hasValidOutputWatermark(raw, raw.revision)) return null;
+  if (!hasContractValidPayload(raw)) return null;
   return raw as unknown as PluginMessageExtra;
 }
 
@@ -298,11 +327,18 @@ function hostRelayedEpistemic(msg: StoredMessage): EpistemicStatus {
 export function projectEnvelope(msg: StoredMessage): MessageEnvelope | null {
   if (msg.deletedAt !== undefined || msg._tombstone) return null;
 
+  let occurredAt: string;
+  try {
+    occurredAt = new Date(msg.timestamp).toISOString();
+  } catch {
+    return null;
+  }
+
   const base = {
     messageId: msg.id,
     threadId: msg.threadId,
     audience: audienceOf(msg),
-    occurredAt: new Date(msg.timestamp).toISOString(),
+    occurredAt,
     ...(msg.replyTo !== undefined ? { replyTo: msg.replyTo } : {}),
   };
 

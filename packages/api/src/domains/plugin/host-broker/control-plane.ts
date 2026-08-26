@@ -264,6 +264,13 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
     const context = await this.currentCallContext(connectionId, row.grant);
     const validated = handler.validateInput(input);
     if (!validated.valid) throw new HostBrokerError('INVALID_CALL_INPUT', `${method} input is invalid`);
+    if (handler.settlementAuthority === 'domain') {
+      const result = await handler.dispatch(context, validated.value);
+      if (!handler.validateResult(result)) {
+        throw new HostBrokerError('INVALID_CALL_RESULT', `${method} handler returned an invalid result`);
+      }
+      return structuredClone(result);
+    }
     const settlementKey = handler.settlementKey(context, validated.value);
     if (typeof settlementKey !== 'string' || settlementKey.length === 0 || settlementKey.length > 4096) {
       throw new HostBrokerError('BROKER_INVARIANT', `${method} produced an invalid settlement key`);
@@ -303,6 +310,19 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       throw new HostBrokerError('BROKER_INVARIANT', `${pluginInstanceId} has multiple active Broker sessions`);
     }
     return this.call(sessions[0].connectionId, 'events.publish', input) as Promise<EventsPublishResult>;
+  }
+
+  async authorizeHostCall(pluginInstanceId: string, requiredGrant: Capability): Promise<BrokerCallContext> {
+    const sessions = (await this.options.store.snapshot()).sessions.filter(
+      (candidate) => candidate.pluginInstanceId === pluginInstanceId && candidate.phase === 'active',
+    );
+    if (sessions.length === 0) {
+      throw new HostBrokerError('INSTANCE_NOT_READY', `${pluginInstanceId} has no active Broker session`);
+    }
+    if (sessions.length !== 1) {
+      throw new HostBrokerError('BROKER_INVARIANT', `${pluginInstanceId} has multiple active Broker sessions`);
+    }
+    return this.currentCallContext(sessions[0].connectionId, requiredGrant);
   }
 
   async renewRuntimeLease(connectionId: string): Promise<number> {
@@ -735,7 +755,10 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   private sameGrants(left: readonly Capability[], right: readonly Capability[]): boolean {
-    return left.length === right.length && left.every((grant, index) => grant === right[index]);
+    if (left.length !== right.length) return false;
+    const sortedLeft = [...left].sort();
+    const sortedRight = [...right].sort();
+    return sortedLeft.every((grant, index) => grant === sortedRight[index]);
   }
 
   private async setInventoryRuntimeState(

@@ -25,17 +25,23 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import {
+  type M0CSnapshotInput,
+  type M0CSnapshotResult,
+  type MessageOutputEvent,
+  validateMessagingRowInput,
+} from '@clowder-ai/plugin-contract';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
-import { isInternalNonQuotableParent } from '../cats/services/stores/visibility.js';
 import type { PluginCallContext, ReadResult, SnapshotResult, SubscribeResult } from './contract/host-types.js';
-import { MessagingError } from './contract/host-types.js';
-import { projectEnvelope, readPluginMessageExtra } from './envelope.js';
+import { MessagingError, SnapshotUnavailableHostError } from './contract/host-types.js';
 import type { HandleService } from './handles.js';
-import type { CursorStore, EventLogStore, SubscriptionRecord } from './stores/ports.js';
+import { SnapshotCaptureCoordinator } from './snapshot-capture.js';
+import { assembleSnapshotPage, resultFits } from './snapshot-page-assembly.js';
+import { decodeSnapshotPageToken, encodeSnapshotAckToken, encodeSnapshotPageToken } from './snapshot-tokens.js';
+import type { CursorStore, EventLogStore, SnapshotViewRecord, SubscriptionRecord } from './stores/ports.js';
 
 export const DEFAULT_READ_LIMIT = 32;
 export const MAX_READ_LIMIT = 32;
-export const SNAPSHOT_MAX_ATTEMPTS = 3;
 
 export interface EventStreamDeps {
   readonly events: EventLogStore;
@@ -48,6 +54,7 @@ interface AckTokenPayload {
   readonly s: string;
   readonly q: number;
   readonly n: string;
+  readonly k?: 'snapshot';
 }
 
 function encodeAckToken(subscriptionId: string, sequence: number): string {
@@ -66,44 +73,38 @@ function decodeAckToken(token: string): AckTokenPayload {
     typeof parsed !== 'object' ||
     parsed === null ||
     typeof (parsed as Record<string, unknown>).s !== 'string' ||
+    typeof (parsed as Record<string, unknown>).n !== 'string' ||
     typeof (parsed as Record<string, unknown>).q !== 'number' ||
-    !Number.isInteger((parsed as Record<string, unknown>).q)
+    !Number.isInteger((parsed as Record<string, unknown>).q) ||
+    ((parsed as Record<string, unknown>).k !== undefined && (parsed as Record<string, unknown>).k !== 'snapshot')
   ) {
     throw new MessagingError('VALIDATION', 'malformed ack token');
   }
   return parsed as unknown as AckTokenPayload;
 }
 
-/**
- * Snapshot visibility (fail-closed, secondary filter after the plugin-owned
- * check): whisper, system/briefing plumbing, scheduler hidden triggers, and
- * A2A routing markers are host-internal — projecting them would fabricate
- * user_intent provenance for host machinery (C-1 provenance mapping).
- *
- * The primary domain boundary is enforced in snapshot() itself: only messages
- * with extra.pluginMessage (mutations tracked by the plugin event log) are
- * included. This filter handles the remaining visibility exclusions within
- * the plugin-owned set.
- */
-function isSnapshotVisible(msg: {
-  visibility?: string;
-  userId: string;
-  origin?: string;
-  extra?: { systemKind?: string; scheduler?: { hiddenTrigger?: boolean } };
-}): boolean {
-  if (msg.visibility === 'whisper') return false;
-  if (isInternalNonQuotableParent(msg as Parameters<typeof isInternalNonQuotableParent>[0])) return false;
-  if (msg.extra?.systemKind !== undefined) return false;
-  if (msg.extra?.scheduler?.hiddenTrigger) return false;
-  if (msg.userId === 'scheduler') return false;
-  return true;
+function assembleReadResult(subscriptionId: string, events: readonly MessageOutputEvent[]): ReadResult {
+  for (let count = events.length; count >= 1; count -= 1) {
+    const page = events.slice(0, count);
+    const last = page[page.length - 1];
+    if (!last) continue;
+    const result: ReadResult = {
+      events: page,
+      ackToken: encodeAckToken(subscriptionId, last.sequence),
+      stale: false,
+    };
+    if (resultFits('messaging.read', result)) return result;
+  }
+  throw new Error('messaging.read cannot encode one valid event within the published result budget');
 }
 
 export class EventStreamService {
   private readonly deps: EventStreamDeps;
+  private readonly snapshots: SnapshotCaptureCoordinator;
 
   constructor(deps: EventStreamDeps) {
     this.deps = deps;
+    this.snapshots = new SnapshotCaptureCoordinator(deps);
   }
 
   async subscribe(ctx: PluginCallContext, handleId: string): Promise<SubscribeResult> {
@@ -165,10 +166,11 @@ export class EventStreamService {
       return { events: [], ackToken: null, stale: true }; // INV-9: surface, never skip
     }
     if (events.length === 0) return { events: [], ackToken: null, stale: false };
-    const last = events[events.length - 1];
+    const result = assembleReadResult(subscriptionId, events);
+    const last = result.events[result.events.length - 1];
     const lastSequence = last ? last.sequence : sub.ackedSequence;
     await this.deps.cursors.advanceDelivered(ctx.pluginInstanceId, subscriptionId, lastSequence);
-    return { events, ackToken: encodeAckToken(subscriptionId, lastSequence), stale: false };
+    return result;
   }
 
   async ack(ctx: PluginCallContext, subscriptionId: string, token: string): Promise<void> {
@@ -176,6 +178,13 @@ export class EventStreamService {
     const payload = decodeAckToken(token);
     if (payload.s !== subscriptionId) {
       throw new MessagingError('PERMISSION', 'ack token belongs to a different subscription (INV-5)');
+    }
+    if (payload.k === 'snapshot') {
+      const outcome = await this.deps.cursors.ackSnapshot(ctx.pluginInstanceId, subscriptionId, payload.n, payload.q);
+      if (outcome === 'rejected') {
+        throw new MessagingError('PERMISSION', 'snapshot ack token is not an active entitlement');
+      }
+      return;
     }
     if (payload.q > sub.lastDeliveredSequence) {
       throw new MessagingError('PERMISSION', 'ack token sequence exceeds delivered watermark');
@@ -190,44 +199,131 @@ export class EventStreamService {
    */
   async snapshot(ctx: PluginCallContext, subscriptionId: string): Promise<SnapshotResult> {
     const sub = await this.requireLiveSubscription(ctx, subscriptionId);
-    for (let attempt = 0; attempt < SNAPSHOT_MAX_ATTEMPTS; attempt += 1) {
-      const headBefore = await this.deps.events.headSequence(sub.threadId);
-      const messages = await this.deps.messageStore.getByThreadAfter(sub.threadId);
-      const headAfter = await this.deps.events.headSequence(sub.threadId);
-      if (headBefore !== headAfter) continue;
+    const captured = await this.snapshots.captureInMemory(sub);
+    await this.deps.cursors.advanceDelivered(ctx.pluginInstanceId, subscriptionId, captured.headSequence);
+    await this.deps.cursors.advanceAck(ctx.pluginInstanceId, subscriptionId, captured.headSequence);
+    return { envelopes: captured.items, resumeSequence: captured.headSequence };
+  }
 
-      const envelopes = [];
-      let pendingOutput = false;
-      for (const msg of messages) {
-        // K-1 domain boundary: only plugin-owned messages whose mutations are
-        // represented by the plugin event log belong in the snapshot. Host
-        // user/cat messages have no corresponding plugin event, so the plugin
-        // event head cannot fence them against concurrent host mutations.
-        if (msg.extra?.pluginMessage === undefined) continue;
-        // Deleted/tombstoned messages are excluded before the fence check —
-        // a pending-output message that was deleted must not block the snapshot.
-        if (msg.deletedAt !== undefined || msg._tombstone) continue;
-        if (!isSnapshotVisible(msg)) continue;
-        const plugin = readPluginMessageExtra(msg);
-        if (
-          !plugin ||
-          plugin.outputRevision !== plugin.revision ||
-          plugin.outputSequence === undefined ||
-          plugin.outputSequence > headBefore
-        ) {
-          pendingOutput = true;
-          break;
-        }
-        const envelope = projectEnvelope(msg);
-        if (!envelope) continue;
-        envelopes.push(envelope);
-      }
-      if (pendingOutput) continue;
+  async snapshotPage(ctx: PluginCallContext, input: M0CSnapshotInput): Promise<M0CSnapshotResult> {
+    const validation = validateMessagingRowInput('messaging.snapshot', input);
+    if (!validation.valid) throw new MessagingError('VALIDATION', 'invalid snapshot page request');
+    const parsed = validation.value;
+    const sub = await this.requireLiveSubscription(ctx, parsed.subscriptionId);
+    const resolved = await this.resolveSnapshotView(ctx, parsed, sub);
+    if (resolved.replay) return this.replaySnapshotPage(ctx, parsed.subscriptionId, resolved.snapshot);
 
-      await this.deps.cursors.advanceDelivered(ctx.pluginInstanceId, subscriptionId, headBefore);
-      await this.deps.cursors.advanceAck(ctx.pluginInstanceId, subscriptionId, headBefore);
-      return { envelopes, resumeSequence: headBefore };
+    const { snapshot, offset, pageTokenId } = resolved;
+    if (offset > snapshot.itemCount) throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
+    const requestedCount = Math.min(parsed.maxItems, snapshot.itemCount - offset);
+    const availableItems = await this.readFrozenPage(ctx, parsed.subscriptionId, snapshot, offset, requestedCount);
+    const assembled = assembleSnapshotPage(parsed.subscriptionId, snapshot, offset, availableItems);
+    let consumed: boolean;
+    try {
+      consumed = await this.deps.cursors.consumeSnapshotPage(
+        ctx.pluginInstanceId,
+        parsed.subscriptionId,
+        snapshot.snapshotId,
+        { offset, ...(pageTokenId === undefined ? {} : { tokenId: pageTokenId }) },
+        {
+          offset: assembled.nextOffset,
+          ...(assembled.nextPageTokenId === undefined ? {} : { tokenId: assembled.nextPageTokenId }),
+          traversalComplete: assembled.traversalComplete,
+        },
+      );
+    } catch {
+      throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
     }
-    throw new MessagingError('RETRYABLE_INFLIGHT', 'snapshot raced an output mutation — retry later');
+    if (!consumed) throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
+    return assembled.result;
+  }
+
+  private async replaySnapshotPage(
+    ctx: PluginCallContext,
+    subscriptionId: string,
+    snapshot: SnapshotViewRecord,
+  ): Promise<M0CSnapshotResult> {
+    const offset = snapshot.lastPageOffset;
+    if (offset === undefined || offset > snapshot.nextOffset) {
+      throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+    }
+    const items = await this.readFrozenPage(ctx, subscriptionId, snapshot, offset, snapshot.nextOffset - offset);
+    let result: M0CSnapshotResult;
+    if (snapshot.traversalComplete) {
+      result = {
+        items,
+        nextPageToken: null,
+        snapshotAckToken: encodeSnapshotAckToken(subscriptionId, snapshot),
+      };
+    } else {
+      if (snapshot.nextPageTokenId === undefined) {
+        throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+      }
+      result = {
+        items,
+        nextPageToken: encodeSnapshotPageToken(
+          subscriptionId,
+          snapshot.snapshotId,
+          snapshot.nextOffset,
+          snapshot.nextPageTokenId,
+        ),
+        snapshotAckToken: null,
+      };
+    }
+    if (!resultFits('messaging.snapshot', result)) {
+      throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+    }
+    return result;
+  }
+
+  private async readFrozenPage(
+    ctx: PluginCallContext,
+    subscriptionId: string,
+    snapshot: SnapshotViewRecord,
+    offset: number,
+    count: number,
+  ): Promise<M0CSnapshotResult['items']> {
+    try {
+      const items = await this.deps.cursors.readSnapshotPage(
+        ctx.pluginInstanceId,
+        subscriptionId,
+        snapshot.snapshotId,
+        offset,
+        count,
+      );
+      if (!items || items.length !== count) throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+      return structuredClone(items);
+    } catch (error) {
+      if (error instanceof SnapshotUnavailableHostError) throw error;
+      throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+    }
+  }
+
+  private async resolveSnapshotView(
+    ctx: PluginCallContext,
+    input: M0CSnapshotInput,
+    sub: SubscriptionRecord,
+  ): Promise<
+    | { snapshot: SnapshotViewRecord; offset: number; pageTokenId?: string; replay?: false }
+    | { snapshot: SnapshotViewRecord; replay: true }
+  > {
+    if (input.pageToken !== undefined) {
+      const token = decodeSnapshotPageToken(input.pageToken);
+      if (token.s !== input.subscriptionId) {
+        throw new MessagingError('PERMISSION', 'snapshot page token belongs to a different subscription');
+      }
+      if (!sub.snapshotView || sub.snapshotView.snapshotId !== token.v) {
+        throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
+      }
+      return { snapshot: sub.snapshotView, offset: token.o, pageTokenId: token.n };
+    }
+    if (sub.snapshotView) {
+      return sub.snapshotView.lastPageOffset === undefined
+        ? { snapshot: sub.snapshotView, offset: 0 }
+        : { snapshot: sub.snapshotView, replay: true };
+    }
+
+    const snapshot = await this.snapshots.captureView(ctx, sub);
+    return snapshot.lastPageOffset === undefined ? { snapshot, offset: 0 } : { snapshot, replay: true };
   }
 }

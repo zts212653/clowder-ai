@@ -42,8 +42,8 @@
   "dependencies": {
     "@cat-cafe/shared": "workspace:*",
     "@clowder-ai/feishu-meeting-intake": "0.1.0-alpha.6",
-    "@clowder-ai/plugin-contract": "0.1.0-beta.9",
-    "@clowder-ai/plugin-sdk": "0.1.0-beta.5",
+    "@clowder-ai/plugin-contract": "0.1.0-beta.11",
+    "@clowder-ai/plugin-sdk": "0.1.0-beta.7",
     "@fastify/cookie": "9",
     "@fastify/cors": "^9.0.0",
     "@fastify/multipart": "8",

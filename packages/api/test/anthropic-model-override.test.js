@@ -142,7 +142,7 @@ describe('anthropic protocol model override from cat defaultModel', () => {
     );
   });
 
-  it('does NOT set MODEL_OVERRIDE when account has no models array', async () => {
+  it('uses the cat defaultModel even when the account has no models array', async () => {
     const root = await mkdtemp(join(tmpdir(), 'anthro-no-model-'));
     const apiDir = join(root, 'packages', 'api');
     const catCafeDir = join(root, '.cat-cafe');
@@ -231,8 +231,8 @@ describe('anthropic protocol model override from cat defaultModel', () => {
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE, 'api_key');
     assert.equal(
       callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE,
-      undefined,
-      'should NOT set MODEL_OVERRIDE when account has no models',
+      'claude-opus-4-6',
+      'the member model must not depend on account.models being populated',
     );
   });
 });

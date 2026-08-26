@@ -74,6 +74,7 @@ export function TextField({
   suggestions,
   required = false,
   tone = 'neutral',
+  ariaDescribedBy,
 }: {
   label: string;
   ariaLabel?: string;
@@ -84,6 +85,7 @@ export function TextField({
   suggestions?: readonly string[];
   required?: boolean;
   tone?: 'neutral' | 'success';
+  ariaDescribedBy?: string;
 }) {
   const listId = suggestions?.length
     ? `input-suggestions-${(ariaLabel ?? label).replace(/\s+/g, '-').toLowerCase()}`
@@ -96,6 +98,7 @@ export function TextField({
     <FieldShell label={label} required={required} tone={tone}>
       <input
         aria-label={ariaLabel ?? label}
+        aria-describedby={ariaDescribedBy}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={`w-full rounded-[10px] border px-3 py-1.5 text-compact leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:ring-1 ${inputColors}`}

@@ -88,7 +88,7 @@ async function expectCode(promise, code) {
 describe('AppendService — rejection paths (§4d)', () => {
   test('INV-10: baseRevision mismatch → CONFLICT with zero mutation', async () => {
     const sent = await sendMessage();
-    await expectCode(service.appendElements(CTX, appendInput(sent.handle, { baseRevision: 99 })), 'CONFLICT');
+    await expectCode(service.appendElements(CTX, appendInput(sent.messageHandle, { baseRevision: 99 })), 'CONFLICT');
     const stored = messageStore.getById(sent.messageId);
     assert.equal(stored.extra.pluginMessage.revision, 1);
     assert.equal(stored.extra.pluginMessage.elements.length, 1);
@@ -99,7 +99,7 @@ describe('AppendService — rejection paths (§4d)', () => {
     await expectCode(
       service.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'overwrite attempt' } }],
         }),
       ),
@@ -128,12 +128,12 @@ describe('AppendService — rejection paths (§4d)', () => {
       },
     });
     const crashy = new appendMod.AppendService({ messageStore, handles, ledger: crashyLedger, events, appendLock });
-    await assert.rejects(crashy.appendElements(CTX, appendInput(sent.handle)), /crash after append write/);
+    await assert.rejects(crashy.appendElements(CTX, appendInput(sent.messageHandle)), /crash after append write/);
 
     await expectCode(
       crashy.appendElements(
         CTX,
-        appendInput(sent.handle, {
+        appendInput(sent.messageHandle, {
           elements: [{ elementId: 'el-DIFFERENT', kind: 'text', payload: { text: 'not the applied operation' } }],
         }),
       ),
@@ -173,7 +173,7 @@ describe('AppendService — rejection paths (§4d)', () => {
       retentionCount: 1,
     });
     await assert.rejects(
-      crashy.appendElements(CTX, appendInput(sent.handle, { baseRevision: 1 })),
+      crashy.appendElements(CTX, appendInput(sent.messageHandle, { baseRevision: 1 })),
       /crash after append event/,
     );
     await events.append(
@@ -195,7 +195,7 @@ describe('AppendService — rejection paths (§4d)', () => {
       1,
     );
 
-    await crashy.appendElements(CTX, appendInput(sent.handle));
+    await crashy.appendElements(CTX, appendInput(sent.messageHandle));
     const [replayed] = await events.readAfter('thread-1', 0, 10);
     assert.equal(replayed.type, 'message.elements.append');
     assert.equal(replayed.baseRevision, 1);
@@ -244,7 +244,7 @@ describe('AppendService — rejection paths (§4d)', () => {
       appendLock,
     });
 
-    await expectCode(racing.appendElements(CTX, appendInput(sent.handle)), 'CONFLICT');
+    await expectCode(racing.appendElements(CTX, appendInput(sent.messageHandle)), 'CONFLICT');
     const stored = messageStore.getById(sent.messageId).extra.pluginMessage;
     assert.equal(stored.revision, 2);
     assert.ok(stored.elements.some((element) => element.elementId === 'el-successor'));
@@ -303,11 +303,11 @@ describe('AppendService — rejection paths (§4d)', () => {
       appendLock: expiringLock,
     });
 
-    const first = racing.appendElements(CTX, appendInput(sent.handle, { operationId: 'op-1' }));
+    const first = racing.appendElements(CTX, appendInput(sent.messageHandle, { operationId: 'op-1' }));
     await firstEventBlocked;
     const second = await racing.appendElements(
       CTX,
-      appendInput(sent.handle, {
+      appendInput(sent.messageHandle, {
         operationId: 'op-2',
         elements: [{ elementId: 'el-3', kind: 'text', payload: { text: 'successor' } }],
       }),

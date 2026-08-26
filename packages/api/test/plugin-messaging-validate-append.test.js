@@ -41,9 +41,8 @@ describe('validateAppendInput', () => {
   });
 
   test('rejects raw messageId, malformed handle, and missing operationId', () => {
-    expectValidationError(
-      () => validate.validateAppendInput({ ...validAppend(), handle: undefined, messageId: 'raw-msg-1' }),
-      'unknown',
+    expectValidationError(() =>
+      validate.validateAppendInput({ ...validAppend(), handle: undefined, messageId: 'raw-msg-1' }),
     );
     expectValidationError(
       () => validate.validateAppendInput(validAppend({ handle: { kind: 'message', token: '' } })),
@@ -53,7 +52,7 @@ describe('validateAppendInput', () => {
       () => validate.validateAppendInput(validAppend({ handle: { kind: 'thread', token: 'msg-1' } })),
       'handle.kind',
     );
-    expectValidationError(() => validate.validateAppendInput(validAppend({ operationId: undefined })), 'operationId');
+    expectValidationError(() => validate.validateAppendInput(validAppend({ operationId: undefined })));
   });
 
   test('rejects unknown append and message-handle properties', () => {

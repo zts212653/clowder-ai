@@ -59,9 +59,9 @@ function harness() {
 }
 
 describe('K-2A contract-native inventory', () => {
-  it('pins the API and runtime boundary to plugin-contract beta.9', () => {
-    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.9');
-    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.9');
+  it('pins the API and runtime boundary to plugin-contract beta.11', () => {
+    assert.equal(packageJson.dependencies['@clowder-ai/plugin-contract'], '0.1.0-beta.11');
+    assert.equal(PLUGIN_CONTRACT_PACKAGE_VERSION, '0.1.0-beta.11');
     assert.equal(PLUGIN_CONTRACT_VERSION, '0.1.0');
   });
 
