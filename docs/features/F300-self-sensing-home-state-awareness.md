@@ -12,7 +12,7 @@ description_updated_at: 2026-08-26T08:43:20Z
 
 # F300: Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长
 
-> **Status**: spec；product contract refreshed，runtime 未实现；maintainer convergence order frozen，R10 candidate content review pending
+> **Status**: spec；product contract refreshed，runtime 未实现；maintainer convergence order frozen，R10 candidate content review passed，maintainer wording acceptance pending
 > **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
 
 - **Original operator direction**: 2026-08-16/17（`0001786845058052`：“期待你们在运行过程中可感知到家里整个系统的情况……不是黑盒”）及后续三机制确认。
