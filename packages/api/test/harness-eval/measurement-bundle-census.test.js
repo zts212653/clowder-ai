@@ -66,18 +66,46 @@ describe('F267 real measurement bundle census', () => {
       active.map((entry) => entry.validityMigration.riskRank).sort((left, right) => left - right),
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     );
-    assert.deepEqual(
-      active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),
-      ['eval:memory'],
-    );
-    assert.equal(
-      census.entries.find((entry) => entry.domainId === 'eval:task-outcome')?.validityMigration.status,
-      'blocked_f275',
-    );
-    assert.equal(
-      census.entries.find((entry) => entry.domainId === 'eval:friction')?.validityMigration.status,
-      'certified_insufficient',
-    );
+    const assigned = active.filter((entry) => entry.validityMigration.batch !== null);
+    if (assigned.length === 0) {
+      assert.equal(
+        active.every(
+          (entry) =>
+            entry.validityMigration.status === 'unmigrated' &&
+            entry.validityMigration.batch === null &&
+            entry.validityMigration.certificateRef === null &&
+            entry.validityMigration.resultRef === null &&
+            entry.validityMigration.replayRef === null &&
+            entry.validityMigration.actionGate === 'keep_observe_only' &&
+            typeof entry.validityMigration.hardBlockReason === 'string' &&
+            entry.validityMigration.hardBlockReason.length > 0,
+        ),
+        true,
+        'a public bootstrap census must keep every active domain locked without inherited evidence',
+      );
+
+      const firstMigration = structuredClone(census);
+      const memoryMigration = firstMigration.entries.find(
+        (entry) => entry.domainId === 'eval:memory',
+      ).validityMigration;
+      assert.equal(memoryMigration.riskRank, 1);
+      memoryMigration.batch = 1;
+      memoryMigration.status = 'contract_ready';
+      assert.doesNotThrow(() => validateMeasurementBundleCensus(firstMigration, repoRoot));
+    } else {
+      assert.deepEqual(
+        active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),
+        ['eval:memory'],
+      );
+      assert.equal(
+        census.entries.find((entry) => entry.domainId === 'eval:task-outcome')?.validityMigration.status,
+        'blocked_f275',
+      );
+      assert.equal(
+        census.entries.find((entry) => entry.domainId === 'eval:friction')?.validityMigration.status,
+        'certified_insufficient',
+      );
+    }
     assert.equal(
       active.every((entry) => entry.validityMigration.actionGate === 'keep_observe_only'),
       true,
@@ -197,15 +225,18 @@ describe('F267 real measurement bundle census', () => {
     skippedBatch.entries.find((entry) => entry.domainId === 'eval:a2a').validityMigration.batch = 3;
     assert.throws(() => validateMeasurementBundleCensus(skippedBatch, repoRoot), /batch|risk rank/i);
 
-    const batchBeforeEvidence = loadCensus();
-    const anchorMigration = batchBeforeEvidence.entries.find(
-      (entry) => entry.domainId === 'eval:anchor-first',
+    const unmigratedBatch = loadCensus();
+    const unmigratedMemory = unmigratedBatch.entries.find(
+      (entry) => entry.domainId === 'eval:memory',
     ).validityMigration;
-    anchorMigration.status = 'unmigrated';
-    anchorMigration.certificateRef = null;
-    anchorMigration.resultRef = null;
-    anchorMigration.replayRef = null;
-    assert.throws(() => validateMeasurementBundleCensus(batchBeforeEvidence, repoRoot), /unmigrated.*batch/i);
+    unmigratedMemory.batch = 1;
+    unmigratedMemory.status = 'unmigrated';
+    unmigratedMemory.certificateRef = null;
+    unmigratedMemory.resultRef = null;
+    unmigratedMemory.replayRef = null;
+    unmigratedMemory.actionGate = 'keep_observe_only';
+    unmigratedMemory.hardBlockReason = 'Measurement validity has not been certified.';
+    assert.throws(() => validateMeasurementBundleCensus(unmigratedBatch, repoRoot), /unmigrated.*batch/i);
 
     const unsafeActionGate = loadCensus();
     const memoryMigration = unsafeActionGate.entries.find(
