@@ -29,7 +29,6 @@ doc_anchors:
   - docs/features/F202-plugin-framework.md
   - docs/features/F285-stackchan-physical-limb-plugin.md
   - docs/features/F247-cloud-cat-family.md
-  - docs/features/F300-self-sensing-home-state-awareness.md
 static_scan_hints: [PluginRegistry, PluginResourceActivator, ScheduleFactoryRegistry, PluginInventoryStore, HostBrokerControlPlane, HostBrokerStore, BrokerMethodHandler, IConversationHostAdapter, append_message, plugin.yaml, pluginId, plugin-owned, factoryId, schedule, PluginConfigPanel]
 cited_by:
   - {feature: F202, date: 2026-05-31, delta: new cell}
@@ -43,7 +42,6 @@ cited_by:
   - {feature: F202, date: 2026-08-10, delta: K-2B contract-native Broker sessions, durable call ledger, and typed signal-intake edge}
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
-  - {feature: F300, date: 2026-08-25, delta: plugin is one provider in the provider-neutral member/environment state model; plugin lifecycle/runtime and authority stay here while projection and self-management policy stay in self-sensing-management}
 ---
 
 # Plugin Framework
@@ -56,7 +54,7 @@ and activation of declared skill, MCP, limb, and schedule resources.
 
 F285 adds the external **official-plugin** seam without moving authority out of
 the Host. `clowder-ai-plugins` owns public contribution schemas, SDK/runtime
-primitives, conformance assets, and official plugin source. Cat Cafe owns
+primitives, conformance assets, and official plugin source. Clowder AI owns
 package admission, artifact identity, effective grants, runtime isolation,
 resource adapters, and the existing domain control planes that those adapters
 invoke. A plugin-declared contribution is a candidate resource, never proof of
@@ -72,7 +70,7 @@ composition constructs and restart-recovers these boundaries, but exposes no
 activation route and starts no package, so live runtime remains dormant.
 
 F292 keeps official-plugin policy and release metadata on opposite sides of the
-trust boundary. Cat Cafe statically owns catalog identity, package name, plugin
+trust boundary. Clowder AI statically owns catalog identity, package name, plugin
 identity, grants, owner-auth runner/domains, and the permitted release channel.
 Only a newer exact version, fixed-registry tarball, SHA512 integrity, and npm
 provenance may refresh from that channel. Refresh is a bounded process-local
@@ -87,7 +85,7 @@ the capability. A missing adapter fails closed; foreground browser/composer
 automation is a separate, explicitly enabled legacy transport.
 
 The personal Chrome path is one concrete, explicitly user-installed adapter
-behind that seam. Cat Cafe owns the authenticated local socket and pairing;
+behind that seam. Clowder AI owns the authenticated local socket and pairing;
 the Native Messaging helper owns native framing, durable idempotency settlement,
 and ambiguous-effect recovery; the extension owns the minimum-permission page
 operation and may settle success only from a DOM-provided Host message ID. The
@@ -95,7 +93,7 @@ adapter may be composed explicitly from a validated socket path and pairing
 secret, but that operator-only seam neither installs into a user's normal Chrome
 profile nor makes fixture selectors evidence of the live ChatGPT contract. Missing
 or partial configuration fails closed and cannot silently enable foreground control.
-Cat Cafe's owner-only `cloudCatBindings(threadId, catId)` remains route truth; it is
+Clowder AI's owner-only `cloudCatBindings(threadId, catId)` remains route truth; it is
 not copied into the extension/helper. Separately, the extension may authorize one
 exact open conversation only from the user's explicit “绑定此会话” action, and the
 helper persists that authorization in its private Host root. Append admission
@@ -103,28 +101,6 @@ requires the routed ID to match the authorization before ledger/browser effects.
 Missing authorization is typed `NEEDS_BINDING`; health checks, gates, retries, and
 delivery may inspect/reuse Host state but may not select, focus, navigate, reload,
 close, or restore owner tabs/windows.
-
-## Shared Touchpoints
-
-- `self-sensing-management` / F300 may read plugin identity, provisioning,
-  configuration, grants, readiness, health, and receipt-bearing execution facts
-  to project a provider-neutral capability into a member-private or team-shared
-  view. A plugin is one provider alongside builtin/member-native,
-  memory/context, thread/workspace, limb/tool, remote, and composite providers;
-  non-plugin capabilities do not enter this cell merely because F300 needs a
-  unified query language. F300 owns projection and authority-bounded management
-  policy, not plugin discovery, lifecycle mutation, authorization, supervision,
-  audit, or settlement. Catalog presence, manifest declaration, Settings
-  visibility, and an installed package never prove that a capability is
-  currently ready, applicable, authorized, or effective. F300 may request a
-  plugin mutation only through this cell's authorized command boundary and may
-  advance mutation-dependent projections only from this cell's receipt. F300's
-  first plugin-backed product slice is gated on this cell exposing separate
-  provisioning/configuration/authority/readiness/failure/recovery facts plus
-  receipt-bearing install/enable/configure/test/disable/uninstall/rollback
-  commands. That implementation-order dependency does not let F300 declare
-  plugin remediation complete or absorb plugin lifecycle; completion remains a
-  Plugin truth-owner/operator evidence decision.
 
 ## Use This When
 
@@ -207,12 +183,6 @@ close, or restore owner tabs/windows.
 - Do not treat ChatGPT conversation visibility in a desktop host as proof of an
   arbitrary-conversation append API, and do not use private endpoints to fill
   a missing official adapter.
-- Do not absorb F300 member/environment projections, visibility policy,
-  in-envelope management, proposal policy, or feedback semantics into plugin
-  lifecycle merely because one provider is a plugin. Do not route memory,
-  context, thread, builtin, member-native, or other non-plugin capabilities
-  through Plugin Manager. Conversely, F300 must not write plugin state except
-  through this cell's authorized commands and receipts.
 
 ## Static Scan Hints
 

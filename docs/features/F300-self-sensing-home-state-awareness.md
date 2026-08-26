@@ -1,572 +1,429 @@
 ---
 feature_ids: [F300]
-related_features: [F153, F220, F223, F233, F293, F296, F298, F299]
-topics: [self-sensing, self-management, member-state, team-state, environment-state, capability, availability, user-friction, capability-construction, interaction-adaptation, plugin-management, feedback-loop]
+related_features: [F153, F220, F223, F233, F246, F281, F293, F296, F298, F299]
+topics: [self-sensing, self-management, home-state, integration-policy, capability, availability, user-friction, interaction-adaptation, feedback-loop]
 doc_kind: spec
 created: 2026-08-17
-description: "成长型 Agent 如何认识自己与团队环境，从真实协作摩擦形成可拒绝改善方案，并在权限边界内完成能力构建、交互适配与反馈闭环"
+description: "Agent Self-Sensing & Self-Management：以薄旅程/集成合同选择相关 owner facts，并把摩擦、建议、owner 执行、首次真实使用和用户处置连成可验证改善闭环"
 description_source: human
-description_author: lang
-description_updated_at: 2026-08-26T04:03:00Z
+description_author: cat-eqdvbcxw
+description_updated_at: 2026-08-26T07:15:00Z
 ---
 
-# F300: Agent Self-Sensing & Self-Management — 从自我与团队认知到能力构建和交互共建
+# F300: Agent Self-Sensing & Self-Management — 薄旅程编排与家况感知
 
-> **Status**: spec（概念重新校准；运行时实现尚未开始） | **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
->
-> **Baseline**: `origin/main@dd86a802`（2026-08-25） | **本次变更**: 只刷新概念、边界、现状与分阶段路线，不实现运行时代码
+> **Status**: spec；source contract 已按产品目标重校准，runtime 未实现，source review pending
+> **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
 
-- **operator direction（`0001787628299553-000287-d2731687`）**: 成熟 Agent 应自行感知能做什么、不能做什么、当前运行到哪里与出了什么问题；用户不应承担能力发现、状态追问和日常运维。F300 尚无对应 runtime 实现，因此总体合同可以重写，原 Home-State 内容只保留为一个实现切片。
-- **operator correction（`0001787630815635-000364-84224743`）**: F300 最关心的是 Agent 自身能力与状态边界的统一抽象；Plugin 只覆盖插件式 provider，memory、context、thread、成员运行等大量能力并不是插件。Self-Sensing / Self-Management 必须同时包含成员自己的私有认知，以及所有成员可用的团队共享认知，让成长型协作伙伴知道自己具有什么、做过什么、能做什么，也知道团队环境里有什么可用。
-- **operator product direction（`0001787716986266-000439-d91c1b16`）**: F300 后续要承载这块能力的具体产品目标与设计；概念已经明确，不能只留下架构摘要。实现可以等待 Plugin 整改完成后启动，但文档现在必须写清完整体验闭环、首个产品纵切与启动门槛。
-- **design reference**: PR [#1356](https://github.com/zts212653/clowder-ai/pull/1356) exact HEAD [`5ebc9058a`](https://github.com/zts212653/clowder-ai/blob/5ebc9058a83ab0293716c26feed30cb561e669f0/docs/architecture/message-delivery-handling-handoff-audit.md) 提供 Stop Agent、exact Agent Client、terminal、Active Run 与公开投影的 owner 边界。它仍是 open RFC，且明确有三项产品语义等待 maintainer/product decision；F300 不把它冒充 `main` 已实现事实，只复用“动作、canonical terminal、共享投影必须分层”的设计原则。
-- **Canonical product narrative**: 本文的[产品目标与完整闭环](#产品目标能力增长但用户心智负担不增长)、[两种可见性平面](#1-两种可见性平面成员自己的与团队共享的)、[统一状态模型](#2-统一的-member--environment-state-model)、[产品设计合同](#产品设计合同能力怎样进入用户的工作方式)与[分阶段路线](#6-分阶段实现路线)
-
-## Architecture Ownership & Delta Evidence
-
-Architecture cell: `self-sensing-management`（相邻：`plugin`、`routing-context`、`identity-session`、`dispatch`、`message-history`）
-
-Map delta: 更新 [`self-sensing-management`](../architecture/ownership/cells/self-sensing-management.md) 的 canonical contract，并保持 [`plugin`](../architecture/ownership/cells/plugin.md) 仅为 provider/lifecycle owner。
-
-Why: F300 拥有 provider-neutral 的 Member/Environment State Model、私有与团队共享投影语义、evidence-bounded friction hypothesis，以及从 grounded state 到 authority-bounded management、能力构建、交互适配和反馈校准的协调政策；每个原始事实和动作仍由原 canonical domain 持有。
-
-Consumer evidence: `rg -n 'MemberSelfView|MemberPublicProjection|TeamSharedView|EnvironmentStateView|SelfStateProjection|HomeStateDeltaV1|affects_current_obligation|affects_next_side_effect|InteractionEpisode|FrictionHypothesis|GroundedProposal' packages -g '*.{ts,tsx,mjs}'` 在 `origin/main@dd86a802` 无匹配，因此当前没有 F300 runtime consumer；完整守望集与 architecture cell 的 `static_scan_hints` 对齐。
-
-Claim guard: “F300 只有架构真相、runtime 尚未实现，且没有复制相邻 owner 状态” → runtime symbol absence + ownership generator clean + feature truth check；出现 symbol 却未登记 owner/callsite，或出现跨 plugin/memory/context/thread/runtime 的中心影子账本即 red。
+- **Original operator direction**: 2026-08-16/17（`0001786845058052`：“期待你们在运行过程中可感知到家里整个系统的情况……不是黑盒”）及后续三机制确认。
+- **Product direction**: 2026-08-25/26（`0001787716986266-000439-d91c1b16`）：F300 后续承载这块完整产品目标和设计；概念已经清楚，Plugin 整改完成后即可启动首个 plugin-backed 纵切，因此 source 必须先写清。
+- **Recalibration evidence**: clowder-ai PR #1391 maintainer design audit（comment `5421892668`）：保留完整产品旅程，但把 F300 收敛为薄 journey/integration owner，不建立超级状态系统或第二真相。
+- **Architecture cells**: 不新增 `self-sensing-management` cell。F300 只跨 `routing-context`、`identity-session`、`approval-index`、`human-disposition-feedback` 等现有 owner 组织集成政策和只读关联视图。
+- **Map delta**: none。首个纵切完成前没有新的 runtime ownership cell；若以后证明需要稳定公共能力，最多登记 integration policy 与 read-only adapters，不能接管来源事实。
 
 ## 一句话定义
 
-**Self-Sensing** 是 Agent 对“我是谁、我有什么、我在做什么、我做过什么、我能做与不能做什么”“团队成员和共享环境现在提供什么”，以及“当前协作为什么值得改变”的有依据认知；**Self-Management** 是它据此维护自身状态、形成可解释改善方案，并在用户决定和既有权限边界内完成能力构建、交互适配与反馈校准。
+**F300 让 Agent 在行动前后读到“此刻与当前协作真正相关”的 owner facts，识别自己能力、可用性和交互摩擦，再沿已有 authority/owner 把候选改善带到第一次真实使用与用户处置；它拥有相关性与旅程验收，不拥有来源事实、通用状态本体或业务变更权。**
 
-F300 的目标不是一张更大的状态页，也不是让一只猫收到更多广播。它要让每个成员拥有一份持续更新、分清私有与共享、能指回 canonical owner 的工作模型，从而成为会认识自己、理解团队环境并能自我调整的成长型协作伙伴。
+## Why：从“人替 Agent 维护系统认知”倒置为 Agent 自己感知
 
-## Why：成长型伙伴不能靠用户充当外置自我意识
+| 今天由用户被迫承担 | F300 希望 Agent 自己承担 |
+|---|---|
+| 取消后反复提醒“别再喊那只猫” | 在相关副作用前感知 authoritative cancellation，并阻止旧动作 |
+| 一只只试猫，猜哪些猫共用同一配额桶 | 读取 owner 提供的 quota topology，一次判断可用性 |
+| 先调用语音工具，失败后才知道插件或权限没准备好 | 在使用前读取 Plugin / permission / device readiness |
+| 发现某个交互总要重复纠正，却只能每次临时补一句 | 识别 friction evidence，提出可解释、可撤回的改善候选 |
+| 为了得到更顺手的体验，自己充当产品经理拼接插件、权限、界面和偏好 | Agent 组织跨 owner 改善旅程；用户只在必要的授权、选择和处置点介入 |
 
-当前系统已经有很多局部真相：Agent Client 知道 exact run，custody 知道责任，Plugin Manager 知道插件生命周期，memory/context owner 知道可访问范围，thread owner 知道协作空间，runtime owner 知道健康与资源。但这些事实没有形成 Agent 可查询、可解释、可用于决策的统一认知。
+产品目标不只是“Agent 多知道一个状态”，而是让系统形成一条有边界、可验证的改善路径：
 
-结果是本应由 Agent 承担的工作倒置给了用户：
+~~~text
+摩擦证据
+  → 读取相关 owner facts
+  → 判断为什么现在相关
+  → 形成 owner-backed 候选
+  → 复用既有用户决定 / authority
+  → 原 owner 执行并给 receipt
+  → 在真实 surface 使用
+  → 第一次真实使用证据
+  → 用户保留 / 调整 / 忽略 / 撤回
+~~~
 
-| 用户被迫承担的工作 | 成熟 Agent 应承担的责任 |
-|--------------------|------------------------|
-| 反复问“你现在跑到哪儿了、是不是停了” | 知道自己的 exact obligation、活动状态、最近结果、阻塞与下一判断点 |
-| 先发现某个成员已经停止，再提醒其他成员 | 从共享成员投影知道谁可用、谁在工作、谁已终局，不向已失效运行继续交付 |
-| 偶然发现“原来你有/没有这项能力” | 认识自身能力、限制、authority、当前 readiness 与替代 provider |
-| 替 Agent 记住 memory/context 是否存在、够不够、还新不新 | 知道自己可访问哪些记忆与上下文、覆盖范围、预算、freshness 和缺口 |
-| 替团队盘点有哪些 thread、工具、插件、成员和共享资源 | 读取团队环境的可用对象、能力、状态和边界 |
-| 替 Agent 安装、启停、恢复或降级 | 在已有 authority 内调用 owner 完成管理并核对 receipt；需要扩权时再提案 |
-| 忍受反复出现的摩擦，再自己寻找功能、插件、设置或教程 | 从当前协作中的可解释证据形成待确认的摩擦假设，把合适能力带回原任务现场 |
-| 安装后再自己摸索“从哪里用、以后去哪里管、到底有没有改善” | 同步完成交互适配，让用户立即真实使用，并按反馈保留、调整、关闭或回滚 |
+“State”是这条路径的认知底座，但单独拥有更多 state 不等于产品目标完成。
 
-这不是“让 Agent 看见所有东西”。真正的团队里，成员既有只有自己可见的工作记忆和局部状态，也有团队共同依赖的公开状态。F300 必须把两者分开，否则不是泄漏私有认知，就是让协作伙伴互相成为黑盒。
+## 0. Phase 0 只冻结四条不变量
 
-## 产品目标：能力增长，但用户心智负担不增长
+在任何 schema、adapter 或 UI 之前，F300 只要求所有实现共同遵守：
 
-Agent 产品的能力可以通过 builtin、memory/context、thread operation、plugin、limb/tool 或 remote connector 持续增长；人的发现、理解、启用和管理带宽却不会同步增长。大而全的固定界面把选择成本交给用户，固定极简只服务平均用户，Chat-only 又会让已经稳定的操作每次重新付出描述和确认成本。
+1. **Source facts remain at owners**：来源事实留在原 owner；F300 不复制成第二账本。
+2. **F300 selects relevant facts**：F300 只选择对当前 obligation、下一副作用或当前改善旅程真正相关的事实。
+3. **Mutation goes to owners**：所有改变仍通过原 owner 的命令、权限与 receipt；F300 不因“感知到”而获得写权。
+4. **User-visible improvement requires first real use + disposition**：只有经历第一次真实使用，并获得用户的保留、调整、忽略或撤回处置，才算用户可见改善闭环。
 
-F300 的产品目标不是让产品“变化更多”，而是让能力持续增长时，用户不必成为能力目录、运行监控和产品配置器：每一次改善都回应当前真实摩擦，引用当前可信能力状态，经过正确的决定与授权，并在原任务里立即证明是否有效。
+这四条是不依赖具体媒介的长期产品合同。Phase 0 不冻结“大一统 self-state schema”、完整 facet 枚举、跨域状态机或新 canonical episode。
 
-系统、Agent 与用户的长期关系固定为：
+## 1. F300 拥有什么、不拥有什么
 
-> **系统提供权威事实和受治理的执行边界；Agent 基于自感知提出并落实改善；用户决定哪些能力和交互进入自己的长期工作方式。**
+### 1.1 薄 owner 边界
 
-### 三种感知共同形成判断依据
+F300 拥有：
 
-| 感知维度 | 回答的问题 | 典型证据 | 不能退化成 |
-|----------|------------|----------|------------|
-| **Self-Capability Management** | 我原则上会什么、不会什么？输入输出、风险、成本和 provider 边界是什么？ | capability contract、F223、builtin/plugin/limb/tool owner | capability 名称、按钮或 tool registration |
-| **Self-Availability Management** | 这项能力此刻是否已 provisioned、configured、authorized、ready、applicable？ | owner lifecycle/runtime fact、route/quota/health、最近 verification | manifest、旧成功记录或单一 `enabled` |
-| **User-Friction Sense** | 当前协作里，为什么现在值得改变？变化是否真的降低了阻力？ | 用户直接表达、当前任务中的失败/重试/绕行、受范围约束的 interaction evidence 与即时反馈 | 持续监控、用户画像、健康/人格/长期意图推断 |
+- **Relevance policy**：哪些 owner facts 与此刻的 obligation / next side effect / improvement candidate 相关，以及 `whyNow`。
+- **Read policy**：成员范围与被授权共享范围下，允许读取哪些来源引用；拒绝默认全家广播。
+- **Thin envelope**：跨 owner 传递引用、新鲜度和可见性所需的最小公共外壳。
+- **M1 / M2 / M3 integration policy**：行动前查证、相关 delta、按需快照如何互补。
+- **Refs-only journey correlation**：把既有 evidence、proposal、decision、receipt、surface、first-use 与 disposition 引用关联起来，便于验收和追责。
+- **Effectiveness decision**：一条改善旅程是否真的到达首次使用、是否减少摩擦，以及用户最终如何处置。
 
-`User-Friction Sense` 感知的是 Agent 自己提供的能力与交互在当前协作中的效果，不是“理解用户的一切”。一次停顿、输入量或模型直觉只能成为待确认假设；它们既不是事实，也不是授权。
+F300 不拥有：
 
-三种感知是形成判断的维度；§1 的 facets 是 Member Self View 的内容轴。Capability / availability 由这些 facets 与 Team Shared / Environment facts 共同支持，而 friction 是当前协作的有界效果信号，不进入成员自我状态 facets。
+- 通用 `SelfStateProjection` 本体、全局 self-state graph 或 `subject × facet × visibility × state` 的组合空间；
+- capability、quota、custody、plugin readiness、permission、preference、surface 等 typed domain payload；
+- 新的 canonical `InteractionEpisode`、`GroundedProposal` 或另一套 proposal / approval / feedback 状态机；
+- “Capability Construction”或“Interaction Adaptation”两个新的 F300 子系统——它们是产品旅程步骤，事实与 mutation 仍归原 owner；
+- 私有/共享双份 store、presentation ledger、command receipt store 或 retention ledger；
+- 仅凭推断、摩擦或“为了用户好”绕过 authority 的能力。
 
-### 两个耦合结果
+### 1.2 三种感知是判断维度，不是状态本体
 
-- **Capability Construction**：发现、匹配、组合、安装/启用、配置、授权、就绪校验、失败恢复、停用或 provider 迁移。
-- **Interaction Adaptation**：解释为什么建议、选择合适媒介、提供使用入口与状态、安排召回和管理路径，并让一次试用在用户确认后稳定为习惯。
+| 判断维度 | Agent 要回答的问题 | 典型 owner facts | 不能被误读为 |
+|---|---|---|---|
+| **Capability Sense** | 我会不会做、能力来自哪里、适用边界是什么？ | core capability、Plugin/Limb registry、tool contract、技能声明 | “tool 名存在”或“UI 看得到”就等于能用 |
+| **Availability Sense** | 此刻能不能做；配额、权限、依赖、设备和运行健康是否允许？ | quota topology、custody、permission、provider/Plugin/runtime readiness | 安装过就等于 ready；stale/unknown 就等于 available |
+| **User-Friction Sense** | 我提供的能力与交互，在当前协作中是否反复让用户解释、等待、切换或纠正？ | 用户显式反馈、重复纠正、失败回执、任务/交互证据 | 诊断用户、推断人格或把所有不满永久画像化 |
 
-二者缺一不可。只构建能力，不适配交互，用户仍不知道能力从哪里用、现在能否用、以后在哪里管理；只改变交互，不读取能力真相，产品会用漂亮入口掩盖未授权、未就绪或已经降级的能力。
+三种感知是**判断问题**；owner payload 是答案来源。它们不要求 F300 再复制一套 capability/availability/friction facets。尤其 friction 是当前协作中的效果信号，不是“用户状态”或“Agent 内在状态”。
 
-### 完整反馈闭环
+`installed ≠ enabled ≠ authorized ≠ reachable ≠ healthy ≠ appropriate now`。实现必须保留这些 owner-defined 差异，不能压成一个含糊布尔值。
 
-```text
-FRICTION EVIDENCE
-  → SENSE self + team + environment
-  → MATCH capability + availability + current task
-  → GROUNDED PROPOSAL
-  → USER DECISION / REQUIRED AUTHORITY
-  → CAPABILITY CONSTRUCTION
-  → INTERACTION ADAPTATION
-  → IMMEDIATE REAL USE
-  → FRICTION / OUTCOME FEEDBACK
-  → RETAIN | EDIT | DISMISS | REVERT
-  → calibrate the next sensing cycle
-```
+## 2. 两种读取策略，而不是两个数据平面
 
-F300 不以“发出建议”“安装成功”“组件渲染”或“工具调用过一次”作为终点。面向用户改善的最小可追责单元是一个 **Interaction Episode**：它必须能从摩擦证据一路指回 capability match、用户决定、owner receipt、首次真实动作和结果反馈。没有用户决定不得越过 proposal；没有首次真实成功不能宣称改善成立；没有恢复路径不能把一次候选固化为长期习惯。
+### 2.1 Member-scoped read
 
-Interaction Episode 不是 F300 的底层状态对象，也不取代 Member/Environment State Model；但对于“能力和交互是否真的变好了”这一产品问题，它是首要体验验收单元。
+Agent 为自己的当前 obligation 做判断时，只读取该 principal 被授权访问、且与当前动作相关的 owner facts。用途包括：
 
-## 1. 两种可见性平面：成员自己的与团队共享的
+- 我是否仍持有这个球；
+- 我在当前 provider / quota / Plugin 条件下是否可执行；
+- 我是否需要在产生外部副作用前重新查证；
+- 我刚才的交互是否出现了可验证 friction。
 
-### 1.1 Member Self View：成员自己的自我模型
+### 2.2 Authorized-shared read
 
-每个 Agent 对自己的认知可以比团队共享投影更细，但仍必须来自 owner truth，而不是模型凭感觉自报：
+团队协作确实需要共享时，读取由原 owner 已明确授权给相关成员/线程的引用。例如共享 quota pool、同一 cancellation subject 或团队已接受的 surface 配置。
 
-| Facet | 成员需要知道什么 | 典型事实来源 |
-|-------|------------------|--------------|
-| Identity & membership | 我是谁、属于哪个家庭/团队/线程、当前角色和责任边界 | identity/session、membership、thread owners |
-| Capability & limits | 我会什么、不会什么、有哪些 provider、输入输出与风险边界 | builtin contracts、F223、plugin/limb/tool owners |
-| Activity & responsibility | 我正在做什么、接过什么、完成/失败/取消了什么、下一责任是什么 | obligation/custody、InvocationRecord、TurnExecution、F299 trajectory |
-| Availability & health | 当前是否可运行，依赖、route、quota、runtime 是否满足 | execution/liveness、route/preflight、runtime/quota owners |
-| Memory & context | 我能访问哪些记忆/上下文，覆盖到哪里、是否 compact/stale、还缺什么 | memory owner、context/session owner、F296 presentation receipt |
-| Authority & policy | 我能自行采取哪些动作，哪些需要新增授权或价值判断 | grants/policy/authority owners |
+### 2.3 边界
 
-“成员自己的”不等于把 chain-of-thought、凭据或无界原始数据存成 F300 资产。F300 只定义可用于任务判断的 typed view；内容读取、保留、压缩和权限继续归 memory/context owner。
+Member-scoped 与 authorized-shared 是**同一组 canonical owner facts 上的读取策略**：
 
-### 1.2 Team Shared View：所有成员可依赖的团队认知
+- 不是 private store 与 shared store；
+- 不是所有私有事实都会晋升为共享；
+- 不是 F300 创建新的团队广播通道；
+- visibility 只表达读取边界，不转移事实所有权；
+- F296 可负责 presentation/delivery，但“被显示/被注入”不改变 canonical owner。
 
-团队共享平面包含两类东西：
+## 3. 最小跨 owner 外壳
 
-1. **Member Public Projection**：成员身份、可协作能力、当前 availability、公开 obligation/活动阶段、已发布结果与显式阻塞；
-2. **Environment State View**：团队空间中可用的 thread、共享 artifact、memory/knowledge surface、builtin/plugin/limb/tool、connector、runtime、额度与其他资源。
+F300 只冻结足以引用事实并判断新鲜度的薄 envelope：
 
-“共享”表示在同一团队和 authority 范围内可查询、可订阅或被投影，不等于把全部事实广播进每只猫的 prompt。成员只在接受任务、选择协作者、执行副作用、处理状态变化或显式查看时获取相关投影；共享投影可以比 owner truth 粗，但不能与 owner truth 矛盾。
-
-团队共享平面禁止暴露：成员私有 memory/context 正文、凭据、未发布草稿、内部推理、无关用户数据，或超出接收者 authority 的资源细节。它可以表达“memory capability 当前不可用”或“共享知识库含某 artifact”，不能因此公开私有内容。
-
-### 1.3 两个平面的关系
-
-```text
-CANONICAL DOMAIN FACTS
-  ├─ member-private projection ──→ exact member's Self View
-  └─ team-shareable projection ─→ Member Public Projection
-                                 + Environment State View
-
-JUDGMENT POINT
-  → query relevant private + shared projections
-  → decide within current authority
-  → canonical owner command
-  → owner receipt / terminal
-  → projections update
-```
-
-同一个变化可能只更新私有平面，也可能产生团队共享投影；选择由事实 owner、visibility policy 与当前 authority 共同决定，不能由 F300 猜测。
-
-## 2. 统一的 Member / Environment State Model
-
-### 2.1 统一的是语义，不是把全家状态复制进一张表
-
-F300 需要 provider-neutral 的 typed projection，使 Agent 能用同一种语言询问 member、capability、obligation、memory/context 与 environment，而不把这些 owner 的状态机合并：
-
-```ts
-type SelfStateProjection = Readonly<{
-  subject: {
-    kind: 'member' | 'capability' | 'obligation' | 'thread' | 'memory' | 'context' | 'resource';
-    ref: string;
-  };
-  facet: 'identity' | 'capability' | 'activity' | 'availability' | 'memory_context' | 'authority' | 'health';
-  visibility: 'member_private' | 'team_shared';
-  state: 'known' | 'unknown' | 'stale' | 'conflicted' | 'unavailable';
-  valueRef?: string;
+~~~ts
+type SensingFactEnvelopeV1 = Readonly<{
+  subjectRef: string;
+  ownerRef: string;
   sourceRefs: readonly string[];
   revision: string;
-  observedAt: number;
-  expiresAt?: number;
-  invalidators: readonly { owner: string; ref: string }[];
+  freshness: Readonly<{
+    observedAt: number;
+    expiresAt?: number;
+    invalidators: readonly { ownerRef: string; ref: string }[];
+  }>;
+  visibility: 'member_private' | 'authorized_shared';
 }>;
-```
+~~~
 
-这是方向性 contract，不是已经获批的数据结构。`valueRef` 指向 owner-owned fact 或受权 projection；F300 不把原始 message、memory body、plugin ledger、thread record 或 runtime state 复制进中心 store。
+- **Typed payload belongs to the owner**：F300 不规定每个 owner 的 payload union，也不把 domain 状态反序列化成万能 schema。
+- `sourceRefs` 必须可回到 canonical truth；摘要或 projection 不得自称 source。
+- 取消、权限、authority 等副作用前置事实必须按 owner 规则实时回源；可缓存项过期后只能是 `unknown`。
+- `visibility` 只约束读取，不授予 mutation。
+- envelope 可以被 transport/presentation 包裹，但不能替代 F296 的 receipt/ledger，也不能让 MessageStore/UI toast 冒充“模型已看见”。
 
-### 2.2 Capability 不能等同于 Plugin，也不能压成 `enabled`
+## 4. 三种互补送达机制
 
-能力 provider 至少包括：Agent-native/builtin、memory、context、thread/workspace operation、plugin、local limb/tool、remote connector，以及这些 provider 的组合。Plugin Manager 只拥有 plugin/package 这一类 provider 的生命周期。
+### M1 — Authoritative preflight
 
-每项能力至少分开：
+在下一次不可忽略的副作用前，按 exact `subjectRef` 向 owner 重读 authoritative truth。典型例子：
 
-| 维度 | 回答的问题 |
-|------|------------|
-| Identity | 这是哪一种稳定能力？provider 更换后是否仍是同一能力？ |
-| Provider | builtin、member-native、memory/context、thread、plugin、limb、remote 或组合？ |
-| Provisioning | provider 是否存在、安装或可取得？ |
-| Configuration | 配置是否完整、版本是否兼容？ |
-| Authority | 当前成员是否获准在这个 scope 使用或改变它？ |
-| Runtime readiness | 依赖、健康、route、quota 与资源此刻是否满足？ |
-| Applicability | 是否适用于当前任务、成员、环境和时刻？ |
-| Effectiveness | 是否真实完成过目标，结果是否仍可信？ |
-| Visibility | 仅成员自己可知，还是团队可依赖？共享到什么粒度？ |
+- 为同一 obligation 再次 @/dispatch 前查 cancellation/custody；
+- 使用语音、摄像头或物理 Limb 前查 permission + runtime readiness；
+- 选择一只猫前查 family/shared-pool quota topology。
 
-因此 `installed ≠ configured ≠ authorized ≠ ready ≠ applicable ≠ effective`；“我能创建 thread”“我能查询某类 memory”“团队有语音能力”和“某插件已安装”是不同事实。
+`unknown` 不得被当成“可以继续”。M1 与旧 M2 冲突时 M1 获胜。
 
-### 2.3 动作、事实与投影必须分开
+### M2 — Relevant delta
 
-| 用户/Agent 动作 | Canonical owner 产生的事实 | F300 可形成的认知 |
-|-----------------|--------------------------|-------------------|
-| Stop 某成员的 exact run | Agent Client terminal、bubble/result、Active Run 释放、owner disposition | 自己知道 run 已取消；其他成员在相关判断读取“该成员不再执行该 obligation” |
-| 新建 thread | thread owner 的新 thread、membership 与 authority receipt | 团队环境出现一个可用协作空间；受邀成员知道其可访问性 |
-| 启动/启用一项能力 | capability owner 的 activation/readiness receipt | 成员私有或团队共享 capability projection 更新 |
-| 卸载一个 plugin | Plugin Manager lifecycle receipt；受影响 provider 失效 | 由该 plugin 提供的能力变为 degraded/unavailable，其他 provider 不被误伤 |
-| memory/context compact、缺失或恢复 | memory/context owner 的 coverage、budget、freshness 与 access fact | 成员知道自己还记得/可读什么、哪里有缺口；团队只见允许共享的 capability/status |
+owner fact 变化且会影响当前 obligation / next side effect 时，F300 admission 为相关 delta，由 F296 负责 epoch-aware presentation、重验证、去重和 provider receipt。
 
-F300 统一这些变化的读模型与管理闭环，不统一它们的写 API。动作请求、canonical outcome 和 derived projection 是三个不同对象。
+~~~ts
+type HomeStateDeltaV1 = Readonly<{
+  fact: SensingFactEnvelopeV1;
+  consumerScope: { threadId: string; catIds: readonly string[] };
+  whyNow: 'affects_current_obligation' | 'affects_next_side_effect';
+}>;
+~~~
 
-## 3. 成员停止后，团队如何正确感知
+M2 不向 active generation 随意插入半句话；只在 provider 已证明安全的边界呈现，否则留到下一 invocation。M2 是否及时到达不替代 M1。
 
-当前文档先前把“取消一只猫，全家在相关判断点知道”写成 Primary journey，这是错误坐标：它暗示 cancellation delta 是 F300 的中心机制，并容易退化为一次全家广播。
+### M3 — Pull snapshot
 
-PR #1356 给出更合理的分层：
+Agent 需要规划或解释时，按 scope 拉取一组 refs-only snapshot。snapshot 只组合 owner references、新鲜度和相关性；不复制 typed truth，不建立长期中心账本。
 
-1. Stop 只选择操作边界上仍 live 的 exact Agent Client run；
-2. Agent Client 产生唯一 canonical `canceled` terminal，原位终局公开 bubble，并释放 exact Active Run；
-3. delivery/history/execution/custody owner 各自维护事实，F300 不另写一个 `cat_stopped` 真相；
-4. 其他成员在任务接续、选择 target、查看团队状态或副作用前，从 Team Shared View 读取由这些事实组成的粗粒度公开投影；
-5. 投影只说明可证明的含义，例如“B 不再执行 obligation X”或“B 当前无 live Agent run”，不能越级声称 provider 已读、责任已完成或成员永久不可用。
+M1/M2/M3 随 Phase 1 的 Home-State 机制纵切落地，并在后续完整产品旅程中复用。它们不是必须等 Plugin 整改才能开始的部分。
 
-这也解释了 F300 与 #1356 的关系：#1356 负责消息/运行如何 canonical 收敛，F300 负责 Agent 在自己的判断中如何认识这个结果。若 #1356 的产品提案尚未获批，F300 只能依赖最终落地的 owner contract，不能复制它的候选状态机。
+## 5. 产品改善旅程：完整，但不接管原 owner
 
-## 4. Self-Management：维护自身状态，也推动受权的产品改善
+| 旅程阶段 | F300 的工作 | Canonical owner / authority |
+|---|---|---|
+| 1. Friction evidence | 选择与 Agent 自己提供的能力/交互相关的证据，记录 `whyNow` | message/task/history、失败 receipt、用户显式反馈等原证据 owner |
+| 2. Sense relevant facts | 通过 M1/M2/M3 读取能力、可用性和当前摩擦所需引用 | capability/Plugin/runtime/quota/custody/permission 等各 owner |
+| 3. Match opportunity | 判断“哪项可用能力可能减少哪项摩擦”，保留不确定性与反证 | F300 relevance policy；不产生新 domain fact |
+| 4. Owner-backed proposal | 让能执行的 producer 形成可审查候选，而非 F300 发明万能 proposal | F246 approval index 与现有 producer proposal |
+| 5. User decision / authority | 复用既有授权；低风险可逆项也必须遵守原 owner policy | F281 `HumanDispositionDecisionEpisode`、原 permission/approval owner |
+| 6. Owner mutation + receipt | 将命令送回原 owner；成功、失败和 partial 都由 owner receipt 证明 | Plugin、permission、preference、surface、runtime 等 owner |
+| 7. Surface adaptation | 把已获授权且有 receipt 的结果呈现在正确 surface | F223 capability surface 与对应 surface owner |
+| 8. First real use | 在真实任务中观察这次改善是否真的被使用，而非“配置成功”即宣称有效 | task/message/session/surface evidence owner |
+| 9. Feedback & disposition | 用户保留、调整、忽略或撤回；必要时回滚到 owner | F281 feedback/disposition + preference/retention owner |
 
-Self-Management 包含两条互补回路。第一条是持续运行所需的**状态维护回路**：
+### 5.1 Refs-only correlation / acceptance view
 
-```text
-SENSE private + shared state
-  → compare obligation / desired state / constraints
-  → choose management action
-      ├─ within existing authority
-      │    → continue / retry / reroute / recover / degrade / stop / compose capability
-      └─ needs new authority or value choice
-           → rejectable proposal → explicit user decision
-  → canonical owner command
-  → receipt / terminal
-  → verify actual state and update projections
-```
+为回答“这条改善从哪里来、做到哪一步、是否真的有用”，F300 可以维护短生命周期、可重建的关联视图：
 
-- 既有 policy/scope/budget 内的例行恢复、改道、降级和安全停止不应反复询问用户。
-- 新增权限、扩大数据或副作用 scope、不可逆动作、持久偏好和价值取舍必须进入可拒绝提案。
-- F300 可以决定“现在需要什么变化”，但安装、授权、thread mutation、memory mutation、runtime cancel 等仍由各 canonical owner 执行。
+~~~ts
+type SelfManagementJourneyRefsV1 = Readonly<{
+  frictionEvidenceRefs: readonly string[];
+  sensingFactRefs: readonly string[];
+  proposalRef?: string;
+  decisionRef?: string;
+  commandReceiptRefs: readonly string[];
+  surfaceRef?: string;
+  firstUseEvidenceRef?: string;
+  dispositionRef?: string;
+}>;
+~~~
 
-第二条是面向能力成长与协作体验的**产品改善回路**：当 User-Friction Sense 形成有依据的假设时，F300 将相关 private/shared state、capability match、authority、风险、成本与恢复路径组织成可拒绝 proposal；用户决定后，再协调 canonical owner 完成能力构建，并让 Dynamic Interaction / surface owner 交付对应的交互适配。首次真实使用和后续反馈决定这次变化保留、编辑、关闭还是回滚。
+它只关联引用：
 
-两条回路不能混为一谈：维持既有运行不应处处打断用户；改变用户的权限、成本、主要输入输出方式、注意力或长期习惯又不能借“自管理”静默完成。Interaction Episode 不是基础状态模型，却是产品改善回路的可追责容器和体验验收单位。
+- 不成为 canonical `InteractionEpisode`；
+- 不成为 canonical `GroundedProposal`；
+- 不复制 proposal、decision、receipt、surface episode 或 retention 状态；
+- 缺失任一关键引用时，验收视图必须如实显示“尚未完成”，不能用文字摘要补齐证据。
 
-## 产品设计合同：能力怎样进入用户的工作方式
+### 5.2 产品设计合同
 
-F300 后续会承载具体产品设计，但这里冻结的是跨媒介、跨 provider 的稳定体验语义，不预先冻结某张页面或某个组件。视觉 UI、CLI、语音和后台能力可以有不同表达，下面五条合同不能随媒介漂移。
+1. **每个能力都有出生证**：能力来自哪里、谁拥有、当前能否使用、需要什么权限、失败怎么恢复。
+2. **事实与呈现分层**：owner fact、presentation、模型 receipt、用户看到的 UI 状态是四件不同的事；任何一层都不能冒充另一层。
+3. **注意力与证据成比例**：一次偶发摩擦先低打扰观察；重复、明确且可行动的摩擦才提升为候选；需要权限或不可逆时必须显式请求。
+4. **候选先于定型**：先生成可解释、可拒绝、可撤回的改善候选；不要因一次推断永久改变 Agent 或用户。
+5. **用户塑造体验，而不是被迫做产品设计**：用户表达目标、纠正和处置；Agent 负责查事实、组织 owner、解释影响并验证真实效果。
 
-### 变化必须有因果来源
+## 6. Plugin gate 是 voice slice-local gate
 
-每一次主动建议、临时工作面、稳定入口、通知或默认行为变化，都必须回答“它由什么出生”：
+Plugin 完整改只阻塞**依赖 Plugin 的语音首纵切**。它不阻塞：
 
-| 来源 | 可以产生的交互 | 生命周期 |
-|------|----------------|----------|
-| 当前任务、运行对象或审批 | 临时工作面、状态和下一动作 | 随对象终局退出，可从历史召回 |
-| 已确认并已就绪的稳定能力 | 可预测入口与管理路径 | 能力降级时原位解释，不伪装可用 |
-| 需要注意的结构化事件或摩擦假设 | 低成本信号、解释或可拒绝 proposal | 处理、拒绝、过期后收敛，不自动变成长期习惯 |
-| 用户直接编辑或确认的候选变化 | 个人布局、触发方式、确认强度或默认媒介 | 可撤销、可恢复默认、可追溯决定 |
+- cancellation/custody 的 M1/M2/M3；
+- refs-only Home-State projection contract；
+- 非 Plugin owner 的只读 adapter；
+- 不依赖 Plugin 的 capability/friction slice；
+- source contract、tests 和 acceptance fixtures。
 
-答不出 evidence、决定者、期限和恢复路径的变化，没有资格进入产品。
+进入 plugin-backed voice journey 前，必须由 Plugin truth owner/operator 提供可验证证据：
 
-### 能力事实与交互投影分层
+1. 安装、启用、权限、runtime readiness 和失败原因可区分；
+2. provider/Plugin capability 有稳定 owner ref 与可查询 typed truth；
+3. microphone 等敏感权限必须由用户亲授，F300 不能代授权；
+4. 调用成功/失败/取消都有 owner receipt，且 UI/presentation 不冒充执行成功；
+5. uninstall/disable/revoke 后相关 proposal、surface 与 retained preference 能失效或回滚。
 
-能力 ready 但当前没有常驻入口，不代表能力不存在；入口可见但能力未授权、未就绪或已经降级，也不代表它可用。所有 surface 必须投影同一份 capability、authority、receipt 和 episode truth：
+F300 可以判断这些证据是否满足 voice slice entry criteria，但**无权宣布 Plugin 全域整改完成**。
 
-| 能力事实 | 交互表达 | 用户与 Agent 应理解什么 |
-|----------|----------|--------------------------|
-| ready，入口已配置 | 可直接调用 | 当前可用，并有稳定管理路径 |
-| 未 ready，入口已配置 | 原位降级、等待或解释 | 入口存在，但现在不能可靠使用 |
-| ready，无常驻入口 | 搜索、命令、对话、策略或相关时刻召回 | 系统会做，不等于必须一直显示 |
-| unsupported / activation failed | 明确原因、恢复或替代方案 | 不伪装成功，不把失败隐藏到下一次调用 |
+## 7. Phases
 
-### 越主动占用注意力，所需依据越强
+### Phase 0 — Thin source contract
 
-默认体验可以克制，但隐藏不能等于失联。普通状态用低成本信号；用户明确请求、已确认的变化、无法继续推进的判断点，或 policy 明确允许的恢复动作，才可以主动展开。被隐藏或关闭的能力仍需稳定、可预测的召回与管理路径。随机 tips、无关推荐和模型“觉得有用”不构成主动打断依据。
+- 冻结四条不变量、薄 envelope、owner map、Plugin slice-local gate。
+- 删除/禁止通用 self-state ontology、新 canonical episode/proposal 与过宽 ownership cell。
+- source truth 必须先落地；publication 只能镜像同源合同，并在合入前对其 exact HEAD 做非作者内容 review。
 
-### 候选先于长期定型
+### Phase 1 — Home-State mechanism slice
 
-Agent 发起的能力或交互变化应先成为真实、可试用、可拒绝且可回滚的候选。能力装配与交互定型是两个决定：用户可以同意一次试用，但不同意修改默认输入方式；也可以保留能力，却隐藏长期入口。拒绝、超时、断线、权限失败或再次进入，都必须回到上一个已确认状态或给出明确恢复路径。
+- 用取消例完成 M1 authoritative preflight + M2 relevant delta + M3 refs-only snapshot。
+- 保留 F296 provider receipt / presentation ledger、F298 durability 与原 custody owner 边界。
+- 可并行补 quota topology、非 Plugin runtime readiness adapter。
 
-### 用户可以直接塑造，但不承担系统设计
+### Phase 2 — First complete product journey: voice
 
-用户可以选择显露程度、入口位置、触发方式、确认强度、默认媒介和打扰策略，并撤销或恢复默认。系统仍负责提供受约束的组件、语义、样式、权限防线和可用性基线；用户组合的是可信积木，不是被迫成为产品经理和工程师。可复用、可分享的是受权的交互偏好，不是发送者的凭据、安装状态、运行对象或私有数据。
+- Plugin gate 满足后，用“反复打字摩擦 → 语音候选 → 亲授麦克风 → owner receipt → 首次真实使用 → 用户处置”跑通完整旅程。
+- 语音是第一个完整纵切，因为它能同时验证 capability、availability、friction、authority、surface 与 rollback；它不是永久架构中心。
 
-## 5. 系统边界与最新 `main` 真相
+### Phase 3 — Heterogeneous proof
 
-### 5.1 Owner 边界
+- 至少再跑一条不同 owner、不同媒介的纵切，例如取消协作、配额路由、桌面 surface 或通知注意力调整。
+- 只有两个异质纵切都重复出现的结构，才有资格从 journey-local 代码提升为稳定 integration adapter。
 
-| 领域 | Canonical owner | F300 责任 |
-|------|-----------------|-----------|
-| Member identity/membership/session | identity/session、thread membership owners | 形成受权的 member-private / team-shared projection |
-| Exact execution, Stop, terminal, liveness | Agent Client、TurnExecution/InvocationRecord、execution owners | 解释活动/availability；不另写 execution 状态机 |
-| Custody/obligation/handoff | F233 与 structured protocol owners | 解释当前责任与历史；不从聊天猜 holder |
-| Memory/context | memory、context/session、F296 owners | 表达 access/coverage/freshness/limit；不复制正文或 ledger |
-| Thread/artifact/team environment | thread、workspace、artifact owners | 构造环境可用性投影；不接管 CRUD |
-| Plugin/package | plugin cell / Plugin Manager | 把 plugin 视为 capability provider；生命周期和 receipt 仍归 plugin |
-| Capability surface/verification | F223 / surface registry | 关联 provider-neutral capability identity；不以 UI 存在证明可用 |
-| Route/runtime/quota/health | F293、F153 与 runtime owners | 在判断点查询 freshness-aware fact |
-| Presentation/delivery | F296、message/history/surface owners | 决定哪些 F300 projection 与当前判断相关；不造第二 delivery channel |
-| User expression / interaction evidence | message、history、surface 与具体任务 owner | 形成当前协作范围内可解释、可撤回的 friction hypothesis；不改写原始事件，不建用户画像 |
-| Dynamic Interaction / preference surfaces | 对话、Hub、CLI、voice 与 preference/retention owners | 定义 capability/episode truth 如何进入当前媒介；长期偏好只能由用户决定并交原 owner 保存 |
+### Phase 4 — Feedback and retention
 
-### 5.2 `origin/main@dd86a802` 现状
-
-| 能力块 | 当前状态 | 与 F300 的关系 |
-|--------|----------|---------------|
-| Promise durability / custody / trajectory | 已有多项基础 | 提供 obligation、responsibility 与历史事实，不等于 Agent 已形成自我模型 |
-| Context presentation/delivery | 部分落地 | 可承载相关投影；仍没有 Member Self / Team Shared contract |
-| Plugin management runtime | 已有实质基础 | 只覆盖 plugin provider，不能代表 builtin、memory、context、thread 或 member-native 能力 |
-| Capability surface registry | 已有 registry 基础 | 描述入口和验证面，不是完整 capability/state graph |
-| Route/execution/runtime facts | 分散存在 | 缺 provider-neutral、visibility-aware、freshness-aware 的查询投影 |
-| PR #1356 lifecycle RFC | open proposal，非 `main` truth | 可作为 exact Stop/terminal/projection 边界参考，不能宣称已实现 |
-| Friction / proposal / episode runtime | **未实现** | 没有 evidence-bounded friction hypothesis、grounded proposal 或 end-to-end Interaction Episode coordinator |
-| F300 runtime | **未实现** | 没有 Member Self View、Team Shared View、Environment State View 或 self-management coordinator；不存在完整产品纵切 |
-
-## 6. 分阶段实现路线
-
-实现顺序遵循“先证明一次完整改善，再从体验证据抽取通用合同”。不能先做一个覆盖所有 provider、所有媒介和所有团队状态的平台，再等待产品价值出现；也不能只做漂亮 Demo，绕过 canonical owner、authority 和失败恢复。
-
-### Phase 0 — 冻结概念与 owner map（本次文档）
-
-- 冻结三种感知、两个耦合结果、完整反馈闭环与 Interaction Episode 成功定义。
-- 冻结成员私有 / 团队共享两个可见性平面，以及 provider-neutral Member / Environment State Model。
-- 冻结能力事实、authority、交互投影和用户长期习惯之间的产品设计合同。
-- 明确 Plugin、memory/context、thread、runtime、delivery、friction evidence 与 surface owner 边界。
-- 记录 Plugin 整改完成前不启动 F300 runtime，但不把 Plugin 误写成 F300 的全部能力边界。
-
-### Phase 1 — 首个完整产品纵切
-
-- 在 Plugin 启动门槛通过后，选择一项 plugin-backed、需要用户决定且能在原任务立即验证的能力完成端到端 episode。语音输入是当前 reference journey，但不是 F300 对某个 provider 或媒介的永久绑定。
-- 同一纵切必须同时经过 friction evidence、capability/availability sensing、proposal、用户决定、plugin owner command/receipt、interaction adaptation、first successful action 与 feedback/rollback。
-- 只实现该纵切所需的最小 projection 和 adapter；缺失字段以 typed unknown 暴露，不用 mock truth、UI state 或 prompt 约定补齐。
-- 纵切失败必须能区分：匹配错误、用户拒绝、权限未授予、plugin activation/configuration/runtime failure、surface failure、真实动作失败与“能力可用但没有降低摩擦”。
-
-### Phase 2 — Projection Contract & Owner Adapters
-
-- 从首纵切提取 subject/facet/visibility/provenance/freshness/invalidator 的 typed projection contract。
-- 为 identity、execution、custody、memory/context、thread/environment 与多类 capability provider 建立只读 owner adapters。
-- 不建立中心 shadow ledger；query 结果可缓存，但必须由 revision/expiry/invalidator 约束。
-- 用 contract tests 证明同一事实不会被 F300、Plugin、History 或 UI 多头写入。
-
-### Phase 3 — Member Self View + Team Shared View
-
-- 让成员在接任务和关键判断点知道自己的 identity、capability、limits、obligation、activity、availability、memory/context 与 authority。
-- 形成成员公开投影与团队环境投影：谁可协作、谁在工作、共享空间/能力/资源有哪些、当前是否可用。
-- 支持“我不知道 / 已过期 / 相互冲突”的明确表达与回源；“做过什么”来自 durable trajectory/result，不靠模型复述聊天。
-- 以相关 query/subscription/context projection 替代全家广播。
-- 用 Stop exact run、新 thread、provider 卸载与 memory/context compact 四类异质纵切验证同一个状态模型。
-
-### Phase 4 — Generalized Self-Management & Interaction Adaptation
-
-- 把首纵切的协调政策扩展到 builtin、memory/context、thread/workspace、limb/tool、remote 与 composite provider。
-- 从 private + shared state 与 friction evidence 选择继续、恢复、组合、降级、停止或形成 proposal。
-- 所有 mutation 交给 canonical owner，并以 receipt/terminal 校准实际状态。
-- 新 authority/value choice 走可拒绝提案；现有 authority 内动作不让用户代运维。
-- 用视觉、CLI、语音或后台能力中的至少两个差异媒介反证：交互语义不依赖某个按钮、页面或话术。
-
-### Phase 5 — Growing Partner Feedback
-
-- 用任务结果、首次真实动作、摩擦变化、恢复质量、误判、协作可见性和用户负担变化验证自管理效果。
-- 学到的稳定能力/偏好只经其 retention/authority owner 保存；不建立无界人格或行为画像。
-- 支持 provider 迁移、权限撤回、memory/context 恢复和状态模型纠错。
-
-## 7. Plugin 启动门槛与首纵切完成定义
-
-co-creator 已明确：F300 runtime 在 Plugin 完整整改完成后开始。这里的“Plugin 完成”不是看某个 PR、页面或安装按钮存在，而是由 Plugin truth owner / operator 明确宣布整改完成，并且首纵切所需的以下合同都有可验证证据：
-
-1. **多轴状态可查询**：provider identity、provisioning、configuration、authority、runtime readiness、failure/degraded reason 与 revision/freshness 可以分别读取；不能只返回 `enabled`。
-2. **命令与 receipt 单写**：install/enable/configure/test/disable/uninstall/rollback 只经 Plugin canonical command 边界执行，并返回可关联到 exact plugin/provider 的 receipt。
-3. **失败和恢复真实**：权限拒绝、配置错误、Host Broker/runtime 不可达、重启 rehydrate、禁用与回滚都有稳定语义；“命令被接受”不冒充 ready。
-4. **F300 只读接缝成立**：F300 能通过 owner adapter 查询与发出 intent，不读取 Plugin 私有 store、不从 Settings UI 反推状态，也不建立第二 lifecycle ledger。
-5. **能力身份不绑死插件**：reference journey 可以由 plugin provider 实现，但 capability identity、episode 和交互偏好能与 provider identity 分离。
-
-门槛通过表示“可以开始实现 F300”，不表示 F300 已完成。首纵切只有同时满足以下条件才算产品上闭环：
-
-- 用户能理解 Agent 为什么此刻提出改善、需要什么权限/成本、会改变什么以及怎样撤回；
-- 用户可以接受、编辑或拒绝，沉默和打开卡片都不算授权；
-- 能力由 canonical owner 真正进入 ready，交互入口/状态/管理路径与事实一致；
-- 用户在原任务里立即完成第一次真实动作，而不是离开现场重新查教程；
-- 结果反馈能让用户保留、调整、关闭或回滚，并成为下一轮 Self-Sensing 的校准证据。
+- 通过现有 feedback/disposition/preference owners 完成保留、调整、忽略、撤回和失效。
+- 用 first-use evidence 判断“真的减少摩擦”，而不是把配置或 UI 出现当成成功。
 
 ## User Journey
 
-Primary journey 证明完整产品闭环；supporting slices 证明同一套 Member / Environment State Model 能跨事实域成立。它们不能各自建立状态机。
+### Primary Journey：不用反复打字，Agent 帮我把语音带到真实使用
 
-### Primary — 从“打字太累”到第一次真实语音输入
+- **Scope unit**: member + current thread；共享只发生在 owner 已授权的引用上
+- **Actor**: 用户 + Agent；用户拥有权限与最终处置权
+- **Entry**: 用户在持续协作中多次表达“打字累/想说话”，或出现可验证的重复输入摩擦
+- **Flow**:
+  1. Agent 把明确表达、重复纠正或输入中断识别为 **friction candidate**；它描述交互效果，不诊断用户健康或人格。
+  2. Agent 读取相关 owner facts：当前是否有语音能力、Plugin/runtime 是否 ready、设备与权限状态、当前 surface 能否承载。
+  3. 若证据不足或不可用，Agent 说明缺口并继续原任务；不展示一个注定失败的“快捷入口”。
+  4. 若证据充分，Agent 提出 owner-backed 候选：“要不要在这个协作里试一次语音输入”，说明影响、权限、失败恢复和可撤回性。
+  5. 用户接受后，麦克风权限仍由用户亲授；拒绝或忽略不会被当作隐式同意。
+  6. Plugin / permission / surface owner 执行并返回 receipts；失败时原位说明哪个 owner、哪一步失败，且原任务仍可继续。
+  7. surface 出现可用语音入口；Agent 不把“按钮出现”当成能力已生效。
+  8. 用户在真实任务中说出下一条内容，系统成功将其带回原任务——这是第一次真实使用证据。
+  9. 用户可保留、调整适用范围、暂时忽略或撤回；相应 owner 更新或回滚，F300 只关联 disposition ref。
+- **Success evidence**: proposal、decision、permission/Plugin receipts、surface ref、真实语音输入回到原任务、最终 disposition 全部可追溯；任一缺失都不能宣称闭环。
+- **Failure semantics**: permission denied、Plugin unavailable、device missing、provider failure、surface failure、first-use failure 分开表达；绝不诊断健康，绝不静默扩大权限。
 
-语音只是当前最容易同时暴露能力、插件、系统权限、交互入口和即时反馈的 reference journey；验收对象是闭环，不是语音功能本身。
+### Mechanism Journey：取消一只猫，全家在相关判断点知道
 
-1. 用户直接说“今天打字太多了，手很累”，或当前文字协作中出现反复、可解释的输入摩擦；Agent 只形成待确认假设，不诊断健康问题。
-2. Agent 查询 voice capability 的稳定 contract、当前 provider、Plugin provisioning/configuration、麦克风 authority、runtime readiness 与当前媒介适用性。
-3. 如果事实缺失、过期或冲突，Agent 明说不知道并回源；如果能力不可行，不为了完成 Demo 仍然建议。
-4. Agent 解释观察到的摩擦、为什么语音可能改善、需要安装/启用什么、哪些步骤可自动完成、哪些系统权限必须用户亲授，以及以后从哪里管理或关闭。
-5. 用户接受、编辑或拒绝 proposal；拒绝立即终止且不降低后续服务质量，接受只授权已明确的 capability/scope/interaction candidate。
-6. F300 把受权 intent 交给 Plugin / permission / surface canonical owner；每一步以 receipt 推进，失败原位解释并提供恢复或回滚。
-7. 能力 ready 后，当前媒介出现清楚的语音入口、状态和管理路径；入口存在不反向证明能力 ready。
-8. 用户不离开当前任务，立即说出下一条消息并看到它进入当前对话；这次动作成功才进入 `first-successful-action`。
-9. 用户根据当场体验保留、调整入口/确认方式、关闭能力或完整回滚；结果成为下一轮 sensing 的反馈，而不是无界用户画像。
+1. 用户取消某个 invocation/obligation，canonical custody owner 写入事实。
+2. F300 只对受影响的 thread/cats admission M2 delta；F296 负责送达与 provider receipt。
+3. 猫在同一 subject 上准备再次 @/dispatch 前执行 M1；若 cancelled 则阻止，若 unknown 则 fail closed。
+4. 用户在原动作位置看见 recorded / pending / presented / failed-or-unknown；只有 provider receipt 才能写 presented。
+5. 新 subject 的无关工作不继承旧 cancellation。
 
-### Supporting A — 成员停止，其他成员在相关判断中知道
+### Supporting Journeys
 
-1. 用户 Stop B 的 exact run；execution owner 走 canonical cancel/terminal。
-2. B 的 Member Self View 反映该 obligation 已 canceled/terminal。
-3. A 在准备 handoff、选 target 或承接任务时查询 Team Shared View，得到“B 不再执行 obligation X”的 source-backed projection。
-4. A 不向旧 run 继续交付；若 B 有新 run 或仍可接受新工作，不能被旧 cancel 污染。
-5. 不向全家广播 raw cancel payload，不由 F300 伪造 terminal。
+| ID | 判断维度 | 旅程 | 预期证据 |
+|---|---|---|---|
+| S1 | Availability | @ Ragdoll 前读取 shared-pool quota topology，一次判断替代逐只试错 | owner topology ref + M1 result |
+| S2 | Capability + Availability | 想用某个非语音 Plugin/Limb 时先读 capability、authorization 与 runtime readiness | owner refs + typed unknown/degraded reason |
+| S3 | Friction | 某 surface 被连续关闭/撤回，Agent 降低注意力或提出可拒绝调整 | repeated evidence refs + existing disposition + later first-use/absence evidence |
 
-### Supporting B — 新 thread / capability / plugin 变化进入团队环境
+## 需求点 Checklist
 
-1. canonical owner 创建 thread、启动能力或卸载 plugin，并返回 receipt。
-2. Environment State View 更新相应对象、visibility 与 readiness。
-3. 受权成员能发现新 thread/能力；无权成员看不到敏感细节。
-4. plugin 卸载只使其 provider 失效；稳定 capability identity 可切到其他 provider，不能把所有能力等同于 plugin。
+| ID | 需求点 | AC | 验证 |
+|---|---|---|---|
+| R1 | F300 是薄旅程/集成 owner，不建立新 ontology 或第二真相 | AC-0.1–0.4 | source diff + ownership review |
+| R2 | M1/M2/M3 保留并复用 canonical owner facts | AC-1.1–1.5 | contract/integration tests |
+| R3 | 完整产品旅程到 first real use + disposition，而非止于 proposal/config | AC-2.1–2.6 | voice journey evidence manifest |
+| R4 | Plugin 整改只 gate plugin-backed voice slice | AC-G1–G4 | gate evidence + independent non-plugin fixtures |
+| R5 | private/shared 是读取策略，authority/visibility/mutation 不混淆 | AC-0.2、AC-2.3 | authorization fixtures |
+| R6 | 抽象必须由异质纵切证明，不以文档枚举先造超级系统 | AC-3.1–3.3 | two-slice comparison |
 
-### Supporting C — Memory / Context 自感知
+## Acceptance Criteria
 
-1. Agent 在任务开始和 context 变化后知道可访问 memory/context 的范围、freshness、预算和缺口。
-2. compact、session rollover 或 retrieval failure 后不假装仍完整记得；必要时回源、降级或向用户解释。
-3. 团队共享平面只投影允许共享的 knowledge artifact/capability/status，不公开成员私有正文。
+### Phase 0：Source contract
 
-### Supporting D — 旧 Home-State Awareness（投影机制）
+- [x] **AC-0.1**: source 明确只冻结四条不变量，并删除“完整 state ontology 是先决条件”的方向
+- [x] **AC-0.2**: Member-scoped / authorized-shared 被定义为读取策略，不是两个 store/data plane；visibility 不授 mutation
+- [x] **AC-0.3**: 薄 envelope 仅含 `subjectRef / ownerRef / sourceRefs / revision / freshness / visibility`，typed payload 留在 owner
+- [x] **AC-0.4**: F300 不拥有 canonical proposal、decision/surface/interaction episode、command receipt 或 retention truth；refs-only view 缺证据时不得补写结论
+- [ ] **AC-0.5**: publication exact HEAD 经非作者内容 review 通过，并有 continuity evidence 证明其 F300 合同与已落地 source 同源
+- [x] **AC-0.6**: 不新增 `self-sensing-management` ownership cell；source Feature Truth 与 ROADMAP 同步
 
-旧 F300 的 M1/M2/M3 保留为“某个 canonical state 影响当前 obligation/下一副作用”时的 delivery/preflight 机制，不再代表 F300 全貌：
+### Phase 1：M1/M2/M3
 
-- **M1 authoritative preflight**：副作用前按 exact subject 回源；`unknown` 在高风险动作上 fail closed。
-- **M2 relevant canonical delta**：F300 判 relevance，F296 负责 presentation/dedupe/receipt；不新建第二 delivery channel。
-- **M3 typed snapshot**：引用 owner fact、revision、freshness 与 invalidator，不复制中心账本。
+- [ ] **AC-1.1**: cancellation M1 按 exact subject 回源；cancelled 阻止同 obligation 动作，unknown fail closed，无关新 subject 不受污染
+- [ ] **AC-1.2**: M2 缺 exact consumer scope、why-now、revision、freshness 或 source refs 即拒绝
+- [ ] **AC-1.3**: F296 负责 epoch-aware presentation、dedupe 与 provider receipt；F300 不建第二 channel/ledger
+- [ ] **AC-1.4**: M3 snapshot 只组合 owner refs；stale/expired 显示 unknown，不拼接推断
+- [ ] **AC-1.5**: quota/plugin/runtime 等 adapter 分别保留 owner typed states，不压成通用 bool
 
-`HomeStateDeltaV1` 若继续实现，应成为 `SelfStateProjection` 的一种 delivery envelope，而不是 cancellation 专用状态机。
+### Plugin-backed voice entry gate
 
-M1/M2/M3 随 Phase 2 projection contract 落地，并在 Phase 3 的 Stop / provider / memory 等纵切中复用，不再让未来实现者自行猜测 phase 归属。
+- [ ] **AC-G1**: Plugin truth owner 提供 installed/enabled/authorized/reachable/healthy 的可区分证据与 stable owner refs
+- [ ] **AC-G2**: microphone 权限由用户亲授；拒绝/撤回有 typed result，不产生隐式同意
+- [ ] **AC-G3**: Plugin invocation 与 surface mutation 均有 owner receipts，失败原因可定位
+- [ ] **AC-G4**: disable/uninstall/revoke 后 proposal/surface/preference 能按原 owner 规则失效或回滚；该 gate 不阻塞 Phase 1 与非 Plugin slice
 
-### Supporting E — 跨媒介适配与用户定型
+### Phase 2：完整 voice 产品旅程
 
-同一项能力分别通过视觉、CLI、语音或后台策略中的至少两种媒介表达：状态、authority 与 receipt 含义保持一致；入口形态、注意力成本和反馈方式可以不同。用户可以只接受一次试用、不改变默认媒介；也可以保留能力但隐藏入口，并始终能从稳定路径召回、管理或恢复默认。
+- [ ] **AC-2.1**: friction evidence 只描述 Agent 能力/交互效果，不诊断用户；候选可解释、可拒绝、可撤回
+- [ ] **AC-2.2**: capability + availability refs 能支持 why-now；证据不足时继续原任务而不是诱导失败
+- [ ] **AC-2.3**: proposal、user decision/authority、owner commands 与 receipts 逐段可追溯，无 silent authority expansion
+- [ ] **AC-2.4**: surface 出现不等于成功；首次真实语音输入必须回到原任务并留下 owner evidence
+- [ ] **AC-2.5**: permission denied、Plugin unavailable、device missing、provider failure、surface failure、first-use failure 六类失败分别验收
+- [ ] **AC-2.6**: 用户可保留、调整、忽略或撤回；F300 只引用 existing disposition/preference/retention truth
 
-## 8. Acceptance Criteria
+### Phase 3–4：异质证明与反馈
 
-### Phase 0 — Architecture truth
+- [ ] **AC-3.1**: 至少两个不同 owner、不同媒介纵切完成，语音不是永久绑定
+- [ ] **AC-3.2**: 任何提升为 shared integration adapter 的结构都有两条异质纵切证据；否则留在 journey-local
+- [ ] **AC-3.3**: effectiveness 由 first-use + disposition / later evidence 判定，proposal accepted、config written 或 UI rendered 都不能单独记成功
 
-- [x] AC-0.1: 文档同时定义 capability、availability、friction 三种感知，以及 capability construction、interaction adaptation 两个耦合结果
-- [x] AC-0.2: 文档区分 Member Self View 与 Team Shared View，并把成员公开投影和团队环境放入共享平面
-- [x] AC-0.3: 文档覆盖 plugin 之外的 builtin、member-native、memory、context、thread/workspace、limb/tool 与 remote provider
-- [x] AC-0.4: 文档区分动作、canonical fact/terminal、derived projection 与 Interaction Episode；统一语义不等于中心 shadow ledger
-- [x] AC-0.5: 文档冻结 friction→proposal→decision→construction/adaptation→immediate use→feedback 的完整产品闭环、跨媒介设计合同与 Plugin 启动门槛
-- [x] AC-0.6: 本轮产品合同扩写由非作者完成 exact-HEAD 内容审阅；旧 R6 approval 不跨实质语义变化复用
+## Existing owner map
 
-### Plugin kickoff gate
+| Truth / action | Existing owner | F300 只做 |
+|---|---|---|
+| custody / cancellation | F233/F293 对应 custody/routing owner | relevance + M1/M2 refs |
+| execution lifecycle | F220/runtime owner | read refs；不改状态机 |
+| runtime health | F153 | relevance + typed adapter |
+| context presentation / model receipt | F296 | 提供 admitted delta；消费 receipt |
+| durability / wake admission | F298 | 依赖其寿命证据 |
+| capability / surface | F223 及具体 capability/surface owner | match journey + surface ref |
+| producer proposal / approval index | F246 | 引用 proposal/approval |
+| human decision / feedback / disposition | F281 | 引用 decision/disposition |
+| Plugin capability / command / readiness | Plugin truth owner/operator | preflight + entry gate |
+| user preference / retention | 对应 preference/retention owner | 关联 ref，不复制 |
 
-- [ ] AC-G1: Plugin truth owner / operator 明确宣布首纵切依赖的整改完成，并绑定 exact implementation/evidence refs
-- [ ] AC-G2: Plugin provider 的 provisioning/configuration/authority/readiness/failure/recovery 可分别查询并带 revision/freshness
-- [ ] AC-G3: 所有 Plugin mutation 经 canonical command + receipt；重启、失败、禁用与回滚不产生平行真相
-- [ ] AC-G4: F300 只经 owner adapter 读事实/发 intent，且 capability identity 不与 plugin identity 永久绑死
+## Dependencies
 
-### Phase 1 — First complete product slice
+- **Can proceed now**: Phase 0 source contract、Phase 1 M1/M2/M3 contracts/fixtures、非 Plugin read-only adapters。
+- **Plugin-backed voice slice blocked by**: Plugin truth owner/operator 对 AC-G1–G4 的完整证据；不是一句“整改完成”。
+- **Runtime delivery depends on**: F296 presentation/receipt contract 与 F298 principal/admission/result durability。
+- **Related**: F223 capability surfaces、F246 proposals/approval、F281 human disposition、F299 user-visible trajectory。
 
-- [ ] AC-1.1: reference journey 从有 provenance 的 friction hypothesis 开始；不做健康、人格或长期意图推断
-- [ ] AC-1.2: proposal 展示 why-now、capability match、当前 readiness、权限/成本、交互变化与恢复路径，并支持 accept/edit/dismiss
-- [ ] AC-1.3: 未获明确 authority 的 episode 不产生 install/configure/permission/external-side-effect command
-- [ ] AC-1.4: Plugin / permission / surface 状态只由 owner receipt 推进；安装、注册或渲染不冒充 ready/effective
-- [ ] AC-1.5: 用户在原任务完成 first successful action，随后可 retain/edit/disable/revert；完整因果链可下钻
-- [ ] AC-1.6: 失败验收覆盖用户拒绝、权限拒绝、activation/runtime/surface/real-action failure 与“成功但未降低摩擦”
+## Non-goals
 
-### Phase 2 — Projection contract
+- 不造 universal self-state ontology、490 类组合矩阵或中心 self graph。
+- 不新增 `self-sensing-management` ownership cell 作为前置条件。
+- 不新增 canonical Interaction/Grounded Proposal/feedback episode。
+- 不把 private/shared 做成双 store 或默认广播。
+- 不因“感知到摩擦”自动安装 Plugin、扩大权限、改生产数据或永久画像用户。
+- 不让 UI rendered、message persisted、proposal accepted 或 command admitted 冒充 first real use。
+- 不让 Plugin 整改成为所有 F300 runtime 的全局 gate。
 
-- [ ] AC-2.1: projection 明确 subject、facet、visibility、source refs、revision、observedAt、expiry/invalidator 与 known/unknown/stale/conflicted/unavailable
-- [ ] AC-2.2: 每个 facet 只有一个 canonical owner；F300 cache 失效后回源，不成为第二真相
-- [ ] AC-2.3: private projection 不进入 team-shared surface；team-shared projection 不泄漏 memory/context body、凭据或无关数据
-- [ ] AC-2.4: contract tests 覆盖 owner mismatch、stale revision、authority change 与 conflicting facts
-
-### Phase 3 — Member and team state
-
-- [ ] AC-3.1: Agent 能查询自己的 capability/limits、obligation/activity、availability、memory/context 与 authority
-- [ ] AC-3.2: Stop exact run 的 canonical terminal 可使相关成员读到更新后的 member public projection；不广播 raw event，不污染新 run
-- [ ] AC-3.3: 新 thread、共享 artifact、capability/provider 和资源按 visibility/authority 出现在 Environment State View
-- [ ] AC-3.4: 相关 projection 只在任务接续、target 选择、副作用或显式查看时进入 context；private/shared 对公开事实不矛盾
-- [ ] AC-3.5: context compact/retrieval failure 后显式降为 incomplete/stale/unknown，并给出回源或降级路径
-
-### Phase 4 — Generalized self-management
-
-- [ ] AC-4.1: 每个 management decision 指回 private/shared state、friction evidence、policy、authority、风险、期望变化与恢复路径
-- [ ] AC-4.2: 既有 authority 内动作可自主完成，但必须经 owner command + receipt/terminal 验证
-- [ ] AC-4.3: 新权限、扩大数据/副作用 scope、不可逆动作、注意力或长期习惯变化必须进入可拒绝候选
-- [ ] AC-4.4: plugin、thread、memory、runtime mutation 均不能由 F300 绕过 canonical owner 直写
-- [ ] AC-4.5: 至少两种差异媒介共享同一 capability/episode truth，surface 不建立平行状态机
-
-### Phase 5 — Growing partner feedback
-
-- [ ] AC-5.1: 评价覆盖任务成功、first action、摩擦变化、误报/漏报、恢复质量、团队协作可见性、用户追问/代运维负担与可恢复性
-- [ ] AC-5.2: provider 迁移、权限撤回、交互偏好恢复、memory/context 恢复和 projection correction 都保留可追溯 receipt
-- [ ] AC-5.3: 不以 projection 数、广播数、proposal 数、plugin 安装数或 UI 生成数作为代理成功
-
-## 9. 非目标与安全边界
-
-- 本次刷新不实现代码，也不承诺后续 phase 排期。
-- 不新建全家状态数据库、第二 Plugin Manager、第二 memory/context store、第二 execution/custody ledger 或统一 mutation super-controller。
-- 不把 member-private 事实、chain-of-thought、凭据、私有 memory/context body 或无关用户数据公开到 Team Shared View。
-- 不把 team-shared 等同于广播；默认使用 scoped query、subscription 和判断点投影。
-- 不允许 Agent 静默扩权、扩大数据/副作用 scope、执行不可逆动作或把推断当成用户授权。
-- 不做无界后台监控、跨场景用户画像、健康/人格诊断或由行为痕迹推断长期意图；friction evidence 必须限于当前受权协作范围。
-- 不让一次试用、默认入口或模型偏好自动沉淀为长期习惯；长期定型必须由用户明确决定且可以恢复。
-- 不以 Plugin、Dynamic UI、History message、manifest 或单次成功调用替代完整能力/状态真相。
-- 不在首个完整 episode 之前先建设覆盖所有 provider 和媒介的通用 Experience Runtime。
-- 不把 #1356 的 open RFC 写成 `main` 已实现或已获产品授权。
-
-## 10. 依赖与所有权地图
-
-| 依赖 | 为 F300 提供 | 不由 F300 接管 |
-|------|-------------|----------------|
-| identity/session/thread owners | member identity、membership、session/thread availability | identity、membership、thread CRUD 与 session lifecycle |
-| F223 | capability surface trigger/execution/verification/eval registry | registry owner 与验证契约 |
-| F233 | custody/obligation canonical fact | custody 状态机与 structured handoff |
-| F220 + execution owners | invocation execution/liveness、terminal 与恢复事实 | Agent Client / execution lifecycle、Stop 与 recovery |
-| F293 | route snapshot/preflight | route decision owner |
-| F296 | context presentation、epoch、dedupe、provider receipt | context body、delivery ledger 与 presentation semantics |
-| memory/context owners | access、coverage、freshness、retention、compaction、budget | memory/context body 与 lifecycle |
-| F298 | principal/admission/result/wake 的持久承诺 | durability infrastructure |
-| F299 + message/history/surface owners | request-generation evidence、trajectory、当前任务 interaction evidence 与诊断下钻 | 原始消息、事件、历史与用户事实；F300 只形成 scoped hypothesis |
-| Plugin cell / Plugin Manager | plugin discovery/install/config/auth/runtime/audit fact + command/receipt；首纵切启动门槛 | plugin/package lifecycle、Host Broker、SDK/实现 |
-| F153/runtime/quota owners | health、resource、quota 与 availability facts | runtime supervision 与 resource mutation |
-| Dynamic Interaction / surfaces | proposal、authority、capability/episode 状态在 UI/CLI/voice/background 中的表达与即时使用反馈 | capability、authority、state、receipt 或用户长期偏好 truth |
-
-F300 implementation kickoff 明确依赖 §7 的 Plugin gate；这是一条实现顺序依赖，不是概念所有权合并。非 plugin provider 的状态、管理和交互仍按各自 owner 接入同一 provider-neutral contract。
-
-## 11. 风险与防线
+## Risks
 
 | 风险 | 防线 |
-|------|------|
-| Self-Sensing 退化成全家广播 | 两种 visibility + scoped query/subscription + relevance gate |
-| 中心模型复制所有 owner 状态 | projection refs + revision/expiry/invalidator；owner command/receipt 单写 |
-| Plugin 再次吞掉能力概念 | provider-neutral identity；memory/context/thread/member-native 与 plugin 同级建模 |
-| 团队共享泄漏成员私有认知 | public projection schema + authority filter + body/credential/thought exclusion |
-| Stop event 被误写成永久成员状态 | exact run/obligation subject；canonical terminal；新 run 不继承旧 cancel |
-| Agent 自我报告替代事实 | provenance + typed unknown/stale/conflicted + authoritative preflight |
-| Self-Management 变成扩权 controller | authority classification + rejectable proposal + canonical owner mutation |
-| User-Friction Sense 变成监控或画像 | current-collaboration scope + explainable hypothesis + confirmation + sensitive inference prohibition |
-| 建议泛滥或随机占用注意力 | why-now + relevance + reject/dismiss + attention threshold + stable recall path |
-| “安装/渲染成功”被误报成“改善成立” | first successful action + friction/outcome feedback + retain/edit/disable/revert |
-| Plugin 整改完成被口头化 | §7 五项可验证 gate + truth owner/operator exact evidence signoff |
-| 抽象过重迟迟无真实价值 | Plugin gate 后先跑一条完整产品纵切，再从证据提取 projection 与跨媒介合同 |
+|---|---|
+| F300 扩成接管所有状态和改善动作的超级系统 | 四不变量 + 薄 envelope + existing owner map + 禁止新 cell |
+| private/shared 被实现成双真相 | 明确为读取策略；所有引用回到同一 owner |
+| friction 变成用户诊断/画像 | 只描述 Agent 自己能力与交互效果；显式反馈优先；候选可撤回 |
+| proposal/episode 名称换皮后重复建账本 | refs-only view；F246/F281/surface/owner receipts 继续 canonical |
+| M2 到达被误当成动作安全 | 副作用前 M1 回源，冲突时 M1 胜 |
+| Plugin 整改口头化或变成全局 blocker | AC-G1–G4 精确证据；只 gate voice slice |
+| “配置完成”被统计为产品改善 | 必须 first real use + disposition |
+| 语音纵切绑死跨媒介设计 | Phase 3 至少一个异质媒介，抽象须双切片证据 |
 
-## 12. Key Decisions
+## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
-|---|------|------|------|
-| KD-1 | F300 基础模型固定为 Member Self View 与 Team Shared View；后者由 Member Public Projection + Environment State View 组成 | 成长型伙伴既需要自己的认知，也需要团队共同认知；两者不能因共享或隐私要求互相吞并 | 2026-08-25 |
-| KD-2 | 统一对象是 provider-neutral state projection 与 management loop，不是中心状态库或统一 mutation API | 让 Agent 用同一种语言理解异质能力，同时保持 canonical owner 单一真相 | 2026-08-25 |
-| KD-3 | Plugin 是 capability provider/lifecycle owner 之一，不是 F300 能力边界 | memory、context、thread、member runtime 等关键能力不会也不应都插件化 | 2026-08-25 |
-| KD-4 | 动作、canonical result/terminal 与 shared projection 分离；成员 Stop 复用 #1356 owner 边界，不建立 cancel broadcast | 其他成员需要知道的是当前可依赖状态，不是复制一条动作事件 | 2026-08-25 |
-| KD-5 | 旧 Home-State M1/M2/M3 是 projection delivery/preflight 的窄机制；Interaction Episode 不是基础状态对象，但它是用户可见改善的首要体验验收单位 | 避免具体取消 bug 反向定义 Self-Sensing，同时不再把完整产品闭环压成一句“上层消费者” | 2026-08-26 |
-| KD-6 | memory/context 是 Self-Sensing 的一等 facet，但内容、retention、compaction 与权限仍归其 owner | Agent 必须知道自己记得什么和缺什么，同时不能建立第二 memory/context store | 2026-08-25 |
-| KD-7 | team-shared 表示受权可依赖，不等于注入所有 prompt 或向全家广播 | 团队认知需要共同事实，也需要 relevance、隐私和 context budget 边界 | 2026-08-25 |
-| KD-8 | 先前 R4 approval 仅覆盖旧 HEAD 的 Interaction Episode/Home-State-first 坐标；本次 operator correction 后必须重新审阅 | 新方向改变了 feature 的核心对象、可见性模型与 phase 顺序，不能用机械 continuity 复用 | 2026-08-25 |
-| KD-9 | F300 的完整产品合同固定为 capability + availability + friction 三种感知，驱动 capability construction + interaction adaptation，并以 immediate use + feedback 闭环 | Member/Environment State 是可信认知底座，但不能单独代表产品目标 | 2026-08-26 |
-| KD-10 | Plugin 完整改是 F300 runtime kickoff gate；通过后先做一条 plugin-backed 完整 episode，再抽取通用平台合同 | 当前最关键执行边界在 Plugin，但 provider-neutral 语义和产品目标不归 Plugin 吞并；纵切先于平台化 | 2026-08-26 |
-| KD-11 | 交互变化必须有 evidence、决定者、期限、召回与恢复路径；能力装配和长期交互定型是两个决定 | 用户可以试用能力而不改变长期习惯，也可以保留能力但选择不同入口 | 2026-08-26 |
+|---|---|---|---|
+| KD-1 | 保留 Capability / Availability / User-Friction 三种判断维度 | 覆盖“会不会、现在能不能、交互是否有效”，同时不要求通用状态本体 | 2026-08-25 |
+| KD-2 | M1 preflight / M2 relevant delta / M3 pull snapshot 继续作为 Home-State 机制 | 它们直接对应取消、配额、Plugin readiness 三个真实例子，且可独立于 voice 开始 | 2026-08-17/26 |
+| KD-3 | F300 是薄 journey/integration owner | 产品旅程需要统一验收，但来源事实、mutation 和 authority 必须留在原 owner | 2026-08-26 |
+| KD-4 | Member Self View / Team Shared View 降为 member-scoped / authorized-shared read strategies | 避免双 store、双 plane 与 visibility→authority 漂移 | 2026-08-26 |
+| KD-5 | 不新增 canonical InteractionEpisode / GroundedProposal | 复用 F246、F281、surface episode、owner receipts；F300 只保留 refs-only correlation | 2026-08-26 |
+| KD-6 | Capability Construction / Interaction Adaptation 是旅程步骤，不是 F300 子系统 | 构建与适配都必须由原 capability/surface/Plugin/preference owner 执行 | 2026-08-26 |
+| KD-7 | Plugin gate 只阻塞 plugin-backed voice 首纵切 | M1/M2/M3、read-only projection 与非 Plugin slice 可独立推进 | 2026-08-26 |
+| KD-8 | 产品改善必须有 first real use + disposition | 防止把 proposal、配置或 UI 投影视为真实用户价值 | 2026-08-26 |
+| KD-9 | 先更新 Cat Café source truth，再同步 public PR | source 是单一真相；publication 不得反向覆盖内部产品合同 | 2026-08-26 |
 
-## 13. Review / Delivery Gate
+## Review & Delivery Gate
 
-- 本次 docs-only 变更继续走既有 PR #1391；新实质内容需要非作者内容 review。
-- Review 重点：完整产品闭环是否重新成为一等合同；三种感知与两种可见性是否同时成立；Plugin kickoff gate 是否具体但未吞并非 plugin provider；首纵切是否可直接指导产品设计与实现；friction/authority/privacy/rollback 是否有硬边界。
-- 校验：strict-delta frontmatter + feature truth + ownership generator idempotence + runtime-symbol absence。
-- Plugin gate 通过后另立执行 thread，先交付 Phase 1 完整产品纵切，再抽取 owner adapter 与异质切片；本 spec 本身不授权 runtime mutation。
+1. source Feature Truth 与 ROADMAP 必须先在 `develop_base` 落地并 push，publication 不得先行定义产品合同。
+2. publication PR #1391 镜像同源 F300/ROADMAP，并移除过早的 `self-sensing-management` cell 及其索引、Plugin cell 越权登记。
+3. 对 publication 新 exact HEAD 做非作者内容 review，同时检查“产品目标是否完整”“ownership 是否足够薄”以及 source/publication continuity；AC-0.5 只允许基于该 terminal review 勾选。
+4. publication formal review 重新绑定新 exact HEAD；作者不自审、不自行 merge。
+5. runtime 实现另走 F128 execution thread、测试与独立验收；spec 完成不等于 runtime 已实现。
