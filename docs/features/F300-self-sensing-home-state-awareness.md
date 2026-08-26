@@ -12,7 +12,7 @@ description_updated_at: 2026-08-26T08:43:20Z
 
 # F300: Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长
 
-> **Status**: spec；source contract 已按产品目标重校准，runtime 未实现，source review pending
+> **Status**: spec；product contract refreshed，runtime 未实现；R9 non-author review passed，maintainer review pending
 > **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
 
 - **Original operator direction**: 2026-08-16/17（`0001786845058052`：“期待你们在运行过程中可感知到家里整个系统的情况……不是黑盒”）及后续三机制确认。
@@ -382,7 +382,7 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 - [x] **AC-0.2**: Member-scoped / authorized-shared 被定义为读取策略，不是两个 store/data plane；visibility 不授 mutation
 - [x] **AC-0.3**: 薄 envelope 仅含 `subjectRef / ownerRef / sourceRefs / revision / freshness / visibility`，typed payload 留在 owner
 - [x] **AC-0.4**: F300 不拥有 canonical proposal、decision/surface/interaction episode、command receipt 或 retention truth；refs-only view 缺证据时不得补写结论
-- [ ] **AC-0.5**: publication exact HEAD 经非作者内容 review 通过，并有 continuity evidence 证明其 F300 合同与已落地 source 同源
+- [x] **AC-0.5**: publication exact HEAD 经非作者内容 review 通过，并有 continuity evidence 证明其 F300 合同与已落地 source 同源
 - [x] **AC-0.6**: 不新增 `self-sensing-management` ownership cell；source Feature Truth 与 ROADMAP 同步
 - [x] **AC-0.7**: 标题、一句话定义与 Primary Journey 明确表达 growing Agent platform 的 Self-Sensing / Self-Management 终态，而非只描述 Home-State 小切片
 - [x] **AC-0.8**: Operational Grounding 与 Agent-first same-source contract 均只引用现有 owner truth，不新增 store、controller 或 domain payload
