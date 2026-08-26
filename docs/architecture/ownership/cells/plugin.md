@@ -118,7 +118,13 @@ close, or restore owner tabs/windows.
   visibility, and an installed package never prove that a capability is
   currently ready, applicable, authorized, or effective. F300 may request a
   plugin mutation only through this cell's authorized command boundary and may
-  advance mutation-dependent projections only from this cell's receipt.
+  advance mutation-dependent projections only from this cell's receipt. F300's
+  first plugin-backed product slice is gated on this cell exposing separate
+  provisioning/configuration/authority/readiness/failure/recovery facts plus
+  receipt-bearing install/enable/configure/test/disable/uninstall/rollback
+  commands. That implementation-order dependency does not let F300 declare
+  plugin remediation complete or absorb plugin lifecycle; completion remains a
+  Plugin truth-owner/operator evidence decision.
 
 ## Use This When
 

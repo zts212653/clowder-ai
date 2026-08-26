@@ -3,14 +3,15 @@ cell_id: self-sensing-management
 title: Self-Sensing / Self-Management
 doc_kind: architecture
 created: 2026-08-25
-summary: F300-owned provider-neutral member/environment state projections, member-private and team-shared visibility semantics, and authority-bounded self-management policy over existing domain owners.
+summary: F300-owned provider-neutral member/environment projections, member-private and team-shared visibility, evidence-bounded friction hypotheses, and authority-bounded capability-construction / interaction-adaptation policy over existing domain owners.
 canonical_features: [F300]
 code_anchors: []
 doc_anchors:
   - docs/features/F300-self-sensing-home-state-awareness.md
-static_scan_hints: [SelfStateProjection, MemberSelfView, MemberPublicProjection, TeamSharedView, EnvironmentStateView, HomeStateDeltaV1, affects_current_obligation, affects_next_side_effect]
+static_scan_hints: [SelfStateProjection, MemberSelfView, MemberPublicProjection, TeamSharedView, EnvironmentStateView, HomeStateDeltaV1, affects_current_obligation, affects_next_side_effect, InteractionEpisode, FrictionHypothesis, GroundedProposal]
 cited_by:
   - {feature: F300, date: 2026-08-25, delta: "provider-neutral self/team/environment sensing contract before runtime implementation; all source facts and mutations stay with adjacent owners"}
+  - {feature: F300, date: 2026-08-26, delta: "full product loop restored: bounded friction hypothesis, rejectable proposal, capability construction, cross-medium interaction adaptation, immediate use and feedback; Plugin completion gates the first runtime slice without absorbing F300 ownership"}
 ---
 
 # Self-Sensing / Self-Management
@@ -39,6 +40,14 @@ It also owns the policy that compares those projections with a current
 obligation, chooses an authority-bounded management intent, calls the canonical
 owner, verifies its receipt/terminal, and then refreshes the projections.
 
+For user-visible growth, F300 owns the coordination semantics that combine a
+scoped, explainable friction hypothesis with capability/availability truth,
+form a rejectable proposal, carry the user's decision into owner commands, and
+verify immediate real use plus feedback. This Interaction Episode is the
+product acceptance unit for a user-visible improvement; it is not a replacement
+for Member/Environment State, raw interaction history, plugin lifecycle, or a
+surface-local state machine.
+
 This cell currently registers architecture truth only. F300 has no runtime code
 anchors at origin/main@dd86a802. The absence of code is not permission to
 infer state from model introspection, chat summaries, UI visibility, plugin
@@ -59,6 +68,17 @@ stores or mutation APIs. A projection identifies:
 The projection may reference an owner-held value. It does not copy raw messages,
 memory/context bodies, plugin ledgers, thread records, credentials or runtime
 state into an F300 shadow store.
+
+F300 also unifies the product coordination vocabulary:
+
+- friction evidence → bounded hypothesis;
+- capability/availability match → grounded, rejectable proposal;
+- user decision / existing authority → canonical owner intent;
+- owner receipt + interaction projection → immediate real use;
+- outcome/friction feedback → retain, edit, dismiss or revert.
+
+It does not own the raw evidence, plugin/runtime mutation, system permission,
+surface implementation, or durable user preference stores behind those stages.
 
 ## Adjacent Ownership Boundaries
 
@@ -89,9 +109,16 @@ state into an F300 shadow store.
 - message/history/delivery owners retain public result and dispatch projections.
   F300 decides whether a state projection is relevant; it does not create a
   second delivery channel or equate persistence with model visibility.
-- Dynamic Interaction and other surfaces consume F300 projections. An
-  Interaction Episode is an optional higher-level consumer, not the canonical
-  self-state object.
+- message/history/surface and task owners retain raw user expressions and
+  interaction events. F300 may form a current-collaboration friction hypothesis
+  with provenance and uncertainty; it must not rewrite the evidence, monitor
+  without scope, or create a cross-context user profile.
+- Dynamic Interaction and other surfaces consume F300 projections and episode
+  semantics. They own medium-specific UI/CLI/voice/background expression, not
+  capability, authority, owner receipts, episode truth or long-term preference
+  decisions. An Interaction Episode is not the canonical self-state object, but
+  it is the required experience acceptance unit when F300 claims a user-visible
+  improvement.
 - All authority owners retain installation, configuration, permission, thread,
   memory, runtime and external-side-effect mutations. F300 routes intents and
   consumes receipts; it gains no universal write authority.
@@ -126,6 +153,15 @@ state into an F300 shadow store.
    become a second writer.
 10. Memory/context awareness never authorizes storage of chain-of-thought,
     credentials, unbounded raw context or another owner's private contents.
+11. A friction hypothesis is limited to explainable evidence from the current
+    authorized collaboration. It never implies health, personality or durable
+    intent, and never grants permission to change capability or interaction.
+12. A user-visible improvement is not effective at proposal, install, ready or
+    render time. It requires an immediate real action plus outcome/friction
+    feedback, with retain/edit/disable/revert paths.
+13. Capability construction and interaction stabilization are separate user
+    decisions. A one-time trial cannot silently become a default medium,
+    persistent entrance, notification policy or other durable habit.
 
 ## Use This When
 
@@ -139,6 +175,12 @@ state into an F300 shadow store.
   memory/context degradation or shared-resource changes into Agent judgment.
 - Deciding whether the Agent may manage a state within existing authority or
   must form a rejectable proposal.
+- Turning current-collaboration friction evidence into a grounded capability
+  proposal, coordinating an approved change across canonical owners, or judging
+  whether immediate real use proved the improvement.
+- Adding interaction birth-certificate, attention, recall, trial, retention or
+  rollback semantics that must stay consistent across UI, CLI, voice and
+  background capabilities.
 
 ## Extend By
 
@@ -150,6 +192,10 @@ state into an F300 shadow store.
   projection delivery and cache invalidation.
 - Validate the abstraction with heterogeneous slices: exact Agent Stop, thread
   lifecycle, plugin/provider change and memory/context change.
+- After the Plugin kickoff contract is complete, start with one plugin-backed
+  end-to-end episode that reaches immediate real use and feedback; extract
+  generalized projections and cross-medium policy from that evidence instead
+  of building a universal runtime first.
 - Use owner command + receipt for management, then re-read the actual state
   rather than treating command acceptance as completion.
 - Update code_anchors, consumer evidence and claim guards in the same change
@@ -169,15 +215,20 @@ state into an F300 shadow store.
   presence.
 - Do not auto-install, auto-authorize, widen scope or perform irreversible or
   external effects because an Agent formed a high-confidence hypothesis.
-- Do not require Dynamic UI or an Interaction Episode; conversation, CLI, voice
-  and future surfaces must consume the same state and authority truth.
+- Do not infer user health, personality or long-term intent from interaction
+  traces, or persist a friction hypothesis as an unbounded user profile.
+- Do not require Dynamic UI; conversation, CLI, voice, background and future
+  surfaces must consume the same state, authority and episode truth. Conversely,
+  do not call a user-visible improvement complete without an Interaction Episode
+  that reaches immediate real use and feedback.
 
 ## Static Scan Hints
 
 Watch for SelfStateProjection, MemberSelfView, MemberPublicProjection,
 TeamSharedView, EnvironmentStateView, HomeStateDeltaV1,
-affects_current_obligation, affects_next_side_effect, or any new store that
-combines identity, execution, custody, memory/context, plugin, thread, delivery,
-authority or surface truth. New runtime anchors require an ownership-map update
-and a claim guard proving that adjacent canonical owners were read rather than
-copied.
+affects_current_obligation, affects_next_side_effect, InteractionEpisode,
+FrictionHypothesis, GroundedProposal, or any new store that combines identity,
+execution, custody, memory/context, plugin, thread, delivery, authority,
+interaction evidence, episode or surface truth. New runtime anchors require an
+ownership-map update and a claim guard proving that adjacent canonical owners
+were read rather than copied.
