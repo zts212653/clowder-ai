@@ -1,11 +1,11 @@
 ---
 title: "A2A 消息投递、处理与交接生命周期架构"
-description: "从场景化主流程出发，定义来源消息封装、有序 Queue、History dispatch refs、事件驱动 admission coordination、typed owner disposition、运行气泡与终局收敛的端到端生命周期。"
+description: "从场景化主流程出发，定义消息封装、有序 Queue、被投递 History 消息的 target dispatch refs、事件驱动 admission coordination、typed owner disposition、运行气泡与终局收敛的端到端生命周期。"
 doc_kind: architecture
 feature_ids: [F039, F055, F078, F117, F122, F167, F175, F177, F194, F233, F254, F264, F275, F277, F280]
 topics: [message, queue, delivery, execution, a2a, routing, history, failure, observability]
 created: 2026-08-13
-updated: 2026-08-25
+updated: 2026-08-26
 status: proposed
 author: "砚砚/cat-eqdvbcxw@gpt-5.6-sol"
 contributors:
@@ -52,9 +52,9 @@ Related: #1354（accepted/triaged umbrella；本文不自动关闭该 issue）
 4. 稳定状态下不可能出现“Queue 非空、没有 Active Run、也没有 drain owner”；
 5. 每次被 admission 的运行先有固定响应气泡，成功、失败、取消、重启都原位终局；
 6. Steer、Append、Cancel queued 与 Stop running 是用户对具体 entry/run 的显式操作，不是正常调度的补救机制；
-7. Agent 内部复用现有未读 cursor 与上下文投影；用户侧用来源消息下的成员头像表达 dispatch 阶段，不引入 read receipt；
+7. Agent 内部复用现有未读 cursor 与上下文投影；用户侧在每条实际被 dispatch 的公开 History 消息下，用每个实际 target 的成员头像表达 processing/terminal 投影，不把来源 carrier 或 source owner 当成 UI 锚点，也不引入 read receipt；
 8. 不同来源已经给定消息用途；入口只把来源 envelope 封装为对应 QueueEntry。所有 `private_input` 与公开 entry 写入同一 durable priority Queue，彼此只在 inline payload 正文上不同；action fence、wait carrier 或 callback carrier 等 typed state 留在各自 owner store，由 owner 以 exact invocation 绑定并在 terminal 提交自身 disposition。
-9. 每条公开 History 来源消息为每个 exact target 保存一条单调的 `dispatchRef` 因果边；阶段只表达尚待 dispatch、已经 dispatch 或已经结束，具体成功、失败、取消与中断仍由关联结果记录唯一表达。
+9. 每条实际被投递的公开 History 消息为每个 exact target 保存一条单调的 `dispatchRef` 因果边；消息可以由用户、成员、外部通知或系统产生，也可以是带下一跳 target 的 completed response bubble。阶段只表达尚待 dispatch、已经 dispatch 或已经结束，具体成功、失败、取消与中断仍由关联结果记录唯一表达。
 10. enqueue-time target、Queue admission、provider body exposure、source handled 与 responsibility completed 是五个不同事实；任何一个都不能冒充另一个。
 
 ### 1.3 非目标
@@ -80,7 +80,7 @@ Related: #1354（accepted/triaged umbrella；本文不自动关闭该 issue）
 1. **来源形成消息**：用户、Connector、系统、Agent 或已有协议 owner 已经决定消息正文、用途与 targets；主生命周期不重新猜用途。
 2. **持久入 Queue**：入口把来源 envelope 封装为一条 QueueEntry。公开输入、Agent wake 与私有输入都写入同一 durable priority Queue；默认 `normal`，同级追加到 FIFO 尾部；commit 后触发 `requestDrain(threadId)`。
 3. **严格处理 comparator 队首**：per-thread drain 只看 `position → urgent/normal → enqueue FIFO` 算出的唯一 head。目标忙时等待；目标可用或存在确定失败时继续，绝不靠 timer 扫描补救。
-4. **Admission 一次切换**：一个事务 exact-take Queue input，按 kind materialize 或复用 History input，把每个公开来源的 target ref 切到 `dispatched`，并为每个 target 创建固定 processing response bubble；事务提交后才建立内存 Active Run 并调用 Agent Client。
+4. **Admission 一次切换**：一个事务 exact-take Queue input，按 kind materialize 或复用实际被投递的 History message，把每个 actual target 的 ref 切到 `dispatched`，并为每个 actual target 创建固定 processing response bubble；事务提交后才建立内存 Active Run 并调用 Agent Client。
 5. **同一气泡持续更新**：stream 只更新 admission 已创建的 response bubble；成员内部 compact、session rollover 或 handoff continuation 都留在 Agent Client 内，不产生新的主生命周期对象。
 6. **Terminal 一次闭合**：completed、failed 或 canceled 都原位终局同一 bubble；同一持久事务让每个 structured owner 按自身 predicate 提交 exact disposition，并只创建该 outcome 合法的 follow-up。这里闭合的是本跳 delivery result，不代替 owner 宣称责任完成。
 7. **释放并继续 drain**：terminal commit 成功后删除 exact Active Run，再次 `requestDrain`。下一条 Queue work 因此不会静默积压。
@@ -112,7 +112,7 @@ sequenceDiagram
     D->>B: launch exact input
     B-->>H: stream snapshots update the same bubble
     B-->>T: completed / failed / canceled callback
-    T->>H: terminalize bubble + source ref B=settled + typed owner disposition
+    T->>H: terminalize bubble + delivered-message ref B=settled + typed owner disposition
     Note over H,R: durable terminal commit first
     T->>R: delete exact run
     T->>D: requestDrain(threadId)
@@ -145,12 +145,12 @@ sequenceDiagram
     end
     Q-->>D: requestDrain(threadId)
     D->>Q: take exact wake when it reaches head
-    D->>H: source ref B=dispatched + create processing bubble B
+    D->>H: delivered-message ref B=dispatched + create processing bubble B
     D->>R: register B exact invocation after commit
     D->>B: dispatch referenced message + actual unread projection
     B-->>H: stream updates the same B bubble
     B-->>T: completed / failed / canceled callback
-    T->>H: terminalize B bubble + source ref B=settled + typed owner disposition
+    T->>H: terminalize B bubble + delivered-message ref B=settled + typed owner disposition
     T->>R: delete exact B run after terminal commit
     T->>D: requestDrain(threadId)
 ```
@@ -308,7 +308,7 @@ admission commit 之前退出，entry 仍在 Queue；startup 必须把原 owner/
 | 对象 | 持久化 | 唯一职责 |
 |---|---:|---|
 | Queue Entry | 是 | 保存一个有序待处理输入、可恢复 source identity、enqueue 时的 target intent，以及 Queue UI 回显所需 payload；仍在 Queue 就表示尚未开始正常 dispatch |
-| Chat History Message | 是 | 保存已经进入聊天面板的输入、Agent 消息与响应气泡；拥有固定 `orderKey`，公开来源可持有指向 exact target/result 的 `dispatchRefs` |
+| Chat History Message | 是 | 保存已经进入聊天面板的输入、Agent 消息与响应气泡；拥有固定 `orderKey`，实际被投递的公开消息可持有指向 exact target/result 的 `dispatchRefs` |
 | Active Run | 否 | 表示 delivery kernel 已为某个 Agent Client admission 的 exact inputs，并关联唯一响应气泡；它是 active-execution projection 的一个输入，不代表 managed command/job 或全部执行真相 |
 
 Queue custody/body exposure、ActionSuccessor/AwaitState/TurnExecution、durable InvocationRecord、callback principal 与 provider presentation ledger 都是已有 owner 对象。它们不进入这三个内核对象，也不会因为本文使用相同的 `entryId / invocationId / messageId` 引用就失去自己的 canonical state。
@@ -319,7 +319,7 @@ Agent Client 是 launch 后的 exact 逻辑运行实例：它承接 stream/final
 
 ```mermaid
 flowchart LR
-    E["来源消息<br/>用户 · 外部 Connector · 系统 · callback"] --> P["封装 QueueEntry<br/>kind + payload + from + targets"]
+    E["输入 envelope<br/>用户 · 外部 Connector · 系统 · callback"] --> P["封装 QueueEntry<br/>kind + payload + from + targets"]
     P -->|"conversation_input"| Q["Queue conversation_input<br/>priority Queue · inline payload"]
     P -->|"private_input"| QC["Queue private_input<br/>same priority Queue · inline payload"]
     PM["Agent post_message"] --> AH["Chat History 独立 Agent message<br/>固定 messageId + orderKey"]
@@ -374,11 +374,11 @@ Stop Agent 不直接写 History terminal。它只从 domain active-execution pro
 
 ### 3.3 Canonical facts 与 derived projections
 
-- Queue membership 是“尚未开始 normal dispatch”的唯一调度真相；已有 Agent History source 上的 `assigned` ref 只是同一 enqueue transaction 写出的可重建因果投影，不能代替 Queue；
+- Queue membership 是“尚未开始 normal dispatch”的唯一调度真相；已有、将被投递的 Agent History message 上的 `assigned` ref 只是同一 enqueue transaction 写出的可重建因果投影，不能代替 Queue；
 - exact live Agent Client 由 durable InvocationRecord/TurnExecution、process-local tracker 与 callback principal 共同形成 domain-owned active-execution projection。Active Run 是其中属于本 delivery kernel 的 exact input/response 关联，不是全部 execution 的唯一真相；
 - Queue custody/body exposure owner 记录 exact target/invocation 何时真正拿到 prompt body，以及随后是否 handled。`assigned`、`dispatched`、processing bubble 或 provider accepted 都不能自动推出 seen/handled；
 - ActionSuccessor、AwaitState、TurnExecution 与其他 structured owner 保留 generation、predicate、attempt、predecessor 和 responsibility terminal。delivery terminal 可以触发 owner disposition，但不能替它宣称责任完成；
-- 响应气泡的 `processing / completed / failed / canceled / interrupted` 是公开输出结果。`dispatchRefs` 只是从来源消息到 Queue/结果事实的持久 derived projection；它不复制 outcome、body exposure、handled 或 typed carrier。
+- 响应气泡的 `processing / completed / failed / canceled / interrupted` 是公开输出结果。`dispatchRefs` 只是从**实际被投递的公开 History 消息**到 Queue/结果事实的持久 derived projection；外部 carrier、pre-History `sourceRecordId` 与 structured source owner 只提供 provenance/authority，不是头像锚点。ref 不复制 outcome、body exposure、handled 或 typed carrier。
 
 ### 3.4 Source ownership / supersession table
 
@@ -396,7 +396,7 @@ owner-timeline baseline 不是推断：当前 `packages/api/src/routes/messages.
 | execution / cancel | **derived composition** | domain active-execution service 组合 InvocationRecord、tracker、TurnExecution、managed command/job 等 owner truth | Active Run 只贡献 Agent Client delivery slice；Stop Agent 只 cancel exact Agent Client snapshot，不能命中 managed command/job，也不能直接写 terminal | A22–A25, A27–A29, A60–A65 |
 | restart interruption | **preserved direct dependency** | durable running invocation/processing bubble、callback principal、immutable structured owner admission binding 与 Queue custody | startup 先按原 owner/predicate fence 区分 verified、mismatch、insufficient evidence；只有 binding 可验证且 live client 消失的 admitted Agent run 原位收敛为 `interrupted`，同步 owner disposition 与 derived refs。已提交 verdict 只补 apply；未 admission work 不自动重放。live cutover 前移除或隔离所有 selectable terminal-plus-queued legacy projection | A17, A19–A21, A49, A53, A59, A80–A89 |
 | model presentation | **author proposal; pending maintainer/product decision** | History/Queue facts、body exposure、active-execution snapshot；动态 context 的 provider-received receipt 仍归 presentation ledger | 作者提议让 UI 与 Agent situation packet 从同一 canonical snapshot 映射，并把用户态 `processing` 保持为 exact server-side Agent execution 已开始且尚未终局；它不承诺 provider 已接收或 Agent 已看到正文。launch/execution 失败仍让同一 bubble 原位 `failed`；`presented` 只由 provider receipt 推进 | A22–A23, A30–A32, A53, A67–A68, A76–A85 |
-| `dispatchRefs` | **rebuildable derived projection** | `assigned` 来自 exact message-wake Queue membership；`dispatched` 来自 source↔processing bubble/invocation binding；`settled` 来自 linked terminal record | History owner 可持久化 ref 供读取，但 startup/reconciler 必须能从上述事实重建。失配时 canonical facts 胜出；唯一映射可 CAS 修复，缺失/多义则 fail closed、隐藏 working claim并报警，不猜测 | A2, A6–A7, A10, A40, A53, A73, A75–A80 |
+| `dispatchRefs` | **rebuildable derived projection** | `assigned` 来自 exact message-wake Queue membership；`dispatched` 来自 delivered-message↔processing bubble/invocation binding；`settled` 来自 linked terminal record | History owner 可持久化 ref 供读取，但 startup/reconciler 必须能从上述事实重建。失配时 canonical facts 胜出；唯一映射可 CAS 修复，缺失/多义则 fail closed、隐藏 working claim并报警，不猜测；外部 carrier/source owner 不能成为替代 UI anchor | A2, A6–A7, A10, A40, A53, A73, A75–A80, A90 |
 
 ### 3.5 五条 normative laws
 
@@ -581,15 +581,15 @@ type ResponseBubble = {
 
 `orderKey` 在消息或响应气泡首次进入 History 时分配，之后永不改变。外部输入在 Queue 阶段已经有 owner-owned `sourceRecordId`，但没有 History membership/orderKey；正常 dispatch admission 复用该 identity 写入 History，并紧接着写入对应的 processing response bubble。bubble 的 `status='processing'` 是 durable **outstanding-result witness**，只说明该 admitted invocation 还没有 delivery-result terminal；它本身不提供 responsibility authorization。只有它、exact live Active Run 与可验证的 admission-time owner fence 同时成立时，UI 才投影“正在处理”，其含义是 server-side Agent execution live。provider-presented、body exposure、seen、handled 与 structured responsibility 仍由各自 owner 独立推进。`completedAt` 只用于耗时与诊断，不能重新排序。
 
-`dispatchRefs` 是来源 History record 到 exact target 结果记录的持久因果边，每个 target 最多一条，并按 target set 的稳定顺序保存：
+`dispatchRefs` 是**实际被投递的公开 History record**到 exact target 结果记录的持久因果边，每个 target 最多一条，并按实际 target set 的稳定顺序保存。这里的 History record 就是正文被交给目标的那条用户消息、成员消息、公开外部/系统通知，或带下一跳 target 的 completed response bubble；它不是 transport carrier、Queue source record、structured source owner，也不是为目标执行另造的一条状态消息：
 
-- `assigned`：来源消息已经在 History，且同一事务已为该 target 创建 durable `message_wake`；它仍由 Queue 调度，用户 UI 不显示头像；
-- `dispatched`：admission 已把该输入交给 target 的 exact run，并创建 `statusMessageId` 指向的 processing response bubble；public conversation input 因为此前尚无 History message，会在 materialize 时直接以此阶段出现；
+- `assigned`：被投递消息已经在 History，且同一事务已为该 target 创建 durable `message_wake`；它仍是尚未 actual dispatch 的 Queue 计划，用户 UI 不用头像宣称目标正在处理；
+- `dispatched`：admission 已把该消息交给解析/重验/fallback 后的 actual target exact run，并创建 `statusMessageId` 指向的 processing response bubble；public conversation input 因为此前尚无 History message，会在 materialize 时直接以 actual target 的这个阶段出现；
 - `settled`：该 target 的本跳已经产生 canonical terminal；`statusMessageId` 继续指向原 response bubble，或在 explicit target 于 admission 前失效时指向相邻的 `DeliveryFailureResult`。
 
-阶段只能单调推进。`completed / failed / canceled / interrupted` 等 outcome 只从 `statusMessageId` 指向的 canonical record 读取，不能复制进 ref 后形成第二份结果真相。`settled` 只表示 linked canonical result 已 terminal；它不表示 target 已看到正文、Queue custody 已 handled、ActionSuccessor/AwaitState 已 completed，或整个责任链结束。一个 response bubble 覆盖多条 exact input 时，每条公开 input 的对应 ref 可以指向同一个 `statusMessageId`；multi-target input 则由每个 target 的 ref 独立推进。`private_input` 没有公开来源 History record，因此不创建 `dispatchRefs`。
+阶段只能单调推进。`completed / failed / canceled / interrupted` 等 outcome 只从 `statusMessageId` 指向的 canonical record 读取，不能复制进 ref 后形成第二份结果真相。`settled` 只表示 linked canonical result 已 terminal；它不表示 target 已看到正文、Queue custody 已 handled、ActionSuccessor/AwaitState 已 completed，或整个责任链结束。一个 response bubble 覆盖多条 exact input 时，每条公开被投递消息的对应 ref 可以指向同一个 `statusMessageId`；multi-target input 则由每个 target 的 ref 独立推进。completed response bubble 若随后带 target，它在上一跳是 terminal result、在下一跳同时也是被投递消息，并只在自身 record 上增加下一跳 refs。`private_input` 没有公开被投递 History record，因此不创建 `dispatchRefs` 或用户头像。
 
-`dispatchRefs` 虽持久化以服务读取性能，仍必须可重建：`assigned` 从 exact `message_wake + target` Queue membership 重建，`dispatched` 从 source identity、processing bubble 的 exact input IDs/target/invocation binding 重建，`settled` 从 linked terminal bubble 或 `DeliveryFailureResult` 重建。History projection owner 负责 reconciliation：唯一映射时用 CAS 修复；canonical facts 缺失、冲突或出现多个候选时 fail closed，移除/隐藏不可信 working claim并写诊断，绝不让 ref 反向终结 Queue、execution 或 structured owner。
+`dispatchRefs` 虽持久化以服务读取性能，仍必须可重建：`assigned` 从 exact `message_wake + target` Queue membership 重建，`dispatched` 从 delivered message identity、processing bubble 的 exact input IDs/target/invocation binding 重建，`settled` 从 linked terminal bubble 或 `DeliveryFailureResult` 重建。History projection owner 负责 reconciliation：唯一映射时用 CAS 修复；canonical facts 缺失、冲突或出现多个候选时 fail closed，移除/隐藏不可信 working claim并写诊断，绝不让 ref 反向终结 Queue、execution 或 structured owner，也不把 provenance carrier 临时投影成一条可见消息。
 
 `DeliveryFailureResult` 是 Chat History 中的公开终局结果，用于没有 target/invocation、因而不能合法创建 `ResponseBubble` 的 pre-admission failure。它引用 exact Queue entry 与 input message，但不伪造 target、invocation 或 Active Run。进入 Chat History 就表示已经进入聊天面板并成为公开对话事实。只给某个 Agent 的内部输入不能靠隐藏 visibility 状态塞进 History；它必须留在 Queue 的 `private_input` payload，dispatch 时只进入该 Agent 的 exact input / situation packet。
 
@@ -690,10 +690,11 @@ CLI output 来自已经运行的 Agent Client：stream 更新既有 response bub
   → 持久化 sourceRecordId + 创建 QueueEntry(conversation_input, inline payload, from, targets)
   → Queue Panel 直接回显 entry payload
   → Queue commit 后 requestDrain(threadId)
-  → admission 时复用 sourceRecordId 为 messageId、分配 orderKey，并以 dispatchRefs=dispatched 写入 Chat History
+  → 队首按当前 membership 重验 targets；为空时选择合法 fallback，得到 actualTargets
+  → admission 时复用 sourceRecordId 为 messageId、分配 orderKey，并以 actualTargets 的 dispatchRefs=dispatched 写入 Chat History
 ```
 
-Queue Panel 是 public conversation input 在排队阶段的唯一用户可见位置，聊天面板只展示已经开始 dispatch 的消息。entry 仍在 Queue 时，输入既不属于 Chat History，也不进入任何 Agent 普通上下文；admission 原子移除 entry、materialize 一条公开 History message 并创建 response bubble 后，它才同时出现在聊天面板并成为本轮 exact Agent input。`private_input` 是同一 durable Queue 中的私有 entry，但不在用户 Queue Panel 或聊天面板展示，只在被投递目标的 exact input 中可见。
+Queue Panel 是 public conversation input 在排队阶段的唯一用户可见位置，聊天面板只展示已经开始 dispatch 的消息。entry 仍在 Queue 时，输入既不属于 Chat History，也不进入任何 Agent 普通上下文；admission 原子移除 entry、按实际解析出的 target set materialize 一条公开 History message 并创建 response bubble 后，它才同时出现在聊天面板并成为本轮 exact Agent input。此时这条新出现的 input bubble 本身就是被投递消息与头像锚点：每个 actual target 的 ref 都直接为 `dispatched`，不存在另一条“source bubble”。`private_input` 是同一 durable Queue 中的私有 entry，但不在用户 Queue Panel 或聊天面板展示，只在被投递目标的 exact input 中可见，因此也没有公开头像锚点。
 
 Queue commit 自身就是外部输入的持久边界。排队阶段的 source record 只提供稳定 identity 与 Queue/custody 恢复，不拥有 History membership/orderKey；admission 复用同一 identity，不为 Queue 回显制造第二条 message。
 
@@ -722,13 +723,13 @@ Agent Client completed final
   → 释放 exact Active Run 后 requestDrain(threadId)
 ```
 
-`post_message` 本身是完整聊天内容，因此立即成为一条独立 History message。completed final 已经属于 admission 时创建的 response bubble，只更新其正文与 terminal status；它不能为了 target routing 再复制成第二条 message。两条路径都只在 canonical 完整正文上解析结构化 target：`post_message` 在发布时解析，final 在 completed terminal 时解析；stream chunk、failed/canceled 残留正文与重复 callback 都不解析。有效 targets、`assigned` refs 与 `message_wake` 必须在同一事务写入；Queue entry 被实际 admission 时再把对应 refs 原子推进到 `dispatched`。
+`post_message` 本身是完整聊天内容，因此立即成为一条独立 History message。completed final 已经属于 admission 时创建的 response bubble，只更新其正文与 terminal status；它不能为了 target routing 再复制成第二条 message。两条路径都只在 canonical 完整正文上解析结构化 target：`post_message` 在发布时解析，final 在 completed terminal 时解析；stream chunk、failed/canceled 残留正文与重复 callback 都不解析。有效 targets、`assigned` refs 与 `message_wake` 必须在同一事务写入；Queue entry 被实际 admission 时再把**这条被投递 History 消息自身**的对应 refs 原子推进到 `dispatched`。因此 completed response bubble 若投给下一跳，既保留上一跳终局，也直接在同一 bubble 下显示下一跳 target 的处理头像，不复制“来源消息”或“投递状态消息”。
 
 没有有效目标时，消息或 completed bubble 只公开给用户，不创建 Queue entry，也不猜测下一只 Agent。独立 Agent message 若由 live invocation 产生，携带 `producerInvocationId`；response bubble 已携带自身 `invocationId/targetId`。这些只是内容因果元数据，不能替代 source owner 的 invocation binding。普通 `message_wake` 的 `payload.messageId` 足以让 dispatch owner 查验是否存在对应 structured handoff；action successor 与 event wait 产生的 `private_input` 也只在 Queue 保存 inline payload，typed carrier 仍留在 owner store。任何 owner 都不得等到 terminal 再从“当前 holder”或聊天正文猜 source。
 
 ### 5.4 targets 在 enqueue 时记录、在队首按 entry kind 确认
 
-入口解析结构化 mention 并把当时有效的 exact `targets` 写入 Queue Entry，但不在 enqueue 时猜默认成员。entry 成为队首后按 `kind` 处理：
+入口解析结构化 mention 并把当时有效的 exact `targets` 写入 Queue Entry；这只形成 `assigned` target intent，不在 enqueue 时猜默认成员。entry 成为队首后先得到 actual target set，再按 `kind` 处理：
 
 - `conversation_input`：按当前 thread membership 重新验证 stored targets；若结果为空，只有当该 thread 没有任何 Active Run 时才从 Chat History 反向找到最近一条 `status='completed'` 响应气泡的回复成员，并确认该成员当前仍可用；`processing / failed / canceled / interrupted` 都不能成为 fallback 候选。没有历史成员时才使用服务端默认成员；默认成员也不可用时，走 §7.1 的 pre-admission failure transaction，不永久卡住队首。
 - `message_wake`：它只因 Agent completed final / `post_message` 的显式 target 才进入 Queue。target 在 head 时失效必须走 §7.1 typed pre-admission failure；若其 `payload.messageId` 对应的 structured dispatch owner 返回 predecessor route，则交回 predecessor 决定改投或上升，否则只留下公开结果；不能 fallback 到最近成员。
@@ -736,7 +737,7 @@ Agent Client completed final
 
 用户/Connector/定时任务等 conversation input 中的裸 `@`、代码片段、未知成员或解析失败只产生 routing warning，并让 `targets=[]`；warning 在 Queue row 中即可见，输入进入 History 时继续随消息保留。
 
-因此只有 `kind='conversation_input'` 才能走 targetless fallback。`private_input` 进入同一 Queue、按 comparator 位置等待且必须 exact-target；Agent message ref 也不能借空 targets 制造一个成员 invocation。public targetless input 不会在其他成员仍运行时猜目标。
+因此只有 `kind='conversation_input'` 才能走 targetless fallback。fallback 一旦在队首解析成功，选中的成员就是这次 dispatch 的 actual target；History materialize、processing bubble、Active Run 与头像 ref 必须使用同一 target set，不能继续显示空 target、失效 mention 或 provenance sender。`private_input` 进入同一 Queue、按 comparator 位置等待且必须 exact-target；Agent message ref 也不能借空 targets 制造一个成员 invocation。public targetless input 不会在其他成员仍运行时猜目标。
 
 ### 5.5 汇合图：单目标、多目标与失败
 
@@ -764,7 +765,7 @@ sequenceDiagram
     S->>Q: peek exact head, wait until all targets admissible
     Note over Q,H: one admission transaction
     S->>Q: take exact entry / compatible conversation prefix
-    S->>H: materialize/reuse sources + refs=dispatched + processing bubble(s)
+    S->>H: materialize/reuse delivered messages + actual-target refs=dispatched + processing bubble(s)
     par target B
         S->>B: dispatch exact inputs
         B-->>H: stream / terminal update same B bubble
@@ -971,9 +972,9 @@ source owner 在 admission 前提交 terminal、replacement 或新的可验证�
 
 1. 再次确认 exact entry 列表仍是从当前队首开始的兼容前缀；
 2. 重新确认 stored targets 或同一 targetless fallback 快照；对 `message_wake` 验证 `payload.messageId`，对 `private_input` 只验证 inline payload 与 exact target，不按正文内容分流；若 entry 另有 source owner，则 owner 从自己的 typed state 产生 exact preflight candidate，冻结 owner kind、lease/generation、predicate/HEAD 与 principal/tenant/route；
-3. 为每个 target 生成 `invocationId + responseMessageId + startedAt`，并让相关 source owner 准备把 exact entry/dispatch 与该 frozen decision 绑定到该 invocation；同 HEAD 但 generation 已替换也属于 stale；
+3. 为每个 resolved actual target 生成 `invocationId + responseMessageId + startedAt`，并让相关 source owner 准备把 exact entry/dispatch 与该 frozen decision 绑定到该 invocation；同 HEAD 但 generation 已替换也属于 stale；
 4. 持久化尚未激活的 exact callback principal；principal mint/persist 失败时整批 entries 保持 Queue 中，不能报告 accepted；
-5. 一个持久事务原子完成：existing owners CAS 验证 preflight candidates 仍 current，并提交 immutable admission bindings；exact take 整个前缀；每条 conversation input 复用 `sourceRecordId` 为公开 `messageId` 并分配 `orderKey`，为每个 target 直接写 `dispatched` ref；每条 message wake 分别验证 `payload.messageId`，把对应 `assigned` ref CAS 推进到 `dispatched`；`private_input` 不写 History message/ref，只返回 exact 私有输入；随后为每个 target 写一条引用完整 `inputEntryIds/inputMessageIds` 的 `processing` ResponseBubble，把各 ref 的 `statusMessageId` 固定到该 bubble，并激活 callback principals；
+5. 一个持久事务原子完成：existing owners CAS 验证 preflight candidates 仍 current，并提交 immutable admission bindings；exact take 整个前缀；每条 conversation input 复用 `sourceRecordId` 为公开 `messageId` 并分配 `orderKey`，只为 admission 时重验/回退所得的 resolved actual targets 直接写 `dispatched` refs；每条 message wake 分别验证 `payload.messageId`，把对应 actual target 的 `assigned` ref CAS 推进到 `dispatched`；`private_input` 不写 History message/ref，只返回 exact 私有输入；随后为每个 actual target 写一条引用完整 `inputEntryIds/inputMessageIds` 的 `processing` ResponseBubble，把各 ref 的 `statusMessageId` 固定到该 bubble，并激活 callback principals；
 6. 在调用 provider 前创建 Active Run；
 7. 调用 provider，明确得到 accepted 或 failure。
 
@@ -1155,9 +1156,9 @@ Queue Panel 是 admission 前的 staging view，不属于 Chat History 排序。
 
 ### 8.2 ordering barrier
 
-`status=processing` 的 response bubble 是 cursor barrier。Queue 中的 conversation input 尚未进入 History，因此不参与 cursor，也不需要伪造一个“前端可见、Agent 不可见”的 History 状态。已有 Agent History source 上的 `assigned` ref 也不构成一条新的未读消息。
+`status=processing` 的 response bubble 是 cursor barrier。Queue 中的 conversation input 尚未进入 History，因此不参与 cursor，也不需要伪造一个“前端可见、Agent 不可见”的 History 状态。已有、将被投递的 Agent History message 上的 `assigned` ref 也不构成一条新的未读消息。
 
-Agent 可以从 source `dispatchRefs` 与关联 bubble/thread snapshot 的投影中知道“成员正在处理”，但这只是 situation summary，不创建 read receipt，也不让持久 cursor 越过 processing bubble并把它当作正文已读。气泡终局后，下一次上下文在原位置读取完整正文，再推进 cursor；failed、canceled 与 interrupted 因此都会作为 canonical terminal 被后续 Agent 看见。
+Agent 可以从被投递 History 消息的 `dispatchRefs` 与关联 bubble/thread snapshot 投影中知道“哪个成员正在处理这条消息”，但这只是 situation summary，不创建 read receipt，也不让持久 cursor 越过 processing bubble并把它当作正文已读。气泡终局后，下一次上下文在原位置读取完整正文，再推进 cursor；failed、canceled 与 interrupted 因此都会作为 canonical terminal 被后续 Agent 看见。
 
 当前被 dispatch 或显式 Append/Steer 的 public conversation input 会先 materialize 为 History message；message ref 复用已有消息；`private_input` 不 materialize，只作为 exact private input 注入 provider。即使普通 cursor 被更早的 processing barrier 挡住，public exact input 或 private exact input 仍可注入；这不越过 barrier，也不把窗口外消息误标为已读。
 
@@ -1326,9 +1327,9 @@ async function steerSelected(entryId, selectedTargets) {
 }
 ```
 
-`takeSelectedMaterializeAndAttachInputToRuns` 的原子范围是“验证 exact selected entry、完整 target set 与所有仍为 processing 的 expected invocations + 让 structured source owner 提交 exact invocation binding + 移除 entry + 把 conversation input 写入 History，或验证并复用 message ref + 把 source refs 推进到 `dispatched` 并指向各 target 的现有 response bubble + 把 input entry/message IDs 持久附到每个 bubble”。Append 不创建新 response bubble；现有 bubbles 已是 outstanding witnesses。只有该事务 winner 才能调用 adapters。某个 target 拒绝时，系统在一个带 invocation + owner-generation 校验的事务中，从该 target 仍为 processing 的 bubble 移除 exact input IDs、让 owner terminalize 对应 binding、把该 source ref 以独立 failure result 收敛为 `settled`，再更新 Active Run；其他已经接受的 target 不回滚。若事务后进程退出，startup 会按 processing bubble 的 `invocationId` 查询 owner bindings并收敛为 interrupted，不会丢掉一次可能已经发生的 client side effect。
+`takeSelectedMaterializeAndAttachInputToRuns` 的原子范围是“验证 exact selected entry、完整 target set 与所有仍为 processing 的 expected invocations + 让 structured source owner 提交 exact invocation binding + 移除 entry + 把 conversation input 写入 History，或验证并复用 message ref + 把被投递消息 refs 推进到 `dispatched` 并指向各 target 的现有 response bubble + 把 input entry/message IDs 持久附到每个 bubble”。Append 不创建新 response bubble；现有 bubbles 已是 outstanding witnesses。只有该事务 winner 才能调用 adapters。某个 target 拒绝时，系统在一个带 invocation + owner-generation 校验的事务中，从该 target 仍为 processing 的 bubble 移除 exact input IDs、让 owner terminalize 对应 binding、把该 delivered-message ref 以独立 failure result 收敛为 `settled`，再更新 Active Run；其他已经接受的 target 不回滚。若事务后进程退出，startup 会按 processing bubble 的 `invocationId` 查询 owner bindings并收敛为 interrupted，不会丢掉一次可能已经发生的 client side effect。
 
-`takeSelectedMaterializeAndCutoverResponses` 的原子范围是“验证 exact selected entry、完整 target set 与各 target 的 running/idle 快照 + 提交新 entry 的 source owner bindings + 移除 entry + materialize public input，或验证并复用 message ref + target 旧 bubbles 原位 canceled、旧 inputs 的 refs 原位 `settled`、按其 invocation IDs 提交 old binding dispositions + 若 History message 的 exact `producerInvocationId` 仍 live，则 source bubble、refs 与 bindings 也原位 canceled/settled/dispositioned + 为每个 target 创建新的 processing bubble + 新 input refs 进入 `dispatched` + 激活 principals”。只有该事务 winner 才能更新 Active Runs 并产生 cancel/`dispatch(force=true)` side effects；进程在事务后退出时，新 bubbles 仍由 startup 通过 durable invocation bindings 收敛为 interrupted，旧 providers 的迟到 callbacks 只会命中已终局的旧 invocations。
+`takeSelectedMaterializeAndCutoverResponses` 的原子范围是“验证 exact selected entry、完整 target set 与各 target 的 running/idle 快照 + 提交新 entry 的 source owner bindings + 移除 entry + materialize public input，或验证并复用 message ref + target 旧 bubbles 原位 canceled、旧 inputs 的 refs 原位 `settled`、按其 invocation IDs 提交 old binding dispositions + 若 History message 的 exact `producerInvocationId` 仍 live，则 producer bubble、refs 与 bindings 也原位 canceled/settled/dispositioned + 为每个 target 创建新的 processing bubble + 新 input refs 进入 `dispatched` + 激活 principals”。只有该事务 winner 才能更新 Active Runs 并产生 cancel/`dispatch(force=true)` side effects；进程在事务后退出时，新 bubbles 仍由 startup 通过 durable invocation bindings 收敛为 interrupted，旧 providers 的迟到 callbacks 只会命中已终局的旧 invocations。
 
 Append 不会自动发生，也不会把两条 History message 合成一条。它只是把新 exact input 加入选定 target set 的现有 Active Runs；已有 response bubbles 继续保持原位置。
 
@@ -1393,9 +1394,9 @@ exact callback principal 在 canonical terminal 前不能因静默 TTL 变成 `u
 前端只展示七个直接事实：
 
 ```text
-Queue row                  → 输入已持久化并获得 source identity，等待 dispatch
-public History message     → 输入已进入聊天面板并开始 dispatch
-source dispatch avatars    → 谁的 server-side Agent execution 已开始、谁已经结束本跳
+Queue row                       → 输入已持久化并获得 source identity，等待 dispatch
+delivered public History message → 正文已进入聊天面板并被交给 actual target
+delivered-message target avatars → 哪些 actual targets 正在处理、哪些已经结束本跳
 processing response bubble → exact server-side Agent execution live，尚未终局
 terminal response bubble   → 已完成、失败、取消或被重启中断
 delivery failure result    → admission 前已确定无法投递，没有伪造运行
@@ -1405,7 +1406,8 @@ terminal without link      → exact execution/result 已终局，但没有可�
 - public conversation input 由 Queue row 直接渲染；它已经有 owner-owned `sourceRecordId`，但还没有 History membership/orderKey；
 - private input 是 durable Queue entry，但只进入内部 ordered-Queue 投影，不在普通 Queue Panel 或 History 渲染；
 - admission 后 Queue row 消失，输入与 processing bubble 一起进入聊天面板；
-- 每条公开来源消息在气泡下按稳定 target 顺序渲染 `dispatchRefs`：`assigned` 不显示，`dispatched` 使用现有回复头像的动态效果，`settled` 显示静态头像；multi-target 的头像分别推进，互不覆盖；
+- 每条实际被 dispatch 的公开 History 消息都在**自身气泡**下按 actual target 的稳定顺序渲染 `dispatchRefs`：`assigned` 仍是尚未 actual dispatch 的 Queue 计划，不用头像宣称正在处理；`dispatched` 在 exact Active Run 可验证时使用现有处理头像的动态效果；`settled` 显示静态头像。multi-target 的头像分别推进，互不覆盖；
+- 该规则与发送者无关：用户消息、成员 `post_message`、公开外部/系统通知都使用自己的消息气泡；completed response bubble 若把 canonical final 投给下一跳，也由这个既有 bubble 承载下一跳头像。transport carrier、pre-History source record、structured source owner 与新建的 processing response bubble 都不是上一条 delivery 的替代锚点；
 - 头像提示只给出成员与阶段/结果：`B 正在处理`、`B 处理完成`、`B 处理失败`、`B 已取消`、`B 已中止`；其中“正在处理”明确表示 B 的 server-side Agent execution 已开始且尚未终局，不承诺 provider 已接收正文或 B 已 seen/handled。具体正文与 reason 仍由 `statusMessageId` 指向的 response bubble / delivery failure record 承载；
 - target/default 或独立 source owner binding 在 admission 前失效时，Queue row 消失；公开输入（若尚未入 History）与 `DeliveryFailureResult` 在一个事务中可见，私有输入只留下 internal diagnostic；不会出现假 member bubble；
 - 已经发布的独立 Agent `post_message` / owner successor 保持原 History 位置，Queue row 只是它的待 dispatch 引用；
@@ -1414,11 +1416,11 @@ terminal without link      → exact execution/result 已终局，但没有可�
 - Stop Agent 可以选择一个 Agent 的 exact Agent Client run，或快照 thread 当前全部 Agent Client runs；它不改变 Queue 顺序与自动 drain，也不取消 managed command/job/wait；
 - 拖动可见 Queue row 后，UI 只提交 `expectedQueueRevision + orderedVisibleEntryIds`，即同一 snapshot 中完整的 visible row 顺序；API 校验 revision、完整 visible set 与 eligibility 后原子写入 `position=0..n-1`。positioned visible rows 位于未定位 hidden rows 前，hidden rows 只按自身 priority/FIFO 排序且不被 UI 直接寻址；任何并发变化都整批 typed conflict；
 - 不展示用户已读/未读、receipt processing、attempt aggregate、thread-wide paused 或无对象 Continue。
-- 若 exact execution/owner result 已 terminal，但 canonical reads 不能证明唯一 `responseMessageId/source ref`，projection 必须诚实显示“已终局，但未关联可见回复”及 diagnostic anchor；不能凭 terminal body、carrier 或当前身份补造 History bubble/ref。只有后续证据能唯一证明既有 lineage 时，reconciler 才可 CAS 修复链接；该 projection 不是第四个 lifecycle ledger。
+- 若 exact execution/owner result 已 terminal，但 canonical reads 不能证明唯一 `responseMessageId/delivered-message ref`，projection 必须诚实显示“已终局，但未关联可见回复”及 diagnostic anchor；不能凭 terminal body、carrier 或当前身份补造 History bubble/ref。只有后续证据能唯一证明既有 lineage 时，reconciler 才可 CAS 修复链接；该 projection 不是第四个 lifecycle ledger。
 
 ### 11.1 用户与 Agent 共用同一工作状态投影
 
-“某成员正在工作”不能由 Queue row、旧对话文本或一个孤立字段单独猜出。用户 UI 与 Agent situation/context summary 必须读取同一份 domain snapshot：source ref 为 `dispatched`、关联 bubble 为 `processing`，并且 active-execution owner 返回匹配的 exact Agent Client run 时，才投影为动态头像/“正在处理”；这里的 processing 是粗粒度 server-execution 状态，不是 provider receipt、body exposure、seen 或 handled 的同义词。任一 canonical read 不完整就 fail closed，不用 ref 单独补齐。ref 为 `settled` 时，从关联 canonical record 读取 completed/failed/canceled/interrupted，并投影为静态头像与对应提示。provider launch 或 execution 失败必须让同一 bubble 原位 `failed` 并保留已有 partial body/typed reason，不能留下永久 spinning，也不需要向普通用户再拆“启动中/连接中”。`assigned` 只说明 Queue 已有定向计划，`dispatched` 只说明 admission 已发生；两者都不表示成员已经看到 exact body。Agent situation packet 的 `presented` receipt 只在 provider adapter 确认收到对应 projection 后写入，也不反向推进 `dispatchRefs` 或 structured responsibility。
+“某成员正在处理这条消息”不能由 Queue row、旧对话文本或一个孤立字段单独猜出。用户 UI 与 Agent situation/context summary 必须读取同一份 domain snapshot：被投递 History 消息对 actual target 的 ref 为 `dispatched`、关联 bubble 为 `processing`，并且 active-execution owner 返回匹配的 exact Agent Client run 时，才在**该被投递消息气泡下**投影动态头像/“正在处理”；这里的 processing 是粗粒度 server-execution 状态，不是 provider receipt、body exposure、seen 或 handled 的同义词。任一 canonical read 不完整就 fail closed，不用 ref、carrier 或 source owner 单独补齐。ref 为 `settled` 时，从关联 canonical record 读取 completed/failed/canceled/interrupted，并在同一消息气泡下投影静态头像与对应提示。provider launch 或 execution 失败必须让关联 response bubble 原位 `failed` 并保留已有 partial body/typed reason，不能让被投递消息头像永久 spinning，也不需要向普通用户再拆“启动中/连接中”。`assigned` 只说明 Queue 已有定向计划，`dispatched` 只说明 admission 已发生；两者都不表示成员已经看到 exact body。Agent situation packet 的 `presented` receipt 只在 provider adapter 确认收到对应 projection 后写入，也不反向推进 `dispatchRefs` 或 structured responsibility。
 
 API 启动时必须先完成 §10.2 的 owner-fence validation、canonical terminal apply、interrupted/source-owner disposition/ref 收敛，才能把无阻塞 thread 标为 ready、提供新的 Agent context 或接受新的 dispatch。重启后 Active Runs 为空，旧 processing bubbles 只有在 exact binding 可验证且 live client 消失时才原位 interrupted；已提交 terminal 只补同一 apply，证据不足则保留 outstanding/blocked 并隐藏“正在工作”。`hold_ball` 或已注册外部等待可以在没有任何 Active Run 时合法存在；它是独立的结构化等待事实，不得伪装成成员正在工作。若其上游协议产生 `private_input` 来源消息，主生命周期只把该 envelope 封装进同一 priority Queue，不需要新增持久责任账本。
 
@@ -1427,20 +1429,20 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | 责任 | 主要代码位置 | 目标改造 |
 |---|---|---|
 | QueueEntry 封装 | message/Connector/scheduled callback routes | 生产者直接给出 `kind + payload + from + targets + priority`；入口只校验合法组合。priority 仅为 `urgent / normal`，缺省 normal；不从 kind/source/payload 推断，也不调用 existing owner 或 Agent Client |
-| 输入持久化 / owner timeline | `packages/api/src/routes/messages.ts` + queued-message custody owner | public conversation 在 enqueue commit 时持久化稳定 `sourceRecordId + entryId + payload/custody`；不提前获得 History membership/orderKey；commit 后 requestDrain。admission 复用该 source identity 并直接建立 `dispatched` refs，不制造中间 `assigned` 状态 |
+| 输入持久化 / owner timeline | `packages/api/src/routes/messages.ts` + queued-message custody owner | public conversation 在 enqueue commit 时持久化稳定 `sourceRecordId + entryId + payload/custody`；不提前获得 History membership/orderKey；commit 后 requestDrain。admission 复用该 identity materialize 被投递 History 消息，并按 actual targets 直接建立 `dispatched` refs；source record/carrier 不形成另一条 UI anchor，也不制造中间 `assigned` 状态 |
 | Queue | `packages/api/src/domains/cats/services/agents/invocation/InvocationQueue.ts` | durable priority QueueEntry；payload 只保留 inline/message_ref 两种承载，`from` 使用判别结构，顶层 `kind` 只有 conversation-input/message-wake/private-input；唯一 comparator 为 `position → urgent/normal → enqueuedAt → id`。显式 reorder 以 `expectedQueueRevision + orderedVisibleEntryIds` 原子刷新完整 visible positions；kind/source/system category 不授予 hidden rank |
 | Admission Coordinator | `packages/api/src/domains/cats/services/agents/invocation/QueueProcessor.ts` | 唯一 requestDrain、dirty-bit single owner、commit 后严格 comparator head、启动恢复；消费 Queue mutation、run terminal 与 external source-owner eligibility 的既有 post-commit signal，不持有 timer 或另一套排序策略，private input 单独 admission |
 | Agent 路由 | `packages/api/src/domains/cats/services/agents/routing/AgentRouter.ts` | enqueue 时解析 exact targets；targetless fallback 留到 head execution |
 | body exposure / handled | `queued-message-custody.ts` + `QueuedMessageCustodyCoordinator.ts` | 保留 exact target/invocation body exposures、seen 与 handled/target outcome；provider prompt exposure 后才写 seen，terminal predicate 后才写 handled；`dispatchRefs` 与 bubble 不得替代或反向推进这些 facts |
 | 未读 / provider presentation | `route-helpers.ts` + context presentation mapper/ledger | 复用 delivery cursor、visibility/window 与 projected/exposed ids；processing barrier + exact input。只有 provider adapter 已接收 projection 后才写 content-free presented receipt；不从 render、admission 或 `dispatchRefs` 提前消费 |
-| admission / 响应发布 | `packages/api/src/domains/cats/services/agents/routing/route-serial.ts` | Agent Client effect 前让 existing owners CAS 提交 immutable exact admission binding（owner kind + lease/generation + frozen predicate/HEAD + principal/tenant/route）；同一 cutover take Queue、materialize input、固定 response bubble、激活 callback principal，并把 exact source ref 创建/推进为 `dispatched`。stream snapshot 原位更新；pre-admission mismatch 写 exact result/diagnostic，insufficient evidence 保持 pending；terminal 按 invocation 原子提交 typed owner dispositions、source refs、completed-final wake/assigned refs 与 predecessor return |
-| History 顺序 / dispatch-ref projection | `redis-message-append.ts` + `RedisMessageStore.ts` + startup reconciler | admission 复用 sourceRecordId 并为 input/bubble 连续分配 orderKey；更新不重排；每个 exact target 的 ref 只允许单调 CAS。reconciler 从 Queue membership、bubble input binding 与 terminal result 重建；唯一映射可修，缺失/多义 fail closed 并报警 |
+| admission / 响应发布 | `packages/api/src/domains/cats/services/agents/routing/route-serial.ts` | Agent Client effect 前让 existing owners CAS 提交 immutable exact admission binding（owner kind + lease/generation + frozen predicate/HEAD + principal/tenant/route）；同一 cutover take Queue、materialize/reuse delivered message、固定 response bubble、激活 callback principal，并把 delivered-message exact target ref 创建/推进为 `dispatched`。stream snapshot 原位更新；pre-admission mismatch 写 exact result/diagnostic，insufficient evidence 保持 pending；terminal 按 invocation 原子提交 typed owner dispositions、delivered-message refs、completed-final wake/assigned refs 与 predecessor return |
+| History 顺序 / dispatch-ref projection | `redis-message-append.ts` + `RedisMessageStore.ts` + startup reconciler | admission 复用 sourceRecordId 并为 delivered input/bubble 连续分配 orderKey；更新不重排；每个 actual target 的 ref 只允许单调 CAS。reconciler 从 Queue membership、delivered message/bubble input binding 与 terminal result 重建；唯一映射可修，缺失/多义 fail closed 并报警 |
 | Active execution | `active-execution-service.ts` + InvocationRecord/Tracker/TurnExecution/managed-command owners | domain service 组合完整性标记与 typed execution kinds；Active Run 只保存 Agent Client exact run + responseMessageId + input IDs，不复制 source carrier。Stop Agent 只筛选/cancel Agent Client kind；owner read 不完整时不宣称 idle/working |
 | Agent wake | `packages/api/src/routes/callback-a2a-trigger.ts` + terminal path | 每条 `post_message` 独立写 History；Agent Client completed final 复用 response bubble；两者解析出有效 target 时原子建立唯一 message-ref entry 与每目标 `assigned` ref；structured dispatch owner 用 message identity 建立 invocation binding |
 | Structured source owners | existing `TurnExecution`、action-successor、event-wait stores/services | 保留各自 typed carrier、lease 与 predicate；preflight 产生 candidate，admission CAS 提交 immutable exact entry/target/invocation fence。unadmitted candidate 的 terminal/replacement/evidence mutation 以既有 durable post-commit event 唤醒 Queue coordinator，由后者重读 typed fact 并 exact CAS；admitted work 的 terminal/replay/startup 只按 invocation 找回原 binding，并让 owner 以同一 generation/predicate 提交或返回既有 disposition/predecessor；callback principal 与 carrier 都不能替代 lease authority；owner namespace 互不覆盖 |
 | Queue / execution 控制 | `packages/api/src/routes/queue.ts` + existing invocation cancellation route | 服务端从 exact Queue revision、完整 target set、source-owner verdict、Active Runs 与 client capabilities 导出并消费同一 action projection。Append/Steer/Cancel queued 与 Stop running 进入同一个 per-thread coordinator；Queue action 对完整 entry all-or-none，先 exact take 后 Agent Client effect，并与对应 ref 创建、推进、删除保持原子；取消尚未 dispatch 的 Agent wake 时删除其 `assigned` refs；Stop 只快照并 cancel exact Agent Clients，不直接写 terminal / 释放 run |
 | Agent Client / provider adapter | `packages/api/src/domains/cats/services/agents/providers/CodexAppServerClient.ts` 及 adapters | adapter 创建 exact Agent Client；client 内部吸收 session/compact/handoff/re-trigger/cancel 差异，对外只暴露 accepted/failure、同 invocation 的 stream callback、唯一 completed/failed/canceled terminal callback 与 exact cancel；Stop cancel 必须停止后续 stream 并正常产出 canceled terminal |
-| UI | `packages/web/src/components/QueuePanel.tsx` 及消息气泡 | Queue row 直接渲染 inline payload 或 message-ref preview，并只把服务端 exact action projection 中的操作呈现为可提交；typed stale/conflict 使旧确认失效并刷新 canonical snapshot，不自动重复。聊天面板只渲染 History；stream/final 同一气泡；failed/canceled 保留 partial body，并用气泡内 status footer 呈现 structured reason，不追加第二条 chat；原消息气泡下按 `dispatchRefs` 投影目标头像：`assigned` 隐藏、`dispatched` 复用现有回复头像动效、`settled` 静态显示并只提示处理结果。exact terminal 缺少可证明 visible lineage 时显示 terminal-without-link diagnostic，不补造 bubble/ref |
+| UI | `packages/web/src/components/QueuePanel.tsx` 及消息气泡 | Queue row 直接渲染 inline payload 或 message-ref preview，并只把服务端 exact action projection 中的操作呈现为可提交；typed stale/conflict 使旧确认失效并刷新 canonical snapshot，不自动重复。聊天面板只渲染 History；stream/final 同一气泡；failed/canceled 保留 partial body，并用气泡内 status footer 呈现 structured reason，不追加第二条 chat。每条实际被 dispatch 的公开 History 消息都在自身气泡下按 actual-target `dispatchRefs` 投影头像：`assigned` 不宣称 processing，`dispatched + exact live run` 复用现有处理头像动效，`settled` 静态显示并只提示处理结果；不得把 carrier/source owner/另造状态消息作为锚点。exact terminal 缺少可证明 visible lineage 时显示 terminal-without-link diagnostic，不补造 bubble/ref |
 
 现有 Queue custody 的 body exposure/seen/handled/attempt、ActionSuccessor/AwaitState、TurnExecution、typed verdict、active-execution composition 与 presentation receipt 都是本 RFC 明确保留的 external owner，不能作为“重复 ledger”删除。Queue / History / Active Run 是 conversation-delivery kernel 的 Occam boundary；不得再增加通用 WorkUnit/Receipt/Settlement ledger。需要 supersede 的是它们在 UI/调度上的替代写入、category-derived Queue rank、Queue pause/fallback；实施时按 §3.4 disposition 逐项迁移，不通过兼容层让两个 owner 同时裁决同一 fact。
 
@@ -1450,11 +1452,11 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 2. 让所有 message/Connector/plugin/scheduler/system 生产者提交 `kind + payload + from + targets + priority + ownerAuthProvenance`；priority 缺省 normal，urgent 必须显式给出；public conversation 同时获得稳定 sourceRecordId。入口只校验判别组合；structured owner 在签发 private envelope 前自行决定是否需要 Agent。CLI completed final 只在 terminal transaction 内创建 message-ref wake；
 3. 把 QueueEntry 的 payload 收敛为 inline/message_ref 两种承载，把 sender 收敛为 namespaced `MessageFrom`，并把顶层 entry kind 收敛为 conversation-input/message-wake/private-input；私有协议差异只体现在 inline payload 正文与 Queue 外 owner binding；实现默认 normal、显式 urgent、同级 FIFO、完整 visible-order batch reorder 与 public conversation 兼容前缀批次；
 4. 调整 public conversation 入口为 Queue-first；独立 Agent `post_message` / completed final 直接复用其 History message，并与 message-ref wake 原子写入每目标 `assigned` ref；targetless fallback 只留给 public head；
-5. 建立 pre-admission terminal transaction 与 admission transaction：前者 exact take + History failure result + 已存在 ref 的 `settled`，后者 existing-owner invocation binding + exact take + materialize input + processing bubble + callback principal + source ref 的 `dispatched`；
+5. 建立 pre-admission terminal transaction 与 admission transaction：前者 exact take + History failure result + 已存在 ref 的 `settled`，后者 existing-owner invocation binding + exact take + materialize/reuse 被投递 History 消息 + processing bubble + callback principal + actual-target ref 的 `dispatched`；
 6. 把 Active Run 收敛为 Agent Client exact invocation、responseMessageId 与三组 exact input IDs，并作为 domain active-execution service 的一个 typed input；managed command/job/child execution 继续由各自 owner 参与完整投影；typed source carrier 只留在 owner 的 invocation binding；
 7. 把所有调度触发收敛到 `requestDrain`，包括 structured source owner 对 unadmitted candidate 的 exact eligibility/evidence post-commit signal；由 coordinator 重读 typed owner fact 并竞争 Queue CAS，删除 timer 型正确性兜底；
 8. 接通现有未读 cursor、Queue custody exact body exposure 与 provider presentation receipt：processing barrier + exact input；Agent situation summary 从 canonical Queue/History/execution snapshot 派生，provider adapter 确认接收后才记 presented；
-9. 让 Agent Client 封装成员内部 session/compact/handoff/re-trigger/cancel，并证明跨这些边界仍保持同一 invocation/callback principal；把现有 DraftStore snapshot 与正式 MessageStore append 收敛为同一 response bubble，completed canonical final 解析 target 并原子创建同 bubble message ref + `assigned` refs，failed/canceled/interrupted 保留 partial body + structured reason，同时按 invocation 提交 typed owner dispositions 与 source ref `settled`；
+9. 让 Agent Client 封装成员内部 session/compact/handoff/re-trigger/cancel，并证明跨这些边界仍保持同一 invocation/callback principal；把现有 DraftStore snapshot 与正式 MessageStore append 收敛为同一 response bubble，completed canonical final 解析 target 后把这个既有 bubble 作为下一跳被投递消息，原子创建同 bubble message ref + `assigned` refs；failed/canceled/interrupted 保留 partial body + structured reason，同时按 invocation 提交 typed owner dispositions 与上一跳 delivered-message ref `settled`；
 10. 接入服务端 exact full-entry action projection 与显式 Append/Steer/Cancel queued/Stop Agent；验证 UI/API 读取并重验同一 Queue revision + 完整 target set + owner/run/capability preconditions，Queue action 先整条 take 后 side effect、对应 refs 同事务迁移，并验证 Stop 只 cancel typed exact Agent Client、绝不命中 managed command/job，由 client 正常回调 canceled terminal，不暂停也不删除 Queue；
 11. 保留 Queue custody 的 exposure/seen/handled/attempt、structured owner、active-execution 与 presentation ledger，以及 Queue 的 `urgent / normal` 两级 priority；删除的只是 category-derived rank、Queue pause、ref 反向裁决和多层 timer/fallback。新增 dispatch-ref reconciler 只修 derived projection，不能改写 canonical owners；
 12. 在隔离环境跑完整验收矩阵后执行 quiescent live cutover：先把 content-free `lifecycleWriterEpoch` CAS guard dark-land 到所有 legacy/new writer transaction；语义激活前停止 legacy 新 admission、收敛或持久化在途事务、撤出未受 guard 保护的 binary，再由独占迁移 lease 完成 `legacy → migrating` writer fence、reconciliation 与 `migrating → live` 提交；不得让两套 lifecycle 并行裁决 live work。
@@ -1467,7 +1469,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 2. **admission cutover**：producer、exact Queue take、immutable owner binding、callback-principal activation、History materialization 与 processing bubble 是一个不可拆的 durable cutover；
 3. **terminal/recovery cutover**：bubble delivery terminal、typed owner disposition、successor/predecessor enqueue、same-generation replay、append-won/apply-crashed compensation 与 startup freshness 是另一个不可拆的 durable cutover。
 
-三个切片可以分别 dark-land，但只有 admission 与 terminal/recovery 都具备并通过 A1–A89 后，live semantics 才一次激活。dark landing 可以沿用 rolling deployment；**live activation 不能是 rolling writer handoff**。激活前置版本必须先把 content-free、monotonic `lifecycleWriterEpoch` CAS guard 部署到每一条 legacy/new admission、terminal 与 migration write transaction；epoch 只裁决哪代 writer 可提交，不复制 Queue、execution 或责任事实，因此不是第四个 lifecycle ledger。任何没有该 guard 的 binary 都不具备 cutover 资格，必须先从流量与进程集合撤出。随后执行 quiescent writer fence：
+三个切片可以分别 dark-land，但只有 admission 与 terminal/recovery 都具备并通过 A1–A90 后，live semantics 才一次激活。dark landing 可以沿用 rolling deployment；**live activation 不能是 rolling writer handoff**。激活前置版本必须先把 content-free、monotonic `lifecycleWriterEpoch` CAS guard 部署到每一条 legacy/new admission、terminal 与 migration write transaction；epoch 只裁决哪代 writer 可提交，不复制 Queue、execution 或责任事实，因此不是第四个 lifecycle ledger。任何没有该 guard 的 binary 都不具备 cutover 资格，必须先从流量与进程集合撤出。随后执行 quiescent writer fence：
 
 1. legacy fleet 先停止接受新的 root ingress/admission，但继续让已接收事务提交 canonical terminal，或留下足以让已 dark-land terminal/recovery reducer 接管 exact callback 的持久 outstanding witness；新 ingress 在 activation 完成前保持 blocked，不绕到新 writer；
 2. 等所有已开启的 legacy lifecycle transaction 退出，并撤出所有未受 epoch guard 保护的 binary；无法证明任一 transaction/binary 已退出时，cutover fail closed；
@@ -1497,8 +1499,8 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | terminal/verdict append 已提交，projection apply 前 crash | append 与 apply 被误当作两个可重新裁决的答案 | startup/retry 读取 exact invocation + admission fence，只补同一 committed terminal/verdict 的 apply；compensation 不 cancel verdict、不产生第二个 semantic answer |
 | execution 已 terminal 但找不到唯一可见 reply lineage | projection 把 execution terminal 误当成可任意补 History link 的许可 | 保留 canonical terminal并显示 terminal-without-link diagnostic；只有唯一证据可 CAS 修复链接，不从 body/carrier/current identity 补造 bubble/ref |
 | target/default 在 admission 前失效却没有可表示结果 | 只有要求 target/invocation 的 ResponseBubble | exact take 与 `DeliveryFailureResult` 同事务；不造假 run、不静默删除、不保留成 replayable entry |
-| 后续 Agent 不知道前一条公开消息由谁处理、是否仍在处理 | source message 与 response bubble 之间没有持久 exact target/结果边 | History 为每个 target 保存单调 `dispatchRef`；Agent 与用户从同一 ref + canonical bubble/thread snapshot 派生状态，不另建 read receipt |
-| 重启或异常终局后来源头像永远闪烁 | terminal/startup 只收敛 response bubble，没有同事务收敛 source ref | terminal 与 startup 都在 thread ready 前把对应 `dispatched` ref 推进为 `settled`，再由 linked canonical result 投影终态 |
+| 后续 Agent 不知道前一条公开消息实际投给谁、谁仍在处理 | 被投递 History message 与 response bubble 之间没有持久 exact target/结果边，或错误地把 carrier/source owner 当 UI anchor | 每条实际被投递的公开 History 消息为 actual targets 保存单调 `dispatchRef`；Agent 与用户从同一 ref + canonical bubble/thread snapshot 派生状态，不另建 source/status bubble 或 read receipt |
+| 重启或异常终局后被投递消息下的目标头像永远闪烁 | terminal/startup 只收敛 response bubble，没有同事务收敛 delivered-message ref | terminal 与 startup 都在 thread ready 前把对应 `dispatched` ref 推进为 `settled`，再由 linked canonical result 在同一被投递消息下投影终态 |
 | 前端 A→B，Agent 却读成 B→A | response 在 final append 时才分配位置 | input/bubble 在 admission 时固定 orderKey；processing 是 cursor barrier；final 原位更新 |
 | client 失败但没有回复 | final 才创建 message，失败路径没有共同出口 | admission 先创建 processing bubble，所有 terminal 原位更新 |
 | completed final 含 `@` 后重复出现两条 Agent message，或目标没有被唤起 | 把 Agent Client final 当成独立 `post_message`，或把 History terminal 与 Queue enqueue 分成两次提交 | final 只原位终局既有 response bubble；有效 target 的 message ref、每目标 `assigned` ref 与 terminal 原子提交并引用同一 `responseMessageId` |
@@ -1519,41 +1521,41 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 
 | 验收 / 反证簇 | 由哪些 laws 推出 | 覆盖范围 |
 |---|---|---|
-| source identity、History membership、target fence、body exposure/handled 与 presentation 必须分离 | L1 + L3 + L5 | A1–A2, A6–A10, A12–A14, A17–A21, A30–A34, A36–A41, A45–A50, A53–A59, A63, A71–A89；§16 中 owner/custody/ref/presentation 互相代写或推断的状态 |
+| source identity、History membership、target fence、body exposure/handled 与 presentation 必须分离 | L1 + L3 + L5 | A1–A2, A6–A10, A12–A14, A17–A21, A30–A34, A36–A41, A45–A50, A53–A59, A63, A71–A90；§16 中 owner/custody/ref/presentation 互相代写或推断的状态 |
 | Queue 顺序、batch/Append/Steer/Cancel 的 exact cutover 与 side-effect/authority fence | L1 + L2 | A3–A5, A8–A18, A26–A29, A35, A37, A42–A44, A51–A52, A57–A58, A61–A64, A69–A70, A73–A75, A81, A84, A86–A89；§16 中跨 head、hidden priority、authority 重选、先 side effect 后 take、重复 launch、UI 发明 eligibility 的状态 |
-| admitted run、delivery terminal、owner disposition、Stop 与 restart recovery | L1 + L4 + L5 | A4–A7, A10, A17–A25, A27–A30, A33–A34, A40–A50, A53, A55–A68, A76–A89；§16 中无 durable result、半终局、stale callback、错误 cancel/replay/compensation、terminal 与 Queue 并存及虚假 working claim |
+| admitted run、delivery terminal、owner disposition、Stop 与 restart recovery | L1 + L4 + L5 | A4–A7, A10, A17–A25, A27–A30, A33–A34, A40–A50, A53, A55–A68, A76–A90；§16 中无 durable result、半终局、stale callback、错误 cancel/replay/compensation、terminal 与 Queue 并存及虚假 working claim |
 
-三行的并集精确覆盖 A1–A89；交集是有意的，因为同一场景可以同时验证顺序、owner 和 recovery。§16 的每一项也必须能归入上表至少一类，不能仅凭“看起来危险”新增无 owner 的禁令。
+三行的并集精确覆盖 A1–A90；交集是有意的，因为同一场景可以同时验证顺序、owner 和 recovery。§16 的每一项也必须能归入上表至少一类，不能仅凭“看起来危险”新增无 owner 的禁令。
 
 ### 15.2 场景矩阵
 
 | ID | 场景 | 必须满足 |
 |---|---|---|
 | A1 | 用户发送 `@B`，B 繁忙 | 一个 `conversation_input` entry 保存 inline payload + `from={kind:'user',...}` + `targets=[B]`；Queue Panel 回显；History 中尚无该输入 |
-| A2 | A `post_message @B`，B 繁忙 | 独立消息立即公开；一个 entry 与一个 B 的 `assigned` ref 原子留下；头像不显示；A 不被自动取消 |
+| A2 | A `post_message @B`，B 繁忙 | 独立消息立即公开并成为待投递消息；一个 entry 与一个 B 的 `assigned` ref 原子留下；尚未 actual dispatch 时不显示“正在处理”头像；A 不被自动取消 |
 | A3 | 队首 `M1→A`、次条 `M2→B`，A 繁忙 | 不跳过 M1；B 不提前启动 |
 | A4 | A 终局释放最后一个 blocker | 同一终局路径 requestDrain；M1 随即被处理，不依赖 timer |
 | A5 | M1 被 provider 接受后 M2 可执行 | drain 继续启动 M2，不等待 M1 完整回复 |
-| A6 | 一条用户消息 `@B @C` | 一个 entry 保存 `[B,C]`；B/C 全空闲后 atomically 创建一条 input + 两个独立 response bubble + 两个分别指向其 bubble 的 `dispatched` refs；两个目标头像独立显示处理中 |
+| A6 | 一条用户消息 `@B @C` | 一个 entry 保存 `[B,C]`；B/C 全空闲后 atomically materialize 这一条被投递 input + 两个独立 response bubble + 两个分别指向其 bubble 的 `dispatched` refs；B/C 头像都挂在该 input bubble 下并独立显示处理中 |
 | A7 | B 启动成功、C 启动失败 | B 继续；C 原位 failed；B/C refs 分别保持 `dispatched`/推进为 `settled`，两者不相互覆盖 |
 | A8 | 连续三条相同 target 用户消息 | 三条独立 entry 作为兼容队首前缀一次 dispatch；分别生成三条公开 History message，不拼正文 |
 | A9 | 用户显式 Append 第二条 | 选中 entry 先 materialize，再加入 exact run；两条 History message 仍独立 |
 | A10 | A→B 与 C→B 的独立消息都在 B 本轮实际未读投影 | 两条 History message/entry/ref 身份独立；两条 wake 被原子移除并附到 B bubble/run；两个 refs 都从 `assigned` 推进为指向该 bubble 的 `dispatched`；B 只启动一次 |
 | A11 | 用户消息无 target，thread 有 Active Run | targetless head 等待，后续显式 target entry 不越过 |
 | A12 | 最后一个 Active Run 终局 | targetless head 只选择最近一条 `completed` 响应的当前可用回复成员；排除 processing/failed/canceled/interrupted；没有则 default |
-| A13 | public conversation input 的 mention 无效或成员已删除 | Queue row 保留 warning；按仍有效 targets 或 targetless fallback 继续，不永久卡 head |
+| A13 | public conversation input 的 mention 无效或成员已删除 | Queue row 保留 warning；按仍有效 targets 或 targetless fallback 继续，不永久卡 head；admission 后消息气泡只为最终 actual targets 建 refs/头像，不保留失效 mention 的假 processing claim |
 | A14 | 普通正文包含 `@` | 不产生结构化 target |
 | A15 | 两个调度事件同时到达 | 一个 drain owner；第二个只置 dirty；不会重复 dispatch |
 | A16 | 事件在 drain 退出窗口到达 | release-owner 临界区观察 dirty，至少再运行一轮 |
 | A17 | Queue commit 后、requestDrain 前进程退出 | startup scan 重新触发，消息不静默积压 |
 | A18 | admission 前 principal persist 失败 | entry 与 inline payload 仍在 Queue；History 无 ghost message；没有 client side effect |
-| A19 | crash after Queue take before provider launch | input、processing bubble 与 `dispatched` source refs 已原子写入；startup 将 bubble 原位 interrupted、refs 原位 `settled`；source owner 返回 predecessor 时原子交回，否则直接闭合；不重放 |
-| A20 | crash after provider accepted before final | 同一 bubble 原位 interrupted 并保留已持久化 partial body；source refs 同事务推进为 `settled`；source owner 返回 predecessor 时原子交回；不追加第二条结果 |
+| A19 | crash after Queue take before provider launch | input、processing bubble 与 `dispatched` delivered-message refs 已原子写入；startup 将 bubble 原位 interrupted、refs 原位 `settled`；source owner 返回 predecessor 时原子交回，否则直接闭合；不重放 |
+| A20 | crash after provider accepted before final | 同一 bubble 原位 interrupted 并保留已持久化 partial body；delivered-message refs 同事务推进为 `settled`；source owner 返回 predecessor 时原子交回；不追加第二条结果 |
 | A21 | detached exact run 长时间静默并跨 API restart | callback principal 不因静默 TTL 变 unknown；迟到 terminal 幂等识别 |
-| A22 | provider launch 抛错 | processing bubble 原位 failed；source refs 原位 `settled`；run 删除；requestDrain |
-| A23 | provider 执行失败且没有正文 | processing bubble 原位 failed、source refs 原位 `settled`；不能永久留空 |
+| A22 | provider launch 抛错 | processing bubble 原位 failed；delivered-message refs 原位 `settled`；run 删除；requestDrain |
+| A23 | provider 执行失败且没有正文 | processing bubble 原位 failed、delivered-message refs 原位 `settled`；不能永久留空 |
 | A24 | provider 成功但没有额外文本 | bubble 原位 completed，并显示可理解的完成说明 |
-| A25 | 用户 Stop 指定 Agent | 只对该 Agent 在操作边界仍 live 的 exact Agent Client 调用 cancel；Stop 本身不写 History、不删除 run；client 的 canceled callback 原位终局 bubble，并把 source refs 推进为 `settled` 后才释放 exact run 并 requestDrain；其他 Agent runs 不变 |
+| A25 | 用户 Stop 指定 Agent | 只对该 Agent 在操作边界仍 live 的 exact Agent Client 调用 cancel；Stop 本身不写 History、不删除 run；client 的 canceled callback 原位终局 bubble，并把 delivered-message refs 推进为 `settled` 后才释放 exact run 并 requestDrain；其他 Agent runs 不变 |
 | A26 | 用户 Cancel queued conversation input | exact entry 删除；不创建 History message；不调用 provider |
 | A27 | 用户 Steer 与正常 drain 竞争同一 entry | exact persistent cutover 同时 take、materialize input、cancel target 旧 bubbles、创建新 bubbles；只有 winner 调 clients |
 | A28 | 用户 Steer 一条 live A invocation 产生的 `A→B` wake | 原子 cutover 后取消 B 的 exact old run 与消息记录的 exact A source run；不按 author 猜测较新的 A run |
@@ -1596,7 +1598,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | A65 | B 的成员运行时在处理中 compact context、roll over session、内部 handoff continuation 或 re-trigger | 主生命周期始终只有同一 B Active Run、`invocationId`、callback principal 与 response bubble；不新增 Queue/History 状态；后续 stream/final 继续更新同一 bubble |
 | A66 | terminal 分别为 completed 无有效 target、failed 且 owners 均返回 `pre=null`、canceled | 三者都不创建 Queue follow-up；有 structured source binding 时由 owner 在 durable terminal transaction 中按 exact generation/predicate 提交 disposition，无 binding 时为空操作；commit 后释放同一 Active Run 并 requestDrain；不存在第四条 `other` outcome |
 | A67 | Agent 连续 stream append chunk、replace snapshot，期间 F5 | UI 与 History 投影始终只有 admission 时的同一 `responseMessageId/orderKey`；持久层保存最新累计 snapshot，不产生每-chunk History rows、不重复拼接正文 |
-| A68 | Agent 已 stream 半段正文后 token 耗尽或被用户取消 | 同一 bubble 保留半段正文；分别终局为 `failed/token_limit` 或 `canceled/user_cancel`，source refs 同事务推进为 `settled`，状态作为 bubble footer/折叠详情显示；不追加第二条 chat，不从 partial body 解析 target |
+| A68 | Agent 已 stream 半段正文后 token 耗尽或被用户取消 | 同一 bubble 保留半段正文；分别终局为 `failed/token_limit` 或 `canceled/user_cancel`，delivered-message refs 同事务推进为 `settled`，状态作为 bubble footer/折叠详情显示；不追加第二条 chat，不从 partial body 解析 target |
 | A69 | 未定位的 Queue rows `N1, N2` 均为 normal，来源随后提交 normal `private_input C` | enqueue commit 后三者的 FIFO comparator 顺序为 `[N1, N2, C]`；若 C 显式为 urgent，则按两级 priority 排到未定位 normal rows 前。C 不因 private kind/source category 插队，轮到 comparator head 时才作为私有输入启动普通 Agent Client 主链；不写 History message、不 fallback |
 | A70 | comparator 当前投影为 `[V1,C1,V2,C2,V3]`，其中 `C1/C2` 是未定位隐藏 rows；用户把 `V3` 拖到 `V1/V2` 之间 | UI 提交同一 revision 下完整 visible 顺序 `[V1,V3,V2]`；服务端原子写 positions 后唯一 comparator 结果为 `[V1,V3,V2,C1,C2]`。`C1/C2` 不被客户端寻址并继续按自身 priority/FIFO 排序；同一个 revision + ordered visible ids 不能得到另一结果，revision/visible set 已变化时整批 conflict |
 | A71 | IM sender id 或 GitHub actor id 与某个 catId 字符串相同 | `from.kind='external'` 的 connector/sender 命名空间保持不变；路由器绝不把它解析成 Agent sender |
@@ -1604,11 +1606,11 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | A73 | Agent `post_message` / completed final 需要唤起成员 | Queue payload 都是唯一 `message_ref`；正文只存在于原 History message，不复制到 Queue；message-ref entry 与每目标 `assigned` ref 原子创建 |
 | A74 | envelope 组合非法，例如 `message_wake + inline`、`conversation_input + message_ref` 或 `private_input` 的 `targets=[]` | enqueue 原子拒绝且不创建 Queue/History 状态，不用运行时猜测修正 |
 | A75 | 用户取消尚未 admission 的 Agent `message_wake` | exact Queue entry 与该 wake 尚未 dispatch 的 `assigned` refs 同事务删除；原 History 正文保留；不制造“已取消处理”头像或结果 |
-| A76 | 用户/Connector 公开消息出队并显式路由给 B/C | materialize 时直接创建 B/C 的 `dispatched` refs 并分别链接两个 processing bubbles；不经过可观察的 `assigned`；头像复用现有回复动效 |
-| A77 | 同一 source 的 B completed、C failed | 两个 refs 各自推进为 `settled`；头像静态显示；提示只分别为“B 处理完成”“C 处理失败”，详细结果仍只来自各自 linked canonical bubble |
+| A76 | 用户/Connector 公开消息出队并显式路由给 B/C | materialize 时直接在这条被投递消息上创建 B/C 的 `dispatched` refs 并分别链接两个 processing bubbles；不经过可观察的 `assigned`；两个头像都在该消息气泡下复用现有处理动效 |
+| A77 | 同一被投递消息的 B completed、C failed | 两个 refs 各自推进为 `settled`；同一消息气泡下两个头像分别停止并静态显示；提示只分别为“B 处理完成”“C 处理失败”，详细结果仍只来自各自 linked canonical bubble |
 | A78 | Agent `message_wake @B` 在 admission 前发现 B 无效 | 原消息保留；`assigned` ref 与 Queue exact take 同事务推进为指向 `DeliveryFailureResult` 的 `settled`；不创建 processing bubble、Active Run 或 fallback target |
-| A79 | A 的 server-side Agent execution 正在处理先前公开输入，provider receipt 尚未知，B 随后获得 situation/context summary | B 从 source 的 A `dispatched` ref、关联 processing bubble 与 exact Active Run 得到粗粒度“A 正在处理”；该文案只表示 server execution live，不是 provider receipt/read receipt，不推进普通 cursor；A 失败时同一 bubble 原位 failed，终局后 B 只读一次原位 terminal bubble |
-| A80 | startup 发现 source ref 为 `dispatched`、关联 bubble 仍 processing | thread 对外 ready 前验证 exact admission fence；binding 可验证且 live client 消失时 bubble 原位 interrupted、ref 原位 `settled`。证据不足时 ref/bubble 保持 outstanding 但不投影动态头像；不得借 ref 自身提供 recovery authority |
+| A79 | A 的 server-side Agent execution 正在处理先前公开输入，provider receipt 尚未知，B 随后获得 situation/context summary | B 从该被投递 History 消息的 A `dispatched` ref、关联 processing bubble 与 exact Active Run 得到粗粒度“A 正在处理”；用户也只在这条消息气泡下看到 A 动态头像。该文案只表示 server execution live，不是 provider receipt/read receipt，不推进普通 cursor；A 失败时关联 bubble 原位 failed，终局后 B 只读一次原位 terminal bubble |
+| A80 | startup 发现 delivered-message ref 为 `dispatched`、关联 bubble 仍 processing | thread 对外 ready 前验证 exact admission fence；binding 可验证且 live client 消失时 bubble 原位 interrupted、ref 原位 `settled`。证据不足时 ref/bubble 保持 outstanding 但不投影动态头像；不得借 ref 自身提供 recovery authority |
 | A81 | preflight 冻结 `HEAD=H, generation=7`，admission persist 前同一 owner 以相同 HEAD 替换为 generation 8 | generation 7 的 admission CAS 失败；不 take Queue、不建 bubble、不激活 principal、不调用 provider。owner 明确 mismatch 后只 CAS 关闭 exact obsolete entry；resolver 不因 HEAD 相同而改绑 generation 8 |
 | A82 | client 以同一 message/invocation、同一 admission fence 重放已提交 terminal | 返回相同 delivery terminal、typed owner disposition 与 follow-up identities；不重新解析 final、不追加 wake/bubble、不产生第二个 verdict。不同 fence 返回 stale/conflict |
 | A83 | typed verdict/event append 已提交，projection/apply 前 crash，随后 compensation/recovery | recovery 读取 exact invocation + admission fence，只补齐同一 verdict 对 bubble/ref 的 apply；compensation 不 cancel 已提交 verdict、不切换 current generation、不把 append-won 状态变成第二个 completed/failed answer |
@@ -1618,6 +1620,7 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 | A87 | structured head 因 `insufficient_evidence` 保持 pending，owner 后来提交足以判为 `admit`、`terminalize_only` 或 `mismatch` 的新证据 | exact evidence-change post-commit signal 触发 requestDrain；新 typed read 只走正常 admission 或 §7.1 exact closure。等待期间它不是可执行 head，不靠 timer/fallback，也不绕过 comparator |
 | A88 | Queue entry 已完成 admission cutover，随后 provider launch/execution failed | 原 Queue entry 在 provider effect 前已经不存在；同一 processing bubble 原位 failed，refs/owner disposition 正常收敛。系统不得生成 `failed + queued` row；Retry/重发若被 owner 授权，只能创建新的 entry/attempt |
 | A89 | live cutover 时存在 failed-only legacy Queue row，或同一 multi-target row 中 terminal B + pending C；另一个旧实例试图在 clean scan 后补写 legacy projection | 所有 writer transaction 已带 `lifecycleWriterEpoch` CAS。先阻断新 legacy admission、退出未受 guard 保护的 binary/已开启 transaction，再取得独占 migration lease并提交 `legacy → migrating`。lease 内保留可证明的 canonical terminal/owner facts；旧 row 整体不可选并删除/隔离 Queue projection，mixed/歧义数据留下 migration diagnostic，不自动拆 target。clean scan 后同 lease CAS `migrating → live`；旧实例的 legacy-epoch commit typed conflict。任一 guard/transaction/scan 条件不成立时保持 `migrating + ingress blocked` |
+| A90 | 用户消息、Agent `post_message`、公开外部/系统通知、带下一跳 target 的 completed response bubble 分别触发 dispatch；其中一条 public input 通过 fallback 选中 D | 四类公开消息都以自身 History record 作为唯一 delivery-avatar anchor；fallback 消息只为 actual target D 建 ref。每个 target 只有在 `dispatched + processing bubble + exact live Active Run` 同时成立时头像动态闪烁，target terminal 后同一头像按 linked result 静态终局；transport carrier、pre-History source-record projection、structured source owner 与另造状态 bubble 都不承载这组头像 |
 
 ## 16. 必须保持不可能的状态
 
@@ -1638,15 +1641,15 @@ API 启动时必须先完成 §10.2 的 owner-fence validation、canonical termi
 - dispatch batching/coalesce 改写、拼接或覆盖两条独立消息的身份；
 - targetless input 在其他 Active Run 尚存时提前猜成员；
 - client side effect 已发生，但 History 中没有固定 response bubble；
-- client side effect 已发生，但 source message 对该 exact target 没有指向固定 response bubble 的 `dispatched` ref；
+- client side effect 已发生，但实际被投递的公开 History message 对该 exact target 没有指向固定 response bubble 的 `dispatched` ref，或 ref/头像错误挂在 transport carrier、source owner、sender provenance 或另造状态消息上；
 - client side effect 已发生，但 structured source owner 尚未绑定 exact entry/target/invocation 与 admission 时冻结的 owner kind、lease/generation、predicate/HEAD、principal/tenant/route；
 - `lifecycleWriterEpoch` 已是 `migrating/live`，legacy-epoch admission/terminal/migration transaction 仍可提交；或 reconciliation clean scan 未受同一 migration lease + expected `migrating` epoch 保护，就被当作激活证据；
 - live cutover 后，同一 `entryId + targetId` delivery attempt 既是 selectable Queue member，又已有 processing/failed/completed/canceled/interrupted bubble；non-selectable migration diagnostic 不属于 Queue member；
 - preflight candidate 与 admission persist 之间 generation 已替换，系统却因 HEAD/carrier 相同而改绑 current generation、take Queue 或调用 provider；
 - callback principal、transport carrier、thread holder 或 current identity 被当作 action/wait lease authority，或 secondary resolver 在 terminal/recovery 重新选择 owner generation；
 - response bubble 已 completed/canceled，而该 invocation 的 structured source bindings 没有在同一个 owner-generation/predicate 校验的 terminal commit 中提交 disposition；
-- source `dispatchRef` 从 `dispatched` 倒退到 `assigned`、跳过 exact target、缺少 `statusMessageId`，或 `settled` ref 指向仍为 processing 的 canonical record；
-- response bubble 已 terminal，但对应 source ref 仍为 `dispatched`，或 ref 已 `settled` 而 linked canonical result 尚未在同一事务终局；
+- delivered-message `dispatchRef` 从 `dispatched` 倒退到 `assigned`、跳过 actual target、缺少 `statusMessageId`，或 `settled` ref 指向仍为 processing 的 canonical record；
+- response bubble 已 terminal，但对应 delivered-message ref 仍为 `dispatched`，或 ref 已 `settled` 而 linked canonical result 尚未在同一事务终局；
 - 无关 `hold_ball`、event wait 或展示 holder 改写了另一个 action/TurnExecution reservation；
 - 无有效 target/invocation 的 pre-admission failure 被伪造成 ResponseBubble、静默删除，或仍留在 Queue 可重放；
 - stream 与 final 使用不同 message id、每个 chunk 追加成 History row，或完成时重新插入位置；
