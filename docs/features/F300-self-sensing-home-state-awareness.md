@@ -79,6 +79,8 @@ F300 的产品目标不是让产品“变化更多”，而是让能力持续增
 
 `User-Friction Sense` 感知的是 Agent 自己提供的能力与交互在当前协作中的效果，不是“理解用户的一切”。一次停顿、输入量或模型直觉只能成为待确认假设；它们既不是事实，也不是授权。
 
+三种感知是形成判断的维度；§1 的 facets 是 Member Self View 的内容轴。Capability / availability 由这些 facets 与 Team Shared / Environment facts 共同支持，而 friction 是当前协作的有界效果信号，不进入成员自我状态 facets。
+
 ### 两个耦合结果
 
 - **Capability Construction**：发现、匹配、组合、安装/启用、配置、授权、就绪校验、失败恢复、停用或 provider 迁移。
@@ -450,7 +452,7 @@ M1/M2/M3 随 Phase 2 projection contract 落地，并在 Phase 3 的 Stop / prov
 - [x] AC-0.3: 文档覆盖 plugin 之外的 builtin、member-native、memory、context、thread/workspace、limb/tool 与 remote provider
 - [x] AC-0.4: 文档区分动作、canonical fact/terminal、derived projection 与 Interaction Episode；统一语义不等于中心 shadow ledger
 - [x] AC-0.5: 文档冻结 friction→proposal→decision→construction/adaptation→immediate use→feedback 的完整产品闭环、跨媒介设计合同与 Plugin 启动门槛
-- [ ] AC-0.6: 本轮产品合同扩写由非作者完成 exact-HEAD 内容审阅；旧 R6 approval 不跨实质语义变化复用
+- [x] AC-0.6: 本轮产品合同扩写由非作者完成 exact-HEAD 内容审阅；旧 R6 approval 不跨实质语义变化复用
 
 ### Plugin kickoff gate
 
