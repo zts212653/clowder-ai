@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 import { StopRecordingIcon } from './icons/StopRecordingIcon';
+import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 
 interface ChatInputActionButtonProps {
   onTranscript: (text: string) => void;
@@ -21,6 +22,8 @@ interface ChatInputActionButtonProps {
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
   hasActiveInvocation?: boolean;
+  /** Stable key derived from active execution IDs; changes when the execution set changes. */
+  activeExecutionKey?: string;
   hasText: boolean;
 }
 
@@ -54,9 +57,38 @@ export function ChatInputActionButton({
   disabled,
   sendDisabled,
   hasActiveInvocation,
+  activeExecutionKey,
   hasText,
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
+  const [confirmSteer, setConfirmSteer] = useState(false);
+  // Captures the execution identity when the steer modal opens.
+  // If the active execution set changes (A ends → B starts), the key
+  // will differ and we dismiss/reject the stale confirmation.
+  const steerBoundKeyRef = useRef<string | undefined>(undefined);
+
+  // P1 fix: auto-dismiss steer confirmation when the target invocation ends
+  // OR when the execution identity changes (A→B same-render transition).
+  // Fail closed: undefined key = unverifiable identity → dismiss.
+  useEffect(() => {
+    if (!hasActiveInvocation) {
+      setConfirmSteer(false);
+      return;
+    }
+    if (confirmSteer) {
+      // Bound key is undefined (legacy/unhydrated path) — we cannot verify
+      // identity, so dismiss the modal rather than risk a stale confirm.
+      if (steerBoundKeyRef.current === undefined) {
+        setConfirmSteer(false);
+        return;
+      }
+      // Same-render A→B: hasActiveInvocation stays true but the key changes.
+      if (activeExecutionKey !== steerBoundKeyRef.current) {
+        setConfirmSteer(false);
+      }
+    }
+  }, [hasActiveInvocation, activeExecutionKey, confirmSteer]);
+
   const isSendDisabled = Boolean(disabled || sendDisabled);
   const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
   const showStop = Boolean(hasActiveInvocation && resolvedStopState !== 'hidden');
@@ -177,13 +209,17 @@ export function ChatInputActionButton({
           >
             <QueueSendIcon className="w-5 h-5" />
           </button>
-          {onForceSend && (
+          {onForceSend && activeExecutionKey !== undefined && (
             <button
-              onClick={onForceSend}
+              type="button"
+              onClick={() => {
+                steerBoundKeyRef.current = activeExecutionKey;
+                setConfirmSteer(true);
+              }}
               disabled={isSendDisabled}
               className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
-              aria-label="强制发送"
-              title="强制发送 — 中断当前猫猫"
+              aria-label="强制停止并发送此消息"
+              title="强制停止并发送此消息"
             >
               <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                 <path
@@ -215,6 +251,20 @@ export function ChatInputActionButton({
         >
           <MicIcon className="w-5 h-5" />
         </button>
+      )}
+      {confirmSteer && (
+        <SteerQueuedEntryModal
+          source="draft"
+          onCancel={() => setConfirmSteer(false)}
+          onConfirm={() => {
+            setConfirmSteer(false);
+            // Guard: only force-send if the execution identity that prompted
+            // confirmation is still current. Catches same-render A→B where
+            // hasActiveInvocation stays true but the execution set changed.
+            const keyMatch = activeExecutionKey !== undefined && activeExecutionKey === steerBoundKeyRef.current;
+            if (hasActiveInvocation && keyMatch) onForceSend?.();
+          }}
+        />
       )}
     </>
   );

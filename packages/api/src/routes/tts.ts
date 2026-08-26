@@ -11,22 +11,17 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat as fsStat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type {
-  ITtsProvider,
-  TtsStreamEvent,
-  TtsSynthesizeRequest,
-  TtsSynthesizeResult,
-  TtsSynthesizeStreamEvent,
-} from '@cat-cafe/shared';
+import type { ITtsProvider, TtsStreamEvent, TtsSynthesizeRequest } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { getCatVoice } from '../config/cat-voices.js';
+import { DocumentCacheRunManager } from '../domains/cats/services/tts/DocumentCacheRunManager.js';
 import type { DocumentListenRepository } from '../domains/cats/services/tts/DocumentListenRepository.js';
 import {
-  LISTEN_AUDIO_CACHE_VERSION,
-  pcm16WavDurationSec,
-  trimLeadingPcm16Wav,
-} from '../domains/cats/services/tts/listen-audio-postprocess.js';
+  type ListenAsset,
+  ListenAssetService,
+  type ListenSynthesisOptions,
+} from '../domains/cats/services/tts/ListenAssetService.js';
 import { chunkText } from '../domains/cats/services/tts/TtsChunker.js';
 import type { TtsRegistry } from '../domains/cats/services/tts/TtsRegistry.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
@@ -45,7 +40,6 @@ const synthesizeSchema = z.object({
 
 /** Strict validation for audio download filename: {64-hex}.{wav|mp3} */
 const AUDIO_FILENAME_RE = /^[0-9a-f]{64}\.(wav|mp3)$/;
-const AUDIO_FORMATS = ['wav', 'mp3'] as const;
 
 function synthesisHash(
   provider: Pick<ITtsProvider, 'id' | 'model'>,
@@ -83,71 +77,6 @@ async function findCachedAudio(cacheDir: string, hash: string, requestedFormat: 
   return null;
 }
 
-interface ListenAssetEvent {
-  type: 'asset';
-  audioUrl: string;
-  assetId: string;
-  cached: boolean;
-  bytes: number;
-  durationSec?: number;
-  synthesisMs?: number;
-}
-
-async function synthesizeAndCacheListenAsset(options: {
-  provider: ITtsProvider;
-  request: TtsSynthesizeRequest;
-  cacheDir: string;
-  hash: string;
-  onChunk: (event: Extract<TtsSynthesizeStreamEvent, { type: 'chunk' }>) => void;
-  signal?: AbortSignal;
-}): Promise<ListenAssetEvent> {
-  const startedAt = Date.now();
-  let finalResult: TtsSynthesizeResult | null = null;
-  if (options.provider.stream) {
-    for await (const event of options.provider.stream(options.request, { signal: options.signal })) {
-      if (event.type === 'chunk') options.onChunk(event);
-      else finalResult = event.result;
-    }
-  } else {
-    finalResult = await options.provider.synthesize(options.request);
-  }
-  options.signal?.throwIfAborted();
-  if (!finalResult) throw new Error('TTS stream completed without a final cache asset');
-
-  const actualFormat = AUDIO_FORMATS.includes(finalResult.format as (typeof AUDIO_FORMATS)[number])
-    ? finalResult.format
-    : 'wav';
-  const audio = actualFormat === 'wav' ? trimLeadingPcm16Wav(finalResult.audio) : finalResult.audio;
-  const durationSec =
-    actualFormat === 'wav' ? (pcm16WavDurationSec(audio) ?? finalResult.durationSec) : finalResult.durationSec;
-  const assetId = `${options.hash}.${actualFormat}`;
-  await writeFile(path.join(options.cacheDir, assetId), audio);
-  return {
-    type: 'asset',
-    audioUrl: `/api/tts/audio/${assetId}`,
-    assetId,
-    cached: false,
-    bytes: audio.byteLength,
-    ...(durationSec != null ? { durationSec } : {}),
-    synthesisMs: Date.now() - startedAt,
-  };
-}
-
-function buildListenSynthesisRequest(body: z.infer<typeof synthesizeSchema>): TtsSynthesizeRequest {
-  const catVoice = getCatVoice(body.catId ?? 'opus');
-  return {
-    text: body.text,
-    voice: body.voice ?? catVoice.voice,
-    langCode: body.langCode ?? catVoice.langCode,
-    speed: body.speed ?? catVoice.speed ?? 1,
-    format: 'wav',
-    ...(catVoice.refAudio ? { refAudio: catVoice.refAudio } : {}),
-    ...(catVoice.refText ? { refText: catVoice.refText } : {}),
-    ...(catVoice.instruct ? { instruct: catVoice.instruct } : {}),
-    ...(catVoice.temperature != null ? { temperature: catVoice.temperature } : {}),
-  };
-}
-
 function sendListenEvent(reply: FastifyReply, event: object): void {
   reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -167,26 +96,65 @@ function startTtsEventStream(reply: FastifyReply): void {
   });
 }
 
-async function streamColdListenAsset(options: {
+function isOpenTtsStream(reply: FastifyReply): boolean {
+  return !reply.raw.destroyed && !reply.raw.writableEnded;
+}
+
+function sendListenAsset(reply: FastifyReply, asset: ListenAsset): void {
+  if (isOpenTtsStream(reply)) sendListenEvent(reply, { type: 'asset', ...asset });
+}
+
+function logListenAsset(request: FastifyRequest, asset: ListenAsset): void {
+  request.log.info(
+    {
+      feature: 'F279',
+      assetId: asset.assetId,
+      cache_hit: asset.cached,
+      cache_miss: !asset.cached,
+      ...(!asset.cached ? { cache_miss_reason: 'asset_not_found', synthesis_ms: asset.synthesisMs } : {}),
+      ...(asset.durationSec && asset.durationSec > 0
+        ? {
+            duration_sec: asset.durationSec,
+            tts_synthesis_rtf: (asset.synthesisMs ?? 0) / (asset.durationSec * 1000),
+          }
+        : {}),
+    },
+    '[F279] listen TTS stream asset',
+  );
+}
+
+function reportListenStreamFailure(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  controller: AbortController,
+  error: unknown,
+): void {
+  if (controller.signal.aborted) {
+    request.log.info('[F279] listen TTS stream cancelled after client disconnect');
+    return;
+  }
+  request.log.error({ err: error }, '[F279] listen TTS stream failed');
+  if (isOpenTtsStream(reply)) {
+    sendListenEvent(reply, { type: 'error', error: error instanceof Error ? error.message : 'TTS stream failed' });
+  }
+}
+
+async function streamListenAsset(options: {
   request: FastifyRequest;
   reply: FastifyReply;
-  provider: ITtsProvider;
-  synthRequest: TtsSynthesizeRequest;
-  cacheDir: string;
-  hash: string;
+  assets: ListenAssetService;
+  text: string;
+  synthesis: ListenSynthesisOptions;
 }): Promise<void> {
   const controller = new AbortController();
   const abortOnClose = () => controller.abort(new Error('Listen client disconnected'));
   options.reply.raw.once('close', abortOnClose);
   try {
-    const asset = await synthesizeAndCacheListenAsset({
-      provider: options.provider,
-      request: options.synthRequest,
-      cacheDir: options.cacheDir,
-      hash: options.hash,
+    const asset = await options.assets.getOrCreate(options.text, {
+      synthesis: options.synthesis,
       signal: controller.signal,
       onChunk: (event) => {
-        if (options.reply.raw.destroyed || options.reply.raw.writableEnded) return;
+        if (!isOpenTtsStream(options.reply)) return;
         sendListenEvent(options.reply, {
           type: 'chunk',
           audioBase64: Buffer.from(event.audio).toString('base64'),
@@ -196,46 +164,20 @@ async function streamColdListenAsset(options: {
         });
       },
     });
-    if (!options.reply.raw.destroyed && !options.reply.raw.writableEnded) sendListenEvent(options.reply, asset);
-    options.request.log.info(
-      {
-        feature: 'F279',
-        assetId: asset.assetId,
-        cache_hit: false,
-        cache_miss: true,
-        cache_miss_reason: 'asset_not_found',
-        synthesis_ms: asset.synthesisMs,
-        ...(asset.durationSec && asset.durationSec > 0
-          ? {
-              duration_sec: asset.durationSec,
-              tts_synthesis_rtf: (asset.synthesisMs ?? 0) / (asset.durationSec * 1000),
-            }
-          : {}),
-      },
-      '[F279] listen TTS stream asset',
-    );
+    sendListenAsset(options.reply, asset);
+    logListenAsset(options.request, asset);
   } catch (error) {
-    if (controller.signal.aborted) {
-      options.request.log.info('[F279] listen TTS stream cancelled after client disconnect');
-    } else {
-      options.request.log.error({ err: error }, '[F279] listen TTS stream failed');
-    }
-    if (!controller.signal.aborted && !options.reply.raw.destroyed && !options.reply.raw.writableEnded) {
-      sendListenEvent(options.reply, {
-        type: 'error',
-        error: error instanceof Error ? error.message : 'TTS stream failed',
-      });
-    }
+    reportListenStreamFailure(options.request, options.reply, controller, error);
   } finally {
     options.reply.raw.removeListener('close', abortOnClose);
-    if (!options.reply.raw.destroyed && !options.reply.raw.writableEnded) options.reply.raw.end();
+    if (isOpenTtsStream(options.reply)) options.reply.raw.end();
   }
 }
 
 async function handleListenStream(
   request: FastifyRequest<{ Body: unknown }>,
   reply: FastifyReply,
-  options: Pick<TtsRouteOptions, 'ttsRegistry' | 'cacheDir'>,
+  options: { assets: ListenAssetService },
 ): Promise<void> {
   if (!resolveUserId(request)) {
     await reply.status(401).send({ error: 'Identity required' });
@@ -247,31 +189,18 @@ async function handleListenStream(
     return;
   }
 
-  let provider: ITtsProvider;
+  const { text, ...synthesis } = parsed.data;
   try {
-    provider = options.ttsRegistry.getDefault();
+    // Resolve before sending SSE headers so an unavailable provider remains a
+    // regular API failure instead of a late stream error.
+    options.assets.getSynthesisFingerprint(synthesis);
   } catch {
     await reply.status(503).send({ error: 'No TTS provider available' });
     return;
   }
 
-  const synthRequest = buildListenSynthesisRequest(parsed.data);
-  const hash = synthesisHash(provider, synthRequest, LISTEN_AUDIO_CACHE_VERSION);
   startTtsEventStream(reply);
-  const cachedAudio = await findCachedAudio(options.cacheDir, hash, 'wav');
-  if (cachedAudio) {
-    const assetId = path.basename(cachedAudio.filePath);
-    sendListenEvent(reply, {
-      type: 'asset',
-      audioUrl: `/api/tts/audio/${assetId}`,
-      assetId,
-      cached: true,
-      bytes: cachedAudio.bytes,
-    });
-    reply.raw.end();
-    return;
-  }
-  await streamColdListenAsset({ request, reply, provider, synthRequest, cacheDir: options.cacheDir, hash });
+  await streamListenAsset({ request, reply, assets: options.assets, text, synthesis });
 }
 
 export interface TtsRouteOptions extends FastifyPluginOptions {
@@ -285,6 +214,14 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
 
   // Ensure cache directory exists
   await mkdir(cacheDir, { recursive: true });
+  const listenAssets = new ListenAssetService(ttsRegistry, cacheDir);
+  const cacheRuns = documentListenRepository
+    ? new DocumentCacheRunManager(documentListenRepository, listenAssets)
+    : undefined;
+  app.addHook('onClose', async () => {
+    cacheRuns?.close();
+    await listenAssets.close();
+  });
 
   /**
    * POST /api/tts/synthesize
@@ -312,6 +249,40 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
       speed: speedOverride,
       purpose,
     } = parsed.data;
+
+    if (purpose === 'listen') {
+      try {
+        const asset = await listenAssets.getOrCreate(text, {
+          synthesis: {
+            ...(catId ? { catId } : {}),
+            ...(voiceOverride ? { voice: voiceOverride } : {}),
+            ...(langCodeOverride ? { langCode: langCodeOverride } : {}),
+            ...(speedOverride != null ? { speed: speedOverride } : {}),
+          },
+        });
+        request.log.info(
+          {
+            feature: 'F279',
+            assetId: asset.assetId,
+            cache_hit: asset.cached,
+            cache_miss: !asset.cached,
+            ...(!asset.cached ? { cache_miss_reason: 'asset_not_found', synthesis_ms: asset.synthesisMs } : {}),
+            ...(asset.durationSec && asset.durationSec > 0
+              ? {
+                  duration_sec: asset.durationSec,
+                  tts_synthesis_rtf: (asset.synthesisMs ?? 0) / (asset.durationSec * 1000),
+                }
+              : {}),
+          },
+          '[F279] listen TTS asset',
+        );
+        return asset;
+      } catch (err) {
+        request.log.error({ err }, 'TTS listen synthesis failed');
+        reply.status(err instanceof Error && err.message.includes('No TTS provider') ? 503 : 502);
+        return { error: 'TTS synthesis failed', detail: err instanceof Error ? err.message : 'unknown' };
+      }
+    }
 
     // Resolve voice config: explicit params > per-cat defaults
     const catVoice = catId ? getCatVoice(catId) : getCatVoice('opus');
@@ -351,7 +322,6 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     let filePath: string | undefined;
     let cached = false;
     let durationSec: number | undefined;
-    let synthesisMs = 0;
     const cachedAudio = await findCachedAudio(cacheDir, hash, requestedFormat);
     if (cachedAudio) {
       filePath = cachedAudio.filePath;
@@ -361,9 +331,7 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     if (!cached) {
       // Synthesize
       try {
-        const synthesisStartedAt = Date.now();
         const result = await provider.synthesize(synthRequest);
-        synthesisMs = Date.now() - synthesisStartedAt;
         durationSec = result.durationSec;
         // Double-check: only allow known audio extensions (defense in depth)
         const allowedFormats = new Set(['wav', 'mp3']);
@@ -381,33 +349,17 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     // filePath is always set: either from cache lookup or synthesis
     const resolvedFilename = path.basename(filePath ?? '');
     const resolvedStat = await fsStat(filePath ?? '');
-    if (purpose === 'listen') {
-      request.log.info(
-        {
-          feature: 'F279',
-          assetId: resolvedFilename,
-          cache_hit: cached,
-          cache_miss: !cached,
-          ...(!cached ? { cache_miss_reason: 'asset_not_found', synthesis_ms: synthesisMs } : {}),
-          ...(durationSec != null && durationSec > 0
-            ? { duration_sec: durationSec, tts_synthesis_rtf: synthesisMs / (durationSec * 1000) }
-            : {}),
-        },
-        '[F279] listen TTS asset',
-      );
-    }
     return {
       audioUrl: `/api/tts/audio/${resolvedFilename}`,
       assetId: resolvedFilename,
       cached,
       bytes: resolvedStat.size,
       ...(durationSec != null ? { durationSec } : {}),
-      ...(purpose === 'listen' ? { synthesisMs } : {}),
     };
   });
 
   app.post<{ Body: unknown }>('/api/tts/listen/stream', (request, reply) =>
-    handleListenStream(request, reply, { ttsRegistry, cacheDir }),
+    handleListenStream(request, reply, { assets: listenAssets }),
   );
 
   // ── F066 Phase 4: Resynthesize endpoint ─────────────────────
@@ -622,7 +574,12 @@ export async function ttsRoutes(app: FastifyInstance, opts: TtsRouteOptions): Pr
     return reply.send(createReadStream(resolvedPath));
   });
 
-  if (documentListenRepository) {
-    registerTtsListenRoutes(app, { cacheDir, repository: documentListenRepository });
+  if (documentListenRepository && cacheRuns) {
+    registerTtsListenRoutes(app, {
+      cacheDir,
+      repository: documentListenRepository,
+      assets: listenAssets,
+      cacheRuns,
+    });
   }
 }

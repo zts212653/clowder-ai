@@ -114,22 +114,19 @@ describe('public measurement census bootstrap', () => {
   });
 
   it('preserves target-owned entries and adds a newly exported domain fail-closed', () => {
-    const newlyExportedDomainFile = 'eval-task-outcome.yaml';
-    const root = seedPublicRepo({ withoutDomainFile: newlyExportedDomainFile });
+    const designGateFile = 'eval-design-gate.yaml';
+    const root = seedPublicRepo({ withoutDomainFile: designGateFile });
     try {
       ensureMeasurementBundleCensusFile(root, '2026-08-24T00:00:00.000Z');
       const before = loadCensus(root);
       const a2a = before.entries.find((entry) => entry.domainId === 'eval:a2a');
       a2a.functionalEquivalents = ['target-owned public calibration note'];
       writeFileSync(resolve(root, censusRef), stringify(before));
-      cpSync(
-        resolve(repoRoot, domainDirRef, newlyExportedDomainFile),
-        resolve(root, domainDirRef, newlyExportedDomainFile),
-      );
+      cpSync(resolve(repoRoot, domainDirRef, designGateFile), resolve(root, domainDirRef, designGateFile));
 
       const result = ensureMeasurementBundleCensusFile(root, '2026-08-25T00:00:00.000Z');
       const after = loadCensus(root);
-      const added = after.entries.find((entry) => entry.domainId === 'eval:task-outcome');
+      const added = after.entries.find((entry) => entry.domainId === 'eval:design-gate');
       const activeRanks = after.entries
         .filter((entry) => entry.classification === 'active_decision_bearing')
         .map((entry) => entry.validityMigration.riskRank);

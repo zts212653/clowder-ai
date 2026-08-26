@@ -25,6 +25,7 @@ import type {
   CapabilityEntry,
   CapabilityPatchRequest,
   CatFamily,
+  GovernanceSelection,
   McpToolInfo,
   MountRules,
   SkillHealthSummary,
@@ -1537,7 +1538,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     getCliConfigPaths,
   });
 
-  // ── POST /api/governance/confirm — F070: First-time confirmation ──
+  // ── POST /api/governance/confirm — F302: preview or confirmed install ──
   app.post('/api/governance/confirm', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -1545,7 +1546,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Identity required' };
     }
 
-    const body = request.body as { projectPath?: string } | undefined;
+    const body = request.body as
+      | {
+          projectPath?: string;
+          dryRun?: boolean;
+          selection?: GovernanceSelection;
+          expectedPreviewChecksum?: string;
+        }
+      | undefined;
     if (!body?.projectPath) {
       reply.status(400);
       return { error: 'Required: projectPath' };
@@ -1564,11 +1572,63 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
     const validated = validatedResult.path;
 
-    const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
+    const { GovernanceBootstrapService, GovernancePreviewConflictError } = await import(
+      '../config/governance/governance-bootstrap.js'
+    );
     const service = new GovernanceBootstrapService(catCafeRoot);
-    const report = await service.bootstrap(validated, { dryRun: false });
+    try {
+      const report = await service.bootstrap(validated, {
+        dryRun: body.dryRun !== false,
+        selection: body.selection,
+        expectedPreviewChecksum: body.expectedPreviewChecksum,
+      });
+      return { ok: true, report };
+    } catch (error) {
+      if (error instanceof GovernancePreviewConflictError) {
+        reply.status(409);
+        return { ok: false, error: error.message, report: error.freshPreview };
+      }
+      throw error;
+    }
+  });
 
-    return { ok: true, report };
+  // ── POST /api/governance/cleanup — F302: preview or confirmed undo ──
+  app.post('/api/governance/cleanup', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+    const body = request.body as
+      | { projectPath?: string; dryRun?: boolean; expectedPreviewChecksum?: string }
+      | undefined;
+    if (!body?.projectPath) {
+      reply.status(400);
+      return { error: 'Required: projectPath' };
+    }
+    const catCafeRoot = getProjectRoot();
+    const validatedResult = await validateExternalProjectPathDetailed(body.projectPath, catCafeRoot);
+    if (!validatedResult.ok) {
+      reply.status(400);
+      return { error: 'Invalid external project path' };
+    }
+    const { GovernanceBootstrapService, GovernancePreviewConflictError } = await import(
+      '../config/governance/governance-bootstrap.js'
+    );
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    try {
+      const report = await service.cleanup(validatedResult.path, {
+        dryRun: body.dryRun !== false,
+        expectedPreviewChecksum: body.expectedPreviewChecksum,
+      });
+      return { ok: true, report };
+    } catch (error) {
+      if (error instanceof GovernancePreviewConflictError) {
+        reply.status(409);
+        return { ok: false, error: error.message, report: error.freshPreview };
+      }
+      throw error;
+    }
   });
 
   // ── GET /api/governance/health — F070: All project health ──

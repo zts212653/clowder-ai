@@ -7,6 +7,12 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 
+import {
+  MESSAGING_ROW_ENCODED_BYTE_BOUNDS,
+  READ_ACK_TOKEN_MAX_LENGTH,
+  REQUEST_ID_MAX_LENGTH,
+} from '@clowder-ai/plugin-contract';
+
 let memory;
 let handlesMod;
 let ledgerMod;
@@ -76,6 +82,29 @@ async function sendN(handleId, n, prefix = 'msg') {
       },
     });
   }
+}
+
+async function sendLargeEvents(handleId, count) {
+  const text = 'x'.repeat(60_000);
+  for (let index = 1; index <= count; index += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await sendService.send(CTX, {
+      address: { kind: 'thread_handle', handle: handleId },
+      idempotencyKey: `large-event-${index}`,
+      payload: {
+        provenance: { epistemicStatus: 'inference' },
+        elements: Array.from({ length: 4 }, (_, elementIndex) => ({
+          elementId: `large-${index}-${elementIndex}`,
+          kind: 'text',
+          payload: { text },
+        })),
+      },
+    });
+  }
+}
+
+function encodedResultBytes(result) {
+  return Buffer.byteLength(JSON.stringify({ jsonrpc: '2.0', id: 'r'.repeat(REQUEST_ID_MAX_LENGTH), result }), 'utf8');
 }
 
 async function expectCode(promise, code) {
@@ -186,6 +215,25 @@ describe('EventStreamService — read/ack (INV-4, INV-5)', () => {
       rest.events.map((e) => e.sequence),
       [3],
     );
+  });
+
+  test('read stops before the beta.11 encoded-result budget and advances only through the emitted prefix', async () => {
+    const handleId = await issueHandle();
+    const { subscriptionId } = await stream.subscribe(CTX, handleId);
+    await sendLargeEvents(handleId, 5);
+
+    const page = await stream.read(CTX, subscriptionId, { limit: 32 });
+    assert.ok(page.events.length > 0 && page.events.length < 5, 'a valid bounded prefix must be emitted');
+    assert.ok(page.ackToken.length <= READ_ACK_TOKEN_MAX_LENGTH);
+    assert.ok(
+      encodedResultBytes(page) <= MESSAGING_ROW_ENCODED_BYTE_BOUNDS['messaging.read'].maxEncodedResultBytes,
+      'the complete compact JSON-RPC result must fit the published row budget',
+    );
+
+    await stream.ack(CTX, subscriptionId, page.ackToken);
+    const remaining = await stream.read(CTX, subscriptionId, { limit: 32 });
+    assert.equal(remaining.events[0].sequence, page.events.at(-1).sequence + 1);
+    assert.equal(page.events.length + remaining.events.length, 5);
   });
 
   test('read never returns more than the C-1 maximum of 32 events', async () => {

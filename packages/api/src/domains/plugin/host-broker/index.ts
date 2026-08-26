@@ -7,6 +7,7 @@ export {
   createEventsPublishBrokerHandler,
   HostBrokerSignalRuntimeLeaseStore,
 } from './events-publish-handler.js';
+export { createMessagingBrokerHandlers, type MessagingBrokerHandlerOptions } from './messaging-handler.js';
 export type {
   BrokerCallStore,
   BrokerRuntimeLeaseStore,

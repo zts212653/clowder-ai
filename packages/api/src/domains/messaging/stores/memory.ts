@@ -13,7 +13,6 @@ import type { HandleScope, MessageOutputEventInput } from '../contract/host-type
 import type {
   AppendLease,
   AppendLock,
-  CursorStore,
   EventLogAppendResult,
   EventLogStore,
   HandleRecord,
@@ -22,8 +21,9 @@ import type {
   LedgerStore,
   MessageHandleRecord,
   SettleResult,
-  SubscriptionRecord,
 } from './ports.js';
+
+export { MemoryCursorStore } from './memory-cursor.js';
 
 /** Deep-clone scope so callers cannot mutate stored authority (INV-22 parity). */
 function cloneScope(scope: HandleScope): HandleScope {
@@ -133,13 +133,11 @@ export class MemoryHandleStore implements HandleStore {
         }
         if (existing.threadId !== record.threadId) {
           throw new Error(
-            `handle binding violation: threadId ` + `existing=${existing.threadId}, requested=${record.threadId}`,
+            `handle binding violation: threadId existing=${existing.threadId}, requested=${record.threadId}`,
           );
         }
         if (existing.userId !== record.userId) {
-          throw new Error(
-            `handle binding violation: userId ` + `existing=${existing.userId}, requested=${record.userId}`,
-          );
+          throw new Error(`handle binding violation: userId existing=${existing.userId}, requested=${record.userId}`);
         }
         return { record: existing, created: false };
       }
@@ -222,80 +220,6 @@ export class MemoryEventLogStore implements EventLogStore {
 
   async headSequence(threadId: string): Promise<number> {
     return this.threads.get(threadId)?.head ?? 0;
-  }
-}
-
-export class MemoryCursorStore implements CursorStore {
-  private readonly subs = new Map<string, SubscriptionRecord>();
-  private readonly subscriptionByHandle = new Map<string, string>();
-
-  private static key(pluginInstanceId: string, subscriptionId: string): string {
-    return `${encodeURIComponent(pluginInstanceId)}:${encodeURIComponent(subscriptionId)}`;
-  }
-
-  private static handleKey(pluginInstanceId: string, handleId: string): string {
-    return `${encodeURIComponent(pluginInstanceId)}:${encodeURIComponent(handleId)}`;
-  }
-
-  async put(record: SubscriptionRecord): Promise<void> {
-    this.subs.set(MemoryCursorStore.key(record.pluginInstanceId, record.subscriptionId), record);
-    this.subscriptionByHandle.set(
-      MemoryCursorStore.handleKey(record.pluginInstanceId, record.handleId),
-      record.subscriptionId,
-    );
-  }
-
-  async get(pluginInstanceId: string, subscriptionId: string): Promise<SubscriptionRecord | null> {
-    return this.subs.get(MemoryCursorStore.key(pluginInstanceId, subscriptionId)) ?? null;
-  }
-
-  async findByHandle(pluginInstanceId: string, handleId: string): Promise<SubscriptionRecord | null> {
-    const subscriptionId = this.subscriptionByHandle.get(MemoryCursorStore.handleKey(pluginInstanceId, handleId));
-    if (!subscriptionId) return null;
-    const record = this.subs.get(MemoryCursorStore.key(pluginInstanceId, subscriptionId));
-    return record && record.revokedAt === undefined ? record : null;
-  }
-
-  async createOrGet(record: SubscriptionRecord): Promise<SubscriptionRecord> {
-    // Deliberately no await: this check+write block is atomic in one JS turn.
-    const handleKey = MemoryCursorStore.handleKey(record.pluginInstanceId, record.handleId);
-    const existingId = this.subscriptionByHandle.get(handleKey);
-    if (existingId) {
-      const existing = this.subs.get(MemoryCursorStore.key(record.pluginInstanceId, existingId));
-      if (existing && existing.revokedAt === undefined) return existing;
-    }
-    this.subs.set(MemoryCursorStore.key(record.pluginInstanceId, record.subscriptionId), record);
-    this.subscriptionByHandle.set(handleKey, record.subscriptionId);
-    return record;
-  }
-
-  async advanceAck(pluginInstanceId: string, subscriptionId: string, sequence: number): Promise<void> {
-    const key = MemoryCursorStore.key(pluginInstanceId, subscriptionId);
-    const record = this.subs.get(key);
-    if (!record) return;
-    if (sequence > record.ackedSequence) {
-      this.subs.set(key, { ...record, ackedSequence: sequence });
-    }
-  }
-
-  async advanceDelivered(pluginInstanceId: string, subscriptionId: string, sequence: number): Promise<void> {
-    const key = MemoryCursorStore.key(pluginInstanceId, subscriptionId);
-    const record = this.subs.get(key);
-    if (!record) return;
-    if (sequence > record.lastDeliveredSequence) {
-      this.subs.set(key, { ...record, lastDeliveredSequence: sequence });
-    }
-  }
-
-  async revokeByHandle(handleId: string, revokedAt: number): Promise<number> {
-    let count = 0;
-    for (const [key, record] of this.subs.entries()) {
-      if (record.handleId === handleId && record.revokedAt === undefined) {
-        this.subs.set(key, { ...record, revokedAt });
-        count += 1;
-      }
-    }
-    return count;
   }
 }
 

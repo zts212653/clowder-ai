@@ -1,5 +1,6 @@
 export interface HostAppendMessageReceipt {
   readonly hostMessageId: string;
+  readonly idempotentReplay?: boolean;
 }
 
 /**

@@ -341,6 +341,14 @@ export const postMessageInputSchema = {
       'Target thread ID. Required for agent-key auth (persistent agent with no default thread). Omit for invocation auth (defaults to invocation thread).',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
+  cloudReturnBinding: z
+    .string()
+    .min(1)
+    .max(800)
+    .optional()
+    .describe(
+      'Opaque F247 runtime-delta capability. Required with replyTo for gpt-pro agent-key returns; copy exactly.',
+    ),
   clientMessageId: z
     .string()
     .min(1)
@@ -384,7 +392,14 @@ export const postMessageInputSchema = {
     .enum(['approved', 'changes_requested', 'commented'])
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal post. Requires invocation-token review custody, coordination.phase="terminal", and clientMessageId. The server derives lease, generation, subject, exact HEAD, holder, route, and tenant; public prose is presentation only.',
+      'Typed local-review decision carried by the same terminal post. Requires invocation-token credentials, coordination.phase="terminal", and clientMessageId. The carrier fast path derives the lease fields; carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject. Public prose is presentation only.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only when the current invocation no longer carries the review lease; it fences identity resolution but grants no authority.',
     ),
   action: executableActionSuccessorMetadataSchema
     .optional()
@@ -420,7 +435,11 @@ export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unc
  */
 export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
   const { threadId: _threadId, ...invocationCommon } = postMessageInputSchema;
-  const { localReviewVerdict: _localReviewVerdict, ...agentKeyCommon } = invocationCommon;
+  const {
+    localReviewVerdict: _localReviewVerdict,
+    reviewedHeadSha: _reviewedHeadSha,
+    ...agentKeyCommon
+  } = invocationCommon;
   if (principal === 'invocation') return invocationCommon;
   if (principal === 'agent-key') {
     return {
@@ -663,6 +682,12 @@ export const crossPostMessageInputSchema = {
         'F193 KD-1 boundary: this is the routing list, NOT relay metadata. Agent-key callers do not inherit F052 sourceThreadId semantics.',
     ),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
+  cloudReturnBinding: z
+    .string()
+    .min(1)
+    .max(800)
+    .optional()
+    .describe('Opaque F247 runtime-delta capability required for a gpt-pro source-bound cross-thread return.'),
   clientMessageId: z
     .string()
     .min(1)
@@ -707,7 +732,14 @@ export const crossPostMessageInputSchema = {
     .enum(['approved', 'changes_requested', 'commented'])
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal cross-post. Invocation-token review custody, coordination.phase="terminal", and clientMessageId are required; public prose is never parsed for settlement.',
+      'Typed local-review decision carried by the same terminal cross-post. Invocation-token credentials, coordination.phase="terminal", and clientMessageId are required. Carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject; public prose is never parsed.',
+    ),
+  reviewedHeadSha: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .optional()
+    .describe(
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only for carrier-free local-review settlement; it is checked against the frozen canonical lease predicate.',
     ),
   action: executableActionSuccessorMetadataSchema
     .optional()
@@ -795,6 +827,7 @@ async function _executePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
+    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -804,6 +837,7 @@ async function _executePostMessage(
       | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     proposedAction?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -812,7 +846,7 @@ async function _executePostMessage(
 ): Promise<ToolResult> {
   if (input.localReviewVerdict) {
     if (!getInvocationAuthSignal().hasFullCredentials) {
-      return errorResult('post_message localReviewVerdict requires invocation-token review-carrier credentials.');
+      return errorResult('post_message localReviewVerdict requires invocation-token credentials.');
     }
     if (input.coordination?.phase !== 'terminal') {
       return errorResult('post_message localReviewVerdict requires coordination.phase="terminal".');
@@ -825,6 +859,11 @@ async function _executePostMessage(
     if (input.action || input.proposedAction) {
       return errorResult('post_message localReviewVerdict cannot be combined with a new action or proposedAction.');
     }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult(
+      'post_message reviewedHeadSha requires localReviewVerdict. Example: localReviewVerdict="approved", reviewedHeadSha="<exact lowercase Git OID>".',
+    );
   }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -840,11 +879,13 @@ async function _executePostMessage(
           streamDisposition: input.streamDisposition ?? 'independent',
           ...(input.threadId ? { threadId: input.threadId } : {}),
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+          ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
           ...(input.effectClass ? { effectClass: input.effectClass } : {}),
           ...(input.coordination ? { coordination: input.coordination } : {}),
           ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+          ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
           ...(input.action ? { action: input.action } : {}),
           ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
           ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -956,6 +997,7 @@ export async function handlePostMessage(
     content: string;
     threadId?: string | undefined;
     replyTo?: string | undefined;
+    cloudReturnBinding?: string | undefined;
     clientMessageId?: string | undefined;
     targetCats?: string[] | undefined;
     streamDisposition?: 'independent' | 'replace_final' | undefined;
@@ -963,6 +1005,7 @@ export async function handlePostMessage(
       | { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined }
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+    reviewedHeadSha?: string | undefined;
     agentKeyCatId?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -1291,11 +1334,13 @@ export async function handleCrossPostMessage(input: {
   content: string;
   targetCats?: string[] | undefined;
   replyTo?: string | undefined;
+  cloudReturnBinding?: string | undefined;
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
   effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
   coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
   localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
+  reviewedHeadSha?: string | undefined;
   action?: ActionSuccessorRequestMetadata | undefined;
   proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
@@ -1371,12 +1416,14 @@ export async function handleCrossPostMessage(input: {
     threadId: input.threadId,
     content: input.content,
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+    ...(input.cloudReturnBinding ? { cloudReturnBinding: input.cloudReturnBinding } : {}),
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
     ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
     ...(input.effectClass ? { effectClass: input.effectClass } : {}),
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
+    ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
     ...(input.action ? { action: input.action } : {}),
     ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
     ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -2997,9 +3044,10 @@ export const callbackTools = [
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'For a local review terminal, put localReviewVerdict on that same post; the server derives the exact lease/HEAD/route and never parses public prose. ' +
+      'For a local review terminal, put localReviewVerdict on that same post; the carrier fast path derives the exact lease/HEAD/route. If the invocation no longer carries the lease, also provide reviewedHeadSha: the server resolves only the inherited coordination subject + reviewer identity against the canonical active lease, and the HEAD fact grants no authority. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns must copy both replyTo=sourceMessageId and cloudReturnBinding from the runtime delta; missing or mismatched bindings fail closed. ' +
       'By default, a later provider final remains a separate durable message. Set streamDisposition="replace_final" only when this callback is the canonical replacement for that same final response. ' +
       'To hand off without structured action identity, write @猫名 on its own line at the START of the line (sentence-internal @mention does NOT route). ' +
       'GOTCHA: This tool uses callback credentials that expire — if it fails with 401, fall back to line-start @mention in your response text. ' +
@@ -3180,13 +3228,14 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'For a local review terminal, include localReviewVerdict on that same cross-post; the server settles the invocation-bound exact generation without a second verdict call or prose grammar. ' +
+      'For a local review terminal, include localReviewVerdict on that same cross-post; the carrier fast path settles the invocation-bound exact generation. If the invocation no longer carries the lease, also provide reviewedHeadSha so the server can resolve only the inherited coordination subject + reviewer identity against the canonical active lease; the HEAD fact grants no authority and prose is never parsed. ' +
       'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
       'GOTCHA: For a direct named external action, pass action + explicit clientMessageId + targetCats. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work instead; action and assign_work remain mutually exclusive. ' +
       'Output: direct action admission posts and queues one fenced carrier; assign_work publishes one pending approval card and posts nothing to the target until approval atomically acquires the fence. ' +
       'Existing standing reuses the same CAS via claimOrigin="existing_standing" + groundingEvidenceRef. returnToPredecessor sends a rejected single generation to the server-persisted predecessor; parallel mode records only the rejecting holder terminal. ' +
       'Structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
+      'F247: gpt-pro agent-key returns must carry the exact replyTo and cloudReturnBinding from the runtime delta. ' +
       'Fallback must use replace with the active leaseId/generation after server-recorded terminal evidence. Use mode=parallel + parallelIntent only for deliberate independent review, #ideate, or explicit operator fan-out. ' +
       'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,

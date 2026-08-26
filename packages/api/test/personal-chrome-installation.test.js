@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
 import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { connect, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { writePersonalChromeConversationAuthorizationsAtomic } from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
+import {
+  readPersonalChromeConversationAuthorizations,
+  writePersonalChromeConversationAuthorizationsAtomic,
+} from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
 import {
   inspectNativeHostInstallation,
   installNativeHost,
   uninstallNativeHost,
 } from '../src/plugins/cloud-cat-personal-host/native-host/install-host.mjs';
+import { createNativeHostBridge } from '../src/plugins/cloud-cat-personal-host/native-host/native-host.mjs';
+import { NATIVE_HOST_ARTIFACT_FILES } from '../src/plugins/cloud-cat-personal-host/native-host/native-host-artifact.mjs';
 import {
   readPersonalChromePairingRecord,
   redactPersonalChromePairingRecord,
@@ -28,6 +34,35 @@ async function testRoot() {
   const root = await mkdtemp(join(tmpdir(), 'cat-cafe-f247-install-'));
   roots.add(root);
   return root;
+}
+
+async function copyArtifact(sourceDirectory, targetDirectory) {
+  await mkdir(targetDirectory, { recursive: true });
+  for (const filename of NATIVE_HOST_ARTIFACT_FILES) {
+    await writeFile(join(targetDirectory, filename), await readFile(join(sourceDirectory, filename)));
+  }
+}
+
+function appendThroughSocket(socketPath, pairingSecret, request) {
+  return new Promise((resolveResult, rejectResult) => {
+    const socket = connect(socketPath);
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.write(`${JSON.stringify({ pairingSecret, request })}\n`);
+    });
+    socket.on('data', (chunk) => {
+      response += chunk;
+    });
+    socket.once('end', () => {
+      try {
+        resolveResult(JSON.parse(response.trim()));
+      } catch (error) {
+        rejectResult(error);
+      }
+    });
+    socket.once('error', rejectResult);
+  });
 }
 
 function pairingRecord(overrides = {}) {
@@ -191,6 +226,139 @@ describe('Personal Chrome Host installation state', () => {
     await assert.rejects(access(first.pairingRecordPath));
     await assert.rejects(access(paths.conversationBindingPath));
     await access(first.artifactEntrypoint);
+  });
+
+  it('distinguishes an intact recorded artifact from the current runtime artifact', async () => {
+    const root = await testRoot();
+    const projectRoot = join(root, 'project');
+    const homeDirectory = join(root, 'home');
+    const currentSource = resolve('src/plugins/cloud-cat-personal-host/native-host');
+    const oldSource = join(root, 'old-artifact');
+    await copyArtifact(currentSource, oldSource);
+    await writeFile(
+      join(oldSource, 'conversation-binding.mjs'),
+      `${await readFile(join(oldSource, 'conversation-binding.mjs'), 'utf8')}\n// legacy schema-v1-only artifact fixture\n`,
+    );
+
+    const installed = await installNativeHost({
+      platform: 'darwin',
+      projectRoot,
+      homeDirectory,
+      extensionId: 'i'.repeat(32),
+      sourceDirectory: oldSource,
+      generatePairingSecret: () => 'w'.repeat(64),
+    });
+    assert.equal(installed.status, 'ready');
+
+    await assert.rejects(
+      inspectNativeHostInstallation({ platform: 'darwin', projectRoot, homeDirectory }),
+      (error) =>
+        error.code === 'NATIVE_HOST_ARTIFACT_STALE' && error.installation?.artifactDigest === installed.artifactDigest,
+    );
+  });
+
+  it('stages repair while the stale helper is live, preserves state, and lets the next helper append', async () => {
+    const root = await testRoot();
+    const projectRoot = join(root, 'project');
+    const homeDirectory = join(root, 'home');
+    const currentSource = resolve('src/plugins/cloud-cat-personal-host/native-host');
+    const oldSource = join(root, 'old-artifact');
+    await copyArtifact(currentSource, oldSource);
+    await writeFile(
+      join(oldSource, 'conversation-binding.mjs'),
+      `${await readFile(join(oldSource, 'conversation-binding.mjs'), 'utf8')}\n// legacy schema-v1-only artifact fixture\n`,
+    );
+    const installedAt = '2026-08-21T07:00:00.000Z';
+    const installed = await installNativeHost({
+      platform: 'darwin',
+      projectRoot,
+      homeDirectory,
+      extensionId: 'j'.repeat(32),
+      sourceDirectory: oldSource,
+      now: () => new Date(installedAt),
+      generatePairingSecret: () => 'x'.repeat(64),
+    });
+    const paths = resolvePersonalChromeHostPaths(projectRoot);
+    await writeFile(
+      paths.conversationBindingPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        provider: 'chatgpt',
+        conversationId: 'conversation-7',
+        chatUrl: 'https://chatgpt.com/c/conversation-7',
+        boundAt: installedAt,
+        updatedAt: installedAt,
+      })}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(paths.ledgerPath, '{"version":1,"entries":[]}\n', { mode: 0o600 });
+    const liveOldHelper = createServer();
+    await new Promise((resolveListen, rejectListen) => {
+      liveOldHelper.once('error', rejectListen);
+      liveOldHelper.listen(paths.socketPath, resolveListen);
+    });
+
+    let repaired;
+    try {
+      repaired = await installNativeHost({
+        platform: 'darwin',
+        projectRoot,
+        homeDirectory,
+        extensionId: 'j'.repeat(32),
+        now: () => new Date('2026-08-21T07:05:00.000Z'),
+        generatePairingSecret: () => 'y'.repeat(64),
+      });
+    } finally {
+      await new Promise((resolveClose, rejectClose) =>
+        liveOldHelper.close((error) => (error ? rejectClose(error) : resolveClose())),
+      );
+    }
+    const record = await readPersonalChromePairingRecord(paths.pairingRecordPath);
+    assert.equal(repaired.operation, 'repaired');
+    assert.equal(record.pairingSecret, 'x'.repeat(64));
+    assert.equal(record.installedAt, installedAt);
+    assert.notEqual(record.artifactDigest, installed.artifactDigest);
+    assert.equal((await readPersonalChromeConversationAuthorizations(paths.conversationBindingPath)).schemaVersion, 2);
+    assert.equal(await readFile(paths.ledgerPath, 'utf8'), '{"version":1,"entries":[]}\n');
+
+    let bridge;
+    bridge = await createNativeHostBridge({
+      socketPath: record.socketPath,
+      ledgerPath: record.ledgerPath,
+      conversationBindingPath: paths.conversationBindingPath,
+      pairingSecret: record.pairingSecret,
+      helperArtifactRevision: record.artifactDigest,
+      async sendNative(request) {
+        await bridge.acceptNativeMessage({
+          v: 2,
+          kind: 'append_result',
+          requestId: request.requestId,
+          idempotencyKey: request.idempotencyKey,
+          status: 'host_observed',
+          hostMessageId: 'chatgpt-real-message-7',
+          observedRevisions: request.expectedRevisions,
+        });
+      },
+    });
+    try {
+      const result = await appendThroughSocket(record.socketPath, record.pairingSecret, {
+        v: 2,
+        kind: 'append_message',
+        requestId: 'request-after-repair',
+        conversationId: 'conversation-7',
+        text: 'repair continuity nonce',
+        idempotencyKey: 'source-after-repair',
+        expectedRevisions: {
+          helper: record.artifactDigest,
+          extension: '0.2.1',
+          pageAdapter: '2026-08-23.1',
+        },
+      });
+      assert.equal(result.status, 'host_observed');
+      assert.equal(result.hostMessageId, 'chatgpt-real-message-7');
+    } finally {
+      await bridge.stop();
+    }
   });
 
   it('refuses to overwrite a Native Messaging manifest not owned by this installation', async () => {

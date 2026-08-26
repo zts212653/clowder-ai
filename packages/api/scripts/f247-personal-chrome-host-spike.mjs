@@ -52,12 +52,17 @@ export async function resolveChromeExecutable({
 
 function appendRequest(requestId) {
   return {
-    v: 1,
-    kind: 'append_message',
+    v: 2,
+    kind: 'append_message_v2',
     requestId,
     conversationId: 'conversation-7',
     text: 'F247_BACKGROUND_TAB_NONCE',
     idempotencyKey: 'source-message-background-proof',
+    expectedRevisions: {
+      helper: 'isolated-spike-helper',
+      extension: '0.2.1',
+      pageAdapter: '2026-08-23.1',
+    },
   };
 }
 

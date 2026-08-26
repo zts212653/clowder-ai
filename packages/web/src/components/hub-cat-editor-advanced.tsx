@@ -1,7 +1,7 @@
 'use client';
 
+import { getContextWindowFallback } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
-import { TriangleAlertIcon } from './HubConfigIcons';
 import { HubSessionStrategyEditor } from './HubSessionStrategyEditor';
 import {
   CODEX_APPROVAL_OPTIONS,
@@ -72,12 +72,13 @@ export function AdvancedRuntimeSection({
           onChange={(value) => onChange({ contextWindow: value })}
           inputMode="numeric"
           tone="success"
-          placeholder="留空或 0 = Auto（由 CLI / 模型目录自动探测）"
+          placeholder="留空或 0 = Auto；正整数 = Manual"
+          ariaDescribedBy="context-window-compat-notice"
         />
         <p className="text-xs leading-5 text-[var(--console-runtime-hint)]">
           填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
         </p>
-        <ResolvedContextInfo cat={cat} />
+        <ContextWindowCompatibilityNotice cat={cat} form={form} />
         {cliExtensionsAvailable && cliEffortOptions ? (
           <>
             <TextField
@@ -196,52 +197,52 @@ export function AdvancedRuntimeSection({
   );
 }
 
-// ─── #1208 Item 4: Resolved Context Info ─────────────────────────────
+function selectionMatchesSavedContext(cat: CatData | null | undefined, form: HubCatEditorFormState): boolean {
+  if (!cat || cat.clientId !== form.clientId || Boolean(cat.acp) !== form.acpEnabled) return false;
+  if (form.clientId !== 'openai') return true;
+  return (cat.cli?.carrier ?? '') === form.codexCarrier;
+}
 
-const SOURCE_LABELS: Record<string, string> = {
-  reported: 'CLI 实时上报',
-  manual: '手动设置',
-  catalog: '模型目录',
-};
+function draftCannotResolveOrApplyContextWindow(form: HubCatEditorFormState): boolean | null {
+  if (form.acpEnabled) return false;
+  if (form.clientId === 'antigravity' || form.clientId === 'catagent' || form.clientId === 'google') return true;
+  if (form.clientId !== 'openai') return false;
+  if (form.codexCarrier === 'app_server') return true;
+  if (form.codexCarrier === 'exec_json') return false;
+  return null;
+}
 
-const SOURCE_BADGES: Record<string, string> = {
-  reported: '✓ 运行时',
-  manual: '✓ 手动',
-  catalog: '≈ 目录',
-};
+function ContextWindowCompatibilityNotice({ cat, form }: { cat?: CatData | null; form: HubCatEditorFormState }) {
+  const usesSavedContext = selectionMatchesSavedContext(cat, form);
+  const capability = usesSavedContext ? cat?.resolvedContext : null;
+  const projectedIncompatibility =
+    capability?.reportsRuntimeWindow === false && capability.nativeWindowControl === false
+      ? true
+      : capability?.reportsRuntimeWindow === true || capability?.nativeWindowControl === true
+        ? false
+        : null;
+  const cannotResolveOrApply = projectedIncompatibility ?? draftCannotResolveOrApplyContextWindow(form);
+  if (cannotResolveOrApply !== true) return null;
 
-/** Show resolved context window info below the Context Window field. */
-function ResolvedContextInfo({ cat }: { cat?: CatData | null }) {
-  if (!cat) return null;
-
-  const rc = cat.resolvedContext;
-  if (!rc || !rc.source) {
-    return (
-      <div className="text-xs leading-5 text-cafe-muted">
-        <p className="flex items-start gap-1">
-          <TriangleAlertIcon />
-          <span>未能解析 Context Window — 无已知的模型目录条目或 CLI 上报值。</span>
-        </p>
-        {rc?.capabilityReason ? <p className="mt-0.5">原因: {rc.capabilityReason}</p> : null}
-      </div>
-    );
-  }
-
-  const badge = SOURCE_BADGES[rc.source] ?? rc.source;
-  const sourceLabel = SOURCE_LABELS[rc.source] ?? rc.source;
-  const windowK = rc.windowTokens ? Math.round(rc.windowTokens / 1000) : 0;
+  const manualWindow = Number(form.contextWindow.trim());
+  const isManual = Number.isInteger(manualWindow) && manualWindow > 0;
+  const hasCurrentAutoResolution =
+    !isManual &&
+    usesSavedContext &&
+    cat?.contextWindow == null &&
+    cat?.defaultModel === form.defaultModel &&
+    (capability?.source === 'reported' || capability?.source === 'catalog');
+  const hasCatalogAutoResolution = !isManual && getContextWindowFallback(form.defaultModel) != null;
+  if (hasCurrentAutoResolution || hasCatalogAutoResolution) return null;
 
   return (
-    <div className="rounded-[8px] border border-[var(--console-runtime-group-bg)] bg-[var(--console-field-bg)] px-3 py-2 text-xs leading-5 text-cafe-secondary">
-      <p>
-        <span className="font-semibold">{badge}</span>
-        {' · '}
-        解析值: {windowK}K tokens
-        {' · '}
-        来源: {sourceLabel}
-        {rc.actionable ? '' : '（仅供参考，不触发自动 Session 操作）'}
-      </p>
-      <p className="mt-0.5 text-cafe-muted">{rc.provenance}</p>
-    </div>
+    <output
+      id="context-window-compat-notice"
+      className="block rounded-[10px] border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-xs leading-5 text-conn-amber-text"
+    >
+      {isManual
+        ? '当前 Client 无法校验或调整自身的上下文窗口；请确认 Manual 值不高于 Client 的实际上限。'
+        : '当前 Client 无法自动探测上下文窗口；请填写正整数使用 Manual 模式。'}
+    </output>
   );
 }

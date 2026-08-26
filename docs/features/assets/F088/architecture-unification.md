@@ -7,7 +7,6 @@ created: 2026-03-10
 # F088 架构归一设计 — Known Issues 解决方案
 
 > 此文件从 `F088-multi-platform-chat-gateway.md` 拆出，保留 ISSUE-1/2 的详细解决方案和架构设计讨论。
-> 设计讨论纪要见 *(internal reference removed)*
 
 ## ISSUE-1: Connector 消息不走统一管道 — ✅ RESOLVED
 

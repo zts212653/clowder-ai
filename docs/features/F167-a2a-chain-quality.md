@@ -4,7 +4,7 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-21
+updated: 2026-08-23
 tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
@@ -769,6 +769,16 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **局部 referent 丢失 + 上位真相源锚定 + 任务替换**：看到“总体愿景”后直接解析到仓库全局 `docs/VISION.md`，没有先用当前文档主题“自进化”限定 referent；与 Case E9 把消息级局部显隐要求替换成 thread 级入口重设计同型。 |
 | 纠正轮次 | 本次 1 次（`0001787299710431-000183-7421a9ae`）；跨任务已有 Case E9 同型证据，因此记录。纠正后已整段撤掉产品愿景和 `docs/VISION.md` 引用，换成自进化终态、自治分级、双证举证链与条件性 CEW 路线，提交 `195aaaf4e` 已推送 main。 |
 | 元心智哪条没执行 | Q2 信息验证：虽读取了真实 canonical 文档，却选错了 resolver；Q3 坐标变换：把“当前研究对象的 vision”错误升格成“整个产品的 VISION”。 |
+
+### Case E13: 把独立产物与双 Episode 压成一条旧故事流水线（2026-08-24，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 为了让 HC 技术范式与 Demo 互相证明，Demo 应逐步映射架构模块；被纠正后，我又从旧稿召回“退款期 7 → 14 天”，把它放进第一 Episode，并把已经确认的欧盟空调政策挪成第二 Episode。 |
+| 实际要求 | 架构图与 Demo 是分别成立、只在关键 claim 上弱连接的两份产物。Demo 自身确实需要两个时间 Episode，但第一 Episode 已明确是欧盟空调政策变化；第二 Episode 要另选不同类型的世界变化，检验第一次长出的防护能否迁移，不能为了凑双幕复活已被淘汰的退款例子。 |
+| 偏差根因 | **过早线性化 + 历史故事锚定 + 时间槽位覆盖**：面对有关联但正交的对象，先压成一条易讲的流水线；需要补第二幕时，又把检索到的旧叙事当成现行约束，用“完整故事”覆盖了用户刚确认的当前起点。 |
+| 纠正轮次 | 同一任务连续 3 次：`0001787584460995-000143-e6ac4670` 拆开架构与 Demo；`0001787584701647-000150-43e45444` 恢复双 Episode 与“下一次不再救火”；`0001787584802908-000151-7db9c48e` 纠正 Episode 1 必须是欧盟空调政策、退款例子必须删除。当前稿把 Episode 2 降为待拍板工作假设，不再把推导冒充确认。 |
+| 元心智哪条没执行 | Q2 信息验证：回读了旧叙事，却没有用最新的人类确认覆盖历史版本；Q3 坐标变换：没有同时保留“产物轴（架构 / Demo）”与“时间轴（学习发生 / 迁移验证）”，反而把两轴挤成一条序列。 |
 
 ## Review Gate
 

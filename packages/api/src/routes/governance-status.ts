@@ -1,7 +1,7 @@
 /**
  * F113 Phase E: GET /api/governance/status
- * Query governance readiness for a project path.
- * Reuses checkGovernancePreflight() and adds isEmptyDir / isGitRepo / gitAvailable.
+ * Query setup facts for a project path.
+ * Governance installation is optional and is not a dispatch-readiness state (F302).
  */
 
 import { execFile } from 'node:child_process';
@@ -9,19 +9,17 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync } from 'fastify';
-import { checkGovernancePreflight } from '../config/governance/governance-preflight.js';
-import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const execFileAsync = promisify(execFile);
 
-async function isEmptyDir(dirPath: string): Promise<boolean> {
+export async function isEmptyDir(dirPath: string): Promise<boolean> {
   try {
     const entries = await readdir(dirPath);
     return entries.length === 0;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -48,12 +46,7 @@ async function checkGitAvailable(): Promise<boolean> {
   return gitAvailableCache;
 }
 
-export interface GovernanceStatusRouteOptions {
-  /** Override Clowder AI root for testing — avoids polluting real registry (#926) */
-  catCafeRoot?: string;
-}
-
-export const governanceStatusRoute: FastifyPluginAsync<GovernanceStatusRouteOptions> = async (app, opts) => {
+export const governanceStatusRoute: FastifyPluginAsync = async (app) => {
   app.get('/api/governance/status', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
     if (!userId) {
@@ -73,9 +66,6 @@ export const governanceStatusRoute: FastifyPluginAsync<GovernanceStatusRouteOpti
       return { error: 'Project path not allowed' };
     }
 
-    const catCafeRoot = opts?.catCafeRoot ?? findMonorepoRoot(process.cwd());
-    const preflight = await checkGovernancePreflight(validated, catCafeRoot);
-
     const [empty, gitRepo, gitOk] = await Promise.all([
       isEmptyDir(validated),
       isGitRepo(validated),
@@ -83,9 +73,6 @@ export const governanceStatusRoute: FastifyPluginAsync<GovernanceStatusRouteOpti
     ]);
 
     return {
-      ready: preflight.ready,
-      needsBootstrap: preflight.needsBootstrap ?? false,
-      needsConfirmation: preflight.needsConfirmation ?? false,
       isEmptyDir: empty,
       isGitRepo: gitRepo,
       gitAvailable: gitOk,

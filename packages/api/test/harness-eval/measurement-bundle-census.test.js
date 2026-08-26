@@ -24,13 +24,13 @@ function loadCensus() {
 }
 
 describe('F267 real measurement bundle census', () => {
-  it('covers each real registry entry once and derives the exact 9/1/1 classification', async () => {
+  it('covers each real registry entry once and derives the exact 10/1/1 classification', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
     const { scanMeasurementVerdictCorpus } = await corpusModuleUnderTest();
     const census = validateMeasurementBundleCensus(loadCensus(), repoRoot);
     const corpus = scanMeasurementVerdictCorpus(repoRoot);
 
-    assert.equal(census.entries.length, 11);
+    assert.equal(census.entries.length, 12);
     assert.equal(census.schemaVersion, 2);
     assert.deepEqual(
       census.entries
@@ -41,6 +41,7 @@ describe('F267 real measurement bundle census', () => {
         'eval:a2a',
         'eval:anchor-first',
         'eval:capability-wakeup',
+        'eval:design-gate',
         'eval:freshness',
         'eval:friction',
         'eval:memory',
@@ -63,7 +64,7 @@ describe('F267 real measurement bundle census', () => {
     const active = census.entries.filter((entry) => entry.classification === 'active_decision_bearing');
     assert.deepEqual(
       active.map((entry) => entry.validityMigration.riskRank).sort((left, right) => left - right),
-      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     );
     assert.deepEqual(
       active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),

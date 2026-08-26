@@ -3,7 +3,14 @@ import type {
   ActiveInvocationFreshnessController,
   PreparedFreshnessNotice,
 } from '../../freshness/FreshnessNoticeBroker.js';
-import type { AgentCarrierSession, ProviderCompactionObservation, ProviderContinuityEvidence } from '../../types.js';
+import type {
+  AgentCarrierSession,
+  PreparedProviderRequestV1,
+  ProviderCompactionObservation,
+  ProviderContinuityEvidence,
+  ProviderRequestGenerationCommitV1,
+} from '../../types.js';
+import { requireExactPreparedProviderMessage } from '../../types.js';
 import {
   asCodexAppServerRecord,
   type CodexAppServerJsonObject,
@@ -86,6 +93,14 @@ export interface CodexAppServerRunInput {
    * synthetic user message to the native thread.
    */
   recoveryInstruction?: string;
+  /** F299: build and durably commit the exact request immediately before turn/start. */
+  prepareRequest?: (
+    promptBytes: string,
+    boundaryReason?: PreparedProviderRequestV1['boundaryReason'],
+  ) => PreparedProviderRequestV1;
+  /** F299: recovery has no user message, but its application context is still model-visible input. */
+  prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
+  beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
 }
 
 export interface CodexAppServerClientDeps {
@@ -246,6 +261,14 @@ export class CodexAppServerClient {
                 ...(compactions.length > 0 ? { compactions } : {}),
               })
             ).prompt;
+      const preparedRequest = isRecoveryTurn
+        ? input.prepareRecoveryRequest?.(recoveryInstruction as string)
+        : input.prepareRequest?.(promptBytes, (input.recoveryAttempt ?? 0) > 0 ? 'transient_cli_exit' : undefined);
+      if (input.beforeProviderLaunch) {
+        if (!preparedRequest) throw new Error('codex_app_server_request_evidence_unavailable');
+        await input.beforeProviderLaunch(preparedRequest);
+      }
+      const submittedPrompt = preparedRequest ? requireExactPreparedProviderMessage(preparedRequest) : promptBytes;
 
       this.lifecycle.patch({ turnStartSent: true });
       const turnResult = asCodexAppServerRecord(
@@ -254,7 +277,7 @@ export class CodexAppServerClient {
           input: isRecoveryTurn
             ? []
             : [
-                { type: 'text', text: promptBytes },
+                { type: 'text', text: submittedPrompt },
                 ...(input.imagePaths ?? []).map((path) => ({ type: 'localImage', path })),
               ],
           ...(isRecoveryTurn && recoveryInstruction

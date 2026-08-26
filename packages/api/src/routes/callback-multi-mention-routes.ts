@@ -28,6 +28,7 @@ import {
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
+import { isTerminalDispositionEvent } from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import {
@@ -588,7 +589,7 @@ async function dispatchToTarget(
           intentModeBroadcast = true;
         }
         if (controller.signal.aborted) break;
-        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+        if (isTerminalDispositionEvent(msg) && msg.catId) {
           invocationTracker?.completeSlot?.(threadId, msg.catId, controller);
         }
 

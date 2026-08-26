@@ -37,6 +37,7 @@ import {
   recordActionSuccessorOutcome,
   recordActionSuccessorReturnDeliveryAttempt,
   replaceActionSuccessor,
+  retirePendingDispatchForFreshnessMismatch,
   returnActionSuccessorToPredecessor,
 } from './action-successor-state-machine.js';
 
@@ -302,13 +303,23 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (input.expectedGeneration !== current.generation) {
         return { outcome: 'stale_generation', lease: current };
       }
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
       if (current.dispatchDeliveryState !== 'pending') {
         return { outcome: 'dispatch_not_pending', lease: current };
       }
+      if (current.dispatchDeliveryReservation) return { outcome: 'dispatch_not_pending', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'holder_terminal', lease: current };
+      const freshnessEvidenceRef = input.freshnessEvidenceRef.trim();
+      if (!freshnessEvidenceRef) throw new Error('dispatch freshness proof requires an evidence identity');
       const next: ActionSuccessorLease = {
         ...current,
         dispatchDeliveryAttemptCount: (current.dispatchDeliveryAttemptCount ?? 0) + 1,
         dispatchDeliveryLastAttemptAt: input.now,
+        evidenceRefs: [...new Set([...current.evidenceRefs, freshnessEvidenceRef])],
         revision: current.revision + 1,
         updatedAt: input.now,
       };
@@ -317,6 +328,73 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (committed === 'written') return { outcome: 'recorded', lease: next };
     }
     throw new Error(`action successor dispatch-attempt CAS exhausted: ${leaseId}`);
+  }
+
+  async reserveDispatchDelivery(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['reserveDispatchDelivery']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['reserveDispatchDelivery']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      if (input.expectedGeneration !== current.generation) {
+        return { outcome: 'stale_generation', lease: current };
+      }
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.dispatchDeliveryState !== 'pending') {
+        return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      if (current.dispatchDeliveryReservation) return { outcome: 'dispatch_reserved', lease: current };
+      if (current.status !== 'active') return { outcome: 'lease_not_active', lease: current };
+      if (Object.keys(current.holderOutcomes).length > 0) return { outcome: 'holder_terminal', lease: current };
+      const freshnessEvidenceRef = input.freshnessEvidenceRef.trim();
+      if (!freshnessEvidenceRef) throw new Error('dispatch reservation requires a freshness evidence identity');
+      if (
+        !current.dispatchDeliveryAttemptCount ||
+        current.dispatchDeliveryLastAttemptAt === undefined ||
+        !current.evidenceRefs.includes(freshnessEvidenceRef)
+      ) {
+        return { outcome: 'attempt_missing', lease: current };
+      }
+      const next: ActionSuccessorLease = {
+        ...current,
+        dispatchDeliveryReservation: {
+          predicateDigest: input.expectedPredicateDigest,
+          freshnessEvidenceRef,
+          reservedAt: input.now,
+        },
+        evidenceRefs: [...new Set([...current.evidenceRefs, freshnessEvidenceRef])],
+        revision: current.revision + 1,
+        updatedAt: input.now,
+      };
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, next);
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+      if (committed === 'written') return { outcome: 'reserved', lease: next };
+    }
+    throw new Error(`action successor dispatch-reservation CAS exhausted: ${leaseId}`);
+  }
+
+  async retirePendingDispatchForFreshnessMismatch(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['retirePendingDispatchForFreshnessMismatch']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['retirePendingDispatchForFreshnessMismatch']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = retirePendingDispatchForFreshnessMismatch(current, {
+        generation: input.expectedGeneration,
+        expectedRevision: input.expectedRevision,
+        expectedPredicateDigest: input.expectedPredicateDigest,
+        evidenceRef: input.evidenceRef,
+        now: input.now,
+      });
+      if (result.outcome !== 'retired') return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor freshness-mismatch retirement CAS exhausted: ${leaseId}`);
   }
 
   async markDispatchDelivered(
@@ -328,16 +406,29 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (input.expectedGeneration !== current.generation) {
         return { outcome: 'stale_generation', lease: current };
       }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
       if (current.dispatchDeliveryState !== 'pending') {
         return { outcome: 'dispatch_not_pending', lease: current };
+      }
+      const reservation = current.dispatchDeliveryReservation;
+      if (
+        !reservation ||
+        reservation.predicateDigest !== input.expectedPredicateDigest ||
+        reservation.freshnessEvidenceRef !== input.freshnessEvidenceRef
+      ) {
+        return { outcome: 'reservation_mismatch', lease: current };
       }
       const deliveredMessageId = input.deliveredMessageId.trim();
       const evidenceRef = input.evidenceRef.trim();
       if (!deliveredMessageId || !evidenceRef) {
         throw new Error('dispatch delivery requires message and evidence identities');
       }
+      const { dispatchDeliveryReservation: _reservation, ...currentWithoutReservation } = current;
       const next: ActionSuccessorLease = {
-        ...current,
+        ...currentWithoutReservation,
         dispatchDeliveryState: 'delivered',
         dispatchDeliveredMessageId: deliveredMessageId,
         evidenceRefs: [...new Set([...current.evidenceRefs, evidenceRef])],
@@ -358,13 +449,18 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (input.expectedGeneration !== current.generation) {
         return { outcome: 'stale_generation', lease: current };
       }
+      if (current.revision !== input.expectedRevision) return { outcome: 'stale_revision', lease: current };
+      if (current.terminalPredicate?.digest !== input.expectedPredicateDigest) {
+        return { outcome: 'predicate_mismatch', lease: current };
+      }
       if (current.dispatchDeliveryState !== 'pending') {
         return { outcome: 'dispatch_not_pending', lease: current };
       }
       const evidenceRef = input.evidenceRef.trim();
       if (!evidenceRef) throw new Error('dispatch failure requires an evidence identity');
+      const { dispatchDeliveryReservation: _reservation, ...currentWithoutReservation } = current;
       const next: ActionSuccessorLease = {
-        ...current,
+        ...currentWithoutReservation,
         dispatchDeliveryState: 'failed',
         dispatchFailureReason: input.reason,
         dispatchFailureEvidenceRef: evidenceRef,

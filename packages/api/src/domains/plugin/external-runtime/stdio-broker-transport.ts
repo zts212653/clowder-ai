@@ -1,9 +1,18 @@
 import {
+  DEADLINE_EXPIRED_CODE,
+  DEADLINE_EXPIRED_MESSAGE,
+  DOMAIN_ERROR_CODE,
+  DOMAIN_ERROR_MESSAGE,
   ERROR_CODE_TO_MESSAGE,
   HANDSHAKE_REJECTED_CODE,
   INTERNAL_ERROR_CODE,
   INVALID_PARAMS_CODE,
+  type M0CDeliverInput,
+  type M0CDeliverResult,
   PARSE_ERROR_CODE,
+  SNAPSHOT_UNAVAILABLE_CODE,
+  SNAPSHOT_UNAVAILABLE_MESSAGE,
+  validateMessagingRowInput,
   type WireMethodName,
 } from '@clowder-ai/plugin-contract';
 import {
@@ -14,6 +23,7 @@ import {
   type StdioChannel,
   type StdioFrame,
 } from '@clowder-ai/plugin-sdk';
+import { MessagingError, SnapshotUnavailableHostError } from '../../messaging/contract/host-types.js';
 import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
 import { HostBrokerError } from '../host-broker/types.js';
 import type { ExternalPluginProcess } from './types.js';
@@ -30,16 +40,25 @@ export interface ExternalStdioBrokerTransportOptions {
 
 export interface ExternalStdioBrokerTransport {
   ping(): Promise<void>;
+  call(method: 'host.messaging.deliver', input: M0CDeliverInput): Promise<M0CDeliverResult>;
   close(): void;
 }
 
 interface PendingHostCall {
-  readonly resolve: () => void;
+  readonly method: 'host.lifecycle.ping' | 'host.messaging.deliver';
+  readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly timer: NodeJS.Timeout;
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 5_000;
+
+function closedHostCallError(method: PendingHostCall['method'], cause?: Error): ExternalPluginRuntimeError {
+  const options = cause === undefined ? undefined : { cause };
+  return method === 'host.lifecycle.ping'
+    ? new ExternalPluginRuntimeError('HEARTBEAT_REJECTED', 'runtime transport closed', options)
+    : new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'runtime transport closed', options);
+}
 
 function standardError(id: string, code: number): JsonObject {
   return {
@@ -65,10 +84,16 @@ function requestParts(frame: StdioFrame): {
   readonly id: string;
   readonly method: WireMethodName;
   readonly input: unknown;
+  readonly deadlineUnixMs: number;
 } {
   const value = frame.value;
-  const params = value.params as { readonly input: unknown };
-  return { id: value.id as string, method: value.method as WireMethodName, input: params.input };
+  const params = value.params as { readonly meta: { readonly deadlineUnixMs: number }; readonly input: unknown };
+  return {
+    id: value.id as string,
+    method: value.method as WireMethodName,
+    input: params.input,
+    deadlineUnixMs: params.meta.deadlineUnixMs,
+  };
 }
 
 function settleHostResponse(
@@ -87,8 +112,12 @@ function settleHostResponse(
   clearTimeout(pending.timer);
   pendingHostCalls.delete(id);
   inFlight.delete(id);
-  if ('result' in value) pending.resolve();
-  else pending.reject(new ExternalPluginRuntimeError('HEARTBEAT_REJECTED', 'plugin rejected Host heartbeat'));
+  if ('result' in value) pending.resolve(value.result);
+  else if (pending.method === 'host.lifecycle.ping') {
+    pending.reject(new ExternalPluginRuntimeError('HEARTBEAT_REJECTED', 'plugin rejected Host heartbeat'));
+  } else {
+    pending.reject(new ExternalPluginRuntimeError('DELIVERY_REJECTED', 'plugin rejected Host message delivery'));
+  }
   return undefined;
 }
 
@@ -112,6 +141,30 @@ function brokerFailureResponse(
   method: WireMethodName,
   error: unknown,
 ): { readonly response: JsonObject; readonly close: boolean } {
+  if (error instanceof SnapshotUnavailableHostError) {
+    return {
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: SNAPSHOT_UNAVAILABLE_CODE,
+          message: SNAPSHOT_UNAVAILABLE_MESSAGE,
+          data: { reason: error.reason },
+        },
+      },
+      close: false,
+    };
+  }
+  if (error instanceof MessagingError) {
+    return {
+      response: {
+        jsonrpc: '2.0',
+        id,
+        error: { code: DOMAIN_ERROR_CODE, message: DOMAIN_ERROR_MESSAGE, data: { code: error.code } },
+      },
+      close: false,
+    };
+  }
   if (error instanceof HostBrokerError) {
     if (method === 'broker.hello' || method === 'broker.ready') {
       return { response: handshakeError(id, error), close: true };
@@ -144,10 +197,10 @@ export function createExternalStdioBrokerTransport(
   let closing = false;
   let hostRequestSequence = 0;
 
-  const rejectPendingHostCalls = (error: Error): void => {
+  const rejectPendingHostCalls = (cause: Error): void => {
     for (const [id, pending] of pendingHostCalls) {
       clearTimeout(pending.timer);
-      pending.reject(error);
+      pending.reject(closedHostCallError(pending.method, cause));
       pendingHostCalls.delete(id);
       inFlight.delete(id);
     }
@@ -171,7 +224,14 @@ export function createExternalStdioBrokerTransport(
     if (!('method' in frame.value)) {
       return settleHostResponse(frame.value, inFlight, pendingHostCalls);
     }
-    const { id, method, input } = requestParts(frame);
+    const { id, method, input, deadlineUnixMs } = requestParts(frame);
+    if (now() >= deadlineUnixMs) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: { code: DEADLINE_EXPIRED_CODE, message: DEADLINE_EXPIRED_MESSAGE, data: {} },
+      };
+    }
     try {
       const result = await invokeBroker(options.connection, method, input, options.onReady);
       return { jsonrpc: '2.0', id, result } as JsonObject;
@@ -195,35 +255,53 @@ export function createExternalStdioBrokerTransport(
         : undefined,
     onFatal: (error) => {
       if (closing) return;
-      rejectPendingHostCalls(error);
-      options.onFatal(error);
+      const cause = error.cause instanceof Error ? error.cause : error;
+      rejectPendingHostCalls(cause);
+      options.onFatal(cause);
     },
   });
 
-  const ping = (): Promise<void> => {
+  const sendHostRequest = <Result>(
+    method: 'host.lifecycle.ping' | 'host.messaging.deliver',
+    requestInput: JsonObject | ((id: string) => JsonObject),
+  ): Promise<Result> => {
     if (closing) {
-      return Promise.reject(new ExternalPluginRuntimeError('HEARTBEAT_REJECTED', 'runtime transport is closed'));
+      return Promise.reject(closedHostCallError(method));
     }
     hostRequestSequence += 1;
-    const id = `host-ping-${hostRequestSequence}`;
-    const result = new Promise<void>((resolve, reject) => {
+    const id = `host-call-${hostRequestSequence}`;
+    const input = typeof requestInput === 'function' ? requestInput(id) : requestInput;
+    const result = new Promise<Result>((resolve, reject) => {
       const timer = setTimeout(() => {
         pendingHostCalls.delete(id);
         inFlight.delete(id);
-        reject(new ExternalPluginRuntimeError('HEARTBEAT_TIMEOUT', 'plugin missed the Host heartbeat deadline'));
+        reject(
+          new ExternalPluginRuntimeError(
+            method === 'host.lifecycle.ping' ? 'HEARTBEAT_TIMEOUT' : 'DELIVERY_REJECTED',
+            method === 'host.lifecycle.ping'
+              ? 'plugin missed the Host heartbeat deadline'
+              : 'plugin missed the Host delivery deadline',
+          ),
+        );
       }, heartbeatTimeoutMs);
       timer.unref();
-      pendingHostCalls.set(id, { resolve, reject, timer });
-      inFlight.set(id, { method: 'host.lifecycle.ping', requestSnapshot: { nonce: id } });
+      pendingHostCalls.set(id, { method, resolve: (value) => resolve(value as Result), reject, timer });
+      inFlight.set(id, {
+        method,
+        requestSnapshot:
+          method === 'host.lifecycle.ping'
+            ? { nonce: input.nonce as string }
+            : { deliveryId: input.deliveryId as string },
+      });
     });
     void channel
       .send({
         jsonrpc: '2.0',
         id,
-        method: 'host.lifecycle.ping',
+        method,
         params: {
           meta: { deadlineUnixMs: now() + heartbeatTimeoutMs },
-          input: { nonce: id },
+          input,
         },
       })
       .catch((error: unknown) => {
@@ -232,15 +310,31 @@ export function createExternalStdioBrokerTransport(
         clearTimeout(pending.timer);
         pendingHostCalls.delete(id);
         inFlight.delete(id);
-        pending.reject(error instanceof Error ? error : new Error('Host heartbeat write failed'));
+        const cause = error instanceof Error ? error : new Error('Host request write failed');
+        pending.reject(closedHostCallError(pending.method, cause));
       });
     return result;
   };
+  const ping = async (): Promise<void> => {
+    await sendHostRequest<{ nonce: string }>('host.lifecycle.ping', (id) => ({ nonce: id }));
+  };
   return {
     ping,
+    call: (method, input) => {
+      const validation = validateMessagingRowInput(method, input);
+      if (!validation.valid) {
+        return Promise.reject(new TypeError(`${method} input failed the published contract`));
+      }
+      return sendHostRequest<M0CDeliverResult>(method, validation.value as unknown as JsonObject);
+    },
     close: () => {
       closing = true;
-      rejectPendingHostCalls(new ExternalPluginRuntimeError('HEARTBEAT_REJECTED', 'runtime transport closed'));
+      for (const [id, pending] of pendingHostCalls) {
+        clearTimeout(pending.timer);
+        pending.reject(closedHostCallError(pending.method));
+        pendingHostCalls.delete(id);
+        inFlight.delete(id);
+      }
       channel.close();
     },
   };

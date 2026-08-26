@@ -768,8 +768,7 @@ describe('agent hook routes', () => {
     assert.equal(body.targets, undefined, 'must not return host health targets');
   });
 
-  it('GET rejects explicit uninitialized projectPath (no .cat-cafe/) instead of falling back to host', async () => {
-    // A valid directory that is not initialized as a project must not fall back to host
+  it('GET treats a valid sidecar-free project as having no project capability overrides', async () => {
     const uninitDir = await mkdtemp(join(tmpdir(), 'agent-hooks-uninit-'));
     try {
       const res = await app.inject({
@@ -777,11 +776,11 @@ describe('agent hook routes', () => {
         url: `/api/agent-hooks/status?projectPath=${encodeURIComponent(uninitDir)}`,
         headers: SESSION_HEADERS,
       });
-      assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
+      assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
-      assert.ok(body.error, 'response must include error message');
-      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
-      assert.equal(body.targets, undefined, 'must not return host health targets');
+      assert.equal(body.targets.find((target) => target.name === 'skills')?.reason, 'no project capabilities');
+      assert.equal(body.targets.find((target) => target.name === 'mcp')?.reason, 'no project capabilities');
+      await assert.rejects(readFile(join(uninitDir, '.cat-cafe', 'capabilities.json'), 'utf8'));
     } finally {
       await rm(uninitDir, { recursive: true, force: true });
     }
@@ -801,7 +800,7 @@ describe('agent hook routes', () => {
     assert.equal(body.targets, undefined, 'must not return sync results');
   });
 
-  it('POST rejects explicit uninitialized projectPath instead of mutating host capabilities', async () => {
+  it('POST syncs hook files for a sidecar-free project without creating project capabilities', async () => {
     const uninitDir = await mkdtemp(join(tmpdir(), 'agent-hooks-uninit-sync-'));
     try {
       const res = await app.inject({
@@ -810,11 +809,10 @@ describe('agent hook routes', () => {
         headers: SESSION_HEADERS,
         payload: { projectPath: uninitDir },
       });
-      assert.equal(res.statusCode, 400, 'uninitialized projectPath must fail loud with 400');
+      assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.payload);
-      assert.ok(body.error, 'response must include error message');
-      assert.equal(body.code, 'PROJECT_NOT_INITIALIZED', 'response must carry the machine-readable code');
-      assert.equal(body.targets, undefined, 'must not return sync results');
+      assert.equal(body.status, 'configured');
+      await assert.rejects(readFile(join(uninitDir, '.cat-cafe', 'capabilities.json'), 'utf8'));
     } finally {
       await rm(uninitDir, { recursive: true, force: true });
     }

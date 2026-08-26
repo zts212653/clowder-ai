@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Clowder AI Personal ChatGPT Pro",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Owner-authorized append bridge for personal ChatGPT conversations.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlgM1q4v6VL4SktWwZeydrLSVL0WW9cxZaCTbFi95GdNloO2oF3awS2yW4kYRh1cuqe9YpkGupr9/e2jmjU8wnvnxRtZRVUmsW1Fxx9KMYpGpXdWuQrc6d6wCWZ0Fa+YU3gORUBEASx47lEMYnF30sCGOHPw5brna2Vz/kfKzLTt5JX7kpshUCpYXZrrisLOJyMxBCSblXO+TP039UMHnvRifiiM5bFZPgfZFeDhiqt9Ye7omm16i8MxLhRqyirfVYtD1Cq5CYuRMqL3aFziwR4WkSN3cyI8AdTk9TYiYa3QzCSwGtENR5PZGo/cLubjOfOBRJVGo7A/75Bj0izrnGwIDAQAB",
-  "permissions": ["nativeMessaging", "tabs"],
+  "permissions": ["nativeMessaging", "tabs", "scripting", "alarms"],
   "host_permissions": ["https://chatgpt.com/c/*"],
   "icons": {
     "16": "icons/gpt-pro-16.png",
@@ -33,7 +33,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["chatgpt-page-adapter.mjs"],
+      "resources": ["chatgpt-page-adapter.mjs", "chatgpt-page-contract.mjs", "chatgpt-composer-transaction.mjs"],
       "matches": ["https://chatgpt.com/*"]
     }
   ]

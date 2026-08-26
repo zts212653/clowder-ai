@@ -1,5 +1,43 @@
 import { z } from 'zod';
 
+const gitShaSchema = z.string().regex(/^[0-9a-f]{40}$/, 'must be a full 40-character Git SHA');
+
+const diffContextSchema = z.object({
+  baseSha: gitShaSchema,
+  headSha: gitShaSchema,
+  files: z.array(
+    z.object({
+      path: z.string().min(1),
+      addedLines: z.array(z.string()),
+    }),
+  ),
+});
+
+const designGateReviewPacketSchema = z.object({
+  exactHeadSha: gitShaSchema,
+  riskClaims: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(['consumer_delta', 'authority_delta', 'preservation_boundary_delta']),
+      summary: z.string(),
+      canonicalSource: z.string(),
+      consumerEvidence: z.string(),
+      claimGuard: z.object({
+        command: z.string(),
+        redWhen: z.string(),
+      }),
+    }),
+  ),
+  targetedSelfCheckReceipts: z.array(
+    z.object({
+      claimId: z.string(),
+      headSha: gitShaSchema,
+      command: z.string(),
+      exitCode: z.number().int(),
+    }),
+  ),
+});
+
 /**
  * F192 sop-wiring — replayable SOP trace selector. Eval cat builds the trace
  * from session observation; generator replays evaluation via predicate evaluator
@@ -61,21 +99,26 @@ export const sopSourceRefsShape = z
           guardian: z.string().optional(),
         }),
         shaContext: z.record(z.string()),
+        diffContext: diffContextSchema.optional(),
+        designGateReviewPacket: designGateReviewPacketSchema.optional(),
       })
       .superRefine((trace, ctx) => {
         const changedFileEvents = trace.changedFileEvents ?? [];
-        if (changedFileEvents.length === 0) return;
-
-        const graphCommands = trace.commands.filter((command) => isConventionGraphCodeConsumers(command.command));
-        if (graphCommands.length === 0) return;
-        for (const [index, changedFileEvent] of changedFileEvents.entries()) {
-          if (graphCommands.some((command) => hasSharedOrderCoordinate(command, changedFileEvent))) continue;
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['changedFileEvents', index],
-            message: 'convention graph commands and changedFileEvents require shared eventNo or timestamp',
-          });
+        if (changedFileEvents.length > 0) {
+          const graphCommands = trace.commands.filter((command) => isConventionGraphCodeConsumers(command.command));
+          if (graphCommands.length > 0) {
+            for (const [index, changedFileEvent] of changedFileEvents.entries()) {
+              if (graphCommands.some((command) => hasSharedOrderCoordinate(command, changedFileEvent))) continue;
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['changedFileEvents', index],
+                message: 'convention graph commands and changedFileEvents require shared eventNo or timestamp',
+              });
+            }
+          }
         }
+
+        validateDesignGateTrace(trace, ctx);
       })
       .describe('Full SopTrace data for deterministic replay. See eval cat invocation instructions for field details.'),
   })
@@ -93,6 +136,77 @@ function hasSharedOrderCoordinate(
     (command.eventNo !== undefined && changedFileEvent.eventNo !== undefined) ||
     (command.timestamp !== undefined && changedFileEvent.timestamp !== undefined)
   );
+}
+
+function validateDesignGateTrace(
+  trace: {
+    changedFiles: string[];
+    diffContext?: z.infer<typeof diffContextSchema>;
+    designGateReviewPacket?: z.infer<typeof designGateReviewPacketSchema>;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const diffContext = trace.diffContext;
+  const packet = trace.designGateReviewPacket;
+  if (!diffContext) {
+    if (packet) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['designGateReviewPacket'],
+        message: 'designGateReviewPacket requires diffContext exact HEAD evidence',
+      });
+    }
+    return;
+  }
+
+  if (diffContext.baseSha === diffContext.headSha) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['diffContext', 'headSha'],
+      message: 'diffContext baseSha and headSha must differ',
+    });
+  }
+
+  const diffPaths = diffContext.files.map((file) => file.path);
+  if (new Set(diffPaths).size !== diffPaths.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['diffContext', 'files'],
+      message: 'diffContext file paths must be unique',
+    });
+  }
+  if (!sameStrings(sortedUnique(trace.changedFiles), sortedUnique(diffPaths))) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['diffContext', 'files'],
+      message: 'diffContext files and changedFiles must describe the same path set',
+    });
+  }
+
+  if (!packet) return;
+  if (packet.exactHeadSha !== diffContext.headSha) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['designGateReviewPacket', 'exactHeadSha'],
+      message: 'designGateReviewPacket exactHeadSha must match diffContext headSha exact HEAD',
+    });
+  }
+  const claimIds = packet.riskClaims.map((claim) => claim.id);
+  if (new Set(claimIds).size !== claimIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['designGateReviewPacket', 'riskClaims'],
+      message: 'design-gate risk claim ids must be unique',
+    });
+  }
+}
+
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export type SopTraceEvalSourceRefs = {
@@ -117,5 +231,27 @@ export type SopTraceEvalSourceRefs = {
     gitState: { branch: string; ahead: number; behind: number; clean: boolean; worktreeRoot?: string };
     handles: { author?: string; reviewer?: string; guardian?: string };
     shaContext: Record<string, string>;
+    diffContext?: {
+      baseSha: string;
+      headSha: string;
+      files: Array<{ path: string; addedLines: string[] }>;
+    };
+    designGateReviewPacket?: {
+      exactHeadSha: string;
+      riskClaims: Array<{
+        id: string;
+        kind: 'consumer_delta' | 'authority_delta' | 'preservation_boundary_delta';
+        summary: string;
+        canonicalSource: string;
+        consumerEvidence: string;
+        claimGuard: { command: string; redWhen: string };
+      }>;
+      targetedSelfCheckReceipts: Array<{
+        claimId: string;
+        headSha: string;
+        command: string;
+        exitCode: number;
+      }>;
+    };
   };
 };

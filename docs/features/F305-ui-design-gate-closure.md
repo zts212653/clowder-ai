@@ -14,7 +14,7 @@ tips_exempt: "内部 UI 设计治理与既有审批体验修正；没有新增�
 
 # F305: UI Design Gate Closure — 先看真页面
 
-> **Status**: spec / Experience Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 
 Architecture cell: `harness-eval`
 
@@ -84,6 +84,8 @@ operator说 **“先看真页面”** 时，它是现有 F083 Design Gate 的快
 - 主操作是否无需滚动即可到达？
 - 系统能否先给出建议或默认判断，让人只纠偏？
 - 内部元数据、工程语法与 Raw 是否默认折叠？
+- 体验稿是否使用可信的用户场景，而不是拿 Feature、ADR、Gate、状态机或架构解释充当产品内容？
+- 遮住设计旁白和开发控制后，第一次看到页面的人能否说出“发生了什么、要不要我行动、下一步是什么”？
 - 每个元素的视觉重量是否与其决策价值相称？
 
 Design Gate、实现自检和非作者 review 都引用这一份，不另建 review checklist。
@@ -100,7 +102,9 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 
 `GenericApprovalItemCard` 与 F292 `MeetingIntakeCard` 共同消费该 pattern；F246/F292 的业务状态、持久化和决定契约保持不变。
 
-## User Journeys
+审批是这个 pattern 的**第一个生产验证点**，不是 F305 的永久边界，也不是验证完就丢弃的 spike。后续 Workspace 模块只有在新增或实质改动用户表面时，才经同一个 F083 Design Gate 判断是否复用已经证明的呈现结构；不批量翻修旧页面，也不强迫不同任务共用同一张卡。
+
+## User Journey
 
 ### Primary — 新增或实质改变用户可见表面
 
@@ -125,22 +129,15 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 4. URI、revision、绝对路径、内部映射语法和 Raw 位于按需详情。
 5. 桌面与窄屏都保持决定可达、文本不溢出、详情可恢复。
 
-## Scope
+## Delivery Phases
 
-### Phase A — 真相与 Design Gate 接线
-
-- 把 `DESIGN.md` 收缩为 ADR-043、F056 与运行 token 的指针，不再复制 token 值。
-- 核实并修正 F056 AC-E9 的无效 commit receipt 与未实际存在的 console-dev 声明。
-- 把 F083 Design Gate 从“功能类型单选”改为“用户可见表面叠加”；加入“先看真页面”触发入口。
-- 让现有 checklist 成为 ADR-043/F056 的 source-mapped 投影，并由 Design Gate/review 共用。
-- 在 Clowder AI 项目路由中排除通用 `frontend-design` 的极端风格，不改动或卸载用户级技能。
-
-### Phase B — 一个 pattern 与真实页面证明
-
-- 在 F056 现有 primitive/pattern 方向下实现 Approval / Needs Me 共享默认。
-- 迁移 `GenericApprovalItemCard` 与 F292 `MeetingIntakeCard`，不改变审批业务契约。
-- 先提供真实壳 mock 给operator确认，再正式实现。
-- 用 browser-preview 对桌面、窄屏和关键状态截图；非作者 review 复用同一 checklist。
+| Phase | 只回答一个问题 | 交付与退出条件 | 状态 |
+|---|---|---|---|
+| **0 · 真实问题与候选方向** | 我们修的是颜色，还是任务层级？ | 真实截图 + 三猫收敛 + Workspace 壳原型；可信会议场景替代内部设计解释 | ✅ done |
+| **1 · 唯一入口与真相修复** | 下一只猫怎样不再绕过现有规则？ | F083/feat-lifecycle 叠加触发、“先看真页面”别名、唯一 checklist、`DESIGN.md`/F056 truth 修复、项目级 skill 路由守卫 | ✅ reviewed |
+| **2 · 共享 Approval 呈现** | 两类审批能否复用同一默认层级而不共享业务？ | 纯呈现 pattern + generic consumer；action/store/schema 保持 feature-owned | ✅ implemented |
+| **3 · F292 与 Workspace 迁移** | 第一个真实消费者是否完整保留行为？ | F292 + 入口 + 移动面板使用共享结构和用户语言；typed actions/revision/repair 全部可达 | ✅ implemented |
+| **4 · 真页面证据与关闭** | 实现是否真的比截图中的旧版清楚？ | default/edit/repair/narrow 浏览器证据 + exact-HEAD 非作者 review + merge-gate + landed Alpha | ✅ done（alpha 双尺寸截图 + 18s journey 落盘 evidence/；愿景守护独立复跑 12/12 + contract 6/6） |
 
 ## Mechanism Selection
 
@@ -150,21 +147,25 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 | checklist 不能成为第二份宪法 | lint/guard | 每个新增结构问题必须带 ADR-043/F056 source anchor；surfaces/manifest 同步测试 |
 | 项目内不能误用冲突的通用视觉技能 | deterministic routing guard | Clowder AI scope fixture 命中项目级排除 |
 | Approval / Needs Me 默认结构被两个 consumer 共用 | component contract test | Generic + F292 同时渲染共享 pattern，业务 action 保持原契约 |
+| 长摘要不能把决定推离首屏，也不能被不可恢复地截断 | component + overflow contract test | 字符串摘要默认三行；仅真实溢出时出现“展开全文 / 收起”，全文始终保留 |
 | 页面在真实使用中清晰、可达、不过载 | real-shell evidence + operator signoff | desktop/narrow screenshots + journey 映射 + sourceMessageId |
 
 这些都是确定契约和已知缺陷，不挂 Eval Hub。运行性能与稳定性也不是本 Feature 的 claim。
 
 ## Acceptance Criteria
 
-- [ ] **AC-A1**：新增或实质改变用户可见布局/交互会叠加触发 F083 体验确认；架构 lane 不会豁免，trivial 样式修正不误报。
-- [ ] **AC-A2**：“先看真页面”可从 Clowder AI skill manifest 进入现有 `feat-lifecycle`，并在该 skill 内恢复真实壳 Design Gate 语义；未新增 skill/stage/registry。
-- [ ] **AC-A3**：design-in-context checklist 的结构问题逐项映射 ADR-043/F056，Design Gate 与 review 不复制第二份清单。
-- [ ] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。
-- [ ] **AC-A5**：Clowder AI 产品表面不会路由到冲突的通用 `frontend-design` 风格指令，且不修改用户在其他项目中的全局技能。
-- [ ] **AC-B1**：Approval / Needs Me 共享 pattern 同时被 generic approval 与 F292 meeting intake 消费；F246/F292 业务契约无变化。
-- [ ] **AC-B2**：F292 真实壳首屏只突出一个当前决定、系统建议和必要上下文；主操作不滚动可达，工程细节/Raw 默认折叠。
-- [ ] **AC-B3**：桌面与窄屏的 mock 在正式 UI 实现前获得 operator sourceMessageId 签字；实现后有 browser-preview 对照截图和需求映射。
-- [ ] **AC-B4**：非作者 reviewer 使用同一 checklist 验证 exact HEAD，且 targeted component/route/skill guards 全绿。
+- [x] **AC-A1**：新增或实质改变用户可见布局/交互会叠加触发 F083 体验确认；架构 lane 不会豁免，trivial 样式修正不误报。
+- [x] **AC-A2**：“先看真页面”可从 Clowder AI skill manifest 进入现有 `feat-lifecycle`，并在该 skill 内恢复真实壳 Design Gate 语义；未新增 skill/stage/registry。
+- [x] **AC-A3**：design-in-context checklist 的结构问题逐项映射 ADR-043/F056，Design Gate 与 review 不复制第二份清单。
+- [x] **AC-A4**：`DESIGN.md` 不再持有运行 token 字面值；F056 AC-E9 的无效 SHA/错误完成声明已按仓内事实修正。
+- [x] **AC-A5**：Clowder AI 产品表面不会路由到冲突的通用 `frontend-design` 风格指令，且不修改用户在其他项目中的全局技能。
+- [x] **AC-B1**：Approval / Needs Me 共享 pattern 已由 generic approval、F292 meeting intake 与体验候选共同消费；F246/F292 store、schema 与 action 契约保持不变。
+- [x] **AC-B2**：F292 真实壳首屏只突出一个当前决定、系统建议和必要上下文；建议齐全时编辑表单默认折叠，主操作先于表单，工程细节默认折叠。
+- [x] **AC-B3**：F292 体验稿和正式页面使用可信用户场景与用户任务语言；产品主体不以 Feature/ADR/Gate/状态机/架构或评审术语解释设计，开发控制可隐藏且位于主体之外。
+- [x] **AC-B4**：审批入口、卡片与移动面板经同一 `ApprovalItemCard` 入口消费共享结构；`Meeting`、`Needs Me`、`rev`、原始 URI、完整项目路径和 `Thread` 不再出现在首屏标题、说明或 badge。
+- [x] **AC-B5**：operator 已确认方向并只要求长内容可折叠（source `0001787536138714-000010-369c1070`，已由 AC-B7 落实）；Phase 4 真实壳证据已落盘（`project-evidence/alpha-desktop-default.png` / `alpha-narrow-default.png` / `alpha-journey-15s.webm`，采自 landed Alpha `8b689ab6c`），愿景守护逐帧核验 default/repair/宽窄四态。
+- [x] **AC-B6**：Kimi 以同一 checklist 放行 exact HEAD `dcd132ed0b138528ad6f635770353a4945543774`；独立复跑 component/route/TypeScript guards 全绿，无 P1/P2。
+- [x] **AC-B7**：共享卡的字符串摘要默认限制为三行，仅在真实测量溢出时显示“展开全文”，展开后可“收起”；critical evidence 继续走 F269 的显式恢复入口，不被静默裁切。
 
 ## Non-goals
 
@@ -201,3 +202,4 @@ F056 AC-A3 下先形成一个窄 pattern，不启动全 Workspace 组件扫荡�
 | KD-3 | checklist 是 ADR-043/F056 的唯一操作投影 | 防止 Design Gate 和 review 各维护一份腐烂清单 | 2026-08-22 |
 | KD-4 | 先做一个 Approval / Needs Me pattern | 用最小可验证样本建立默认，不以完整 design system 代偿未知 | 2026-08-22 |
 | KD-5 | Taste 只提供候选证据 | 规范权威继续属于 ADR-043/F056；避免 vignette 噪声覆盖明确契约 | 2026-08-22 |
+| KD-6 | 产品主体讲用户正在做的事，不替设计者解释理论 | 真实用户场景才能检验任务、默认与层级；内部概念只留在设计文档或可隐藏控制层 | 2026-08-23 |

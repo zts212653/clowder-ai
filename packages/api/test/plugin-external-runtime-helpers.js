@@ -73,6 +73,7 @@ export async function createExternalRuntimeHarness({
   activeLeaseTtlMs,
   brokerStore = new MemoryHostBrokerStore(),
   now = Date.now,
+  effectiveGrants = ['events.publish'],
 } = {}) {
   if (!rootDir) throw new TypeError('rootDir is required');
   await mkdir(join(rootDir, 'dist'), { recursive: true });
@@ -88,7 +89,7 @@ export async function createExternalRuntimeHarness({
     computedPackageDigest: packageDigest,
     expectedPackageDigest: packageDigest,
     packagePluginId: EXTERNAL_PLUGIN_ID,
-    effectiveGrants: ['events.publish'],
+    effectiveGrants,
     signalSchemas: {
       'schemas/external.signal.v1.schema.json': {
         type: 'object',

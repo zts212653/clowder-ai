@@ -6,10 +6,8 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
-import {
-  PersonalChromeAuthorizationList,
-  type PersonalChromeAuthorizedConversation,
-} from './PersonalChromeAuthorizationList';
+import { type PersonalChromeAuthorizedConversation } from './PersonalChromeAuthorizationList';
+import { PersonalChromeAuthorizationSection } from './PersonalChromeAuthorizationSection';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsDeleteButton } from './primitives/SettingsDeleteButton';
 import { SettingsPrimaryButton } from './primitives/SettingsPrimaryButton';
@@ -22,7 +20,7 @@ export interface PersonalChromePluginState {
   platform: string;
   platformSupport: 'supported' | 'unsupported';
   artifact: {
-    helper: 'absent' | 'ready' | 'invalid' | 'unsupported';
+    helper: 'absent' | 'ready' | 'stale' | 'invalid' | 'unsupported';
     extension: 'chrome_web_store';
   };
   distribution: {
@@ -40,18 +38,25 @@ export interface PersonalChromePluginState {
     conversations: PersonalChromeAuthorizedConversation[];
   };
   intent: { status: 'developer_preview' };
-  live: { status: 'dormant' | 'connected' | 'degraded' | 'unsupported' };
+  live: {
+    status: 'dormant' | 'connected' | 'stale_adapter' | 'restart_required' | 'degraded' | 'failed' | 'unsupported';
+    errorCode?: string;
+  };
 }
 
 export type PersonalChromePluginAction = 'install' | 'repair' | 'uninstall';
 
 function visibleStatus(state: PersonalChromePluginState) {
   if (state.platformSupport === 'unsupported') return { label: '当前系统暂不支持', tone: 'slate' as const };
+  if (state.artifact.helper === 'stale') return { label: '需升级', tone: 'amber' as const };
   if (state.artifact.helper === 'invalid' || state.config.status === 'invalid') {
     return { label: '需修复', tone: 'red' as const };
   }
   if (state.authorization.status === 'invalid') return { label: '授权记录损坏', tone: 'red' as const };
-  if (state.live.status === 'degraded') return { label: '连接异常', tone: 'red' as const };
+  if (state.live.status === 'stale_adapter') return { label: '扩展待重载', tone: 'amber' as const };
+  if (state.live.status === 'degraded' || state.live.status === 'failed') {
+    return { label: '连接异常', tone: 'red' as const };
+  }
   if (state.distribution.publication !== 'published') return { label: '待发布', tone: 'amber' as const };
   if (state.artifact.helper === 'absent') return { label: '未安装', tone: 'slate' as const };
   if (state.authorization.status === 'empty') return { label: '待授权', tone: 'amber' as const };
@@ -103,6 +108,28 @@ function PublicationNotice({ state }: { state: PersonalChromePluginState }) {
   );
 }
 
+function RevisionNotice({ state }: { state: PersonalChromePluginState }) {
+  if (state.platformSupport !== 'supported') return null;
+  if (state.live.status === 'restart_required') {
+    return (
+      <div className="mt-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-3 py-2">
+        <SettingsText as="p" tone="amber">
+          Helper 已可安全原地升级。点“修复”准备新版后，只需在 Chrome
+          扩展页重载一次；页面适配器会自动重新注入，无需再刷新会话页。
+        </SettingsText>
+      </div>
+    );
+  }
+  if (state.live.status !== 'stale_adapter') return null;
+  return (
+    <div className="mt-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-3 py-2">
+      <SettingsText as="p" tone="amber">
+        已连接的扩展或页面适配器版本过旧。准备新版后，在 Chrome 扩展页重载一次即可；无需再刷新会话页。
+      </SettingsText>
+    </div>
+  );
+}
+
 export function PersonalChromePluginCard({
   state,
   expanded,
@@ -110,6 +137,7 @@ export function PersonalChromePluginCard({
   onToggleDetails,
   onAction,
   onRevoke,
+  onRefresh,
 }: {
   state: PersonalChromePluginState;
   expanded: boolean;
@@ -117,11 +145,14 @@ export function PersonalChromePluginCard({
   onToggleDetails: () => void;
   onAction: (action: PersonalChromePluginAction) => void;
   onRevoke: (conversationId: string) => void;
+  onRefresh: () => void;
 }) {
   const status = visibleStatus(state);
   const repairable =
-    state.platformSupport === 'supported' && (state.artifact.helper === 'invalid' || state.config.status === 'invalid');
-  const installed = state.artifact.helper === 'ready' || state.artifact.helper === 'invalid';
+    state.platformSupport === 'supported' &&
+    (state.artifact.helper === 'stale' || state.artifact.helper === 'invalid' || state.config.status === 'invalid');
+  const installed =
+    state.artifact.helper === 'ready' || state.artifact.helper === 'stale' || state.artifact.helper === 'invalid';
   const installable =
     state.platformSupport === 'supported' &&
     state.artifact.helper === 'absent' &&
@@ -175,11 +206,17 @@ export function PersonalChromePluginCard({
       </div>
       {expanded && (
         <div className="border-t border-[var(--console-border-soft)] px-4 py-3">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <SettingsBadge tone="purple">开发者预览</SettingsBadge>
-            <SettingsText tone="muted">macOS / Linux；Windows 当前不支持</SettingsText>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <SettingsBadge tone="purple">开发者预览</SettingsBadge>
+              <SettingsText tone="muted">macOS / Linux；Windows 当前不支持</SettingsText>
+            </div>
+            <SettingsSecondaryButton disabled={busy} onClick={onRefresh}>
+              {busy ? '处理中…' : '刷新状态'}
+            </SettingsSecondaryButton>
           </div>
           {state.platformSupport === 'supported' && <PublicationNotice state={state} />}
+          <RevisionNotice state={state} />
           {state.platformSupport === 'supported' && state.authorization.status === 'invalid' && (
             <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2">
               <SettingsText as="p" tone="red">
@@ -188,7 +225,8 @@ export function PersonalChromePluginCard({
             </div>
           )}
           {state.platformSupport === 'supported' && state.authorization.status !== 'invalid' && (
-            <PersonalChromeAuthorizationList
+            <PersonalChromeAuthorizationSection
+              status={state.authorization.status}
               conversations={state.authorization.conversations}
               count={state.authorization.count}
               limit={state.authorization.limit}

@@ -1,5 +1,10 @@
 import process from 'node:process';
-import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
+import {
+  type M0CDeliverInput,
+  type M0CDeliverResult,
+  WIRE_METHOD_REGISTRY,
+  WIRE_VERSION,
+} from '@clowder-ai/plugin-contract';
 import type { BrokerConnection } from '../host-broker/builtin-loopback.js';
 import { HostBrokerError } from '../host-broker/types.js';
 import type { PluginInventoryTransaction } from '../host-inventory/ports.js';
@@ -120,6 +125,31 @@ export class ExternalPluginRuntimeSupervisor {
   async stopAll(reason = 'host_shutdown'): Promise<void> {
     this.recovery.stopAccepting();
     await Promise.all([...this.active.values()].map((execution) => this.finish(execution, reason, 'stopped', true)));
+  }
+
+  async deliver(pluginInstanceId: string, input: M0CDeliverInput): Promise<M0CDeliverResult> {
+    const execution = this.active.get(pluginInstanceId);
+    if (!execution?.started || execution.ending || !execution.transport) {
+      throw new ExternalPluginRuntimeError(
+        'DELIVERY_REJECTED',
+        `${pluginInstanceId} has no active stdio runtime for Host delivery`,
+      );
+    }
+    try {
+      await this.options.broker.authorizeHostCall(
+        pluginInstanceId,
+        WIRE_METHOD_REGISTRY['host.messaging.deliver'].grant,
+      );
+    } catch (error) {
+      await this.finish(execution, 'authority_changed', 'stopped', true);
+      throw new ExternalPluginRuntimeError(
+        'DELIVERY_REJECTED',
+        `${pluginInstanceId} lost onMessage authority before Host delivery`,
+        { cause: error },
+      );
+    }
+    this.assertOpen(execution);
+    return execution.transport.call('host.messaging.deliver', input);
   }
 
   async recoverAfterRestart(): Promise<number> {

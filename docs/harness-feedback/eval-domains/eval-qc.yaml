@@ -9,6 +9,9 @@ evalCat:
   handle: "@opus"
   model: claude-opus-4-6
 frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
 sourceAdapter: qc-metrics-eval
 sourceRefsKind: qc-metrics-rollup
 threadPolicy:

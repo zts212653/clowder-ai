@@ -177,7 +177,13 @@ describe('POST /api/messages parallel slot release', () => {
       }),
       routeExecution: async function* () {
         yield { type: 'text', catId: 'opus', content: 'first', timestamp: Date.now() };
-        yield { type: 'error', catId: 'opus', error: 'tool failed', timestamp: Date.now() };
+        yield {
+          type: 'error',
+          catId: 'opus',
+          error: 'tool failed',
+          errorDisposition: 'terminal',
+          timestamp: Date.now(),
+        };
         await gate.promise;
         yield { type: 'text', catId: 'codex', content: 'second', timestamp: Date.now() };
         yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
@@ -250,5 +256,83 @@ describe('POST /api/messages parallel slot release', () => {
     gate.resolve();
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(tracker.has(threadId), false, 'all slots should clear once the last cat finishes');
+  });
+
+  it('keeps a cat cancelable after a transient diagnostic until its done frame', async (t) => {
+    const gate = deferred();
+    const tracker = new InvocationTracker();
+    const invocationQueue = new InvocationQueue();
+    const broadcastEvents = [];
+    const threadId = 'thread-transient-error-stays-cancelable';
+
+    const router = {
+      resolveTargetsAndIntent: async () => ({
+        targetCats: ['opus'],
+        intent: { intent: 'execute', explicit: true, promptTags: [] },
+      }),
+      routeExecution: async function* () {
+        yield {
+          type: 'error',
+          catId: 'opus',
+          error: 'recoverable provider diagnostic',
+          errorDisposition: 'transient',
+          timestamp: Date.now(),
+        };
+        await gate.promise;
+        yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+      },
+      ackCollectedCursors: async () => {},
+    };
+
+    const app = Fastify();
+    await app.register(messagesRoutes, {
+      registry: makeRegistry(),
+      messageStore: makeMessageStore(),
+      socketManager: makeSocketManager(broadcastEvents),
+      router,
+      invocationTracker: tracker,
+      invocationRecordStore: makeInvocationRecordStore(),
+    });
+    await app.register(queueRoutes, {
+      threadStore: makeThreadStore(),
+      invocationQueue,
+      queueProcessor: makeQueueProcessor(),
+      invocationTracker: tracker,
+      socketManager: makeSocketManager(broadcastEvents),
+    });
+    await app.ready();
+    t.after(async () => {
+      gate.resolve();
+      await app.close();
+    });
+
+    const sendRes = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+      payload: {
+        content: 'transient error ownership repro',
+        threadId,
+      },
+    });
+    assert.equal(sendRes.statusCode, 200, sendRes.body);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const queueRes = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}/queue`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(queueRes.statusCode, 200);
+    assert.deepEqual(
+      JSON.parse(queueRes.body).activeInvocations.map((slot) => slot.catId),
+      ['opus'],
+      'a transient diagnostic must not release the exact Stop controller',
+    );
+    assert.equal(tracker.has(threadId, 'opus'), true);
+
+    gate.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(tracker.has(threadId), false, 'the done frame releases the slot');
   });
 });

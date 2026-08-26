@@ -1,6 +1,6 @@
 /** Kimi Agent Service — kimi-cli subprocess via print mode + stream-json. */
 
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   type CatId,
@@ -24,6 +24,7 @@ import type {
   AgentService,
   AgentServiceOptions,
   MessageMetadata,
+  PreparedProviderRequestV1,
 } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
@@ -349,6 +350,38 @@ export class KimiAgentService implements AgentService {
       // metadata.usage (the session snapshot writes lastTurnInputTokens for
       // health display; it is not verified billable turn telemetry).
       let rawCostBasis: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } | undefined;
+      const promptFlag = isLegacy ? '--prompt' : '-p';
+      const promptIndex = args.lastIndexOf(promptFlag);
+      const submittedPrompt = promptIndex >= 0 ? args[promptIndex + 1] : undefined;
+      if (typeof submittedPrompt !== 'string') throw new Error('kimi_request_prompt_unavailable');
+      const nativeInstructions: PreparedProviderRequestV1['nativeInstructions'] = l0AgentFilePath
+        ? [
+            {
+              body: readFileSync(l0AgentFilePath, 'utf8'),
+              injectionDecision: 'native_agent_file_compiled',
+            },
+          ]
+        : [];
+      const preparedRequest: PreparedProviderRequestV1 = Object.freeze({
+        v: 1,
+        message: Object.freeze({
+          body: submittedPrompt,
+          ...(submittedPrompt !== effectivePrompt ? { injectionDecision: 'member_cli_prompt_override' } : {}),
+        }),
+        nativeInstructions: Object.freeze(nativeInstructions.map((instruction) => Object.freeze(instruction))),
+        runtime: Object.freeze({
+          provider: 'kimi',
+          carrier: 'stream_json',
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          protocol: 'stream-json',
+          ...(effortLevel ? { reasoningEffort: effortLevel } : {}),
+        }),
+        tools: Object.freeze({ finalSurface: 'unknown' as const }),
+        providerNativeVisibility: 'unknown',
+      });
+      await options?.beforeProviderLaunch?.(preparedRequest);
+      if (!('body' in preparedRequest.message)) throw new Error('kimi_prepared_message_not_exact');
+      args[promptIndex + 1] = preparedRequest.message.body;
       const cliOpts = {
         command: kimiCommand,
         args,

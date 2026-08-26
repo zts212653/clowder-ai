@@ -172,6 +172,62 @@ describe('PersonalChromePluginPanel', () => {
     expect(findButton(container, '修复')).toBeUndefined();
   });
 
+  it('turns a stale loaded adapter into one extension-reload action without another repair loop', async () => {
+    mockApiFetch.mockResolvedValue(
+      jsonResponse(
+        publishedState({
+          authorization: {
+            status: 'authorized',
+            count: 1,
+            limit: 32,
+            conversations: [
+              {
+                conversationId: 'conversation-17',
+                authorizedAt: '2026-08-21T07:00:00.000Z',
+                updatedAt: '2026-08-21T07:00:00.000Z',
+              },
+            ],
+          },
+          live: { status: 'stale_adapter', errorCode: 'STALE_HELPER_PROTOCOL' },
+        }),
+      ),
+    );
+
+    await act(async () => root.render(<PersonalChromePluginPanel />));
+    await flushEffects();
+    await act(async () => findButton(container, '查看 Personal ChatGPT Pro 详情')?.click());
+
+    expect(container.textContent).toContain('扩展待重载');
+    expect(container.textContent).toContain('在 Chrome 扩展页重载一次即可');
+    expect(container.textContent).toContain('无需再刷新会话页');
+    expect(findButton(container, '修复')).toBeUndefined();
+  });
+
+  it('offers Developer Preview repair for a stale installed artifact even before Web Store publication', async () => {
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugins/personal-chrome' && !init) {
+        return jsonResponse(
+          state({
+            artifact: { helper: 'stale', extension: 'chrome_web_store' },
+            config: { status: 'ready' },
+            live: { status: 'restart_required' },
+          }),
+        );
+      }
+      if (url === '/api/plugins/personal-chrome/repair') return jsonResponse(state());
+      return jsonResponse({}, 404);
+    });
+
+    await act(async () => root.render(<PersonalChromePluginPanel />));
+    await flushEffects();
+
+    expect(container.textContent).toContain('需升级');
+    expect(findButton(container, '安装')).toBeUndefined();
+    await act(async () => findButton(container, '修复')?.click());
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/personal-chrome/repair', { method: 'POST' });
+  });
+
   it('uses one Settings action to prepare the Host and open the published Web Store journey', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     mockApiFetch.mockImplementation(async (url, init) => {
@@ -195,6 +251,47 @@ describe('PersonalChromePluginPanel', () => {
     expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/personal-chrome/install', { method: 'POST' });
     expect(open).toHaveBeenCalledWith(listingUrl, '_blank', 'noopener,noreferrer');
     expect(container.textContent).toContain('待授权');
+  });
+
+  it('refreshes Host authorization in place so the current-thread route step appears', async () => {
+    let inspectCount = 0;
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugins/personal-chrome' && !init) {
+        inspectCount += 1;
+        if (inspectCount === 1) return jsonResponse(publishedState());
+        return jsonResponse(
+          publishedState({
+            authorization: {
+              status: 'authorized',
+              count: 1,
+              limit: 32,
+              conversations: [
+                {
+                  conversationId: 'conversation-after-refresh',
+                  authorizedAt: '2026-08-23T07:00:00.000Z',
+                  updatedAt: '2026-08-23T07:00:00.000Z',
+                },
+              ],
+            },
+          }),
+        );
+      }
+      if (url.endsWith('/cloud-bindings')) return jsonResponse({ bindings: {} }, 403);
+      return jsonResponse({}, 404);
+    });
+
+    await act(async () => root.render(<PersonalChromePluginPanel />));
+    await flushEffects();
+    await act(async () => findButton(container, '查看 Personal ChatGPT Pro 详情')?.click());
+    expect(container.textContent).not.toContain('当前 thread 路由');
+
+    await act(async () => findButton(container, '刷新状态')?.click());
+    await flushEffects();
+
+    expect(inspectCount).toBe(2);
+    expect(container.textContent).toContain('Host 会话授权');
+    expect(container.textContent).toContain('conversation-after-refresh');
+    expect(container.textContent).toContain('当前 thread 路由');
   });
 
   it('shows a bounded authorization list and revokes one exact conversation', async () => {
@@ -239,6 +336,7 @@ describe('PersonalChromePluginPanel', () => {
     await act(async () => findButton(container, '查看 Personal ChatGPT Pro 详情')?.click());
 
     expect(container.textContent).toContain('已授权会话（2/32）');
+    expect(container.textContent).toContain('当前 thread 路由');
     expect(container.textContent).toContain('conversation-17');
     expect(container.textContent).toContain('conversation-18');
     await act(async () => findButton(container, '撤销会话 conversation-17')?.click());

@@ -1,33 +1,26 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  launchDetached,
+  launchWithLaunchd,
+  ownsLaunchdJob,
+  ownsLaunchdProcess,
+  ownsProcess,
+  removeLaunchdJob,
+} from './preview-process-launchers.mjs';
 
 const RECORD_VERSION = 1;
 const DEFAULT_START_TIMEOUT_MS = 10_000;
 const DEFAULT_RECOVERY_TIMEOUT_MS = 20_000;
 const STOP_TERM_GRACE_MS = 3_000;
 const STOP_KILL_GRACE_MS = 1_000;
-const SENSITIVE_ENV_KEYS = [
-  'CAT_CAFE_INVOCATION_ID',
-  'CAT_CAFE_CALLBACK_TOKEN',
-  'CAT_CAFE_SUPERVISOR_PARENT_PID',
-  'CAT_CAFE_AGENT_KEY_FILES',
-];
+const LAUNCHD_LABEL_PREFIX = 'com.catcafe.preview';
 
 function usage() {
   return `Usage:
@@ -83,6 +76,8 @@ function resolveConfig(options) {
     stateDir,
     recordPath: join(stateDir, `${id}.json`),
     logPath: join(stateDir, `${id}.log`),
+    launchdLabel: `${LAUNCHD_LABEL_PREFIX}.${id}`,
+    plistPath: join(stateDir, `${id}.plist`),
   };
 }
 
@@ -102,21 +97,8 @@ function readRecord(config) {
   }
 }
 
-function readProcessIdentity(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  const started = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8' });
-  const command = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
-  if (started.status !== 0 || command.status !== 0) return null;
-  const processStartedAt = started.stdout.trim();
-  const processCommand = command.stdout.trim();
-  return processStartedAt && processCommand ? { processStartedAt, processCommand } : null;
-}
-
-function ownsProcess(record) {
-  const current = readProcessIdentity(record?.pid);
-  return Boolean(
-    current && current.processStartedAt === record.processStartedAt && current.processCommand === record.processCommand,
-  );
+function ownsManagedProcess(config, record) {
+  return record?.origin === 'launchd' ? ownsLaunchdProcess(config, record) : ownsProcess(record);
 }
 
 function processGroupExists(record) {
@@ -167,21 +149,6 @@ async function waitForProcessGroupExit(record, timeoutMs) {
   return !processGroupExists(record);
 }
 
-async function captureIdentity(pid) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const identity = readProcessIdentity(pid);
-    if (identity) return identity;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
-  }
-  return null;
-}
-
-function cleanChildEnv() {
-  const env = { ...process.env };
-  for (const key of SENSITIVE_ENV_KEYS) delete env[key];
-  return env;
-}
-
 function killOwnedGroup(record, signal, ownershipAlreadyProven = false) {
   if (!ownershipAlreadyProven && !ownsProcess(record)) return false;
   try {
@@ -197,6 +164,7 @@ function report(config, payload, exitCode = 0) {
     process.stdout.write(`${JSON.stringify(payload)}\n`);
   } else {
     process.stdout.write(`[preview-process] ${payload.status} ${payload.cwd}:${payload.port}`);
+    if (payload.origin) process.stdout.write(`\norigin: ${payload.origin}`);
     if (payload.logPath) process.stdout.write(`\nlog: ${payload.logPath}`);
     process.stdout.write('\n');
   }
@@ -207,42 +175,40 @@ async function currentStatus(config) {
   const record = readRecord(config);
   const reachable = await probePort(config.port);
   if (!record) return { status: reachable ? 'unmanaged' : 'stopped', record: null, reachable };
-  const owned = ownsProcess(record);
+  const owned = ownsManagedProcess(config, record);
   if (owned && reachable) return { status: 'running', record, reachable };
   if (owned && !record.readyAt) return { status: 'starting', record, reachable };
   if (owned) return { status: 'unavailable', record, reachable };
   return { status: reachable ? 'unmanaged' : 'stopped', record, reachable };
 }
 
-async function start(config) {
-  const existing = await currentStatus(config);
+function reportManagedStatus(config, status, record) {
+  report(config, {
+    status,
+    cwd: config.cwd,
+    port: config.port,
+    pid: record.pid,
+    origin: record.origin ?? 'detached',
+    logPath: record.logPath,
+  });
+}
+
+async function handleExistingStart(config, existing) {
   if (existing.status === 'running') {
-    report(config, { status: 'running', cwd: config.cwd, port: config.port, logPath: existing.record.logPath });
-    return;
+    reportManagedStatus(config, 'running', existing.record);
+    return true;
   }
   if (existing.status === 'starting') {
     const reachable = await waitForPort(config.port, true, DEFAULT_RECOVERY_TIMEOUT_MS);
-    if (reachable && ownsProcess(existing.record)) {
+    if (reachable && ownsManagedProcess(config, existing.record)) {
       const readyRecord = { ...existing.record, readyAt: new Date().toISOString() };
       writeRecord(config, readyRecord);
-      report(config, {
-        status: 'running',
-        cwd: config.cwd,
-        port: config.port,
-        pid: readyRecord.pid,
-        logPath: readyRecord.logPath,
-      });
-      return;
+      reportManagedStatus(config, 'running', readyRecord);
+      return true;
     }
-    if (ownsProcess(existing.record)) {
-      report(config, {
-        status: 'starting',
-        cwd: config.cwd,
-        port: config.port,
-        pid: existing.record.pid,
-        logPath: existing.record.logPath,
-      });
-      return;
+    if (ownsManagedProcess(config, existing.record)) {
+      reportManagedStatus(config, 'starting', existing.record);
+      return true;
     }
     rmSync(config.recordPath, { force: true });
     throw new Error(`preview process exited before listening on port ${config.port}; see ${config.logPath}`);
@@ -250,56 +216,50 @@ async function start(config) {
   if (existing.status === 'unmanaged' || existing.status === 'unavailable') {
     throw new Error(`refusing to replace ${existing.status} target on port ${config.port}`);
   }
+  return false;
+}
+
+async function finishStartedProcess(config, record) {
+  let reachable = await waitForPort(config.port, true, DEFAULT_START_TIMEOUT_MS);
+  if (!reachable && ownsManagedProcess(config, record)) {
+    reachable = await waitForPort(config.port, true, DEFAULT_RECOVERY_TIMEOUT_MS);
+  }
+  if (reachable) {
+    const readyRecord = { ...record, readyAt: new Date().toISOString() };
+    writeRecord(config, readyRecord);
+    reportManagedStatus(config, 'running', readyRecord);
+    return;
+  }
+  if (ownsManagedProcess(config, record)) {
+    reportManagedStatus(config, 'starting', record);
+    return;
+  }
+  if (record.origin === 'launchd') {
+    removeLaunchdJob(config);
+    rmSync(config.plistPath, { force: true });
+  }
+  rmSync(config.recordPath, { force: true });
+  throw new Error(`preview process exited before listening on port ${config.port}; see ${config.logPath}`);
+}
+
+async function start(config) {
+  const existing = await currentStatus(config);
+  if (await handleExistingStart(config, existing)) return;
   rmSync(config.recordPath, { force: true });
   mkdirSync(config.stateDir, { recursive: true, mode: 0o700 });
-  const logFd = openSync(config.logPath, 'a', 0o600);
-  let child;
-  try {
-    child = spawn(config.command[0], config.command.slice(1), {
-      cwd: config.cwd,
-      detached: true,
-      env: cleanChildEnv(),
-      stdio: ['ignore', logFd, logFd],
-    });
-  } finally {
-    closeSync(logFd);
-  }
-  child.unref();
-  const identity = await captureIdentity(child.pid);
-  if (!identity) throw new Error(`started PID ${child.pid} but could not capture its process identity`);
+  const processHandle = process.platform === 'darwin' ? await launchWithLaunchd(config) : await launchDetached(config);
   const record = {
     version: RECORD_VERSION,
     id: config.id,
     cwd: config.cwd,
     port: config.port,
     command: config.command,
-    pid: child.pid,
-    ...identity,
+    ...processHandle,
     startedAt: new Date().toISOString(),
     logPath: config.logPath,
   };
   writeRecord(config, record);
-  let reachable = await waitForPort(config.port, true, DEFAULT_START_TIMEOUT_MS);
-  if (!reachable && ownsProcess(record)) {
-    reachable = await waitForPort(config.port, true, DEFAULT_RECOVERY_TIMEOUT_MS);
-  }
-  if (!reachable) {
-    if (ownsProcess(record)) {
-      report(config, {
-        status: 'starting',
-        cwd: config.cwd,
-        port: config.port,
-        pid: child.pid,
-        logPath: config.logPath,
-      });
-      return;
-    }
-    rmSync(config.recordPath, { force: true });
-    throw new Error(`preview process exited before listening on port ${config.port}; see ${config.logPath}`);
-  }
-  const readyRecord = { ...record, readyAt: new Date().toISOString() };
-  writeRecord(config, readyRecord);
-  report(config, { status: 'running', cwd: config.cwd, port: config.port, pid: child.pid, logPath: config.logPath });
+  await finishStartedProcess(config, record);
 }
 
 async function status(config) {
@@ -313,7 +273,13 @@ async function status(config) {
       status: result.status,
       cwd: config.cwd,
       port: config.port,
-      ...(result.record ? { pid: result.record.pid, logPath: result.record.logPath } : {}),
+      ...(result.record
+        ? {
+            pid: result.record.pid,
+            origin: result.record.origin ?? 'detached',
+            logPath: result.record.logPath,
+          }
+        : {}),
     },
     result.status === 'running' || result.status === 'starting' ? 0 : 1,
   );
@@ -325,8 +291,25 @@ async function stop(config) {
     report(config, { status: 'stopped', cwd: config.cwd, port: config.port });
     return;
   }
-  if (!result.record || !ownsProcess(result.record)) {
+  if (result.status === 'stopped' && result.record?.origin === 'launchd' && ownsLaunchdJob(config, result.record)) {
+    removeLaunchdJob(config);
+    rmSync(config.recordPath, { force: true });
+    rmSync(config.plistPath, { force: true });
+    report(config, { status: 'stopped', cwd: config.cwd, port: config.port, logPath: result.record.logPath });
+    return;
+  }
+  if (!result.record || !ownsManagedProcess(config, result.record)) {
     throw new Error(`refusing to stop ${result.status} port ${config.port}: exact process ownership is not proven`);
+  }
+  if (result.record.origin === 'launchd') {
+    removeLaunchdJob(config);
+    if (!(await waitForPort(config.port, false, STOP_TERM_GRACE_MS + STOP_KILL_GRACE_MS))) {
+      throw new Error(`failed to stop launchd preview ${config.launchdLabel}; state retained at ${config.recordPath}`);
+    }
+    rmSync(config.recordPath, { force: true });
+    rmSync(config.plistPath, { force: true });
+    report(config, { status: 'stopped', cwd: config.cwd, port: config.port, logPath: result.record.logPath });
+    return;
   }
   killOwnedGroup(result.record, 'SIGTERM');
   if (!(await waitForProcessGroupExit(result.record, STOP_TERM_GRACE_MS))) {

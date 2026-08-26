@@ -1,6 +1,5 @@
 'use client';
 
-import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useMemo } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
@@ -8,7 +7,6 @@ import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { ExecutionCancelButton } from './ExecutionCancelButton';
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -79,12 +77,10 @@ function LivenessWarningBanner({
   status,
   warning,
   name,
-  execution,
 }: {
   status: CatStatusType;
   warning?: LivenessWarningSnapshot;
   name: string;
-  execution: ActiveExecutionProjection;
 }) {
   if (!warning || (status !== 'alive_but_silent' && status !== 'suspected_stall')) return null;
   const stalled = status === 'suspected_stall';
@@ -126,13 +122,6 @@ function LivenessWarningBanner({
             </span>
           </div>
         </div>
-        <ExecutionCancelButton
-          execution={execution}
-          label="取消"
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[var(--cafe-surface)] flex-shrink-0 transition-opacity hover:opacity-90 ${
-            stalled ? 'bg-[var(--semantic-critical)]' : 'bg-[var(--semantic-warning)]'
-          }`}
-        />
       </div>
     </div>
   );
@@ -186,14 +175,13 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
               />
             ))}
           </span>
-          <ExecutionCancelButton execution={execution} label="取消" className="ml-auto text-xs text-cafe-muted" />
         </div>
       </div>
     );
   }
 
   if (warning && (status === 'alive_but_silent' || status === 'suspected_stall')) {
-    return <LivenessWarningBanner status={status} warning={warning} name={name} execution={execution} />;
+    return <LivenessWarningBanner status={status} warning={warning} name={name} />;
   }
 
   // Default: normal thinking/streaming indicator.
@@ -209,7 +197,6 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
           {agyProgress ? ` · ${agyProgress}` : status === 'streaming' ? '回复中' : '思考中'}
           {` · ${execution.threadTitle ?? execution.threadId} · 实时回合`}
         </span>
-        <ExecutionCancelButton execution={execution} label="取消" className="ml-auto text-xs text-cafe-muted" />
         {/* #738: animated typing dots */}
         <span className="flex items-center gap-0.5">
           {[0, 1, 2].map((i) => (

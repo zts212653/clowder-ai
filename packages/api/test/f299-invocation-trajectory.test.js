@@ -177,6 +177,26 @@ describe('F299 active and sealed invocation routes', () => {
     return created.invocationId;
   }
 
+  async function createCanonicalExecution(
+    { invocationRecordStore, turnExecutionStore },
+    threadId,
+    userId = 'user-f299',
+    catId = 'codex-sol',
+  ) {
+    const parentInvocationId = await createInvocationRecord(invocationRecordStore, threadId, userId);
+    const invocationId = `turn-${Math.random()}`;
+    await turnExecutionStore.createRunning({
+      invocationId,
+      parentInvocationId,
+      threadId,
+      userId,
+      catId,
+      executionKind: 'ordinary',
+      startedAt: 1_000,
+    });
+    return { invocationId, parentInvocationId };
+  }
+
   async function writeTranscriptFile(record, filename, envelopes) {
     const dir = join(dataDir, 'threads', record.threadId, record.catId, 'sessions', record.id);
     await mkdir(dir, { recursive: true });
@@ -198,13 +218,16 @@ describe('F299 active and sealed invocation routes', () => {
   }
 
   it('resolves an invocation to its canonical cross-thread session before opening trajectory', async () => {
-    const { invocationRecordStore, sessionChainStore, transcriptWriter } = await setup({
+    const { invocationRecordStore, sessionChainStore, transcriptWriter, turnExecutionStore } = await setup({
       threads: [
         { id: 'thread-current-page', createdBy: 'user-f299' },
         { id: 'thread-canonical', createdBy: 'user-f299' },
       ],
     });
-    const invocationId = await createInvocationRecord(invocationRecordStore, 'thread-canonical');
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-canonical',
+    );
     const session = await sessionChainStore.create({
       threadId: 'thread-canonical',
       catId: 'codex-sol',
@@ -237,9 +260,257 @@ describe('F299 active and sealed invocation routes', () => {
     });
   });
 
+  it('resolves a real child invocation through its distinct parent dispatch record', async () => {
+    const { invocationRecordStore, sessionChainStore, transcriptWriter, turnExecutionStore } = await setup({
+      threads: [
+        { id: 'thread-current-page', createdBy: 'user-f299' },
+        { id: 'thread-canonical', createdBy: 'user-f299' },
+      ],
+    });
+    const parentInvocationId = await createInvocationRecord(invocationRecordStore, 'thread-canonical');
+    const childInvocationId = 'turn-child-distinct-from-parent';
+    await turnExecutionStore.createRunning({
+      invocationId: childInvocationId,
+      parentInvocationId,
+      threadId: 'thread-canonical',
+      userId: 'user-f299',
+      catId: 'codex-sol',
+      executionKind: 'ordinary',
+      startedAt: 1_000,
+    });
+    const session = await sessionChainStore.create({
+      threadId: 'thread-canonical',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-canonical-child',
+    });
+    transcriptWriter.appendEvent(
+      {
+        sessionId: session.id,
+        threadId: session.threadId,
+        catId: session.catId,
+        cliSessionId: session.cliSessionId,
+        seq: session.seq,
+      },
+      { type: 'done' },
+      childInvocationId,
+    );
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-canonical/invocations',
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    assert.equal(list.statusCode, 200);
+    assert.equal(list.json().invocations[0]?.invocationId, childInvocationId);
+
+    const result = await app.inject({
+      method: 'GET',
+      url: `/api/invocations/${childInvocationId}/trajectory`,
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(result.json(), {
+      invocationId: childInvocationId,
+      threadId: 'thread-canonical',
+      sessionId: session.id,
+    });
+  });
+
+  it('projects ordered request generations across replacement Sessions through one invocation route', async () => {
+    const { invocationRecordStore, messageStore, sessionChainStore, transcriptWriter, turnExecutionStore } =
+      await setup();
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
+    const first = await sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-generation-1',
+    });
+    const second = await sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-generation-2',
+    });
+    const availableSource = await messageStore.append({
+      threadId: 'thread-f299',
+      userId: 'user-f299',
+      catId: null,
+      content: 'available source',
+      timestamp: 900,
+    });
+    const hardDeletedSource = await messageStore.append({
+      threadId: 'thread-f299',
+      userId: 'user-f299',
+      catId: null,
+      content: 'hard-deleted source',
+      timestamp: 901,
+    });
+    await messageStore.hardDelete(hardDeletedSource.id, 'user-f299');
+    const sourceIds = [availableSource.id, hardDeletedSource.id];
+    const digest = `hmac-sha256:${'a'.repeat(64)}`;
+    for (const [index, session] of [first, second].entries()) {
+      const ordinal = index + 1;
+      const requestGenerationId = `00000000-0000-4000-8000-${String(ordinal).padStart(12, '0')}`;
+      await transcriptWriter.appendDurableEvent(
+        {
+          sessionId: session.id,
+          threadId: session.threadId,
+          catId: session.catId,
+          cliSessionId: session.cliSessionId,
+          seq: session.seq,
+        },
+        {
+          type: 'request_generation_assembled',
+          envelope: {
+            v: 1,
+            invocationId,
+            sessionId: session.id,
+            generationOrdinal: ordinal,
+            requestGenerationId,
+            promptGenerationId: digest,
+            assembledAt: 1_000 + ordinal,
+            continuity: { capability: 'unknown', compactionRefs: [] },
+            channels: [
+              {
+                channel: 'message',
+                accuracy: 'exact',
+                keyedContentDigest: digest,
+                byteLength: 6,
+                body: `turn-${ordinal}`,
+                sourceRefs: [{ owner: 'message', ref: `thread-f299:${sourceIds[index]}` }],
+              },
+            ],
+            presentations: [],
+            runtime: {
+              requested: { provider: 'openai', carrier: 'app_server' },
+              providerNativeVisibility: 'unknown',
+            },
+            tools: { finalSurface: 'unknown' },
+            retryBoundary:
+              ordinal === 1 ? { attempt: 1 } : { attempt: 2, previousGenerationOrdinal: 1, reason: 'missing_session' },
+          },
+        },
+        invocationId,
+      );
+    }
+
+    const result = await app.inject({
+      method: 'GET',
+      url: `/api/invocations/${invocationId}/request-generations`,
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(
+      result.json().generations.map((generation) => ({
+        ordinal: generation.envelope.generationOrdinal,
+        sessionId: generation.envelope.sessionId,
+        state: generation.envelope.channels[0].state,
+        ...(generation.envelope.channels[0].body === undefined ? {} : { body: generation.envelope.channels[0].body }),
+      })),
+      [
+        { ordinal: 1, sessionId: first.id, state: 'redacted' },
+        { ordinal: 2, sessionId: second.id, state: 'redacted' },
+      ],
+    );
+
+    const revealed = await app.inject({
+      method: 'GET',
+      url: `/api/invocations/${invocationId}/request-generations?reveal=exact`,
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    assert.equal(revealed.statusCode, 200);
+    assert.deepEqual(
+      revealed.json().generations.map((generation) => ({
+        state: generation.envelope.channels[0].state,
+        ...(generation.envelope.channels[0].body === undefined ? {} : { body: generation.envelope.channels[0].body }),
+      })),
+      [{ state: 'available', body: 'turn-1' }, { state: 'deleted' }],
+    );
+  });
+
+  it('returns intact later generations with a typed ordinal gap instead of failing the whole route', async () => {
+    const { invocationRecordStore, sessionChainStore, transcriptWriter, turnExecutionStore } = await setup();
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
+    const session = await sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-generation-gap',
+    });
+    const digest = `hmac-sha256:${'a'.repeat(64)}`;
+    await transcriptWriter.appendDurableEvent(
+      {
+        sessionId: session.id,
+        threadId: session.threadId,
+        catId: session.catId,
+        cliSessionId: session.cliSessionId,
+        seq: session.seq,
+      },
+      {
+        type: 'request_generation_assembled',
+        envelope: {
+          v: 1,
+          invocationId,
+          sessionId: session.id,
+          generationOrdinal: 2,
+          requestGenerationId: '00000000-0000-4000-8000-000000000002',
+          promptGenerationId: digest,
+          assembledAt: 1_002,
+          continuity: { capability: 'unknown', compactionRefs: [] },
+          channels: [
+            {
+              channel: 'message',
+              accuracy: 'exact',
+              keyedContentDigest: digest,
+              byteLength: 6,
+              body: 'turn-2',
+              sourceRefs: [],
+            },
+          ],
+          presentations: [],
+          runtime: {
+            requested: { provider: 'openai', carrier: 'app_server' },
+            providerNativeVisibility: 'unknown',
+          },
+          tools: { finalSurface: 'unknown' },
+          retryBoundary: { attempt: 2, previousGenerationOrdinal: 1, reason: 'missing_session' },
+        },
+      },
+      invocationId,
+    );
+
+    const result = await app.inject({
+      method: 'GET',
+      url: `/api/invocations/${invocationId}/request-generations`,
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(
+      result.json().generations.map((generation) => generation.envelope.generationOrdinal),
+      [2],
+    );
+    assert.deepEqual(result.json().gaps, [
+      { kind: 'evidence_gap', fromOrdinal: 1, toOrdinal: 1, state: 'unknown', reason: 'ordinal_gap' },
+    ]);
+  });
+
   it('treats evidence thread and session coordinates as fail-closed hints', async () => {
-    const { invocationRecordStore, sessionChainStore, transcriptWriter } = await setup();
-    const invocationId = await createInvocationRecord(invocationRecordStore, 'thread-f299');
+    const { invocationRecordStore, sessionChainStore, transcriptWriter, turnExecutionStore } = await setup();
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
     const session = await sessionChainStore.create({
       threadId: 'thread-f299',
       catId: 'codex-sol',
@@ -276,7 +547,7 @@ describe('F299 active and sealed invocation routes', () => {
   });
 
   it('returns typed unavailable results for missing canonical records and sessions', async () => {
-    const { invocationRecordStore } = await setup();
+    const { invocationRecordStore, turnExecutionStore } = await setup();
     const missingRecord = await app.inject({
       method: 'GET',
       url: '/api/invocations/inv-missing/trajectory',
@@ -285,7 +556,10 @@ describe('F299 active and sealed invocation routes', () => {
     assert.equal(missingRecord.statusCode, 404);
     assert.equal(missingRecord.json().code, 'INVOCATION_RECORD_NOT_FOUND');
 
-    const invocationId = await createInvocationRecord(invocationRecordStore, 'thread-f299');
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
     const missingSession = await app.inject({
       method: 'GET',
       url: `/api/invocations/${invocationId}/trajectory`,
@@ -293,15 +567,68 @@ describe('F299 active and sealed invocation routes', () => {
     });
     assert.equal(missingSession.statusCode, 404);
     assert.equal(missingSession.json().code, 'INVOCATION_SESSION_NOT_FOUND');
+
+    await turnExecutionStore.createRunning({
+      invocationId: 'turn-parent-missing',
+      parentInvocationId: 'parent-missing',
+      threadId: 'thread-f299',
+      userId: 'user-f299',
+      catId: 'codex-sol',
+      executionKind: 'ordinary',
+      startedAt: 1_001,
+    });
+    const missingParent = await app.inject({
+      method: 'GET',
+      url: '/api/invocations/turn-parent-missing/trajectory',
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    assert.equal(missingParent.statusCode, 404);
+    assert.equal(missingParent.json().code, 'INVOCATION_PARENT_RECORD_NOT_FOUND');
+  });
+
+  it('fails closed when the exact child and parent dispatch identity disagree', async () => {
+    const { invocationRecordStore, turnExecutionStore } = await setup({
+      threads: [
+        { id: 'thread-f299', createdBy: 'user-f299' },
+        { id: 'thread-other', createdBy: 'user-f299' },
+      ],
+    });
+    const parentInvocationId = await createInvocationRecord(invocationRecordStore, 'thread-other');
+    await turnExecutionStore.createRunning({
+      invocationId: 'turn-parent-mismatch',
+      parentInvocationId,
+      threadId: 'thread-f299',
+      userId: 'user-f299',
+      catId: 'codex-sol',
+      executionKind: 'ordinary',
+      startedAt: 1_002,
+    });
+
+    const result = await app.inject({
+      method: 'GET',
+      url: '/api/invocations/turn-parent-mismatch/trajectory',
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+
+    assert.equal(result.statusCode, 409);
+    assert.equal(result.json().code, 'INVOCATION_RECORD_INTEGRITY_MISMATCH');
   });
 
   it('rejects foreign records and filters user-indexed system-thread sessions by current user', async () => {
-    const { invocationRecordStore, sessionChainStore, transcriptWriter } = await setup({
+    const { invocationRecordStore, sessionChainStore, transcriptWriter, turnExecutionStore } = await setup({
       thread: { id: 'thread-f299', createdBy: 'system' },
       indexedUsers: ['user-f299', 'other-user'],
     });
-    const ownerInvocationId = await createInvocationRecord(invocationRecordStore, 'thread-f299');
-    const foreignInvocationId = await createInvocationRecord(invocationRecordStore, 'thread-f299', 'other-user');
+    const { invocationId: ownerInvocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
+    const { invocationId: foreignInvocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+      'other-user',
+      'opus',
+    );
     const ownerSession = await sessionChainStore.create({
       threadId: 'thread-f299',
       catId: 'codex-sol',
@@ -350,11 +677,14 @@ describe('F299 active and sealed invocation routes', () => {
   });
 
   it('keeps an owned invocation inaccessible when its system thread is not user-indexed', async () => {
-    const { invocationRecordStore } = await setup({
+    const { invocationRecordStore, turnExecutionStore } = await setup({
       thread: { id: 'thread-f299', createdBy: 'system' },
       indexedUsers: [],
     });
-    const invocationId = await createInvocationRecord(invocationRecordStore, 'thread-f299');
+    const { invocationId } = await createCanonicalExecution(
+      { invocationRecordStore, turnExecutionStore },
+      'thread-f299',
+    );
 
     const result = await app.inject({
       method: 'GET',

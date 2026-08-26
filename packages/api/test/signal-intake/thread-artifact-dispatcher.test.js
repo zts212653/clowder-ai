@@ -32,7 +32,7 @@ describe('F292 private-thread artifact handoff', () => {
     assert.equal(await authority.resolve('host:private-thread:thread-1#alias', 'owner-1'), null);
   });
 
-  it('keeps external transcript inside a data-only envelope and wakes one existing thread cat', async () => {
+  it('delivers through the explicit preferred cat even before the new thread has participants', async () => {
     const admission = await admissionHarness();
     await admission.service.publish(admission.binding, publishInput());
     const intake = {
@@ -57,7 +57,7 @@ describe('F292 private-thread artifact handoff', () => {
       rollbackEnqueue() {},
     };
     const dispatcher = new ThreadMeetingArtifactDispatcher({
-      threadStore: { get: async () => thread },
+      threadStore: { get: async () => ({ ...thread, participants: [] }) },
       messageStore: {
         append: async (input) => {
           appended.push(input);

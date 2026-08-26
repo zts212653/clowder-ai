@@ -20,7 +20,7 @@ import type {
   FreshnessCarrierDeliverySemantics,
   FreshnessCarrierProvider,
   QueueHandledDisposition,
-  QueueLineageEvidenceRef,
+  QueueTargetOutcomeEvidenceRef,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
@@ -105,7 +105,7 @@ interface QueuedHandledEvent extends FreshnessEventBase {
   queueEntryId: string;
   messageIds: string[];
   disposition: QueueHandledDisposition;
-  evidenceRef: QueueLineageEvidenceRef;
+  evidenceRef: QueueTargetOutcomeEvidenceRef;
   remainingTargetCats: string[];
 }
 
@@ -173,7 +173,7 @@ export interface ProviderNoticeSeenEvent extends ProviderNoticeEventBase {
 export interface ProviderNoticeHandledEvent extends ProviderNoticeEventBase {
   kind: 'provider_notice_handled';
   queueEntryId: string;
-  evidenceRef: QueueLineageEvidenceRef;
+  evidenceRef: QueueTargetOutcomeEvidenceRef;
 }
 
 export interface ProviderCarrierCapabilityDeclaredEvent extends FreshnessEventBase {
@@ -317,7 +317,7 @@ export class FreshnessAttentionEventLog {
     catId: CatId;
     queueEntryId: string;
     messageIds: readonly string[];
-    evidenceRef: QueueLineageEvidenceRef;
+    evidenceRef: QueueTargetOutcomeEvidenceRef;
   }): Promise<number> {
     const events = await this.queryByInvocation(input.invocationId);
     const messageIds = new Set(input.messageIds);

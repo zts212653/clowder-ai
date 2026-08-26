@@ -2,12 +2,11 @@
 
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
-import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { AppServerLifecycleSnapshot, AppServerLifecycleStage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -46,7 +45,6 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const effectiveThreadId = threadId ?? currentThreadId;
   const { catInvocations, catStatuses } = useThreadLiveness(effectiveThreadId);
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
-  const cancelPendingByKey = useActiveExecutionStore((state) => state.cancelPendingByKey);
   const executionHydration = useActiveExecutionStore((state) => state.hydration);
   const executionAnchorThreadId = useActiveExecutionStore((state) => state.anchorThreadId);
   const { getCatById } = useCatData();
@@ -87,25 +85,6 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     const interval = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(interval);
   }, [activeExecutions.length]);
-
-  const handleStopAll = useCallback(async () => {
-    const cancelableExecutions = activeExecutions.filter((execution) => execution.cancelability.state === 'cancelable');
-    const results = await Promise.allSettled(
-      cancelableExecutions.map((execution) => cancelProjectedExecution(execution)),
-    );
-    if (results.some((result) => result.status === 'rejected')) {
-      useToastStore.getState().addToast({
-        type: 'error',
-        title: '部分执行未能停止',
-        message: '运行状态已重新同步，请按仍显示的精确执行重试。',
-        duration: 5000,
-      });
-    }
-  }, [activeExecutions]);
-  const stopAllPending = activeExecutions.some(
-    (execution) => cancelPendingByKey[activeExecutionKey(execution)] === true,
-  );
-  const hasCancelableExecution = activeExecutions.some((execution) => execution.cancelability.state === 'cancelable');
 
   // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
   const stalled = activeExecutions.some((execution) => {
@@ -184,16 +163,6 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
             />
           );
         })}
-        {activeExecutions.length > 1 && (
-          <button
-            type="button"
-            onClick={handleStopAll}
-            disabled={stopAllPending || !hasCancelableExecution}
-            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0 disabled:cursor-wait disabled:opacity-50"
-          >
-            {stopAllPending ? '停止中…' : '全部停止'}
-          </button>
-        )}
       </div>
       <ForceResetEntry escalated={stalled} onClick={() => setResetDialogOpen(true)} />
       <ForceResetDialog

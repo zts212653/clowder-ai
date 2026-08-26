@@ -333,7 +333,7 @@
     {
       "id": "F056",
       "name": "Clowder AI 设计语言 — 猫猫化不是猫化",
-      "status": "doing（Phase E 11/12 done + Phase E Sweep 2026-05-25~28 完成：bubble routing 统一 / variant slug 补齐 / 350-line split / clowder-ai#784 review-response — AC-E12 Playwright baseline deferred 到集成验证） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
+      "status": "doing（Phase E 10/12 done；AC-E9 console-dev 投影 partial，AC-E12 Playwright baseline deferred；Phase E Sweep 2026-05-25~28 的 bubble routing / variant slug / 350-line split / clowder-ai#784 review-response 已完成） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
       "file": "F056-cat-cafe-design-language.md"
     },
     {
@@ -957,7 +957,7 @@
     {
       "id": "F156",
       "name": "Security Hardening — 实时通道 + 本机信任边界加固",
-      "status": "spec (Phase E planned) | **Owner**: Ragdoll | **Priority**: P0 | **Completed**: 2026-04-12 (Phase A~D) | **Reopened**: 2026-04-16 (Phase E)",
+      "status": "spec (Phase E design) | **Owner**: Ragdoll | **Priority**: P0 | **Completed**: 2026-04-12 (Phase A~D) | **Reopened**: 2026-04-16 (Phase E)",
       "file": "F156-websocket-security-hardening.md"
     },
     {
@@ -1173,7 +1173,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-07-03",
+      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + Phase I dual-trigger control plane) | **Owner**: Ragdoll | **Truth sync**: 2026-08-24",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1647,7 +1647,7 @@
     {
       "id": "F279",
       "name": "Workspace Listen Mode — 正文听读与可复用音频缓存",
-      "status": "in-progress / Phase A passed; Phase B complete; Phase C implementation landed with full Workspace UAT pending; Phase D background full-document cache Design Gate draft pending operator signoff",
+      "status": "in-progress / Phase A passed; Phase B complete; Phase C implementation landed with full Workspace UAT pending; Phase D lean full-document cache Design Gate passed and ready for implementation",
       "file": "F279-workspace-listen-mode.md"
     },
     {
@@ -1743,7 +1743,7 @@
     {
       "id": "F297",
       "name": "Sidebar Projection Convergence — 服务端权威快照，前端单一写入",
-      "status": "done | **Completed**: 2026-08-21 | **Evolved from**: F081 | **Renewed CloseGate**: PASS by 小团团·Maine Coon (@codex-terra)，P1 deferred = 0（`0001787371427031-000209-64cae1d3`）；prior Luna verdict remains superseded by the working-order runtime counterexample | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1",
+      "status": "in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`0001787464914112-000015-317297b0`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1",
       "file": "F297-sidebar-projection-convergence.md"
     },
     {
@@ -1773,7 +1773,7 @@
     {
       "id": "F302",
       "name": "Runtime-First Portable Governance — 零写入出征与可选项目治理",
-      "status": "spec | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "done | **Completed**: 2026-08-23 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F302-runtime-first-portable-governance.md"
     },
     {
@@ -1785,13 +1785,13 @@
     {
       "id": "F304",
       "name": "Local Interaction Request Liveness — 后台重负载下前台创建不饿死",
-      "status": "phase-b-merged | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "done | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1 | **Completed**: 2026-08-23",
       "file": "F304-local-interaction-request-liveness.md"
     },
     {
       "id": "F305",
       "name": "UI Design Gate Closure — 先看真页面",
-      "status": "spec / Experience Design Gate | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "done — 2026-08-24 愿景守护 seal_close（fable-5，非作者非 reviewer；见 vision-guard-seal） | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F305-ui-design-gate-closure.md"
     }
   ]

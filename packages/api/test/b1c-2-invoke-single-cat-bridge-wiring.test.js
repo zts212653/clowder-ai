@@ -69,6 +69,7 @@ function makeMinimalDeps(extraDeps = {}) {
     sessionManager: {},
     threadStore: makeMockThreadStore(),
     apiUrl: 'http://localhost:0',
+    cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
     ...extraDeps,
   };
 }
@@ -81,6 +82,7 @@ const baseParams = {
   threadId: 'thread_t1',
   ownerAuthProvenance: 'strict',
   isLastCat: true,
+  executionCausal: { triggerMessageId: 'source-message-user-1' },
 };
 
 function bridgeStatus(messages) {
@@ -112,6 +114,7 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     );
     assert.equal(bridge.calls.length, 0, 'bridge NOT called when mentionContent missing');
     assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(bridgeStatus(messages).reason, 'incomplete-dispatch-provenance');
     assert.equal(messages.at(-1).type, 'done');
   });
 
@@ -128,6 +131,7 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     );
     assert.equal(bridge.calls.length, 0, 'bridge NOT called when mentioningCatId missing');
     assert.equal(bridgeStatus(messages).status, 'unavailable');
+    assert.equal(bridgeStatus(messages).reason, 'incomplete-dispatch-provenance');
     assert.equal(messages.at(-1).type, 'done');
   });
 
@@ -150,8 +154,27 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     // gpt52 R1 P1-2: calledBy MUST be the mentioning catId, NOT the userId.
     assert.equal(dispatchedParams.calledBy, 'opus-47');
     assert.notEqual(dispatchedParams.calledBy, baseParams.userId, 'calledBy must not be the thread owner userId');
+    assert.equal(dispatchedParams.sourceMessageId, 'source-message-user-1');
+    assert.equal(dispatchedParams.cloudReturnBinding, 'cbr1.aW52LWNsb3Vk.signature');
     assert.equal(bridgeStatus(messages).status, 'sent');
     assert.equal(messages.at(-1).type, 'done', 'guard still yields done');
+  });
+
+  it('fails closed with typed degraded status when the exact source message is absent', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        executionCausal: undefined,
+        mentionContent: 'must not become an unbound cloud turn',
+        mentioningCatId: 'opus-47',
+      }),
+    );
+
+    assert.equal(bridge.calls.length, 0);
+    assert.equal(bridgeStatus(messages).reason, 'missing-source-message-id');
   });
 
   it('waits for the bounded bridge receipt, but not for the cloud cat response', async () => {

@@ -65,4 +65,40 @@ describe('SystemNoticeBar', () => {
     expect(html).not.toMatch(/text-\[#[0-9A-Fa-f]{3,6}\]/);
     expect(html).not.toMatch(/border-\[#[0-9A-Fa-f]{3,6}\]/);
   });
+
+  it('renders a source-bound cloud audit with exact hydrated preview and honest receipt fields', () => {
+    const html = renderNotice({
+      content: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
+      timestamp: new Date('2026-08-23T12:34:00-07:00').getTime(),
+      replyTo: 'source-message-1',
+      replyPreview: { senderCatId: 'codex-sol', content: '审查 exact source 回程' },
+      source: {
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: 'info',
+        meta: {
+          noticeTone: 'info',
+          cloudBridgeOutboundReceipt: {
+            v: 1,
+            sourceMessageId: 'source-message-1',
+            sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'inv-source-1' },
+            dispatchInvocationId: 'inv-cloud-1',
+            targetCatId: 'gpt-pro',
+            status: 'sent',
+            transport: 'host',
+            hostMessageId: 'host-message-1',
+            idempotency: { keyKind: 'source_message_id', disposition: 'replayed' },
+          },
+        },
+      },
+    });
+
+    expect(html).toContain('审查 exact source 回程');
+    expect(html).toContain('@gpt-pro');
+    expect(html).toContain('host');
+    expect(html).toContain('host-message-1');
+    expect(html).toContain('幂等重放');
+    expect(html).toContain('inv-cloud-1');
+    expect(html).not.toContain('conversation-7');
+  });
 });

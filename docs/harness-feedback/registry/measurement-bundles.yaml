@@ -1,6 +1,6 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-08-23T00:38:41Z
+generatedAt: 2026-08-24T22:14:10Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
@@ -126,6 +126,37 @@ entries:
       actionGate: keep_observe_only
       hardBlockReason: This public instance has not certified measurement validity for
         eval:capability-wakeup.
+  - domainId: eval:design-gate
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F303
+      ownerCatId: codex-sol
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f303-design-gate-episode
+      kind: design-gate-episode-source-map
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f303-design-gate-episode/design-gate-episode-source-map public registry
+        contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 5
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:design-gate.
   - domainId: eval:external-case-closure
     classification: registered_nonoperational
     enabled: true
@@ -173,7 +204,7 @@ entries:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 5
+      riskRank: 6
       batch: null
       status: unmigrated
       certificateRef: null
@@ -203,7 +234,7 @@ entries:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 6
+      riskRank: 7
       batch: null
       status: unmigrated
       certificateRef: null
@@ -263,7 +294,7 @@ entries:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 7
+      riskRank: 8
       batch: null
       status: unmigrated
       certificateRef: null
@@ -292,7 +323,7 @@ entries:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 8
+      riskRank: 9
       batch: null
       status: unmigrated
       certificateRef: null
@@ -321,7 +352,7 @@ entries:
       domainInstructions: true
       publishInstructions: true
     validityMigration:
-      riskRank: 9
+      riskRank: 10
       batch: null
       status: unmigrated
       certificateRef: null

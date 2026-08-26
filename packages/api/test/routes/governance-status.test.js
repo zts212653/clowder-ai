@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import Fastify from 'fastify';
-import { governanceStatusRoute } from '../../dist/routes/governance-status.js';
+import { governanceStatusRoute, isEmptyDir } from '../../dist/routes/governance-status.js';
 
 const HEADERS = { 'x-cat-cafe-user': 'test-user' };
 
@@ -42,7 +42,9 @@ describe('GET /api/governance/status', () => {
     const body = JSON.parse(res.payload);
     assert.equal(body.isEmptyDir, true);
     assert.equal(body.isGitRepo, false);
-    assert.equal(body.ready, false);
+    assert.equal('ready' in body, false, 'governance installation is not readiness');
+    assert.equal('needsBootstrap' in body, false);
+    assert.equal('needsConfirmation' in body, false);
   });
 
   it('returns isGitRepo=true for git-initialized directory', async () => {
@@ -68,6 +70,12 @@ describe('GET /api/governance/status', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.payload);
     assert.equal(body.isEmptyDir, false);
+  });
+
+  it('does not classify a readdir failure as an empty directory', async () => {
+    const filePath = join(testRoot, 'not-a-directory.txt');
+    await writeFile(filePath, 'sentinel');
+    assert.equal(await isEmptyDir(filePath), false);
   });
 
   it('returns gitAvailable boolean', async () => {

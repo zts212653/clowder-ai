@@ -12,7 +12,7 @@ export interface LocalReviewCompletionBootstrapInput {
 }
 
 export interface LocalReviewVerdictBindingInput {
-  leaseStore: Pick<ActionSuccessorLeaseStore, 'get' | 'recoverLocalReviewVerdict'>;
+  leaseStore: Pick<ActionSuccessorLeaseStore, 'get' | 'getByIdentity' | 'recoverLocalReviewVerdict'>;
   completionService: Pick<ActionSuccessorCompletionService, 'complete'>;
   truthResolver: Pick<ActionSubjectTruthResolver, 'resolveFreshness'>;
 }

@@ -4,28 +4,67 @@ import { JSDOM } from 'jsdom';
 
 import { createChatGptPageAdapter } from '../src/plugins/cloud-cat-personal-host/extension/chatgpt-page-adapter.mjs';
 
-function createFixture({ conversationId = 'conversation-7', addMessageId = true } = {}) {
+function createFixture({
+  conversationId = 'conversation-7',
+  addMessageId = true,
+  initialComposerText = '',
+  sendButton = 'present',
+} = {}) {
   const dom = new JSDOM(
     `<!doctype html><body>
       <main id="messages"></main>
-      <div id="prompt-textarea" contenteditable="true"></div>
-      <button data-testid="send-button">Send</button>
+      <div id="prompt-textarea" contenteditable="true">${initialComposerText}</div>
+      ${sendButton === 'absent' ? '' : '<button data-testid="send-button">Send</button>'}
     </body>`,
     { url: `https://chatgpt.com/c/${conversationId}`, pretendToBeVisual: true },
   );
   const document = dom.window.document;
+  const composer = document.querySelector('#prompt-textarea');
+  document.execCommand = (command, _showUi, value) => {
+    if (command === 'insertText' && typeof value === 'string') {
+      composer.textContent = value;
+      composer.dispatchEvent(
+        new dom.window.InputEvent('input', {
+          bubbles: true,
+          composed: true,
+          inputType: 'insertText',
+          data: value,
+        }),
+      );
+      return true;
+    }
+    if (command === 'delete') {
+      composer.replaceChildren();
+      composer.dispatchEvent(
+        new dom.window.InputEvent('input', {
+          bubbles: true,
+          composed: true,
+          inputType: 'deleteContentBackward',
+          data: null,
+        }),
+      );
+      return true;
+    }
+    return false;
+  };
   let sendCount = 0;
   const sentTexts = [];
-  document.querySelector('[data-testid="send-button"]').addEventListener('click', () => {
-    sendCount += 1;
-    sentTexts.push(document.querySelector('#prompt-textarea').textContent);
-    const message = document.createElement('article');
-    message.dataset.messageAuthorRole = 'user';
-    if (addMessageId) message.dataset.messageId = `host-message-${sendCount}`;
-    message.textContent = document.querySelector('#prompt-textarea').textContent;
-    document.querySelector('#messages').append(message);
-  });
-  return { dom, document, getSendCount: () => sendCount, sentTexts };
+  const attachSendHandler = (button) =>
+    button.addEventListener('click', () => {
+      sendCount += 1;
+      const composer = document.querySelector('#prompt-textarea');
+      const sentText = composer.textContent;
+      sentTexts.push(sentText);
+      const message = document.createElement('article');
+      message.dataset.messageAuthorRole = 'user';
+      if (addMessageId) message.dataset.messageId = `host-message-${sendCount}`;
+      message.textContent = sentText;
+      document.querySelector('#messages').append(message);
+      composer.replaceChildren();
+    });
+  const initialButton = document.querySelector('[data-testid="send-button"]');
+  if (initialButton) attachSendHandler(initialButton);
+  return { dom, document, attachSendHandler, getSendCount: () => sendCount, sentTexts };
 }
 
 describe('ChatGPT page adapter', () => {
@@ -49,6 +88,136 @@ describe('ChatGPT page adapter', () => {
     assert.equal(result.hostMessageId, 'host-message-1');
     assert.equal(fixture.getSendCount(), 1);
     assert.deepEqual(progress, ['inserted', 'submitted', 'host_observed']);
+  });
+
+  it('inserts first, then waits for the send button that the input event renders', async () => {
+    const fixture = createFixture({ sendButton: 'absent' });
+    const composer = fixture.document.querySelector('#prompt-textarea');
+    composer.addEventListener('input', () => {
+      if (fixture.document.querySelector('[data-testid="send-button"]')) return;
+      setTimeout(() => {
+        const button = fixture.document.createElement('button');
+        button.dataset.testid = 'send-button';
+        button.textContent = 'Send';
+        fixture.attachSendHandler(button);
+        fixture.document.body.append(button);
+      }, 5);
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      sendButtonTimeoutMs: 50,
+    });
+
+    const result = await adapter.appendMessage({
+      requestId: 'request-dynamic-send',
+      conversationId: 'conversation-7',
+      text: 'button follows input',
+      idempotencyKey: 'source-message-dynamic-send',
+    });
+
+    assert.equal(result.hostMessageId, 'host-message-1');
+    assert.equal(fixture.getSendCount(), 1);
+  });
+
+  it('restores the exact empty composer and reports typed no-send when the button never appears', async () => {
+    const fixture = createFixture({ sendButton: 'absent' });
+    const composer = fixture.document.querySelector('#prompt-textarea');
+    const inputTypes = [];
+    composer.addEventListener('input', (event) => inputTypes.push(event.inputType));
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      sendButtonTimeoutMs: 20,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-missing-send',
+        conversationId: 'conversation-7',
+        text: 'must be rolled back',
+        idempotencyKey: 'source-message-missing-send',
+      }),
+      (error) => error.code === 'SEND_BUTTON_NOT_FOUND',
+    );
+
+    assert.equal(composer.innerHTML, '');
+    assert.equal(fixture.getSendCount(), 0);
+    assert.deepEqual(inputTypes, ['insertText', 'deleteContentBackward']);
+  });
+
+  it('does not overwrite a non-empty owner draft', async () => {
+    const fixture = createFixture({ initialComposerText: 'owner draft' });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-owner-draft',
+        conversationId: 'conversation-7',
+        text: 'must not replace draft',
+        idempotencyKey: 'source-message-owner-draft',
+      }),
+      (error) => error.code === 'COMPOSER_NOT_EMPTY',
+    );
+
+    assert.equal(fixture.document.querySelector('#prompt-textarea').textContent, 'owner draft');
+    assert.equal(fixture.getSendCount(), 0);
+  });
+
+  it('restores the composer and reports typed no-send when the rendered button stays disabled', async () => {
+    const fixture = createFixture();
+    const button = fixture.document.querySelector('[data-testid="send-button"]');
+    button.disabled = true;
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      sendButtonTimeoutMs: 20,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-disabled-send',
+        conversationId: 'conversation-7',
+        text: 'must not remain',
+        idempotencyKey: 'source-message-disabled-send',
+      }),
+      (error) => error.code === 'SEND_BUTTON_DISABLED',
+    );
+
+    assert.equal(fixture.document.querySelector('#prompt-textarea').innerHTML, '');
+    assert.equal(fixture.getSendCount(), 0);
+  });
+
+  it('reports a restoration failure instead of claiming a clean no-send state', async () => {
+    const fixture = createFixture({ sendButton: 'absent' });
+    const composer = fixture.document.querySelector('#prompt-textarea');
+    composer.addEventListener('input', (event) => {
+      if (event.inputType === 'deleteContentBackward') composer.textContent = 'framework residue';
+    });
+    const adapter = createChatGptPageAdapter({
+      document: fixture.document,
+      location: fixture.dom.window.location,
+      MutationObserver: fixture.dom.window.MutationObserver,
+      sendButtonTimeoutMs: 20,
+    });
+
+    await assert.rejects(
+      adapter.appendMessage({
+        requestId: 'request-restore-failure',
+        conversationId: 'conversation-7',
+        text: 'restore failure nonce',
+        idempotencyKey: 'source-message-restore-failure',
+      }),
+      (error) => error.code === 'COMPOSER_RESTORE_FAILED',
+    );
+    assert.equal(fixture.getSendCount(), 0);
   });
 
   it('preserves intentional leading and trailing whitespace in the append text', async () => {

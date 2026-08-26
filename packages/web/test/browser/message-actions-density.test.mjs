@@ -26,6 +26,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -34,6 +35,8 @@ import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
+const COLD_COMPILE_TIMEOUT_MS = 180_000;
+const HYDRATION_TIMEOUT_MS = 30_000;
 
 async function findFreePort() {
   const server = createServer();
@@ -47,14 +50,27 @@ async function findFreePort() {
 }
 
 async function waitForPage(url, server, output) {
-  // This page pulls the full Markdown renderer (KaTeX included); its first dev compile is
-  // slow, and the browser guards each own a whole Next dev server.
+  // A route-level 200 can arrive before Next has emitted the client chunks referenced by that
+  // document. Opening Chromium in that gap yields a permanent chunk-load error, so readiness
+  // means both the HTML and every explicit first-screen script are fully retrievable.
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) throw new Error(`Next.js exited before readiness:\n${output.join('')}`);
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.ok) {
+        const html = await response.text();
+        const scriptUrls = Array.from(
+          html.matchAll(/<script[^>]+src="([^"]+)"/g),
+          ([, source]) => new URL(source.replaceAll('&amp;', '&'), url),
+        );
+        if (scriptUrls.length > 0) {
+          const scriptResponses = await Promise.all(scriptUrls.map((scriptUrl) => fetch(scriptUrl)));
+          const scriptsReady = scriptResponses.every((scriptResponse) => scriptResponse.ok);
+          await Promise.all(scriptResponses.map((scriptResponse) => scriptResponse.arrayBuffer()));
+          if (scriptsReady) return;
+        }
+      }
     } catch {
       // The server is still compiling or has not opened its socket yet.
     }
@@ -70,17 +86,136 @@ async function stopServer(server) {
   if (server.exitCode === null) server.kill('SIGKILL');
 }
 
+function createTestChildEnvironment(overrides = {}) {
+  const childEnv = {
+    ...process.env,
+    ...overrides,
+  };
+
+  // Node's test runner owns every NODE_TEST_* variable. Letting any of them cross into the
+  // application server or browser process can change their runtime and corrupt client hydration.
+  for (const key of Object.keys(childEnv)) {
+    if (key.startsWith('NODE_TEST_')) delete childEnv[key];
+  }
+  return childEnv;
+}
+
+function assertNoTestRunnerEnvironment(childEnv, childName) {
+  assert.deepEqual(
+    Object.keys(childEnv).filter((key) => key.startsWith('NODE_TEST_')),
+    [],
+    `${childName} must not inherit Node test-runner coordination state`,
+  );
+}
+
+async function stubProvisionalAvatar(context) {
+  // CatAvatar's provisional path is covered by its own hydration-race test. Keep this layout
+  // fixture from compiling Next's /_not-found route while the action UI is hydrating.
+  await context.route('**/avatars/codex-sol.png', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      path: path.join(WEB_ROOT, 'public/avatars/codex.png'),
+    }),
+  );
+}
+
+async function waitForHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
+  await page.locator('[data-testid="f294-quote-plane-fixtures"][data-hydrated="true"]').waitFor({
+    state: 'attached',
+    timeout,
+  });
+}
+
+async function gotoHydratedFixture(page, timeout = HYDRATION_TIMEOUT_MS) {
+  const clientErrors = [];
+  let rejectClientFailure;
+  const clientFailure = new Promise((_, reject) => {
+    rejectClientFailure = reject;
+  });
+  const onConsole = (message) => {
+    if (message.type() === 'error') clientErrors.push(`console: ${message.text()}`);
+  };
+  const onPageError = (error) => {
+    clientErrors.push(`pageerror: ${error.stack || error.message}`);
+    rejectClientFailure(error);
+  };
+  const onRequestFailed = (request) =>
+    clientErrors.push(`requestfailed: ${request.url()} (${request.failure()?.errorText ?? 'unknown'})`);
+  const onRequest = (request) => {
+    if (!request.url().includes('/_next/static/')) clientErrors.push(`request: ${request.method()} ${request.url()}`);
+  };
+  const onResponse = (response) => {
+    if (response.status() >= 400) clientErrors.push(`response: ${response.status()} ${response.url()}`);
+  };
+  page.on('console', onConsole);
+  page.on('pageerror', onPageError);
+  page.on('requestfailed', onRequestFailed);
+  page.on('request', onRequest);
+  page.on('response', onResponse);
+
+  try {
+    await Promise.race([
+      (async () => {
+        await page.goto(baseUrl, { waitUntil: 'networkidle', timeout });
+        await waitForHydratedFixture(page, timeout);
+      })(),
+      clientFailure,
+    ]);
+  } catch (error) {
+    const documentState = await page
+      .evaluate(() => {
+        const scripts = Array.from(document.scripts, (script, index) => ({
+          index,
+          source: script.src || `[inline:${script.text.length}]`,
+        }));
+        return {
+          readyState: document.readyState,
+          hydrated: document.querySelector('[data-testid="f294-quote-plane-fixtures"]')?.getAttribute('data-hydrated'),
+          scripts,
+        };
+      })
+      .catch((diagnosticError) => ({ diagnosticError: diagnosticError.message }));
+    throw new Error(
+      [
+        `F294 fixture did not hydrate: ${error.message}`,
+        `document=${JSON.stringify(documentState)}`,
+        ...clientErrors,
+        `Next output:\n${serverOutput.join('').slice(-12_000)}`,
+      ].join('\n'),
+      { cause: error },
+    );
+  } finally {
+    page.off('console', onConsole);
+    page.off('pageerror', onPageError);
+    page.off('requestfailed', onRequestFailed);
+    page.off('request', onRequest);
+    page.off('response', onResponse);
+  }
+}
+
+async function reloadHydratedFixture(page) {
+  await page.reload({ waitUntil: 'networkidle' });
+  await waitForHydratedFixture(page);
+}
+
 function readToolbarState() {
-  const host = document.querySelector('[data-testid="f294-density-source"] [data-context-quote-source="message"]');
-  const bubble = document.querySelector('[data-testid="f294-density-source"] [data-message-id="f294-density-message"]');
-  const toolbar = document.querySelector('[data-testid="f294-density-source"] div.absolute');
-  if (!host || !bubble || !toolbar) throw new Error('F294 density fixture did not render');
+  const quoteRoot = document.querySelector('[data-testid="f294-density-source"] [data-context-quote-source="message"]');
+  const host = document.querySelector('[data-testid="f294-density-source"] [data-message-id="f294-density-message"]');
+  const header = document.querySelector('[data-testid="f294-density-source"] [data-testid="message-header"]');
+  const bubble = host?.querySelector('[data-testid="message-bubble"]');
+  const toolbar = document.querySelector('[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]');
+  if (!quoteRoot || !host || !header || !bubble || !toolbar) throw new Error('F294 density fixture did not render');
   const hostRect = host.getBoundingClientRect();
+  const headerRect = header.getBoundingClientRect();
   const bubbleRect = bubble.getBoundingClientRect();
   const style = getComputedStyle(toolbar);
   return {
-    reservedRowHeight: bubbleRect.top - hostRect.top,
-    hostPaddingTop: getComputedStyle(host).paddingTop,
+    hostPaddingTop: getComputedStyle(quoteRoot).paddingTop,
+    geometry: {
+      host: { top: hostRect.top, height: hostRect.height },
+      header: { top: headerRect.top, height: headerRect.height },
+      bubble: { top: bubbleRect.top, height: bubbleRect.height },
+    },
     toolbarOpacity: Number(style.opacity),
     toolbarPointerEvents: style.pointerEvents,
     toolbarHitTarget: (() => {
@@ -95,38 +230,137 @@ function readToolbarState() {
   };
 }
 
+function assertStableMessageGeometry(resting, current, state) {
+  for (const region of ['host', 'header', 'bubble']) {
+    for (const metric of ['top', 'height']) {
+      const delta = Math.abs(current.geometry[region][metric] - resting.geometry[region][metric]);
+      assert.ok(delta <= 1, `${state} changed ${region}.${metric} by ${delta}px`);
+    }
+  }
+}
+
+function readAdjacentMessageCollision() {
+  const rows = Array.from(
+    document.querySelectorAll('[data-testid="f294-density-source"] [data-context-quote-source="message"]'),
+  );
+  const previous = rows[0];
+  const current = rows[1];
+  const previousFooter = previous?.querySelector('[data-testid="message-metadata"]');
+  const currentHeader = current?.querySelector('[data-testid="message-header"]');
+  const currentAuthor = currentHeader?.querySelector(':scope > div:first-child > span:first-child');
+  const currentToolbar = current?.querySelector(
+    '[data-testid="message-actions-toolbar"], [data-testid="message-actions-compact-trigger"]',
+  );
+  if (!previousFooter || !currentHeader || !currentAuthor || !currentToolbar) {
+    throw new Error('adjacent F294 message fixture did not render');
+  }
+  const footerRect = previousFooter.getBoundingClientRect();
+  const headerRect = currentHeader.getBoundingClientRect();
+  const authorRect = currentAuthor.getBoundingClientRect();
+  const toolbarRect = currentToolbar.getBoundingClientRect();
+  const overlaps = (left, right) =>
+    left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
+  const horizontalGap = (left, right) => Math.max(left.left - right.right, right.left - left.right, 0);
+  const headerContentOverlaps = Array.from(
+    currentHeader.querySelectorAll(':scope > div:first-child > :not([data-message-action-slot])'),
+  )
+    .map((element) => element.getBoundingClientRect())
+    .some((rect) => overlaps(toolbarRect, rect));
+  return {
+    footer: { left: footerRect.left, right: footerRect.right, top: footerRect.top, bottom: footerRect.bottom },
+    header: { left: headerRect.left, right: headerRect.right, top: headerRect.top, bottom: headerRect.bottom },
+    toolbar: {
+      left: toolbarRect.left,
+      right: toolbarRect.right,
+      top: toolbarRect.top,
+      bottom: toolbarRect.bottom,
+    },
+    overlapsPreviousMetadata: overlaps(toolbarRect, footerRect),
+    headerContentOverlaps,
+    toolbarToAuthorGap: horizontalGap(toolbarRect, authorRect),
+  };
+}
+
 let server;
 let serverOutput;
 let browser;
+let browserContext;
 let baseUrl;
+let testDistDirPath;
+let testTsconfigPath;
 
 before(async () => {
   const port = await findFreePort();
+  testDistDirPath = await mkdtemp(path.join(WEB_ROOT, '.next-test-f294-'));
+  const testDistDir = path.basename(testDistDirPath);
+  testTsconfigPath = path.join(WEB_ROOT, `tsconfig.${testDistDir.slice(1)}.json`);
+  await writeFile(
+    testTsconfigPath,
+    `${JSON.stringify(
+      {
+        extends: './tsconfig.json',
+        include: ['next-env.d.ts', '**/*.ts', '**/*.tsx', `${testDistDir}/types/**/*.ts`],
+        exclude: ['node_modules', 'worker'],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const nextDevEnvironment = createTestChildEnvironment({
+    CAT_CAFE_WEB_TEST_DIST_DIR: testDistDir,
+    CAT_CAFE_WEB_TEST_TSCONFIG: path.basename(testTsconfigPath),
+    NEXT_TELEMETRY_DISABLED: '1',
+    NODE_ENV: 'development',
+  });
+  assertNoTestRunnerEnvironment(nextDevEnvironment, 'the Next dev child');
+  assert.match(
+    nextDevEnvironment.CAT_CAFE_WEB_TEST_DIST_DIR,
+    /^\.next-test-f294-/,
+    'the Next dev child must not share the production .next directory',
+  );
   serverOutput = [];
   server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: WEB_ROOT,
-    env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'development' },
+    env: nextDevEnvironment,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stdout.on('data', (chunk) => serverOutput.push(chunk.toString()));
   server.stderr.on('data', (chunk) => serverOutput.push(chunk.toString()));
   baseUrl = `http://127.0.0.1:${port}/dev/f294-quote-plane-fixtures`;
   await waitForPage(baseUrl, server, serverOutput);
-  browser = await chromium.launch({ headless: true });
+  const browserEnvironment = createTestChildEnvironment();
+  assertNoTestRunnerEnvironment(browserEnvironment, 'the Chromium child');
+  browser = await chromium.launch({ headless: true, env: browserEnvironment });
+  browserContext = await browser.newContext();
+  await stubProvisionalAvatar(browserContext);
+
+  // An HTTP 200 only proves that Next finished the server route. The first real browser load
+  // still has to compile and hydrate the 421 kB client graph, which belongs to the suite's cold
+  // bootstrap budget rather than the first test's ordinary interaction budget.
+  const warmupPage = await browserContext.newPage();
+  await warmupPage.setViewportSize({ width: 1440, height: 900 });
+  try {
+    await gotoHydratedFixture(warmupPage, COLD_COMPILE_TIMEOUT_MS);
+  } finally {
+    await warmupPage.close();
+  }
 });
 
 after(async () => {
+  if (browserContext) await browserContext.close();
   if (browser) await browser.close();
   if (server) await stopServer(server);
+  if (testDistDirPath) await rm(testDistDirPath, { recursive: true, force: true });
+  if (testTsconfigPath) await rm(testTsconfigPath, { force: true });
 });
 
 test('message actions occupy no resting layout and stay unpainted until asked for', { timeout: 90_000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 360, height: 800 } });
+  const page = await browserContext.newPage();
+  await page.setViewportSize({ width: 1440, height: 900 });
   try {
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await gotoHydratedFixture(page);
 
     const resting = await page.evaluate(readToolbarState);
-    assert.equal(resting.reservedRowHeight, 0, 'a resting message must not reserve a row for its action bar');
     assert.equal(resting.hostPaddingTop, '0px', 'a resting message must not pad the top for its action bar');
     assert.equal(resting.toolbarOpacity, 0, 'the action bar must not be painted at rest');
     assert.equal(resting.toolbarPointerEvents, 'none', 'an invisible action bar must not swallow pointer events');
@@ -135,7 +369,9 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
     // transition-opacity animates, so settle before measuring.
     await page.waitForFunction(
       () => {
-        const toolbar = document.querySelector('[data-testid="f294-density-source"] div.absolute');
+        const toolbar = document.querySelector(
+          '[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]',
+        );
         return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 1;
       },
       { timeout: 5_000 },
@@ -148,15 +384,58 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
       true,
       'the real message boundary must not paint-clip its revealed action bar',
     );
-    assert.equal(hovered.reservedRowHeight, 0, 'revealing the action bar must not reflow the message');
+    assertStableMessageGeometry(resting, hovered, 'hover');
     assert.ok(hovered.actionAriaLabels.includes('多选消息'), 'hover must reveal the multi-select action');
     assert.ok(hovered.actionTitles.includes('引用回复'), 'hover must preserve the reply action');
     assert.ok(hovered.actionTitles.includes('删除'), 'hover must preserve the delete action');
     assert.ok(hovered.actionAriaLabels.includes('更多消息操作'), 'hover must preserve the overflow action');
 
+    // Moving the pointer away and focusing a hidden action must reveal the same local row for
+    // keyboard users, without relying on hover to keep it painted.
+    await page.mouse.move(0, 0);
+    const selectionButton = page
+      .locator('[data-testid="f294-density-source"] [data-context-quote-source="message"]')
+      .first()
+      .getByRole('button', { name: '多选消息' });
+    await selectionButton.focus();
+    await page.waitForFunction(
+      () => {
+        const toolbar = document.querySelector(
+          '[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]',
+        );
+        return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 1;
+      },
+      { timeout: 5_000 },
+    );
+    const focused = await page.evaluate(readToolbarState);
+    assert.equal(focused.toolbarOpacity, 1, 'the action bar must appear on keyboard focus');
+    assert.equal(focused.toolbarPointerEvents, 'auto', 'the focused action bar must be operable');
+    assertStableMessageGeometry(resting, focused, 'toolbar keyboard focus');
+
+    // A focusable control inside the message body is not a request to paint the action dock.
+    const bodyControl = page.locator(
+      '[data-testid="f294-density-source"] [data-message-id="f294-density-message"] a[href="https://example.com/f294-body-control"]',
+    );
+    await bodyControl.focus();
+    await page.waitForFunction(
+      () => {
+        const toolbar = document.querySelector(
+          '[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]',
+        );
+        return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 0;
+      },
+      { timeout: 5_000 },
+    );
+    const bodyFocused = await page.evaluate(readToolbarState);
+    assert.equal(bodyFocused.toolbarOpacity, 0, 'body control focus must not reveal the action dock');
+    assert.equal(bodyFocused.toolbarPointerEvents, 'none', 'a hidden dock must not intercept body controls');
+    assertStableMessageGeometry(resting, bodyFocused, 'body control focus');
+
     // Keyboard users reach the same actions without a pointer.
-    await page.getByRole('button', { name: '多选消息' }).click();
+    await selectionButton.focus();
+    await selectionButton.click();
     assert.equal(await page.getByTestId('f294-density-enter-count').textContent(), '1');
+    assert.equal(await page.getByTestId('f294-density-enter-message').textContent(), 'f294-density-message');
 
     // Measure what a human selecting the SECOND rendered paragraph actually reports.
     const collision = await page.evaluate(() => {
@@ -281,13 +560,63 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
   }
 });
 
+test('a revealed message toolbar never covers adjacent message chrome', { timeout: 90_000 }, async () => {
+  for (const viewport of [
+    { width: 360, height: 800 },
+    { width: 640, height: 800 },
+    { width: 768, height: 900 },
+    { width: 1024, height: 900 },
+    { width: 1440, height: 900 },
+  ]) {
+    const page = await browserContext.newPage();
+    await page.setViewportSize(viewport);
+    try {
+      await gotoHydratedFixture(page);
+      await page
+        .locator('[data-testid="f294-density-source"] [data-message-id="f294-density-followup-message"]')
+        .hover();
+      await page.waitForFunction(
+        () => {
+          const rows = document.querySelectorAll(
+            '[data-testid="f294-density-source"] [data-context-quote-source="message"]',
+          );
+          const toolbar = rows[1]?.querySelector(
+            '[data-testid="message-actions-toolbar"], [data-testid="message-actions-compact-trigger"]',
+          );
+          return toolbar !== null && Number(getComputedStyle(toolbar).opacity) === 1;
+        },
+        { timeout: 5_000 },
+      );
+
+      const collision = await page.evaluate(readAdjacentMessageCollision);
+      assert.equal(
+        collision.overlapsPreviousMetadata,
+        false,
+        `the current toolbar must not cover the previous metadata at ${viewport.width}px: ${JSON.stringify(collision)}`,
+      );
+      assert.equal(
+        collision.headerContentOverlaps,
+        false,
+        `the current toolbar must not cover its own author chrome at ${viewport.width}px: ${JSON.stringify(collision)}`,
+      );
+      assert.ok(
+        collision.toolbarToAuthorGap <= 48,
+        `the current toolbar must stay near its author area at ${viewport.width}px: ${JSON.stringify(collision)}`,
+      );
+    } finally {
+      await page.close();
+    }
+  }
+});
+
 test(
   'a cross-row paragraph selection keeps the real MessageActions forward affordance',
   { timeout: 90_000 },
   async () => {
-    const page = await browser.newPage({ viewport: { width: 360, height: 800 } });
+    const page = await browserContext.newPage();
+    await page.setViewportSize({ width: 360, height: 800 });
     try {
-      await page.goto(baseUrl, { waitUntil: 'networkidle' });
+      await gotoHydratedFixture(page);
       const selectedText = await page.evaluate(() => {
         const bubble = document.querySelector('[data-testid="f294-cross-row-bubble"]');
         if (!bubble) throw new Error('cross-row MessageActions fixture did not render');
@@ -318,7 +647,7 @@ test(
       await page.getByRole('dialog', { name: '转发到' }).waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: '取消转发' }).click();
-      await page.reload({ waitUntil: 'networkidle' });
+      await reloadHydratedFixture(page);
       await page.evaluate(() => {
         const first = document.querySelector('[data-testid="f294-cross-row-bubble"] p');
         if (!first) throw new Error('cross-row duplicate fixture did not render');
@@ -343,9 +672,10 @@ test(
 );
 
 test('a Markdown-rendered CLI table row keeps the real forwarding affordance', { timeout: 90_000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 720, height: 900 } });
+  const page = await browserContext.newPage();
+  await page.setViewportSize({ width: 720, height: 900 });
   try {
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await gotoHydratedFixture(page);
     const selectionEvidence = await page.evaluate(() => {
       const bubble = document.querySelector('[data-testid="f294-cli-markdown-bubble"]');
       const segment = bubble?.querySelector('[data-context-quote-segment-id="stdout"]');
@@ -381,9 +711,10 @@ test('a Markdown-rendered CLI table row keeps the real forwarding affordance', {
 });
 
 test('a Rich Card final paragraph still exposes the quote affordance', { timeout: 90_000 }, async () => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browserContext.newPage();
+  await page.setViewportSize({ width: 1440, height: 900 });
   try {
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    await gotoHydratedFixture(page);
     const selectionEvidence = await page.evaluate(() => {
       const bubble = document.querySelector('[data-testid="f294-rich-last-line-bubble"]');
       const paragraphs = bubble ? Array.from(bubble.querySelectorAll('p')) : [];
@@ -406,7 +737,7 @@ test('a Rich Card final paragraph still exposes the quote affordance', { timeout
     assert.equal(selectionEvidence.text, '已执行：最后一行仍然可以引用。');
     await page.getByTestId('message-selection-add-to-chat').waitFor({ state: 'visible' });
 
-    await page.reload({ waitUntil: 'networkidle' });
+    await reloadHydratedFixture(page);
     const boundarySelection = await page.evaluate(() => {
       const bubble = document.querySelector('[data-testid="f294-rich-last-line-bubble"]');
       const paragraph = bubble ? Array.from(bubble.querySelectorAll('p')).at(-1) : null;
@@ -448,29 +779,54 @@ test('a Rich Card final paragraph still exposes the quote affordance', { timeout
   }
 });
 
-test('touch-only devices keep every per-message action reachable', { timeout: 90_000 }, async () => {
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    hasTouch: true,
-    isMobile: true,
-  });
-  const page = await context.newPage();
-  try {
-    await page.goto(baseUrl, { waitUntil: 'networkidle' });
+test(
+  'touch-only devices expose a compact 44px entry that expands every message action',
+  { timeout: 90_000 },
+  async () => {
+    for (const viewport of [
+      { width: 360, height: 800 },
+      { width: 768, height: 1024 },
+    ]) {
+      const context = await browser.newContext({ viewport, hasTouch: true, isMobile: true });
+      await stubProvisionalAvatar(context);
+      const page = await context.newPage();
+      try {
+        await gotoHydratedFixture(page);
 
-    // Guard the emulation itself: without (hover: none) this test would prove nothing.
-    const touchLike = await page.evaluate(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
-    assert.equal(touchLike, true, 'mobile emulation must report a hoverless coarse pointer');
+        // Guard the emulation itself: without (hover: none) this test would prove nothing.
+        const touchLike = await page.evaluate(() => window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+        assert.equal(touchLike, true, 'mobile emulation must report a hoverless coarse pointer');
 
-    const state = await page.evaluate(readToolbarState);
-    assert.equal(state.toolbarOpacity, 1, 'a touch-only device has no hover, so actions must be visible');
-    assert.equal(state.toolbarPointerEvents, 'auto', 'a touch-only device must be able to tap the actions');
-    assert.ok(state.reservedRowHeight > 0, 'a permanently visible toolbar must reserve its own row on touch');
+        const firstRow = page
+          .locator('[data-testid="f294-density-source"] [data-context-quote-source="message"]')
+          .first();
+        const compactEntry = firstRow.getByRole('button', { name: '打开消息操作' });
+        await compactEntry.waitFor({ state: 'visible' });
+        const entryBox = await compactEntry.boundingBox();
+        assert.ok(entryBox, 'the compact action entry must have a rendered hit box');
+        assert.ok(entryBox.width >= 44, `compact entry width must be at least 44px, saw ${entryBox.width}`);
+        assert.ok(entryBox.height >= 44, `compact entry height must be at least 44px, saw ${entryBox.height}`);
 
-    // Tapping a real action works without any hover or keyboard focus.
-    await page.getByRole('button', { name: '多选消息' }).tap();
-    assert.equal(await page.getByTestId('f294-density-enter-count').textContent(), '1');
-  } finally {
-    await context.close();
-  }
-});
+        await compactEntry.tap();
+        const expandedDock = page.getByTestId('message-actions-compact-sheet').getByTestId('message-actions-toolbar');
+        await expandedDock.waitFor({ state: 'visible' });
+        const directTargets = expandedDock.locator('button');
+        const targetCount = await directTargets.count();
+        assert.ok(targetCount >= 4, 'the compact entry must expand the complete direct action dock');
+        for (let index = 0; index < targetCount; index += 1) {
+          const box = await directTargets.nth(index).boundingBox();
+          assert.ok(box, `expanded action ${index} must have a rendered hit box`);
+          assert.ok(box.width >= 44, `expanded action ${index} width must be at least 44px, saw ${box.width}`);
+          assert.ok(box.height >= 44, `expanded action ${index} height must be at least 44px, saw ${box.height}`);
+        }
+
+        // Tapping the expanded action still targets the originating message.
+        await expandedDock.getByRole('button', { name: '多选消息' }).tap();
+        assert.equal(await page.getByTestId('f294-density-enter-count').textContent(), '1');
+        assert.equal(await page.getByTestId('f294-density-enter-message').textContent(), 'f294-density-message');
+      } finally {
+        await context.close();
+      }
+    }
+  },
+);

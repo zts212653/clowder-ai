@@ -12,6 +12,7 @@ function depsWithStore(store, router = null) {
       start: mock.fn(() => new AbortController()),
       startAll: mock.fn(() => new AbortController()),
       complete: mock.fn(),
+      completeSlot: mock.fn(),
       completeAll: mock.fn(),
       has: mock.fn(() => false),
     },
@@ -523,6 +524,37 @@ describe('QueueProcessor action successor generation fence', () => {
     assert.equal(store.preflightOutput.mock.calls.length, 2);
     assert.equal(store.commitOutcome.mock.calls.length, 0);
     assert.equal(deps.socketManager.broadcastAgentMessage.mock.calls.length, 2);
+  });
+
+  it('retains queue Stop ownership across transient diagnostics until done', async () => {
+    const store = {
+      preflight: mock.fn(async () => ({ ok: true, reason: 'active' })),
+      preflightOutput: mock.fn(async () => ({ ok: true, reason: 'active' })),
+      commitOutcome: mock.fn(),
+    };
+    const deps = depsWithStore(store, {
+      routeExecution: mock.fn(async function* (...args) {
+        const options = args[6];
+        assert.equal(await options.beforeOutputCommit('opus'), true);
+        yield {
+          type: 'error',
+          catId: 'opus',
+          error: 'recoverable provider diagnostic',
+          errorDisposition: 'transient',
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      }),
+      ackCollectedCursors: mock.fn(async () => {}),
+    });
+    const processor = new QueueProcessor(deps);
+    const entry = enqueueActionEntry(deps);
+
+    const result = await processor.executeEntry(entry);
+
+    assert.equal(result.status, 'succeeded');
+    assert.equal(deps.invocationTracker.completeSlot.mock.calls.length, 1);
+    assert.equal(deps.invocationTracker.completeSlot.mock.calls[0].arguments[1], 'opus');
   });
 
   it('finalizes every failed holder when aggregate success has no successful output', async () => {

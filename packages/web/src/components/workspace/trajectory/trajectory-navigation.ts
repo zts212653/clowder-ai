@@ -177,15 +177,19 @@ export function restoreTrajectoryOrigin(originRef: TrajectoryOriginRef): void {
   }
 
   store.setWorkspaceMode('eval');
-  retryOnAnimationFrame(() => {
+  const restoreEvalOrigin = () => {
     const element = findEvalWorkspaceEvent(originRef.eventId);
     const container = findTrajectoryOriginScrollContainer(element);
     if (!element || !container) return false;
-    const currentOffset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTop = Math.max(0, container.scrollTop + currentOffset - originRef.viewportOffsetPx);
-    element.focus({ preventScroll: true });
-    return true;
-  });
+    if (document.activeElement !== element) {
+      const currentOffset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      container.scrollTop = Math.max(0, container.scrollTop + currentOffset - originRef.viewportOffsetPx);
+      element.focus({ preventScroll: true });
+    }
+    return document.activeElement === element;
+  };
+  restoreEvalOrigin();
+  retryOnAnimationFrame(restoreEvalOrigin);
 }
 
 export function restoreTrajectoryPromptMessage(threadId: string, messageId: string): void {

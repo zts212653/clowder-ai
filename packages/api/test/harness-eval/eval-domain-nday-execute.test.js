@@ -45,6 +45,9 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
     const afterMs = Date.now();
 
     assert.equal(deliverMock.mock.calls.length, 1, 'deliver must be called exactly once');
+    const delivered = deliverMock.mock.calls[0].arguments[0];
+    assert.match(delivered.content, /Trigger channel: time/);
+    assert.match(delivered.idempotencyKey, /^eval-domain-trigger:eval:friction:every-3d:/);
     const storedVal = redis._store.get('eval-nday-last-dispatch:eval:friction');
     assert.ok(storedVal, 'Redis last-dispatch key must be set after execute');
     const storedMs = parseInt(storedVal, 10);

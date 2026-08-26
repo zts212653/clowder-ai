@@ -70,6 +70,7 @@ function makeParallelDeps({ bridge, disposition }) {
       threadStore: makeThreadStore(),
       apiUrl: 'http://localhost:0',
       cloudInvokeBridge: bridge,
+      cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
       a2aDispatchDispositionService: disposition,
     },
     messageStore: {
@@ -142,6 +143,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return bridgeOutcome;
             },
           },
+          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -165,7 +167,7 @@ describe('F247 cloud runtime terminal contract', () => {
     const messages = await result;
 
     assert.equal(bridgeCalls.length, 1);
-    assert.equal(bridgeCalls[0].idempotencyKey, 'source-message-9');
+    assert.equal(bridgeCalls[0].sourceMessageId, 'source-message-9');
     const created = messages.find(
       (message) => message.type === 'system_info' && message.content?.includes('invocation_created'),
     );
@@ -179,14 +181,29 @@ describe('F247 cloud runtime terminal contract', () => {
       return JSON.parse(message.content).type === 'cloud_bridge_status';
     });
     assert.equal(visible.length, 1, 'one bridge attempt produces one user-visible status');
-    assert.deepEqual(JSON.parse(visible[0].content), {
-      type: 'cloud_bridge_status',
-      catId: 'gpt-pro',
-      status: 'unavailable',
-      reason: 'no-adapter',
-      message:
-        '未发送给 @gpt-pro：还没有可用的后台 Host Adapter。请先安装并配对 Chrome 扩展，再绑定目标 ChatGPT 会话；前台自动化保持关闭。',
-      detail: 'No configured personal Chrome Host Adapter',
+    const fallbackStatus = JSON.parse(visible[0].content);
+    assert.deepEqual(
+      { ...fallbackStatus, outboundReceipt: undefined },
+      {
+        type: 'cloud_bridge_status',
+        catId: 'gpt-pro',
+        status: 'unavailable',
+        reason: 'no-adapter',
+        message:
+          '未发送给 @gpt-pro：还没有可用的后台 Host Adapter。请先安装并配对 Chrome 扩展，再绑定目标 ChatGPT 会话；前台自动化保持关闭。',
+        detail: 'No configured personal Chrome Host Adapter',
+        outboundReceipt: undefined,
+      },
+    );
+    assert.deepEqual(fallbackStatus.outboundReceipt, {
+      v: 1,
+      sourceMessageId: 'source-message-9',
+      sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'parent-invocation' },
+      dispatchInvocationId: createdPayload.invocationId,
+      targetCatId: 'gpt-pro',
+      status: 'failed',
+      transport: 'none',
+      idempotency: { keyKind: 'source_message_id', disposition: 'not_attempted' },
     });
 
     assert.equal(disposition.calls.length, 1);
@@ -228,8 +245,10 @@ describe('F247 cloud runtime terminal contract', () => {
               capturedUrl: 'https://chatgpt.com/c/conversation-7',
               transport: 'host',
               hostMessageId: 'chatgpt-user-message-42',
+              idempotentReplay: false,
             }),
           },
+          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
           a2aDispatchDispositionService: disposition,
         },
         {
@@ -243,13 +262,27 @@ describe('F247 cloud runtime terminal contract', () => {
       .filter((message) => message.type === 'system_info' && message.content)
       .map((message) => JSON.parse(message.content))
       .find((payload) => payload.type === 'cloud_bridge_status');
-    assert.deepEqual(status, {
+    const { outboundReceipt, ...sentStatus } = status;
+    assert.deepEqual(sentStatus, {
       type: 'cloud_bridge_status',
       catId: 'gpt-pro',
       status: 'sent',
       message: '已发送给 @gpt-pro，等待它从 ChatGPT 云端会话回写。',
       transport: 'host',
       hostMessageId: 'chatgpt-user-message-42',
+    });
+    assert.equal(outboundReceipt.sourceMessageId, 'source-message-9');
+    assert.deepEqual(outboundReceipt.sourceSender, {
+      kind: 'cat',
+      id: 'codex-sol',
+      invocationId: 'parent-invocation',
+    });
+    assert.equal(outboundReceipt.status, 'sent');
+    assert.equal(outboundReceipt.transport, 'host');
+    assert.equal(outboundReceipt.hostMessageId, 'chatgpt-user-message-42');
+    assert.deepEqual(outboundReceipt.idempotency, {
+      keyKind: 'source_message_id',
+      disposition: 'fresh',
     });
     assert.equal(disposition.calls.length, 1);
     assert.equal(disposition.calls[0].disposition, 'completed');
@@ -286,7 +319,7 @@ describe('F247 cloud runtime terminal contract', () => {
 
     assert.equal(bridgeCalls.length, 1);
     assert.equal(bridgeCalls[0].calledBy, 'codex-sol');
-    assert.equal(bridgeCalls[0].idempotencyKey, 'source-message-parallel-4');
+    assert.equal(bridgeCalls[0].sourceMessageId, 'source-message-parallel-4');
     assert.equal(disposition.calls.length, 1);
     assert.equal(disposition.calls[0].auth.a2aTriggerMessageId, 'source-message-parallel-4');
     assert.equal(disposition.calls[0].auth.originTriggerMessageId, 'source-message-parallel-4');
@@ -328,7 +361,7 @@ describe('F247 cloud runtime terminal contract', () => {
       .map((message) => JSON.parse(message.content))
       .find((payload) => payload.type === 'cloud_bridge_status');
     assert.equal(status.status, 'unavailable');
-    assert.match(status.detail, /provenance was incomplete/);
+    assert.match(status.detail, /provenance or return-binding signer was incomplete/);
     assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
@@ -354,6 +387,7 @@ describe('F247 cloud runtime terminal contract', () => {
               return { kind: 'fallback', reason: 'no-adapter', detail: 'host unavailable' };
             },
           },
+          cloudReturnBindingSigner: { sign: () => 'cbr1.aW52LWNsb3Vk.signature' },
           a2aDispatchDispositionService: disposition,
         },
         baseParams,

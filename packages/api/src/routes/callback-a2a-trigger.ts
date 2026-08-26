@@ -26,7 +26,10 @@ import {
   normalizeOwnerAuthProvenance,
   type OwnerAuthProvenance,
 } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
-import { PerCatTerminalDispositionCollector } from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import {
+  isTerminalDispositionEvent,
+  PerCatTerminalDispositionCollector,
+} from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import {
   createCrossThreadQueueEntryFromCustody,
   createFanoutQueueCustodyAdmission,
@@ -1083,7 +1086,7 @@ export async function triggerA2AInvocation(
         }
         if (controller?.signal.aborted) break;
         terminalDispositions.observe(msg);
-        if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+        if (isTerminalDispositionEvent(msg) && msg.catId) {
           invocationTracker?.completeSlot?.(threadId, msg.catId, controller);
         }
         if (msg.type === 'done' && msg.errorCode) {

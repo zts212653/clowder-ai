@@ -191,15 +191,6 @@
       "expiresOn": "2026-08-31"
     },
     {
-      "id": "governance-pack",
-      "match": "governance-pack\\.test",
-      "category": "source_only",
-      "reason": "Governance pack assertions validate source-only sync content and are intentionally excluded from public gate.",
-      "owner": "@zts212653",
-      "introducedBy": "069d0f0fb",
-      "expiresOn": "2026-08-31"
-    },
-    {
       "id": "pack-integration",
       "match": "pack-integration\\.test",
       "category": "source_only",
@@ -323,6 +314,15 @@
       "reason": "Merge-gate provenance contract tests are source-owned governance coverage, not public runtime behavior.",
       "owner": "@zts212653",
       "introducedBy": "bd8823b99",
+      "expiresOn": "2026-08-31"
+    },
+    {
+      "id": "harness-eval-design-gate-private-evidence",
+      "match": "harness-eval/design-gate-episode-source-provider-private-evidence\\.test",
+      "category": "private_fixture",
+      "reason": "The committed design-gate episode proof consumes home-only source maps and review provenance; the self-contained provider contract remains in the public suite.",
+      "owner": "@zts212653",
+      "introducedBy": "a21fd7682",
       "expiresOn": "2026-08-31"
     },
     {

@@ -32,6 +32,45 @@ const validInput = {
   },
 };
 
+const BASE_SHA = 'a'.repeat(40);
+const HEAD_SHA = 'b'.repeat(40);
+const ROUTE_PATH = 'packages/api/src/routes/thread-invocations.ts';
+
+function validDesignGateEvidence() {
+  return {
+    changedFiles: [ROUTE_PATH],
+    diffContext: {
+      baseSha: BASE_SHA,
+      headSha: HEAD_SHA,
+      files: [{ path: ROUTE_PATH, addedLines: ['resolveThreadAccessPolicy(request)'] }],
+    },
+    designGateReviewPacket: {
+      exactHeadSha: HEAD_SHA,
+      riskClaims: [
+        {
+          id: 'consumer-thread-invocations',
+          kind: 'consumer_delta',
+          summary: 'New route reuses canonical access policy.',
+          canonicalSource: 'packages/api/src/domains/thread-access-policy.ts#resolveThreadAccessPolicy',
+          consumerEvidence: `rg -n "resolveThreadAccessPolicy" ${ROUTE_PATH}`,
+          claimGuard: {
+            command: 'node --test packages/api/test/thread-invocations-route.test.js',
+            redWhen: 'the route rejects an indexed system thread',
+          },
+        },
+      ],
+      targetedSelfCheckReceipts: [
+        {
+          claimId: 'consumer-thread-invocations',
+          headSha: HEAD_SHA,
+          command: 'node --test packages/api/test/thread-invocations-route.test.js',
+          exitCode: 0,
+        },
+      ],
+    },
+  };
+}
+
 describe('SOP Trace Adapter (AC-E17)', () => {
   it('builds a valid SopTrace from structured input', () => {
     const trace = buildSopTrace(validInput);
@@ -132,6 +171,85 @@ describe('SOP Trace Adapter (AC-E17)', () => {
     });
     assert.equal(trace.envSnapshot.MISSING_VAR, undefined);
     assert.equal(trace.envSnapshot.REDIS_URL, 'redis://localhost:6398');
+  });
+
+  it('preserves exact diff context and the structured design-gate review packet', () => {
+    const evidence = validDesignGateEvidence();
+    const trace = buildSopTrace({ ...validInput, ...evidence });
+
+    assert.deepEqual(trace.diffContext, evidence.diffContext);
+    assert.deepEqual(trace.designGateReviewPacket, evidence.designGateReviewPacket);
+  });
+
+  it('rejects diff context that does not cover the exact changed-file set', () => {
+    const evidence = validDesignGateEvidence();
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          ...evidence,
+          changedFiles: [ROUTE_PATH, 'packages/api/src/routes/second-route.ts'],
+        }),
+      /same path set|diffContext/i,
+    );
+  });
+
+  it('rejects duplicate risk claim ids', () => {
+    const evidence = validDesignGateEvidence();
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          ...evidence,
+          designGateReviewPacket: {
+            ...evidence.designGateReviewPacket,
+            riskClaims: [evidence.designGateReviewPacket.riskClaims[0], evidence.designGateReviewPacket.riskClaims[0]],
+          },
+        }),
+      /risk claim ids.*unique/i,
+    );
+  });
+
+  it('rejects a review packet that is not bound to the diff exact HEAD', () => {
+    const evidence = validDesignGateEvidence();
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          ...evidence,
+          designGateReviewPacket: {
+            ...evidence.designGateReviewPacket,
+            exactHeadSha: 'c'.repeat(40),
+          },
+        }),
+      /exactHeadSha.*headSha|exact HEAD/i,
+    );
+  });
+
+  it('rejects a review packet without exact diff context', () => {
+    const evidence = validDesignGateEvidence();
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          changedFiles: [ROUTE_PATH],
+          designGateReviewPacket: evidence.designGateReviewPacket,
+        }),
+      /requires diffContext exact HEAD/i,
+    );
+  });
+
+  it('rejects abbreviated Git SHAs in diff context', () => {
+    const evidence = validDesignGateEvidence();
+    assert.throws(
+      () =>
+        buildSopTrace({
+          ...validInput,
+          ...evidence,
+          diffContext: { ...evidence.diffContext, headSha: 'abc123' },
+        }),
+      /40-character Git SHA/i,
+    );
   });
 
   it('rejects missing sessionId', () => {

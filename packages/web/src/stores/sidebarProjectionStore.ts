@@ -225,7 +225,16 @@ export function projectSidebarRows(
           break;
         case 'attention': {
           const value = command.value as SidebarCommandValueMap['attention'];
-          projected = { ...projected, unreadCount: value.unreadCount, hasUserMention: value.hasUserMention };
+          const hidesTerminalPresence =
+            (projected.presence.status === 'done' || projected.presence.status === 'error') &&
+            value.unreadCount === 0 &&
+            !value.hasUserMention;
+          projected = {
+            ...projected,
+            unreadCount: value.unreadCount,
+            hasUserMention: value.hasUserMention,
+            presence: hidesTerminalPresence ? { status: 'idle' } : projected.presence,
+          };
           break;
         }
       }

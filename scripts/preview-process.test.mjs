@@ -63,6 +63,7 @@ describe('preview-process managed lifecycle', () => {
       { env, encoding: 'utf8', timeout: 15_000 },
     );
     assert.equal(start.status, 0, start.stderr || start.stdout);
+    if (process.platform === 'darwin') assert.match(start.stdout, /origin: launchd/);
 
     const status = spawnSync(
       process.execPath,
@@ -71,6 +72,41 @@ describe('preview-process managed lifecycle', () => {
     );
     assert.equal(status.status, 0, status.stderr || status.stdout);
     assert.equal(JSON.parse(status.stdout).status, 'running');
+
+    if (process.platform === 'darwin') {
+      const id = createHash('sha256').update(`${root}\0${port}`).digest('hex').slice(0, 16);
+      const record = JSON.parse(readFileSync(join(stateDir, `${id}.json`), 'utf8'));
+      assert.equal(
+        record.origin,
+        'launchd',
+        'a preview handed to the user must be launched outside the invocation process domain',
+      );
+      assert.match(record.launchdLabel, /^com\.catcafe\.preview\.[a-f0-9]{16}$/);
+
+      const launchd = spawnSync('launchctl', ['print', `gui/${process.getuid()}/${record.launchdLabel}`], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      assert.equal(launchd.status, 0, launchd.stderr || launchd.stdout);
+      assert.match(launchd.stdout, new RegExp(`\\bpid = ${record.pid}\\b`));
+      assert.match(launchd.stdout, /\bruns = 1\b/);
+      assert.doesNotMatch(
+        launchd.stdout,
+        /properties = keepalive/,
+        'a one-shot preview launcher must not spin by relaunching an already-running child',
+      );
+      assert.doesNotMatch(launchd.stdout, /\.codex\/tmp/);
+      const plist = readFileSync(record.plistPath, 'utf8');
+      assert.doesNotMatch(plist, /<key>CAT_CAFE_(?:CALLBACK_TOKEN|INVOCATION_ID|AGENT_KEY_FILES)<\/key>/);
+      assert.doesNotMatch(plist, /\.codex\/tmp/);
+
+      const ppid = spawnSync('ps', ['-p', String(record.pid), '-o', 'ppid='], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      assert.equal(ppid.status, 0, ppid.stderr || ppid.stdout);
+      assert.equal(Number(ppid.stdout.trim()), 1);
+    }
 
     const response = spawnSync(
       process.execPath,
@@ -125,6 +161,48 @@ describe('preview-process managed lifecycle', () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it('cleans an exited one-shot LaunchAgent without claiming ownership of another process', async () => {
+    if (process.platform !== 'darwin') return;
+    const oneShotPort = await reservePort();
+    const fixture = [
+      "const http = require('node:http');",
+      `const server = http.createServer((_req, res) => res.end('one-shot')).listen(${oneShotPort}, '127.0.0.1');`,
+      'setTimeout(() => server.close(() => process.exit(0)), 750);',
+    ].join('');
+    const start = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'start', '--port', String(oneShotPort), '--cwd', root, '--', process.execPath, '-e', fixture],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(start.status, 0, start.stderr || start.stdout);
+
+    const deadline = Date.now() + 3_000;
+    let status;
+    do {
+      status = spawnSync(
+        process.execPath,
+        [SCRIPT_PATH, 'status', '--port', String(oneShotPort), '--cwd', root, '--json'],
+        { env, encoding: 'utf8', timeout: 5_000 },
+      );
+      if (JSON.parse(status.stdout).status === 'stopped') break;
+    } while (Date.now() < deadline);
+    assert.equal(JSON.parse(status.stdout).status, 'stopped');
+
+    const stop = spawnSync(
+      process.execPath,
+      [SCRIPT_PATH, 'stop', '--port', String(oneShotPort), '--cwd', root, '--json'],
+      { env, encoding: 'utf8', timeout: 5_000 },
+    );
+    assert.equal(stop.status, 0, stop.stderr || stop.stdout);
+
+    const id = createHash('sha256').update(`${root}\0${oneShotPort}`).digest('hex').slice(0, 16);
+    const launchd = spawnSync('launchctl', ['print', `gui/${process.getuid()}/com.catcafe.preview.${id}`], {
+      encoding: 'utf8',
+      timeout: 5_000,
+    });
+    assert.notEqual(launchd.status, 0, 'stopping an exited one-shot preview must boot out its loaded job');
   });
 
   it('continues a bounded readiness probe when a managed cold start crosses ten seconds', async () => {

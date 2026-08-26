@@ -87,6 +87,93 @@ describe('cat_cafe_publish_verdict eval:sop sourceRefs schema', () => {
     assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
   });
 
+  it('preserves exact diff context and design-gate review evidence', () => {
+    const trace = baseTrace();
+    const routePath = 'packages/api/src/routes/thread-invocations.ts';
+    const headSha = 'b'.repeat(40);
+    trace.changedFiles = [routePath];
+    trace.diffContext = {
+      baseSha: 'a'.repeat(40),
+      headSha,
+      files: [{ path: routePath, addedLines: ['resolveThreadAccessPolicy(request)'] }],
+    };
+    trace.designGateReviewPacket = {
+      exactHeadSha: headSha,
+      riskClaims: [
+        {
+          id: 'consumer-thread-invocations',
+          kind: 'consumer_delta',
+          summary: 'New route reuses canonical access policy.',
+          canonicalSource: 'packages/api/src/domains/thread-access-policy.ts#resolveThreadAccessPolicy',
+          consumerEvidence: `rg -n "resolveThreadAccessPolicy" ${routePath}`,
+          claimGuard: {
+            command: 'node --test packages/api/test/thread-invocations-route.test.js',
+            redWhen: 'the route rejects an indexed system thread',
+          },
+        },
+      ],
+      targetedSelfCheckReceipts: [
+        {
+          claimId: 'consumer-thread-invocations',
+          headSha,
+          command: 'node --test packages/api/test/thread-invocations-route.test.js',
+          exitCode: 0,
+        },
+      ],
+    };
+
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: validPacket,
+      sourceRefs: { kind: 'sop-trace-eval', sopDefinitionId: 'development', trace },
+    });
+
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+    assert.deepEqual(result.data.sourceRefs.trace.diffContext, trace.diffContext);
+    assert.deepEqual(result.data.sourceRefs.trace.designGateReviewPacket, trace.designGateReviewPacket);
+  });
+
+  it('rejects a design-gate review packet whose HEAD differs from the diff HEAD', () => {
+    const trace = baseTrace();
+    trace.changedFiles = ['packages/api/src/routes/thread-invocations.ts'];
+    trace.diffContext = {
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      files: [{ path: trace.changedFiles[0], addedLines: ['resolveThreadAccessPolicy(request)'] }],
+    };
+    trace.designGateReviewPacket = {
+      exactHeadSha: 'c'.repeat(40),
+      riskClaims: [],
+      targetedSelfCheckReceipts: [],
+    };
+
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: validPacket,
+      sourceRefs: { kind: 'sop-trace-eval', sopDefinitionId: 'development', trace },
+    });
+
+    assert.ok(!result.success, 'mismatched exact HEAD must fail closed at the MCP contract');
+  });
+
+  it('rejects abbreviated Git SHAs in design-gate diff context', () => {
+    const trace = baseTrace();
+    trace.changedFiles = ['packages/api/src/routes/thread-invocations.ts'];
+    trace.diffContext = {
+      baseSha: 'a'.repeat(40),
+      headSha: 'abc123',
+      files: [{ path: trace.changedFiles[0], addedLines: [] }],
+    };
+
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: validPacket,
+      sourceRefs: { kind: 'sop-trace-eval', sopDefinitionId: 'development', trace },
+    });
+
+    assert.ok(!result.success, 'abbreviated HEAD must fail closed at the MCP contract');
+  });
+
   it('rejects sop-trace-eval with missing changedFiles', () => {
     const result = schema.safeParse({
       domainId: 'eval:sop',

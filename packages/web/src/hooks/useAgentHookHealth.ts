@@ -22,8 +22,6 @@ export interface AgentHookTargetHealth {
 export interface AgentHookStatusResponse {
   status: AgentHookHealthStatus;
   targets: AgentHookTargetHealth[];
-  /** The project has not been initialized, so no capability targets were probed. */
-  uninitialised?: true;
 }
 
 interface UseAgentHookHealthOptions {
@@ -65,13 +63,6 @@ function isAgentHookStatusResponse(value: unknown): value is AgentHookStatusResp
   );
 }
 
-async function readUninitialisedProject(res: Response): Promise<AgentHookStatusResponse | null> {
-  if (res.status !== 400) return null;
-  const { code } = (await res.json().catch(() => ({}))) as { code?: unknown };
-  if (code !== 'PROJECT_NOT_INITIALIZED') return null;
-  return { status: 'unsupported', targets: [], uninitialised: true };
-}
-
 async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatusResponse> {
   if (hasCachedHealth && cachedHealth && cachedProjectPath === projectPath) return cachedHealth;
   if (inFlightStatus && inFlightProjectPath === projectPath) return inFlightStatus;
@@ -84,8 +75,6 @@ async function readAgentHookStatus(projectPath?: string): Promise<AgentHookStatu
   inFlightStatus = apiFetch(url)
     .then(async (res) => {
       if (!res.ok) {
-        const uninitialised = await readUninitialisedProject(res);
-        if (uninitialised) return uninitialised;
         throw new Error(`agent hook status failed (${res.status})`);
       }
       const status = await res.json();
@@ -107,8 +96,6 @@ async function postAgentHookSync(projectPath?: string): Promise<AgentHookStatusR
     body: projectPath ? JSON.stringify({ projectPath }) : undefined,
   });
   if (!res.ok) {
-    const uninitialised = await readUninitialisedProject(res);
-    if (uninitialised) return cacheStatus(uninitialised, projectPath);
     throw new Error(`agent hook sync failed (${res.status})`);
   }
   const status = await res.json();

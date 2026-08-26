@@ -123,7 +123,7 @@ const CANONICAL_SEND = {
   messageId: 'B-msg-id',
   threadId: 'B-thread',
   revision: 1,
-  handle: { kind: 'message', token: 'B-handle-token' },
+  messageHandle: { kind: 'message', token: 'B-handle-token' },
 };
 
 const CANONICAL_APPEND = {
@@ -193,7 +193,7 @@ describe('SendService — stale-claimant settlement (lines 222-233)', () => {
     // Must return B's canonical receipt, NOT A's locally constructed value
     assert.equal(result.messageId, CANONICAL_SEND.messageId);
     assert.equal(result.threadId, CANONICAL_SEND.threadId);
-    assert.deepEqual(result.handle, CANONICAL_SEND.handle);
+    assert.deepEqual(result.messageHandle, CANONICAL_SEND.messageHandle);
   });
 
   test('rejected → re-claim settled → returns canonical receipt', async () => {
@@ -214,7 +214,7 @@ describe('SendService — stale-claimant settlement (lines 222-233)', () => {
     const result = await service.send(CTX, draftFor(handleId));
 
     assert.equal(result.messageId, CANONICAL_SEND.messageId);
-    assert.deepEqual(result.handle, CANONICAL_SEND.handle);
+    assert.deepEqual(result.messageHandle, CANONICAL_SEND.messageHandle);
   });
 
   test('rejected → re-claim inflight → throws RETRYABLE_INFLIGHT', async () => {
@@ -277,7 +277,7 @@ describe('AppendService — stale-claimant settlement (lines 82-95)', () => {
     intercepting.preSettle = alreadySettledHook(CANONICAL_APPEND);
 
     const result = await appendService.appendElements(CTX, {
-      handle: sendReceipt.handle,
+      handle: sendReceipt.messageHandle,
       operationId: 'op-stale',
       elements: [{ elementId: 'el-a', kind: 'text', payload: { text: 'appended' } }],
     });
@@ -296,7 +296,7 @@ describe('AppendService — stale-claimant settlement (lines 82-95)', () => {
     intercepting.preReClaim = reClaimSettledHook(CANONICAL_APPEND);
 
     const result = await appendService.appendElements(CTX, {
-      handle: sendReceipt.handle,
+      handle: sendReceipt.messageHandle,
       operationId: 'op-stale-rej',
       elements: [{ elementId: 'el-b', kind: 'text', payload: { text: 'appended' } }],
     });
@@ -313,7 +313,7 @@ describe('AppendService — stale-claimant settlement (lines 82-95)', () => {
 
     await assert.rejects(
       appendService.appendElements(CTX, {
-        handle: sendReceipt.handle,
+        handle: sendReceipt.messageHandle,
         operationId: 'op-stale-inf',
         elements: [{ elementId: 'el-c', kind: 'text', payload: { text: 'appended' } }],
       }),

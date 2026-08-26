@@ -46,11 +46,15 @@ describe('MessagingService facade — full chain', () => {
     assert.equal(read1.events[0].type, 'message.publish');
     await service.ack(CTX, subscriptionId, read1.ackToken);
 
-    assert.ok(sendReceipt.handle, 'SendReceipt must include an opaque message handle');
-    assert.notEqual(sendReceipt.handle.token, sendReceipt.messageId, 'handle token must be opaque (not messageId)');
+    assert.ok(sendReceipt.messageHandle, 'SendReceipt must include an opaque message handle');
+    assert.notEqual(
+      sendReceipt.messageHandle.token,
+      sendReceipt.messageId,
+      'handle token must be opaque (not messageId)',
+    );
 
     const appendReceipt = await service.appendElements(CTX, {
-      handle: sendReceipt.handle,
+      handle: sendReceipt.messageHandle,
       operationId: 'e2e-op-1',
       baseRevision: 1,
       elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'appended e2e' }, derivedFromElementId: 'el-1' }],
@@ -110,7 +114,7 @@ describe('MessagingService facade — full chain', () => {
     await service.revokeHandle(parent.handleId);
     await assert.rejects(
       service.appendElements(CTX, {
-        handle: first.handle,
+        handle: first.messageHandle,
         operationId: 'blocked-by-parent-revoke',
         elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'blocked' } }],
       }),
@@ -131,10 +135,10 @@ describe('MessagingService facade — full chain', () => {
         elements: [{ elementId: 'el-1', kind: 'text', payload: { text: 'mine' } }],
       },
     });
-    await service.revokeHandle(second.handle.token);
+    await service.revokeHandle(second.messageHandle.token);
     await assert.rejects(
       service.appendElements(CTX, {
-        handle: second.handle,
+        handle: second.messageHandle,
         operationId: 'blocked-by-message-revoke',
         elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'blocked' } }],
       }),
@@ -161,7 +165,7 @@ describe('MessagingService facade — full chain', () => {
     await assert.rejects(service.subscribe(foreign, handleId), (err) => err.code === 'PERMISSION');
     await assert.rejects(
       service.appendElements(foreign, {
-        handle: sent.handle,
+        handle: sent.messageHandle,
         operationId: 'steal-1',
         elements: [{ elementId: 'el-x', kind: 'text', payload: { text: 'not mine' } }],
       }),

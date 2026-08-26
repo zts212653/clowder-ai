@@ -78,6 +78,7 @@ describe('Eval Hub lifecycle summary route', () => {
       '2026-07-19-capability-wakeup-workspace-navigator-fix-recheck-v2',
       '2026-07-26-capability-wakeup-workspace-navigator-insufficient-fix-v2',
       '2026-08-16-capability-wakeup-workspace-navigator-no-data-observe',
+      '2026-08-23-capability-wakeup-workspace-navigator-no-data-observe',
     ]);
     assert.equal(item.lifecycle.targetOwnerCatId, 'opus-47');
     await app.close();

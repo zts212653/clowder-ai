@@ -48,15 +48,17 @@ export class ActionSuccessorStandingError extends Error {
   }
 }
 
-type ActionSuccessorStandingInput = Pick<
+export type ActionSuccessorStandingSnapshot = Pick<
   ActionSuccessorAdmissionInput,
-  'action' | 'holderCatIds' | 'targetThreadId' | 'tenantScope'
+  'holderCatIds' | 'targetThreadId' | 'tenantScope'
 >;
 
-export function assertActionSuccessorStanding(
-  input: ActionSuccessorStandingInput,
+type ActionSuccessorStandingInput = Pick<ActionSuccessorAdmissionInput, 'action'> & ActionSuccessorStandingSnapshot;
+
+export function actionSuccessorStandingMismatchDimensions(
+  input: ActionSuccessorStandingSnapshot,
   freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
-): void {
+): ActionSuccessorStandingMismatchDimension[] {
   const mismatchDimensions: ActionSuccessorStandingMismatchDimension[] = [];
   if (
     freshness.ownerCatId !== undefined &&
@@ -70,6 +72,14 @@ export function assertActionSuccessorStanding(
   if (freshness.tenantScope !== undefined && input.tenantScope !== freshness.tenantScope) {
     mismatchDimensions.push('tenant');
   }
+  return mismatchDimensions;
+}
+
+export function assertActionSuccessorStanding(
+  input: ActionSuccessorStandingSnapshot,
+  freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
+): void {
+  const mismatchDimensions = actionSuccessorStandingMismatchDimensions(input, freshness);
   if (mismatchDimensions.length > 0) {
     throw new ActionSuccessorStandingError(
       'mismatch',
@@ -81,7 +91,7 @@ export function assertActionSuccessorStanding(
 
 export type LocalReviewTerminalRoutePreflight =
   | { applicable: false }
-  | { applicable: true; allow: true; expectedThreadId: string }
+  | { applicable: true; allow: true; expectedThreadId: string; predecessorCatId: string }
   | {
       applicable: true;
       allow: false;
@@ -173,6 +183,7 @@ export class ActionSuccessorAdmissionService {
     if (lease.actionFamily !== 'review' || lease.successorSlot !== 'reviewer') return { applicable: false };
 
     const expectedThreadId = lease.predecessorThreadId;
+    const predecessorCatId = lease.predecessorCatId;
     if (lease.generation !== input.generation) {
       return {
         applicable: true,
@@ -197,7 +208,7 @@ export class ActionSuccessorAdmissionService {
         ...(expectedThreadId ? { expectedThreadId } : {}),
       };
     }
-    if (!expectedThreadId) {
+    if (!expectedThreadId || !predecessorCatId) {
       return { applicable: true, allow: false, reason: 'predecessor_route_missing' };
     }
     if (input.targetThreadId !== expectedThreadId) {
@@ -208,7 +219,7 @@ export class ActionSuccessorAdmissionService {
         expectedThreadId,
       };
     }
-    return { applicable: true, allow: true, expectedThreadId };
+    return { applicable: true, allow: true, expectedThreadId, predecessorCatId };
   }
 
   async admit(
@@ -367,7 +378,11 @@ export class ActionSuccessorAdmissionService {
   ): Promise<ActionFreshnessResolution> {
     const freshness = await this.truthResolver.resolveFreshness(terminalPredicate);
     if (freshness.status === 'verified' && freshness.freshnessKey !== terminalPredicate.freshnessKey) {
-      return { status: 'mismatch', reason: 'verified freshness identity does not match the canonical predicate' };
+      return {
+        status: 'mismatch',
+        reason: 'verified freshness identity does not match the canonical predicate',
+        evidenceRef: freshness.evidenceRef,
+      };
     }
     return freshness;
   }

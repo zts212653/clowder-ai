@@ -5,7 +5,7 @@ export const PLUGIN_ID = 'official.example-source';
 export const INSTANCE_ID = 'pi_example';
 export const PACKAGE_DIGEST = `sha512-${createHash('sha512').update('k2b-example-package').digest('base64')}`;
 
-export function pluginManifest() {
+export function pluginManifest(capabilities = ['events.publish']) {
   return {
     pluginId: PLUGIN_ID,
     version: '1.0.0',
@@ -16,7 +16,7 @@ export function pluginManifest() {
         id: 'source',
         name: 'Source',
         resources: [],
-        capabilities: ['events.publish'],
+        capabilities,
       },
     ],
     signals: {
@@ -56,18 +56,18 @@ export function eventsPublishInput(overrides = {}) {
   };
 }
 
-export async function readyInventory() {
+export async function readyInventory({ effectiveGrants = ['events.publish'] } = {}) {
   const inventory = new MemoryPluginInventoryStore();
   const controlPlane = new HostInventoryControlPlane(inventory, {
     createInstanceId: () => INSTANCE_ID,
     now: () => 1_000,
   });
   await controlPlane.installPackage({
-    manifest: pluginManifest(),
+    manifest: pluginManifest(effectiveGrants),
     computedPackageDigest: PACKAGE_DIGEST,
     expectedPackageDigest: PACKAGE_DIGEST,
     packagePluginId: PLUGIN_ID,
-    effectiveGrants: ['events.publish'],
+    effectiveGrants,
     signalSchemas: {
       'schemas/example.signal.v1.schema.json': {
         type: 'object',

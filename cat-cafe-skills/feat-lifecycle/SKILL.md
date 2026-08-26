@@ -2,8 +2,8 @@
 name: feat-lifecycle
 description: >
   Feature 立项、讨论、完成的全生命周期管理。
-  Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求。
-  Not for: 代码实现、review、merge（那些有专门的 skill）。
+  Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求，或operator说“先看真页面”要求恢复既有 F083 Design Gate。
+  Not for: 不涉及 Feature/Design Gate 真相更新的纯代码实现、review、merge（那些有专门的 skill）。
   Output: Feature 聚合文件 + BACKLOG 索引 + 真相源同步。
 triggers:
   - "开个新功能"
@@ -14,6 +14,7 @@ triggers:
   - "F0xx done"
   - "验收通过"
   - "讨论新功能需求"
+  - "先看真页面"
 argument-hint: "[阶段: kickoff|discussion|completion] [F0xx 或主题]"
 ---
 
@@ -150,16 +151,27 @@ Step 2 写完 spec，Why / 现状 / AC 逐条过这道自检：
 
 ## Design Gate (设计确认) 🔴
 
-**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准开 worktree。User Journey 没落盘，不准过 Design Gate。**
+**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准进入正式产品实现；隔离 worktree
+可承载真实壳体验稿。User Journey 没落盘，不准过 Design Gate。**
 
-按功能类型分流确认：
+先按主要功能类型分流，再判断是否叠加了**用户可见表面**；两者不是互斥分类：
 
 | 类型 | 判断标准 | 确认人 | 方式 |
 |------|---------|--------|------|
-| **前端 UI/UX** | 用户能看到的改动 | **operator** | wireframe → operator OK 后继续 |
+| **前端 UI/UX** | 新增或实质改变用户可见布局/交互 | **operator** | 真实产品壳中的主旅程 + 默认状态 + 窄屏状态 → operator OK 后继续 |
 | **纯后端** | API/数据模型/内部逻辑 | **其他猫猫** | `collaborative-thinking` 讨论达成共识 |
 | **架构级** | 跨模块、新基础设施 | **猫猫讨论 → operator拍板** | 先出方案再上报 |
 | **Trivial** | ≤5 行、纯重构、文档 | 跳过 | 跳过 Design Gate，按 SOP 例外路径判断 |
+
+**叠加触发（F305）**：主要类型即使是纯后端或架构，只要同一改动新增或实质改变用户可见
+布局/交互，就同时走前端 UI/UX 确认；后端/架构确认不能替代体验确认。小型文字、间距或颜色
+修正若不改变用户任务、布局或交互，仍走 Trivial，不扩大门禁。
+
+**“先看真页面”快捷入口（F305 → F083）**：这句话不是新 Magic Word、stage 或 skill。
+收到后停止用 schema、字段表、设计说明或抽象 wireframe 证明体验成立；把当前方案放回真实
+Clowder AI 产品壳，展示主旅程、默认状态与窄屏状态，并逐项使用
+`../.cat-cafe-shared-refs/design-in-context-checklist.md`。正式 UI 实现和合入必须等这个方向确认；
+体验稿本身可以留在隔离预览 worktree。
 
 **前置检查（F086 M2）**：
 开 Design Gate 前，先做触发器 E "新领域侦查"：
@@ -198,6 +210,48 @@ Why: 一句话
 - `Map delta: new cell required` = 找不到归属；这不是回去填表，而是 Phase 0 架构发现未完成。
 
 答不出来 → Design Gate 不放行。禁止用新 Feature 私造 `Store` / `Queue` / `Router` / `Adapter` 来绕开已有 cell。
+
+### Architecture / contract integrity admission（F303）🔴
+
+F191 三行先回答归属；随后只在以下三个客观事实任一命中时，把对应 claim 纳入
+architecture / contract 风险核验。它仍属于现有 Design Gate，不是新 stage。
+
+F303 trigger set (three-item OR; no fourth trigger):
+
+- `consumer_delta`: 新增或搬动 route、surface、后台 job 或 caller，并复用既有 auth、policy、resolver、cursor 或 lifecycle 语义。
+- `authority_delta`: 重构、迁移或 single-writer 收敛改变 canonical owner、writer 或 read path。
+- `preservation_boundary_delta`: 出现“保持既有行为”“不改变鉴权”“Map delta: none”“只做 projection”等 preservation claim，且 diff 触及对应 consumer 或 authority boundary。
+
+重复事故 family 与 route-local 分叉只作为 admission 后的证据深度 prior，不是第四个
+trigger。普通增量仍只写 `Architecture cell / Map delta / Why`，不要求永久 consumer Matrix。
+
+命中任一项的 eligible spec/plan 在 F191 三行后追加：
+
+```markdown
+Canonical source: {repo-relative path#symbol | doc path#anchor}
+Consumer evidence: {rerunnable LSP/rg command + relevant output | explicit references + why automatic scan cannot express the boundary}
+Claim guard: {claim} → {test/lint/guard/self-check command or test name} → red when {input or condition}
+```
+
+- `Canonical source` 必须是可检查存在性的 exact ref，不能只写 Feature 名或自然语言 owner。
+- 代码符号 consumer 用可重跑的 LSP find-references / `rg` 命令与相关输出。
+- 只有 MCP tool、skill、workflow callback 等约定面适用 F242 convention graph；工具无法表达的语义边界改用显式 references，并写明无法自动扫描的理由。
+- `Claim guard` 必须指向一个具体 test/lint/guard/self-check 命令或测试名，并说明什么输入或条件会使它变红。
+
+缺少上述任一项，eligible change 不通过 Design Gate。重构、迁移或 single-writer eligible
+change 还必须追加：
+
+```markdown
+Characterization/contract test: {command or test name}
+Code-derived consumer census: {rerunnable command + relevant output}
+Migration/restart/rollback evidence: {only when persistence or runtime semantics migrate}
+```
+
+前两项缺一即不通过；只有持久化或运行语义迁移时才要求第三项。不要为普通增量填空白
+字段，也不要把这份 change-local evidence 扩成 registry、dashboard 或永久 Matrix。
+
+F277 related-set / attention projection 只能作为显式关系的展示证据；它不能提供或推断
+work、custody、completion、acceptance truth。需要这些事实时回到各自 canonical owner。
 
 **主动交互反馈出生三问（F281 / ADR-038）🔴**：
 
@@ -266,7 +320,7 @@ ADR-031 v3.4 选择器速查：
 
 **流程**：
 1. 判断功能类型 → 选择确认路径
-2. 前端：画 wireframe（Pencil / 文字版 ASCII）→ 发operator → 等 OK
+2. 前端：在真实产品壳做可见体验稿（可先用 Pencil 探索）→ 展示主旅程、默认与窄屏 → 等 OK
 3. 后端：`collaborative-thinking` → 拉相关猫讨论 API 契约/数据模型
 4. 架构：猫猫讨论 → 结论给operator → **必须附 Decision Packet**（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）→ operator拍板
 5. 确认产出归档 `feature-discussions/{date}-{fid}-design/`

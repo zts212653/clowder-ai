@@ -128,7 +128,10 @@ export async function prepareProviderPresentationAttempt<TReceipt>(input: {
   readonly scope?: PresentationScope;
   readonly opportunityContext?: OpportunityPresentationContext;
   readonly buildEffectivePrompt: (promptSegments: readonly string[]) => string;
+  /** F299: production callers bind this to the transcript owner's persistent HMAC key. */
+  readonly createPromptGenerationId?: (effectivePrompt: string) => string | Promise<string>;
 }): Promise<ProviderPresentationAttempt<TReceipt>> {
+  const createGenerationId = input.createPromptGenerationId ?? promptGenerationId;
   const currentEnvelopes = input.envelopes.filter((envelope) => isCurrentAdmission(envelope, input.opportunityContext));
   const invalidEnvelopes = input.envelopes.filter(
     (envelope) => !isCurrentAdmission(envelope, input.opportunityContext),
@@ -156,7 +159,7 @@ export async function prepareProviderPresentationAttempt<TReceipt>(input: {
     const effectivePrompt = input.buildEffectivePrompt([]);
     return createAttempt({
       effectivePrompt,
-      promptGenerationId: promptGenerationId(effectivePrompt),
+      promptGenerationId: await createGenerationId(effectivePrompt),
       ledger: input.ledger,
       reserved: [],
       omitted: [...invalidEnvelopes, ...projected.map(({ envelope }) => envelope)],
@@ -169,7 +172,7 @@ export async function prepareProviderPresentationAttempt<TReceipt>(input: {
 
   for (;;) {
     const effectivePrompt = input.buildEffectivePrompt(remaining.map(({ promptSegment }) => promptSegment));
-    const generationId = promptGenerationId(effectivePrompt);
+    const generationId = await createGenerationId(effectivePrompt);
     if (remaining.length === 0) {
       return createAttempt({
         effectivePrompt,

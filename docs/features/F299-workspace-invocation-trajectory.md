@@ -64,7 +64,7 @@ operator experience（2026-08-16）："我们没做好的最重要的是那层�
 
 Phase C 不建设 evidence manifest、通用 evidence-ref 协议或新的跨域 registry。它只把现有坐标接通：
 
-- **共享锚点只有已有的 `inv:<invocationId>`**。`invocationId` 是 canonical `InvocationRecord` 主键；record 可导出 `threadId`，可见 SessionChain / transcript 再定位 `sessionId`。对外不要求 evidence 重复携带派生坐标，也不把当前页面 thread 当真相。canonical lookup 失败或访问策略拒绝时，显示不可用/拒绝，不猜投。
+- **共享锚点只有已有的 `inv:<invocationId>`**。这里的 `invocationId` 是 transcript/F192 使用的 exact `TurnExecution` child id；resolver 先读取该 durable child ledger，再经 `parentInvocationId` 对照 canonical `InvocationRecord`，最后以 child 的 `threadId/catId` 在可见 SessionChain / transcript 中定位 `sessionId`。对外不要求 evidence 重复携带派生坐标，也不把当前页面 thread 当真相；child、parent 或 session 缺失、identity 不一致、访问策略拒绝时均 typed fail-closed。
 - evidence 自带的 `threadId / sessionId` 只能作为 lookup hint，使用前必须与 canonical record/session 对照；hint 冲突 fail-closed。解析与读取继续复用 Phase B.2 的 `thread-access-policy`，不因拿到 invocationId 绕过用户过滤。
 - transcript 是 inspector 已有主证据；Prompt X-Ray（F237）、trace（F153）、task trajectory（F200）等只在各自 owner 能解析时显示 source-owned link。集合开放、按需出现，不要求四源齐全；F299 不复制 payload、不持久化 availability、不统一发明 absent reason。
 - F192 只为**确实能归因到单个 invocation** 的新 verdict evidence 追加同一个 `inv:<id>`；metric / snapshot / session / trace 等非 invocation evidence 保持原生引用。ref 卫生债在 F192 producer 侧收敛，F299/Hub 不学习 `session:.../invocation:...`、`attribution:...` 等多套语法。既有 verdict artifact 不回写。
@@ -73,7 +73,13 @@ Phase C 不建设 evidence manifest、通用 evidence-ref 协议或新的跨域 
 
 ### Phase D: P3 durable request envelope
 
-持久化 Clowder AI 自己组装的模型可见输入：effective system prompt / runtime context snapshot / L0 版本与 injection decision / skills 与 memory 注入 / provider+model config / tool schema hash / compaction 与 retry/error 边界；**含 F300 视野快照（交汇点）**。retention 从出生遵循 ADR-045 推论 1/2（内存只作 cache、TTL 只做 GC 不做注销），不进 F298 存量家族表（2026-08-17 跨 session 裁定）。前置：隐私/保留/redaction Decision Packet 交 operator。
+持久化 Clowder AI 自己组装的模型可见输入：effective system prompt / runtime context snapshot / L0 版本与 injection decision / skills 与 memory 注入 / provider+model config / tool schema hash / compaction 与 retry/error 边界；**含 F300 视野快照（交汇点）**。retention 从出生遵循 ADR-045 推论 1/2（内存只作 cache、TTL 只做 GC 不做注销），不进 F298 存量家族表（2026-08-17 跨 session 裁定）。
+
+Gate 0 经 operator 与 @fable5 以奥卡姆剃刀收敛（`0001787500223746-000067-a890cf02`、`0001787500358068-000071-bd47674c`、`0001787503434011-000116-f8a9a068`）：**request envelope 是 Session transcript 的组成部分，不是拥有独立隐私/访问/删除规则的新实体。**唯一规则是：
+
+> 证据默认持久；You 界面默认摘要、按需展开；猫不被自动灌入完整输入，而是沿现有 user/thread 与各 source owner 的读取规则顺藤摸瓜；源数据被 hard-delete/forget 时，transcript 内的 exact 副本同步失去可读正文。soft-delete 仍继承现有可恢复语义。
+
+因此不新增 originating-cat / reviewer lease 权限、不新增 assignment ledger、不新增“删除模型输入”动作。知道 `inv:<id>` 不能绕过 Phase B.2 的 `thread-access-policy`；段级内容按 `sourceRef` 继承既有 owner scope，persona-private / memory / external tool 等来源不会因进入 envelope 而扩权。You 与猫的差异是消费方式（页面 reveal vs bounded drill），不是两套授权体系。exact bytes、generation、keyed digest / 去重 blob 只属于 transcript 内部存储机制，不成为第二本 context ledger 或第二套生命周期真相。
 
 ### Phase E: P4 inspector 效用 eval
 
@@ -114,7 +120,7 @@ F298 保证事实**活着** → F300 保证事实**到达**猫的判断点 → �
 
 | ID | Scope unit | Actor | Flow | Evidence |
 |----|------------|-------|------|----------|
-| S1 | thread | 猫猫 | 回复中给 `inv:<id>` 锚点 → F299 从 canonical record/session 解析位置 → 对方一键打开同一 invocation 取证 | 实现后录屏 |
+| S1 | thread | 猫猫 | 回复中给 `inv:<id>` 锚点 → F299 从 canonical child execution / parent record / session 解析位置 → 对方一键打开同一 invocation 取证 | 实现后录屏 |
 | S2 | workspace | operator | Eval verdict 中精确归因的 `inv:<id>` chip → 点击 → 轨迹 mode 定位该 invocation → 返回原 evidence card | 实现后截图 |
 
 ## 需求点 Checklist
@@ -170,12 +176,12 @@ F298 保证事实**活着** → F300 保证事实**到达**猫的判断点 → �
 - [x] AC-B13: user-indexed 非 default system thread 下，当前用户可读的 session/transcript/invocation/theater 为按用户过滤子集（非全部用户）；`thread_eval_friction` 现场红→绿；前端 403 以 typed 拒绝原因呈现，不再吞为 `0 total`
 
 ### Phase C（P2 精确 invocation 证据投影）
-- [x] AC-C1: `inv:<id>` 通过 canonical InvocationRecord + 可见 SessionChain/transcript 解析到真实 `threadId/sessionId` 后才打开 inspector；source hint 必须对照、冲突 fail-closed，当前页面 thread 不得兜底猜投。权限回归证明单键入口仍经过 `thread-access-policy` 与当前用户 record 过滤
-- [x] AC-C2: Inspector 只展示 source owner 在读取时可解析的 evidence links；transcript / prompt capture / trace / task trajectory 不构成必齐清单。F299 无 manifest/store/新 registry，不复制 payload、不持久化 availability、不跨 owner 推断 absent reason
+- [x] AC-C1: `inv:<id>` 先解析 exact child `TurnExecution`，再经其 `parentInvocationId` 对照 canonical InvocationRecord，并在可见 SessionChain/transcript 中定位真实 `threadId/sessionId` 后才打开 inspector；child/parent identity 与 source hint 必须对照、冲突 fail-closed，当前页面 thread 不得兜底猜投。权限回归证明单键入口仍经过 `thread-access-policy` 与当前用户 record 过滤
+- [x] AC-C2: Inspector 只展示 source owner 在读取时可解析且可消费的 evidence links；Prompt X-Ray 必须以同一 `apiFetch` / `API_URL` / session transport 预读 detail 成功后才显示，并复用第一方人类可读 Prompt Inspector，禁止相对 raw API 导航。source owner 403/404 时不渲染该 chip；transcript / prompt capture / trace / task trajectory 不构成必齐清单。F299 无 manifest/store/新 registry，不复制 payload、不持久化 availability、不跨 owner 推断 absent reason
 - [x] AC-C3: F192 producer 对精确 invocation evidence 输出已有 `inv:<id>`，Hub verdict card 可打开 F299 并用既有 `TrajectoryOriginRef` 返回原 card；非 invocation evidence 保留原生链接，F299 不解析其他 ref grammar，历史 verdict 不回写
 
 ### Phase D（P3 request envelope）
-- [ ] AC-D1: envelope 回答"这轮猫看见了什么"，覆盖 effective system prompt、runtime context snapshot、skills/memory 注入、model/provider config、tool schema hash、compaction 与 retry/error 边界，并精确到 L0 版本与注入决策；scope = Clowder AI-owned assembly，外部 runtime 标 capability label，不冒充 universal truth，也不把 Phase B.1 的展示标签冒充完整模型输入
+- [x] AC-D1: envelope 回答"这轮猫看见了什么"，覆盖 effective system prompt、runtime context snapshot、skills/memory 注入、model/provider config、tool schema hash、compaction 与 retry/error 边界，并精确到 L0 版本与注入决策；scope = Clowder AI-owned assembly，外部 runtime 标 capability label，不冒充 universal truth，也不把 Phase B.1 的展示标签冒充完整模型输入。每代必须把实际 launch 的同一不可变 bytes 在 provider 调用前 durable append 到当时 active Session transcript，失败则 fail-closed 不 launch；retry/seal 跨 Session 仍由同一 TurnExecution child 保序串联。读取继续经过 `thread-access-policy` 与段级 `sourceRef` owner scope：You 默认摘要后按需展开，猫按需 bounded drill 而非自动注入；不得新建 originating-cat / reviewer-lease 权限。source hard-delete/forget 必须让 envelope 副本正文同步不可读，soft-delete 维持现有可恢复语义
 
 ### Phase E（P4 eval）
 - [ ] AC-E1: `eval:trajectory-inspector` 经 F192 registry / verdict / re-eval closure 产出 keep/tune/sunset；使用 time-to-evidence、根因证据闭合结果、Raw/JSONL grep 回退三维向量，沉默 episode 不从分母消失，不合成总分、不含打开率
@@ -211,7 +217,7 @@ metric_birth_certificate:
 ## Dependencies
 
 - **Evolved from**: F233（failed-close 传承：workspace `trajectory` mode 位 + Phase C 代码 rm/migration 决策归本 feat）
-- **Blocked by**: Phase D 前置为 operator Decision Packet，属决策门非 feat 依赖
+- **Blocked by**: 无。Phase D Gate 0 已于 2026-08-23 经 operator 裁决关闭；实现继续受既有 transcript / source owner / thread access 合同约束
 - **Cross-feature boundary**: Phase C 的 `inv:<id>` producer hygiene 与 Phase E domain 注册归 F192；F299 只拥有 resolver/inspector/navigation。两边在各自 ownership cell 实现，不新立共同层
 - **Related**: F192（eval verdict/evidence producer + Phase E control plane）、F252（#2605 Theater 复用 Sessions——B.2 共同受益方）、F300（"猫的视野快照"在 Phase D 交汇）、F252（TrajectoryPanel 现存消费方，AC-B4）、F298（#4 仅供 credential disposition，不供业务终态）、F237（Prompt X-Ray 证据源）、F153（trace 证据源）、F200（taskTrajectory 证据源）
 
@@ -221,14 +227,14 @@ metric_birth_certificate:
 |------|------|
 | 重蹈 F233"AC 全绿但 operator 从未消费"（Goal Drift） | 消费者定位 + Anti-goal 写死在 spec；Phase E 指标不含打开率 |
 | F252 Story 入口断链 | AC-B5 显式验收；D9 已冻结“ThreadSidebar + Workspace Launcher + legacy URL compatibility”，F299 不接管 Story ownership |
-| Phase D 隐私越界 | Decision Packet 未签不动工；retention 出生合规（ADR-045 推论 1/2） |
+| Phase D 隐私越界 | envelope 归 Session transcript；读取复用 `thread-access-policy` 并按段继承 source owner scope，不新建猫角色/权限/删除语义；retention 出生合规（ADR-045 推论 1/2） |
 | 展示层被误当第二真相源 | LL-099 家规：只投影 canonical transcript，不建新表；review 检查项 |
 | 入口过度曝光制造噪音税 | D4 异常优先显形；健康消息不打扰 |
 | 只靠颜色区分角色造成无障碍退化 | 类型文字与图标为主、颜色为辅；键盘/触屏/非颜色辨识纳入 AC-B8 |
 | access policy 第四次各修各的（#1913→#2605→#3787 同族复发） | B.2 修在 `identity-session` 单一 authority，四 consumer 共用；review 检查项：route 内不得新增手写 owner/default 判定 |
 | 为可读性合并后损伤证据保真 | 人类时间线合并，Raw 永远保留原始 event；两者由同一 canonical source 投影 |
 | 工具来源靠名字猜导致误标 | provenance 由 canonical typed field 承担；缺失显式 `unknown`，不推断成 MCP |
-| `inv:<id>` 入口被实现成绕过 thread 权限的全局后门 | InvocationRecord 只负责定位；读取仍经 `thread-access-policy` + 当前用户 record 过滤，hint 冲突 fail-closed |
+| `inv:<id>` 入口被实现成绕过 thread 权限的全局后门 | TurnExecution child 与 parent InvocationRecord 只负责 canonical 定位及 identity 对照；读取仍经 `thread-access-policy` + 当前用户 record 过滤，hint 冲突 fail-closed |
 | Hub 为兼容历史债学习越来越多 ref grammar | 格式卫生在 F192 producer 侧收敛；F299 只认 `inv:<id>`，历史 artifact 不回写、不猜解析 |
 | F299 固化四源 manifest 后与 F153/F237/F200 状态漂移 | 来源集合开放、读取时由 owner 解析；F299 不持久化 availability/absent reason |
 | Phase E 因只采“主动打开”形成幸存者偏差 | eligible anomaly opportunity 是 episode；not_taken/unresolved 留在向量中，人工校准后才出 verdict |
@@ -248,14 +254,15 @@ metric_birth_certificate:
 | KD-6 | Phase B.1 学 DSH 的 typed event language，不照抄 palette：人类时间线语义合并，Raw 保持逐事件 | DSH 对照暴露的根因是 taxonomy 没显形，不是少一套颜色；可读性与证据保真应分层承担 | 2026-08-20 |
 | KD-7 | “触发输入”引用 MessageStore，完整模型可见输入留在 Phase D envelope | 前者回答“这轮因何开始”且可返回现场；后者涉及 system/context/skills/config/retention，不能混成一张 USER 卡 | 2026-08-20 |
 | KD-8 | Phase B.1 不新增角色 Filter；删除重复图例，长轨迹采用保头、保尾、保异常的原位折叠 | 10 天 776 invocation 样本中 TOOL p50/p90=20/147，而 SYSTEM+CONTEXT p50/p90=1/3；旧前 N 行截断会隐藏后段 error 与失败工具，角色 Filter 不解决主要拥挤源 | 2026-08-21 |
-| KD-9 | Phase C 不建 evidence manifest / universal ref；跨 surface 只共享既有 `inv:<id>`，位置由 canonical record/session 解析 | 坐标维度应等于真实自由度；派生 thread/session 不应成为 evidence producer 的重复负担，也不能用当前页面值猜投 | 2026-08-22 |
+| KD-9 | Phase C 不建 evidence manifest / universal ref；跨 surface 只共享既有 `inv:<id>`，位置由 canonical child execution → parent record → session 解析 | 坐标维度应等于真实自由度；派生 thread/session 不应成为 evidence producer 的重复负担，也不能用当前页面值猜投 | 2026-08-22 |
 | KD-10 | Phase E 是 F192 `eval:trajectory-inspector` domain，不是 F299 自建 eval | 复用既有 registry、verdict、handoff 与 re-eval closure，避免第二套控制面 | 2026-08-22 |
+| KD-11 | Phase D envelope 是 Session transcript 的组成部分，段级按 `sourceRef` 继承既有 owner scope；You reveal 与猫 bounded drill 只是两种消费方式，不构成两套权限 | operator 指出 originating-cat/reviewer 限制会与记忆读取及 B.2 `thread-access-policy` 冲突；奥卡姆剃刀要求删除独立 privacy/access/delete 层，同时保留 actual-bytes-before-launch 的证据合同 | 2026-08-23 |
 
 ## Review Gate
 
 - Phase B: ✅ @fable5 已对 exact `c22defbd0` 完成唯一一次最终架构审核并 `APPROVE`；AC-B6 已消费，可进入 F128 执行 thread，标准跨个体 review + merge-gate
 - Phase B.1: 语义范围由 operator 2026-08-20 DSH 对照反馈冻结；实现前只补一版在地视觉稿确认 OQ-4，不重开 Phase B 架构评审
 - Phase B.1 / B.2 implementation: ✅ @codex-sol author；@kimi 已完成非作者 exact-HEAD review；Phase B.2 PR #3833 与 Phase B.1 PR #3834 均已合入
-- Phase C: ✅ 方向经 operator 2026-08-22 收敛；实现按 F299 resolver/UX 与 F192 producer hygiene 分属 ownership且不新建共同层；@opus47 exact-HEAD review `APPROVE`，PR #3871 已合入
-- Phase D: 需 operator Decision Packet 先行
+- Phase C: ✅ 方向经 operator 2026-08-22 收敛；实现按 F299 resolver/UX 与 F192 producer hygiene 分属 ownership且不新建共同层；@opus47 exact-HEAD review `APPROVE` 后 PR #3871 合入，真实 ID-space P1 再由 PR #3877 修复（@luna 窄范围 `APPROVE`，P1/P2/P3=0；merge `528de1026`）
+- Phase D: ✅ PR #3905 已合入；`@opus5` 对 exact `ceccd78b3` `APPROVE`，full gate 与 merged-main Alpha 的真实聊天→trajectory→source-authorized reveal 链均通过，AC-D1 已关闭
 - Phase E: 出生证已落盘；实现注册为 F192 domain，按 F192 domain onboarding/review gate 执行

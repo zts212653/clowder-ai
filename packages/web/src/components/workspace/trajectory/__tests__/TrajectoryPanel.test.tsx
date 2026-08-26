@@ -70,6 +70,36 @@ function summary(invocationId: string, sessionId: string, threadId = 'thread-f29
   };
 }
 
+function generationProjection() {
+  const digest = `hmac-sha256:${'b'.repeat(64)}`;
+  return {
+    envelope: {
+      v: 1,
+      invocationId: 'inv-loaded',
+      sessionId: 'session-loaded',
+      generationOrdinal: 1,
+      requestGenerationId: '00000000-0000-4000-8000-000000000001',
+      promptGenerationId: digest,
+      assembledAt: 1_000,
+      continuity: { capability: 'unknown', compactionRefs: [] },
+      channels: [
+        {
+          channel: 'message',
+          accuracy: 'exact',
+          keyedContentDigest: digest,
+          byteLength: 5,
+          sourceRefs: [],
+          state: 'redacted',
+        },
+      ],
+      presentations: [],
+      runtime: { requested: { provider: 'openai', carrier: 'app_server' }, providerNativeVisibility: 'unknown' },
+      tools: { finalSurface: 'unknown' },
+      retryBoundary: { attempt: 1 },
+    },
+  };
+}
+
 describe('F299 trajectory search navigation', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -527,6 +557,17 @@ describe('F299 trajectory search navigation', () => {
           }),
         };
       }
+      if (input === '/api/invocations/inv-loaded/request-generations?threadId=thread-f299&sessionId=session-loaded') {
+        return {
+          ok: true,
+          json: async () => ({
+            invocationId: 'inv-loaded',
+            threadId: 'thread-f299',
+            generations: [generationProjection()],
+            gaps: [{ kind: 'evidence_gap', fromOrdinal: 2, toOrdinal: 2, state: 'unknown', reason: 'ordinal_gap' }],
+          }),
+        };
+      }
       if (input === '/api/sessions/session-loaded/invocations/inv-loaded') {
         return {
           ok: true,
@@ -547,6 +588,9 @@ describe('F299 trajectory search navigation', () => {
     await act(async () => {});
 
     expect(container.textContent).toContain('1 / 1');
+    expect(container.textContent).toContain('Input generations');
+    expect(container.textContent).toContain('Generation #1');
+    expect(container.textContent).toContain('Generation evidence gap #2');
     const back = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '← 返回');
     await act(async () => back?.click());
     expect(container.querySelector('[data-invocation-id="inv-loaded"]')?.textContent).toContain('1 tools');

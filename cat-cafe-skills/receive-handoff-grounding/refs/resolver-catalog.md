@@ -101,8 +101,10 @@ claim "reviewer 已 approve PR"。
 | `git ls-tree / cat-file` | T1 | tree/blob SHA |
 | `TaskStore.get(taskId)` | T1 | task updated_at |
 | `ThreadStore.get(threadId)` `threadKind` | T2 | thread updated_at (context signal only) |
+| `cat_cafe_get_thread_metadata()`（可选候选缩窄） | T2 | metadata updated_at；允许为空/陈旧，不能替代 canonical resolver |
 
 **Limitation**：`threadKind` 是 context signal，**不**是 truth source（R3 critical: 不能独立裁决）。
+Thread metadata 同样不是必读前置条件；仅在已有理由认为它能缩小搜索范围时可选读取，命中后仍须用上表 T0/T1 resolver 核验。
 
 ### 4. Callback / wait coverage
 

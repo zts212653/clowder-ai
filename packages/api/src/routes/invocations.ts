@@ -15,7 +15,10 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 const log = createModuleLogger('routes/invocations');
 
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import { PerCatTerminalDispositionCollector } from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
+import {
+  isTerminalDispositionEvent,
+  PerCatTerminalDispositionCollector,
+} from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
@@ -318,7 +321,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             governanceErrorCode = msg.errorCode;
           }
           terminalDispositions.observe(msg);
-          if ((msg.type === 'done' || msg.type === 'error') && msg.catId) {
+          if (isTerminalDispositionEvent(msg) && msg.catId) {
             opts.invocationTracker.completeSlot(record.threadId, msg.catId, controller);
           }
           // F194 Phase Z9 (砚砚 R1 P1-2): use stampVisibleTurn helper. After route-serial /

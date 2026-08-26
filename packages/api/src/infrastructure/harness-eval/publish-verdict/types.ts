@@ -1,6 +1,7 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
+import type { DesignGateEpisodeSourceSelector } from '../design-gate/design-gate-types.js';
 import type { FreshnessReplaySelector } from '../freshness/freshness-replay-types.js';
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
@@ -169,7 +170,8 @@ export type VerdictSourceRefs =
   | FrictionRollupSourceSelector
   | AnchorTelemetrySourceSelector
   | QcMetricsSelector
-  | FreshnessReplaySelector;
+  | FreshnessReplaySelector
+  | DesignGateEpisodeSourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

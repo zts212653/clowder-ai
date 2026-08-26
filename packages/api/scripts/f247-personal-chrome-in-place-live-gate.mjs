@@ -76,14 +76,21 @@ async function requireInstalledAuthorization(readConversationAuthorizations, env
   }
 }
 
-export async function runPersonalChromeInPlaceLiveGate({
-  adapter,
-  env = process.env,
-  readConversationAuthorizations,
-  conversationId,
-  nonce = `F247_IN_PLACE_LIVE_GATE_${new Date().toISOString()}_${randomUUID()}`,
-  idempotencyKey = `f247-in-place-${randomUUID()}`,
-} = {}) {
+export async function runPersonalChromeInPlaceLiveGate(options = {}) {
+  if (Object.hasOwn(options, 'nonce') || Object.hasOwn(options, 'text') || Object.hasOwn(options, 'message')) {
+    throw new LiveGateNotObservedError(
+      'ARBITRARY_TEXT_UNSUPPORTED',
+      'the diagnostic gate generates its own verification nonce and does not accept chat body text',
+    );
+  }
+  const {
+    adapter,
+    env = process.env,
+    readConversationAuthorizations,
+    conversationId,
+    idempotencyKey = `f247-in-place-${randomUUID()}`,
+  } = options;
+  const nonce = `F247_IN_PLACE_LIVE_GATE_${new Date().toISOString()}_${randomUUID()}`;
   const authorization = await requireInstalledAuthorization(readConversationAuthorizations, env, conversationId);
   const delivery = await verifyBoundDelivery({
     adapter: adapter ?? (await createInstalledAdapter(env)),
@@ -92,11 +99,12 @@ export async function runPersonalChromeInPlaceLiveGate({
     idempotencyKey,
   });
   return {
+    kind: 'diagnostic_receipt',
     status: 'PASS',
     coverage: 'running-owner-chrome-native-messaging-full-seam',
     browserLifecycle: 'untouched',
     foregroundMutation: 'none-by-construction',
-    conversationId: authorization.conversationId,
+    canonicalThreadProjection: false,
     hostMessageId: delivery.hostMessageId,
     retryHostMessageId: delivery.retryHostMessageId,
   };

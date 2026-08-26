@@ -18,7 +18,6 @@ const hasSourceStagingContent = existsSync(
 
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
-import { GovernanceBootstrapService } from '../dist/config/governance/governance-bootstrap.js';
 import { ContextEpochOwner } from '../dist/domains/cats/services/session/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 
@@ -5562,6 +5561,57 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(sessionRecordCreated, true, 'should create SessionRecord when sessionChain enabled');
   });
 
+  it('F299 rejects substantive output when a provider bypasses the durable request-generation fence', async () => {
+    const activeRecord = {
+      id: 'sr-f299-bypass',
+      seq: 0,
+      status: 'active',
+      catId: 'opus',
+      threadId: 'thread-f299-bypass',
+      userId: 'u1',
+    };
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'text', catId: 'opus', content: 'must not escape', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        get: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+      transcriptWriter: {
+        appendEvent: () => {},
+        appendDurableEvent: async () => {},
+        keyedContentDigest: async () => `hmac-sha256:${'a'.repeat(64)}`,
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'u1',
+        threadId: 'thread-f299-bypass',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(
+      messages.some((message) => message.type === 'text'),
+      false,
+    );
+    const error = messages.find((message) => message.type === 'error');
+    assert.match(error?.error ?? '', /request_generation_commit_unavailable/);
+  });
+
   // --- F-BLOAT: Resume skips systemPrompt injection ---
 
   it('F-BLOAT: skips systemPrompt on resume (sessionId present)', async () => {
@@ -9041,7 +9091,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
   });
 
-  it('reads external-project governance from the persistent workspace when invoked from a runtime checkout', async () => {
+  it('invokes an uninitialized external project from a runtime checkout without writing governance files', async () => {
     const previousCwd = process.cwd();
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
     const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
@@ -9056,8 +9106,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
     process.chdir(runtimeRoot);
 
-    const bootstrap = new GovernanceBootstrapService(workspaceRoot);
-    await bootstrap.bootstrap(externalProject, { dryRun: false });
+    const beforeEntries = await readdir(externalProject);
 
     let invokedService = false;
     const service = {
@@ -9087,12 +9136,13 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
         }),
       );
 
-      assert.equal(invokedService, true, 'the initialized external project should reach the agent service');
+      assert.equal(invokedService, true, 'an uninitialized external project should reach the agent service');
       assert.equal(
         msgs.some((m) => m.type === 'system_info' && m.content?.includes('governance_blocked')),
         false,
-        'dispatch must read the registry written under the persistent workspace',
+        'governance installation is not a dispatch readiness gate',
       );
+      assert.deepStrictEqual(await readdir(externalProject), beforeEntries, 'dispatch must not materialize governance');
     } finally {
       process.chdir(previousCwd);
       if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -9531,8 +9581,8 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
   });
 
-  it('bug-fix: account resolution uses runtime root (process.cwd()), not thread.projectPath', async () => {
-    // Regression: thread.projectPath points to dev worktree which lacks runtime-only accounts.
+  it('F302: sidecar-free external project resolves bound accounts from the runtime root', async () => {
+    // Regression: thread.projectPath points to an external repository with no Clowder AI sidecar.
     // Account resolution must always use process.cwd() (the runtime root).
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
 
@@ -9542,16 +9592,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await mkdir(runtimeApiDir, { recursive: true });
     await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
 
-    // devRoot = where thread.projectPath points (missing the custom account)
+    // devRoot = where thread.projectPath points (no .cat-cafe directory at all)
     const devRoot = await mkdtemp(join(tmpdir(), 'account-dev-root-'));
     const devApiDir = join(devRoot, 'packages', 'api');
     await mkdir(devApiDir, { recursive: true });
     await writeFile(join(devRoot, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
-    // Write a minimal catalog in devRoot WITHOUT the custom account
-    const devCatCafe = join(devRoot, '.cat-cafe');
-    await mkdir(devCatCafe, { recursive: true });
-    await writeFile(join(devCatCafe, 'cat-catalog.json'), JSON.stringify({ accounts: {} }), 'utf-8');
-
     // Create the custom account only in runtimeRoot
     const customProfile = await createProviderProfile(runtimeRoot, {
       provider: 'openai',

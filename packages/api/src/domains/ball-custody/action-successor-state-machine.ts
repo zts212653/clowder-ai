@@ -18,19 +18,6 @@ export type {
   ActionSuccessorSlot,
 } from '@cat-cafe/shared';
 export type {
-  ActionSuccessorIdentity,
-  ActionSuccessorIdentityErrorCode,
-  ActionSuccessorIdentityInput,
-} from './action-successor-identity.js';
-export {
-  ActionSuccessorIdentityError,
-  canonicalizeActionIdentity,
-  canonicalizeActionSubjectRef,
-} from './action-successor-identity.js';
-
-import { recordActionSuccessorOutcome } from './action-successor-outcome-state-machine.js';
-export { recordActionSuccessorOutcome };
-export type {
   ActionCompletionCandidateSnapshot,
   ActionCompletionTruthVerdict,
   ActionCompletionVerdict,
@@ -42,6 +29,24 @@ export {
   continueActionSuccessorFreshRevision,
   recordActionCompletionCandidate,
 } from './action-successor-completion-state-machine.js';
+export type {
+  ActionSuccessorIdentity,
+  ActionSuccessorIdentityErrorCode,
+  ActionSuccessorIdentityInput,
+} from './action-successor-identity.js';
+export {
+  ActionSuccessorIdentityError,
+  canonicalizeActionIdentity,
+  canonicalizeActionSubjectRef,
+} from './action-successor-identity.js';
+export type {
+  RetirePendingDispatchForFreshnessMismatchInput,
+  RetirePendingDispatchForFreshnessMismatchResult,
+} from './action-successor-outcome-state-machine.js';
+export {
+  recordActionSuccessorOutcome,
+  retirePendingDispatchForFreshnessMismatch,
+} from './action-successor-outcome-state-machine.js';
 export type {
   ReplaceActionSuccessorInput,
   ReplaceActionSuccessorResult,
@@ -69,12 +74,18 @@ export {
 export type ActionSuccessorHolderOutcome = 'succeeded' | 'failed' | 'canceled' | 'unavailable' | 'rejected_ownership';
 export type ActionSuccessorLeaseStatus = 'active' | 'replaceable' | 'completed';
 export type ActionSuccessorDispatchDeliveryState = 'pending' | 'delivered' | 'failed';
+export interface ActionSuccessorDispatchDeliveryReservation {
+  predicateDigest: string;
+  freshnessEvidenceRef: string;
+  reservedAt: number;
+}
 export type ActionSuccessorDispatchFailureReason =
   | 'proposal_missing'
   | 'proposal_not_approved'
   | 'proposal_fence_mismatch'
   | 'carrier_source_conflict'
-  | 'carrier_receipt_conflict';
+  | 'carrier_receipt_conflict'
+  | 'terminal_predicate_mismatch';
 
 interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
   leaseId: string;
@@ -103,6 +114,8 @@ interface ActionSuccessorLeaseBase extends ActionSuccessorIdentity {
   dispatchDeliveryState?: ActionSuccessorDispatchDeliveryState;
   dispatchDeliveryAttemptCount?: number;
   dispatchDeliveryLastAttemptAt?: number;
+  /** Durable linearization point between verified recovery truth and carrier side effects. */
+  dispatchDeliveryReservation?: ActionSuccessorDispatchDeliveryReservation;
   dispatchDeliveredMessageId?: string;
   dispatchFailureReason?: ActionSuccessorDispatchFailureReason;
   dispatchFailureEvidenceRef?: string;

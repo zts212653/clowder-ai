@@ -45,7 +45,7 @@ describe('project setup flow (integration)', () => {
     await rm(fakeCatCafeRoot, { recursive: true, force: true });
   });
 
-  it('mkdir → status (needsBootstrap) → setup(init) → status (ready)', async () => {
+  it('mkdir → project facts → setup(init) without implicit governance writes', async () => {
     // 1. Create a subdirectory
     const mkdirRes = await app.inject({
       method: 'POST',
@@ -57,7 +57,7 @@ describe('project setup flow (integration)', () => {
     const { createdPath } = JSON.parse(mkdirRes.payload);
     assert.ok(createdPath.endsWith('my-project'));
 
-    // 2. Check governance status — should need bootstrap
+    // 2. Check project facts — governance installation is not readiness
     const statusRes1 = await app.inject({
       method: 'GET',
       url: `/api/governance/status?projectPath=${encodeURIComponent(createdPath)}`,
@@ -65,11 +65,12 @@ describe('project setup flow (integration)', () => {
     });
     assert.equal(statusRes1.statusCode, 200);
     const status1 = JSON.parse(statusRes1.payload);
-    assert.equal(status1.ready, false);
+    assert.equal('ready' in status1, false);
+    assert.equal('needsBootstrap' in status1, false);
     assert.equal(status1.isEmptyDir, true);
     assert.equal(status1.isGitRepo, false);
 
-    // 3. Run setup with mode=init (git init + governance bootstrap)
+    // 3. Run setup with mode=init (git init only)
     const setupRes = await app.inject({
       method: 'POST',
       url: '/api/projects/setup',
@@ -79,8 +80,9 @@ describe('project setup flow (integration)', () => {
     assert.equal(setupRes.statusCode, 200);
     const setup = JSON.parse(setupRes.payload);
     assert.equal(setup.ok, true);
+    assert.equal('governanceReport' in setup, false);
 
-    // 4. Check governance status again — should now be ready
+    // 4. Project facts reflect git init, without a readiness state
     const statusRes2 = await app.inject({
       method: 'GET',
       url: `/api/governance/status?projectPath=${encodeURIComponent(createdPath)}`,
@@ -92,7 +94,7 @@ describe('project setup flow (integration)', () => {
     assert.equal(status2.isEmptyDir, false); // .git exists now
   });
 
-  it('mkdir → setup(skip) still bootstraps governance', async () => {
+  it('mkdir → setup(skip) leaves the empty directory untouched', async () => {
     // 1. Create a subdirectory
     const mkdirRes = await app.inject({
       method: 'POST',
@@ -103,7 +105,7 @@ describe('project setup flow (integration)', () => {
     assert.equal(mkdirRes.statusCode, 200);
     const { createdPath } = JSON.parse(mkdirRes.payload);
 
-    // 2. Run setup with mode=skip (no git, governance only)
+    // 2. Run setup with mode=skip (no git, no governance)
     const setupRes = await app.inject({
       method: 'POST',
       url: '/api/projects/setup',
@@ -114,7 +116,7 @@ describe('project setup flow (integration)', () => {
     const setup = JSON.parse(setupRes.payload);
     assert.equal(setup.ok, true);
 
-    // 3. Status should reflect: no git repo, not empty (governance files exist)
+    // 3. Status should reflect: no git repo and still empty
     const statusRes = await app.inject({
       method: 'GET',
       url: `/api/governance/status?projectPath=${encodeURIComponent(createdPath)}`,
@@ -123,5 +125,6 @@ describe('project setup flow (integration)', () => {
     assert.equal(statusRes.statusCode, 200);
     const status = JSON.parse(statusRes.payload);
     assert.equal(status.isGitRepo, false);
+    assert.equal(status.isEmptyDir, true);
   });
 });

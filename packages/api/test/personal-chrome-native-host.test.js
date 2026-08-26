@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  PersonalChromeConversationAuthorizationError,
   readPersonalChromeConversationAuthorizations,
   writePersonalChromeConversationAuthorizationsAtomic,
 } from '../src/plugins/cloud-cat-personal-host/native-host/conversation-binding.mjs';
@@ -21,7 +22,7 @@ import {
   encodeNativeMessage,
   NativeMessageDecoder,
 } from '../src/plugins/cloud-cat-personal-host/native-host/native-framing.mjs';
-import { createNativeHostBridge } from '../src/plugins/cloud-cat-personal-host/native-host/native-host.mjs';
+import { createNativeHostBridge as createNativeHostBridgeImpl } from '../src/plugins/cloud-cat-personal-host/native-host/native-host.mjs';
 import {
   LEDGER_ENTRY_LIMIT,
   LEDGER_FILE_LIMIT,
@@ -34,6 +35,28 @@ const bridges = [];
 const ledgerArtifacts = new Set();
 const apiRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const nativeHostEntrypoint = join(apiRoot, 'src/plugins/cloud-cat-personal-host/native-host/native-host.mjs');
+const helperArtifactRevision = `sha512:${'0'.repeat(128)}`;
+
+async function createNativeHostBridge(options) {
+  const bridge = await createNativeHostBridgeImpl({ helperArtifactRevision, ...options });
+  return {
+    ...bridge,
+    acceptNativeMessage(message) {
+      const normalized =
+        message?.kind === 'append_result' && message.observedRevisions === undefined
+          ? {
+              ...message,
+              observedRevisions: {
+                helper: helperArtifactRevision,
+                extension: '0.2.1',
+                pageAdapter: '2026-08-23.1',
+              },
+            }
+          : message;
+      return bridge.acceptNativeMessage(normalized);
+    },
+  };
+}
 
 afterEach(async () => {
   await Promise.all(bridges.splice(0).map((bridge) => bridge.stop()));
@@ -83,12 +106,17 @@ function localAppend(socketPath, pairingSecret, request) {
 
 function appendRequest(overrides = {}) {
   return {
-    v: 1,
+    v: 2,
     kind: 'append_message',
     requestId: 'request-1',
     conversationId: 'conversation-7',
     text: 'hello cloud cat',
     idempotencyKey: 'source-message-9',
+    expectedRevisions: {
+      helper: helperArtifactRevision,
+      extension: '0.2.1',
+      pageAdapter: '2026-08-23.1',
+    },
     ...overrides,
   };
 }
@@ -208,6 +236,80 @@ describe('Native Messaging framing', () => {
 });
 
 describe('personal Chrome native host bridge', () => {
+  it('rejects a legacy v1 append before Chrome dispatch', async () => {
+    const paths = testPaths('legacy-v1-append');
+    const forwarded = [];
+    let bridge;
+    bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: async (message) => {
+        forwarded.push(message);
+        await bridge.acceptNativeMessage({
+          v: 2,
+          kind: 'append_result',
+          requestId: message.requestId,
+          idempotencyKey: message.idempotencyKey,
+          status: 'host_observed',
+          hostMessageId: 'must-not-be-observed',
+        });
+      },
+    });
+    bridges.push(bridge);
+
+    const result = await localAppend(paths.socketPath, 'a'.repeat(64), appendRequest({ v: 1 }));
+
+    assert.equal(result.errorCode, 'INVALID_REQUEST');
+    assert.deepEqual(forwarded, []);
+    assert.equal((await loadLedger(paths.ledgerPath)).size, 0);
+  });
+
+  it('maps a legacy extension response to stale_adapter without waiting for timeout', async () => {
+    const paths = testPaths('legacy-extension-health');
+    const forwarded = [];
+    let bridge;
+    bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: async (message) => {
+        forwarded.push(message);
+        await bridge.acceptNativeMessage({
+          v: 1,
+          kind: 'append_result',
+          requestId: message.requestId,
+          idempotencyKey: 'invalid-key',
+          status: 'failed',
+          errorCode: 'INVALID_REQUEST',
+        });
+      },
+    });
+    bridges.push(bridge);
+
+    const result = await localAppend(paths.socketPath, 'a'.repeat(64), {
+      v: 2,
+      kind: 'health_check',
+      requestId: 'health-legacy-extension',
+      conversationId: 'conversation-7',
+      expectedRevisions: {
+        helper: helperArtifactRevision,
+        extension: '0.2.1',
+        pageAdapter: '2026-08-23.1',
+      },
+    });
+
+    assert.equal(result.status, 'stale_adapter');
+    assert.equal(result.errorCode, 'STALE_EXTENSION_PROTOCOL');
+    assert.deepEqual(result.observedRevisions, {
+      helper: helperArtifactRevision,
+      extension: '0.0.0',
+      pageAdapter: 'unobserved',
+    });
+    assert.deepEqual(
+      forwarded.map((message) => message.kind),
+      ['health_check'],
+    );
+  });
+
   it('returns typed needs-binding before ledger admission or Chrome dispatch', async () => {
     const paths = testPaths('needs-binding');
     await unlink(paths.conversationBindingPath);
@@ -374,6 +476,44 @@ describe('personal Chrome native host bridge', () => {
     assert.equal(await readFile(paths.conversationBindingPath, 'utf8'), before);
   });
 
+  it('exposes authorization contention as a bounded cause without leaking persisted binding data', async () => {
+    const paths = testPaths('explicit-binding-busy');
+    const before = await readFile(paths.conversationBindingPath, 'utf8');
+    const outbound = [];
+    const bridge = await createNativeHostBridge({
+      ...paths,
+      pairingSecret: 'a'.repeat(64),
+      sendNative: (message) => outbound.push(message),
+      authorizeConversation: async () => {
+        throw new PersonalChromeConversationAuthorizationError(
+          'AUTHORIZATION_BUSY',
+          'conversation authorization mutation remained busy',
+        );
+      },
+    });
+    bridges.push(bridge);
+
+    await bridge.acceptNativeMessage({
+      v: 1,
+      kind: 'bind_conversation',
+      requestId: 'binding-busy-1',
+      conversationId: 'conversation-8',
+      chatUrl: 'https://chatgpt.com/c/conversation-8',
+    });
+
+    assert.deepEqual(outbound, [
+      {
+        v: 1,
+        kind: 'binding_result',
+        requestId: 'binding-busy-1',
+        status: 'failed',
+        errorCode: 'AUTHORIZATION_BUSY',
+      },
+    ]);
+    assert.equal(await readFile(paths.conversationBindingPath, 'utf8'), before);
+    assert.equal(JSON.stringify(outbound).includes('conversation-7'), false);
+  });
+
   it(
     'returns typed binding-record-invalid before ledger admission or Chrome dispatch',
     { skip: process.platform === 'win32' },
@@ -462,7 +602,7 @@ describe('personal Chrome native host bridge', () => {
     await bridge.waitForDispatchCount(2);
     for (const request of outbound.filter((message) => message.kind === 'append_message')) {
       await bridge.acceptNativeMessage({
-        v: 1,
+        v: 2,
         kind: 'append_result',
         requestId: request.requestId,
         idempotencyKey: request.idempotencyKey,
@@ -614,7 +754,7 @@ describe('personal Chrome native host bridge', () => {
     assert.ok(['request-1', 'request-2'].includes(forwarded[0].requestId));
 
     await bridge.acceptNativeMessage({
-      v: 1,
+      v: 2,
       kind: 'append_result',
       // Concurrent Unix socket connects have no arrival-order guarantee. Reply to
       // whichever retry became the canonical dispatch; both callers must share it.
@@ -624,9 +764,25 @@ describe('personal Chrome native host bridge', () => {
       hostMessageId: 'chatgpt-user-message-42',
     });
 
-    assert.equal((await first).hostMessageId, 'chatgpt-user-message-42');
-    assert.equal((await retry).hostMessageId, 'chatgpt-user-message-42');
+    const receipts = [await first, await retry];
+    assert.deepEqual(
+      receipts.map((receipt) => receipt.hostMessageId),
+      ['chatgpt-user-message-42', 'chatgpt-user-message-42'],
+    );
+    assert.deepEqual(
+      receipts.map((receipt) => receipt.idempotentReplay).sort(),
+      [false, true],
+      'one canonical delivery and one coalesced retry must be distinguishable',
+    );
     assert.equal(forwarded.length, 1);
+
+    const terminalRetry = await localAppend(
+      paths.socketPath,
+      'a'.repeat(64),
+      appendRequest({ requestId: 'request-3' }),
+    );
+    assert.equal(terminalRetry.hostMessageId, 'chatgpt-user-message-42');
+    assert.equal(terminalRetry.idempotentReplay, true);
   });
 
   it('does not expose a terminal receipt to retries before the terminal ledger write commits', async () => {
@@ -658,7 +814,7 @@ describe('personal Chrome native host bridge', () => {
     const first = localAppend(paths.socketPath, 'a'.repeat(64), appendRequest({ requestId: 'request-1' }));
     await bridge.waitForDispatchCount(1);
     const terminalAcceptance = bridge.acceptNativeMessage({
-      v: 1,
+      v: 2,
       kind: 'append_result',
       requestId: 'request-1',
       idempotencyKey: 'source-message-9',
@@ -755,7 +911,7 @@ describe('personal Chrome native host bridge', () => {
     const first = localAppend(paths.socketPath, 'a'.repeat(64), appendRequest());
     await bridge.waitForDispatchCount(1);
     await bridge.acceptNativeMessage({
-      v: 1,
+      v: 2,
       kind: 'append_result',
       requestId: 'request-1',
       idempotencyKey: 'source-message-9',
@@ -800,6 +956,7 @@ describe('personal Chrome native host bridge', () => {
     const stopped = await pending;
     assert.equal(stopped.errorCode, 'HOST_STOPPED');
     assert.equal(stopped.idempotencyKey, 'source-message-9');
+    assert.equal(stopped.idempotentReplay, false);
 
     const replayed = [];
     const restarted = await createNativeHostBridge({
@@ -815,6 +972,7 @@ describe('personal Chrome native host bridge', () => {
     );
     assert.equal(retry.status, 'failed');
     assert.equal(retry.errorCode, 'AMBIGUOUS_EFFECT');
+    assert.equal(retry.idempotentReplay, true);
     assert.deepEqual(replayed, []);
   });
 
@@ -835,7 +993,7 @@ describe('personal Chrome native host bridge', () => {
     );
     assert.equal(conflict.errorCode, 'IDEMPOTENCY_CONFLICT');
     await bridge.acceptNativeMessage({
-      v: 1,
+      v: 2,
       kind: 'append_result',
       requestId: 'request-1',
       idempotencyKey: 'source-message-9',
@@ -857,7 +1015,7 @@ describe('personal Chrome native host bridge', () => {
     await bridge.waitForDispatchCount(1);
 
     await bridge.acceptNativeMessage({
-      v: 1,
+      v: 2,
       kind: 'append_result',
       requestId: 'request-1',
       idempotencyKey: 'source-message-9',
@@ -937,6 +1095,7 @@ describe('native host install plan', () => {
           CAT_CAFE_PERSONAL_CHROME_SOCKET: socketPath,
           CAT_CAFE_PERSONAL_CHROME_LEDGER: join(testRoot, 'r.json'),
           CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET: 'p'.repeat(64),
+          CAT_CAFE_PERSONAL_CHROME_HELPER_ARTIFACT_REVISION: helperArtifactRevision,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -1031,19 +1190,25 @@ describe('native host install plan', () => {
             (child.exitCode !== null ? new Error(stderr || `native host exited ${child.exitCode}`) : undefined),
           10_000,
         );
+        const expectedRevisions = {
+          helper: plan.artifactDigest,
+          extension: '0.2.1',
+          pageAdapter: '2026-08-23.1',
+        };
         const outboundPromise = readOneNativeMessage(child.stdout);
-        const localResultPromise = localAppend(plan.socketPath, pairingSecret, appendRequest());
+        const localResultPromise = localAppend(plan.socketPath, pairingSecret, appendRequest({ expectedRevisions }));
         const outbound = await outboundPromise;
-        assert.deepEqual(outbound, appendRequest());
+        assert.deepEqual(outbound, appendRequest({ expectedRevisions }));
 
         child.stdin.write(
           encodeNativeMessage({
-            v: 1,
+            v: 2,
             kind: 'append_result',
             requestId: outbound.requestId,
             idempotencyKey: outbound.idempotencyKey,
             status: 'host_observed',
             hostMessageId: 'chatgpt-user-message-launched-host-1',
+            observedRevisions: expectedRevisions,
           }),
         );
         assert.equal((await localResultPromise).hostMessageId, 'chatgpt-user-message-launched-host-1');

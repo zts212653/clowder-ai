@@ -612,6 +612,8 @@ export interface AgentRouterOptions {
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
   cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  /** F247: shared signer for source-bound cloud Remote MCP returns. */
+  cloudReturnBindingSigner?: import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner;
   /** F247/F167: server-owned terminal producer for the exact cloud A2A carrier. */
   a2aDispatchDispositionService?: Pick<
     import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
@@ -635,6 +637,8 @@ export interface AgentRouterOptions {
   personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287: invocation-bound Cue Plane adapter. */
   memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  /** F231 canonical profile owner for F299 source-lifecycle binding. */
+  profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
 }
 
 /**
@@ -704,6 +708,7 @@ export class AgentRouter {
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
   /** F247 AC-B1c-3 PR-C */
   private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  private cloudReturnBindingSigner?: import('../../cloud-bridge/cloud-return-binding.js').CloudReturnBindingSigner;
   private a2aDispatchDispositionService?: Pick<
     import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
     'complete'
@@ -725,6 +730,7 @@ export class AgentRouter {
   private personMemoryProposalStatusContextResolver?: import('../../../../memory/people/PersonMemoryProposalStatusContextResolver.js').PersonMemoryProposalStatusContextResolver;
   /** F287 */
   private memoryCuePromptService?: import('../../../../memory/cue/MemoryCueInvocationPromptService.js').MemoryCueInvocationPromptResolver;
+  private profileRepository?: import('../../profile/ProfileRepository.js').FileProfileRepository;
   private speechMentionRe: RegExp;
 
   /**
@@ -841,6 +847,7 @@ export class AgentRouter {
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
+    this.cloudReturnBindingSigner = options.cloudReturnBindingSigner;
     this.a2aDispatchDispositionService = options.a2aDispatchDispositionService;
     this.freshnessReinvokeCheck = options.freshnessReinvokeCheck;
     this.turnExecutionStore = options.turnExecutionStore;
@@ -851,6 +858,7 @@ export class AgentRouter {
     this.injectionTraceStore = options.injectionTraceStore;
     this.personMemoryProposalStatusContextResolver = options.personMemoryProposalStatusContextResolver;
     this.memoryCuePromptService = options.memoryCuePromptService;
+    this.profileRepository = options.profileRepository;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -1488,6 +1496,7 @@ export class AgentRouter {
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
         ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
+        ...(this.cloudReturnBindingSigner ? { cloudReturnBindingSigner: this.cloudReturnBindingSigner } : {}),
         ...(this.a2aDispatchDispositionService
           ? { a2aDispatchDispositionService: this.a2aDispatchDispositionService }
           : {}),
@@ -1497,6 +1506,7 @@ export class AgentRouter {
           ? { providerNativeFreshnessFactory: this.providerNativeFreshnessFactory }
           : {}),
         ...(this.memoryCuePromptService ? { memoryCuePromptService: this.memoryCuePromptService } : {}),
+        ...(this.profileRepository ? { profileRepository: this.profileRepository } : {}),
       },
       messageStore: this.messageStore,
       deliveryCursorStore: this.deliveryCursorStore,

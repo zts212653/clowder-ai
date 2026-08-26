@@ -13,7 +13,7 @@ tips_exempt: "内部状态收敛与写入面重构；不新增用户可操作的
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入
 
-> **Status**: done | **Completed**: 2026-08-21 | **Evolved from**: F081 | **Renewed CloseGate**: PASS by 小团团·Maine Coon (@codex-terra)，P1 deferred = 0（`0001787371427031-000209-64cae1d3`）；prior Luna verdict remains superseded by the working-order runtime counterexample | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1
+> **Status**: in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`0001787464914112-000015-317297b0`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1
 >
 > **operator kickoff**: `0001786949883267-000007-1c4fc745`（“回到数学之美和第一性原理”“可以立项一下”“你主导，他辅助 review”；并授权 F081 AC-B2 处置由 owner 自决）+ `0001786950276392-000031-c800463d`（“立项直接 commit push，不需要提 PR，Maine Coon re 出来的问题当场改”）。
 >

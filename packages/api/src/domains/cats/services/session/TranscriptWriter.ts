@@ -13,6 +13,7 @@
  *   { v:1, t:number, threadId, catId, sessionId, cliSessionId?, invocationId?, eventNo, event }
  */
 
+import { createHmac, randomBytes } from 'node:crypto';
 import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -157,14 +158,47 @@ export class TranscriptWriter {
   private buffers = new Map<string, BufferedEvent[]>();
   /** Serialized disk write chains per session for incremental crash-recovery append. */
   private diskWriteQueue = new Map<string, Promise<void>>();
+  private contentDigestKey?: Promise<Buffer>;
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
     this.indexStride = opts.indexStride ?? 100;
   }
 
-  /** Append a raw event to the in-memory buffer for a session. */
-  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+  private async loadContentDigestKey(): Promise<Buffer> {
+    const keyPath = join(this.dataDir, '.request-envelope-hmac-key');
+    try {
+      const existing = await readFile(keyPath);
+      if (existing.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return existing;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await mkdir(this.dataDir, { recursive: true });
+    const created = randomBytes(32);
+    try {
+      await writeFile(keyPath, created, { flag: 'wx', mode: 0o600 });
+      return created;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const winner = await readFile(keyPath);
+      if (winner.byteLength !== 32) throw new Error('request_envelope_hmac_key_invalid');
+      return winner;
+    }
+  }
+
+  /** Stable owner-local digest for sensitive transcript content. */
+  async keyedContentDigest(content: string): Promise<string> {
+    this.contentDigestKey ??= this.loadContentDigestKey();
+    const key = await this.contentDigestKey;
+    return `hmac-sha256:${createHmac('sha256', key).update(content).digest('hex')}`;
+  }
+
+  private bufferEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): BufferedEvent {
     let buf = this.buffers.get(session.sessionId);
     if (!buf) {
       buf = [];
@@ -177,11 +211,54 @@ export class TranscriptWriter {
       event,
     };
     buf.push(entry);
+    return entry;
+  }
+
+  private rollbackBufferedEvent(sessionId: string, entry: BufferedEvent): void {
+    const buf = this.buffers.get(sessionId);
+    if (!buf) return;
+    const index = buf.indexOf(entry);
+    if (index < 0) return;
+    buf.splice(index, 1);
+    for (let cursor = index; cursor < buf.length; cursor += 1) {
+      const buffered = buf[cursor];
+      if (buffered) buffered.eventNo = cursor;
+    }
+    if (buf.length === 0) this.buffers.delete(sessionId);
+  }
+
+  /** Append a raw event to the in-memory buffer for a session. */
+  appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
+    const entry = this.bufferEvent(session, event, invocationId);
 
     // Incremental disk append for crash recovery (F232 disk fallback).
     // Fire-and-forget: buffer is the primary source during normal operation;
     // disk copy only matters when the process restarts and buffer is lost.
-    this.enqueueDiskAppend(session, entry);
+    void this.enqueueDiskAppend(session, entry).catch(() => {
+      // Best-effort: buffer is the primary source for ordinary transcript events.
+    });
+  }
+
+  /**
+   * Append an event only after its active-session JSONL record is durable.
+   *
+   * F299 request generations call this before provider launch. The event is
+   * reserved in the buffer to preserve process-local ordering, but a failed
+   * disk write rolls that reservation back and rejects the caller. Unlike
+   * ordinary transcript output, this path must never degrade to best-effort.
+   */
+  async appendDurableEvent(
+    session: TranscriptSessionInfo,
+    event: Record<string, unknown>,
+    invocationId?: string,
+  ): Promise<void> {
+    const entry = this.bufferEvent(session, event, invocationId);
+    try {
+      await this.enqueueDiskAppend(session, entry);
+    } catch (error) {
+      this.rollbackBufferedEvent(session.sessionId, entry);
+      throw error;
+    }
   }
 
   /** Get buffered events for a session (for testing). */
@@ -195,29 +272,31 @@ export class TranscriptWriter {
   }
 
   /** Enqueue a single event append to disk. Writes are serialized per session. */
-  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): void {
+  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): Promise<void> {
     const prev = this.diskWriteQueue.get(session.sessionId) ?? Promise.resolve();
-    const next = prev
-      .then(async () => {
-        const dir = this.sessionDir(session);
-        await mkdir(dir, { recursive: true });
-        const envelope = {
-          v: 1,
-          t: entry.timestamp,
-          threadId: session.threadId,
-          catId: session.catId,
-          sessionId: session.sessionId,
-          ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-          invocationId: entry.invocationId,
-          eventNo: entry.eventNo,
-          event: entry.event,
-        };
-        await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
-      })
-      .catch(() => {
-        // Best-effort: buffer is the primary source; disk append is crash-recovery insurance.
-      });
-    this.diskWriteQueue.set(session.sessionId, next);
+    const attempt = prev.then(async () => {
+      const dir = this.sessionDir(session);
+      await mkdir(dir, { recursive: true });
+      const envelope = {
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        invocationId: entry.invocationId,
+        eventNo: entry.eventNo,
+        event: entry.event,
+      };
+      await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
+    });
+    // Keep the queue usable after a failed durable append. Individual callers
+    // still receive the original rejection through `attempt`.
+    this.diskWriteQueue.set(
+      session.sessionId,
+      attempt.catch(() => {}),
+    );
+    return attempt;
   }
 
   /** Wait for all pending incremental disk writes to complete. Primarily for testing. */

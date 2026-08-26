@@ -296,8 +296,16 @@ export class FallbackCarrierWrapper implements AgentService {
       // Cloud P1 fix: monitor yielded errors (not just thrown) — carriers can surface
       // quota/structural failures as error messages instead of throwing.
       const fallbackCarrier = this._carrierFactory(fallbackTier, this.catId);
+      const fallbackOptions = options?.beforeProviderLaunch
+        ? {
+            ...options,
+            beforeProviderLaunch: (request: import('../../types.js').PreparedProviderRequestV1) =>
+              options.beforeProviderLaunch?.({ ...request, boundaryReason: 'provider_fallback' }) ??
+              Promise.reject(new Error('provider_launch_recorder_unavailable')),
+          }
+        : options;
       try {
-        for await (const fbMsg of fallbackCarrier.invoke(prompt, options)) {
+        for await (const fbMsg of fallbackCarrier.invoke(prompt, fallbackOptions)) {
           if (fbMsg.type === 'error' && typeof fbMsg.error === 'string') {
             const fbCls = classifyCarrierFailure(fbMsg.error);
             if (fbCls !== 'transient') {

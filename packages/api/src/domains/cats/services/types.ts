@@ -13,6 +13,9 @@ import type {
   MessageContent,
   QueueTerminalConsumptionWitness,
   ReplyPreview,
+  RequestGenerationRetryReason,
+  RequestGenerationSourceRef,
+  SanitizedRequestedRuntimeConfigV1,
 } from '@cat-cafe/shared';
 import type { Span } from '@opentelemetry/api';
 import type { CliDiagnostics } from '../../../utils/cli-diagnostics.js';
@@ -633,6 +636,63 @@ export interface AgentServiceOptions {
   parentSpan?: Span;
   /** ADR-042 hard execution boundary for automatic supplement checks. */
   toolExecutionPolicy?: ToolExecutionPolicy;
+  /**
+   * F299 Phase D: fail-closed recorder invoked by the concrete adapter after
+   * its final message/native channels are immutable and immediately before
+   * those same values cross the provider boundary.
+   */
+  beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
+}
+
+export interface PreparedProviderRequestV1 {
+  readonly v: 1;
+  /** Bounded invocation-local reason when this is an adapter-owned follow-up launch. */
+  readonly boundaryReason?: RequestGenerationRetryReason;
+  readonly message:
+    | {
+        readonly accuracy?: 'exact';
+        readonly body: string;
+        readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+        readonly injectionDecision?: string;
+      }
+    | {
+        readonly accuracy: 'unsupported' | 'unknown';
+        readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+        readonly injectionDecision?: string;
+      };
+  readonly nativeInstructions: readonly {
+    readonly body: string;
+    readonly sourceRefs?: readonly RequestGenerationSourceRef[];
+    readonly injectionDecision?: string;
+  }[];
+  readonly runtime: SanitizedRequestedRuntimeConfigV1;
+  /**
+   * Ephemeral tool evidence. Raw schemas and server names are consumed by the
+   * transcript owner to mint keyed set digests and are never persisted.
+   */
+  readonly tools: PreparedProviderToolSurfaceV1;
+  readonly providerNativeVisibility: 'unsupported' | 'unknown';
+}
+
+export interface PreparedProviderToolSurfaceV1 {
+  readonly finalSurface: 'exact' | 'declared_only' | 'unsupported' | 'unknown';
+  /** Secret-free server identifiers actually declared to the carrier. */
+  readonly declaredServerNames?: readonly string[];
+  /** Clowder AI-owned schemas actually placed on the request boundary. */
+  readonly catCafeSchemas?: readonly unknown[];
+  /** Schemas reported back by a provider-owned negotiation surface. */
+  readonly providerObservedSchemas?: readonly unknown[];
+}
+
+export function requireExactPreparedProviderMessage(request: PreparedProviderRequestV1): string {
+  if ('body' in request.message) return request.message.body;
+  throw new Error('prepared_provider_request_message_not_exact');
+}
+
+export interface ProviderRequestGenerationCommitV1 {
+  readonly requestGenerationId: string;
+  readonly generationOrdinal: number;
+  readonly sessionId: string;
 }
 
 /**

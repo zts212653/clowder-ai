@@ -16,6 +16,7 @@ export type ExternalPluginRuntimeErrorCode =
   | 'HANDSHAKE_TIMEOUT'
   | 'HEARTBEAT_TIMEOUT'
   | 'HEARTBEAT_REJECTED'
+  | 'DELIVERY_REJECTED'
   | 'PROTOCOL_VIOLATION';
 
 export class ExternalPluginRuntimeError extends Error {

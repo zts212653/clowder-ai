@@ -156,6 +156,20 @@ export function ChatInput({
     return ids;
   }, [activeInvocations, canonicalExecutions, hasUnverifiedLegacyExecution, storeTargetCats]);
 
+  // Stable identity key for the current execution set. Changes when any
+  // execution starts or ends, enabling the steer confirmation modal to
+  // detect same-render A→B invocation transitions.
+  const activeExecutionKey = useMemo(
+    () =>
+      canonicalExecutions.length > 0
+        ? canonicalExecutions
+            .map((e) => e.executionId)
+            .sort()
+            .join(',')
+        : undefined,
+    [canonicalExecutions],
+  );
+
   const [input, setInput] = useState(() => (threadId ? (threadDrafts.get(threadId) ?? '') : ''));
   const [showMentions, setShowMentions] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
@@ -1033,6 +1047,7 @@ export function ChatInput({
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
+          activeExecutionKey={whisperTargetsAllIdle ? undefined : activeExecutionKey}
           hasText={Boolean(input.trim() || contextAttachments.length > 0)}
         />
       </div>
