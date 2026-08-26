@@ -23,6 +23,40 @@ function loadCensus() {
   return parse(readFileSync(censusPath, 'utf8'));
 }
 
+function assertInstanceLocalMigrationContract(census, validateMeasurementBundleCensus) {
+  const active = census.entries.filter((entry) => entry.classification === 'active_decision_bearing');
+  const assigned = active.filter((entry) => entry.validityMigration.batch !== null);
+  if (assigned.length === 0) {
+    assert.equal(
+      active.every(
+        (entry) =>
+          entry.validityMigration.status === 'unmigrated' &&
+          entry.validityMigration.batch === null &&
+          entry.validityMigration.certificateRef === null &&
+          entry.validityMigration.resultRef === null &&
+          entry.validityMigration.replayRef === null &&
+          entry.validityMigration.actionGate === 'keep_observe_only' &&
+          typeof entry.validityMigration.hardBlockReason === 'string' &&
+          entry.validityMigration.hardBlockReason.length > 0,
+      ),
+      true,
+      'a public bootstrap census must keep every active domain locked without inherited evidence',
+    );
+
+    const firstMigration = structuredClone(census);
+    const memoryMigration = firstMigration.entries.find((entry) => entry.domainId === 'eval:memory').validityMigration;
+    assert.equal(memoryMigration.riskRank, 1);
+    memoryMigration.batch = 1;
+    memoryMigration.status = 'contract_ready';
+    assert.doesNotThrow(() => validateMeasurementBundleCensus(firstMigration, repoRoot));
+  } else {
+    assert.deepEqual(
+      active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),
+      ['eval:memory'],
+    );
+  }
+}
+
 describe('F267 real measurement bundle census', () => {
   it('covers each real registry entry once and derives the exact 10/1/1 classification', async () => {
     const { validateMeasurementBundleCensus } = await moduleUnderTest();
@@ -66,51 +100,38 @@ describe('F267 real measurement bundle census', () => {
       active.map((entry) => entry.validityMigration.riskRank).sort((left, right) => left - right),
       [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     );
-    const assigned = active.filter((entry) => entry.validityMigration.batch !== null);
-    if (assigned.length === 0) {
-      assert.equal(
-        active.every(
-          (entry) =>
-            entry.validityMigration.status === 'unmigrated' &&
-            entry.validityMigration.batch === null &&
-            entry.validityMigration.certificateRef === null &&
-            entry.validityMigration.resultRef === null &&
-            entry.validityMigration.replayRef === null &&
-            entry.validityMigration.actionGate === 'keep_observe_only' &&
-            typeof entry.validityMigration.hardBlockReason === 'string' &&
-            entry.validityMigration.hardBlockReason.length > 0,
-        ),
-        true,
-        'a public bootstrap census must keep every active domain locked without inherited evidence',
-      );
+    assertInstanceLocalMigrationContract(census, validateMeasurementBundleCensus);
+  });
 
-      const firstMigration = structuredClone(census);
-      const memoryMigration = firstMigration.entries.find(
-        (entry) => entry.domainId === 'eval:memory',
-      ).validityMigration;
-      assert.equal(memoryMigration.riskRank, 1);
-      memoryMigration.batch = 1;
-      memoryMigration.status = 'contract_ready';
-      assert.doesNotThrow(() => validateMeasurementBundleCensus(firstMigration, repoRoot));
-    } else {
-      assert.deepEqual(
-        active.filter((entry) => entry.validityMigration.batch === 1).map((entry) => entry.domainId),
-        ['eval:memory'],
-      );
-      assert.equal(
-        census.entries.find((entry) => entry.domainId === 'eval:task-outcome')?.validityMigration.status,
-        'blocked_f275',
-      );
-      assert.equal(
-        census.entries.find((entry) => entry.domainId === 'eval:friction')?.validityMigration.status,
-        'certified_insufficient',
-      );
+  it('accepts a valid first instance-local migration without source snapshot statuses', async () => {
+    const { validateMeasurementBundleCensus } = await moduleUnderTest();
+    const partial = structuredClone(loadCensus());
+    for (const entry of partial.entries.filter((candidate) => candidate.classification === 'active_decision_bearing')) {
+      entry.validityMigration.batch = null;
+      entry.validityMigration.status = 'unmigrated';
+      entry.validityMigration.certificateRef = null;
+      entry.validityMigration.resultRef = null;
+      entry.validityMigration.replayRef = null;
+      entry.validityMigration.actionGate = 'keep_observe_only';
+      entry.validityMigration.hardBlockReason = 'Measurement validity has not been certified.';
     }
-    assert.equal(
-      active.every((entry) => entry.validityMigration.actionGate === 'keep_observe_only'),
-      true,
-      'uncertified or insufficient bundles must fail closed',
-    );
+    const memoryMigration = partial.entries.find((entry) => entry.domainId === 'eval:memory').validityMigration;
+    memoryMigration.batch = 1;
+    memoryMigration.status = 'contract_ready';
+
+    const validated = validateMeasurementBundleCensus(partial, repoRoot);
+    assert.doesNotThrow(() => assertInstanceLocalMigrationContract(validated, validateMeasurementBundleCensus));
+
+    const usable = structuredClone(partial);
+    const usableMemory = usable.entries.find((entry) => entry.domainId === 'eval:memory').validityMigration;
+    usableMemory.status = 'certified_usable';
+    usableMemory.certificateRef = 'docs/harness-feedback/certificates/public-memory.yaml';
+    usableMemory.resultRef = 'docs/harness-feedback/measurement-results/public-memory.yaml';
+    usableMemory.replayRef = 'docs/harness-feedback/replays/public-memory.yaml';
+    usableMemory.actionGate = 'certificate_actions_allowed';
+    usableMemory.hardBlockReason = null;
+    const validatedUsable = validateMeasurementBundleCensus(usable, repoRoot);
+    assert.doesNotThrow(() => assertInstanceLocalMigrationContract(validatedUsable, validateMeasurementBundleCensus));
   });
 
   it('refreshes only derived verdict counts while preserving the reviewed census contract', async () => {
