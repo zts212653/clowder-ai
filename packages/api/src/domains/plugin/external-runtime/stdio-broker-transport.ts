@@ -9,6 +9,7 @@ import {
   INVALID_PARAMS_CODE,
   type M0CDeliverInput,
   type M0CDeliverResult,
+  MESSAGING_ROW_METHODS,
   PARSE_ERROR_CODE,
   SNAPSHOT_UNAVAILABLE_CODE,
   SNAPSHOT_UNAVAILABLE_MESSAGE,
@@ -52,6 +53,9 @@ interface PendingHostCall {
 }
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 5_000;
+const PLUGIN_TO_HOST_MESSAGING_METHODS = new Set<WireMethodName>(
+  MESSAGING_ROW_METHODS.filter((method) => method !== 'host.messaging.deliver'),
+);
 
 function closedHostCallError(method: PendingHostCall['method'], cause?: Error): ExternalPluginRuntimeError {
   const options = cause === undefined ? undefined : { cause };
@@ -136,11 +140,35 @@ async function invokeBroker(
   return connection.call(method, input);
 }
 
-function brokerFailureResponse(
-  id: string,
-  method: WireMethodName,
-  error: unknown,
-): { readonly response: JsonObject; readonly close: boolean } {
+type BrokerFailure = { readonly response: JsonObject; readonly close: boolean };
+
+function hostBrokerFailureResponse(id: string, method: WireMethodName, error: HostBrokerError): BrokerFailure {
+  if (method === 'broker.hello' || method === 'broker.ready') {
+    return { response: handshakeError(id, error), close: true };
+  }
+  if (error.code === 'INVALID_CALL_INPUT' || error.code === 'METHOD_NOT_READY') {
+    return { response: standardError(id, INVALID_PARAMS_CODE), close: false };
+  }
+  if (error.code === 'CAPABILITY_DENIED') {
+    if (PLUGIN_TO_HOST_MESSAGING_METHODS.has(method)) {
+      return {
+        response: {
+          jsonrpc: '2.0',
+          id,
+          error: { code: DOMAIN_ERROR_CODE, message: DOMAIN_ERROR_MESSAGE, data: { code: 'PERMISSION' } },
+        },
+        close: false,
+      };
+    }
+    return { response: standardError(id, INVALID_PARAMS_CODE), close: false };
+  }
+  if (error.code === 'AUTHORITY_CHANGED' || error.code === 'SESSION_NOT_ACTIVE' || error.code === 'SESSION_NOT_FOUND') {
+    return { response: standardError(id, INTERNAL_ERROR_CODE), close: true };
+  }
+  return { response: standardError(id, INTERNAL_ERROR_CODE), close: false };
+}
+
+function brokerFailureResponse(id: string, method: WireMethodName, error: unknown): BrokerFailure {
   if (error instanceof SnapshotUnavailableHostError) {
     return {
       response: {
@@ -166,19 +194,7 @@ function brokerFailureResponse(
     };
   }
   if (error instanceof HostBrokerError) {
-    if (method === 'broker.hello' || method === 'broker.ready') {
-      return { response: handshakeError(id, error), close: true };
-    }
-    if (error.code === 'INVALID_CALL_INPUT' || error.code === 'METHOD_NOT_READY') {
-      return { response: standardError(id, INVALID_PARAMS_CODE), close: false };
-    }
-    if (
-      error.code === 'AUTHORITY_CHANGED' ||
-      error.code === 'SESSION_NOT_ACTIVE' ||
-      error.code === 'SESSION_NOT_FOUND'
-    ) {
-      return { response: standardError(id, INTERNAL_ERROR_CODE), close: true };
-    }
+    return hostBrokerFailureResponse(id, method, error);
   }
   return { response: standardError(id, INTERNAL_ERROR_CODE), close: false };
 }

@@ -160,7 +160,7 @@ describe('AppendService — happy path (AC-4)', () => {
 });
 
 describe('AppendService — INV-7 provenance whitewash guard', () => {
-  test('non-inference claim without derivation → PERMISSION', async () => {
+  test('non-inference claim without derivation → VALIDATION', async () => {
     const sent = await sendMessage();
     await expectCode(
       service.appendElements(
@@ -169,7 +169,7 @@ describe('AppendService — INV-7 provenance whitewash guard', () => {
           elements: [{ elementId: 'el-2', kind: 'text', payload: { text: 'x' }, epistemicStatus: 'observation' }],
         }),
       ),
-      'PERMISSION',
+      'VALIDATION',
     );
   });
 
@@ -207,7 +207,7 @@ describe('AppendService — INV-7 provenance whitewash guard', () => {
           ],
         }),
       ),
-      'PERMISSION',
+      'VALIDATION',
     );
   });
 });

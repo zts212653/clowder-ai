@@ -177,7 +177,7 @@ export class EventStreamService {
     const sub = await this.requireLiveSubscription(ctx, subscriptionId);
     const payload = decodeAckToken(token);
     if (payload.s !== subscriptionId) {
-      throw new MessagingError('PERMISSION', 'ack token belongs to a different subscription (INV-5)');
+      throw new MessagingError('VALIDATION', 'ack token belongs to a different subscription (INV-5)');
     }
     if (payload.k === 'snapshot') {
       const outcome = await this.deps.cursors.ackSnapshot(ctx.pluginInstanceId, subscriptionId, payload.n, payload.q);

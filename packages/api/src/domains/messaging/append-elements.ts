@@ -30,7 +30,7 @@ export function stampAppendedElements(
     const claimed = element.epistemicStatus ?? 'inference';
     if (claimed !== 'inference' && (!source || statusOf(source, plugin) !== claimed)) {
       throw new MessagingError(
-        'PERMISSION',
+        'VALIDATION',
         'appended element claims a non-inference status without an equal-status derivation source (INV-7)',
       );
     }
