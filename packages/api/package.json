@@ -11,6 +11,7 @@
     "build:f247-extension": "node scripts/build-f247-personal-chrome-extension.mjs",
     "build:f247-extension:write": "node scripts/build-f247-personal-chrome-extension.mjs --write",
     "check:codex-protocol-census": "pnpm run build",
+    "check:codex-protocol-drift": "pnpm run build && node ./scripts/check-codex-app-server-protocol-census.mjs --drift",
     "start": "node dist/index.js",
     "test": "pnpm --filter @cat-cafe/mcp-server... build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js && pnpm run test:cli",
     "test:public": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh bash ./scripts/run-public-tests.sh",

@@ -156,6 +156,10 @@ function assertExactSet(label, expectedValues, actualValues) {
   }
 }
 
+/**
+ * Validate fixture against a live or pinned snapshot.
+ * Used by both hermetic and drift-audit paths.
+ */
 export function assertProtocolCensus(expectedFixture, actualSource) {
   assertDeclaredCounts('stable', expectedFixture?.stable);
   assertDeclaredCounts('experimental', expectedFixture?.experimental);
@@ -243,23 +247,20 @@ function loadPinnedCensus() {
   };
 }
 
-export function runProtocolCensus() {
+// ────────────────────────────────────────────────────────────────
+// Hermetic census: repo-fixed baseline only — no ambient CLI read.
+// This is the build gate: same git tree ⇒ same result on every machine.
+// ────────────────────────────────────────────────────────────────
+
+export function runHermeticCensus() {
   const pinned = loadPinnedCensus();
-  let census;
-  try {
-    census = loadInstalledCensus();
-  } catch (error) {
-    const unavailable = error && typeof error === 'object' && error.code === 'ENOENT';
-    if (!unavailable) throw error;
-    if (process.env.CAT_CAFE_REQUIRE_INSTALLED_CODEX_CENSUS === '1') throw error;
-    census = { source: pinned.source, snapshot: pinned.snapshot };
-  }
-  const snapshot = assertProtocolCensus(pinned.fixture, census.snapshot);
+  const snapshot = assertProtocolCensus(pinned.fixture, pinned.snapshot);
+  assertCodexThreadItemCensus(snapshot.threadItemTypes);
   const stable = snapshot.stable.counts;
   const experimental = snapshot.experimental.counts;
   const delta = snapshot.experimental.methodDelta;
   process.stdout.write(
-    `Codex app-server protocol census OK (${census.source}, version=${snapshot.codexVersion}, ` +
+    `Codex app-server protocol census OK (${pinned.source}, ` +
       `stable=${stable.clientRequests}/${stable.serverNotifications}/${stable.serverRequests}, ` +
       `experimental=${experimental.clientRequests}/${experimental.serverNotifications}/${experimental.serverRequests}, ` +
       `delta=${delta.clientRequests.length}/${delta.serverNotifications.length}/${delta.serverRequests.length}, ` +
@@ -267,5 +268,93 @@ export function runProtocolCensus() {
   );
 }
 
+// ────────────────────────────────────────────────────────────────
+// Drift audit: compare installed Codex CLI against pinned fixture.
+// Run explicitly (pnpm check:codex-protocol-drift) or in periodic CI;
+// never as part of the normal build.
+// ────────────────────────────────────────────────────────────────
+
+function formatDriftReport(pinned, installed) {
+  const lines = [];
+  lines.push(`Codex protocol drift audit: pinned=${pinned.codexVersion}, installed=${installed.codexVersion}`);
+  for (const surface of Object.keys(SURFACE_FILES)) {
+    const pinnedMethods = pinned.stable.methods[surface];
+    const installedMethods = installed.stable.methods[surface];
+    const newMethods = installedMethods.filter((m) => !pinnedMethods.includes(m));
+    const removedMethods = pinnedMethods.filter((m) => !installedMethods.includes(m));
+    if (newMethods.length > 0) lines.push(`  stable.${surface} +${newMethods.length}: ${newMethods.join(', ')}`);
+    if (removedMethods.length > 0)
+      lines.push(`  stable.${surface} -${removedMethods.length}: ${removedMethods.join(', ')}`);
+  }
+  for (const surface of Object.keys(SURFACE_FILES)) {
+    const pinnedMethods = pinned.experimental.methods[surface];
+    const installedMethods = installed.experimental.methods[surface];
+    const newMethods = installedMethods.filter((m) => !pinnedMethods.includes(m));
+    const removedMethods = pinnedMethods.filter((m) => !installedMethods.includes(m));
+    if (newMethods.length > 0) lines.push(`  experimental.${surface} +${newMethods.length}: ${newMethods.join(', ')}`);
+    if (removedMethods.length > 0)
+      lines.push(`  experimental.${surface} -${removedMethods.length}: ${removedMethods.join(', ')}`);
+  }
+  const pinnedTypes = pinned.threadItemTypes;
+  const installedTypes = installed.threadItemTypes;
+  const newTypes = installedTypes.filter((t) => !pinnedTypes.includes(t));
+  const removedTypes = pinnedTypes.filter((t) => !installedTypes.includes(t));
+  if (newTypes.length > 0) lines.push(`  ThreadItem +${newTypes.length}: ${newTypes.join(', ')}`);
+  if (removedTypes.length > 0) lines.push(`  ThreadItem -${removedTypes.length}: ${removedTypes.join(', ')}`);
+  return lines;
+}
+
+export function runDriftAudit() {
+  const pinned = loadPinnedCensus();
+  let installed;
+  try {
+    installed = loadInstalledCensus();
+  } catch (error) {
+    const unavailable = error && typeof error === 'object' && error.code === 'ENOENT';
+    if (unavailable) {
+      process.stdout.write('Codex protocol drift audit: codex CLI not installed, nothing to compare.\n');
+      return;
+    }
+    throw error;
+  }
+
+  const pinnedSnapshot = pinned.snapshot;
+  const installedSnapshot = installed.snapshot;
+
+  if (pinnedSnapshot.codexVersion === installedSnapshot.codexVersion) {
+    // Same version — run full exact-match assertion to catch unexpected divergence.
+    assertProtocolCensus(pinned.fixture, installedSnapshot);
+    process.stdout.write(
+      `Codex protocol drift audit: no drift (pinned=${pinnedSnapshot.codexVersion}, installed=${installedSnapshot.codexVersion})\n`,
+    );
+    return;
+  }
+
+  // Different version — report delta, then fail to signal fixture needs updating.
+  const report = formatDriftReport(pinnedSnapshot, installedSnapshot);
+  for (const line of report) {
+    process.stderr.write(line + '\n');
+  }
+  process.stderr.write(
+    '\nFixture is pinned at Codex ' +
+      pinnedSnapshot.codexVersion +
+      ' but installed CLI is ' +
+      installedSnapshot.codexVersion +
+      '.\n' +
+      'Update the fixture with: pnpm --dir packages/api run check:codex-protocol-drift --update\n' +
+      'Then review the new methods and assign dispositions.\n',
+  );
+  throw new Error(
+    `Codex protocol drift detected: pinned=${pinnedSnapshot.codexVersion}, installed=${installedSnapshot.codexVersion}`,
+  );
+}
+
 const directRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (directRun) runProtocolCensus();
+if (directRun) {
+  const mode = process.argv[2];
+  if (mode === '--drift') {
+    runDriftAudit();
+  } else {
+    runHermeticCensus();
+  }
+}
