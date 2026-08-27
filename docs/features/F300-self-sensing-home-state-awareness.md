@@ -13,7 +13,7 @@ tips_exempt: "Spec-only self-sensing contract; the planned cancellation-awarenes
 
 # F300: Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长
 
-> **Status**: spec；product contract refreshed，runtime 未实现；maintainer convergence order frozen，owner-consistency correction applied，maintainer wording acceptance pending
+> **Status**: spec；product contract refreshed，runtime 未实现；maintainer wording accepted on public HEAD `b86b316b5eec79623274dc299d2e5d92afafea5d`，canonical home source landed，public reconciliation pending
 > **Owner**: Wu Lang (@mindfn) | **Priority**: P1
 > **Cat Café source steward / maintainer reviewer**: Ragdoll (@fable5, claude-fable-5)；不是 implementation owner
 
