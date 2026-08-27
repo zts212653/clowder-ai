@@ -114,16 +114,6 @@ export interface SocketCallbacks {
   onMessageRecalled?: (data: { messageId: string; threadId: string; verdict: 'zero_exposure' | 'exposed' }) => void;
   onMessageReceiptUpdated?: (data: { messageId: string; threadId: string }) => void;
   onThreadBranched?: (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => void;
-  onAuthorizationRequest?: (data: {
-    requestId: string;
-    catId: string;
-    threadId: string;
-    action: string;
-    reason: string;
-    context?: string;
-    createdAt: number;
-  }) => void;
-  onAuthorizationResponse?: (data: { requestId: string; status: string; scope?: string; reason?: string }) => void;
   /** F101: Game state update */
   onGameStateUpdate?: (data: { gameId: string; view: unknown; timestamp: number }) => void;
   /** F101 Phase D: Independent game thread created */
@@ -911,19 +901,6 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
     });
     socket.on('thread_branched', (data: { sourceThreadId: string; newThreadId: string; fromMessageId: string }) => {
       callbacksRef.current.onThreadBranched?.(data);
-    });
-
-    socket.on('authorization:request', (data: Record<string, unknown>) => {
-      const currentThread = threadIdRef.current;
-      if (data.threadId && currentThread && data.threadId !== currentThread) return;
-      callbacksRef.current.onAuthorizationRequest?.(
-        data as Parameters<NonNullable<SocketCallbacks['onAuthorizationRequest']>>[0],
-      );
-    });
-    socket.on('authorization:response', (data: Record<string, unknown>) => {
-      callbacksRef.current.onAuthorizationResponse?.(
-        data as Parameters<NonNullable<SocketCallbacks['onAuthorizationResponse']>>[0],
-      );
     });
 
     const normalizeQueueForDebug = (queue: unknown): unknown[] => (Array.isArray(queue) ? queue : []);

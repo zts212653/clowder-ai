@@ -227,3 +227,27 @@ export function supportsPreProviderContinuityCapability(capability: AgentContext
   const providerCarrier = resolveProviderCarrier(capability);
   return providerCarrier.provider === 'codex' && providerCarrier.carrier === 'exec_json';
 }
+
+/**
+ * Whether a settled handshake can safely carry a write opportunity in the
+ * provider's final prompt generation.
+ *
+ * `exec_json` makes its bounded decision before provider launch. `app_server`
+ * is different: it is unsupported until the provider-owned preflight returns
+ * evidence, then `settle` builds the only prompt bytes the runtime will see.
+ * Keeping those states separate prevents an unresolved app-server handshake
+ * from presenting while allowing its evidence-backed final generation through.
+ */
+export function supportsWriteOpportunityPresentationHandshake(handshake: ContextContinuityHandshake): boolean {
+  if (supportsPreProviderContinuityHandshake(handshake)) return true;
+  return supportsProviderContinuityPreflight(handshake) && handshake.disposition.state !== 'unknown';
+}
+
+/** Whether a carrier can reach a supported write-opportunity presentation generation. */
+export function supportsWriteOpportunityPresentationCapability(capability: AgentContextCapability): boolean {
+  const providerCarrier = resolveProviderCarrier(capability);
+  return (
+    (providerCarrier.provider === 'codex' && providerCarrier.carrier === 'exec_json') ||
+    carrierHasProviderContinuityPreflight(providerCarrier)
+  );
+}

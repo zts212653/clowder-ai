@@ -169,6 +169,33 @@ describe('K-2A fail-closed inventory writes', () => {
     );
   });
 
+  it('rejects a direct package swap while runtime authority is active without writing inventory', async () => {
+    const store = new MemoryPluginInventoryStore();
+    const controlPlane = service(store);
+    await controlPlane.installPackage(candidate());
+    await store.transaction((transaction) => {
+      const current = transaction.instances.get('pi_atomic');
+      transaction.instances.put({
+        ...current,
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'healthy',
+      });
+    });
+
+    await expectNoWrites(
+      store,
+      () =>
+        controlPlane.upgradePackage({
+          pluginInstanceId: 'pi_atomic',
+          expectedLifecycleRevision: 1,
+          expectedGrantRevision: 1,
+          ...upgradedCandidate(),
+        }),
+      'RUNTIME_NOT_STOPPED',
+    );
+  });
+
   it('serializes upgrade versus revoke so exactly one revision-1 mutation commits', async () => {
     for (const firstOperation of ['upgrade', 'revoke']) {
       const store = new MemoryPluginInventoryStore();

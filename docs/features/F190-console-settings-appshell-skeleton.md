@@ -5,7 +5,7 @@ topics: [console, settings, app-shell, community, inbound-pr, frontend, service-
 doc_kind: spec
 created: 2026-05-07
 community_pr: clowder-ai#645, clowder-ai#662, clowder-ai#669, clowder-ai#674, clowder-ai#1083
-tips_exempt: ASR backend consolidation preserves the existing Services UI workflow and adds no new user action or discovery surface
+tips_exempt: Retiring the unused generic permission dependency leaves the existing Settings and Approval Hub workflows unchanged and adds no new user action or discovery surface
 ---
 
 # F190: Console Settings/AppShell Skeleton — 社区 Console 重构的可控切片
@@ -388,7 +388,6 @@ Signal 页面两仓**双向分叉**：本地功能更多，但开源有 2 项我
 | marketplace-badges.tsx | 23 | 两边都硬编码 |
 | DiffViewer.tsx | 22 | 语法高亮色，可能有意为之 |
 | ChatContainer.tsx | 22 | 两边都硬编码 |
-| AuthorizationCard.tsx | 22 | 两边都硬编码 |
 | TriageBadge.tsx | 18 | 状态标签色 |
 | CapabilityAuditLog.tsx | 18 | 审计日志色 |
 

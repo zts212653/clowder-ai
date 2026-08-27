@@ -1930,3 +1930,15 @@ created: 2026-02-26
 - 原理：**Fail-closed 不是“信息不足时关闭最多东西”，而是“信息不足时只拒绝无法证明安全的 claim”。** 护栏的权限应等于它保护的风险域；超过这个范围，护栏本身就成为更高影响的故障源。恢复承诺同样是一种契约——若动作不能推动状态迁移，就不该把它展示为出口。
 
 - 关联：F294 / PR #3744（旧页面兼容性守卫）/ PR #3750（事故修复）/ LL-097（不同完成 claim 必须分账）/ ADR-031（按问题选择机制，不把工具箱当清单）
+
+### LL-101: 安全长门禁仍需先收敛——冻结切面、便宜闭包、首错即停
+
+- 状态：validated
+- 更新时间：2026-08-26
+
+- 坑：全量开源同步已经有 temp target、F251、reconciliation、完整 source/public gate 等安全边界，但一次同步仍连续跑数小时、反复因新的导出脚本闭包、capability-tip 引用、migration notes 或移动中的 main 失败。每个红灯都是真问题，然而发现顺序让便宜的确定性错误排在 install/build/`test:public` 之后；修完一个再追最新 main，又让先前长跑证据失效。安全性提高了，收敛成本却没有被设计。
+- 根因：把“验证强度”误当成“执行顺序”，让昂贵综合门禁同时承担快速反馈；又把 moving branch 当 release cut，缺少 source/public/reconciliation 的显式冻结边界。长门禁失败后继续跑后续阶段收集次生错误，则进一步放大无效耗时。
+- 防护：默认使用稳定快车道：①先完成 community/intake guard；②冻结 exact source SHA、public target HEAD 与 reconciliation artifact；③从冻结 source checkout 重新执行该 SHA 自己的 wrapper，并在 detached temp target 反复跑无安装、无真实写入 preflight，前置 export/security、public script closure、增量引用、F251 和 behavior notes；④preflight/validate/真实写入均要求 target HEAD、远端 public main 与 expected target HEAD 三头一致；⑤preflight 绿后，对同一切面各跑一次完整 source gate 与 temp-public validation；⑥完整 public gate首个硬失败立即停止；⑦新 source main 提交默认进入下一班，不能悄悄刷新当前切面。
+- 边界：这不是减少 release 证据。完整 source gate、完整 temp-public gate、F251、startup acceptance 与真实 target 写前复核仍保留；`--fast-validate` 也不能替代它们。public main 前进时只重开 public/reconciliation 切面；只有 source/export binding 变化才使 source gate 证据失效。
+- 原理：**综合长门禁适合证明终态，不适合承担发现所有低成本错误的第一反馈。** 正确的加速不是少测，而是让确定性失败尽早、让昂贵证明只跑在稳定切面上、让失败及时取消剩余成本。
+- 关联：F116 / F251 / `scripts/sync-to-opensource.sh --preflight` / `docs/postmortems/2026-03-13-opensource-sync-incident-chain.md` / LL-035（temp-target 安全）/ LL-036（长跑终态诚实）/ LL-079（volatile ref）

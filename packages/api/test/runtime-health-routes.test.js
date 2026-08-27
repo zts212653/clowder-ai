@@ -19,4 +19,10 @@ describe('runtime health routes', () => {
     assert.match(src, /resolveRuntimeDeploymentRevision/);
     assert.match(src, /deploymentRevision:\s*runtimeDeploymentRevision/);
   });
+
+  it('projects live callback-registry readiness and gives hooks the same invocation authority', () => {
+    assert.match(src, /sessionHookAuthenticationReady\s*=\s*\(\)\s*=>\s*registry\.isStartupRecoveryComplete\(\)/);
+    assert.match(src, /checks\.sessionHooks\s*=\s*\{\s*ok:\s*sessionHookAuthenticationReady\(\),\s*ms:\s*0\s*\}/);
+    assert.match(src, /callbackRegistry:\s*registry/);
+  });
 });

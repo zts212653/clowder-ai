@@ -31,6 +31,19 @@ export interface ActionSuccessorFence {
   invocationLineageRef?: string;
 }
 
+export function actionSuccessorFencesMatch(
+  candidate: ActionSuccessorFence | undefined,
+  expected: ActionSuccessorFence,
+): boolean {
+  return (
+    candidate?.leaseId === expected.leaseId &&
+    candidate?.generation === expected.generation &&
+    candidate?.dispatchId === expected.dispatchId &&
+    candidate?.terminalPredicateDigest === expected.terminalPredicateDigest &&
+    candidate?.invocationLineageRef === expected.invocationLineageRef
+  );
+}
+
 export function buildActionSuccessorFence(lease: ActionSuccessorLease, dispatchId: string): ActionSuccessorFence {
   return {
     leaseId: lease.leaseId,

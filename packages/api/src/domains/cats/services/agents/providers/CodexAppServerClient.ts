@@ -32,7 +32,11 @@ import {
   classifyCodexProtocolItem,
   classifyCodexSafeBoundary,
 } from './codex-app-server-boundary.js';
-import { buildCodexAppServerThreadParams, closeCodexAppServerTransport } from './codex-app-server-client-helpers.js';
+import {
+  buildCodexAppServerThreadParams,
+  type CodexAppServerApprovalsReviewer,
+  closeCodexAppServerTransport,
+} from './codex-app-server-client-helpers.js';
 import { CodexAppServerRpcError } from './codex-app-server-rpc-error.js';
 
 export type {
@@ -79,6 +83,14 @@ export interface CodexAppServerRunInput {
   config?: JsonObject;
   /** F291: omitted inherits Codex config; null explicitly requests Standard. */
   serviceTier?: string | null;
+  /**
+   * F306: exact app-server wire enum. There is deliberately no default;
+   * production selection of `user` remains blocked on the Phase B interaction
+   * surface, while this adapter seam can carry an explicitly approved route.
+   */
+  approvalsReviewer?: CodexAppServerApprovalsReviewer;
+  /** F306: current-turn response constraint; never persisted as thread config. */
+  outputSchema?: JsonObject;
   imagePaths?: readonly string[];
   signal?: AbortSignal;
   /** Inactivity timeout. Zero keeps the F118 manual-cancel-only default. */
@@ -216,7 +228,11 @@ export class CodexAppServerClient {
       activeThreadId = threadId;
       yield this.lifecycle.event(this.lifecycle.transition('thread_ready', { threadId }));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
-      yield { type: 'thread.started', thread_id: threadId };
+      yield {
+        type: 'thread.started',
+        thread_id: threadId,
+        ...(verdict.kind === 'replaced' ? { session_replacement: verdict.replacement } : {}),
+      };
       yield { type: 'app_server.continuity_verdict', verdict };
 
       // F296 B4a preflight fence. The provider verdict exists; buffered
@@ -290,8 +306,7 @@ export class CodexAppServerClient {
                 },
               }
             : {}),
-          ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(input.approvalPolicy ? { approvalPolicy: input.approvalPolicy } : {}),
+          ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
         }),
       );
       const turn = asCodexAppServerRecord(turnResult?.turn);

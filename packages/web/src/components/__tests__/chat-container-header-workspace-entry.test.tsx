@@ -50,7 +50,6 @@ describe('F284 Workspace entry', () => {
           sidebarOpen={false}
           onToggleSidebar={vi.fn()}
           threadId="thread-status"
-          authPendingCount={0}
           viewMode="single"
           onToggleViewMode={vi.fn()}
           statusPanelOpen={false}

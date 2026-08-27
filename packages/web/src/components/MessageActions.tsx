@@ -191,6 +191,9 @@ export function MessageActions({
    * Narrow/coarse layouts retain the same slot but put one 44px entry in it; the full dock opens
    * as a sheet, so touch reachability does not cost every message a permanent vertical row. */
   const toolbarPositionClass = isUser ? 'top-0 right-10 sm:right-auto sm:left-10' : 'top-0 left-10';
+  const actionSlotPositionClass = isUser
+    ? 'absolute right-0 top-1/2 -translate-y-1/2'
+    : 'absolute left-0 top-1/2 -translate-y-1/2';
   const actionsExpanded = compactOpen ? true : overflowOpen;
   const desktopOverflowOpen = overflowOpen && isDesktop && !compactActions;
   const useOverflowSheet = !(isDesktop && !compactActions);
@@ -421,7 +424,7 @@ export function MessageActions({
       data-testid="message-actions-toolbar"
       role="toolbar"
       aria-label="消息操作"
-      className={`${toolbarVisibilityClass} ${actionSlot ? 'relative' : `absolute ${toolbarPositionClass}`} z-30 flex transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe ${
+      className={`${toolbarVisibilityClass} ${actionSlot ? actionSlotPositionClass : `absolute ${toolbarPositionClass}`} z-30 flex transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe ${
         compactPresentation
           ? 'w-full justify-center gap-1 p-2 [&_button]:min-h-11 [&_button]:min-w-11'
           : 'gap-0.5 px-1 py-0.5'
@@ -581,7 +584,7 @@ export function MessageActions({
       aria-label="打开消息操作"
       aria-expanded={compactOpen}
       onClick={() => setCompactOpen(true)}
-      className={`${actionSlot ? '' : `absolute ${toolbarPositionClass}`} pointer-events-none grid min-h-11 min-w-11 place-items-center rounded-lg border border-cafe bg-cafe-surface/90 text-cafe-muted opacity-0 shadow-sm transition-[background-color,color,opacity] group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:opacity-100`}
+      className={`${actionSlot ? 'absolute inset-0' : `absolute ${toolbarPositionClass}`} pointer-events-none grid min-h-11 min-w-11 place-items-center rounded-lg border border-cafe bg-cafe-surface/90 text-cafe-muted opacity-0 shadow-sm transition-[background-color,color,opacity] group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 [@media(hover:none)_and_(pointer:coarse)]:pointer-events-auto [@media(hover:none)_and_(pointer:coarse)]:opacity-100`}
     >
       <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="5" cy="12" r="1.8" />

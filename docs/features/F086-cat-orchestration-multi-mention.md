@@ -6,6 +6,7 @@ topics: [collaboration, routing, mcp, multi-mention, orchestration, meta-cogniti
 doc_kind: done
 created: 2026-03-08
 completed: 2026-03-09
+tips_exempt: "2026-08-27 link/reference hygiene only; no user-facing capability or action changed."
 ---
 
 # F086 Cat Orchestration — 猫猫自主协作 + 元认知系统

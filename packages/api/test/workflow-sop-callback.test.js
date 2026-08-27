@@ -88,6 +88,25 @@ function createStubBacklogStore() {
   };
 }
 
+function createStubThreadStore() {
+  let backlogItemId;
+  const baseThread = {
+    id: 'thread-1',
+    createdBy: 'test-user',
+  };
+  return {
+    get(threadId) {
+      return threadId === baseThread.id ? { ...baseThread, ...(backlogItemId ? { backlogItemId } : {}) } : null;
+    },
+    list(userId) {
+      return userId === baseThread.createdBy ? [this.get(baseThread.id)] : [];
+    },
+    linkBacklogItem(nextBacklogItemId) {
+      backlogItemId = nextBacklogItemId;
+    },
+  };
+}
+
 // Minimal in-memory workflow SOP store
 function createInMemoryWorkflowSopStore() {
   const store = new Map();
@@ -142,18 +161,21 @@ function createInMemoryWorkflowSopStore() {
 describe('WorkflowSop callback route', () => {
   let app;
   let workflowSopStore;
+  let threadStore;
 
   before(async () => {
     const module = await import('../dist/routes/callback-workflow-sop-routes.js');
     const { registerCallbackAuthHook } = await import('../dist/routes/callback-auth-prehandler.js');
 
     workflowSopStore = createInMemoryWorkflowSopStore();
+    threadStore = createStubThreadStore();
 
     app = Fastify();
     registerCallbackAuthHook(app, createStubRegistry());
     module.registerCallbackWorkflowSopRoutes(app, {
       workflowSopStore,
       backlogStore: createStubBacklogStore(),
+      threadStore,
     });
     await app.ready();
   });
@@ -161,6 +183,7 @@ describe('WorkflowSop callback route', () => {
   beforeEach(() => {
     workflowSopStore.store.clear();
     workflowSopStore.calls.length = 0;
+    threadStore.linkBacklogItem(undefined);
   });
 
   it('creates workflow SOP via callback with auth', async () => {
@@ -192,6 +215,80 @@ describe('WorkflowSop callback route', () => {
       updatedBy: 'opus',
       ownerUserId: 'test-user',
     });
+  });
+
+  it('serves the canonical SOP through the MCP callback-authenticated drill', async () => {
+    threadStore.linkBacklogItem('item-1');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/update-workflow-sop',
+      headers: {
+        'content-type': 'application/json',
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
+      payload: {
+        backlogItemId: 'item-1',
+        featureId: 'F073',
+        stage: 'impl',
+        batonHolder: 'opus',
+      },
+    });
+    assert.equal(created.statusCode, 200);
+
+    const originalEnv = { ...process.env };
+    const originalFetch = globalThis.fetch;
+    try {
+      process.env.CAT_CAFE_API_URL = 'http://cat-cafe.test';
+      process.env.CAT_CAFE_INVOCATION_ID = INVOCATION_ID;
+      process.env.CAT_CAFE_CALLBACK_TOKEN = CALLBACK_TOKEN;
+      delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+      globalThis.fetch = async (url, options) => {
+        const target = new URL(url);
+        const response = await app.inject({
+          method: 'GET',
+          url: `${target.pathname}${target.search}`,
+          headers: options?.headers,
+        });
+        return {
+          ok: response.statusCode >= 200 && response.statusCode < 300,
+          status: response.statusCode,
+          text: async () => response.body,
+          json: async () => JSON.parse(response.body),
+        };
+      };
+
+      const { handleGetWorkflowSop } = await import('../../mcp-server/dist/tools/callback-tools.js');
+      const result = await handleGetWorkflowSop({ threadId: 'thread-1' });
+
+      assert.equal(result.isError, undefined, result.content[0].text);
+      const body = JSON.parse(result.content[0].text);
+      assert.equal(body.threadId, 'thread-1');
+      assert.equal(body.backlogItemId, 'item-1');
+      assert.equal(body.workflowSop.featureId, 'F073');
+      assert.equal(body.workflowSop.stage, 'impl');
+      assert.equal(body.workflowSop.version, 1);
+    } finally {
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnv)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnv);
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not disclose a workflow SOP outside the callback principal thread scope', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/get-workflow-sop?threadId=thread-other-user',
+      headers: {
+        'x-invocation-id': INVOCATION_ID,
+        'x-callback-token': CALLBACK_TOKEN,
+      },
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.deepEqual(JSON.parse(response.body), { error: 'Workflow SOP thread access denied' });
   });
 
   it('rejects callback admission whose owner came from compatibility fallback', async () => {

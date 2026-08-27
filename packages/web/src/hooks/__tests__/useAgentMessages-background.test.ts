@@ -140,6 +140,36 @@ describe('background thread socket handling', () => {
       const ts = useChatStore.getState().getThreadState('thread-bg');
       expect(ts.catStatuses.opus).toBe('done');
     });
+
+    it('done rekeys a background live bubble to its persisted message ID', () => {
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'inv-bg-export',
+        content: 'background response',
+        origin: 'stream',
+        timestamp: Date.now(),
+      });
+
+      simulateBackgroundMessage({
+        type: 'done',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        invocationId: 'inv-bg-export',
+        messageId: 'persisted-bg-message',
+        isFinal: true,
+        timestamp: Date.now() + 1,
+      });
+
+      expect(useChatStore.getState().getThreadState('thread-bg').messages).toEqual([
+        expect.objectContaining({
+          id: 'persisted-bg-message',
+          content: 'background response',
+          isStreaming: false,
+        }),
+      ]);
+    });
   });
 
   describe('P1-3 (R2): error must not be overwritten by done', () => {

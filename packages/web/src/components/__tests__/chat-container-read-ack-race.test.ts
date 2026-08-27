@@ -122,10 +122,6 @@ vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn() }),
 }));
 
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({ pending: [], respond: vi.fn(), handleAuthRequest: vi.fn(), handleAuthResponse: vi.fn() }),
-}));
-
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
@@ -152,7 +148,6 @@ vi.mock('../MessageActions', () => ({
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('@/components/ScrollToBottomButton', () => ({ ScrollToBottomButton: () => null }));
-vi.mock('@/components/AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('@/components/WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('@/components/icons/PawIcon', () => ({ PawIcon: () => null }));
 

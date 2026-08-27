@@ -150,7 +150,6 @@ export { buildSopTrace } from './sop/sop-trace-adapter.js';
 export type {
   AssembledEpisode,
   CancelReason,
-  PermissionCancelInput,
   StoredEpisode,
   TaskOutcomeAttribution,
   TaskOutcomeEpisode,
@@ -162,11 +161,23 @@ export {
   handleGetEpisode,
   handleListEpisodes,
   handleMagicWord,
-  handlePermissionCancel,
   TASK_OUTCOME_ATTRIBUTIONS,
   TaskOutcomeEpisodeStore,
   VERDICT_CLASSES,
 } from './task-outcome/index.js';
+export { generateTrajectoryInspectorLiveVerdict } from './trajectory-inspector/eval-trajectory-inspector-live-verdict.js';
+export { RepoTrajectoryInspectorEvidenceSource } from './trajectory-inspector/trajectory-inspector-repo-evidence-source.js';
+export {
+  type TrajectoryInspectorSourceProvider,
+  TrajectoryInspectorSourceProviderImpl,
+} from './trajectory-inspector/trajectory-inspector-source-provider.js';
+export type {
+  TrajectoryInspectorEpisode,
+  TrajectoryInspectorEpisodeBundle,
+  TrajectoryInspectorVector,
+  TrajectoryInspectorWindowSelector,
+} from './trajectory-inspector/trajectory-inspector-types.js';
+export { validateTrajectoryInspectorWindowSelector } from './trajectory-inspector/trajectory-inspector-types.js';
 export type { HandoffDecision, VerdictHandoffPacket } from './verdict-handoff.js';
 // Verdict handoff
 export { assertCanCrossThreadHandoff, parseVerdictHandoffPacket } from './verdict-handoff.js';

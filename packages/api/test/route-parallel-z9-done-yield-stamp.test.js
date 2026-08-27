@@ -94,4 +94,22 @@ describe('F194 Phase Z9 砚砚 R2 P1 — routeParallel done yield stamps ownInvo
       'parallel done invocationId is own per-cat-turn, NOT parent (otherwise turn collapses to parent)',
     );
   });
+
+  it('parallel done carries the canonical stored message ID for immediate client actions', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id-parallel', 'persist me') });
+
+    const yielded = [];
+    for await (const msg of routeParallel(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      parentInvocationId: 'parent-live-export-parallel',
+    })) {
+      yielded.push(msg);
+    }
+
+    const doneMsg = yielded.find((message) => message.type === 'done');
+    assert.ok(doneMsg, 'done event yielded');
+    assert.equal(doneMsg.messageId, 'msg-1', 'parallel done must expose the durable output message ID');
+    const stored = await deps.messageStore.getById(doneMsg.messageId);
+    assert.equal(stored?.content, 'persist me', 'the emitted ID must resolve immediately');
+  });
 });

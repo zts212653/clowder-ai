@@ -4,7 +4,7 @@ import {
   asrPersonMemoryDynamicSceneEntryV1Schema,
   projectDeliveredWriteOpportunityRecord,
 } from '@cat-cafe/shared';
-import { supportsPreProviderContinuityHandshake } from '../../cats/services/agents/invocation/context-continuity.js';
+import { supportsWriteOpportunityPresentationHandshake } from '../../cats/services/agents/invocation/context-continuity.js';
 import type { ContextPresentationEnvelope } from '../../cats/services/session/context-presentation.js';
 import type { ContextContinuityHandshake } from '../../cats/services/types.js';
 import {
@@ -75,7 +75,7 @@ function f296PresentationVerifier(candidate: unknown) {
   ) {
     return { status: 'invalid' } as const;
   }
-  if (value.outcome === 'delivered' && !supportsPreProviderContinuityHandshake(continuity)) {
+  if (value.outcome === 'delivered' && !supportsWriteOpportunityPresentationHandshake(continuity)) {
     return { status: 'invalid' } as const;
   }
   return {
@@ -153,7 +153,7 @@ export class AsrPersonMemoryOpportunityPromptService {
     const presentationReceipts: AsrPersonMemoryPresentationReceipt[] = [];
     const presentationEnvelopes: AsrPersonMemoryPresentationEnvelope[] = [];
     const segments: string[] = [];
-    const presentationSupported = supportsPreProviderContinuityHandshake(input.continuity);
+    const presentationSupported = supportsWriteOpportunityPresentationHandshake(input.continuity);
     const seenGenerationKeys = new Set(input.terminalGenerationKeys);
 
     for (const candidate of input.candidates) {

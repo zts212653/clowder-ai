@@ -149,6 +149,12 @@ import {
 import { ToolExecutionPolicyUnavailableError } from './tool-execution-policy.js';
 import { stampVisibleTurn } from './visible-turn.js';
 
+function exactSteerReservationTarget(entry: QueueEntry, reservationId: string): string | undefined {
+  const reservation = entry.exactSteerBatch;
+  if (!reservation || reservation.reservationId !== reservationId) return undefined;
+  return isOrdinaryQueueTargetEligible(entry, reservation.targetCatId) ? reservation.targetCatId : undefined;
+}
+
 /** Minimal interfaces for deps — avoid importing full types for testability */
 
 interface TrackerLike {
@@ -3244,7 +3250,9 @@ export class QueueProcessor {
   ): Promise<{ started: boolean; entry?: QueueEntry }> {
     const current = this.deps.queue.getEntrySnapshot(threadId, userId, entryId);
     if (!current || current.status !== 'queued') return { started: false };
-    const entryCat = current.targetCats[0] ?? 'unknown';
+    const entryCat = exactSteerReservationTarget(current, reservationId);
+    if (!entryCat) return { started: false };
+    const eligibleTargetCats = current.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(current, catId));
     const slotKey = QueueProcessor.slotKey(threadId, entryCat);
     this.clearPause(threadId, entryCat);
     if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(threadId, entryCat)) {
@@ -3252,7 +3260,7 @@ export class QueueProcessor {
     }
     const entry = this.deps.queue.claimExactSteerReservation(threadId, userId, entryId, reservationId);
     if (!entry) return { started: false };
-    if (!(await this.startReservedEntry(entry, slotKey, entryCat))) return { started: false };
+    if (!(await this.startReservedEntry(entry, slotKey, entryCat, eligibleTargetCats))) return { started: false };
     return { started: true, entry };
   }
 
@@ -3563,7 +3571,8 @@ export class QueueProcessor {
         opts.onlyNonAgent,
       );
       if (exact) {
-        const exactCat = exact.entry.targetCats[0] ?? catId;
+        const exactCat = exactSteerReservationTarget(exact.entry, exact.reservationId);
+        if (!exactCat) return { started: false };
         const exactSlotKey = QueueProcessor.slotKey(threadId, exactCat);
         if (this.processingSlots.has(exactSlotKey) || this.deps.invocationTracker.has(threadId, exactCat)) {
           busyCats.add(exactCat);
@@ -3593,7 +3602,8 @@ export class QueueProcessor {
       const eligibleTargetCats = entry.targetCats.filter((targetCatId) =>
         isOrdinaryQueueTargetEligible(entry, targetCatId),
       );
-      const entryCat = eligibleTargetCats[0] ?? catId;
+      const entryCat = exact ? exactSteerReservationTarget(entry, exact.reservationId) : eligibleTargetCats[0];
+      if (!entryCat) return { started: false };
       const entrySk = QueueProcessor.slotKey(threadId, entryCat);
 
       if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
@@ -3653,7 +3663,8 @@ export class QueueProcessor {
     if (!nextEntry) return { started: false };
 
     const eligibleTargetCats = nextEntry.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(nextEntry, catId));
-    const entryCat = eligibleTargetCats[0] ?? 'unknown';
+    const entryCat = exact ? exactSteerReservationTarget(nextEntry, exact.reservationId) : eligibleTargetCats[0];
+    if (!entryCat) return { started: false };
     const sk = QueueProcessor.slotKey(threadId, entryCat);
 
     // Mutex check — per-slot (before mutating queue state)

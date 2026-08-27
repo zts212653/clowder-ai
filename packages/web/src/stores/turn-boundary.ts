@@ -5,6 +5,11 @@ type TurnBoundaryPoint = {
   timestamp?: number;
   deliveredAt?: number;
   timelineOrderAt?: number;
+  extra?: {
+    stream?: {
+      turnInvocationId?: string;
+    };
+  };
 };
 
 function getTurnBoundaryTimestamp(point: TurnBoundaryPoint): number | undefined {
@@ -14,15 +19,20 @@ function getTurnBoundaryTimestamp(point: TurnBoundaryPoint): number | undefined 
 }
 
 /**
- * Legacy Antigravity payloads can reuse the parent invocation id across
- * multiple same-cat turns. A user message between two assistant records is the
- * hard boundary that keeps those turns from being reconciled as one bubble.
+ * Exact per-turn identity is authoritative even when a user supplement lands
+ * between two carriers of the same active turn. Without that identity, legacy
+ * payloads can reuse the parent invocation id across multiple same-cat turns;
+ * a user message then remains the hard reconciliation boundary.
  */
 export function crossesUserTurnBoundary(
   messages: TurnBoundaryPoint[],
   left: TurnBoundaryPoint,
   right: TurnBoundaryPoint,
 ): boolean {
+  const leftTurnInvocationId = left.extra?.stream?.turnInvocationId;
+  const rightTurnInvocationId = right.extra?.stream?.turnInvocationId;
+  if (leftTurnInvocationId && leftTurnInvocationId === rightTurnInvocationId) return false;
+
   const leftTs = getTurnBoundaryTimestamp(left);
   const rightTs = getTurnBoundaryTimestamp(right);
   if (leftTs === undefined || rightTs === undefined || leftTs === rightTs) return false;

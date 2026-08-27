@@ -21,9 +21,43 @@ describe('Session Hooks Routes', () => {
   let SessionSealer;
   let sessionHooksRoutes;
 
-  const DEFAULT_HOOK_TOKEN = 'test-hook-token';
+  const DEFAULT_CALLBACK_AUTH = {
+    invocationId: 'test-invocation-id',
+    callbackToken: 'test-callback-token',
+  };
+  const DEFAULT_SCOPE = { userId: 'user-1', catId: 'opus', threadId: 'thread-1' };
 
-  async function setup({ digestMap, hookToken = DEFAULT_HOOK_TOKEN, noToken = false } = {}) {
+  function callbackRegistryFor(scope = DEFAULT_SCOPE, { startupRecoveryPending = false } = {}) {
+    return {
+      isStartupRecoveryComplete: () => !startupRecoveryPending,
+      verify: async (invocationId, callbackToken) => {
+        const resolvedScope = typeof scope === 'function' ? scope() : scope;
+        return invocationId === DEFAULT_CALLBACK_AUTH.invocationId &&
+          callbackToken === DEFAULT_CALLBACK_AUTH.callbackToken
+          ? {
+              ok: true,
+              record: {
+                ...DEFAULT_CALLBACK_AUTH,
+                ...resolvedScope,
+                ownerAuthProvenance: 'strict',
+                clientMessageIds: new Set(),
+                toolExecutionPolicy: { mode: 'read_only' },
+                createdAt: 0,
+                expiresAt: null,
+                state: 'active',
+              },
+            }
+          : { ok: false, reason: 'invalid_token' };
+      },
+    };
+  }
+
+  async function setup({
+    digestMap,
+    callbackScope = DEFAULT_SCOPE,
+    startupRecoveryPending = false,
+    followCreatedSession = true,
+  } = {}) {
     const storeMod = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sealerMod = await import('../dist/domains/cats/services/session/SessionSealer.js');
     const routeMod = await import('../dist/routes/session-hooks.js');
@@ -32,6 +66,14 @@ describe('Session Hooks Routes', () => {
     sessionHooksRoutes = routeMod.sessionHooksRoutes;
 
     const sessionChainStore = new SessionChainStore();
+    const activeScope = { ...callbackScope };
+    const createSession = sessionChainStore.create.bind(sessionChainStore);
+    sessionChainStore.create = (input) => {
+      if (followCreatedSession) {
+        Object.assign(activeScope, { userId: input.userId, catId: input.catId, threadId: input.threadId });
+      }
+      return createSession(input);
+    };
     const sessionSealer = new SessionSealer(sessionChainStore);
     const transcriptReader = mockTranscriptReader(digestMap ?? {});
 
@@ -40,15 +82,18 @@ describe('Session Hooks Routes', () => {
       sessionChainStore,
       sessionSealer,
       transcriptReader,
-      ...(noToken ? {} : { hookToken }),
+      callbackRegistry: callbackRegistryFor(() => activeScope, { startupRecoveryPending }),
     });
     await app.ready();
-    return { app, sessionChainStore, sessionSealer, hookToken };
+    return { app, sessionChainStore, sessionSealer };
   }
 
   /** Helper: default auth headers for hook requests */
-  function authHeaders(token = DEFAULT_HOOK_TOKEN) {
-    return { 'x-cat-cafe-hook-token': token };
+  function authHeaders(auth = DEFAULT_CALLBACK_AUTH) {
+    return {
+      'x-invocation-id': auth.invocationId,
+      'x-callback-token': auth.callbackToken,
+    };
   }
 
   function applyPolicy(sessionChainStore, record, config, execution = { status: 'active', missingCapabilities: [] }) {
@@ -196,7 +241,7 @@ describe('Session Hooks Routes', () => {
         sessionChainStore,
         sessionSealer,
         transcriptReader,
-        hookToken: DEFAULT_HOOK_TOKEN,
+        callbackRegistry: callbackRegistryFor(),
       });
       await app.ready();
 
@@ -238,7 +283,7 @@ describe('Session Hooks Routes', () => {
         sessionChainStore,
         sessionSealer: new sealerMod.SessionSealer(sessionChainStore),
         transcriptReader: mockTranscriptReader({ [ownerA.id]: digestA, [ownerB.id]: digestB }),
-        hookToken: DEFAULT_HOOK_TOKEN,
+        callbackRegistry: callbackRegistryFor({ userId: 'user-a', catId: 'opus', threadId: 'default' }),
       });
       await app.ready();
 
@@ -298,7 +343,7 @@ describe('Session Hooks Routes', () => {
         sessionChainStore,
         sessionSealer,
         transcriptReader,
-        hookToken: DEFAULT_HOOK_TOKEN,
+        callbackRegistry: callbackRegistryFor({ userId: 'user-1', catId: 'opus', threadId: 'thread-sealed-capsule' }),
       });
       await app.ready();
 
@@ -467,7 +512,11 @@ describe('Session Hooks Routes', () => {
         sessionChainStore,
         sessionSealer,
         transcriptReader,
-        hookToken: DEFAULT_HOOK_TOKEN,
+        callbackRegistry: callbackRegistryFor({
+          userId: 'user-1',
+          catId: 'opus',
+          threadId: 'thread-compact-with-history',
+        }),
       });
       await app.ready();
 
@@ -784,7 +833,7 @@ describe('Session Hooks Routes', () => {
         hybrid: { maxCompressions: 2 },
       });
       const originalRecordCompressionEvent = sessionChainStore.recordCompressionEvent.bind(sessionChainStore);
-      sessionChainStore.recordCompressionEvent = (id, revision) => {
+      sessionChainStore.recordCompressionEvent = (id, revision, invocationId) => {
         sessionChainStore.applyPolicySnapshot(id, {
           config: { strategy: 'compress', thresholds: { warn: 0.8, action: 0.9 } },
           source: 'runtime_override',
@@ -792,7 +841,7 @@ describe('Session Hooks Routes', () => {
           changedAt: 1,
           execution: { status: 'active', missingCapabilities: [] },
         });
-        return originalRecordCompressionEvent(id, revision);
+        return originalRecordCompressionEvent(id, revision, invocationId);
       };
 
       const res = await app.inject({
@@ -835,8 +884,8 @@ describe('Session Hooks Routes', () => {
       assert.equal(JSON.parse(allowed.payload).action, 'compress_allowed');
 
       const originalRecordCompressionEvent = sessionChainStore.recordCompressionEvent.bind(sessionChainStore);
-      sessionChainStore.recordCompressionEvent = (id, revision) => {
-        const observed = originalRecordCompressionEvent(id, revision);
+      sessionChainStore.recordCompressionEvent = (id, revision, invocationId) => {
+        const observed = originalRecordCompressionEvent(id, revision, invocationId);
         sessionChainStore.applyPolicySnapshot(id, {
           config: { strategy: 'compress', thresholds: { warn: 0.8, action: 0.9 } },
           source: 'runtime_override',
@@ -910,11 +959,11 @@ describe('Session Hooks Routes', () => {
     });
   });
 
-  // --- Hook Token Authentication ---
+  // --- Invocation-scoped hook authentication ---
 
-  describe('Hook token authentication', () => {
-    it('returns 401 when hookToken is configured but request has no token', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+  describe('Invocation-scoped hook authentication', () => {
+    it('returns 401 when request has no invocation credentials', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'POST',
@@ -924,24 +973,24 @@ describe('Session Hooks Routes', () => {
 
       assert.equal(res.statusCode, 401);
       const body = JSON.parse(res.payload);
-      assert.ok(body.error.includes('hook token'));
+      assert.equal(body.error, 'callback_auth_failed');
     });
 
-    it('returns 401 when hookToken is configured but request has wrong token', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+    it('returns 401 when callback token is wrong', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'POST',
         url: '/api/sessions/seal',
-        headers: { 'x-cat-cafe-hook-token': 'wrong-token' },
+        headers: authHeaders({ ...DEFAULT_CALLBACK_AUTH, callbackToken: 'wrong-token' }),
         payload: { cliSessionId: 'cli-abc', reason: 'test' },
       });
 
       assert.equal(res.statusCode, 401);
     });
 
-    it('allows request when hookToken matches', async () => {
-      const { app, sessionChainStore } = await setup({ hookToken: 'secret-token-123' });
+    it('allows request when invocation credentials and session scope match', async () => {
+      const { app, sessionChainStore } = await setup();
       const record = sessionChainStore.create({
         cliSessionId: 'cli-auth',
         threadId: 'thread-1',
@@ -953,7 +1002,7 @@ describe('Session Hooks Routes', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/sessions/seal',
-        headers: { 'x-cat-cafe-hook-token': 'secret-token-123' },
+        headers: authHeaders(),
         payload: { cliSessionId: 'cli-auth', reason: 'test-auth' },
       });
 
@@ -962,22 +1011,45 @@ describe('Session Hooks Routes', () => {
       assert.equal(body.status, 'sealing');
     });
 
-    it('returns 503 when hookToken is not configured (fail-closed)', async () => {
-      const { app } = await setup({ noToken: true }); // explicitly no hookToken
+    it('rejects a valid hook credential when the requested session belongs to another invocation scope', async () => {
+      const { app, sessionChainStore } = await setup({ followCreatedSession: false });
+      const record = sessionChainStore.create({
+        cliSessionId: 'cli-other-scope',
+        threadId: 'thread-other',
+        catId: 'codex',
+        userId: 'user-other',
+      });
+      applyPolicy(sessionChainStore, record, handoffPolicy);
 
       const res = await app.inject({
         method: 'POST',
         url: '/api/sessions/seal',
+        headers: authHeaders(),
+        payload: { cliSessionId: 'cli-other-scope', reason: 'cross-scope-attempt' },
+      });
+
+      assert.equal(res.statusCode, 403);
+      assert.deepEqual(JSON.parse(res.payload), { error: 'session_hook_scope_mismatch' });
+      assert.equal(sessionChainStore.get(record.id).status, 'active');
+    });
+
+    it('returns 503 while callback-auth startup recovery is pending', async () => {
+      const { app } = await setup({ startupRecoveryPending: true });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/seal',
+        headers: authHeaders(),
         payload: { cliSessionId: 'cli-noauth', reason: 'test' },
       });
 
       assert.equal(res.statusCode, 503);
       const body = JSON.parse(res.payload);
-      assert.ok(body.error.includes('CAT_CAFE_HOOK_TOKEN'));
+      assert.equal(body.error, 'callback_auth_startup_recovery_pending');
     });
 
-    it('returns 401 for GET endpoint when token is missing', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+    it('returns 401 for GET endpoint when credentials are missing', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'GET',
@@ -991,8 +1063,13 @@ describe('Session Hooks Routes', () => {
   // --- F073 P4: SOP stage bookmark ---
 
   describe('POST /api/sessions/sop-bookmark (F073 P4)', () => {
+    function createBookmarkSession(sessionChainStore, cliSessionId) {
+      return sessionChainStore.create({ cliSessionId, ...DEFAULT_SCOPE });
+    }
+
     it('stores SOP bookmark for cliSessionId', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-1');
 
       const res = await app.inject({
         method: 'POST',
@@ -1007,7 +1084,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('GET retrieves stored SOP bookmark', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-2');
 
       // Store first
       await app.inject({
@@ -1044,7 +1122,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('POST overwrites previous bookmark for same cliSessionId', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-3');
 
       await app.inject({
         method: 'POST',
@@ -1072,7 +1151,8 @@ describe('Session Hooks Routes', () => {
     });
 
     it('POST returns 400 for missing required fields', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-sop-4');
 
       const res = await app.inject({
         method: 'POST',
@@ -1084,8 +1164,8 @@ describe('Session Hooks Routes', () => {
       assert.equal(res.statusCode, 400);
     });
 
-    it('requires hook token authentication', async () => {
-      const { app } = await setup({ hookToken: 'secret-token-123' });
+    it('requires invocation callback authentication', async () => {
+      const { app } = await setup();
 
       const res = await app.inject({
         method: 'POST',
@@ -1097,7 +1177,9 @@ describe('Session Hooks Routes', () => {
     });
 
     it('TTL sweep removes entries older than 24h on next write', async () => {
-      const { app } = await setup();
+      const { app, sessionChainStore } = await setup();
+      createBookmarkSession(sessionChainStore, 'cli-old');
+      createBookmarkSession(sessionChainStore, 'cli-new');
 
       // Store an old bookmark
       await app.inject({

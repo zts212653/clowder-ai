@@ -14,7 +14,16 @@ function pressureSignals(row, totalMemoryKb, memoryFreePercent) {
   if (rssMemoryPercent >= CRITICAL_MEMORY_FRACTION * 100) {
     signals.push(`${rssMemoryPercent.toFixed(1)}% of system memory`);
   }
-  if (row.cpuPercent !== null && row.cpuPercent >= ACTIVE_CPU_PERCENT) {
+  // macOS reports process CPU per core, so 100% can mean one busy core rather
+  // than system-wide pressure. Treat that activity as critical only once the
+  // daemon also owns a material share of memory. On a 128 GiB workstation,
+  // for example, 7 GiB + one busy core remains advisory while memory is
+  // healthy; the same footprint on a 64 GiB machine still blocks.
+  if (
+    row.cpuPercent !== null &&
+    row.cpuPercent >= ACTIVE_CPU_PERCENT &&
+    rssMemoryPercent >= ADVISORY_MEMORY_FRACTION * 100
+  ) {
     signals.push(`CPU ${row.cpuPercent.toFixed(1)}%`);
   }
   if (memoryFreePercent !== null && memoryFreePercent <= CONSTRAINED_MEMORY_FREE_PERCENT) {
@@ -49,7 +58,7 @@ export function classifyFseventsdPressure(row, advisoryRssKb, totalMemoryKb, mem
       level: 'warning',
       message:
         `fseventsd RSS ${row.rssKb}KB exceeds advisory threshold ${advisoryRssKb}KB (pid ${row.pid}), ` +
-        `but no active pressure signal was observed (${observed}); gate allowed. Monitor before starting other heavy file workloads.`,
+        `but no critical system-pressure signal was observed (${observed}); gate allowed. Monitor before starting other heavy file workloads.`,
     };
   }
 

@@ -29,7 +29,6 @@ export type {
   A1WorldTruthInput,
   AssembledEpisode,
   MagicWordInput,
-  PermissionCancelInput,
   SignalAppendResult,
 } from './task-outcome-routes.js';
 export {
@@ -37,19 +36,16 @@ export {
   handleGetEpisode,
   handleListEpisodes,
   handleMagicWord,
-  handlePermissionCancel,
 } from './task-outcome-routes.js';
 
 // Signal builders
 export type {
   BuildA1WorldTruthInput,
   BuildMagicWordInput,
-  BuildPermissionCancelInput,
 } from './task-outcome-signal-builder.js';
 export {
   buildA1WorldTruthSignal,
   buildMagicWordSignal,
-  buildPermissionCancelSignal,
 } from './task-outcome-signal-builder.js';
 
 // Store

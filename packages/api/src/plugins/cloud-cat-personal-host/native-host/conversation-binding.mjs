@@ -23,6 +23,10 @@ export class PersonalChromeConversationAuthorizationError extends Error {
   }
 }
 
+export function isPersonalChromeConversationId(value) {
+  return typeof value === 'string' && CONVERSATION_ID.test(value);
+}
+
 function requireExactString(value, field) {
   if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
     throw new Error(`${field} must be a non-empty exact string`);
@@ -73,7 +77,7 @@ export function conversationIdFromExactChatGptUrl(value) {
 
 function validateAuthorization(value, label = 'conversation authorization') {
   requireExactFields(value, AUTHORIZATION_FIELDS, label);
-  if (typeof value.conversationId !== 'string' || !CONVERSATION_ID.test(value.conversationId)) {
+  if (!isPersonalChromeConversationId(value.conversationId)) {
     throw new Error(`${label} conversationId has an invalid format`);
   }
   const urlConversationId = conversationIdFromExactChatGptUrl(value.chatUrl);
@@ -118,7 +122,7 @@ function validateLegacyBinding(value) {
   if (value.schemaVersion !== 1) throw new Error('legacy schemaVersion must equal 1');
   if (value.provider !== 'chatgpt') throw new Error('legacy provider must equal chatgpt');
   const conversationId = value.conversationId;
-  if (typeof conversationId !== 'string' || !CONVERSATION_ID.test(conversationId)) {
+  if (!isPersonalChromeConversationId(conversationId)) {
     throw new Error('legacy conversationId has an invalid format');
   }
   if (conversationIdFromExactChatGptUrl(value.chatUrl) !== conversationId) {
@@ -304,7 +308,7 @@ export async function authorizePersonalChromeConversation(path, value) {
 }
 
 export async function revokePersonalChromeConversation(path, conversationId, timestamp) {
-  if (typeof conversationId !== 'string' || !CONVERSATION_ID.test(conversationId)) {
+  if (!isPersonalChromeConversationId(conversationId)) {
     throw new Error('conversationId has an invalid format');
   }
   const updatedAt = requireIsoTimestamp(timestamp, 'revocation timestamp');

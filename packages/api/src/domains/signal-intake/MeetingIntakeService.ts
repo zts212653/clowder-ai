@@ -69,10 +69,13 @@ export class MeetingIntakeService {
         'an executing or completed meeting intake cannot be dismissed',
       );
     }
+    const terminal = { ...current };
+    delete (terminal as { repair?: MeetingIntakeRepair }).repair;
     return this.write(current, {
-      ...current,
+      ...terminal,
       judgmentState: 'dismissed',
       executionState: 'idle',
+      healthState: 'healthy',
       unresolved: [],
       revision: current.revision + 1,
       updatedAt: this.now(),

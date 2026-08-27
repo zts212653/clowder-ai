@@ -323,14 +323,29 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     endpointEnvVars: ['AUDIO_SERVICE_URL'],
     defaultEndpoint: 'http://127.0.0.1:9881',
     healthPath: '/status',
+    deepHealthPath: '/health/deep',
     prerequisites: {
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/audio-capture-venv',
-      packages: ['sounddevice', 'fastapi', 'uvicorn', 'numpy'],
-      // No models — audio-capture has no ML inference. Modal still shows
-      // install button (allModels.length === 0 short-circuits canConfirm).
-      models: [],
-      estimatedMinutes: 2,
+      packages: [
+        'aiohttp',
+        'sounddevice',
+        'numpy',
+        'torch',
+        'torchaudio',
+        'soundfile',
+        'scikit-learn',
+        'modelscope[framework]',
+      ],
+      models: [
+        serviceModel(
+          'iic/speech_campplus_sv_zh-cn_16k-common',
+          '~30MB',
+          'CAM++ speaker embedding for enrolled voices and session-local Speaker N separation',
+          true,
+        ),
+      ],
+      estimatedMinutes: 10,
     },
     scripts: {
       install: 'scripts/services/audio-capture-install.sh',

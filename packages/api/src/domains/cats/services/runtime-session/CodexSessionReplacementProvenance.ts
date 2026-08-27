@@ -26,13 +26,26 @@ export interface CodexActiveWriterDiagnostics {
   writerClientIdentity: 'unavailable';
 }
 
-export interface CodexSessionReplacementProvenance {
+export interface CodexActiveWriterReplacementProvenance {
   cause: 'active_writer_reborn';
   previousNativeThreadId: string;
   detectedAt: number;
   attempt: number;
   diagnostics: CodexActiveWriterDiagnostics;
 }
+
+export type CodexNativeResumeRejection = 'rollout_not_found' | 'max_payload_size_exceeded';
+
+export interface CodexNativeResumeReplacementProvenance {
+  cause: 'native_resume_rejected';
+  previousNativeThreadId: string;
+  detectedAt: number;
+  rejection: CodexNativeResumeRejection;
+}
+
+export type CodexSessionReplacementProvenance =
+  | CodexActiveWriterReplacementProvenance
+  | CodexNativeResumeReplacementProvenance;
 
 export interface CodexActiveWriterDetection {
   previousNativeThreadId: string;
@@ -134,9 +147,12 @@ export function buildCodexActiveWriterDiagnostics(input: {
 
 export function isCodexSessionReplacementProvenance(value: unknown): value is CodexSessionReplacementProvenance {
   if (!isRecord(value)) return false;
-  if (value.cause !== 'active_writer_reborn') return false;
   if (!isNonEmptyString(value.previousNativeThreadId)) return false;
   if (!isFiniteNumber(value.detectedAt)) return false;
+  if (value.cause === 'native_resume_rejected') {
+    return value.rejection === 'rollout_not_found' || value.rejection === 'max_payload_size_exceeded';
+  }
+  if (value.cause !== 'active_writer_reborn') return false;
   if (!Number.isInteger(value.attempt) || (value.attempt as number) < 1) return false;
   if (!isRecord(value.diagnostics)) return false;
   const diagnostics = value.diagnostics;

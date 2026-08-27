@@ -15,6 +15,38 @@ function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+function validArtifact(value: unknown, intakeId: string, sourceHandle: string): boolean {
+  if (value === undefined) return true;
+  const artifact = record(value);
+  if (!artifact) return false;
+  const allowed = new Set([
+    'contentType',
+    'resourceRef',
+    'sourceHandle',
+    'sourceRevision',
+    'byteLength',
+    'trust',
+    'instructionPolicy',
+  ]);
+  if (Object.keys(artifact).some((key) => !allowed.has(key))) return false;
+  if (
+    artifact.contentType !== 'text/plain' ||
+    artifact.sourceHandle !== sourceHandle ||
+    typeof artifact.sourceRevision !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(artifact.sourceRevision) ||
+    artifact.resourceRef !==
+      `meeting-artifact://intakes/${encodeURIComponent(intakeId)}?revision=${artifact.sourceRevision}` ||
+    !Number.isSafeInteger(artifact.byteLength) ||
+    Number(artifact.byteLength) < 0 ||
+    Number(artifact.byteLength) > 2_000_000 ||
+    artifact.trust !== 'untrusted_external' ||
+    artifact.instructionPolicy !== 'data_only'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function parseMeetingIntake(raw: string): MeetingIntake {
   let value: unknown;
   try {
@@ -37,6 +69,7 @@ export function parseMeetingIntake(raw: string): MeetingIntake {
     !nonEmpty(origin.pluginInstanceId) ||
     !source ||
     !nonEmpty(source.handle) ||
+    !validArtifact(intake.artifact, intake.intakeId as string, source.handle) ||
     !ingress ||
     !nonEmpty(ingress.publicationId) ||
     !nonEmpty(ingress.canonicalDigest) ||

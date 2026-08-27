@@ -54,6 +54,21 @@ describe('TranscriptPanel — TranscriptLineRow', () => {
     expect(html).toContain('第二句话包含特殊字符');
     expect(html).toContain('&amp;');
   });
+
+  it('renders input source independently from speaker identity', () => {
+    const line: TranscriptLine = {
+      ...baseLine,
+      speaker_label: 'Speaker 2',
+      speaker_identity_source: 'session_cluster',
+      input_id: 'meeting',
+      input_source: 'app',
+      input_label: 'WeLink',
+    };
+    const html = renderToStaticMarkup(<TranscriptLineRow line={line} />);
+
+    expect(html).toContain('Speaker 2:');
+    expect(html).toContain('WeLink');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -269,5 +284,74 @@ describe('TranscriptPanel — full panel integration', () => {
 
     expect(container.innerHTML).toContain('没有说话人标签');
     expect(container.innerHTML).not.toContain('text-cafe-accent-primary');
+  });
+
+  it('starts App and mic as inputs in one AudioSession', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/audio/status') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ running: false }) });
+      }
+      if (path === '/api/audio/transcript') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ lines: [] }) });
+      }
+      if (path === '/api/audio/sources') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              apps: [{ id: 'com.huawei.cloudlink', name: 'Huawei Cloud Meeting' }],
+              mics: [{ index: 0, name: 'Studio Mic', default: true }],
+            }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            status: {
+              running: true,
+              inputs: [
+                { id: 'app', source: 'app', label: 'WeLink', state: 'running' },
+                { id: 'mic', source: 'mic', label: 'Studio Mic', state: 'running' },
+              ],
+            },
+          }),
+      });
+    });
+    const { TranscriptPanel } = await import('../TranscriptPanel');
+    await act(async () => {
+      root.render(<TranscriptPanel />);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+
+    const [appSelect, micSelect] = Array.from(container.querySelectorAll('select'));
+    await act(async () => {
+      appSelect.value = 'com.huawei.cloudlink';
+      appSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      micSelect.value = '0';
+      micSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const start = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Start App + mic'),
+    );
+    await act(async () => {
+      start?.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    const call = mockApiFetch.mock.calls.find(([path]) => path === '/api/audio/start');
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call?.[1]?.body as string)).toEqual({
+      thread_id: 'test-thread',
+      inputs: [
+        {
+          id: 'app',
+          source: 'app',
+          app_name: 'com.huawei.cloudlink',
+          label: 'Huawei Cloud Meeting',
+        },
+        { id: 'mic', source: 'mic', device: 0, label: 'Studio Mic' },
+      ],
+    });
   });
 });

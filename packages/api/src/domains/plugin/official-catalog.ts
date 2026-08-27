@@ -66,10 +66,10 @@ export const OFFICIAL_PLUGIN_POLICIES = [
     pluginId: 'official.feishu-meeting-intake',
     releaseTag: 'next',
     bootstrapRelease: {
-      version: '0.1.0-alpha.4',
+      version: '0.1.0-alpha.8',
       archiveUrl:
-        'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.4.tgz',
-      packageDigest: 'sha512-LCGMvCt7RR7gvlpJazEo3nwM9BY55Ibl3HCd34Jmcphe1LNBnFVY6DCDpkrrD+xh45c3xA9Sc4C3U6jtRrfLyw==',
+        'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.8.tgz',
+      packageDigest: 'sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==',
     },
     effectiveGrants: ['events.publish'],
     ownerAuth: {

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent 产品宣传片小导演台</title>
+  <style>
+    :root{--ink:#2b211b;--muted:#796b61;--paper:#fffaf1;--cream:#f7ecd9;--coral:#ec735d;--gold:#e7ad47;--mint:#83b69b;--blue:#708eaa;--line:#dfcfba;--shadow:0 18px 50px rgba(73,47,28,.13)}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#f8edda 0%,#f7f3e9 52%,#e8f1ec 100%);color:var(--ink);font-family:ui-rounded,"SF Pro Rounded","PingFang SC","Microsoft YaHei",system-ui,sans-serif;line-height:1.5}
+    button{font:inherit;color:inherit}.stage{max-width:1120px;margin:0 auto;padding:30px}.hero{position:relative;overflow:hidden;padding:34px;border:1px solid rgba(110,81,57,.13);border-radius:28px;background:rgba(255,250,241,.92);box-shadow:var(--shadow)}
+    .hero:after{content:"";position:absolute;width:260px;height:260px;right:-70px;top:-110px;border-radius:50%;background:radial-gradient(circle,var(--gold),transparent 68%);opacity:.24}.eyebrow{font-size:13px;font-weight:800;letter-spacing:.14em;color:#a65343}.hero h1{max-width:760px;margin:8px 0 9px;font-size:clamp(29px,5vw,57px);line-height:1.03;letter-spacing:-.04em}.hero p{max-width:760px;margin:0;color:var(--muted);font-size:17px}.formula{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}.formula span{padding:8px 11px;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:750;font-size:13px}.formula i{align-self:center;color:var(--coral);font-style:normal;font-weight:900}
+    .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;margin-top:18px}.panel{padding:22px;border:1px solid rgba(110,81,57,.13);border-radius:22px;background:rgba(255,250,241,.91);box-shadow:0 12px 34px rgba(73,47,28,.08)}.panel h2{margin:0 0 5px;font-size:19px}.kicker{color:var(--muted);font-size:13px}
+    .relay{position:relative;margin-top:18px;padding-left:10px}.rail{position:absolute;left:24px;top:25px;bottom:25px;width:3px;border-radius:3px;background:linear-gradient(var(--coral),var(--gold),var(--mint),var(--blue))}.beat{position:relative;display:grid;grid-template-columns:38px 1fr;gap:12px;width:100%;padding:10px;border:0;border-radius:16px;background:transparent;text-align:left;cursor:pointer;transition:.18s}.beat:hover,.beat:focus-visible{background:#f8ecd9;outline:none}.beat.active{background:#fff;border:1px solid var(--line);box-shadow:0 8px 22px rgba(73,47,28,.09)}.dot{position:relative;display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:#fff;font-size:14px;font-weight:900;z-index:1}.beat b{display:block;font-size:15px}.beat small{display:block;margin-top:2px;color:var(--muted)}
+    .monitor{position:sticky;top:18px;min-height:295px;padding:20px;border-radius:20px;background:#2d2926;color:#fff;overflow:hidden}.monitor:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 85% 10%,rgba(236,115,93,.42),transparent 35%),linear-gradient(160deg,transparent 55%,rgba(131,182,155,.18));pointer-events:none}.monitor>*{position:relative}.monitor .label{color:#e9c686;font-size:12px;font-weight:800;letter-spacing:.12em}.monitor h3{margin:10px 0 7px;font-size:25px}.monitor p{margin:0;color:#e9e2d9}.monitor .lens{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.lens div{padding:11px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.07)}.lens span{display:block;color:#bdb2aa;font-size:11px;text-transform:uppercase}.lens strong{font-size:13px}.receipt{display:flex;gap:8px;align-items:center;margin-top:18px;padding:11px;border-radius:12px;background:#fff7e8;color:var(--ink);font-size:13px}.receipt em{font-style:normal;font-size:20px}
+    .tests{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}.test{padding:14px;border:1px solid var(--line);border-radius:15px;background:#fff}.test strong{display:block;margin-bottom:4px;font-size:14px}.test span{color:var(--muted);font-size:12px}.test.good{border-color:#9dc7b0;background:#eff8f2}.test.bad{border-color:#e6a395;background:#fff2ee}
+    .desk{grid-column:1/-1}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.tab{padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer;font-size:13px;font-weight:750}.tab.active{background:var(--ink);color:#fff;border-color:var(--ink)}.lesson{display:grid;grid-template-columns:120px 1fr;gap:18px;padding:18px;border-radius:17px;background:#fff;border:1px solid var(--line)}.lesson .icon{display:grid;place-items:center;min-height:105px;border-radius:14px;background:var(--cream);font-size:44px}.lesson h3{margin:0 0 5px}.lesson p{margin:0;color:var(--muted)}.lesson ul{margin:10px 0 0;padding-left:18px}.lesson li{margin:4px 0}
+    .sound{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:14px}.channel{position:relative;min-height:112px;padding:13px;border-radius:14px;color:#fff;overflow:hidden}.channel:after{content:"";position:absolute;left:12px;right:12px;bottom:12px;height:4px;border-radius:4px;background:rgba(255,255,255,.28)}.channel b,.channel span{position:relative;z-index:1;display:block}.channel span{margin-top:5px;font-size:12px;color:rgba(255,255,255,.8)}.voice{background:#5a4a40}.music{background:#b87832}.sfx{background:#54846c}.silence{background:#657e96}.sound-note{margin-top:10px;color:var(--muted);font-size:13px}
+    .footer{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-top:18px;padding:18px 22px;border-radius:20px;background:var(--ink);color:#fff}.footer strong{font-size:18px}.footer span{color:#d9cec6;font-size:13px}.seal{white-space:nowrap;padding:9px 12px;border-radius:999px;background:var(--coral);font-weight:850;font-size:13px}
+    @media(max-width:760px){.stage{padding:14px}.hero{padding:23px}.grid{grid-template-columns:1fr}.monitor{position:relative;top:auto}.tests,.sound{grid-template-columns:1fr 1fr}.lesson{grid-template-columns:1fr}.lesson .icon{min-height:75px}.footer{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="hero">
+      <div class="eyebrow">ELI5 · AGENT PRODUCT FILM DIRECTOR</div>
+      <h1>别给机器拍证件照。<br>拍一场<strong>愿望接力赛</strong>。</h1>
+      <p>观众真正想看的是：一句愿望怎样被产品接住、交给 Agent、遇到问题、被人纠正，最后成为可继续生长的东西。成果只是终点盖章，不是整场比赛。</p>
+      <div class="formula"><span>人的愿望</span><i>→</i><span>产品接球</span><i>→</i><span>Agent 可见行动</span><i>→</i><span>人能纠正</span><i>→</i><span>成果收据</span><i>→</i><span>下次继续</span></div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>① 镜头跟着“球权变化”走</h2>
+        <div class="kicker">点一拍，右边会告诉你该拍什么、为什么动、声音干什么。</div>
+        <div class="relay" id="relay">
+          <div class="rail"></div>
+          <button class="beat active" data-step="0"><span class="dot">1</span><span><b>愿望落地</b><small>不是“这里有个输入框”，而是“我想要什么”。</small></span></button>
+          <button class="beat" data-step="1"><span class="dot">2</span><span><b>产品接球</b><small>谁接了、怎么理解、下一步是什么。</small></span></button>
+          <button class="beat" data-step="2"><span class="dot">3</span><span><b>世界开始变化</b><small>状态、角色、工具与共享空间真的在动。</small></span></button>
+          <button class="beat" data-step="3"><span class="dot">4</span><span><b>人类纠正</b><small>好产品不是不犯错，而是听得见、改得动。</small></span></button>
+          <button class="beat" data-step="4"><span class="dot">5</span><span><b>成果盖章，再回产品</b><small>短暂看结果，然后回到关系与延续。</small></span></button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="monitor" aria-live="polite">
+          <div class="label" id="stepLabel">SHOT 01 · TENSION</div>
+          <h3 id="stepTitle">先让观众想要同一个愿望</h3>
+          <p id="stepBody">拍真实的人类愿望和旧世界的摩擦。焦点在“为什么需要”，不是 UI 全景。</p>
+          <div class="lens">
+            <div><span>画面怎么动</span><strong id="motion">从环境建立到愿望气泡；出现后停住</strong></div>
+            <div><span>声音做什么</span><strong id="audio">先留一点空气，再让一句人声进入</strong></div>
+          </div>
+          <div class="receipt"><em>🧾</em><span id="proof">此时不要炫成果；还没轮到收据登场。</span></div>
+        </div>
+        <div class="tests">
+          <div class="test good"><strong>✅ 替换测试</strong><span>换一个成果，产品故事仍成立。</span></div>
+          <div class="test bad"><strong>🚫 焦虑摄像机</strong><span>世界不动，只剩无限慢 zoom。</span></div>
+          <div class="test bad"><strong>🚫 功能报菜名</strong><span>每个功能各拍一张卡，没有因果。</span></div>
+        </div>
+      </div>
+
+      <div class="panel desk">
+        <h2>② 导演不是加特效，是给每一层分工作</h2>
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="story">叙事</button>
+          <button class="tab" data-tab="camera">镜头</button>
+          <button class="tab" data-tab="truth">真相</button>
+          <button class="tab" data-tab="format">格式</button>
+        </div>
+        <div class="lesson" id="lesson">
+          <div class="icon" id="lessonIcon">🏃</div>
+          <div><h3 id="lessonTitle">一条任务，七个因果拍点</h3><p id="lessonBody">痛点 → 承诺 → 第一份小证据 → 难度升级 → 人类控制 → 成果落锤 → 回到产品和关系。</p><ul id="lessonList"><li>每一章回答上一章刚制造的问题。</li><li>多个功能必须成为同一任务里的必要动作。</li></ul></div>
+        </div>
+
+        <h2 style="margin-top:20px">③ 声音台：不是每个 click 都“叮”</h2>
+        <div class="sound">
+          <div class="channel voice"><b>对白 / 旁白</b><span>意义与关系，永远先听清。</span></div>
+          <div class="channel music"><b>音乐</b><span>章节压力、成长和释放。</span></div>
+          <div class="channel sfx"><b>SFX / Foley</b><span>只标重要因果：接球、纠正、完成。</span></div>
+          <div class="channel silence"><b>静默</b><span>给转折、理解和 payoff 留空间。</span></div>
+        </div>
+        <div class="sound-note">简单规则：删掉这个声音，如果因果和情绪一点没损失，它多半只是糖霜。音乐铺满每一秒，音效就没有说话的地方。</div>
+      </div>
+    </section>
+
+    <section class="footer">
+      <div><strong>最后一问：看完的人想要“那个成果”，还是想要“这个产品陪他继续做事”？</strong><br><span>答案若是前者，回 brief；答案若是后者，才交给 video-forge 开机。</span></div>
+      <div class="seal">产品是主角 · 成果是 proof</div>
+    </section>
+  </main>
+  <script>
+    const steps=[
+      {label:'SHOT 01 · TENSION',title:'先让观众想要同一个愿望',body:'拍真实的人类愿望和旧世界的摩擦。焦点在“为什么需要”，不是 UI 全景。',motion:'从环境建立到愿望气泡；出现后停住',audio:'先留一点空气，再让一句人声进入',proof:'此时不要炫成果；还没轮到收据登场。'},
+      {label:'SHOT 02 · ACCEPTANCE',title:'拍清楚“产品接住了”',body:'让角色、holder、计划或下一步变得可见。观众第一次理解：这不是聊天回复，是一段可追踪的工作。',motion:'焦点从愿望移到接球者与新状态',audio:'一个克制的接球 cue；音乐 motif 开始',proof:'证明产品理解并拥有了下一步，而非只说“好的”。'},
+      {label:'SHOT 03 · ACTION',title:'让世界内部发生事情',body:'状态、对象、工具、handoff 与共享空间依次改变。镜头只在意义变化时切，不追每一个鼠标动作。',motion:'状态驱动的硬切、match cut、布局变化',audio:'工具回执和交接做因果标点，不给每次点击配音',proof:'真实动作或诚实重演；不能用静帧加 zoom 冒充。'},
+      {label:'SHOT 04 · CONTROL',title:'把纠错拍成产品能力',body:'人说“不对”，系统停、听、改，并保留连续性。这一拍同时回答信任和控制权。',motion:'先稳定读清纠正，再显示状态真正改变',audio:'音乐短暂 duck 或留白，让“听见”变得可感',proof:'纠正前后必须有可比较的状态，不靠旁白自夸。'},
+      {label:'SHOT 05 · PAYOFF',title:'成果盖章，然后把镜头还给产品',body:'成果短暂证明整条循环真的做成了；最后回到 thread、伙伴、记忆或下一次愿望。',motion:'稳定 reveal；不再焦虑推近；最后回到产品世界',audio:'motif 解决，留一口呼吸给产品名与关系',proof:'成果是收据。换成果后，观众仍应想要这个产品。'}
+    ];
+    const lessons={
+      story:{icon:'🏃',title:'一条任务，七个因果拍点',body:'痛点 → 承诺 → 第一份小证据 → 难度升级 → 人类控制 → 成果落锤 → 回到产品和关系。',items:['每一章回答上一章刚制造的问题。','多个功能必须成为同一任务里的必要动作。']},
+      camera:{icon:'🎥',title:'主体先动，镜头后动',body:'先让 UI 状态、对象、布局或人物发生变化；运镜只表达注意力、亲密、尺度或发现。',items:['Establish → focus → settle。','完成时稳定，不要再推一次。']},
+      truth:{icon:'🔎',title:'四种画面，四种诚实',body:'真实录制、忠实重演、设计解释、未来愿景可以混用，但不能混淆。',items:['过去/现在要有来源；未来用动画和未来时态。','不展示或伪造 chain-of-thought。']},
+      format:{icon:'⏱️',title:'先选容器，再定时长',body:'60 秒品牌片、3 分钟 demo、8 分钟 launch 各有合法用途；时长服务于信念变化与证据量。',items:['一个承诺用短 hero；复杂可信度用完整案例。','教学 walkthrough 不要冒充宣传片。']}
+    };
+    document.querySelectorAll('.beat').forEach(btn=>btn.addEventListener('click',()=>{
+      document.querySelectorAll('.beat').forEach(x=>x.classList.remove('active'));btn.classList.add('active');
+      const s=steps[Number(btn.dataset.step)];
+      document.getElementById('stepLabel').textContent=s.label;document.getElementById('stepTitle').textContent=s.title;document.getElementById('stepBody').textContent=s.body;document.getElementById('motion').textContent=s.motion;document.getElementById('audio').textContent=s.audio;document.getElementById('proof').textContent=s.proof;
+    }));
+    document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');
+      const l=lessons[btn.dataset.tab];document.getElementById('lessonIcon').textContent=l.icon;document.getElementById('lessonTitle').textContent=l.title;document.getElementById('lessonBody').textContent=l.body;document.getElementById('lessonList').innerHTML=l.items.map(x=>'<li>'+x+'</li>').join('');
+    }));
+  </script>
+</body>
+</html>

@@ -124,6 +124,11 @@ function wrapResponseWithRedact(res: http.ServerResponse): http.ServerResponse {
 const EXPECTED_MODE = 'cloud-pro-phase0' as const;
 const EXPECTED_READONLY = 'true' as const;
 const EXPECTED_CAT_ID = 'gpt-pro' as const;
+const SPIKE_VERSION = '0.0.5-b1a' as const;
+const SPIKE_ARTIFACT_REVISION = crypto
+  .createHash('sha256')
+  .update(fs.readFileSync(fileURLToPath(import.meta.url)))
+  .digest('hex');
 
 function validateB1aEnv(): void {
   const errors: string[] = [];
@@ -139,6 +144,12 @@ function validateB1aEnv(): void {
   }
   if (process.env.CAT_CAFE_CAT_ID !== EXPECTED_CAT_ID) {
     errors.push(`CAT_CAFE_CAT_ID must be "${EXPECTED_CAT_ID}" (got: "${process.env.CAT_CAFE_CAT_ID ?? ''}")`);
+  }
+  if (process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID !== EXPECTED_CAT_ID) {
+    errors.push(
+      `CAT_CAFE_AGENT_KEY_BOUND_CAT_ID must be "${EXPECTED_CAT_ID}" so this dedicated ` +
+        'cloud process can authenticate source-bound returns without a caller-supplied selector',
+    );
   }
   if (!process.env.CAT_CAFE_USER_ID) {
     errors.push('CAT_CAFE_USER_ID missing');
@@ -171,33 +182,18 @@ function validateB1aEnv(): void {
         'Use env -u CAT_CAFE_CALLBACK_TOKEN in the spike startup wrapper.',
     );
   }
-  // 砚砚 R10 P1: B1a Custom Instructions mandates `agentKeyCatId="gpt-pro"` on
-  // every collab/memory tool call. With `requestedCatId` always set, the callback
-  // resolver in callback-tools.ts:92-106 unconditionally takes the variantMap
-  // path:
-  //   if (requestedCatId) {
-  //     const variantFiles = parseAgentKeyFileMap(variantMapRaw);
-  //     return readAgentKeyFile(variantFiles[requestedCatId]);
-  //   }
-  //   // CAT_CAFE_AGENT_KEY_FILE / _SECRET are never reached when requestedCatId is set.
-  //
-  // So `_FILE` alone (no `_FILES`) cannot rescue B1a once Custom Instructions
-  // require `agentKeyCatId`: /health would advertise OK while every compliant
-  // collab call fails as callback-not-configured. Validate the variantMap entry
-  // here so the public surface fails closed, not the call surface.
-  //
-  // Falls back to AGENT_KEY_SECRET (callers without agentKeyCatId would still
-  // resolve via that path), but in the B1a / cloud-pro-phase0 configuration the
-  // map entry is the production source of truth and must exist.
+  // This process is dedicated to gpt-pro and binds that identity at startup.
+  // The single-entry variant map remains the key source of truth; validating both
+  // prevents a caller from selecting another principal and lets source-bound
+  // returns omit deployment knowledge that only the server possesses.
   const agentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
   const agentKeyFilesRaw = process.env.CAT_CAFE_AGENT_KEY_FILES;
 
   if (!agentKeyFilesRaw) {
     errors.push(
       `CAT_CAFE_AGENT_KEY_FILES is required for cloud-pro-phase0 — ` +
-        `B1a Custom Instructions enforce agentKeyCatId="${EXPECTED_CAT_ID}", ` +
-        `which forces the callback resolver onto the variantMap path. ` +
-        `CAT_CAFE_AGENT_KEY_FILE alone never reached.`,
+        `the bound identity "${EXPECTED_CAT_ID}" resolves only through its variantMap entry. ` +
+        'CAT_CAFE_AGENT_KEY_FILE alone is not a dedicated-principal contract.',
     );
   } else {
     let map: Record<string, unknown> = {};
@@ -232,7 +228,7 @@ function validateB1aEnv(): void {
       if (typeof candidate !== 'string' || candidate.trim().length === 0) {
         errors.push(
           `CAT_CAFE_AGENT_KEY_FILES has no usable "${EXPECTED_CAT_ID}" entry — ` +
-            `callback resolver returns undefined for input.agentKeyCatId="${EXPECTED_CAT_ID}".`,
+            `callback resolver returns undefined for the bound identity "${EXPECTED_CAT_ID}".`,
         );
       } else {
         const resolvedPath = candidate.trim();
@@ -256,13 +252,13 @@ function validateB1aEnv(): void {
     }
   }
 
-  // AGENT_KEY_SECRET is still accepted as an additional source, but on its own
-  // is not enough for cloud-pro-phase0 unless callers omit agentKeyCatId
-  // (which Custom Instructions forbid). Document the diagnostic-only role.
+  // AGENT_KEY_SECRET is still accepted as an additional source, but the dedicated
+  // bound identity resolves through the variant map, so `_SECRET` alone is not
+  // sufficient for cloud-pro-phase0.
   if (agentKeySecret && !agentKeyFilesRaw) {
     errors.push(
       'CAT_CAFE_AGENT_KEY_SECRET is set but CAT_CAFE_AGENT_KEY_FILES is missing — ' +
-        '_SECRET alone is unreachable when callers pass agentKeyCatId.',
+        '_SECRET alone is outside the dedicated bound-principal path.',
     );
   }
 
@@ -317,7 +313,7 @@ function isAuthorized(req: http.IncomingMessage): boolean {
 function createSpikeServer(): McpServer {
   const server = new McpServer({
     name: 'cat-cafe-cloud-pro-b1a',
-    version: '0.0.4-b1a',
+    version: SPIKE_VERSION,
   });
 
   // server-toolsets.applyReadonlyFilter 在 cloud-pro-phase0 mode 下
@@ -392,7 +388,8 @@ async function main(): Promise<void> {
         JSON.stringify({
           status: 'ok',
           server: 'cat-cafe-cloud-pro-b1a',
-          version: '0.0.4-b1a',
+          version: SPIKE_VERSION,
+          artifact_revision: SPIKE_ARTIFACT_REVISION,
           mode: process.env.CAT_CAFE_DESKTOP_MODE,
           cat_id: process.env.CAT_CAFE_CAT_ID,
         }),
@@ -423,6 +420,7 @@ async function main(): Promise<void> {
     console.error('[cat-cafe-b1a] DESKTOP_MODE:', process.env.CAT_CAFE_DESKTOP_MODE);
     console.error('[cat-cafe-b1a] READONLY:', process.env.CAT_CAFE_READONLY);
     console.error('[cat-cafe-b1a] CAT_ID:', process.env.CAT_CAFE_CAT_ID);
+    console.error('[cat-cafe-b1a] ARTIFACT_REVISION:', SPIKE_ARTIFACT_REVISION);
     console.error('[cat-cafe-b1a] USER_ID:', process.env.CAT_CAFE_USER_ID);
     console.error('[cat-cafe-b1a] AGENT_KEY_FILE:', process.env.CAT_CAFE_AGENT_KEY_FILE ?? '(via _FILES or _SECRET)');
     console.error('[cat-cafe-b1a] API_URL:', process.env.CAT_CAFE_API_URL ?? '(unset, default)');

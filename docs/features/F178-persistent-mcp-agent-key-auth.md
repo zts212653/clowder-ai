@@ -4,7 +4,7 @@ related_features: [F061, F174, F077, F086, F098, F193]
 topics: [auth, mcp, agent-key, persistent-credential, antigravity, infrastructure]
 doc_kind: spec
 created: 2026-04-26
-tips_exempt: automatic credential lifecycle hardening with no new user-invokable action; existing Remote MCP tools remain the just-in-time discovery surface
+tips_exempt: renewed for the legacy generic-permission sunset truth sync; Remote MCP discovery is unchanged and no new user-invokable action shipped
 ---
 
 # F178: Persistent MCP Agent-Key Auth — 跨 invocation 写权限
@@ -168,7 +168,7 @@ Why: F178 owns the persistent agent-key principal and canonical sidecar lifecycl
 | KD-1 | F174 已 done，agent-key 在 F174 基建上加层而非另起独立 auth 体系 | 复用 Redis registry / 结构化错误 / Route B framework / telemetry，避免双套基础设施 | 2026-04-26（立项时） |
 | KD-2 | agent-key 是独立 first-class 概念（不是扩长 invocation token） | invocation token 必须短生命（隔离不变量），扩长会绕过 F174 Phase A 安全边界 | 2026-04-26（立项时） |
 | KD-3 | Phase B 先引入 `CallbackPrincipal`（`kind: 'invocation' \| 'agent_key'`），不把 agent-key 硬塞 `InvocationRecord` | Maine Coon提出：`request.callbackAuth` 现被当 `InvocationRecord` 用，agent-key 需要另一种 principal；否则 route 里到处 `if (agentKey)` 补丁 = 多项式堆项。Ragdoll-46 采纳 | 2026-04-26（Design Gate） |
-| KD-4 | Binding scope = per-cat-per-user，route 级 thread 语义保留 | 持久 agent 价值 = 跨 thread 主动写；per-thread 等于换笼子。但 invocation-scoped route（`request_permission` / `hold_ball` / `guide_*` 等）仍绑 thread | 2026-04-26（Design Gate） |
+| KD-4 | Binding scope = per-cat-per-user，route 级 thread 语义保留 | 持久 agent 价值 = 跨 thread 主动写；per-thread 等于换笼子。但 invocation-scoped route（`hold_ball` / `guide_*` 等）仍绑 thread；历史 `request_permission` 已由 F286 落日 | 2026-04-26（Design Gate；2026-08-24 truth sync） |
 | KD-5 | 默认全开，不做逐猫审批 | operator拍板："默认大家都开启"。用户痛点是减少限制。Hub 做 inventory/revoke/audit 管理面板 | 2026-04-26（operator拍板） |
 | KD-6 | 服务端 Redis + hash，客户端 0600 sidecar file | Redis+hash 复用 F174 范式；客户端不放 mcp_config.json（git diff / 截图 / 复制链路泄漏面） | 2026-04-26（Design Gate） |
 | KD-7 | 45d TTL + rotation API + ≤24h overlap + 实时 revocation | 90d blast radius 过大；7d grace 无必要（capability orchestrator 自动改配置） | 2026-04-26（Design Gate） |

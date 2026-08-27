@@ -205,9 +205,18 @@ function readToolbarState() {
   const bubble = host?.querySelector('[data-testid="message-bubble"]');
   const toolbar = document.querySelector('[data-testid="f294-density-source"] [data-testid="message-actions-toolbar"]');
   if (!quoteRoot || !host || !header || !bubble || !toolbar) throw new Error('F294 density fixture did not render');
+  const actionSlot = header.querySelector('[data-message-action-slot]');
+  const headerItems = Array.from(
+    header.querySelectorAll(':scope > div:first-child > :not([data-message-action-slot])'),
+  );
+  const author = headerItems[0];
+  const timestamp = headerItems[1];
   const hostRect = host.getBoundingClientRect();
   const headerRect = header.getBoundingClientRect();
   const bubbleRect = bubble.getBoundingClientRect();
+  const actionSlotRect = actionSlot.getBoundingClientRect();
+  const authorRect = author.getBoundingClientRect();
+  const timestampRect = timestamp.getBoundingClientRect();
   const style = getComputedStyle(toolbar);
   return {
     hostPaddingTop: getComputedStyle(quoteRoot).paddingTop,
@@ -218,6 +227,8 @@ function readToolbarState() {
     },
     toolbarOpacity: Number(style.opacity),
     toolbarPointerEvents: style.pointerEvents,
+    actionSlotWidth: actionSlotRect.width,
+    authorToTimestampGap: Math.max(timestampRect.left - authorRect.right, authorRect.left - timestampRect.right, 0),
     toolbarHitTarget: (() => {
       const rect = toolbar.getBoundingClientRect();
       const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
@@ -256,16 +267,14 @@ function readAdjacentMessageCollision() {
   }
   const footerRect = previousFooter.getBoundingClientRect();
   const headerRect = currentHeader.getBoundingClientRect();
-  const authorRect = currentAuthor.getBoundingClientRect();
   const toolbarRect = currentToolbar.getBoundingClientRect();
   const overlaps = (left, right) =>
     left.left < right.right && left.right > right.left && left.top < right.bottom && left.bottom > right.top;
   const horizontalGap = (left, right) => Math.max(left.left - right.right, right.left - left.right, 0);
-  const headerContentOverlaps = Array.from(
+  const headerContentRects = Array.from(
     currentHeader.querySelectorAll(':scope > div:first-child > :not([data-message-action-slot])'),
-  )
-    .map((element) => element.getBoundingClientRect())
-    .some((rect) => overlaps(toolbarRect, rect));
+  ).map((element) => element.getBoundingClientRect());
+  const headerContentOverlaps = headerContentRects.some((rect) => overlaps(toolbarRect, rect));
   return {
     footer: { left: footerRect.left, right: footerRect.right, top: footerRect.top, bottom: footerRect.bottom },
     header: { left: headerRect.left, right: headerRect.right, top: headerRect.top, bottom: headerRect.bottom },
@@ -277,7 +286,7 @@ function readAdjacentMessageCollision() {
     },
     overlapsPreviousMetadata: overlaps(toolbarRect, footerRect),
     headerContentOverlaps,
-    toolbarToAuthorGap: horizontalGap(toolbarRect, authorRect),
+    toolbarToHeaderGap: Math.min(...headerContentRects.map((rect) => horizontalGap(toolbarRect, rect))),
   };
 }
 
@@ -364,6 +373,14 @@ test('message actions occupy no resting layout and stay unpainted until asked fo
     assert.equal(resting.hostPaddingTop, '0px', 'a resting message must not pad the top for its action bar');
     assert.equal(resting.toolbarOpacity, 0, 'the action bar must not be painted at rest');
     assert.equal(resting.toolbarPointerEvents, 'none', 'an invisible action bar must not swallow pointer events');
+    assert.ok(
+      resting.actionSlotWidth <= 1,
+      `a hidden action anchor must reserve no row width, saw ${resting.actionSlotWidth}px`,
+    );
+    assert.ok(
+      resting.authorToTimestampGap <= 12,
+      `author and timestamp must remain one metadata cluster, saw ${resting.authorToTimestampGap}px`,
+    );
 
     await page.locator('[data-testid="f294-density-source"] [data-message-id="f294-density-message"]').hover();
     // transition-opacity animates, so settle before measuring.
@@ -600,8 +617,8 @@ test('a revealed message toolbar never covers adjacent message chrome', { timeou
         `the current toolbar must not cover its own author chrome at ${viewport.width}px: ${JSON.stringify(collision)}`,
       );
       assert.ok(
-        collision.toolbarToAuthorGap <= 48,
-        `the current toolbar must stay near its author area at ${viewport.width}px: ${JSON.stringify(collision)}`,
+        collision.toolbarToHeaderGap <= 12,
+        `the current toolbar must stay attached to its metadata cluster at ${viewport.width}px: ${JSON.stringify(collision)}`,
       );
     } finally {
       await page.close();

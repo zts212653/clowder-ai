@@ -99,12 +99,68 @@ describe('F296 B3b-3: declaration and routable event are separate capabilities',
   test('Claude print accepts its typed stream boundary and authenticated hook', () => {
     const print = capability('anthropic', 'print_sdk', true);
     assert.equal(
-      resolveAuthoritativeCompactionSupport({ capability: print, eventSource: 'claude_compact_boundary' }).status,
+      resolveAuthoritativeCompactionSupport({
+        capability: print,
+        eventSource: 'claude_compact_boundary',
+        hookAuthenticationReady: true,
+        hookCarrierReady: true,
+        hookInvocationAttested: true,
+      }).status,
       'supported',
     );
     assert.equal(
-      resolveAuthoritativeCompactionSupport({ capability: print, eventSource: 'claude_precompact_hook' }).status,
+      resolveAuthoritativeCompactionSupport({
+        capability: print,
+        eventSource: 'claude_precompact_hook',
+        hookAuthenticationReady: true,
+        hookCarrierReady: true,
+        hookInvocationAttested: true,
+      }).status,
       'supported',
+    );
+  });
+
+  test('Claude print refuses sequence authority when project hook authentication is unavailable', () => {
+    const print = capability('anthropic', 'print_sdk', true);
+    for (const eventSource of ['claude_compact_boundary', 'claude_precompact_hook']) {
+      assert.deepEqual(
+        resolveAuthoritativeCompactionSupport({
+          capability: print,
+          eventSource,
+          hookAuthenticationReady: false,
+          hookCarrierReady: true,
+        }),
+        { status: 'unsupported', reason: 'hook_authentication_unavailable' },
+      );
+    }
+  });
+
+  test('Claude print refuses sequence authority when the active workspace hook carrier is unavailable', () => {
+    const print = capability('anthropic', 'print_sdk', true);
+    for (const eventSource of ['claude_compact_boundary', 'claude_precompact_hook']) {
+      assert.deepEqual(
+        resolveAuthoritativeCompactionSupport({
+          capability: print,
+          eventSource,
+          hookAuthenticationReady: true,
+          hookCarrierReady: false,
+        }),
+        { status: 'unsupported', reason: 'hook_carrier_unavailable' },
+      );
+    }
+  });
+
+  test('Claude print refuses sequence authority when this invocation has no authenticated seal observation', () => {
+    const print = capability('anthropic', 'print_sdk', true);
+    assert.deepEqual(
+      resolveAuthoritativeCompactionSupport({
+        capability: print,
+        eventSource: 'claude_compact_boundary',
+        hookAuthenticationReady: true,
+        hookCarrierReady: true,
+        hookInvocationAttested: false,
+      }),
+      { status: 'unsupported', reason: 'hook_invocation_attestation_unavailable' },
     );
   });
 

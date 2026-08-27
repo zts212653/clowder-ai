@@ -173,6 +173,22 @@ describe('FloatingTranscriptWindow', () => {
     expect(html).toContain('/tmp/recording.mp3');
   });
 
+  it('shows one recording path per input after multi-input capture', () => {
+    const html = renderToStaticMarkup(
+      <FloatingTranscriptWindow
+        lines={sampleLines}
+        connected={false}
+        recording={false}
+        savedRecordingPaths={{ app: '/tmp/app.mp3', mic: '/tmp/mic.mp3' }}
+        onClose={() => {}}
+      />,
+    );
+    expect(html).toContain('Recording (app):');
+    expect(html).toContain('/tmp/app.mp3');
+    expect(html).toContain('Recording (mic):');
+    expect(html).toContain('/tmp/mic.mp3');
+  });
+
   it('shows Pause button when recording and not paused', () => {
     const html = renderToStaticMarkup(
       <FloatingTranscriptWindow
@@ -210,13 +226,103 @@ describe('FloatingTranscriptWindow', () => {
         connected={true}
         recording={false}
         onClose={() => {}}
-        sources={{ apps: ['Google Chrome', 'Zoom'], mics: [{ index: 0, name: 'MacBook Pro Mic', default: true }] }}
+        sources={{
+          apps: [
+            { id: 'com.google.Chrome', name: 'Google Chrome' },
+            { id: 'us.zoom.xos', name: 'Zoom' },
+          ],
+          mics: [{ index: 0, name: 'MacBook Pro Mic', default: true }],
+        }}
         onStart={() => {}}
       />,
     );
     expect(html).toContain('Google Chrome');
     expect(html).toContain('Zoom');
     expect(html).toContain('Start');
+  });
+
+  it('shows ASR, speaker separation, and each input health in context', () => {
+    const html = renderToStaticMarkup(
+      <FloatingTranscriptWindow
+        lines={[]}
+        connected={true}
+        recording={true}
+        onClose={() => {}}
+        status={{
+          running: true,
+          health: {
+            asr: { state: 'ready' },
+            speaker_separation: { state: 'error', reason: 'CAM++ model missing' },
+          },
+          cluster_diagnostics: {
+            confirmed: 2,
+            provisional: 1,
+            max_clusters: 8,
+            confirmations_required: 2,
+            birth_threshold: 0.65,
+            assignment_threshold: 0.55,
+            replacements: 0,
+          },
+          inputs: [
+            { id: 'meeting', source: 'app', app_name: 'WeLink', label: 'Remote meeting', state: 'running' },
+            { id: 'local', source: 'mic', label: 'My mic', state: 'failed', reason: 'device busy' },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('ASR: ready');
+    expect(html).toContain('Speakers: error');
+    expect(html).toContain('Clusters: 2 confirmed');
+    expect(html).toContain('1 learning');
+    expect(html).toContain('CAM++ model missing');
+    expect(html).toContain('Remote meeting: running');
+    expect(html).toContain('My mic: failed');
+  });
+
+  it('shows ASR and input degradation reasons as visible text', () => {
+    const html = renderToStaticMarkup(
+      <FloatingTranscriptWindow
+        lines={[]}
+        connected={true}
+        recording={true}
+        onClose={() => {}}
+        status={{
+          running: true,
+          health: {
+            asr: { state: 'error', reason: 'Whisper connection refused' },
+            speaker_separation: { state: 'ready' },
+          },
+          inputs: [{ id: 'local', source: 'mic', label: 'My mic', state: 'failed', reason: 'device busy' }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('>ASR: Whisper connection refused</p>');
+    expect(html).toContain('>My mic: device busy</p>');
+  });
+
+  it('marks component health as last known and inputs stopped after capture ends', () => {
+    const html = renderToStaticMarkup(
+      <FloatingTranscriptWindow
+        lines={[]}
+        connected={false}
+        recording={false}
+        onClose={() => {}}
+        status={{
+          running: false,
+          health: {
+            asr: { state: 'ready' },
+            speaker_separation: { state: 'ready' },
+          },
+          inputs: [{ id: 'local', source: 'mic', label: 'My mic', state: 'running' }],
+        }}
+      />,
+    );
+
+    expect(html).toContain('ASR: last ready');
+    expect(html).toContain('Speakers: last ready');
+    expect(html).toContain('My mic: stopped');
   });
 
   it('hides source selector when recording is active', () => {
@@ -226,7 +332,7 @@ describe('FloatingTranscriptWindow', () => {
         connected={true}
         recording={true}
         onClose={() => {}}
-        sources={{ apps: ['Google Chrome'], mics: [] }}
+        sources={{ apps: [{ id: 'com.google.Chrome', name: 'Google Chrome' }], mics: [] }}
         onStart={() => {}}
       />,
     );

@@ -136,10 +136,12 @@ function manifestSetFindings(
       })
       .map((entry) => entry.name),
   ]);
+  const hasCurrentDelta = expectedRetired.length > 0 || expectedCanonical.length > 0 || expectedProfileNames.length > 0;
   if (
-    !equalSet(manifest.retiredNames, expectedRetired) ||
-    !equalSet(manifest.canonicalNames, expectedCanonical) ||
-    !equalSet(Object.keys(manifest.expectedProfiles), expectedProfileNames)
+    hasCurrentDelta &&
+    (!equalSet(manifest.retiredNames, expectedRetired) ||
+      !equalSet(manifest.canonicalNames, expectedCanonical) ||
+      !equalSet(Object.keys(manifest.expectedProfiles), expectedProfileNames))
   ) {
     findings.push({
       code: 'cutover-set-mismatch',

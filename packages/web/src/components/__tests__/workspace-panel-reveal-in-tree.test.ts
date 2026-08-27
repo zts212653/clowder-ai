@@ -118,7 +118,7 @@ const SEARCH_RESULTS = [
 
 /* ---- Helpers ---- */
 function setupWithSearchResults(treeOverride?: TreeNode[]) {
-  const setSearchResults = vi.fn();
+  const resetSearch = vi.fn();
   const fetchSubtree = vi.fn();
   const setOpenFile = vi.fn();
 
@@ -129,11 +129,13 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
     file: null,
     searchResults: SEARCH_RESULTS,
     loading: false,
+    searchLoading: false,
+    searchError: null,
     worktreesLoading: false,
     worktreesError: null,
     error: null,
     search: vi.fn(),
-    setSearchResults,
+    resetSearch,
     fetchFile: vi.fn(),
     fetchTree: vi.fn(),
     fetchSubtree,
@@ -174,7 +176,7 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
     return sel(store);
   });
   mocks.usePersistedState.mockImplementation((_key: string, init: unknown) => [init, vi.fn()]);
-  return { setSearchResults, fetchSubtree, setOpenFile, workspaceValue };
+  return { resetSearch, fetchSubtree, setOpenFile, workspaceValue };
 }
 
 function setupWithMutableStore(initialStore: Record<string, unknown>) {
@@ -239,9 +241,10 @@ function setupWithMutableStore(initialStore: Record<string, unknown>) {
     worktreesLoading: false,
     worktreesError: null,
     searchLoading: false,
+    searchError: null,
     error: null,
     search: vi.fn(),
-    setSearchResults: vi.fn(),
+    resetSearch: vi.fn(),
     fetchFile: vi.fn(),
     fetchTree: vi.fn(),
     fetchSubtree: vi.fn(),

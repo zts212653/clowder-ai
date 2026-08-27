@@ -111,7 +111,7 @@ describe('SessionChainStore', () => {
     };
 
     store.applyPolicySnapshot(logical.id, snapshot);
-    store.recordCompressionEvent(logical.id, 'revision-a');
+    store.recordCompressionEvent(logical.id, 'revision-a', 'inv-policy');
     store.applyPolicySnapshot(logical.id, snapshot);
     assert.equal(store.get(logical.id).hybridProgress.observedCount, 1);
 
@@ -142,9 +142,9 @@ describe('SessionChainStore', () => {
     };
     store.applyPolicySnapshot(logical.id, snapshot);
 
-    const first = store.recordCompressionEvent(logical.id, 'revision-a');
-    const second = store.recordCompressionEvent(logical.id, 'revision-a');
-    const stale = store.recordCompressionEvent(logical.id, 'revision-old');
+    const first = store.recordCompressionEvent(logical.id, 'revision-a', 'inv-first');
+    const second = store.recordCompressionEvent(logical.id, 'revision-a', 'inv-second');
+    const stale = store.recordCompressionEvent(logical.id, 'revision-old', 'inv-stale-policy');
 
     assert.equal(first.revisionMatched, true);
     assert.equal(second.hybridProgress.observedCount, 2);
@@ -152,6 +152,11 @@ describe('SessionChainStore', () => {
     assert.equal(stale.revisionMatched, false);
     assert.equal(stale.hybridProgress.observedCount, 2);
     assert.equal(store.get(logical.id).compressionCount, null);
+    assert.deepEqual(store.get(logical.id).compressionObservation, {
+      invocationId: 'inv-stale-policy',
+      sequence: 2,
+      observedAt: store.get(logical.id).updatedAt,
+    });
   });
 
   test('#1329 increments lifetime telemetry only when zero was actually observed', async () => {
@@ -171,9 +176,14 @@ describe('SessionChainStore', () => {
     };
     store.applyPolicySnapshot(logical.id, snapshot);
 
-    const event = store.recordCompressionEvent(logical.id, 'revision-compress');
+    const event = store.recordCompressionEvent(logical.id, 'revision-compress', 'inv-compress');
     assert.equal(event.compressionCount, 1);
     assert.equal(event.hybridProgress, null);
+    assert.deepEqual(store.get(logical.id).compressionObservation, {
+      invocationId: 'inv-compress',
+      sequence: 1,
+      observedAt: store.get(logical.id).updatedAt,
+    });
   });
 
   test('#1329 Redis result decoding preserves unknown counters when fields are absent', async () => {
@@ -191,7 +201,7 @@ describe('SessionChainStore', () => {
       },
     });
 
-    const event = await store.recordCompressionEvent('session-a', 'revision-a');
+    const event = await store.recordCompressionEvent('session-a', 'revision-a', 'inv-redis-decode');
 
     assert.equal(event.compressionCount, null);
     assert.equal(event.hybridProgress.observedCount, 7);

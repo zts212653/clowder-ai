@@ -15,6 +15,7 @@ import {
   intentChip,
   secondaryTruth,
 } from './message-disposition-presentation';
+import { QueueEntryActions } from './QueueEntryActions';
 import { UNSETTLED_SEEN_LABEL } from './queue-receipt-projection';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
@@ -172,10 +173,12 @@ export interface QueueEntryRowProps {
   onRemove: (id: string) => void;
   onRecallEdit: (id: string) => void;
   onSteer: (id: string) => void;
+  onRetry: (messageId: string, targetCatId: string, attemptId: string) => void;
   onRemind: (id: string, targetCatId: string) => void;
   activeInvocationIdByCatId: Readonly<Record<string, string>>;
   activeCarrierCapabilityByCatId: Readonly<Record<string, FreshnessCarrierCapability | undefined>>;
   remindingTargetKeys: ReadonlySet<string>;
+  retryingAttemptIds: ReadonlySet<string>;
 }
 
 export function SortableQueueEntryRow(props: QueueEntryRowProps) {
@@ -200,10 +203,12 @@ function QueueEntryRow({
   onRemove,
   onRecallEdit,
   onSteer,
+  onRetry,
   onRemind,
   activeInvocationIdByCatId,
   activeCarrierCapabilityByCatId,
   remindingTargetKeys,
+  retryingAttemptIds,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
   const isAgent = entry.source === 'agent';
@@ -320,15 +325,7 @@ function QueueEntryRow({
       </div>
 
       <div className="flex items-center gap-1 shrink-0 mt-1">
-        <button
-          type="button"
-          data-testid={`steer-${entry.id}`}
-          onClick={() => onSteer(entry.id)}
-          className="text-xs px-2.5 py-1 rounded-full border border-cafe text-cafe-secondary hover:bg-cafe-surface transition-colors"
-          aria-label="Steer"
-        >
-          Steer
-        </button>
+        <QueueEntryActions entry={entry} retryingAttemptIds={retryingAttemptIds} onRetry={onRetry} onSteer={onSteer} />
         {canRecallEdit && (
           <button
             type="button"

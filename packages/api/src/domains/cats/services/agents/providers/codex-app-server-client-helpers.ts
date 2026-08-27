@@ -2,6 +2,8 @@ import type { AgentCarrierSession } from '../../types.js';
 import type { CodexAppServerJsonObject } from './CodexAppServerEventMapper.js';
 import { CodexAppServerLifecycle, type CodexAppServerLifecycleSnapshot } from './CodexAppServerLifecycle.js';
 
+export type CodexAppServerApprovalsReviewer = 'user' | 'auto_review' | 'guardian_subagent';
+
 interface ThreadParamsInput {
   model?: string;
   cwd?: string;
@@ -11,6 +13,7 @@ interface ThreadParamsInput {
   config?: CodexAppServerJsonObject;
   /** Omitted = inherit Codex config; null = explicit Standard; fast = request Fast. */
   serviceTier?: string | null;
+  approvalsReviewer?: CodexAppServerApprovalsReviewer;
 }
 
 export function buildCodexAppServerThreadParams(
@@ -26,6 +29,7 @@ export function buildCodexAppServerThreadParams(
     ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     ...(input.config ? { config: input.config } : {}),
     ...(Object.hasOwn(input, 'serviceTier') ? { serviceTier: input.serviceTier ?? null } : {}),
+    ...(input.approvalsReviewer ? { approvalsReviewer: input.approvalsReviewer } : {}),
   };
 }
 

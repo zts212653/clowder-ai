@@ -115,8 +115,8 @@ test('valid Web Store publication and multiple authorizations project only bound
 test('a connected socket with a stale page adapter is never projected as ready', async () => {
   const expected = {
     helper: `sha512:${'a'.repeat(128)}`,
-    extension: '0.2.1',
-    pageAdapter: '2026-08-23.1',
+    extension: '0.2.5',
+    pageAdapter: '2026-08-27.1',
   };
   const state = await inspectPersonalChromePluginState({
     platform: 'darwin',
@@ -164,8 +164,8 @@ test('an active legacy Helper projects one final extension reload action, not ge
     status: 'stale_adapter',
     expectedRevisions: {
       helper: expectedHelper,
-      extension: '0.2.1',
-      pageAdapter: '2026-08-23.1',
+      extension: '0.2.5',
+      pageAdapter: '2026-08-27.1',
     },
     errorCode: 'STALE_HELPER_PROTOCOL',
   });

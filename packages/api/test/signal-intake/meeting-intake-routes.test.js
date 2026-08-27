@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { F292ApprovalAdapter } from '../../dist/domains/approval-hub/adapters/F292ApprovalAdapter.js';
 import {
   MeetingIntakeActionService,
   MeetingIntakeService,
@@ -184,6 +185,56 @@ describe('F292 meeting intake recovery routes', () => {
     assert.equal(deliveries.length, 1);
   });
 
+  it('dismisses a confirmed failed intake as terminal truth without delivery or repeat pending projection', async () => {
+    const current = await admission.intakes.get('intake-1');
+    const choices = {
+      speakerMap: { 1: 'You' },
+      context: 'Saved context',
+      destinationHandle: 'host:private-thread:thread-1',
+      outputs: ['minutes'],
+    };
+    const failed = await admission.intakes.compareAndSet('intake-1', current.revision, {
+      ...current,
+      judgmentState: 'confirmed',
+      executionState: 'failed',
+      healthState: 'degraded',
+      unresolved: [],
+      choices,
+      repair: { code: 'route_unavailable', action: 'retry', observedAt: 12_000 },
+      revision: current.revision + 1,
+      updatedAt: 12_000,
+    });
+    assert.equal(failed.outcome, 'written');
+
+    const dismissed = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/dismiss',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { expectedRevision: failed.intake.revision },
+    });
+
+    assert.equal(dismissed.statusCode, 200);
+    assert.equal(dismissed.json().intake.judgmentState, 'dismissed');
+    assert.equal(dismissed.json().intake.executionState, 'idle');
+    assert.equal(dismissed.json().intake.healthState, 'healthy');
+    assert.equal(dismissed.json().intake.repair, undefined);
+    assert.deepEqual(dismissed.json().intake.choices, choices);
+    assert.equal(deliveries.length, 0);
+
+    const adapter = new F292ApprovalAdapter(admission.intakes);
+    assert.deepEqual(await adapter.listPending('owner-1'), []);
+    assert.equal((await adapter.listSettled('owner-1'))[0].status, 'rejected');
+
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/dismiss',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { expectedRevision: dismissed.json().intake.revision },
+    });
+    assert.equal(replay.statusCode, 400);
+    assert.equal(deliveries.length, 0);
+  });
+
   it('retries the same confirmed intake after Feishu authorization is restored', async () => {
     let authorized = false;
     resolveArtifact = async () => {
@@ -322,5 +373,49 @@ describe('F292 meeting intake recovery routes', () => {
       assert.equal(wrongTypeRequestId.statusCode, 400);
     }
     assert.equal(presentationRetries.length, 0);
+  });
+
+  it('keeps manual recovery reference-only and normalizes it onto the Feishu source adapter', async () => {
+    resolveArtifact = async () => {
+      throw Object.assign(new Error('source deleted'), { code: 'SOURCE_DELETED' });
+    };
+    const failed = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/confirm',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: {
+        expectedRevision: 1,
+        choices: {
+          speakerMap: { 1: 'You' },
+          context: 'Product review',
+          destinationHandle: 'host:private-thread:thread-1',
+          outputs: ['minutes'],
+        },
+      },
+    });
+    assert.equal(failed.json().intake.repair.action, 'manual_import');
+
+    const inlineBody = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/manual-import',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: { expectedRevision: failed.json().intake.revision, transcript: 'must not cross this boundary' },
+    });
+    assert.equal(inlineBody.statusCode, 400);
+
+    resolveArtifact = async () => ({ contentType: 'text/plain', text: 'Source-owned transcript' });
+    const recovered = await app.inject({
+      method: 'POST',
+      url: '/api/meeting-intakes/intake-1/manual-import',
+      headers: { 'x-test-session-user': 'owner-1' },
+      payload: {
+        expectedRevision: failed.json().intake.revision,
+        reference: 'https://example.feishu.cn/minutes/obcn-manual',
+      },
+    });
+    assert.equal(recovered.statusCode, 200);
+    assert.equal(recovered.json().intake.executionState, 'succeeded');
+    assert.equal(deliveries[0].artifact.sourceHandle, 'feishu://meeting-artifacts/minute/obcn-manual?revision=latest');
+    assert.equal('text' in deliveries[0].artifact, false);
   });
 });

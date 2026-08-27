@@ -364,13 +364,54 @@ PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merg
 全量同步到 `clowder-ai` 时，**不能只看家里的 `pnpm gate` 绿不绿**。  
 `source gate green != target/public gate green`。
 
-硬规则：
-1. 先在 `cat-cafe` 导出同一份同步产物到 **temp target**
-2. 在 temp target 跑完整 public gate：`pnpm check`、`pnpm lint`、`build`、`pnpm --filter @cat-cafe/api run test:public`、startup acceptance
-3. **只有 temp target public gate 全绿，才允许碰真实 `clowder-ai`**
-4. 本机 README/macOS smoke 不属于 full sync 主路径；它必须是 sync 完成后的独立步骤，且必须显式隔离端口/Redis
+默认只走**稳定快车道**：
 
-一句话：**不要再把真实 `clowder-ai` 当第一轮验收场，更不能把 runtime 当验收靶子。**
+1. 先处理 Community Diff Guard / intake ledger，确认社区已合入内容不会被覆盖。
+2. 冻结同一班车的 `source SHA + public target HEAD + reconciliation artifact`；后续新进 `origin/main` 的提交默认排到下一班，不追着移动的 main 重跑。
+3. 对冻结切面反复运行无安装、无真实目标写入的 `--preflight`。它先做导出、安全扫描、导出闭包、capability-tip 增量引用、F251、Public Behavior Change Reporter；红灯只修对应问题并重跑这条便宜车道。
+4. preflight 绿后，才对同一 source SHA 跑**一次**完整 source gate，再对同一切面跑**一次** temp-target `--validate`。
+5. temp-target 完整 public gate 遇到首个硬失败立即终止；不再继续烧 `test:public` / startup acceptance 来收集一串次生红灯。
+6. **只有完整 source gate 与 temp-target public gate 都绿，才允许碰真实 `clowder-ai`**。
+7. 本机 README/macOS smoke 不属于 full sync 主路径；它必须是 sync 完成后的独立步骤，且必须显式隔离端口/Redis。
+
+同一组参数贯穿 preflight、validate 与真实同步：
+
+```bash
+SOURCE_SHA=<frozen-cat-cafe-sha>
+EXPECTED_TARGET_HEAD=<frozen-clowder-ai-sha>
+RECONCILIATION_FILE=docs/ops/<date>-full-sync-reconciliation.json
+MIGRATION_NOTES_FILE=/tmp/<date>-full-sync-migration-notes.md
+
+CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
+  --preflight --yes \
+  --source-sha="$SOURCE_SHA" \
+  --expected-target-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE"
+
+test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || exit 75
+env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+  pnpm gate --no-rebase
+test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || exit 75
+
+CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
+  --validate --yes \
+  --source-sha="$SOURCE_SHA" \
+  --expected-target-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE"
+
+CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
+  --yes \
+  --source-sha="$SOURCE_SHA" \
+  --expected-target-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE"
+```
+
+脚本会在 preflight、validate 与真实写入前 fetch public main，并要求 target HEAD、`origin/main`、`--expected-target-head` 三者完全一致。若 public main 在班车期间前进，只重新冻结 public/reconciliation 切面并先跑便宜 preflight；只有 source SHA、manifest/exporter blob 或实际导出字节变化，才需要重跑 source full gate。`--fast-validate` 只是诊断选项，不能替代 preflight，也不能充当 release evidence。
+
+一句话：**先用便宜检查收敛冻结切面，再各跑一次昂贵门禁；不要把真实 `clowder-ai` 当第一轮验收场，更不能把 runtime 当验收靶子。**
 
 ### Release Provenance（三点映射）
 

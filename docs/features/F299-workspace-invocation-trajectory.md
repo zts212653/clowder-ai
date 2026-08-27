@@ -1,6 +1,6 @@
 ---
 feature_ids: [F299]
-related_features: [F233, F252, F153, F200, F237, F298, F300, F304]
+related_features: [F192, F233, F252, F153, F200, F237, F298, F300, F304]
 topics: [observability, trajectory, invocation, workspace, ux, drill-down]
 doc_kind: spec
 created: 2026-08-17
@@ -18,7 +18,7 @@ description_updated_at: 2026-08-18T13:05:00Z
 - **Reviewer**: spec 细节由 @codex-sol 补齐；@fable5 已对 exact `c22defbd0` 完成唯一一次最终架构审核并 `APPROVE`
 Architecture cell: identity-session, bubble-pipeline, hub-action-surface
 
-Map delta: none（2026-08-21，Phase B.1）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1 只在既有 `bubble-pipeline` canonical message ref 与 `hub-action-surface` trajectory inspector 上增加语义投影，不新建 Store / Queue / authority
+Map delta: none（2026-08-24，Phase A–D 已完成，Phase E 待接线）——Phase B.2 已把 `thread-access-policy` authority subcell 登记到 `identity-session`；B.1–D 只扩展既有 transcript / projection / read policy，Phase E 复用 `harness-eval` cell 的 registry、trigger、verdict 与 re-eval closure，不新建 Store / Queue / authority
 
 ## Why
 
@@ -84,6 +84,8 @@ Gate 0 经 operator 与 @fable5 以奥卡姆剃刀收敛（`0001787500223746-000
 ### Phase E: P4 inspector 效用 eval
 
 作为 F192 既有控制面的 `eval:trajectory-inspector` domain 注册，不在 F299 自建 scheduler、verdict store 或第二套 Eval Hub。consumer =「F299 owner 与 operator 对 You/猫调查异常 invocation 的体验作 keep/tune/sunset」；以异常调查 time-to-evidence、根因证据闭合结果、Raw/JSONL grep 回退为多维向量，不合成总分、不以打开率衡量价值。
+
+**当前进度（2026-08-24）**：Phase A–D 已全部 merge，并完成 merged-main Alpha；Phase E 是 F299 唯一剩余阶段。F192 Phase I 的共享 time/threshold trigger dispatcher 已落地，但仓库中尚无 `eval:trajectory-inspector` registry entry、source adapter、publish adapter 或 system thread，不能把“出生证已冻结”冒充“domain 已接线”。下一步只做 F192 domain onboarding + 可重放 episode/reducer + verdict/re-eval 闭环，不扩 F299 页面、不再设计第二套指标或调度。
 
 ## 消费者与时刻（防 Goal Drift · operator 灵魂拷问 `0001786985975123` 后修正）
 
@@ -265,4 +267,4 @@ metric_birth_certificate:
 - Phase B.1 / B.2 implementation: ✅ @codex-sol author；@kimi 已完成非作者 exact-HEAD review；Phase B.2 PR #3833 与 Phase B.1 PR #3834 均已合入
 - Phase C: ✅ 方向经 operator 2026-08-22 收敛；实现按 F299 resolver/UX 与 F192 producer hygiene 分属 ownership且不新建共同层；@opus47 exact-HEAD review `APPROVE` 后 PR #3871 合入，真实 ID-space P1 再由 PR #3877 修复（@luna 窄范围 `APPROVE`，P1/P2/P3=0；merge `528de1026`）
 - Phase D: ✅ PR #3905 已合入；`@opus5` 对 exact `ceccd78b3` `APPROVE`，full gate 与 merged-main Alpha 的真实聊天→trajectory→source-authorized reveal 链均通过，AC-D1 已关闭
-- Phase E: 出生证已落盘；实现注册为 F192 domain，按 F192 domain onboarding/review gate 执行
+- Phase E: 🟡 唯一剩余阶段；出生证已落盘，F192 Phase I 控制面可复用，但 domain 尚未注册/接线。下一步按 F192 domain onboarding/review gate 实现，AC-E1 只在真实 keep/tune/sunset verdict + re-eval closure 后关闭

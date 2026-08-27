@@ -5,7 +5,6 @@ import {
   handleGetEpisode,
   handleListEpisodes,
   handleMagicWord,
-  handlePermissionCancel,
   handleUpdateTerminalState,
 } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-routes.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
@@ -16,54 +15,6 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
 
   beforeEach(() => {
     store = new TaskOutcomeEpisodeStore(':memory:');
-  });
-
-  describe('handlePermissionCancel', () => {
-    it('records a cancel and auto-creates episode if none exists', () => {
-      const result = handlePermissionCancel(store, {
-        toolName: 'cat_cafe_hold_ball',
-        paramsSummary: 'reason: "waiting"',
-        reason: 'wrong_direction',
-        catId: 'opus',
-        threadId: 'thread_abc',
-        sessionId: 'session_1',
-      });
-      assert.ok(result.episodeId);
-      assert.equal(result.signalAppended, true);
-
-      const episode = store.getEpisode(result.episodeId);
-      assert.ok(episode);
-      const signals = store.getSignals(result.episodeId);
-      assert.equal(signals.length, 1);
-      assert.equal(signals[0].record.type, 'permission_cancel');
-      assert.equal(signals[0].record.toolName, 'cat_cafe_hold_ball');
-    });
-
-    it('appends cancel to existing active episode', () => {
-      const ep = store.createEpisode({
-        trigger: 'user_ask',
-        threadId: 'thread_abc',
-        participants: ['opus'],
-      });
-
-      const result = handlePermissionCancel(store, {
-        toolName: 'cat_cafe_post_message',
-        catId: 'opus',
-        threadId: 'thread_abc',
-      });
-      assert.equal(result.episodeId, ep.episodeId);
-      assert.equal(result.signalAppended, true);
-    });
-
-    it('defaults reason to skip', () => {
-      const result = handlePermissionCancel(store, {
-        toolName: 'edit_file',
-        catId: 'opus',
-        threadId: 'thread_abc',
-      });
-      const signals = store.getSignals(result.episodeId);
-      assert.equal(signals[0].record.reason, 'skip');
-    });
   });
 
   describe('handleMagicWord', () => {
@@ -194,12 +145,6 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
         threadId: 'thread_abc',
         participants: ['opus'],
       });
-      handlePermissionCancel(store, {
-        toolName: 'hold_ball',
-        reason: 'should_not_do',
-        catId: 'opus',
-        threadId: 'thread_abc',
-      });
       handleA1WorldTruth(store, {
         type: 'merge',
         ref: 'PR#1',
@@ -211,7 +156,7 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
       assert.ok(result);
       assert.equal(result.episodeId, ep.episodeId);
       assert.equal(result.signals.a1WorldTruth.length, 1);
-      assert.equal(result.signals.a2InteractionDecisions.length, 1);
+      assert.equal(result.signals.a2InteractionDecisions.length, 0);
     });
 
     it('returns null for non-existent episode', () => {

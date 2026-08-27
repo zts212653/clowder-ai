@@ -111,13 +111,8 @@ vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn() }),
 }));
 
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({ pending: [], respond: vi.fn(), handleAuthRequest: vi.fn(), handleAuthResponse: vi.fn() }),
-}));
-
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 
-vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));

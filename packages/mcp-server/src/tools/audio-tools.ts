@@ -1,12 +1,12 @@
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 /**
  * F195 Phase B — Audio capture & transcription MCP tools.
  *
- * All tools proxy to the standalone audio-service (Python, default :9881).
+ * All tools call the API-owned audio controller. MCP invocations never own
+ * sidecar lease tokens and therefore cannot end capture during shutdown.
  */
 
-import { randomUUID } from 'node:crypto';
 import { createMeetingContextBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
@@ -16,94 +16,34 @@ const defineTool = defineMcpMigrationFactory('audio-tools.ts', undefined, {
   resourceFamily: 'audio',
   authority: 'local-runtime',
 });
+const defineCanonicalTool = defineMcpCanonicalFactory('audio-tools.ts', undefined, {
+  resourceFamily: 'audio',
+  authority: 'local-runtime',
+});
 
-const AUDIO_URL = process.env.AUDIO_SERVICE_URL ?? 'http://127.0.0.1:9881';
-const CONTROLLER_LEASE_TTL_S = 15;
-const SHUTDOWN_STOP_TIMEOUT_MS = 5_000;
-
-type ActiveCaptureLease = {
-  token: string;
-  threadId: string;
-  heartbeat: NodeJS.Timeout;
-  expiresAtMs: number;
-};
-
-let activeCaptureLease: ActiveCaptureLease | null = null;
+const API_URL = process.env.CAT_CAFE_API_URL ?? 'http://127.0.0.1:3004';
+const USER_ID = process.env.CAT_CAFE_USER_ID ?? 'default-user';
+const AUDIO_INPUT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 async function audioFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${AUDIO_URL}${path}`, {
+  return fetch(`${API_URL}/api/audio${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string>) },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-cat-cafe-user': USER_ID,
+      ...(process.env.CAT_CAFE_CAT_ID ? { 'x-cat-id': process.env.CAT_CAFE_CAT_ID } : {}),
+      ...(init?.headers as Record<string, string>),
+    },
   });
 }
 
-function releaseActiveCaptureLease(lease: ActiveCaptureLease): void {
-  clearInterval(lease.heartbeat);
-  if (activeCaptureLease === lease) activeCaptureLease = null;
-}
-
-function releaseActiveCaptureLeaseIfExpired(lease: ActiveCaptureLease | null): boolean {
-  if (!lease || Date.now() < lease.expiresAtMs) return false;
-  releaseActiveCaptureLease(lease);
-  return true;
-}
-
-function getActiveCaptureLease(): ActiveCaptureLease | null {
-  const lease = activeCaptureLease;
-  return releaseActiveCaptureLeaseIfExpired(lease) ? null : lease;
-}
-
-async function renewActiveCaptureLease(): Promise<void> {
-  const lease = activeCaptureLease;
-  if (!lease) return;
-  try {
-    const resp = await audioFetch('/lease', {
-      method: 'POST',
-      body: JSON.stringify({ lease_token: lease.token, thread_id: lease.threadId }),
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!resp.ok) {
-      console.error(`[audio] controller lease rejected (${resp.status}); capture will expire`);
-      releaseActiveCaptureLease(lease);
-    } else if (activeCaptureLease === lease) {
-      lease.expiresAtMs = Date.now() + CONTROLLER_LEASE_TTL_S * 1000;
-    }
-  } catch (err) {
-    if (releaseActiveCaptureLeaseIfExpired(lease)) {
-      console.error(`[audio] controller lease expired after renewal failures: ${audioError(err)}`);
-    } else {
-      // Keep retrying transient failures until the last confirmed renewal
-      // expires. The sidecar independently finalizes on the same TTL.
-      console.error(`[audio] controller lease renewal failed: ${audioError(err)}`);
-    }
-  }
-}
-
 export async function shutdownActiveAudioCapture(): Promise<void> {
-  const lease = activeCaptureLease;
-  activeCaptureLease = null;
-  if (!lease) return;
-  clearInterval(lease.heartbeat);
-  try {
-    const resp = await audioFetch('/stop', {
-      method: 'POST',
-      body: JSON.stringify({
-        lease_token: lease.token,
-        reason: 'runtime-graceful-shutdown',
-      }),
-      signal: AbortSignal.timeout(SHUTDOWN_STOP_TIMEOUT_MS),
-    });
-    if (!resp.ok) {
-      console.error(`[audio] graceful capture stop rejected (${resp.status}); waiting for lease expiry`);
-    }
-  } catch (err) {
-    // The sidecar still converges through lease expiry if shutdown races it.
-    console.error(`[audio] graceful capture stop failed: ${audioError(err)}`);
-  }
+  // Compatibility hook for existing MCP entry points. The API process owns
+  // renewal/finalization, so an invocation ending is intentionally neutral.
 }
 
 function audioError(err: unknown): string {
-  return `Cannot reach audio service at ${AUDIO_URL}: ${err instanceof Error ? err.message : String(err)}`;
+  return `Cannot reach Clowder AI API at ${API_URL}: ${err instanceof Error ? err.message : String(err)}`;
 }
 
 // ── Schemas ──────────────────────────────────────────────────
@@ -116,12 +56,54 @@ export const audioCaptureStartInputSchema = {
     .describe('Audio source: "app" for app audio via ScreenCaptureKit, "mic" for microphone'),
   app_name: z
     .string()
+    .trim()
+    .min(1)
     .optional()
-    .describe('Target app name — REQUIRED when source="app" (e.g. "Google Chrome", "zoom.us", "腾讯会议")'),
+    .describe('Stable app ID returned by audio_list_sources — REQUIRED when source="app"'),
   device: z.number().int().optional().describe('Mic device index for source=mic (omit for default)'),
+  label: z.string().trim().min(1).optional().describe('Human-readable label for the primary input'),
+  speaker_evidence: z
+    .object({
+      kind: z.enum(['provider_track', 'exclusive_source']),
+      speaker_id: z.string().trim().min(1),
+      speaker_label: z.string().trim().min(1),
+    })
+    .optional()
+    .describe('Provider track identity or an explicitly exclusive speaker source; app identity alone is not evidence'),
   chunk_sec: z.number().min(0.5).optional().describe('ASR chunk duration in seconds (default 3.0, min 0.5)'),
   meeting_id: z.string().optional().describe('Meeting session ID — binds this capture to a MeetingSession'),
   thread_id: z.string().trim().min(1).describe('Thread ID — required controller lease owner for active capture'),
+  additional_inputs: z
+    .array(
+      z.object({
+        id: z
+          .string()
+          .trim()
+          .regex(
+            AUDIO_INPUT_ID_PATTERN,
+            'Input ID must start with an alphanumeric and contain only alphanumerics, dot, underscore, or hyphen',
+          ),
+        source: z.enum(['app', 'mic']),
+        app_name: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe('Stable app ID returned by audio_list_sources — REQUIRED when this input source="app"'),
+        device: z.number().int().optional(),
+        label: z.string().trim().min(1).optional(),
+        speaker_evidence: z
+          .object({
+            kind: z.enum(['provider_track', 'exclusive_source']),
+            speaker_id: z.string().trim().min(1),
+            speaker_label: z.string().trim().min(1),
+          })
+          .optional(),
+      }),
+    )
+    .max(7)
+    .optional()
+    .describe('Up to seven additional inputs captured in the same AudioSession (eight total)'),
 };
 
 export const audioCaptureStopInputSchema = {};
@@ -135,6 +117,10 @@ export const audioEnrollSpeakersInputSchema = {
         id: z.string().describe('Unique participant ID'),
         name: z.string().describe('Display name'),
         role: z.enum(['host', 'participant']).optional().describe('Role — "host" is the local user (mic source)'),
+        voice_sample: z
+          .string()
+          .optional()
+          .describe('Optional base64 16 kHz mono PCM enrollment sample; metadata alone is never identity evidence'),
       }),
     )
     .min(1)
@@ -161,14 +147,17 @@ export const audioReadTranscriptInputSchema = {
 
 // ── Handlers ─────────────────────────────────────────────────
 
-type SourceInfo = { apps: string[]; mics: Array<{ index: number; name: string; default: boolean }> };
+type SourceInfo = {
+  apps: Array<{ id: string; name: string }>;
+  mics: Array<{ index: number; name: string; default: boolean }>;
+};
 
 export async function handleAudioListSources(): Promise<ToolResult> {
   try {
     const resp = await audioFetch('/sources');
     if (!resp.ok) return errorResult(`Audio service error: ${resp.status}`);
     const data = (await resp.json()) as SourceInfo;
-    const apps = data.apps?.length ? data.apps.join(', ') : '(none detected)';
+    const apps = data.apps?.length ? data.apps.map((app) => `${app.name} [${app.id}]`).join('\n  ') : '(none detected)';
     const mics = data.mics?.length
       ? data.mics.map((m) => `  [${m.index}] ${m.name}${m.default ? ' (default)' : ''}`).join('\n')
       : '  (none)';
@@ -182,32 +171,64 @@ type StartInput = {
   source: 'app' | 'mic';
   app_name?: string;
   device?: number;
+  label?: string;
+  speaker_evidence?: {
+    kind: 'provider_track' | 'exclusive_source';
+    speaker_id: string;
+    speaker_label: string;
+  };
   chunk_sec?: number;
   meeting_id?: string;
   thread_id: string;
+  additional_inputs?: Array<{
+    id: string;
+    source: 'app' | 'mic';
+    app_name?: string;
+    device?: number;
+    label?: string;
+    speaker_evidence?: {
+      kind: 'provider_track' | 'exclusive_source';
+      speaker_id: string;
+      speaker_label: string;
+    };
+  }>;
 };
 
 export async function handleAudioCaptureStart(input: StartInput): Promise<ToolResult> {
-  if (getActiveCaptureLease()) {
-    return errorResult('Audio capture is already owned by this MCP runtime. Stop it before starting another.');
-  }
   try {
     const threadId = input.thread_id.trim();
+    const { additional_inputs: additionalInputs = [], ...legacy } = input;
+    const inputs = [
+      {
+        id: 'primary',
+        source: legacy.source,
+        ...(legacy.app_name ? { app_name: legacy.app_name } : {}),
+        ...(legacy.device !== undefined ? { device: legacy.device } : {}),
+        ...(legacy.label ? { label: legacy.label } : {}),
+        ...(legacy.speaker_evidence ? { speaker_evidence: legacy.speaker_evidence } : {}),
+      },
+      ...additionalInputs,
+    ];
     const resp = await audioFetch('/start', {
       method: 'POST',
       body: JSON.stringify({
-        ...input,
+        chunk_sec: legacy.chunk_sec,
+        meeting_id: legacy.meeting_id,
         thread_id: threadId,
-        controller_id: `mcp-runtime:${process.pid}:${randomUUID()}`,
-        lease_ttl_s: CONTROLLER_LEASE_TTL_S,
+        inputs,
       }),
     });
     const data = (await resp.json()) as {
       ok?: boolean;
       error?: string;
-      lease_token?: string;
       action?: { start_endpoint?: string; logs_endpoint?: string };
-      status?: { source: string; app_name?: string; meeting_id?: string; thread_id?: string };
+      status?: {
+        source?: string;
+        app_name?: string;
+        meeting_id?: string;
+        thread_id?: string;
+        inputs?: Array<{ id: string; source: string; label?: string; state?: string }>;
+      };
     };
     if (!resp.ok) {
       const recovery =
@@ -216,17 +237,12 @@ export async function handleAudioCaptureStart(input: StartInput): Promise<ToolRe
           : '';
       return errorResult(`${data.error ?? `Start failed: ${resp.status}`}${recovery}`);
     }
-    if (!data.lease_token) return errorResult('Audio service start omitted controller lease token.');
-    const heartbeat = setInterval(() => void renewActiveCaptureLease(), (CONTROLLER_LEASE_TTL_S * 1000) / 3);
-    heartbeat.unref();
-    activeCaptureLease = {
-      token: data.lease_token,
-      threadId,
-      heartbeat,
-      expiresAtMs: Date.now() + CONTROLLER_LEASE_TTL_S * 1000,
-    };
     const s = data.status;
-    const label = s?.app_name ? `${s.source} (${s.app_name})` : s?.source;
+    const label = s?.inputs?.length
+      ? s.inputs.map((item) => `${item.label ?? item.id} [${item.state ?? item.source}]`).join(', ')
+      : s?.app_name
+        ? `${s.source} (${s.app_name})`
+        : s?.source;
     const meeting = s?.meeting_id ? ` [meeting=${s.meeting_id}]` : '';
     return successResult(
       `Audio capture started: ${label}${meeting}. Transcription will appear as chunks are processed.`,
@@ -237,12 +253,9 @@ export async function handleAudioCaptureStart(input: StartInput): Promise<ToolRe
 }
 
 export async function handleAudioCaptureStop(): Promise<ToolResult> {
-  const lease = getActiveCaptureLease();
-  if (!lease) return errorResult('No audio capture lease is owned by this MCP runtime.');
   try {
     const resp = await audioFetch('/stop', {
       method: 'POST',
-      body: JSON.stringify({ lease_token: lease.token, reason: 'controller-stop' }),
     });
     const data = (await resp.json()) as {
       summary?: {
@@ -251,17 +264,23 @@ export async function handleAudioCaptureStop(): Promise<ToolResult> {
         avg_asr_latency?: number;
         transcript_path?: string;
         recording_path?: string;
+        recording_paths?: Record<string, string>;
         error?: string;
       };
     };
     if (!resp.ok) return errorResult(`Stop failed: ${resp.status}`);
-    releaseActiveCaptureLease(lease);
     const s = data.summary;
     if (!s || s.error) return successResult(s?.error ?? 'No active session.');
     const txLine = s.transcript_path ? `\n  Transcript: ${s.transcript_path}` : '';
     const recLine = s.recording_path ? `\n  Recording: ${s.recording_path}` : '';
+    const recLines =
+      !s.recording_path && s.recording_paths
+        ? Object.entries(s.recording_paths)
+            .map(([inputId, path]) => `\n  Recording (${inputId}): ${path}`)
+            .join('')
+        : '';
     return successResult(
-      `Capture stopped.\n  Chunks: ${s.chunks}\n  Duration: ${s.duration_s}s\n  Avg ASR latency: ${s.avg_asr_latency}s${txLine}${recLine}`,
+      `Capture stopped.\n  Chunks: ${s.chunks}\n  Duration: ${s.duration_s}s\n  Avg ASR latency: ${s.avg_asr_latency}s${txLine}${recLine}${recLines}`,
     );
   } catch (err) {
     return errorResult(audioError(err));
@@ -280,7 +299,31 @@ type StatusResp = {
   participants?: { id: string; name: string; role?: string }[];
   advisory_mode?: string;
   talking_points?: string[];
+  health?: Record<string, { state?: string; reason?: string; model?: string }>;
+  cluster_diagnostics?: {
+    confirmed: number;
+    provisional: number;
+    max_clusters: number;
+    confirmations_required: number;
+    birth_threshold: number;
+    assignment_threshold: number;
+    replacements: number;
+  };
+  inputs?: Array<{
+    id: string;
+    source: string;
+    label?: string;
+    state?: string;
+    reason?: string | null;
+    chunk_count?: number;
+    deduplicated_chunks?: number;
+  }>;
 };
+
+function formatClusterDiagnostics(diagnostics: StatusResp['cluster_diagnostics']): string {
+  if (!diagnostics) return '';
+  return `\n  Speaker clusters: ${diagnostics.confirmed} confirmed; ${diagnostics.provisional} learning; ${diagnostics.replacements} recovered; birth>=${diagnostics.birth_threshold}; assignment>=${diagnostics.assignment_threshold}`;
+}
 
 export async function handleAudioCaptureStatus(): Promise<ToolResult> {
   try {
@@ -288,7 +331,11 @@ export async function handleAudioCaptureStatus(): Promise<ToolResult> {
     if (!resp.ok) return errorResult(`Audio service error: ${resp.status}`);
     const s = (await resp.json()) as StatusResp;
     if (!s.running) return successResult('Not currently capturing audio.');
-    const label = s.app_name ? `${s.source} (${s.app_name})` : (s.source ?? 'unknown');
+    const label = s.inputs?.length
+      ? s.inputs.map((item) => `${item.label ?? item.id} [${item.source}/${item.state ?? 'unknown'}]`).join(', ')
+      : s.app_name
+        ? `${s.source} (${s.app_name})`
+        : (s.source ?? 'unknown');
     const meeting = s.meeting_id ? `\n  Meeting: ${s.meeting_id}` : '';
     const thread = s.thread_id ? `\n  Thread: ${s.thread_id}` : '';
     const speakers = s.participants?.length
@@ -296,8 +343,25 @@ export async function handleAudioCaptureStatus(): Promise<ToolResult> {
       : '';
     const advisory = s.advisory_mode && s.advisory_mode !== 'passive' ? `\n  Advisory: ${s.advisory_mode}` : '';
     const points = s.talking_points?.length ? `\n  Talking points: ${s.talking_points.length} registered` : '';
+    const inputs = s.inputs?.length
+      ? `\n  Inputs:\n${s.inputs
+          .map(
+            (item) =>
+              `    ${item.label ?? item.id}: ${item.state ?? 'unknown'}; chunks=${item.chunk_count ?? 0}; dedup=${item.deduplicated_chunks ?? 0}${item.reason ? `; reason=${item.reason}` : ''}`,
+          )
+          .join('\n')}`
+      : '';
+    const health = s.health
+      ? `\n  Health: ${Object.entries(s.health)
+          .map(
+            ([name, component]) =>
+              `${name}=${component.state ?? 'unknown'}${component.reason ? ` (${component.reason})` : ''}`,
+          )
+          .join(', ')}`
+      : '';
+    const clusters = formatClusterDiagnostics(s.cluster_diagnostics);
     return successResult(
-      `Capturing: ${label}\n  Duration: ${s.duration_s}s | Chunks: ${s.chunk_count} | Avg ASR: ${s.avg_asr_latency}s${meeting}${thread}${speakers}${advisory}${points}`,
+      `Capturing: ${label}\n  Duration: ${s.duration_s}s | Chunks: ${s.chunk_count} | Avg ASR: ${s.avg_asr_latency}s${meeting}${thread}${speakers}${advisory}${points}${health}${clusters}${inputs}`,
     );
   } catch (err) {
     return errorResult(audioError(err));
@@ -313,6 +377,10 @@ type TranscriptLine = {
   speaker_label?: string;
   speaker_confidence?: number;
   speaker_id?: string | null;
+  speaker_identity_source?: string;
+  input_id?: string;
+  input_source?: string;
+  input_label?: string;
 };
 type TranscriptSummary = { time_range: [number, number]; line_count: number; duration_s: number; key_lines: string[] };
 
@@ -322,7 +390,8 @@ function formatLines(lines: TranscriptLine[]): string {
     .map((l) => {
       const t = new Date(l.ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
       const speaker = l.speaker_label ? `${l.speaker_label}: ` : '';
-      return `[${t}] ${speaker}${l.text}`;
+      const source = l.input_label ?? l.input_id ?? l.input_source;
+      return `[${t}]${source ? ` [${source}]` : ''} ${speaker}${l.text}`;
     })
     .join('\n');
   return `${lines.length} transcript lines:\n\n${text}`;
@@ -383,6 +452,10 @@ export async function handleAudioReadTranscript(input: {
                 speakerId: l.speaker_id ?? undefined,
                 speakerLabel: l.speaker_label ?? '参会者',
                 speakerConfidence: l.speaker_confidence ?? 0.5,
+                speakerIdentitySource: l.speaker_identity_source,
+                inputId: l.input_id,
+                inputSource: l.input_source,
+                inputLabel: l.input_label,
                 timestamp: l.ts,
                 content: l.text,
               }),
@@ -411,7 +484,14 @@ export async function handleAudioReadTranscript(input: {
   }
 }
 
-type EnrollInput = { participants: Array<{ id: string; name: string; role?: 'host' | 'participant' }> };
+type EnrollInput = {
+  participants: Array<{
+    id: string;
+    name: string;
+    role?: 'host' | 'participant';
+    voice_sample?: string;
+  }>;
+};
 
 export async function handleAudioEnrollSpeakers(input: EnrollInput): Promise<ToolResult> {
   try {
@@ -462,7 +542,7 @@ export const audioTools = [
   defineTool({
     name: 'cat_cafe_audio_list_sources',
     description:
-      'List available audio capture sources: running applications (for per-app ScreenCaptureKit capture) and microphone devices.',
+      'List ScreenCaptureKit App sources and microphone devices accepted by live-audio capture. Use when: the user asks to monitor/listen to an App, meeting, video, or microphone, and before every App capture start. NOT for: guessing an App coordinate from its process or display name. Output: a read-only source list with each App display name plus its stable capture ID and each microphone index. GOTCHA: pass the returned App ID unchanged as app_name; labels such as WeLinkMeeting may be a different namespace and can fail capture.',
     inputSchema: audioListSourcesInputSchema,
     handler: handleAudioListSources,
     governance: {
@@ -473,10 +553,10 @@ export const audioTools = [
       targetExposure: 'lazy-discoverable',
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_audio_capture_start',
     description:
-      'Start real-time audio capture and transcription. source="app" captures a specific application\'s audio via ScreenCaptureKit (requires app_name). source="mic" captures from the system microphone. Audio is automatically chunked and transcribed via ASR.',
+      'Start one durable live-audio session with a primary source and optional additional app/mic inputs. Use when: the user asks to monitor/listen to a meeting, video, application, microphone, or App + mic together. NOT for: offline audio-file transcription or assigning names from an App/source label. Output: an API-owned capture that persists across MCP invocations and emits transcript lines with separate input-source and speaker-identity coordinates. GOTCHA: for App inputs, first call audio_list_sources and pass its stable App ID unchanged as app_name; MCP shutdown is capture-neutral, and only explicit stop/API lifecycle owns finalization.',
     inputSchema: audioCaptureStartInputSchema,
     handler: handleAudioCaptureStart,
     governance: {
@@ -503,7 +583,8 @@ export const audioTools = [
   }),
   defineTool({
     name: 'cat_cafe_audio_capture_status',
-    description: 'Check current audio capture status: whether capturing, source type, duration, and chunk count.',
+    description:
+      'Read the current durable live-audio controller and component state. Use when: checking whether monitoring survived another turn, diagnosing missing speakers/transcript, or reporting capture health. NOT for: reading transcript content (use cat_cafe_audio_read_transcript) or proving health from process liveness. Output: ASR/speaker state, every input and degradation reason, duration, chunk and echo-dedup counts.',
     inputSchema: audioCaptureStatusInputSchema,
     handler: handleAudioCaptureStatus,
     governance: {
@@ -528,10 +609,10 @@ export const audioTools = [
       targetExposure: 'lazy-discoverable',
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_audio_enroll_speakers',
     description:
-      'Enroll meeting participants for speaker attribution. Call before starting capture. The host (role="host") maps to mic source; other participants map to app/system audio. With 2 total participants, the non-host gets attributed by name. With 3+, non-host lines show "有人说" (confidence below threshold).',
+      'Register meeting participant metadata for ASR context and optional base64 voice enrollment. Use when: the user supplies participant names/roles or real 16 kHz PCM voice samples before capture. NOT for: inferring a human identity from participant metadata, App name, or microphone source alone. Output: participant context plus enrolled-voice evidence when a sample is usable. GOTCHA: attribution still follows manual confirmation, provider/exclusive evidence, enrolled voice, session Speaker N, then Unknown.',
     inputSchema: audioEnrollSpeakersInputSchema,
     handler: handleAudioEnrollSpeakers,
     governance: {

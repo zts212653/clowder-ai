@@ -678,6 +678,30 @@ describe('MessageReceiptDock', () => {
     expect(container.querySelector('[title="消息已由你撤出待处理，提醒随之结束"]')).not.toBeNull();
   });
 
+  it('shows a terminal no-op instead of recovery for an ended action-successor notice', () => {
+    const terminalNotice: QueueMessageReceipt = {
+      version: 1,
+      entryId: 'entry-terminal-notice',
+      scope: 'cross_thread_delivery',
+      targets: [{ catId: 'codex', state: 'withdrawn', retryable: false, withdrawnAt: 900 }],
+      reminderAttempts: [],
+    };
+
+    act(() => {
+      root.render(
+        <MessageReceiptDock
+          messageId="message-terminal-notice"
+          receipt={terminalNotice}
+          messages={[]}
+          getCatLabel={() => '砚砚'}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('砚砚 · 通知未送达 · 关联事项已结束');
+    expect(container.querySelector('[data-retry-target="codex"]')).toBeNull();
+  });
+
   it('does not render a work-period dock for the message that started the invocation', () => {
     act(() => {
       root.render(

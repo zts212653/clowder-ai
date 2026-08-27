@@ -130,6 +130,51 @@ describe('F244 capability tips hard check', () => {
       writeInventory(root, []);
       const result = checkCapabilityTipsForRepo(root, {
         changedFiles: ['docs/features/F250-test.md'],
+        baseFileContents: {
+          'docs/features/F250-test.md': '# F250 Test\n',
+        },
+      });
+      assert.equal(result.ok, true, result.errors.join('\n'));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when a changed feature reuses an unchanged tips_exempt declaration', () => {
+    const root = makeRepo();
+    try {
+      const baseDocument = '---\ntips_exempt: internal refactor only\n---\n# F250 Test\n';
+      writeFileSync(
+        path.join(root, 'docs', 'features', 'F250-test.md'),
+        `${baseDocument}\n## New user-visible surface\n`,
+      );
+      writeInventory(root, []);
+      const result = checkCapabilityTipsForRepo(root, {
+        changedFiles: ['docs/features/F250-test.md'],
+        baseFileContents: {
+          'docs/features/F250-test.md': baseDocument,
+        },
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.errors.join('\n'), /unchanged tips_exempt/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('passes when a changed feature explicitly renews its tips_exempt declaration', () => {
+    const root = makeRepo();
+    try {
+      writeFileSync(
+        path.join(root, 'docs', 'features', 'F250-test.md'),
+        '---\ntips_exempt: Phase B still has no user entry\n---\n# F250 Test\n',
+      );
+      writeInventory(root, []);
+      const result = checkCapabilityTipsForRepo(root, {
+        changedFiles: ['docs/features/F250-test.md'],
+        baseFileContents: {
+          'docs/features/F250-test.md': '---\ntips_exempt: Phase A has no user entry\n---\n# F250 Test\n',
+        },
       });
       assert.equal(result.ok, true, result.errors.join('\n'));
     } finally {
@@ -248,6 +293,8 @@ describe('F244 capability tips hard check', () => {
     const frontmatter = markdownBlock.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? '';
 
     assert.match(frontmatter, /^# tips_exempt: \{reason\}/m);
+    assert.match(markdownBlock, /one-change lease/);
+    assert.match(markdownBlock, /unchanged exemptions fail closed/);
     assert.doesNotMatch(markdownBlock, /- \[ \] `tips_exempt:` \{reason\}/);
   });
 });

@@ -1,10 +1,10 @@
 ---
 feature_ids: [F192]
-related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275]
+related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275, F299]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
-tips_exempt: harness-internal eval infra — no user-visible capability change
+tips_exempt: Dual-trigger eval dispatch, F299 handoff truth, and generic-permission sunset are harness-internal control-plane changes with no new user-visible capability
 user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 
@@ -74,7 +74,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 
 如果链路里任何一环需要人手工补文件、手工抄 bundle、手工 commit，那就还不算接进 F192 control plane。
 
-### Current Domain Wire Status (2026-06-09 truth sync)
+### Selected Domain Wire Status (2026-08-24 truth sync)
 
 | Domain | Schedule | Publish path | Current truth |
 |--------|----------|--------------|---------------|
@@ -84,6 +84,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live, but the current Episode estimator is thread/latest-in-progress based and has no managed-work eligibility. Until F275 + F267 migration gates pass, output is event/thread-level telemetry only; task-level success/latency/attempt conclusions are invalid. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 | `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
+| `eval:trajectory-inspector` | planned (F299 Phase E) | not wired | F299 metric birth certificate is frozen, but no registry entry, source adapter, publish adapter, or system thread exists yet. Onboarding must reuse F192 Phase I shared trigger dispatcher, verdict handoff, Eval Hub, and re-eval closure; F299 does not build a second control plane. |
 
 ## Why
 
@@ -338,6 +339,8 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-G12: Magic Word 运行时检测 hook——messages.ts tryDetectMagicWords() 在 queued + immediate 双路径检测 → F227 Event Memory 真相源写入 + episode magic_word_ref projection signal（F227 归一后，Event Memory 是真相源，episode 存 ref；11 tests green）
 - [x] AC-G13: Cancel burst proxy signal——CancelBurstDetector（threshold=3, window=60s）+ index.ts authorization handler 接线，burst 触发时追加 proxy signal（8 tests green）
 - [x] AC-G11: 端到端验证——自动化 e2e 集成测试（PR #2167）：6 chain × 10 assertions，三条 production helper（appendPermissionCancelToEpisode / appendMagicWordRefToEpisode / checkAndAppendCancelBurst）从 index.ts 提取后 test + production 共用同一路径；含 reason normalization 边界测试。手动 runtime 验收待operator + Ragdoll一起看 eval hub
+
+> **2026-08-24 sunset disposition:** AC-G2/G6/G8/G9/G10/G11/G13 记录的是当时已交付的历史链路，不再表示当前 writer。operator 决定直接落日 generic permission lifecycle（source `[thread-id]#0001787632982035-000007-ecf7a681`）；F286 同步移除 authorization deny hook、manual task-outcome cancel route、permission-cancel builder/wiring 与 cancel-burst detector。`permission_cancel` / `cancel_burst` schema、read projection、adapter 和统计仍保留，仅用于读取既有 episode 数据；不得据此恢复新的写入入口。
 
 依赖：复用 F192 已有 Eval Domain Registry / Verdict Handoff / Re-eval Closure / Eval Hub 控制面。与 F222 Frustration Auto-Issue 的打通（confirmed issue → episode signal）标记为 v1。
 

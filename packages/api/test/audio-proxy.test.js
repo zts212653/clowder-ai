@@ -50,6 +50,52 @@ describe('audio proxy routes', () => {
     }
   });
 
+  it('forwards N input contracts while keeping the sidecar token private', async () => {
+    const calls = [];
+    globalThis.fetch = mock.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : undefined });
+      if (String(url).endsWith('/start')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            lease_token: 'api-only-secret',
+            status: { running: true, inputs: [{ id: 'meeting' }, { id: 'local' }] },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true, summary: { chunks: 0 } }), { status: 200 });
+    });
+    const app = await buildApp();
+    try {
+      const inputs = [
+        { id: 'meeting', source: 'app', app_name: 'WeLink', label: 'Remote meeting' },
+        {
+          id: 'local',
+          source: 'mic',
+          label: 'My microphone',
+          speaker_evidence: {
+            kind: 'exclusive_source',
+            speaker_id: 'me',
+            speaker_label: 'You',
+          },
+        },
+      ];
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/audio/start',
+        payload: { inputs, thread_id: 'thread-1' },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(Object.hasOwn(JSON.parse(res.payload), 'lease_token'), false);
+      assert.deepEqual(calls[0].body.inputs, inputs);
+      assert.match(calls[0].body.controller_id, /^api-runtime:/);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('renews the runtime lease and finalizes capture during graceful API shutdown', async () => {
     const calls = [];
     globalThis.fetch = mock.fn(async (url, init = {}) => {

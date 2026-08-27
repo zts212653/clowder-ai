@@ -44,7 +44,8 @@ test('F296 B3b-3 hook injects only the API-selected cold packet, never the raw d
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH}`,
         F296_FAKE_DIGEST: fakeDigest,
-        CAT_CAFE_HOOK_TOKEN: 'fixture-token',
+        CAT_CAFE_INVOCATION_ID: 'fixture-invocation',
+        CAT_CAFE_CALLBACK_TOKEN: 'fixture-callback-token',
       },
     });
     assert.equal(result.status, 0, result.stderr);

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { artifact, contractTrialFixture as fixture, intake } from './asr-person-memory-contract-fixture.js';
+import {
+  artifact,
+  artifactText,
+  contractTrialFixture as fixture,
+  intake,
+} from './asr-person-memory-contract-fixture.js';
 
 describe('ASR → F276 dynamic scene producer', () => {
   it('builds deterministic source-only opportunities without classifying importance, intent, or truth', async () => {
@@ -22,7 +27,7 @@ describe('ASR → F276 dynamic scene producer', () => {
     assert.equal(first[0].opportunity.sourceCoordinates[0].speaker.attributionCeiling, 'owner_confirmed_mapping');
     assert.equal(first[0].opportunity.scope.ownerUserId, 'owner-1');
     assert.equal(first[0].opportunity.scope.threadId, 'thread-1');
-    assert.equal(first[0].opportunity.sourceCoordinates[0].segment.end, Buffer.byteLength(artifact.text, 'utf8'));
+    assert.equal(first[0].opportunity.sourceCoordinates[0].segment.end, Buffer.byteLength(artifactText, 'utf8'));
     const serialized = JSON.stringify(first);
     assert.doesNotMatch(serialized, /private transcript/);
     assert.doesNotMatch(serialized, /importance|intent|truth|candidatePayload/);

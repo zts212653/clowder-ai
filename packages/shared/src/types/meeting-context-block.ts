@@ -7,6 +7,10 @@ export interface MeetingContextBlock {
   speakerId?: string;
   speakerLabel: string;
   speakerConfidence: number;
+  speakerIdentitySource?: string;
+  inputId?: string;
+  inputSource?: string;
+  inputLabel?: string;
   timestamp: number;
   content: string;
 }
@@ -26,6 +30,10 @@ export function createMeetingContextBlock(input: {
   speakerId?: string;
   speakerLabel: string;
   speakerConfidence: number;
+  speakerIdentitySource?: string;
+  inputId?: string;
+  inputSource?: string;
+  inputLabel?: string;
   timestamp: number;
   content: string;
   provenance?: MeetingContextProvenance;
@@ -43,6 +51,10 @@ export function createMeetingContextBlock(input: {
     speakerId: input.speakerId,
     speakerLabel: label,
     speakerConfidence: confidence,
+    speakerIdentitySource: input.speakerIdentitySource,
+    inputId: input.inputId,
+    inputSource: input.inputSource,
+    inputLabel: input.inputLabel,
     timestamp: input.timestamp,
     content: sanitized,
   };

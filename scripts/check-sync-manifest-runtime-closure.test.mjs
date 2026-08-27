@@ -3,12 +3,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
 
+import ts from 'typescript';
 import YAML from 'yaml';
 
 import { resolvePublicTestFiles } from '../packages/api/scripts/resolve-public-test-files.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const MANIFEST_PATH = resolve(ROOT, 'sync-manifest.yaml');
+const SYNC_SCRIPT_PATH = resolve(ROOT, 'scripts/sync-to-opensource.sh');
 const isHomeRepo = existsSync(MANIFEST_PATH);
 
 function toRepoPath(absolutePath) {
@@ -24,14 +26,29 @@ function resolveLocalImport(importer, specifier) {
 }
 
 function collectRelativeImports(source) {
-  const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const sourceFile = ts.createSourceFile(
+    'exported-script.mjs',
+    source,
+    ts.ScriptTarget.Latest,
+    false,
+    ts.ScriptKind.JS,
+  );
   const specifiers = new Set();
-  const staticImport = /(?:import|export)\s+(?:[^'";]*?\s+from\s+)?['"](\.[^'"]+)['"]/g;
-  const dynamicImport = /import\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
 
-  for (const pattern of [staticImport, dynamicImport]) {
-    for (const match of code.matchAll(pattern)) specifiers.add(match[1]);
+  function visit(node) {
+    const moduleSpecifier =
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
+        ? node.moduleSpecifier
+        : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+          ? node.arguments[0]
+          : undefined;
+    if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier) && moduleSpecifier.text.startsWith('.')) {
+      specifiers.add(moduleSpecifier.text);
+    }
+    ts.forEachChild(node, visit);
   }
+
+  visit(sourceFile);
   return [...specifiers];
 }
 
@@ -143,6 +160,17 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!isExported(localEnvironment), `${localEnvironment} must never be exported from source`);
   });
 
+  it('preserves target-owned file metadata across backup and restore', () => {
+    const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
+    const backupFunction = syncScript.match(/backup_target_owned_items\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+    const restoreFunction = syncScript.match(/restore_target_owned_items\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+
+    assert.match(backupFunction, /cp -pR /, 'target-owned directories must retain timestamps during backup');
+    assert.match(backupFunction, /cp -p /, 'target-owned files must retain timestamps during backup');
+    assert.match(restoreFunction, /cp -pR /, 'target-owned directories must retain timestamps during restore');
+    assert.match(restoreFunction, /cp -p /, 'target-owned files must retain timestamps during restore');
+  });
+
   it('exports every direct local import of an exported script', () => {
     const missing = [];
 
@@ -227,6 +255,23 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       `${hook} must be exported with ${contract}, otherwise the public suite cannot exercise the cold-packet boundary`,
     );
     assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
+  });
+
+  it('exports every project hook read by the public F296 authentication contract', () => {
+    const contract = 'packages/api/test/f296-session-hook-auth.test.js';
+    const source = readFileSync(resolve(ROOT, contract), 'utf8');
+    const hookReferences = [...source.matchAll(/['"](\.\.\/\.\.\/\.\.\/\.claude\/hooks\/[^'"]+)['"]/g)].map((match) =>
+      toRepoPath(resolveLocalImport(contract, match[1])),
+    );
+
+    assert.ok(hookReferences.length > 0, `${contract} must keep its real project-hook references`);
+    for (const hook of hookReferences) {
+      assert.ok(
+        managedFiles.has(hook),
+        `${hook} must be exported with ${contract}, otherwise test:public reads a missing runtime asset`,
+      );
+      assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
+    }
   });
 
   it('exports the Alpha runner closure exercised by the public F296 contracts', () => {

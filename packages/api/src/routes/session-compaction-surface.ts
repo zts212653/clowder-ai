@@ -7,6 +7,7 @@ import {
 import type { PostCompactContextProjector } from '../domains/cats/services/agents/routing/post-compact-context-projector.js';
 import {
   type AuthoritativeCompactionEventSource,
+  authenticatedCompactionSequenceFromSession,
   authoritativeCompactionEventFromSession,
   resolveAuthoritativeCompactionSupport,
 } from '../domains/cats/services/session/authoritative-compaction.js';
@@ -21,6 +22,8 @@ export interface SessionCompactionSurfaceDeps {
   contextEpochOwner?: Pick<ContextEpochOwner, 'observeCompaction'>;
   resolveContextCapability?: (catId: SessionRecord['catId']) => AgentContextCapability;
   postCompactContextProjector?: PostCompactContextProjector;
+  /** Live invocation callback-auth readiness shared by route and provider consumers. */
+  hookAuthenticationReady?: boolean | (() => boolean);
 }
 
 export function createSessionCompactionSurface(deps: SessionCompactionSurfaceDeps) {
@@ -34,6 +37,16 @@ export function createSessionCompactionSurface(deps: SessionCompactionSurfaceDep
     const support = resolveAuthoritativeCompactionSupport({
       capability: deps.resolveContextCapability(record.catId),
       eventSource,
+      hookAuthenticationReady:
+        typeof deps.hookAuthenticationReady === 'function'
+          ? deps.hookAuthenticationReady()
+          : (deps.hookAuthenticationReady ?? false),
+      // Reaching this authenticated route is the carrier proof. Provider-stream
+      // boundaries use the active workspace filesystem predicate instead.
+      hookCarrierReady: true,
+      // The authenticated route records this atomically before asking the
+      // epoch owner; replay routes consume the same durable observation.
+      hookInvocationAttested: authenticatedCompactionSequenceFromSession(record) !== null,
     });
     if (support.status === 'unsupported') return support;
     const decision = await deps.contextEpochOwner.observeCompaction({

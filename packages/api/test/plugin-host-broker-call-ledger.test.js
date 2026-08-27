@@ -51,7 +51,9 @@ function fakeEventsHandler(overrides = {}) {
 
 async function activeHarness(handler, options = {}) {
   let now = options.now ?? 5_000;
-  const inventory = await readyInventory();
+  const inventory = await readyInventory(
+    options.effectiveGrants === undefined ? {} : { effectiveGrants: options.effectiveGrants },
+  );
   const store = options.store ?? new MemoryHostBrokerStore();
   const broker = new HostBrokerControlPlane({
     inventory,
@@ -204,6 +206,15 @@ describe('K-2B durable Broker call ledger', () => {
       isBrokerError('SESSION_NOT_ACTIVE'),
     );
     assert.equal(expiredHandler.dispatchCount(), 0);
+  });
+
+  it('rejects a capability absent at handshake without misclassifying authority drift', async () => {
+    const handler = fakeEventsHandler();
+    const { connection, store } = await activeHarness(handler, { effectiveGrants: [] });
+
+    await assert.rejects(connection.call('events.publish', eventsPublishInput()), isBrokerError('CAPABILITY_DENIED'));
+    assert.equal(handler.dispatchCount(), 0);
+    assert.equal((await store.snapshot()).sessions[0].phase, 'active');
   });
 
   it('admits an owner-requested historical signal only through the exact active runtime ledger', async () => {

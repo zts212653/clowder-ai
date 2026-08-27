@@ -11,11 +11,16 @@
  * corresponding Clowder AI SessionRecord via `getByCliSessionId()`.
  */
 
-import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import type { FastifyInstance, FastifyPluginOptions, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
+import {
+  type CallbackAuthRegistry,
+  registerCallbackAuthHook,
+  requireCallbackAuth,
+} from './callback-auth-prehandler.js';
 import { createSessionCompactionSurface, type SessionCompactionSurfaceDeps } from './session-compaction-surface.js';
 
 const sealSchema = z.object({
@@ -33,31 +38,54 @@ interface SessionHooksRouteOptions extends FastifyPluginOptions, SessionCompacti
   sessionChainStore: ISessionChainStore;
   sessionSealer: ISessionSealer;
   transcriptReader: TranscriptReader;
-  /** Shared secret for hook authentication. If set, X-Cat-Cafe-Hook-Token header is required. */
-  hookToken?: string;
+  /** Invocation-scoped callback authority shared with the managed Claude child. */
+  callbackRegistry: CallbackAuthRegistry;
+}
+
+function cliSessionIdFromHookRequest(request: FastifyRequest): string | undefined {
+  const body = request.body && typeof request.body === 'object' ? (request.body as Record<string, unknown>) : undefined;
+  const query =
+    request.query && typeof request.query === 'object' ? (request.query as Record<string, unknown>) : undefined;
+  if (typeof body?.cliSessionId === 'string') return body.cliSessionId;
+  return typeof query?.cliSessionId === 'string' ? query.cliSessionId : undefined;
+}
+
+function invocationOwnsSession(
+  invocation: { userId: string; catId: string; threadId: string },
+  session: { userId: string; catId: string; threadId: string },
+): boolean {
+  return (
+    session.userId === invocation.userId &&
+    session.catId === invocation.catId &&
+    session.threadId === invocation.threadId
+  );
 }
 
 export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHooksRouteOptions): Promise<void> {
-  const { sessionChainStore, sessionSealer, hookToken } = opts;
-  const compactionSurface = createSessionCompactionSurface(opts);
+  const { sessionChainStore, sessionSealer, callbackRegistry } = opts;
+  const compactionSurface = createSessionCompactionSurface({
+    ...opts,
+    hookAuthenticationReady: () => callbackRegistry.isStartupRecoveryComplete?.() !== false,
+  });
 
-  // Hook authentication guard — fail-closed: always requires valid token
-  app.addHook('onRequest', async (request, reply) => {
-    if (!hookToken) {
-      reply.status(503);
-      reply.send({ error: 'Hook authentication not configured (set CAT_CAFE_HOOK_TOKEN)' });
-      return;
-    }
-    const provided = request.headers['x-cat-cafe-hook-token'];
-    if (provided !== hookToken) {
-      reply.status(401);
-      reply.send({ error: 'Invalid or missing hook token' });
+  registerCallbackAuthHook(app, callbackRegistry, { enforceToolExecutionPolicy: false });
+  app.addHook('preHandler', async (request, reply) => {
+    const invocation = requireCallbackAuth(request, reply);
+    if (!invocation) return;
+    const cliSessionId = cliSessionIdFromHookRequest(request);
+    if (!cliSessionId) return;
+    const session = await sessionChainStore.getByCliSessionId(cliSessionId);
+    if (!session) return;
+    if (!invocationOwnsSession(invocation, session)) {
+      reply.status(403).send({ error: 'session_hook_scope_mismatch' });
     }
   });
 
   // POST /api/sessions/seal — Hook-triggered session seal
   // Called by f24-pre-compact.sh before Claude Code context compression.
   app.post('/api/sessions/seal', async (request, reply) => {
+    const invocation = requireCallbackAuth(request, reply);
+    if (!invocation) return;
     const parseResult = sealSchema.safeParse(request.body);
     if (!parseResult.success) {
       reply.status(400);
@@ -105,7 +133,11 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     // Atomically update lifetime telemetry (when its origin is known) and the
     // revision-scoped hybrid counter. A concurrent policy revision makes the
     // event stale instead of attributing it to the new epoch.
-    const observed = await sessionChainStore.recordCompressionEvent(record.id, policy.revision);
+    const observed = await sessionChainStore.recordCompressionEvent(
+      record.id,
+      policy.revision,
+      invocation.invocationId,
+    );
     if (!observed) {
       reply.status(409);
       return { error: 'Session disappeared during compression observation (race)', sessionId: record.id };
@@ -218,6 +250,10 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
     const { cliSessionId, skill, sopStage } = parsed.data;
+    if (!(await sessionChainStore.getByCliSessionId(cliSessionId))) {
+      reply.status(404);
+      return { error: 'No session found for this CLI session ID' };
+    }
     const now = new Date(Date.now()).toISOString();
     sopBookmarks.set(cliSessionId, { skill, sopStage, recordedAt: now });
 
@@ -240,6 +276,10 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     if (!cliSessionId) {
       reply.status(400);
       return { error: 'cliSessionId query parameter required' };
+    }
+    if (!(await sessionChainStore.getByCliSessionId(cliSessionId))) {
+      reply.status(404);
+      return { error: 'No session found for this CLI session ID' };
     }
     const bookmark = sopBookmarks.get(cliSessionId);
     if (!bookmark) {

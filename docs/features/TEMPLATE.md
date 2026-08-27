@@ -15,7 +15,9 @@ related_features: []
 topics: []
 doc_kind: spec
 created: {YYYY-MM-DD}
-# Optional F244 exemption for pure internal/no-user-visible changes only:
+# Optional F244 exemption for pure internal/no-user-visible changes only.
+# This is a one-change lease: any later contribution-relevant edit must add a tip
+# or explicitly renew/remove the exemption so the gate cannot silently reuse it.
 # tips_exempt: {reason}
 ---
 
@@ -50,7 +52,7 @@ created: {YYYY-MM-DD}
 
 - [ ] Added/updated 1-2 tips in `packages/web/src/lib/capability-tips.seed.json`
 - [ ] Existing tip sourceRef still covers this user-visible change
-- [ ] If exempt, uncomment/add `tips_exempt: {reason}` in YAML frontmatter
+- [ ] If exempt, add or explicitly renew `tips_exempt: {reason}` in YAML frontmatter for this change; unchanged exemptions fail closed on later edits
 
 Reviewer usefulness check: tip teaches a concrete action, timing, or traceable house rule; title-only tips must be rejected.
 

@@ -17,7 +17,6 @@ function renderHeader(root: Root, props: Record<string, unknown> = {}) {
         sidebarOpen={false}
         onToggleSidebar={vi.fn()}
         threadId="thread-selection"
-        authPendingCount={0}
         viewMode="single"
         onToggleViewMode={vi.fn()}
         statusPanelOpen={false}

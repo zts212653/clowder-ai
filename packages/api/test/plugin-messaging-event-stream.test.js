@@ -291,7 +291,7 @@ describe('EventStreamService — read/ack (INV-4, INV-5)', () => {
     const subB = await stream.subscribe(CTX, issuedB.handleId);
     await sendN(handleA, 1);
     const readA = await stream.read(CTX, subA.subscriptionId, {});
-    await expectCode(stream.ack(CTX, subB.subscriptionId, readA.ackToken), 'PERMISSION');
+    await expectCode(stream.ack(CTX, subB.subscriptionId, readA.ackToken), 'VALIDATION');
   });
 
   test('malformed or forged tokens rejected', async () => {

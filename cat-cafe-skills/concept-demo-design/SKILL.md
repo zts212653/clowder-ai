@@ -143,6 +143,40 @@ Contract 必须记录：
 
 每一幕只新增一个概念。保留人物、原话和具体动作；压低抽象门槛时，不要把叙事压成 SOP 摘要。
 
+### 真实交互 claim：让输入真的长出状态
+
+只有交付声明真的包含编辑、输入、批注、聊天/讨论、发送、审批、拖动/加节点或可恢复草稿时，才触发这组证据。它适用于 `product_experience_gate`、`journey_validation`，也适用于任何其他 `demo_kind` 的同类真实交互 claim；不能因为页面有 tab、播放键或场景切换就自动触发。`concept_story` 的预设叙事与讲者场景控制不是用户交互 claim，照常可用。
+
+对每一条真实交互 claim，Demo Contract 必须写清并用可重放浏览器旅程证明：
+
+1. **用户语义与因果**：用户是在批注、聊天、审批还是创建节点；哪个动作导致哪条新记录、状态或历史出现。不能用“右栏更新”模糊代替。
+2. **语义控件与状态后果**：核心输入是可编辑语义控件，核心动作有 handler 且改变状态。视觉上像输入框的 `span`、空按钮、或只切换预写场景的控制都不算。
+3. **陌生 sentinel**：测试者输入 fixture 中不存在的一段陌生 sentinel；动作后该值必须出现在 DOM 或声明的 browser store 中，证明不是预写内容轮播。
+4. **条件恢复**：只有声称可恢复/持久化时，才额外刷新并证明同一 sentinel 回来；没有此 claim 不强加 storage。
+5. **可重放证据**：Contract 给出 exact browser-test / journey command。截图和视频只能证明外观，不能单独证明输入、因果或状态增长。
+
+允许 fake backend：内存 state、browser store 或 localStorage 都可以。`pnpm check:design-gate-real-interaction` 守住这条契约的 RED/GREEN 回归 fixture；每个实际 Demo 仍必须把自己的可重放浏览器旅程写进 Contract，不能拿该共享 fixture 代替产品证据。
+
+若交付声明已接入真实产品或具备成熟文档编辑能力，还必须提交 `docs/design-gate-claims/<id>.json`。可执行 checker 会读取其中的 `claims.productIntegration.mountChain`，逐跳核验入口、宿主与 surface 的真实文件、import 和 mount；若有 `claims.documentEditor`，还会核验 manifest 中的引擎依赖、adapter 导入/挂载、五项实现 token，并拒绝 `textarea` / `contentEditable`。只写 Contract 表格、截图或测试 fixture 不算提交证据；普通 concept story 与未作这些 claim 的组件实验不进入该加严车道。
+
+### Workspace / product-shell claim：证明用户拥有工作集
+
+只有 Demo 声称自己在验证 **Workspace、产品主壳、多对象协作或多 Agent 工作台** 时，才触发这组证据；普通设置页、单对象详情页和一次性流程不需要为了“完整”补 tab。
+
+1. **先声明层级**：写清当前画面是一个 feature surface、一个对象详情，还是承载多个 surface 的 product shell。把一个做得很完整的资产页叫“Workspace”不算成立。
+2. **证明接在真实宿主里**：若 claim 是“已进入现有产品 / Collective”，Contract 必须写出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**。单独 `/dev` route、自造导航或 **独立复制壳**可以验证组件，但不得充当产品接入证据。
+3. **工作集由用户组成**：用户能从真实入口把 fixture 中未预开的对象加入工作集，形成新的 typed tab / pane；预先摆好几个场景按钮或只替换同一块 DOM 不算。
+4. **异质 surface 共存**：至少两个职责不同的 surface（例如 Channel + Artifact、Chat + Review、File + Browser）能同时保持或快速切回，而不是把所有能力压成同一张卡或同一个右栏模板。
+5. **主工作面与 sidecar 分工**：inspector / sidecar 只承载临时上下文、短动作或快速窥视；需要持续阅读、编辑、对比或独立导航的对象可以晋升为 tab / split pane。右栏不是所有对象的终身监狱。
+6. **每个 surface 有自己的连续性**：切换后草稿、选择、滚动、缩放和内部导航仍在；只有声称跨刷新恢复时，才要求刷新后恢复同一 working set。
+7. **多 Agent claim 另证运行连续性**：若声称 Agent 可以并行工作，离开其 surface 后运行仍继续，状态可找，结果回到 exact Artifact / Work / Review；头像、在线点或预写“正在运行”不能替代这条因果。
+
+tab chrome 本身不是证据。证据是陌生用户真的创造了一个新工作上下文、在多个上下文间继续做事，且系统没有偷偷丢失状态或把结果塞回一坨聊天回复。
+
+### 文档编辑 claim：接引擎，不造输入框戏法
+
+只有 claim 包含共同编辑文档、稳定选区批注、Agent patch 原位审阅或版本撤销时才触发。Contract 必须点名**成熟编辑器引擎**，并证明 `human_edit / selection_anchor / annotation / patch_review / version_undo` 五项**编辑器适配契约**。原生 `textarea`、`contenteditable` 拼装或按段落拆输入框，只能证明文本字段发生变化，不能通过“文档编辑器”验收。
+
 ## 7. 用最低成本做出“真的画面”
 
 默认选择确定性的纯前端交互。只有核心 claim 依赖真实后端行为时，才增加后端。
@@ -163,6 +197,8 @@ Contract 必须记录：
 |---|---|
 | `demo_kind` 是否选对，Demo 的证据能否回答所声明的判题 | Contract 审计 |
 | 场景顺序、控件、暂停、标签、角色连续性 | 自动化 test / guard |
+| 真实交互 claim 的输入、动作与状态增长 | 语义控件 + 陌生 sentinel 的可重放浏览器旅程；恢复 claim 再加刷新断言 |
+| Workspace / product-shell claim 的用户工作集、异质 surface 与状态连续性 | 从真实入口创建新 typed tab / pane + 跨 surface 切换重放；多 Agent claim 再加后台运行与 exact result-return 证据 |
 | 交付车道是否选对、视觉真相源是否真的被采用 | Contract 审计 + 与所列产品页面逐幕对照 |
 | 产品体验 Gate 的默认态、比较变量、折叠恢复与 Must-Preserve 是否成立 | 确定性 fixture + 浏览器逐态对照 + operator 签字 |
 | 用户旅程的步骤、handoff、失败恢复与终态是否真实 | Journey ledger + step / transition / recovery 断言 |
@@ -195,6 +231,10 @@ Contract 必须记录：
 | 一上来滚指标和日志 | 默认观众认识控制台 | 第一幕做面板与指标导览 |
 | 自动播放太快 | 按观看速度设计，没按讲述速度设计 | 试讲定速 + 完整暂停语义 |
 | 两个客户/时间段混在一起 | 场景连续性未写进 Contract | 显式分隔、角色标签、状态前提 |
+| 假输入、空按钮或预设切换被称作“可编辑 / 可聊天” | 只证明了画面与场景控制，没有证明用户因果 | 以陌生 sentinel 走一次真实输入→动作→DOM/store 新状态的浏览器旅程 |
+| 把一个资产页或 Channel 页叫“多人多 Agent Workspace” | 把 feature surface 冒充 product shell；用户无法组成自己的工作集 | 先标明层级，再从真实入口创建异质 tab / pane，并验证切换后的连续性 |
+| 所有对象都塞进右栏或同一块内容区 | 把 inspector 当成主导航，重要对象无法持续阅读、编辑或对比 | sidecar 只做临时上下文；长期对象可晋升 tab / split，主工作面由用户拥有 |
+| tab 都是预先摆好的场景开关 | 只换皮肤，没有创建新对象上下文 | 用 fixture 外对象从真实入口新增 tab，并证明独立状态与关闭 / 恢复语义 |
 | 信号只能经人肉转发 | 没画 signal path | 删除无价值 middle man，换可直达场景 |
 | 收下所有反馈 | 把测量源当规约 owner | 分拣表达问题与立场问题，保留人的晋升/拒绝权 |
 | 改完即宣布成功 | 缺少新世界外推 | 同题对照、新用户、灰度或真实后续行为 |

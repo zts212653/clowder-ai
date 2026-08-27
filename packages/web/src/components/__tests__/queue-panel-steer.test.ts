@@ -38,6 +38,41 @@ const PROCESSING_ENTRY: QueueEntry = {
   status: 'processing',
 };
 
+const FAILED_ENTRY: QueueEntry = {
+  ...QUEUED_ENTRY,
+  targetStates: { opus: 'failed' },
+  queueReceipt: {
+    version: 1,
+    entryId: QUEUED_ENTRY.id,
+    targets: [
+      {
+        catId: 'opus',
+        state: 'failed',
+        attempts: [
+          {
+            id: 'q1:opus:3',
+            targetCatId: 'opus',
+            sequence: 3,
+            state: 'failed',
+            createdAt: NOW - 100,
+            updatedAt: NOW,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      },
+    ],
+    reminderAttempts: [],
+  },
+};
+
+function response(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  };
+}
+
 describe('QueuePanel steer (F047)', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -83,6 +118,37 @@ describe('QueuePanel steer (F047)', () => {
     const html = container.innerHTML;
     expect(html).toContain('Steer');
     expect(container.querySelector('[data-testid="steer-q2"]')).toBeNull();
+  });
+
+  it('routes a failed target to Retry instead of exposing Steer', () => {
+    useChatStore.setState({ queue: [FAILED_ENTRY] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="steer-q1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="retry-q1-opus"]')).not.toBeNull();
+  });
+
+  it('retries the exact failed target once through its message and attempt fence', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(response({ status: 'retry_queued' }, 202) as Response);
+    useChatStore.setState({ queue: [FAILED_ENTRY] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const retry = container.querySelector('[data-testid="retry-q1-opus"]') as HTMLButtonElement | null;
+    expect(retry).not.toBeNull();
+    await act(async () => retry?.click());
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/messages/m1/queue-targets/opus/retry',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ attemptId: 'q1:opus:3' }),
+      }),
+    );
   });
 
   it('renders only actionable per-target queue truth hydrated from the server', () => {
@@ -133,6 +199,39 @@ describe('QueuePanel steer (F047)', () => {
     );
     const callArgs = (apiFetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[1] as { body?: string };
     expect(callArgs.body).toBeUndefined();
+  });
+
+  it('closes a stale Steer confirmation and refreshes Queue truth after a 409', async () => {
+    vi.mocked(apiFetch)
+      .mockResolvedValueOnce(
+        response({ code: 'STEER_STATE_CHANGED', error: 'Steer 状态已变化，请重试' }, 409) as Response,
+      )
+      .mockResolvedValueOnce(response({ queue: [], paused: false }) as Response);
+    useChatStore.setState({ queue: [{ ...QUEUED_ENTRY, targetStates: { opus: 'queued' } }] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="steer-q1"]')?.click());
+    const confirm = container.querySelector<HTMLButtonElement>('[data-testid="steer-confirm"]');
+    expect(confirm).not.toBeNull();
+    await act(async () => confirm?.click());
+
+    expect(container.querySelector('[data-testid="steer-confirm"]')).toBeNull();
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenNthCalledWith(1, '/api/threads/thread-1/queue/q1/steer', { method: 'POST' });
+    expect(apiFetch).toHaveBeenNthCalledWith(2, '/api/threads/thread-1/queue');
+    expect(useChatStore.getState().queue).toEqual([]);
+  });
+
+  it('keeps Steer available for an ordinary pending target', () => {
+    useChatStore.setState({ queue: [{ ...QUEUED_ENTRY, targetStates: { opus: 'queued' } }] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    expect(container.querySelector('[data-testid="steer-q1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="retry-q1-opus"]')).toBeNull();
   });
 
   it('shows the single Steer contract as stop current then restart from this exact message', () => {

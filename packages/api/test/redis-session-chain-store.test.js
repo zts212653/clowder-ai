@@ -367,13 +367,15 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     await store.applyPolicySnapshot(logical.id, snapshot);
 
     const [one, two] = await Promise.all([
-      store.recordCompressionEvent(logical.id, 'revision-a'),
-      store.recordCompressionEvent(logical.id, 'revision-a'),
+      store.recordCompressionEvent(logical.id, 'revision-a', 'inv-redis-one'),
+      store.recordCompressionEvent(logical.id, 'revision-a', 'inv-redis-two'),
     ]);
     assert.deepEqual([one.hybridProgress.observedCount, two.hybridProgress.observedCount].sort(), [1, 2]);
     const reread = await store.get(logical.id);
     assert.equal(reread.compressionCount, null);
     assert.equal(reread.hybridProgress.observedCount, 2);
+    assert.equal(reread.compressionObservation.invocationId, 'inv-redis-two');
+    assert.equal(reread.compressionObservation.sequence, 2);
 
     await store.applyPolicySnapshot(logical.id, { ...snapshot, revision: 'revision-b', changedAt: 20 });
     const reset = await store.get(logical.id);

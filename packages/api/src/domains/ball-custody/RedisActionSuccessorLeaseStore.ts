@@ -19,6 +19,7 @@ import {
   CLAIM_ACTION_SUCCESSOR_LUA,
   CLEAR_ACTION_SUBJECT_TERMINAL_LUA,
   COMMIT_ACTION_SUCCESSOR_CAS_LUA,
+  CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA,
   MARK_ACTION_SUBJECT_TERMINAL_LUA,
   PREFLIGHT_ACTION_SUCCESSOR_LUA,
 } from './action-successor-redis-scripts.js';
@@ -59,6 +60,33 @@ function isActiveTaskLease(lease: ActionSuccessorLease | null): lease is ActionS
     lease.subjectRef.startsWith('subject:task:') &&
     lease.terminalPredicate?.kind === 'task_done'
   );
+}
+
+function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: ActionSuccessorLease, now: number): void {
+  const terminalPredicate = expected.terminalPredicate;
+  if (!terminalPredicate) throw new Error('fresh action successor lease requires a terminal predicate');
+  const replay = claimActionSuccessor(lease, {
+    leaseId: expected.leaseId,
+    tenantScope: expected.tenantScope,
+    subjectRef: expected.subjectRef,
+    actionFamily: expected.actionFamily,
+    successorSlot: expected.successorSlot,
+    mode: expected.mode,
+    holderCatIds: expected.holderCatIds,
+    ...(expected.parallelIntent ? { parallelIntent: expected.parallelIntent } : {}),
+    dispatchId: expected.dispatchId,
+    claimOrigin: expected.claimOrigin,
+    holderThreadId: expected.holderThreadId,
+    ...(expected.predecessorCatId ? { predecessorCatId: expected.predecessorCatId } : {}),
+    ...(expected.predecessorThreadId ? { predecessorThreadId: expected.predecessorThreadId } : {}),
+    issuerStandingEvidenceRef: expected.issuerStandingEvidenceRef,
+    evidenceRefs: expected.evidenceRefs,
+    terminalPredicate,
+    now,
+  });
+  if (replay.outcome !== 'replayed') {
+    throw new Error(`action successor fresh-revision replay mismatch: ${expected.dispatchId}`);
+  }
 }
 
 export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore {
@@ -227,15 +255,37 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
     leaseId: string,
     input: Parameters<ActionSuccessorLeaseStore['continueFreshRevision']>[1],
   ): ReturnType<ActionSuccessorLeaseStore['continueFreshRevision']> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
-      const current = await this.require(leaseId);
-      const result = continueActionSuccessorFreshRevision(current, input);
-      if (result.outcome !== 'continued') return result;
-      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
-      if (committed === 'written') return result;
-      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    const current = await this.require(leaseId);
+    const result = continueActionSuccessorFreshRevision(current, input);
+    if (result.outcome !== 'continued') return result;
+    const raw = (await this.redis.eval(
+      CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA,
+      5,
+      ActionSuccessorKeys.detail(current.leaseId),
+      ActionSuccessorKeys.detail(result.lease.leaseId),
+      ActionSuccessorKeys.identity(current),
+      ActionSuccessorKeys.subjectTerminal(current.subjectRef),
+      ActionSuccessorKeys.ALL,
+      String(current.revision),
+      result.lease.dispatchId,
+      JSON.stringify(result.lease),
+    )) as [string, string];
+    const [outcome, payload] = raw;
+    if (outcome === 'subject_terminal') return { outcome, lease: current };
+    if (outcome === 'continued') {
+      const lease = parseActionSuccessorLease(payload);
+      if (!lease) throw new Error('missing fresh action successor lease payload');
+      validateFreshRevisionReplay(lease, result.lease, input.now);
+      return { outcome, lease };
     }
-    throw new Error(`action successor fresh-revision CAS exhausted: ${leaseId}`);
+    if (outcome === 'lease_missing') throw new Error(`action successor lease not found: ${leaseId}`);
+    if (outcome === 'stale_revision' || outcome === 'identity_advanced') {
+      return { outcome: 'stale_generation', lease: current };
+    }
+    if (outcome === 'successor_exists') {
+      throw new Error(`action successor fresh lease id already exists: ${result.lease.leaseId}`);
+    }
+    throw new Error(`unexpected action successor fresh-revision outcome: ${outcome}`);
   }
 
   async replace(

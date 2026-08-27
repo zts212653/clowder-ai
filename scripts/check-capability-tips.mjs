@@ -236,26 +236,78 @@ function isContributionRelevantFile(filePath) {
   );
 }
 
-function fileHasTipsExemption(repoRoot, filePath) {
-  const resolved = resolve(repoRoot, filePath);
-  if (!existsSync(resolved)) return false;
-  const content = readFileSync(resolved, 'utf8');
-  const exemptionRe = /^tips_exempt\s*:\s*\S.*$/im;
+function extractTipsExemption(content, filePath) {
+  const exemptionRe = /^tips_exempt\s*:\s*(\S.*)$/im;
 
   if (/\.md$/i.test(filePath)) {
     const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-    return frontmatter ? exemptionRe.test(frontmatter[1] ?? '') : false;
+    return frontmatter?.[1]?.match(exemptionRe)?.[1]?.trim() ?? null;
   }
 
   if (/\.ya?ml$/i.test(filePath)) {
-    return exemptionRe.test(content);
+    return content.match(exemptionRe)?.[1]?.trim() ?? null;
   }
 
-  return false;
+  return null;
+}
+
+function readCurrentTipsExemption(repoRoot, filePath) {
+  const resolved = resolve(repoRoot, filePath);
+  if (!existsSync(resolved)) return null;
+  const content = readFileSync(resolved, 'utf8');
+  return extractTipsExemption(content, filePath);
+}
+
+function readBaseFileContent(repoRoot, filePath, options) {
+  if (isObject(options.baseFileContents) && Object.hasOwn(options.baseFileContents, filePath)) {
+    return { ok: true, content: options.baseFileContents[filePath] };
+  }
+
+  const baseRef = options.baseRef ?? 'origin/main';
+  try {
+    return {
+      ok: true,
+      content: execFileSync('git', ['show', `${baseRef}:${filePath}`], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    };
+  } catch {
+    try {
+      const existingPath = execFileSync('git', ['ls-tree', '--name-only', baseRef, '--', filePath], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (!existingPath) return { ok: true, content: null };
+    } catch {
+      // Fall through to the fail-closed result below.
+    }
+  }
+
+  return {
+    ok: false,
+    error: `${filePath}: cannot validate tips_exempt freshness against ${baseRef}`,
+  };
 }
 
 function tipReferencesPath(tip, filePath) {
   return isSourceRef(tip.sourceRef) && tip.sourceRef.path === filePath;
+}
+
+function validateContributionCoverage(repoRoot, filePath, tips, options) {
+  if (tips.some((tip) => tipReferencesPath(tip, filePath))) return null;
+
+  const currentExemption = readCurrentTipsExemption(repoRoot, filePath);
+  if (!currentExemption) return `${filePath}: missing capability tip or tips_exempt`;
+
+  const baseFile = readBaseFileContent(repoRoot, filePath, options);
+  if (!baseFile.ok) return baseFile.error;
+  const baseExemption = typeof baseFile.content === 'string' ? extractTipsExemption(baseFile.content, filePath) : null;
+  if (baseExemption !== currentExemption) return null;
+
+  return `${filePath}: unchanged tips_exempt cannot cover a new contribution-relevant change; add a matching tip or explicitly renew/remove the exemption`;
 }
 
 function getGitChangedFiles(repoRoot) {
@@ -305,9 +357,8 @@ export function checkCapabilityTipsForRepo(repoRoot = defaultRepoRoot, options =
   });
 
   for (const filePath of changedFiles.filter(isContributionRelevantFile)) {
-    if (fileHasTipsExemption(repoRoot, filePath)) continue;
-    if (tips.some((tip) => tipReferencesPath(tip, filePath))) continue;
-    allErrors.push(`${filePath}: missing capability tip or tips_exempt`);
+    const coverageError = validateContributionCoverage(repoRoot, filePath, tips, options);
+    if (coverageError) allErrors.push(coverageError);
   }
 
   return { ok: allErrors.length === 0, errors: allErrors, warnings: allWarnings };

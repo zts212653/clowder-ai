@@ -1625,6 +1625,89 @@ describe('POST /api/messages deliveryMode', () => {
     );
   });
 
+  it('preserves partial success when another targeted cat ends with a terminal error', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.invocationTracker.resolveFinalStatus = mock.fn(() => 'succeeded');
+    deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({
+      targetCats: ['opus', 'codex'],
+      intent: { intent: 'execute' },
+    }));
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      yield {
+        type: 'error',
+        catId: 'codex',
+        error: 'codex terminal failure',
+        errorDisposition: 'terminal',
+        timestamp: Date.now(),
+      };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus @codex preserve partial success', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const terminalWrites = deps.invocationRecordStore.update.mock.calls.filter(
+      (call) => call.arguments[0] === 'inv-stub' && ['failed', 'succeeded'].includes(call.arguments[1]?.status),
+    );
+    assert.deepEqual(
+      terminalWrites.map((call) => call.arguments[1]),
+      [{ status: 'succeeded', successfulCatIds: ['opus'] }],
+    );
+    const completion = deps.queueProcessor.onInvocationComplete.mock.calls.find(
+      (call) => call.arguments[0] === 'thread-1' && call.arguments[1] === 'opus',
+    );
+    assert.equal(completion?.arguments[2], 'succeeded');
+    assert.deepEqual(completion?.arguments[4], ['opus']);
+  });
+
+  it('targeted terminal error persists the primary failure instead of succeeded with an empty witness', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'error',
+        catId: 'opus',
+        error: 'authoritative_compaction_unsupported:hook_authentication_unavailable',
+        errorDisposition: 'terminal',
+        timestamp: Date.now(),
+      };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus compact safely', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const terminalWrites = deps.invocationRecordStore.update.mock.calls.filter(
+      (call) => call.arguments[0] === 'inv-stub' && ['failed', 'succeeded'].includes(call.arguments[1]?.status),
+    );
+    assert.deepEqual(
+      terminalWrites.map((call) => call.arguments[1]),
+      [
+        {
+          status: 'failed',
+          error: 'authoritative_compaction_unsupported:hook_authentication_unavailable',
+        },
+      ],
+    );
+    const completion = deps.queueProcessor.onInvocationComplete.mock.calls.find(
+      (call) => call.arguments[0] === 'thread-1' && call.arguments[1] === 'opus',
+    );
+    assert.equal(completion?.arguments[2], 'failed');
+    assert.deepEqual(completion?.arguments[4], []);
+  });
+
   it('immediate multi-cat execution schedules continuation for every sealed cat', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.router.resolveTargetsAndIntent.mock.mockImplementation(async () => ({

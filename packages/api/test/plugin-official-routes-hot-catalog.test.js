@@ -4,12 +4,12 @@ import { test } from 'node:test';
 import { entry, harness, readHeaders, writeHeaders } from './plugin-official-routes.fixture.js';
 
 test('observes a newer catalog snapshot without rebuilding routes and never offers a downgrade', async () => {
-  const alpha5 = {
+  const alpha9 = {
     ...entry,
-    version: '0.1.0-alpha.5',
+    version: '0.1.0-alpha.9',
     archiveUrl:
-      'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.5.tgz',
-    packageDigest: `sha512-${Buffer.alloc(64, 5).toString('base64')}`,
+      'https://registry.npmjs.org/@clowder-ai/feishu-meeting-intake/-/feishu-meeting-intake-0.1.0-alpha.9.tgz',
+    packageDigest: `sha512-${Buffer.alloc(64, 9).toString('base64')}`,
   };
   let current = entry;
   const catalogProvider = {
@@ -23,10 +23,10 @@ test('observes a newer catalog snapshot without rebuilding routes and never offe
     assert.equal(before.json().plugins[0].updateAvailable, false);
     assert.deepEqual(before.json().catalog, { status: 'fresh', checkedAt: 1_000 });
 
-    current = alpha5;
+    current = alpha9;
     const after = await app.inject({ method: 'GET', url: '/api/plugins/official', headers: readHeaders });
     assert.equal(after.statusCode, 200, after.payload);
-    assert.equal(after.json().plugins[0].availableVersion, '0.1.0-alpha.5');
+    assert.equal(after.json().plugins[0].availableVersion, '0.1.0-alpha.9');
     assert.equal(after.json().plugins[0].updateAvailable, true);
 
     const staleInstall = await app.inject({
@@ -63,8 +63,8 @@ test('observes a newer catalog snapshot without rebuilding routes and never offe
 
   const newerInstall = await harness({
     catalogProvider,
-    installedVersion: '0.1.0-alpha.6',
-    installedDigest: `sha512-${Buffer.alloc(64, 6).toString('base64')}`,
+    installedVersion: '0.1.0-alpha.10',
+    installedDigest: `sha512-${Buffer.alloc(64, 10).toString('base64')}`,
   });
   try {
     current = entry;

@@ -27,6 +27,7 @@ function makeProposal(overrides = {}) {
 
 describe('writeVignette persistence boundary', () => {
   let workspaceDir;
+  let originDir;
 
   beforeEach(() => {
     workspaceDir = join(tmpdir(), `vignette-persistence-test-${Date.now()}`);
@@ -36,10 +37,15 @@ describe('writeVignette persistence boundary', () => {
     execSync('git config user.name "Test"', { cwd: workspaceDir, stdio: 'pipe' });
     writeFileSync(join(workspaceDir, 'README.md'), 'init');
     execSync('git add . && git commit -m "init"', { cwd: workspaceDir, stdio: 'pipe' });
+    originDir = join(tmpdir(), `vignette-persistence-origin-${Date.now()}.git`);
+    execFileSync('git', ['init', '--bare', '--initial-branch=main', originDir], { stdio: 'pipe' });
+    execFileSync('git', ['remote', 'add', 'origin', originDir], { cwd: workspaceDir, stdio: 'pipe' });
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
   });
 
   afterEach(() => {
     rmSync(workspaceDir, { recursive: true, force: true });
+    rmSync(originDir, { recursive: true, force: true });
   });
 
   it('does not treat workspace environment roots as the canonical Taste locator', async () => {
@@ -49,6 +55,7 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
 
     const runtimeDir = join(tmpdir(), `vignette-runtime-test-${Date.now()}`);
     mkdirSync(runtimeDir, { recursive: true });
@@ -65,17 +72,12 @@ describe('writeVignette persistence boundary', () => {
       const result = await writer(proposal);
 
       assert.equal(result.path, `docs/taste/vignettes/${slug}.md`);
-      assert.ok(existsSync(join(workspaceDir, result.path)), 'persistent workspace should receive the vignette');
+      assert.ok(!existsSync(join(workspaceDir, result.path)), 'primary workspace must not be mutated by publication');
       assert.ok(!existsSync(join(runtimeDir, result.path)), 'runtime checkout must not receive the vignette');
-      const committedFiles = execSync('git -c core.quotePath=false diff-tree --no-commit-id --name-only -r HEAD', {
-        cwd: workspaceDir,
-        stdio: 'pipe',
-      })
-        .toString()
-        .trim()
-        .split('\n');
-      assert.ok(committedFiles.includes(result.path));
-      assert.ok(committedFiles.includes('docs/taste/index.md'));
+      assert.match(
+        execFileSync('git', ['--git-dir', originDir, 'show', `main:${result.path}`], { encoding: 'utf8' }),
+        /proposalId: proposal_abc123xyz/,
+      );
 
       const sensitive = await writer(makeProposal({ id: 'proposal_sensitive_xyz', privacy: 'sensitive' }));
       assert.ok(sensitive.path.startsWith('private/taste/'));
@@ -97,6 +99,7 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
 
     const runtimeDir = join(tmpdir(), `vignette-runtime-worktree-test-${Date.now()}`);
     execFileSync('git', ['worktree', 'add', '-b', 'runtime/main-sync', runtimeDir], {
@@ -112,8 +115,12 @@ describe('writeVignette persistence boundary', () => {
       const proposal = makeProposal({ id: 'proposal_equal_roots_xyz' });
       const result = await createVignetteWriter(runtimeDir)(proposal);
 
-      assert.ok(existsSync(join(workspaceDir, result.path)), 'primary main worktree should receive the vignette');
+      assert.ok(!existsSync(join(workspaceDir, result.path)), 'primary main worktree must remain operator-owned');
       assert.ok(!existsSync(join(runtimeDir, result.path)), 'runtime/main-sync must remain disposable');
+      assert.match(
+        execFileSync('git', ['--git-dir', originDir, 'show', `main:${result.path}`], { encoding: 'utf8' }),
+        /proposalId: proposal_equal_roots_xyz/,
+      );
       assert.equal(
         execSync('git branch --show-current', { cwd: workspaceDir, stdio: 'pipe' }).toString().trim(),
         'main',
@@ -134,21 +141,27 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
 
     const writer = createVignetteWriter(workspaceDir);
     const first = await writer(makeProposal());
-    const committedContent = readFileSync(join(workspaceDir, first.path), 'utf8');
-    const commitCountBefore = execSync('git rev-list --count HEAD', { cwd: workspaceDir, stdio: 'pipe' })
-      .toString()
-      .trim();
+    const committedContent = execFileSync('git', ['--git-dir', originDir, 'show', `main:${first.path}`], {
+      encoding: 'utf8',
+    });
+    const commitCountBefore = execFileSync('git', ['--git-dir', originDir, 'rev-list', '--count', 'main'], {
+      encoding: 'utf8',
+    }).trim();
 
     const retried = await writer(makeProposal());
 
     assert.deepEqual(retried, first);
-    assert.equal(readFileSync(join(workspaceDir, retried.path), 'utf8'), committedContent);
-    const commitCountAfter = execSync('git rev-list --count HEAD', { cwd: workspaceDir, stdio: 'pipe' })
-      .toString()
-      .trim();
+    assert.equal(
+      execFileSync('git', ['--git-dir', originDir, 'show', `main:${retried.path}`], { encoding: 'utf8' }),
+      committedContent,
+    );
+    const commitCountAfter = execFileSync('git', ['--git-dir', originDir, 'rev-list', '--count', 'main'], {
+      encoding: 'utf8',
+    }).trim();
     assert.equal(commitCountAfter, commitCountBefore);
   });
 
@@ -164,6 +177,7 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
     const hooksDir = join(workspaceDir, '.git/hooks');
     writeFileSync(join(hooksDir, 'pre-commit'), '#!/bin/sh\nexit 1\n');
     chmodSync(join(hooksDir, 'pre-commit'), 0o755);
@@ -187,6 +201,7 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
     writeFileSync(indexPath, stagedIndex, 'utf8');
     execSync('git add docs/taste/index.md', { cwd: workspaceDir, stdio: 'pipe' });
     const statusBefore = execSync(`git status --porcelain -- docs/taste/index.md docs/taste/vignettes/${slug}.md`, {
@@ -195,7 +210,7 @@ describe('writeVignette persistence boundary', () => {
     }).toString();
     const headBefore = execSync('git rev-parse HEAD', { cwd: workspaceDir, stdio: 'pipe' }).toString();
 
-    await assert.rejects(() => createVignetteWriter(workspaceDir)(proposal), /refuses to write over dirty output path/);
+    await createVignetteWriter(workspaceDir)(proposal);
 
     assert.equal(readFileSync(indexPath, 'utf8'), stagedIndex, 'working-tree index bytes must be preserved');
     assert.equal(
@@ -203,7 +218,7 @@ describe('writeVignette persistence boundary', () => {
       stagedIndex,
       'staged index bytes must be preserved',
     );
-    assert.ok(!existsSync(vignettePath), 'writer must not create the vignette before rejecting');
+    assert.ok(!existsSync(vignettePath), 'isolated publisher must not write the primary vignette path');
     assert.equal(
       execSync(`git status --porcelain -- docs/taste/index.md docs/taste/vignettes/${slug}.md`, {
         cwd: workspaceDir,
@@ -231,6 +246,7 @@ describe('writeVignette persistence boundary', () => {
       cwd: workspaceDir,
       stdio: 'pipe',
     });
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
     writeFileSync(vignettePath, stagedVignette, 'utf8');
     execSync(`git add ${relativeVignettePath}`, { cwd: workspaceDir, stdio: 'pipe' });
     const statusBefore = execSync(`git status --porcelain -- docs/taste/index.md ${relativeVignettePath}`, {
@@ -239,7 +255,7 @@ describe('writeVignette persistence boundary', () => {
     }).toString();
     const headBefore = execSync('git rev-parse HEAD', { cwd: workspaceDir, stdio: 'pipe' }).toString();
 
-    await assert.rejects(() => createVignetteWriter(workspaceDir)(proposal), /refuses to write over dirty output path/);
+    await assert.rejects(() => createVignetteWriter(workspaceDir)(proposal), /Taste publication conflict/);
 
     assert.equal(readFileSync(vignettePath, 'utf8'), stagedVignette, 'working-tree vignette bytes must be preserved');
     assert.equal(

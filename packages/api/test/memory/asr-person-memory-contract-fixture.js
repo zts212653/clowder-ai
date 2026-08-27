@@ -11,13 +11,15 @@ export const intake = {
   updatedAt: 1_000,
 };
 
+export const artifactText = 'speaker_1: private transcript\nspeaker_2: more private transcript';
 export const artifact = {
-  text: 'speaker_1: private transcript\nspeaker_2: more private transcript',
-  provenance: {
-    sourceHandle: 'lark://minutes/meeting-1',
-    trust: 'untrusted_external',
-    instructionPolicy: 'data_only',
-  },
+  contentType: 'text/plain',
+  resourceRef: `meeting-artifact://intakes/meeting-intake-1?revision=sha256:${'b'.repeat(64)}`,
+  sourceHandle: 'lark://minutes/meeting-1',
+  sourceRevision: `sha256:${'b'.repeat(64)}`,
+  byteLength: Buffer.byteLength(artifactText, 'utf8'),
+  trust: 'untrusted_external',
+  instructionPolicy: 'data_only',
 };
 
 export async function contractTrialFixture(options = {}) {

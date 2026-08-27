@@ -62,17 +62,20 @@ describe('Thread API', () => {
     assert.deepEqual(body.participants, []);
   });
 
-  it('POST /api/threads persists an explicit preferred cat for a new meeting destination', async () => {
+  it('POST /api/threads atomically persists the preferred cat and pin for a new meeting destination', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/threads',
-      payload: { userId: 'alice', title: 'Meeting destination', preferredCats: ['codex-sol'] },
+      payload: { userId: 'alice', title: 'Meeting destination', preferredCats: ['codex-sol'], pinned: true },
     });
 
     assert.equal(res.statusCode, 201);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.preferredCats, ['codex-sol']);
-    assert.deepEqual((await threadStore.get(body.id)).preferredCats, ['codex-sol']);
+    assert.equal(body.pinned, true);
+    const stored = await threadStore.get(body.id);
+    assert.deepEqual(stored.preferredCats, ['codex-sol']);
+    assert.equal(stored.pinned, true);
   });
 
   it('POST /api/threads keeps omitted projectPath as default', async () => {

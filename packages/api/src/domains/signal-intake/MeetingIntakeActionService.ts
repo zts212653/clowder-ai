@@ -1,10 +1,11 @@
-import type { MeetingIntake, MeetingIntakeChoices } from '@cat-cafe/shared';
+import type { MeetingArtifactDescriptor, MeetingIntake, MeetingIntakeChoices } from '@cat-cafe/shared';
 import { MeetingIntakeError } from './errors.js';
+import { createMeetingArtifactDescriptor } from './MeetingArtifactResourceService.js';
 import type { MeetingIntakeService } from './MeetingIntakeService.js';
 import type { MeetingIntakeStore } from './MeetingIntakeStore.js';
 import type { SourceAccessLeaseService } from './SourceAccessLeaseService.js';
 
-export interface MeetingArtifact {
+export interface ResolvedMeetingArtifact {
   readonly contentType: 'text/plain';
   readonly text: string;
   readonly provenance: {
@@ -15,7 +16,7 @@ export interface MeetingArtifact {
 }
 
 export interface MeetingArtifactDispatcher {
-  deliver(input: { readonly intake: MeetingIntake; readonly artifact: MeetingArtifact }): Promise<void>;
+  deliver(input: { readonly intake: MeetingIntake; readonly artifact: MeetingArtifactDescriptor }): Promise<void>;
   retryPresentation(input: {
     readonly intake: MeetingIntake;
     readonly clientRequestId: string;
@@ -160,33 +161,35 @@ export class MeetingIntakeActionService {
     ownerId: string,
     intakeId: string,
     expectedRevision: number,
-    transcript: string,
+    sourceHandle: string,
   ): Promise<MeetingIntake> {
     const current = await this.requireOwner(ownerId, intakeId, expectedRevision);
     if (
       current.repair?.action !== 'manual_import' ||
       current.judgmentState !== 'confirmed' ||
       current.executionState !== 'failed' ||
-      transcript.trim().length === 0 ||
-      Buffer.byteLength(transcript, 'utf8') > 2_000_000
+      !sourceHandle.startsWith('feishu://meeting-artifacts/') ||
+      !this.options.sources.supports(sourceHandle)
     ) {
-      throw new MeetingIntakeError('INVALID_TRANSITION', 'manual transcript import is unavailable or invalid');
+      throw new MeetingIntakeError('INVALID_TRANSITION', 'manual meeting source reference is unavailable or invalid');
     }
-    return this.executeArtifact(current, {
-      contentType: 'text/plain',
-      text: transcript,
-      provenance: {
-        sourceHandle: `host:manual-import:${intakeId}`,
-        trust: 'untrusted_external',
-        instructionPolicy: 'data_only',
-      },
+    const rebound = await this.write(current, {
+      ...current,
+      source: { handle: sourceHandle },
+      artifact: undefined,
+      sourceState: 'ready',
+      executionState: 'queued',
+      repair: undefined,
+      revision: current.revision + 1,
+      updatedAt: this.now(),
     });
+    return this.executeFromSource(ownerId, intakeId, rebound.revision);
   }
 
   private async executeFromSource(ownerId: string, intakeId: string, expectedRevision: number): Promise<MeetingIntake> {
     const current = await this.requireOwner(ownerId, intakeId, expectedRevision);
     const running = await this.start(current);
-    let artifact: MeetingArtifact;
+    let resolved: ResolvedMeetingArtifact;
     try {
       const principalId = `meeting-intake:${running.intakeId}`;
       const lease = await this.options.sources.issue({
@@ -194,19 +197,26 @@ export class MeetingIntakeActionService {
         principalId,
         purpose: 'transcript',
       });
-      artifact = await this.options.sources.resolve(
+      resolved = await this.options.sources.resolve(
         { intakeId: running.intakeId, principalId, purpose: 'transcript', grant: lease.grant },
         new AbortController().signal,
       );
     } catch (error) {
       return this.fail(running, sourceFailure(error));
     }
-    return this.finish(running, async () => this.options.dispatcher.deliver({ intake: running, artifact }));
-  }
-
-  private async executeArtifact(current: MeetingIntake, artifact: MeetingArtifact): Promise<MeetingIntake> {
-    const running = await this.start(current);
-    return this.finish(running, async () => this.options.dispatcher.deliver({ intake: running, artifact }));
+    const artifact = createMeetingArtifactDescriptor({
+      intakeId: running.intakeId,
+      sourceHandle: resolved.provenance.sourceHandle,
+      contentType: resolved.contentType,
+      text: resolved.text,
+    });
+    const bound = await this.write(running, {
+      ...running,
+      artifact,
+      revision: running.revision + 1,
+      updatedAt: this.now(),
+    });
+    return this.finish(bound, async () => this.options.dispatcher.deliver({ intake: bound, artifact }));
   }
 
   private async start(current: MeetingIntake): Promise<MeetingIntake> {

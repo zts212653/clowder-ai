@@ -1,11 +1,15 @@
 import type { ActionSubjectTruthResolver } from './ActionSubjectTruthResolver.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
+import type { ActionSuccessorProjectionRetirementService } from './ActionSuccessorProjectionRetirementService.js';
+import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 
-function hasSameFenceSucceeded(
+function sameFenceSucceededLease(
   lease: Awaited<ReturnType<ActionSuccessorLeaseStore['get']>>,
   input: { generation: number; catId: string },
-): boolean {
-  return lease?.generation === input.generation && lease.holderOutcomes[input.catId]?.outcome === 'succeeded';
+): ActionSuccessorLease | null {
+  return lease?.generation === input.generation && lease.holderOutcomes[input.catId]?.outcome === 'succeeded'
+    ? lease
+    : null;
 }
 
 export type ActionSuccessorCompletionResult =
@@ -25,7 +29,13 @@ export class ActionSuccessorCompletionService {
       'get' | 'recordCompletionCandidate' | 'commitCompletionVerdict'
     >,
     private readonly truthResolver: Pick<ActionSubjectTruthResolver, 'resolveCompletion'>,
+    private readonly projectionRetirement?: Pick<ActionSuccessorProjectionRetirementService, 'retire'>,
   ) {}
+
+  private async committed(lease: ActionSuccessorLease, input: { leaseId: string; generation: number }) {
+    if (lease.status === 'completed') await this.projectionRetirement?.retire(lease);
+    return { outcome: 'committed' as const, leaseId: input.leaseId, generation: input.generation };
+  }
 
   async complete(input: {
     leaseId: string;
@@ -37,9 +47,8 @@ export class ActionSuccessorCompletionService {
     const lease = await this.leaseStore.get(input.leaseId);
     if (!lease) return { outcome: 'stale', reason: 'lease_missing' };
     if (lease.generation !== input.generation) return { outcome: 'stale', reason: 'stale_generation' };
-    if (hasSameFenceSucceeded(lease, input)) {
-      return { outcome: 'committed', leaseId: input.leaseId, generation: input.generation };
-    }
+    const replayedLease = sameFenceSucceededLease(lease, input);
+    if (replayedLease) return this.committed(replayedLease, input);
     if (lease.status !== 'active') return { outcome: 'stale', reason: 'lease_not_active' };
     if (!lease.terminalPredicate) return { outcome: 'insufficient', reason: 'terminal predicate unavailable' };
 
@@ -50,8 +59,9 @@ export class ActionSuccessorCompletionService {
       now: input.now,
     });
     if (candidate.outcome !== 'recorded' || !candidate.lease) {
-      return hasSameFenceSucceeded(candidate.lease, input)
-        ? { outcome: 'committed', leaseId: input.leaseId, generation: input.generation }
+      const replayedCandidate = sameFenceSucceededLease(candidate.lease, input);
+      return replayedCandidate
+        ? this.committed(replayedCandidate, input)
         : { outcome: 'stale', reason: candidate.outcome };
     }
     const predicate = candidate.lease.terminalPredicate;
@@ -75,8 +85,10 @@ export class ActionSuccessorCompletionService {
       verdict,
       now: input.now,
     });
-    return committed.outcome === 'committed' || hasSameFenceSucceeded(committed.lease, input)
-      ? { outcome: 'committed', leaseId: input.leaseId, generation: input.generation }
+    if (committed.outcome === 'committed') return this.committed(committed.lease, input);
+    const concurrentlyCommitted = sameFenceSucceededLease(committed.lease, input);
+    return concurrentlyCommitted
+      ? this.committed(concurrentlyCommitted, input)
       : { outcome: 'stale', reason: committed.outcome };
   }
 }

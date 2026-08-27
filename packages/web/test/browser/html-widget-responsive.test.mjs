@@ -220,6 +220,30 @@ test(
       const magentaPixels = await countMagentaPixels(png);
       assert.ok(magentaPixels > 1_000, `exported PNG lost the bottom sentinel (${magentaPixels} magenta pixels)`);
 
+      await t.test('relaunches Chromium after the shared export browser disconnects', async () => {
+        const disconnectedBrowser = exporter.browser;
+        assert.ok(disconnectedBrowser?.isConnected(), 'the prior successful export must keep a live shared browser');
+        const browserProcess = disconnectedBrowser.process();
+        assert.ok(browserProcess, 'the shared browser must expose its owned Chromium process');
+
+        const disconnected = Promise.race([
+          once(disconnectedBrowser, 'disconnected'),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timed out waiting for the shared browser to disconnect')), 5_000),
+          ),
+        ]);
+        assert.equal(browserProcess.kill(), true, 'the regression must terminate the shared Chromium process');
+        await disconnected;
+        assert.equal(disconnectedBrowser.isConnected(), false);
+
+        const recoveredPng = await exporter.capture(`${url}?fixture=short`, 'browser-test-user', {
+          selectionMessageIds: [FIXTURE_MESSAGE_ID],
+        });
+        assert.ok(recoveredPng.length > 0, 'the next export must succeed without restarting the API process');
+        assert.notEqual(exporter.browser, disconnectedBrowser, 'the stale browser handle must be replaced');
+        assert.equal(exporter.browser?.isConnected(), true, 'the replacement browser must remain connected');
+      });
+
       await t.test('async descendant geometry invalidates readiness before PNG capture', async () => {
         const asyncPng = await exporter.capture(`${url}?fixture=async-image`, 'browser-test-user', {
           selectionMessageIds: [FIXTURE_MESSAGE_ID],

@@ -164,6 +164,10 @@ export class SourceAccessLeaseService {
     }
   }
 
+  supports(sourceHandle: string): boolean {
+    return this.options.resolvers.resolve(sourceHandle) !== null;
+  }
+
   async issue(input: {
     readonly intakeId: string;
     readonly principalId: string;

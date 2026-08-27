@@ -43,8 +43,14 @@ export async function harness(options = {}) {
     store,
     now: () => now++,
     supervisor: {
-      start: async (instanceId) => processCalls.push(`start:${instanceId}`),
-      stop: async (instanceId) => processCalls.push(`stop:${instanceId}`),
+      start: async (instanceId) => {
+        processCalls.push(`start:${instanceId}`);
+        return options.start?.(instanceId);
+      },
+      stop: async (instanceId) => {
+        processCalls.push(`stop:${instanceId}`);
+        return options.stop?.(instanceId);
+      },
     },
   });
   const app = Fastify();
@@ -67,6 +73,9 @@ export async function harness(options = {}) {
       },
       update: async (catalogId, instanceId, expectedRevision, expectedRelease) => {
         updateCalls.push({ catalogId, instanceId, expectedRevision, expectedRelease });
+        if (options.update) {
+          return options.update({ catalogId, instanceId, expectedRevision, expectedRelease });
+        }
         return inventory.upgradePackage({
           pluginInstanceId: instanceId,
           expectedLifecycleRevision: expectedRevision,
@@ -81,6 +90,7 @@ export async function harness(options = {}) {
     },
     ...(options.auth === undefined ? {} : { auth: options.auth }),
     ...(options.historyImport === undefined ? {} : { historyImport: options.historyImport }),
+    ...(options.meetingIntake === undefined ? {} : { meetingIntake: options.meetingIntake }),
   });
   await app.ready();
   return { app, store, processCalls, installCalls, updateCalls };

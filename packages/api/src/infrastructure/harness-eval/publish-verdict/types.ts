@@ -6,6 +6,7 @@ import type { FreshnessReplaySelector } from '../freshness/freshness-replay-type
 import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
+import type { TrajectoryInspectorWindowSelector } from '../trajectory-inspector/trajectory-inspector-types.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 
 /**
@@ -171,7 +172,8 @@ export type VerdictSourceRefs =
   | AnchorTelemetrySourceSelector
   | QcMetricsSelector
   | FreshnessReplaySelector
-  | DesignGateEpisodeSourceSelector;
+  | DesignGateEpisodeSourceSelector
+  | TrajectoryInspectorWindowSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

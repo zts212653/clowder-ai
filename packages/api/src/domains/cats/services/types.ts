@@ -268,7 +268,7 @@ export interface AgentMessage {
   metadata?: MessageMetadata;
   /** Message origin: stream = CLI stdout (thinking), callback = MCP post_message (speech) */
   origin?: 'stream' | 'callback';
-  /** Backend stored-message ID (set for callback post-message, used for rich_block correlation) */
+  /** Canonical stored-message ID once persistence has completed. */
   messageId?: string;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {

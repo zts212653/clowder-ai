@@ -104,6 +104,7 @@ test('the app-server compaction source is bound to the app-server carrier', () =
 test('no other carrier can borrow the app-server proof, whatever it declares', () => {
   for (const [provider, carrier] of [
     ['openai', 'exec_json'],
+    ['anthropic', 'print_sdk'],
     ['anthropic', 'bg'],
     ['google', 'gemini_cli'],
     ['kimi', 'stream_json'],
@@ -118,11 +119,14 @@ test('no other carrier can borrow the app-server proof, whatever it declares', (
   }
 });
 
-test('existing Claude compaction support is unchanged', () => {
+test('Claude compaction support remains available when every hook proof is present', () => {
   assert.equal(
     resolveAuthoritativeCompactionSupport({
       capability: capability('anthropic', 'print_sdk', true),
       eventSource: 'claude_compact_boundary',
+      hookAuthenticationReady: true,
+      hookCarrierReady: true,
+      hookInvocationAttested: true,
     }).status,
     'supported',
   );

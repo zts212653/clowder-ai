@@ -11,7 +11,7 @@ feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, 
 related_features: [F139, F148, F153, F169, F192, F229, F236, F242, F243, F246, F258, F267]
 topics: [memory, recall, write-side, write-opportunity, standing-reflex, cue-plane, derived-view, context-presentation, relationship-memory, lifecycle, evidence, profile, taste, event-memory, proactive, architecture]
 created: 2026-06-28
-revised: 2026-08-18
+revised: 2026-08-25
 status: active
 author: "Maine Coon/GPT-5.5"
 revised_by: "小太阳·Maine Coon/GPT-5.6 Sol"
@@ -21,7 +21,7 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-02T11:00:04Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-08-18T12:55:00Z
+description_updated_at: 2026-08-25T16:10:49Z
 ---
 
 # Clowder AI 记忆系统全景
@@ -103,8 +103,9 @@ opportunity plane、一个回源闭环：
   既有 schema 的 reflex 字段覆盖审计，冻结为 reflex-candidate per-lane entry + generated read-only
   catalog；不扩充全部非 reflex hook，也不预设中央 mutable registry；
   ASR→F276 只作首个纵切候选。
-- W0-C/W0-D v0.2 已补齐两处 current-main 坐标：Taste canonical approve→write→index→read 与
-  Profile canonical root→logical URI→authenticated read 均存在；开放项收窄为 speaker provenance、
+- W0-C/W0-D v0.2 已补齐两处 current-main 坐标：Taste canonical approve→isolated
+  `origin/main` publication→index/read 与 Profile canonical root→logical URI→authenticated read 均存在；
+  public writer 不再把 primary-main local commit 当完成 terminal；开放项收窄为 speaker provenance、
   standing trigger、organic consumption 与 view invalidation，不再拿历史 split-brain/landing bug 代证。
 - W0-F 四篇论文一手审计已完成：LazyMem 只测显式 query 后的 construction；PM-Bench 测固定
   合成周里的 opportunity monitoring + action；RWM 测 fixed invocation 后 intervention；
@@ -350,7 +351,7 @@ lane-neutral candidate detection/readiness，也不会因为频率高就直接�
 | Feature | 它拥有的真相 / 责任 | 状态 |
 |---|---|---|
 | [F152](../features/F152-expedition-memory.md) | 外部项目冷启动；generalizable candidate→approve→personal durable truth→compiler | durable supply 已闭；只欠 AC-C5 You 全链 UAT |
-| [F221](../features/F221-taste-lane.md) | 可复用品味 vignette 与 propose/approve | 写入口与可搜索 materialization 已有；长期有机增长继续观察 |
+| [F221](../features/F221-taste-lane.md) | 可复用品味 vignette 与 propose/approve | public approve 以隔离 `origin/main` publication 为完成 terminal，push/crash 可恢复；长期有机增长继续观察 |
 | [F227](../features/F227-event-memory.md) | 认知转折、magic-word Event Memory、timeline/teleport | Phase A code complete；alpha backfill+视觉/teleport acceptance pending；B/C 未做 |
 | [F231](../features/F231-user-profile-capsule.md) | You profile 与 cat↔You relationship primer | A–C + D code landed；AC-D6 live migration blocked on OQ-7 granularity |
 | [F260](../features/F260-write-side-autopsy-entity-deref.md) | entity registry/alias/conflict/revision ledger | 主链 closed；管理入口与三项 maintenance 待明确 owner |

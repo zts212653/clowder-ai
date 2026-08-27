@@ -4,38 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import type {
+  AudioInputRequest,
+  AudioSources,
+  AudioSseEvent,
+  AudioStatus,
+  TranscriptLine,
+} from './audio-transcript-contract';
 import { FloatingTranscriptWindow } from './FloatingTranscriptWindow';
-
-interface TranscriptLine {
-  ts: number;
-  elapsed_s: number;
-  chunk_num: number;
-  asr_latency: number;
-  text: string;
-  speaker_label?: string;
-  speaker_confidence?: number;
-  speaker_id?: string | null;
-}
-
-interface Participant {
-  id: string;
-  name: string;
-  role?: string;
-}
-
-interface AudioSources {
-  apps: string[];
-  mics: { index: number; name: string; default: boolean }[];
-}
-
-interface AudioStatus {
-  running: boolean;
-  paused?: boolean;
-  source?: string;
-  app_name?: string;
-  duration_s?: number;
-  participants?: Participant[];
-}
 
 interface InterventionAdvisory {
   type: 'intervention_advisory';
@@ -45,28 +21,6 @@ interface InterventionAdvisory {
   source_chunk_num: number;
   source_text: string;
   talking_point: string | null;
-}
-
-interface SseEvent {
-  type: string;
-  status?: string;
-  source?: string;
-  app_name?: string;
-  ts?: number;
-  elapsed_s?: number;
-  chunk_num?: number;
-  asr_latency?: number;
-  text?: string;
-  speaker_label?: string;
-  speaker_confidence?: number;
-  speaker_id?: string | null;
-  reason?: string;
-  confidence?: number;
-  source_chunk_num?: number;
-  source_text?: string;
-  talking_point?: string | null;
-  transcript_path?: string;
-  recording_path?: string;
 }
 
 export function FloatingTranscriptContainer() {
@@ -82,7 +36,9 @@ export function FloatingTranscriptContainer() {
   const [advisoryMode, setAdvisoryMode] = useState<'active' | 'passive'>('passive');
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [savedRecordingPath, setSavedRecordingPath] = useState<string | null>(null);
+  const [savedRecordingPaths, setSavedRecordingPaths] = useState<Record<string, string>>({});
   const [sources, setSources] = useState<AudioSources | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const advisoryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -127,49 +83,78 @@ export function FloatingTranscriptContainer() {
     es.onerror = () => setConnected(false);
     es.onmessage = (ev) => {
       try {
-        const data = JSON.parse(ev.data) as SseEvent;
-        if (data.type === 'transcript' && data.ts && data.text != null) {
+        const data = JSON.parse(ev.data) as AudioSseEvent;
+        if (data.type === 'transcript' && typeof data.ts === 'number' && typeof data.text === 'string') {
+          const timestamp = data.ts;
+          const text = data.text;
           setLines((prev) => [
             ...prev,
             {
-              ts: data.ts!,
+              ts: timestamp,
               elapsed_s: data.elapsed_s ?? 0,
               chunk_num: data.chunk_num ?? 0,
               asr_latency: data.asr_latency ?? 0,
-              text: data.text!,
+              text,
               speaker_label: data.speaker_label,
               speaker_confidence: data.speaker_confidence,
               speaker_id: data.speaker_id,
+              speaker_identity_source: data.speaker_identity_source,
+              speaker_cluster_id: data.speaker_cluster_id,
+              input_id: data.input_id,
+              input_source: data.input_source,
+              input_label: data.input_label,
             },
           ]);
-        } else if (data.type === 'intervention_advisory') {
+        } else if (
+          data.type === 'intervention_advisory' &&
+          typeof data.ts === 'number' &&
+          typeof data.reason === 'string' &&
+          typeof data.confidence === 'number' &&
+          typeof data.source_chunk_num === 'number' &&
+          typeof data.source_text === 'string'
+        ) {
           setAdvisory({
             type: 'intervention_advisory',
-            ts: data.ts!,
-            reason: data.reason!,
-            confidence: data.confidence!,
-            source_chunk_num: data.source_chunk_num!,
-            source_text: data.source_text!,
+            ts: data.ts,
+            reason: data.reason,
+            confidence: data.confidence,
+            source_chunk_num: data.source_chunk_num,
+            source_text: data.source_text,
             talking_point: data.talking_point ?? null,
           });
           if (advisoryTimer.current) clearTimeout(advisoryTimer.current);
           advisoryTimer.current = setTimeout(() => setAdvisory(null), 10_000);
         } else if (data.type === 'status') {
           if (data.status === 'started') {
-            setStatus({ running: true, source: data.source, app_name: data.app_name });
+            setStatus((previous) => ({
+              ...previous,
+              running: true,
+              source: data.source,
+              app_name: data.app_name,
+              inputs: data.inputs,
+              health: data.health ?? previous.health,
+            }));
             setLines([]);
             setElapsed(0);
             setSavedPath(null);
             setSavedRecordingPath(null);
+            setSavedRecordingPaths({});
           } else if (data.status === 'stopped') {
             setStatus((prev) => ({ ...prev, running: false, paused: false }));
             if (data.transcript_path) setSavedPath(data.transcript_path);
             if (data.recording_path) setSavedRecordingPath(data.recording_path);
+            setSavedRecordingPaths(data.recording_paths ?? {});
           } else if (data.status === 'paused') {
             setStatus((prev) => ({ ...prev, paused: true }));
           } else if (data.status === 'resumed') {
             setStatus((prev) => ({ ...prev, paused: false }));
           }
+        } else if (data.type === 'input_status') {
+          void apiFetch('/api/audio/status')
+            .then(async (response) => {
+              if (response.ok) setStatus((await response.json()) as AudioStatus);
+            })
+            .catch(() => undefined);
         }
       } catch {}
     };
@@ -186,10 +171,17 @@ export function FloatingTranscriptContainer() {
     try {
       const resp = await apiFetch('/api/audio/stop', { method: 'POST' });
       if (resp.ok) {
-        const data = (await resp.json()) as { summary?: { transcript_path?: string; recording_path?: string } };
+        const data = (await resp.json()) as {
+          summary?: {
+            transcript_path?: string;
+            recording_path?: string;
+            recording_paths?: Record<string, string>;
+          };
+        };
         setStatus((prev) => ({ ...prev, running: false }));
         setSavedPath(data.summary?.transcript_path ?? null);
         setSavedRecordingPath(data.summary?.recording_path ?? null);
+        setSavedRecordingPaths(data.summary?.recording_paths ?? {});
       }
     } catch {}
   }, []);
@@ -209,25 +201,33 @@ export function FloatingTranscriptContainer() {
   }, []);
 
   const handleStart = useCallback(
-    async (source: string, appName?: string, deviceIndex?: number) => {
+    async (inputs: AudioInputRequest[]) => {
+      if (!currentThreadId) {
+        setStartError('Open a thread before starting companion audio.');
+        return;
+      }
       try {
-        const body: Record<string, unknown> = { source };
-        if (appName) body.app_name = appName;
-        if (deviceIndex != null) body.device = deviceIndex;
-        if (currentThreadId) body.thread_id = currentThreadId;
+        setStartError(null);
         const resp = await apiFetch('/api/audio/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ inputs, thread_id: currentThreadId }),
         });
         if (resp.ok) {
-          setStatus({ running: true, source, app_name: appName });
+          const data = (await resp.json()) as { status: AudioStatus };
+          setStatus(data.status);
           setLines([]);
           setElapsed(0);
           setSavedPath(null);
           setSavedRecordingPath(null);
+          setSavedRecordingPaths({});
+        } else {
+          const data = (await resp.json()) as { error?: string };
+          setStartError(data.error ?? 'Audio capture could not start.');
         }
-      } catch {}
+      } catch {
+        setStartError('Audio service is offline.');
+      }
     },
     [currentThreadId],
   );
@@ -280,7 +280,13 @@ export function FloatingTranscriptContainer() {
 
   if (!visible) return null;
 
-  const sourceLabel = status.app_name ? status.app_name : status.source === 'mic' ? 'Microphone' : undefined;
+  const sourceLabel = status.inputs?.length
+    ? status.inputs.map((input) => input.label ?? input.id).join(' + ')
+    : status.app_name
+      ? status.app_name
+      : status.source === 'mic'
+        ? 'Microphone'
+        : undefined;
 
   return createPortal(
     <FloatingTranscriptWindow
@@ -291,9 +297,12 @@ export function FloatingTranscriptContainer() {
       sourceLabel={sourceLabel}
       elapsed={elapsed}
       participants={status.participants}
+      status={status}
       savedPath={savedPath ?? undefined}
       savedRecordingPath={savedRecordingPath ?? undefined}
+      savedRecordingPaths={savedRecordingPaths}
       sources={sources ?? undefined}
+      startError={startError ?? undefined}
       onClose={handleClose}
       onStop={handleStop}
       onPause={handlePause}

@@ -3,7 +3,7 @@ feature_ids: [F298]
 related_features: [F174, F167, F108, F048, F261, F275, F299, F300]
 topics: [runtime, durability, callback-auth, invocation-lifecycle]
 doc_kind: spec
-tips_exempt: "Phase A is automatic callback-auth durability and typed-diagnostic hardening; it adds no user action or discoverable capability surface."
+tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; automatic durability hardening still adds no user action or discoverable capability surface."
 created: 2026-08-17
 description: "运行态承诺持久性：凭证/队列/唤醒等跨进程承诺必须活得比所服务过程长，内存态只能是 cache（ADR-045 收敛锚）"
 description_source: human

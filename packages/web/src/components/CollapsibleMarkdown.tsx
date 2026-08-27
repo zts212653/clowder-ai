@@ -17,6 +17,8 @@ export function CollapsibleMarkdown({
   disclosureKey?: string;
 }) {
   const fold = shouldFoldText(content);
+  const isExport =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('export') === 'true';
   const { expanded, setExpanded } = useMessageDisclosureState(disclosureKey, false);
   const collapsed = fold && !expanded;
   const lineCount = content.split('\n').length;
@@ -35,7 +37,7 @@ export function CollapsibleMarkdown({
 
   const toggle = useCallback(() => setExpanded((v) => !v), [setExpanded]);
 
-  if (!fold) {
+  if (!fold || isExport) {
     return <MarkdownContent content={content} className={className} />;
   }
 

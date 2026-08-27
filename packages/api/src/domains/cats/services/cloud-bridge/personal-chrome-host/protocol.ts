@@ -1,8 +1,8 @@
 import { type CloudBridgeFailureDiagnosticV1, isCloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
 
 export const PERSONAL_CHROME_PROTOCOL_VERSION = 2 as const;
-export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.1' as const;
-export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-08-23.1' as const;
+export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.5' as const;
+export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-08-27.1' as const;
 export const PERSONAL_CHROME_MAX_TEXT_BYTES = 128 * 1024;
 export const PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES = 256 * 1024;
 

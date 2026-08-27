@@ -13,6 +13,8 @@ export type {
   OfficialPluginAuthCommandSpec,
 } from './official-plugin-auth-command.js';
 export * from './official-plugin-history-import.js';
+export * from './official-plugin-meeting-intake.js';
+export * from './official-plugin-meeting-intake-port.js';
 export * from './official-signal-routes.js';
 export { PluginRegistry, resourceCapId } from './PluginRegistry.js';
 export type { ActivatePluginResult, ActivationResult, LimbAdapterFactory } from './PluginResourceActivator.js';

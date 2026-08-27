@@ -26,7 +26,21 @@ const SEND_BUTTON_SELECTORS = [
   'button[aria-label="Send prompt"]',
   'button[aria-label="发送提示"]',
 ];
-const USER_MESSAGE_SELECTOR = '[data-message-author-role="user"][data-message-id]';
+const USER_MESSAGE_SELECTOR = '[data-message-author-role="user"]';
+const MESSAGE_TURN_SELECTOR = 'article[data-testid^="conversation-turn-"], article';
+
+function hostMessageIdFor(message) {
+  const owner = message.closest('[data-message-id]');
+  const ownerId = owner?.getAttribute('data-message-id')?.trim();
+  if (ownerId) return ownerId;
+
+  const turn = message.closest(MESSAGE_TURN_SELECTOR);
+  if (!turn) return null;
+  const candidates = [...turn.querySelectorAll('[data-message-id]')]
+    .map((candidate) => candidate.getAttribute('data-message-id')?.trim())
+    .filter(Boolean);
+  return candidates.length === 1 ? candidates[0] : null;
+}
 
 export { ChatGptPageAdapterError };
 
@@ -93,7 +107,7 @@ function observeHostMessage({ document, MutationObserver, existingIds, text, tim
     };
     const scan = () => {
       for (const message of document.querySelectorAll(USER_MESSAGE_SELECTOR)) {
-        const messageId = message.getAttribute('data-message-id');
+        const messageId = hostMessageIdFor(message);
         if (!messageId || existingIds.has(messageId)) continue;
         if (contentEditableText(message) !== text) continue;
         finish(() => resolve({ hostMessageId: messageId }));
@@ -158,11 +172,7 @@ function requireEmptyComposer(document, revisions) {
 }
 
 function existingUserMessageIds(document) {
-  return new Set(
-    [...document.querySelectorAll(USER_MESSAGE_SELECTOR)]
-      .map((message) => message.getAttribute('data-message-id'))
-      .filter(Boolean),
-  );
+  return new Set([...document.querySelectorAll(USER_MESSAGE_SELECTOR)].map(hostMessageIdFor).filter(Boolean));
 }
 
 function requireSafeSubmissionState({

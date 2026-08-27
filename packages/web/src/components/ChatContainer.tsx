@@ -7,7 +7,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { useActiveExecutionProjection } from '@/hooks/useActiveExecutionProjection';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
-import { useAuthorization } from '@/hooks/useAuthorization';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
@@ -40,7 +39,6 @@ import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { invalidateSidebarProjection } from '@/utils/sidebar-thread-snapshot';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
-import { AuthorizationCard } from './AuthorizationCard';
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
@@ -392,13 +390,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const { handleAgentMessage, resetRefs, resetTimeout, clearDoneTimeout } = useAgentMessages();
   const { handleScroll, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
-  const {
-    pending: authPending,
-    respond: authRespond,
-    handleAuthRequest,
-    handleAuthResponse,
-  } = useAuthorization(threadId);
-
   // F096: Listen for interactive block send events
   // F229 Bug 2 fix: ignore events tagged with sendContext (e.g. 'concierge')
   // to prevent InteractiveBlock clicks in the concierge panel from leaking
@@ -763,8 +754,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     handleAgentMessage,
     resetTimeout,
     clearDoneTimeout,
-    handleAuthRequest,
-    handleAuthResponse,
     onNavigateToThread: navigateToThread,
     onIndexEvent: handleIndexSocketEvent,
   });
@@ -1097,7 +1086,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           sidebarOpen={sidebarOpen}
           onToggleSidebar={toggleSidebar}
           threadId={threadId}
-          authPendingCount={authPending.length}
           viewMode={viewMode}
           onToggleViewMode={() => setViewMode(viewMode === 'single' ? 'split' : 'single')}
           statusPanelOpen={statusPanelOpen && rightPanelMode === 'workspace'}
@@ -1259,14 +1247,6 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         </div>
 
         <div ref={attachBottomChromeRef}>
-          {authPending.length > 0 && (
-            <div className="border-t border-conn-amber-ring bg-conn-amber-bg/40 py-2">
-              {authPending.map((req) => (
-                <AuthorizationCard key={req.requestId} request={req} onRespond={authRespond} />
-              ))}
-            </div>
-          )}
-
           <ThreadExecutionBar threadId={threadId} />
           <QueuePanel threadId={threadId} />
           <VoteActiveBar threadId={threadId} onEnd={() => {}} />

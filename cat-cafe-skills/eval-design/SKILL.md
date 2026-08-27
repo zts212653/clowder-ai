@@ -1,15 +1,16 @@
 ---
 name: eval-design
-tips_exempt: internal governance discriminator; it does not expose a user-invocable capability
-description: "E0资格门+指标出生证+七公理+五病体检。Use when: 设计、修改或审计eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 指标出生证或病名+处置。"
+tips_exempt: "v0.3 adds internal eval role separation plus longitudinal trigger, maturity, and actionability governance; it changes no user-invocable capability or product surface."
+description: "E0资格门+指标出生证+纵向运行拓扑+七公理+五病体检。Use when: 设计、修改或审计eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 指标出生证（纵向eval含触发契约）或病名+处置。"
 ---
 
-# Eval Design — E0 资格门 · 出生证契约 · 设计自检 · 五病体检 · 干预证
+# Eval Design — E0 资格门 · 出生证契约 · 运行拓扑 · 设计自检 · 五病体检 · 干预证
 
-> **版本定位**（2026-08-10 宪法对齐轮）：v0.2 = E0 资格门 + 出生证契约 + 五病
-> 体检 + 双 falsifier 干预证。上位宪法：`docs/architecture/eval-philosophy.md`
-> （七公理 E0–E6，v2.1 跨模型红队思辨轮收敛）。机制选择与落地边界以 ADR-031 v3.4
-> 为准：按问题选机制，不按层补齐。
+> **版本定位**（2026-08-23 v2.2 修正轮）：v0.3 = v0.2 + E5 自评回灌禁区 +
+> runway 记账成本 + 纵向 Eval 运行拓扑 + 裁决角色分权。上位宪法：
+> `docs/architecture/eval-philosophy.md`（七公理 E0–E6；v2.2 已 ratified）。
+> 机制选择与落地边界以 ADR-031 v3.4 为准：按问题选机制，
+> 不按层补齐。
 
 ## Why This Is a Skill（价值门禁）
 
@@ -17,7 +18,7 @@ description: "E0资格门+指标出生证+七公理+五病体检。Use when: 设
 Eval 宪法（七公理 E0–E6）+ Alden 三日思辨的操作化——未来任何猫给任何 harness 域
 配 eval 时，用同一套流程，防止家里的 eval 资产继续长成划水/污染/归因停滞/
 干预失证/摸鱼五病混合物。
-来源：docs/architecture/eval-philosophy.md（宪法 v2.1，七公理）+
+来源：docs/architecture/eval-philosophy.md（宪法 v2.2，七公理）+
 feature-discussions/2026-07-17-eval-charter-draft.md（v1 历史草案，已演进归档）+
 2026-07-16-alden-dialogue-distillation.md（思辨蒸馏）。
 
@@ -35,8 +36,10 @@ feature-discussions/2026-07-17-eval-charter-draft.md（v1 历史草案，已演�
    判分成本≈0、可自动重复）/ 在冻结先验里（judge 射程：便宜但有额度）/ 只在
    价值主人脑中与真实后果里（必须外采）。裁判类型由 claim 的域决定，**不由
    预算决定**；
-3. **裁判的工资谁在付**——verifier=测试维护投入；judge=calibration runway
-   （额度，见出生证）；价值主人=真实关系与打扰预算。答不出付薪方=环转不久。
+3. **裁判的工资谁在付**——verifier=测试维护投入；judge=冻结先验额度 +
+   calibration runway 的记账/人锚抽样成本（见出生证）；价值主人=真实关系与打扰
+   预算。答不出付薪方=环转不久。若连 runway 都付不起，结论是缩小或不建 judge 环，
+   不是省掉测量后继续宣称它可持续。
 
 E0 划的是**自治上限**：外部新 bit 缺位，不得宣称开放价值 claim 已全自动闭环
 改善——但不否决候选生成、分诊、shadow、灰度等局部自动化。建前定资格，运行中
@@ -46,14 +49,19 @@ E0 划的是**自治上限**：外部新 bit 缺位，不得宣称开放价值 c
 ## 一、指标出生证契约（适用字段缺一不发牌照）
 
 任何新指标上线前填齐基础字段；使用 judge 或其他会折旧、存在额度的裁判时，
-再填额度字段：
+再填额度字段；只有累计证据、持续运行的纵向 Eval 才填运行拓扑字段：
 
 ```yaml
 metric_birth_certificate:
   utility_claim:      # 这个数字上升，代表什么真实的东西变好？（答不出 = 拒发）
   estimator:          # 分子/分母/排除项/采样方式/judge 及其版本
   validity_bounds:    # 预注册失效条件：什么分布漂移/优化压力/judge 变化会让它失真
-  consumer:           # 谁消费它、驱动什么决策（无 consumer = 摸鱼指标，拒发）
+  roles:              # 四角色分别写明；允许兼任，但须在 role_overlap_justification 解释
+    observer:         # 谁读 canonical evidence、生成测量
+    domain_owner:     # 谁拥有该域规约与真相
+    consumer:         # 谁据此做 keep/tune/sunset（无 consumer = 摸鱼指标，拒发）
+    calibrator:       # 谁独立检查量尺/观察面可靠性
+  role_overlap_justification:  # 同一主体兼任时，凭什么仍有独立性；开放价值 claim 从严
   calibration_plan:   # 多久和人工裁决/外生 ground truth 对一次表；相关性掉线阈值
   repeatability_contract:  # （v0.1 增，Sol 刀③）本指标属发现/归因/验收哪一环节；
                            # episode/环境/judge/版本如何冻结；跑几次；均值与 CI 波动
@@ -69,19 +77,37 @@ metric_birth_certificate:
                            # shadow / 转人工复核 / 回退简单基线。分级停止判据：决策
                            # 分歧率越过预注册阈值=单独硬停（锚级）；输出多样性坍缩=
                            # gaming 调查（统计级）；打不赢最低充分替代物=经济退场。
+  # 以下块只对累计证据、持续运行的纵向 Eval 适用；单次交付检查不填。
+  longitudinal_trigger_contract:
+    trigger_policy:        # event_plus_time | time_only；不把长期 Eval 配成无兜底 event_only
+    evidence_ingestion:    # canonical episode 如何进入；入库成功不等于已经运行 Eval
+    early_trigger:         # 可靠事件源下，什么阈值跨越/关键事件会提前唤醒
+    time_fallback:         # 最长沉默多久必须复评；time_only 必须声明最大检测延迟
+    dedupe_key:            # event 与 time 同时命中时如何归并成一次窗口
+    overlap_policy:        # 上一轮仍运行时，第二次触发如何 queue/coalesce/reject
+    maturity_predicate:    # 什么条件说明证据窗口已成熟，可计算有效测量
+    actionability_gate:    # validity、权限、校准满足什么条件，verdict 才能驱动动作
 ```
+
+纵向 Eval 有四个时刻，禁止压成一个布尔值：**证据进入**只是有了原料；**唤醒**只是
+开始运行；**成熟**才允许形成有效测量；**可行动**才允许 verdict 驱动 keep/tune/sunset。
+有可靠事件源时，优先“事件早触发 + 时间防沉默”；没有可靠事件源可以诚实选择
+`time_only`，同时写明最大检测延迟。单次交付型检查不挂这套长期机制。
 
 ## 二、设计自检（七公理速查——每条能一票否决）
 
 | 公理 | 自检问题 | 否决示例 |
 |---|---|---|
-| E0 资格 | claim 的新鲜判别 bit 在系统可观察边界内吗？裁判射程与付薪方答得出吗？ | 外部新 bit 缺位仍称全自动闭环；verifier 射程内用 judge 糊；无 runway/exhaustion_action 的 judge 环 |
+| E0 资格 | claim 的新鲜判别 bit 在系统可观察边界内吗？裁判射程与付薪方答得出吗？ | 外部新 bit 缺位仍称全自动闭环；verifier 射程内用 judge 糊；无 runway/exhaustion_action 或无人承担记账成本的 judge 环 |
 | E1 单位 | 度量的是 episode（机会×行为×后果）吗？沉默入分母了吗？ | per-猫总分；无沉默采样的主动性指标 |
 | E2 形状 | 非对称代价显式了吗？多维保留向量/约束了吗？ | 单一 accuracy；跨量纲加权总分 |
-| E3 对抗 | 出题/被测/裁决分权了吗？有外生锚吗？观测面体检过吗？ | 自报分数无锚；带毒管线上装仪表 |
-| E4 代谢 | 有孵化-退役机制吗？judge 版本化了吗？代谢率可见吗？ | 无退役题库；永不换版的 judge |
-| E5 回灌 | 分数会进被测者上下文吗？叙事反馈的案例抽样冻结了吗？ | verdict 分数注入 prompt；报告人自选案例 |
+| E3 对抗 | observer/domain owner/consumer/calibrator 分权了吗？有外生锚吗？观测面体检过了吗？ | 机制作者兼 observer 后又独自校准开放价值 claim；带毒管线上装仪表 |
+| E4 代谢 | 有孵化-退役机制吗？纵向 Eval 的进入/唤醒/成熟/可行动分开了吗？多久不能不醒？ | 把 maturity 当 scheduler trigger；只有事件触发、沉默时永久不复评 |
+| E5 回灌 | 未验证自评会以事实身份进被测者上下文吗？叙事反馈的案例抽样冻结了吗？ | 把 expected outcome 写成 outcome 回灌；报告人自选案例 |
 | E6 环节 | 发现/归因/验收/改进的性质分开了吗？ | 同批 fixture 既挑改动又验收；归因直接当梯度 |
+
+E5 禁止的是**事实化回灌**：明确保留为 `hypothesis/expectation`，且下游始终按
+待验证命题读取的字段可以保留；一旦改名、渲染或汇总成既成事实，仍触发否决。
 
 ## 三、存量体检尺（五病——按举证链定位，资产病 / 流程病分治）
 
@@ -164,6 +190,8 @@ intervention_card:
 | 观测面没体检就装仪表 | 精确的幻觉 | E3：先修有毒观测面 |
 | 指标失效后继续引用 | 决策建立在死指标上 | validity_bounds 预注册 + 校准计划 |
 | 把审计报告写成总分排行榜 | 违反 E2/E5 | 输出病名+处置建议，不输出分数 |
+| 把成熟条件当唤醒条件（`maturity ≠ invocation trigger`） | Eval 要么永远不醒，要么未成熟就出结论 | 纵向触发契约拆开 ingestion/wake/maturity/actionability |
+| observer 被当成 domain owner / consumer | 看见信号的人顺手垄断规约与裁决 | 四角色显式登记；兼任写独立性理由，开放价值 claim 配独立 calibrator |
 
 ## 和其他 Skill 的区别
 
@@ -176,7 +204,7 @@ intervention_card:
 
 ## 下一步
 
-- 新指标设计完成 → 出生证入 feature doc / spec，consumer 与校准计划写进 AC
+- 新指标设计完成 → 出生证入 feature doc / spec；纵向 Eval 另把触发契约与四角色写进 AC
 - 存量体检完成 → 体检报告（病名+处置）走 F192 verdict 管线（fix/keep_observe/sunset）
 - 摸出宪法级问题 → 回 docs/architecture/eval-philosophy.md 提修正案（v1 草案
   已演进归档，勿再引用）
