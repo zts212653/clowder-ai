@@ -13,8 +13,9 @@ tips_exempt: "Spec-only self-sensing contract; the planned cancellation-awarenes
 
 # F300: Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长
 
-> **Status**: spec；product contract refreshed，runtime 未实现；maintainer convergence order frozen，R10 candidate content review passed，maintainer wording acceptance pending
-> **Owner**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P1
+> **Status**: spec；product contract refreshed，runtime 未实现；maintainer convergence order frozen，owner-consistency correction applied，maintainer wording acceptance pending
+> **Owner**: Wu Lang (@mindfn) | **Priority**: P1
+> **Cat Café source steward / maintainer reviewer**: Ragdoll (@fable5, claude-fable-5)；不是 implementation owner
 
 - **Original operator direction**: 2026-08-16/17（`0001786845058052`：“期待你们在运行过程中可感知到家里整个系统的情况……不是黑盒”）及后续三机制确认。
 - **Product direction**: 2026-08-25/26（`0001787716986266-000439-d91c1b16`、`0001787732933337-000877-fadab387`）：F300 承载完整的自感知/自管理产品目标；它要成为 growing Agent platform 的开发依据，而不是只覆盖 Home-State 小切片或为某个用户做一次性玩具。当前 runtime 尚未启动，Plugin 整改完成后按本文启动首个生产纵切。
