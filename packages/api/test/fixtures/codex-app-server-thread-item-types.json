@@ -3,11 +3,11 @@
     "stable": "codex app-server generate-json-schema --out <stable-dir>",
     "experimental": "codex app-server generate-json-schema --experimental --out <experimental-dir>"
   },
-  "codexVersion": "0.149.1",
+  "codexVersion": "0.150.1",
   "stable": {
     "counts": {
       "clientRequests": 95,
-      "serverNotifications": 75,
+      "serverNotifications": 79,
       "serverRequests": 10
     },
     "methods": {
@@ -897,6 +897,13 @@
           "validationRef": "packages/api/src/domains/cats/services/agents/providers/CodexAppServerEventMapper.ts"
         },
         {
+          "method": "mcpServer/event/stream/notification",
+          "disposition": "delegated",
+          "owner": "F146/F202/F286 capability lifecycle",
+          "maturity": "planned",
+          "validationRef": "docs/features/F306-codex-app-capability-parity.md#phase-d能力生态与持续-parity"
+        },
+        {
           "method": "mcpServer/oauthLogin/completed",
           "disposition": "delegated",
           "owner": "F146/F202/F286 capability lifecycle",
@@ -1059,6 +1066,27 @@
         },
         {
           "method": "thread/realtime/error",
+          "disposition": "unsupported_by_policy",
+          "owner": "host-security boundary",
+          "maturity": "policy_blocked",
+          "validationRef": "docs/features/F306-codex-app-capability-parity.md#明确不造什么"
+        },
+        {
+          "method": "thread/realtime/item/completed",
+          "disposition": "unsupported_by_policy",
+          "owner": "host-security boundary",
+          "maturity": "policy_blocked",
+          "validationRef": "docs/features/F306-codex-app-capability-parity.md#明确不造什么"
+        },
+        {
+          "method": "thread/realtime/item/started",
+          "disposition": "unsupported_by_policy",
+          "owner": "host-security boundary",
+          "maturity": "policy_blocked",
+          "validationRef": "docs/features/F306-codex-app-capability-parity.md#明确不造什么"
+        },
+        {
+          "method": "thread/realtime/item/transcript/delta",
           "disposition": "unsupported_by_policy",
           "owner": "host-security boundary",
           "maturity": "policy_blocked",
@@ -1281,8 +1309,8 @@
   },
   "experimental": {
     "counts": {
-      "clientRequests": 150,
-      "serverNotifications": 75,
+      "clientRequests": 153,
+      "serverNotifications": 79,
       "serverRequests": 11
     },
     "methods": {
@@ -1339,6 +1367,8 @@
         "marketplace/add",
         "marketplace/remove",
         "marketplace/upgrade",
+        "mcpServer/event/stream/start",
+        "mcpServer/event/stream/stop",
         "mcpServer/oauth/login",
         "mcpServer/resource/read",
         "mcpServer/tool/call",
@@ -1425,6 +1455,7 @@
         "thread/settings/update",
         "thread/shellCommand",
         "thread/start",
+        "thread/timeline/list",
         "thread/turns/list",
         "thread/unarchive",
         "thread/unsubscribe",
@@ -1470,6 +1501,7 @@
         "item/reasoning/summaryTextDelta",
         "item/reasoning/textDelta",
         "item/started",
+        "mcpServer/event/stream/notification",
         "mcpServer/oauthLogin/completed",
         "mcpServer/startupStatus/updated",
         "model/rerouted",
@@ -1494,6 +1526,9 @@
         "thread/queue/changed",
         "thread/realtime/closed",
         "thread/realtime/error",
+        "thread/realtime/item/completed",
+        "thread/realtime/item/started",
+        "thread/realtime/item/transcript/delta",
         "thread/realtime/itemAdded",
         "thread/realtime/outputAudio/delta",
         "thread/realtime/sdp",
@@ -1540,6 +1575,8 @@
         "fuzzyFileSearch/sessionStart",
         "fuzzyFileSearch/sessionStop",
         "fuzzyFileSearch/sessionUpdate",
+        "mcpServer/event/stream/start",
+        "mcpServer/event/stream/stop",
         "memory/reset",
         "mock/experimentalMethod",
         "plugin/search",
@@ -1585,6 +1622,7 @@
         "thread/search",
         "thread/searchOccurrences",
         "thread/settings/update",
+        "thread/timeline/list",
         "thread/turns/list"
       ],
       "serverNotifications": [],
