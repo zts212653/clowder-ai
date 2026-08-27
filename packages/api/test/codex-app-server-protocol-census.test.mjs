@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   assertProtocolCensus,
   computeProtocolSnapshot,
+  runDriftAudit,
   runHermeticCensus,
 } from '../scripts/check-codex-app-server-protocol-census.mjs';
 
 const fixturePath = fileURLToPath(new URL('./fixtures/codex-app-server-thread-item-types.json', import.meta.url));
+const scriptPath = fileURLToPath(new URL('../scripts/check-codex-app-server-protocol-census.mjs', import.meta.url));
 
 async function loadFixture() {
   return JSON.parse(await readFile(fixturePath, 'utf8'));
@@ -61,12 +65,37 @@ test('fails loud on stable method add/delete/rename and experimental delta drift
   assert.throws(() => assertProtocolCensus(fixture, deltaDrift), /experimental\.serverRequests.*unknown=/);
 });
 
-test('hermetic census uses only the repo-pinned fixture — no ambient CLI dependency', async () => {
+test('hermetic census reads only the committed fixture and never shells out', async () => {
   // Regression: the build census must produce identical results regardless of
   // which (or whether any) Codex CLI version is installed on the developer machine.
   // runHermeticCensus reads ONLY the committed fixture; it never shells out to `codex`.
-  // If it did, this test would be flaky across machines with different CLI versions.
-  assert.doesNotThrow(() => runHermeticCensus());
+
+  // Run the script as a subprocess with PATH emptied of codex to prove no child process.
+  // If the hermetic path tried to shell out to `codex`, it would fail with ENOENT.
+  const result = execFileSync(process.execPath, [scriptPath], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+    env: { ...process.env, PATH: '' },
+  });
+  assert.match(result, /protocol census OK/);
+});
+
+test('drift audit fails closed when codex CLI is not installed', async () => {
+  // The explicit --drift audit must fail-closed when the codex binary is absent.
+  // A silent pass here would hide real drift from the developer.
+  // Run as subprocess with empty PATH so `codex` is guaranteed absent.
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, [scriptPath, '--drift'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        env: { ...process.env, PATH: '' },
+      }),
+    (error) => {
+      // Must exit non-zero AND the error message must mention the CLI being absent.
+      return error.status !== 0 && /codex CLI is not installed/.test(error.stderr);
+    },
+  );
 });
 
 test('version drift between fixture and live snapshot is caught', async () => {
@@ -75,5 +104,17 @@ test('version drift between fixture and live snapshot is caught', async () => {
   assert.throws(
     () => assertProtocolCensus(fixture, computeProtocolSnapshot(mutated)),
     /version drift.*expected=0\.150\.1.*actual=0\.999\.0/,
+  );
+});
+
+test('unknown CLI arguments are rejected with non-zero exit', async () => {
+  // Typos like --update or --driftt must not silently fall back to hermetic mode.
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, [scriptPath, '--bogus'], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }),
+    (error) => error.status !== 0,
   );
 });

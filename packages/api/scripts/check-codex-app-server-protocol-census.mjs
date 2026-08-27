@@ -312,8 +312,13 @@ export function runDriftAudit() {
   } catch (error) {
     const unavailable = error && typeof error === 'object' && error.code === 'ENOENT';
     if (unavailable) {
-      process.stdout.write('Codex protocol drift audit: codex CLI not installed, nothing to compare.\n');
-      return;
+      // Fail-closed: an explicit drift audit that cannot locate its target is an error,
+      // not a silent pass.  The caller asked "is there drift?" — if we can't check, we
+      // must not pretend we checked.
+      throw new Error(
+        'Codex protocol drift audit failed: codex CLI is not installed. ' +
+          'Install Codex or remove --drift to run the hermetic-only census.',
+      );
     }
     throw error;
   }
@@ -340,9 +345,7 @@ export function runDriftAudit() {
       pinnedSnapshot.codexVersion +
       ' but installed CLI is ' +
       installedSnapshot.codexVersion +
-      '.\n' +
-      'Update the fixture with: pnpm --dir packages/api run check:codex-protocol-drift --update\n' +
-      'Then review the new methods and assign dispositions.\n',
+      '.\nUpdate the fixture, then review the new methods and assign dispositions.\n',
   );
   throw new Error(
     `Codex protocol drift detected: pinned=${pinnedSnapshot.codexVersion}, installed=${installedSnapshot.codexVersion}`,
@@ -354,7 +357,12 @@ if (directRun) {
   const mode = process.argv[2];
   if (mode === '--drift') {
     runDriftAudit();
-  } else {
+  } else if (mode === undefined) {
     runHermeticCensus();
+  } else {
+    process.stderr.write(
+      `Unknown argument: ${mode}\nUsage: node check-codex-app-server-protocol-census.mjs [--drift]\n`,
+    );
+    process.exitCode = 1;
   }
 }
