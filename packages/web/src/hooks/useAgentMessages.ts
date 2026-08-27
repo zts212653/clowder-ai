@@ -3025,7 +3025,11 @@ export function handleBackgroundAgentMessage(
   }
 
   if (msg.type === 'done') {
-    stopTrackedStream(streamKey, msg, options);
+    const finalizedStream = stopTrackedStream(streamKey, msg, options);
+    if (finalizedStream && msg.messageId && finalizedStream.id !== msg.messageId) {
+      options.store.replaceThreadMessageId(msg.threadId, finalizedStream.id, msg.messageId);
+      options.finalizedBgRefs.set(streamKey, msg.messageId);
+    }
     const currentStatus = options.store.getThreadState(msg.threadId).catStatuses[msg.catId];
     if (currentStatus !== 'error') {
       options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'done');
@@ -5283,6 +5287,10 @@ export function useAgentMessages() {
             }
           }
           if (messageId) {
+            if (msg.messageId && msg.messageId !== messageId) {
+              replaceMessageId(messageId, msg.messageId);
+              messageId = msg.messageId;
+            }
             setStreaming(messageId, false);
             // Bug-G: back-fill invocationId on bubbles that somehow missed the
             // invocation_created binding path (the primary handler at :789-802
@@ -5328,9 +5336,13 @@ export function useAgentMessages() {
           // co-existence: tool_or_cli / thinking) per ADR-033.
           if (!isStaleDone && msg.invocationId) {
             const threadId = msg.threadId ?? useChatStore.getState().currentThreadId;
-            const event = adaptIncomingToBubbleEvent({ ...msg, threadId } as BackgroundAgentMessage, {
-              sourcePath: 'active',
-            });
+            // The terminal messageId is an identity handoff for the already-visible
+            // assistant bubble, not the identity of a new system_status bubble.
+            // Rekey above, then let the done reducer match only by invocation.
+            const event = adaptIncomingToBubbleEvent(
+              { ...msg, threadId, messageId: undefined } as BackgroundAgentMessage,
+              { sourcePath: 'active' },
+            );
             if (event) {
               const storeSnapshot = useChatStore.getState();
               const result = applyBubbleEventWithRecovery({

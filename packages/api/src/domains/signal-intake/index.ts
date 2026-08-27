@@ -4,6 +4,7 @@ export * from './DestinationAuthority.js';
 export * from './errors.js';
 export * from './IngressTrace.js';
 export * from './LarkCliFeishuSourceResolver.js';
+export * from './MeetingArtifactResourceService.js';
 export * from './MeetingIntakeActionService.js';
 export * from './MeetingIntakeService.js';
 export * from './MeetingIntakeStore.js';

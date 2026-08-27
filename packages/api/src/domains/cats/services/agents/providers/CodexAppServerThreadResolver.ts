@@ -1,5 +1,7 @@
 import {
   CodexActiveWriterRecoveryError,
+  type CodexNativeResumeRejection,
+  type CodexSessionReplacementProvenance,
   captureCodexActiveWriterDetection,
 } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import { asCodexAppServerRecord } from './CodexAppServerEventMapper.js';
@@ -24,6 +26,7 @@ export type CodexAppServerThreadVerdict =
       readonly kind: 'replaced';
       readonly requestedThreadId: string;
       readonly threadId: string;
+      readonly replacement: CodexSessionReplacementProvenance;
       readonly raw: unknown;
     }
   | {
@@ -49,6 +52,13 @@ export function isThreadNotResumableRejection(message: string): boolean {
   const text = message.trim();
   if (/^Invalid request:/i.test(text)) return false;
   return /^no rollout found for thread id \S+$/i.test(text);
+}
+
+function classifyNativeResumeRejection(message: string): CodexNativeResumeRejection | undefined {
+  const text = message.trim();
+  if (isThreadNotResumableRejection(text)) return 'rollout_not_found';
+  if (text === 'Max payload size exceeded') return 'max_payload_size_exceeded';
+  return undefined;
 }
 
 function threadIdOf(response: unknown): string {
@@ -107,12 +117,24 @@ export async function resolveCodexAppServerThread(input: {
     // rejection fails the invocation loudly, whereas the opposite default would
     // silently discard session continuity and bury the real bug behind a
     // brand-new runtime.
-    if (!isCodexAppServerRpcError(failure) || !isThreadNotResumableRejection(failure.message)) throw failure;
+    const rejection = classifyNativeResumeRejection(failure.message);
+    if (!rejection) throw failure;
+    // Not-found is a JSON-RPC provider verdict. The observed max-payload
+    // terminal instead closes the carrier request without an RPC envelope, but
+    // it is equally bounded: exact text, during thread/resume, before turn/start.
+    if (rejection === 'rollout_not_found' && !isCodexAppServerRpcError(failure)) throw failure;
+    const detectedAt = input.now();
     const fallback = await input.request('thread/start', input.startParams ?? {});
     return {
       kind: 'replaced',
       requestedThreadId,
       threadId: threadIdOf(fallback),
+      replacement: {
+        cause: 'native_resume_rejected',
+        previousNativeThreadId: requestedThreadId,
+        detectedAt,
+        rejection,
+      },
       raw: fallback,
     };
   }

@@ -358,6 +358,16 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_AGENT_KEY_BOUND_CAT_ID',
+    defaultValue: '(空)',
+    description:
+      'F247 Cloud Cat — dedicated Remote MCP deployment 绑定的 agent-key principal；仅由服务启动器设置，调用方不可覆盖。',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_REMOTE_PORT',
     defaultValue: '3098',
     description:
@@ -457,13 +467,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'server',
     sensitive: false,
     runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_HOOK_TOKEN',
-    defaultValue: '(空)',
-    description: 'Hook 回调鉴权 token',
-    category: 'server',
-    sensitive: true,
   },
   {
     name: 'CAT_CAFE_TEST_SANDBOX',

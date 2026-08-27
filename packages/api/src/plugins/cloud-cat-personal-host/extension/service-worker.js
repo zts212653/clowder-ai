@@ -4,24 +4,15 @@ const NATIVE_RECONNECT_ALARM_DELAY_MINUTES = 0.5;
 const APPEND_PROTOCOL_VERSION = 2;
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/;
 const MAX_TEXT_BYTES = 128 * 1024;
-const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.1';
+const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.5';
 let nativePort = null;
 let bindingRequestSequence = 0;
 let bindingQuerySequence = 0;
 let pendingBindingRequestId = null;
 let pendingBindingQueryRequestId = null;
-const nativeHealth = {
-  connectAttempts: 0,
-  connected: false,
-  lastErrorCode: null,
-};
+const nativeHealth = { connectAttempts: 0, connected: false, lastErrorCode: null };
 globalThis.__f247NativeHealth = nativeHealth;
-const conversationBinding = {
-  status: 'unbound',
-  conversationId: null,
-  boundAt: null,
-  errorCode: null,
-};
+const conversationBinding = { status: 'unbound', conversationId: null, boundAt: null, errorCode: null };
 globalThis.__f247ConversationBinding = conversationBinding;
 function nativeDisconnectCode(message) {
   const normalized = typeof message === 'string' ? message.toLowerCase() : '';
@@ -34,13 +25,11 @@ function nativeDisconnectCode(message) {
 function validToken(value, maximum) {
   return typeof value === 'string' && value.length <= maximum && SAFE_TOKEN.test(value);
 }
-
 function validText(value) {
   return (
     typeof value === 'string' && value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= MAX_TEXT_BYTES
   );
 }
-
 function validRevisions(value) {
   return validToken(value?.helper, 135) && validToken(value?.extension, 32) && validToken(value?.pageAdapter, 32);
 }
@@ -334,9 +323,6 @@ function connectNativeHost() {
       setTimeout(() => {
         if (!nativePort) connectNativeHost();
       }, 1000);
-      void chrome.alarms.create(NATIVE_RECONNECT_ALARM, {
-        delayInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
-      });
     }
   });
   const requestId = `binding-query-${Date.now()}-${++bindingQuerySequence}`;
@@ -356,4 +342,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.action.onClicked.addListener(bindClickedConversation);
 
+void chrome.alarms.create(NATIVE_RECONNECT_ALARM, {
+  delayInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
+  periodInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
+});
 connectNativeHost();

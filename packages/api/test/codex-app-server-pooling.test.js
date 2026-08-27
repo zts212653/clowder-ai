@@ -116,6 +116,22 @@ class ActiveWriterWire extends PoolWire {
   }
 }
 
+class OversizedResumeWire extends PoolWire {
+  constructor(previousThreadId, replacementThreadId) {
+    super(replacementThreadId);
+    this.previousThreadId = previousThreadId;
+  }
+
+  async write(message) {
+    if (message.method === 'thread/resume') {
+      this.writes.push(message);
+      this.inbox.push({ id: message.id, error: { code: -32600, message: 'Max payload size exceeded' } });
+      return;
+    }
+    return super.write(message);
+  }
+}
+
 class FakeHostPool {
   constructor() {
     this.calls = [];
@@ -332,6 +348,31 @@ test('CodexAgentService exposes active-writer refusal without minting a replacem
     /thread native-old already has an active writer/,
     'typed diagnostics must not expose raw upstream active-writer text',
   );
+});
+
+test('CodexAgentService carries oversized native replacement provenance on the pre-turn session_init', async () => {
+  const wire = new OversizedResumeWire('native-oversized', 'native-cold');
+  const service = new CodexAgentService({
+    carrierMode: 'app_server',
+    cliCommand: process.execPath,
+    l0CompilerFn: fakeL0Compiler,
+    model: 'gpt-5.6-sol',
+  });
+
+  const output = await drain(
+    service.invoke('continue from cold navigation', {
+      invocationId: 'invocation-oversized-rollover',
+      sessionId: 'native-oversized',
+      agentCarrierSessionFactory: async () => wire,
+    }),
+  );
+
+  const init = output.find((message) => message.type === 'session_init');
+  assert.equal(init.sessionId, 'native-cold');
+  assert.equal(init.sessionReplacement?.cause, 'native_resume_rejected');
+  assert.equal(init.sessionReplacement?.previousNativeThreadId, 'native-oversized');
+  assert.equal(init.sessionReplacement?.rejection, 'max_payload_size_exceeded');
+  assert.equal(wire.writes.filter((message) => message.method === 'turn/start').length, 1);
 });
 
 test('CodexAgentService surfaces one checkpoint card when an in-flight tool blocks capacity recovery', async () => {

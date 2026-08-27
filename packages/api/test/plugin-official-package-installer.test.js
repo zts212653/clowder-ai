@@ -62,7 +62,7 @@ test('same exact catalog install is idempotent and does not mint a second instan
   assert.equal((await store.snapshot()).instances.length, 1);
 });
 
-test('explicit update replaces a stopped older package in place and remains disabled', async () => {
+test('explicit update replaces a stopped older package in place and preserves its stable activation state', async () => {
   const oldArchive = await packageArchive();
   const nextManifest = manifest({ version: '0.1.0-alpha.2' });
   const nextArchive = await packageArchive({ packageManifest: nextManifest });
@@ -113,7 +113,7 @@ test('explicit update replaces a stopped older package in place and remains disa
   assert.equal(snapshot.instances.filter((instance) => instance.lifecycleState === 'installed').length, 1);
   assert.equal(snapshot.instances[0].packageDigest, nextArchive.integrity);
   assert.equal(snapshot.instances[0].configReadiness, 'ready');
-  assert.equal(snapshot.instances[0].activationState, 'disabled');
+  assert.equal(snapshot.instances[0].activationState, 'error');
   assert.equal(snapshot.instances[0].runtimeState, 'stopped');
   assert.equal(snapshot.instances[0].lifecycleRevision, 2);
   assert.equal(

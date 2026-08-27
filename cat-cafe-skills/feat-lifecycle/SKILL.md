@@ -194,6 +194,16 @@ Clowder AI 产品壳，展示主旅程、默认状态与窄屏状态，并逐项
 | operator口述期望已回填 | ✅ | Discussion 落盘 ≠ spec 记录（F252 直接原因） |
 | 非用户可感知 | — | 写 `user_journey_exempt: {reason}`，不能靠缺段默认跳过 |
 
+**真实交互 claim 证据（不新增 stage）**：只有交付声明包含编辑、输入、批注、聊天/讨论、发送、审批、拖动/加节点或可恢复草稿时，现有 Design Gate 追加一行 claim→证据；不因 `concept_story` 的预设叙事、播放或场景控制而误触发。
+
+对 `product_experience_gate`、`journey_validation` 或同等真实交互 claim，必须记录并提供可重放浏览器旅程：核心输入为语义控件、核心动作有 handler/状态后果、fixture 外的陌生 sentinel 在动作后进入 DOM 或声明的 browser store。声称可恢复/持久化时才加刷新恢复断言；没有该 claim 不强加 storage。批注、聊天/讨论、协同记录或历史写清用户语义与因果，不能只说“右栏变化”。截图/视频只能证明外观，不能单独通过这项验收。
+
+`pnpm check:design-gate-real-interaction` 守住静态布景的 RED/GREEN 回归 fixture；它不替代每个 Demo 在 Contract 中列出的 exact 可重放浏览器旅程。
+
+若本轮声明已接入真实产品或具备成熟文档编辑能力，必须同时提交 `docs/design-gate-claims/<id>.json`。命令会消费该文件并核验真实入口→宿主→surface 的逐跳 import/mount；编辑器 claim 另核验 manifest 引擎依赖、adapter 的五项实现 token 与实际挂载，并拒绝原生输入框。没有 product/editor claim 的普通 demo 不需要为了过门补空 contract。
+
+**产品宿主与编辑器 claim 证据（同属现有 Design Gate）**：若交付声称已进入现有 Workspace / Collective，必须记录**真实产品宿主**的用户入口、目标组件路径与**宿主挂载证据**；单独 `/dev` route、自造导航或**独立复制壳**只能算组件实验，不能推进正式后端阶段。若交付声称共同编辑文档、稳定选区批注、Agent patch 审阅或版本撤销，必须点名**成熟编辑器引擎**并覆盖 `human_edit / selection_anchor / annotation / patch_review / version_undo` 五项**编辑器适配契约**；原生 `textarea`、`contenteditable` 或分段输入框不能冒充文档编辑器。
+
 **架构归属一问（F191）🔴**：
 
 每个非 trivial Feature 在 Design Gate 必须能用一句话回答：

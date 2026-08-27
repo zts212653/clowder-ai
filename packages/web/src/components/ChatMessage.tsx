@@ -619,6 +619,7 @@ export const ChatMessage = memo(function ChatMessage({
 
     const userHeader = (
       <div className="flex justify-end items-center gap-2 mb-1">
+        <MessageActionSlot />
         {isWhisper && (
           <span
             className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
@@ -631,7 +632,6 @@ export const ChatMessage = memo(function ChatMessage({
         )}
         <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
         <CopyIdButton messageId={message.id} />
-        <MessageActionSlot />
         <span className="text-xs font-semibold" style={{ color: 'var(--color-cocreator-primary)' }}>
           {coCreator.name}
         </span>
@@ -746,7 +746,6 @@ export const ChatMessage = memo(function ChatMessage({
           >
             {catStyle?.label ?? message.catId}
           </span>
-          <MessageActionSlot />
           <span className="text-xs text-cafe-muted shrink-0">{formatTime(message.timestamp)}</span>
           <CopyIdButton messageId={message.id} />
           <InvocationTrajectoryAnchor message={message} threadId={renderThreadId} />
@@ -843,6 +842,7 @@ export const ChatMessage = memo(function ChatMessage({
               onSynthesize={ttsSynthesize}
             />
           )}
+          <MessageActionSlot />
         </div>
         {showSchedulerAccent && (
           <div className={SCHEDULER_ACCENT_BADGE_CLASS}>

@@ -142,10 +142,14 @@ function parseAgentKeyFileMap(raw: string | undefined): Record<string, string> {
 
 function resolveAgentKeySecret(options?: AgentKeyOptions): string | undefined {
   const requestedCatId = options?.agentKeyCatId?.trim();
+  const boundCatId = process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID?.trim();
   const variantMapRaw = process.env.CAT_CAFE_AGENT_KEY_FILES?.trim();
-  if (requestedCatId) {
+  if (requestedCatId && boundCatId && requestedCatId !== boundCatId) return undefined;
+
+  const effectiveCatId = requestedCatId || boundCatId;
+  if (effectiveCatId) {
     const variantFiles = parseAgentKeyFileMap(variantMapRaw);
-    return readAgentKeyFile(variantFiles[requestedCatId]);
+    return readAgentKeyFile(variantFiles[effectiveCatId]);
   }
 
   if (variantMapRaw) return undefined;
@@ -310,10 +314,6 @@ const agentKeyCatIdSchema = z
 
 type AgentKeySelectable = { agentKeyCatId?: string | undefined };
 type WithAgentKey<T> = T & AgentKeySelectable;
-
-const agentKeyInputShape = {
-  agentKeyCatId: agentKeyCatIdSchema,
-};
 
 function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | undefined } {
   return { agentKeyCatId: input.agentKeyCatId };
@@ -484,6 +484,12 @@ export const getThreadContextInputSchema = {
     .optional()
     .default(100)
     .describe('Number of recent messages to retrieve (default: 100, max: 200)'),
+  cursor: z
+    .string()
+    .min(1)
+    .max(4096)
+    .optional()
+    .describe('Opaque nextCursor from the immediately preceding read with the same thread, filters, and mode.'),
   threadId: z
     .string()
     .min(1)
@@ -521,10 +527,20 @@ export const getThreadContextInputSchema = {
     .optional()
     .describe(
       'Response projection mode. "anchor" (DEFAULT — omit for normal browsing): token-lean previews with drillDown pointers to full content. ' +
-        '"full": returns complete message bodies (no truncation, no drillDown). ' +
-        'Use "full" for bulk/export AND whenever a freshness catch asks you to consume the contiguous unread set: only full exposes same-target queued bodies and advances queued-read evidence. ' +
+        '"full": returns complete message bodies inside a bounded aggregate page; use nextCursor when hasMore=true. A persisted message larger than the page is returned as an honest anchor with a precise drill pointer; a transient queued body without a persisted message anchor remains unseen and says to retry after persistence. ' +
+        'An oversized workflow SOP is likewise returned as an honest anchor that points to cat_cafe_get_workflow_sop instead of overflowing the aggregate envelope. ' +
+        'Use "full" whenever a freshness catch asks you to consume the contiguous unread set: current-thread reads prefer the unread delta, and only complete bodies advance queued-read evidence. ' +
         'GOTCHA: anchor previews are not a freshness closure and cannot prove queued messages were handled.',
     ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
+
+export const getWorkflowSopInputSchema = {
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Thread whose linked canonical workflow SOP should be read. Omit for the current invocation thread.'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -1083,6 +1099,7 @@ export async function handleAckMentions(input: WithAgentKey<{ upToMessageId: str
 
 export async function handleGetThreadContext(input: {
   limit?: number | undefined;
+  cursor?: string | undefined;
   threadId?: string | undefined;
   messageId?: string | undefined;
   before?: number | undefined;
@@ -1096,6 +1113,7 @@ export async function handleGetThreadContext(input: {
     '/api/callbacks/thread-context',
     {
       ...(input.limit ? { limit: String(input.limit) } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       ...(input.messageId ? { messageId: input.messageId } : {}),
       ...(input.before !== undefined ? { before: String(input.before) } : {}),
@@ -1105,6 +1123,19 @@ export async function handleGetThreadContext(input: {
       ...(input.responseMode ? { responseMode: input.responseMode } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
+export async function handleGetWorkflowSop(input: {
+  threadId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/get-workflow-sop',
+    {
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+    agentKeyOptions(input),
   );
 }
 
@@ -1652,43 +1683,6 @@ export async function handleGenerateDocument(input: {
     agentKeyOptions(input),
   );
   return result;
-}
-
-export const requestPermissionInputSchema = {
-  action: z.string().min(1).describe('The action requiring permission (e.g. "git_commit", "file_delete")'),
-  reason: z.string().min(1).describe('Why you need this permission'),
-  context: z.string().max(5000).optional().describe('Optional additional context for the request'),
-};
-
-export const checkPermissionStatusInputSchema = {
-  requestId: z.string().min(1).describe('The requestId returned from a previous request_permission call'),
-};
-
-export async function handleRequestPermission(input: {
-  action: string;
-  reason: string;
-  context?: string | undefined;
-  agentKeyCatId?: string | undefined;
-}): Promise<ToolResult> {
-  return callbackPost(
-    '/api/callbacks/request-permission',
-    {
-      action: input.action,
-      reason: input.reason,
-      ...(input.context ? { context: input.context } : {}),
-    },
-    agentKeyOptions(input),
-  );
-}
-
-export async function handleCheckPermissionStatus(input: WithAgentKey<{ requestId: string }>): Promise<ToolResult> {
-  return callbackGet(
-    '/api/callbacks/permission-status',
-    {
-      requestId: input.requestId,
-    },
-    agentKeyOptions(input),
-  );
 }
 
 const githubWaitPredicateInputSchema = z.discriminatedUnion('kind', [
@@ -3096,14 +3090,14 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_get_thread_context',
     description:
       'Read messages from one thread, with token-lean anchor previews by default and optional full bodies, ranked keywords, or a bounded window around messageId. ' +
       'Use when: browsing the current conversation, reading a different known threadId, finding relevant messages inside that thread, opening context around a known messageId, or a freshness notice asks you to catch up. ' +
       'NOT for: finding features, decisions, plans, lessons, or unknown threads across project knowledge; use search_evidence or list_threads first. ' +
-      'Output: threadId plus ordered messages; anchor mode includes drillDown pointers to cat_cafe_get_message, responseMode="full" returns complete bodies and includes same-target queued bodies, and ranked keyword reads include scanCapped. ' +
-      'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters. Pass threadId only to read a different thread; omit it for the current thread.',
+      'Output: a bounded aggregate envelope with threadId, ordered messages, hasMore, and nextCursor when continuation is required; anchor mode includes drillDown pointers, while responseMode="full" returns complete bodies per ordinary item and includes same-target queued bodies. ' +
+      'GOTCHA: keyword ranking is best-effort over a bounded recent scan; scanCapped=true means older history may contain additional matches. A single item larger than the full-page budget falls back to an honest anchor; drill an oversized workflow SOP with cat_cafe_get_workflow_sop using the returned threadId. Anchor mode does not consume queued bodies or close freshness responsibility; for a freshness catch, use responseMode="full" with no catId/keyword/messageId filters and follow nextCursor until hasMore=false. Pass threadId only to read a different thread; omit it for the current thread.',
     inputSchema: getThreadContextInputSchema,
     handler: handleGetThreadContext,
     governance: {
@@ -3113,6 +3107,30 @@ export const callbackTools = [
       authority: 'callback-thread',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+    },
+  }),
+  defineCanonicalTool({
+    name: 'cat_cafe_get_workflow_sop',
+    description:
+      'Read the complete canonical workflow SOP linked to an owner-visible thread. ' +
+      'Use when: cat_cafe_get_thread_context returns an oversized workflowSop anchor and you need the resume capsule or checks. ' +
+      'NOT for: updating workflow state (use cat_cafe_update_workflow), browsing messages, or guessing a backlog item from a feature ID. ' +
+      'Output: threadId, backlogItemId, and the persisted workflowSop including resumeCapsule, checks, version, and update provenance. ' +
+      'GOTCHA: thread ownership is resolved from callback or agent-key identity; agent-key callers must provide threadId and the matching agentKeyCatId.',
+    inputSchema: getWorkflowSopInputSchema,
+    handler: handleGetWorkflowSop,
+    governance: {
+      implementationExport: 'handleGetWorkflowSop',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-thread',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'progressive-disclosure',
+        admissionRef: 'file:docs/features/F236-anchor-first-context-entry.md',
+      },
     },
   }),
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
@@ -3349,39 +3367,6 @@ export const callbackTools = [
       action: 'derive',
       authority: 'callback-owner',
       risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_request_permission',
-    description:
-      'Request permission from the user before performing a sensitive action (e.g. git_commit, file_delete). ' +
-      'Returns granted/denied immediately if a rule exists, or pending with a requestId if the user needs to approve. ' +
-      'WORKFLOW: request_permission → if pending → wait → check_permission_status with the returned requestId.',
-    inputSchema: requestPermissionInputSchema,
-    handler: handleRequestPermission,
-    governance: {
-      implementationExport: 'handleRequestPermission',
-      resourceFamily: 'permission',
-      action: 'command',
-      authority: 'callback-owner',
-      risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full'],
-    },
-  }),
-  defineTool({
-    name: 'cat_cafe_check_permission_status',
-    description:
-      'Check the status of a previously submitted permission request. ' +
-      'Use the requestId returned from request_permission. Returns granted/denied/pending.',
-    inputSchema: checkPermissionStatusInputSchema,
-    handler: handleCheckPermissionStatus,
-    governance: {
-      implementationExport: 'handleCheckPermissionStatus',
-      resourceFamily: 'permission',
-      action: 'read',
-      authority: 'callback-owner',
-      risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full'],
     },
   }),

@@ -106,9 +106,6 @@ vi.mock('@/hooks/useChatHistory', () => ({
 vi.mock('@/hooks/useSendMessage', () => ({
   useSendMessage: () => ({ handleSend: vi.fn() }),
 }));
-vi.mock('@/hooks/useAuthorization', () => ({
-  useAuthorization: () => ({ pending: [], respond: vi.fn(), handleAuthRequest: vi.fn(), handleAuthResponse: vi.fn() }),
-}));
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 vi.mock('@/hooks/useChatSocketCallbacks', () => ({
   useChatSocketCallbacks: () => ({}),
@@ -240,7 +237,6 @@ vi.mock('../TransferTargetPicker', () => ({
       : null,
 }));
 vi.mock('../SplitPaneView', () => ({ SplitPaneView: () => null }));
-vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
 
 describe('ChatContainer mobile interactions', () => {
   let container: HTMLDivElement;

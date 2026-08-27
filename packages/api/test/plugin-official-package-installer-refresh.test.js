@@ -59,7 +59,7 @@ test('explicit install rejects when the provider advances past the owner-confirm
   assert.equal((await store.snapshot()).instances.length, 0);
 });
 
-test('one installer observes a newer provider snapshot and performs the explicit stopped update', async () => {
+test('one installer observes a newer provider snapshot and preserves a stopped error projection', async () => {
   const alpha4Manifest = manifest({ version: '0.1.0-alpha.4' });
   const alpha5Manifest = manifest({ version: '0.1.0-alpha.5' });
   const alpha4Archive = await packageArchive({ packageManifest: alpha4Manifest });
@@ -115,7 +115,7 @@ test('one installer observes a newer provider snapshot and performs the explicit
   assert.equal(updated.packageDigest, alpha5.packageDigest);
   const snapshot = await store.snapshot();
   assert.equal(snapshot.instances[0].packageDigest, alpha5.packageDigest);
-  assert.equal(snapshot.instances[0].activationState, 'disabled');
+  assert.equal(snapshot.instances[0].activationState, 'error');
   assert.equal(snapshot.instances[0].runtimeState, 'stopped');
 });
 

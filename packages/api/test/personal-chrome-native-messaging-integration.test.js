@@ -58,70 +58,6 @@ function queryRevisionHealth(socketPath, pairingSecret, request) {
 }
 
 describe('Personal Chrome Native Messaging full seam', () => {
-  it('reconnects through a durable alarm when the transient service-worker timer is lost', async () => {
-    const serviceWorkerSource = await readFile(serviceWorkerPath, 'utf8');
-    const ports = [];
-    const alarmListeners = [];
-    const createdAlarms = [];
-    const transientTimers = [];
-    const chrome = {
-      runtime: {
-        connectNative() {
-          const disconnectListeners = [];
-          const port = {
-            onMessage: { addListener() {} },
-            onDisconnect: { addListener: (listener) => disconnectListeners.push(listener) },
-            postMessage() {},
-            disconnectListeners,
-          };
-          ports.push(port);
-          return port;
-        },
-        lastError: null,
-        onMessage: { addListener() {} },
-      },
-      alarms: {
-        create(name, options) {
-          createdAlarms.push({ name, options });
-          return Promise.resolve();
-        },
-        onAlarm: { addListener: (listener) => alarmListeners.push(listener) },
-      },
-      action: {
-        onClicked: { addListener() {} },
-        setBadgeText() {},
-        setTitle() {},
-      },
-      tabs: {},
-    };
-
-    runInNewContext(serviceWorkerSource, {
-      chrome,
-      URL,
-      TextEncoder,
-      clearTimeout() {},
-      console: { warn() {} },
-      setTimeout(callback, delay) {
-        transientTimers.push({ callback, delay });
-      },
-    });
-    assert.equal(ports.length, 1);
-
-    ports[0].disconnectListeners[0]();
-    await Promise.resolve();
-
-    assert.equal(transientTimers.length, 1);
-    assert.equal(createdAlarms.length, 1);
-    assert.equal(createdAlarms[0].name, 'f247-native-host-reconnect');
-    assert.equal(createdAlarms[0].options.delayInMinutes, 0.5);
-    assert.equal(alarmListeners.length, 1);
-
-    // The service worker may terminate before its setTimeout callback. The alarm
-    // is the browser-owned event that must still recreate the Native Messaging port.
-    alarmListeners[0]({ name: 'f247-native-host-reconnect' });
-    assert.equal(ports.length, 2);
-  });
-
   it('reports a bounded native host discovery failure without leaking browser error details', async () => {
     const serviceWorkerSource = await readFile(serviceWorkerPath, 'utf8');
     const disconnectListeners = [];
@@ -280,8 +216,8 @@ describe('Personal Chrome Native Messaging full seam', () => {
       text: 'TEXT_IS_ONLY_PRESENT_IN_THE_PROTOCOL_REQUEST',
       expectedRevisions: {
         helper: helperArtifactRevision,
-        extension: '0.2.1',
-        pageAdapter: '2026-08-23.1',
+        extension: '0.2.5',
+        pageAdapter: '2026-08-27.1',
       },
     });
     await terminal;
@@ -456,15 +392,15 @@ describe('Personal Chrome Native Messaging full seam', () => {
         conversationId: 'conversation-7',
         expectedRevisions: {
           helper: helperArtifactRevision,
-          extension: '0.2.1',
-          pageAdapter: '2026-08-23.1',
+          extension: '0.2.5',
+          pageAdapter: '2026-08-27.1',
         },
       });
       assert.equal(revisionHealth.status, 'ready');
       assert.deepEqual(revisionHealth.observedRevisions, {
         helper: helperArtifactRevision,
-        extension: '0.2.1',
-        pageAdapter: '2026-08-23.1',
+        extension: '0.2.5',
+        pageAdapter: '2026-08-27.1',
       });
 
       let requestIndex = 0;

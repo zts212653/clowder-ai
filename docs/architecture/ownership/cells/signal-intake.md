@@ -3,7 +3,7 @@ cell_id: signal-intake
 title: External Signal Intake
 doc_kind: architecture
 created: 2026-08-08
-summary: Host-owned admission, routing, durable workflow intake, source-resolution authority, and repair projection for declared external plugin signals.
+summary: Host-owned admission, routing, durable workflow intake, source-resolution authority, bounded source consumption, and repair projection for declared external plugin signals.
 canonical_features: [F292]
 code_anchors:
   - packages/shared/src/types/signal-ingress.ts
@@ -11,19 +11,23 @@ code_anchors:
   - packages/api/src/domains/signal-intake/SignalAdmissionService.ts
   - packages/api/src/domains/signal-intake/RedisMeetingIntakeStore.ts
   - packages/api/src/domains/signal-intake/SourceAccessLeaseService.ts
+  - packages/api/src/domains/signal-intake/MeetingArtifactResourceService.ts
   - packages/api/src/domains/signal-intake/AsrPersonMemorySceneBuilder.ts
   - packages/api/src/domains/signal-intake/AsrPersonMemoryQueueCarrier.ts
   - packages/shared/src/types/memory-write-opportunity.ts
   - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/routes/meeting-intake-routes.ts
+  - packages/api/src/routes/callback-meeting-artifact-routes.ts
+  - packages/mcp-server/src/tools/meeting-artifact-tools.ts
 doc_anchors:
   - docs/features/F292-feishu-meeting-intake-plugin.md
   - feature-specs/2026-08-08-f292-feishu-meeting-intake.md
-static_scan_hints: [SignalAdmissionService, SignalRouteStore, MeetingIntakeStore, MeetingIntakeService, SourceAccessLeaseService, EventsPublishBrokerHandler, signal-ingress, meeting-intake]
+static_scan_hints: [SignalAdmissionService, SignalRouteStore, MeetingIntakeStore, MeetingIntakeService, SourceAccessLeaseService, MeetingArtifactResourceService, EventsPublishBrokerHandler, signal-ingress, meeting-intake]
 cited_by:
   - {feature: F292, date: 2026-08-08, delta: "new Host-side cell separates durable external-signal truth from plugin lifecycle and source-specific collectors"}
   - {feature: F292, date: 2026-08-10, delta: "K-2B typed events.publish adapter consumes Host Broker identity while preserving signal-intake settlement authority"}
   - {feature: F276, date: 2026-08-15, delta: "confirmed meeting artifacts may emit one bounded mechanical WriteOpportunity scene and exact owner-message carrier; memory retains all judgment and destination authority"}
+  - {feature: F292, date: 2026-08-24, delta: "source-owned transcript bytes are consumed through one version-fenced bounded reader; initial cat delivery becomes a provider-authored refs-only envelope"}
 ---
 
 # External Signal Intake
@@ -36,8 +40,8 @@ F292 owns the first reusable Host path from an admitted external plugin signal t
 recoverable user workflow item. This cell validates Host-bound producer identity, declaration,
 effective grant, runtime liveness, payload bounds, privacy/source class, and idempotency before it
 creates or reconciles one TTL=0 intake. It also owns Host-configured consumer/filter/wake routes,
-short-lived source-access authority, repair states, and the projection predicate that decides whether
-human judgment is still required.
+short-lived source-access authority, version-fenced bounded source consumption, repair states, and
+the projection predicate that decides whether human judgment is still required.
 
 The external source remains source truth. This cell persists bounded metadata, source refs,
 governance/settlement history, and workflow choices; it does not become a document store or universal
@@ -70,6 +74,9 @@ recover ambiguous Broker dispatch without creating a second intake.
   while same-key/different-input conflicts fail closed.
 - Cross the plugin boundary with bounded metadata and opaque source refs. Resolve source content only
   through an exact-purpose, exact-intake, revocable Host lease.
+- Bind each cat task to a content-hash revision, admit one refs-only provider envelope, and expose
+  source text only through explicit character/token bounds plus revision-bound cursors. Documents and
+  resource links are projections, never alternate transcript authorities.
 - Keep user-visible workflow/governance state at TTL=0. Payload-free delivery traces are diagnostics
   with bounded retention and cannot recover or delete an intake.
 - Project only unresolved judgment or actionable repair into Needs Me; the projection has no second
@@ -89,6 +96,8 @@ recover ambiguous Broker dispatch without creating a second intake.
   destination. This cell may emit only bounded mechanical observations from confirmed meeting
   artifacts and an exact live-owner-message visibility witness; it cannot decide intent,
   importance, transcript truth, or person-memory truth.
+- `mcp-surface-governance` owns canonical tool identity, registration, exposure, and action boundary
+  for the meeting reader. This cell owns its source/revision/cursor semantics and callback policy.
 
 ## Do NOT Unify With
 
@@ -107,4 +116,4 @@ recover ambiguous Broker dispatch without creating a second intake.
 
 Watch for new `SignalAdmissionService`, `SignalRouteStore`, `MeetingIntakeStore`,
 `SourceAccessLeaseService`, `events.publish`, `signals.provides`, signal idempotency/settlement keys,
-source-handle resolution, or direct plugin-to-thread/cat routing.
+source-handle resolution, version-fenced meeting artifact reads, or direct plugin-to-thread/cat routing.

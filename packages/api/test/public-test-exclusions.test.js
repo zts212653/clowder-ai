@@ -49,7 +49,7 @@ const RECONCILED_EXCLUSIONS = [
   'harness-eval/design-gate-episode-source-provider-private-evidence\\.test',
   'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
   'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
-  'harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
+  'harness-eval/(?:friction-measurement-bundle|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
   'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
   'harness-eval/legacy-reeval-case-(?:hub|migration)\\.test',
 ];
@@ -133,7 +133,6 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     'test/f254-freshness-replay-provider.test.js',
     'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/design-gate-episode-source-provider-private-evidence.test.js',
-    'test/harness-eval/measurement-bundle-census.test.js',
     'test/harness-eval/publish-verdict-memory.test.js',
   ]) {
     assert.ok(resolved.excludedFiles.includes(file), `${file} should be private-fixture-only`);
@@ -144,6 +143,7 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     'test/f254-freshness-instruction-surface.test.js',
     'test/harness-eval/design-gate-episode-source-provider.test.js',
     'test/harness-eval/eval-capability-tips-enable-gate.test.js',
+    'test/harness-eval/measurement-bundle-census.test.js',
     'test/system-prompt-builder.test.js',
     'test/weixin-mp-path-security.test.js',
   ]) {

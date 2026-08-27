@@ -15,6 +15,7 @@ export default defineConfig({
       'src/__tests__/wait-termination.test.ts',
       'src/__tests__/proactive-memory-opportunity.test.ts',
       'src/__tests__/memory-write-opportunity.test.ts',
+      'src/__tests__/standing-reflex-episode.test.ts',
       'src/__tests__/subject-key.test.ts',
       'src/__tests__/cli-effort.test.ts',
       'src/__tests__/codex-speed.test.ts',

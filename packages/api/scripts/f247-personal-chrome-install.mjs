@@ -16,6 +16,10 @@ import {
 } from '../src/plugins/cloud-cat-personal-host/native-host/install-host.mjs';
 import { resolvePersonalChromeHostPaths } from '../src/plugins/cloud-cat-personal-host/native-host/pairing-record.mjs';
 import { probeNativeHostHealth } from './f247-personal-chrome-health-probe.mjs';
+import {
+  assertPersonalChromeConversationOption,
+  parsePersonalChromeInstallArguments,
+} from './f247-personal-chrome-install-cli-options.mjs';
 import { extensionIdFromManifestKey } from './f247-personal-chrome-live-contract.mjs';
 import { projectPersonalChromeLiveState } from './f247-personal-chrome-state-health.mjs';
 
@@ -178,6 +182,7 @@ export async function inspectPersonalChromePluginState({
   platform = process.platform,
   projectRoot,
   extensionId,
+  conversationId,
   webStoreListingUrl = process.env.CAT_CAFE_PERSONAL_CHROME_WEB_STORE_URL,
   inspectInstallation = inspectNativeHostInstallation,
   readAuthorizations = readPersonalChromeConversationAuthorizations,
@@ -199,11 +204,18 @@ export async function inspectPersonalChromePluginState({
     inspectInstallation,
   });
   await projectAuthorizationState({ state, path: paths.conversationBindingPath, readAuthorizations });
+  if (
+    conversationId !== undefined &&
+    !state.authorization.conversations.some((entry) => entry.conversationId === conversationId)
+  ) {
+    state.live = { status: 'degraded', errorCode: 'AUTHORIZATION_NOT_FOUND' };
+    return state;
+  }
   await projectPersonalChromeLiveState({
     state,
     installation,
     pairingRecordPath: paths.pairingRecordPath,
-    conversationId: state.authorization.conversations.at(-1)?.conversationId,
+    conversationId,
     probeLive,
   });
   return state;
@@ -224,11 +236,12 @@ export function createPersonalChromePluginPort({
   now = () => new Date(),
 } = {}) {
   const resolvedProjectRoot = projectRoot ?? process.env.CAT_CAFE_CONFIG_ROOT?.trim() ?? monorepoRoot;
-  const inspect = async () =>
+  const inspect = async ({ conversationId } = {}) =>
     inspectPersonalChromePluginState({
       platform,
       projectRoot: resolvedProjectRoot,
       extensionId,
+      conversationId,
       webStoreListingUrl,
       inspectInstallation,
       readAuthorizations,
@@ -303,19 +316,26 @@ export function createPersonalChromePluginPort({
   };
 }
 
-export async function runPersonalChromeInstall({ action = 'install', projectRoot, env = process.env } = {}) {
+export async function runPersonalChromeInstall({
+  action = 'install',
+  projectRoot,
+  conversationId,
+  conversationIdOptionPresent = false,
+  env = process.env,
+} = {}) {
+  assertPersonalChromeConversationOption({ conversationId, optionPresent: conversationIdOptionPresent });
   const port = createPersonalChromePluginPort({
     projectRoot: projectRoot ?? env.CAT_CAFE_CONFIG_ROOT?.trim() ?? monorepoRoot,
     webStoreListingUrl: env.CAT_CAFE_PERSONAL_CHROME_WEB_STORE_URL,
   });
   if (action === 'install') return port.install();
-  if (action === 'inspect') return port.inspect();
+  if (action === 'inspect') return port.inspect({ conversationId });
   if (action === 'uninstall') return port.uninstall();
   throw new Error('action must be install, inspect, or uninstall');
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  runPersonalChromeInstall({ action: process.argv[2] ?? 'install' })
+  runPersonalChromeInstall(parsePersonalChromeInstallArguments(process.argv.slice(2)))
     .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
     .catch((error) => {
       process.stderr.write(

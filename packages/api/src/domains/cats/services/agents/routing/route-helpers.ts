@@ -123,8 +123,6 @@ export interface RouteStrategyDeps {
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
   /** F222: Frustration auto-issue store (optional, fail-open) */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  /** F222: Pending request store — used for cancel burst detection (listRecentDenied) */
-  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F093: World context provider for world-building mode (optional, fail-open) */
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup (optional, fail-open) */
@@ -898,6 +896,7 @@ const USER_FACING_SYSTEM_INFO_TYPES = new Set([
   // so marking it user-facing prevents route-serial from appending a misleading silent_completion.
   'malformed_toolcall_relay_46',
   'mode_switch_proposal',
+  'session_rollover_lifecycle',
   'session_seal_requested',
   'silent_completion',
   'warning',

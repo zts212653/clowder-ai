@@ -37,18 +37,23 @@ function createMockMessageStore() {
 }
 
 describe('F296 B3b production context infrastructure wiring', () => {
-  it('AgentRouter forwards the exact configured owner and ledger into InvocationDeps', () => {
+  it('AgentRouter forwards the exact configured owner, hook readiness coordinates, and ledger into InvocationDeps', () => {
     const contextEpochOwner = { resolve: async () => assert.fail('wiring test must not resolve') };
     const presentationLedger = { reserve: async () => assert.fail('wiring test must not reserve') };
+    const claudeProjectHookCarrierReady = () => true;
     const router = new AgentRouter({
       agentRegistry: new AgentRegistry(),
       registry: createMockRegistry(),
       messageStore: createMockMessageStore(),
       contextEpochOwner,
+      hookAuthenticationReady: true,
+      claudeProjectHookCarrierReady,
       presentationLedger,
     });
 
     assert.equal(router.getStrategyDeps().invocationDeps.contextEpochOwner, contextEpochOwner);
+    assert.equal(router.getStrategyDeps().invocationDeps.hookAuthenticationReady, true);
+    assert.equal(router.getStrategyDeps().invocationDeps.claudeProjectHookCarrierReady, claudeProjectHookCarrierReady);
     assert.equal(router.getStrategyDeps().invocationDeps.presentationLedger, presentationLedger);
   });
 
@@ -60,6 +65,16 @@ describe('F296 B3b production context infrastructure wiring', () => {
       source,
       /^\s*contextEpochOwner,\s*$/m,
       'the constructed owner must be passed into AgentRouter rather than remaining dead composition code',
+    );
+    assert.match(
+      source,
+      /hookAuthenticationReady:\s*sessionHookAuthenticationReady/,
+      'the live invocation-auth readiness resolver must reach provider-bound invocation deps',
+    );
+    assert.match(
+      source,
+      /claudeProjectHookCarrierReady:\s*isClaudeProjectHookCarrierReady/,
+      'the active-workspace carrier resolver must reach provider-bound invocation deps',
     );
     assert.match(source, /new PresentationLedger\(new RedisPresentationLedgerStore\(redis\)\)/);
     assert.match(

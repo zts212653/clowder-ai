@@ -84,8 +84,8 @@ describe('F247 managed normal-dispatch live gate', () => {
       fingerprint: {
         v: 1,
         phase: 'before_submit',
-        adapterRevision: '2026-08-23.1',
-        artifactRevision: '0.2.1',
+        adapterRevision: '2026-08-27.1',
+        artifactRevision: '0.2.5',
         firstUnsupportedPath: 'composer/p[0]/mark[0]',
         nodes: [{ path: 'composer', kind: 'element', tag: 'DIV', childCount: 1 }],
         truncated: false,

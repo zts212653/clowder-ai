@@ -102,15 +102,16 @@ describe('F244 CapabilityTipStrip', () => {
     );
     // Container renders immediately (with shimmer placeholder)
     expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
-    // But no tip content yet (no "Tip" label, no "了解更多" button)
-    expect(container.querySelector('[data-testid="capability-tip-learn-more"]')).toBeNull();
+    // But no tip content or action yet.
+    const actionSelector = '[data-testid="capability-tip-learn-more"], [data-testid="capability-tip-open-surface"]';
+    expect(container.querySelector(actionSelector)).toBeNull();
 
     await act(async () => {
       vi.advanceTimersByTime(6000);
     });
     // After delay: tip content appears
     expect(container.querySelector('[data-testid="capability-tip-strip"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="capability-tip-learn-more"]')).not.toBeNull();
+    expect(container.querySelector(actionSelector)).not.toBeNull();
   });
 
   it('does not default omitted audience to all-only tips', async () => {

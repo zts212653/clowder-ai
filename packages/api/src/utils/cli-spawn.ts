@@ -236,6 +236,9 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   // forwarding either value would let a raw dev command act like the runtime owner.
   'CONNECTOR_GATEWAY_AUTOSTART',
   'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+  // Legacy F296 process-scoped bearer. Session hooks authenticate with the
+  // invocation-bound callback pair; never leak a stale operator token to any child.
+  'CAT_CAFE_HOOK_TOKEN',
   // Per-invocation process ownership is a capability, not ambient config. A
   // nested API or persistent host must not inherit the outer invocation.
   CLI_EXECUTION_OWNER_BINDING_ENV,

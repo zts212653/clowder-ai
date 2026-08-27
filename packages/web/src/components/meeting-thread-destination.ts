@@ -49,6 +49,7 @@ export async function createMeetingDestination(title: string, projectPath: strin
       title,
       ...(projectPath && projectPath !== 'default' ? { projectPath } : {}),
       preferredCats: [catId],
+      pinned: true,
     }),
   });
   const body: unknown = await response.json().catch(() => ({}));

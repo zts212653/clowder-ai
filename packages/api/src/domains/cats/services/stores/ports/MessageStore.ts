@@ -283,6 +283,11 @@ export interface StoredMessage {
     meetingArtifact?: {
       intakeId: string;
       sourceHandle: string;
+      /** Versioned bounded reader identity. Legacy pre-reader carriers omit these fields. */
+      resourceRef?: string;
+      sourceRevision?: `sha256:${string}`;
+      byteLength?: number;
+      contentType?: 'text/plain';
       trust: 'untrusted_external';
       instructionPolicy: 'data_only';
     };

@@ -9,24 +9,32 @@ community_issue: "clowder-ai-plugins#23"
 description: "飞书生成会议文字稿后，官方 input-source 插件把它变成可恢复的 Meeting Intake；人只补说话人、背景与去向，猫带着家里记忆产出纪要、决定、Roadmap 或任务。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-22T02:35:00Z
+description_updated_at: 2026-08-24T19:40:00Z
 tips_exempt: "The existing feature-f292-feishu-meeting-intake tip already opens this capability; search and in-place Thread creation are contextual actions inside its existing Needs Me card."
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F292-feishu-meeting-intake-plugin.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F292-feishu-meeting-intake-plugin.md"
+    toolName: cat_cafe_read_meeting_artifact
+    resourceFamily: meeting-artifact
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: implementation / alpha.6 is deployed with connected owner auth; live dogfood exposed a Host restart/sleep recovery defect, whose repair is in verification before automatic-intake and duplicate-delivery acceptance
+> **Status**: implementation / live alpha.8 plus the paired Host repair are activated; the owner-selected future-only recovery skipped 3 bounded candidates without replay, and a fresh successful observation verifies that automatic intake is running
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
 
 ## Architecture Ownership
 
-Architecture cell: plugin, signal-intake, approval-index
+Architecture cell: plugin, signal-intake, approval-index, mcp-surface-governance
 
 Host-state cell: `signal-intake`（Phase A frozen）
 
-Map delta: **completed**. The existing `plugin` cell already owns repository-local activation
+Map delta: **update required and included**. The existing `plugin` cell already owns repository-local activation
 plus the Host-governed official external plugin contract, so it is the correct owner for the C-2
 manifest/wire surface. It must not silently absorb K-3a routing, durable `MeetingIntake`, or Needs Me
 projection: those are Host domain truth, not extension lifecycle. The new `signal-intake` cell owns
@@ -34,7 +42,9 @@ generic signal admission, Host routes, durable workflow intake, source-access au
 truth. The existing `approval-index` cell owns the one-meeting attention projection and its bounded
 destination picker; it does not become a second intake store. `github-signals` keeps its GitHub-specific collection frontier/snapshots and remains the
 behavior oracle rather than a schema or migration target. F292 still does not create a parallel
-`event_source` resource or a universal event store.
+`event_source` resource or a universal event store. The `signal-intake` cell now also owns the
+version-fenced, cursor-bounded source-read policy; `mcp-surface-governance` owns only the canonical
+`cat_cafe_read_meeting_artifact` tool identity and exposure, not meeting or transcript truth.
 
 Ownership is split deliberately:
 
@@ -71,6 +81,9 @@ compatibility fixture; migrating GitHub is explicitly out of scope.
   plugin architecture from day one, as F285 did, so the implementation is not migrated later.
 - Feature authorization: `0001786250693680-000748-45686450` — formally establish F292 and request one
   bounded architecture review.
+- Live approval follow-ups: `0001787579895936-000010-0cd735df` and
+  `0001787580117810-000023-f4e3a869` — make a newly created destination immediately findable and keep
+  an explicit terminal no-write disposition available before successful delivery.
 - Public contract/design issue:
   [`clowder-ai-plugins#23`](https://github.com/zts212653/clowder-ai-plugins/issues/23).
 
@@ -103,9 +116,9 @@ Anker recorder
 
 | Evidence | Already true | Not yet true |
 |---|---|---|
-| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials. The latest real owner Minute (`AI创新项目招人及运营规划`, 2026-08-14) was read through that authorization and yielded a 73,137-byte / 1,229-line transcript without manual TXT download; the owner import endpoint is now on Host main | The source read and Host route are complete, but alpha.6 still has to create exactly one durable intake and prove duplicate replay behavior in alpha |
-| Plugin repository | PR #24 merged C-2 + official plugin source; PR #26/#29 completed the first release chain; PR #30 added the reviewed stdio entrypoint; PR #31 fixed the immutable runtime closure; PR #33 fenced source readiness; PR #34 published alpha.4; PR #35 published the shared-CLI conflict fallback; PR #36 published alpha.6 with explicit historical URL/token inspection and a 10-minute search-consistency watermark. Contract `0.1.0-beta.9`, SDK `0.1.0-beta.5`, and Feishu `0.1.0-alpha.6` are registry-visible with exact integrity and provenance | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement; explicit dist-tag cleanup must not be reintroduced as an F292 token gate |
-| Host Broker direction | PR #3522/#3542 merged durable intake, Needs Me, source grants, and cat delivery; PR #3555 merged the contract-native Broker; PR #3558 merged supervised stdio runtime; PR #3581 merged owner lifecycle controls; PR #3698 added bounded diagnostics; PR #3704 added version projection/update; PR #3717 merged hot release discovery; PR #3741 aligned Broker and supervisor pre-active budgets; PR #3742 merged owner-only historical Minutes import through the active `events.publish` ledger plus Host-to-child heartbeat lease renewal. Alpha.5 activation completed in 33.13 seconds and remains `enabled + healthy` | Alpha must adopt the exact alpha.6 artifact, import the latest historical Minute, and prove one durable intake plus duplicate replay truth |
+| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials. Package state owns the polling cursor, exactly-once outbox, observation/publication timestamps, and bounded catch-up window | The current live alpha.7 instance is intentionally left dormant until the owner chooses future-only versus previewed replay for the observed two-day gap |
+| Plugin repository | PR #41 merged as `37796035e4` and published Feishu `0.1.0-alpha.8`. It migrates state v1→v2 in memory, records observation/publication health, detects an old cursor before activation, and exposes bounded preview/fingerprint/replay/future-only recovery. Registry integrity is `sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==` | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement |
+| Host Broker direction | The paired Host repair preserves enabled intent across package update, exposes package-owned intake health, blocks stale-cursor activation, and gives the owner a previewed future-only versus replay choice before any enable/backfill. Replay still enters through the package outbox and existing Broker idempotency boundary | The change must pass review/merge and alpha verification; live alpha.7 update, enable, or replay remains owner-gated |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
 | Needs Me / F290 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F290 is still at Experience Design Gate; F292 honestly rejects Channel destinations |
 
@@ -123,8 +136,9 @@ missed events and pre-plugin meetings, not the primary journey.
   requires a new Broker handshake. Interrupted enable/disable transitions still recover to `error`.
 - **Package adoption is explicit and state-honest.** Settings distinguishes the installed artifact
   from the catalog's available version. An owner update verifies the exact internal-archive/SRI and both
-  lifecycle and grant revisions, preserves the same instance/config, and leaves it disabled/stopped;
-  it never smuggles activation into an upgrade.
+  lifecycle and grant revisions, preserves the same instance/config and durable activation intent,
+  and safely stops/swaps/restores an already-enabled runtime. A dormant instance stays dormant; a
+  failed restore becomes an actionable typed error rather than masquerading as owner-disabled.
 - **Release discovery is hot; authority is not.** The Host keeps plugin identity, grants, owner-auth
   runner/domains, and release channel as static policy. It may refresh only a newer exact version,
   npm tarball, SHA512 SRI, and provenance from the fixed `next` endpoint. A bounded single-flight
@@ -136,17 +150,20 @@ missed events and pre-plugin meetings, not the primary journey.
   home directory for the existing user login; Clowder AI neither stores nor passes a Feishu token.
 - **An existing intake is durable and repairable.** Needs Me can collect speaker mapping, missing
   context, a Host-owned private-thread destination, and requested outputs against an exact revision.
-  Failed source resolution offers retry, regrant, and bounded manual-transcript recovery on the same
-  TTL=0 record.
+  Failed source resolution offers retry, regrant, and reference-only Feishu URL/token recovery on the
+  same TTL=0 record; raw transcript bodies are rejected at that route.
 - **Owner auth is explicit and in-product.** The installed official plugin card exposes a “连接飞书”
   action. Host launches only the package-owned, catalog-declared `lark-cli` runner with fixed device-auth
   domains, then renders the opaque verification URL, user code, and QR inside the card. The device code
   stays server-side, credentials remain in the user's `lark-cli` store, and enable is blocked until
   verification succeeds. Intake-level regrant routes back to this single action instead of displaying a
   terminal command.
-- **Delivery stays inside Host authority.** A one-shot source grant resolves the transcript, the cat
-  receives it as `untrusted_external` / data-only content with provenance, and the resulting request
-  is queued idempotently in the chosen owner-scoped private thread. F290 Channels remain unavailable.
+- **Delivery stays inside Host authority.** A one-shot source grant binds a content hash and byte count,
+  then Host queues one hard-bounded connector envelope in the chosen owner-scoped private thread. The
+  envelope is visibly authored by “飞书会议入站 / 录音豆”, separates confirmed request fields from the
+  `untrusted_external` / data-only resource, and contains no transcript body. The assigned cat reads
+  overview, outline, or bounded content pages through the exact versioned ref. F290 Channels remain
+  unavailable.
 - **Historical recovery is an owner action, not cursor manipulation.** The owner may paste one bounded
   Feishu/Lark Minutes URL or token. Host checks the exact healthy official instance and lifecycle
   revision before and after the user-authorized read, normalizes through the published plugin package,
@@ -178,19 +195,29 @@ missed events and pre-plugin meetings, not the primary journey.
 1. Host resolves safe defaults from meeting metadata and existing user policy.
 2. If speaker identities, missing background, destination, or desired output still require judgment,
    Needs Me shows one meeting card with title/time/source/readiness and the unresolved fields.
-3. You can map speakers, add context, search recent private threads by title/project/ID or create and
-   auto-select one in place, and select minutes / decisions / Roadmap / tasks without downloading a file.
+3. You can map speakers, add context, search recent private threads by title/project/ID or create,
+   auto-pin, and auto-select one in place, and select minutes / decisions / Roadmap / tasks without
+   downloading a file. The ordinary Thread action can unpin the new destination later.
 4. Auto-resolvable meetings do not create inbox noise. A future F290 Channel appears only after Host
    has a real Channel contract and authority check; the plugin itself never sees that destination.
+5. Until delivery succeeds, the card keeps a secondary “这次会议不写入” action visible. One explicit
+   confirmation settles the intake as rejected without creating or delivering a destination; saved
+   choices remain audit truth and the terminal item does not return to the pending projection.
 
 ### J3 — A cat produces a context-aware artifact
 
-1. Host hands the cat an exact intake/source ref plus the confirmed human choices.
-2. The cat fetches the transcript through the granted source adapter and searches authorized house
-   memory for people, projects, decisions, and prior commitments.
-3. The cat preserves transcript uncertainty, distinguishes verbatim evidence from inference, and
+1. Host sends one system-authored, hard-bounded meeting-intake envelope. It keeps confirmed
+   `speakerMap` / context / outputs / destination separate from a versioned source resource and never
+   impersonates You or puts transcript text in the initial message.
+2. The cat calls `cat_cafe_read_meeting_artifact` with explicit `maxChars` and `maxTokens`, normally
+   starting from overview/outline and continuing content only through `nextCursor`; optional
+   time-range and speaker filters stay bound into the cursor.
+3. Each page is re-resolved through the existing one-shot source adapter grant. A changed or replaced
+   source revision fails closed, so an old task cannot read newer artifact bytes.
+4. The cat searches authorized house memory for people, projects, decisions, and prior commitments.
+5. The cat preserves transcript uncertainty, distinguishes verbatim evidence from inference, and
    produces the selected artifacts with source provenance.
-4. The result lands in the Host-owned destination; `MeetingIntake` records completion, failure, or
+6. The result lands in the Host-owned destination; `MeetingIntake` records completion, failure, or
    remaining judgment without copying transcript truth into the plugin.
 
 ### J4 — Failure is recoverable and visible
@@ -341,13 +368,19 @@ missed events and pre-plugin meetings, not the primary journey.
   meeting remain auditable records but project as one canonical meeting card.
 - [x] AC-C2: Projection tests prove that only unresolved human judgment or repair appears in Needs Me;
   confirmed speaker/context/destination/output choices transition the same durable record and all
-  visible degraded states offer a concrete retry/regrant/manual-import action.
+  visible degraded states offer a concrete retry/regrant/manual-import action. Before successful
+  delivery, unresolved and repair cards also expose a confirmed no-write disposition that preserves
+  saved choices, performs no delivery, and leaves the pending projection exactly once.
 - [x] AC-C3: Destination tests prove the plugin cannot address any cat/thread/invocation/Channel; Host
   routes a confirmed intake to an existing private thread, while unavailable F290 destinations are
   honestly disabled rather than guessed or silently downgraded.
 - [x] AC-C4: Source-resolution and prompt-injection tests prove transcript retrieval occurs only under
-  explicit grant; cat context admission preserves source/provenance and does not leak household
-  memory, transcript text, or summary prompts back into the plugin event/logs.
+  explicit grant. The first cat context is a hard-bounded Host/connector envelope whose size is
+  invariant under a hostile ten-hour transcript fixture; it exposes the exact source revision and
+  no body. The canonical reader provides overview/outline, revision-bound cursor continuation,
+  speaker/time filters, explicit character/token bounds, and fail-closed stale-revision handling.
+  Cat context admission preserves source/provenance and does not leak household memory, transcript
+  text, or summary prompts back into the plugin event/logs.
 
 ### Phase D（Real Meeting Dogfood + Release）
 
@@ -356,11 +389,14 @@ missed events and pre-plugin meetings, not the primary journey.
   thread routing; evidence includes source refs, disposition transitions, and final artifact lineage.
 - [ ] AC-D2: Restart, duplicate/redelivery, auth loss/regrant, transcript-not-ready, deleted source,
   manual recovery, and plugin upgrade drills retain one durable intake and expose correct health,
-  retry, and redacted diagnostics.
+  retry, and redacted diagnostics. Package state records last successful source observation and Host
+  publication settlement; a stale cursor becomes a bounded owner decision with preview, explicit
+  future-only skip or fingerprint-fenced replay through the existing exactly-once outbox.
 - [ ] AC-D3: Install/update/repair/uninstall and permission guidance is user-visible; a capability tip
   opens the meeting-intake action and links to the released plugin/feature truth. A newer reviewed
-  official release becomes visible without a Host code change or restart, while package update and
-  runtime enable remain separate explicit owner actions.
+  official release becomes visible without a Host code change or restart. First enable remains an
+  explicit owner action; updating an already-enabled instance preserves that intent through one
+  serialized stop/swap/resume transaction and exposes a retryable restore failure.
 - [ ] AC-D4: Exact contract/plugin/core versions plus conformance and dogfood evidence are recorded;
   a synthetic second input source reuses C-2/K-3a without a new domain-specific Host route, while the
   existing GitHub integration remains untouched.
@@ -375,9 +411,11 @@ missed events and pre-plugin meetings, not the primary journey.
 ## Dependencies
 
 - **Evolved from**: F202 + F240（plugin lifecycle and IM connector boundary）.
-- **Remaining Phase D gate**: update alpha to the exact alpha.6 artifact, then import the latest real
-  historical Minute and verify one
-  durable intake plus duplicate replay before continuing the full real-meeting journey. K-2D #3558,
+- **Remaining Phase D gate**: the exact alpha.8 artifact and paired Host repair passed isolated alpha
+  verification and are active on the connected live instance. The owner's future-only choice skipped
+  3 bounded candidates without replay; the poller is enabled/healthy and has recorded a fresh successful
+  observation. Verify one new durable intake plus duplicate/redelivery behavior before continuing the
+  full real-meeting journey. K-2D #3558,
   hot release discovery, the readiness-budget repair, package publication, package-side stdio runtime,
   K-2A inventory/update, K-2B transport, and K-2D supervision are complete. F289's paused one-shot
   migration remains explicitly outside this dependency chain.
@@ -427,7 +465,8 @@ missed events and pre-plugin meetings, not the primary journey.
 | KD-7 | GitHub is a behavior oracle, not a migration target | It proves the need while keeping F292 bounded and reversible | 2026-08-08 |
 | KD-8 | No automatic Feishu writeback in F292 | It is a separate bidirectional authority/grant surface, not required to remove the routing bottleneck | 2026-08-08 |
 | KD-9 | The `plugin` cell owns only the C-2 contract surface; K-3a route, durable intake, and Needs Me projection require explicit Host-side ownership | Extension lifecycle and durable observation/workflow truth have different invariants; `github-signals` is the symmetry check | 2026-08-08 |
-| KD-10 | Official release coordinates hot-refresh inside a fixed Host policy, but update and enable remain explicit separate actions | Future reviewed prereleases should not require a Host code change/restart; identity, authority, rollback resistance, owner confirmation, and activation cannot be delegated to mutable registry metadata | 2026-08-15 |
+| KD-10 | Official release coordinates hot-refresh inside a fixed Host policy; first enable remains explicit, while update preserves the instance's existing activation intent | Future reviewed prereleases should not require a Host code change/restart; treating package replacement as owner-disable caused a silent intake gap | 2026-08-24 |
+| KD-11 | Initial meeting delivery is a provider-authored bounded envelope; transcript consumption uses the canonical source resolver through a versioned cursor reader | A resource link or document projection alone still causes unbounded eager loading unless the read contract itself owns bounds and revision fencing | 2026-08-24 |
 
 ## Review Gate
 

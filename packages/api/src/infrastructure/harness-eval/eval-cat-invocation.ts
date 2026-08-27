@@ -1,5 +1,10 @@
 import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './domain/eval-domain-registry.js';
+import { PUBLISH_VERDICT_PACKET_INSTRUCTIONS } from './eval-cat-publish-instructions.js';
 import { FRESHNESS_PUBLISH_SELECTOR_INSTRUCTIONS } from './freshness/freshness-eval-cat-instructions.js';
+import {
+  TRAJECTORY_INSPECTOR_DOMAIN_INSTRUCTIONS,
+  TRAJECTORY_INSPECTOR_PUBLISH_SELECTOR_INSTRUCTIONS,
+} from './trajectory-inspector/trajectory-inspector-eval-cat-instructions.js';
 
 export interface LegacyCleanupStatus {
   status: 'not_checked' | 'dry_run_ready' | 'redirected' | 'disabled';
@@ -50,46 +55,8 @@ const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
     'Enter the eval:anchor-first domain thread. Analyze the anchor-first preview↔drill open-rate telemetry rollup: per-tool preview response counts, previewed items, drilled unique items, open-rate (drilledUniqueItems / previewedItems), charsSaved (originalChars - returnedChars), drillChars, and double-sided netBenefit (charsSaved - drillChars). Each rollup covers the LATEST 24h in-memory snapshot (event buffer has 24h retention; the weekly firing frequency is how often the eval cat runs, NOT the data window). Compare per-tool stats across the 4 preview tools (pending-mentions, thread-context, list-tasks, get-message) and 2 drill tools (get-message, list-tasks). Also review Adoption Detail / activationCounts adoption_* fields: explicitAnchorCalls, explicitFullCalls, defaultAnchorCalls, defaultFullCalls, legacyEquivalentAnchorCalls, and uniqueCatsExplicitAnchor answer whether cats are actively choosing anchor or only hitting defaults / old equivalent controls. orphanDrills indicates drills whose itemId matched no preview in the window (stale drill pointers, drills outside window, items surfaced before the event log started, or drills that arrived before any preview of that item — temporal causality enforced). Track-1 aggregate snapshot is cross-referenced for volume sanity checks. SUNSET SIGNAL CRITERIA (AC-E3, 双信号 — both required for delete_sunset): The attribution bundle includes pre-computed sunsetSignals per tool and a sunsetAssessment summary. Signal 1 (anchor tax): sunsetSignals.anchorTax=true when openRateByItem > 80% AND netBenefit < 0 — cats drill almost everything, anchor saves nothing; frictionSignal.severity is escalated to high, proposedAction is fix (not sunset — generator cannot confirm Signal 2 blindness; only eval cat escalates to delete_sunset after cross-referencing task-outcome). Signal 2 (blindness — MORE dangerous, token account INVISIBLE): reference-read the latest eval:task-outcome verdict/trend — if task-outcome quality (corrected_success / needs_investigation rates) worsened after anchor deployment and correlates with anchor tool usage, this is the insidious signal that preview is causing judgment errors. F236 does NOT write to eval:task-outcome; cross-reference only. VERDICT MAPPING: Both signals (tax + blindness evidence) → delete_sunset with governance.cvoAcceptRequired=true; ownerAsk.requestedAction MUST specify WHICH tool(s) to sunset. Signal 1 only (tax, no blindness evidence) → fix (investigate whether preview quality can improve to reduce drill rate). Signal 2 only (blindness, no clear tax) → fix (urgent: preview may be causing judgment errors, investigate). Neither signal + healthy data → keep_observe (log as Phase C expansion data basis). Insufficient data (low confidence / few preview events) → keep_observe with note on sample size. For delete_sunset verdicts: specify per-tool sunset in ownerAsk (e.g. "sunset anchor on thread-context, keep anchor on pending-mentions").',
   'eval:design-gate':
     'Enter the eval:design-gate domain thread. Reconstruct eligible Feature/PR episodes only through the F303 canonical source-map adapter: admission plus exact HEAD, gate/self-check, non-author review, landed Alpha, and explicit no-escape consequence or linked incident/fix attribution. Opportunity, behavior, and consequence must all resolve; missing refs and silence are invalid, never success. Report the six-field estimator as a vector (eligible episodes, pre-review unique catches, post-merge divergence escapes, false-positive blocks, extra active minutes, extra review rounds) without a composite score or cat ranking. Discovery, attribution, and acceptance remain separate; same-batch replay is repeatability evidence, not independent acceptance. Until the first four weeks or twenty eligible episodes (whichever comes first) and measurement validity is usable, verdict must be keep_observe. Map keep/tune/missing-capability/sunset to keep_observe/fix/build/delete_sunset only when the source and validity gates authorize it.',
+  'eval:trajectory-inspector': TRAJECTORY_INSPECTOR_DOMAIN_INSTRUCTIONS,
 };
-
-/** F192 Phase H AC-H4: publish verdict through MCP, never direct git push. */
-/** Common packet section — used by all domain publish instructions. */
-const PUBLISH_VERDICT_PACKET_INSTRUCTIONS = `
-
-## Publish your verdict (MANDATORY — NOT git push)
-
-When your analysis converges to a verdict, call the \`cat_cafe_publish_verdict\` MCP tool with a complete \`VerdictHandoffPacket\` (12 top-level fields; governance optional except for delete_sunset; all other fields REQUIRED):
-
-1. **id** — stable verdict slug (lowercase alphanumeric + hyphens, e.g. \`2026-06-05-{domainSlug}-c1-friction\`)
-2. **domainId** — must match your assigned domain
-3. **createdAt** — ISO 8601 timestamp
-4. **phenomenon** — what you observed (1-2 sentences)
-5. **harnessUnderEval** — { featureId, componentId, name } of harness being evaluated
-6. **evidencePacket** — { snapshotRefs, attributionRefs, metricRefs, sampleTraceRefs } — concrete refs to committed bundle artifacts, NOT raw narrative. Every \`metricRefs\` entry must resolve against this domain's metric glossary; unknown refs fail before any evidence branch or PR is created. \`sampleTraceRefs\` must be NON-EMPTY even on no-finding packets — pass at least one metadata-only ref so the bundle has a stable anchor (the schema validator rejects empty arrays at submit time).
-7. **dailyTrend** — { window, current, baseline, threshold, direction } — quantitative trend data. \`current\` / \`baseline\` / \`threshold\` are each a **record/object whose values are numbers** (Zod \`record(number)\`) — e.g. \`current: { verdictWithoutPass: 9 }\`. Bare number primitives (\`current: 9\`), strings (\`"3/10"\`), null, and nested-object values are rejected by the schema at submit time. \`window\` is a string label (e.g. \`"24h"\`); \`direction\` is the enum \`improved\` / \`regressed\` / \`flat\` / \`unknown\`.
-8. **rootCauseHypothesis** — { summary, confidence (low/medium/high), alternatives[] }
-9. **verdict** — categorical: \`fix\` / \`build\` / \`keep_observe\` / \`delete_sunset\` (NOT a score)
-10. **ownerAsk** — { targetFeatureId, targetOwnerCatId, requestedAction }
-11. **acceptanceReevalPlan** — { nextEvalAt, closureCondition }
-12. **counterarguments** — non-empty array of alternative interpretations
-13. **governance** (OPTIONAL except for \`delete_sunset\` verdict, where \`governance.cvoAcceptRequired: true\` is REQUIRED)
-
-## After publishing — PR lifecycle (MANDATORY)
-
-The MCP tool returns a PR URL. Your job is NOT done at publish — follow through:
-
-### Evidence-only verdict PR (\`keep_observe\` / first-round verdicts)
-1. The PR contains only docs/evidence files (no code). You are the domain owner — **self-merge via \`gh pr merge <number> --squash --delete-branch\`** after confirming the PR is clean (no unintended files).
-2. Post a summary in your domain thread: verdict direction + PR URL + next eval schedule.
-
-### Actionable verdict PR (\`fix\` / \`build\` / \`delete_sunset\`)
-1. Merge the evidence PR yourself (same as above — evidence is evidence regardless of verdict direction).
-2. The \`ownerAsk.targetOwnerCatId\` in your verdict identifies who should act on the finding. **Cross-post to that owner's thread** via \`cat_cafe_cross_post_message\` with: verdict summary, PR URL, and the specific \`requestedAction\`.
-3. If the owner creates a fix/build PR with code changes, that PR follows normal cross-review merge-gate (NOT self-merge).
-
-### Thread traceability
-Include your domain thread ID in the verdict PR body (the MCP tool does this automatically via provenance.json). If someone asks "which thread produced this PR", the answer is in \`provenance.json → sourceThreadId\`.
-`;
 
 /** a2a-specific sourceRefs section (snapshot/attribution YAML basenames). */
 const PUBLISH_VERDICT_INSTRUCTIONS_A2A = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
@@ -299,6 +266,8 @@ The source map contains canonical refs only. The API re-resolves admission, GitH
 The MCP tool creates the existing isolated evidence branch and PR. Do not write or push verdict artifacts directly.
 `;
 
+const PUBLISH_VERDICT_INSTRUCTIONS_TRAJECTORY_INSPECTOR = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}${TRAJECTORY_INSPECTOR_PUBLISH_SELECTOR_INSTRUCTIONS}`;
+
 const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = {
   'eval:a2a': PUBLISH_VERDICT_INSTRUCTIONS_A2A,
   'eval:capability-wakeup': PUBLISH_VERDICT_INSTRUCTIONS_CAPABILITY_WAKEUP,
@@ -310,6 +279,7 @@ const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = 
   'eval:qc': PUBLISH_VERDICT_INSTRUCTIONS_QC,
   'eval:freshness': PUBLISH_VERDICT_INSTRUCTIONS_FRESHNESS,
   'eval:design-gate': PUBLISH_VERDICT_INSTRUCTIONS_DESIGN_GATE,
+  'eval:trajectory-inspector': PUBLISH_VERDICT_INSTRUCTIONS_TRAJECTORY_INSPECTOR,
 };
 
 /** Registry census hook: report instruction wiring without duplicating either map. */

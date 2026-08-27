@@ -7,12 +7,16 @@ topics: [message, queue, delivery, execution, a2a, routing, history, failure, ob
 created: 2026-08-13
 updated: 2026-08-26
 status: approved
-author: "砚砚/cat-eqdvbcxw@gpt-5.6-sol"
+architecture_cell: "dispatch + ball-custody + bubble-pipeline + approval-index"
+architecture_map_delta: "none — consolidates existing delivery, custody, result, and responsibility owners; adds no canonical cell or parallel ledger"
+author: "Maine Coon/cat-eqdvbcxw@gpt-5.6-sol"
 contributors:
-  - "砚砚/codex@gpt-5.6-terra"
-  - "宪宪/Fable@claude-opus-4-8"
-  - "宪宪/opus@claude-opus-4-6"
-related_issue: 1354
+  - "Maine Coon/codex@gpt-5.6-terra"
+  - "Ragdoll/Fable@claude-opus-4-8"
+  - "Ragdoll/opus@claude-opus-4-6"
+source_issue: "clowder-ai#1354"
+source_pr: "clowder-ai#1356"
+source_head: "1ff99bd78de7c413b1020508b41bc5fbfb71adee"
 related_docs:
   - docs/features/F055-a2a-mcp-structured-routing.md
   - docs/features/F078-smart-routing-group-mentions.md
@@ -28,7 +32,13 @@ related_docs:
 
 # A2A 消息投递、处理与交接生命周期架构
 
-Related umbrella: #1354
+Related umbrella: [clowder-ai#1354](https://github.com/zts212653/clowder-ai/issues/1354)
+
+Architecture cell: `dispatch + ball-custody + bubble-pipeline + approval-index`
+
+Map delta: none — consolidates existing delivery, custody, result, and responsibility owners; adds no canonical cell or parallel ledger.
+
+Why: the RFC makes one end-to-end contract from existing owner facts so implementation cannot reintroduce competing lifecycle rules.
 
 ## 1. 背景、方向与阅读方式
 

@@ -9,7 +9,6 @@ interface ChatContainerHeaderProps {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   threadId: string;
-  authPendingCount: number;
   viewMode: 'single' | 'split';
   onToggleViewMode: () => void;
   statusPanelOpen: boolean;
@@ -21,7 +20,6 @@ export function ChatContainerHeader({
   sidebarOpen,
   onToggleSidebar,
   threadId,
-  authPendingCount,
   // F099/OQ-4: viewMode toggle hidden — candidate for removal (KD-7)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   viewMode: _viewMode,
@@ -62,14 +60,6 @@ export function ChatContainerHeader({
             </div>
           </div>
         </div>
-        {authPendingCount > 0 && (
-          <span
-            className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full bg-conn-amber-bg text-conn-amber-text text-micro font-bold animate-pulse-subtle"
-            title={`${authPendingCount} 个授权请求等待处理`}
-          >
-            🔐 {authPendingCount}
-          </span>
-        )}
         {/* F284: one stable recall entry; activity stays a badge, not a second header capability. */}
         <PanelToggle
           onToggleStatusPanel={onToggleStatusPanel}

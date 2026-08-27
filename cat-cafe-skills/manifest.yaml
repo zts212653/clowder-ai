@@ -667,27 +667,29 @@ skills:
     sop_step: null
     merged_from: null
 
-  # ── Eval 设计与体检（Eval 宪法操作化，2026-08-10 v2.1 对齐）──
+  # ── Eval 设计与体检（Eval 宪法操作化，2026-08-23 v2.2 修正轮）──
   eval-design:
     category: "调研与知识"
     description: >
-      E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
-      Use when: 按 ADR-031 v3.4 机制选择判定 eval 该不该建、新增或修改任何指标、审计现有 eval 资产病灶。
+      E0 资格门（GT 域/裁判射程/付薪方/自治上限）+ 指标出生证契约 + 纵向运行拓扑（进入/唤醒/成熟/可行动）+ 七公理设计自检 + 存量 eval 体检尺（五病：划水/污染/归因停滞/干预失证/摸鱼）。
+      Use when: 按 ADR-031 v3.4 机制选择判定 eval 该不该建、新增或修改任何指标、设计累计证据的纵向触发契约、审计现有 eval 资产病灶。
       Not for: 单次交付自检（用 quality-gate）、审外部 claim（用 source-audit）、摩擦诊断（用 code-as-harness）。
-      Output: 带出生证的指标定义，或带病名+处置建议的体检报告（不输出总分排行榜）。
+      Output: 带出生证的指标定义（纵向 eval 含触发契约），或带病名+处置建议的体检报告（不输出总分排行榜）。
     triggers:
       - "设计 eval"
       - "定指标"
       - "eval 指标"
       - "指标出生证"
       - "eval 体检"
+      - "纵向 eval"
+      - "eval trigger"
       - "摸鱼指标"
       - "metric design"
     not_for:
       - "单次交付自检"
       - "外部 claim 审计"
       - "摩擦诊断"
-    output: "Metric birth certificate 或 eval 体检报告（病名 + 处置）"
+    output: "Metric birth certificate（纵向 eval 含触发契约）或 eval 体检报告（病名 + 处置）"
     next: ["quality-gate", "self-evolution"]
     sop_step: null
     merged_from: null
@@ -894,13 +896,47 @@ skills:
     sop_step: null
     merged_from: null
 
+  agent-product-promo-director:
+    category: "创作与媒体"
+    description: >
+      Agent/AI 产品宣传片的创意导演层：先锁产品主角、观众信念变化与影片格式，再把不可见的 Agent
+      协作翻译成可拍的故事、镜头、运动、声音和 provenance contract。
+      Use when: 用户问 Agent 产品宣传片如何导演/剪辑/叙事/配声音、要拆参考片、写 creative brief/beat sheet，
+      或 video-forge 开机前仍未锁定主语与镜头语法。
+      Not for: brief 已冻结后的录制/TTS/对齐/渲染（用 video-forge）、教程/功能 walkthrough、纯动画生产
+      （用 anime-forge）、只找时效性竞品（先用 deep-research）。
+      Output: product-hero sentence + belief change + format decision + claim/proof beat sheet +
+      shot/motion/sound maps + provenance ledger + operator acceptance questions。
+      GOTCHA: 用户举的页面、thread 或成果只是候选证据，不自动成为影片主题；内部静态分镜不能冒充成片。
+    triggers:
+      - "Agent 产品宣传片"
+      - "AI 产品宣传片"
+      - "宣传片怎么剪"
+      - "宣传片导演"
+      - "宣传片叙事"
+      - "宣传片运镜"
+      - "宣传片音效"
+      - "creative brief"
+      - "beat sheet"
+      - "产品是主角"
+    not_for:
+      - "已冻结 brief 的视频生产"
+      - "教程或功能 walkthrough"
+      - "纯动画生产"
+      - "只找时效性竞品"
+    output: "Agent product-hero director brief + causal beat/shot/motion/sound/provenance contracts"
+    next: ["deep-research", "video-forge", "anime-forge", "rich-messaging"]
+    sop_step: null
+    merged_from: null
+
   video-forge:
     category: "创作与媒体"
     description: >
       视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
       Use when: 做视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
-      Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。
-      Output: schema 驱动的视频成片 + 多猫审查通过 + 可发布。
+      Not for: Agent 产品宣传片仍未锁定主角/信念/导演语法（先用 agent-product-promo-director）、
+      纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。
+      Output: schema 驱动的视频成片 + operator 创意验收 + 风险匹配的技术审查 + 可发布。
     triggers:
       - "做视频"
       - "showcase 视频"
@@ -909,11 +945,12 @@ skills:
       - "video review"
       - "节奏审查"
     not_for:
+      - "Agent 产品宣传片尚未锁定主角与导演语法"
       - "纯代码开发"
       - "纯文档写作"
       - "PPT"
     output: "Schema-driven video production pipeline"
-    next: ["rich-messaging"]
+    next: ["agent-product-promo-director", "rich-messaging"]
     sop_step: null
     merged_from: null
 

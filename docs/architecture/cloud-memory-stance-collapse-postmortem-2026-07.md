@@ -8,8 +8,10 @@ related_docs:
   - architecture/memory-write-side-autopsy-2026-07.md
   - architecture/memory-system-overview.md
   - features/F260-write-side-autopsy-entity-deref.md
+  - feature-discussions/2026-08-24-memory-belief-admission/README.md
 topics: [memory, cloud-memory, stance, provenance, profile, negative-memory, postmortem, f260]
 created: 2026-07-08
+updated: 2026-08-24
 status: draft
 author: "Maine Coon/gpt-5.5"
 description: "云端 ChatGPT 记忆把交付/批判语境压成用户观点的 stance collapse 事故复盘；补充云端记忆系统外部描述，并给 F260 与 Clowder AI 记忆系统设计输入。"
@@ -47,6 +49,16 @@ external_sources:
 2. `doc_aliases` / `entity_registry` / profile primer / relationship dictionary 这类“可解引用对象”，默认应是 **候选索引**，不是用户观点库。
 3. 负向记忆、退役记忆、交付语境记忆必须是一等公民。它们的用途是阻止误用，不是反向自动注入一段“用户讨厌 X”。
 4. 小模型或云端黑盒摘要可以当线索生产者，不能单独给用户画像、项目 canon 或关系事实定案。
+
+### 0.1 2026-08-24 术语精化：belief laundering 与 False Familiarity
+
+本事故后来得到两个更准确的诊断名：**belief laundering** 指机制——候选/摘要/推断经过 memory
+surface 转手后，获得“像既有认知”的权威外观；**False Familiarity** 指用户体验——系统表现得
+非常熟悉用户，但熟悉的是压缩模型加工错的共同历史。stance collapse 是这组机制的一种具体病型。
+
+这只是给已有事故补诊断语言，不声称家里已有 detector 或 False Familiarity Rate。指标若要出生，
+仍需明确 consumer、分母、ground truth 与 keep/tune/sunset 决策。完整取舍见
+Memory Belief / Claim-Use Admission (internal)。
 
 ## 1. 云端记忆系统：公开说明与本事故观察
 

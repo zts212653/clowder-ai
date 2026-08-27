@@ -20,6 +20,7 @@ import {
   queueTargetStateEntries,
 } from './queue-receipt-projection';
 import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import { useQueueActionConvergence } from './useQueueActionConvergence';
 
 const COLLAPSE_THRESHOLD = 4;
 
@@ -125,7 +126,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
-  const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
+  const { steerEntryId, retryingAttemptIds, handleRetry, handleSteerConfirm, handleSteerOpen, handleSteerCancel } =
+    useQueueActionConvergence(threadId);
   const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
@@ -337,12 +339,6 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     }
   }, [addToast, setQueue, threadId]);
 
-  const handleSteerOpen = useCallback((entryId: string) => {
-    setSteerEntryId(entryId);
-  }, []);
-
-  const handleSteerCancel = useCallback(() => setSteerEntryId(null), []);
-
   const handleRemind = useCallback(
     async (entryId: string, targetCatId: string) => {
       const key = `${entryId}:${targetCatId}`;
@@ -381,25 +377,6 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     },
     [addToast, threadId],
   );
-
-  const handleSteerConfirm = useCallback(async () => {
-    if (!steerEntryId) return;
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}/queue/${steerEntryId}/steer`, {
-        method: 'POST',
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg =
-          data?.code === 'ENTRY_PROCESSING' ? '该消息正在处理，无法 steer' : (data?.error ?? 'Steer 失败，请重试');
-        addToast({ type: 'error', title: 'Steer 失败', message: msg, threadId, duration: 5000 });
-        return;
-      }
-      setSteerEntryId(null);
-    } catch {
-      addToast({ type: 'error', title: 'Steer 失败', message: 'Steer 失败，请重试', threadId, duration: 5000 });
-    }
-  }, [addToast, steerEntryId, threadId]);
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -565,10 +542,12 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     onRemove={handleRemove}
                     onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}
+                    onRetry={handleRetry}
                     onRemind={handleRemind}
                     activeInvocationIdByCatId={activeInvocationIdByCatId}
                     activeCarrierCapabilityByCatId={activeCarrierCapabilityByCatId}
                     remindingTargetKeys={remindingTargetKeys}
+                    retryingAttemptIds={retryingAttemptIds}
                   />
                 );
               })}

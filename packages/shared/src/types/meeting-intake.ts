@@ -42,6 +42,17 @@ export interface MeetingIntakeIngress {
   readonly firstDeliveredAt: number;
 }
 
+/** Bounded Host projection over source-owned bytes. It is never the transcript authority. */
+export interface MeetingArtifactDescriptor {
+  readonly contentType: 'text/plain';
+  readonly resourceRef: string;
+  readonly sourceHandle: string;
+  readonly sourceRevision: `sha256:${string}`;
+  readonly byteLength: number;
+  readonly trust: 'untrusted_external';
+  readonly instructionPolicy: 'data_only';
+}
+
 /** Durable, source-ref-only workflow truth. Transcript bytes never belong here. */
 export interface MeetingIntake {
   readonly intakeId: string;
@@ -59,6 +70,7 @@ export interface MeetingIntake {
   readonly healthState: MeetingIntakeHealthState;
   readonly unresolved: readonly MeetingIntakeJudgmentField[];
   readonly choices: MeetingIntakeChoices;
+  readonly artifact?: MeetingArtifactDescriptor;
   readonly repair?: MeetingIntakeRepair;
   readonly revision: number;
   readonly createdAt: number;

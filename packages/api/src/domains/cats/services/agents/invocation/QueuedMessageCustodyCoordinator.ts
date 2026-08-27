@@ -1,4 +1,5 @@
 import type { CatId, QueueReminderAttempt, QueueTargetAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
+import { actionSuccessorFencesMatch } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import type {
   RetryAuthorityCommit,
   RetryCustodyTransition,
@@ -32,6 +33,15 @@ import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 interface CoordinatorDeps {
   messageStore: IMessageStore;
   now?: () => number;
+}
+
+export interface RetireActionSuccessorQueueCustodyResult {
+  changed: boolean;
+  messageId: string;
+  threadId: string;
+  userId: string;
+  entryIds: string[];
+  targetCatIds: CatId[];
 }
 
 const QUEUE_CUSTODY_CAS_MAX_ATTEMPTS = 8;
@@ -1557,6 +1567,51 @@ export class QueuedMessageCustodyCoordinator {
           )) || changed;
       }
       return changed;
+    });
+  }
+
+  /**
+   * Terminalize the exact durable Queue targets bound to one completed action
+   * fence. Immutable carrier bindings remain as receipt provenance.
+   */
+  async retireActionSuccessorFence(
+    messageId: string,
+    fence: NonNullable<QueueEntry['actionSuccessorFence']>,
+  ): Promise<RetireActionSuccessorQueueCustodyResult | null> {
+    const observed = await this.messageStore.getById(messageId);
+    const observedCustody = observed?.queueCustody;
+    if (!observed || !observedCustody) return null;
+    const observedBindings = Object.entries(observedCustody.carrierByTargetCatId ?? {}).filter(([, binding]) =>
+      actionSuccessorFencesMatch(binding.actionSuccessorFence, fence),
+    );
+    if (observedBindings.length === 0) return null;
+    const lockKey = `action:${fence.leaseId}:${fence.generation}`;
+    return this.withEntryLock(lockKey, async () => {
+      let targetCatIds = observedBindings.map(([catId]) => catId as CatId);
+      let entryIds = [...new Set(observedBindings.map(([, binding]) => binding.entryId))];
+      const changed = await this.transition(
+        messageId,
+        (current) => {
+          const matchingBindings = Object.entries(current.carrierByTargetCatId ?? {}).filter(([, binding]) =>
+            actionSuccessorFencesMatch(binding.actionSuccessorFence, fence),
+          );
+          targetCatIds = matchingBindings.map(([catId]) => catId as CatId);
+          entryIds = [...new Set(matchingBindings.map(([, binding]) => binding.entryId))];
+          return settleQueueCustodyWithdrawal(current, targetCatIds, this.now(), {
+            actionSuccessorTerminalFence: fence,
+          });
+        },
+        undefined,
+        true,
+      );
+      return {
+        changed,
+        messageId,
+        threadId: observed.threadId,
+        userId: observed.userId,
+        entryIds,
+        targetCatIds,
+      };
     });
   }
 

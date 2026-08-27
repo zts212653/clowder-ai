@@ -2,6 +2,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.unmock('@/components/useConfirm');
+
 const mockFetchPending = vi.fn(async () => {});
 const mockApiFetch = vi.fn();
 const mockInvalidateSidebarProjection = vi.fn(async () => true);
@@ -86,6 +88,7 @@ vi.mock('@/hooks/useCatData', () => ({
 }));
 
 import { MeetingIntakeCard } from '../MeetingIntakeCard';
+import { ConfirmProvider } from '../useConfirm';
 
 function setNativeValue(element: HTMLTextAreaElement | HTMLInputElement, value: string): void {
   const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -135,9 +138,21 @@ describe('F292 MeetingIntakeCard', () => {
     container.remove();
   });
 
+  async function renderCard(renderedItem = item): Promise<void> {
+    await act(async () =>
+      root.render(
+        React.createElement(ConfirmProvider, null, React.createElement(MeetingIntakeCard, { item: renderedItem })),
+      ),
+    );
+  }
+
+  function buttonWithText(text: string): HTMLButtonElement | undefined {
+    return Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.trim() === text);
+  }
+
   it('collects speakers, context, existing private thread, and outputs before exact-revision confirm', async () => {
     mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 4 } }) });
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item })));
+    await renderCard();
 
     expect(container.textContent).toContain('等你确认');
     expect(container.textContent).toContain('为什么需要我');
@@ -218,7 +233,7 @@ describe('F292 MeetingIntakeCard', () => {
       }),
     });
     mockApiFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ intake: { revision: 4 } }) });
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item })));
+    await renderCard();
 
     expect(container.querySelector('select[data-testid="meeting-destination"]')).toBeNull();
     await act(async () => {
@@ -249,6 +264,7 @@ describe('F292 MeetingIntakeCard', () => {
         title: 'Weekly sync 跟进',
         projectPath: '/workspace/cat-cafe',
         preferredCats: ['codex-sol'],
+        pinned: true,
       }),
     });
     expect(container.textContent).toContain('已选择：Weekly sync 跟进');
@@ -304,7 +320,7 @@ describe('F292 MeetingIntakeCard', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ preferredCats: ['codex-sol'] }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ intake: { revision: 7 } }) });
 
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: repairItem })));
+    await renderCard(repairItem);
 
     expect(container.textContent).toContain('保存位置还没有负责整理的猫猫');
     expect(container.textContent).toContain('已经填写的内容会保留');
@@ -342,7 +358,7 @@ describe('F292 MeetingIntakeCard', () => {
         },
       },
     };
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: readyItem })));
+    await renderCard(readyItem);
 
     expect(container.querySelector('[data-testid="meeting-confirm"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="meeting-speakers"]')).toBeNull();
@@ -366,10 +382,28 @@ describe('F292 MeetingIntakeCard', () => {
         repair: { code: 'source_deleted', action: 'manual_import', observedAt: 2 },
       },
     };
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: repairItem })));
-    expect(container.querySelector('[data-testid="meeting-manual-transcript"]')).not.toBeNull();
+    await renderCard(repairItem);
+    const reference = container.querySelector('[data-testid="meeting-manual-reference"]') as HTMLInputElement;
+    expect(reference).not.toBeNull();
+    expect(container.textContent).not.toContain('粘贴会议文字稿');
     expect(container.querySelector('[data-testid="approve-btn"]')).toBeNull();
     expect(container.querySelector('[data-testid="reject-btn"]')).toBeNull();
+    await act(async () => {
+      setNativeValue(reference, 'https://example.feishu.cn/minutes/obcn-manual');
+      reference.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 5 } }) });
+    await act(async () => {
+      (container.querySelector('[data-testid="meeting-manual-import"]') as HTMLButtonElement).click();
+    });
+    expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/manual-import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expectedRevision: 3,
+        reference: 'https://example.feishu.cn/minutes/obcn-manual',
+      }),
+    });
   });
 
   it('exposes typed retry and routes regrant to the in-product plugin auth action', async () => {
@@ -385,7 +419,7 @@ describe('F292 MeetingIntakeCard', () => {
       },
     };
     mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ intake: { revision: 6 } }) });
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: retryItem })));
+    await renderCard(retryItem);
     await act(async () => (container.querySelector('[data-testid="meeting-retry"]') as HTMLButtonElement).click());
     expect(mockApiFetch).toHaveBeenLastCalledWith('/api/meeting-intakes/intake-1/retry', {
       method: 'POST',
@@ -401,7 +435,7 @@ describe('F292 MeetingIntakeCard', () => {
         repair: { code: 'auth_required', action: 'regrant', observedAt: 3 },
       },
     };
-    await act(async () => root.render(React.createElement(MeetingIntakeCard, { item: regrantItem })));
+    await renderCard(regrantItem);
     const regrant = container.querySelector<HTMLAnchorElement>('[data-testid="meeting-regrant"]');
     expect(regrant?.href).toContain('/settings?s=plugins');
     expect(regrant?.textContent).toContain('重新连接飞书');
@@ -415,5 +449,92 @@ describe('F292 MeetingIntakeCard', () => {
     });
     expect(container.textContent).not.toContain('lark-cli auth login');
     expect(mockFetchPending).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an explicit no-write action available and only dismisses after confirmation', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ intake: { revision: 2, judgmentState: 'dismissed' } }),
+    });
+    await renderCard();
+
+    const dismiss = buttonWithText('这次会议不写入');
+    expect(dismiss).toBeDefined();
+    await act(async () => dismiss?.click());
+    expect(container.textContent).toContain('确认这次会议不写入吗？');
+
+    await act(async () => buttonWithText('返回')?.click());
+    expect(mockApiFetch).not.toHaveBeenCalled();
+    expect(buttonWithText('这次会议不写入')).toBeDefined();
+
+    await act(async () => buttonWithText('这次会议不写入')?.click());
+    await act(async () => buttonWithText('确认不写入')?.click());
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/meeting-intakes/intake-1/dismiss', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 1 }),
+    });
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/threads')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/meeting-intakes/intake-1/confirm')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/meeting-intakes/intake-1/retry')).toBe(false);
+    expect(mockFetchPending).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps no-write available for a confirmed failed intake without requiring choices again', async () => {
+    const repairItem = {
+      ...item,
+      detail: {
+        ...item.detail,
+        revision: 4,
+        judgmentState: 'confirmed',
+        executionState: 'failed',
+        healthState: 'degraded',
+        unresolved: [],
+        choices: {
+          speakerMap: { 1: 'You' },
+          context: 'Saved context',
+          destinationHandle: 'host:private-thread:archive-0',
+          outputs: ['minutes'],
+        },
+        repair: { code: 'route_unavailable', action: 'retry', observedAt: 2 },
+      },
+    };
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ intake: { revision: 5, judgmentState: 'dismissed' } }),
+    });
+    await renderCard(repairItem);
+
+    expect(buttonWithText('这次会议不写入')).toBeDefined();
+    await act(async () => buttonWithText('这次会议不写入')?.click());
+    await act(async () => buttonWithText('确认不写入')?.click());
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/meeting-intakes/intake-1/dismiss', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 4 }),
+    });
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/threads/archive-0')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/meeting-intakes/intake-1/retry')).toBe(false);
+    expect(mockApiFetch.mock.calls.some(([url]) => url === '/api/meeting-intakes/intake-1/confirm')).toBe(false);
+  });
+
+  it('does not offer no-write after the intake has succeeded', async () => {
+    await renderCard({
+      ...item,
+      detail: {
+        ...item.detail,
+        judgmentState: 'confirmed',
+        executionState: 'succeeded',
+        healthState: 'healthy',
+        unresolved: [],
+      },
+    });
+
+    expect(buttonWithText('这次会议不写入')).toBeUndefined();
   });
 });

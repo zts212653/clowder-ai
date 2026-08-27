@@ -38,6 +38,35 @@ redis.call('SET', KEYS[1], ARGV[2])
 return 1
 `;
 
+/**
+ * Preserve the completed fenced decision and atomically move only the stable
+ * identity pointer to a new lease for a fresh predicate. Replays naming the
+ * same successor dispatch return the already-installed lease.
+ */
+export const CONTINUE_ACTION_SUCCESSOR_FRESH_REVISION_LUA = `
+if redis.call('EXISTS', KEYS[4]) == 1 then return {'subject_terminal', ''} end
+local oldRaw = redis.call('GET', KEYS[1])
+if not oldRaw then return {'lease_missing', ''} end
+local old = cjson.decode(oldRaw)
+if tonumber(old.revision) ~= tonumber(ARGV[1]) then return {'stale_revision', oldRaw} end
+local indexedDetailKey = redis.call('GET', KEYS[3])
+if indexedDetailKey ~= KEYS[1] then
+  if indexedDetailKey then
+    local indexedRaw = redis.call('GET', indexedDetailKey)
+    if indexedRaw then
+      local indexed = cjson.decode(indexedRaw)
+      if indexed.dispatchId == ARGV[2] then return {'continued', indexedRaw} end
+    end
+  end
+  return {'identity_advanced', oldRaw}
+end
+if redis.call('EXISTS', KEYS[2]) == 1 then return {'successor_exists', oldRaw} end
+redis.call('SET', KEYS[2], ARGV[3])
+redis.call('SET', KEYS[3], KEYS[2])
+redis.call('SADD', KEYS[5], KEYS[2])
+return {'continued', ARGV[3]}
+`;
+
 export const MARK_ACTION_SUBJECT_TERMINAL_LUA = `
 local existing = redis.call('GET', KEYS[1])
 if existing then

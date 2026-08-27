@@ -1,15 +1,15 @@
 ---
 feature_ids: [F246]
-related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260]
+related_features: [F128, F139, F168, F193, F208, F221, F225, F231, F260, F286]
 topics: [approval, hub, cvo-gate, cross-thread, cqrs, proposal, provenance, schedule]
 doc_kind: spec
 created: 2026-06-20
-updated: 2026-07-21
+updated: 2026-08-24
 ---
 
 # F246: Approval Hub — 统一审批中心底座
 
-> **Status**: in-progress（Phase A–H done；Phase I spec 已由 PR #3122 落地；Wave 0 由 PR #3135 交付 AC-I1/I4 与底座迁移；Wave 1 由 PR #3178 交付 F139 strict principal + create/delete approval gate（AC-I5~I7）；Wave 2 由 PR #3228 交付 F193/F260/F221 producer ingress hardening（AC-I8~I10），后续 AC-I11~I15 仍待实现）| **Phase I Owner**: Maine Coon Sol/小太阳·Maine Coon (@codex-sol)；历史 owner：Ragdoll/Ragdoll (opus-46, Phase A–H) | **Priority**: P1（Phase I）
+> **Status**: in-progress（Phase A–H done；Phase I spec 已由 PR #3122 落地；Wave 0 由 PR #3135 交付 AC-I1/I4 与底座迁移；Wave 1 由 PR #3178 交付 F139 strict principal + create/delete approval gate（AC-I5~I7）；Wave 2 由 PR #3228 交付 F193/F260/F221 producer ingress hardening（AC-I8~I10）；Authorization 接入项已按 operator 2026-08-24 落日决定取消，后续 AC-I11/I13~I15 仍待实现）| **Phase I Owner**: Maine Coon Sol/小太阳·Maine Coon (@codex-sol)；历史 owner：Ragdoll/Ragdoll (opus-46, Phase A–H) | **Priority**: P1（Phase I）
 
 Architecture cell: `approval-index`
 Map delta: update required（Phase I）— 保留 feature adapter + query aggregation；`approval-index` 新增统一 producer ingress、单一注册表与来源双锚契约，不新增第二套 canonical proposal store。
@@ -35,7 +35,7 @@ Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点�
 - 最近 200 条 settled 样本中，F128 154/154、F225 6/6、F231 10/10 有 message anchor；F193 0/13、F260 0/10；F221 7/7 由 caller 传入，但字段仍可选。
 - F193 已进 Hub 但 producer 不追加 chat card；F260 明确选择“不生成 confirmation card”；前端在 message anchor 缺失时仍以“查看上下文”打开 thread 根部。
 - F139 调度是临时 preview + 提示词要求口头确认；agent 可直接调用持久化 endpoint。现场 25 条可见任务中 13 builtin、12 dynamic（7 active / 5 paused），dynamic store 没有原始审批 message anchor。
-- F208 spec 明写 `proposal → Hub pending → operator approve/reject`，实现没有 adapter；Authorization 仍是 thread-local 临时卡。两者审计时 pending 均为 0，属于潜伏缺口而非当下积压。
+- F208 spec 明写 `proposal → Hub pending → operator approve/reject`，实现没有 adapter。原 Authorization thread-local 临时卡曾被列为潜伏缺口；operator 于 2026-08-24 确认当前无产品需求，选择由 F286 直接落日整套 generic permission lifecycle，而非迁入 Hub。
 - 当前 adapter 数已从 AC-D7 记录的 4 增至 6，越过“达到 5 时测 p95”的测量触发点；尚无新的代表性 inbox p95 证据。
 
 ### 痛点
@@ -118,6 +118,7 @@ Why: operator 审批不仅会散落，还可能进入 Hub 后失去原文锚点�
 | F260 | propose_entity | ⚠️ 已接 Hub；明确无 confirmation card，Phase I 修复 |
 | F139 | agent schedule create / permanent delete | ✅ Wave 1：verified cat 先 proposal，approve 后 materialize/delete；authenticated operator 直执并审计 |
 | F208 | dossier distillation | ❌ spec 承诺 Hub 但无 adapter；Phase I 接入 event origin |
+| Authorization system | generic permission lifecycle | ✅ sunset disposition：当前无需求，不接 Hub；F286 原子删除旧 MCP/API/Redis/UI，历史数据保留 |
 | Knowledge Feed | 知识条目审核 | ❌ Parked（operator） |
 | Limb | pair_approve | ❌ Dropped（operator） |
 
@@ -452,6 +453,7 @@ interface ApprovalEnvelope {
 1. **Wave 0 — 底座先行（PR #3135）**：`ApprovalProducerRegistry` 单源、`ApprovalIngress`、双锚 DTO、truthful jump UI、adapter fan-out 分项日志；本 wave 完成 AC-I1/I4，并先迁移 F128/F225/F231，AC-I2/I3 随其余 producer 在后续 wave 收口。
 2. **Wave 1 — 活风险止血（已实现）**：F139 cat-proxy create/permanent-delete proposal 化，批准后才 materialize/delete；strict principal guard 覆盖同一 mutation endpoint，暂停/恢复保留直执但统一鉴权与审计。
 3. **Wave 2 — 已接但缺锚**：F193 / F260 / F221 统一生成 card，并迁移为 `originRef + approvalCardRef`。
+4. **Wave 3 — 剩余漏接项**：仅 F208 dossier proposal。Authorization system 不再是 Wave 3 项：operator source `[thread-id]#0001787632982035-000007-ecf7a681` 决定当前无需求并直接 sunset；如未来出现新的授权需求，必须作为 feature-specific typed producer 重新立契约，不复活 generic once/thread/global adapter。
 
 #### 机制选择
 
@@ -474,9 +476,10 @@ interface ApprovalEnvelope {
 - [x] **AC-I9**: F260 entity proposal 自动持久化审批 card，并同时写入 origin/card 双锚；不再以“无 confirmation card”为设计例外。Callback 必须携带稳定 `clientRequestId`（canonical MCP producer 自动生成）；staged retry 恢复同一 proposal，anchored dedup retry 经 ingress 重放 fanout，均不按 `entityId + catId` 猜测重试身份。（Wave 2，PR #3228）
 - [x] **AC-I10**: F221 taste proposal 由 ingress 生成审批 card；caller 传入的消息只可成为 `originRef`，不能让 optional `sourceMessageId` 决定 Hub 是否可追溯。Callback 必须携带稳定 `clientRequestId`（canonical MCP producer 自动生成）；staged retry 恢复同一 proposal，anchored dedup retry 经 ingress 重放 fanout。（Wave 2，PR #3228）
 - [ ] **AC-I11**: F208 dossier distillation proposal 接入 Hub adapter；无 chat 原文的自动涌现使用稳定 event origin，approve/reject 后 canonical store 与 Hub 历史一致。
+- [x] **AC-I12（sunset disposition）**: 不接入 Authorization system。operator 于 2026-08-24 确认当前无此产品需求并授权 F286 原子删除 generic MCP/prompt/API/Redis/UI 生命周期；Approval Hub 不新增 adapter，也不保留 thread 紧急卡或 once/thread/global 双表面。历史数据不删除。
 - [ ] **AC-I13**: 历史无可靠来源的 dynamic schedule / ApprovalItem 标为 `legacy_unanchored`，不伪造 approved/rejected；re-attestation 是带当前 actor/time/双锚的新记录，有视觉区分与审计测试。
 - [ ] **AC-I14**: adapter count 已达 6 后，在 alpha 以 ≥10 pending、≥3 adapters 的代表性 inbox 测 pending fetch p95，并记录分项耗时；p95 ≥250ms 才开 materialized index plan，否则记录结果并继续 query aggregation。
-- [ ] **AC-I15**: 回归/UAT 覆盖 Hub ↔ card ↔ origin 双向跳转、F139 两类 principal、orphan 防护、历史缺锚视觉；F139/F208/F221/F260 的 feature truth、Authorization phase truth 与 F246 census 同步。
+- [ ] **AC-I15**: 回归/UAT 覆盖 Hub ↔ card ↔ origin 双向跳转、F139 两类 principal、orphan 防护、历史缺锚视觉；F139/F208/F221/F260 的 feature truth 与 F246 census 同步。Authorization phase doc 仅保留为已落日历史 provenance。
 
 ## Dependencies
 

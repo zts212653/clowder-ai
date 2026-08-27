@@ -28,6 +28,7 @@ import {
 } from '../domains/cats/services/agents/invocation/active-execution-service.js';
 import {
   type InvocationQueue,
+  isOrdinaryQueueTargetEligible,
   isSystemPinnedQueueEntry,
   type QueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -915,7 +916,11 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // Steer has exactly one meaning: cancel the current target invocation and
       // immediately start this same durable queue entry. Reordering remains a
       // separate drag/move interaction and is never accepted as a Steer mode.
-      const steerCatId = entry.targetCats[0] ?? 'unknown';
+      const steerCatId = entry.targetCats.find((catId) => isOrdinaryQueueTargetEligible(entry, catId));
+      if (!steerCatId) {
+        reply.status(409);
+        return { error: 'Steer 状态已变化，请重试', code: 'STEER_STATE_CHANGED' };
+      }
       // Reserve the entry BEFORE preempting. Preemption cancels a running turn;
       // doing it first meant a losing CAS returned STEER_STATE_CHANGED *after*
       // the user's turn was already killed — they lost the work and did not get

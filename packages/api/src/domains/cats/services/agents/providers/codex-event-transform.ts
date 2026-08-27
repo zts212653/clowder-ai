@@ -1,4 +1,5 @@
 import type { CatId } from '@cat-cafe/shared';
+import { isCodexSessionReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type { AgentMessage } from '../../types.js';
 
 export interface CodexReconnectNotice {
@@ -257,10 +258,14 @@ export function transformCodexEvent(
   if (e.type === 'thread.started') {
     const threadId = e.thread_id;
     if (typeof threadId !== 'string') return null;
+    const sessionReplacement = isCodexSessionReplacementProvenance(e.session_replacement)
+      ? e.session_replacement
+      : undefined;
     return {
       type: 'session_init',
       catId,
       sessionId: threadId,
+      ...(sessionReplacement ? { sessionReplacement } : {}),
       timestamp: Date.now(),
     };
   }

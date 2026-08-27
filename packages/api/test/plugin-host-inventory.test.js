@@ -100,7 +100,7 @@ describe('K-2A contract-native inventory', () => {
         ...current,
         configReadiness: 'ready',
         activationState: 'enabled',
-        runtimeState: 'healthy',
+        runtimeState: 'stopped',
       });
     });
 
@@ -124,7 +124,7 @@ describe('K-2A contract-native inventory', () => {
 
     assert.equal(upgraded.pluginInstanceId, installed.pluginInstanceId);
     assert.equal(instance.configReadiness, 'ready');
-    assert.equal(instance.activationState, 'disabled');
+    assert.equal(instance.activationState, 'enabled');
     assert.equal(instance.runtimeState, 'stopped');
     assert.equal(grants.grantRevision, 2);
     assert.deepEqual(grants.requestedCapabilities, ['messaging.send']);

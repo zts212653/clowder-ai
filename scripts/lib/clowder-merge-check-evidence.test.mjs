@@ -31,6 +31,7 @@ function planWithObservation(statusCheckObservation) {
       subjectRef: `pr:${REPOSITORY}#${PR_NUMBER}`,
       scope: 'pull_request',
     },
+    intakePlan: { decision: 'public-only' },
   });
 }
 
@@ -45,6 +46,7 @@ function planWithChecks(statusCheckRollup) {
       subjectRef: `pr:${REPOSITORY}#${PR_NUMBER}`,
       scope: 'pull_request',
     },
+    intakePlan: { decision: 'public-only' },
   });
 }
 

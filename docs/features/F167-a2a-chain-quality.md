@@ -4,8 +4,8 @@ related_features: [F064, F027, F055, F122, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-08-23
-tips_exempt: action-custody protocol is exposed to cats through the typed MCP action schema; no separate operator-facing capability action
+updated: 2026-08-26
+tips_exempt: renewed for the Case E16 product-coordinate and authorization lesson; the typed MCP action schema remains the only operable surface and no user action changed
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -779,6 +779,36 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 偏差根因 | **过早线性化 + 历史故事锚定 + 时间槽位覆盖**：面对有关联但正交的对象，先压成一条易讲的流水线；需要补第二幕时，又把检索到的旧叙事当成现行约束，用“完整故事”覆盖了用户刚确认的当前起点。 |
 | 纠正轮次 | 同一任务连续 3 次：`0001787584460995-000143-e6ac4670` 拆开架构与 Demo；`0001787584701647-000150-43e45444` 恢复双 Episode 与“下一次不再救火”；`0001787584802908-000151-7db9c48e` 纠正 Episode 1 必须是欧盟空调政策、退款例子必须删除。当前稿把 Episode 2 降为待拍板工作假设，不再把推导冒充确认。 |
 | 元心智哪条没执行 | Q2 信息验证：回读了旧叙事，却没有用最新的人类确认覆盖历史版本；Q3 坐标变换：没有同时保留“产物轴（架构 / Demo）”与“时间轴（学习发生 / 迁移验证）”，反而把两轴挤成一条序列。 |
+
+### Case E14: 把「执行拆出去」的角色拓扑约束替换成 deictic 局部 referent（2026-08-25，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | operator 说 F306 当前 thread 是指挥 + Vision Guard、"执行拆出去"，需要另起一个 Command Thread 承接指挥职责，因此在 F306 内新建 proposal 让自己负责创建那个 command thread。 |
+| 实际要求 | F306 当前 thread 已经是唯一指挥塔；"执行拆出去"是把 Phase A 执行工作分派给另一只猫（Opus 5），本 thread 保持 command + Vision Guard 双职；proposal 应该是 execution proposal 派给执行者，不是新建自己负责的 command thread。 |
+| 偏差根因 | **局部 referent 锚定 + 角色拓扑反校验缺失**：把 operator 一句话里的"这个 thread"局部解析成"待创建 proposal 的 subject thread"，没有先用同句里"执行拆出去"这个谓词反查当前 thread 已经承担的角色。**分界判据**：一句话同时携带 deictic referent（"这个"/代词）与角色/拓扑约束（"指挥"/"执行"）时，**角色约束优先用于消歧**，deictic 先按角色反查再落到具体对象。与 Case E9/E12 同型（局部 referent 丢失 + 上位真相源锚定 + 任务替换）。 |
+| 纠正轮次 | 同一任务 2 次（`0001787715648448-000187-88875ef3` operator 首次纠正、`0001787716300810-000201-4d23c6c9` operator 第二次纠正"你才是指挥，提议应该让别人执行"）；跨任务已有 Case E9/E12 同型证据，因此按重复理解偏差记录。纠正后错误 proposal 已撤；Phase A execution proposal `proposal_mt9k6k3bsapth6gq` 改派 Opus 5；F306 当前 thread 的唯一指挥塔真相已提交 main `d9713cd6e`（docs(F306): bind command thread and delegate Phase A）。 |
+| 元心智哪条没执行 | Q2 信息验证：没有先把当前 thread 已承担的角色/拓扑约束当作 resolver 核对 referent；Q3 坐标变换：没有把"这个 thread"从"待创建对象"坐标系变换到"已承担指挥角色"坐标系。 |
+
+### Case E15: 把一次性 generation 推导成一次性 tracking（2026-08-26，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F280 的 “all effects visible and one-shot” 应直接落到用户操作：每次 tracking 唤醒都消费注册，owner 处理完事件后必须显式再次调用工具；透明 prefill / reply-and-wait 足以抵消这项负担。 |
+| 实际要求 | 用户表达的是持续的 tracking intent：注册一次后默认跟到 subject terminal、owner fence 失效、显式取消或可选绝对 deadline。每次事件仍可在内部消费一个 generation，并以 fresh baseline 原子安装下一代；用户只看见“tracking continues”，不承担重新调用工具。精确单次责任才显式选择 one-shot。 |
+| 偏差根因 | **抽象边界倒置 + 局部安全不变量泄漏到用户旅程**：把内部用于幂等、审计和 stale-action 防护的 generation 生命周期，误当成用户可见 tracking 生命周期；局部看每次 effect 都显式，整体却把 re-registration 责任分散到每个 agent / skill / workflow，制造了更难审计的漏挂面。与 Case E7 的“逐项机制正确掩盖整体体验冲突”同型。**分界判据**：内部状态单元的一次性，不能推导出用户意图的一次性；先按用户旅程定义外部生命周期，再用 generation 承载内部交付。 |
+| 纠正轮次 | 同一 issue 方向任务 2 次：`0001787713386682-000092-e89e6359` 要求同时从 maintainer / 社区伙伴出发并避免冲突概念；`0001787797857153-000002-465d8fde` 直接指出显式重新注册会很难用。纠正后已在 clowder-ai#1392 评论 `5433637783` 接受 continuous-by-default tracking，移除 `needs-maintainer-decision`，并注册 clowder-ai#1394 新 HEAD wait `0001787798159931-000005-654c3718`。 |
+| 元心智哪条没执行 | Q3 坐标变换：没有先从“用户要持续关注 PR”定义终态，再把 one-shot generation 放回实现坐标；反而从内部契约形状反推用户必须执行的动作。 |
+
+### Case E16: 把“共同工作台”降成 Workspace 里的独立功能，并在设计对齐前开工（2026-08-26，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | F307 是在现有三栏 shell 旁边增加一套可组合工作台；operator 说 F290 半成品“得删一下”时，我又把这句设计反馈直接当成当轮实施授权，先进入删除与门禁。 |
+| 实际要求 | 现有右侧 Workspace 本体就是共同工作台；F307 是把它从单槽升级成用户拥有的 working set，不是在里面注册“共同工作集”卡片或另造页面。此轮先共同冻结要做什么，等 operator 明确“该删的删掉”后才执行 F290 乌龙清理；F307 新布局仍停在 Design Gate。 |
+| 偏差根因 | **产品坐标层级混同 + 行动偏好覆盖 speech-act 校验**：没有先区分 application container 与 feature-owned child surface，也没有先判断人类是在共创概念还是授权修改，就把“听懂方向”替换成“开始实现”。这与 Case E1 的任务替换同型；而已合入的 #3966 / #3974 又证明“把共同工作台做成独立入口 / mode”不是一次性误写。**分界判据**：先用现有真实 shell 确认对象处在哪一层，再分别确认“设计命题是否冻结”与“本轮是否授权产生副作用”；二者不能互相推导。 |
+| 纠正轮次 | 本次先由 `0001787752296857-000614-5db2a57c` 纠正“只是在讲想法，不应直接干活”，再由 `0001787798861085-000028-f5e4622f` 冻结“Workspace 本体就是共同工作台”并明确授权删除乌龙。纠正后未继续实现 F307 UI，只清理 #3974 留下的独立 F290 surface / mode / persistence，并加入窄边界 guard。 |
+| 元心智哪条没执行 | Q1 角色与授权确认：当时应是共同定义产品的讨论伙伴，不是已经接到实现球的 author；Q3 坐标变换：没有把“共同工作台”放回现有三栏 shell 的 application-level 坐标，误当成 Workspace 内的 child feature。 |
 
 ## Review Gate
 

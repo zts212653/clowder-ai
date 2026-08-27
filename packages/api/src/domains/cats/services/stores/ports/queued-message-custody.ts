@@ -5,7 +5,10 @@ import type {
   QueueTargetAttempt,
   QueueTargetOutcome,
 } from '@cat-cafe/shared';
-import type { ActionSuccessorFence } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import {
+  type ActionSuccessorFence,
+  actionSuccessorFencesMatch,
+} from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../../owner-auth-provenance.js';
 
 export type QueuedMessageCustodyStatus = 'queued' | 'processing' | 'terminal';
@@ -118,6 +121,8 @@ export interface QueuedMessageCustody {
   /** Author-cleared targets: terminal for Queue actionability, preserved in owner history. */
   withdrawnByCatIds?: CatId[];
   withdrawnAtByCatId?: Record<string, number>;
+  /** Exact completed action fence that made a withdrawn target permanently non-retryable. */
+  actionSuccessorTerminalFenceByTargetCatId?: Record<string, ActionSuccessorFence>;
   handledByCatIds: CatId[];
   /** F264: exact successful invocation evidence; absent on legacy handled custody. */
   targetOutcomeByCatId?: Record<string, QueueTargetOutcome>;
@@ -781,6 +786,17 @@ function assertCustodyTargets(custody: QueuedMessageCustody, allowLegacyMissingE
       throw new Error('withdrawnAt requires a withdrawn target');
     }
   }
+  for (const [catId, terminalFence] of Object.entries(custody.actionSuccessorTerminalFenceByTargetCatId ?? {})) {
+    if (!custody.withdrawnByCatIds?.includes(catId as CatId)) {
+      throw new Error('action-successor terminal fence requires a withdrawn target');
+    }
+    if (!isValidActionSuccessorFence(terminalFence)) {
+      throw new Error('invalid withdrawn action-successor terminal fence');
+    }
+    if (!actionSuccessorFencesMatch(custody.carrierByTargetCatId?.[catId]?.actionSuccessorFence, terminalFence)) {
+      throw new Error('withdrawn action-successor terminal fence must match its immutable carrier');
+    }
+  }
   assertTargetSubsets(custody, allTargets);
   assertBodyExposures(custody, allTargets);
   assertInvocationBindings(custody, allTargets);
@@ -894,6 +910,14 @@ function assertWithdrawalMonotonicity(current: QueuedMessageCustody, next: Queue
       exactExposure === true &&
       lateOutcome.handledAt > (current.withdrawnAtByCatId?.[catId] ?? Number.POSITIVE_INFINITY);
     if (!supersededByExactTerminalHandling) throw new Error('queue custody withdrawals are append-only');
+  }
+}
+
+function assertActionSuccessorTerminalMonotonicity(current: QueuedMessageCustody, next: QueuedMessageCustody): void {
+  for (const [catId, fence] of Object.entries(current.actionSuccessorTerminalFenceByTargetCatId ?? {})) {
+    if (!actionSuccessorFencesMatch(next.actionSuccessorTerminalFenceByTargetCatId?.[catId], fence)) {
+      throw new Error('queue custody action-successor terminal fences are append-only');
+    }
   }
 }
 
@@ -1057,6 +1081,7 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   assertBodyExposureMonotonicity(current, input.next);
   assertAuthorIntentMonotonicity(current, input.next);
   assertWithdrawalMonotonicity(current, input.next);
+  assertActionSuccessorTerminalMonotonicity(current, input.next);
   assertReminderAttemptMonotonicity(current, input.next);
   assertTargetAttemptMonotonicity(current, input.next);
   if (input.next.revision !== current.revision + 1) {
@@ -1104,6 +1129,11 @@ export function cloneQueuedMessageCustody(custody: QueuedMessageCustody): Queued
     failedByCatIds: [...custody.failedByCatIds],
     ...(custody.withdrawnByCatIds ? { withdrawnByCatIds: [...custody.withdrawnByCatIds] } : {}),
     ...(custody.withdrawnAtByCatId ? { withdrawnAtByCatId: { ...custody.withdrawnAtByCatId } } : {}),
+    ...(custody.actionSuccessorTerminalFenceByTargetCatId
+      ? {
+          actionSuccessorTerminalFenceByTargetCatId: structuredClone(custody.actionSuccessorTerminalFenceByTargetCatId),
+        }
+      : {}),
     handledByCatIds: [...custody.handledByCatIds],
     ...(custody.targetOutcomeByCatId ? { targetOutcomeByCatId: structuredClone(custody.targetOutcomeByCatId) } : {}),
     ...(custody.steeredInvocationIdByCatId
@@ -1127,6 +1157,8 @@ export function cloneQueuedMessageCustody(custody: QueuedMessageCustody): Queued
 interface QueueCustodyWithdrawalOptions {
   /** Recall must advance the custody revision even when every target was already settled. */
   forceRevision?: boolean;
+  /** Persist the exact business-terminal proof for matching action carriers. */
+  actionSuccessorTerminalFence?: ActionSuccessorFence;
 }
 
 function withoutSelectedEntries<T>(
@@ -1215,6 +1247,21 @@ export function settleQueueCustodyWithdrawal(
   for (const catId of withdrawnNow) {
     withdrawnAtByCatId[catId] ??= withdrawnAt;
   }
+  const actionSuccessorTerminalFenceByTargetCatId = structuredClone(
+    current.actionSuccessorTerminalFenceByTargetCatId ?? {},
+  );
+  let actionSuccessorTerminalChanged = false;
+  if (options.actionSuccessorTerminalFence) {
+    for (const catId of selected) {
+      if (!withdrawnNow.includes(catId as CatId) && !current.withdrawnByCatIds?.includes(catId as CatId)) continue;
+      const carrierFence = current.carrierByTargetCatId?.[catId]?.actionSuccessorFence;
+      if (!actionSuccessorFencesMatch(carrierFence, options.actionSuccessorTerminalFence)) continue;
+      if (!actionSuccessorTerminalFenceByTargetCatId[catId]) {
+        actionSuccessorTerminalFenceByTargetCatId[catId] = { ...options.actionSuccessorTerminalFence };
+        actionSuccessorTerminalChanged = true;
+      }
+    }
+  }
   const awakenedInvocationIdByCatId = withoutSelectedEntries(current.awakenedInvocationIdByCatId, selected);
   const awakenedAtByCatId = withoutSelectedEntries(current.awakenedAtByCatId, selected);
   const steeredInvocationIdByCatId = withoutSelectedEntries(current.steeredInvocationIdByCatId, selected);
@@ -1230,7 +1277,8 @@ export function settleQueueCustodyWithdrawal(
     hasSelectedEntry(current.awakenedInvocationIdByCatId, selected) ||
     hasSelectedEntry(current.steeredInvocationIdByCatId, selected) ||
     hasSelectedEntry(current.carrierStateByTargetCatId, selected) ||
-    includesSelected(current.steerRequestedByCatIds, selected);
+    includesSelected(current.steerRequestedByCatIds, selected) ||
+    actionSuccessorTerminalChanged;
   if (!activeStateChanged && !options.forceRevision) return current;
 
   const {
@@ -1242,6 +1290,7 @@ export function settleQueueCustodyWithdrawal(
     carrierStateByTargetCatId: _carrierStateByTargetCatId,
     withdrawnByCatIds: _withdrawnByCatIds,
     withdrawnAtByCatId: _withdrawnAtByCatId,
+    actionSuccessorTerminalFenceByTargetCatId: _actionSuccessorTerminalFenceByTargetCatId,
     reminderAttempts: _reminderAttempts,
     targetAttempts: _targetAttempts,
     ...stableCurrent
@@ -1257,6 +1306,9 @@ export function settleQueueCustodyWithdrawal(
     failedByCatIds: current.failedByCatIds.filter((catId) => !selected.has(catId)),
     withdrawnByCatIds,
     withdrawnAtByCatId,
+    ...(Object.keys(actionSuccessorTerminalFenceByTargetCatId).length > 0
+      ? { actionSuccessorTerminalFenceByTargetCatId }
+      : {}),
     ...(Object.keys(carrierStateByTargetCatId).length > 0 ? { carrierStateByTargetCatId } : {}),
     ...((current.steerRequestedByCatIds ?? []).some((catId) => !selected.has(catId))
       ? { steerRequestedByCatIds: (current.steerRequestedByCatIds ?? []).filter((catId) => !selected.has(catId)) }

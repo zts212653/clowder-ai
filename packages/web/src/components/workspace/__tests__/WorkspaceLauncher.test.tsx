@@ -183,6 +183,101 @@ describe('F284 WorkspaceLauncher', () => {
     expect(container.querySelector('[data-testid="workspace-launcher-dev"]')).toBeNull();
   });
 
+  it('searches workspace filenames and content from the home field and opens a matching file', async () => {
+    vi.useFakeTimers();
+    const onSearch = vi.fn().mockResolvedValue(undefined);
+    const onReset = vi.fn();
+    const onOpenResult = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <WorkspaceLauncher
+            workspaceSearch={{
+              enabled: true,
+              results: [
+                {
+                  path: 'docs/features/F063-hub-workspace-explorer.md',
+                  line: 37,
+                  content: '全文搜索：输关键词 → 搜遍仓库',
+                  contextBefore: '',
+                  contextAfter: '',
+                  matchType: 'content',
+                },
+              ],
+              loading: false,
+              error: null,
+              onSearch,
+              onReset,
+              onOpenResult,
+              onViewAll: vi.fn(),
+            }}
+          />,
+        );
+      });
+
+      const search = container.querySelector<HTMLInputElement>('[data-testid="workspace-launcher-search"]');
+      await act(async () => {
+        if (!search) return;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(search, '全文搜索');
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(onReset).toHaveBeenCalled();
+      expect(onSearch).toHaveBeenCalledWith('全文搜索');
+      expect(container.textContent).toContain('F063-hub-workspace-explorer.md');
+      expect(container.textContent).toContain('全文搜索：输关键词 → 搜遍仓库');
+
+      const result = container.querySelector('[data-testid="workspace-launcher-file-result"]');
+      await act(async () => {
+        result?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(onOpenResult).toHaveBeenCalledWith('docs/features/F063-hub-workspace-explorer.md', 37);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps matching capability entrances available when workspace file search fails', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        root.render(
+          <WorkspaceLauncher
+            workspaceSearch={{
+              enabled: true,
+              results: [],
+              loading: false,
+              error: 'Failed to search workspace',
+              onSearch: vi.fn().mockResolvedValue(undefined),
+              onReset: vi.fn(),
+              onOpenResult: vi.fn(),
+              onViewAll: vi.fn(),
+            }}
+          />,
+        );
+      });
+
+      const search = container.querySelector<HTMLInputElement>('[data-testid="workspace-launcher-search"]');
+      await act(async () => {
+        if (!search) return;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(search, '评估');
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(250);
+      });
+
+      expect(container.textContent).toContain('暂时没能搜索当前工作区，请重试');
+      expect(container.querySelector('[data-testid="workspace-launcher-eval"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('routes selection through the canonical store action', async () => {
     await renderLauncher();
     const item = container.querySelector('[data-testid="workspace-launcher-recall"]');

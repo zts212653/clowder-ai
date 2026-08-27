@@ -1,24 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Rnd } from 'react-rnd';
-
-interface TranscriptLine {
-  ts: number;
-  elapsed_s: number;
-  chunk_num: number;
-  asr_latency: number;
-  text: string;
-  speaker_label?: string;
-  speaker_confidence?: number;
-  speaker_id?: string | null;
-}
-
-interface Participant {
-  id: string;
-  name: string;
-  role?: string;
-}
+import { AudioHealthStrip } from './AudioHealthStrip';
+import { AudioInputPicker } from './AudioInputPicker';
+import type {
+  AudioInputRequest,
+  AudioSources,
+  AudioStatus,
+  Participant,
+  TranscriptLine,
+} from './audio-transcript-contract';
+import { FloatingTranscriptLines } from './FloatingTranscriptLines';
 
 interface InterventionAdvisory {
   type: 'intervention_advisory';
@@ -30,11 +23,6 @@ interface InterventionAdvisory {
   talking_point: string | null;
 }
 
-interface AudioSources {
-  apps: string[];
-  mics: { index: number; name: string; default: boolean }[];
-}
-
 interface FloatingTranscriptWindowProps {
   lines: TranscriptLine[];
   connected: boolean;
@@ -43,14 +31,17 @@ interface FloatingTranscriptWindowProps {
   sourceLabel?: string;
   elapsed?: number;
   participants?: Participant[];
+  status?: AudioStatus;
   savedPath?: string;
   savedRecordingPath?: string;
+  savedRecordingPaths?: Record<string, string>;
   sources?: AudioSources;
+  startError?: string;
   onClose: () => void;
   onStop?: () => void;
   onPause?: () => void;
   onResume?: () => void;
-  onStart?: (source: string, appName?: string, deviceIndex?: number) => void;
+  onStart?: (inputs: AudioInputRequest[]) => void;
   onMinimize?: () => void;
   onCorrect?: (chunkNum: number, speakerId: string, speakerLabel: string) => void;
   advisory?: InterventionAdvisory | null;
@@ -83,10 +74,6 @@ function saveLayout(layout: PersistedLayout) {
   } catch {}
 }
 
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('zh-CN', { hour12: false });
-}
-
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -101,9 +88,12 @@ export function FloatingTranscriptWindow({
   sourceLabel,
   elapsed = 0,
   participants,
+  status,
   savedPath,
   savedRecordingPath,
+  savedRecordingPaths = {},
   sources,
+  startError,
   onClose,
   onStop,
   onPause,
@@ -117,24 +107,8 @@ export function FloatingTranscriptWindow({
   onAdvisoryDismiss,
   onAdvisoryDnd,
 }: FloatingTranscriptWindowProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const autoScroll = useRef(true);
   const [minimized, setMinimized] = useState(false);
   const [layout, setLayout] = useState<PersistedLayout>(loadLayout);
-  const [correctingChunk, setCorrectingChunk] = useState<number | null>(null);
-  const [selectedSource, setSelectedSource] = useState<string>('');
-
-  useEffect(() => {
-    if (autoScroll.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [lines]);
-
-  const handleScroll = useCallback(() => {
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    autoScroll.current = scrollHeight - scrollTop - clientHeight < 40;
-  }, []);
 
   const handleMinimize = useCallback(() => {
     setMinimized((v) => !v);
@@ -284,6 +258,8 @@ export function FloatingTranscriptWindow({
           </button>
         </div>
 
+        {status && <AudioHealthStrip status={status} />}
+
         {/* Advisory hint */}
         {advisory && (
           <div
@@ -322,99 +298,33 @@ export function FloatingTranscriptWindow({
         )}
 
         {/* Saved paths */}
-        {!recording && (savedPath || savedRecordingPath) && (
+        {!recording && (savedPath || savedRecordingPath || Object.keys(savedRecordingPaths).length > 0) && (
           <div className="border-b border-cafe-border bg-cafe-surface-secondary px-3 py-1.5 text-xs text-cafe-text-secondary space-y-0.5">
             {savedPath && <div>Transcript: {savedPath}</div>}
             {savedRecordingPath && <div>Recording: {savedRecordingPath}</div>}
+            {!savedRecordingPath &&
+              Object.entries(savedRecordingPaths).map(([inputId, path]) => (
+                <div key={inputId}>
+                  Recording ({inputId}): {path}
+                </div>
+              ))}
           </div>
         )}
 
         {/* Source selector — shown when not recording */}
         {!recording && sources && onStart && (
           <div className="border-b border-cafe-border bg-cafe-surface-secondary px-3 py-2 space-y-2">
-            <select
-              value={selectedSource}
-              onChange={(e) => setSelectedSource(e.target.value)}
-              className="w-full rounded border border-cafe-border bg-cafe-surface-primary px-2 py-1 text-xs text-cafe-text-primary"
-            >
-              <option value="">Select source...</option>
-              {sources.apps.map((app) => (
-                <option key={app} value={`app:${app}`}>
-                  {app}
-                </option>
-              ))}
-              {sources.mics.map((mic) => (
-                <option key={`mic-${mic.index}`} value={`mic:${mic.index}`}>
-                  {mic.name}
-                  {mic.default ? ' (default)' : ''}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={!selectedSource}
-              onClick={() => {
-                if (!selectedSource) return;
-                const colonIdx = selectedSource.indexOf(':');
-                const type = selectedSource.slice(0, colonIdx);
-                const value = selectedSource.slice(colonIdx + 1);
-                if (type === 'app') onStart('app', value);
-                else onStart('mic', undefined, Number(value));
-              }}
-              className="w-full rounded bg-[var(--semantic-success)] px-2 py-1 text-xs font-medium text-[var(--cafe-surface)] hover:bg-conn-green-text disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Start
-            </button>
+            <AudioInputPicker sources={sources} onStart={onStart} />
+            {startError && <p className="text-xs text-conn-red-text">{startError}</p>}
           </div>
         )}
 
-        {/* Transcript body */}
-        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-3 py-2 font-mono text-xs">
-          {lines.length === 0 && (
-            <p className="mt-8 text-center text-cafe-text-muted">
-              {recording ? 'Waiting for first transcript chunk...' : 'No transcript data.'}
-            </p>
-          )}
-          {lines.map((l, i) => (
-            <div key={l.chunk_num ?? i} className="mb-1 flex gap-2">
-              <span className="shrink-0 text-cafe-text-muted">[{formatTime(l.ts)}]</span>
-              {l.speaker_label && (
-                <span className="relative shrink-0">
-                  <button
-                    type="button"
-                    className="font-medium text-cafe-accent-primary hover:underline"
-                    onClick={() =>
-                      participants?.length && onCorrect
-                        ? setCorrectingChunk(correctingChunk === l.chunk_num ? null : l.chunk_num)
-                        : undefined
-                    }
-                    title={participants?.length ? 'Click to correct speaker' : undefined}
-                  >
-                    {l.speaker_label}:
-                  </button>
-                  {correctingChunk === l.chunk_num && participants && onCorrect && (
-                    <div className="absolute left-0 top-full z-10 mt-1 rounded border border-cafe-border bg-cafe-surface-primary py-1 shadow-lg">
-                      {participants.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="block w-full whitespace-nowrap px-3 py-1 text-left text-xs text-cafe-text-primary hover:bg-cafe-surface-secondary"
-                          onClick={() => {
-                            onCorrect(l.chunk_num, p.id, p.name);
-                            setCorrectingChunk(null);
-                          }}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </span>
-              )}
-              <span className="text-cafe-text-primary">{l.text}</span>
-            </div>
-          ))}
-        </div>
+        <FloatingTranscriptLines
+          lines={lines}
+          recording={recording}
+          participants={participants}
+          onCorrect={onCorrect}
+        />
 
         {/* Footer */}
         <div className="flex items-center gap-3 border-t border-cafe-border px-3 py-1.5 text-micro text-cafe-text-muted">

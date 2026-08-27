@@ -1,11 +1,12 @@
 ---
 name: video-forge
-tips_exempt: internal quality discipline (continuity contract teaches cats, not users); no new user-facing capability
+tips_exempt: renewed for agent-product-promo-director routing and risk-matched review guidance; this changes cat production discipline, not a user-invokable product capability
 description: >
   视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
-  Use when: 做视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
-  Not for: 纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。
-  Output: schema 驱动的视频成片 + 多猫审查通过 + 可发布。
+  Use when: 已明确要制作视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
+  Not for: Agent 产品宣传片仍未锁定主角、观众信念与导演语法（先用 agent-product-promo-director）；
+  只找时效性外部参考（用 deep-research）；纯代码开发（用 worktree/tdd）、纯文档写作（直接写）、PPT（用 ppt-forge）。
+  Output: schema 驱动的视频成片 + operator 创意验收 + 风险匹配的技术审查 + 可发布。
 ---
 
 # Video Forge — AI 视频生产线
@@ -13,14 +14,43 @@ description: >
 > 关联 Feature: [F138 Video Studio](../../docs/features/F138-video-studio.md)
 > 技术收敛纪要: 2026-04-05 三猫收敛
 
+## Intent Gate：研究不是开机令
+
+进入生产线前先判用户要解决的究竟是哪一个问题：
+
+| Intent | 用户真正要的 | 本轮输出 | 禁止偷换成 |
+|---|---|---|---|
+| `research` | “宣传片该怎么剪”“看看别人怎么做”“有什么剪辑手法/Skill” | `agent-product-promo-director` 的主角/故事/镜头/声音合同；时效性案例由 `deep-research` 供证 | 挑一个现成页面直接录制或渲染试片 |
+| `production` | 明确要求拍、剪、录、配音或渲染某一支片 | 下方开局参数 + 正式生产线 | 用研究报告代替成片 |
+| `review` | 判断一支已有视频哪里对/错 | 对已有 artifact 的可见性、内容与节奏 verdict | 未经要求另拍一版 |
+
+- 用户拿一个真实 thread、页面或旧片举例，只证明它是候选素材/证据，**不自动授权把它选成宣传片主题**。
+- `research` 或 brief 未锁先走 `agent-product-promo-director`；需要近期外部参考时再由它调用 `deep-research`。只有用户明确转入 `production` 且主角/格式/beat sheet 已锁，才继续本 Skill。
+- 意图模糊且开机会制造新素材时，留在可逆的 research/brief 层，并明确当前假设；不要用“先做个 rough cut 看看”代替方向判断。
+
+> 失败史（2026-08-25）：用户最初要求研究真实 AI 产品宣传片的剪辑与叙事，团队却围绕一个 crime-wall 页面连续制作多版试片；后来即使修复了“PPT 化”的 motion 问题，仍然没有回答原问题。根因不是导演技巧不足，而是把 reference research 错路由成了 production。
+
+## Narrative Subject Gate：产品是主角，成果只是 proof
+
+产品宣传片在写分镜前，先用一句话回答：**观众看完应该想要哪个产品？**
+
+- 合格主语：用户的愿望进入产品 → 产品把它变成共享目标 → 猫猫在产品里记忆、接力、用工具、碰壁并纠错 → 共享工作区中的成果逐渐长出来。
+- 成果只承担 proof：网页、报告、代码或图片证明前面的产品过程真的完成了工作；它们不能取代产品成为整支片的 hero。
+- 视觉主线要持续留在产品世界中：thread、球权、记忆、工具状态、workspace 与人类反馈是连续动作，不是成品前的一组过场字卡。
+- 替换测试：把片中的具体成果换成另一种成果，若故事就不再成立，说明 brief 卖的是那个成果，不是 Clowder AI。
+- 创意主语、情绪与“像不像我们”由 operator 验收；同行 review 可以审事实、技术和证据纪律，不能替代创意 ground truth。低风险玩票式试验直接找 operator 校准，不用同行 review 代替 taste 判断。
+
+任一项不成立 → 停在 brief，不进素材、分镜或渲染。
+
+> 失败史（2026-08-25）：修正 Intent Gate 后的首版 hero blueprint 虽然写到了多猫协作，却仍让 crime-wall artifact 承担视觉高潮。operator 指出“我们卖的是自己的产品，不是做出来的那个东西”；根因是 brief 有过程词汇，但没有锁定叙事主语与创意验收者。
+
 ## 核心原则
 
-**视频不是一只猫的活，是多猫流水线 + operator素材。** 角色按当前 roster 可用猫分配。
+**视频职责要覆盖，但不默认拉多猫。** 一只执行猫可以兼任编排、渲染与低风险技术 QA；只有风险路由要求独立验证、任务确实需要专长，或 operator 明确要求时才找其他猫。创意 ground truth 始终回 operator，不能用同行 review 替代。
 
-- 主执行猫（当前持球猫）：video-spec 编排 + Remotion 渲染 + 对齐集成
-- QA/审查猫（跨 family）：音画同步 QA + 事实审查 + schema review
-- 视觉把关猫（跨 family）：节奏/调性审查 + 字幕/排版设计 + retiming 风格把关
-- operator：素材录制 + 粗标时间点 + 剧本确认 + 审片
+- 主执行猫（当前持球猫）：video-spec 编排 + 渲染 + 对齐集成 + 自证
+- 风险匹配的独立验证者（按需）：音画同步、事实、安全、schema 或发布风险
+- operator：创意主语、情绪、剧本与成片验收；玩票/低风险试验直接走此通道
 
 ### 铁规矩
 
@@ -28,6 +58,8 @@ description: >
 2. **不赌 TTS 原生 timestamps** — forced alignment 出时间戳（KD-10）
 3. **拒绝暴力慢放** — 画面不够时：FREEZE_STYLIZED > B_ROLL > SLOW_MO（KD-14）
 4. **Contract 和 Renderer 解耦** — video-spec JSON 是真相源，Remotion/FFmpeg 是可替换渲染器
+5. **镜头内部必须发生事情** — 产品片 / showcase 的主要叙事节点必须有主体、UI 或状态随时间变化；静帧上的推拉、平移、溶解只算镜头包装，不算动作素材
+6. **产品是主角，成果只是 proof** — 过程持续展示产品如何组织协作；成品只证明它做成了，不能抢走叙事主语
 
 ## 两条生产路径
 
@@ -61,7 +93,7 @@ description: >
 | 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON（4 层 segment contract），operator确认 |
 | spec 确认 | **D: 全局配音 + 对齐** | 主执行猫 | CosyVoice 全局配音 → Qwen3-ForcedAligner → word_timestamps |
 | 对齐完成 | **E: Remotion 渲染** | 主执行猫 | schema → inputProps → preview render |
-| 预览版出来 | **F: 审查 Gate** | 全部参与猫 + operator | 见下方审查标准 |
+| 预览版出来 | **F: 审查 Gate** | 主执行猫自证 + operator；风险命中时再加独立验证者 | 见下方审查标准 |
 | 审查通过 | **G: Final Render + 交付** | 主执行猫 | 高质量渲染 + 封面导出 + 发布 |
 | operator不满意 | **R: Patch Loop** | 主执行猫 + 视觉把关猫 | retiming / 重录 / 重写段落 |
 
@@ -82,8 +114,20 @@ description: >
 |------|------|------|
 | P1 | 暴力慢放 | 画面被强行降速拉伸，卡顿拖沓 |
 | P1 | 节奏断裂 | 高燃段突然变慢 / 温馨段突然快切 |
+| P1 | PPT 化 / 假运动 | 主要叙事节点只轮播静帧；唯一时间变化来自推拉、平移、字幕或转场 |
 | P2 | vibe 不连贯 | 整体情绪没有起承转合 |
 | P2 | 字幕风格不一致 | 不同段落字幕样式混乱 |
+
+#### F2.5: Motion Evidence Gate（产品片 / showcase）
+
+在预览渲染前，逐个主要叙事节点回答：**画面内部发生了什么？**
+
+- 合格证据：真实录制的操作/反馈、purpose-recorded UI 状态变化、主体动作，或实际动画合成中的形变/接力/聚合。
+- 不合格替代：对静态截图做 Ken Burns 推拉、横移、溶解、字幕入场；这些可以辅助动作，但不能独自承担动作。
+- 若本轮要验证的是运镜、节奏或剪辑，预演必须包含真实时间变化；style frame / 静态分镜只能验证构图与美术，不能冒充 motion animatic。
+- 任一主要节点没有 motion evidence → **BLOCK 预览交付**，回到素材补录或动效合成；不得再靠旁白、音乐或更多转场补偿。
+
+> 失败史（2026-08-25 crime-wall）：连续两版用 viewport motion 移动录屏，第三版把六张精修静帧放上时间轴；技术检查均绿，但观感依次是“晕”“怪”“PPT”。共同根因是把 camera motion 当成了 subject motion。
 
 ### F3: 内容审查（operator）
 
@@ -91,6 +135,7 @@ description: >
 |------|------|------|
 | P1 | 事实错误 | 展示的功能/数据不对 |
 | P1 | 敏感信息泄露 | 截图里有 token / API key / 私人信息 |
+| P1 | 叙事主语错位 | 影片卖的是某个页面/文件，而不是产品如何让协作发生 |
 | P2 | 画面选取不佳 | "这段换个更好的片段" |
 
 ## AI 视频生成（短片段素材）
@@ -198,8 +243,11 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 | 画面不够就暴力慢放 | 按 retiming 优先级处理 |
 | 没压缩就用原始素材 | 入库前统一压缩（CRF 23） |
 | segment contract 扁平不分层 | 4 层：source/narration/render/control |
+| 用户问“宣传片该怎么剪”时先拿现成页面试拍 | 先过 Intent Gate；研究只交 reference breakdown + brief，素材示例不是 production 授权 |
+| 宣传片围绕一个漂亮成果做 hero reveal | 先过 Narrative Subject Gate；Clowder AI 的协作过程是主角，成果只作 proof，创意方向由 operator 验收 |
 | 加速后沿用原始时间轴切段 | **加速会压缩时长，后续段的起始时间必须重新计算。** 例：A 段原 130s 以 2x 输出 65s，B 段在 final timeline 从 65s 开始而非 130s。用 output duration 逐段累加，不要用 source timestamps 直接拼 |
 | 只加速长等待段忽略短等待 | 分段不够细时，"Thinking"状态可能散落在多个区间里。逐段审素材，把所有等待态都标出来分别处理 |
+| 把 style frames 加转场后当产品视频 | 先过 Motion Evidence Gate；没有镜头内部动作就只交 storyboard/style reel，不交视频预览 |
 
 ## 视频预览（Console 内联播放）
 

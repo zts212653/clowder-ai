@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { runCodexAppServerWithRecovery } from '../dist/domains/cats/services/agents/providers/CodexAppServerRunner.js';
+import { CodexAppServerRpcError } from '../dist/domains/cats/services/agents/providers/codex-app-server-rpc-error.js';
 import { createDirectAgentCarrierSession } from '../dist/domains/cats/services/agents/providers/DirectAgentCarrierSession.js';
 import { captureCodexActiveWriterDetection } from '../dist/domains/cats/services/runtime-session/CodexSessionReplacementProvenance.js';
 
@@ -70,44 +71,72 @@ class AsyncInbox {
 }
 
 class ProtocolWire {
-  constructor() {
+  constructor(options = {}) {
     this.inbox = new AsyncInbox();
     this.writes = [];
     this.terminateCalls = 0;
     this.closeCalls = 0;
     this.experimentalApiEnabled = false;
+    this.rejectApprovalsReviewer = options.rejectApprovalsReviewer ?? false;
+    this.rejectOutputSchema = options.rejectOutputSchema ?? false;
   }
 
   read() {
     return this.inbox;
   }
 
+  respondThread(message, threadId) {
+    if (this.rejectApprovalsReviewer && message.params.approvalsReviewer) {
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32602, message: 'approvalsReviewer is unavailable for this host' },
+      });
+      return;
+    }
+    this.inbox.push({ id: message.id, result: { thread: { id: threadId } } });
+  }
+
+  respondTurn(message) {
+    if (this.rejectOutputSchema && message.params.outputSchema) {
+      this.inbox.push({
+        id: message.id,
+        error: { code: -32602, message: 'outputSchema is not supported by the selected model' },
+      });
+      return;
+    }
+    if (message.params.additionalContext && !this.experimentalApiEnabled) {
+      this.inbox.push({
+        id: message.id,
+        error: {
+          code: -32600,
+          message: 'turn/start.additionalContext requires experimentalApi capability',
+        },
+      });
+      return;
+    }
+    this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress' } } });
+  }
+
   async write(message) {
     this.writes.push(message);
-    if (message.method === 'initialize') {
-      this.experimentalApiEnabled = message.params.capabilities?.experimentalApi === true;
-      this.inbox.push({ id: message.id, result: {} });
+    switch (message.method) {
+      case 'initialize':
+        this.experimentalApiEnabled = message.params.capabilities?.experimentalApi === true;
+        this.inbox.push({ id: message.id, result: {} });
+        break;
+      case 'thread/start':
+        this.respondThread(message, 'thread-1');
+        break;
+      case 'thread/resume':
+        this.respondThread(message, message.params.threadId);
+        break;
+      case 'turn/start':
+        this.respondTurn(message);
+        break;
+      case 'turn/interrupt':
+        this.inbox.push({ id: message.id, result: {} });
+        break;
     }
-    if (message.method === 'thread/start') {
-      this.inbox.push({ id: message.id, result: { thread: { id: 'thread-1' } } });
-    }
-    if (message.method === 'thread/resume') {
-      this.inbox.push({ id: message.id, result: { thread: { id: message.params.threadId } } });
-    }
-    if (message.method === 'turn/start') {
-      if (message.params.additionalContext && !this.experimentalApiEnabled) {
-        this.inbox.push({
-          id: message.id,
-          error: {
-            code: -32600,
-            message: 'turn/start.additionalContext requires experimentalApi capability',
-          },
-        });
-      } else {
-        this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress' } } });
-      }
-    }
-    if (message.method === 'turn/interrupt') this.inbox.push({ id: message.id, result: {} });
   }
 
   async terminate() {
@@ -120,6 +149,141 @@ class ProtocolWire {
     this.inbox.close();
   }
 }
+
+test('F306 keeps sticky controls single-writer while mapping approved native parameters', async () => {
+  const wire = new ProtocolWire();
+  const client = new CodexAppServerClient({ wire });
+  const run = collect(
+    client.run({
+      prompt: frozenPrompt('structured answer'),
+      thread: { kind: 'start' },
+      model: 'gpt-test',
+      cwd: '/tmp/f306-workspace',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      serviceTier: 'fast',
+      approvalsReviewer: 'auto_review',
+      outputSchema: {
+        type: 'object',
+        properties: { answer: { type: 'string' } },
+        required: ['answer'],
+        additionalProperties: false,
+      },
+    }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  const threadStart = wire.writes.find((message) => message.method === 'thread/start');
+  const turnStart = wire.writes.find((message) => message.method === 'turn/start');
+
+  assert.deepEqual(
+    {
+      model: threadStart.params.model,
+      cwd: threadStart.params.cwd,
+      sandbox: threadStart.params.sandbox,
+      approvalPolicy: threadStart.params.approvalPolicy,
+      serviceTier: threadStart.params.serviceTier,
+      approvalsReviewer: threadStart.params.approvalsReviewer,
+    },
+    {
+      model: 'gpt-test',
+      cwd: '/tmp/f306-workspace',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      serviceTier: 'fast',
+      approvalsReviewer: 'auto_review',
+    },
+  );
+  for (const stickyField of [
+    'model',
+    'effort',
+    'cwd',
+    'sandboxPolicy',
+    'approvalPolicy',
+    'serviceTier',
+    'approvalsReviewer',
+  ]) {
+    assert.equal(
+      Object.hasOwn(turnStart.params, stickyField),
+      false,
+      `${stickyField} must have exactly one writer outside turn/start`,
+    );
+  }
+  assert.deepEqual(turnStart.params.outputSchema, {
+    type: 'object',
+    properties: { answer: { type: 'string' } },
+    required: ['answer'],
+    additionalProperties: false,
+  });
+  assert.equal(Object.hasOwn(threadStart.params, 'outputSchema'), false);
+  assert.equal(Object.hasOwn(threadStart.params, 'personality'), false);
+  assert.equal(Object.hasOwn(turnStart.params, 'personality'), false);
+
+  wire.inbox.push({
+    method: 'turn/completed',
+    params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+  });
+  await run;
+});
+
+test('F306 preserves typed upstream rejection for approvalsReviewer without replacement fallback', async () => {
+  const wire = new ProtocolWire({ rejectApprovalsReviewer: true });
+  const client = new CodexAppServerClient({ wire });
+  const outcomePromise = collectFailure(
+    client.run({
+      prompt: frozenPrompt('answer'),
+      thread: { kind: 'resume', threadId: 'thread-existing' },
+      approvalsReviewer: 'auto_review',
+    }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'thread/resume'));
+  await delay(5);
+  const turnStart = wire.writes.find((message) => message.method === 'turn/start');
+  if (turnStart) {
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  }
+  const outcome = await outcomePromise;
+
+  assert.equal(outcome.error instanceof CodexAppServerRpcError, true);
+  assert.equal(outcome.error?.method, 'thread/resume');
+  assert.equal(outcome.error?.code, -32602);
+  assert.equal(outcome.error?.message, 'approvalsReviewer is unavailable for this host');
+  assert.equal(
+    wire.writes.some((message) => message.method === 'thread/start'),
+    false,
+  );
+});
+
+test('F306 preserves typed upstream rejection for outputSchema at turn/start', async () => {
+  const wire = new ProtocolWire({ rejectOutputSchema: true });
+  const client = new CodexAppServerClient({ wire });
+  const outcomePromise = collectFailure(
+    client.run({
+      prompt: frozenPrompt('answer'),
+      thread: { kind: 'start' },
+      outputSchema: { type: 'object' },
+    }),
+  );
+
+  await waitFor(() => wire.writes.some((message) => message.method === 'turn/start'));
+  const turnStart = wire.writes.find((message) => message.method === 'turn/start');
+  if (!turnStart.params.outputSchema) {
+    wire.inbox.push({
+      method: 'turn/completed',
+      params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } },
+    });
+  }
+  const outcome = await outcomePromise;
+
+  assert.equal(outcome.error instanceof CodexAppServerRpcError, true);
+  assert.equal(outcome.error?.method, 'turn/start');
+  assert.equal(outcome.error?.code, -32602);
+  assert.equal(outcome.error?.message, 'outputSchema is not supported by the selected model');
+});
 
 test('F299 app-server awaits durable request evidence before turn/start', async () => {
   const wire = new ProtocolWire();

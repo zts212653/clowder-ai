@@ -8,6 +8,7 @@ description: "家况可感知：custody/quota/plugin 等 canonical 状态送达�
 description_source: human
 description_author: fable-5
 description_updated_at: 2026-08-18T13:05:00Z
+tips_exempt: "Spec-only self-sensing contract; the planned cancellation-awareness tip must wait until Phase A has a real delivered journey and stable user/cat entry surface."
 ---
 
 # F300: Self-Sensing 首切片 — 家况可感知（Home-State Awareness）
@@ -31,6 +32,7 @@ operator experience（2026-08-16 `0001786845058052`）："其实这里他是期�
 - 配额拓扑（家族共享猫粮桶）无结构化查询面——例②实测：fable 断粮时靠逐只试错归纳出共享桶事实。
 - F293 route snapshot 已组合 quota/provider health，但只在 route 判断点；`limb_list_available` 已列节点能力，readiness 深度不足以回答例③。
 - F233 值班简报（同账本的日报消费形态）已 sunset：65 天 operator 零消费——证明"推送到日报"不是正确送达形态，判断点送达是本 feat 要验证的替代。
+- **协调状态黑盒实证（2026-08-25，clowder-ai #1391 settlement 链）**：lease `52752674…` 出现双向身份栅栏死锁——实际 reviewer route 被拒 non-holder、issuer route 被拒 non-issuer，任何 actor 不冒充即无法结算；参与者全程无工具可查"此刻谁是 canonical holder"，只能靠三次 409 试错反推，最终弃协调层、以 GitHub 真相收口（coord-cbfb561b terminal, option c）。这是 M3 要治的"家况对参与者是黑盒"的一手反面标本：GitHub 真相层全程零差错，所有损耗都在不可感知的协调面。
 
 ## What
 

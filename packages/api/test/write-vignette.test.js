@@ -1,6 +1,6 @@
 // @ts-check
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -204,6 +204,7 @@ describe('writeVignette', () => {
 
   describe('createVignetteWriter — git rollback', () => {
     let gitDir;
+    let originDir;
 
     beforeEach(() => {
       gitDir = join(tmpdir(), `vignette-git-test-${Date.now()}`);
@@ -211,13 +212,17 @@ describe('writeVignette', () => {
       execSync('git init -b main', { cwd: gitDir, stdio: 'pipe' });
       execSync('git config user.email "test@test.com"', { cwd: gitDir, stdio: 'pipe' });
       execSync('git config user.name "Test"', { cwd: gitDir, stdio: 'pipe' });
-      // Initial commit so HEAD exists
       writeFileSync(join(gitDir, 'README.md'), 'init');
       execSync('git add . && git commit -m "init"', { cwd: gitDir, stdio: 'pipe' });
+      originDir = join(tmpdir(), `vignette-git-origin-${Date.now()}.git`);
+      execFileSync('git', ['init', '--bare', '--initial-branch=main', originDir], { stdio: 'pipe' });
+      execFileSync('git', ['remote', 'add', 'origin', originDir], { cwd: gitDir, stdio: 'pipe' });
+      execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
     });
 
     afterEach(() => {
       rmSync(gitDir, { recursive: true, force: true });
+      rmSync(originDir, { recursive: true, force: true });
     });
 
     it('cleans git staging area on commit failure (no stale staged files)', async () => {
@@ -234,6 +239,7 @@ describe('writeVignette', () => {
         cwd: gitDir,
         stdio: 'pipe',
       });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
 
       const writer = createVignetteWriter(gitDir);
       const proposal = makeProposal({ status: 'approving' });
@@ -246,26 +252,25 @@ describe('writeVignette', () => {
       assert.equal(staged, '', 'git index should have no staged files after failed commit rollback');
     });
 
-    it('rolls back vignette file when index write fails (R4 P1)', async () => {
-      // Make docs/taste/index.md readonly → insertIntoIndex will throw when trying to write
+    it('does not depend on primary index writability', async () => {
       mkdirSync(join(gitDir, 'docs/taste'), { recursive: true });
       writeFileSync(join(gitDir, 'docs/taste/index.md'), '# Taste Index\n\n### 表达真実\n', 'utf8');
       execSync('git add docs/taste/index.md && git commit -m "add index"', { cwd: gitDir, stdio: 'pipe' });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
 
-      // Make index file readonly to force insertIntoIndex to throw
       chmodSync(join(gitDir, 'docs/taste/index.md'), 0o444);
 
       const writer = createVignetteWriter(gitDir);
       const proposal = makeProposal({ status: 'approving' });
 
-      await assert.rejects(() => writer(proposal), /Vignette write failed/);
+      const result = await writer(proposal);
 
-      // The vignette file should have been cleaned up (rolled back)
-      const slug = deriveSlug(proposal);
-      const vignettePath = join(gitDir, 'docs/taste/vignettes', `${slug}.md`);
-      assert.ok(!existsSync(vignettePath), 'vignette file should be cleaned up after index write failure');
+      assert.ok(!existsSync(join(gitDir, result.path)), 'publisher must not mutate the primary worktree');
+      assert.match(
+        execFileSync('git', ['--git-dir', originDir, 'show', `main:${result.path}`], { encoding: 'utf8' }),
+        /proposalId: proposal_abc123xyz/,
+      );
 
-      // Restore permissions for cleanup
       chmodSync(join(gitDir, 'docs/taste/index.md'), 0o644);
     });
 
@@ -274,20 +279,23 @@ describe('writeVignette', () => {
       mkdirSync(join(gitDir, 'docs/taste'), { recursive: true });
       writeFileSync(join(gitDir, 'docs/taste/index.md'), '# Taste Index\n\n### 表达真实\n', 'utf8');
       execSync('git add docs/taste/index.md && git commit -m "add index"', { cwd: gitDir, stdio: 'pipe' });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
 
-      // Stage an UNRELATED file before calling the writer
       writeFileSync(join(gitDir, 'unrelated.txt'), 'should not be committed by taste writer');
       execSync('git add unrelated.txt', { cwd: gitDir, stdio: 'pipe' });
 
       const writer = createVignetteWriter(gitDir);
       const proposal = makeProposal({ status: 'approving' });
+      const primaryHeadBefore = execSync('git rev-parse HEAD', { cwd: gitDir, stdio: 'pipe' }).toString().trim();
       await writer(proposal);
 
-      // The taste commit should NOT contain unrelated.txt
-      const lastCommitFiles = execSync('git diff-tree --no-commit-id --name-only -r HEAD', {
-        cwd: gitDir,
-        stdio: 'pipe',
-      })
+      const lastCommitFiles = execFileSync(
+        'git',
+        ['--git-dir', originDir, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'main'],
+        {
+          encoding: 'utf8',
+        },
+      )
         .toString()
         .trim()
         .split('\n');
@@ -298,49 +306,42 @@ describe('writeVignette', () => {
         'taste commit should contain vignette file',
       );
 
-      // unrelated.txt should STILL be staged (not lost)
       const staged = execSync('git diff --cached --name-only', { cwd: gitDir, stdio: 'pipe' }).toString().trim();
       assert.ok(staged.includes('unrelated.txt'), 'unrelated file should still be staged after taste commit');
+      assert.equal(execSync('git rev-parse HEAD', { cwd: gitDir, stdio: 'pipe' }).toString().trim(), primaryHeadBefore);
     });
 
-    it('refuses a repository with no checked-out main worktree', async () => {
-      // Create a non-main branch to simulate runtime worktree scenario
+    it('publishes without a checked-out main worktree', async () => {
+      mkdirSync(join(gitDir, 'docs/taste'), { recursive: true });
+      writeFileSync(join(gitDir, 'docs/taste/index.md'), '# Taste Index\n\n### 表达真実\n', 'utf8');
+      execSync('git add docs/taste/index.md && git commit -m "add index"', { cwd: gitDir, stdio: 'pipe' });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
       execSync('git checkout -b runtime/main-sync', { cwd: gitDir, stdio: 'pipe' });
 
-      // Set up docs/taste/index.md
-      mkdirSync(join(gitDir, 'docs/taste'), { recursive: true });
-      writeFileSync(join(gitDir, 'docs/taste/index.md'), '# Taste Index\n\n### 表达真実\n', 'utf8');
-      execSync('git add docs/taste/index.md && git commit -m "add index"', { cwd: gitDir, stdio: 'pipe' });
-
       const writer = createVignetteWriter(gitDir);
       const proposal = makeProposal({ status: 'approving' });
 
-      // Writer must refuse — there is no canonical main worktree in this repository.
-      await assert.rejects(
-        () => writer(proposal),
-        /cannot find a checked-out refs\/heads\/main worktree/,
-        'should reject a repository without a canonical main worktree',
+      const result = await writer(proposal);
+      assert.match(
+        execFileSync('git', ['--git-dir', originDir, 'show', `main:${result.path}`], { encoding: 'utf8' }),
+        /proposalId: proposal_abc123xyz/,
       );
-
-      // No files should have been written to disk
-      const slug = deriveSlug(proposal);
-      const vignettePath = join(gitDir, 'docs/taste/vignettes', `${slug}.md`);
-      assert.ok(!existsSync(vignettePath), 'vignette file must not exist after branch guard rejection');
     });
 
-    it('allows commits on main branch (happy path with guard)', async () => {
-      // We're already on main from beforeEach — set up docs/taste/index.md
+    it('publishes from a main checkout without advancing its local HEAD', async () => {
       mkdirSync(join(gitDir, 'docs/taste'), { recursive: true });
       writeFileSync(join(gitDir, 'docs/taste/index.md'), '# Taste Index\n\n### 表达真実\n', 'utf8');
       execSync('git add docs/taste/index.md && git commit -m "add index"', { cwd: gitDir, stdio: 'pipe' });
+      execFileSync('git', ['push', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
 
       const writer = createVignetteWriter(gitDir);
       const proposal = makeProposal({ status: 'approving' });
+      const primaryHeadBefore = execSync('git rev-parse HEAD', { cwd: gitDir, stdio: 'pipe' }).toString().trim();
 
-      // Should succeed on main
       const result = await writer(proposal);
       assert.ok(result.slug, 'should return slug');
       assert.ok(result.path, 'should return path');
+      assert.equal(execSync('git rev-parse HEAD', { cwd: gitDir, stdio: 'pipe' }).toString().trim(), primaryHeadBefore);
     });
   });
 });

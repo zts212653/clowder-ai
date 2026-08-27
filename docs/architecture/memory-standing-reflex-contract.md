@@ -1,23 +1,24 @@
 ---
 doc_kind: architecture
-description: "Wave 1 Standing Reflex Contract v1：冻结机械 observation 如何形成一次有界 WriteOpportunity、由猫给出 propose/defer/abstain disposition、最终进入唯一 destination lane 的权力边界、字段合同、状态机与观测语义；复用 F237 per-hook 拓扑但不把非 reflex hook 强塞进同一 schema。"
+description: "Wave 1 Standing Reflex Contract v1.1：在既有 WriteOpportunity 状态机上补充所有持久写入面的四拍闭环声明（感知、提案、裁决、消费）；允许 none/exempt/sunset，但不允许答案缺席，并保持统一协议、不统一权力与存储。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-08-15T13:04:00Z
+description_updated_at: 2026-08-26T06:00:00Z
 feature_ids: []
-related_features: [F221, F231, F237, F276, F282, F287, F296]
+related_features: [F102, F152, F221, F231, F237, F255, F276, F282, F287, F296]
 related_docs:
-  - docs/architecture/context-injection-reflex-source-map.md
+  - docs/architecture/standing-reflex-episode-replay-shadow.md
   - docs/architecture/memory-write-lane-census.md
+  - docs/architecture/context-injection-reflex-source-map.md
   - docs/architecture/memory-outcome-attribution-source-map.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
   - feature-discussions/2026-08-10-memory-write-trigger-rethink.md
-topics: [memory, standing-reflex, write-opportunity, contract, disposition, governance]
+topics: [memory, standing-reflex, write-opportunity, write-surface, contract, disposition, governance]
 created: 2026-08-15
-status: frozen-v1
+status: frozen-v1.1
 ---
 
-# Memory Standing Reflex Contract v1
+# Memory Standing Reflex Contract v1.1
 
 > **冻结对象**：为什么、何时把一次“是否写入记忆”的判断机会送给哪位 consumer，以及
 > consumer 如何留下 terminal disposition。本文冻结逻辑合同与权力边界，**不冻结中央 registry、
@@ -34,7 +35,9 @@ mechanical observation
   → F296 presentation（只管本 epoch 怎么呈现）
   → cat disposition: propose | defer | abstain
   → exactly one destination-lane proposal contract
-  → owner adjudication / correction / sunset evidence
+  → lane-owned adjudication
+  → canonical materialization
+  → consumer / correction / forget / outcome evidence
 ```
 
 三个权力边界不可合并：
@@ -97,7 +100,30 @@ reflex candidate 建 per-lane entry，再生成统一只读视图。禁止为了
 原文 payload 留在 source owner；deferred receipt 只保存 source ref、entry/version、eligibleAt、expiry、
 dedupe key 与 terminal state。频率只能提高“值得判断”的优先级，不能提高 truth authority。
 
-### 3.2 Surface selection
+### 3.2 全写入面四拍闭环声明
+
+`StandingReflexEntryV1` 只描述真正拥有主动判断机会的 entry；它不能代表全部持久写入面。凡是能让未来
+猫的判断、行为或 owner-visible truth 发生变化的 durable surface——包括 MCP/API lane、文件习俗、
+Skill、ADR、Lessons Learned、feedback/episode 产物——都必须另有一份
+`MemoryWriteSurfaceClosureV1` 逻辑声明，回答同样四拍：
+
+| 拍 | 必答字段 | 合法答案与硬边界 |
+|---|---|---|
+| ① 感知 | `observationSource`、`eligibilityPredicate`、`sourceCoordinateKinds` | 可以是机械 detector、猫的收尾 convention 或 `none`；`none` 表示无主动入口，不得伪装成健康 |
+| ② 提案 | `candidateContract`、`proposalEntry`、`allowedDispositions` | 可以 direct-edit、typed proposal、`exempt` 或 `sunset`；direct-edit 仍须声明来源与 authority，不能靠“文件一直这样写”免答 |
+| ③ 裁决 | `adjudicator`、`adjudicationSurface`、`materializationTarget` | operator、猫本人、reviewer、确定性 guard、机械规则均可；不是所有 lane 都进 Approval Hub，但每条必须只有一个 canonical truth owner |
+| ④ 消费 | `consumers`、`readEntry`、`usageEvidence`、`correctionAndForgetPath` | reader 存在不等于消费发生；`none` 是 keep/sunset 信号，未知必须写 `unknown`，禁止拿零条解释为零伤害 |
+
+闭环声明还必须给出 `lifecycleStatus=active|exempt|sunset_candidate|sunset`、owner、revision 与
+invalidators。它是 lane-owned contract 的 generated read-only 投影，**不是新的中央可写 registry**。
+一面多 owner 合法；同一 claim family 只能有一个 authority。协议归一允许实现分诊：Diary 可由作者
+自治，机械 Entity 可由规则裁决，规范性 LL 可要求更强 review，global distillation 可直接 sunset。
+
+四拍与完整生命周期的关系是：四拍保证“从哪出生、谁签字、谁使用”不缺席；现有 entry 状态机继续
+保证 delivery/disposition/dedupe/expiry；Derived View Contract 继续保证派生物不夺权。四拍不是用来
+把七条 lane 补成一样，也不授权给没有 consumer 的 surface 新建 detector。
+
+### 3.3 Surface selection
 
 | Surface | 合法条件 | 反例 |
 |---|---|---|
@@ -153,7 +179,11 @@ Compaction、resume、`-p`/interactive/bg-cron 只改变 presentation evidence�
 
 未选择的机制不是欠账。`proposal approved` 不能同时冒充 delivery health、判断质量和 utility。
 
-## 7. 现有 lane 的迁移判读
+四拍 episode、source-only deterministic replay、content-free shadow health 以及 Taste/Profile E0 的
+canonical 细化见 [Standing Reflex Episode / Replay / Shadow 基座](standing-reflex-episode-replay-shadow.md)。
+该基座只做 refs-only adapter/projection；不改变本文冻结的 detector、lane authority 与 storage 边界。
+
+## 7. 现有写入面的迁移判读
 
 | Lane | 当前合同资产 | 进入本合同前的真实缺口 |
 |---|---|---|
@@ -162,13 +192,16 @@ Compaction、resume、`-p`/interactive/bg-cron 只改变 presentation evidence�
 | Profile / F231 | canonical data root、L0 logical URI、authenticated reader 已存在 | standing trigger 再次蒸发；不能只修 storage |
 | Event / F227 | typed store 与 timeline read 面 | validation/consumption health 未量化 |
 | Entity / F260 | nudge/revision/cue 先例 | 无需为合同完整度重做健康 lane |
-| Knowledge | zero-trigger、无已证明 consumer | 先做 keep-or-sunset 价值决策，不自动获 entry |
+| Operational knowledge：LL / Decision / Method | scanner/search/F287 与 Skill/ADR 读取都是真 consumer | 最老的 direct-edit、F102 marker、F152 distillation 三套出生法未归一；先分 authority，再迁协议 |
+| Global distillation / F152 | `distillation_candidates=0`、无已证明 consumer | 先做 keep-or-sunset 价值决策；不得再用它代表全部 Knowledge |
+| Feedback / Episode / Reflection | 多个生产者与检索入口存在 | 不得因 scanner 统一映射为 `lesson` 就自动获得规范性 LL authority |
 | Diary / F255 | present loop + indexed first-person outputs | AC-C2 proposal 通道独立推进；第一人称 diary 不强塞 owner approval |
 
 ## 8. Contract Trial Ready gate
 
 一根纵切只有同时满足以下条件才可作为首案：
 
+- 所属 durable write surface 已有四拍闭环声明；答案可以是 `none/exempt/sunset`，不能缺席；
 - entry 的上表字段可完整实例化；
 - 每个 eligible lane 的 immediate/deferred 都指向该 lane 同一 canonical destination proposal；
 - deferred receipt 有明确的重新入场谓词、expiry/re-arm 与 lineage；首案必须实测 receipt 在后续
@@ -179,4 +212,4 @@ Compaction、resume、`-p`/interactive/bg-cron 只改变 presentation evidence�
 - 不为首案新造 lane 专属真相源。
 
 ---
-*Frozen v1 · 小太阳·Maine Coon/gpt-5.6-sol · 2026-08-15*
+*Frozen v1.1 · v1 小太阳·Maine Coon/gpt-5.6-sol · 四拍增补 2026-08-26*

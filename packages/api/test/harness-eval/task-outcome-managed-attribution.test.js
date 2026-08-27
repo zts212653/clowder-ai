@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
 
-import { CancelBurstDetector } from '../../dist/infrastructure/harness-eval/task-outcome/cancel-burst-detector.js';
 import {
   appendMagicWordRefToEpisode,
-  appendPermissionCancelToEpisode,
   appendPrLifecycleEvidenceToEpisode,
-  checkAndAppendCancelBurst,
 } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-signal-wiring.js';
 import { TaskOutcomeEpisodeStore } from '../../dist/infrastructure/harness-eval/task-outcome/task-outcome-store.js';
 
@@ -26,19 +23,19 @@ describe('F275 managed-work outcome attribution', () => {
     const workA = { workId: 'wrk_a', attemptId: 'wat_a_1' };
     const workB = { workId: 'wrk_b', attemptId: 'wat_b_1' };
 
-    const aCancel = appendPermissionCancelToEpisode(store, {
-      toolName: 'Bash',
-      cancelReason: 'wrong_direction',
-      catId: 'codex-sol',
+    const episodeA = store.createEpisode({
+      trigger: 'task_created',
       threadId,
-      managedWorkBinding: workA,
+      participants: ['codex-sol'],
+      attribution: 'managed_attributed',
+      ...workA,
     });
-    const bCancel = appendPermissionCancelToEpisode(store, {
-      toolName: 'Edit',
-      cancelReason: 'skip',
-      catId: 'codex-terra',
+    const episodeB = store.createEpisode({
+      trigger: 'task_created',
       threadId,
-      managedWorkBinding: workB,
+      participants: ['codex-terra'],
+      attribution: 'managed_attributed',
+      ...workB,
     });
     const chat = appendMagicWordRefToEpisode(store, {
       eventId: 'evt_chat',
@@ -68,23 +65,31 @@ describe('F275 managed-work outcome attribution', () => {
       threadId,
     });
 
-    assert.equal(mergeA.episodeId, aCancel.episodeId, 'work A merge must join work A only');
+    assert.equal(mergeA.episodeId, episodeA.episodeId, 'work A merge must join work A only');
     assert.equal(duplicateMergeA.signalAppended, false, 'replayed PR evidence must be idempotent');
-    assert.notEqual(mergeA.episodeId, bCancel.episodeId);
+    assert.notEqual(mergeA.episodeId, episodeB.episodeId);
     assert.notEqual(mergeA.episodeId, chat.episodeId);
     assert.notEqual(missing.episodeId, mergeA.episodeId);
 
-    const episodeA = store.getEpisode(aCancel.episodeId);
-    const episodeB = store.getEpisode(bCancel.episodeId);
+    const storedEpisodeA = store.getEpisode(episodeA.episodeId);
+    const storedEpisodeB = store.getEpisode(episodeB.episodeId);
     const chatEpisode = store.getEpisode(chat.episodeId);
     const unattributedEpisode = store.getEpisode(missing.episodeId);
 
     assert.deepEqual(
-      { attribution: episodeA?.attribution, workId: episodeA?.workId, attemptId: episodeA?.attemptId },
+      {
+        attribution: storedEpisodeA?.attribution,
+        workId: storedEpisodeA?.workId,
+        attemptId: storedEpisodeA?.attemptId,
+      },
       { attribution: 'managed_attributed', workId: 'wrk_a', attemptId: 'wat_a_1' },
     );
     assert.deepEqual(
-      { attribution: episodeB?.attribution, workId: episodeB?.workId, attemptId: episodeB?.attemptId },
+      {
+        attribution: storedEpisodeB?.attribution,
+        workId: storedEpisodeB?.workId,
+        attemptId: storedEpisodeB?.attemptId,
+      },
       { attribution: 'managed_attributed', workId: 'wrk_b', attemptId: 'wat_b_1' },
     );
     assert.deepEqual(
@@ -102,7 +107,7 @@ describe('F275 managed-work outcome attribution', () => {
 
     assert.equal(store.getSignals(episodeA.episodeId).filter((signal) => signal.record.type === 'merge').length, 1);
     assert.equal(store.getSignals(episodeB.episodeId).filter((signal) => signal.record.type === 'merge').length, 0);
-    assert.equal(episodeA?.terminalState, 'in_progress', 'PR merge is evidence, not work terminal authority');
+    assert.equal(storedEpisodeA?.terminalState, 'in_progress', 'PR merge is evidence, not work terminal authority');
   });
 
   it('keeps separate unattributed episodes for separate PR artifacts in one thread', () => {
@@ -148,42 +153,6 @@ describe('F275 managed-work outcome attribution', () => {
       }),
       null,
       'terminal evidence must stay terminal after replay',
-    );
-  });
-
-  it('partitions cancel burst windows by managed attempt inside one thread', () => {
-    const detector = new CancelBurstDetector({ threshold: 3, windowMs: 60_000 });
-    const threadId = 'thread_shared';
-    const workA = { workId: 'wrk_a', attemptId: 'wat_a_1' };
-    const workB = { workId: 'wrk_b', attemptId: 'wat_b_1' };
-    appendPermissionCancelToEpisode(store, {
-      toolName: 'Bash',
-      catId: 'codex-sol',
-      threadId,
-      managedWorkBinding: workA,
-    });
-    appendPermissionCancelToEpisode(store, {
-      toolName: 'Edit',
-      catId: 'codex-terra',
-      threadId,
-      managedWorkBinding: workB,
-    });
-
-    assert.equal(checkAndAppendCancelBurst(store, detector, threadId, 1_000, workA).burst, false);
-    assert.equal(checkAndAppendCancelBurst(store, detector, threadId, 2_000, workB).burst, false);
-    assert.equal(checkAndAppendCancelBurst(store, detector, threadId, 3_000, workA).burst, false);
-    const burstA = checkAndAppendCancelBurst(store, detector, threadId, 4_000, workA);
-
-    assert.equal(burstA.burst, true);
-    assert.equal(burstA.proxyAppended, true);
-    assert.equal(
-      store.getSignals(burstA.episodeId).filter((signal) => signal.record.type === 'cancel_burst').length,
-      1,
-    );
-    const episodeB = store.getActiveEpisodeByAttribution({ attribution: 'managed_attributed', ...workB });
-    assert.equal(
-      store.getSignals(episodeB.episodeId).filter((signal) => signal.record.type === 'cancel_burst').length,
-      0,
     );
   });
 });

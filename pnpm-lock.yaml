@@ -30,8 +30,8 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@clowder-ai/feishu-meeting-intake':
-        specifier: 0.1.0-alpha.6
-        version: 0.1.0-alpha.6
+        specifier: 0.1.0-alpha.8
+        version: 0.1.0-alpha.8
       '@clowder-ai/plugin-contract':
         specifier: 0.1.0-beta.11
         version: 0.1.0-beta.11
@@ -198,6 +198,9 @@ importers:
       '@types/ws':
         specifier: ^8.5.0
         version: 8.18.1
+      esbuild:
+        specifier: 0.27.2
+        version: 0.27.2
       fast-check:
         specifier: ^4.5.3
         version: 4.5.3
@@ -1042,8 +1045,8 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.6':
-    resolution: {integrity: sha512-lYf6b5JXMiSYoxg128nyGso1zUvb+rxStAsq08vlcdRY7aeVyt7vGTCQQ2qsThr1KxfythFKIrSFS+2sdaMwpw==}
+  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.8':
+    resolution: {integrity: sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==}
     engines: {node: '>=20.0.0'}
     bundledDependencies:
       - '@clack/core'
@@ -7434,7 +7437,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.6': {}
+  '@clowder-ai/feishu-meeting-intake@0.1.0-alpha.8': {}
 
   '@clowder-ai/plugin-contract@0.1.0-beta.11':
     dependencies:

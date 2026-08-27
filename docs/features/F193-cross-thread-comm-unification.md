@@ -5,7 +5,7 @@ topics: [mcp, cross-thread, agent-first, harness]
 doc_kind: spec
 created: 2026-05-07
 user_journey_exempt: infrastructure feature — dispatch routing is invisible to end user
-tips_exempt: infrastructure — no user-facing capability to tip
+tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; the infrastructure change adds no user-facing capability."
 ---
 
 # F193: Cross-Thread Communication Unification

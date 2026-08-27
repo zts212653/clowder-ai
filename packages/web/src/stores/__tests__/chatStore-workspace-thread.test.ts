@@ -110,6 +110,22 @@ describe('workspace state per-thread persistence', () => {
     expect(useChatStore.getState().workspaceOpenTabs).toEqual(['file1.ts', 'file2.ts', 'file3.ts']);
     expect(useChatStore.getState().workspaceOpenFilePath).toBe('file3.ts');
   });
+
+  it('fails closed when a saved thread still names the rejected Collective workspace mode', () => {
+    useChatStore.getState().setCurrentThread('thread-b');
+    useChatStore.getState().setCurrentThread('thread-a');
+
+    const threadStates = useChatStore.getState().threadStates;
+    useChatStore.setState({
+      threadStates: {
+        ...threadStates,
+        'thread-b': { ...threadStates['thread-b'], workspaceMode: 'collective' as never },
+      },
+    });
+
+    useChatStore.getState().setCurrentThread('thread-b');
+    expect(useChatStore.getState().workspaceMode).toBe('dev');
+  });
 });
 
 describe('presentation lock (AC-PL1~PL5)', () => {

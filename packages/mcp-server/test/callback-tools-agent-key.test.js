@@ -298,4 +298,32 @@ describe('MCP callback tools: agent-key support', () => {
       unlinkSync(antigOpusFile);
     }
   });
+
+  it('uses the service-bound cat identity when a dedicated Remote MCP omits agentKeyCatId', async () => {
+    const gptProFile = join(tmpdir(), `agent-key-gpt-pro-${Date.now()}.secret`);
+    writeFileSync(gptProFile, 'gpt-pro-secret\n', { mode: 0o600 });
+    try {
+      setEnv({
+        CAT_CAFE_API_URL: 'http://localhost:3004',
+        CAT_CAFE_INVOCATION_ID: undefined,
+        CAT_CAFE_CALLBACK_TOKEN: undefined,
+        CAT_CAFE_AGENT_KEY_SECRET: undefined,
+        CAT_CAFE_AGENT_KEY_FILE: undefined,
+        CAT_CAFE_AGENT_KEY_FILES: JSON.stringify({ 'gpt-pro': gptProFile }),
+        CAT_CAFE_AGENT_KEY_BOUND_CAT_ID: 'gpt-pro',
+      });
+      const mod = await import(`../dist/tools/callback-tools.js?t=${Date.now()}`);
+
+      const config = mod.getCallbackConfig();
+      assert.ok(config, 'identity-bound Remote MCP must not require the model to repeat its deployment identity');
+      assert.equal(config.agentKeySecret, 'gpt-pro-secret');
+      assert.equal(
+        mod.getCallbackConfig({ agentKeyCatId: 'other-cloud-cat' }),
+        null,
+        'an explicit identity must never escape the service-bound principal',
+      );
+    } finally {
+      unlinkSync(gptProFile);
+    }
+  });
 });

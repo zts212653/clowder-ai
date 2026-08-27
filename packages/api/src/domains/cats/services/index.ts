@@ -46,14 +46,11 @@ export { WerewolfLobby } from './game/werewolf/WerewolfLobby.js';
 export { buildWerewolfPrompt } from './game/werewolf/werewolf-prompts.js';
 export type { AuditEvent, AuditEventInput } from './orchestration/EventAuditLog.js';
 export { AuditEventTypes, EventAuditLog, getEventAuditLog } from './orchestration/EventAuditLog.js';
-export { createAuthorizationAuditStore } from './stores/factories/AuthorizationAuditStoreFactory.js';
-export { createAuthorizationRuleStore } from './stores/factories/AuthorizationRuleStoreFactory.js';
 export { createDraftStore } from './stores/factories/DraftStoreFactory.js';
 export type { AnyInvocationRecordStore } from './stores/factories/InvocationRecordStoreFactory.js';
 export { createInvocationRecordStore } from './stores/factories/InvocationRecordStoreFactory.js';
 export type { AnyMessageStore } from './stores/factories/MessageStoreFactory.js';
 export { createMessageStore } from './stores/factories/MessageStoreFactory.js';
-export { createPendingRequestStore } from './stores/factories/PendingRequestStoreFactory.js';
 export type { AnySessionChainStore } from './stores/factories/SessionChainStoreFactory.js';
 export { createSessionChainStore } from './stores/factories/SessionChainStoreFactory.js';
 export { createSummaryStore } from './stores/factories/SummaryStoreFactory.js';
@@ -113,13 +110,10 @@ export type {
   TurnExecutionStatus,
 } from './stores/ports/TurnExecutionStore.js';
 export { projectTurnExecutionMessage } from './stores/ports/TurnExecutionStore.js';
-export { RedisAuthorizationAuditStore } from './stores/redis/RedisAuthorizationAuditStore.js';
-export { RedisAuthorizationRuleStore } from './stores/redis/RedisAuthorizationRuleStore.js';
 export { RedisDraftStore } from './stores/redis/RedisDraftStore.js';
 export { RedisGameStore } from './stores/redis/RedisGameStore.js';
 export { RedisInvocationRecordStore } from './stores/redis/RedisInvocationRecordStore.js';
 export { RedisMessageStore } from './stores/redis/RedisMessageStore.js';
-export { RedisPendingRequestStore } from './stores/redis/RedisPendingRequestStore.js';
 export { RedisSessionChainStore } from './stores/redis/RedisSessionChainStore.js';
 export { RedisSummaryStore } from './stores/redis/RedisSummaryStore.js';
 export { RedisTaskStore } from './stores/redis/RedisTaskStore.js';

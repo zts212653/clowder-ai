@@ -84,11 +84,13 @@ function projectQueueReceiptTarget(
   }
   if (state.withdrawn.has(catId)) {
     const exposure = latestExposure(custody, catId);
+    const actionSuccessorRetired = custody.actionSuccessorTerminalFenceByTargetCatId?.[catId] !== undefined;
     return {
       catId,
       state: 'withdrawn',
       ...authorIntentProjection,
       ...attemptsProjection,
+      ...(actionSuccessorRetired ? { retryable: false } : {}),
       withdrawnAt: custody.withdrawnAtByCatId?.[catId],
       ...(exposure ? { invocationId: exposure.invocationId, seenAt: exposure.seenAt } : {}),
     };

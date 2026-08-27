@@ -1,0 +1,32 @@
+domainId: eval:trajectory-inspector
+displayName: Invocation Trajectory Inspector Utility Eval
+descriptionForHuman: 异常 invocation 出现后，Inspector 是否让猫更快拿到并接受根因证据，同时避免错 thread、错 invocation 与 Raw/JSONL 绕行
+metricGlossaryRef: eval-trajectory-inspector.metrics.yaml
+systemThreadId: thread_eval_trajectory_inspector
+evalCat:
+  catId: codex-sol
+  handle: "@codex-sol"
+  model: gpt-5.6-sol
+frequency: weekly
+triggerPolicy:
+  mode: time_only
+  maxDetectionDelayHours: 168
+sourceAdapter: f299-trajectory-inspector-episodes
+sourceRefsKind: trajectory-inspector-window
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F299
+  ownerCatId: fable5
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 336
+fixtures: []
+enabled: true

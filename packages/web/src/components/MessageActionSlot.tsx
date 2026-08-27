@@ -18,5 +18,11 @@ export function MessageActionSlotProvider({
 export function MessageActionSlot() {
   const register = useContext(MessageActionSlotContext);
   if (!register) return null;
-  return <div ref={register} data-message-action-slot className="flex shrink-0 items-center" />;
+  return (
+    <div
+      ref={register}
+      data-message-action-slot
+      className="relative h-0 w-0 shrink-0 self-center overflow-visible max-md:h-11 max-md:w-11 [@media(hover:none)_and_(pointer:coarse)]:h-11 [@media(hover:none)_and_(pointer:coarse)]:w-11"
+    />
+  );
 }

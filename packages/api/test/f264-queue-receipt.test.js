@@ -176,6 +176,90 @@ describe('F264 queue receipt projection', () => {
     assert.equal(receipt.targets[2].state, 'handled');
   });
 
+  test('projects a withdrawn action-successor carrier as a terminal non-retryable no-op', () => {
+    const withdrawn = custody({
+      status: 'terminal',
+      allTargetCats: ['codex'],
+      pendingTargetCats: [],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      bodyExposures: [],
+      failedByCatIds: [],
+      handledByCatIds: [],
+      targetOutcomeByCatId: undefined,
+      withdrawnByCatIds: ['codex'],
+      withdrawnAtByCatId: { codex: 1_650 },
+      carrierByTargetCatId: {
+        codex: {
+          entryId: 'entry-1',
+          idempotencyKey: 'action:lease-1:4:codex',
+          actionSuccessorFence: {
+            leaseId: 'lease-1',
+            generation: 4,
+            dispatchId: 'dispatch-1',
+            terminalPredicateDigest: 'predicate-a',
+          },
+          source: 'agent',
+          sourceCategory: 'a2a',
+          a2aTriggerMessageId: 'message-1',
+          autoExecute: true,
+          createdAt: 1_000,
+        },
+      },
+      actionSuccessorTerminalFenceByTargetCatId: {
+        codex: {
+          leaseId: 'lease-1',
+          generation: 4,
+          dispatchId: 'dispatch-1',
+          terminalPredicateDigest: 'predicate-a',
+        },
+      },
+    });
+
+    assert.deepEqual(projectQueueReceipt(withdrawn).targets, [
+      { catId: 'codex', state: 'withdrawn', retryable: false, withdrawnAt: 1_650 },
+    ]);
+  });
+
+  test('keeps a manually withdrawn action-successor carrier distinct from business terminal retirement', () => {
+    const withdrawn = custody({
+      status: 'terminal',
+      allTargetCats: ['codex'],
+      pendingTargetCats: [],
+      notifiedByCatIds: [],
+      seenByCatIds: [],
+      seenInvocationIdByCatId: {},
+      bodyExposures: [],
+      failedByCatIds: [],
+      handledByCatIds: [],
+      targetOutcomeByCatId: undefined,
+      withdrawnByCatIds: ['codex'],
+      withdrawnAtByCatId: { codex: 1_650 },
+      carrierByTargetCatId: {
+        codex: {
+          entryId: 'entry-1',
+          idempotencyKey: 'action:lease-1:4:codex',
+          actionSuccessorFence: {
+            leaseId: 'lease-1',
+            generation: 4,
+            dispatchId: 'dispatch-1',
+            terminalPredicateDigest: 'predicate-a',
+          },
+          source: 'agent',
+          sourceCategory: 'a2a',
+          a2aTriggerMessageId: 'message-1',
+          autoExecute: true,
+          createdAt: 1_000,
+        },
+      },
+    });
+
+    assert.deepEqual(projectQueueReceipt(withdrawn).targets, [
+      { catId: 'codex', state: 'withdrawn', withdrawnAt: 1_650 },
+    ]);
+  });
+
   test('validates typed terminal-silent and exact source-response consumption witnesses', () => {
     const terminalSilent = custody({
       targetOutcomeByCatId: {

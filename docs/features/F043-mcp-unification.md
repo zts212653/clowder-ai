@@ -5,6 +5,7 @@ debt_ids: []
 topics: [mcp, architecture, agent-collaboration]
 doc_kind: feature-spec
 created: 2026-02-27
+tips_exempt: "F286 removes two obsolete MCP tools from this completed architecture; it introduces no new user-invokable capability or workflow."
 ---
 
 # F043: MCP 归一化 — Server 拆分 + 协作工具补全
@@ -52,7 +53,7 @@ created: 2026-02-27
 
 #### ① cat-cafe-collab（协作核心）
 
-现有：post_message, get_thread_context, get_pending_mentions, ack_mentions, update_task, create_rich_block, get_rich_block_rules, request_permission, check_permission
+立项时现有：post_message, get_thread_context, get_pending_mentions, ack_mentions, update_task, create_rich_block, get_rich_block_rules, request_permission, check_permission（末两项已于 2026-08-24 由 F286 落日；此处保留历史 census）
 
 新增：
 - `search_messages` — catId/keyword 过滤 **[P0]**

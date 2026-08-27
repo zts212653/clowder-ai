@@ -4,7 +4,7 @@ related_features: [F133, F139, F141, F168, F280]
 topics: [github, conflict-detection, review-feedback, pr-signals, automation]
 doc_kind: spec
 created: 2026-03-26
-tips_exempt: agent-facing tracking policy is surfaced in MCP parameter descriptions and pr-signals/mcp-callbacks refs; no separate web capability tip
+tips_exempt: "Renewed 2026-08-27 for link/reference hygiene only; the agent-facing tracking policy adds no separate user capability."
 ---
 
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知

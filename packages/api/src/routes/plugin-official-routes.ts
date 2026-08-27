@@ -5,7 +5,6 @@ import type { PluginInventoryStore } from '../domains/plugin/host-inventory/port
 import type { PluginInstanceRecord, PluginInventorySnapshot } from '../domains/plugin/host-inventory/types.js';
 import { OFFICIAL_PLUGIN_CATALOG, type OfficialPluginCatalogEntry } from '../domains/plugin/official-catalog.js';
 import {
-  compareOfficialPluginVersions,
   type OfficialPluginCatalogProvider,
   type OfficialPluginCatalogSnapshot,
   StaticOfficialPluginCatalog,
@@ -14,15 +13,22 @@ import { OfficialPluginInstallError } from '../domains/plugin/official-package-e
 import type { OfficialPluginPackageInstaller } from '../domains/plugin/official-package-installer.js';
 import type { OfficialPluginAuthPort } from '../domains/plugin/official-plugin-auth.js';
 import type { OfficialPluginHistoryImportPort } from '../domains/plugin/official-plugin-history-import.js';
+import type { OfficialPluginMeetingIntakePort } from '../domains/plugin/official-plugin-meeting-intake-port.js';
 import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
 import { registerOfficialPluginHistoryRoutes } from './plugin-official-history-routes.js';
+import { registerOfficialPluginMeetingIntakeRoutes } from './plugin-official-meeting-intake-routes.js';
+import { projectOfficialPlugin } from './plugin-official-projection.js';
 
 interface OfficialPluginRouteOptions {
   readonly inventory: PluginInventoryStore;
   readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'update'>;
-  readonly lifecycle: Pick<ExternalPluginLifecycleService, 'prepare' | 'enable' | 'disable' | 'repair' | 'uninstall'>;
+  readonly lifecycle: Pick<
+    ExternalPluginLifecycleService,
+    'prepare' | 'enable' | 'disable' | 'repair' | 'uninstall' | 'runWithRuntimeSuspended'
+  >;
   readonly auth?: OfficialPluginAuthPort;
   readonly historyImport?: OfficialPluginHistoryImportPort;
+  readonly meetingIntake?: OfficialPluginMeetingIntakePort;
   readonly catalog?: readonly OfficialPluginCatalogEntry[];
   readonly catalogProvider?: OfficialPluginCatalogProvider;
 }
@@ -48,54 +54,6 @@ interface OfficialPluginUpdateRequest {
     expectedRevision?: unknown;
     expectedCatalogVersion?: unknown;
     expectedPackageDigest?: unknown;
-  };
-}
-
-function projectInstance(instance: PluginInstanceRecord | undefined, snapshot: PluginInventorySnapshot) {
-  if (!instance) return null;
-  const installedPackage = snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
-  return {
-    pluginInstanceId: instance.pluginInstanceId,
-    installedVersion: installedPackage?.version ?? null,
-    packageDigest: instance.packageDigest,
-    lifecycleState: instance.lifecycleState,
-    configReadiness: instance.configReadiness,
-    activationState: instance.activationState,
-    runtimeState: instance.runtimeState,
-    lifecycleRevision: instance.lifecycleRevision,
-    installedAt: instance.installedAt,
-    updatedAt: instance.updatedAt,
-    ...(instance.lastRuntimeError === undefined ? {} : { lastRuntimeError: instance.lastRuntimeError }),
-  };
-}
-
-function projectPlugin(
-  entry: OfficialPluginCatalogEntry,
-  snapshot: PluginInventorySnapshot,
-  instanceOverride?: PluginInstanceRecord,
-) {
-  const instance =
-    instanceOverride ??
-    snapshot.instances.find(
-      (candidate) => candidate.pluginId === entry.pluginId && candidate.lifecycleState === 'installed',
-    );
-  const installedPackage = instance
-    ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-    : undefined;
-  const versionComparison = installedPackage
-    ? compareOfficialPluginVersions(entry.version, installedPackage.version)
-    : undefined;
-  return {
-    catalogId: entry.catalogId,
-    packageName: entry.packageName,
-    version: entry.version,
-    availableVersion: entry.version,
-    pluginId: entry.pluginId,
-    packageDigest: entry.packageDigest,
-    effectiveGrants: [...entry.effectiveGrants],
-    ownerAuthAvailable: entry.ownerAuth !== undefined,
-    updateAvailable: instance !== undefined && versionComparison !== undefined && versionComparison > 0,
-    instance: projectInstance(instance, snapshot),
   };
 }
 
@@ -167,13 +125,35 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
     ...(snapshot.errorCode === undefined ? {} : { errorCode: snapshot.errorCode }),
   });
 
+  const resolveCurrentOfficialInstance = async (instanceId: string) => {
+    const { catalogByPluginId } = await catalogIndexes();
+    return resolveOfficialInstance(await options.inventory.snapshot(), instanceId, catalogByPluginId);
+  };
+
+  const project = (
+    entry: OfficialPluginCatalogEntry,
+    snapshot: PluginInventorySnapshot,
+    instance?: PluginInstanceRecord,
+  ) => projectOfficialPlugin(entry, snapshot, options.meetingIntake, instance);
+
+  if (options.meetingIntake) {
+    registerOfficialPluginMeetingIntakeRoutes(app, {
+      inventory: options.inventory,
+      lifecycle: options.lifecycle,
+      auth: options.auth,
+      meetingIntake: options.meetingIntake,
+      resolve: resolveCurrentOfficialInstance,
+      project: (entry, snapshot, instance) => project(entry, snapshot, instance),
+    });
+  }
+
   app.get('/api/plugins/official', async (request, reply) => {
     const access = requirePluginReadAccess(request);
     if ('error' in access) return pluginAccessError(reply, access);
     const catalog = await catalogProvider.snapshot();
     const inventory = await options.inventory.snapshot();
     return {
-      plugins: catalog.entries.map((entry) => projectPlugin(entry, inventory)),
+      plugins: await Promise.all(catalog.entries.map((entry) => project(entry, inventory))),
       catalog: catalogStatus(catalog),
     };
   });
@@ -203,7 +183,7 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
         instance = await options.lifecycle.prepare(instance.pluginInstanceId, instance.lifecycleRevision);
         snapshot = await options.inventory.snapshot();
       }
-      return projectPlugin(entry, snapshot, instance);
+      return await project(entry, snapshot, instance);
     } catch (error) {
       return sendMutationError(reply, error);
     }
@@ -235,16 +215,25 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
       });
     }
     try {
-      const updated = await options.installer.update(
-        resolved.entry.catalogId,
-        resolved.instance.pluginInstanceId,
-        revision,
-        expectedRelease,
-      );
+      const maintenance = await options.lifecycle.runWithRuntimeSuspended({
+        instanceId: resolved.instance.pluginInstanceId,
+        expectedRevision: revision,
+        stopReason: 'package_update',
+        resumeFailureCode: 'UPDATE_RESUME_FAILED',
+        operation: (stopped) =>
+          options.installer.update(
+            resolved.entry.catalogId,
+            stopped.pluginInstanceId,
+            stopped.lifecycleRevision,
+            expectedRelease,
+          ),
+      });
       const snapshot = await options.inventory.snapshot();
-      const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === updated.pluginInstanceId);
+      const instance = snapshot.instances.find(
+        (candidate) => candidate.pluginInstanceId === maintenance.instance.pluginInstanceId,
+      );
       if (!instance) return reply.status(500).send({ error: 'Updated plugin projection is unavailable' });
-      return projectPlugin(resolved.entry, snapshot, instance);
+      return await project(resolved.entry, snapshot, instance);
     } catch (error) {
       return sendMutationError(reply, error);
     }
@@ -329,8 +318,17 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
             });
           }
         }
+        if (action === 'enable' && options.meetingIntake) {
+          const catchUp = await options.meetingIntake.detect(resolved.entry, resolved.instance);
+          if (catchUp && catchUp.status !== 'idle') {
+            return reply.status(409).send({
+              error: 'Choose whether to restore only future meetings or catch up the frozen window',
+              code: 'CATCH_UP_REQUIRED',
+            });
+          }
+        }
         const updated = await operation(resolved.instance.pluginInstanceId, revision);
-        return projectPlugin(resolved.entry, await options.inventory.snapshot(), updated);
+        return await project(resolved.entry, await options.inventory.snapshot(), updated);
       } catch (error) {
         return sendMutationError(reply, error);
       }

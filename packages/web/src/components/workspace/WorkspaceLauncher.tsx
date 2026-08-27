@@ -7,6 +7,7 @@ import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { WorkspaceSurface } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { RecentTrajectoryRecall } from './RecentTrajectoryRecall';
+import { type LauncherWorkspaceSearch, WorkspaceLauncherSearch } from './WorkspaceLauncherSearch';
 
 export type WorkspaceDevSurface = WorkspaceSurface;
 
@@ -231,12 +232,14 @@ export function WorkspaceLauncher({
   threadId,
   defaultCatId = 'opus',
   actions,
+  workspaceSearch,
 }: {
   onSelectDevSurface?: (surface: WorkspaceDevSurface) => void;
   onOpenStatus?: () => void;
   threadId?: string;
   defaultCatId?: string;
   actions?: ReactNode;
+  workspaceSearch?: LauncherWorkspaceSearch;
 }) {
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
   const [query, setQuery] = useState('');
@@ -291,26 +294,7 @@ export function WorkspaceLauncher({
         {actions && <div className="flex shrink-0 items-center">{actions}</div>}
       </div>
 
-      <label className="mb-5 flex items-center gap-2 rounded-xl border border-cafe-subtle bg-[var(--console-card-bg)] px-3.5 py-3 focus-within:border-cafe-accent/45">
-        <svg
-          aria-hidden="true"
-          className="h-4 w-4 shrink-0 text-cafe-muted"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        >
-          <circle cx="7" cy="7" r="4.5" />
-          <path d="m10.5 10.5 3 3" />
-        </svg>
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索文件、任务、状态或陪伴…"
-          className="min-w-0 flex-1 bg-transparent text-xs text-cafe-black outline-none placeholder:text-cafe-muted"
-          data-testid="workspace-launcher-search"
-        />
-      </label>
+      <WorkspaceLauncherSearch query={query} onQueryChange={setQuery} workspaceSearch={workspaceSearch} />
 
       <div className="space-y-6">
         {!normalizedQuery && threadId && <RecentTrajectoryRecall threadId={threadId} />}

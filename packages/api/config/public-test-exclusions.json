@@ -345,9 +345,9 @@
     },
     {
       "id": "harness-eval-private-measurement-evidence",
-      "match": "harness-eval/(?:friction-measurement-bundle|measurement-bundle-census|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test",
+      "match": "harness-eval/(?:friction-measurement-bundle|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test",
       "category": "private_fixture",
-      "reason": "Measurement census and rejudge checks consume private certificates, verdicts, and replay artifacts that are deliberately absent from the public export.",
+      "reason": "Friction measurement and rejudge checks consume private certificates, verdicts, and replay artifacts that are deliberately absent from the public export.",
       "owner": "@zts212653",
       "introducedBy": "bfa9e2c8f",
       "expiresOn": "2026-08-31"

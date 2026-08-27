@@ -268,9 +268,34 @@ function parseMeetingArtifactCarrier(value: unknown): StoredMessageExtra['meetin
   ) {
     return undefined;
   }
+  const hasVersionedResource =
+    candidate.resourceRef !== undefined ||
+    candidate.sourceRevision !== undefined ||
+    candidate.byteLength !== undefined ||
+    candidate.contentType !== undefined;
+  if (
+    hasVersionedResource &&
+    (!isNonEmptyString(candidate.resourceRef) ||
+      candidate.resourceRef.length > 1_024 ||
+      typeof candidate.sourceRevision !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/.test(candidate.sourceRevision) ||
+      !Number.isSafeInteger(candidate.byteLength) ||
+      Number(candidate.byteLength) < 0 ||
+      candidate.contentType !== 'text/plain')
+  ) {
+    return undefined;
+  }
   return {
     intakeId: candidate.intakeId,
     sourceHandle: candidate.sourceHandle,
+    ...(hasVersionedResource
+      ? {
+          resourceRef: candidate.resourceRef as string,
+          sourceRevision: candidate.sourceRevision as `sha256:${string}`,
+          byteLength: candidate.byteLength as number,
+          contentType: 'text/plain' as const,
+        }
+      : {}),
     trust: 'untrusted_external',
     instructionPolicy: 'data_only',
   };

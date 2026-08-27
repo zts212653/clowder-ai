@@ -50,7 +50,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     });
   });
 
-  it('requires a signed binding and rejects a substituted replyTo on the gpt-pro agent-key path', async () => {
+  it('admits independent gpt-pro posts while binding every source-reply attempt', async () => {
     process.env.DEFAULT_OWNER_USER_ID = 'alice';
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { InvocationRegistry } = await import(
@@ -63,6 +63,7 @@ describe('F247 source-bound Remote MCP return contract', () => {
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 source-bound return');
+    await threadStore.addParticipants(thread.id, ['codex']);
     const source = store.append({
       userId: 'alice',
       catId: 'codex-sol',
@@ -98,6 +99,37 @@ describe('F247 source-bound Remote MCP return contract', () => {
       socketManager: { broadcastAgentMessage: () => undefined },
     });
 
+    const proactive = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'independent proactive analysis',
+        threadId: thread.id,
+        targetCats: ['codex'],
+      },
+    });
+    assert.equal(proactive.statusCode, 200);
+    assert.ok(proactive.json().messageId);
+    const proactiveStored = (await store.getByThread(thread.id)).find(
+      (message) => message.content === 'independent proactive analysis',
+    );
+    assert.ok(proactiveStored);
+    assert.equal(proactiveStored.replyTo, undefined);
+
+    const proactiveReplace = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: 'must not replace a source without invocation provenance',
+        threadId: thread.id,
+        streamDisposition: 'replace_final',
+      },
+    });
+    assert.equal(proactiveReplace.statusCode, 400);
+    assert.equal(proactiveReplace.json().kind, 'replace_final_agent_key_unsupported');
+
     const missingBinding = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
@@ -106,6 +138,15 @@ describe('F247 source-bound Remote MCP return contract', () => {
     });
     assert.equal(missingBinding.statusCode, 400);
     assert.equal(missingBinding.json().kind, 'cloud_return_binding_required');
+
+    const missingReplyTo = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: { content: 'missing reply source', threadId: thread.id, cloudReturnBinding: binding },
+    });
+    assert.equal(missingReplyTo.statusCode, 400);
+    assert.equal(missingReplyTo.json().kind, 'cloud_return_binding_required');
 
     const substituted = await app.inject({
       method: 'POST',

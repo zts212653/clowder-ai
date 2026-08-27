@@ -160,13 +160,17 @@ export function formatContinuationPrompt(capsule: CollaborationContinuityCapsule
     ].join('\n');
   }
   if (capsule.continuationReason === 'runtime_replacement' && capsule.replacement) {
+    const recoveryEvidence =
+      capsule.replacement.cause === 'active_writer_reborn'
+        ? `${capsule.replacement.diagnostics.classification} (${capsule.replacement.diagnostics.confidence} confidence)`
+        : capsule.replacement.rejection;
     return [
       '[System Continuation]',
       'Your previous native session was replaced during automatic native runtime recovery.',
       `Thread: ${capsule.threadId}`,
       `Cat: ${capsule.catId}`,
       `Previous native thread: ${capsule.replacement.previousNativeThreadId}`,
-      `Recovery evidence: ${capsule.replacement.diagnostics.classification} (${capsule.replacement.diagnostics.confidence} confidence).`,
+      `Recovery evidence: ${recoveryEvidence}.`,
       'Continue the same structured work using the injected session bootstrap and durable thread evidence.',
       'Confirm the current workspace, branch, task state, and completed side effects before resuming.',
       'Do not repeat already completed external side effects.',

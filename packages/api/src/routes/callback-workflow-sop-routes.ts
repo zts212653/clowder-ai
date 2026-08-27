@@ -4,17 +4,22 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStoreContract.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IWorkflowSopStore } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { VersionConflictError } from '../domains/cats/services/stores/ports/WorkflowSopStore.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
-import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { requireCallbackAuth, requireCallbackPrincipal } from './callback-auth-prehandler.js';
+import { resolvePrincipalThread } from './callback-scope-helpers.js';
 
-/** Minimal thread store interface for resolver — only needs get(). */
+/** Thread store surface required for owner-scoped current/cross-thread resolution. */
 export interface WorkflowThreadStoreLike {
-  get(
-    threadId: string,
-  ): { backlogItemId?: string; userId?: string } | null | Promise<{ backlogItemId?: string; userId?: string } | null>;
+  get: IThreadStore['get'];
+  list: IThreadStore['list'];
 }
+
+const getWorkflowSopCallbackSchema = z.object({
+  threadId: z.string().min(1).optional(),
+});
 
 const updateWorkflowSopCallbackSchema = z.object({
   backlogItemId: z.string().min(1).optional(), // F073 follow-up: now optional — server resolves via featureId
@@ -228,6 +233,50 @@ export function registerCallbackWorkflowSopRoutes(
   },
 ): void {
   const { workflowSopStore, backlogStore, taskStore, threadStore } = deps;
+
+  app.get('/api/callbacks/get-workflow-sop', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+    const parsed = getWorkflowSopCallbackSchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query', details: parsed.error.issues };
+    }
+    if (!threadStore) {
+      reply.status(503);
+      return { error: 'Thread store not configured for workflow SOP reads' };
+    }
+
+    const threadResult = await resolvePrincipalThread(principal, parsed.data.threadId, {
+      threadStore,
+      accessDeniedError: 'Workflow SOP thread access denied',
+    });
+    if (!threadResult.ok) {
+      reply.status(threadResult.statusCode);
+      return { error: threadResult.error };
+    }
+
+    const thread = await threadStore.get(threadResult.threadId);
+    if (!thread?.backlogItemId) {
+      reply.status(404);
+      return { error: 'Workflow SOP not found' };
+    }
+    const ownedItem = await backlogStore.get(thread.backlogItemId, principal.userId);
+    if (!ownedItem) {
+      reply.status(404);
+      return { error: 'Workflow SOP not found' };
+    }
+    const workflowSop = await workflowSopStore.get(thread.backlogItemId);
+    if (!workflowSop) {
+      reply.status(404);
+      return { error: 'Workflow SOP not found' };
+    }
+    return {
+      threadId: threadResult.threadId,
+      backlogItemId: thread.backlogItemId,
+      workflowSop,
+    };
+  });
 
   app.post('/api/callbacks/update-workflow-sop', async (request, reply) => {
     const record = requireCallbackAuth(request, reply);

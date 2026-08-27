@@ -1,6 +1,6 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-08-24T22:14:10Z
+generatedAt: 2026-08-27T06:35:32Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
@@ -361,3 +361,34 @@ entries:
       actionGate: keep_observe_only
       hardBlockReason: This public instance has not certified measurement validity for
         eval:task-outcome.
+  - domainId: eval:trajectory-inspector
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F299
+      ownerCatId: fable5
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f299-trajectory-inspector-episodes
+      kind: trajectory-inspector-window
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f299-trajectory-inspector-episodes/trajectory-inspector-window public
+        registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 11
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:trajectory-inspector.

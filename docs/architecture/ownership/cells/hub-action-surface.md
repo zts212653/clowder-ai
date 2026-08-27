@@ -2,7 +2,7 @@
 cell_id: hub-action-surface
 title: Hub Action Surface
 summary: First-party Hub user-visible actions that let cats surface files, previews, rich blocks, workflow state, and other in-context artifacts to the user.
-canonical_features: [F022, F063, F096, F120, F131, F223, F232, F284]
+canonical_features: [F022, F063, F096, F120, F131, F223, F232, F284, F290, F299, F307]
 code_anchors:
   - packages/shared/src/types/context-attachment.ts
   - packages/shared/src/schemas/context-attachment.schema.ts
@@ -29,6 +29,9 @@ doc_anchors:
   - docs/features/F223-capability-surface-registry.md
   - docs/features/F232-thread-artifacts-panel.md
   - docs/features/F284-contextual-workspace-shell.md
+  - docs/features/F290-ai-native-collective.md
+  - docs/features/F299-workspace-invocation-trajectory.md
+  - docs/features/F307-composable-workbench.md
   - cat-cafe-skills/refs/capability-wakeup-index.md
 static_scan_hints: [ContextAttachment, context_attachment, Add to chat, workspace:navigate, preview:auto-open, create_rich_block, rich block, workspace panel, browser preview, surface to user, in-context artifact]
 cited_by:
@@ -36,6 +39,9 @@ cited_by:
   - {feature: F232, date: 2026-06-12, delta: update — thread artifacts aggregation endpoint + ArtifactsPanel drawer}
   - {feature: F284, date: 2026-07-31, delta: update — contextual Workspace shell and deterministic existing-surface reveal policy}
   - {feature: F063, date: 2026-08-08, delta: update — structured composer/message context attachments and text-selection Add to chat}
+  - {feature: F290, date: 2026-08-26, delta: boundary — Collective owns lineage, permissions and result targets but no Workspace mode or layout persistence}
+  - {feature: F299, date: 2026-08-26, delta: update — invocation and Agent Run records/lifecycle remain source-owned while Workbench consumes typed descriptors}
+  - {feature: F307, date: 2026-08-26, delta: update — application-level working-set, typed tab/split/sidecar topology and restore owner}
 ---
 
 # Hub Action Surface
@@ -46,11 +52,14 @@ F223 owns the cross-cutting capability surface registry. This cell owns first-pa
 
 This cell is separate from `action-plane`: action-plane owns external/vendor resource mutations such as Lark/WeCom docs, tasks, meetings, dry-run, idempotency, and resource handles. Hub action surface owns first-party UI state and display side effects.
 
+F307 owns the application-level Composable Workbench contract: working-set identity, typed tabs, active/split state, sidecar promotion, order, pin and restore validation. F284 owns the existing contextual right-side Workspace v1—stable entry, launcher, current focus, Activity and deterministic reveal—and is a migration source/consumer of F307, not a second layout owner. F290 supplies descriptors for Collective-owned Channel, Artifact, Topic, Roadmap and Review objects, including lineage, permission projection, Collective-scoped result targets and provenance. Invocation and Agent Run records/lifecycle remain owned by runtime/F299 and enter F307 through their own descriptors. Product records do not leak into the generic Workbench reducer, while product adapters do not persist a second tab/split truth.
+
 ## Use This When
 
 - Adding or changing a first-party Clowder AI action that opens, reveals, previews, renders, or updates a Hub surface for the user.
 - Adding structured Thread, Workspace File, or Quote context that must survive composer drafts, message persistence, model consumption, and Hub rendering without Markdown identity heuristics.
 - Adding a typed cat execution surface for an existing Hub API route such as Workspace navigation or Browser Preview auto-open.
+- Adding an F307 typed tab, split, sidecar promotion or restore rule that must work across product-owned Workbench surfaces.
 - Adding socket emission, room targeting, thread/worktree scoping, audit events, or verification probes for user-visible Hub side effects.
 - Deciding whether a skill should call an MCP tool, helper, callback route, or existing Hub API to surface an artifact to the user.
 
@@ -68,7 +77,9 @@ This cell is separate from `action-plane`: action-plane owns external/vendor res
 - Do not use this cell to justify MCP wrappers for discovery alone. A first-party Hub MCP wrapper is valid only when it replaces fragile manual calls and carries schema, scoping, audit, or verification value.
 - Do not move canonical eval ownership here. F192 remains the owner of `eval:capability-wakeup`, verdict handoff, and re-eval closure.
 - Do not move raw telemetry ownership here. F153 owns telemetry; this cell may emit or consume audit/probe signals.
+- Do not move Collective content, lineage, permission or result-target ownership into F307. F290 supplies those records through the Workbench boundary.
+- Do not let F284 or any product Feature create a second working-set/layout persistence owner. F284 remains the contextual Workspace v1 entry and migration baseline.
 
 ## Static Scan Hints
 
-Watch for `/api/workspace/navigate`, `workspace:navigate`, `/api/preview/auto-open`, `preview:auto-open`, `cat_cafe_create_rich_block`, rich block rendering, `setWorkspaceOpenFile`, `setWorkspaceRevealPath`, Browser Preview auto-open, and skill docs that teach cats to call first-party Hub APIs by hand.
+Watch for `/api/workspace/navigate`, `workspace:navigate`, `/api/preview/auto-open`, `preview:auto-open`, `cat_cafe_create_rich_block`, rich block rendering, `setWorkspaceOpenFile`, `setWorkspaceRevealPath`, Browser Preview auto-open, and skill docs that teach cats to call first-party Hub APIs by hand. Until F307 passes Design Gate, no domain Feature may register its own generic Workspace mode or layout persistence.

@@ -82,6 +82,35 @@ describe('GET thread-context with workflowSop', () => {
     return app;
   }
 
+  function seedWorkflowSop(backlogItemId, capsuleChars) {
+    workflowSopStore._store.set(backlogItemId, {
+      featureId: 'F236',
+      backlogItemId,
+      sopDefinitionId: 'development',
+      stage: 'impl',
+      batonHolder: 'opus',
+      nextSkill: 'tdd',
+      resumeCapsule: {
+        goal: 'g'.repeat(capsuleChars),
+        done: [],
+        currentFocus: '',
+      },
+      checks: {
+        remoteMainSynced: 'verified',
+        qualityGatePassed: 'unknown',
+        reviewApproved: 'unknown',
+        visionGuardDone: 'unknown',
+      },
+      version: 1,
+      updatedAt: Date.now(),
+      updatedBy: 'opus',
+    });
+  }
+
+  function seedOversizedWorkflowSop(backlogItemId) {
+    seedWorkflowSop(backlogItemId, 90_000);
+  }
+
   test('returns workflowSop when thread has linked backlogItemId', async () => {
     const app = await createApp();
 
@@ -130,6 +159,130 @@ describe('GET thread-context with workflowSop', () => {
     // version and updatedAt should NOT be in the response
     assert.equal(body.workflowSop.version, undefined);
     assert.equal(body.workflowSop.updatedAt, undefined);
+  });
+
+  test('bounds an oversized workflowSop even when the thread has no messages', async () => {
+    const app = await createApp();
+    const thread = threadStore.create('user-1', 'F236 oversized workflow SOP', 'default');
+    threadStore.linkBacklogItem(thread.id, 'item-f236-oversized-empty');
+    seedOversizedWorkflowSop('item-f236-oversized-empty');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.messages, []);
+    assert.equal(body.workflowSop.oversized, true);
+    assert.equal(body.workflowSop.truncated, true);
+    assert.equal(body.workflowSop.serializedBytes > 24_000, true);
+    assert.equal('resumeCapsule' in body.workflowSop, false);
+    assert.deepEqual(body.workflowSop.drillDown, {
+      kind: 'workflow_sop',
+      tool: 'cat_cafe_get_workflow_sop',
+      args: { threadId: thread.id },
+    });
+  });
+
+  test('keeps full-message paging bounded when workflowSop itself is oversized', async () => {
+    const app = await createApp();
+    const thread = threadStore.create('user-1', 'F236 oversized workflow SOP paging', 'default');
+    threadStore.linkBacklogItem(thread.id, 'item-f236-oversized-paging');
+    seedOversizedWorkflowSop('item-f236-oversized-paging');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const expectedIds = [];
+    for (let index = 0; index < 3; index += 1) {
+      const message = messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        threadId: thread.id,
+        content: `workflow-sop-page-${index}-${'m'.repeat(10_000)}`,
+        mentions: [],
+        timestamp: index + 1,
+      });
+      expectedIds.push(message.id);
+    }
+
+    const returnedIds = [];
+    let cursor;
+    for (let page = 0; page < 3; page += 1) {
+      const params = new URLSearchParams({ responseMode: 'full' });
+      if (cursor) params.set('cursor', cursor);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${params}`,
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+
+      assert.equal(response.statusCode, 200, response.body);
+      assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+      const body = JSON.parse(response.body);
+      assert.equal(body.workflowSop.oversized, true);
+      assert.equal(body.workflowSop.truncated, true);
+      for (const message of body.messages) {
+        assert.equal(typeof message.content, 'string', 'ordinary paged messages remain complete');
+        assert.equal(message.truncated, false);
+        returnedIds.push(message.id);
+      }
+      if (!body.hasMore) break;
+      assert.equal(typeof body.nextCursor, 'string');
+      cursor = body.nextCursor;
+    }
+
+    assert.deepEqual(returnedIds, expectedIds);
+    assert.equal(new Set(returnedIds).size, expectedIds.length);
+  });
+
+  test('uses the bounded SOP base when it preserves later ordinary full messages', async () => {
+    const app = await createApp();
+    const thread = threadStore.create('user-1', 'F236 moderate workflow SOP paging', 'default');
+    threadStore.linkBacklogItem(thread.id, 'item-f236-moderate-paging');
+    seedWorkflowSop('item-f236-moderate-paging', 15_000);
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const expectedContents = [`${'a'.repeat(500)}`, `${'b'.repeat(10_000)}`];
+    const expectedIds = expectedContents.map(
+      (content, index) =>
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          threadId: thread.id,
+          content,
+          mentions: [],
+          timestamp: index + 1,
+        }).id,
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.ok(Buffer.byteLength(response.body, 'utf8') <= 24_000);
+    const body = JSON.parse(response.body);
+    assert.equal(body.workflowSop.oversized, true);
+    assert.equal(body.workflowSop.truncated, true);
+    assert.equal(body.hasMore, false);
+    assert.equal(body.nextCursor, undefined);
+    assert.deepEqual(
+      body.messages.map((message) => message.id),
+      expectedIds,
+    );
+    assert.deepEqual(
+      body.messages.map((message) => message.content),
+      expectedContents,
+    );
+    assert.equal(
+      body.messages.every((message) => message.truncated === false),
+      true,
+    );
+    assert.equal(new Set(body.messages.map((message) => message.id)).size, expectedIds.length);
   });
 
   test('returns thread context without workflowSop when stored SOP stage is invalid even with nextSkill override', async () => {

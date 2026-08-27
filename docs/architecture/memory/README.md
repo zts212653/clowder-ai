@@ -4,9 +4,9 @@ doc_kind: architecture
 architecture_domain: memory
 truth_mode: current-map
 canonical_for: memory-architecture-navigation
-as_of: 2026-08-18
+as_of: 2026-08-26
 freshness_owner: memory-architecture
-constructor_version: memory-atlas-v1
+constructor_version: memory-atlas-v1.2
 view_state: fresh
 feature_ids: [F102, F152, F163, F186, F188, F200, F209, F221, F227, F231, F255, F256, F260, F263, F271, F272, F276, F281, F282, F287, F296]
 related_features: [F139, F148, F153, F192, F229, F237, F242, F246, F267]
@@ -16,13 +16,15 @@ related_docs:
   - docs/architecture/memory-system-overview.md
   - docs/architecture/memory-philosophy.md
   - docs/architecture/retrieval-pipeline-deep-dive.md
+  - docs/architecture/memory-write-lane-census.md
   - docs/architecture/memory-standing-reflex-contract.md
   - docs/architecture/memory-derived-view-contract.md
   - docs/architecture/memory-outcome-attribution-source-map.md
   - feature-specs/2026-08-15-memory-system-research-first-roadmap.md
+  - feature-discussions/2026-08-24-memory-belief-admission/README.md
 topics: [memory, architecture, atlas, evidence, recall, write-side, standing-reflex, derived-view, context-presentation, governance, outcome]
 created: 2026-08-18
-revised: 2026-08-18
+revised: 2026-08-26
 status: active
 author: "小太阳·Maine Coon/GPT-5.6 Sol"
 description: "Clowder AI 记忆系统的唯一导航入口：用九个观察面登记权威 claim，用六层叙事、端到端状态流和问题路由连接现有架构、合同、census、source map、feature 与历史材料。"
@@ -31,7 +33,7 @@ description_author: codex-sol
 description_generated_by: codex-sol@gpt-5.6-sol
 description_generated_at: 2026-08-18T12:55:00Z
 description_confirmed_by: codex-sol
-description_updated_at: 2026-08-18T12:55:00Z
+description_updated_at: 2026-08-26T06:00:00Z
 ---
 
 # Memory Architecture Atlas｜记忆系统多视图图谱
@@ -74,7 +76,8 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 - **证据层**保存原文、原件和 source coordinate；它可以被纠正或遗忘，但不靠摘要维持真相。
 - **导航层**用索引、别名、图和指纹告诉猫去哪里找；导航产物可重建，不拥有内容。
 - **读取层**让猫按任务主动搜索、下钻、回源；给坐标，不把候选喂成结论。
-- **写入层**包含 Entity、Taste、Profile、Event、Person、Knowledge、Diary 七条不同车道。
+- **写入层**包含 Entity、Taste、Profile、Event、Person、Diary 等产品车道，也包含 LL、ADR、
+  Method、feedback/episode 等 durable 文件习俗；每一面都要说明从哪里感知、怎样提案、谁裁决、谁消费。
 - **主动性层**提供一次“现在是否值得判断”的机会；detector 只报事实，猫给 disposition。
 - **治理层**负责批准、拒绝、纠正、遗忘、权限和派生视图失效。
 
@@ -122,7 +125,7 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 | **拓扑面** | 当前有哪些职责模块，它们怎样连接、谁不拥有谁？ | [Memory System Overview](../memory-system-overview.md) | [Memory ownership cell](../ownership/cells/memory.md)、[Proactive Relationship Loop](../ownership/cells/proactive-relationship-loop.md)、Research-First roadmap |
 | **真相与投影面** | 什么是 canonical truth，什么只是可重建 view；过期怎样可见？ | [Derived View Contract](../memory-derived-view-contract.md) | [Derived View Census](../memory-derived-view-census.md)、[ADR-020](../../decisions/020-f102-memory-system-architecture.md) |
 | **读取面** | 猫怎样搜索、融合、重排、下钻并回到原文？ | [Retrieval Pipeline Deep Dive](../retrieval-pipeline-deep-dive.md) | [Memory Cue Source Map](../memory-cue-source-map.md)、[F200](../../features/F200-memory-recall-eval.md)、[F287](../../features/F287-memory-cue-plane.md) |
-| **写入面** | 哪些内容进入哪条 typed lane；trigger、validation、consumption 是否闭环？ | [Write Lane Census](../memory-write-lane-census.md) | 各 lane feature spec；[Write-Side Autopsy](../memory-write-side-autopsy-2026-07.md) 只作历史基线 |
+| **写入面** | 哪些产品 lane 与文件习俗能改变未来判断；感知、提案、裁决、消费是否闭环？ | [Write Surface Census](../memory-write-lane-census.md) | 各 lane/claim-family owner；[Write-Side Autopsy](../memory-write-side-autopsy-2026-07.md) 只作历史基线 |
 | **主动性面** | 什么时候值得让猫判断 `propose / defer / abstain` 或浮现旧记忆？ | [Standing Reflex Contract](../memory-standing-reflex-contract.md) | [Context Injection & Reflex Source Map](../context-injection-reflex-source-map.md)、[F282](../../features/F282-proactive-memory-pipeline.md)、[F276](../../features/F276-people-relationship-memory.md)、[F287](../../features/F287-memory-cue-plane.md) |
 | **呈现面** | 已经 admitted 的内容怎样按 carrier、continuity、epoch 和 tier 进入当前 context？ | [F296 Context Presentation](../../features/F296-continuity-aware-context-injection.md) | [Context Injection & Reflex Source Map](../context-injection-reflex-source-map.md) |
 | **治理面** | 谁能批准、纠正、遗忘、retire、改变 ACL；失效怎样传播？ | lane-owned feature specs + 两份 frozen contract | [Memory ownership cell](../ownership/cells/memory.md)、ADR-028 |
@@ -135,7 +138,7 @@ Clowder AI 的记忆系统不是一个数据库，也不是“把旧聊天自动
 | 证据层 | 真相与投影面、治理面 | owner、ACL、revision、forget |
 | 导航层 | 读取面、真相与投影面 | index/view 的 lineage 与 invalidation |
 | 读取层 | 读取面、结果面 | presented ≠ inspected ≠ used |
-| 写入层 | 写入面、治理面 | 七条 lane 各有 destination owner，不共享审批语义 |
+| 写入层 | 写入面、治理面 | durable surface 各有 canonical authority，不共享审批语义 |
 | 主动性层 | 主动性面、呈现面 | why/when/disposition 与“本 epoch 怎样送达”属于不同权力域 |
 | 治理层 | 治理面、结果面 | outcome observation 不能直接获得纠错或 truth authority |
 
@@ -156,8 +159,8 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | 记忆系统总体 current/target 拓扑 | [Memory System Overview](../memory-system-overview.md) | 只描述其职责，不复制闭环账本 | 新增/移除模块、权力边界或 opportunity plane |
 | 长期原则与否定式判据 | [Memory Philosophy](../memory-philosophy.md) | 一句话摘要 + 链接 | operator/ADR 改变原则，或原则被正式 supersede |
 | Pull recall 的真实执行管线 | [Retrieval Deep Dive](../retrieval-pipeline-deep-dive.md) | 说明它横跨导航、读取、证据回源 | 检索阶段、排序权力或输出 envelope 改变 |
-| 七条写入车道的 2026-08-15 快照 | [Write Lane Census](../memory-write-lane-census.md) | 明示它是 as-of census | 新 census supersede；单 lane 当前状态仍回 feature spec |
-| WriteOpportunity 的共享 invariant | [Standing Reflex Contract](../memory-standing-reflex-contract.md) | 解释 why/when/disposition 边界 | 合同版本变化 |
+| Durable 写入面的四拍 census（产品 lane + 文件习俗） | [Write Surface Census](../memory-write-lane-census.md) | 明示其中 counts 是 as-of snapshot；不复制单 lane current state | census universe/authority map 变化；单 lane 当前状态仍回 feature spec |
+| WriteOpportunity 与 durable-surface closure 的共享 invariant | [Standing Reflex Contract](../memory-standing-reflex-contract.md) | 解释四拍与 why/when/disposition 边界 | 合同版本变化 |
 | Derived view 的 lineage/invalidation | [Derived View Contract](../memory-derived-view-contract.md) | 解释 truth/view 边界 | 合同版本变化 |
 | RecallOpportunity catalog 与 cue 生命周期 | [F287](../../features/F287-memory-cue-plane.md) | 指向 feature 与 [source map](../memory-cue-source-map.md) | producer catalog、authority 或 lifecycle contract 改变 |
 | Context presentation / continuity | [F296](../../features/F296-continuity-aware-context-injection.md) | 不复制 carrier 支持矩阵和运行状态 | presentation authority、epoch 或 carrier contract 改变 |
@@ -172,11 +175,12 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | “为什么不直接抽取、自动写、自动相信？” | Memory Philosophy | 需要争论过程与外部证据时进 rethink/source audit |
 | “一次 search 到底经历什么？” | Retrieval Pipeline Deep Dive | 需要召回健康/行为反馈时进 F200/F256 |
 | “已有记忆为什么会在此刻浮现？” | F287 + Memory Cue Source Map | 需要 provider 怎样送达时进 F296 |
-| “一件新事怎样变成长期记忆？” | Write Lane Census | 找到 lane 后进入对应 feature spec |
+| “一件新事怎样变成长期记忆或行为规则？” | Write Surface Census | 找到产品 lane 或文件 claim family 后进入对应 authority owner |
 | “谁决定现在值得提议写入？” | Standing Reflex Contract | 查实际注入面与 owner 时进 injection/reflex source map |
 | “画像、摘要、索引过期了怎么办？” | Derived View Contract | 查现有 11 类 view 的病灶时进 census |
 | “代码合入后猫真的看到了吗？” | F296 | 查 outcome 能证明到哪时进 outcome source map |
 | “它到底有没有帮助任务？” | Outcome Source Map | 只有明确 keep/tune/sunset consumer 才进入 eval 设计 |
+| “搜到了以后，这轮最多允许怎么用？” | Claim / Use Admission 讨论收敛 | 当前仍回 Philosophy、F287、F296、Derived View Contract 与 Outcome Source Map 分别查边界；讨论稿不是 frozen contract |
 | “一条 cue 怎样成为猫自己的 seed、意图和行动？” | [F255](../../features/F255-auto-dream.md) + [F272](../../features/F272-cat-jumps-on-the-table.md) | 查跨 owner 边界时进 Proactive Relationship Loop cell |
 | “现在做到哪了？” | 对应 feature doc + Research-First roadmap | 不从历史 discussion 或旧聊天卡片推断 |
 | “为什么会长成这样？” | rethink、autopsy、postmortem | 历史材料不能反向覆盖 current truth |
@@ -193,6 +197,22 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | **Discussion / research** | 推理、分歧、prior art、出处 | 保留论证史，结论回流 canonical owner | 把探索中的假说当 current contract |
 | **Postmortem / autopsy** | 历史事故与 failure mode | 追加修正和后续处置 | 用已修事故描述当前 runtime |
 
+### 开放设计接缝：Claim / Use Admission（尚未冻结）
+
+2026-08-24 的两篇思辨稿没有发现“缺了一个中央 Judge 服务”，而是给既有接缝命了名：
+`retrieved / presented / inspected` 之后，当前 consumer 仍需决定候选只可用于导航、soft context，还是
+足以支撑 factual claim / action basis。现有 owner 分散在 Philosophy（主权）、F287（cue lifecycle）、
+F296（presentation ceiling）、Derived View Contract（source/view 上限）与 Outcome Source Map（可观测
+层级）；在明确 consumer 与 trial 前，Atlas 只负责导航，不替它们拼出第二套 contract。
+
+同轮还登记了一个可能的合同 delta：现有 `sourceRefs/revisions` 能回源，但未显式表达多个 derived
+views 是否共享同一 evidence ancestor。**同祖后代不能冒充独立佐证**；具体字段与归属仍开放，不先
+实现 lineage registry 或 detector。
+
+优先级不因此改写：Claim / Use Admission 修的是读侧污染，Standing Reflex / trigger 修的是“材料根本
+没有获得判断机会”。黄挺案即使读侧合同满分，也救不回一只没有响过的门铃。Scout 的带路权同样
+需要 query→candidate provenance 与多路 coverage，但不另建中央 Judge。
+
 历史入口：
 
 - [2026-07 Write-Side Autopsy](../memory-write-side-autopsy-2026-07.md)
@@ -205,11 +225,11 @@ F255/F272 的 owned seed、intent 与行动是记忆循环的下游主体边界�
 | 字段 | 本 Atlas 的值 |
 |---|---|
 | `sourceRefs` | 上述 claim registry 中的 canonical docs |
-| `sourceRevision` | 初版取证基线 `main@3a5d1aa433853b3a98bdea152ceae8bad8e1d52e`；运行状态仍回当前 feature truth，不在 Atlas 复制 |
-| `constructedAt / asOf` | 2026-08-18 |
+| `sourceRevision` | 初版取证基线 `main@3a5d1aa433853b3a98bdea152ceae8bad8e1d52e`；v1.1 语义增量回源 2026-08-24 discussion；运行状态仍回当前 feature truth，不在 Atlas 复制 |
+| `constructedAt / asOf` | 初版 2026-08-18；v1.1 重验 2026-08-24 |
 | `validTime` | 直到下列 invalidator 命中；时间流逝本身不是失效证明 |
 | `ACL intersection` | 只引用 workspace 内公开共享文档；不复制 owner-private payload |
-| `constructorVersion` | `memory-atlas-v1` |
+| `constructorVersion` | `memory-atlas-v1.2` |
 | `state` | `fresh`；命中 invalidator 后必须先标 `suspect`，不能继续冒充当前入口 |
 
 ### Invalidators

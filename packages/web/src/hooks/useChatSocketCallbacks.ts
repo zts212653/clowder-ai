@@ -13,8 +13,6 @@ interface ExternalDeps {
   handleAgentMessage: SocketCallbacks['onMessage'];
   resetTimeout: () => void;
   clearDoneTimeout: (threadId?: string) => void;
-  handleAuthRequest: NonNullable<SocketCallbacks['onAuthorizationRequest']>;
-  handleAuthResponse: NonNullable<SocketCallbacks['onAuthorizationResponse']>;
   onNavigateToThread?: (threadId: string) => void;
   onIndexEvent?: SocketCallbacks['onIndexEvent'];
 }
@@ -29,8 +27,6 @@ export function useChatSocketCallbacks({
   handleAgentMessage,
   resetTimeout,
   clearDoneTimeout,
-  handleAuthRequest,
-  handleAuthResponse,
   onNavigateToThread,
   onIndexEvent,
 }: ExternalDeps): SocketCallbacks {
@@ -122,8 +118,6 @@ export function useChatSocketCallbacks({
       onThreadBranched: () => {
         void invalidateSidebarProjection();
       },
-      onAuthorizationRequest: handleAuthRequest,
-      onAuthorizationResponse: handleAuthResponse,
       onGameStateUpdate: (data) => {
         const view = data.view as GameView;
         // P1-3 fix: Only accept updates for the current thread
@@ -154,8 +148,6 @@ export function useChatSocketCallbacks({
       requestStreamCatchUp,
       resetTimeout,
       clearDoneTimeout,
-      handleAuthRequest,
-      handleAuthResponse,
       onNavigateToThread,
       onIndexEvent,
       threadId,

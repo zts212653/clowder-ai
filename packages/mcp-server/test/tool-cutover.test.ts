@@ -101,6 +101,43 @@ describe('F286 atomic cutover guard', () => {
     assert.equal(result.ok, true);
   });
 
+  it('keeps a landed cutover manifest as historical truth after the protected baseline advances', () => {
+    const result = validateAtomicCutovers({
+      before: [newEntry],
+      after: [newEntry],
+      manifests: [manifest()],
+      scans: [cleanScan()],
+    });
+
+    assert.deepEqual(result.findings, []);
+    assert.equal(result.ok, true);
+
+    const resurrected = validateAtomicCutovers({
+      before: [newEntry],
+      after: [newEntry],
+      manifests: [manifest()],
+      scans: [
+        {
+          ...cleanScan(),
+          matches: [{ root: 'packages/api/src', path: 'packages/api/src/resurrected.ts', line: 1 }],
+        },
+      ],
+    });
+    assert.ok(resurrected.findings.some((finding) => finding.code === 'stale-retired-reference'));
+  });
+
+  it('keeps cross-family validation active for historical manifests', () => {
+    const result = validateAtomicCutovers({
+      before: [newEntry],
+      after: [newEntry],
+      manifests: [manifest({ resource: { kind: 'family', resourceFamily: 'other' } })],
+      scans: [cleanScan()],
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some((finding) => finding.code === 'cross-family-cutover'));
+  });
+
   it('rejects a manifest whose old/new sets do not exactly cover the derived delta', () => {
     const result = validateAtomicCutovers({
       before: [oldEntry],

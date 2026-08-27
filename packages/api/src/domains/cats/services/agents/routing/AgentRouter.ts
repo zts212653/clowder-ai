@@ -540,6 +540,10 @@ export interface AgentRouterOptions {
   sessionChainStore?: ISessionChainStore;
   /** F296 B3b-1: persistent context epoch and cold/hot mode owner. */
   contextEpochOwner?: ContextEpochOwner;
+  /** F296: authenticated Claude project-hook readiness from API bootstrap. */
+  hookAuthenticationReady?: boolean | (() => boolean);
+  /** F296: project-local PreCompact carrier readiness for the invocation workspace. */
+  claudeProjectHookCarrierReady?: boolean | ((projectRoot: string) => boolean);
   /** F296 B3b-2: shared provider-presentation delivery ledger. */
   presentationLedger?: PresentationLedger;
   /** F211 Phase A2: runtime sidecar for provider runtime session metadata */
@@ -604,8 +608,6 @@ export interface AgentRouterOptions {
   turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222: Frustration auto-issue store */
   frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  /** F222: Pending request store — cancel burst detection */
-  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229: Concierge config store for duty-cat岗位 prompt injection */
   conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
@@ -653,6 +655,8 @@ export class AgentRouter {
   private threadStore: IThreadStore | null;
   private sessionChainStore: ISessionChainStore | undefined;
   private contextEpochOwner: ContextEpochOwner | undefined;
+  private hookAuthenticationReady: boolean | (() => boolean);
+  private claudeProjectHookCarrierReady: boolean | ((projectRoot: string) => boolean);
   private presentationLedger: PresentationLedger | undefined;
   private runtimeSessionStore: IRuntimeSessionStore | undefined;
   private transcriptWriter: TranscriptWriter | undefined;
@@ -701,7 +705,6 @@ export class AgentRouter {
   private turnCustodyProjectionService?: import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyProjectionService;
   /** F222 */
   private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
-  private pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F229 */
   private conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
   /** F229 Phase B */
@@ -815,6 +818,8 @@ export class AgentRouter {
     this.threadStore = options.threadStore ?? null;
     this.sessionChainStore = options.sessionChainStore;
     this.contextEpochOwner = options.contextEpochOwner;
+    this.hookAuthenticationReady = options.hookAuthenticationReady ?? false;
+    this.claudeProjectHookCarrierReady = options.claudeProjectHookCarrierReady ?? false;
     this.presentationLedger = options.presentationLedger;
     this.runtimeSessionStore = options.runtimeSessionStore;
     this.transcriptWriter = options.transcriptWriter;
@@ -843,7 +848,6 @@ export class AgentRouter {
     this.ballCustody = options.ballCustody;
     this.turnCustodyProjectionService = options.turnCustodyProjectionService;
     this.frustrationIssueStore = options.frustrationIssueStore;
-    this.pendingRequestStore = options.pendingRequestStore;
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
     this.cloudInvokeBridge = options.cloudInvokeBridge;
@@ -1480,6 +1484,8 @@ export class AgentRouter {
         ...(this.taskProgressStore ? { taskProgressStore: this.taskProgressStore } : {}),
         ...(this.sessionChainStore ? { sessionChainStore: this.sessionChainStore } : {}),
         ...(this.contextEpochOwner ? { contextEpochOwner: this.contextEpochOwner } : {}),
+        hookAuthenticationReady: this.hookAuthenticationReady,
+        claudeProjectHookCarrierReady: this.claudeProjectHookCarrierReady,
         ...(this.presentationLedger ? { presentationLedger: this.presentationLedger } : {}),
         ...(this.runtimeSessionStore ? { runtimeSessionStore: this.runtimeSessionStore } : {}),
         ...(this.transcriptWriter ? { transcriptWriter: this.transcriptWriter } : {}),
@@ -1525,7 +1531,6 @@ export class AgentRouter {
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),
       ...(this.frustrationIssueStore ? { frustrationIssueStore: this.frustrationIssueStore } : {}),
-      ...(this.pendingRequestStore ? { pendingRequestStore: this.pendingRequestStore } : {}),
       ...(this.ballCustody ? { ballCustody: this.ballCustody } : {}),
       ...(this.turnCustodyProjectionService ? { turnCustodyProjectionService: this.turnCustodyProjectionService } : {}),
       ...(this.freshnessEventLog ? { freshnessEventLog: this.freshnessEventLog } : {}),

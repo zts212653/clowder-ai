@@ -67,6 +67,47 @@ interface CodeSelectionAction {
   selectionEnd: number;
 }
 
+function collectSelectionAnchors(view: EditorView): RectLike[] {
+  const mainSelection = view.state.selection.main;
+  const offsets = selectionAnchorPositionsForRows(mainSelection, view.viewportLineBlocks);
+  const editorRect = view.dom.getBoundingClientRect();
+  const anchorOffsets = new Set<number>();
+  const anchors: RectLike[] = [];
+  const addAnchor = (offset: number) => {
+    if (anchorOffsets.has(offset)) return null;
+    anchorOffsets.add(offset);
+    const coords = view.coordsAtPos(offset);
+    if (!coords) return null;
+    anchors.push({ ...coords, width: coords.right - coords.left, height: coords.bottom - coords.top });
+    return coords;
+  };
+
+  for (const offset of offsets) {
+    const coords = addAnchor(offset);
+    if (!coords) continue;
+    const visibleTop = Math.max(coords.top, editorRect.top);
+    const visibleBottom = Math.min(coords.bottom, editorRect.bottom);
+    if (visibleTop >= visibleBottom) continue;
+    const y = (visibleTop + visibleBottom) / 2;
+    const left = view.posAtCoords({ x: editorRect.left + 1, y });
+    const right = view.posAtCoords({ x: editorRect.right - 1, y });
+    if (left === null || right === null) continue;
+    const visibleOffset = selectionOffsetInRange(mainSelection, {
+      from: Math.min(left, right),
+      to: Math.max(left, right),
+    });
+    if (visibleOffset !== null) addAnchor(visibleOffset);
+  }
+  return anchors;
+}
+
+function selectionActionForView(view: EditorView, shell: HTMLDivElement | null): CodeSelectionAction | null {
+  const selection = getSelectionInfo(view);
+  if (!shell || !selection) return null;
+  const position = positionSelectionActionForAnchors(collectSelectionAnchors(view), shell.getBoundingClientRect());
+  return position ? { position, ...selection } : null;
+}
+
 export function CodeViewer({
   content,
   mime,
@@ -117,51 +158,8 @@ export function CodeViewer({
     viewRef.current?.destroy();
 
     const lang = getLanguageExtension(mime, path);
-    const syncSelectionAction = (targetView: EditorView) => {
-      const shell = shellRef.current;
-      const selection = getSelectionInfo(targetView);
-      if (!shell || !selection) {
-        setSelectionAction(null);
-        return;
-      }
-      const shellRect = shell.getBoundingClientRect();
-      const mainSelection = targetView.state.selection.main;
-      const offsets = selectionAnchorPositionsForRows(mainSelection, targetView.viewportLineBlocks);
-      const editorRect = targetView.dom.getBoundingClientRect();
-      const anchorOffsets = new Set<number>();
-      const anchors: RectLike[] = [];
-      const addAnchor = (offset: number) => {
-        if (anchorOffsets.has(offset)) return null;
-        anchorOffsets.add(offset);
-        const coords = targetView.coordsAtPos(offset);
-        if (!coords) return null;
-        anchors.push({
-          ...coords,
-          width: coords.right - coords.left,
-          height: coords.bottom - coords.top,
-        });
-        return coords;
-      };
-
-      for (const offset of offsets) {
-        const coords = addAnchor(offset);
-        if (!coords) continue;
-        const visibleTop = Math.max(coords.top, editorRect.top);
-        const visibleBottom = Math.min(coords.bottom, editorRect.bottom);
-        if (visibleTop >= visibleBottom) continue;
-        const y = (visibleTop + visibleBottom) / 2;
-        const left = targetView.posAtCoords({ x: editorRect.left + 1, y });
-        const right = targetView.posAtCoords({ x: editorRect.right - 1, y });
-        if (left === null || right === null) continue;
-        const visibleOffset = selectionOffsetInRange(mainSelection, {
-          from: Math.min(left, right),
-          to: Math.max(left, right),
-        });
-        if (visibleOffset !== null) addAnchor(visibleOffset);
-      }
-      const position = positionSelectionActionForAnchors(anchors, shellRect);
-      setSelectionAction(position ? { position, ...selection } : null);
-    };
+    const syncSelectionAction = (targetView: EditorView) =>
+      setSelectionAction(selectionActionForView(targetView, shellRef.current));
 
     const state = EditorState.create({
       doc: content,
@@ -218,6 +216,7 @@ export function CodeViewer({
   restoreScrollTopRef.current = restoreScrollTop;
 
   useEffect(() => {
+    void restoreKey;
     const view = viewRef.current;
     if (!view || !onScrollTopChangeRef.current) return;
     const saved = restoreScrollTopRef.current;
@@ -226,7 +225,7 @@ export function CodeViewer({
     } else {
       onScrollTopChangeRef.current(view.scrollDOM.scrollTop);
     }
-  }, [restoreKey, onScrollTopChange]);
+  }, [restoreKey]);
 
   const handleSave = useCallback(async () => {
     const view = viewRef.current;
