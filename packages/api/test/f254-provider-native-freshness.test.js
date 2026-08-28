@@ -6,7 +6,6 @@ import { CodexAgentService } from '../dist/domains/cats/services/agents/provider
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { ClaudeNativeToolBoundaryClassifier } from '../dist/domains/cats/services/agents/providers/claude-native-tool-boundary.js';
 import {
-  assertCodexThreadItemCensus,
   classifyCodexProtocolItem,
   classifyCodexSafeBoundary,
 } from '../dist/domains/cats/services/agents/providers/codex-app-server-boundary.js';
@@ -252,29 +251,24 @@ describe('F254 D2 provider-native freshness truth', () => {
     }
   });
 
-  it('guards the installed app-server ThreadItem census instead of silently accepting protocol drift', () => {
-    const installedTypes = [
-      'userMessage',
-      'hookPrompt',
-      'agentMessage',
-      'plan',
-      'reasoning',
-      'commandExecution',
-      'fileChange',
-      'mcpToolCall',
-      'dynamicToolCall',
-      'collabAgentToolCall',
-      'subAgentActivity',
-      'webSearch',
-      'imageView',
-      'sleep',
-      'imageGeneration',
-      'enteredReviewMode',
-      'exitedReviewMode',
-      'contextCompaction',
-    ];
-    assert.doesNotThrow(() => assertCodexThreadItemCensus(installedTypes));
-    assert.throws(() => assertCodexThreadItemCensus([...installedTypes, 'futureTool']), /futureTool/);
+  it('classifies a future ThreadItem as bounded unknown data instead of throwing', () => {
+    assert.deepEqual(
+      classifyCodexProtocolItem({
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          item: { id: 'future-1', type: 'futureTool', status: 'completed' },
+        },
+      }),
+      {
+        itemType: 'unknown',
+        status: 'completed',
+        classification: 'unknown',
+        toolSurface: 'unknown',
+        boundedUnknownSample: 'futureTool',
+      },
+    );
   });
 
   it('keeps opportunity, delivered, and seen separate while coalescing a frontier', async () => {

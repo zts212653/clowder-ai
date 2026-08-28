@@ -1714,6 +1714,16 @@ export class CodexAgentService implements AgentService {
             retryBudget: 1,
             ...(options?.recoveryAnchor ? { recoveryAnchor: options.recoveryAnchor } : {}),
             clientDeps: {
+              onUnsupportedNotification: ({ method }) => {
+                log.warn(
+                  {
+                    catId: this.catId,
+                    invocationId: auditContext?.invocationId ?? options?.invocationId,
+                    method,
+                  },
+                  '[F306] unsupported Codex app-server notification skipped',
+                );
+              },
               ...(options?.activeInvocationFreshness ? { freshnessController: options.activeInvocationFreshness } : {}),
               ...(auditContext
                 ? {

@@ -13,8 +13,10 @@ import type {
 import { requireExactPreparedProviderMessage } from '../../types.js';
 import {
   asCodexAppServerRecord,
+  boundedUnsupportedCodexAppServerNotificationMethod,
   type CodexAppServerJsonObject,
   codexAppServerErrorMessage,
+  isCodexAppServerTokenUsageNotification,
   mapCodexAppServerCompactionObservation,
   mapCodexAppServerNotification,
   mapCodexAppServerTokenUsage,
@@ -119,6 +121,7 @@ export interface CodexAppServerClientDeps {
   wire: AgentCarrierSession;
   freshnessController?: ActiveInvocationFreshnessController;
   onEnvelope?: (direction: 'inbound' | 'outbound', envelope: JsonObject) => void | Promise<void>;
+  onUnsupportedNotification?: (observation: { method: string }) => void | Promise<void>;
   onLifecycle?: (snapshot: CodexAppServerLifecycleSnapshot) => void;
   now?: () => number;
 }
@@ -169,6 +172,7 @@ export class CodexAppServerClient {
   private pumpPromise: Promise<void> | null = null;
   private pumpFailure: Error | null = null;
   private pumpEnded = false;
+  private readonly observedUnsupportedNotificationMethods = new Set<string>();
   private readonly lifecycle: CodexAppServerLifecycle;
 
   constructor(private readonly deps: CodexAppServerClientDeps) {
@@ -371,8 +375,8 @@ export class CodexAppServerClient {
           }
         }
 
-        if (record?.method === 'thread/tokenUsage/updated') {
-          latestUsage = mapCodexAppServerTokenUsage(asCodexAppServerRecord(record.params)?.tokenUsage) ?? latestUsage;
+        if (isCodexAppServerTokenUsageNotification(record)) {
+          latestUsage = mapCodexAppServerTokenUsage(asCodexAppServerRecord(record?.params)?.tokenUsage) ?? latestUsage;
         }
 
         // F296 B4b (kimi review A4): a compaction can also arrive *during* the
@@ -387,6 +391,7 @@ export class CodexAppServerClient {
         }
 
         const mapped = mapCodexAppServerNotification(envelope);
+        await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
         if (record?.method === 'turn/completed') {
@@ -563,6 +568,18 @@ export class CodexAppServerClient {
   private async write(message: JsonObject): Promise<void> {
     await this.deps.onEnvelope?.('outbound', message);
     await this.deps.wire.write(message);
+  }
+
+  private async observeUnsupportedNotification(envelope: unknown): Promise<void> {
+    const method = boundedUnsupportedCodexAppServerNotificationMethod(envelope);
+    if (!method || this.observedUnsupportedNotificationMethods.has(method)) return;
+    if (this.observedUnsupportedNotificationMethods.size >= 8) return;
+    this.observedUnsupportedNotificationMethods.add(method);
+    try {
+      await this.deps.onUnsupportedNotification?.({ method });
+    } catch {
+      // Runtime health telemetry must never abort provider work.
+    }
   }
 
   private rejectPending(error: Error): void {

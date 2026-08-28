@@ -7,16 +7,17 @@ export type CodexProtocolItemClassification =
   | 'deferred_no_data'
   | 'unknown';
 
-interface CodexThreadItemCensusEntry {
+interface CodexThreadItemClassificationEntry {
   classification: Exclude<CodexProtocolItemClassification, 'unknown'>;
   toolSurface?: ProviderNativeFreshnessToolSurface;
 }
 
 /**
- * Exhaustive against the installed app-server ThreadItem union. New variants
- * must be consciously classified before the census guard turns green.
+ * Consumer-owned semantic classifications. This is intentionally not an
+ * exhaustive mirror of the upstream ThreadItem union: unknown variants remain
+ * observable at runtime without becoming a build or rollout dependency.
  */
-export const CODEX_THREAD_ITEM_CENSUS = {
+export const CODEX_THREAD_ITEM_CLASSIFICATIONS = {
   userMessage: { classification: 'intentional_non_boundary' },
   hookPrompt: { classification: 'intentional_non_boundary' },
   agentMessage: { classification: 'intentional_non_boundary' },
@@ -35,7 +36,7 @@ export const CODEX_THREAD_ITEM_CENSUS = {
   enteredReviewMode: { classification: 'intentional_non_boundary' },
   exitedReviewMode: { classification: 'intentional_non_boundary' },
   contextCompaction: { classification: 'intentional_non_boundary' },
-} as const satisfies Readonly<Record<string, CodexThreadItemCensusEntry>>;
+} as const satisfies Readonly<Record<string, CodexThreadItemClassificationEntry>>;
 
 const LEGACY_TOOL_SURFACES: Readonly<Record<string, ProviderNativeFreshnessToolSurface>> = {
   command_execution: 'command_execution',
@@ -80,8 +81,8 @@ export function classifyCodexProtocolItem(event: unknown): CodexProtocolItemObse
   const item = asRecord(asRecord(envelope.params)?.item);
   const rawItemType = item?.type;
   if (typeof rawItemType !== 'string') return null;
-  const known = CODEX_THREAD_ITEM_CENSUS[rawItemType as keyof typeof CODEX_THREAD_ITEM_CENSUS] as
-    | CodexThreadItemCensusEntry
+  const known = CODEX_THREAD_ITEM_CLASSIFICATIONS[rawItemType as keyof typeof CODEX_THREAD_ITEM_CLASSIFICATIONS] as
+    | CodexThreadItemClassificationEntry
     | undefined;
   if (!known) {
     return {
@@ -98,18 +99,6 @@ export function classifyCodexProtocolItem(event: unknown): CodexProtocolItemObse
     classification: known.classification,
     toolSurface: known.toolSurface ?? 'other',
   };
-}
-
-export function assertCodexThreadItemCensus(installedItemTypes: readonly string[]): void {
-  const expected = Object.keys(CODEX_THREAD_ITEM_CENSUS).sort();
-  const actual = [...new Set(installedItemTypes)].sort();
-  const missing = expected.filter((itemType) => !actual.includes(itemType));
-  const unknown = actual.filter((itemType) => !expected.includes(itemType));
-  if (missing.length > 0 || unknown.length > 0) {
-    throw new Error(
-      `Codex app-server ThreadItem census drift: missing=[${missing.join(',')}], unknown=[${unknown.join(',')}]`,
-    );
-  }
 }
 
 export function classifyCodexAppServerToolSurface(event: unknown): ProviderNativeFreshnessToolSurface | null {
@@ -137,8 +126,8 @@ export function classifyCodexExecToolSurface(event: unknown): ProviderNativeFres
   const item = asRecord(record.item);
   const itemType = item?.type;
   if (typeof itemType !== 'string') return null;
-  const known = CODEX_THREAD_ITEM_CENSUS[itemType as keyof typeof CODEX_THREAD_ITEM_CENSUS] as
-    | CodexThreadItemCensusEntry
+  const known = CODEX_THREAD_ITEM_CLASSIFICATIONS[itemType as keyof typeof CODEX_THREAD_ITEM_CLASSIFICATIONS] as
+    | CodexThreadItemClassificationEntry
     | undefined;
   if (known?.classification === 'safe_boundary') return known.toolSurface ?? null;
   return LEGACY_TOOL_SURFACES[itemType] ?? null;
