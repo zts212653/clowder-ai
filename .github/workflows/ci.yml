@@ -134,7 +134,7 @@ jobs:
         with:
           name: public-test-plan-${{ github.sha }}
           path: ${{ runner.temp }}/public-test
-      - name: Run serial public-test lane
+      - name: Run public-test lane
         run: >-
           pnpm --filter @cat-cafe/api run test:public:shard --
           --plan "${{ runner.temp }}/public-test/plan.json"
